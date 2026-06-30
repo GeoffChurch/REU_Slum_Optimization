@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          # Fail if pixi.lock is out of date with pyproject.toml.
+          locked: true
+      - run: pixi run lint
+      - run: pixi run typecheck
+      - run: pixi run test
