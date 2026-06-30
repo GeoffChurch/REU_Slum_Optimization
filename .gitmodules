@@ -1,0 +1,3 @@
+[submodule "ext/kblock"]
+	path = ext/kblock
+	url = https://github.com/mansueto-institute/kblock.git
