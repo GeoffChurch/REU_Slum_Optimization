@@ -1,3 +1,6 @@
 [submodule "ext/kblock"]
 	path = ext/kblock
 	url = https://github.com/mansueto-institute/kblock.git
+[submodule "ext/topology"]
+	path = ext/topology
+	url = git@github.com:jmendoza167/topology.git
