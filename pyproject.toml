@@ -125,6 +125,15 @@ module = "reblock.derive.parcel_graph"
 disallow_untyped_calls = false
 
 [[tool.mypy.overrides]]
+# Same situation as reblock.derive.parcel_graph above: reblock.eval.kcomplexity
+# is fully annotated itself, but drives topology's legacy MyGraph directly --
+# graph.define_roads()/myedges() are untyped (see the my_graph/
+# my_graph_helpers override above), which --strict's disallow_untyped_calls
+# would otherwise flag at these call sites.
+module = "reblock.eval.kcomplexity"
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
 # Same situation as reblock.derive.parcel_graph above: reblock.methods.topology
 # is fully annotated itself, but drives topology's legacy MyGraph directly --
 # graph.define_roads()/define_interior_parcels()/myedges() and the
