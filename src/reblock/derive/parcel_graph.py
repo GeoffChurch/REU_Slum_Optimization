@@ -18,6 +18,16 @@ class PlanarParcelGraph:
     crs: CRS
 
 
+def parcel_origin(parcels: GeoDataFrame) -> tuple[float, float]:
+    """The re-zero origin for a parcel set: `(minx, miny)` of its bounds.
+
+    Shared with the tests so their independently-built comparison graphs
+    re-zero to the exact same origin production uses (they'd otherwise drift).
+    """
+    minx, miny, _, _ = parcels.total_bounds
+    return (float(minx), float(miny))
+
+
 def _myfaces_from_parcels(parcels: GeoDataFrame, origin: tuple[float, float]) -> list[MyFace]:
     """Ring (exterior coords, re-zeroed) -> MyFace, one per parcel.
 
@@ -38,8 +48,7 @@ def _myfaces_from_parcels(parcels: GeoDataFrame, origin: tuple[float, float]) ->
 
 
 def to_parcel_graph(block: Block) -> PlanarParcelGraph:
-    minx, miny, _, _ = block.parcels.total_bounds
-    origin = (float(minx), float(miny))
+    origin = parcel_origin(block.parcels)
 
     graph = graphFromMyFaces(_myfaces_from_parcels(block.parcels, origin))
     # Real parcel geometry has near-coincident (but not bit-identical) shared

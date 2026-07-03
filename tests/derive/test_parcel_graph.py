@@ -11,7 +11,7 @@ from topology.graph.my_graph_helpers import graphFromShapes
 
 from reblock.contracts import Block
 from reblock.data.shapefile import ShapefileSource
-from reblock.derive.parcel_graph import _myfaces_from_parcels, to_parcel_graph
+from reblock.derive.parcel_graph import _myfaces_from_parcels, parcel_origin, to_parcel_graph
 
 UTM = CRS.from_epsg(32643)
 
@@ -82,8 +82,7 @@ def test_clean_up_geometry_fixes_near_duplicate_shared_vertex_pinch_point() -> N
     block = Block(block_id="phule_9", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
                   parcels=parcels, streets=streets)
 
-    minx, miny, _, _ = block.parcels.total_bounds
-    origin = (float(minx), float(miny))
+    origin = parcel_origin(block.parcels)
     raw = graphFromMyFaces(_myfaces_from_parcels(block.parcels, origin))  # type: ignore[no-untyped-call]
     assert len(raw.inner_facelist) == 0  # the bug clean_up_geometry exists to fix
 
@@ -156,8 +155,7 @@ def test_derivation_matches_topology_native_ring_construction() -> None:
 
     mismatches: list[str] = []
     for block in blocks:
-        minx, miny, _, _ = block.parcels.total_bounds
-        origin = (float(minx), float(miny))
+        origin = parcel_origin(block.parcels)
 
         ours = graphFromMyFaces(_myfaces_from_parcels(block.parcels, origin))  # type: ignore[no-untyped-call]
 
@@ -175,3 +173,44 @@ def test_derivation_matches_topology_native_ring_construction() -> None:
             mismatches.append(block.block_id)
 
     assert mismatches == []
+
+
+def test_full_pipeline_facecount_over_all_phule_blocks() -> None:
+    """Full-pipeline regression: runs the ACTUAL public `to_parcel_graph`
+    (INCLUDING its `clean_up_geometry(0.5, byblock=False)` call -- the piece
+    that fixes ~139/370 blocks) over every real Phule Nagar block and pins
+    the current empirical result. The sibling parity test above deliberately
+    bypasses `clean_up_geometry` to isolate the pure ring-construction, so
+    this is the only committed guard on the shipped pipeline's real-world
+    behaviour: a future change to the threshold or the byblock flag would
+    regress these numbers, and this test would catch it.
+
+    Empirically (verified before pinning): 370 blocks, 1178 parcels, 1180
+    total inner faces, and EXACTLY two blocks whose inner-face count differs
+    from their parcel count -- phule_99 (20 parcels -> 21 faces) and
+    phule_105 (23 -> 24). Both are real overlapping-sliver source geometry
+    (an extra traced face from a genuine self-overlap), not derivation bugs;
+    the ids and the count are pinned so a real regression (clean-up silently
+    dropping/merging faces on many blocks) can't hide behind the sliver
+    noise. `>=` on face count guards the direction that matters most: the
+    clean-up must never lose real parcel faces.
+    """
+    region = ShapefileSource(PHULE.with_suffix(".shp"), region_id="phule").region()
+    blocks = list(region.blocks)
+    assert len(blocks) == 370
+
+    total_parcels = 0
+    total_faces = 0
+    mismatched_ids: list[str] = []
+    for block in blocks:
+        faces = len(to_parcel_graph(block).graph.inner_facelist)
+        parcels = len(block.parcels)
+        total_parcels += parcels
+        total_faces += faces
+        assert faces >= parcels, f"{block.block_id}: {faces} faces < {parcels} parcels"
+        if faces != parcels:
+            mismatched_ids.append(block.block_id)
+
+    assert total_parcels == 1178
+    assert total_faces == 1180
+    assert sorted(mismatched_ids) == ["phule_105", "phule_99"]
