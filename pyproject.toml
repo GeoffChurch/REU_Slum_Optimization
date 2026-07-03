@@ -45,6 +45,11 @@ mypy = "*"
 pytest = "*"
 pytest-cov = "*"
 ruff = "*"
+# geopandas/shapely ship no py.typed marker; these are the upstream typeshed
+# stub packages (not an ignore_missing_imports shim) so contracts.py's use of
+# GeoDataFrame/Polygon/CRS stays fully checked under mypy --strict.
+types-geopandas = "*"
+types-shapely = "*"
 
 [tool.pixi.environments]
 default = { features = ["dev"], solve-group = "default" }
