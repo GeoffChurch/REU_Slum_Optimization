@@ -152,7 +152,7 @@ __all__ = [
 - [ ] **Step 7: Write the failing calibration test** `ext/topology/tests/test_k_complexity.py`. A 1×N grid of parcels with the two long sides forming the block; mark the far-left edge as the only road → the strip is N layers deep.
 
 ```python
-from topology import MyEdge, MyNode, define_roads_on, graphFromMyFaces, k_complexity
+from topology import MyEdge, MyFace, MyNode, define_roads_on, graphFromMyFaces, k_complexity
 
 
 def _strip(n: int):
@@ -166,7 +166,6 @@ def _strip(n: int):
 
 
 def test_k_of_strip_with_far_left_street() -> None:
-    from topology import MyFace  # noqa: F401
     for n in (1, 3, 5):
         g = _strip(n)
         define_roads_on(g, lambda e: e.nodes[0].x == 0 and e.nodes[1].x == 0)
