@@ -763,10 +763,10 @@ git commit -m "feat: add TopologyMethod (parcels -> Proposal of new roads)"
 - Test: `tests/eval/test_kcomplexity.py` (+ `tests/eval/__init__.py`)
 
 **Interfaces:**
-- Consumes: `Block`, `Proposal`, `Metrics`; `to_parcel_graph`; `topology.k_complexity`, `topology.define_roads_on`.
-- Produces: `KComplexityEval` implementing `Eval`; `.score(block, proposal) -> Metrics` with `values` keys `k_before`, `k_after`, `delta_k`, `added_road_length_m`. k is computed on the parcel graph: mark `Block.streets` edges as roads → `k_before`; additionally mark the `Proposal.roads` edges → `k_after`.
+- Consumes: `Block`, `Proposal`, `Metrics`; `to_parcel_graph`; `topology.k_complexity`.
+- Produces: `KComplexityEval` implementing `Eval`; `.score(block, proposal) -> Metrics` with `values` keys `k_before`, `k_after`, `delta_k`, `added_road_length_m`. k is computed on the parcel graph: `graph.define_roads()` marks the boundary (Slice 1: `Block.streets` == boundary) → `k_before`; additionally marking the `Proposal.roads` edges (exact endpoint match) → `k_after`.
 
-- [ ] **Step 1: Create `tests/eval/__init__.py` and write the failing test** `tests/eval/test_kcomplexity.py`. On a 1×4 strip with the far-left edge as street, k=4; adding the far-right edge as a road makes the strip reachable from both ends → k=2.
+- [ ] **Step 1: Create `tests/eval/__init__.py` and write the failing test** `tests/eval/test_kcomplexity.py`. A 3×3 grid's centre parcel is enclosed → `k_before = 2`; an interior road reaching the centre drops it to `k_after = 1`. (Geometry and values verified against topology's weak-dual `k_complexity` in Task 1 — a 1-wide strip is degenerate for this metric and must NOT be used.)
 
 ```python
 import geopandas as gpd
@@ -779,23 +779,27 @@ from reblock.eval.kcomplexity import KComplexityEval
 UTM = CRS.from_epsg(32643)
 
 
-def _strip_block(n: int) -> Block:
-    polys = [Polygon([(i, 0), (i + 1, 0), (i + 1, 1), (i, 1)]) for i in range(n)]
-    parcels = gpd.GeoDataFrame({"parcel_id": list(range(n))}, geometry=polys, crs=UTM)
-    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
-    return Block(block_id="s", crs=UTM, boundary=parcels.geometry.union_all(),
-                 parcels=parcels, streets=streets)
+def _grid_block(n: int) -> Block:
+    polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
+             for i in range(n) for j in range(n)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
+    boundary = parcels.geometry.union_all()
+    streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
 
 
-def test_delta_k_from_added_road() -> None:
-    block = _strip_block(4)
-    right = gpd.GeoDataFrame(geometry=[LineString([(4, 0), (4, 1)])], crs=UTM)
-    proposal = Proposal(block_id="s", crs=UTM, roads=right, method="topology")
+def test_delta_k_from_interior_connector() -> None:
+    # 3x3 grid: centre parcel enclosed -> k_before = 2. An interior road from
+    # boundary node (1,0) up to the centre's corner (1,1) reaches the centre
+    # -> k_after = 1. Values verified in Task 1's k_complexity road-sensitivity.
+    block = _grid_block(3)
+    connector = gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM)
+    proposal = Proposal(block_id="g", crs=UTM, roads=connector, method="topology")
 
     v = KComplexityEval().score(block, proposal).values
-    assert v["k_before"] == 4
-    assert v["k_after"] == 2
-    assert v["delta_k"] == 2
+    assert v["k_before"] == 2
+    assert v["k_after"] == 1
+    assert v["delta_k"] == 1
     assert v["added_road_length_m"] == 1.0
 ```
 
@@ -812,10 +816,10 @@ from __future__ import annotations
 
 from geopandas import GeoDataFrame
 from shapely.geometry import LineString
-from topology import define_roads_on, k_complexity
+from topology import k_complexity
 
 from reblock.contracts import Block, Metrics, Proposal
-from reblock.derive.parcel_graph import PlanarParcelGraph, to_parcel_graph
+from reblock.derive.parcel_graph import to_parcel_graph
 
 
 def _endpoint_keys(lines: GeoDataFrame, origin: tuple[float, float]) -> set[frozenset[tuple[float, float]]]:
@@ -828,41 +832,37 @@ def _endpoint_keys(lines: GeoDataFrame, origin: tuple[float, float]) -> set[froz
     return keys
 
 
-def _k_with_roads(ppg: PlanarParcelGraph, road_lines: GeoDataFrame) -> int:
-    keys = _endpoint_keys(road_lines, ppg.origin)
-
-    def is_road(edge: object) -> bool:
-        a, b = edge.nodes  # type: ignore[attr-defined]
-        return frozenset(((a.x, a.y), (b.x, b.y))) in keys
-
-    define_roads_on(ppg.graph, is_road)
+def _k(block: Block, extra_roads: GeoDataFrame | None) -> int:
+    # Slice 1: Block.streets == the block boundary, so topology's native
+    # define_roads() (outer-face detection) marks the initial streets robustly.
+    # Proposed interior roads are 2-point method edges matched by exact endpoints.
+    ppg = to_parcel_graph(block)
+    ppg.graph.define_roads()
+    if extra_roads is not None and not extra_roads.empty:
+        keys = _endpoint_keys(extra_roads, ppg.origin)
+        for edge in ppg.graph.myedges():
+            a, b = edge.nodes
+            if frozenset(((a.x, a.y), (b.x, b.y))) in keys:
+                edge.road = True
     return k_complexity(ppg.graph)
 
 
 class KComplexityEval:
     def score(self, block: Block, proposal: Proposal) -> Metrics:
-        ppg = to_parcel_graph(block)
-        k_before = _k_with_roads(ppg, block.streets)
-
-        if proposal.roads is not None and not proposal.roads.empty:
-            combined = GeoDataFrame(
-                geometry=list(block.streets.geometry) + list(proposal.roads.geometry),
-                crs=block.crs)
-            added_len = float(proposal.roads.geometry.length.sum())
-        else:
-            combined, added_len = block.streets, 0.0
-        k_after = _k_with_roads(ppg, combined)
-
+        k_before = _k(block, None)
+        k_after = _k(block, proposal.roads)
+        added = (float(proposal.roads.geometry.length.sum())
+                 if proposal.roads is not None and not proposal.roads.empty else 0.0)
         return Metrics(block_id=block.block_id, method=proposal.method, eval="kcomplexity",
                        values={"k_before": float(k_before), "k_after": float(k_after),
                                "delta_k": float(k_before - k_after),
-                               "added_road_length_m": added_len})
+                               "added_road_length_m": added})
 ```
 
 - [ ] **Step 4: Run test to verify it passes.**
 
 Run: `pixi run pytest tests/eval/test_kcomplexity.py -v`
-Expected: PASS. If `k_before`/`k_after` are off, first confirm Task 1's `k_complexity` calibration (strip → k=N); the eval inherits that convention. `define_roads_on` for `Block.streets`=boundary must mark the outer ring — verify the boundary lines' endpoints coincide with parcel-graph nodes (they do for axis-aligned unit parcels).
+Expected: PASS (`k_before`=2, `k_after`=1). If `k_before` isn't 2, `define_roads()` isn't marking the derived graph's boundary — confirm `to_parcel_graph` yields a traceable planar graph (Task 4), and if needed fall back to marking boundary edges whose midpoint lies on `block.streets`. If `k_after` isn't 1, confirm the connector endpoints `(1,0)-(1,1)` coincide with graph nodes (they do for unit parcels) and that Task 1's `k_complexity` road-sensitivity holds.
 
 - [ ] **Step 5: Verify + commit.**
 
