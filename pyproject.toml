@@ -28,10 +28,16 @@ platforms = ["linux-64"]
 python = ">=3.11,<3.13"
 geopandas = "*"
 pyarrow = "*"
+networkx = "*"
+scipy = "*"
+matplotlib-base = "*"
+pyshp = "*"
+hydra-core = "*"
 
 # Install the reblock package itself, editable, from this directory.
 [tool.pixi.pypi-dependencies]
 reblock = { path = ".", editable = true }
+topology = { path = "ext/topology", editable = true }
 
 # Dev-only tooling, kept out of the runtime dependency set.
 [tool.pixi.feature.dev.dependencies]
@@ -57,6 +63,52 @@ check = { depends-on = ["lint", "typecheck", "test"] }
 python_version = "3.11"
 strict = true
 files = ["src", "tests"]
+# topology is installed via a PEP 660 "strict" editable install, whose .pth
+# registers a sys.meta_path finder at runtime rather than a plain sys.path
+# entry — mypy's static .pth scan can't see through that, so point it at the
+# source tree directly (this is not an ignore_missing_imports shim: topology
+# ships py.typed and a fully typed public surface).
+mypy_path = ["ext/topology"]
+
+# topology's pre-existing (unannotated) graph implementation transitively
+# imports untyped third-party libraries. These overrides target *those*
+# libraries, not topology itself — topology's own public surface
+# (topology/__init__.py, topology/graph/complexity.py) stays fully checked.
+[[tool.mypy.overrides]]
+module = ["networkx.*", "scipy.*", "shapefile.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# numpy 2.5's bundled stubs (a .pyi file) use PEP 695 `type` statements
+# (Python 3.12+ only syntax), which fail to parse under our
+# python_version = "3.11" target; this is a numpy/mypy version mismatch
+# unrelated to topology's typing. follow_imports_for_stubs makes
+# follow_imports apply to .pyi files too (by default it only affects .py).
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+
+[[tool.mypy.overrides]]
+# topology.graph.{my_graph,my_graph_helpers} are the pre-existing, deliberately
+# unannotated legacy graph implementation (the brief scopes typing to the new
+# facade — topology/__init__.py and topology/graph/complexity.py — not to
+# retrofitting ~1000 lines of legacy code). follow_imports=silent still parses
+# them (so MyGraph/MyEdge/... are real inferred types for consumers, not Any)
+# but suppresses their own missing-annotation noise.
+module = [
+    "topology.graph.my_graph",
+    "topology.graph.my_graph_helpers",
+    "topology.utils.lazy_property",
+]
+follow_imports = "silent"
+
+[[tool.mypy.overrides]]
+# complexity.py is the typed facade: its own signatures (k_complexity,
+# define_roads_on) are fully annotated and checked. It necessarily calls into
+# the legacy untyped helpers above, which --strict's disallow_untyped_calls
+# would otherwise flag at these call sites specifically.
+module = "topology.graph.complexity"
+disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
