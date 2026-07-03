@@ -115,6 +115,15 @@ follow_imports = "silent"
 module = "topology.graph.complexity"
 disallow_untyped_calls = false
 
+[[tool.mypy.overrides]]
+# Same situation as topology.graph.complexity above: reblock.derive.parcel_graph
+# is fully annotated itself, but constructs topology's legacy MyNode/MyEdge/
+# MyFace and calls graphFromMyFaces directly -- those constructors/functions
+# are untyped (see the my_graph/my_graph_helpers override above), which
+# --strict's disallow_untyped_calls would otherwise flag at these call sites.
+module = "reblock.derive.parcel_graph"
+disallow_untyped_calls = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=reblock --cov-report=term-missing"
