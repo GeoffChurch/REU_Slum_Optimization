@@ -8,9 +8,12 @@ reblock "adds roads to maps via pluggable methods, then evaluates them." The sys
 set of statically-typed layers wired by **Hydra structured configs**, checked under
 `mypy --strict`. Two submodules are fixed points:
 
-- `ext/topology` — the classic Brelsford/Mansueto parcel-graph reblocker. **The first method.**
-- `ext/kblock` — the Mansueto block-delineation + population + k-complexity pipeline. Serves
-  as **a data source** and as the source of **eval algorithms** (k-complexity, population).
+- `ext/topology` — the classic Brelsford/Mansueto parcel-graph reblocker (**owned** — we
+  co-develop it). Provides **the first method** *and* the canonical **k-complexity** metric
+  (the weak-dual nesting depth the Brelsford work defines; `stacked_duals`).
+- `ext/kblock` — the Mansueto block-delineation pipeline. A **data source** (blocks, streets,
+  population); **not** used for eval algorithms (its `compute_k` is a reimplementation of
+  topology's original — we use topology's).
 
 This spec records the durable architecture (shared by all slices) and then scopes **Slice 1**,
 a walking skeleton that proves every interface end-to-end on data already in the repo, with
@@ -70,24 +73,29 @@ Hold across all slices; not re-litigated per slice.
    areas/lengths; topology requires metric regardless). Adapters reproject on load and record
    `Block.crs`; anything reblock writes records its own CRS.
 
-10. **topology port = I/O boundary only.** Replace topology's input seams (`graphFromShapes` /
-    `graphFromJSON`) and output seam (`myedges_geoJSON`) with `Block` / `Proposal`-native
-    adapters, and **delete** the pyshp and string-bool-GeoJSON paths — no shim. The
-    `MyNode`/`MyEdge`/`MyFace`/networkx algorithm core is untouched. The input adapter maps
-    **`Block.streets` → the graph's initial road edges**, rather than letting topology
-    re-derive the boundary internally — so the method honors the data layer's street
-    definition uniformly (real OSM streets from kblock, boundary from the shapefile source).
-    "What a street is" is a **data-layer decision**; the method requires only *an* initial
-    road set. For Phule Nagar `Block.streets` = boundary, which reproduces topology's current
-    behavior (and preserves the regression oracle).
+10. **topology is a co-developed, typed dependency (owned).** We own topology, so rather than
+    quarantine it we make it a properly-packaged, `py.typed` dependency and **add** a
+    `Block`/`Proposal`-native API *alongside* its existing shapefile-in / GeoJSON-out
+    interfaces. Those stay — they're legitimate standalone options on the same `MyGraph`
+    engine, not compat shims (the shapefile loader even powers the regression oracle). Typing
+    scope (owner choice): the **public surface reblock imports** (`MyGraph`/`MyNode`/`MyEdge`/
+    `MyFace`, `graphFromMyFaces`, `define_roads`, `define_interior_parcels`, `build_all_roads`,
+    `road_length`, `myedges`, and a new `k_complexity`); internal algorithm typing deferred.
+    The `Block`→graph adapter maps **`Block.streets` → the graph's initial road edges** (the
+    data layer owns "what a street is"; the method needs only *an* initial road set). For
+    Phule Nagar `Block.streets` = boundary, matching topology's own baseline (and preserving
+    the regression oracle). Known wart, deferred: topology's GeoJSON emits `"true"`/`"false"`
+    as strings, not JSON booleans.
 
 11. **Compute, don't consume — and reuse the algorithm on both ends.** Metrics like
     k-complexity and amenity-accessibility must be *computed* (kblock's parquet only holds
     *status-quo* values; evals need *post-intervention* values). The same algorithm is reused
     by a `Screen` (status quo → targeting) and by an `Eval` (post-intervention → improvement).
-    k-complexity is ported from a single kblock function (`kblock.batch_4_compute_k.compute_k`),
-    not its pipeline; the amenity travel-time model is net-new (kblock has none) or wraps an
-    external accessibility tool.
+    k-complexity is **topology's own** metric — the weak-dual nesting depth
+    (`stacked_duals`/`form_equivalence_classes`), which the dual excludes road edges from, so
+    it is road-relative and drops as roads are added. We expose it as a typed
+    `k_complexity(graph) -> int` and import it in the eval; we do **not** port kblock's
+    `compute_k`. The amenity travel-time model is net-new (kblock has none).
 
 ---
 
@@ -184,7 +192,7 @@ tessellation, no downloads.
 | `reblock.data.shapefile` | `ShapefileSource`: `gpd.read_file` topology's `examples/data/phule_nagar_v6.shp`, group parcels into blocks by **adjacency (connected components)**, and return a **`Region`** whose `blocks` are one `Block` per component (`parcels` = the component's polygons, `boundary` = its dissolved outer ring, reprojected to local UTM). Component-splitting is a small geopandas-native step the Source owns. **Not** topology's pyshp path. |
 | `reblock.derive.parcel_graph` | `to_parcel_graph(block) -> PlanarParcelGraph` — the view topology needs |
 | `reblock.methods.topology` | port topology's I/O to consume `PlanarParcelGraph` / emit `Proposal` (fills `roads` + tagged `edges`); wrap as a `Method` |
-| `reblock.eval.kcomplexity` | port `compute_k`; `Eval` computing `k_before` / `k_after` / `delta_k` + `added_road_length_m` |
+| `reblock.eval.kcomplexity` | `Eval` wrapping topology's exposed `k_complexity(graph)`; computes `k_before` / `k_after` / `delta_k` + `added_road_length_m` |
 | `reblock.run` | Hydra entrypoint: `data=phule method=topology eval=kcomplexity` |
 
 ### Data flow
@@ -201,14 +209,14 @@ ShapefileSource.region()                              # a Region; blocks = one p
 For the very first skeleton the runner may restrict to a single chosen component, then
 generalize to all components once the interfaces are proven.
 
-### Eval definition (flagged for confirmation — see Open questions)
+### Eval definition
 
-- `buildings` argument to `compute_k` = **parcel centroids**.
-- initial `streets` = **`Block.streets`**, which the `ShapefileSource` fills with the block's
-  outer boundary (Phule Nagar has no street data; the boundary is topology's own baseline).
-- `k_before = compute_k(boundary, centroids, Block.streets)`;
-  `k_after  = compute_k(boundary, centroids, Block.streets + roads)`.
-- the ported `compute_k` operates in the **Block's CRS**, dropping kblock's hardcoded `srid=3395`.
+- k-complexity = topology's **weak-dual nesting depth** (`stacked_duals`), exposed as a typed
+  `k_complexity(graph) -> int`. The weak dual excludes road edges, so k is road-relative.
+- `to_parcel_graph(block)` builds the graph; the eval marks `Block.streets` as the initial
+  road edges → reads `k_before`; then marks the `Proposal.roads` edges too → reads `k_after`.
+  For Phule Nagar `Block.streets` = boundary (topology's baseline).
+- Everything runs in the **Block's local UTM CRS** — no kblock, no pygeos, no `srid=3395`.
 
 ### Out of scope for Slice 1
 
@@ -228,8 +236,10 @@ kblock source · population/displacement · water · regional screening · footp
 
 - **Contract tests:** construction + `__post_init__` validation (missing column / geographic
   CRS / empty geometry rejected).
-- **Regression oracle:** topology-via-`Block` on Phule Nagar reproduces the road-tagged edge
-  set from topology's current standalone output — guards the I/O port against drift.
+- **Port oracle:** the `Block`→graph derivation reproduces topology's *native* planar graph
+  (same inner-face count) built from the same shapefile — deterministic, so it isolates the
+  I/O port from the stochastic road-builder. Method correctness is covered separately by an
+  "all interior parcels resolved" invariant.
 - **Eval sanity:** `k_after ≤ k_before`, `delta_k ≥ 0`, `added_road_length_m > 0` when roads added.
 - **End-to-end:** `reblock.run data=phule method=topology eval=kcomplexity` emits `Metrics`;
   passes `pixi run check` (ruff + mypy --strict + pytest).
