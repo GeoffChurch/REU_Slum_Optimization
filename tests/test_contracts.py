@@ -36,6 +36,18 @@ def test_block_rejects_missing_parcel_id() -> None:
               parcels=_parcels().drop(columns=["parcel_id"]), streets=_streets())
 
 
+def test_block_rejects_missing_geometry_column() -> None:
+    with pytest.raises(ValueError, match="geometry"):
+        Block(block_id="x", crs=UTM, boundary=Polygon([(0, 0), (1, 0), (1, 1)]),
+              parcels=_parcels().rename_geometry("geom"), streets=_streets())
+
+
+def test_block_rejects_empty_parcels() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        Block(block_id="x", crs=UTM, boundary=Polygon([(0, 0), (1, 0), (1, 1)]),
+              parcels=_parcels().head(0), streets=_streets())
+
+
 def test_metrics_and_proposal_records() -> None:
     m = Metrics(block_id="x", method="topology", eval="kcomplexity",
                 values={"k_before": 3.0, "k_after": 1.0})
