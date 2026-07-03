@@ -60,6 +60,7 @@ typecheck = "mypy --strict src tests"
 lint = "ruff check ."
 fmt = "ruff format ."
 check = { depends-on = ["lint", "typecheck", "test"] }
+run = "python -m reblock.run"
 
 # ---------------------------------------------------------------------------
 # Tooling config
