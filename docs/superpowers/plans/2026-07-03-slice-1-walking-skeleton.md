@@ -54,7 +54,7 @@ tests/ ...                # mirrors src
 
 **Interfaces:**
 - Produces (importable from reblock): `from topology import MyGraph, MyNode, MyEdge, MyFace, graphFromMyFaces, build_all_roads, import_and_setup, define_roads_on, k_complexity`.
-- `k_complexity(graph: MyGraph) -> int` — Brelsford weak-dual nesting depth; road-relative (the dual excludes road edges). Calibrated so a street-on-one-end strip of N parcels yields k = N.
+- `k_complexity(graph: MyGraph) -> int` — Brelsford weak-dual nesting depth = count of non-empty weak-dual levels; road-relative (the dual excludes road edges). Canonical values: 2×2 grid → 1, 3×3 → 2 (centre enclosed), 5×5 → 3. **A 1-wide strip is degenerate for this metric — do not use strips to calibrate.**
 
 - [ ] **Step 1: Move the packages under a `topology/` namespace.**
 
@@ -101,7 +101,9 @@ setup(name='topology', version='2.0',
 """k-complexity: the Brelsford weak-dual nesting depth of a parcel graph.
 
 The weak dual excludes road edges, so k is relative to the current road set and
-drops as roads are added. Exposed as the canonical metric reblock's eval imports.
+drops as (interior) roads are added. Exposed as the canonical metric reblock's
+eval imports. NOTE: a 1-wide strip is degenerate here (a path-shaped dual has no
+faces) — calibrate against nested grids, never strips.
 """
 from __future__ import annotations
 
@@ -114,8 +116,8 @@ def k_complexity(graph: MyGraph) -> int:
         return 0
     graph.inner_facelist  # ensure faces are traced
     result, _ = form_equivalence_classes(graph)
-    layers = [depth for depth, faces in result.items() if faces]
-    return (max(layers) + 1) // 2 if layers else 0
+    # k = number of non-empty weak-dual nesting levels (Brelsford depth).
+    return sum(1 for faces in result.values() if faces)
 ```
 
 - [ ] **Step 6: Add a typed road-marking helper + facade re-exports.** Append to `topology/graph/complexity.py`:
@@ -149,33 +151,48 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 7: Write the failing calibration test** `ext/topology/tests/test_k_complexity.py`. A 1×N grid of parcels with the two long sides forming the block; mark the far-left edge as the only road → the strip is N layers deep.
+- [ ] **Step 7: Write the failing calibration test** `ext/topology/tests/test_k_complexity.py`. Use **nested grids** (not strips). An n×n grid of unit parcels with its outer boundary as road: 2×2 (all parcels face the boundary) → k=1; 3×3 (centre enclosed) → k=2; 5×5 (doubly nested) → k=3. Also verify road-sensitivity: an interior road reaching the enclosed centre drops 3×3 from k=2 to k=1.
 
 ```python
 from topology import MyEdge, MyFace, MyNode, define_roads_on, graphFromMyFaces, k_complexity
 
 
-def _strip(n: int):
-    # n unit squares in a row; build faces from explicit edges
+def _grid(n: int):
     faces = []
     for i in range(n):
-        c = [MyNode((i, 0)), MyNode((i + 1, 0)), MyNode((i + 1, 1)), MyNode((i, 1))]
-        edges = [MyEdge((c[j], c[(j + 1) % 4])) for j in range(4)]
-        faces.append(MyFace(edges))
+        for j in range(n):
+            c = [MyNode((i, j)), MyNode((i + 1, j)), MyNode((i + 1, j + 1)), MyNode((i, j + 1))]
+            edges = [MyEdge((c[k], c[(k + 1) % 4])) for k in range(4)]
+            faces.append(MyFace(edges))
     return graphFromMyFaces(faces)
 
 
-def test_k_of_strip_with_far_left_street() -> None:
-    for n in (1, 3, 5):
-        g = _strip(n)
-        define_roads_on(g, lambda e: e.nodes[0].x == 0 and e.nodes[1].x == 0)
-        assert k_complexity(g) == n
+def _mark_boundary(g, n: int) -> None:
+    define_roads_on(g, lambda e: (e.nodes[0].x in (0, n) and e.nodes[1].x in (0, n))
+                    or (e.nodes[0].y in (0, n) and e.nodes[1].y in (0, n)))
+
+
+def test_k_of_nested_grids() -> None:
+    for n, expected in ((2, 1), (3, 2), (5, 3)):
+        g = _grid(n)
+        _mark_boundary(g, n)
+        assert k_complexity(g) == expected
+
+
+def test_interior_road_drops_k() -> None:
+    g = _grid(3)
+    _mark_boundary(g, 3)
+    assert k_complexity(g) == 2
+    for e in g.myedges():           # interior connector (1,0)->(1,1) reaches the centre
+        if {e.nodes[0].loc, e.nodes[1].loc} == {(1.0, 0.0), (1.0, 1.0)}:
+            e.road = True
+    assert k_complexity(g) == 1
 ```
 
 - [ ] **Step 8: Run the calibration test.**
 
-Run: `cd ext/topology && python -m pytest tests/test_k_complexity.py -v` (topology must be importable — install first, Step 10, or `pip install -e .` in a scratch env)
-Expected: PASS. **If the returned integers are off by a constant** (e.g. all +1, or the `(max+1)//2` convention is wrong), adjust the final expression in `k_complexity` until the strip yields exactly `n`, then re-run. The strip values are the definition; pin the formula to them.
+Run (after the editable install, Steps 10–11): `pixi run python -m pytest ext/topology/tests/test_k_complexity.py -v`
+Expected: PASS. **If the integers are off**, adjust ONLY the final expression in `k_complexity` until the nested grids yield 2×2→1, 3×3→2, 5×5→3 and the interior-road case drops 3×3 from 2 to 1. Those canonical values are the definition; pin the formula to them (never change the expected values). `len(stacked_duals())` is NOT the formula — it is off by a non-constant amount.
 
 - [ ] **Step 9: Run topology's existing suite to confirm the move didn't break it.**
 
