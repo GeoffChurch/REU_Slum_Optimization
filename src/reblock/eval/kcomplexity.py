@@ -1,4 +1,11 @@
-"""KComplexityEval: Δ of topology's k-complexity from inserting proposed roads."""
+"""KComplexityEval: Δ of access-depth (BFS parcel peel) from inserting proposed roads.
+
+WeakDualKEval retains the prior topology-weak-dual k-complexity metric
+(Brelsford et al.) as an optional eval, for literature comparability; it is
+no longer the primary metric because it degenerates on single-file corridors
+(scores k=1 regardless of length) and silently caps k at 8 -- see
+`reblock.derive.access` for the robust replacement.
+"""
 from __future__ import annotations
 
 from geopandas import GeoDataFrame
@@ -6,9 +13,23 @@ from shapely.geometry import LineString
 from topology import k_complexity
 
 from reblock.contracts import Block, Metrics, Proposal
+from reblock.derive.access import parcel_access_layers
 from reblock.derive.parcel_graph import to_parcel_graph
 
 _EndpointKey = frozenset[tuple[float, float]]
+
+
+class KComplexityEval:
+    def score(self, block: Block, proposal: Proposal) -> Metrics:
+        pre = parcel_access_layers(block, None)
+        post = parcel_access_layers(block, proposal.roads)
+        added = (float(proposal.roads.geometry.length.sum())
+                 if proposal.roads is not None and not proposal.roads.empty else 0.0)
+        kb, ka = int(pre.max()), int(post.max())
+        return Metrics(block_id=block.block_id, method=proposal.method, eval="kcomplexity",
+                       values={"k_before": float(kb), "k_after": float(ka),
+                               "delta_k": float(kb - ka), "added_road_length_m": added},
+                       fields={"access_before": pre, "access_after": post})
 
 
 def _endpoint_keys(lines: GeoDataFrame, origin: tuple[float, float]) -> set[_EndpointKey]:
@@ -41,13 +62,13 @@ def _k(block: Block, extra_roads: GeoDataFrame | None) -> int:
     return k_complexity(ppg.graph)
 
 
-class KComplexityEval:
+class WeakDualKEval:
     def score(self, block: Block, proposal: Proposal) -> Metrics:
         k_before = _k(block, None)
         k_after = _k(block, proposal.roads)
         added = (float(proposal.roads.geometry.length.sum())
                  if proposal.roads is not None and not proposal.roads.empty else 0.0)
-        return Metrics(block_id=block.block_id, method=proposal.method, eval="kcomplexity",
+        return Metrics(block_id=block.block_id, method=proposal.method, eval="weakdual_k",
                        values={"k_before": float(k_before), "k_after": float(k_after),
                                "delta_k": float(k_before - k_after),
                                "added_road_length_m": added})
