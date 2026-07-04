@@ -1,11 +1,14 @@
 """ShapefileSource: read a parcel shapefile into a Region of Blocks (geopandas)."""
 from __future__ import annotations
 
+import warnings
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
 import networkx as nx
+from pyproj import CRS
 from shapely import STRtree
 from shapely.geometry import LineString, MultiLineString, Polygon
 
@@ -46,9 +49,11 @@ def _boundary_lines(boundary: object) -> list[LineString]:
 
 
 class ShapefileSource:
-    def __init__(self, path: str | Path, region_id: str = "region") -> None:
+    def __init__(self, path: str | Path, region_id: str = "region", *,
+                 assumed_crs: CRS | int | None = None) -> None:
         self.path = Path(path)
         self.region_id = region_id
+        self.assumed_crs = assumed_crs
 
     def region(self) -> Region:
         raw = gpd.read_file(self.path)
@@ -57,28 +62,58 @@ class ShapefileSource:
         if raw.crs is None:
             # Some shapefiles (e.g. topology's Phule Nagar fixture) ship without a
             # .prj sidecar, so geopandas reads them with crs=None and
-            # estimate_utm_crs() has nothing to work from. Assume Web Mercator
-            # (EPSG:3857) — the common default for shapefiles exported without
-            # projection info — as the least-surprising fallback so the UTM
-            # estimate below has a CRS to reproject through. For Phule Nagar this
-            # resolves to ~19.05N/72.93E (Thane, India) and EPSG:32643, matching
-            # the UTM zone already assumed elsewhere in this project.
-            raw = raw.set_crs(3857)
+            # estimate_utm_crs() has nothing to work from. Guessing a CRS here
+            # (e.g. defaulting to Web Mercator) risks silently landing real
+            # parcels on Null Island if the guess is wrong, so require the
+            # caller to state the assumption explicitly instead.
+            if self.assumed_crs is None:
+                raise ValueError(
+                    f"{self.path}: shapefile has no CRS (.prj missing); pass "
+                    "assumed_crs=... to ShapefileSource to state the assumption "
+                    "explicitly (e.g. assumed_crs=3857)"
+                )
+            raw = raw.set_crs(self.assumed_crs)
         utm = raw.estimate_utm_crs()
         raw = raw.to_crs(utm).reset_index(drop=True)
 
-        blocks: list[Block] = []
+        # Explode multi-part records (e.g. a native MultiPolygon row) into
+        # their constituent single-part geometries at the row level, before
+        # component grouping. Without this, one native multi-part parcel can
+        # dissolve its whole connected component into a MultiPolygon, which
+        # violates Block.boundary: Polygon (see Epworth_Before.shp: 2 native
+        # MultiPolygon rows out of 5918). Then keep only non-empty Polygons:
+        # explode can leave empty Polygon parts, which still report
+        # geom_type == "Polygon" but carry no geometry, so mirror the
+        # top-of-region() ~is_empty filter here too.
+        raw = raw.explode(index_parts=False, ignore_index=True)
+        keep = (raw.geometry.geom_type == "Polygon") & ~raw.geometry.is_empty
+        raw = cast(gpd.GeoDataFrame, raw[keep].reset_index(drop=True))
+
+        return Region(region_id=self.region_id, crs=utm, blocks=self._iter_blocks(raw, utm))
+
+    def _iter_blocks(self, raw: gpd.GeoDataFrame, utm: CRS) -> Iterator[Block]:
         for k, idx in enumerate(_components(raw)):
             geoms = list(raw.iloc[idx].geometry)
             parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(geoms)))},
                                        geometry=geoms, crs=utm)
             boundary_poly = parcels.geometry.union_all()
             if not isinstance(boundary_poly, Polygon):
-                raise ValueError(
-                    f"{self.region_id}_{k}: dissolved component is a "
-                    f"{type(boundary_poly).__name__}, not a single Polygon"
+                # Real-defect backstop, now non-fatal: exploding multi-part
+                # rows above means a native multi-part record can no longer
+                # land here, but genuine source-data defects still can -- e.g.
+                # overlapping-sliver parcels whose whole-component union
+                # resolves to two disjoint parts (Epworth: ~4 of ~584
+                # components). Such a component can't be expressed as a single
+                # Block.boundary Polygon, so drop it with a visible warning
+                # (logged data loss) rather than crashing the entire load. The
+                # Goal: one malformed record must not take down the dataset.
+                warnings.warn(
+                    f"{self.region_id}_{k}: skipping component; dissolve is "
+                    f"{type(boundary_poly).__name__}, not a Polygon "
+                    f"({len(geoms)} parcels dropped)",
+                    stacklevel=2,
                 )
+                continue
             streets = gpd.GeoDataFrame(geometry=_boundary_lines(boundary_poly.boundary), crs=utm)
-            blocks.append(Block(block_id=f"{self.region_id}_{k}", crs=utm,
-                                boundary=boundary_poly, parcels=parcels, streets=streets))
-        return Region(region_id=self.region_id, crs=utm, blocks=tuple(blocks))
+            yield Block(block_id=f"{self.region_id}_{k}", crs=utm,
+                        boundary=boundary_poly, parcels=parcels, streets=streets)

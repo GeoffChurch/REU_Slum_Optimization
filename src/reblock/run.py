@@ -20,13 +20,17 @@ class RunConfig:
     alpha: float = 2.0
     seed: int = 0
     max_blocks: int = 1
+    # ShapefileSource now fails loud instead of guessing a CRS when a
+    # shapefile has no .prj (e.g. Phule Nagar); the CLI needs a way to state
+    # that assumption. None preserves "fail loud" as the CLI default too.
+    assumed_crs: int | None = None
 
 
 ConfigStore.instance().store(name="run", node=RunConfig)
 
 
 def run(cfg: RunConfig) -> list[Metrics]:
-    source = ShapefileSource(cfg.shapefile, region_id=cfg.region_id)
+    source = ShapefileSource(cfg.shapefile, region_id=cfg.region_id, assumed_crs=cfg.assumed_crs)
     method = TopologyMethod(alpha=cfg.alpha, seed=cfg.seed)
     evaluator = KComplexityEval()
     region = source.region()

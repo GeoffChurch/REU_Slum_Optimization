@@ -149,7 +149,8 @@ def test_derivation_matches_topology_native_ring_construction() -> None:
     order-dependent quirk of topology's own third-party clean-up algorithm,
     not something to_parcel_graph should be graded on.)
     """
-    region = ShapefileSource(PHULE.with_suffix(".shp"), region_id="phule").region()
+    region = ShapefileSource(PHULE.with_suffix(".shp"), region_id="phule",
+                              assumed_crs=3857).region()
     blocks = list(region.blocks)
     assert len(blocks) == 370
 
@@ -195,7 +196,8 @@ def test_full_pipeline_facecount_over_all_phule_blocks() -> None:
     noise. `>=` on face count guards the direction that matters most: the
     clean-up must never lose real parcel faces.
     """
-    region = ShapefileSource(PHULE.with_suffix(".shp"), region_id="phule").region()
+    region = ShapefileSource(PHULE.with_suffix(".shp"), region_id="phule",
+                              assumed_crs=3857).region()
     blocks = list(region.blocks)
     assert len(blocks) == 370
 

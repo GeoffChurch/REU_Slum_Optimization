@@ -19,7 +19,7 @@ def test_cli_entrypoint_smoke(tmp_path: Path) -> None:
     # tree instead of littering it on every test run (it's gitignored, but still).
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
-         f"shapefile={PHULE}", "max_blocks=1", f"hydra.run.dir={tmp_path}"],
+         f"shapefile={PHULE}", "max_blocks=1", "assumed_crs=3857", f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stderr
@@ -28,7 +28,8 @@ def test_cli_entrypoint_smoke(tmp_path: Path) -> None:
 
 
 def test_end_to_end_phule() -> None:
-    results = run(RunConfig(shapefile=PHULE, region_id="phule", alpha=2.0, seed=0, max_blocks=1))
+    results = run(RunConfig(shapefile=PHULE, region_id="phule", alpha=2.0, seed=0, max_blocks=1,
+                             assumed_crs=3857))
     assert len(results) == 1
     v = results[0].values
     assert v["k_after"] <= v["k_before"] and v["delta_k"] >= 0
@@ -41,7 +42,7 @@ def test_pipeline_actually_reblocks_a_real_phule_block() -> None:
     # drops k), and assert it. Deterministic under seed=0. The whole 370-block region
     # scans in <2s (build_all_roads ~5ms/block here), so no cap is needed; early-exit
     # on first success. Empirically the first (and only) improving block is phule_105.
-    region = ShapefileSource(PHULE, region_id="phule").region()
+    region = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857).region()
     evaluator = KComplexityEval()
 
     scanned = 0
