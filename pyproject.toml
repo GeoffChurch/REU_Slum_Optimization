@@ -74,6 +74,10 @@ files = ["src", "tests"]
 # entry — mypy's static .pth scan can't see through that, so point it at the
 # source tree directly (this is not an ignore_missing_imports shim: topology
 # ships py.typed and a fully typed public surface).
+# WARNING: do NOT add a tests/__init__.py to reblock's own tests/ -- mypy_path
+# exposes ext/topology's top-level "tests" package too, and turning ours into a
+# package as well collides with it (mypy treats both as module "tests"),
+# making mypy fatal with a duplicate-module error.
 mypy_path = ["ext/topology"]
 
 # topology's pre-existing (unannotated) graph implementation transitively

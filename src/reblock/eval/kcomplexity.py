@@ -25,6 +25,11 @@ def _k(block: Block, extra_roads: GeoDataFrame | None) -> int:
     # Slice 1: Block.streets == the block boundary, so topology's native
     # define_roads() (outer-face detection) marks the initial streets robustly.
     # Proposed interior roads are 2-point method edges matched by exact endpoints.
+    #
+    # NOTE (Slice 1, decision 10 gap): Block.streets == the block boundary here, so
+    # define_roads() (outer-face detection) is used as the initial road set instead of
+    # deriving it from Block.streets. Slice 2 must map Block.streets -> initial road
+    # edges instead, so real OSM streets that are interior frontage are honored.
     ppg = to_parcel_graph(block)
     ppg.graph.define_roads()
     if extra_roads is not None and not extra_roads.empty:

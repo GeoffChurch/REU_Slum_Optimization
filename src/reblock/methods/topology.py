@@ -27,6 +27,10 @@ class TopologyMethod:
     def propose(self, block: Block) -> Proposal:
         ppg = to_parcel_graph(block)
         graph = ppg.graph
+        # NOTE (Slice 1, decision 10 gap): Block.streets == the block boundary here, so
+        # define_roads() (outer-face detection) is used as the initial road set instead of
+        # deriving it from Block.streets. Slice 2 must map Block.streets -> initial road
+        # edges instead, so real OSM streets that are interior frontage are honored.
         graph.define_roads()                 # boundary edges = initial streets
         graph.define_interior_parcels()
         initial = {e for e in graph.myedges() if e.road}
@@ -38,6 +42,11 @@ class TopologyMethod:
         np.random.seed(self.seed)
         build_all_roads(graph, alpha=self.alpha, vquiet=True)
 
+        # `e not in initial` is a value-equality set-difference: MyEdge.__eq__/__hash__ are
+        # VALUE-based on the unordered pair of node locations (see MyEdge in
+        # ext/topology/topology/graph/my_graph.py), not identity-based. So this correctly
+        # finds edges newly marked as roads regardless of whether build_all_roads mutates
+        # edges in place or topology otherwise preserves the original edge objects.
         new_edges = [e for e in graph.myedges() if e.road and e not in initial]
         roads = gpd.GeoDataFrame(geometry=[_edge_line(e, ppg.origin) for e in new_edges],
                                  crs=block.crs)

@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 
 from reblock.data.shapefile import ShapefileSource
@@ -7,6 +9,22 @@ from reblock.run import RunConfig, run
 
 PHULE = str(Path(__file__).resolve().parents[1] / "ext" / "topology" / "examples"
             / "data" / "phule_nagar_v6.shp")
+
+
+def test_cli_entrypoint_smoke(tmp_path: Path) -> None:
+    # Exercises the real @hydra.main/ConfigStore entrypoint (python -m reblock.run),
+    # not just run(RunConfig(...)) directly -- catches breakage in CLI arg parsing /
+    # config registration that calling run() in-process can't see. hydra.run.dir is
+    # redirected to tmp_path so the Hydra-created outputs/ dir lands outside the repo
+    # tree instead of littering it on every test run (it's gitignored, but still).
+    result = subprocess.run(
+        [sys.executable, "-m", "reblock.run",
+         f"shapefile={PHULE}", "max_blocks=1", f"hydra.run.dir={tmp_path}"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "phule_0" in result.stdout
+    assert "k_before" in result.stdout
 
 
 def test_end_to_end_phule() -> None:
