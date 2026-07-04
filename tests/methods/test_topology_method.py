@@ -19,6 +19,24 @@ def _grid(n: int) -> Block:
     return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
 
 
+def _split_square(size: float = 10.0) -> Block:
+    """A square block split into two parcels by a single mid vertical party line.
+
+    The shared interior edge `(size/2, 0)-(size/2, size)` has BOTH endpoints on
+    the boundary (they sit on the bottom and top edges) yet its midpoint is
+    `size/2` units from any street -- exactly the "chord across a notch" that an
+    endpoint-only street match wrongly reads as a road, while a whole-edge
+    (within-corridor) match correctly rejects it.
+    """
+    h = size / 2
+    left = Polygon([(0, 0), (h, 0), (h, size), (0, size)])
+    right = Polygon([(h, 0), (size, 0), (size, size), (h, size)])
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[left, right], crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
+    return Block(block_id="split", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+
+
 def _grid_with_south_street_only(n: int) -> Block:
     """Same NxN grid as `_grid`, but `Block.streets` is only the south side of
     the boundary (a proper subset), not the whole boundary. This should leave
@@ -80,6 +98,24 @@ def test_propose_accepts_explicit_prior_none() -> None:
 def test_proposal_id_encodes_alpha_and_seed() -> None:
     proposal = TopologyMethod(alpha=2.0, seed=0).propose(_grid(3))
     assert proposal.proposal_id == "topology_a2.0_s0"
+
+
+def test_interior_chord_with_boundary_endpoints_is_not_marked_road() -> None:
+    # Mutation check for the street->edge marking. The mid party line of a
+    # split square has both endpoints ON the boundary but a midpoint 5 units
+    # from any street; an endpoint-only match marks it road (wrong), a
+    # whole-edge/within-corridor match rejects it. (Fails under the old
+    # endpoint-only predicate; passes once the edge itself must lie on the
+    # street.)
+    proposal = TopologyMethod(seed=0).propose(_split_square(10.0))
+    assert proposal.edges is not None
+    party_line = LineString([(5.0, 0.0), (5.0, 10.0)])
+    marked = [bool(is_road)
+              for geom, is_road in zip(proposal.edges.geometry, proposal.edges["road"],
+                                       strict=True)
+              if geom.equals(party_line)]
+    assert marked, "party-line edge missing from proposal.edges"
+    assert not any(marked), "interior party line wrongly marked road=True"
 
 
 def test_partial_streets_yield_a_different_larger_proposal() -> None:

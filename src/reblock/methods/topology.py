@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import geopandas as gpd
 import numpy as np
 from shapely import union_all
-from shapely.geometry import LineString, Point
+from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 from topology import MyEdge, MyGraph, build_all_roads
 
@@ -41,19 +41,23 @@ def _mark_streets_as_roads(graph: MyGraph, streets: gpd.GeoDataFrame,
                            origin: tuple[float, float]) -> None:
     """Set `edge.road = True` for graph edges coincident with `Block.streets`.
 
-    "Coincident" is a geometric proximity test (both endpoints within
-    `_STREET_MATCH_TOL` of the street network), not exact endpoint equality:
-    `Block.streets` and the parcel graph are independently derived from the
-    same raw parcels (see module docstring on `_STREET_MATCH_TOL`), so exact
-    coordinate equality would silently miss real, cleaned-up boundary edges.
+    "Coincident" means the *whole edge* lies within `_STREET_MATCH_TOL` of the
+    street network -- tested as the edge line being `within` the street's
+    `buffer(tol)` corridor, not merely its two endpoints being near a street.
+    Endpoint-only proximity over-matches: an interior party line whose two
+    endpoints happen to sit on the boundary (a chord across a notch/reflex
+    corner) would be wrongly marked a road even though it detours far from any
+    street. The buffer tolerance absorbs the sub-`tol` coordinate drift between
+    `Block.streets` and the cleaned parcel graph (see `_STREET_MATCH_TOL`), so
+    genuine boundary edges still match despite that drift.
     """
     street_geom = _streets_local_geometry(streets, origin)
     if street_geom is None:
         return
+    corridor = street_geom.buffer(_STREET_MATCH_TOL)
     for edge in graph.myedges():
         a, b = edge.nodes
-        if (Point(a.x, a.y).distance(street_geom) <= _STREET_MATCH_TOL
-                and Point(b.x, b.y).distance(street_geom) <= _STREET_MATCH_TOL):
+        if LineString([(a.x, a.y), (b.x, b.y)]).within(corridor):
             edge.road = True
 
 
