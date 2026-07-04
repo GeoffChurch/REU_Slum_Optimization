@@ -2,6 +2,10 @@
 
 **Status:** draft for review · **Date:** 2026-07-03
 
+> **Superseded in part (2026-07-04):** after a red-team, decisions 2, 4, 10, 11 and the
+> contracts are revised by `2026-07-04-reblock-hardening-design.md`. This doc remains the
+> record of the original Slice-1 design (which shipped).
+
 ## Goal
 
 reblock "adds roads to maps via pluggable methods, then evaluates them." The system is a
