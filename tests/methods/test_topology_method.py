@@ -2,7 +2,7 @@ from typing import cast
 
 import geopandas as gpd
 from pyproj import CRS
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Polygon
 
 from reblock.contracts import Block
 from reblock.methods.topology import TopologyMethod
@@ -17,6 +17,23 @@ def _grid(n: int) -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
     return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+
+
+def _grid_with_south_street_only(n: int) -> Block:
+    """Same NxN grid as `_grid`, but `Block.streets` is only the south side of
+    the boundary (a proper subset), not the whole boundary. This should leave
+    every non-bottom-row parcel initially interior -- a much larger initial
+    interior set than `_grid`'s full-boundary streets, which only strands the
+    single center parcel -- proving `Block.streets` (not `define_roads()`'s
+    boundary shortcut) drives the initial road set.
+    """
+    polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
+             for i in range(n) for j in range(n)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    south = LineString([(i, 0) for i in range(n + 1)])
+    streets = gpd.GeoDataFrame(geometry=[south], crs=UTM)
+    return Block(block_id="g_south", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
 
 
 def test_proposes_roads_for_interior_parcel() -> None:
@@ -51,3 +68,31 @@ def test_all_interior_parcels_connected() -> None:
     build_all_roads(ppg.graph, alpha=2.0, vquiet=True)  # type: ignore[no-untyped-call]
     ppg.graph.define_interior_parcels()  # type: ignore[no-untyped-call]
     assert len(ppg.graph.interior_parcels) == 0
+
+
+def test_propose_accepts_explicit_prior_none() -> None:
+    # `prior` is unused today (topology is block-independent) but must be
+    # accepted so TopologyMethod structurally satisfies the Method protocol.
+    proposal = TopologyMethod(seed=0).propose(_grid(3), prior=None)
+    assert proposal.roads is not None and len(proposal.roads) >= 1
+
+
+def test_proposal_id_encodes_alpha_and_seed() -> None:
+    proposal = TopologyMethod(alpha=2.0, seed=0).propose(_grid(3))
+    assert proposal.proposal_id == "topology_a2.0_s0"
+
+
+def test_partial_streets_yield_a_different_larger_proposal() -> None:
+    # `Block.streets` here is only the south side of the boundary, a proper
+    # subset of it -- so if `propose` truly consumes `Block.streets` (rather
+    # than always deriving the initial road set from the full boundary via
+    # `define_roads()`), far more parcels start out interior (6 of 9, vs. just
+    # the 1 center parcel for full-boundary streets) and the greedy builder
+    # must add substantially more new road to resolve them all.
+    full = TopologyMethod(seed=0).propose(_grid(3))
+    partial = TopologyMethod(seed=0).propose(_grid_with_south_street_only(3))
+    assert full.roads is not None and partial.roads is not None
+    assert partial.roads.geometry.length.sum() > full.roads.geometry.length.sum()
+    assert len(partial.roads) > len(full.roads)
+    assert (sorted(g.wkt for g in partial.roads.geometry)
+            != sorted(g.wkt for g in full.roads.geometry))
