@@ -3,11 +3,14 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from geopandas import GeoDataFrame
 from pyproj import CRS
 from shapely.geometry import Polygon
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 def _require_columns(gdf: GeoDataFrame, cols: set[str], name: str) -> None:
@@ -27,9 +30,6 @@ class Region:
     crs: CRS
     blocks: Iterable[Block]
     roads: GeoDataFrame | None = None
-    water: GeoDataFrame | None = None
-    food: GeoDataFrame | None = None
-    healthcare: GeoDataFrame | None = None
     attrs: Mapping[str, object] = field(default_factory=dict)
 
 
@@ -40,9 +40,6 @@ class Block:
     boundary: Polygon
     parcels: GeoDataFrame
     streets: GeoDataFrame
-    buildings: GeoDataFrame | None = None
-    water: GeoDataFrame | None = None
-    barriers: GeoDataFrame | None = None
     attrs: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -58,9 +55,8 @@ class Proposal:
     block_id: str
     crs: CRS
     roads: GeoDataFrame | None = None
-    water_points: GeoDataFrame | None = None
-    water_mains: GeoDataFrame | None = None
     edges: GeoDataFrame | None = None
+    proposal_id: str = ""
     method: str = ""
     params: Mapping[str, object] = field(default_factory=dict)
 
@@ -71,18 +67,32 @@ class Metrics:
     method: str
     eval: str
     values: Mapping[str, float]
+    fields: Mapping[str, pd.Series] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Result:
+    block: Block
+    proposal: Proposal
+    metrics: tuple[Metrics, ...]
+
+    def metric(self, eval: str, key: str) -> float:
+        for m in self.metrics:
+            if m.eval == eval:
+                return m.values[key]
+        raise KeyError(f"no metric {key!r} for eval {eval!r}")
 
 
 class Source(Protocol):
     def region(self) -> Region: ...
 
 
-class Screen(Protocol):
-    def rank(self, region: Region) -> Mapping[str, float]: ...
-
-
 class Method(Protocol):
-    def propose(self, block: Block) -> Proposal: ...
+    def propose(self, block: Block, prior: Proposal | None = None) -> Proposal: ...
+
+
+class RegionMethod(Protocol):
+    def propose(self, region: Region) -> Iterable[Proposal]: ...
 
 
 class Eval(Protocol):
