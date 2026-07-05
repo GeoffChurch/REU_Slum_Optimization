@@ -1,7 +1,9 @@
 from pathlib import Path
 
+import geopandas as gpd
 import pytest
-from shapely.geometry import Polygon
+from pyproj import CRS
+from shapely.geometry import Polygon, box
 
 from reblock.contracts import Block
 from reblock.data.shapefile import ShapefileSource
@@ -21,6 +23,22 @@ def test_source_yields_metric_blocks() -> None:
     assert isinstance(b, Block) and b.crs.is_projected
     assert not b.parcels.empty and "parcel_id" in b.parcels.columns
     assert b.boundary.area > 0 and b.block_id.startswith("phule_")
+
+
+def test_streets_excludes_interior_gap_rings() -> None:
+    # 8 unit squares tiling a 3x3 grid with the CENTRE removed -> the dissolved
+    # block boundary is a donut with one interior ring (the central hole). That
+    # hole is a gap between parcels, not a street, so block.streets must be the
+    # OUTER frontage only (a single ring), never the interior gap-ring. Real
+    # data has many such gaps (CapeTown's dissolved union has 169); seeding the
+    # peel or marking roads from them is wrong and crashes the road-builder.
+    utm = CRS.from_epsg(32643)
+    squares = [box(x, y, x + 1, y + 1) for x in range(3) for y in range(3)
+               if not (x == 1 and y == 1)]
+    raw = gpd.GeoDataFrame(geometry=squares, crs=utm)
+    block = next(ShapefileSource("unused", region_id="donut")._iter_blocks(raw, utm))
+    assert len(block.boundary.interiors) == 1     # the central hole really exists
+    assert len(block.streets) == 1                # ...but streets = the outer ring only
 
 
 def test_missing_crs_without_assumed_crs_raises() -> None:

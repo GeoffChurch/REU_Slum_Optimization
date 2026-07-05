@@ -10,7 +10,7 @@ import geopandas as gpd
 import networkx as nx
 from pyproj import CRS
 from shapely import STRtree
-from shapely.geometry import LineString, MultiLineString, Polygon
+from shapely.geometry import LineString, Polygon
 
 from reblock.contracts import Block, Region
 
@@ -38,14 +38,6 @@ def _components(gdf: gpd.GeoDataFrame) -> list[list[int]]:
             if i < jj and g.intersection(geoms[jj]).length > 0:
                 graph.add_edge(i, jj)
     return [sorted(c) for c in nx.connected_components(graph)]
-
-
-def _boundary_lines(boundary: object) -> list[LineString]:
-    if isinstance(boundary, MultiLineString):
-        return list(boundary.geoms)
-    if isinstance(boundary, LineString):
-        return [boundary]
-    return []
 
 
 class ShapefileSource:
@@ -114,6 +106,16 @@ class ShapefileSource:
                     stacklevel=2,
                 )
                 continue
-            streets = gpd.GeoDataFrame(geometry=_boundary_lines(boundary_poly.boundary), crs=utm)
+            # streets = the block's OUTER frontage only. `boundary_poly.boundary`
+            # would also include every interior ring, and on real data the
+            # dissolved parcel union has many -- sliver gaps between imperfectly
+            # tiling parcels (CapeTown: 169). Those holes are digitization gaps,
+            # not streets: seeding the BFS peel from them falsely reads
+            # gap-adjacent interior parcels as street frontage, and marking their
+            # edges as roads paints stray interior road segments that break
+            # topology's greedy builder. The exterior ring is exactly the outer
+            # frontage, matching topology's own outer-face define_roads().
+            streets = gpd.GeoDataFrame(
+                geometry=[LineString(boundary_poly.exterior.coords)], crs=utm)
             yield Block(block_id=f"{self.region_id}_{k}", crs=utm,
                         boundary=boundary_poly, parcels=parcels, streets=streets)
