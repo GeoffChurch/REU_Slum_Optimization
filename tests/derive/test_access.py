@@ -2,12 +2,46 @@ from typing import cast
 
 import geopandas as gpd
 from pyproj import CRS
+from shapely import from_wkt, snap
+from shapely.errors import GEOSException
 from shapely.geometry import LineString, Polygon
 
 from reblock.contracts import Block
-from reblock.derive.access import parcel_access_layers
+from reblock.derive.access import _adjacency, parcel_access_layers
 
 UTM = CRS.from_epsg(32643)
+
+# Two real CapeTown parcels (origin-shifted to a compact local frame) that share
+# a ~5.94 m boundary edge but whose messy touching makes shapely `snap()` raise a
+# GEOS "side location conflict". Fixture for the peel's snap-crash fallback.
+_SNAP_CRASH_A = (
+    "POLYGON ((1.9866548709687777 4.1239692606031895, 0.6000346247456037 "
+    "3.9856557371094823, 0.6612303015426733 5.1532828798517585, "
+    "1.0609374018968083 5.995375864207745, 1.390652027039323 6.170351724140346, "
+    "1.7913760460796766 7.010007037781179, 2.291363297146745 7.019778151996434, "
+    "2.286477740330156 7.2697717770934105, 2.5364713624003343 7.2746573351323605, "
+    "3.3282402640325017 7.494427074678242, 3.526674743683543 7.79418680537492, "
+    "4.276655612979084 7.808843473903835, 4.271770056977402 8.058837096206844, "
+    "4.77175729861483 8.068608208559453, 4.766871742962394 8.318601830862463, "
+    "5.516852606495377 8.333258498460054, 5.808826373016927 7.237436773255467, "
+    "5.638817939267028 6.4030229691416025, 5.961782830127049 5.5887297336012125, "
+    "6.325460155203473 5.347991726361215, 6.217004209349398 5.20699826348573, "
+    "4.308344294142444 4.836281311698258, 1.9866548709687777 4.1239692606031895))"
+)
+_SNAP_CRASH_C = (
+    "POLYGON ((1.8147879005991854 0.147713715210557, 1.4281845087534748 "
+    "0.0004144152626395, 1.0314231939264573 0.8632100289687514, "
+    "0.7761156757478602 1.6180128017440438, -8.878804510459304e-05 "
+    "3.4074111403897405, 0.6000346247456037 3.9856557371094823, "
+    "1.9866548709687777 4.1239692606031895, 4.308344294142444 4.836281311698258, "
+    "6.217004209349398 5.20699826348573, 6.325460155203473 5.347991726361215, "
+    "6.575453772675246 5.352877285331488, 6.580339331703726 5.102883664891124, "
+    "6.4929363579140045 4.696337741799653, 6.18629914597841 3.9743308471515775, "
+    "6.688041081593838 2.5436511477455497, 6.384086882113479 2.3480682922527194, "
+    "6.134093261382077 2.343182728625834, 6.138978823728394 2.0931891091167927, "
+    "6.063126474211458 1.675542856566608, 5.903641892189626 1.3383226860314608, "
+    "5.023939229140524 1.203123134560883, 1.8147879005991854 0.147713715210557))"
+)
 
 
 def _grid_block(n: int, x0: float = 0.0) -> Block:
@@ -91,6 +125,25 @@ def test_diagonal_touch_is_not_adjacency() -> None:
     assert layers.loc[1] == 2
     assert layers.loc[2] == 3        # 3 via the edge chain; would be 2 if corners counted
     assert layers.max() == 3
+
+
+def test_snap_geosexception_falls_back_to_direct_intersection() -> None:
+    # Regression: on real cadastral data (CapeTown) shapely `snap()` can raise a
+    # GEOS "side location conflict" for a messy touching pair. _adjacency must
+    # not let that crash the whole peel -- it falls back to a direct intersection
+    # on validated operands, which still finds the ~5.94 m shared edge. Assert
+    # (1) the fixture really does still make snap raise (guards the fixture from
+    # silently degrading), and (2) _adjacency reports the pair as adjacent.
+    a, c = from_wkt(_SNAP_CRASH_A), from_wkt(_SNAP_CRASH_C)
+    try:
+        snap(a, c, 0.5).intersection(c)
+    except GEOSException:
+        pass
+    else:  # pragma: no cover - fixture-integrity guard
+        raise AssertionError("fixture no longer triggers the snap GEOSException")
+    adj = _adjacency([a, c], 0.5)
+    assert adj[0] == {1}
+    assert adj[1] == {0}
 
 
 def test_disconnected_parcel_gets_layer_past_deepest() -> None:
