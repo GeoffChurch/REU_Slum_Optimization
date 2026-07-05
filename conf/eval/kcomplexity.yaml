@@ -1,0 +1,4 @@
+# A list (see conf/method/topology.yaml for why): `cfg.eval` instantiates to
+# a ListConfig of Eval instances, so a Result can carry more than one Metrics
+# per proposal.
+- _target_: reblock.eval.kcomplexity.KComplexityEval

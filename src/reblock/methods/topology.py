@@ -12,15 +12,15 @@ from shapely.geometry.base import BaseGeometry
 from topology import MyEdge, MyGraph, build_all_roads
 
 from reblock.contracts import Block, Proposal
+from reblock.derive.access import STREET_TOL
 from reblock.derive.parcel_graph import to_parcel_graph
 
-# `to_parcel_graph`'s `clean_up_geometry(0.5, byblock=False)` step merges
-# near-duplicate parcel vertices within this many units of each other, so a
-# surviving graph node can sit up to this far from the raw vertex `Block.streets`
-# was built from (`ShapefileSource` derives it from the *un-cleaned* parcel
-# union). Matching edges to streets must tolerate that same drift, or real
-# (noisy) boundary geometry silently under-matches -- see `_mark_streets_as_roads`.
-_STREET_MATCH_TOL = 0.5
+# The street-seam tolerance is shared with the BFS peel: both gate the same
+# `Block.streets` seam and must agree, so the value lives in one place (see
+# `reblock.derive.access.STREET_TOL` for the `clean_up_geometry(0.5)`
+# rationale). Matching edges to streets must tolerate that same sub-tol drift,
+# or real (noisy) boundary geometry silently under-matches -- see
+# `_mark_streets_as_roads`.
 
 
 def _edge_line(edge: MyEdge, origin: tuple[float, float]) -> LineString:
@@ -41,20 +41,20 @@ def _mark_streets_as_roads(graph: MyGraph, streets: gpd.GeoDataFrame,
                            origin: tuple[float, float]) -> None:
     """Set `edge.road = True` for graph edges coincident with `Block.streets`.
 
-    "Coincident" means the *whole edge* lies within `_STREET_MATCH_TOL` of the
+    "Coincident" means the *whole edge* lies within `STREET_TOL` of the
     street network -- tested as the edge line being `within` the street's
     `buffer(tol)` corridor, not merely its two endpoints being near a street.
     Endpoint-only proximity over-matches: an interior party line whose two
     endpoints happen to sit on the boundary (a chord across a notch/reflex
     corner) would be wrongly marked a road even though it detours far from any
     street. The buffer tolerance absorbs the sub-`tol` coordinate drift between
-    `Block.streets` and the cleaned parcel graph (see `_STREET_MATCH_TOL`), so
+    `Block.streets` and the cleaned parcel graph (see `STREET_TOL`), so
     genuine boundary edges still match despite that drift.
     """
     street_geom = _streets_local_geometry(streets, origin)
     if street_geom is None:
         return
-    corridor = street_geom.buffer(_STREET_MATCH_TOL)
+    corridor = street_geom.buffer(STREET_TOL)
     for edge in graph.myedges():
         a, b = edge.nodes
         if LineString([(a.x, a.y), (b.x, b.y)]).within(corridor):

@@ -1,0 +1,4 @@
+_target_: reblock.data.shapefile.ShapefileSource
+path: ${shapefile}
+region_id: ${region_id}
+assumed_crs: ${assumed_crs}

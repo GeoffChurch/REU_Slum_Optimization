@@ -1,0 +1,17 @@
+defaults:
+  - data: phule
+  - method: topology
+  - eval: kcomplexity
+  - _self_
+
+# Top-level scalars are the interpolation sources the data/method config
+# groups reference (${shapefile}, ${alpha}, ...) -- overriding them at the
+# CLI (e.g. `shapefile=...`) flows into whichever source/method is selected
+# without needing group-qualified overrides like `data.path=...`.
+shapefile: ???
+region_id: phule
+alpha: 2.0
+seed: 0
+assumed_crs: null
+max_blocks: 1
+render_dir: null

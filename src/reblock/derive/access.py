@@ -17,6 +17,15 @@ from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import Block
 
+# The `Block.streets` seam tolerance. `to_parcel_graph`'s
+# `clean_up_geometry(0.5, byblock=False)` step merges parcel vertices within
+# this many units, so anything gating that seam -- the peel's parcel-adjacency
+# and street-seeding here, and `TopologyMethod`'s street-edge matching (which
+# imports this same constant) -- must tolerate the same drift, or noisy real
+# boundary geometry silently under-matches. One constant so the two never
+# disagree.
+STREET_TOL = 0.5
+
 
 def _adjacency(geoms: list[BaseGeometry], tol: float) -> list[set[int]]:
     """Parcel-parcel adjacency: pairs whose boundaries share a positive-length
@@ -45,7 +54,7 @@ def _adjacency(geoms: list[BaseGeometry], tol: float) -> list[set[int]]:
 
 
 def parcel_access_layers(
-    block: Block, roads: GeoDataFrame | None, *, tol: float = 0.5
+    block: Block, roads: GeoDataFrame | None, *, tol: float = STREET_TOL
 ) -> pd.Series:
     """BFS-peel access depth per parcel: 1 = touches a street, L = L-1 parcels deep.
 
