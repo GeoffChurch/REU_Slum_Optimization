@@ -36,6 +36,18 @@ def run(cfg: RunConfig | DictConfig) -> list[Result]: ...   # single data + meth
   numpy RNG (`np.random.seed`); refactor it to a **local** `np.random.default_rng(seed)` passed into
   the builder so `run()` has no global side effect and repeats are bit-identical (needed for the
   purity claim; also removes a latent cross-method nondeterminism).
+- **Block selection — filter early, at the source.** A `block_ids` list (a top-level interpolated
+  Hydra scalar, exactly like `${shapefile}`/`${alpha}` today) flows into the `Source` constructor;
+  `region()` filters the blocks frame **before** the sjoin + per-block build loop, so a targeted run
+  does O(k) work for k requested blocks (and the sjoin touches only their buildings) instead of
+  building the whole region and discarding. **No `Source`-protocol change** — it is another
+  constructor param, Hydra-set; `block_ids=None` means "all blocks" (today's behaviour). This early
+  split is also what makes the L2 per-block cache **O(n)-not-2ⁿ** (§6): the split boundary is the
+  individual block, so any `block_ids` subset reuses the same per-block cache entries.
+
+  ```bash
+  python -m reblock.run data=capetown method=peel block_ids=[ZAF.9.3.1_1_44882] render_dir=renders
+  ```
 
 ## 2. Outputs — pluggable emitters that consume `Result`s
 
@@ -148,28 +160,69 @@ For now: keep today's pattern — `conf/{data,method,eval}/*.yaml` groups with `
 one cleanup worth doing *within* this refactor (no full migration needed): simplify the
 `RunConfig.__post_init__` flat-field→`_target_`-dict translation glue now that `run()` is atomic.
 
-## 6. Efficiency — in-process reuse, no disk cache
+**Block selection wires as a top-level interpolated scalar** (§1): add `block_ids: null` to
+`conf/config.yaml` (and `conf/compare.yaml`), referenced as `block_ids: ${block_ids}` in each
+`conf/data/*.yaml` group that supports it — the same interpolation pattern `${shapefile}`/`${alpha}`
+already use, so a CLI `block_ids=[...]` flows into the selected `Source` with no group-qualified
+override.
 
-**Decision (post-review):** drop persistent `joblib` caching. Three review lenses converged: the
-spec's design could return silently-wrong results two ways (a positional `block_id = f"{region_id}_{k}"`
-key that serves stale geometry when a fixture is regenerated; `parcel_access_layers(block, None)` vs
-`(block, roads)` collapsing to one key → `delta_k=0`), the human-bumped code-version tag is
-unreliable (even joblib's own func-hash misses transitive edits + the `STREET_TOL` constant), and for
-a pipeline that runs a handful of blocks in seconds it's a dependency + correctness surface solving a
-problem the project doesn't have.
+## 6. Efficiency — in-process reuse (L1) + per-block persistent cache (L2)
 
-Because §3/§4 run the whole sweep **in one process**, the "as cheap as an in-process family" goal is
-achieved directly, with none of joblib's hazards:
+Two complementary layers. L1 is the within-one-process fast path (no serialization); L2 persists the
+expensive **pure** derivations across sweep invocations. Both key on the **individual block**, never
+on the filter or the run — the O(n)-not-2ⁿ principle.
 
-- The aggregate **loads the `Source` once** and materializes each `Block` once (iterate the
-  `region.blocks` generator a single time), rather than re-reading per atomic call.
-- Per block, compute the shared derivations once — `parcel_adjacency`, the `roads=None` "before"
-  layers, the topology graph build — into a plain in-process `dict` keyed by the block, then fan out
-  across methods/evals. No pickling, no disk, no cache dir, no version tag, no content-vs-id hazard.
+**L1 — in-process reuse (within one sweep).** Because §3/§4 run the whole sweep in one process, the
+aggregate **loads the `Source` once**, materializes each `Block` once (iterate `region.blocks`
+a single time), and computes the shared **method-independent** derivations once per block —
+`parcel_adjacency`, the `roads=None` "before" access layers, the "before" geometric distances, the
+topology graph build — into a plain in-process `dict` keyed by the block, then fans out across
+methods/evals. No pickling, no disk. This is the fast path for repeated touches within a single sweep.
 
-If cross-process / resumable sweeps are ever genuinely needed, add caching *then*, with
-**content-addressed keys** (hash the block geometry once at load, carry it on the `Block`) and an
-**automatic source-hash version** — not a positional id and a hand-bumped tag. Captured in the backlog.
+**L2 — per-block persistent cache (across sweeps / invocations).** The measured cost breakdown (Cape
+Town, 700–900-parcel blocks) shows the tessellation is **not** the bottleneck: `_voronoi_parcels`
+≈ 20 ms (~6% of a peel block-run), while the eval (`parcel_access_layers` ×2 + geometric Dijkstra +
+connectivity ≈ 210 ms) and the method (`propose` — 110 ms peel; **minutes** for topology) dominate.
+So the persistent cache targets the expensive **pure** derivations, keyed per block:
+
+- block build / Voronoi (≈20 ms each; ≈6–7 s across a ~300-block region)
+- the method-independent **before**-derivations (`access_before`, `geometric_before`) — recomputed
+  for *every* method/param on the same block, so the biggest sweep win
+- the **method proposal** per `(block, method-params)` — trivial for peel, but turns a topology rerun
+  from minutes into an instant hit
+
+All are pure and deterministic given a fixed GEOS, so all are safely cacheable.
+
+**The key is per-block and content-addressed, never per-filter** — cache-unit key =
+`(block_id, source_content_hash, geos_version, proj_version[, method-params])`:
+
+- **`block_id` + `source_content_hash`** (a hash of the source parquet(s), computed once at load and
+  carried on the `Block`) — so a block built under filter `{X,Y,Z}` and under filter `{X}` hit the
+  *same* entry. n blocks → n keys, reused across all 2ⁿ filters. This is why block selection filters
+  *early* (§1): the split boundary is the block, so the cache unit is the block. (Owner's lean:
+  `block_id` + whole-source hash over per-geometry-WKB hashing — simpler, and kblock ids are stable;
+  trade-off is coarse invalidation, below.)
+- **`geos_version` AND `proj_version` in the key** — parcel counts are GEOS-sensitive (the
+  pinned-value test is GEOS-fragile) and the cached derivations run on **already-reprojected**
+  geometry, so a GEOS *or* PROJ upgrade changes the result; joblib keys on args + func-source but
+  **not** on native-library versions. Because the owner's key is a **raw source-file hash** (not the
+  reprojected geometry), neither library version folds in on its own — **both must be explicit**.
+  (Keying on the reprojected geometry-WKB instead would auto-fold PROJ — a change reprojects to new
+  coords → new hash → clean miss — but that is the finer/costlier alternative rejected above.)
+- **separate keys for `before` vs `after` derivations** — the original design collapsed
+  `parcel_access_layers(block, None)` and `(block, roads)` to one key (→ `delta_k=0`); keying the
+  before-derivations on the block alone and the after-derivations on `(block, proposal)` keeps them
+  distinct.
+
+**This supersedes the earlier "drop joblib" decision.** That decision was right for the *original*
+design (a positional `block_id = f"{region_id}_{k}"` key that served stale geometry, the before/after
+collapse, a hand-bumped version tag) and for a seconds-fast toy pipeline. With real two-city data
+(region builds cost seconds, sweeps are real), the corrected content-addressed / version-keyed design
+above, and the owner's "cache anything that can be safely cached" directive, the per-block **L2 cache
+is in-scope for this slice**. Trade-off, stated: keying on the whole `source_content_hash` invalidates
+*all* blocks when the source file changes (coarse but always safe); per-geometry-WKB hashing would
+invalidate only changed blocks (finer, at a WKB-hash-per-lookup cost) — we take the coarse, simpler
+key. Revisit only if partial-source edits become common.
 
 ## 7. What this deletes / changes
 
@@ -189,6 +242,11 @@ If cross-process / resumable sweeps are ever genuinely needed, add caching *then
   `propose` must truncate a deterministic prefix — add a monotonic-nesting test.
 - **New:** an emitter layer (`ScorecardConfig`/`RenderConfig` + `emit(results, out_dir, cfg)` fns,
   render lifted from `run()`); `src/reblock/compare.py` (the aggregate) + `conf/compare.yaml`.
+- **New:** `block_ids` selection — a top-level interpolated scalar → `Source` constructor → early
+  filter before sjoin/build (§1); `Block` carries a `source_content_hash` computed once at load.
+- **New:** the L2 per-block persistent cache (§6), keyed
+  `(block_id, source_content_hash, geos_version, proj_version[, params])` — supersedes the earlier
+  drop-joblib stance for the corrected, content-addressed design.
 
 ## 8. Testing
 
@@ -201,6 +259,13 @@ If cross-process / resumable sweeps are ever genuinely needed, add caching *then
 - Aggregate: a 2-point sweep on a fixture → a scorecard with 2 rows + one shared-`vmax` before and
   2 afters; assert the shared per-block derivation is **computed once** across the two `run()` calls
   (in-process reuse — e.g. a call counter on the derivation).
+- Block selection: `block_ids=[b]` yields only block `b`'s `Result`(s), and the source **builds only
+  that block** (assert via a build/Voronoi call counter, not just that others are absent from the
+  output) — the early-filter guarantee, not a post-filter. `block_ids=None` → all blocks (unchanged).
+- L2 cache: two independent invocations over overlapping blocks return **identical** `Result`s and the
+  second **skips** the cached derivations (a recompute counter); a filter `{X}` reuses the entry built
+  under `{X,Y}` (same key → one compute total); a simulated `geos_version`/`proj_version` bump forces a
+  **clean miss** (recompute, no stale hit); before- and after-derivations do **not** collapse to one key.
 
 ## 9. Migration note (owner's "migrate, don't accommodate")
 

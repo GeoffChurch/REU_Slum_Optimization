@@ -40,16 +40,14 @@ Deferred ideas and threads, captured so they aren't lost. Not committed work; gr
 - **joblib / disk caching** — only if sweeps ever get big enough to need cross-process/resumable
   runs. If so: **content-addressed keys** (hash of block geometry, not a positional `block_id`) and
   an **automatic source-hash version** (not a human-bumped tag). Otherwise in-process memoization.
-  - **Voronoi tessellation is safe to cache** (verified): `_voronoi_parcels(poly, points, crs)` is a
-    pure, deterministic function (no RNG/global state; deterministic for fixed inputs + fixed GEOS) —
-    exactly what makes the pinned-value test stable. Cache the **fine-grained function post-
-    reprojection**: a PROJ upgrade changes the reprojected coords → different hash → automatic miss,
-    so only **GEOS/shapely version must be folded into the key explicitly** (parcel counts are
-    GEOS-sensitive; joblib keys on args+func-source, NOT on library versions → a GEOS bump would
-    silently serve a stale tessellation without this). Content-address on geometry WKB + deduped
-    point coords + crs + geos_version. Payoff is **cross-run/sweep only** — within one run each block
-    is already built once (lazy generator); per-block ~0.2s, full ~300-block region ~60s. Belongs in
-    the flow-refactor/sweep slice, not the single-run path.
+  - **Voronoi tessellation is safe to cache** (verified pure/deterministic — what makes the
+    pinned-value test stable) — but the measurement showed Voronoi is only ~6% of a block-run, so
+    caching must also cover the method-independent before-derivations + method proposals (the real
+    cost; topology's `propose` is minutes). **Now folded into the flow-refactor spec §6 (in-scope) as
+    the L2 per-block persistent cache.** Two keying options weighed there: (a) reprojected-geometry-WKB
+    hash → PROJ auto-folds, per-block-granular invalidation, costlier lookups; (b) `block_id` + raw
+    source-file hash (owner's lean, adopted) → simpler, but coarse whole-source invalidation and
+    **both** GEOS *and* PROJ versions must be explicit in the key. See spec §6 for the adopted design.
 - **Peel-reblocker budget sweep + trunk-merging** — budget = a swept `PeelReblocker` param (no
   internal DSL); trunk-merging to make the peel spine length-competitive with topology. Retains the
   downward-closed / monotonic-prefix truncation correctness the peel Slice-2 red-team flagged.
