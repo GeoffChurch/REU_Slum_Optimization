@@ -1,0 +1,58 @@
+from pathlib import Path
+from typing import cast
+
+import geopandas as gpd
+from pyproj import CRS
+from shapely.geometry import Point, Polygon, box
+from shapely.ops import unary_union
+
+from reblock.contracts import Block
+from reblock.data.kblock import KblockSource
+from reblock.derive.access import parcel_access_layers
+
+ROOT = Path(__file__).resolve().parents[1]
+DJI_BLOCKS = str(ROOT / "data" / "kblock" / "blocks_dji_sample.parquet")
+DJI_BLD = str(ROOT / "data" / "kblock" / "buildings_dji_sample.parquet")
+
+
+def test_yields_wellformed_blocks_from_fixture() -> None:
+    blocks = list(KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").region().blocks)
+    assert len(blocks) >= 5
+    b = blocks[0]
+    assert isinstance(b, Block) and isinstance(b.boundary, Polygon) and b.crs.is_projected
+    assert not b.parcels.empty and b.parcels["parcel_id"].is_unique
+    assert all(g.geom_type == "Polygon" for g in b.parcels.geometry)     # exploded, no MultiPolygon
+    assert "kblock_k" in b.attrs
+
+
+def test_voronoi_parcels_tile_a_synthetic_block() -> None:
+    # 3x3 grid of building points in a unit-ish block -> 9 tiling parcels, centre at peel-depth 2.
+    utm = CRS.from_epsg(32638)
+    poly = box(0, 0, 30, 30)
+    pts = [Point(5 + 10 * i, 5 + 10 * j) for i in range(3) for j in range(3)]
+    blocks = gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm)
+    bld = gpd.GeoDataFrame(geometry=pts, crs=utm)
+    src = KblockSource("unused", "unused", region_id="t", min_buildings=4)
+    # test helper: (blocks_gdf, bld_gdf) -> Iterator[Block]
+    block = next(src._blocks_from(blocks, bld))
+    assert len(block.parcels) == 9
+    assert parcel_access_layers(block, None).max() == 2
+
+
+def test_all_parcels_single_polygon_on_concave_block() -> None:
+    # Explode invariant: on a concave ("plus"-shaped) block, every yielded parcel is a single
+    # Polygon even when a clipped Voronoi cell splits into disjoint lobes across the concavity.
+    # (Real MultiPolygon splitting is exercised on real data by
+    # test_yields_wellformed_blocks_from_fixture, which asserts all-Polygon on the dense
+    # informal fixture blocks -- concave, and verified this session to produce MultiPolygon
+    # cells pre-explode.)
+    utm = CRS.from_epsg(32638)
+    # a "+" (single Polygon)
+    poly = cast(Polygon, unary_union([box(10, 0, 20, 30), box(0, 10, 30, 20)]))
+    # all points inside the "+"
+    pts = [Point(15, 5), Point(15, 15), Point(15, 25), Point(5, 15), Point(25, 15)]
+    block = next(KblockSource("u", "u", region_id="t", min_buildings=4)._blocks_from(
+        gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm),
+        gpd.GeoDataFrame(geometry=pts, crs=utm)))
+    assert all(g.geom_type == "Polygon" for g in block.parcels.geometry)
+    assert block.parcels["parcel_id"].is_unique

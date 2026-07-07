@@ -1,0 +1,91 @@
+"""KblockSource: real kblock street-bounded blocks + a building-point layer -> Blocks.
+
+Parcels are the Voronoi cells of a block's building points, clipped to the block and
+exploded to single polygons (standard Voronoi-clip, implemented independently).
+streets = the block boundary (a kblock block is a street-bounded face). Agnostic to
+the building source (reads whatever points GeoParquet fixture-prep produced).
+"""
+from __future__ import annotations
+
+import warnings
+from collections.abc import Iterator
+from pathlib import Path
+from typing import cast
+
+import geopandas as gpd
+from pyproj import CRS
+from shapely import make_valid, voronoi_polygons
+from shapely.geometry import GeometryCollection, MultiPoint, MultiPolygon, Point, Polygon
+from shapely.geometry.base import BaseGeometry
+
+from reblock.contracts import Block, Region
+
+
+def _voronoi_parcels(poly: Polygon, points: list[Point], crs: CRS) -> gpd.GeoDataFrame | None:
+    seen: set[tuple[float, float]] = set()
+    sites: list[Point] = []
+    for p in points:
+        key = (round(p.x, 3), round(p.y, 3))          # mm dedupe: voronoi needs distinct sites
+        if key not in seen:
+            seen.add(key)
+            sites.append(p)
+    if len(sites) < 4:
+        return None
+    geoms: list[Polygon] = []
+    for cell in voronoi_polygons(MultiPoint(sites), extend_to=poly.envelope).geoms:
+        clipped = make_valid(cell).intersection(poly)
+        parts: list[BaseGeometry]
+        if isinstance(clipped, (MultiPolygon, GeometryCollection)):
+            parts = list(clipped.geoms)
+        else:
+            parts = [clipped]
+        for part in parts:                             # explode lobes -> one parcel_id per polygon
+            if isinstance(part, Polygon) and not part.is_empty and part.area > 0:
+                geoms.append(part)
+    if not geoms:
+        return None
+    return gpd.GeoDataFrame({"parcel_id": list(range(len(geoms)))}, geometry=geoms, crs=crs)
+
+
+class KblockSource:
+    def __init__(self, blocks_path: str | Path, buildings_path: str | Path,
+                 region_id: str = "kblock", *, min_buildings: int = 10) -> None:
+        self.blocks_path = Path(blocks_path)
+        self.buildings_path = Path(buildings_path)
+        self.region_id = region_id
+        self.min_buildings = min_buildings
+
+    def region(self) -> Region:
+        blocks = gpd.read_parquet(
+            self.blocks_path, columns=["block_id", "k_complexity", "geometry"])
+        bld = gpd.read_parquet(self.buildings_path, columns=["geometry"])
+        utm = blocks.estimate_utm_crs()
+        return Region(region_id=self.region_id, crs=utm,
+                      blocks=self._blocks_from(blocks.to_crs(utm), bld.to_crs(utm)))
+
+    def _blocks_from(self, blocks: gpd.GeoDataFrame, bld: gpd.GeoDataFrame) -> Iterator[Block]:
+        utm = blocks.crs
+        if utm is None:
+            raise ValueError(f"{self.region_id}: blocks GeoDataFrame has no CRS")
+        joined = gpd.sjoin(bld, blocks, predicate="within", how="inner")
+        pts_by_block: dict[object, list[Point]] = {
+            bid: cast(list[Point], list(grp["geometry"]))
+            for bid, grp in joined.groupby("block_id")
+        }
+        for _, row in blocks.sort_values("block_id").iterrows():
+            pts = pts_by_block.get(row["block_id"], [])
+            if len(pts) < self.min_buildings:
+                continue
+            poly = make_valid(row["geometry"])
+            if not isinstance(poly, Polygon):
+                warnings.warn(f"{self.region_id}:{row['block_id']}: dissolve is "
+                              f"{poly.geom_type}, not Polygon; skipping", stacklevel=2)
+                continue
+            parcels = _voronoi_parcels(poly, pts, utm)
+            if parcels is None:
+                continue
+            streets = gpd.GeoDataFrame(  # all rings (incl. holes)
+                geometry=[poly.boundary], crs=utm)
+            yield Block(block_id=str(row["block_id"]), crs=utm, boundary=poly,
+                        parcels=parcels, streets=streets,
+                        attrs={"kblock_k": float(row["k_complexity"])})
