@@ -40,6 +40,16 @@ Deferred ideas and threads, captured so they aren't lost. Not committed work; gr
 - **joblib / disk caching** — only if sweeps ever get big enough to need cross-process/resumable
   runs. If so: **content-addressed keys** (hash of block geometry, not a positional `block_id`) and
   an **automatic source-hash version** (not a human-bumped tag). Otherwise in-process memoization.
+  - **Voronoi tessellation is safe to cache** (verified): `_voronoi_parcels(poly, points, crs)` is a
+    pure, deterministic function (no RNG/global state; deterministic for fixed inputs + fixed GEOS) —
+    exactly what makes the pinned-value test stable. Cache the **fine-grained function post-
+    reprojection**: a PROJ upgrade changes the reprojected coords → different hash → automatic miss,
+    so only **GEOS/shapely version must be folded into the key explicitly** (parcel counts are
+    GEOS-sensitive; joblib keys on args+func-source, NOT on library versions → a GEOS bump would
+    silently serve a stale tessellation without this). Content-address on geometry WKB + deduped
+    point coords + crs + geos_version. Payoff is **cross-run/sweep only** — within one run each block
+    is already built once (lazy generator); per-block ~0.2s, full ~300-block region ~60s. Belongs in
+    the flow-refactor/sweep slice, not the single-run path.
 - **Peel-reblocker budget sweep + trunk-merging** — budget = a swept `PeelReblocker` param (no
   internal DSL); trunk-merging to make the peel spine length-competitive with topology. Retains the
   downward-closed / monotonic-prefix truncation correctness the peel Slice-2 red-team flagged.
