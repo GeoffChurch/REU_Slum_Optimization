@@ -93,6 +93,39 @@ def test_diagonal_touch_is_not_adjacency() -> None:
     assert layers.max() == 3
 
 
+def test_access_before_unchanged_by_connectivity_change() -> None:
+    # roads=None: seed_geom is exactly the streets, so before-layers are identical
+    # to the pre-change behaviour (2x2 -> all layer 1, 3x3 -> centre layer 2).
+    assert parcel_access_layers(_grid_block(2), None).max() == 1
+    assert parcel_access_layers(_grid_block(3), None).max() == 2
+
+
+def test_disconnected_road_gives_no_credit() -> None:
+    # 1x5 strip, street on the left edge only -> depths 1..5. A road segment
+    # floating in the interior (NOT touching the street) must confer NO access:
+    # k stays 5, exactly as with no roads.
+    polys = [Polygon([(i, 0), (i+1, 0), (i+1, 1), (i, 1)]) for i in range(5)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(5))}, geometry=polys, crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
+    block = Block(block_id="s", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
+                  parcels=parcels, streets=streets)
+    floating = gpd.GeoDataFrame(geometry=[LineString([(3, 0.5), (4, 0.5)])], crs=UTM)  # interior
+    assert parcel_access_layers(block, floating).max() == 5          # no unearned credit
+    assert parcel_access_layers(block, None).max() == 5
+
+
+def test_connected_road_reduces_depth() -> None:
+    # Same strip, but a road running from the street (x=0) inward DOES connect,
+    # so it grants access and reduces depth.
+    polys = [Polygon([(i, 0), (i+1, 0), (i+1, 1), (i, 1)]) for i in range(5)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(5))}, geometry=polys, crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
+    block = Block(block_id="s", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
+                  parcels=parcels, streets=streets)
+    connected = gpd.GeoDataFrame(geometry=[LineString([(0, 0.5), (4, 0.5)])], crs=UTM)  # touches
+    assert parcel_access_layers(block, connected).max() == 1
+
+
 def test_disconnected_parcel_gets_layer_past_deepest() -> None:
     # A parcel with no adjacency to anything and no street contact must not
     # silently read as layer 0 (which would look identical to "touches

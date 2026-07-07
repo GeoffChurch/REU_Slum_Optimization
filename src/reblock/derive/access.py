@@ -9,10 +9,13 @@ capping at 8) and is native per-parcel by `parcel_id`.
 from __future__ import annotations
 
 from collections import deque
+from typing import NamedTuple
 
+import networkx as nx
 import pandas as pd
 from geopandas import GeoDataFrame
-from shapely import union_all
+from shapely import STRtree, union_all
+from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 
 from reblock.contracts import Block
 from reblock.derive.adjacency import parcel_adjacency
@@ -25,6 +28,55 @@ from reblock.derive.adjacency import parcel_adjacency
 # boundary geometry silently under-matches. One constant so the two never
 # disagree.
 STREET_TOL = 0.5
+
+
+class StreetConnectivity(NamedTuple):
+    seed_geom: BaseGeometry | None      # streets + road segments that reach a street
+    n_components: int                   # touch-components among the road segments
+    connected_frac: float               # road length in street-connected components / total
+
+
+def _line_parts(roads: GeoDataFrame | None) -> list[BaseGeometry]:
+    """Positive-length line parts of `roads` (explode Multi*; drop non-lines)."""
+    if roads is None or roads.empty:
+        return []
+    parts: list[BaseGeometry] = []
+    for g in roads.geometry:
+        if g is None or g.is_empty:
+            continue
+        geoms: list[BaseGeometry] = list(g.geoms) if isinstance(g, BaseMultipartGeometry) else [g]
+        parts.extend(p for p in geoms if "LineString" in p.geom_type and p.length > 0)
+    return parts
+
+
+def street_connectivity(
+    streets: GeoDataFrame, roads: GeoDataFrame | None, tol: float
+) -> StreetConnectivity:
+    """Seed geometry = streets plus only those road segments whose touch-component
+    reaches a street (variant a). Floating interior roads grant no access."""
+    street_geom = union_all(list(streets.geometry)) if len(streets) else None
+    segs = _line_parts(roads)
+    if not segs:
+        return StreetConnectivity(street_geom, 0, 0.0)
+    tree = STRtree(segs)
+    graph: nx.Graph = nx.Graph()
+    graph.add_nodes_from(range(len(segs)))
+    for i, g in enumerate(segs):
+        for j in tree.query(g, predicate="dwithin", distance=tol):
+            jj = int(j)
+            if i < jj:
+                graph.add_edge(i, jj)
+    comps = list(nx.connected_components(graph))
+    live: list[int] = []
+    for comp in comps:
+        if street_geom is not None and any(segs[i].distance(street_geom) <= tol for i in comp):
+            live.extend(comp)
+    total = sum(segs[i].length for i in range(len(segs)))
+    live_len = sum(segs[i].length for i in live)
+    frac = live_len / total if total > 0 else 0.0
+    parts = ([street_geom] if street_geom is not None else []) + [segs[i] for i in live]
+    seed = union_all(parts) if parts else None
+    return StreetConnectivity(seed, len(comps), frac)
 
 
 def parcel_access_layers(
@@ -48,10 +100,7 @@ def parcel_access_layers(
 
     adj = parcel_adjacency(geoms, tol)
 
-    seed_geoms = list(block.streets.geometry)
-    if roads is not None and not roads.empty:
-        seed_geoms += list(roads.geometry)
-    street = union_all(seed_geoms) if seed_geoms else None
+    street = street_connectivity(block.streets, roads, tol).seed_geom
 
     layer = [0] * len(geoms)
     frontier = deque(
