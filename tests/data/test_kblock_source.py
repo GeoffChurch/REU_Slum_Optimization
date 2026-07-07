@@ -9,10 +9,13 @@ from shapely.ops import unary_union
 from reblock.contracts import Block
 from reblock.data.kblock import KblockSource
 from reblock.derive.access import parcel_access_layers
+from reblock.derive.geometric_access import geometric_access_distances
 
 ROOT = Path(__file__).resolve().parents[1]
 DJI_BLOCKS = str(ROOT / "data" / "kblock" / "blocks_dji_sample.parquet")
 DJI_BLD = str(ROOT / "data" / "kblock" / "buildings_dji_sample.parquet")
+CT_BLOCKS = str(ROOT / "data" / "kblock" / "blocks_capetown_sample.parquet")
+CT_BLD = str(ROOT / "data" / "kblock" / "buildings_capetown_sample.parquet")
 
 
 def test_yields_wellformed_blocks_from_fixture() -> None:
@@ -56,3 +59,18 @@ def test_all_parcels_single_polygon_on_concave_block() -> None:
         gpd.GeoDataFrame(geometry=pts, crs=utm)))
     assert all(g.geom_type == "Polygon" for g in block.parcels.geometry)
     assert block.parcels["parcel_id"].is_unique
+
+
+def test_pinned_capetown_block_morphology() -> None:
+    # A deep, dense CapeTown block (force-included in the fixture) with real peel signal --
+    # pins exact morphology values read off the committed fixture (stable: the fixture's
+    # building set is fixed), replacing a vacuous "peel-k >= 2" assertion.
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", min_buildings=10)
+    block = next(b for b in src.region().blocks if b.block_id == "ZAF.9.3.1_1_44882")
+    layers = parcel_access_layers(block, None)
+    geo = geometric_access_distances(block, None)
+    # Pinned by running this test once against the committed fixture and reading the
+    # values off the (deterministic) assertion failure -- not invented.
+    assert int(layers.max()) == 7
+    assert abs(float(geo.max()) - 62.34) < 1.0
+    assert list(layers.value_counts().sort_index().values[:3]) == [167, 195, 168]

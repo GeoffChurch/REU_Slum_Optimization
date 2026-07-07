@@ -213,6 +213,26 @@ def test_hydra_compose_wires_peel_method() -> None:
     assert r.metric("kcomplexity", "k_after") <= r.metric("kcomplexity", "k_before")
 
 
+def test_hydra_compose_wires_kblock_source_and_peel_pipeline() -> None:
+    # First non-trivial real reblocking through the WHOLE pipeline: unlike Phule (every
+    # block scores k=1, no peel signal -- see test_topology_reblocks_a_synthetic_nested_block),
+    # kblock's Voronoi blocks have real interior parcels, so PeelReblocker demonstrably
+    # improves some of them. max_blocks=1 already suffices: the first sorted DJI block
+    # (DJI.1_2_602) improves under peel (delta_k=3), so it's kept at 1 for speed rather
+    # than probing further.
+    with initialize(version_base=None, config_path="../conf"):
+        cfg = compose(config_name="config", overrides=[
+            "data=dji", "method=peel", "eval=kcomplexity", "max_blocks=1",
+        ])
+        results = run(cfg)
+
+    assert len(results) >= 1
+    for r in results:
+        kc = next(m for m in r.metrics if m.eval == "kcomplexity")
+        assert "geometric_access_max_m" in kc.values
+    assert max(r.metric("kcomplexity", "delta_k") for r in results) > 0
+
+
 def test_topology_reblocks_a_synthetic_nested_block() -> None:
     # Capstone efficacy proof. Both real fixtures available to this pipeline --
     # Phule Nagar (all 370/370 blocks) and ext/topology/Data/Epworth_demo.shp
