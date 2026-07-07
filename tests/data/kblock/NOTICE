@@ -1,0 +1,85 @@
+Third-party data notices for tests/data/kblock/
+================================================
+
+These fixtures are derived data, committed under this repository for testing
+`reblock.data.kblock.KblockSource`. reblock's own code license (see the repo's top-level LICENSE,
+if/when added) does NOT apply to the data in this directory — each source below carries its own
+license, orthogonal to reblock's code license. See PROVENANCE.md for full source URLs, retrieval
+date, checksums, and the exact selection predicate used to produce these fixtures.
+
+1. Google Open Buildings V3 (Cape Town building points)
+--------------------------------------------------------
+
+`buildings_capetown_sample.parquet` is derived from Google Research's Open Buildings V3 dataset.
+
+  Copyright Google LLC. Licensed under CC BY 4.0.
+  https://creativecommons.org/licenses/by/4.0/
+  Dataset: https://sites.research.google/open-buildings/
+
+  Citation:
+  Sirko, W., et al. "Continental-Scale Building Detection from High Resolution Satellite Imagery."
+  arXiv:2107.12283 (2021).
+
+  Modifications made by this repository:
+    - Filtered to the Cape Town bounding box (lon in [18.3, 19.0], lat in [-34.4, -33.5]).
+    - Filtered to confidence >= 0.7.
+    - Emitted as point (centroid) geometries only, dropping all other source columns except
+      `area_in_meters` and `confidence` in the raw download (the committed fixture keeps only
+      `geometry`, per the KblockSource building-points interface).
+    - Further subset to only the points that spatially join (predicate="within") into one of the
+      ~300 densest Cape Town blocks selected for this fixture (see PROVENANCE.md).
+
+2. kblock / Million Neighborhoods Africa Database (block geometries + k_complexity)
+--------------------------------------------------------------------------------------
+
+`blocks_dji_sample.parquet` and `blocks_capetown_sample.parquet` are derived from the Million
+Neighborhoods Africa Database (Mansueto Institute for Urban Innovation, University of Chicago),
+distributed via Harvard Dataverse:
+https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/DQY54U
+
+  Citation:
+  Bettencourt, Luis M. A.; Marchio, Nicholas. (2023). Million Neighborhoods Africa Database.
+  University of Chicago. https://www.millionneighborhoods.africa
+
+  LICENSE NOTE (unresolved conflict — flagged, not silently picked): the Dataverse dataset-level
+  `license` field reports CC0 1.0, but the dataset's own citation notes state verbatim: "Million
+  Neighborhoods Africa Database (2023) is made available under the Open Database License:
+  http://opendatacommons.org/licenses/odbl/1.0/." This repository treats the data as **ODbL 1.0**
+  (attribution + share-alike) pending resolution with the depositor, and provides this attribution
+  accordingly:
+
+  Million Neighborhoods Africa Database is made available under the Open Database License (ODbL):
+  http://opendatacommons.org/licenses/odbl/1.0/. Any rights in individual contents of the database
+  are licensed under the Database Contents License: http://opendatacommons.org/licenses/dbcl/1.0/.
+
+  Modifications made by this repository:
+    - Subset to a density-selected sample of ~300 blocks per city (+ 1 pinned validation block
+      each) out of the full country dataset (see PROVENANCE.md for the exact predicate).
+    - Kept only the `block_id`, `k_complexity`, `geometry` columns (dropped ~53 other columns:
+      population/urban-hierarchy/street-network fields not used by KblockSource).
+
+3. OpenStreetMap (DJI building points, as redistributed via kblock's sample-data.zip)
+-----------------------------------------------------------------------------------------
+
+`buildings_dji_sample.parquet` is ultimately derived from OpenStreetMap building data (converted to
+centroid points by the kblock project and redistributed in its `sample-data.zip` reprex archive;
+see PROVENANCE.md for the exact URL and extraction method).
+
+  (c) OpenStreetMap contributors. Licensed under the Open Database License (ODbL) 1.0.
+  https://www.openstreetmap.org/copyright
+  http://opendatacommons.org/licenses/odbl/1.0/
+
+  Modifications made by this repository:
+    - Extracted only the `buildings_points_DJI.parquet` entry from the archive (no other content
+      from sample-data.zip is used or redistributed).
+    - Further subset to only the points that spatially join (predicate="within") into one of the
+      ~300 densest DJI blocks selected for this fixture (see PROVENANCE.md).
+
+No GPL source is redistributed or copied
+-----------------------------------------
+
+`ext/kblock` (a git submodule of https://github.com/mansueto-institute/kblock, GPLv3) was consulted
+only to confirm public download URLs/endpoints (facts, not copyrightable expression) for this
+NOTICE and for `scripts/fetch_kblock_fixtures.py`. No kblock source code is copied, ported, or
+cited as an implementation authority anywhere in this repository; `KblockSource`'s Voronoi
+parcelization (a later task) is an independent implementation of a standard, textbook technique.
