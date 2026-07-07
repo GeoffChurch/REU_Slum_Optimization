@@ -13,7 +13,7 @@ from shapely.geometry import LineString
 from topology import k_complexity
 
 from reblock.contracts import Block, Metrics, Proposal
-from reblock.derive.access import parcel_access_layers
+from reblock.derive.access import STREET_TOL, parcel_access_layers, street_connectivity
 from reblock.derive.parcel_graph import to_parcel_graph
 
 _EndpointKey = frozenset[tuple[float, float]]
@@ -26,9 +26,12 @@ class KComplexityEval:
         added = (float(proposal.roads.geometry.length.sum())
                  if proposal.roads is not None and not proposal.roads.empty else 0.0)
         kb, ka = int(pre.max()), int(post.max())
+        sc = street_connectivity(block.streets, proposal.roads, STREET_TOL)
         return Metrics(block_id=block.block_id, method=proposal.method, eval="kcomplexity",
                        values={"k_before": float(kb), "k_after": float(ka),
-                               "delta_k": float(kb - ka), "added_road_length_m": added},
+                               "delta_k": float(kb - ka), "added_road_length_m": added,
+                               "n_road_components": float(sc.n_components),
+                               "connected_road_frac": sc.connected_frac},
                        fields={"access_before": pre, "access_after": post})
 
 

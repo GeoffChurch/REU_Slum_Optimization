@@ -2,10 +2,11 @@ from typing import cast
 
 import geopandas as gpd
 from pyproj import CRS
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Polygon, box
 
 from reblock.contracts import Block, Proposal
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
+from reblock.methods.topology import TopologyMethod
 
 UTM = CRS.from_epsg(32643)
 
@@ -18,6 +19,14 @@ def _grid_block(n: int, ox: float = 0.0, oy: float = 0.0) -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
     return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+
+
+def _grid5() -> Block:
+    polys = [box(i, j, i + 1, j + 1) for i in range(5) for j in range(5)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(25))}, geometry=polys, crs=UTM)
+    b = cast(Polygon, parcels.geometry.union_all())
+    return Block(block_id="g5", crs=UTM, boundary=b, parcels=parcels,
+                 streets=gpd.GeoDataFrame(geometry=[b.exterior], crs=UTM))
 
 
 def test_delta_k_from_interior_connector() -> None:
@@ -68,6 +77,26 @@ def test_no_roads_leaves_k_unchanged() -> None:
     assert v["k_after"] == v["k_before"]
     assert v["delta_k"] == 0.0
     assert v["added_road_length_m"] == 0.0
+
+
+def test_topology_roads_are_street_connected_and_unchanged() -> None:
+    # Gate: topology's interior roads reach block.streets, so the connectivity-
+    # aware metric neither drops its access (k stays 1) nor flags disconnection.
+    block = _grid5()
+    proposal = TopologyMethod(alpha=2.0, seed=0).propose(block)
+    m = KComplexityEval().score(block, proposal)
+    assert m.values["k_after"] == 1.0
+    assert m.values["connected_road_frac"] == 1.0
+    assert m.values["n_road_components"] >= 1
+
+
+def test_diagnostics_present_and_zero_for_no_roads() -> None:
+    block = _grid5()
+    empty = Proposal(block_id="g5", crs=UTM, roads=gpd.GeoDataFrame(geometry=[], crs=UTM),
+                     method="none")
+    m = KComplexityEval().score(block, empty)
+    assert m.values["n_road_components"] == 0.0
+    assert m.values["connected_road_frac"] == 0.0
 
 
 def test_weakdual_k_pins_old_behavior() -> None:
