@@ -12,11 +12,10 @@ from collections import deque
 
 import pandas as pd
 from geopandas import GeoDataFrame
-from shapely import STRtree, make_valid, snap, union_all
-from shapely.errors import GEOSException
-from shapely.geometry.base import BaseGeometry
+from shapely import union_all
 
 from reblock.contracts import Block
+from reblock.derive.adjacency import parcel_adjacency
 
 # The `Block.streets` seam tolerance. `to_parcel_graph`'s
 # `clean_up_geometry(0.5, byblock=False)` step merges parcel vertices within
@@ -26,49 +25,6 @@ from reblock.contracts import Block
 # boundary geometry silently under-matches. One constant so the two never
 # disagree.
 STREET_TOL = 0.5
-
-
-def _shared_len(gi: BaseGeometry, gj: BaseGeometry, tol: float) -> float:
-    """Length of the boundary run parcels `gi`, `gj` share (0 if only a point).
-
-    Snapping `gi` onto `gj` within `tol` first bridges sub-`tol` digitization
-    gaps so near-adjacent parcels still register a shared edge. On real
-    cadastral data (e.g. CapeTown) `snap()` can raise a GEOS "side location
-    conflict" for a pair that already touches messily -- but the snap is only
-    needed to bridge a genuine *gap*, and a pair that makes snap fail is
-    already in contact, so fall back to a direct intersection on validated
-    operands. That still measures the shared run; it just skips the (here
-    unnecessary) gap bridge. Never crash the whole peel over one bad pair.
-    """
-    try:
-        return float(snap(gi, gj, tol).intersection(gj).length)
-    except GEOSException:
-        return float(make_valid(gi).intersection(make_valid(gj)).length)
-
-
-def _adjacency(geoms: list[BaseGeometry], tol: float) -> list[set[int]]:
-    """Parcel-parcel adjacency: pairs whose boundaries share a positive-length
-    run, within `tol` of each other.
-
-    `tol` bridges pinch-point digitization gaps the same way topology's
-    `clean_up_geometry` does (see `reblock.derive.parcel_graph`), but here
-    it's a cheap per-pair snap rather than a whole-graph re-noding: a
-    candidate pair (found via STRtree's `dwithin`) is confirmed by snapping
-    one geometry onto the other within `tol` and checking that what they
-    then share is a line, not just a point -- this is exactly what excludes
-    diagonally-touching parcels (which share only a corner) from being
-    treated as adjacent.
-    """
-    tree = STRtree(geoms)
-    left, right = tree.query(geoms, predicate="dwithin", distance=tol)
-    adj: list[set[int]] = [set() for _ in geoms]
-    for i, j in zip(left.tolist(), right.tolist(), strict=True):
-        if i >= j:
-            continue  # each unordered pair once; also drops self-pairs (i == j)
-        if _shared_len(geoms[i], geoms[j], tol) > 0:
-            adj[i].add(j)
-            adj[j].add(i)
-    return adj
 
 
 def parcel_access_layers(
@@ -90,7 +46,7 @@ def parcel_access_layers(
     ids = list(parcels["parcel_id"])
     geoms = list(parcels.geometry)
 
-    adj = _adjacency(geoms, tol)
+    adj = parcel_adjacency(geoms, tol)
 
     seed_geoms = list(block.streets.geometry)
     if roads is not None and not roads.empty:
