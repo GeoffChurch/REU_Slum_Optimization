@@ -99,6 +99,18 @@ def test_diagnostics_present_and_zero_for_no_roads() -> None:
     assert m.values["connected_road_frac"] == 0.0
 
 
+def test_geometric_access_emitted() -> None:
+    # The geometric (Dijkstra-metres) access measure rides alongside the
+    # topological peel-k: a scalar summary in .values and a per-parcel
+    # field in .fields, indexed like the peel fields.
+    block = _grid5()
+    proposal = Proposal(block_id="g5", crs=UTM, roads=None, method="none")
+
+    m = KComplexityEval().score(block, proposal)
+    assert m.values["geometric_access_max_m"] >= 0.0
+    assert len(m.fields["geometric_access_m"]) == len(block.parcels)
+
+
 def test_weakdual_k_pins_old_behavior() -> None:
     # WeakDualKEval retains the old topology-weak-dual logic verbatim, for
     # Brelsford/literature comparability, and emits no per-parcel fields.

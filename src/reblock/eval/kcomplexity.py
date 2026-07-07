@@ -1,5 +1,19 @@
 """KComplexityEval: Δ of access-depth (BFS parcel peel) from inserting proposed roads.
 
+`k_before`/`k_after`/`delta_k` here are **topological** ring-depth (peel-k):
+the number of BFS-peel layers from the street inward, which scales roughly
+like sqrt(building-count) on a Voronoi tiling and is insensitive to the
+metric size of parcels -- it counts hops, not metres. The per-parcel layer
+sequence for a side (e.g. before/after) is recovered downstream via
+`fields["access_before"].value_counts().sort_index()`.
+
+`geometric_access_max_m` (`fields["geometric_access_m"]` per-parcel) is the
+companion **geometric** access measure: Dijkstra shortest-path metres from
+each parcel to the nearest street on the centroid-weighted parcel-adjacency
+graph (see `reblock.derive.geometric_access`). It is morphology-sensitive
+where peel-k is not -- e.g. it distinguishes a long single-file corridor
+from a short one, which peel-k (and the old weak-dual k) cannot.
+
 WeakDualKEval retains the prior topology-weak-dual k-complexity metric
 (Brelsford et al.) as an optional eval, for literature comparability; it is
 no longer the primary metric because it degenerates on single-file corridors
@@ -14,15 +28,21 @@ from topology import k_complexity
 
 from reblock.contracts import Block, Metrics, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers, street_connectivity
+from reblock.derive.geometric_access import geometric_access_distances
 from reblock.derive.parcel_graph import to_parcel_graph
 
 _EndpointKey = frozenset[tuple[float, float]]
 
 
 class KComplexityEval:
+    """Emits topological peel-k (`k_before`/`k_after`/`delta_k`, ring-depth hops --
+    see module docstring) plus the geometric access measure `geometric_access_max_m`
+    (metres, computed on the post-proposal graph via `geometric_access_distances`)."""
+
     def score(self, block: Block, proposal: Proposal) -> Metrics:
         pre = parcel_access_layers(block, None)
         post = parcel_access_layers(block, proposal.roads)
+        geo = geometric_access_distances(block, proposal.roads)
         added = (float(proposal.roads.geometry.length.sum())
                  if proposal.roads is not None and not proposal.roads.empty else 0.0)
         kb, ka = int(pre.max()), int(post.max())
@@ -37,8 +57,10 @@ class KComplexityEval:
                                # component per root subtree -- connected_road_frac is the
                                # connectivity signal, not this count.
                                "n_road_components": float(sc.n_components),
-                               "connected_road_frac": sc.connected_frac},
-                       fields={"access_before": pre, "access_after": post})
+                               "connected_road_frac": sc.connected_frac,
+                               "geometric_access_max_m": float(geo.max()) if len(geo) else 0.0},
+                       fields={"access_before": pre, "access_after": post,
+                               "geometric_access_m": geo})
 
 
 def _endpoint_keys(lines: GeoDataFrame, origin: tuple[float, float]) -> set[_EndpointKey]:
