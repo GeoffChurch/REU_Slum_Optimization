@@ -90,6 +90,25 @@ def test_cli_entrypoint_smoke(tmp_path: Path) -> None:
     assert len(afters) >= 1 and afters[0].stat().st_size > 0
 
 
+def test_cli_block_ids_renders_single_capetown_block(tmp_path: Path) -> None:
+    # Validates the README recipe end-to-end through the real @hydra.main entrypoint:
+    # block_ids builds ONLY the flagship, and render_dir writes its before/after PNGs.
+    result = subprocess.run(
+        [sys.executable, "-m", "reblock.run",
+         "data=capetown", "method=peel", "eval=kcomplexity",
+         "block_ids=[ZAF.9.3.1_1_44882]", "render_dir=renders",
+         f"hydra.run.dir={tmp_path}"],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ZAF.9.3.1_1_44882" in result.stdout
+
+    befores = list(tmp_path.glob("renders/ZAF.9.3.1_1_44882_before.png"))
+    afters = list(tmp_path.glob("renders/ZAF.9.3.1_1_44882_*_after.png"))
+    assert len(befores) == 1 and befores[0].stat().st_size > 0
+    assert len(afters) >= 1 and afters[0].stat().st_size > 0
+
+
 def test_end_to_end_phule_wiring(tmp_path: Path) -> None:
     # Wiring proof on real data: phule_0 has no interior parcels reachable by
     # the greedy road-builder (see the efficacy test below for why NO Phule or
