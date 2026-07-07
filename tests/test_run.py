@@ -200,6 +200,19 @@ def test_hydra_compose_wires_config_groups() -> None:
     assert r.metric("kcomplexity", "k_after") <= r.metric("kcomplexity", "k_before")
 
 
+def test_hydra_compose_wires_peel_method() -> None:
+    with initialize(version_base=None, config_path="../conf"):
+        cfg = compose(config_name="config", overrides=[
+            "data=phule", "method=peel", "eval=kcomplexity",
+            f"shapefile={PHULE}", "assumed_crs=3857", "max_blocks=1",
+        ])
+        results = run(cfg)
+    assert len(results) == 1
+    r = results[0]
+    assert r.proposal.method == "peel" and r.proposal.proposal_id == "peel"
+    assert r.metric("kcomplexity", "k_after") <= r.metric("kcomplexity", "k_before")
+
+
 def test_topology_reblocks_a_synthetic_nested_block() -> None:
     # Capstone efficacy proof. Both real fixtures available to this pipeline --
     # Phule Nagar (all 370/370 blocks) and ext/topology/Data/Epworth_demo.shp

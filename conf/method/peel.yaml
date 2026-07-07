@@ -1,0 +1,3 @@
+# A list, not a dict (see conf/method/topology.yaml): run() instantiates
+# cfg.method as a list of Methods so a block can be scored under several.
+- _target_: reblock.methods.peel.PeelReblocker

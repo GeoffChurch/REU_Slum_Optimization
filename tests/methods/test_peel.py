@@ -44,6 +44,17 @@ def test_deterministic_under_row_shuffle() -> None:
     assert r1 == r2
 
 
+def test_head_to_head_both_reach_k1_peel_connected() -> None:
+    from reblock.eval.kcomplexity import KComplexityEval
+    from reblock.methods.topology import TopologyMethod
+    block = _grid5()
+    topo = KComplexityEval().score(block, TopologyMethod(alpha=2.0, seed=0).propose(block)).values
+    peel = KComplexityEval().score(block, PeelReblocker().propose(block)).values
+    assert topo["k_after"] == 1.0 and peel["k_after"] == 1.0  # both fully reblock
+    assert peel["connected_road_frac"] == 1.0                 # peel network reaches the street
+    assert peel["added_road_length_m"] > 0                    # it actually laid roads
+
+
 def test_unreachable_island_is_skipped_and_counted() -> None:
     # A parcel disconnected from everything (no adjacency, no street) has no
     # descent parent -> skipped, counted, and left deep in k_after.
