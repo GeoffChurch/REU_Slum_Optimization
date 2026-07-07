@@ -1,9 +1,10 @@
 """PeelReblocker: route roads by steepest descent down the access-depth peel.
 
 Deterministic, graph-free second method. Each interior parcel links (via its
-centroid) to a descent parent one layer shallower; every root (a street-adjacent
-parcel that is some parcel's parent) is tied to the nearest street point. The
-union is a connected centerline network reaching the street (full access).
+representative point, guaranteed inside the polygon even when non-convex) to a
+descent parent one layer shallower; every root (a street-adjacent parcel that
+is some parcel's parent) is tied to the nearest street point. The union is a
+connected centerline network reaching the street (full access).
 """
 from __future__ import annotations
 
@@ -26,12 +27,25 @@ class PeelReblocker:
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; steepest-descent is block-only
         ids = list(block.parcels["parcel_id"])
+        if len(set(ids)) != len(ids):
+            raise ValueError(
+                "Block.parcels['parcel_id'] must be unique: deterministic descent-parent "
+                "tie-breaks (min parcel_id) require unambiguous ids"
+            )
+        if block.streets.empty:
+            raise ValueError(
+                "Block.streets must be non-empty: with no street frontage the peel would "
+                "collapse every parcel to a false depth-1 and emit an empty no-op proposal"
+            )
         geoms = list(block.parcels.geometry)
         pos = {pid: i for i, pid in enumerate(ids)}
         layer = parcel_access_layers(block, None, tol=self.tol)
         depth = {pid: int(layer.loc[pid]) for pid in ids}
         adj = parcel_adjacency(geoms, self.tol)
-        cent = [g.centroid for g in geoms]
+        # representative_point() (not centroid) is guaranteed to lie inside the
+        # polygon for arbitrary/non-convex shapes, so every served parcel's link
+        # actually touches it -- a reflex/L-shaped parcel's centroid can fall outside.
+        cent = [g.representative_point() for g in geoms]
         street = union_all(list(block.streets.geometry))
 
         segments: list[LineString] = []

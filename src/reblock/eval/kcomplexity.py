@@ -26,10 +26,16 @@ class KComplexityEval:
         added = (float(proposal.roads.geometry.length.sum())
                  if proposal.roads is not None and not proposal.roads.empty else 0.0)
         kb, ka = int(pre.max()), int(post.max())
+        # tol is intentionally pinned to STREET_TOL for this slice; Slice 2 will
+        # thread it from the method instead of hardcoding the module default.
         sc = street_connectivity(block.streets, proposal.roads, STREET_TOL)
         return Metrics(block_id=block.block_id, method=proposal.method, eval="kcomplexity",
                        values={"k_before": float(kb), "k_after": float(ka),
                                "delta_k": float(kb - ka), "added_road_length_m": added,
+                               # n_road_components counts road-only touch components (excludes
+                               # the street), so a fully street-connected spine reports one
+                               # component per root subtree -- connected_road_frac is the
+                               # connectivity signal, not this count.
                                "n_road_components": float(sc.n_components),
                                "connected_road_frac": sc.connected_frac},
                        fields={"access_before": pre, "access_after": post})

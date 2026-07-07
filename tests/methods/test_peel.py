@@ -1,8 +1,9 @@
 from typing import cast
 
 import geopandas as gpd
+import pytest
 from pyproj import CRS
-from shapely.geometry import Polygon, box
+from shapely.geometry import LineString, Polygon, box
 
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers, street_connectivity
@@ -68,3 +69,48 @@ def test_unreachable_island_is_skipped_and_counted() -> None:
     block = Block(block_id="d", crs=UTM, boundary=hull, parcels=parcels, streets=streets)
     proposal = PeelReblocker().propose(block)
     assert proposal.params["unreachable"] == 1
+
+
+def test_spine_serves_non_convex_reflex_parcel() -> None:
+    # `p` is a "C"-shaped (reflex/non-convex) parcel: a right-hand bar plus top
+    # and bottom arms, wrapped around a notch. `q` exactly fills that notch and
+    # pokes out to the street, so `q` is the sole descent parent for `p` (`p`
+    # only reaches depth 2 through its adjacency to `q`).
+    #
+    # `p.centroid` falls inside the notch -- i.e. inside `q`'s territory, well
+    # outside `p`'s own polygon -- so a centroid-based descent link from `p` to
+    # `q` lands >1 unit from `p`'s actual boundary (STREET_TOL is 0.5): `p`
+    # would silently fail to gain access. `representative_point()` is
+    # guaranteed to lie inside `p`, so the link always touches it.
+    p = Polygon([(2, 0), (10, 0), (10, 10), (2, 10), (2, 8), (8, 8), (8, 2), (2, 2)])
+    assert not p.contains(p.centroid)              # centroid is provably OUTSIDE p
+    assert p.contains(p.representative_point())    # representative_point is always inside
+
+    q = box(-2, 2, 8, 8)  # fills p's notch on 3 sides and extends left to the street
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[q, p], crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(-2, 2), (-2, 8)])], crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all().convex_hull)
+    block = Block(block_id="reflex", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+
+    assert parcel_access_layers(block, None).loc[1] == 2  # p starts at depth 2, via q
+
+    proposal = PeelReblocker().propose(block)
+    assert parcel_access_layers(block, proposal.roads).max() == 1  # p is served (depth 1)
+
+
+def test_duplicate_parcel_id_raises() -> None:
+    block = _grid5()
+    dup = block.parcels.copy()
+    dup["parcel_id"] = 0  # collapse every id to the same value
+    bad = Block(block_id="dup", crs=block.crs, boundary=block.boundary,
+                parcels=dup, streets=block.streets)
+    with pytest.raises(ValueError, match="parcel_id"):
+        PeelReblocker().propose(bad)
+
+
+def test_empty_streets_raises() -> None:
+    block = _grid5()
+    bad = Block(block_id="nostreet", crs=block.crs, boundary=block.boundary,
+                parcels=block.parcels, streets=gpd.GeoDataFrame(geometry=[], crs=block.crs))
+    with pytest.raises(ValueError, match="streets"):
+        PeelReblocker().propose(bad)
