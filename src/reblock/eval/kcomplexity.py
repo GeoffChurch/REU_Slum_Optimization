@@ -12,7 +12,10 @@ companion **geometric** access measure: Dijkstra shortest-path metres from
 each parcel to the nearest street on the centroid-weighted parcel-adjacency
 graph (see `reblock.derive.geometric_access`). It is morphology-sensitive
 where peel-k is not -- e.g. it distinguishes a long single-file corridor
-from a short one, which peel-k (and the old weak-dual k) cannot.
+from a short one, which peel-k (and the old weak-dual k) cannot. Unlike the
+peel (which uses a finite sentinel), these values may be non-finite (`inf`)
+for a parcel with no street-connected path, so downstream aggregation must
+handle non-finite values.
 
 WeakDualKEval retains the prior topology-weak-dual k-complexity metric
 (Brelsford et al.) as an optional eval, for literature comparability; it is

@@ -61,6 +61,25 @@ def test_all_parcels_single_polygon_on_concave_block() -> None:
     assert block.parcels["parcel_id"].is_unique
 
 
+def test_streets_are_full_boundary_including_holes() -> None:
+    # KblockSource sets block.streets = poly.boundary -- the WHOLE boundary including
+    # interior rings (a courtyard seeds the peel), deliberately unlike ShapefileSource's
+    # `.exterior`. No committed fixture has a hole, so a regression to `.exterior` would
+    # pass every other test; lock it with a synthetic block that has one.
+    utm = CRS.from_epsg(32638)
+    poly = cast(Polygon, box(0, 0, 30, 30).difference(box(10, 10, 20, 20)))
+    assert len(poly.interiors) == 1  # sanity: genuinely has a hole
+    # building points in the ring around the hole (avoid it), one per side
+    pts = [Point(2, 2), Point(28, 2), Point(2, 28), Point(28, 28)]
+    blocks = gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm)
+    bld = gpd.GeoDataFrame(geometry=pts, crs=utm)
+    src = KblockSource("unused", "unused", region_id="t", min_buildings=4)
+    block = next(src._blocks_from(blocks, bld))
+    streets_len = float(block.streets.geometry.length.sum())
+    assert abs(streets_len - poly.boundary.length) < 1e-6
+    assert streets_len > poly.exterior.length + 1e-6  # the hole's ring adds length
+
+
 def test_pinned_capetown_block_morphology() -> None:
     # A deep, dense CapeTown block (force-included in the fixture) with real peel signal --
     # pins exact morphology values read off the committed fixture (stable: the fixture's
