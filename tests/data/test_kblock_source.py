@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
+import pytest
 from pyproj import CRS
 from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
@@ -93,3 +94,26 @@ def test_pinned_capetown_block_morphology() -> None:
     assert int(layers.max()) == 7
     assert abs(float(geo.max()) - 62.34) < 1.0
     assert list(layers.value_counts().sort_index().values[:3]) == [167, 195, 168]
+
+
+def test_block_ids_filters_to_requested_block() -> None:
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown",
+                       block_ids=["ZAF.9.3.1_1_44882"])
+    blocks = list(src.region().blocks)
+    assert [b.block_id for b in blocks] == ["ZAF.9.3.1_1_44882"]
+    # UTM is estimated from the full frame, so filtering to one block can't shift the
+    # CRS: the block reproduces its full-region morphology (pinned peel-k == 7).
+    assert int(parcel_access_layers(blocks[0], None).max()) == 7
+
+
+def test_block_ids_selects_exactly_the_listed_blocks() -> None:
+    ids = ["ZAF.9.3.1_1_44882", "ZAF.9.3.1_1_44571"]
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=ids)
+    got = [b.block_id for b in src.region().blocks]
+    assert got == sorted(ids)   # _blocks_from yields in sorted block_id order
+
+
+def test_block_ids_unknown_raises() -> None:
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=["NOPE"])
+    with pytest.raises(ValueError, match="NOPE"):
+        src.region()

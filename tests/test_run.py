@@ -233,6 +233,20 @@ def test_hydra_compose_wires_kblock_source_and_peel_pipeline() -> None:
     assert max(r.metric("kcomplexity", "delta_k") for r in results) > 0
 
 
+def test_block_ids_targets_one_capetown_block_through_the_pipeline() -> None:
+    with initialize(version_base=None, config_path="../conf"):
+        cfg = compose(config_name="config", overrides=[
+            "data=capetown", "method=peel", "eval=kcomplexity",
+            "block_ids=[ZAF.9.3.1_1_44882]", "max_blocks=10",
+        ])
+        results = run(cfg)
+    # block_ids overrides the coarse max_blocks front-selection: exactly the one block.
+    assert [r.block.block_id for r in results] == ["ZAF.9.3.1_1_44882"]
+    r = results[0]
+    assert r.metric("kcomplexity", "geometric_access_max_m") >= 0.0
+    assert r.metric("kcomplexity", "delta_k") > 0   # peel flattens this deep block
+
+
 def test_topology_reblocks_a_synthetic_nested_block() -> None:
     # Capstone efficacy proof. Both real fixtures available to this pipeline --
     # Phule Nagar (all 370/370 blocks) and ext/topology/Data/Epworth_demo.shp

@@ -49,17 +49,27 @@ def _voronoi_parcels(poly: Polygon, points: list[Point], crs: CRS) -> gpd.GeoDat
 
 class KblockSource:
     def __init__(self, blocks_path: str | Path, buildings_path: str | Path,
-                 region_id: str = "kblock", *, min_buildings: int = 10) -> None:
+                 region_id: str = "kblock", *, min_buildings: int = 10,
+                 block_ids: list[str] | None = None) -> None:
         self.blocks_path = Path(blocks_path)
         self.buildings_path = Path(buildings_path)
         self.region_id = region_id
         self.min_buildings = min_buildings
+        self.block_ids = list(block_ids) if block_ids is not None else None
 
     def region(self) -> Region:
         blocks = gpd.read_parquet(
             self.blocks_path, columns=["block_id", "k_complexity", "geometry"])
+        blocks["block_id"] = blocks["block_id"].astype(str)
+        utm = blocks.estimate_utm_crs()   # full frame => CRS is stable under block_ids filtering
+        if self.block_ids is not None:
+            wanted = {str(b) for b in self.block_ids}
+            missing = wanted - set(blocks["block_id"])
+            if missing:
+                raise ValueError(
+                    f"{self.region_id}: block_ids not found in source: {sorted(missing)}")
+            blocks = cast(gpd.GeoDataFrame, blocks[blocks["block_id"].isin(wanted)])
         bld = gpd.read_parquet(self.buildings_path, columns=["geometry"])
-        utm = blocks.estimate_utm_crs()
         return Region(region_id=self.region_id, crs=utm,
                       blocks=self._blocks_from(blocks.to_crs(utm), bld.to_crs(utm)))
 
