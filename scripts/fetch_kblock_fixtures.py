@@ -280,7 +280,8 @@ def load_blocks(iso3: str, raw_dir: Path, *, version: str = DATAVERSE_VERSION) -
         print(f"[fetch] downloading {iso3}_geodata.parquet from Dataverse "
               f"({DATAVERSE_DOI} v{version})...")
         download_dataverse_blocks(iso3, path, version=version)
-    return gpd.read_parquet(path, columns=["block_id", "k_complexity", "geometry"])
+    return gpd.read_parquet(
+        path, columns=["block_id", "k_complexity", "building_count", "block_area_m2", "geometry"])
 
 
 def load_dji_buildings(raw_dir: Path) -> gpd.GeoDataFrame:
