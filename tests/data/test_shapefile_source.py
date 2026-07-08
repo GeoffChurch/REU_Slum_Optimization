@@ -80,3 +80,11 @@ def test_epworth_full_drain_is_non_fatal_and_skips_unloadable_components() -> No
     for b in blocks:
         assert isinstance(b, Block) and b.crs.is_projected
         assert isinstance(b.boundary, Polygon) and b.boundary.is_valid and b.boundary.area > 0
+
+
+def test_shapefile_blocks_carry_source_content_hash() -> None:
+    region = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857).region()
+    blocks = list(region.blocks)
+    assert blocks, "expected at least one built block"
+    h = blocks[0].source_content_hash
+    assert h and all(b.source_content_hash == h for b in blocks)  # same hash for all blocks

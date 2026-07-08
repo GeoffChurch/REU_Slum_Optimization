@@ -40,6 +40,7 @@ class Block:
     boundary: Polygon
     parcels: GeoDataFrame
     streets: GeoDataFrame
+    source_content_hash: str = ""   # content hash of the Source's file(s); "" => uncacheable
     attrs: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

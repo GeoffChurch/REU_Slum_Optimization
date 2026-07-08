@@ -12,6 +12,7 @@ from pyproj import CRS
 from shapely import STRtree
 from shapely.geometry import LineString, Polygon
 
+from reblock.cache import source_hash
 from reblock.contracts import Block, Region
 
 
@@ -81,9 +82,12 @@ class ShapefileSource:
         keep = (raw.geometry.geom_type == "Polygon") & ~raw.geometry.is_empty
         raw = cast(gpd.GeoDataFrame, raw[keep].reset_index(drop=True))
 
-        return Region(region_id=self.region_id, crs=utm, blocks=self._iter_blocks(raw, utm))
+        sch = source_hash(self.path)
+        return Region(region_id=self.region_id, crs=utm,
+                      blocks=self._iter_blocks(raw, utm, sch))
 
-    def _iter_blocks(self, raw: gpd.GeoDataFrame, utm: CRS) -> Iterator[Block]:
+    def _iter_blocks(self, raw: gpd.GeoDataFrame, utm: CRS,
+                     source_content_hash: str = "") -> Iterator[Block]:
         for k, idx in enumerate(_components(raw)):
             geoms = list(raw.iloc[idx].geometry)
             parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(geoms)))},
@@ -118,4 +122,5 @@ class ShapefileSource:
             streets = gpd.GeoDataFrame(
                 geometry=[LineString(boundary_poly.exterior.coords)], crs=utm)
             yield Block(block_id=f"{self.region_id}_{k}", crs=utm,
-                        boundary=boundary_poly, parcels=parcels, streets=streets)
+                        boundary=boundary_poly, parcels=parcels, streets=streets,
+                        source_content_hash=source_content_hash)

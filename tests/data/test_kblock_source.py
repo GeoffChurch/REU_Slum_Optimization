@@ -123,3 +123,11 @@ def test_capetown_fixture_has_density_columns() -> None:
     import geopandas as gpd
     cols = set(gpd.read_parquet(CT_BLOCKS).columns)
     assert {"building_count", "block_area_m2"} <= cols   # the Screen's cheap-pass signals
+
+
+def test_kblock_blocks_carry_source_content_hash() -> None:
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    blocks = list(src.region().blocks)
+    assert blocks, "expected at least one built block"
+    h = blocks[0].source_content_hash
+    assert h and all(b.source_content_hash == h for b in blocks)  # same hash for all blocks
