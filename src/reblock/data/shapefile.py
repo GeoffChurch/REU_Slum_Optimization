@@ -87,7 +87,7 @@ class ShapefileSource:
                       blocks=self._iter_blocks(raw, utm, sch))
 
     def _iter_blocks(self, raw: gpd.GeoDataFrame, utm: CRS,
-                     source_content_hash: str = "") -> Iterator[Block]:
+                     source_content_hash: str) -> Iterator[Block]:
         for k, idx in enumerate(_components(raw)):
             geoms = list(raw.iloc[idx].geometry)
             parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(geoms)))},

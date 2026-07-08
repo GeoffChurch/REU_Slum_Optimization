@@ -38,7 +38,7 @@ def test_voronoi_parcels_tile_a_synthetic_block() -> None:
     bld = gpd.GeoDataFrame(geometry=pts, crs=utm)
     src = KblockSource("unused", "unused", region_id="t", min_buildings=4)
     # test helper: (blocks_gdf, bld_gdf) -> Iterator[Block]
-    block = next(src._blocks_from(blocks, bld))
+    block = next(src._blocks_from(blocks, bld, source_content_hash=""))
     assert len(block.parcels) == 9
     assert parcel_access_layers(block, None).max() == 2
 
@@ -57,7 +57,7 @@ def test_all_parcels_single_polygon_on_concave_block() -> None:
     pts = [Point(15, 5), Point(15, 15), Point(15, 25), Point(5, 15), Point(25, 15)]
     block = next(KblockSource("u", "u", region_id="t", min_buildings=4)._blocks_from(
         gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm),
-        gpd.GeoDataFrame(geometry=pts, crs=utm)))
+        gpd.GeoDataFrame(geometry=pts, crs=utm), source_content_hash=""))
     assert all(g.geom_type == "Polygon" for g in block.parcels.geometry)
     assert block.parcels["parcel_id"].is_unique
 
@@ -75,7 +75,7 @@ def test_streets_are_full_boundary_including_holes() -> None:
     blocks = gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm)
     bld = gpd.GeoDataFrame(geometry=pts, crs=utm)
     src = KblockSource("unused", "unused", region_id="t", min_buildings=4)
-    block = next(src._blocks_from(blocks, bld))
+    block = next(src._blocks_from(blocks, bld, source_content_hash=""))
     streets_len = float(block.streets.geometry.length.sum())
     assert abs(streets_len - poly.boundary.length) < 1e-6
     assert streets_len > poly.exterior.length + 1e-6  # the hole's ring adds length

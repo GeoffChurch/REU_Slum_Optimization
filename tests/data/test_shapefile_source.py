@@ -36,7 +36,8 @@ def test_streets_excludes_interior_gap_rings() -> None:
     squares = [box(x, y, x + 1, y + 1) for x in range(3) for y in range(3)
                if not (x == 1 and y == 1)]
     raw = gpd.GeoDataFrame(geometry=squares, crs=utm)
-    block = next(ShapefileSource("unused", region_id="donut")._iter_blocks(raw, utm))
+    block = next(ShapefileSource("unused", region_id="donut")._iter_blocks(
+        raw, utm, source_content_hash=""))
     assert len(block.boundary.interiors) == 1     # the central hole really exists
     assert len(block.streets) == 1                # ...but streets = the outer ring only
 
