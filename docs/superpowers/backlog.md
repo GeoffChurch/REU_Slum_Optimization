@@ -2,6 +2,41 @@
 
 Deferred ideas and threads, captured so they aren't lost. Not committed work; groom before pulling into a slice.
 
+## Cross-block reblocking (Phase 0 speced+planned; Phase 1 + red-team-cut metrics here)
+
+The non-myopic direction: streets that span multiple blocks, stay smooth, and *cross* other streets
+rather than dead-ending at them. **Phase 0** (merge_cluster + orthogonal metric basis + a falsifiable
+probe) is speced/planned (`specs/2026-07-07-cross-block-phase0-design.md`,
+`plans/2026-07-08-cross-block-phase0.md`) and **gates the rest**: build Phase 1 only if the probe
+shows real cross-block headroom over boundary-reconciled block-local reblocking.
+
+- **Phase 1 — cross-block placement methods.** Needs a `RegionMethod.propose(region)` path (declared,
+  unused, `contracts.py:94`) + evaluation on the merged super-block. Five candidate approaches explored
+  (distinct schools): planner arterials→feeders hierarchy; tensor-field streamlines; free-space medial
+  axis; network-design ILP (explicit crossing/turn/displacement objective); continuous/variational
+  elastica with a differentiable crossing bonus. Brainstorm → **red-team when concrete**, using the
+  Phase-0 probe's headroom as ground truth. Cross-cutting risks (from the approach red-team): the
+  dominant-orientation/grid assumption fails on organic settlements (needs a bearing-entropy gate);
+  points-not-footprints ceilings displacement realism.
+- **Arc roads + arc-aware smoothness metric.** Relax "straight" → "constant curvature" (arcs):
+  penalize curvature *variation* (∫(κ′)²), which admits lines AND arcs equally. The naive
+  `curvature_variation` was **cut from Phase 0** after the red-team — it reads 0 for 2-point-`LineString`
+  methods, is sampling-density × micro-noise dominated (a clean arc swings 0.008→36 across sampling
+  densities), and is scale-confounded. Do it right (arc-length resampling / a dimensionless bearing-TV),
+  build it *with* the first arc-emitting method so it calibrates on real output, and add a junction
+  continuation-pairing rule to extract polylines from branching networks. Arc rep = biarcs/arc-splines;
+  arc noding is closed-form but shapely wants sampled polylines.
+- **Through-going crossing refinement.** Phase 0 counts bare degree-≥4; the real "crossing" is a
+  collinear pass-through — define via orientation **mod 180°** (directed bearings make a clean `+`
+  score zero), bearing measured over the first L metres of each incident edge. Refine in Phase 1 where
+  real crossings validate the threshold.
+- **`dwellings_displaced` with real footprints.** Cut from Phase 0: building *points* under-count (a
+  road clipping a parcel corner displaces 0 while destroying the home) and bias toward gap-threading
+  methods; displacing a building also changes the Voronoi tessellation the eval scores (circular
+  dependency). Needs real footprints, not points.
+- **Spine-merge optimizer.** Phase 0 ships only a heuristic spine-merge *reference*; the real optimizer
+  (merge redundant boundary-parallel spines into shared through-trunks) is a Phase-1 method.
+
 ## Visualizations (brainstorm needed — own its own brainstorm)
 
 - **Region choropleth** — color every block in a region by a metric (peel-k, geometric access
