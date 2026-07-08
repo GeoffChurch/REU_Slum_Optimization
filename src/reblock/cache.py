@@ -12,6 +12,7 @@ docs/superpowers/specs/2026-07-07-atomic-flow-and-sweep-architecture-design.md Â
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -29,17 +30,29 @@ from reblock.derive.geometric_access import geometric_access_distances
 
 SOURCE_HASH_UNSET = ""
 
-_CACHE_DIR = Path.home() / ".cache" / "reblock" / "derivations"
+# REBLOCK_CACHE_DIR overrides the on-disk location; read at import time so a
+# subprocess (e.g. the `python -m reblock.run` CLI spawned by tests/test_run.py)
+# picks up a test-session override from its inherited environment even though
+# it never sees the in-process `cache.memory` monkeypatch (see tests/conftest.py).
+_CACHE_DIR = Path(os.environ.get("REBLOCK_CACHE_DIR",
+                                  str(Path.home() / ".cache" / "reblock" / "derivations")))
 memory = joblib.Memory(location=str(_CACHE_DIR), verbose=0)
 
 # Modules whose source defines the cached derivations; hashed into every key so
 # an edit to derivation logic auto-invalidates (joblib alone only hashes the
 # thin wrapper, not its callees). Coarse but safe: any edit to these files
 # invalidates all cached derivations.
+#
+# Note: the vendored `ext/topology` road-builder (behind `topology.propose`) is
+# NOT hashed here -- it's a stable, pinned dependency, not project source under
+# active edit. If it ever changes, clear the cache manually
+# (`reblock.cache.memory.clear()` or `rm -rf ~/.cache/reblock/derivations`).
 _DERIVATION_MODULE_FILES = (
     Path(__file__).with_name("cache.py"),
     Path(__file__).parent / "derive" / "access.py",
     Path(__file__).parent / "derive" / "geometric_access.py",
+    Path(__file__).parent / "derive" / "adjacency.py",
+    Path(__file__).parent / "derive" / "parcel_graph.py",
     Path(__file__).parent / "data" / "kblock.py",
     Path(__file__).parent / "methods" / "topology.py",
     Path(__file__).parent / "methods" / "peel.py",
