@@ -1,0 +1,2 @@
+# A list (see conf/eval/kcomplexity.yaml): run() instantiates cfg.eval as a list of Evals.
+- _target_: reblock.eval.structure.StructureEval
