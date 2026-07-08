@@ -3,7 +3,7 @@ from pathlib import Path
 
 from hydra import compose, initialize
 
-from reblock.screen.__main__ import detect
+from reblock.screen.__main__ import detect, emit
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,3 +27,14 @@ def test_detect_flags_flagship(tmp_path: Path) -> None:
                       overrides=["screen=dense_compact", "screen.density_min=35"])
     ids = detect(cfg, cache_dir=tmp_path)
     assert "ZAF.9.3.1_1_44882" in ids and ids == sorted(ids)
+
+
+def test_emit_writes_flagged_ids(tmp_path: Path) -> None:
+    out = emit(["ZAF.9.3.1_1_44882", "ZAF.9.3.1_1_50000"], tmp_path)
+    assert out == tmp_path / "flagged_blocks.txt"
+    assert out.read_text() == "ZAF.9.3.1_1_44882\nZAF.9.3.1_1_50000\n"
+
+
+def test_emit_empty_writes_empty_file(tmp_path: Path) -> None:
+    out = emit([], tmp_path)
+    assert out.exists() and out.read_text() == ""
