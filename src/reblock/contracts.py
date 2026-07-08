@@ -97,3 +97,7 @@ class RegionMethod(Protocol):
 
 class Eval(Protocol):
     def score(self, block: Block, proposal: Proposal) -> Metrics: ...
+
+
+class Screen(Protocol):
+    def select(self) -> list[str]: ...   # informal block_ids, sorted

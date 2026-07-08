@@ -1,0 +1,5 @@
+# A Screen (selectable like conf/method, conf/eval). Paths are injected by the reblock.screen app.
+_target_: reblock.screen.dense_compact.DenseCompactScreen
+density_min: 30.0
+mean_depth_min: 1.3
+# k_min: null   # optional extra cheap gate; off by default (density + mean_depth do the work)
