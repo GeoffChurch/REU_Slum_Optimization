@@ -9,7 +9,7 @@ from pyproj import CRS
 from shapely.geometry import Polygon
 
 import reblock.cache as cache
-from reblock.contracts import Block
+from reblock.contracts import Block, Proposal
 from reblock.derive.access import parcel_access_layers
 
 _UTM = CRS.from_epsg(32643)
@@ -129,10 +129,25 @@ def test_cached_propose_hits_and_bypasses(
 
     from reblock.methods.topology import TopologyMethod
     m = TopologyMethod(alpha=2.0, seed=0)
+    calls = {"n": 0}
+    original_propose = m.propose
+
+    def spy(block: Block, prior: Proposal | None = None) -> Proposal:
+        calls["n"] += 1
+        return original_propose(block, prior)
+
+    monkeypatch.setattr(m, "propose", spy)
+
     block = _grid_block("cafe1234")
     p1 = cache.cached_propose(m, block)
     p2 = cache.cached_propose(m, block)          # HIT
+    # The real proof of a cache hit: the underlying method.propose ran exactly
+    # once across both cached_propose calls (the tautological proposal_id
+    # check below would pass even if propose reran every time).
+    assert calls["n"] == 1
     assert p1.proposal_id == p2.proposal_id == "topology_a2.0_s0"
+    assert p1.roads is not None and p2.roads is not None
+    assert p1.roads.equals(p2.roads)
     # bypass path when hash unset writes nothing
     monkeypatch.setattr(cache, "memory", joblib.Memory(location=str(tmp_path / "b"), verbose=0))
     monkeypatch.setattr(cache, "_propose_impl_cached",

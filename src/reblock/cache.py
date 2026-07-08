@@ -118,7 +118,7 @@ def cached_geometric(block: Block, roads: GeoDataFrame | None, roads_key: str) -
 
 
 def _voronoi_impl(poly: Polygon, points: list[Point], crs: Any, *, block_id: str,
-                  src_hash: str, geos: str, proj: str, code: str) -> Any:
+                  src_hash: str, geos: str, proj: str, code: str) -> GeoDataFrame | None:
     from reblock.data.kblock import _voronoi_parcels  # local import avoids a cycle
     return _voronoi_parcels(poly, points, crs)
 
@@ -133,7 +133,7 @@ _propose_impl_cached = cached(_propose_impl, ignore=["method", "block"])
 
 
 def cached_voronoi_parcels(poly: Polygon, points: list[Point], crs: Any, *,
-                           block_id: str, source_content_hash: str) -> Any:
+                           block_id: str, source_content_hash: str) -> GeoDataFrame | None:
     """`_voronoi_parcels`, memoized on (block_id, source_content_hash, geos, proj,
     code_version). Blocks with an unset `source_content_hash` bypass the cache
     entirely (synthetic/test blocks)."""
@@ -141,8 +141,11 @@ def cached_voronoi_parcels(poly: Polygon, points: list[Point], crs: Any, *,
     if source_content_hash == SOURCE_HASH_UNSET:
         return _voronoi_parcels(poly, points, crs)
     geos, proj, code = key_parts()
-    return _voronoi_impl_cached(poly, points, crs, block_id=block_id,
-                                src_hash=source_content_hash, geos=geos, proj=proj, code=code)
+    # _voronoi_impl_cached is Callable[..., Any] (see `cached`'s joblib-typing note);
+    # cast back to the declared return type rather than let strict mypy flag it.
+    return cast("GeoDataFrame | None", _voronoi_impl_cached(
+        poly, points, crs, block_id=block_id,
+        src_hash=source_content_hash, geos=geos, proj=proj, code=code))
 
 
 def cached_propose(method: Method, block: Block) -> Proposal:
