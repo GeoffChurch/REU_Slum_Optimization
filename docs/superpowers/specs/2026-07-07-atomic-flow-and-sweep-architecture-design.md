@@ -1,6 +1,12 @@
 # reblock — Atomic flow + externalized sweeps
 
-**Status:** draft for review · **Date:** 2026-07-07 · **Branch:** `flow-refactor` (to be cut)
+**Status:** revised for execution (sliced F1–F4) · **Date:** 2026-07-08 · **Branch:** `flow-refactor` (to be cut)
+
+> **Revision note (2026-07-08):** §1's `block_ids` early-filter has since **shipped** in the kblock
+> `Source`, and the slum-detection S1 slice shipped the standalone `reblock.screen` app this spec
+> folds away. This refactor is now executed in four ordered slices (see *Slicing & sequencing*
+> below), and two requirements are added: a **one-command end-to-end** (detect → reblock → render)
+> and a **binary city flagged-map** visual — both land in **F3**.
 
 ## Why this exists
 
@@ -14,6 +20,33 @@ This refactor **fully externalizes sweeps**: `run()` becomes a pure atomic funct
 thin **aggregate** app owns every cross-run concern (the sweep, the head-to-head scorecard, the
 shared-scale before/after). `joblib` caching of the expensive derivations makes an external sweep
 as cheap as an in-process family — so the atomic flow stays trivial and the Slice-2 DSL disappears.
+
+## Slicing & sequencing (F1–F4)
+
+**Already shipped** (this spec's §1 block selection): the `block_ids` early-filter at the `Source`
+— a top-level interpolated scalar → constructor → filter before sjoin/build. The rest is delivered
+in four ordered, individually-shippable slices, each with its own plan + execution (F2–F4 designs
+refined just-in-time):
+
+- **F1 — Atomic pure `run()` + render emitter.** §1 (drop the `method` **list → single**; remove
+  render coupling from `run()`; `TopologyMethod` **local RNG**; `run()` pure, writes nothing) + the
+  §2 **render emitter only** (`RenderConfig`, `emit(results, out_dir, cfg)`, `png`/`separate` —
+  today's behavior) + §9 migration. **No emitter registry yet** — `main` calls the one render
+  emitter directly; the `enabled_emitters` fan-out arrives in F4 with a second emitter.
+  `format=webpage` / `side_by_side` deferred until needed.
+- **F2 — L2 per-block persistent cache.** §6: joblib, content-addressed key
+  `(block_id, source_content_hash, geos_version, proj_version[, params])`, separate before/after
+  keys, `Block` carries `source_content_hash`. The "no double-build" enabler for F3.
+- **F3 — Screen as a `run()` stage + city flagged-map + delete the standalone app.** §1's
+  screen-stage subsection: a `Screen` stage before block iteration, default `IdentityScreen`
+  passthrough, the S1 `DenseCompactScreen` plugged in; a **binary city flagged-map emitter** (all
+  metro blocks drawn light, flagged blocks highlighted); **delete the standalone `reblock.screen`
+  app** (migrate its detect + flagged-ids/visual output into the stage + emitters). F2's L2 cache
+  makes the screen's fine-pass builds cache hits, so `run()`'s reblock build is a hit —
+  screen-then-reblock is free of double-building. Delivers the **one-command end-to-end** (detect →
+  reblock → render) + its README recipe.
+- **F4 — Compare aggregate + sweep.** The §2 **emitter registry** + §3/§4 `reblock.compare` +
+  scorecard emitter + L1 in-process reuse (§6). The topology-vs-peel head-to-head.
 
 ## 1. Atomic `run()` — pure, single of each
 
@@ -36,7 +69,7 @@ def run(cfg: RunConfig | DictConfig) -> list[Result]: ...   # single data + meth
   numpy RNG (`np.random.seed`); refactor it to a **local** `np.random.default_rng(seed)` passed into
   the builder so `run()` has no global side effect and repeats are bit-identical (needed for the
   purity claim; also removes a latent cross-method nondeterminism).
-- **Block selection — filter early, at the source.** A `block_ids` list (a top-level interpolated
+- **Block selection — filter early, at the source. (SHIPPED — kblock `Source`.)** A `block_ids` list (a top-level interpolated
   Hydra scalar, exactly like `${shapefile}`/`${alpha}` today) flows into the `Source` constructor;
   `region()` filters the blocks frame **before** the sjoin + per-block build loop, so a targeted run
   does O(k) work for k requested blocks (and the sjoin touches only their buildings) instead of
@@ -290,8 +323,8 @@ migration are **kept/deferred** (§5), so there is no config-consumer churn this
 
 ## Sequencing
 
-Independent of the kblock source (a `Source` is unaffected — it works with atomic `run()` unchanged).
-**Recommended order: kblock source first, this refactor second** — kblock provides the real
-two-city, two-method data that gives the aggregate/comparison something worth sweeping and rendering,
-so the refactor lands with an immediate real payoff (the Cape Town topology-vs-peel head-to-head as a
-`reblock.compare` run). Either order is safe.
+The kblock source shipped first (as recommended), so the real two-city, two-method data is already
+in place — this refactor lands with an immediate payoff (the Cape Town topology-vs-peel head-to-head
+as a `reblock.compare` run at F4). Execution order is the four slices above: **F1 → F2 → F3 → F4**
+(F2 precedes F3 so the screen's fine-pass builds are L2 cache hits when `run()` reblocks — no
+double-building; F4 last, orthogonal to the F3 end-to-end/visual payoff).
