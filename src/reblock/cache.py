@@ -21,8 +21,9 @@ import pandas as pd
 import pyproj
 import shapely
 from geopandas import GeoDataFrame
+from shapely.geometry import Point, Polygon
 
-from reblock.contracts import Block
+from reblock.contracts import Block, Method, Proposal
 from reblock.derive.access import parcel_access_layers
 from reblock.derive.geometric_access import geometric_access_distances
 
@@ -114,3 +115,44 @@ def cached_geometric(block: Block, roads: GeoDataFrame | None, roads_key: str) -
     return cast("pd.Series", _geometric_impl_cached(
         block, roads, block_id=block.block_id, src_hash=block.source_content_hash,
         geos=geos, proj=proj, code=code, roads_key=roads_key))
+
+
+def _voronoi_impl(poly: Polygon, points: list[Point], crs: Any, *, block_id: str,
+                  src_hash: str, geos: str, proj: str, code: str) -> Any:
+    from reblock.data.kblock import _voronoi_parcels  # local import avoids a cycle
+    return _voronoi_parcels(poly, points, crs)
+
+
+def _propose_impl(method: Method, block: Block, *, block_id: str, src_hash: str,
+                  geos: str, proj: str, code: str, method_repr: str) -> Proposal:
+    return method.propose(block)
+
+
+_voronoi_impl_cached = cached(_voronoi_impl, ignore=["poly", "points", "crs"])
+_propose_impl_cached = cached(_propose_impl, ignore=["method", "block"])
+
+
+def cached_voronoi_parcels(poly: Polygon, points: list[Point], crs: Any, *,
+                           block_id: str, source_content_hash: str) -> Any:
+    """`_voronoi_parcels`, memoized on (block_id, source_content_hash, geos, proj,
+    code_version). Blocks with an unset `source_content_hash` bypass the cache
+    entirely (synthetic/test blocks)."""
+    from reblock.data.kblock import _voronoi_parcels
+    if source_content_hash == SOURCE_HASH_UNSET:
+        return _voronoi_parcels(poly, points, crs)
+    geos, proj, code = key_parts()
+    return _voronoi_impl_cached(poly, points, crs, block_id=block_id,
+                                src_hash=source_content_hash, geos=geos, proj=proj, code=code)
+
+
+def cached_propose(method: Method, block: Block) -> Proposal:
+    """`method.propose(block)`, memoized on (block_id, source_content_hash, geos,
+    proj, code_version, repr(method)) -- `repr(method)` encodes the method's
+    dataclass params, giving a stable per-params identity. Blocks with an unset
+    `source_content_hash` bypass the cache entirely (synthetic/test blocks)."""
+    if block.source_content_hash == SOURCE_HASH_UNSET:
+        return method.propose(block)
+    geos, proj, code = key_parts()
+    return cast("Proposal", _propose_impl_cached(
+        method, block, block_id=block.block_id, src_hash=block.source_content_hash,
+        geos=geos, proj=proj, code=code, method_repr=repr(method)))

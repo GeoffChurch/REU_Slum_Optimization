@@ -116,3 +116,26 @@ def test_cached_access_bypasses_when_hash_unset(
     assert isinstance(out, pd.Series)
     # Bypass path: an unset source hash never writes to the joblib store.
     assert not any(tmp_path.glob("**/*.pkl"))
+
+
+def test_cached_propose_hits_and_bypasses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import joblib
+
+    monkeypatch.setattr(cache, "memory", joblib.Memory(location=str(tmp_path), verbose=0))
+    monkeypatch.setattr(cache, "_propose_impl_cached",
+                        cache.cached(cache._propose_impl, ignore=["method", "block"]))
+
+    from reblock.methods.topology import TopologyMethod
+    m = TopologyMethod(alpha=2.0, seed=0)
+    block = _grid_block("cafe1234")
+    p1 = cache.cached_propose(m, block)
+    p2 = cache.cached_propose(m, block)          # HIT
+    assert p1.proposal_id == p2.proposal_id == "topology_a2.0_s0"
+    # bypass path when hash unset writes nothing
+    monkeypatch.setattr(cache, "memory", joblib.Memory(location=str(tmp_path / "b"), verbose=0))
+    monkeypatch.setattr(cache, "_propose_impl_cached",
+                        cache.cached(cache._propose_impl, ignore=["method", "block"]))
+    cache.cached_propose(m, _grid_block(cache.SOURCE_HASH_UNSET))
+    assert not any((tmp_path / "b").glob("**/*.pkl"))
