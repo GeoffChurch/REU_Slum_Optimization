@@ -9,7 +9,7 @@ import geopandas as gpd
 import networkx as nx
 import pandas as pd
 from shapely import STRtree, line_merge, set_precision, union_all
-from shapely.geometry import LineString, MultiLineString
+from shapely.geometry import LineString, MultiLineString, Point
 from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import Block
@@ -181,3 +181,42 @@ def circuity(block: Block, roads: gpd.GeoDataFrame | None, tol: float = STREET_T
         if euc > tol and nd < float("inf"):
             ratios.append(nd / euc)
     return float(pd.Series(ratios).mean()) if ratios else 1.0
+
+
+def throughput_ratio(graph: nx.Graph, block: Block, tol: float = STREET_TOL) -> float:
+    """Max-flow from a unit-demand super-source over parcel access-nodes to a
+    super-sink at the perimeter, normalized by parcel count: 1.0 = no bottleneck,
+    lower = the network chokes. Each undirected graph edge becomes two directed
+    edges of unit capacity; multiple parcels nearest the same node accumulate
+    demand on that node's super-source edge rather than overwriting it."""
+    if graph.number_of_nodes() == 0:
+        return 0.0
+    nodes = list(graph.nodes)
+    node_pts = [Point(n) for n in nodes]
+    tree = STRtree(node_pts)
+
+    flow: nx.DiGraph = nx.DiGraph()
+    for u, v in graph.edges:
+        flow.add_edge(u, v, capacity=1.0)
+        flow.add_edge(v, u, capacity=1.0)
+
+    perim = block.boundary.exterior
+    sink = "__SINK__"
+    for n, pt in zip(nodes, node_pts, strict=True):
+        if pt.distance(perim) <= tol:
+            flow.add_edge(n, sink, capacity=float("inf"))
+
+    src = "__SRC__"
+    demand = 0
+    for geom in block.parcels.geometry:
+        idx = int(tree.nearest(geom.representative_point()))
+        node = nodes[idx]
+        if flow.has_edge(src, node):
+            flow[src][node]["capacity"] += 1.0
+        else:
+            flow.add_edge(src, node, capacity=1.0)
+        demand += 1
+
+    if demand == 0 or src not in flow or sink not in flow:
+        return 0.0
+    return float(nx.maximum_flow_value(flow, src, sink)) / demand

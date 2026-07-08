@@ -75,3 +75,24 @@ def test_circuity_straight_is_one_detour_is_more() -> None:
                   parcels=parcels, streets=streets)
     c = circuity(block, None)
     assert c >= 1.0 and c < 1.5
+
+
+def test_throughput_tree_bottlenecks_grid_does_not() -> None:
+    import geopandas as gpd
+    from shapely.geometry import Polygon, box
+
+    from reblock.contracts import Block
+    from reblock.derive.network_metrics import node_network, throughput_ratio
+    # 3 interior parcels behind a single-file corridor (tree) -> min-cut 1 -> ratio ~1/3;
+    # the same parcels with a second parallel corridor -> higher throughput.
+    parcels = gpd.GeoDataFrame(
+        {"parcel_id": [0, 1, 2]},
+        geometry=[box(1, 0, 2, 1), box(2, 0, 3, 1), box(3, 0, 4, 1)], crs=UTM)
+    boundary = Polygon([(0, 0), (4, 0), (4, 1), (0, 1)])
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)   # left perimeter
+    block = Block(block_id="s", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    single = _lines([(0.5, 0.5), (3.5, 0.5)])                       # one spine
+    g1 = node_network(single, streets)
+    both = _lines([(0.5, 0.2), (3.5, 0.2)], [(0.5, 0.8), (3.5, 0.8)])  # two parallel spines
+    g2 = node_network(both, streets)
+    assert throughput_ratio(g2, block) >= throughput_ratio(g1, block)
