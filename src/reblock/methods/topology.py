@@ -77,11 +77,19 @@ class TopologyMethod:
         initial = {e for e in graph.myedges() if e.road}
 
         # build_all_roads is probabilistic: choose_path -> WeightedPick draws
-        # from numpy's global RNG (np.random.choice), so np.random.seed is what
-        # actually pins the road layout; seed random too for any stdlib draws.
-        random.seed(self.seed)
-        np.random.seed(self.seed)
-        build_all_roads(graph, alpha=self.alpha, vquiet=True)
+        # from numpy's GLOBAL RNG (np.random.choice; ext/topology, not threadable
+        # without editing vendored code), so we seed the global RNGs to pin the
+        # layout but SAVE+RESTORE them so propose() leaves the caller's RNG
+        # untouched -- run() must be side-effect free (spec §1).
+        np_state = np.random.get_state()
+        py_state = random.getstate()
+        try:
+            random.seed(self.seed)
+            np.random.seed(self.seed)
+            build_all_roads(graph, alpha=self.alpha, vquiet=True)
+        finally:
+            np.random.set_state(np_state)
+            random.setstate(py_state)
 
         # `e not in initial` is a value-equality set-difference: MyEdge.__eq__/__hash__ are
         # VALUE-based on the unordered pair of node locations (see MyEdge in

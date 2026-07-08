@@ -79,7 +79,7 @@ def run(cfg: RunConfig | DictConfig) -> list[Result]: ...   # single data + meth
   individual block, so any `block_ids` subset reuses the same per-block cache entries.
 
   ```bash
-  python -m reblock.run data=capetown method=peel block_ids=[ZAF.9.3.1_1_44882] render_dir=renders
+  python -m reblock.run data=capetown method=peel block_ids=[ZAF.9.3.1_1_44882] render.enabled=true
   ```
 
 - **Screen becomes a `run()` stage** (folds in the standalone `reblock.screen` app from the

@@ -1,8 +1,5 @@
-# A list, not a dict: run()/main() instantiate `cfg.method` as a list of
-# methods (`hydra.utils.instantiate(cfg.method)` -> ListConfig of Method
-# instances) so a block can be scored under more than one method in a single
-# run. Combine methods by pointing a config at a file listing several
-# `_target_` entries (see conf/eval/*.yaml for the same convention on evals).
-- _target_: reblock.methods.topology.TopologyMethod
-  alpha: ${alpha}
-  seed: ${seed}
+# Single method per run (F1 atomic run(): cfg.method is ONE _target_ dict).
+# Multi-method comparison lives in reblock.compare (F4), not here.
+_target_: reblock.methods.topology.TopologyMethod
+alpha: ${alpha}
+seed: ${seed}

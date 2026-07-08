@@ -1,3 +1,4 @@
+import random
 from typing import cast
 
 import geopandas as gpd
@@ -74,8 +75,6 @@ def test_propose_is_deterministic_across_runs() -> None:
 
 
 def test_all_interior_parcels_connected() -> None:
-    import random
-
     from topology import build_all_roads
 
     from reblock.derive.parcel_graph import to_parcel_graph
@@ -132,3 +131,17 @@ def test_partial_streets_yield_a_different_larger_proposal() -> None:
     assert len(partial.roads) > len(full.roads)
     assert (sorted(g.wkt for g in partial.roads.geometry)
             != sorted(g.wkt for g in full.roads.geometry))
+
+
+def test_propose_does_not_perturb_global_rng() -> None:
+    # run() purity depends on propose() not mutating the caller's global RNG.
+    # propose() seeds np.random/random internally (build_all_roads draws from
+    # the global np.random.choice), so it must save+restore that global state.
+    import numpy as np
+    block = _grid(3)
+    np.random.seed(12345)
+    np_state_before = np.random.get_state()[1].tolist()
+    py_state_before = random.getstate()
+    TopologyMethod(alpha=2.0, seed=0).propose(block)
+    assert np.random.get_state()[1].tolist() == np_state_before
+    assert random.getstate() == py_state_before

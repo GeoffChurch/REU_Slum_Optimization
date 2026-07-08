@@ -27,10 +27,10 @@ by targeting it with `block_ids` — no need to process the whole region:
 
 ```bash
 pixi run python -m reblock.run data=capetown method=peel eval=kcomplexity \
-  "block_ids=[ZAF.9.3.1_1_44882]" render_dir=renders hydra.run.dir=outputs/ct-flagship
+  "block_ids=[ZAF.9.3.1_1_44882]" render.enabled=true hydra.run.dir=outputs/ct-flagship
 ```
 
-Writes `outputs/ct-flagship/renders/ZAF.9.3.1_1_44882_before.png` and one
+Writes `outputs/ct-flagship/ZAF.9.3.1_1_44882_before.png` and one
 `_<proposal>_after.png`. Swap `data=capetown` → `data=dji`, or `method=peel` →
 `method=topology`. Omit `block_ids` to process the first `max_blocks` blocks instead.
 
