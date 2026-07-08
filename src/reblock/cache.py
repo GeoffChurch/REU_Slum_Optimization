@@ -5,7 +5,8 @@ We never hash the heavy geometry (slow + GEOS-fragile); instead each cached
 wrapper passes the heavy objects via joblib `ignore=` and keys ONLY on
 lightweight strings: (block_id, source_content_hash, geos, proj, code_version,
 roads_key | method_repr). An empty source_content_hash bypasses the cache
-(synthetic/test blocks). See docs/.../2026-07-07-atomic-flow-...-design.md §6.
+(synthetic/test blocks). See
+docs/superpowers/specs/2026-07-07-atomic-flow-and-sweep-architecture-design.md §6.
 """
 
 from __future__ import annotations
