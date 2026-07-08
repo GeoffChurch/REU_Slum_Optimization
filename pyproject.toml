@@ -36,6 +36,8 @@ scipy = "*"
 matplotlib-base = "*"
 pyshp = "*"
 hydra-core = "*"
+# Backs reblock.cache's content-addressed L2 derivation cache (joblib.Memory).
+joblib = "*"
 
 # Install the reblock package itself, editable, from this directory.
 [tool.pixi.pypi-dependencies]
@@ -92,6 +94,14 @@ mypy_path = ["ext/topology"]
 # (topology/__init__.py, topology/graph/complexity.py) stays fully checked.
 [[tool.mypy.overrides]]
 module = ["networkx.*", "scipy.*", "shapefile.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# joblib (backs reblock.cache's L2 derivation cache) ships no py.typed marker
+# and, unlike geopandas/shapely, has no upstream types-joblib stub package to
+# install instead — so this is a plain ignore_missing_imports shim, not a
+# preference over real stubs.
+module = "joblib.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
