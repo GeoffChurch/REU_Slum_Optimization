@@ -37,6 +37,24 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
 - **Spine-merge optimizer.** Phase 0 ships only a heuristic spine-merge *reference*; the real optimizer
   (merge redundant boundary-parallel spines into shared through-trunks) is a Phase-1 method.
 
+**Phase-0 probe findings (from the built probe — these shape the go/no-go and Phase-1 eval):**
+- **The metric basis is ~2D on real data, not 8D.** The correlation-matrix orthogonality check did its
+  job: on the 29-cluster sample the structural tier collapses (`throughput ~ added_road_length ~
+  dead_end_fraction`, all |r|>0.9) to ~2 independent directions (a tree-depth/cost axis + a weak
+  cross-block axis). Prune the basis accordingly; don't treat all 8 axes as independent evidence.
+- **The welfare/directness tier is DEGENERATE for peel-like methods.** `geometric_access_max_m`,
+  `_p95_m`, and `circuity` read 0 / 1.0 because peel reblocking reaches every parcel (residual
+  access = 0; no off-road parcels for circuity). These are vacuous, NOT evidence of optimality. A
+  meaningful directness metric must measure **travel along the road network** (shortest path on the
+  noded graph vs straight-line), not residual parcel access — a Phase-1-scale metric redesign.
+- **`Region.blocks` one-shot-generator footgun.** `KblockSource.region()` returns a lazy generator
+  (intentional for the fast single-block CLI path), so iterating `region.blocks` twice silently yields
+  empty the second time (this bit the probe). Consider hardening the `Region.blocks` contract to a
+  re-iterable `Sequence` — weigh against the lazy-build perf; touches `contracts.py`.
+- **Robust frontage detection.** `_interior_boundaries` uses exact `.intersection().length>0` (could
+  under-match sub-tol-gapped real geometry); and `_side` now length-invariantly gates on-boundary
+  points — but a buffered/segment-aware frontage-and-side treatment would be sturdier for messy data.
+
 ## Visualizations (brainstorm needed — own its own brainstorm)
 
 - **Region choropleth** — color every block in a region by a metric (peel-k, geometric access

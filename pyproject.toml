@@ -59,7 +59,7 @@ default = { features = ["dev"], solve-group = "default" }
 
 [tool.pixi.tasks]
 test = "pytest"
-typecheck = "mypy --strict src tests"
+typecheck = "mypy --strict src tests scripts/crossblock_probe.py"
 lint = "ruff check ."
 fmt = "ruff format ."
 check = { depends-on = ["lint", "typecheck", "test"] }
@@ -71,7 +71,10 @@ run = "python -m reblock.run"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["src", "tests"]
+# scripts/crossblock_probe.py only, NOT the whole scripts/ dir: the pre-existing
+# scripts/fetch_kblock_fixtures.py (Task 0, out of scope here) has its own
+# pre-existing --strict findings and was never covered by this config before.
+files = ["src", "tests", "scripts/crossblock_probe.py"]
 # topology is installed via a PEP 660 "strict" editable install, whose .pth
 # registers a sys.meta_path finder at runtime rather than a plain sys.path
 # entry — mypy's static .pth scan can't see through that, so point it at the
@@ -154,6 +157,12 @@ disallow_untyped_calls = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=reblock --cov-report=term-missing"
+# tests/test_crossblock_probe.py imports `scripts.crossblock_probe`. scripts/ is a
+# regular package (scripts/__init__.py) but lives at the repo root, which pytest's
+# rootdir-based sys.path insertion (anchored at tests/, since tests/ has no
+# __init__.py -- see the mypy_path note below) does not add. This is the minimal
+# path tweak to make that import resolve at test-collection time.
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
