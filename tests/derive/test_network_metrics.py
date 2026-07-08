@@ -77,22 +77,29 @@ def test_circuity_straight_is_one_detour_is_more() -> None:
     assert c >= 1.0 and c < 1.5
 
 
-def test_throughput_tree_bottlenecks_grid_does_not() -> None:
-    import geopandas as gpd
+def test_throughput_bottleneck_single_vs_branched() -> None:
+    # 3 parcels clustered at interior node (7,2), > tol from every perimeter edge, so their
+    # only egress is along the road corridor(s) to the left perimeter. A single unit-capacity
+    # corridor bottlenecks all 3 to min-cut 1 -> 1/3; two edge-disjoint corridors -> min-cut 2
+    # -> 2/3. Both < 1.0 (a genuine bottleneck the metric detects), branched > single.
+    import pytest
     from shapely.geometry import Polygon, box
 
     from reblock.contracts import Block
-    from reblock.derive.network_metrics import node_network, throughput_ratio
-    # 3 interior parcels behind a single-file corridor (tree) -> min-cut 1 -> ratio ~1/3;
-    # the same parcels with a second parallel corridor -> higher throughput.
+    from reblock.derive.network_metrics import throughput_ratio
+
     parcels = gpd.GeoDataFrame(
         {"parcel_id": [0, 1, 2]},
-        geometry=[box(1, 0, 2, 1), box(2, 0, 3, 1), box(3, 0, 4, 1)], crs=UTM)
-    boundary = Polygon([(0, 0), (4, 0), (4, 1), (0, 1)])
-    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)   # left perimeter
+        geometry=[box(7, 1, 8, 2), box(7, 2, 8, 3), box(6, 1.5, 7, 2.5)], crs=UTM)
+    boundary = Polygon([(0, 0), (10, 0), (10, 4), (0, 4)])
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 4)])], crs=UTM)
     block = Block(block_id="s", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
-    single = _lines([(0.5, 0.5), (3.5, 0.5)])                       # one spine
-    g1 = node_network(single, streets)
-    both = _lines([(0.5, 0.2), (3.5, 0.2)], [(0.5, 0.8), (3.5, 0.8)])  # two parallel spines
-    g2 = node_network(both, streets)
-    assert throughput_ratio(g2, block) >= throughput_ratio(g1, block)
+
+    single = _lines([(7, 2), (0, 2)])                        # one corridor to the perimeter
+    branched = _lines([(7, 2), (0, 1)], [(7, 2), (0, 3)])    # two edge-disjoint corridors
+    t_single = throughput_ratio(node_network(single, streets), block)
+    t_branched = throughput_ratio(node_network(branched, streets), block)
+
+    assert t_single == pytest.approx(1 / 3)
+    assert t_branched == pytest.approx(2 / 3)
+    assert t_single < 1.0 and t_branched > t_single  # a real bottleneck, and branching relieves it
