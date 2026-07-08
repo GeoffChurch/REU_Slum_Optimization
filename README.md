@@ -35,3 +35,15 @@ Writes `outputs/ct-flagship/renders/ZAF.9.3.1_1_44882_before.png` and one
 `method=topology`. Omit `block_ids` to process the first `max_blocks` blocks instead.
 
 (Quote `"block_ids=[...]"` so the shell doesn't glob the brackets.)
+
+## Detect informal settlements (Screen)
+
+Flag the dense/compact informal blocks in a city — the settlement blocks worth reblocking:
+
+```bash
+pixi run python -m reblock.screen screen=dense_compact city=capetown
+```
+
+First run downloads + caches the full Cape Town data under `~/.cache/reblock` (nothing is
+committed); later runs are instant. Prints the flagged `block_ids`. Tune the thresholds, e.g.
+`screen.density_min=50 screen.mean_depth_min=1.5`.

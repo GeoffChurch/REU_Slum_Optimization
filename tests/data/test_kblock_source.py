@@ -117,3 +117,9 @@ def test_block_ids_unknown_raises() -> None:
     src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=["NOPE"])
     with pytest.raises(ValueError, match="NOPE"):
         src.region()
+
+
+def test_capetown_fixture_has_density_columns() -> None:
+    import geopandas as gpd
+    cols = set(gpd.read_parquet(CT_BLOCKS).columns)
+    assert {"building_count", "block_area_m2"} <= cols   # the Screen's cheap-pass signals

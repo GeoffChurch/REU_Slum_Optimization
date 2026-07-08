@@ -90,8 +90,10 @@ Only the buildings that spatially joined into a **kept** block are written to th
 fixture — not all buildings in the raw city dataset.
 
 This predicate is a pure function of the raw inputs (no RNG) — re-running the script against the
-same raw files reproduces byte-identical fixtures (verified this session: two separate runs against
-the cached raw files produced identical SHA256s for all four outputs).
+same raw files reproduces byte-identical fixtures (verified this session: a fresh
+`fetch_kblock_fixtures.py` run against the cached raw files produced SHA256s identical to all four
+committed fixtures below). The committed fixtures **are** exactly this script's output — there is
+no separate augmentation step; `fetch_kblock_fixtures.py` is the single producer.
 
 ## Pinned validation blocks
 
@@ -117,14 +119,17 @@ values on these, computed from `KblockSource`, which doesn't exist yet — Task 
 
 | file | rows | bytes | sha256 |
 |---|---|---|---|
-| `blocks_dji_sample.parquet` | 301 | 43,790 | `5c2b7e38a78439b1d66f4217574be458ad1283372d16104a574896396afb4553` |
+| `blocks_dji_sample.parquet` | 301 | 48,194 | `730082e30a9b774b943a6955762b2a3c40a5ba9ab2bd5d0816ecba5d385f8121` |
 | `buildings_dji_sample.parquet` | 13,002 | 235,238 | `d71ec7f66230f4145d0e47dd542ca5254baa46bc99dae5f895da62a7d17f5893` |
-| `blocks_capetown_sample.parquet` | 301 | 108,175 | `30e4e759c72207e282d816db32d7b9a8ffe542a5d0dc41c8262afe8d433904ce` |
+| `blocks_capetown_sample.parquet` | 301 | 113,076 | `92e1d3d1388a7e9301d07274ea8b1e9f2c56188fe98d2ebf4b2d0faa725015d8` |
 | `buildings_capetown_sample.parquet` | 38,930 | 731,131 | `dbc436428d9d29909a14dfbc09287df5b3fa18a8b026a7d13293cb3abb934262` |
 
-Total 1.1 MB. `blocks_*` columns: `block_id`, `k_complexity` (kblock's own weak-dual metric,
-carried through for context only — **never** asserted against our own peel-k, per the
-kblock-source design doc), `geometry` (`Polygon`, EPSG:4326). `buildings_*` columns: `geometry`
+Total 1.1 MB. `blocks_*` columns, in order: `block_id`; `k_complexity` (kblock's own weak-dual
+metric, carried through for context only — **never** asserted against our own peel-k, per the
+kblock-source design doc); `building_count` (kblock's own Ecopia-based building count per block);
+`block_area_m2` (block area in m²); `geometry` (`Polygon`, EPSG:4326). The `building_count` /
+`block_area_m2` pair are the free per-block density signals consumed by the Screen layer
+(`density = building_count / (block_area_m2 / 1e4)`). `buildings_*` columns: `geometry`
 (`Point`, EPSG:4326) only, per the brief ("building fixtures need only a geometry column").
 
 301 rows per city = 300 densest blocks + 1 force-included pinned block (each pinned block, per the
