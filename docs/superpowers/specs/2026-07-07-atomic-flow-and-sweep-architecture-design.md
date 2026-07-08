@@ -49,6 +49,18 @@ def run(cfg: RunConfig | DictConfig) -> list[Result]: ...   # single data + meth
   python -m reblock.run data=capetown method=peel block_ids=[ZAF.9.3.1_1_44882] render_dir=renders
   ```
 
+- **Screen becomes a `run()` stage** (folds in the standalone `reblock.screen` app from the
+  slum-detection S1 slice — `specs/2026-07-08-screen-slum-detection-design.md`). Add a `Screen` stage
+  before block iteration: `run()` instantiates `cfg.screen` (default **`IdentityScreen`**, a
+  passthrough that selects the configured `block_ids` / all blocks), calls `select() -> block_ids`,
+  and those become the source's `block_ids`. This makes it **one entrypoint** — `Source → Screen →
+  Method → Eval`, screen mandatory-but-defaulted — instead of a separate detect app. The reason it
+  belongs *here* and not in S1: a real Screen's fine pass already builds its survivors (Voronoi+peel
+  for `mean_depth`), and `run()` then builds the selected blocks to reblock them — the **L2 per-block
+  cache (§6) makes that second build a cache hit**, so the screen-then-reblock unification is free of
+  double-building only once L2 exists. S1 ships the standalone app as the interim; this stage
+  supersedes it (delete the standalone app when this lands — migrate, don't keep both).
+
 ## 2. Outputs — pluggable emitters that consume `Result`s
 
 Both kinds of output (the quantitative **scorecard** and the **visualizations**) are just consumers

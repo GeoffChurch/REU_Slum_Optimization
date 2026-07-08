@@ -124,6 +124,13 @@ A thin `@hydra.main` app mirroring `reblock.run`, driven by **`conf/screen_confi
 It resolves the city's data, injects the paths into the configured Screen, runs `select()`, and prints
 the flagged `block_ids` + a count.
 
+**Interim by design.** This standalone app is superseded by the flow-refactor, which folds `Screen`
+into `run()` as a stage (default `IdentityScreen` passthrough → one entrypoint `Source → Screen →
+Method → Eval`), where the L2 per-block cache makes screen-then-reblock free of double-building (see
+`specs/2026-07-07-atomic-flow-and-sweep-architecture-design.md` §1). Delete this app when that lands —
+migrate, don't keep both. S1 ships it because it's a few lines, needs no `run()` change, and gives the
+detect capability now.
+
 ```python
 @hydra.main(version_base=None, config_path="../../conf", config_name="screen_config")
 def main(cfg):
