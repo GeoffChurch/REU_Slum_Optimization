@@ -4,6 +4,7 @@ heatmaps under the Hydra run dir.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
@@ -17,6 +18,8 @@ from omegaconf import DictConfig
 
 from reblock.contracts import Block, Eval, Method, Metrics, Proposal, Result, Source
 from reblock.render import render_after, render_before, save_render
+
+log = logging.getLogger(__name__)
 
 _KCOMPLEXITY = "kcomplexity"
 
@@ -140,7 +143,7 @@ def _render_block(block: Block, per_proposal: list[tuple[Proposal, tuple[Metrics
 def main(cfg: DictConfig) -> None:
     render_base = Path(HydraConfig.get().runtime.output_dir)
     for r in run(cfg, render_base=render_base):
-        print(r.block.block_id, {m.eval: dict(m.values) for m in r.metrics})
+        log.info("%s %s", r.block.block_id, {m.eval: dict(m.values) for m in r.metrics})
 
 
 if __name__ == "__main__":
