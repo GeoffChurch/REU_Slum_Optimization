@@ -185,6 +185,13 @@ addopts = "--cov=reblock --cov-report=term-missing"
 # __init__.py -- see the mypy_path note below) does not add. This is the minimal
 # path tweak to make that import resolve at test-collection time.
 pythonpath = ["."]
+# joblib's numpy pickler (numpy_pickle.py) sets `array.shape`, which NumPy 2.5
+# deprecated; it fires on every L2-cache round-trip of a numpy-backed object.
+# Upstream joblib issue (not our code) -- scope the ignore to that one message so
+# genuine warnings stay visible.
+filterwarnings = [
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:joblib.numpy_pickle",
+]
 
 [tool.ruff]
 line-length = 100
