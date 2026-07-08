@@ -145,7 +145,7 @@ def test_runconfig_accepts_explicit_data_method_eval_overrides() -> None:
         max_blocks=1,
         data={"_target_": "reblock.data.shapefile.ShapefileSource",
               "path": PHULE, "region_id": "phule", "assumed_crs": 3857},
-        method=[{"_target_": "reblock.methods.topology.TopologyMethod", "alpha": 2.0, "seed": 0}],
+        method={"_target_": "reblock.methods.topology.TopologyMethod", "alpha": 2.0, "seed": 0},
         eval=[{"_target_": "reblock.eval.kcomplexity.KComplexityEval"},
               {"_target_": "reblock.eval.kcomplexity.WeakDualKEval"}],
     )
@@ -156,51 +156,6 @@ def test_runconfig_accepts_explicit_data_method_eval_overrides() -> None:
     r = results[0]
     assert {m.eval for m in r.metrics} == {"kcomplexity", "weakdual_k"}
     assert r.metric("kcomplexity", "k_after") <= r.metric("kcomplexity", "k_before")
-
-
-def test_run_scores_multiple_methods_in_one_call(tmp_path: Path) -> None:
-    # Regression guard for the render design's "one before, N afters" premise:
-    # run() must score EVERY configured method against each block and bundle
-    # one Result per (block, method). Mirrors
-    # test_runconfig_accepts_explicit_data_method_eval_overrides, but flips it
-    # to TWO methods (distinct seeds -> distinct proposal_ids) x one eval,
-    # instead of one method x two evals. Uses the same fast real phule_0 block
-    # (max_blocks=1) as that test -- run() instantiates its source via
-    # hydra.utils.instantiate(cfg.data), which needs a _target_-referenceable
-    # class, so a direct-constructed synthetic Block can't be fed through the
-    # real run() path; phule_0 is the fast, already-loaded real block.
-    cfg = RunConfig(
-        max_blocks=1,
-        render_dir="renders",
-        data={"_target_": "reblock.data.shapefile.ShapefileSource",
-              "path": PHULE, "region_id": "phule", "assumed_crs": 3857},
-        method=[
-            {"_target_": "reblock.methods.topology.TopologyMethod", "alpha": 2.0, "seed": 0},
-            {"_target_": "reblock.methods.topology.TopologyMethod", "alpha": 2.0, "seed": 1},
-        ],
-        eval=[{"_target_": "reblock.eval.kcomplexity.KComplexityEval"}],
-    )
-
-    results = run(cfg, render_base=tmp_path)
-
-    # Two methods, one block -> two Results (one per method), same block.
-    assert len(results) == 2
-    assert results[0].block.block_id == results[1].block.block_id == "phule_0"
-    ids = [r.proposal.proposal_id for r in results]
-    assert ids == ["topology_a2.0_s0", "topology_a2.0_s1"]
-    assert len(set(ids)) == 2  # distinct proposals, not the same one twice
-
-    # Render layout: exactly ONE before per block, and one distinct after per
-    # proposal (the "one before, N afters" the shared-vmax design depends on).
-    renders = tmp_path / "renders"
-    befores = list(renders.glob("phule_0_before.png"))
-    afters = sorted(renders.glob("phule_0_*_after.png"))
-    assert len(befores) == 1 and befores[0].stat().st_size > 0
-    assert [p.name for p in afters] == [
-        "phule_0_topology_a2.0_s0_after.png",
-        "phule_0_topology_a2.0_s1_after.png",
-    ]
-    assert all(p.stat().st_size > 0 for p in afters)
 
 
 def test_hydra_compose_wires_config_groups() -> None:

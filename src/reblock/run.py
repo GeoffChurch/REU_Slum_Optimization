@@ -64,24 +64,22 @@ class RunConfig:
                 "assumed_crs": self.assumed_crs,
             }
         if self.method is None:
-            self.method = [{
+            self.method = {
                 "_target_": "reblock.methods.topology.TopologyMethod",
                 "alpha": self.alpha, "seed": self.seed,
-            }]
+            }
         if self.eval is None:
             self.eval = [{"_target_": "reblock.eval.kcomplexity.KComplexityEval"}]
 
 
 def run(cfg: RunConfig | DictConfig, *, render_base: Path | None = None) -> list[Result]:
-    # Instantiate each list element individually (not `instantiate(cfg.method)`
-    # as a whole): when `_target_` resolves to a @dataclass (every Method/Eval
-    # here is one), instantiating the whole ListConfig in one call short-
-    # circuits to schema-validated DictConfig nodes instead of calling the
-    # constructor, silently yielding config objects with no `.propose`/
-    # `.score` methods rather than real instances. Per-element instantiate()
-    # doesn't have this problem.
+    # Per-element instantiate for the eval LIST (not instantiate(cfg.eval) as a
+    # whole): instantiating a ListConfig of @dataclass _target_s short-circuits
+    # to schema-validated DictConfig nodes instead of calling the constructor.
+    # cfg.method is a single _target_ dict, so instantiate(cfg.method) calls the
+    # constructor directly and is safe.
     source = cast(Source, instantiate(cfg.data))
-    methods = cast("list[Method]", [instantiate(m) for m in cfg.method])
+    method = cast(Method, instantiate(cfg.method))
     evals = cast("list[Eval]", [instantiate(e) for e in cfg.eval])
 
     render_dir = (render_base / cfg.render_dir
@@ -92,15 +90,12 @@ def run(cfg: RunConfig | DictConfig, *, render_base: Path | None = None) -> list
     region = source.region()
     results: list[Result] = []
     for block in islice(region.blocks, cfg.max_blocks):
-        per_proposal: list[tuple[Proposal, tuple[Metrics, ...]]] = []
-        for method in methods:
-            proposal = method.propose(block)
-            metrics = tuple(ev.score(block, proposal) for ev in evals)
-            per_proposal.append((proposal, metrics))
-            results.append(Result(block=block, proposal=proposal, metrics=metrics))
+        proposal = method.propose(block)
+        metrics = tuple(ev.score(block, proposal) for ev in evals)
+        results.append(Result(block=block, proposal=proposal, metrics=metrics))
 
         if render_dir is not None:
-            _render_block(block, per_proposal, render_dir)
+            _render_block(block, [(proposal, metrics)], render_dir)
 
     return results
 
