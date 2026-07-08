@@ -119,6 +119,18 @@ module = [
 follow_imports = "silent"
 
 [[tool.mypy.overrides]]
+# reblock/data/provision.py imports download_dataverse_blocks/download_capetown_buildings/
+# CT_BBOX from scripts/fetch_kblock_fixtures.py -- a pre-existing script (Task 0, out of
+# scope here) with its own pre-existing --strict findings, previously excluded from `files`
+# (see the "files" comment above) precisely so it wasn't checked. Since provision.py *is*
+# in `files`, mypy's default follow_imports="normal" would transitively re-check that
+# script's whole body anyway. follow_imports=silent still parses it (so the imported
+# names have real inferred types at provision.py's call sites, not Any) but suppresses
+# its own unrelated errors, mirroring the topology.graph.my_graph* override above.
+module = "scripts.fetch_kblock_fixtures"
+follow_imports = "silent"
+
+[[tool.mypy.overrides]]
 # complexity.py is the typed facade: its own signatures (k_complexity,
 # define_roads_on) are fully annotated and checked. It necessarily calls into
 # the legacy untyped helpers above, which --strict's disallow_untyped_calls
