@@ -4,15 +4,14 @@ from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
-import pandas as pd
 from hydra import compose, initialize
 from pyproj import CRS
 from shapely.geometry import Polygon
 
-from reblock.contracts import Block, Metrics, Proposal, Result
+from reblock.contracts import Block, Result
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.methods.topology import TopologyMethod
-from reblock.run import RunConfig, _render_block, run
+from reblock.run import RunConfig, run
 
 PHULE = str(Path(__file__).resolve().parents[1] / "ext" / "topology" / "examples"
             / "data" / "phule_nagar_v6.shp")
@@ -38,89 +37,53 @@ def _grid_block(n: int) -> Block:
                  parcels=parcels, streets=streets)
 
 
-def test_render_after_filenames_stay_unique_when_proposal_id_is_empty(tmp_path: Path) -> None:
-    # Guard: the after-PNG name is `{block_id}_{proposal_id}_after.png`, and
-    # `proposal_id` defaults to "" -- so two proposals that both leave it empty
-    # (a future method might) must NOT collide onto one filename and silently
-    # overwrite. run() falls back to a per-proposal index. No current Method
-    # produces an empty proposal_id, so this exercises the render helper
-    # directly with hand-built empty-id proposals.
-    block = _grid_block(3)
-    layers = pd.Series(
-        [1] * len(block.parcels),
-        index=pd.Index(block.parcels["parcel_id"], name="parcel_id"),
-    )
-
-    def _kc() -> Metrics:
-        return Metrics(block_id=block.block_id, method="x", eval="kcomplexity",
-                       values={"delta_k": 0.0},
-                       fields={"access_before": layers, "access_after": layers})
-
-    per_proposal: list[tuple[Proposal, tuple[Metrics, ...]]] = [
-        (Proposal(block_id=block.block_id, crs=UTM, proposal_id=""), (_kc(),)),
-        (Proposal(block_id=block.block_id, crs=UTM, proposal_id=""), (_kc(),)),
-    ]
-    _render_block(block, per_proposal, tmp_path)
-
-    afters = sorted(p.name for p in tmp_path.glob("*_after.png"))
-    assert afters == ["synthetic_3x3_proposal0_after.png",
-                      "synthetic_3x3_proposal1_after.png"]
-
-
 def test_cli_entrypoint_smoke(tmp_path: Path) -> None:
     # Exercises the real @hydra.main entrypoint (python -m reblock.run) against
     # the conf/ config groups, not just run(RunConfig(...)) directly -- catches
     # breakage in CLI arg parsing / config-group composition that calling run()
     # in-process can't see. hydra.run.dir is redirected to tmp_path so the
-    # Hydra-created output dir (and the renders/ written under it) land outside
+    # Hydra-created output dir (and the PNGs written under it) land outside
     # the repo tree instead of littering it on every test run.
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
          f"shapefile={PHULE}", "max_blocks=1", "assumed_crs=3857",
-         "render_dir=renders", f"hydra.run.dir={tmp_path}"],
+         "render.enabled=true", f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0, result.stderr
     assert "phule_0" in result.stdout
     assert "k_before" in result.stdout
 
-    befores = list(tmp_path.glob("renders/phule_0_before.png"))
-    afters = list(tmp_path.glob("renders/phule_0_*_after.png"))
+    befores = list(tmp_path.glob("phule_0_before.png"))
+    afters = list(tmp_path.glob("phule_0_*_after.png"))
     assert len(befores) == 1 and befores[0].stat().st_size > 0
     assert len(afters) >= 1 and afters[0].stat().st_size > 0
 
 
 def test_cli_block_ids_renders_single_capetown_block(tmp_path: Path) -> None:
     # Validates the README recipe end-to-end through the real @hydra.main entrypoint:
-    # block_ids builds ONLY the flagship, and render_dir writes its before/after PNGs.
+    # block_ids builds ONLY the flagship, and render.enabled writes its before/after PNGs.
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
          "data=capetown", "method=peel", "eval=kcomplexity",
-         "block_ids=[ZAF.9.3.1_1_44882]", "render_dir=renders",
+         "block_ids=[ZAF.9.3.1_1_44882]", "render.enabled=true",
          f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, result.stderr
     assert "ZAF.9.3.1_1_44882" in result.stdout
 
-    befores = list(tmp_path.glob("renders/ZAF.9.3.1_1_44882_before.png"))
-    afters = list(tmp_path.glob("renders/ZAF.9.3.1_1_44882_*_after.png"))
+    befores = list(tmp_path.glob("ZAF.9.3.1_1_44882_before.png"))
+    afters = list(tmp_path.glob("ZAF.9.3.1_1_44882_*_after.png"))
     assert len(befores) == 1 and befores[0].stat().st_size > 0
     assert len(afters) >= 1 and afters[0].stat().st_size > 0
 
 
-def test_end_to_end_phule_wiring(tmp_path: Path) -> None:
-    # Wiring proof on real data: phule_0 has no interior parcels reachable by
-    # the greedy road-builder (see the efficacy test below for why NO Phule or
-    # Epworth_demo block shows peel-metric improvement), so this asserts the
-    # pipeline produces well-formed Results and renders -- not that it
-    # improves anything on this particular block.
-    results = run(
-        RunConfig(shapefile=PHULE, region_id="phule", alpha=2.0, seed=0, max_blocks=1,
-                  assumed_crs=3857, render_dir="renders"),
-        render_base=tmp_path,
-    )
-
+def test_end_to_end_phule_wiring() -> None:
+    # Wiring proof on real data: run() returns well-formed Results and writes
+    # nothing (rendering is an emitter now, exercised by the CLI test below).
+    results = run(RunConfig(shapefile=PHULE, region_id="phule", alpha=2.0, seed=0,
+                            max_blocks=1, assumed_crs=3857))
     assert len(results) == 1
     r = results[0]
     assert isinstance(r, Result)
@@ -128,10 +91,21 @@ def test_end_to_end_phule_wiring(tmp_path: Path) -> None:
     assert r.metric("kcomplexity", "k_after") <= r.metric("kcomplexity", "k_before")
     assert r.metric("kcomplexity", "delta_k") >= 0
 
-    before_png = tmp_path / "renders" / "phule_0_before.png"
-    after_png = tmp_path / "renders" / f"phule_0_{r.proposal.proposal_id}_after.png"
-    assert before_png.exists() and before_png.stat().st_size > 0
-    assert after_png.exists() and after_png.stat().st_size > 0
+
+def test_run_is_pure_deterministic_and_leaves_global_rng_untouched() -> None:
+    import numpy as np
+    cfg = RunConfig(shapefile=PHULE, region_id="phule", alpha=2.0, seed=0,
+                    max_blocks=1, assumed_crs=3857)
+    np.random.seed(777)
+    state_before = np.random.get_state()[1].tolist()
+    r1 = run(cfg)
+    r2 = run(cfg)
+    # no global RNG side-effect
+    assert np.random.get_state()[1].tolist() == state_before
+    # bit-identical repeats
+    assert [x.proposal.proposal_id for x in r1] == [x.proposal.proposal_id for x in r2]
+    assert (r1[0].metric("kcomplexity", "delta_k")
+            == r2[0].metric("kcomplexity", "delta_k"))
 
 
 def test_runconfig_accepts_explicit_data_method_eval_overrides() -> None:
