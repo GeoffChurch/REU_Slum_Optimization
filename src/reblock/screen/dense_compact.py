@@ -4,6 +4,7 @@ density (+ optional k) gate over free kblock columns; fine pass = build only sur
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import geopandas as gpd
@@ -11,6 +12,8 @@ import pandas as pd
 
 from reblock.data.kblock import KblockSource
 from reblock.derive.access import parcel_access_layers
+
+log = logging.getLogger(__name__)
 
 
 class DenseCompactScreen:
@@ -37,10 +40,17 @@ class DenseCompactScreen:
             self.blocks_path,
             columns=["block_id", "k_complexity", "building_count", "block_area_m2", "geometry"])
         survivors = self._cheap_survivors(blocks)
+        log.info("cheap pass: %d/%d blocks pass density_min=%.1f%s",
+                 len(survivors), len(blocks), self.density_min,
+                 f", k_min={self.k_min}" if self.k_min is not None else "")
         if not survivors:
             return []
+        log.info("fine pass: building %d survivor blocks (Voronoi + peel) -- the slow step",
+                 len(survivors))
         src = KblockSource(self.blocks_path, self.buildings_path, region_id="screen",
                             min_buildings=self.min_buildings, block_ids=survivors)
         kept = [blk.block_id for blk in src.region().blocks
                 if float(parcel_access_layers(blk, None).mean()) >= self.mean_depth_min]
+        log.info("fine pass: kept %d blocks with mean access-depth >= %.2f",
+                 len(kept), self.mean_depth_min)
         return sorted(kept)
