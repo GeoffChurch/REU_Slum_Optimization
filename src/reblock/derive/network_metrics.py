@@ -8,7 +8,7 @@ from __future__ import annotations
 import geopandas as gpd
 import networkx as nx
 import pandas as pd
-from shapely import line_merge, set_precision, union_all
+from shapely import STRtree, line_merge, set_precision, union_all
 from shapely.geometry import LineString, MultiLineString
 from shapely.geometry.base import BaseGeometry
 
@@ -156,15 +156,28 @@ def boundary_redundant_road_fraction(
 
 
 def circuity(block: Block, roads: gpd.GeoDataFrame | None, tol: float = STREET_TOL) -> float:
-    """mean(network distance / straight-line distance) from each parcel to the nearest
-    street, over parcels genuinely off-street. Floor 1.0 (direct); higher = detours."""
+    """mean(network distance / straight-line distance) from each off-street parcel to the
+    nearest street-frontage parcel, on the parcel-adjacency graph. Numerator and
+    denominator share endpoints (parcel centroid -> frontage-parcel centroid), so the
+    floor is 1.0 (direct) and detours score higher. geometric_access_distances anchors a
+    street-touching parcel's network distance at 0, so the euclidean baseline is measured
+    to the frontage-parcel centroid the network path actually reaches, not to the street
+    line (which would make the ratio spuriously < 1)."""
     net = geometric_access_distances(block, roads, tol=tol)
-    street = union_all(list(block.streets.geometry)
-                       + _road_lines(roads))     # type: ignore[operator]
+    cents = {pid: g.representative_point()
+             for pid, g in zip(block.parcels["parcel_id"], block.parcels.geometry, strict=True)}
+    frontage = [pid for pid in net.index if float(net.loc[pid]) <= tol]
+    if not frontage:
+        return 1.0
+    frontage_pts = [cents[pid] for pid in frontage]
+    tree = STRtree(frontage_pts)
     ratios: list[float] = []
-    for pid, geom in zip(block.parcels["parcel_id"], block.parcels.geometry, strict=True):
-        euc = geom.representative_point().distance(street)
+    for pid in net.index:
         nd = float(net.loc[pid])
+        if nd <= tol:
+            continue
+        idx = int(tree.nearest(cents[pid]))
+        euc = cents[pid].distance(frontage_pts[idx])
         if euc > tol and nd < float("inf"):
             ratios.append(nd / euc)
     return float(pd.Series(ratios).mean()) if ratios else 1.0

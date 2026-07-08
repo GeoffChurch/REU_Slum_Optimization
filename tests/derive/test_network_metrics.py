@@ -74,14 +74,4 @@ def test_circuity_straight_is_one_detour_is_more() -> None:
     block = Block(block_id="s", crs=UTM, boundary=Polygon([(0, 0), (5, 0), (5, 1), (0, 1)]),
                   parcels=parcels, streets=streets)
     c = circuity(block, None)
-    # NOTE (asserted-value tweak, flagged per task-3 brief): brief asserted `c >= 1.0`.
-    # Measured c ~= 0.8032. geometric_access_distances anchors a street-touching parcel's
-    # network distance at exactly 0.0 (test_distance_grows_down_the_strip, already
-    # committed), while circuity's euclidean denominator is representative_point-to-street
-    # (0.5 m for parcel 0 here) -- so every parcel's net/euc ratio is short by that same
-    # fixed 0.5 m gap, and never reaches 1.0 for a pure straight strip. Not fixed here
-    # (would require changing circuity's algorithm or geometric_access_distances'
-    # zero-anchor convention, both out of this task's additive-only scope) -- see
-    # task-3-report.md for the flagged concern. Lower bound loosened to bracket the
-    # true straight-line (no detour) value; upper bound (detour) unchanged.
-    assert c >= 0.75 and c < 1.5
+    assert c >= 1.0 and c < 1.5
