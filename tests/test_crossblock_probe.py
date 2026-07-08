@@ -24,3 +24,7 @@ def test_probe_cluster_returns_baseline_and_reference_metrics() -> None:
     # with the float metrics), so a numeric comparison needs a float() narrowing for mypy.
     assert float(row["base_circuity"]) >= 1.0
     assert "ref_circuity" in row                        # the spine-merge reference was scored too
+    assert float(row["base_added_road_length_per_parcel"]) > 0.0   # baseline genuinely has roads
+    # (catches the empty-generator bug: a drained region.blocks silently yields an
+    # empty-roads baseline, which would make this and the assertion below vacuously pass)
+    assert float(row["ref_n_cross_block_streets"]) > 0.0   # spine-merge reference genuinely fires

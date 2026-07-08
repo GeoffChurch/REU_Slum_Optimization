@@ -53,7 +53,9 @@ def _score(merged: Block, proposal: Proposal, prefix: str) -> dict[str, float]:
 def probe_cluster(
     block_ids: list[str], blocks_path: str, buildings_path: str) -> dict[str, float | str]:
     src = KblockSource(blocks_path, buildings_path, region_id="capetown", block_ids=block_ids)
-    region: Region = src.region()
+    region = src.region()
+    region = Region(region_id=region.region_id, crs=region.crs,
+                     blocks=list(region.blocks), roads=region.roads, attrs=region.attrs)
     merged = merge_cluster(region)
     base = reconciled_baseline(region, merged)
     ref = spine_merge_reference(merged, base)
