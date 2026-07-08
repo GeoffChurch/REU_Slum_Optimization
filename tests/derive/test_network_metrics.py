@@ -3,6 +3,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, MultiLineString
 
 from reblock.derive.network_metrics import (
+    boundary_redundant_road_fraction,
     circuity,
     cross_block_trunk_length_m,
     crossing_counts,
@@ -59,6 +60,19 @@ def test_cross_block_counts_both_sides_only() -> None:
     assert n_cross_block_streets(along, VBOUND) == 0
     assert n_cross_block_streets(kiss, VBOUND) == 0
     assert cross_block_trunk_length_m(crossing, VBOUND) == 4.0
+
+
+def test_boundary_redundant_road_fraction_parallel_vs_crossing() -> None:
+    import pytest
+    # a road parallel to and within `band` of the interior boundary, that never crosses it,
+    # is entirely "redundant" (the spine a shared through-trunk would merge) -> fraction ~1.0
+    parallel = _lines([(2, -3), (2, 3)])
+    assert boundary_redundant_road_fraction(parallel, VBOUND, band=20.0) == pytest.approx(1.0)
+
+    # a road that crosses the boundary is excluded from the "redundant" numerator entirely
+    # (even though it also runs within band) -> fraction 0.0
+    crossing = _lines([(-2, 0), (2, 0)])
+    assert boundary_redundant_road_fraction(crossing, VBOUND, band=20.0) == 0.0
 
 
 def test_circuity_straight_is_one_detour_is_more() -> None:

@@ -25,6 +25,7 @@ def reconciled_baseline(region: Region, merged: Block, tol: float = STREET_TOL) 
             segments.extend(prop.roads.geometry)
     if not segments:
         return Proposal(block_id=merged.block_id, crs=merged.crs, method="peel_reconciled",
+                        proposal_id="peel_reconciled",
                         roads=gpd.GeoDataFrame(geometry=[], crs=merged.crs))
     # snap co-located endpoints together (reconcile stubs meeting across a boundary)
     reference = union_all(segments)

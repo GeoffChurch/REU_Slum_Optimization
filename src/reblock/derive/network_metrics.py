@@ -105,13 +105,43 @@ def _road_lines(roads: gpd.GeoDataFrame | None) -> list[LineString]:
 
 
 def _side(b: LineString, x: float, y: float) -> int:
-    """Which side of the chord through b's endpoints the point (x, y) lies on
-    (+1 / -1), or 0 if on it. Endpoint-chord is exact for straight shared frontages
-    and an accepted approximation for gently-curved ones (a genuine crossing still
-    has vertices clearly on both sides)."""
-    (x0, y0), (x1, y1) = b.coords[0], b.coords[-1]
+    """Which side of `b`'s NEAREST segment the point (x, y) lies on (+1/-1), or 0 if within
+    `STREET_TOL` of it. Using the nearest segment (not the endpoint-chord) is robust to long
+    jagged real frontages: a boundary-hugging stub's on-frontage vertex reads 0 and its
+    in-block vertex reads its true side, so the stub is not miscounted as crossing.
+
+    The "on it" test compares the point's actual (shapely-computed) distance to the nearest
+    segment against `STREET_TOL` -- the same real-world "same feature" precision
+    `_crosses_boundary` already uses for its own distance gate -- rather than a raw
+    un-normalized cross-product threshold. Two empirical failure modes on real Cape Town
+    clusters drove this: (1) the raw cross product scales with segment length, so a
+    length-blind `cross > 1e-9` is far tighter than double-precision noise at UTM-scale
+    coordinates (~1e6-1e7 m) once a chord runs 100+ m -- on ZAF.9.3.1_1_16951+_17068 (449 m
+    frontage split into four ~100-170 m straight sub-chords, so the nearest-segment search
+    alone is a no-op there) a point sitting exactly on a 170 m chord raised a raw cross of
+    ~2e-8 from coordinate noise alone, past the 1e-9 floor; (2) even with an
+    infinite-precision cross product, a block-local peel stub can run genuinely ~0.1-0.3 m
+    off an interior chord that is itself a straight-line idealization of a slightly wiggly
+    real cadastral edge (verified on ZAF.9.3.1_1_23732+_23733 and _46298+_46299) -- still
+    "on" that boundary in every real-world sense the rest of this module treats as one
+    feature. Both produced false "both sides" crossings on the reconciled baseline (spec
+    says this MUST be 0 -- block-local roads can't cross a block boundary by construction).
+    Gating on real distance against `STREET_TOL` (not a bare sign) fixes both to 0."""
+    pt = Point(x, y)
+    coords = list(b.coords)
+    best: tuple[tuple[float, float], tuple[float, float]] | None = None
+    best_d = float("inf")
+    for i in range(len(coords) - 1):
+        ax, ay = coords[i][0], coords[i][1]
+        cx, cy = coords[i + 1][0], coords[i + 1][1]
+        d = pt.distance(LineString([(ax, ay), (cx, cy)]))
+        if d < best_d:
+            best_d, best = d, ((ax, ay), (cx, cy))
+    if best is None or best_d <= STREET_TOL:
+        return 0
+    (x0, y0), (x1, y1) = best
     cross = (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0)
-    return 1 if cross > 1e-9 else (-1 if cross < -1e-9 else 0)
+    return 1 if cross > 0 else -1
 
 
 def _crosses_boundary(line: LineString, interior: MultiLineString, tol: float) -> bool:

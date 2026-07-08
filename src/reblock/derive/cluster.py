@@ -15,14 +15,13 @@ from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import Block, Region
-from reblock.derive.access import STREET_TOL
 
 
 def _blocks_sorted(region: Region) -> list[Block]:
     return sorted(region.blocks, key=lambda b: b.block_id)
 
 
-def _interior_boundaries(blocks: list[Block], tol: float) -> MultiLineString:
+def _interior_boundaries(blocks: list[Block]) -> MultiLineString:
     """The shared frontage lines between adjacent blocks (each pair's boundary
     intersection, kept only where it is a positive-length line)."""
     lines: list[BaseGeometry] = []
@@ -58,7 +57,7 @@ def merge_cluster(region: Region) -> Block:
     streets = gpd.GeoDataFrame(
         geometry=[union_all([g for b in blocks for g in b.streets.geometry])], crs=crs)
 
-    interior = _interior_boundaries(blocks, STREET_TOL)
+    interior = _interior_boundaries(blocks)
     return Block(
         block_id="+".join(b.block_id for b in blocks), crs=crs, boundary=boundary,
         parcels=parcels, streets=streets,

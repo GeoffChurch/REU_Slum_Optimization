@@ -92,7 +92,15 @@ def main(n_sample: int = 30) -> None:
     # a list-of-columns selection is always a DataFrame at runtime); cast to the true runtime
     # type, matching the existing `cast(gpd.GeoDataFrame, ...)` precedent in kblock.py.
     base_df = cast(pd.DataFrame, df[base_cols])
-    print(base_df.corr().round(2).to_string())
+    # a constant column has undefined correlation (0/0) -- pandas emits NaN for its whole
+    # row/column, striping the matrix. Drop it from the correlation input only (it still
+    # appears in the headroom table below, where "constant" is itself informative).
+    corr_cols = [c for c in base_cols if base_df[c].std() > 0]
+    dropped_cols = [c for c in base_cols if c not in corr_cols]
+    if dropped_cols:
+        print(f"  dropped constant columns (std=0, would NaN-stripe the matrix): {dropped_cols}")
+    corr_df = cast(pd.DataFrame, base_df[corr_cols])
+    print(corr_df.corr().round(2).to_string())
 
     print("\n=== headroom: baseline metric distributions (vs floors) ===")
     print(base_df.describe(percentiles=[0.5]).round(3).to_string())
@@ -101,6 +109,17 @@ def main(n_sample: int = 30) -> None:
     for k in ("circuity", "meshedness", "n_cross_block_streets", "added_road_length_per_parcel"):
         if f"base_{k}" in df and f"ref_{k}" in df:
             print(f"  {k}: {df[f'base_{k}'].median():.3f} -> {df[f'ref_{k}'].median():.3f}")
+
+    print("\n=== interpretation caveats ===")
+    print(
+        "  geometric_access_max_m, geometric_access_p95_m, circuity are DEGENERATE here -- the\n"
+        "  peel baseline reaches every parcel, so residual access is 0 and circuity is undefined\n"
+        "  (fallback 1.0). They are NOT evidence that block-local reblocking is already optimal;\n"
+        "  they are vacuous for a fully-connecting method. (A meaningful directness metric would\n"
+        "  measure travel along the road network -- deferred.)\n"
+        "  The spine-merge reference is a crude heuristic STRAWMAN (its `_midline` doglegs ADD\n"
+        "  road and it fails to fire on the median cluster). A negligible baseline->reference\n"
+        "  improvement is NOT evidence against cross-block headroom.")
 
 
 if __name__ == "__main__":

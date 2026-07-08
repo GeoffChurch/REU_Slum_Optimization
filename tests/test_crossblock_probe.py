@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import geopandas as gpd
+from shapely.geometry import MultiLineString
 
 from scripts.crossblock_probe import enumerate_adjacent_pairs, probe_cluster
 
@@ -28,3 +29,50 @@ def test_probe_cluster_returns_baseline_and_reference_metrics() -> None:
     # (catches the empty-generator bug: a drained region.blocks silently yields an
     # empty-roads baseline, which would make this and the assertion below vacuously pass)
     assert float(row["ref_n_cross_block_streets"]) > 0.0   # spine-merge reference genuinely fires
+
+
+def test_baseline_never_crosses_an_interior_boundary_on_real_cluster() -> None:
+    # Spec invariant: block-local roads live inside one block, so the baseline CANNOT cross an
+    # interior boundary. (Regression guard for the endpoint-chord false-positive.)
+    from reblock.contracts import Region
+    from reblock.data.kblock import KblockSource
+    from reblock.derive.cluster import merge_cluster
+    from reblock.derive.crossblock import reconciled_baseline
+    from reblock.derive.network_metrics import n_cross_block_streets
+
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown",
+                       block_ids=["ZAF.9.3.1_1_44882", "ZAF.9.3.1_1_44673"])
+    region = src.region()
+    region = Region(region_id=region.region_id, crs=region.crs, blocks=list(region.blocks),
+                    roads=region.roads, attrs=region.attrs)
+    merged = merge_cluster(region)
+    base = reconciled_baseline(region, merged)
+    interior = merged.attrs["interior_boundaries"]
+    assert isinstance(interior, MultiLineString)
+    assert base.roads is not None and not base.roads.empty          # baseline has roads
+    assert n_cross_block_streets(base.roads, interior) == 0
+
+
+def test_baseline_never_crosses_the_worst_jagged_frontage_pair() -> None:
+    # The flagship pair above (44882+44673) already read 0 even under the pre-fix
+    # endpoint-chord `_side` -- it does NOT exercise the false-positive. This pair
+    # (ZAF.9.3.1_1_16951+_17068, a real 449 m frontage split into four ~100-170 m straight
+    # sub-chords) is the one that empirically read 33 under the old endpoint-chord `_side`;
+    # this is the actual regression guard for that false positive.
+    from reblock.contracts import Region
+    from reblock.data.kblock import KblockSource
+    from reblock.derive.cluster import merge_cluster
+    from reblock.derive.crossblock import reconciled_baseline
+    from reblock.derive.network_metrics import n_cross_block_streets
+
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown",
+                       block_ids=["ZAF.9.3.1_1_16951", "ZAF.9.3.1_1_17068"])
+    region = src.region()
+    region = Region(region_id=region.region_id, crs=region.crs, blocks=list(region.blocks),
+                    roads=region.roads, attrs=region.attrs)
+    merged = merge_cluster(region)
+    base = reconciled_baseline(region, merged)
+    interior = merged.attrs["interior_boundaries"]
+    assert isinstance(interior, MultiLineString)
+    assert base.roads is not None and not base.roads.empty          # baseline has roads
+    assert n_cross_block_streets(base.roads, interior) == 0
