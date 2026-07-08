@@ -31,7 +31,9 @@ produce.
 **In:** `merge_cluster(region) -> Block`; a **correctly-noded planar graph** + an **orthogonal metric
 basis** (below) computed on the boundary-reconciled block-local baseline; and the **probe** — run the
 basis over a stratified sample of real clusters, **validate the basis's orthogonality with a
-correlation matrix**, and assess cross-block headroom against a **pre-registered falsification bar**.
+correlation matrix**, and assess cross-block headroom from the **metric distributions (read against
+their theoretical floors) plus a reference comparison** — reported transparently for a documented
+go/no-go judgment (no pre-registered numeric bar; see §3).
 
 **Out (deferred, with reasons):**
 - **`curvature_variation` + raw descriptors** — its point is scoring *arcs*, but arc-emitting methods
@@ -121,14 +123,22 @@ Fully automatic; no hand-drawn network.
    throughput vs meshedness; dead-end-fraction vs meshedness.)
 4. **Assess headroom.** Report the **distributions** of the falsification metrics (circuity,
    throughput, `geometric_access_p95_m`) and `boundary_redundant_road_fraction` across the sample.
-5. **Optional relative check.** A *heuristic* automatic spine-merge reference (replace near-parallel
-   boundary-flanking spine pairs with a single through-trunk crossing the boundary) scored on the same
-   basis — isolates the cross-block-specific gain without any optimizer.
-6. **Pre-registered falsification bar** (write the numbers before running; defaults to refine):
-   *cross-block reblocking is **not** worth Phase 1 if, across the sample, median `circuity < 1.3`
-   **and** median `boundary_redundant_road_fraction < 0.10` (the baseline is already direct and shares
-   little redundant boundary road).* If instead circuity is high and boundary-redundant road is large,
-   the cross-block headroom is real and Phase 1 proceeds.
+5. **Reference comparison (recommended).** A *heuristic* automatic spine-merge reference (replace
+   near-parallel boundary-flanking spine pairs with a single through-trunk crossing the boundary)
+   scored on the same basis — isolates the cross-block-specific gain without any optimizer or hand
+   drawing. Report the baseline → reference **improvement** per metric across the sample.
+6. **Go/no-go by documented judgment — no pre-registered numeric bar.** The owner has no prior for the
+   threshold levels, and a mis-calibrated bar is a worse failure than the rationalization it guards
+   against (kill a good direction, or wave through a bad one, on an arbitrary line). Instead: report
+   the **full distributions** of the falsification-tier metrics against their theoretical floors
+   (circuity floor 1.0; throughput vs perimeter capacity; `geometric_access_p95_m`) **and** the
+   baseline → spine-merge-reference improvement, then make a documented Phase-1 go/no-go on that
+   visible evidence. The extremes need no calibration (circuity ≈ 1.05 ⇒ little headroom; ≈ 1.8 ⇒
+   lots; a negligible reference improvement ⇒ cross-block isn't the lever). The safeguard against
+   post-hoc rationalization is **transparency** — the whole distribution and the reference comparison
+   are reported, never a single cluster or a single number. The point that survives from the red-team:
+   the probe *can* return evidence against Phase 1 (metrics near their floors, negligible reference
+   gain), which the original self-confirming scorecard could not.
 
 ## 4. Testing
 
