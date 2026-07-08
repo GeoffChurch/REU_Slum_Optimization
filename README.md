@@ -26,7 +26,7 @@ Render a block's access-depth heatmaps (before, and after a road-building method
 by targeting it with `block_ids` — no need to process the whole region:
 
 ```bash
-python -m reblock.run data=capetown method=peel eval=kcomplexity \
+pixi run python -m reblock.run data=capetown method=peel eval=kcomplexity \
   "block_ids=[ZAF.9.3.1_1_44882]" render_dir=renders hydra.run.dir=outputs/ct-flagship
 ```
 
