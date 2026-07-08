@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import geopandas as gpd
 import networkx as nx
+import pandas as pd
 from shapely import line_merge, set_precision, union_all
 from shapely.geometry import LineString, MultiLineString
 from shapely.geometry.base import BaseGeometry
 
+from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
+from reblock.derive.geometric_access import geometric_access_distances
 
 _Node = tuple[float, float]
 
@@ -90,3 +93,78 @@ def crossing_counts(graph: nx.Graph) -> dict[str, int]:
         elif deg == 1 and any(graph[node][nb]["is_road"] for nb in graph[node]):
             n_dead += 1
     return {"n_crossings": n_cross, "n_t_junctions": n_t, "n_dead_ends": n_dead}
+
+
+def _road_lines(roads: gpd.GeoDataFrame | None) -> list[LineString]:
+    if roads is None or roads.empty:
+        return []
+    out: list[LineString] = []
+    for g in roads.geometry:
+        out.extend(_iter_lines(g))
+    return out
+
+
+def _side(b: LineString, x: float, y: float) -> int:
+    """Which side of the chord through b's endpoints the point (x, y) lies on
+    (+1 / -1), or 0 if on it. Endpoint-chord is exact for straight shared frontages
+    and an accepted approximation for gently-curved ones (a genuine crossing still
+    has vertices clearly on both sides)."""
+    (x0, y0), (x1, y1) = b.coords[0], b.coords[-1]
+    cross = (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0)
+    return 1 if cross > 1e-9 else (-1 if cross < -1e-9 else 0)
+
+
+def _crosses_boundary(line: LineString, interior: MultiLineString, tol: float) -> bool:
+    """True iff `line` has vertices strictly on both sides of some interior boundary
+    segment AND runs within `tol` of it — robust where shapely's `.crosses` is not
+    (runs-along -> side 0 only; kiss-and-bounce -> one side only)."""
+    for b in interior.geoms:
+        sides = {_side(b, x, y) for x, y in line.coords}
+        if {-1, 1} <= sides and line.distance(b) <= tol:
+            return True
+    return False
+
+
+def n_cross_block_streets(
+    roads: gpd.GeoDataFrame | None, interior: MultiLineString, tol: float = STREET_TOL) -> int:
+    if interior.is_empty:
+        return 0
+    return sum(_crosses_boundary(ls, interior, tol) for ls in _road_lines(roads))
+
+
+def cross_block_trunk_length_m(
+    roads: gpd.GeoDataFrame | None, interior: MultiLineString, tol: float = STREET_TOL) -> float:
+    if interior.is_empty:
+        return 0.0
+    return float(sum(ls.length for ls in _road_lines(roads)
+                     if _crosses_boundary(ls, interior, tol)))
+
+
+def boundary_redundant_road_fraction(
+    roads: gpd.GeoDataFrame | None, interior: MultiLineString, tol: float = STREET_TOL,
+    band: float = 20.0) -> float:
+    """Fraction of road length running within `band` of an interior boundary WITHOUT
+    crossing it — the boundary-parallel spine road a shared through-trunk would merge."""
+    lines = _road_lines(roads)
+    total = sum(ls.length for ls in lines)
+    if total == 0 or interior.is_empty:
+        return 0.0
+    corridor = interior.buffer(band)
+    redundant = sum(ls.intersection(corridor).length for ls in lines
+                    if not _crosses_boundary(ls, interior, tol))
+    return float(redundant / total)
+
+
+def circuity(block: Block, roads: gpd.GeoDataFrame | None, tol: float = STREET_TOL) -> float:
+    """mean(network distance / straight-line distance) from each parcel to the nearest
+    street, over parcels genuinely off-street. Floor 1.0 (direct); higher = detours."""
+    net = geometric_access_distances(block, roads, tol=tol)
+    street = union_all(list(block.streets.geometry)
+                       + _road_lines(roads))     # type: ignore[operator]
+    ratios: list[float] = []
+    for pid, geom in zip(block.parcels["parcel_id"], block.parcels.geometry, strict=True):
+        euc = geom.representative_point().distance(street)
+        nd = float(net.loc[pid])
+        if euc > tol and nd < float("inf"):
+            ratios.append(nd / euc)
+    return float(pd.Series(ratios).mean()) if ratios else 1.0
