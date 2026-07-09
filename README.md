@@ -63,3 +63,19 @@ access-depth, so `max_blocks` takes the deepest/worst blocks.
 For a quick, no-download try, swap `data=capetown_full` → `data=capetown` (the committed
 301-block sample; its map is geographically sparse — the full metro fills in). The
 default `screen=identity` is a passthrough — a plain reblock with no screening.
+
+## Compare methods at a budget (cost-benefit curves)
+
+Rank the reblockers by *efficiency* — how much access each buys per meter of road,
+across the whole budget range (not just at full build, where they converge):
+
+```bash
+pixi run python -m reblock.compare data=dji eval=kcomplexity methods=[dijkstra,peel] max_blocks=5 hydra.run.dir=outputs/compare
+```
+
+Writes `auc_table.csv` (mean efficiency per method — higher = more access per meter of
+road) and `curve_<block>.png` (overlaid cost-benefit curves: fraction of access-burden
+removed vs road density, m/ha). Add `topology` to `methods=[...]` for the full three-way
+— it's minutes/block, so keep the block count small (results are cached after the first
+run). On real data, dijkstra tracks topology closely at a fraction of the compute, while
+peel needs ~3× the road for the same access.
