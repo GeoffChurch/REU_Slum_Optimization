@@ -9,7 +9,7 @@ from __future__ import annotations
 from shapely.geometry import MultiLineString
 
 from reblock.contracts import Block, Metrics, Proposal
-from reblock.derive.geometric_access import geometric_access_distances
+from reblock.derivations import geometric_after
 from reblock.derive.network_metrics import (
     boundary_redundant_road_fraction,
     circuity,
@@ -31,7 +31,7 @@ class StructureEval:
             interior = MultiLineString([])
 
         graph = node_network(roads, block.streets)
-        geo = geometric_access_distances(block, roads)
+        geo = geometric_after(block, proposal)   # derive()-cached (was geometric_access_distances)
         n_parcels = max(len(block.parcels), 1)
         road_len = (float(roads.geometry.length.sum())
                     if roads is not None and not roads.empty else 0.0)

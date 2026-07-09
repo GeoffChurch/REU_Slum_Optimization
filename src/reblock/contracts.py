@@ -108,10 +108,6 @@ class Method(Protocol):
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal: ...
 
 
-class RegionMethod(Protocol):
-    def propose(self, region: Region) -> Iterable[Proposal]: ...
-
-
 class Eval(Protocol):
     def score(self, block: Block, proposal: Proposal) -> Metrics: ...
 

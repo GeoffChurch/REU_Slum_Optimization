@@ -18,7 +18,7 @@ from reblock.budget import Curve, auc, cost_benefit_curve
 from reblock.contracts import Method, Screen, Source
 from reblock.derivations import propose
 from reblock.emit import compare_report as compare_report
-from reblock.pipeline import sample
+from reblock.pipeline import select_blocks
 
 log = logging.getLogger(__name__)
 
@@ -34,23 +34,17 @@ class MethodCurve:
 def compare(cfg: DictConfig) -> list[MethodCurve]:
     source = cast(Source, instantiate(cfg.data))
     screen = cast(Screen, instantiate(cfg.screen))
-    methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in cfg.methods]
-    selection = screen.select(source)
-    picked = sample(selection, cfg.max_blocks)
-    if picked is not None:
-        source.block_ids = picked  # type: ignore[attr-defined]
-        blocks = list(source.region().blocks)
-    else:
-        from itertools import islice
-        blocks = list(islice(source.region().blocks, cfg.max_blocks))
+    names = list(cfg.methods)   # config keys -> the AUC-table labels (not method.identity)
+    methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in names]
+    _, blocks = select_blocks(source, screen, cfg.max_blocks)
 
     # one curve per (block, method); a per-block common cost cap = the max full road density.
     raw: list[tuple[str, str, Curve]] = []
     for block in blocks:
-        for method in methods:
+        for name, method in zip(names, methods, strict=True):
             # every Method here always populates roads (never a None-roads Proposal).
             roads = cast(GeoDataFrame, propose(method, block).roads)
-            raw.append((_name(method), block.block_id, cost_benefit_curve(block, roads)))
+            raw.append((name, block.block_id, cost_benefit_curve(block, roads)))
     results: list[MethodCurve] = []
     for block_id in {b for _, b, _ in raw}:
         block_curves = [(m, c) for m, b, c in raw if b == block_id]
@@ -58,11 +52,6 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
         for m, c in block_curves:
             results.append(MethodCurve(m, block_id, c, auc(c, cap)))
     return results
-
-
-def _name(method: Method) -> str:
-    ident = method.identity
-    return str(ident[0]) if isinstance(ident, tuple) and ident else type(method).__name__
 
 
 @hydra.main(version_base=None, config_path="../../conf", config_name="compare_config")

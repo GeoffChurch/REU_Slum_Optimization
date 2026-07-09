@@ -58,23 +58,30 @@ def sample(selection: list[str] | None, n: int) -> list[str] | None:
     return selection[:n] if selection is not None else None
 
 
+def select_blocks(source: Source, screen: Screen,
+                  max_blocks: int) -> tuple[list[str] | None, list[Block]]:
+    """Screen -> selection -> sample -> build. Returns (full selection retained for
+    emitters, built blocks in selection/priority order). Shared by run() and
+    reblock.compare so the selection semantics live in one place. `source.block_ids` is a
+    kblock-specific mutable filter (not the Source Protocol); the assignment is guarded by
+    `picked is not None`, so it is only reached for kblock-backed runs."""
+    selection = screen.select(source)
+    picked = sample(selection, max_blocks)
+    if picked is None:
+        return selection, list(islice(source.region().blocks, max_blocks))
+    source.block_ids = picked  # type: ignore[attr-defined]
+    built = {b.block_id: b for b in source.region().blocks}
+    # Yield in `picked` (screen priority / severity) order, not the parquet order region()
+    # happens to build in, so a max_blocks-limited run reblocks/reports worst-first.
+    return selection, [built[bid] for bid in picked if bid in built]
+
+
 def run(spec: PipelineSpec) -> RunOutput:
-    """The dataflow pipeline: screen the source for the selection, sample it, build
-    only the sample, reblock each -> RunOutput(selection, results). The full
-    selection is retained (results cover only the sampled max_blocks). Writes no
-    files (emitters, at the edge, do the writing) and touches no config or global
-    state; the sole mutation is the kblock block_ids filter below (an idempotent
-    attr on the caller's Source object, not part of the Source contract)."""
-    selection = spec.screen.select(spec.source)
-    picked = sample(selection, spec.max_blocks)
-    if picked is not None:
-        # block_ids is a kblock-specific mutable filter, not part of the Source
-        # Protocol (ShapefileSource has none); the assignment is guarded by
-        # `picked is not None`, so it is only reached for kblock-backed runs.
-        spec.source.block_ids = picked  # type: ignore[attr-defined]
-        blocks = list(spec.source.region().blocks)
-    else:
-        blocks = list(islice(spec.source.region().blocks, spec.max_blocks))   # ALL -> islice
+    """The dataflow pipeline: screen the source for the selection, sample it, build only
+    the sample (in priority order), reblock each -> RunOutput(selection, results). The
+    full selection is retained (results cover only the sampled max_blocks). Writes no
+    files (emitters, at the edge, do the writing) and touches no config or global state."""
+    selection, blocks = select_blocks(spec.source, spec.screen, spec.max_blocks)
     results = _reblock_all(blocks, spec.method, spec.evals)
     return RunOutput(selection=selection, results=results)
 
