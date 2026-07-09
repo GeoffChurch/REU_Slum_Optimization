@@ -86,3 +86,23 @@ def test_road_drainage_floating_roads_get_zero() -> None:
     block = _grid_block(3)
     floating = gpd.GeoDataFrame(geometry=[LineString([(1.2, 1.2), (1.8, 1.8)])], crs=UTM)
     assert road_drainage(block, floating) == [0]
+
+
+def test_efficiency_and_directness_rise_with_roads() -> None:
+    from reblock.budget import network_efficiency
+    block = _grid_block(5)
+    roads = DijkstraReblocker().propose(block).roads
+    assert roads is not None
+    e_none, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, roads.iloc[:0]))   # no roads
+    e_full, d_full = network_efficiency(block, roads)
+    assert e_full > e_none and d_full > d_none
+
+
+def test_cost_benefit_curve_accepts_a_benefit_fn() -> None:
+    from reblock.budget import cost_benefit_curve, efficiency_benefit
+    block = _grid_block(5)
+    roads = DijkstraReblocker().propose(block).roads
+    assert roads is not None
+    curve = cost_benefit_curve(block, roads, benefit_fn=efficiency_benefit, n_points=8)
+    assert curve.benefit[-1] >= curve.benefit[0]      # efficiency non-decreasing with roads
+    assert len(curve.cost) == len(curve.benefit)
