@@ -43,8 +43,9 @@ def sample(selection: list[str] | None, n: int) -> list[str] | None:
     through -- the caller then islices the built region to `n`.
 
     `block_ids` is treated as a **priority-ordered** selection: `sample` takes
-    the first `n` in order (the screen returns sorted ids; a caller's explicit
-    list is its own priority). If a sampled block fails to build (e.g. too few
+    the first `n` in order (a screen may rank its ids, e.g. DenseCompactScreen
+    returns them worst-access first; a caller's explicit list is its own
+    priority). If a sampled block fails to build (e.g. too few
     building points for a valid Voronoi cell), it is skipped and the run yields
     **fewer than `n`** results -- there is no silent backfill from later in the
     selection. This is intentional: it builds only what it reblocks (the redesign

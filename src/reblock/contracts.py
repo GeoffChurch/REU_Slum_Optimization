@@ -117,4 +117,4 @@ class Eval(Protocol):
 
 
 class Screen(Protocol):
-    def select(self, source: Source) -> list[str] | None: ...   # block_ids (sorted), or None => all
+    def select(self, source: Source) -> list[str] | None: ...   # selected block_ids, or None => all

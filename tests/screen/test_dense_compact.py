@@ -72,7 +72,7 @@ def test_max_depth_min_gate_drops_blocks_without_a_deep_parcel(tmp_path: Path) -
 
 
 def _write_sort_fixture(tmp: Path) -> tuple[str, str]:
-    # "aaa": shallow — one row of buildings all fronting the block edge (max-depth 1).
+    # "aaa": shallow — buildings all fronting the block edge (two rows, max-depth 1).
     # "zzz": deep — a 5x5 grid in a compact block (ring depths 1/2/3 -> max-depth 3).
     shallow = box(EX, NY, EX + 30, NY + 2)
     deep = box(EX + 60, NY, EX + 110, NY + 50)
