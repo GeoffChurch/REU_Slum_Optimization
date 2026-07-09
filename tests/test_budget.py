@@ -8,6 +8,7 @@ from shapely.geometry import Polygon
 from reblock.budget import Curve, access_burden, auc, cost_benefit_curve, road_drainage
 from reblock.contracts import Block
 from reblock.methods.dijkstra import DijkstraReblocker
+from reblock.methods.peel import PeelReblocker
 
 UTM = CRS.from_epsg(32643)
 
@@ -106,3 +107,22 @@ def test_cost_benefit_curve_accepts_a_benefit_fn() -> None:
     curve = cost_benefit_curve(block, roads, benefit_fn=efficiency_benefit, n_points=8)
     assert curve.benefit[-1] >= curve.benefit[0]      # efficiency non-decreasing with roads
     assert len(curve.cost) == len(curve.benefit)
+
+
+def test_efficiency_and_directness_are_monotone_across_the_full_curve() -> None:
+    # Regression for the review finding: efficiency_benefit/directness_benefit re-derived each
+    # parcel's entry node against the CURRENT road subset, so entries churned as roads were
+    # added and E/directness could FALL mid-curve (reproduced ~9% drops for PeelReblocker, and
+    # mid-curve dips even for DijkstraReblocker). The fix freezes entries against the FULL road
+    # set once; only edge availability grows across prefixes, so both metrics must be
+    # non-decreasing over every point of the curve, for both methods' road layouts.
+    from reblock.budget import directness_benefit, efficiency_benefit
+    block = _grid_block(5)
+    for method in (DijkstraReblocker(), PeelReblocker()):
+        roads = method.propose(block).roads
+        assert roads is not None
+        for benefit_fn in (efficiency_benefit, directness_benefit):
+            curve = cost_benefit_curve(block, roads, benefit_fn=benefit_fn, n_points=40)
+            assert curve.benefit == sorted(curve.benefit), (
+                f"{type(method).__name__} + {benefit_fn.__name__} not monotone: {curve.benefit}"
+            )

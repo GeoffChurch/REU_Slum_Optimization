@@ -14,6 +14,7 @@ import pandas as pd
 from geopandas import GeoDataFrame
 from shapely import STRtree
 from shapely.geometry import Point
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block
@@ -71,8 +72,7 @@ def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL)
 BenefitFactory = Callable[..., Callable[["GeoDataFrame | None"], float]]
 
 
-def _road_street_graph(block: Block, roads: GeoDataFrame | None,
-                       tol: float) -> tuple[nx.Graph, dict[frozenset[tuple[float, float]], int]]:
+def _road_street_graph(block: Block, roads: GeoDataFrame | None, tol: float) -> nx.Graph:
     """Graph over the road segments PLUS block.streets (so inter-parcel trips can use the
     street), nodes = snapped endpoints. (Shared with road_drainage's graph build.)"""
     g: nx.Graph = nx.Graph()
@@ -86,18 +86,12 @@ def _road_street_graph(block: Block, roads: GeoDataFrame | None,
                 na, nb = _rnd(a), _rnd(b)
                 if na != nb:
                     g.add_edge(na, nb, weight=Point(na).distance(Point(nb)))
-    return g, {}
+    return g
 
 
-def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
-                       tol: float = STREET_TOL) -> tuple[float, float]:
-    """Sampled (E, directness): from K seeded source parcels to ALL parcels, over the
-    road+street graph. E = mean(1/d), directness = mean(euclid/d), each averaged over the
-    FIXED set of all-parcel pairs (unreached pairs contribute 0 -- the standard global-
-    efficiency definition); (0,0) if the graph is empty. Deterministic: sources are evenly
-    spaced by sorted id.
-
-    Each parcel's entry is its nearest graph node that its own geometry actually touches
+def _entry_nodes(geoms: list[BaseGeometry], nodes: list[tuple[float, float]], tree: STRtree,
+                 tol: float) -> list[tuple[float, float] | None]:
+    """Each parcel's entry: its nearest graph node that its own geometry actually touches
     (dwithin `tol`, matching the touch tolerance `parcel_access_layers` uses) -- NOT the
     nearest node to an interior representative point within a generous multiple of `tol`.
     That looser variant let interior parcels several parcel-widths from any street snap
@@ -105,32 +99,29 @@ def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
     parcels already looked reachable before any road existed; adding roads then only
     lengthened those already-short ring hops into ring+spur+ring detours, so E and
     directness fell as roads were added -- the opposite of what the metric is meant to
-    measure. Requiring an actual touch, plus scoring over the fixed all-parcel pair set
-    instead of only the pairs currently reachable (which grows with roads and dilutes the
-    mean with new hard-to-reach pairs), keeps both metrics non-decreasing as roads are
-    added (verified on grid blocks from n=3 to n=10)."""
-    g, _ = _road_street_graph(block, roads, tol)
-    n = len(block.parcels)
-    if n < 2 or g.number_of_nodes() == 0:
-        return 0.0, 0.0
-    geoms = list(block.parcels.geometry)
-    reps = [gm.representative_point() for gm in geoms]
-    nodes = list(g.nodes)
-    tree = STRtree([Point(node) for node in nodes])
-    # each parcel -> nearest node it actually touches (its access point); parcels with
-    # none are unreached this round (still counted as targets, contributing 0)
+    measure. Parcels touching no node are unreached this round (still counted as targets
+    below, contributing 0)."""
     entry: list[tuple[float, float] | None] = []
     for geom in geoms:
         near = tree.query(geom, predicate="dwithin", distance=tol)
         entry.append(min((nodes[j] for j in near), key=lambda node: geom.distance(Point(node)),
                          default=None))
-    step = max(1, n // k)
-    sources = list(range(n))[::step][:k]
+    return entry
+
+
+def _sampled_efficiency(g: nx.Graph, entry: list[tuple[float, float] | None],
+                        reps: list[Point], sources: list[int]) -> tuple[float, float]:
+    """(E, directness) from each source parcel's entry node to every other parcel's entry
+    node, over graph `g`. E = mean(1/d), directness = mean(euclid/d), each averaged over the
+    FIXED set of all-parcel pairs (unreached pairs -- entry missing, or absent/unreachable in
+    `g` -- contribute 0, the standard global-efficiency definition); (0, 0) if there are no
+    pairs."""
     inv_sum = dir_sum = 0.0
     pairs = 0
     for si in sources:
-        dist = nx.single_source_dijkstra_path_length(g, entry[si]) if entry[si] is not None else {}
-        for j in range(n):
+        src = entry[si]
+        dist = nx.single_source_dijkstra_path_length(g, src) if src is not None and src in g else {}
+        for j in range(len(entry)):
             if j == si:
                 continue
             pairs += 1
@@ -143,7 +134,71 @@ def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
     return inv_sum / pairs, dir_sum / pairs
 
 
-def access_benefit(block: Block, *, tol: float = STREET_TOL) -> Callable[..., float]:
+def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
+                       tol: float = STREET_TOL) -> tuple[float, float]:
+    """Sampled (E, directness) of the network `roads` + block.streets, with entries fixed to
+    THIS graph (i.e. `roads` serves as both the entry-node mapping and the edge set): from K
+    seeded source parcels to ALL parcels. (0, 0) if the graph is empty. Deterministic: sources
+    are evenly spaced over the parcel row order.
+
+    Note this function alone is NOT guaranteed monotone as `roads` grows across separate
+    calls, because each call re-derives entries against its own `roads` and entries can churn.
+    `cost_benefit_curve`'s `efficiency_benefit`/`directness_benefit` factories get monotonicity
+    instead by freezing entries against the FULL road set once, then only growing the edge set
+    -- see `_entry_nodes`/`_sampled_efficiency` above, which this function also uses."""
+    g = _road_street_graph(block, roads, tol)
+    n = len(block.parcels)
+    if n < 2 or g.number_of_nodes() == 0:
+        return 0.0, 0.0
+    geoms = list(block.parcels.geometry)
+    reps = [gm.representative_point() for gm in geoms]
+    nodes = list(g.nodes)
+    tree = STRtree([Point(node) for node in nodes])
+    entry = _entry_nodes(geoms, nodes, tree, tol)
+    step = max(1, n // k)
+    sources = list(range(n))[::step][:k]
+    return _sampled_efficiency(g, entry, reps, sources)
+
+
+def _efficiency_factory(block: Block, roads_full: GeoDataFrame | None, tol: float,
+                        k: int = 40) -> Callable[[GeoDataFrame | None], tuple[float, float]]:
+    """Freeze the parcel->entry-node mapping and the K sampled sources against the FULL
+    graph (`roads_full` + block.streets), built ONCE. The returned f(roads_prefix) computes
+    (E, directness) from those FIXED entries, but over a subgraph containing only
+    `roads_prefix` + block.streets edges (rounded coordinates keep node identity stable
+    across subsets, so this is a true subgraph on the same node set). A source/dest whose
+    fixed entry node is absent or unreachable in that subgraph contributes 0.
+
+    Since the entry mapping, sources, and the all-parcel pair set never change while the
+    edge set only grows as `roads_prefix` grows, shortest-path distances from fixed entries
+    are non-increasing -- so E and directness are non-decreasing across cost_benefit_curve's
+    prefixes, unlike calling `network_efficiency(block, roads_prefix)` per prefix (which
+    re-derives entries against each prefix and can regress, see budget.py module docstring
+    history / the review this fixes)."""
+    g_full = _road_street_graph(block, roads_full, tol)
+    n = len(block.parcels)
+    if n < 2 or g_full.number_of_nodes() == 0:
+        return lambda _roads: (0.0, 0.0)
+    geoms = list(block.parcels.geometry)
+    reps = [gm.representative_point() for gm in geoms]
+    nodes = list(g_full.nodes)
+    tree = STRtree([Point(node) for node in nodes])
+    entry = _entry_nodes(geoms, nodes, tree, tol)
+    step = max(1, n // k)
+    sources = list(range(n))[::step][:k]
+
+    def f(roads_prefix: GeoDataFrame | None) -> tuple[float, float]:
+        g = _road_street_graph(block, roads_prefix, tol)
+        return _sampled_efficiency(g, entry, reps, sources)
+    return f
+
+
+def access_benefit(block: Block, roads_full: GeoDataFrame | None, *,
+                   tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
+    """`roads_full` is unused here: access_burden's per-block unreached_depth cap (N+1)
+    already makes this benefit monotone as roads are added. The param exists so this matches
+    the shared benefit-factory signature (see efficiency_benefit/directness_benefit, which do
+    need the full road set to freeze entries)."""
     adj = parcel_adjacency(list(block.parcels.geometry), tol)
     cap = len(block.parcels) + 1
     base = access_burden(parcel_access_layers(block, None, tol=tol, adj=adj, unreached_depth=cap))
@@ -156,12 +211,16 @@ def access_benefit(block: Block, *, tol: float = STREET_TOL) -> Callable[..., fl
     return f
 
 
-def efficiency_benefit(block: Block, *, tol: float = STREET_TOL) -> Callable[..., float]:
-    return lambda roads: network_efficiency(block, roads, tol=tol)[0]
+def efficiency_benefit(block: Block, roads_full: GeoDataFrame | None, *,
+                       tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
+    f = _efficiency_factory(block, roads_full, tol)
+    return lambda roads: f(roads)[0]
 
 
-def directness_benefit(block: Block, *, tol: float = STREET_TOL) -> Callable[..., float]:
-    return lambda roads: network_efficiency(block, roads, tol=tol)[1]
+def directness_benefit(block: Block, roads_full: GeoDataFrame | None, *,
+                       tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
+    f = _efficiency_factory(block, roads_full, tol)
+    return lambda roads: f(roads)[1]
 
 
 @dataclass(frozen=True)
@@ -174,8 +233,11 @@ def cost_benefit_curve(block: Block, roads: GeoDataFrame, *,
                        benefit_fn: BenefitFactory = access_benefit,
                        n_points: int = 20, tol: float = STREET_TOL) -> Curve:
     """Order roads by drainage descending, then at n_points cumulative-length budgets score
-    benefit_fn's benefit vs the no-roads baseline. `benefit_fn` is a factory: block -> f(roads)."""
-    value = benefit_fn(block, tol=tol)
+    benefit_fn's benefit vs the no-roads baseline. `benefit_fn` is a factory:
+    (block, roads_full) -> f(roads_prefix), given the FULL road set so it can freeze any
+    graph/entry state against it (see efficiency_benefit/directness_benefit); it is then
+    called with growing prefixes of `roads` (starting with the empty prefix as baseline)."""
+    value = benefit_fn(block, roads, tol=tol)
     cost, benefit = [0.0], [value(cast(GeoDataFrame, roads.iloc[:0]))]
     if len(roads) == 0 or block.boundary.area == 0.0:
         return Curve(cost, benefit)
