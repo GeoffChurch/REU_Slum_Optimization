@@ -226,20 +226,27 @@ def test_flagged_map_no_matching_ids_does_not_crash(tmp_path: Path) -> None:
 
 
 def test_cli_screen_stage_end_to_end(tmp_path: Path) -> None:
-    # One command: screen (dense_compact) -> reblock (peel) -> render + city map.
+    # Guards the README headline recipe: one command doing NON-TRIVIAL screening
+    # (dense_compact prunes the 301-block sample to a strict subset) -> MULTI-block
+    # reblock (peel) -> both visuals (per-block before/after heatmaps + city map).
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
          "data=capetown", "screen=dense_compact", "screen.density_min=35",
-         "method=peel", "eval=kcomplexity", "max_blocks=1",
+         "method=peel", "eval=kcomplexity", "max_blocks=3",
          "render.enabled=true", "flagged_map.enabled=true",
          f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr
+    # screening visual + a non-trivial flagged subset (the screen pruned, didn't pass all through)
     assert (tmp_path / "flagged_map.png").stat().st_size > 0
-    flagged = (tmp_path / "flagged_blocks.txt").read_text()
+    flagged = (tmp_path / "flagged_blocks.txt").read_text().splitlines()
     assert "ZAF.9.3.1_1_44882" in flagged
-    assert list(tmp_path.glob("*_before.png")) and list(tmp_path.glob("*_after.png"))
+    assert 0 < len(flagged) < 301
+    # multi-block reblocking: each of the max_blocks=3 survivors gets a before + after heatmap
+    befores = list(tmp_path.glob("*_before.png"))
+    afters = list(tmp_path.glob("*_after.png"))
+    assert len(befores) >= 2 and len(afters) == len(befores)
 
 
 def test_topology_reblocks_a_synthetic_nested_block() -> None:

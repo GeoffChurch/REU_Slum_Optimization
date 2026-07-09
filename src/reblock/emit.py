@@ -48,10 +48,10 @@ def render_results(results: list[Result], out_dir: Path, cfg: RenderConfig) -> N
 
 
 def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path | None:
-    """Binary city choropleth: every metro block drawn light, the flagged ones
-    highlighted. Re-reads the blocks parquet geometry (kept out of the Screen so it
-    stays a pure selector). Returns the written path, or None if there are no ids.
-    Gating is the caller's (cfg.flagged_map.enabled)."""
+    """Binary city choropleth: every metro block drawn as light-grey context, the
+    flagged ones highlighted red. Re-reads the blocks parquet geometry (kept out of
+    the Screen so it stays a pure selector). Returns the written path, or None if
+    there are no ids. Gating is the caller's (cfg.flagged_map.enabled)."""
     import geopandas as gpd
     if not flagged_ids:
         return None
@@ -62,11 +62,14 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
     fig, ax = plt.subplots(figsize=(10, 10))
     unflagged = blocks[~blocks["flagged"]]
     flagged = blocks[blocks["flagged"]]
+    # Informal blocks are small polygons on a wide metro extent, so a thin edge (not
+    # just a fill) is what makes them visible; unflagged get a mid-grey that reads on
+    # white, flagged a bolder red + heavier edge to stand out against that context.
     if not unflagged.empty:
-        unflagged.plot(ax=ax, color="#e8e8e8", edgecolor="none")
+        unflagged.plot(ax=ax, color="#cccccc", edgecolor="#9a9a9a", linewidth=0.3)
     if not flagged.empty:
-        flagged.plot(ax=ax, color="#c0392b", edgecolor="none")
-    ax.set_title(f"{int(blocks['flagged'].sum())} flagged blocks")
+        flagged.plot(ax=ax, color="#c0392b", edgecolor="#7b241c", linewidth=0.5)
+    ax.set_title(f"{int(blocks['flagged'].sum())} of {len(blocks)} blocks flagged")
     ax.set_axis_off()
     out_path = out_dir / "flagged_map.png"
     save_render(fig, out_path)

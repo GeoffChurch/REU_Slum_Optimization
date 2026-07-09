@@ -39,16 +39,24 @@ Writes `outputs/ct-flagship/ZAF.9.3.1_1_44882_before.png` and one
 ## Detect → reblock → visualize (one command)
 
 Screen a city for its dense/compact informal blocks, reblock the top survivors, and
-emit both the city flagged-map and per-block before/after heatmaps:
+emit both the city flagged-map and per-block before/after heatmaps. This runs on the
+committed 301-block Cape Town sample — no download, ~5 s:
 
 ```bash
-pixi run python -m reblock.run data=capetown_full screen=dense_compact \
-  method=peel eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=5
+pixi run python -m reblock.run data=capetown screen=dense_compact screen.density_min=35 \
+  method=peel eval=kcomplexity render.enabled=true flagged_map.enabled=true \
+  max_blocks=5 hydra.run.dir=outputs/ct-screen
 ```
 
-First run downloads + caches the full Cape Town data under `~/.cache/reblock` (nothing
-is committed); later runs are instant. Writes `flagged_map.png` (whole city, flagged
-blocks highlighted), `flagged_blocks.txt` (every flagged id), and `*_before.png` /
-`*_<proposal>_after.png` for each of the `max_blocks` reblocked blocks into the Hydra
-run dir. Tune the gates with `screen.density_min=50 screen.mean_depth_min=1.5`. The
-default `screen=identity` is a passthrough — a plain reblock with no screening.
+Writes into `outputs/ct-screen/`: `flagged_map.png` (the sample, flagged blocks in red
+over grey context), `flagged_blocks.txt` (every flagged id), and `*_before.png` /
+`*_<proposal>_after.png` for each of the `max_blocks` reblocked survivors. Tune the
+gates with `screen.density_min=50 screen.mean_depth_min=1.5`.
+
+For the **full Cape Town metro** — thousands of contiguous blocks, a dense city map —
+swap `data=capetown` → `data=capetown_full`; the first run downloads + caches the real
+data under `~/.cache/reblock` (nothing committed), later runs are instant. (The sample
+above is geographically sparse, so its map reads as scattered blocks; the full metro
+fills in.)
+
+The default `screen=identity` is a passthrough — a plain reblock with no screening.
