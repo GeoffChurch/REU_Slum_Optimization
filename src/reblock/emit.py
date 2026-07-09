@@ -46,6 +46,29 @@ def render_results(results: list[Result], out_dir: Path, cfg: RenderConfig) -> N
         _render_block_group(group, out_dir)
 
 
+def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path | None:
+    """Binary city choropleth: every metro block drawn light, the flagged ones
+    highlighted. Re-reads the blocks parquet geometry (kept out of the Screen so it
+    stays a pure selector). Returns the written path, or None if there are no ids.
+    Gating is the caller's (cfg.flagged_map.enabled)."""
+    import geopandas as gpd
+    if not flagged_ids:
+        return None
+    blocks = gpd.read_parquet(blocks_path, columns=["block_id", "geometry"])
+    blocks["block_id"] = blocks["block_id"].astype(str)
+    blocks["flagged"] = blocks["block_id"].isin(set(flagged_ids))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 10))
+    blocks[~blocks["flagged"]].plot(ax=ax, color="#e8e8e8", edgecolor="none")
+    blocks[blocks["flagged"]].plot(ax=ax, color="#c0392b", edgecolor="none")
+    ax.set_title(f"{len(flagged_ids)} flagged blocks")
+    ax.set_axis_off()
+    out_path = out_dir / "flagged_map.png"
+    save_render(fig, out_path)
+    plt.close(fig)
+    return out_path
+
+
 def _render_block_group(group: list[Result], out_dir: Path) -> None:
     block = group[0].block
     # access_before is method-independent: take it from the first Result that

@@ -190,6 +190,38 @@ def test_block_ids_targets_one_capetown_block_through_the_pipeline() -> None:
     assert r.metric("kcomplexity", "delta_k") > 0   # peel flattens this deep block
 
 
+def test_flagged_map_writes_png(tmp_path: Path) -> None:
+    from reblock.emit import flagged_map
+    blocks = str(Path(__file__).resolve().parents[0] / "data" / "kblock"
+                 / "blocks_capetown_sample.parquet")
+    out = flagged_map(blocks, ["ZAF.9.3.1_1_44882"], tmp_path)
+    assert out is not None and out.exists() and out.stat().st_size > 0
+
+
+def test_flagged_map_none_when_no_ids(tmp_path: Path) -> None:
+    from reblock.emit import flagged_map
+    blocks = str(Path(__file__).resolve().parents[0] / "data" / "kblock"
+                 / "blocks_capetown_sample.parquet")
+    assert flagged_map(blocks, [], tmp_path) is None
+
+
+def test_cli_screen_stage_end_to_end(tmp_path: Path) -> None:
+    # One command: screen (dense_compact) -> reblock (peel) -> render + city map.
+    result = subprocess.run(
+        [sys.executable, "-m", "reblock.run",
+         "data=capetown", "screen=dense_compact", "screen.density_min=35",
+         "method=peel", "eval=kcomplexity", "max_blocks=1",
+         "render.enabled=true", "flagged_map.enabled=true",
+         f"hydra.run.dir={tmp_path}"],
+        capture_output=True, text=True, timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "flagged_map.png").stat().st_size > 0
+    flagged = (tmp_path / "flagged_blocks.txt").read_text()
+    assert "ZAF.9.3.1_1_44882" in flagged
+    assert list(tmp_path.glob("*_before.png")) and list(tmp_path.glob("*_after.png"))
+
+
 def test_topology_reblocks_a_synthetic_nested_block() -> None:
     # Capstone efficacy proof. Both real fixtures available to this pipeline --
     # Phule Nagar (all 370/370 blocks) and ext/topology/Data/Epworth_demo.shp

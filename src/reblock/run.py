@@ -15,7 +15,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from reblock.contracts import Eval, Method, Screen, Source
-from reblock.emit import render_results
+from reblock.emit import flagged_map, render_results
 from reblock.pipeline import PipelineSpec, run
 
 log = logging.getLogger(__name__)
@@ -42,8 +42,21 @@ def main(cfg: DictConfig) -> None:
     output = run(spec)
     for r in output.results:
         log.info("%s %s", r.block.block_id, {m.eval: dict(m.values) for m in r.metrics})
+
+    out_dir = Path(HydraConfig.get().runtime.output_dir)
+    if output.selection is not None:
+        flagged_path = out_dir / "flagged_blocks.txt"
+        flagged_path.write_text("".join(f"{b}\n" for b in output.selection))
+        log.info("%d blocks flagged -> %s", len(output.selection), flagged_path)
     if cfg.render.enabled:
-        render_results(output.results, Path(HydraConfig.get().runtime.output_dir), cfg.render)
+        render_results(output.results, out_dir, cfg.render)
+    if cfg.flagged_map.enabled:
+        blocks_path = getattr(spec.source, "blocks_path", None)
+        if blocks_path is None:
+            log.warning("flagged_map: source %s has no blocks_path; skipping",
+                        type(spec.source).__name__)
+        else:
+            flagged_map(str(blocks_path), output.selection or [], out_dir)
 
 
 if __name__ == "__main__":

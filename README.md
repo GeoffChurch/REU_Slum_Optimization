@@ -36,14 +36,19 @@ Writes `outputs/ct-flagship/ZAF.9.3.1_1_44882_before.png` and one
 
 (Quote `"block_ids=[...]"` so the shell doesn't glob the brackets.)
 
-## Detect informal settlements (Screen)
+## Detect → reblock → visualize (one command)
 
-Flag the dense/compact informal blocks in a city — the settlement blocks worth reblocking:
+Screen a city for its dense/compact informal blocks, reblock the top survivors, and
+emit both the city flagged-map and per-block before/after heatmaps:
 
 ```bash
-pixi run python -m reblock.screen screen=dense_compact city=capetown
+pixi run python -m reblock.run data=capetown_full screen=dense_compact \
+  method=peel eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=5
 ```
 
-First run downloads + caches the full Cape Town data under `~/.cache/reblock` (nothing is
-committed); later runs are instant. Prints the flagged `block_ids`. Tune the thresholds, e.g.
-`screen.density_min=50 screen.mean_depth_min=1.5`.
+First run downloads + caches the full Cape Town data under `~/.cache/reblock` (nothing
+is committed); later runs are instant. Writes `flagged_map.png` (whole city, flagged
+blocks highlighted), `flagged_blocks.txt` (every flagged id), and `*_before.png` /
+`*_<proposal>_after.png` for each of the `max_blocks` reblocked blocks into the Hydra
+run dir. Tune the gates with `screen.density_min=50 screen.mean_depth_min=1.5`. The
+default `screen=identity` is a passthrough — a plain reblock with no screening.

@@ -23,6 +23,11 @@ render:
   format: png
   layout: separate
 
+# City flagged-map emitter (reblock.emit.flagged_map): opt-in; draws all metro
+# blocks light with the screen's flagged blocks highlighted, into the run dir.
+flagged_map:
+  enabled: false
+
 # Optional list of block ids to build (kblock sources only); null => all blocks.
 # Filters at the source before the Voronoi build, so targeting one block is O(1).
 block_ids: null
