@@ -26,7 +26,7 @@ def test_spine_reaches_k1_and_is_street_connected() -> None:
     assert parcel_access_layers(block, proposal.roads).max() == 1          # full access
     sc = street_connectivity(block.streets, proposal.roads, STREET_TOL)
     assert sc.connected_frac == 1.0                            # every corridor reaches street
-    assert proposal.proposal_id == "peel" and proposal.method == "peel"
+    assert proposal.proposal_id == "peel_tol0.5" and proposal.method == "peel"
     assert proposal.edges is None
 
 

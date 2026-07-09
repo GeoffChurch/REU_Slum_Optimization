@@ -157,7 +157,7 @@ def test_hydra_compose_wires_peel_method() -> None:
         results = run(cfg)
     assert len(results) == 1
     r = results[0]
-    assert r.proposal.method == "peel" and r.proposal.proposal_id == "peel"
+    assert r.proposal.method == "peel" and r.proposal.proposal_id == "peel_tol0.5"
     assert r.metric("kcomplexity", "k_after") <= r.metric("kcomplexity", "k_before")
 
 

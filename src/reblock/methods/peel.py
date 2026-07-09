@@ -74,6 +74,6 @@ class PeelReblocker:
 
         roads = gpd.GeoDataFrame(geometry=segments, crs=block.crs)
         return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
-                        proposal_id="peel", method="peel",
+                        proposal_id=f"peel_tol{self.tol}", method="peel",
                         params={"unreachable": unreachable},
                         block_identity=block.identity)
