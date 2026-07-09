@@ -50,7 +50,10 @@ class Identified(Protocol):
     def identity(self) -> Hashable: ...
 
 
-def _source_hash(*paths: Path) -> str:
+def source_hash(*paths: Path) -> str:
+    """sha256 over the sorted paths' names + bytes. Stable, content-sensitive,
+    order-independent. Used for a Source's data files (Block.source_content_hash)
+    and for the derivation-module code hash below."""
     h = hashlib.sha256()
     for p in sorted(paths, key=str):
         h.update(str(Path(p).name).encode())
@@ -58,7 +61,7 @@ def _source_hash(*paths: Path) -> str:
     return h.hexdigest()
 
 
-_CODE_HASH = _source_hash(*_DERIVATION_MODULES)
+_CODE_HASH = source_hash(*_DERIVATION_MODULES)
 
 
 def version() -> tuple[str, str, str]:

@@ -12,8 +12,8 @@ from pyproj import CRS
 from shapely import STRtree
 from shapely.geometry import LineString, Polygon
 
-from reblock.cache import source_hash
 from reblock.contracts import Block, Region
+from reblock.derive_graph import source_hash
 
 
 def _components(gdf: gpd.GeoDataFrame) -> list[list[int]]:

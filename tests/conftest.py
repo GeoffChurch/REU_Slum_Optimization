@@ -1,12 +1,12 @@
 """Session-wide test isolation for the derivation caches (see
-src/reblock/cache.py, src/reblock/derive_graph.py).
+src/reblock/derive_graph.py).
 
 REBLOCK_CACHE_DIR is set HERE, at module load, BEFORE any `reblock.*` import.
 pytest imports conftest.py before collecting test modules, so this is the
 first place any `reblock` code can run -- setting the env var here (rather
 than via a fixture, which only runs after import) means every module-level
-`joblib.Memory(location=...)` in the codebase (cache.py, derive_graph.py, and
-any future derivation module) binds to this session tmp dir the moment it's
+`joblib.Memory(location=...)` in the codebase (derive_graph.py and any future
+derivation module) binds to this session tmp dir the moment it's
 imported, never touching the user's real ~/.cache/reblock/derivations.
 
 This matters because `joblib.Memory.__init__` eagerly creates its directory
@@ -22,10 +22,10 @@ scratch cache for normal use -- tests must never read or write that.
 tests/test_run.py also shells out to `python -m reblock.run` via subprocess:
 that child process inherits our environment (it's launched without an
 explicit `env=` override), so it too binds to this tmp dir when it freshly
-imports cache.py/derive_graph.py.
+imports derive_graph.py.
 
-Per-test/per-module monkeypatches (tests/test_cache.py, tests/test_derive_graph.py)
-still work on top of this: they further repoint `memory` (and rebind the
+Per-test monkeypatches (tests/test_derive_graph.py) still work on top of
+this: they further repoint `memory` (and rebind the
 relevant cached wrapper) onto their own tmp_path, and pytest undoes those
 afterward, falling back down to the session tmp dir this module-load
 env-set establishes.

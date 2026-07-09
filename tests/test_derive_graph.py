@@ -85,3 +85,22 @@ def test_version_bump_forces_a_miss(monkeypatch: pytest.MonkeyPatch) -> None:
     dg.clear_l1()
     dg.derive(fn, a)                 # new version -> new key -> recompute
     assert box["n"] == 2
+
+
+def test_source_hash_is_stable_and_content_sensitive(tmp_path: Path) -> None:
+    a = tmp_path / "a.bin"
+    a.write_bytes(b"hello")
+    h1 = dg.source_hash(a)
+    h2 = dg.source_hash(a)
+    assert h1 == h2 and h1 != ""
+    a.write_bytes(b"HELLO")
+    assert dg.source_hash(a) != h1
+
+
+def test_source_hash_covers_all_paths_order_independent(tmp_path: Path) -> None:
+    a = tmp_path / "a.bin"
+    a.write_bytes(b"aaa")
+    b = tmp_path / "b.bin"
+    b.write_bytes(b"bbb")
+    assert dg.source_hash(a, b) == dg.source_hash(b, a)   # sorted internally
+    assert dg.source_hash(a, b) != dg.source_hash(a)

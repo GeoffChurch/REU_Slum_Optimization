@@ -18,9 +18,9 @@ from shapely import make_valid, voronoi_polygons
 from shapely.geometry import GeometryCollection, MultiPoint, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
-from reblock.cache import source_hash
 from reblock.contracts import Block, Region
 from reblock.derivations import VoronoiInput, voronoi
+from reblock.derive_graph import source_hash
 
 
 def _voronoi_parcels(poly: Polygon, points: list[Point], crs: CRS) -> gpd.GeoDataFrame | None:
