@@ -21,7 +21,7 @@ packages = ["src/reblock"]
 [tool.pixi.workspace]
 channels = ["conda-forge"]
 # Add "osx-arm64" / "osx-64" / "win-64" here when collaborators are on those.
-platforms = ["linux-64"]
+platforms = ["linux-64", "osx-arm64"]
 
 # Runtime deps resolved from conda-forge (binary-correct GDAL/GEOS stack).
 [tool.pixi.dependencies]
