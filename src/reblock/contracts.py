@@ -1,7 +1,7 @@
 """Canonical typed contracts — the waist every layer adapts to."""
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -50,6 +50,13 @@ class Block:
             raise ValueError("Block.parcels must be non-empty")
         _require_columns(self.streets, {"geometry"}, "Block.streets")
 
+    @property
+    def identity(self) -> tuple[str, str] | None:
+        """Content-address for the derivation cache: (source hash, block_id), or
+        None when the source hash is unknown (synthetic/test blocks -> uncacheable,
+        so they never key-collide). See reblock.derive_graph.derive."""
+        return (self.source_content_hash, self.block_id) if self.source_content_hash else None
+
 
 @dataclass(frozen=True)
 class Proposal:
@@ -60,6 +67,13 @@ class Proposal:
     proposal_id: str = ""
     method: str = ""
     params: Mapping[str, object] = field(default_factory=dict)
+    block_identity: Hashable | None = None
+
+    @property
+    def identity(self) -> tuple[Hashable, str] | None:
+        """(block_identity, proposal_id) -- proposal_id encodes method+params, so
+        it distinguishes proposals for a block. None when block_identity is unknown."""
+        return (self.block_identity, self.proposal_id) if self.block_identity is not None else None
 
 
 @dataclass(frozen=True)
