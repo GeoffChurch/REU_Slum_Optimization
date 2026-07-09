@@ -156,6 +156,19 @@ def test_hydra_compose_wires_peel_method() -> None:
     assert r.metric("kcomplexity", "k_after") <= r.metric("kcomplexity", "k_before")
 
 
+def test_hydra_compose_wires_dijkstra_method() -> None:
+    with initialize(version_base=None, config_path="../conf"):
+        cfg = compose(config_name="config", overrides=[
+            "data=dji", "method=dijkstra", "eval=kcomplexity", "max_blocks=1",
+        ])
+        results = run(spec_from_cfg(cfg)).results
+    assert len(results) >= 1
+    r = results[0]
+    assert r.proposal.method == "dijkstra"
+    assert r.metric("kcomplexity", "connected_road_frac") == 1.0
+    assert r.metric("kcomplexity", "delta_k") > 0     # boundary network flattens a real block
+
+
 def test_hydra_compose_wires_kblock_source_and_peel_pipeline() -> None:
     # First non-trivial real reblocking through the WHOLE pipeline: unlike Phule (every
     # block scores k=1, no peel signal -- see test_topology_reblocks_a_synthetic_nested_block),

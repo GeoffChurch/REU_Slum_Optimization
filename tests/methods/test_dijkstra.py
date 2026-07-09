@@ -1,13 +1,15 @@
 from typing import cast
 
 import geopandas as gpd
+import numpy as np
 from pyproj import CRS
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
-from reblock.methods.dijkstra import _reblock_dijkstra
+from reblock.eval.kcomplexity import KComplexityEval
+from reblock.methods.dijkstra import DijkstraReblocker, _reblock_dijkstra
 
 UTM = CRS.from_epsg(32643)
 
@@ -77,6 +79,30 @@ def test_reblock_dijkstra_covers_t_junction_parcels() -> None:
     assert len(roads) > 0                                  # centre not stranded (pre-fix: empty)
     conn = street_connectivity(block.streets, roads, STREET_TOL)
     assert conn.connected_frac == 1.0
-    centre = block.parcels.geometry.iloc[0]                # the interior centre square
+    centre = cast(Polygon, block.parcels.geometry.iloc[0])  # the interior centre square
     rnet = unary_union(list(roads.geometry))
     assert centre.exterior.distance(rnet) <= STREET_TOL    # a road reaches its frontage
+
+
+def test_dijkstra_reblocks_a_synthetic_nested_block() -> None:
+    # 3x3 grid: the centre parcel is landlocked at peel-depth 2; the boundary-routed
+    # network reaches it, so k_after collapses to 1 (matches the peel/topology capstone).
+    block = _grid_block(3)
+    proposal = DijkstraReblocker().propose(block)
+    m = KComplexityEval().score(block, proposal).values
+    assert m["k_before"] == 2.0
+    assert m["k_after"] == 1.0 and m["delta_k"] > 0
+    assert m["connected_road_frac"] == 1.0
+    assert proposal.roads is not None and len(proposal.roads) > 0
+    assert proposal.proposal_id == "dijkstra" and proposal.method == "dijkstra"
+
+
+def test_dijkstra_propose_is_deterministic_and_leaves_rng_untouched() -> None:
+    block = _grid_block(5)
+    np.random.seed(123)
+    state = np.random.get_state()[1].tolist()
+    p1 = DijkstraReblocker().propose(block)
+    p2 = DijkstraReblocker().propose(block)
+    assert np.random.get_state()[1].tolist() == state          # no global RNG side-effect
+    assert p1.roads is not None and p2.roads is not None
+    assert [g.wkt for g in p1.roads.geometry] == [g.wkt for g in p2.roads.geometry]

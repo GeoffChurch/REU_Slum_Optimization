@@ -9,6 +9,7 @@ k-metric's street_connectivity grants each fronted parcel depth-1 access).
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import cast
 
 import geopandas as gpd
@@ -17,7 +18,7 @@ from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
-from reblock.contracts import Block
+from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 
 INF = float("inf")
@@ -91,3 +92,19 @@ def _reblock_dijkstra(block: Block) -> gpd.GeoDataFrame:
     rows = [{"geometry": LineString(sorted(e)), "drain": d} for e, d in items]  # type: ignore[arg-type]
     return gpd.GeoDataFrame(rows, columns=["geometry", "drain"], geometry="geometry",
                             crs=block.crs)
+
+
+@dataclass
+class DijkstraReblocker:
+    @property
+    def identity(self) -> tuple[str]:
+        return ("dijkstra",)
+
+    def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
+        del prior  # accepted for Method conformance; the routing is block-only
+        roads = _reblock_dijkstra(block)
+        spurs = int((roads["drain"] == 1).sum()) if len(roads) else 0
+        return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+                        proposal_id="dijkstra", method="dijkstra",
+                        params={"segments": len(roads), "leaf_roads": spurs},
+                        block_identity=block.identity)
