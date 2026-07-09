@@ -1,7 +1,7 @@
 defaults:
   - data: phule
   - screen: identity
-  - method: topology
+  - method: dijkstra
   - eval: kcomplexity
   - _self_
 

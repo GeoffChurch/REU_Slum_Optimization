@@ -26,12 +26,14 @@ Render a block's access-depth heatmaps (before, and after a road-building method
 by targeting it with `block_ids` — no need to process the whole region:
 
 ```bash
-pixi run python -m reblock.run data=capetown method=peel eval=kcomplexity "block_ids=[ZAF.9.3.1_1_44882]" render.enabled=true
+pixi run python -m reblock.run data=capetown method=dijkstra eval=kcomplexity "block_ids=[ZAF.9.3.1_1_44882]" render.enabled=true
 ```
 
 Writes `ZAF.9.3.1_1_44882_before.png` and one `_<proposal>_after.png` into the Hydra
-run dir (`outputs/<date>/<time>/`). Swap `data=capetown` → `data=dji`, or `method=peel`
-→ `method=topology`. Omit `block_ids` to process the first `max_blocks` blocks instead.
+run dir (`outputs/<date>/<time>/`). `dijkstra` is the default method — a buildable
+frontage-routed street network (~1 s/block); swap `method=peel` (fast through-parcel
+sketch) or `method=topology` (slow greedy optimizer). Swap `data=capetown` → `data=dji`,
+or omit `block_ids` to process the first `max_blocks` blocks instead.
 
 (Quote `"block_ids=[...]"` so the shell doesn't glob the brackets.)
 
@@ -41,14 +43,15 @@ Screen a city for its dense/compact informal blocks, reblock the worst survivors
 emit both the city flagged-map and per-block before/after heatmaps:
 
 ```bash
-pixi run python -m reblock.run data=capetown_full screen=dense_compact screen.density_min=35 method=topology eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=5
+pixi run python -m reblock.run data=capetown_full screen=dense_compact screen.density_min=35 method=dijkstra eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=5
 ```
 
 The first run downloads + caches the full Cape Town metro under `~/.cache/reblock`
-(nothing committed); later runs are instant. The screen pass is quick, but
-`method=topology` builds a full road network per block and takes a few minutes each, so
-`max_blocks=5` runs several minutes — swap `method=peel` for a fast geometric pass
-(~seconds). Outputs land in the Hydra run dir (`outputs/<date>/<time>/`):
+(nothing committed); later runs are instant. `method=dijkstra` (the default) routes each
+block's buildable street network in ~1 s, so the screen pass dominates the runtime and
+`max_blocks=5` adds only seconds — swap `method=topology` for a slower, higher-quality
+greedy optimizer (minutes per block) or `method=peel` for a fast through-parcel sketch.
+Outputs land in the Hydra run dir (`outputs/<date>/<time>/`):
 `flagged_map.png` (whole metro, flagged blocks in red over grey context),
 `flagged_blocks.txt` (every flagged id, worst-access first), and `*_before.png` /
 `*_<proposal>_after.png` for each reblocked block.
