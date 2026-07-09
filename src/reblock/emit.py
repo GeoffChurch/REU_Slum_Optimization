@@ -1,6 +1,7 @@
-"""Output emitters: consumers of run()'s Result list. F1 ships the render
-emitter (per block: a shared-vmax before + one after per proposal). The
-enabled-emitter registry/fan-out arrives in F4 with the scorecard emitter.
+"""Output emitters: consumers of a run's RunOutput. `render_results` draws, per
+block, a shared-vmax before + one after per proposal; `flagged_map` draws the
+city choropleth of the screen's flagged blocks. `main` (the Hydra edge) gates
+each on its config flag. A scorecard/compare emitter is planned future work.
 """
 from __future__ import annotations
 
@@ -18,8 +19,8 @@ _KCOMPLEXITY = "kcomplexity"
 @dataclass
 class RenderConfig:
     enabled: bool = False
-    format: str = "png"       # F1: "png" only
-    layout: str = "separate"  # F1: "separate" only
+    format: str = "png"       # only "png" is implemented
+    layout: str = "separate"  # only "separate" is implemented
 
 
 def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
@@ -36,7 +37,7 @@ def render_results(results: list[Result], out_dir: Path, cfg: RenderConfig) -> N
     peel), so a block scored without kcomplexity is skipped."""
     if cfg.format != "png" or cfg.layout != "separate":
         raise NotImplementedError(
-            f"render F1 supports format=png/layout=separate only; "
+            f"render supports format=png/layout=separate only; "
             f"got format={cfg.format!r} layout={cfg.layout!r}")
     out_dir.mkdir(parents=True, exist_ok=True)
     by_block: dict[str, list[Result]] = {}
