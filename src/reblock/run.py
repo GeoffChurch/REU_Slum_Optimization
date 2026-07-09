@@ -16,9 +16,9 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from reblock.contracts import Eval, Method, Result, Source
-from reblock.derivations import propose
+from reblock.contracts import Eval, Method, Source
 from reblock.emit import render_results
+from reblock.pipeline import RunOutput, reblock_block, sample
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +39,9 @@ class RunConfig:
     # ShapefileSource fails loud instead of guessing a CRS when a shapefile has
     # no .prj (e.g. Phule Nagar); None preserves "fail loud" as the CLI default.
     assumed_crs: int | None = None
+    # Optional list of block ids to build (kblock sources only); None => all
+    # blocks. Mirrors conf/config.yaml's top-level `block_ids: null`.
+    block_ids: list[str] | None = None
     data: Any = None
     method: Any = None
     eval: Any = None
@@ -59,10 +62,10 @@ class RunConfig:
             self.eval = [{"_target_": "reblock.eval.kcomplexity.KComplexityEval"}]
 
 
-def run(cfg: RunConfig | DictConfig) -> list[Result]:
-    """Pure: one Source, one Method per block, scored by each Eval -> one Result
-    per block (Result.metrics is a tuple over the eval list). Writes nothing and
-    has no global side-effect."""
+def run(cfg: RunConfig | DictConfig) -> RunOutput:
+    """The dataflow pipeline: sample the selection, build only the sample, reblock
+    each -> RunOutput(selection, results). The full selection is retained (results
+    cover only the sampled max_blocks)."""
     # Per-element instantiate for the eval LIST (not instantiate(cfg.eval) whole):
     # instantiating a ListConfig of @dataclass _target_s short-circuits to
     # schema-validated DictConfig nodes instead of calling the constructor.
@@ -71,22 +74,28 @@ def run(cfg: RunConfig | DictConfig) -> list[Result]:
     method = cast(Method, instantiate(cfg.method))
     evals = cast("list[Eval]", [instantiate(e) for e in cfg.eval])
 
-    region = source.region()
-    results: list[Result] = []
-    for block in islice(region.blocks, cfg.max_blocks):
-        proposal = propose(method, block)
-        metrics = tuple(ev.score(block, proposal) for ev in evals)
-        results.append(Result(block=block, proposal=proposal, metrics=metrics))
-    return results
+    selection = list(cfg.block_ids) if cfg.block_ids is not None else None
+    picked = sample(selection, cfg.max_blocks)
+    if picked is not None:
+        # Source is a structural Protocol (region() only); block_ids is a
+        # kblock-specific mutable attr, not part of the Source contract
+        # (ShapefileSource has none -- see RunConfig.block_ids docstring).
+        source.block_ids = picked  # type: ignore[attr-defined]
+        blocks = source.region().blocks
+    else:
+        blocks = islice(source.region().blocks, cfg.max_blocks)   # ALL -> islice
+
+    results = [reblock_block(block, method, evals) for block in blocks]
+    return RunOutput(selection=selection, results=results)
 
 
 @hydra.main(version_base=None, config_path="../../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
-    results = run(cfg)
-    for r in results:
+    output = run(cfg)
+    for r in output.results:
         log.info("%s %s", r.block.block_id, {m.eval: dict(m.values) for m in r.metrics})
     if cfg.render.enabled:
-        render_results(results, Path(HydraConfig.get().runtime.output_dir), cfg.render)
+        render_results(output.results, Path(HydraConfig.get().runtime.output_dir), cfg.render)
 
 
 if __name__ == "__main__":

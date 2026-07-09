@@ -83,7 +83,7 @@ def test_end_to_end_phule_wiring() -> None:
     # Wiring proof on real data: run() returns well-formed Results and writes
     # nothing (rendering is an emitter now, exercised by the CLI test below).
     results = run(RunConfig(shapefile=PHULE, region_id="phule", alpha=2.0, seed=0,
-                            max_blocks=1, assumed_crs=3857))
+                            max_blocks=1, assumed_crs=3857)).results
     assert len(results) == 1
     r = results[0]
     assert isinstance(r, Result)
@@ -98,8 +98,8 @@ def test_run_is_pure_deterministic_and_leaves_global_rng_untouched() -> None:
                     max_blocks=1, assumed_crs=3857)
     np.random.seed(777)
     state_before = np.random.get_state()[1].tolist()
-    r1 = run(cfg)
-    r2 = run(cfg)
+    r1 = run(cfg).results
+    r2 = run(cfg).results
     # no global RNG side-effect
     assert np.random.get_state()[1].tolist() == state_before
     # bit-identical repeats
@@ -124,7 +124,7 @@ def test_runconfig_accepts_explicit_data_method_eval_overrides() -> None:
               {"_target_": "reblock.eval.kcomplexity.WeakDualKEval"}],
     )
 
-    results = run(cfg)
+    results = run(cfg).results
 
     assert len(results) == 1
     r = results[0]
@@ -141,7 +141,7 @@ def test_hydra_compose_wires_config_groups() -> None:
             "data=phule", "method=topology", "eval=kcomplexity",
             f"shapefile={PHULE}", "assumed_crs=3857", "max_blocks=1",
         ])
-        results = run(cfg)
+        results = run(cfg).results
 
     assert len(results) == 1
     r = results[0]
@@ -154,7 +154,7 @@ def test_hydra_compose_wires_peel_method() -> None:
             "data=phule", "method=peel", "eval=kcomplexity",
             f"shapefile={PHULE}", "assumed_crs=3857", "max_blocks=1",
         ])
-        results = run(cfg)
+        results = run(cfg).results
     assert len(results) == 1
     r = results[0]
     assert r.proposal.method == "peel" and r.proposal.proposal_id == "peel_tol0.5"
@@ -172,7 +172,7 @@ def test_hydra_compose_wires_kblock_source_and_peel_pipeline() -> None:
         cfg = compose(config_name="config", overrides=[
             "data=dji", "method=peel", "eval=kcomplexity", "max_blocks=1",
         ])
-        results = run(cfg)
+        results = run(cfg).results
 
     assert len(results) >= 1
     for r in results:
@@ -187,7 +187,7 @@ def test_block_ids_targets_one_capetown_block_through_the_pipeline() -> None:
             "data=capetown", "method=peel", "eval=kcomplexity",
             "block_ids=[ZAF.9.3.1_1_44882]", "max_blocks=10",
         ])
-        results = run(cfg)
+        results = run(cfg).results
     # block_ids overrides the coarse max_blocks front-selection: exactly the one block.
     assert [r.block.block_id for r in results] == ["ZAF.9.3.1_1_44882"]
     r = results[0]
