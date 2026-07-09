@@ -1,0 +1,23 @@
+defaults:
+  - data: dji
+  - screen: identity
+  - eval: kcomplexity
+  - _self_
+
+# The methods available, then the names to actually run. Overriding the names via
+# CLI is clean -- `methods=[dijkstra,peel]` (topology is slow, minutes/block).
+all_methods:
+  dijkstra: {_target_: reblock.methods.dijkstra.DijkstraReblocker}
+  peel: {_target_: reblock.methods.peel.PeelReblocker}
+  topology: {_target_: reblock.methods.topology.TopologyMethod}
+methods: [dijkstra, peel, topology]
+
+shapefile: ???
+region_id: phule
+assumed_crs: null
+max_blocks: 5
+block_ids: null
+
+hydra:
+  job:
+    chdir: false
