@@ -2,6 +2,7 @@ from typing import cast
 
 import geopandas as gpd
 import numpy as np
+import pytest
 from pyproj import CRS
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
@@ -106,3 +107,26 @@ def test_dijkstra_propose_is_deterministic_and_leaves_rng_untouched() -> None:
     assert np.random.get_state()[1].tolist() == state          # no global RNG side-effect
     assert p1.roads is not None and p2.roads is not None
     assert [g.wkt for g in p1.roads.geometry] == [g.wkt for g in p2.roads.geometry]
+
+
+def test_reblock_dijkstra_requires_streets() -> None:
+    # No street frontage -> fail loud (mirrors PeelReblocker), not a silent no-op that
+    # the k-metric would misread as "delta_k=0, nothing to improve".
+    block = _grid_block(3)
+    no_streets = Block(block_id="x", crs=block.crs, boundary=block.boundary,
+                       parcels=block.parcels, streets=gpd.GeoDataFrame(geometry=[], crs=block.crs))
+    with pytest.raises(ValueError, match="streets must be non-empty"):
+        _reblock_dijkstra(no_streets)
+
+
+def test_dijkstra_reports_unreachable_parcels() -> None:
+    # A parcel disconnected from the street's boundary-graph component gets no road; the
+    # count is surfaced in params (mirrors PeelReblocker's "unreachable" diagnostic).
+    grid = _grid_block(2)   # 2x2: every parcel fronts the outer street -> all served
+    isolated = Polygon([(100, 100), (101, 100), (101, 101), (100, 101)])
+    parcels = gpd.GeoDataFrame(
+        {"parcel_id": [*grid.parcels["parcel_id"], 999]},
+        geometry=[*grid.parcels.geometry, isolated], crs=grid.crs)
+    block = Block(block_id="iso", crs=grid.crs, boundary=grid.boundary,
+                  parcels=parcels, streets=grid.streets)
+    assert DijkstraReblocker().propose(block).params["unreachable"] == 1

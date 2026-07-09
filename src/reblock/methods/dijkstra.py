@@ -48,6 +48,10 @@ def _boundary_graph(parcels: gpd.GeoDataFrame) -> nx.Graph:
 
 
 def _reblock_dijkstra(block: Block) -> gpd.GeoDataFrame:
+    if block.streets.empty:
+        raise ValueError(
+            "Block.streets must be non-empty: with no street frontage the forest has no "
+            "root -- every parcel would be a false depth-1 and the proposal an empty no-op")
     parcels = block.parcels
     g = _boundary_graph(parcels)
     edges: list[tuple[tuple[float, float], tuple[float, float]]] = sorted(g.edges())
@@ -61,6 +65,7 @@ def _reblock_dijkstra(block: Block) -> gpd.GeoDataFrame:
     drain: dict[frozenset[tuple[float, float]], int] = defaultdict(int)
     info: list[tuple[list[tuple[tuple[float, float], tuple[float, float]]],
                      tuple[float, float] | None]] = []
+    n_unreachable = 0
     for geom in parcels.geometry:
         ext = cast(Polygon, geom).exterior
         ring = ext.buffer(STREET_TOL)
@@ -68,11 +73,12 @@ def _reblock_dijkstra(block: Block) -> gpd.GeoDataFrame:
         # T-junctions, where union-noding split an edge the parcel's raw coords no longer match).
         pes = [edges[i] for i in sorted(tree.query(ext, predicate="dwithin", distance=STREET_TOL))
                if edge_geoms[i].within(ring)]
-        if not pes or any(LineString(list(e)).within(corridor) for e in pes):
-            info.append((pes, None))
+        if pes and any(LineString(list(e)).within(corridor) for e in pes):
+            info.append((pes, None))                 # street-fronting: already served
             continue
         pn = [n for e in pes for n in e if n in dist]
         if not pn:
+            n_unreachable += 1                        # non-street parcel, no route to a street
             info.append((pes, None))
             continue
         entry = min(pn, key=lambda n: (dist[n], n))
@@ -90,8 +96,10 @@ def _reblock_dijkstra(block: Block) -> gpd.GeoDataFrame:
 
     items = sorted(drain.items(), key=lambda kv: (-kv[1], sorted(kv[0])))
     rows = [{"geometry": LineString(sorted(e)), "drain": d} for e, d in items]  # type: ignore[arg-type]
-    return gpd.GeoDataFrame(rows, columns=["geometry", "drain"], geometry="geometry",
-                            crs=block.crs)
+    gdf = gpd.GeoDataFrame(rows, columns=["geometry", "drain"], geometry="geometry",
+                           crs=block.crs)
+    gdf.attrs["unreachable"] = n_unreachable
+    return gdf
 
 
 @dataclass
@@ -106,5 +114,6 @@ class DijkstraReblocker:
         spurs = int((roads["drain"] == 1).sum()) if len(roads) else 0
         return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
                         proposal_id="dijkstra", method="dijkstra",
-                        params={"segments": len(roads), "leaf_roads": spurs},
+                        params={"segments": len(roads), "leaf_roads": spurs,
+                                "unreachable": int(roads.attrs.get("unreachable", 0))},
                         block_identity=block.identity)
