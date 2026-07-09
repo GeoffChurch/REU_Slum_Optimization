@@ -1,45 +1,48 @@
-"""Session-wide test isolation for the L2 derivation cache (see
-src/reblock/cache.py). Without this, every test that builds a real block with
-a non-empty source_content_hash (tests/test_run.py, tests/data/test_kblock_source.py,
-tests/data/test_shapefile_source.py, ...) would flow through the module-level
-cached wrappers bound at import time to the REAL ~/.cache/reblock/derivations,
-making the suite read/write the user's real cache and non-hermetic.
+"""Session-wide test isolation for the derivation caches (see
+src/reblock/cache.py, src/reblock/derive_graph.py).
 
-tests/test_run.py also shells out to `python -m reblock.run` via subprocess: that
-child process never sees our in-process monkeypatch of cache.memory, so we also
-set REBLOCK_CACHE_DIR in the environment (inherited by the subprocess, which is
-launched without an explicit `env=` override) so cache.py's module-level
-_CACHE_DIR/memory bind to the same tmp dir when it's freshly imported there.
+REBLOCK_CACHE_DIR is set HERE, at module load, BEFORE any `reblock.*` import.
+pytest imports conftest.py before collecting test modules, so this is the
+first place any `reblock` code can run -- setting the env var here (rather
+than via a fixture, which only runs after import) means every module-level
+`joblib.Memory(location=...)` in the codebase (cache.py, derive_graph.py, and
+any future derivation module) binds to this session tmp dir the moment it's
+imported, never touching the user's real ~/.cache/reblock/derivations.
 
-tests/test_cache.py's own per-function monkeypatches still work on top of this:
-they further repoint cache.memory (and rebind the relevant wrapper) to their own
-tmp_path, and pytest restores those afterward, un-doing back down to the state
-this fixture establishes.
+This matters because `joblib.Memory.__init__` eagerly creates its directory
+(and a .gitignore inside it) at construction time -- a fixture-based repoint
+(monkeypatching `memory` after import) is too late to prevent that eager
+directory creation against the real cache dir; only an import-time env
+override prevents it.
+
+tests/test_run.py also shells out to `python -m reblock.run` via subprocess:
+that child process inherits our environment (it's launched without an
+explicit `env=` override), so it too binds to this tmp dir when it freshly
+imports cache.py/derive_graph.py.
+
+Per-test/per-module monkeypatches (tests/test_cache.py, tests/test_derive_graph.py)
+still work on top of this: they further repoint `memory` (and rebind the
+relevant cached wrapper) onto their own tmp_path, and pytest undoes those
+afterward, falling back down to the session tmp dir this module-load
+env-set establishes.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import os
+import tempfile
 
-import joblib
-import pytest
+os.environ.setdefault("REBLOCK_CACHE_DIR", tempfile.mkdtemp(prefix="reblock-test-cache-"))
 
-import reblock.cache as cache
+from collections.abc import Iterator  # noqa: E402
+
+import pytest  # noqa: E402
+
+import reblock.derive_graph as _dg  # noqa: E402
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _isolate_derivation_cache(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
-    mp = pytest.MonkeyPatch()
-    tmp_dir = tmp_path_factory.mktemp("derivations")
-    mp.setenv("REBLOCK_CACHE_DIR", str(tmp_dir))
-    mp.setattr(cache, "memory", joblib.Memory(location=str(tmp_dir), verbose=0))
-    mp.setattr(cache, "_access_impl_cached",
-               cache.cached(cache._access_impl, ignore=["block", "roads"]))
-    mp.setattr(cache, "_geometric_impl_cached",
-               cache.cached(cache._geometric_impl, ignore=["block", "roads"]))
-    mp.setattr(cache, "_voronoi_impl_cached",
-               cache.cached(cache._voronoi_impl, ignore=["poly", "points", "crs"]))
-    mp.setattr(cache, "_propose_impl_cached",
-               cache.cached(cache._propose_impl, ignore=["method", "block"]))
+@pytest.fixture(autouse=True)
+def _clear_l1() -> Iterator[None]:
+    _dg.clear_l1()
     yield
-    mp.undo()
+    _dg.clear_l1()

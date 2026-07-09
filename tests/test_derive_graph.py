@@ -73,3 +73,15 @@ def test_missing_identity_bypasses_cache(tmp_path: Path) -> None:
     dg.derive(fn, _NoIdentity())     # no identity -> never cached
     assert box["n"] == 2
     assert not dg._L1                 # nothing stored in L1
+
+
+def test_version_bump_forces_a_miss(monkeypatch: pytest.MonkeyPatch) -> None:
+    box = {"n": 0}
+    fn = _count(box)
+    a = _Datum("a")
+    dg.derive(fn, a)
+    # simulate a derivation-logic / lib change: version() returns a new tag
+    monkeypatch.setattr(dg, "version", lambda: ("CHANGED", "g", "p"))
+    dg.clear_l1()
+    dg.derive(fn, a)                 # new version -> new key -> recompute
+    assert box["n"] == 2
