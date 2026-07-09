@@ -80,7 +80,8 @@ def street_connectivity(
 
 
 def parcel_access_layers(
-    block: Block, roads: GeoDataFrame | None, *, tol: float = STREET_TOL
+    block: Block, roads: GeoDataFrame | None, *, tol: float = STREET_TOL,
+    adj: list[set[int]] | None = None,
 ) -> pd.Series:
     """BFS-peel access depth per parcel: 1 = touches a street, L = L-1 parcels deep.
 
@@ -98,7 +99,7 @@ def parcel_access_layers(
     ids = list(parcels["parcel_id"])
     geoms = list(parcels.geometry)
 
-    adj = parcel_adjacency(geoms, tol)
+    adj = adj if adj is not None else parcel_adjacency(geoms, tol)
 
     street = street_connectivity(block.streets, roads, tol).seed_geom
 
