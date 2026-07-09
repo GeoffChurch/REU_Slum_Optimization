@@ -10,6 +10,7 @@ all_methods:
   dijkstra: {_target_: reblock.methods.dijkstra.DijkstraReblocker}
   peel: {_target_: reblock.methods.peel.PeelReblocker}
   topology: {_target_: reblock.methods.topology.TopologyMethod}
+  mesh: {_target_: reblock.methods.mesh.MeshReblocker}
 methods: [dijkstra, peel, topology]
 
 shapefile: ???
