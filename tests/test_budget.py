@@ -49,3 +49,10 @@ def test_auc_rewards_reaching_benefit_at_lower_cost() -> None:
     dear = Curve(cost=[0.0, 4.0], benefit=[0.0, 1.0])      # full benefit only by cost 4
     assert auc(cheap, cost_cap=4.0) > auc(dear, cost_cap=4.0)
     assert 0.0 <= auc(dear, cost_cap=4.0) <= 1.0
+
+
+def test_auc_interpolates_a_cap_straddling_segment() -> None:
+    # A curve whose data crosses the cap BETWEEN points must interpolate the partial area,
+    # not drop the whole segment (regression: dropped it -> 0.30 instead of 0.5125).
+    c = Curve(cost=[0.0, 3.0, 5.0], benefit=[0.0, 0.8, 1.0])
+    assert abs(auc(c, cost_cap=4.0) - 0.5125) < 1e-6

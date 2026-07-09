@@ -37,12 +37,14 @@ def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL)
     g: nx.Graph = nx.Graph()
     edge_row: dict[frozenset[tuple[float, float]], int] = {}
     for i, geom in enumerate(roads.geometry):
-        cs = list(geom.coords)
-        for a, b in zip(cs, cs[1:], strict=False):
-            na, nb = _rnd(a), _rnd(b)
-            if na != nb:
-                g.add_edge(na, nb, weight=Point(na).distance(Point(nb)))
-                edge_row[frozenset((na, nb))] = i
+        parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]   # explode Multi*
+        for part in parts:
+            cs = list(part.coords)
+            for a, b in zip(cs, cs[1:], strict=False):
+                na, nb = _rnd(a), _rnd(b)
+                if na != nb:
+                    g.add_edge(na, nb, weight=Point(na).distance(Point(nb)))
+                    edge_row[frozenset((na, nb))] = i
     street = unary_union(list(block.streets.geometry))
     snodes = {node for node in g.nodes if Point(node).distance(street) <= tol}
     if not snodes:
@@ -78,7 +80,7 @@ def cost_benefit_curve(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
     adj = parcel_adjacency(list(block.parcels.geometry), tol)
     base = access_burden(parcel_access_layers(block, None, tol=tol, adj=adj))
     cost, benefit = [0.0], [0.0]
-    if len(roads) == 0 or base == 0.0:
+    if len(roads) == 0 or base == 0.0 or block.boundary.area == 0.0:
         return Curve(cost, benefit)
     drain = road_drainage(block, roads, tol=tol)
     order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
@@ -111,6 +113,11 @@ def auc(curve: Curve, cost_cap: float) -> float:
     area = 0.0
     pairs = zip(zip(cs, bs, strict=False), zip(cs[1:], bs[1:], strict=False), strict=False)
     for (c0, b0), (c1, b1) in pairs:
-        if c1 <= cost_cap:
-            area += 0.5 * (b0 + b1) * (c1 - c0)
+        if c0 >= cost_cap:
+            break
+        if c1 > cost_cap:                       # segment straddles the cap: interpolate to it
+            b_cap = b0 + (b1 - b0) * (cost_cap - c0) / (c1 - c0) if c1 > c0 else b0
+            area += 0.5 * (b0 + b_cap) * (cost_cap - c0)
+            break
+        area += 0.5 * (b0 + b1) * (c1 - c0)
     return area / cost_cap
