@@ -70,7 +70,7 @@ Rank the reblockers by *efficiency* — how much access each buys per meter of r
 across the whole budget range (not just at full build, where they converge):
 
 ```bash
-pixi run python -m reblock.compare data=dji eval=kcomplexity methods=[dijkstra,peel] max_blocks=5 hydra.run.dir=outputs/compare
+pixi run python -m reblock.compare data=dji eval=kcomplexity methods=[dijkstra,peel,topology] max_blocks=2
 ```
 
 Writes `auc_table.csv` (mean efficiency per method — higher = more access per meter of
