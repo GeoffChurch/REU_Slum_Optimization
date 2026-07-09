@@ -1,7 +1,7 @@
 """Hydra entrypoint: composes conf/{data,method,eval} config groups into a
-pluggable Source -> Method -> [Eval] pipeline. `run()` is a pure function
-(returns Results, writes nothing); rendering is an opt-in emitter called by
-`main` (see reblock.emit).
+pluggable Source -> Method -> [Eval] pipeline. `run()` is the dataflow pipeline
+returning `RunOutput(selection, results)` (see reblock.pipeline); it writes
+nothing. Rendering is an opt-in emitter called by `main` (see reblock.emit).
 """
 from __future__ import annotations
 
