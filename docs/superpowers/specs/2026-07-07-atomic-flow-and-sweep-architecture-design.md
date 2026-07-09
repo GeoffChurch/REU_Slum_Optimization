@@ -28,23 +28,40 @@ as cheap as an in-process family — so the atomic flow stays trivial and the Sl
 in four ordered, individually-shippable slices, each with its own plan + execution (F2–F4 designs
 refined just-in-time):
 
-- **F1 — Atomic pure `run()` + render emitter.** §1 (drop the `method` **list → single**; remove
+- **F1 — Atomic pure `run()` + render emitter. (SHIPPED.)** §1 (drop the `method` **list → single**; remove
   render coupling from `run()`; `TopologyMethod` **local RNG**; `run()` pure, writes nothing) + the
   §2 **render emitter only** (`RenderConfig`, `emit(results, out_dir, cfg)`, `png`/`separate` —
   today's behavior) + §9 migration. **No emitter registry yet** — `main` calls the one render
   emitter directly; the `enabled_emitters` fan-out arrives in F4 with a second emitter.
   `format=webpage` / `side_by_side` deferred until needed.
-- **F2 — L2 per-block persistent cache.** §6: joblib, content-addressed key
-  `(block_id, source_content_hash, geos_version, proj_version[, params])`, separate before/after
-  keys, `Block` carries `source_content_hash`. The "no double-build" enabler for F3.
-- **F3 — Screen as a `run()` stage + city flagged-map + delete the standalone app.** §1's
-  screen-stage subsection: a `Screen` stage before block iteration, default `IdentityScreen`
-  passthrough, the S1 `DenseCompactScreen` plugged in; a **binary city flagged-map emitter** (all
-  metro blocks drawn light, flagged blocks highlighted); **delete the standalone `reblock.screen`
-  app** (migrate its detect + flagged-ids/visual output into the stage + emitters). F2's L2 cache
-  makes the screen's fine-pass builds cache hits, so `run()`'s reblock build is a hit —
-  screen-then-reblock is free of double-building. Delivers the **one-command end-to-end** (detect →
-  reblock → render) + its README recipe.
+- **F2 — L2 per-block persistent cache. (SHIPPED.)** §6: joblib, content-addressed key
+  `(block_id, source_content_hash, geos_version, proj_version, code_version[, roads_key | repr(method)])`,
+  separate before/after keys, `Block` carries `source_content_hash`, empty-hash bypass, tmp-dir test
+  isolation (`tests/conftest.py`). The "no double-build" enabler for F3. (The §6 **L1 in-process**
+  layer moved to F3 — see below — since F3 is where the in-process double-touch first happens.)
+- **F3 — Screen as a `run()` stage + city flagged-map + L1 + delete the standalone app.** A `Screen`
+  stage before block iteration, default `IdentityScreen` passthrough, the S1 `DenseCompactScreen`
+  plugged in. Concrete decisions (design pass 2026-07-08):
+  - **Screen protocol → `select() -> list[str] | None`** (`None` = all blocks). `IdentityScreen`
+    returns its configured `block_ids` (or `None`); `DenseCompactScreen` returns a concrete flagged
+    list. (Migrate the protocol; the standalone app that consumed `-> list[str]` is deleted here.)
+  - **Injection wiring:** `run()` instantiates the `Source`, injects the source's data paths
+    (`KblockSource` exposes `.blocks_path`/`.buildings_path`) into the `Screen`, calls
+    `select()`, and reassigns `source.block_ids = selected` (when non-`None`) before `region()`.
+    Single source of truth for the data location; `IdentityScreen` needs no paths (so `ShapefileSource`
+    runs pass through). F2's L2 (disk) + F3's L1 (memory) make the screen's fine-pass build a hit
+    when `run()` reblocks — screen-then-reblock free of double-building.
+  - **`flagged_map` emitter** — a pluggable output (symmetric with `render`, `FlaggedMapConfig(enabled=False)`)
+    that **re-reads the blocks parquet geometry** + takes the flagged `block_ids` and draws the binary
+    city choropleth (all blocks light, flagged highlighted) to the run dir. Kept out of the Screen so
+    the Screen stays a pure `raw data → block_ids` selector.
+  - **Lightweight L1 in-process cache** (§6 L1, pulled forward): an in-process dict above the joblib
+    L2 in `reblock.cache`, keyed on the **same content-address string** the L2 wrappers compute —
+    checked before the joblib call. Makes the screen→reblock double-build and the `flagged_map`
+    parquet re-read free memory hits (no pickle round-trip, no NumPy-2.5 warning). One-process lifetime.
+  - **Delete the standalone `reblock.screen` app**; migrate its `flagged_blocks.txt` write + count-log
+    into a small run-output step. Both visualizations emit from one command (`render` + `flagged_map`).
+  Delivers the **one-command end-to-end** (detect → reblock → render + city map) + its README recipe.
 - **F4 — Compare aggregate + sweep.** The §2 **emitter registry** + §3/§4 `reblock.compare` +
   scorecard emitter + L1 in-process reuse (§6). The topology-vs-peel head-to-head.
 
