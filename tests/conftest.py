@@ -15,6 +15,10 @@ This matters because `joblib.Memory.__init__` eagerly creates its directory
 directory creation against the real cache dir; only an import-time env
 override prevents it.
 
+We set it UNCONDITIONALLY (not `setdefault`): the test suite must always be
+hermetic, even if a developer/CI has exported REBLOCK_CACHE_DIR at a persistent
+scratch cache for normal use -- tests must never read or write that.
+
 tests/test_run.py also shells out to `python -m reblock.run` via subprocess:
 that child process inherits our environment (it's launched without an
 explicit `env=` override), so it too binds to this tmp dir when it freshly
@@ -32,7 +36,7 @@ from __future__ import annotations
 import os
 import tempfile
 
-os.environ.setdefault("REBLOCK_CACHE_DIR", tempfile.mkdtemp(prefix="reblock-test-cache-"))
+os.environ["REBLOCK_CACHE_DIR"] = tempfile.mkdtemp(prefix="reblock-test-cache-")
 
 from collections.abc import Iterator  # noqa: E402
 
