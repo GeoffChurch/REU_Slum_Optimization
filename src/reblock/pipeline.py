@@ -6,11 +6,15 @@ splits "how many" from "which", each picked block goes through reblock_block
 """
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from itertools import islice
 
 from reblock.contracts import Block, Eval, Method, Result, Screen, Source
 from reblock.derivations import propose
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -68,8 +72,42 @@ def run(spec: PipelineSpec) -> RunOutput:
         # Protocol (ShapefileSource has none); the assignment is guarded by
         # `picked is not None`, so it is only reached for kblock-backed runs.
         spec.source.block_ids = picked  # type: ignore[attr-defined]
-        blocks = spec.source.region().blocks
+        blocks = list(spec.source.region().blocks)
     else:
-        blocks = islice(spec.source.region().blocks, spec.max_blocks)   # ALL -> islice
-    results = [reblock_block(block, spec.method, spec.evals) for block in blocks]
+        blocks = list(islice(spec.source.region().blocks, spec.max_blocks))   # ALL -> islice
+    results = _reblock_all(blocks, spec.method, spec.evals)
     return RunOutput(selection=selection, results=results)
+
+
+def _estimate_seconds(done: list[tuple[int, float]], n_parcels: int) -> float | None:
+    """Rough per-parcel time estimate from the blocks finished so far (None until the
+    first completes). Self-calibrating and method-agnostic; assumes reblock time scales
+    ~linearly with parcel count -- a first approximation (topology may be super-linear),
+    so it is a guide, not a guarantee."""
+    total_parcels = sum(p for p, _ in done)
+    if total_parcels == 0:
+        return None
+    rate = sum(t for _, t in done) / total_parcels
+    return rate * n_parcels
+
+
+def _reblock_all(blocks: list[Block], method: Method, evals: list[Eval]) -> list[Result]:
+    """Reblock each block, logging live per-block progress -- id, parcel count, a running
+    time estimate, and elapsed. The reblock phase is the slow step for method=topology, so
+    this turns a silent wait into visible progress (one pair of lines per reblocked block;
+    `blocks` is only the sampled max_blocks, so the volume stays bounded)."""
+    n = len(blocks)
+    results: list[Result] = []
+    done: list[tuple[int, float]] = []   # (n_parcels, seconds) per finished block
+    for i, block in enumerate(blocks, 1):
+        n_parcels = len(block.parcels)
+        est = _estimate_seconds(done, n_parcels)
+        log.info("reblocking (%d/%d) %s: %d parcels%s", i, n, block.block_id, n_parcels,
+                 "" if est is None else f" (~{est:.0f}s est)")
+        t0 = time.perf_counter()
+        result = reblock_block(block, method, evals)
+        dt = time.perf_counter() - t0
+        done.append((n_parcels, dt))
+        results.append(result)
+        log.info("  reblocked %s in %.1fs", block.block_id, dt)
+    return results
