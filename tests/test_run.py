@@ -205,6 +205,26 @@ def test_flagged_map_none_when_no_ids(tmp_path: Path) -> None:
     assert flagged_map(blocks, [], tmp_path) is None
 
 
+def test_flagged_map_all_flagged_does_not_crash(tmp_path: Path) -> None:
+    # Every block flagged -> the unflagged subset is empty; must still render.
+    from reblock.emit import flagged_map
+    blocks_path = str(Path(__file__).resolve().parents[0] / "data" / "kblock"
+                      / "blocks_capetown_sample.parquet")
+    all_ids = [str(bid) for bid in
+               gpd.read_parquet(blocks_path, columns=["block_id", "geometry"])["block_id"]]
+    out = flagged_map(blocks_path, all_ids, tmp_path)
+    assert out is not None and out.exists() and out.stat().st_size > 0
+
+
+def test_flagged_map_no_matching_ids_does_not_crash(tmp_path: Path) -> None:
+    # Non-empty ids that match no block -> the flagged subset is empty; must still render.
+    from reblock.emit import flagged_map
+    blocks_path = str(Path(__file__).resolve().parents[0] / "data" / "kblock"
+                      / "blocks_capetown_sample.parquet")
+    out = flagged_map(blocks_path, ["NOT-A-REAL-ID"], tmp_path)
+    assert out is not None and out.exists() and out.stat().st_size > 0
+
+
 def test_cli_screen_stage_end_to_end(tmp_path: Path) -> None:
     # One command: screen (dense_compact) -> reblock (peel) -> render + city map.
     result = subprocess.run(

@@ -59,9 +59,13 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
     blocks["flagged"] = blocks["block_id"].isin(set(flagged_ids))
     out_dir.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 10))
-    blocks[~blocks["flagged"]].plot(ax=ax, color="#e8e8e8", edgecolor="none")
-    blocks[blocks["flagged"]].plot(ax=ax, color="#c0392b", edgecolor="none")
-    ax.set_title(f"{len(flagged_ids)} flagged blocks")
+    unflagged = blocks[~blocks["flagged"]]
+    flagged = blocks[blocks["flagged"]]
+    if not unflagged.empty:
+        unflagged.plot(ax=ax, color="#e8e8e8", edgecolor="none")
+    if not flagged.empty:
+        flagged.plot(ax=ax, color="#c0392b", edgecolor="none")
+    ax.set_title(f"{int(blocks['flagged'].sum())} flagged blocks")
     ax.set_axis_off()
     out_path = out_dir / "flagged_map.png"
     save_render(fig, out_path)
