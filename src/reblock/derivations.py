@@ -2,8 +2,8 @@
 (reblock.derive_graph) on the L2 identities. Before/after are SEPARATE functions
 so their distinct fn.identity gives distinct cache keys -- no roads_key. The
 algorithm bodies live in reblock.derive.* / reblock.data.kblock and are reused
-verbatim; this module only adds the derive() memoization layer (superseding the
-four reblock.cache wrappers, deleted in a later layer).
+verbatim; this module only adds the derive() memoization layer (which replaced
+F2's four per-function cache wrappers).
 """
 from __future__ import annotations
 
