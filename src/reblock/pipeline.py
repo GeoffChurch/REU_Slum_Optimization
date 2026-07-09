@@ -56,8 +56,10 @@ def sample(selection: list[str] | None, n: int) -> list[str] | None:
 def run(spec: PipelineSpec) -> RunOutput:
     """The dataflow pipeline: screen the source for the selection, sample it, build
     only the sample, reblock each -> RunOutput(selection, results). The full
-    selection is retained (results cover only the sampled max_blocks). Pure: reads
-    its inputs and returns a value; writes nothing (emitters, at the edge, write)."""
+    selection is retained (results cover only the sampled max_blocks). Writes no
+    files (emitters, at the edge, do the writing) and touches no config or global
+    state; the sole mutation is the kblock block_ids filter below (an idempotent
+    attr on the caller's Source object, not part of the Source contract)."""
     selection = spec.screen.select(spec.source)
     picked = sample(selection, spec.max_blocks)
     if picked is not None:
