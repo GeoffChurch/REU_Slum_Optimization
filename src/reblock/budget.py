@@ -78,15 +78,27 @@ def cost_benefit_curve(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
     benefit = fraction of Sigma depth^2 removed vs the no-roads baseline. Adjacency is built
     once and reused across prefixes."""
     adj = parcel_adjacency(list(block.parcels.geometry), tol)
-    base = access_burden(parcel_access_layers(block, None, tol=tol, adj=adj))
     cost, benefit = [0.0], [0.0]
-    if len(roads) == 0 or base == 0.0 or block.boundary.area == 0.0:
+    if len(roads) == 0 or block.boundary.area == 0.0:
+        return Curve(cost, benefit)
+    # A stable per-block depth cap for UNREACHED parcels so burden is comparable across
+    # prefixes. Without it the placeholder is max(reached)+1 -- which MOVES per prefix, so
+    # bridging a deep disconnected pocket can make burden jump UP (benefit dips). N+1 exceeds
+    # any reachable depth (a BFS peel visits each parcel at most once, so depth <= N), which
+    # guarantees each parcel's effective depth is non-increasing as roads are added (monotonic)
+    # and encodes "no access is worse than any depth".
+    cap = len(block.parcels) + 1
+
+    def _burden(rd: GeoDataFrame | None) -> float:
+        return access_burden(parcel_access_layers(block, rd, tol=tol, adj=adj, unreached_depth=cap))
+
+    base = _burden(None)
+    if base == 0.0:
         return Curve(cost, benefit)
     drain = road_drainage(block, roads, tol=tol)
     order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
     ordered = roads.iloc[order].reset_index(drop=True)
-    lengths = ordered.geometry.length.to_numpy()
-    cum = lengths.cumsum()
+    cum = ordered.geometry.length.to_numpy().cumsum()
     total = float(cum[-1])
     area_ha = block.boundary.area / 1e4
     seen = 0
@@ -95,8 +107,7 @@ def cost_benefit_curve(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
         if m <= seen:
             continue
         seen = m
-        depths = parcel_access_layers(block, ordered.iloc[:m], tol=tol, adj=adj)
-        b = 1.0 - access_burden(depths) / base
+        b = 1.0 - _burden(ordered.iloc[:m]) / base
         cost.append(float(cum[m - 1]) / area_ha)
         benefit.append(b)
     return Curve(cost, benefit)

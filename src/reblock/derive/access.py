@@ -81,7 +81,7 @@ def street_connectivity(
 
 def parcel_access_layers(
     block: Block, roads: GeoDataFrame | None, *, tol: float = STREET_TOL,
-    adj: list[set[int]] | None = None,
+    adj: list[set[int]] | None = None, unreached_depth: int | None = None,
 ) -> pd.Series:
     """BFS-peel access depth per parcel: 1 = touches a street, L = L-1 parcels deep.
 
@@ -121,7 +121,10 @@ def parcel_access_layers(
 
     unreached = [i for i, depth in enumerate(layer) if depth == 0]
     if unreached:
-        far = max(layer) + 1
+        # `unreached_depth` pins unreached parcels to a caller-supplied, prefix-stable
+        # value (the budget curve needs this for cross-prefix comparability); default is
+        # the historical "one past the deepest reached layer".
+        far = unreached_depth if unreached_depth is not None else max(layer) + 1
         for i in unreached:
             layer[i] = far
 

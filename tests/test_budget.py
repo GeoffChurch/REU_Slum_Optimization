@@ -56,3 +56,33 @@ def test_auc_interpolates_a_cap_straddling_segment() -> None:
     # not drop the whole segment (regression: dropped it -> 0.30 instead of 0.5125).
     c = Curve(cost=[0.0, 3.0, 5.0], benefit=[0.0, 0.8, 1.0])
     assert abs(auc(c, cost_cap=4.0) - 0.5125) < 1e-6
+
+
+def test_cost_benefit_curve_monotonic_with_disconnected_pocket() -> None:
+    # One street-fronting parcel T + a chain P0..P3 across a GAP from T (adjacency-disconnected),
+    # reachable only via a road to P0 -- then P1..P3 chain DEEP via parcel adjacency. Bridging the
+    # pocket makes those deep parcels exceed the moving unreached-placeholder, so benefit would DIP
+    # without a stable per-block depth cap; with the cap the curve is monotonic.
+    from shapely.geometry import LineString
+
+    t = Polygon([(0, 0), (2, 0), (2, 1), (0, 1)])
+    pocket = [Polygon([(0, 3 + y), (2, 3 + y), (2, 4 + y), (0, 4 + y)]) for y in range(4)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(5))}, geometry=[t, *pocket], crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (2, 0)])], crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    block = Block(block_id="pk", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    roads = gpd.GeoDataFrame(geometry=[
+        LineString([(1, 0), (1, 3)]),    # bridge street -> P0 (P0=depth1; P1..P3 chain deep)
+        LineString([(1, 3), (1, 4)]),    # a leaf inside the pocket
+    ], crs=UTM)
+    curve = cost_benefit_curve(block, roads, n_points=6)
+    assert curve.benefit == sorted(curve.benefit)    # monotonic (would dip without the cap)
+    assert curve.benefit[-1] > 0.0
+
+
+def test_road_drainage_floating_roads_get_zero() -> None:
+    # roads with no street-connected component grant no access -> all-zero drainage.
+    from shapely.geometry import LineString
+    block = _grid_block(3)
+    floating = gpd.GeoDataFrame(geometry=[LineString([(1.2, 1.2), (1.8, 1.8)])], crs=UTM)
+    assert road_drainage(block, floating) == [0]
