@@ -52,10 +52,49 @@ def test_select_two_tier_drops_shallow(tmp_path: Path) -> None:
 
 
 def test_select_flags_flagship_on_real_fixture() -> None:
-    # density_min=35.0 is the smallest round threshold that clears the flagship's real
-    # column-based density (~35.6/ha over the free building_count/block_area_m2 columns;
-    # see git history / PROVENANCE for why it is not the ~108/ha spatial-join figure).
+    # density_min=35.0 clears the flagship's real column-based density (~35.6/ha over
+    # the free building_count/block_area_m2 columns). Returned order is now max-access-
+    # depth descending (not alphabetical), so assert membership, not sort.
     s = DenseCompactScreen(density_min=35.0, mean_depth_min=1.3)
     src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown")
     ids = s.select(src)
-    assert ids is not None and "ZAF.9.3.1_1_44882" in ids and ids == sorted(ids)
+    assert ids is not None and "ZAF.9.3.1_1_44882" in ids
+
+
+def test_max_depth_min_gate_drops_blocks_without_a_deep_parcel(tmp_path: Path) -> None:
+    bp, dp = _write_synth(tmp_path)
+    # A: max-depth 3; B: max-depth 1. mean_depth_min=1.0 passes BOTH on the mean gate,
+    # so max_depth_min=3 is the deciding gate -> only A (has a parcel at depth 3) survives.
+    s = DenseCompactScreen(density_min=50.0, mean_depth_min=1.0,
+                           max_depth_min=3.0, min_buildings=10)
+    src = KblockSource(bp, dp, region_id="test", min_buildings=10)
+    assert s.select(src) == ["A"]
+
+
+def _write_sort_fixture(tmp: Path) -> tuple[str, str]:
+    # "aaa": shallow — one row of buildings all fronting the block edge (max-depth 1).
+    # "zzz": deep — a 5x5 grid in a compact block (ring depths 1/2/3 -> max-depth 3).
+    shallow = box(EX, NY, EX + 30, NY + 2)
+    deep = box(EX + 60, NY, EX + 110, NY + 50)
+    blocks = gpd.GeoDataFrame({
+        "block_id": ["aaa", "zzz"], "k_complexity": [2.0, 3.0],
+        "building_count": [15, 25], "block_area_m2": [60.0, 2500.0],
+    }, geometry=[shallow, deep], crs=UTM)
+    pts = [Point(EX + 1 + 2 * i, NY + row)                            # aaa: 2 rows
+           for i in range(15) for row in (0.5, 1.5)]
+    pts += [Point(EX + 65 + 10 * i, NY + 5 + 10 * j)                  # zzz: 5x5
+            for i in range(5) for j in range(5)]
+    bld = gpd.GeoDataFrame(geometry=pts, crs=UTM)
+    bp, dp = tmp / "b.parquet", tmp / "d.parquet"
+    blocks.to_parquet(bp)
+    bld.to_parquet(dp)
+    return str(bp), str(dp)
+
+
+def test_select_ranks_by_max_depth_descending(tmp_path: Path) -> None:
+    bp, dp = _write_sort_fixture(tmp_path)
+    s = DenseCompactScreen(density_min=50.0, mean_depth_min=1.0, min_buildings=10)
+    src = KblockSource(bp, dp, region_id="test", min_buildings=10)
+    # deep "zzz" (max-depth 3) outranks shallow "aaa" (max-depth 1) -> reverse-alphabetical,
+    # which alphabetical sorted() could never produce -> proves the severity sort.
+    assert s.select(src) == ["zzz", "aaa"]

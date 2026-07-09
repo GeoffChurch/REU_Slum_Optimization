@@ -20,9 +20,11 @@ log = logging.getLogger(__name__)
 
 class DenseCompactScreen:
     def __init__(self, *, density_min: float = 30.0, mean_depth_min: float = 1.3,
-                 k_min: float | None = None, min_buildings: int = 10) -> None:
+                 max_depth_min: float | None = None, k_min: float | None = None,
+                 min_buildings: int = 10) -> None:
         self.density_min = density_min
         self.mean_depth_min = mean_depth_min
+        self.max_depth_min = max_depth_min
         self.k_min = k_min
         self.min_buildings = min_buildings
 
@@ -52,8 +54,20 @@ class DenseCompactScreen:
                  len(survivors))
         src = KblockSource(source.blocks_path, source.buildings_path, region_id="screen",
                            min_buildings=self.min_buildings, block_ids=survivors)
-        kept = [blk.block_id for blk in src.region().blocks
-                if float(access_before(blk).mean()) >= self.mean_depth_min]
-        log.info("fine pass: kept %d blocks with mean access-depth >= %.2f",
-                 len(kept), self.mean_depth_min)
-        return sorted(kept)
+        # One access-depth series per block; keep those clearing the mean gate (and the
+        # optional max gate), ranked deepest-parcel-first so a downstream max_blocks picks
+        # the worst-access blocks rather than an alphabetical slice.
+        ranked: list[tuple[float, str]] = []
+        for blk in src.region().blocks:
+            depths = access_before(blk)
+            mean_d, max_d = float(depths.mean()), float(depths.max())
+            if mean_d < self.mean_depth_min:
+                continue
+            if self.max_depth_min is not None and max_d < self.max_depth_min:
+                continue
+            ranked.append((max_d, blk.block_id))
+        ranked.sort(key=lambda r: (-r[0], r[1]))   # max-depth desc; ties by block_id asc
+        log.info("fine pass: kept %d blocks (mean-depth >= %.2f%s), ranked by max access-depth",
+                 len(ranked), self.mean_depth_min,
+                 "" if self.max_depth_min is None else f", max-depth >= {self.max_depth_min:.1f}")
+        return [bid for _, bid in ranked]
