@@ -1,15 +1,28 @@
-"""The dataflow pipeline: run() composes these stages. reblock_block is the
-per-block stage (F4's sweep maps it over blocks); sample splits "how many to
-reblock" from "which blocks are selected"; RunOutput carries the full selection
-out so downstream emitters (the city flagged-map) get all of it, not just the
-sampled results.
+"""The dataflow pipeline core (pure typed composition -- no Hydra, no DictConfig;
+config lives at the edge in reblock.run). PipelineSpec bundles the typed stages;
+run() threads them: screen.select(source) yields the retained selection, sample
+splits "how many" from "which", each picked block goes through reblock_block
+(propose + score). See docs/superpowers/specs/2026-07-08-content-addressed-dataflow-redesign.md.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import islice
 
-from reblock.contracts import Block, Eval, Method, Result
+from reblock.contracts import Block, Eval, Method, Result, Screen, Source
 from reblock.derivations import propose
+
+
+@dataclass(frozen=True)
+class PipelineSpec:
+    """The typed stages of one run, composed at the edge (reblock.run.spec_from_cfg)
+    from Hydra config, or directly in Python. The core pipeline (run) is exactly a
+    function of this value -- it never sees a DictConfig."""
+    source: Source
+    screen: Screen
+    method: Method
+    evals: list[Eval]
+    max_blocks: int = 1
 
 
 @dataclass(frozen=True)
@@ -35,6 +48,25 @@ def sample(selection: list[str] | None, n: int) -> list[str] | None:
     building points for a valid Voronoi cell), it is skipped and the run yields
     **fewer than `n`** results -- there is no silent backfill from later in the
     selection. This is intentional: it builds only what it reblocks (the redesign
-    keeps selection and sampling separate), and the L5 screen feeds pre-verified
+    keeps selection and sampling separate), and the screen feeds pre-verified
     survivors, so the shortfall case does not arise there."""
     return selection[:n] if selection is not None else None
+
+
+def run(spec: PipelineSpec) -> RunOutput:
+    """The dataflow pipeline: screen the source for the selection, sample it, build
+    only the sample, reblock each -> RunOutput(selection, results). The full
+    selection is retained (results cover only the sampled max_blocks). Pure: reads
+    its inputs and returns a value; writes nothing (emitters, at the edge, write)."""
+    selection = spec.screen.select(spec.source)
+    picked = sample(selection, spec.max_blocks)
+    if picked is not None:
+        # block_ids is a kblock-specific mutable filter, not part of the Source
+        # Protocol (ShapefileSource has none); the assignment is guarded by
+        # `picked is not None`, so it is only reached for kblock-backed runs.
+        spec.source.block_ids = picked  # type: ignore[attr-defined]
+        blocks = spec.source.region().blocks
+    else:
+        blocks = islice(spec.source.region().blocks, spec.max_blocks)   # ALL -> islice
+    results = [reblock_block(block, spec.method, spec.evals) for block in blocks]
+    return RunOutput(selection=selection, results=results)

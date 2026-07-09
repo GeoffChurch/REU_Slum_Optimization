@@ -1,5 +1,6 @@
 defaults:
   - data: phule
+  - screen: identity
   - method: topology
   - eval: kcomplexity
   - _self_
