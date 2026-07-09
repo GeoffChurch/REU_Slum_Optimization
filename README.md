@@ -26,37 +26,37 @@ Render a block's access-depth heatmaps (before, and after a road-building method
 by targeting it with `block_ids` — no need to process the whole region:
 
 ```bash
-pixi run python -m reblock.run data=capetown method=peel eval=kcomplexity \
-  "block_ids=[ZAF.9.3.1_1_44882]" render.enabled=true hydra.run.dir=outputs/ct-flagship
+pixi run python -m reblock.run data=capetown method=peel eval=kcomplexity "block_ids=[ZAF.9.3.1_1_44882]" render.enabled=true
 ```
 
-Writes `outputs/ct-flagship/ZAF.9.3.1_1_44882_before.png` and one
-`_<proposal>_after.png`. Swap `data=capetown` → `data=dji`, or `method=peel` →
-`method=topology`. Omit `block_ids` to process the first `max_blocks` blocks instead.
+Writes `ZAF.9.3.1_1_44882_before.png` and one `_<proposal>_after.png` into the Hydra
+run dir (`outputs/<date>/<time>/`). Swap `data=capetown` → `data=dji`, or `method=peel`
+→ `method=topology`. Omit `block_ids` to process the first `max_blocks` blocks instead.
 
 (Quote `"block_ids=[...]"` so the shell doesn't glob the brackets.)
 
 ## Detect → reblock → visualize (one command)
 
-Screen a city for its dense/compact informal blocks, reblock the top survivors, and
-emit both the city flagged-map and per-block before/after heatmaps. This runs on the
-committed 301-block Cape Town sample — no download, ~5 s:
+Screen a city for its dense/compact informal blocks, reblock the worst survivors, and
+emit both the city flagged-map and per-block before/after heatmaps:
 
 ```bash
-pixi run python -m reblock.run data=capetown screen=dense_compact screen.density_min=35 \
-  method=peel eval=kcomplexity render.enabled=true flagged_map.enabled=true \
-  max_blocks=5 hydra.run.dir=outputs/ct-screen
+pixi run python -m reblock.run data=capetown_full screen=dense_compact screen.density_min=35 method=topology eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=5
 ```
 
-Writes into `outputs/ct-screen/`: `flagged_map.png` (the sample, flagged blocks in red
-over grey context), `flagged_blocks.txt` (every flagged id), and `*_before.png` /
-`*_<proposal>_after.png` for each of the `max_blocks` reblocked survivors. Tune the
-gates with `screen.density_min=50 screen.mean_depth_min=1.5`.
+The first run downloads + caches the full Cape Town metro under `~/.cache/reblock`
+(nothing committed); later runs are instant. The screen pass is quick, but
+`method=topology` builds a full road network per block and takes a few minutes each, so
+`max_blocks=5` runs several minutes — swap `method=peel` for a fast geometric pass
+(~seconds). Outputs land in the Hydra run dir (`outputs/<date>/<time>/`):
+`flagged_map.png` (whole metro, flagged blocks in red over grey context),
+`flagged_blocks.txt` (every flagged id, worst-access first), and `*_before.png` /
+`*_<proposal>_after.png` for each reblocked block.
 
-For the **full Cape Town metro** — thousands of contiguous blocks, a dense city map —
-swap `data=capetown` → `data=capetown_full`; the first run downloads + caches the real
-data under `~/.cache/reblock` (nothing committed), later runs are instant. (The sample
-above is geographically sparse, so its map reads as scattered blocks; the full metro
-fills in.)
+Tune the gates: `screen.density_min=50 screen.mean_depth_min=1.5 screen.max_depth_min=4`
+(keep only blocks with a parcel at least that deep). Survivors are ranked by max
+access-depth, so `max_blocks` takes the deepest/worst blocks.
 
-The default `screen=identity` is a passthrough — a plain reblock with no screening.
+For a quick, no-download try, swap `data=capetown_full` → `data=capetown` (the committed
+301-block sample; its map is geographically sparse — the full metro fills in). The
+default `screen=identity` is a passthrough — a plain reblock with no screening.
