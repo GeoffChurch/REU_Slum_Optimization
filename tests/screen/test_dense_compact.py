@@ -4,6 +4,7 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import Point, box
 
+from reblock.data.kblock import KblockSource
 from reblock.screen.dense_compact import DenseCompactScreen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,8 +37,8 @@ def _write_synth(tmp: Path) -> tuple[str, str]:
 
 
 def test_cheap_survivors_gate(tmp_path: Path) -> None:
-    bp, dp = _write_synth(tmp_path)
-    s = DenseCompactScreen(bp, dp, density_min=50.0, min_buildings=10)
+    bp, _ = _write_synth(tmp_path)
+    s = DenseCompactScreen(density_min=50.0, min_buildings=10)
     # density/ha: A=25/(2500/1e4)=100, B=30/(60/1e4)=5000, C=2/(900/1e4)=22
     assert s._cheap_survivors(gpd.read_parquet(bp)) == ["A", "B"]   # C (22) fails; sorted
 
@@ -45,26 +46,16 @@ def test_cheap_survivors_gate(tmp_path: Path) -> None:
 def test_select_two_tier_drops_shallow(tmp_path: Path) -> None:
     bp, dp = _write_synth(tmp_path)
     # cheap keeps A,B; fine gate mean_depth_min=1.2 keeps A (deep, ~1.4), drops B (strip, ~1.0)
-    s = DenseCompactScreen(bp, dp, density_min=50.0, mean_depth_min=1.2, min_buildings=10)
-    assert s.select() == ["A"]
+    s = DenseCompactScreen(density_min=50.0, mean_depth_min=1.2, min_buildings=10)
+    src = KblockSource(bp, dp, region_id="test", min_buildings=10)
+    assert s.select(src) == ["A"]
 
 
 def test_select_flags_flagship_on_real_fixture() -> None:
-    # Deviation from the task brief, documented in task-2-report.md: the brief assumed
-    # density_min=80 would keep only the very densest blocks while still including the
-    # pinned flagship (comment: "the flagship's density is 108/ha"). That 108/ha figure
-    # turns out to be the flagship's density measured via a live spatial join against
-    # `buildings_capetown_sample.parquet` (713 pts / 6.61 ha). `_cheap_survivors` never
-    # does that join -- by design, it is the *cheap* gate over the free `building_count`/
-    # `block_area_m2` columns Task 1 committed (sourced from the raw upstream kblock ZAF
-    # dataset, a different building census than our Open-Buildings-derived fixture).
-    # Measured directly from those committed columns, the flagship's density is ~35.6/ha
-    # (342 / (96001.96/1e4)) -- below this fixture's own median density (~77/ha) -- so
-    # density_min=80 drops it before it ever reaches the fine gate. density_min=35.0 is
-    # the smallest round threshold that clears the flagship's real column-based density
-    # with margin; the resulting cheap-survivor set is larger than "only the densest"
-    # (255/301 blocks) but the fine (real KblockSource + mean-depth) pass still completes
-    # in ~4s, well within "may take a few seconds."
-    s = DenseCompactScreen(CT_BLOCKS, CT_BLD, density_min=35.0, mean_depth_min=1.3)
-    ids = s.select()
-    assert "ZAF.9.3.1_1_44882" in ids and ids == sorted(ids)   # the deep flagship survives
+    # density_min=35.0 is the smallest round threshold that clears the flagship's real
+    # column-based density (~35.6/ha over the free building_count/block_area_m2 columns;
+    # see git history / PROVENANCE for why it is not the ~108/ha spatial-join figure).
+    s = DenseCompactScreen(density_min=35.0, mean_depth_min=1.3)
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown")
+    ids = s.select(src)
+    assert ids is not None and "ZAF.9.3.1_1_44882" in ids and ids == sorted(ids)

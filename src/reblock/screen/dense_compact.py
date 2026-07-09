@@ -1,27 +1,26 @@
 """DenseCompactScreen: flag dense/compact informal blocks. Cheap pass = vectorized
 density (+ optional k) gate over free kblock columns; fine pass = build only survivors
-(reusing KblockSource) and keep those whose mean parcel access-depth clears mean_depth_min.
+(reusing the source's KblockSource paths) and keep those whose mean parcel access-depth
+clears mean_depth_min. The fine-pass depth goes through reblock.derivations.access_before
+(a derive() call), so building a survivor here is an L1 hit when run() later scores it.
 """
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
 
+from reblock.contracts import Source
 from reblock.data.kblock import KblockSource
-from reblock.derive.access import parcel_access_layers
+from reblock.derivations import access_before
 
 log = logging.getLogger(__name__)
 
 
 class DenseCompactScreen:
-    def __init__(self, blocks_path: str | Path, buildings_path: str | Path, *,
-                 density_min: float = 30.0, mean_depth_min: float = 1.3,
+    def __init__(self, *, density_min: float = 30.0, mean_depth_min: float = 1.3,
                  k_min: float | None = None, min_buildings: int = 10) -> None:
-        self.blocks_path = Path(blocks_path)
-        self.buildings_path = Path(buildings_path)
         self.density_min = density_min
         self.mean_depth_min = mean_depth_min
         self.k_min = k_min
@@ -35,9 +34,13 @@ class DenseCompactScreen:
             mask = mask & (blocks["k_complexity"] >= self.k_min)
         return sorted(bid[mask.to_numpy()])
 
-    def select(self) -> list[str]:
+    def select(self, source: Source) -> list[str]:
+        if not isinstance(source, KblockSource):
+            raise TypeError(
+                f"DenseCompactScreen needs a KblockSource (kblock columns); "
+                f"got {type(source).__name__}")
         blocks = gpd.read_parquet(
-            self.blocks_path,
+            source.blocks_path,
             columns=["block_id", "k_complexity", "building_count", "block_area_m2", "geometry"])
         survivors = self._cheap_survivors(blocks)
         log.info("cheap pass: %d/%d blocks pass density_min=%.1f%s",
@@ -47,10 +50,10 @@ class DenseCompactScreen:
             return []
         log.info("fine pass: building %d survivor blocks (Voronoi + peel) -- the slow step",
                  len(survivors))
-        src = KblockSource(self.blocks_path, self.buildings_path, region_id="screen",
-                            min_buildings=self.min_buildings, block_ids=survivors)
+        src = KblockSource(source.blocks_path, source.buildings_path, region_id="screen",
+                           min_buildings=self.min_buildings, block_ids=survivors)
         kept = [blk.block_id for blk in src.region().blocks
-                if float(parcel_access_layers(blk, None).mean()) >= self.mean_depth_min]
+                if float(access_before(blk).mean()) >= self.mean_depth_min]
         log.info("fine pass: kept %d blocks with mean access-depth >= %.2f",
                  len(kept), self.mean_depth_min)
         return sorted(kept)

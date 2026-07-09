@@ -1,6 +1,0 @@
-defaults:
-  - screen: dense_compact
-  - _self_
-
-# Which city's data to screen (downloaded on demand + cached; see reblock.data.provision).
-city: capetown

@@ -1,4 +1,5 @@
-# A Screen (selectable like conf/method, conf/eval). Paths are injected by the reblock.screen app.
+# A Screen (selectable like conf/method, conf/eval). Reads paths from the run's
+# Source (a KblockSource) at select() time; the thresholds below are the gates.
 _target_: reblock.screen.dense_compact.DenseCompactScreen
 density_min: 30.0
 mean_depth_min: 1.3

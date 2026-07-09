@@ -1,0 +1,5 @@
+# The passthrough Screen (run()'s default): selects the configured block_ids (or
+# all blocks). block_ids is interpolated from the top-level ${block_ids}, so the
+# `block_ids=[...]` CLI override flows through the identity screen unchanged.
+_target_: reblock.screen.identity.IdentityScreen
+block_ids: ${block_ids}
