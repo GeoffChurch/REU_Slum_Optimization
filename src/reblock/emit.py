@@ -81,33 +81,46 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
     return out_path
 
 
+_METRIC_YLABELS = {
+    "access": "fraction of access-burden removed",
+    "efficiency": "network efficiency E",
+    "directness": "directness (1/circuity)",
+}
+
+
 def compare_report(results: list[MethodCurve], out_dir: Path) -> None:
-    """Aggregate AUC table (mean efficiency per method) + overlaid cost-benefit curves
-    per block. `results` is the flat (method x block) list from reblock.compare."""
+    """Per metric (access, efficiency, directness): an aggregate AUC table (mean AUC per
+    method) + overlaid cost-benefit curves per block. `results` is the flat
+    (method x block x metric) list from reblock.compare."""
     import csv
     from statistics import mean
     out_dir.mkdir(parents=True, exist_ok=True)
-    by_method: dict[str, list[float]] = {}
-    by_block: dict[str, list[MethodCurve]] = {}
+    by_metric: dict[str, list[MethodCurve]] = {}
     for r in results:
-        by_method.setdefault(r.method, []).append(r.auc)
-        by_block.setdefault(r.block_id, []).append(r)
-    with (out_dir / "auc_table.csv").open("w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["method", "mean_auc", "n_blocks"])
-        for m, aucs in sorted(by_method.items(), key=lambda kv: -mean(kv[1])):
-            w.writerow([m, f"{mean(aucs):.4f}", len(aucs)])
-    for block_id, curves in by_block.items():
-        fig, ax = plt.subplots(figsize=(7, 5))
-        for mc in curves:
-            ax.plot(mc.curve.cost, mc.curve.benefit, marker="o",
-                    label=f"{mc.method} (AUC {mc.auc:.2f})")
-        ax.set_xlabel("road density (m/ha)")
-        ax.set_ylabel("fraction of access-burden removed")
-        ax.set_title(f"cost-benefit: {block_id}")
-        ax.legend()
-        save_render(fig, out_dir / f"curve_{block_id}.png")
-        plt.close(fig)
+        by_metric.setdefault(r.metric, []).append(r)
+    for metric, metric_results in by_metric.items():
+        by_method: dict[str, list[float]] = {}
+        by_block: dict[str, list[MethodCurve]] = {}
+        for r in metric_results:
+            by_method.setdefault(r.method, []).append(r.auc)
+            by_block.setdefault(r.block_id, []).append(r)
+        with (out_dir / f"auc_table_{metric}.csv").open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["method", "mean_auc", "n_blocks"])
+            for m, aucs in sorted(by_method.items(), key=lambda kv: -mean(kv[1])):
+                w.writerow([m, f"{mean(aucs):.4f}", len(aucs)])
+        ylabel = _METRIC_YLABELS[metric]
+        for block_id, curves in by_block.items():
+            fig, ax = plt.subplots(figsize=(7, 5))
+            for mc in curves:
+                ax.plot(mc.curve.cost, mc.curve.benefit, marker="o",
+                        label=f"{mc.method} (AUC {mc.auc:.2f})")
+            ax.set_xlabel("road density (m/ha)")
+            ax.set_ylabel(ylabel)
+            ax.set_title(f"cost-benefit ({metric}): {block_id}")
+            ax.legend()
+            save_render(fig, out_dir / f"curve_{metric}_{block_id}.png")
+            plt.close(fig)
 
 
 def _render_block_group(group: list[Result], out_dir: Path) -> None:

@@ -14,7 +14,15 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from reblock.budget import Curve, auc, cost_benefit_curve
+from reblock.budget import (
+    BenefitFactory,
+    Curve,
+    access_benefit,
+    auc,
+    cost_benefit_curve,
+    directness_benefit,
+    efficiency_benefit,
+)
 from reblock.contracts import Method, Screen, Source
 from reblock.derivations import propose
 from reblock.emit import compare_report as compare_report
@@ -22,11 +30,20 @@ from reblock.pipeline import select_blocks
 
 log = logging.getLogger(__name__)
 
+# The three lenses every method is graded on: access (burden removed), network-efficiency
+# (E, mean 1/distance), and directness (mean euclid/distance, i.e. 1/circuity).
+METRICS: dict[str, BenefitFactory] = {
+    "access": access_benefit,
+    "efficiency": efficiency_benefit,
+    "directness": directness_benefit,
+}
+
 
 @dataclass(frozen=True)
 class MethodCurve:
     method: str
     block_id: str
+    metric: str
     curve: Curve
     auc: float
 
@@ -38,19 +55,24 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
     methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in names]
     _, blocks = select_blocks(source, screen, cfg.max_blocks)
 
-    # one curve per (block, method); a per-block common cost cap = the max full road density.
-    raw: list[tuple[str, str, Curve]] = []
+    # one curve per (block, method, metric); a per-(block, metric) common cost cap = the max
+    # full road density (the cost axis is metric-independent, so this cap is the same across
+    # metrics for a given block -- grouping by (block_id, metric) is still the clean structure).
+    raw: list[tuple[str, str, str, Curve]] = []
     for block in blocks:
         for name, method in zip(names, methods, strict=True):
             # every Method here always populates roads (never a None-roads Proposal).
             roads = cast(GeoDataFrame, propose(method, block).roads)
-            raw.append((name, block.block_id, cost_benefit_curve(block, roads)))
+            for metric, benefit_fn in METRICS.items():
+                curve = cost_benefit_curve(block, roads, benefit_fn=benefit_fn)
+                raw.append((name, block.block_id, metric, curve))
     results: list[MethodCurve] = []
-    for block_id in {b for _, b, _ in raw}:
-        block_curves = [(m, c) for m, b, c in raw if b == block_id]
-        cap = max((c.cost[-1] for _, c in block_curves if c.cost), default=0.0)
-        for m, c in block_curves:
-            results.append(MethodCurve(m, block_id, c, auc(c, cap)))
+    groups = {(b, metric) for _, b, metric, _ in raw}
+    for block_id, metric in groups:
+        group = [(m, c) for m, b, met, c in raw if b == block_id and met == metric]
+        cap = max((c.cost[-1] for _, c in group if c.cost), default=0.0)
+        for m, c in group:
+            results.append(MethodCurve(m, block_id, metric, c, auc(c, cap)))
     return results
 
 
@@ -59,8 +81,8 @@ def main(cfg: DictConfig) -> None:
     results = compare(cfg)
     out_dir = Path(HydraConfig.get().runtime.output_dir)
     compare_report(results, out_dir)
-    for r in sorted(results, key=lambda r: -r.auc):
-        log.info("%s %s AUC=%.3f", r.block_id, r.method, r.auc)
+    for r in sorted(results, key=lambda r: (r.metric, -r.auc)):
+        log.info("%s %s %s AUC=%.3f", r.metric, r.block_id, r.method, r.auc)
 
 
 if __name__ == "__main__":
