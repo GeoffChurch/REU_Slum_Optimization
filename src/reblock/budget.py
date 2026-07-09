@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeVar, cast
 
 import networkx as nx
 import pandas as pd
@@ -229,18 +229,20 @@ class Curve:
     benefit: list[float]  # fraction of Sigma depth^2 removed, in [0, 1]
 
 
-def cost_benefit_curve(block: Block, roads: GeoDataFrame, *,
-                       benefit_fn: BenefitFactory = access_benefit,
-                       n_points: int = 20, tol: float = STREET_TOL) -> Curve:
-    """Order roads by drainage descending, then at n_points cumulative-length budgets score
-    benefit_fn's benefit vs the no-roads baseline. `benefit_fn` is a factory:
-    (block, roads_full) -> f(roads_prefix), given the FULL road set so it can freeze any
-    graph/entry state against it (see efficiency_benefit/directness_benefit); it is then
-    called with growing prefixes of `roads` (starting with the empty prefix as baseline)."""
-    value = benefit_fn(block, roads, tol=tol)
-    cost, benefit = [0.0], [value(cast(GeoDataFrame, roads.iloc[:0]))]
+V = TypeVar("V")
+
+
+def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | None], V],
+           n_points: int, tol: float) -> tuple[list[float], list[V]]:
+    """Drainage-ordered cumulative-budget sweep: returns (costs m/ha, [value(prefix)]).
+    Order roads by drainage descending, then at n_points cumulative-length budgets evaluate
+    `value` on the empty-prefix baseline and each growing prefix (skipping budgets that add no
+    new road). `value` maps a road prefix -> any V (a float for a single metric, a tuple for
+    several -- run the whole sweep ONCE for a batched multi-metric value)."""
+    costs: list[float] = [0.0]
+    vals: list[V] = [value(cast(GeoDataFrame, roads.iloc[:0]))]
     if len(roads) == 0 or block.boundary.area == 0.0:
-        return Curve(cost, benefit)
+        return costs, vals
     drain = road_drainage(block, roads, tol=tol)
     order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
     ordered = roads.iloc[order].reset_index(drop=True)
@@ -252,9 +254,32 @@ def cost_benefit_curve(block: Block, roads: GeoDataFrame, *,
         if m <= seen:
             continue
         seen = m
-        cost.append(float(cum[m - 1]) / area_ha)
-        benefit.append(value(ordered.iloc[:m]))
-    return Curve(cost, benefit)
+        costs.append(float(cum[m - 1]) / area_ha)
+        vals.append(value(ordered.iloc[:m]))
+    return costs, vals
+
+
+def cost_benefit_curve(block: Block, roads: GeoDataFrame, *,
+                       benefit_fn: BenefitFactory = access_benefit,
+                       n_points: int = 20, tol: float = STREET_TOL) -> Curve:
+    """Order roads by drainage descending, then at n_points cumulative-length budgets score
+    benefit_fn's benefit vs the no-roads baseline. `benefit_fn` is a factory:
+    (block, roads_full) -> f(roads_prefix), given the FULL road set so it can freeze any
+    graph/entry state against it (see efficiency_benefit/directness_benefit); it is then
+    called with growing prefixes of `roads` (starting with the empty prefix as baseline)."""
+    costs, benefit = _sweep(block, roads, benefit_fn(block, roads, tol=tol), n_points, tol)
+    return Curve(costs, benefit)
+
+
+def efficiency_directness_curves(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
+                                 tol: float = STREET_TOL) -> tuple[Curve, Curve]:
+    """ONE sampled shortest-path sweep yielding both E and directness curves. The efficiency
+    factory returns (E, directness) per prefix, so a single `_sweep` yields both -- avoids the
+    doubled ~n_points x K Dijkstra pass of scoring efficiency_benefit and directness_benefit
+    separately."""
+    f = _efficiency_factory(block, roads, tol)          # prefix -> (E, directness)
+    costs, pairs = _sweep(block, roads, f, n_points, tol)
+    return Curve(costs, [p[0] for p in pairs]), Curve(costs, [p[1] for p in pairs])
 
 
 def auc(curve: Curve, cost_cap: float) -> float:

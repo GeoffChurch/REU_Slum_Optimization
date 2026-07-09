@@ -1,6 +1,11 @@
 """MeshReblocker: the dijkstra forest plus crossing roads. Closes boundary-graph loops in
-descending shortcut-ratio order (forest-path-distance / edge-length -- a one-BFS proxy for
-circuity reduction), so the network gains through-roads and redundancy the tree lacks."""
+descending shortcut-ratio order (current-network detour / edge-length -- a proxy for circuity
+reduction), so the network gains through-roads and redundancy the tree lacks. The detour is
+measured on the forest AUGMENTED with the street path, so a candidate whose endpoints lie in
+different forest subtrees (the street wraps the perimeter, so the forest fragments into one
+subtree per street-access root) gets its true finite current-network detour (down to root A ->
+along the walkable street -> up to root B) instead of being dropped as unreachable -- those
+cross-tree edges are the highest-value through-roads."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -23,24 +28,31 @@ def _mesh_roads(block: Block) -> gpd.GeoDataFrame:
         frozenset((_rnd(cast("tuple[float, float]", a)), _rnd(cast("tuple[float, float]", b))))
         for line in forest.geometry
         for a, b in zip(list(line.coords), list(line.coords)[1:], strict=False)}
+    # fg: forest (drainage) edges only -- used to test that candidate endpoints are forest nodes.
     fg = nx.Graph()
     for e in forest_edges:
         u, v = tuple(e)
         fg.add_edge(u, v, weight=Point(u).distance(Point(v)))
     street = unary_union(list(block.streets.geometry))
     corridor = street.buffer(STREET_TOL)
+    # ag: forest edges + the street path (boundary-graph edges lying on the street). Detours are
+    # measured on ag so cross-subtree candidates get a large FINITE ratio instead of being dropped.
+    ag = nx.Graph((u, v, d) for u, v, d in fg.edges(data=True))
+    for u, v, w in g.edges(data="weight"):
+        if LineString(sorted((u, v))).within(corridor):
+            ag.add_edge(u, v, weight=w)
     # candidate loops: graph edges NOT in the forest with both endpoints already on the forest
     cands = []
     for u, v, w in g.edges(data="weight"):
-        if frozenset((u, v)) in forest_edges or u not in fg or v not in fg:
+        if frozenset((u, v)) in forest_edges or u not in fg or v not in fg:   # endpoints in forest
             continue
         if LineString(sorted((u, v))).within(corridor):   # coincides with a street: not a new road
             continue
         try:
-            fp = nx.shortest_path_length(fg, u, v, weight="weight")
+            detour = nx.shortest_path_length(ag, u, v, weight="weight")
         except nx.NetworkXNoPath:
             continue
-        cands.append((fp / w, w, frozenset((u, v))))   # (shortcut ratio, len, edge)
+        cands.append((detour / w, w, frozenset((u, v))))   # (shortcut ratio, len, edge)
     cands.sort(key=lambda c: (-c[0], sorted(c[2])))
     loops = [LineString(sorted(e)) for ratio, _w, e in cands if ratio > 1.0]   # a real detour
 

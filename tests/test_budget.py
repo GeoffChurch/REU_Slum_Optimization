@@ -8,6 +8,7 @@ from shapely.geometry import Polygon
 from reblock.budget import Curve, access_burden, auc, cost_benefit_curve, road_drainage
 from reblock.contracts import Block
 from reblock.methods.dijkstra import DijkstraReblocker
+from reblock.methods.mesh import MeshReblocker
 from reblock.methods.peel import PeelReblocker
 
 UTM = CRS.from_epsg(32643)
@@ -118,7 +119,7 @@ def test_efficiency_and_directness_are_monotone_across_the_full_curve() -> None:
     # non-decreasing over every point of the curve, for both methods' road layouts.
     from reblock.budget import directness_benefit, efficiency_benefit
     block = _grid_block(5)
-    for method in (DijkstraReblocker(), PeelReblocker()):
+    for method in (DijkstraReblocker(), PeelReblocker(), MeshReblocker()):
         roads = method.propose(block).roads
         assert roads is not None
         for benefit_fn in (efficiency_benefit, directness_benefit):

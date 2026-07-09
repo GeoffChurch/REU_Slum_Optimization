@@ -15,13 +15,11 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from reblock.budget import (
-    BenefitFactory,
     Curve,
     access_benefit,
     auc,
     cost_benefit_curve,
-    directness_benefit,
-    efficiency_benefit,
+    efficiency_directness_curves,
 )
 from reblock.contracts import Method, Screen, Source
 from reblock.derivations import propose
@@ -32,11 +30,6 @@ log = logging.getLogger(__name__)
 
 # The three lenses every method is graded on: access (burden removed), network-efficiency
 # (E, mean 1/distance), and directness (mean euclid/distance, i.e. 1/circuity).
-METRICS: dict[str, BenefitFactory] = {
-    "access": access_benefit,
-    "efficiency": efficiency_benefit,
-    "directness": directness_benefit,
-}
 
 
 @dataclass(frozen=True)
@@ -63,9 +56,11 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
         for name, method in zip(names, methods, strict=True):
             # every Method here always populates roads (never a None-roads Proposal).
             roads = cast(GeoDataFrame, propose(method, block).roads)
-            for metric, benefit_fn in METRICS.items():
-                curve = cost_benefit_curve(block, roads, benefit_fn=benefit_fn)
-                raw.append((name, block.block_id, metric, curve))
+            access = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
+            eff, direct = efficiency_directness_curves(block, roads)   # one sweep -> both curves
+            raw.append((name, block.block_id, "access", access))
+            raw.append((name, block.block_id, "efficiency", eff))
+            raw.append((name, block.block_id, "directness", direct))
     results: list[MethodCurve] = []
     groups = {(b, metric) for _, b, metric, _ in raw}
     for block_id, metric in groups:

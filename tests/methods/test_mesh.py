@@ -3,6 +3,7 @@ from typing import cast
 import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
+from shapely.ops import unary_union
 
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
@@ -69,11 +70,12 @@ def test_mesh_more_direct_than_the_tree() -> None:
 
 
 def test_mesh_adds_no_street_duplicate_road() -> None:
-    block = _grid_block(5)                             # fully street-bounded: no interior shortcuts
-    tree = DijkstraReblocker().propose(block).roads
+    block = _grid_block(5)
     mesh = MeshReblocker().propose(block).roads
-    assert tree is not None and mesh is not None
-    assert len(mesh) == len(tree)                      # perimeter-street candidates are excluded
+    assert mesh is not None
+    street = unary_union(list(block.streets.geometry))
+    corridor = street.buffer(STREET_TOL)
+    assert not any(g.within(corridor) for g in mesh.geometry)   # never pave over an existing street
 
 
 def test_mesh_identity_and_proposal_metadata() -> None:
