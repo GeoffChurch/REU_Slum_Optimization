@@ -18,6 +18,7 @@ from shapely import make_valid, voronoi_polygons
 from shapely.geometry import GeometryCollection, MultiPoint, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
+from reblock.cache import cached_voronoi_parcels, source_hash
 from reblock.contracts import Block, Region
 
 
@@ -70,10 +71,12 @@ class KblockSource:
                     f"{self.region_id}: block_ids not found in source: {sorted(missing)}")
             blocks = cast(gpd.GeoDataFrame, blocks[blocks["block_id"].isin(wanted)])
         bld = gpd.read_parquet(self.buildings_path, columns=["geometry"])
+        sch = source_hash(self.blocks_path, self.buildings_path)
         return Region(region_id=self.region_id, crs=utm,
-                      blocks=self._blocks_from(blocks.to_crs(utm), bld.to_crs(utm)))
+                      blocks=self._blocks_from(blocks.to_crs(utm), bld.to_crs(utm), sch))
 
-    def _blocks_from(self, blocks: gpd.GeoDataFrame, bld: gpd.GeoDataFrame) -> Iterator[Block]:
+    def _blocks_from(self, blocks: gpd.GeoDataFrame, bld: gpd.GeoDataFrame,
+                     source_content_hash: str) -> Iterator[Block]:
         utm = blocks.crs
         if utm is None:
             raise ValueError(f"{self.region_id}: blocks GeoDataFrame has no CRS")
@@ -91,11 +94,13 @@ class KblockSource:
                 warnings.warn(f"{self.region_id}:{row['block_id']}: dissolve is "
                               f"{poly.geom_type}, not Polygon; skipping", stacklevel=2)
                 continue
-            parcels = _voronoi_parcels(poly, pts, utm)
+            parcels = cached_voronoi_parcels(poly, pts, utm, block_id=str(row["block_id"]),
+                                             source_content_hash=source_content_hash)
             if parcels is None:
                 continue
             streets = gpd.GeoDataFrame(  # all rings (incl. holes)
                 geometry=[poly.boundary], crs=utm)
             yield Block(block_id=str(row["block_id"]), crs=utm, boundary=poly,
                         parcels=parcels, streets=streets,
+                        source_content_hash=source_content_hash,
                         attrs={"kblock_k": float(row["k_complexity"])})

@@ -36,7 +36,8 @@ def test_streets_excludes_interior_gap_rings() -> None:
     squares = [box(x, y, x + 1, y + 1) for x in range(3) for y in range(3)
                if not (x == 1 and y == 1)]
     raw = gpd.GeoDataFrame(geometry=squares, crs=utm)
-    block = next(ShapefileSource("unused", region_id="donut")._iter_blocks(raw, utm))
+    block = next(ShapefileSource("unused", region_id="donut")._iter_blocks(
+        raw, utm, source_content_hash=""))
     assert len(block.boundary.interiors) == 1     # the central hole really exists
     assert len(block.streets) == 1                # ...but streets = the outer ring only
 
@@ -80,3 +81,11 @@ def test_epworth_full_drain_is_non_fatal_and_skips_unloadable_components() -> No
     for b in blocks:
         assert isinstance(b, Block) and b.crs.is_projected
         assert isinstance(b.boundary, Polygon) and b.boundary.is_valid and b.boundary.area > 0
+
+
+def test_shapefile_blocks_carry_source_content_hash() -> None:
+    region = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857).region()
+    blocks = list(region.blocks)
+    assert blocks, "expected at least one built block"
+    h = blocks[0].source_content_hash
+    assert h and all(b.source_content_hash == h for b in blocks)  # same hash for all blocks
