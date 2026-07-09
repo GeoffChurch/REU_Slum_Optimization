@@ -13,7 +13,7 @@ from typing import Any
 import pandas as pd
 from shapely.geometry import Point, Polygon
 
-from reblock.contracts import Block, Proposal
+from reblock.contracts import Block, Method, Proposal
 from reblock.derive.access import parcel_access_layers
 from reblock.derive.geometric_access import geometric_access_distances
 from reblock.derive_graph import derive
@@ -41,6 +41,14 @@ def _geometric_after_impl(block: Block, proposal: Proposal) -> pd.Series:
 
 def geometric_after(block: Block, proposal: Proposal) -> pd.Series:
     return derive(_geometric_after_impl, block, proposal)
+
+
+def _propose_impl(method: Method, block: Block) -> Proposal:
+    return method.propose(block)
+
+
+def propose(method: Method, block: Block) -> Proposal:
+    return derive(_propose_impl, method, block)
 
 
 @dataclass(frozen=True)

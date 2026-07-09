@@ -66,6 +66,10 @@ class TopologyMethod:
     alpha: float = 2.0
     seed: int = 0
 
+    @property
+    def identity(self) -> tuple[str, float, int]:
+        return ("topology", self.alpha, self.seed)
+
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         ppg = to_parcel_graph(block)
         graph = ppg.graph
@@ -107,4 +111,5 @@ class TopologyMethod:
             geometry=[_edge_line(e, ppg.origin) for e in all_edges], crs=block.crs)
         return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=edges,
                         proposal_id=f"topology_a{self.alpha}_s{self.seed}",
-                        method="topology", params={"alpha": self.alpha, "seed": self.seed})
+                        method="topology", params={"alpha": self.alpha, "seed": self.seed},
+                        block_identity=block.identity)

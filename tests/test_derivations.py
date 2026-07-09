@@ -80,3 +80,25 @@ def test_bypass_when_hash_empty() -> None:
     block = _grid_block("")                        # identity None -> uncacheable
     out = D.access_before(block)
     assert isinstance(out, pd.Series)             # computes directly, no cache touch
+
+
+def test_propose_matches_direct_and_caches(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reblock.methods.peel import PeelReblocker
+
+    box = {"n": 0}
+    method = PeelReblocker()
+    real_propose = method.propose
+
+    def spy(block: Block, prior: Proposal | None = None) -> Proposal:
+        box["n"] += 1
+        return real_propose(block, prior)
+    monkeypatch.setattr(method, "propose", spy)
+
+    block = _grid_block("deadbeef")
+    direct = real_propose(block)
+    out1 = D.propose(method, block)
+    out2 = D.propose(method, block)               # cache hit -> no second spy call
+    assert box["n"] == 1
+    assert out1.roads is not None and out2.roads is not None and direct.roads is not None
+    assert (sorted(g.wkt for g in out1.roads.geometry)
+            == sorted(g.wkt for g in direct.roads.geometry))

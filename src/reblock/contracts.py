@@ -103,6 +103,8 @@ class Source(Protocol):
 
 
 class Method(Protocol):
+    @property
+    def identity(self) -> object: ...
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal: ...
 
 

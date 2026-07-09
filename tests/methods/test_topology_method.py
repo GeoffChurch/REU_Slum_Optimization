@@ -11,13 +11,14 @@ from reblock.methods.topology import TopologyMethod
 UTM = CRS.from_epsg(32643)
 
 
-def _grid(n: int) -> Block:
+def _grid(n: int, hash_: str = "") -> Block:
     polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
              for i in range(n) for j in range(n)]
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=hash_)
 
 
 def _split_square(size: float = 10.0) -> Block:
@@ -131,6 +132,16 @@ def test_partial_streets_yield_a_different_larger_proposal() -> None:
     assert len(partial.roads) > len(full.roads)
     assert (sorted(g.wkt for g in partial.roads.geometry)
             != sorted(g.wkt for g in full.roads.geometry))
+
+
+def test_proposal_carries_block_identity() -> None:
+    block = _grid(3, hash_="deadbeef")
+    proposal = TopologyMethod().propose(block)
+    assert proposal.block_identity == block.identity
+
+
+def test_identity_is_stable_per_params() -> None:
+    assert TopologyMethod(alpha=2.0, seed=0).identity == ("topology", 2.0, 0)
 
 
 def test_propose_does_not_perturb_global_rng() -> None:

@@ -24,6 +24,10 @@ from reblock.derive.adjacency import parcel_adjacency
 class PeelReblocker:
     tol: float = STREET_TOL
 
+    @property
+    def identity(self) -> tuple[str, float]:
+        return ("peel", self.tol)
+
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; steepest-descent is block-only
         ids = list(block.parcels["parcel_id"])
@@ -71,4 +75,5 @@ class PeelReblocker:
         roads = gpd.GeoDataFrame(geometry=segments, crs=block.crs)
         return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
                         proposal_id="peel", method="peel",
-                        params={"unreachable": unreachable})
+                        params={"unreachable": unreachable},
+                        block_identity=block.identity)
