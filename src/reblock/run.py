@@ -16,8 +16,8 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from reblock.cache import cached_propose
 from reblock.contracts import Eval, Method, Result, Source
+from reblock.derivations import propose
 from reblock.emit import render_results
 
 log = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ def run(cfg: RunConfig | DictConfig) -> list[Result]:
     region = source.region()
     results: list[Result] = []
     for block in islice(region.blocks, cfg.max_blocks):
-        proposal = cached_propose(method, block)
+        proposal = propose(method, block)
         metrics = tuple(ev.score(block, proposal) for ev in evals)
         results.append(Result(block=block, proposal=proposal, metrics=metrics))
     return results

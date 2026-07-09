@@ -18,8 +18,9 @@ from shapely import make_valid, voronoi_polygons
 from shapely.geometry import GeometryCollection, MultiPoint, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
-from reblock.cache import cached_voronoi_parcels, source_hash
+from reblock.cache import source_hash
 from reblock.contracts import Block, Region
+from reblock.derivations import VoronoiInput, voronoi
 
 
 def _voronoi_parcels(poly: Polygon, points: list[Point], crs: CRS) -> gpd.GeoDataFrame | None:
@@ -94,8 +95,9 @@ class KblockSource:
                 warnings.warn(f"{self.region_id}:{row['block_id']}: dissolve is "
                               f"{poly.geom_type}, not Polygon; skipping", stacklevel=2)
                 continue
-            parcels = cached_voronoi_parcels(poly, pts, utm, block_id=str(row["block_id"]),
-                                             source_content_hash=source_content_hash)
+            parcels = voronoi(VoronoiInput(
+                source_id=source_content_hash, block_id=str(row["block_id"]),
+                poly=poly, points=pts, crs=utm))
             if parcels is None:
                 continue
             streets = gpd.GeoDataFrame(  # all rings (incl. holes)

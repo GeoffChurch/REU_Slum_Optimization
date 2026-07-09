@@ -29,8 +29,8 @@ from geopandas import GeoDataFrame
 from shapely.geometry import LineString
 from topology import k_complexity
 
-from reblock.cache import cached_access_layers, cached_geometric
 from reblock.contracts import Block, Metrics, Proposal
+from reblock.derivations import access_after, access_before, geometric_after
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.parcel_graph import to_parcel_graph
 
@@ -43,10 +43,9 @@ class KComplexityEval:
     (metres, computed on the post-proposal graph via `geometric_access_distances`)."""
 
     def score(self, block: Block, proposal: Proposal) -> Metrics:
-        after_key = proposal.proposal_id or proposal.method or "__after__"
-        pre = cached_access_layers(block, None, "__before__")
-        post = cached_access_layers(block, proposal.roads, after_key)
-        geo = cached_geometric(block, proposal.roads, after_key)
+        pre = access_before(block)
+        post = access_after(block, proposal)
+        geo = geometric_after(block, proposal)
         added = (float(proposal.roads.geometry.length.sum())
                  if proposal.roads is not None and not proposal.roads.empty else 0.0)
         kb, ka = int(pre.max()), int(post.max())
