@@ -320,7 +320,7 @@ EOF
 Replace the whole imports + programmatic-caller region. New imports at the top of `tests/test_run.py`:
 
 ```python
-from reblock.contracts import Block, Result
+from reblock.contracts import Block, Eval, Result
 from reblock.data.shapefile import ShapefileSource
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
 from reblock.methods.topology import TopologyMethod
@@ -329,15 +329,18 @@ from reblock.run import spec_from_cfg
 from reblock.screen.identity import IdentityScreen
 ```
 
-Add a small helper (below the `_grid_block` helper) that builds the common Phule spec:
+Add a small helper (below the `_grid_block` helper) that builds the common Phule spec.
+The param is typed `list[Eval]` (NOT `list[object]`: `mypy --strict` rejects passing a
+`list[object]` into `PipelineSpec.evals: list[Eval]` — `list` is invariant; the call-site
+list literals infer as `list[Eval]` against this param and pass cleanly):
 
 ```python
-def _phule_spec(evals: list[object], max_blocks: int = 1) -> PipelineSpec:
+def _phule_spec(evals: list[Eval], max_blocks: int = 1) -> PipelineSpec:
     return PipelineSpec(
         source=ShapefileSource(PHULE, region_id="phule", assumed_crs=3857),
         screen=IdentityScreen(),
         method=TopologyMethod(alpha=2.0, seed=0),
-        evals=evals,  # type: list[Eval]
+        evals=evals,
         max_blocks=max_blocks,
     )
 ```
