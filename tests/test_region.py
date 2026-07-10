@@ -311,3 +311,30 @@ def test_kblock_source_block_geometries_is_cheap_and_wellformed() -> None:
     assert not geoms.empty
     assert set(geoms.columns) >= {"block_id", "geometry"}
     assert {"DJI.1_2_1267", "DJI.1_2_602"} <= set(geoms["block_id"])
+
+
+def test_kblock_building_points_are_points_in_region_utm() -> None:
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    pts = src.building_points()
+    assert not pts.empty and (pts.geometry.geom_type == "Point").all()
+    assert pts.crs == src.block_geometries().crs                 # same UTM -> overlays align
+
+
+def test_kblock_building_points_bbox_windows() -> None:
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    allpts = src.building_points()
+    minx, miny, maxx, maxy = allpts.total_bounds
+    # Bottom-left quadrant of the extent -- a strict, non-empty subset (the DJI points
+    # cluster near the extent, so the geometric *middle* is empty; a corner has ~100).
+    sub = (minx, miny, (minx + maxx) / 2, (miny + maxy) / 2)
+    assert 0 < len(src.building_points(sub)) < len(allpts)
+
+
+def test_kblock_block_geometries_bbox_windows() -> None:
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    allg = src.block_geometries()
+    minx, miny, maxx, maxy = allg.total_bounds
+    sub = (minx, miny, (minx + maxx) / 2, (miny + maxy) / 2)
+    # Strict, non-empty subset: `> 0` guards against a regression that windows to empty
+    # (e.g. swapped x/y or an inverted .cx slice), which a bare `< len(allg)` would miss.
+    assert 0 < len(src.block_geometries(sub)) < len(allg)

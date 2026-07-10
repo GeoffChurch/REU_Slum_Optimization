@@ -18,7 +18,8 @@ from shapely import make_valid, voronoi_polygons
 from shapely.geometry import GeometryCollection, MultiPoint, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
-from reblock.contracts import Block, Region
+from reblock.contracts import BBox, Block, Region
+from reblock.data._util import _window
 from reblock.derivations import VoronoiInput, voronoi
 from reblock.derive_graph import source_hash
 
@@ -58,19 +59,36 @@ class KblockSource:
         self.region_id = region_id
         self.min_buildings = min_buildings
         self.block_ids = list(block_ids) if block_ids is not None else None
+        self._utm: CRS | None = None
 
-    def block_geometries(self) -> gpd.GeoDataFrame:
+    def _target_utm(self) -> CRS:
+        """The UTM `region()`/the accessors reproject to, computed once from the blocks
+        parquet's geometry column (cheap: no buildings, no Voronoi) and cached."""
+        if self._utm is None:
+            self._utm = gpd.read_parquet(
+                self.blocks_path, columns=["geometry"]).estimate_utm_crs()
+        return self._utm
+
+    def block_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
         """Cheap block_id + geometry accessor for a RegionBuilder: reads only the blocks
         parquet (no buildings, no Voronoi), reprojected to the same UTM `region()` uses.
         Applies `self.block_ids` as a flat filter if set (the region CLI passes a flat set of
-        candidate ids here, not the nested seed groups)."""
+        candidate ids here, not the nested seed groups). `bbox` (in the target UTM) windows
+        the result via `.cx`; `bbox=None` returns everything."""
         blocks = gpd.read_parquet(self.blocks_path, columns=["block_id", "geometry"])
         blocks["block_id"] = blocks["block_id"].astype(str)
-        utm = blocks.estimate_utm_crs()
         if self.block_ids is not None:
             wanted = {str(b) for b in self.block_ids}
             blocks = cast(gpd.GeoDataFrame, blocks[blocks["block_id"].isin(wanted)])
-        return cast(gpd.GeoDataFrame, blocks.to_crs(utm)[["block_id", "geometry"]])
+        out = cast(gpd.GeoDataFrame, blocks.to_crs(self._target_utm())[["block_id", "geometry"]])
+        return _window(out, bbox)
+
+    def building_points(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
+        """The buildings parquet's points, reprojected to the same UTM as `block_geometries()`/
+        `region()` so overlays align. `bbox` (in the target UTM) windows via `.cx`."""
+        pts = gpd.read_parquet(self.buildings_path, columns=["geometry"]).to_crs(
+            self._target_utm())
+        return _window(pts, bbox)
 
     def region(self) -> Region:
         blocks = gpd.read_parquet(

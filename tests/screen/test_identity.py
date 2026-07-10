@@ -1,9 +1,18 @@
-from reblock.contracts import Region
+from geopandas import GeoDataFrame
+
+from reblock.contracts import BBox, Region
 from reblock.screen.identity import IdentityScreen
 
 
 class _StubSource:
-    def region(self) -> Region:  # satisfies Source structurally; unused by IdentityScreen
+    # satisfies Source structurally; none of the three are used by IdentityScreen
+    def region(self) -> Region:
+        raise NotImplementedError
+
+    def block_geometries(self, bbox: BBox | None = None) -> GeoDataFrame:
+        raise NotImplementedError
+
+    def building_points(self, bbox: BBox | None = None) -> GeoDataFrame:
         raise NotImplementedError
 
 

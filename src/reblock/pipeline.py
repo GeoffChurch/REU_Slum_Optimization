@@ -61,9 +61,9 @@ def _seed_groups(
     itself) can hand them straight back in without re-invoking a possibly-expensive screen.
     Otherwise the screen selects: a real selection wraps as singleton seed groups; None (all
     blocks) returns (None, None) -- the caller's signal to take the classic build-limited
-    all-blocks path (a region builder has nothing to expand over an unenumerated full metro,
-    and that path also serves sources without a block_geometries() accessor, e.g.
-    ShapefileSource)."""
+    all-blocks path (a region builder has nothing to expand over an unenumerated full metro;
+    every Source has block_geometries(), so this path is chosen by *no groups*, not by
+    capability)."""
     if block_groups is not None:
         selection = sorted({b for group in block_groups for b in group})
         return block_groups, selection
@@ -82,16 +82,17 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
     inner list (its region; a singleton list for a single-block region). A screen that passes
     everything through (None -- no explicit groups either) takes the classic build-limited
     all-blocks path instead: `source.region()` already filters to buildable blocks and sorts,
-    so `islice` takes the first `max_blocks` buildable ones as singleton "regions" -- no
-    `block_geometries()` accessor required, so e.g. ShapefileSource still works. Shared by
-    `pipeline.run` and `reblock.compare` so the region-resolution semantics live in one place."""
+    so `islice` takes the first `max_blocks` buildable ones as singleton "regions" -- chosen
+    by the absence of groups, not by source capability (every Source has block_geometries()).
+    Shared by `pipeline.run` and `reblock.compare` so the region-resolution semantics live in
+    one place."""
     groups, _selection = _seed_groups(source, screen, block_groups)
     if groups is None:
         blocks = list(islice(source.region().blocks, max_blocks))
         return [[b] for b in blocks]
 
     source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
-    block_geoms = source.block_geometries()     # type: ignore[attr-defined]
+    block_geoms = source.block_geometries()
     regions = region_builder.build(block_geoms, groups)[:max_blocks]
     members = sorted({b for region in regions for b in region})
     source.block_ids = members                  # type: ignore[attr-defined]  # members only

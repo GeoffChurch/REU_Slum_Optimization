@@ -89,3 +89,12 @@ def test_shapefile_blocks_carry_source_content_hash() -> None:
     assert blocks, "expected at least one built block"
     h = blocks[0].source_content_hash
     assert h and all(b.source_content_hash == h for b in blocks)  # same hash for all blocks
+
+
+def test_shapefile_building_points_empty_and_block_geometries_present() -> None:
+    # Phule Nagar has no .prj sidecar (see test_missing_crs_without_assumed_crs_raises).
+    src = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857)
+    assert src.building_points().empty          # no point cloud -- honest, not a stub
+    bg = src.block_geometries()
+    assert not bg.empty and set(bg.columns) >= {"block_id", "geometry"}
+    assert (bg.geometry.geom_type == "Polygon").all()

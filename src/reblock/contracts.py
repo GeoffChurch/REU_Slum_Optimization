@@ -98,8 +98,15 @@ class Result:
         raise KeyError(f"no metric {key!r} for eval {eval!r}")
 
 
+BBox = tuple[float, float, float, float]   # (minx, miny, maxx, maxy), source CRS-agnostic input
+
+
 class Source(Protocol):
     def region(self) -> Region: ...
+    # block_id + geometry:
+    def block_geometries(self, bbox: BBox | None = None) -> GeoDataFrame: ...
+    # points; may be empty:
+    def building_points(self, bbox: BBox | None = None) -> GeoDataFrame: ...
 
 
 class Method(Protocol):
