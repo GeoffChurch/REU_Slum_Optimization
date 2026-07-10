@@ -49,6 +49,7 @@ topology = { path = "ext/topology", editable = true }
 mypy = "*"
 pytest = "*"
 pytest-cov = "*"
+pytest-xdist = "*"   # parallel test execution (-n auto) -- the suite is CPU-bound, not serial
 ruff = "*"
 # geopandas/shapely ship no py.typed marker; these are the upstream typeshed
 # stub packages (not an ignore_missing_imports shim) so contracts.py's use of
@@ -178,7 +179,7 @@ disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=reblock --cov-report=term-missing"
+addopts = "--cov=reblock --cov-report=term-missing -n auto --dist worksteal"
 # tests/test_crossblock_probe.py imports `scripts.crossblock_probe`. scripts/ is a
 # regular package (scripts/__init__.py) but lives at the repo root, which pytest's
 # rootdir-based sys.path insertion (anchored at tests/, since tests/ has no
