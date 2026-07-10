@@ -8,7 +8,7 @@ import geopandas as gpd
 import networkx as nx
 import pytest
 from pyproj import CRS
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
 from reblock.budget import auc, efficiency_directness_curves
@@ -45,11 +45,12 @@ _SIDES = {
 
 
 def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str = "all",
-                block_id: str = "grid") -> Block:
+                block_id: str = "grid", points: gpd.GeoDataFrame | None = None) -> Block:
     """A w x h grid of unit parcels at (x0, y0). `streets_side="all"` (the default) gives the
     full block-perimeter frontage (as if every existing road around the block is already
     street); a side name ("bottom"/"top"/"left"/"right") gives frontage on only that outer
-    edge, for building a deep block/region."""
+    edge, for building a deep block/region. `points`, if given, becomes the block's
+    `building_points` (default: the empty default -- most fixtures don't need real sites)."""
     polys, ids = [], []
     for i in range(w):
         for j in range(h):
@@ -61,7 +62,11 @@ def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str = "all",
     boundary = cast(Polygon, unary_union(polys))
     line = boundary.boundary if streets_side == "all" else _SIDES[streets_side](x0, y0, w, h)
     streets = gpd.GeoDataFrame(geometry=[line], crs=UTM)
-    return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    if points is None:
+        return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels,
+                    streets=streets)
+    return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                building_points=points)
 
 
 def _spans_both_sides(roads: gpd.GeoDataFrame, x_split: float, margin: float) -> bool:
@@ -124,6 +129,20 @@ def test_region_block_identity_folds_the_existing_egress_model_tag() -> None:
     assert rb.source_content_hash == hashlib.sha256(
         ("region-existing-egress|" + member_hash).encode()).hexdigest()
     assert region_block([a, b]).source_content_hash == rb.source_content_hash   # deterministic
+
+
+def test_region_block_unions_member_building_points() -> None:
+    # Two blocks with explicit building_points -- region_block.building_points is their union
+    # (concatenated, not deduped: overlapping points from different sources are both real sites).
+    a_pts = gpd.GeoDataFrame(geometry=[Point(0.5, 0.5), Point(1.5, 1.5)], crs=UTM)
+    b_pts = gpd.GeoDataFrame(geometry=[Point(3.5, 0.5)], crs=UTM)
+    a = _grid_block(0, 0, 3, 3, block_id="a", points=a_pts)
+    b = _grid_block(3, 0, 3, 3, block_id="b", points=b_pts)
+    rb = region_block([a, b])
+
+    assert len(rb.building_points) == len(a_pts) + len(b_pts)
+    assert rb.building_points.crs == UTM
+    assert (rb.building_points.geometry.geom_type == "Point").all()
 
 
 def test_region_block_rejects_empty_list() -> None:
@@ -328,6 +347,13 @@ def test_kblock_building_points_bbox_windows() -> None:
     # cluster near the extent, so the geometric *middle* is empty; a corner has ~100).
     sub = (minx, miny, (minx + maxx) / 2, (miny + maxy) / 2)
     assert 0 < len(src.building_points(sub)) < len(allpts)
+
+
+def test_kblock_block_carries_building_points() -> None:
+    block = next(iter(KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").region().blocks))
+    assert not block.building_points.empty
+    assert (block.building_points.geometry.geom_type == "Point").all()
+    assert block.building_points.crs == block.crs
 
 
 def test_kblock_block_geometries_bbox_windows() -> None:

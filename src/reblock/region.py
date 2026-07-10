@@ -80,6 +80,12 @@ def region_block(blocks: list[Block]) -> Block:
 
     streets = gpd.GeoDataFrame(geometry=[_union_streets(blocks)], crs=crs)
 
+    member_pts = [b.building_points for b in blocks if not b.building_points.empty]
+    building_points = (
+        gpd.GeoDataFrame(pd.concat(member_pts, ignore_index=True), crs=crs) if member_pts
+        else gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=crs)
+    )
+
     # The identity folds in the region model version. derive() caches on the block's identity
     # (source_content_hash, block_id); the region's streets ARE the full existing network the
     # access/curve derivations consume, so a change in what the region means -- here the move to
@@ -91,7 +97,8 @@ def region_block(blocks: list[Block]) -> Block:
     )
     block_id = "region:" + "+".join(sorted(b.block_id for b in blocks))
     return Block(block_id=block_id, crs=crs, boundary=boundary, parcels=parcels,
-                streets=streets, source_content_hash=source_content_hash)
+                streets=streets, source_content_hash=source_content_hash,
+                building_points=building_points)
 
 
 def region_reblock(blocks: list[Block], method: Method, evals: list[Eval]) -> Result:

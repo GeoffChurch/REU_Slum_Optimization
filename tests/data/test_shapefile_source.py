@@ -98,3 +98,10 @@ def test_shapefile_building_points_empty_and_block_geometries_present() -> None:
     bg = src.block_geometries()
     assert not bg.empty and set(bg.columns) >= {"block_id", "geometry"}
     assert (bg.geometry.geom_type == "Polygon").all()
+
+
+def test_shapefile_block_has_empty_building_points() -> None:
+    # A parcel shapefile has no point cloud -- Block.building_points is honestly empty (the
+    # dataclass default), not a stub or a throwing accessor.
+    block = next(iter(ShapefileSource(PHULE, region_id="phule", assumed_crs=3857).region().blocks))
+    assert block.building_points.empty

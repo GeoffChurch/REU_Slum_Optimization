@@ -136,4 +136,5 @@ class KblockSource:
             yield Block(block_id=str(row["block_id"]), crs=utm, boundary=poly,
                         parcels=parcels, streets=streets,
                         source_content_hash=source_content_hash,
-                        attrs={"kblock_k": float(row["k_complexity"])})
+                        attrs={"kblock_k": float(row["k_complexity"])},
+                        building_points=gpd.GeoDataFrame(geometry=list(pts), crs=utm))

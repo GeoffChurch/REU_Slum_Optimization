@@ -5,12 +5,17 @@ from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+import geopandas as gpd
 from geopandas import GeoDataFrame
 from pyproj import CRS
 from shapely.geometry import Polygon
 
 if TYPE_CHECKING:
     import pandas as pd
+
+
+def _empty_points() -> GeoDataFrame:
+    return gpd.GeoDataFrame({"geometry": []}, geometry="geometry")
 
 
 def _require_columns(gdf: GeoDataFrame, cols: set[str], name: str) -> None:
@@ -42,6 +47,7 @@ class Block:
     streets: GeoDataFrame
     source_content_hash: str = ""   # content hash of the Source's file(s); "" => uncacheable
     attrs: Mapping[str, object] = field(default_factory=dict)
+    building_points: GeoDataFrame = field(default_factory=_empty_points)  # real sites; may be empty
 
     def __post_init__(self) -> None:
         _require_projected(self.crs, "Block.crs")
