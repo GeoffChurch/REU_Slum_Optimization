@@ -17,9 +17,11 @@ from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from reblock.budget import access_burden, network_efficiency
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.methods.dijkstra import _rnd
+from reblock.derive.adjacency import parcel_adjacency
+from reblock.methods.dijkstra import _boundary_graph, _rnd
 
 
 def _xy(c: tuple[float, ...]) -> tuple[float, float]:
@@ -113,3 +115,74 @@ def _planarize(lines: list[LineString], crs: CRS) -> GeoDataFrame:
     parts: list[BaseGeometry] = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
     rows = [ln for ln in parts if "LineString" in ln.geom_type and ln.length > 0]
     return gpd.GeoDataFrame({"geometry": rows}, geometry="geometry", crs=crs)
+
+
+def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]],
+           base_burden: float) -> float:
+    """Objective value of the road set (higher = better). Mirrors the budget metrics with a
+    cached parcel-adjacency for the greedy's inner loop."""
+    if objective == "access":
+        if base_burden == 0.0:
+            return 0.0
+        depths = parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj,
+                                      unreached_depth=len(block.parcels) + 1)
+        return 1.0 - access_burden(depths) / base_burden
+    e, direct = network_efficiency(block, roads)
+    return e if objective == "efficiency" else direct
+
+
+def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
+                      top_k: int = 8, lam: float = 2.0, max_roads: int = 15) -> GeoDataFrame:
+    """Greedily commit the straight arterial with the best objective gain per meter until
+    `max_roads` are placed or no candidate improves. `mode` in {"buildable", "aspirational"}."""
+    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    base_burden = access_burden(parcel_access_layers(
+        block, None, tol=STREET_TOL, adj=adj, unreached_depth=len(block.parcels) + 1))
+    g = _boundary_graph(block.parcels)
+    nodes = list(g.nodes)
+    node_tree = STRtree([Point(nd) for nd in nodes])
+
+    committed: list[LineString] = []                        # realized geometry, in commit order
+    while len(committed) < max_roads:
+        streets = [ln for ln in block.streets.geometry if isinstance(ln, LineString)]
+        network: list[LineString] = streets + committed
+        anchors = _anchor_points(network or streets, n_anchors)
+        base = _planarize(committed, block.crs)
+        base_val = _score(objective, block, base, adj, base_burden)
+        curr_roads = base if len(committed) else None
+        targets = _deep_targets(block, curr_roads, top_k, adj)
+
+        best_gain, best_real = 0.0, None
+        for chord in _candidate_chords(anchors, targets):
+            real = chord if mode == "aspirational" else _snap(chord, g, node_tree, nodes, lam)
+            if real is None or real.length == 0:
+                continue
+            trial = _planarize(committed + [real], block.crs)
+            gain = (_score(objective, block, trial, adj, base_burden) - base_val) / real.length
+            if gain > best_gain or (best_real is not None and gain == best_gain
+                                    and real.wkt < best_real.wkt):
+                best_gain, best_real = gain, real
+        if best_real is None:                               # no candidate improves -> stop
+            break
+        committed.append(best_real)
+
+    return _planarize_ranked(committed, block.crs)
+
+
+def _planarize_ranked(committed: list[LineString], crs: CRS) -> GeoDataFrame:
+    """Planarize the committed segments and tag each noded piece with `drain` = descending
+    greedy rank of the source segment (first-committed = highest), so cost_benefit_curve slices
+    in greedy order. A piece belongs to the earliest-committed segment that covers it."""
+    gdf = _planarize(committed, crs)
+    if gdf.empty:
+        gdf["drain"] = []
+        return gdf
+    n = len(committed)
+    drains: list[int] = []
+    for geom in gdf.geometry:
+        mid = geom.interpolate(0.5, normalized=True)
+        src = next((i for i, seg in enumerate(committed)
+                    if mid.distance(seg) <= STREET_TOL), n - 1)
+        drains.append(n - src)                              # earliest source -> highest drain
+    gdf["drain"] = drains
+    return gdf.sort_values("drain", ascending=False, kind="stable").reset_index(drop=True)

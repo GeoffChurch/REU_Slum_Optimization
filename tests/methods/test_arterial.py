@@ -6,12 +6,13 @@ from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL
+from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import (
     _anchor_points,
     _candidate_chords,
     _deep_targets,
+    _greedy_arterials,
     _planarize,
     _snap,
 )
@@ -79,3 +80,56 @@ def test_planarize_nodes_two_crossing_chords() -> None:
     coords = {c for geom in gdf.geometry for c in geom.coords}
     assert (1.0, 1.0) in coords                    # crossing became a shared vertex
     assert len(gdf) == 4                           # each chord split into two at the crossing
+
+
+def test_greedy_first_arterial_cuts_the_deep_block() -> None:
+    # A long 3x9 block with street frontage on ONE short end only (not full-boundary: with
+    # streets on all 4 sides every interior parcel is at most 2 hops from a street, so a
+    # length-1 stub that merely touches the shared corner of two such parcels already "unlocks"
+    # them for network_efficiency's per-pair entry-reachability test -- under the greedy's
+    # gain-per-meter ranking that corner-touch stub always beats a length-9 spine, no matter how
+    # many parcels the spine would serve, because the spine's benefit is diluted by its length.
+    # A real deep pocket -- depth growing down the spine, only reachable by routing its length --
+    # is what actually forces a spanning arterial to be the best first move.
+    polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
+             for i in range(3) for j in range(9)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (0.0, 9.0)])], crs=UTM)
+    block = Block(block_id="long", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    roads = _greedy_arterials(block, mode="buildable", objective="directness", max_roads=3,
+                              n_anchors=12)
+    assert len(roads) >= 1
+    assert roads.geometry.length.max() >= 6.0                        # a real lengthwise arterial
+    conn = street_connectivity(block.streets, roads, STREET_TOL)
+    assert conn.connected_frac == 1.0                                # buildable + street-connected
+
+
+def test_greedy_is_deterministic() -> None:
+    block = _grid_block(5)
+    r1 = _greedy_arterials(block, mode="buildable", objective="directness", max_roads=4,
+                           n_anchors=12)
+    r2 = _greedy_arterials(block, mode="buildable", objective="directness", max_roads=4,
+                           n_anchors=12)
+    assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
+
+
+def test_greedy_drain_is_descending_rank_and_slices_monotone() -> None:
+    from reblock.budget import cost_benefit_curve
+    block = _grid_block(6)
+    roads = _greedy_arterials(block, mode="buildable", objective="directness", max_roads=5,
+                              n_anchors=12)
+    assert list(roads["drain"]) == sorted(roads["drain"], reverse=True)   # rank descending
+    curve = cost_benefit_curve(block, roads)                              # slices in greedy order
+    assert curve.benefit == sorted(curve.benefit)                        # monotone non-decreasing
+
+
+def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
+    block = _grid_block(6)
+    roads = _greedy_arterials(block, mode="aspirational", objective="directness", max_roads=6,
+                              n_anchors=12)
+    from reblock.budget import _road_street_graph
+    g = _road_street_graph(block, roads, STREET_TOL)
+    # at least one interior node has degree >= 4 -> a real crossroads, not overlapping lines
+    interior = [nd for nd in g.nodes if Point(nd).distance(block.boundary.boundary) > STREET_TOL]
+    assert any(g.degree[nd] >= 4 for nd in interior)
