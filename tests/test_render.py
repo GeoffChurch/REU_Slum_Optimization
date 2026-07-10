@@ -3,16 +3,17 @@ from typing import cast
 
 import geopandas as gpd
 import matplotlib
+import pytest
 
 matplotlib.use("Agg")
 from matplotlib.collections import PatchCollection
 from matplotlib.figure import Figure
 from pyproj import CRS
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import Block, Metrics, Proposal
 from reblock.derive.access import parcel_access_layers
-from reblock.render import render_after, render_before, save_render
+from reblock.render import _frame_bbox, render_after, render_before, save_render
 
 UTM = CRS.from_epsg(32643)
 
@@ -123,6 +124,51 @@ def test_save_render_writes_a_nonempty_file(tmp_path: Path) -> None:
     fig = render_before(block, layers, vmax=2)
     out = tmp_path / "b.png"
 
+    save_render(fig, out)
+
+    assert out.exists()
+    assert out.stat().st_size > 0
+
+
+def test_frame_bbox_is_square_centred_and_padded() -> None:
+    # A non-square input (wide rectangle) must still produce a square frame,
+    # centred on the input's own centre, with the half-width strictly larger
+    # than the input's half-extent (padding applied).
+    geoms = gpd.GeoSeries([Polygon([(0, 0), (10, 0), (10, 2), (0, 2)])], crs=UTM)
+
+    minx, miny, maxx, maxy = _frame_bbox(geoms, pad_frac=0.6)
+
+    width, height = maxx - minx, maxy - miny
+    assert width == pytest.approx(height)
+    assert (minx + maxx) / 2 == pytest.approx(5.0)
+    assert (miny + maxy) / 2 == pytest.approx(1.0)
+    # half-extent of the input's longer side is 5.0 (+1.0 base pad) -> 6.0,
+    # then padded by pad_frac=0.6 -> 9.6, so the frame is well beyond the input.
+    assert width / 2 == pytest.approx(6.0 * 1.6)
+
+
+def test_draw_heatmap_with_context_and_own_points_renders_without_error(
+    tmp_path: Path,
+) -> None:
+    # Small synthetic context/own-point layers, disjoint from the block itself,
+    # exercise the full draw order (context outlines/points + own points) and
+    # must not raise, and must still produce a written, non-empty file.
+    block = _grid_block(3)
+    layers = parcel_access_layers(block, None)
+    context_outlines = gpd.GeoDataFrame(
+        {"block_id": ["neighbour"]},
+        geometry=[Polygon([(5, 5), (7, 5), (7, 7), (5, 7)])],
+        crs=UTM,
+    )
+    context_points = gpd.GeoDataFrame(geometry=[Point(6, 6)], crs=UTM)
+    own_points = gpd.GeoDataFrame(geometry=[Point(0.5, 0.5), Point(1.5, 1.5)], crs=UTM)
+
+    fig = render_before(
+        block, layers, vmax=2,
+        context_outlines=context_outlines, context_points=context_points,
+        own_points=own_points,
+    )
+    out = tmp_path / "with_context.png"
     save_render(fig, out)
 
     assert out.exists()

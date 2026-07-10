@@ -20,11 +20,26 @@ import pandas as pd
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 
-from reblock.contracts import Block, Metrics, Proposal
+from reblock.contracts import BBox, Block, Metrics, Proposal
 
 _CMAP = "YlOrRd"
 _BOUNDARY_COLOR = "#222222"
 _ROAD_COLOR = "#08306b"
+_CONTEXT_OUTLINE = "#dddddd"
+_CONTEXT_PT = "#c9c9c9"
+_OWN_PT = "#333333"
+
+
+def _frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.6) -> BBox:
+    """A padded square bbox centred on `geoms`' total_bounds -- the render view, and the bbox
+    the context query is windowed to. Square + padded so the selection dominates with a context
+    margin.
+    """
+    minx, miny, maxx, maxy = geoms.total_bounds
+    half = max(maxx - minx, maxy - miny) / 2 + 1.0
+    half += half * pad_frac
+    cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
+    return (cx - half, cy - half, cx + half, cy + half)
 
 
 def _parcels_with_layer(block: Block, layers: pd.Series) -> gpd.GeoDataFrame:
@@ -38,12 +53,29 @@ def _parcels_with_layer(block: Block, layers: pd.Series) -> gpd.GeoDataFrame:
     return parcels
 
 
-def _draw_heatmap(block: Block, layers: pd.Series, vmax: int) -> Figure:
+def _draw_heatmap(
+    block: Block, layers: pd.Series, vmax: int, *,
+    context_outlines: gpd.GeoDataFrame | None = None,
+    context_points: gpd.GeoDataFrame | None = None,
+    own_points: gpd.GeoDataFrame | None = None,
+) -> Figure:
     parcels = _parcels_with_layer(block, layers)
 
     fig, ax = plt.subplots()
     parcels.plot(ax=ax, column="layer", cmap=_CMAP, vmin=1, vmax=vmax,
                  edgecolor="#999999", linewidth=0.3)
+
+    frame = _frame_bbox(block.parcels)
+    ax.set_xlim(frame[0], frame[2])
+    ax.set_ylim(frame[1], frame[3])
+
+    # Dimmed context (neighbouring blocks' outlines + building points), drawn under the
+    # selection's own boundary/streets/points so the selection reads unambiguously on top.
+    if context_outlines is not None and not context_outlines.empty:
+        context_outlines.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.3)
+    if context_points is not None and not context_points.empty:
+        context_points.plot(ax=ax, color=_CONTEXT_PT, markersize=2, alpha=0.6)
+
     gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
         ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
     # The existing street network, drawn like the boundary. For a single block this is the
@@ -53,6 +85,9 @@ def _draw_heatmap(block: Block, layers: pd.Series, vmax: int) -> Figure:
     if block.streets is not None and not block.streets.empty:
         block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
 
+    if own_points is not None and not own_points.empty:
+        own_points.plot(ax=ax, color=_OWN_PT, markersize=5)
+
     sm = plt.cm.ScalarMappable(cmap=_CMAP, norm=Normalize(vmin=1, vmax=vmax))
     fig.colorbar(sm, ax=ax).set_label("access depth (parcels from a street)")
 
@@ -61,9 +96,17 @@ def _draw_heatmap(block: Block, layers: pd.Series, vmax: int) -> Figure:
     return fig
 
 
-def render_before(block: Block, layers: pd.Series, *, vmax: int) -> Figure:
+def render_before(
+    block: Block, layers: pd.Series, *, vmax: int,
+    context_outlines: gpd.GeoDataFrame | None = None,
+    context_points: gpd.GeoDataFrame | None = None,
+    own_points: gpd.GeoDataFrame | None = None,
+) -> Figure:
     """Status-quo access-depth heatmap for `block` (method-independent)."""
-    fig = _draw_heatmap(block, layers, vmax)
+    fig = _draw_heatmap(
+        block, layers, vmax,
+        context_outlines=context_outlines, context_points=context_points, own_points=own_points,
+    )
     fig.axes[0].set_title(f"{block.block_id} — before")
     return fig
 
@@ -71,9 +114,15 @@ def render_before(block: Block, layers: pd.Series, *, vmax: int) -> Figure:
 def render_after(
     block: Block, proposal: Proposal, layers: pd.Series, *, vmax: int,
     metrics: Metrics | None = None,
+    context_outlines: gpd.GeoDataFrame | None = None,
+    context_points: gpd.GeoDataFrame | None = None,
+    own_points: gpd.GeoDataFrame | None = None,
 ) -> Figure:
     """Post-intervention access-depth heatmap for `block`, plus `proposal.roads`."""
-    fig = _draw_heatmap(block, layers, vmax)
+    fig = _draw_heatmap(
+        block, layers, vmax,
+        context_outlines=context_outlines, context_points=context_points, own_points=own_points,
+    )
     ax = fig.axes[0]
     if proposal.roads is not None and not proposal.roads.empty:
         proposal.roads.plot(ax=ax, color=_ROAD_COLOR, linewidth=2.0)
