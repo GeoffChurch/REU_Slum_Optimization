@@ -114,9 +114,15 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
 def main(cfg: DictConfig) -> None:
     results = compare(cfg)
     out_dir = Path(HydraConfig.get().runtime.output_dir)
-    compare_report(results, out_dir, cost=str(cfg.get("cost", "length")))
-    for r in sorted(results, key=lambda r: (r.metric, -r.auc)):
-        log.info("%s %s %s AUC=%.3f", r.metric, r.block_id, r.method, r.auc)
+    cost = str(cfg.get("cost", "length"))
+    compare_report(results, out_dir, cost=cost)
+    if cost == "displacement":   # AUC inverts on the displacement axis -- log benefit + displaced
+        for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
+            log.info("%s %s %s: benefit=%.3f, %d displaced", r.metric, r.block_id, r.method,
+                     r.curve.benefit[-1], int(r.curve.cost[-1]))
+    else:
+        for r in sorted(results, key=lambda r: (r.metric, -r.auc)):
+            log.info("%s %s %s AUC=%.3f", r.metric, r.block_id, r.method, r.auc)
 
 
 if __name__ == "__main__":

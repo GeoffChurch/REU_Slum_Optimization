@@ -191,10 +191,12 @@ _METRIC_YLABELS = {
 
 
 def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "length") -> None:
-    """Per metric (access, efficiency, directness): an aggregate AUC table (mean AUC per
-    method) + overlaid cost-benefit curves per block. `results` is the flat
-    (method x block x metric) list from reblock.compare. `cost` sets the x-axis label to match
-    the curves' x (road density, or buildings displaced)."""
+    """Per metric (access, efficiency, directness): a per-method summary table + overlaid
+    cost-benefit curves per block. `results` is the flat (method x block x metric) list from
+    reblock.compare. `cost` sets the x-axis (road density m/ha, or buildings displaced) AND the
+    table: for "length" a `auc_table_{metric}.csv` (mean AUC, higher = better); for "displacement"
+    a `tradeoff_table_{metric}.csv` (mean terminal benefit + mean buildings displaced) -- because
+    AUC over the displacement axis inverts (a method that displaces nothing scores 0)."""
     import csv
     from statistics import mean
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -202,23 +204,40 @@ def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "lengt
     for r in results:
         by_metric.setdefault(r.metric, []).append(r)
     for metric, metric_results in by_metric.items():
-        by_method: dict[str, list[float]] = {}
         by_block: dict[str, list[MethodCurve]] = {}
         for r in metric_results:
-            by_method.setdefault(r.method, []).append(r.auc)
             by_block.setdefault(r.block_id, []).append(r)
-        with (out_dir / f"auc_table_{metric}.csv").open("w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["method", "mean_auc", "n_blocks"])
-            for m, aucs in sorted(by_method.items(), key=lambda kv: -mean(kv[1])):
-                w.writerow([m, f"{mean(aucs):.4f}", len(aucs)])
+        if cost == "displacement":
+            # AUC over the displacement axis is meaningless -- a home-sparing method displaces 0,
+            # so its curve has no width and AUC->0, ranking the BEST method worst. Report instead
+            # the two numbers that matter: terminal navigability and total buildings displaced.
+            by_bd: dict[str, list[tuple[float, float]]] = {}
+            for r in metric_results:
+                by_bd.setdefault(r.method, []).append((r.curve.benefit[-1], r.curve.cost[-1]))
+            with (out_dir / f"tradeoff_table_{metric}.csv").open("w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["method", "mean_terminal_benefit",
+                            "mean_buildings_displaced", "n_blocks"])
+                for m, bd in sorted(by_bd.items(), key=lambda kv: -mean(b for b, _ in kv[1])):
+                    w.writerow([m, f"{mean(b for b, _ in bd):.4f}",
+                                f"{mean(d for _, d in bd):.1f}", len(bd)])
+        else:
+            by_method: dict[str, list[float]] = {}
+            for r in metric_results:
+                by_method.setdefault(r.method, []).append(r.auc)
+            with (out_dir / f"auc_table_{metric}.csv").open("w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["method", "mean_auc", "n_blocks"])
+                for m, aucs in sorted(by_method.items(), key=lambda kv: -mean(kv[1])):
+                    w.writerow([m, f"{mean(aucs):.4f}", len(aucs)])
         ylabel = _METRIC_YLABELS[metric]
         xlabel = "buildings displaced" if cost == "displacement" else "road density (m/ha)"
         for block_id, curves in by_block.items():
             fig, ax = plt.subplots(figsize=(7, 5))
             for mc in curves:
-                ax.plot(mc.curve.cost, mc.curve.benefit, marker="o",
-                        label=f"{mc.method} (AUC {mc.auc:.2f})")
+                label = (f"{mc.method} ({int(mc.curve.cost[-1])} displaced)"
+                         if cost == "displacement" else f"{mc.method} (AUC {mc.auc:.2f})")
+                ax.plot(mc.curve.cost, mc.curve.benefit, marker="o", label=label)
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
             ax.set_title(f"cost-benefit ({metric}): {block_id}")

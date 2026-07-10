@@ -29,7 +29,11 @@ def test_compare_displacement_cost_axis_runs_and_writes_curves(tmp_path: Path) -
          f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, result.stderr
-    assert (tmp_path / "auc_table_directness.csv").exists()
+    # displacement uses a tradeoff table (terminal benefit + buildings displaced), NOT the AUC
+    # table -- AUC inverts on the displacement axis (a home-sparing method scores 0).
+    assert (tmp_path / "tradeoff_table_directness.csv").exists()
+    assert not (tmp_path / "auc_table_directness.csv").exists()
+    assert "buildings_displaced" in (tmp_path / "tradeoff_table_directness.csv").read_text()
     assert list(tmp_path.glob("curve_directness_*.png"))
 
 
