@@ -1,4 +1,6 @@
+import hashlib
 import logging
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -99,6 +101,29 @@ def test_region_block_streets_are_the_full_existing_network() -> None:
     outer_edge = LineString([(0, 0), (0, 3)])
     assert shared_edge.within(street_union)
     assert outer_edge.within(street_union)
+
+
+def test_region_block_identity_folds_the_existing_egress_model_tag() -> None:
+    # The cache-identity fix: derive() caches on Block.identity = (source_content_hash, block_id),
+    # which EXCLUDES streets, so region_block folds a model-version tag into source_content_hash --
+    # otherwise a region scored under a different streets/egress model collides on the same key
+    # (the bug: the old perimeter-egress eval-swap's cached access reused under the new model).
+    # Needs CACHEABLE members (non-empty source_content_hash) so the tagged branch runs; the
+    # _grid_block fixtures elsewhere have "" hashes and take the uncacheable "" branch.
+    a = replace(_grid_block(0, 0, 3, 3, block_id="a"), source_content_hash="srcA")
+    b = replace(_grid_block(3, 0, 3, 3, block_id="b"), source_content_hash="srcB")
+    rb = region_block([a, b])
+
+    assert rb.identity is not None                       # cacheable: the tagged else-branch ran
+    member_hash = hashlib.sha256(
+        "|".join(sorted(f"{blk.source_content_hash}:{blk.block_id}" for blk in (a, b))).encode()
+    ).hexdigest()
+    # NOT the bare member hash the old (perimeter-egress) model keyed on ...
+    assert rb.source_content_hash != member_hash
+    # ... but exactly that member hash folded under the existing-egress version tag.
+    assert rb.source_content_hash == hashlib.sha256(
+        ("region-existing-egress|" + member_hash).encode()).hexdigest()
+    assert region_block([a, b]).source_content_hash == rb.source_content_hash   # deterministic
 
 
 def test_region_block_rejects_empty_list() -> None:
