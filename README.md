@@ -118,7 +118,18 @@ pulls furthest ahead** — on a region there is room for long cross-block throug
 directness AUC leads dijkstra/mesh by a wide margin (the seed's existing roads already give decent
 access, so the tree methods only add local spurs; arterial adds the region-spanning routes).
 
-A pluggable **`region_builder`** expands each seed group: `identity` (default; reblock exactly the
-listed blocks) or `convex_hull` (`region_builder=convex_hull`) which fills the blocks inside a
-disjoint group's convex hull into one contiguous region. `identity` warns if a group's blocks are
-not adjacent (a disjoint group reblocks independently, not jointly — use `convex_hull` to fill it).
+A pluggable **`region_builder`** expands each seed group before reblocking: `identity` (default;
+reblock exactly the listed blocks) or `convex_hull` (`region_builder=convex_hull`), which fills the
+blocks inside a disjoint group's convex hull into one contiguous region. `identity` warns if a
+group's blocks are not adjacent (a disjoint group reblocks independently, not jointly — use
+`convex_hull` to fill it).
+
+```bash
+# convex_hull: two DISJOINT blocks -> fill the gap into one contiguous region, reblocked jointly
+pixi run python -m reblock.run data=dji method=greedy_arterial region_builder=convex_hull \
+  "block_ids=[[DJI.3_1_3951,DJI.3_1_3956]]" eval=kcomplexity render.enabled=true region_map.enabled=true
+```
+
+`DJI.3_1_3951` and `DJI.3_1_3956` don't touch, so `identity` would reblock them separately; the hull
+pulls in the bridging block `DJI.3_1_3952`, giving one 3-block region. `region_map.png` shows the two
+seed blocks outlined in heavy black with the filled-in block colored as the same region.

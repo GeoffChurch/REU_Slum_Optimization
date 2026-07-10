@@ -122,6 +122,17 @@ def region_map(block_geoms: GeoDataFrame, regions: list[list[str]],
             continue
         n_seeds += len(seed_blocks)
         seed_blocks.plot(ax=ax, facecolor="none", edgecolor="black", linewidth=2.2)
+    # Frame the view on the region members (with context padding) rather than the whole
+    # metro -- a small region on a wide candidate extent is otherwise an invisible speck,
+    # defeating the point of showing which blocks the builder pulled in.
+    all_members = geoms[geoms["block_id"].isin({b for region in regions for b in region})]
+    if not all_members.empty:
+        minx, miny, maxx, maxy = all_members.total_bounds
+        half = max(maxx - minx, maxy - miny) / 2 + 1.0
+        half += half * 0.6                                  # context margin around the region
+        cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
+        ax.set_xlim(cx - half, cx + half)
+        ax.set_ylim(cy - half, cy + half)
     ax.set_title(f"{len(regions)} region(s), {n_members} member block(s) of {len(geoms)} "
                  f"candidates ({n_seeds} seed block(s) outlined)")
     ax.set_axis_off()
