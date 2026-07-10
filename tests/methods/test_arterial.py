@@ -252,13 +252,14 @@ def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 
 
 
 def test_cost_displacement_avoids_the_denser_corridor() -> None:
-    # The discriminating test: two mirror-image deep-pocket arms give tied straight-arterial
-    # candidates (same benefit, same length) -- cost="length" can't tell them apart on anything
-    # but the deterministic wkt tie-break. Cluster building_points densely along the LEFT arm's
-    # corridor and sparsely along the RIGHT's: cost="length" ignores the points entirely (ties,
-    # tie-break picks the smaller-wkt candidate); cost="displacement" must pick whichever
-    # candidate displaces fewer buildings -- proving the denominator actually switched, not just
-    # that the method runs.
+    # cost="displacement" must select differently from cost="length": dense building points along
+    # the LEFT arm, sparse on the RIGHT. The arms are length- and benefit-tied, so cost="length" is
+    # blind to the points (it falls to the wkt tie-break); cost="displacement" steers away from the
+    # dense corridor to a road that displaces strictly fewer buildings -- here the optimum is a free
+    # (zero-displacement) chord, so it wins via the infinite-gain path. This would fail if
+    # cost="displacement" silently reused length (the two picks would coincide). The FINITE
+    # raw/denom ranking (two candidates both displacing >0, pick the cheaper) is covered by the
+    # next test.
     left_pts = [Point(0.5, y) for y in range(1, 8)]     # dense: 7 sites astride the left arm
     right_pts = [Point(10.5, 4)]                        # sparse: 1 site astride the right arm
     pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
@@ -272,11 +273,48 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
     assert len(roads_length) == 1 and len(roads_disp) == 1
     # the cost switch changed WHICH road is proposed:
     assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt
-    # ... because it displaces fewer buildings, not merely a different one:
+    # ... to one that displaces fewer buildings than the length-optimal pick:
     d_length = displacement_count(pts, roads_length, corridor_m=1.0)
     d_disp = displacement_count(pts, roads_disp, corridor_m=1.0)
     assert d_disp < d_length
-    assert d_disp == 0                     # the displacement-optimal pick here is fully clear
+    assert d_disp == 0                     # this optimum is a free chord -> infinite-gain path
+
+
+def _grid_block_with_points(building_points: gpd.GeoDataFrame, w: int = 8, h: int = 3) -> Block:
+    # A w x h unit-parcel grid with bottom-edge street frontage -- a shallow block whose only
+    # deep parcels are the top row, so straight arterials from the bottom compete on reaching them.
+    polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
+             for i in range(w) for j in range(h)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (float(w), 0.0)])], crs=UTM)
+    return Block(block_id="grid", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                building_points=building_points)
+
+
+def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None:
+    # The FINITE-vs-FINITE case the greedy denominator exists for: every candidate here displaces
+    # >0 buildings (points tile the whole block at corridor_m=1.0, so no free/zero-displacement
+    # escape chord exists), so the pick is decided by the raw/denom comparison, NOT the inf branch.
+    # A heavy cluster sits astride the access-optimal corridor (x~2): cost="length" drives straight
+    # through it (many displaced); cost="displacement" must swerve to a sparser corridor that
+    # displaces far fewer while giving up a little access benefit.
+    base = [Point(i + 0.5, j + 0.5) for i in range(8) for j in range(3)]     # tile: no free chord
+    cluster = [Point(2.0 + dx, 1.5 + dy) for dx in (-0.4, -0.2, 0.0, 0.2, 0.4)
+               for dy in (-0.6, -0.3, 0.0, 0.3, 0.6)]                        # dense at x~2
+    pts = gpd.GeoDataFrame(geometry=base + cluster, crs=UTM)
+    block = _grid_block_with_points(pts)
+
+    roads_length = _greedy_arterials(block, mode="aspirational", objective="access", max_roads=1,
+                                     n_anchors=10, top_k=4, corridor_m=1.0, cost="length")
+    roads_disp = _greedy_arterials(block, mode="aspirational", objective="access", max_roads=1,
+                                   n_anchors=10, top_k=4, corridor_m=1.0, cost="displacement")
+    d_length = displacement_count(pts, roads_length, corridor_m=1.0)
+    d_disp = displacement_count(pts, roads_disp, corridor_m=1.0)
+
+    assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt   # cost changed it
+    assert d_disp >= 1               # the pick DISPLACES -> the finite raw/denom branch, not inf
+    assert d_disp < d_length         # ... and displaces strictly fewer than the length-optimal pick
 
 
 def test_cost_displacement_is_deterministic() -> None:
