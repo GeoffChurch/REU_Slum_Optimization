@@ -197,3 +197,29 @@ def test_buildable_arterial_more_direct_than_dijkstra() -> None:
     _, dc_dij = efficiency_directness_curves(block, dij)
     cap = max(dc_art.cost[-1], dc_dij.cost[-1])
     assert auc(dc_art, cap) > auc(dc_dij, cap)
+
+
+def _holed_block() -> Block:
+    # A 5x5 grid with the center parcel removed -> the block boundary is a square with a square
+    # hole, so `boundary.boundary` is a MultiLineString (outer ring + inner ring).
+    polys, ids = [], []
+    for i in range(5):
+        for j in range(5):
+            if (i, j) == (2, 2):
+                continue
+            polys.append(Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]))
+            ids.append(i * 5 + j)
+    parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
+    return Block(block_id="holed", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+
+
+def test_greedy_handles_multilinestring_streets() -> None:
+    # A holed/courtyard block's streets are a MultiLineString; anchor sampling must explode Multi*
+    # rather than filter it out, or the greedy sees no anchors and returns an empty proposal.
+    block = _holed_block()
+    assert "Multi" in block.streets.geometry.iloc[0].geom_type    # precondition: streets ARE Multi
+    roads = _greedy_arterials(block, mode="buildable", objective="directness",
+                              max_roads=3, n_anchors=12)
+    assert len(roads) >= 1

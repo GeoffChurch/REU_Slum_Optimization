@@ -2,6 +2,13 @@
 
 **Status:** draft for review · **Date:** 2026-07-09
 
+> **Implementation note (2026-07-10):** the **buildable** mode shipped (it leads dijkstra/mesh
+> ~10× on directness). The **aspirational** mode + "price of buildability" are **deferred**: the
+> aspirational ceiling is not valid under the current vertex-based `network_efficiency` scoring
+> (sparse-vertex ideal chords are undercounted; densifying is too slow), so `greedy_arterial_aspirational`
+> is not in the compare. The root fix is the line-proximity metric in `docs/metrics-north-star.md`.
+> Sections below describing aspirational/price-of-buildability are the design intent, not shipped behavior.
+
 A new `Method` that grows a road network by **greedily inserting the single best straight
 segment** — the through-road, spur, or continuation with the highest objective gain per meter —
 one at a time until a road budget runs out. Unlike the tree methods (dijkstra/peel, one myopic

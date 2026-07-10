@@ -55,9 +55,11 @@ demand-aware, with the parcel→graph entry problem fixed at the root.
 We hit a concrete symptom while building the arterial method: `network_efficiency` scores a
 parcel as "served" only if a graph **vertex** sits within `tol` of it. Buildable roads (boundary
 paths) are vertex-dense so this ≈ line-proximity; ideal straight chords (2 vertices) are not, so
-they get massively undercounted, inverting the price-of-buildability. We patch it today by
-densifying chord geometry. **The north-star's line-proximity noded entry makes the patch
-unnecessary** — every method, including the aspirational ceiling, "just works."
+they get massively undercounted, inverting the price-of-buildability. Densifying the chords
+was tried and **rejected** — it bloats the graph and makes scoring too slow — so the aspirational
+ceiling is currently *deferred*, not patched (the artifact stands). **The north-star's
+line-proximity noded entry would dissolve it** — every method, including the aspirational
+ceiling, "just works" — which is the real reason to move to it.
 
 ## Cheap proxies (and yes — spectral ones are the interesting part)
 
@@ -120,7 +122,8 @@ shortest-path E does not. Movement ≈ current flow; "easy to get around" ≈ lo
 
 ## Near-term vs long-term
 
-- **Near-term:** keep the three lenses; patch the vertex artifact with chord densification.
+- **Near-term:** keep the three lenses; the vertex artifact stays *unpatched* (densification
+  was evaluated and rejected as too slow), so the aspirational ceiling is deferred.
 - **Long-term:** replace them with demand-weighted travel cost, entries line-noded — and
   evaluate **grounded effective resistance** as the cheap, redundancy-aware, monotone,
   cheap-marginal spectral surrogate (which may also let the greedy methods score candidates far

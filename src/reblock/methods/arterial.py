@@ -8,6 +8,7 @@ intersections. See docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-d
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import geopandas as gpd
@@ -32,10 +33,11 @@ def _xy(c: tuple[float, ...]) -> tuple[float, float]:
     return (c[0], c[1])
 
 
-def _anchor_points(network: list[LineString], n: int) -> list[tuple[float, float]]:
+def _anchor_points(network: Sequence[BaseGeometry], n: int) -> list[tuple[float, float]]:
     """`n` points sampled evenly by arc-length along the merged network, plus every network
     vertex (so committed-segment endpoints are always anchors -> continuations come for free).
-    _rnd-snapped, de-duplicated, sorted for determinism."""
+    `unary_union` explodes any Multi* input, so streets given as a MultiLineString (a block with
+    a hole/courtyard) are handled. _rnd-snapped, de-duplicated, sorted for determinism."""
     merged = unary_union(network)
     lines = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
     pts: set[tuple[float, float]] = set()
@@ -143,12 +145,15 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     g = _boundary_graph(block.parcels)
     nodes = list(g.nodes)
     node_tree = STRtree([Point(nd) for nd in nodes])
-    streets = [ln for ln in block.streets.geometry if isinstance(ln, LineString)]
+    # Raw street geometries (may be a MultiLineString for a holed/courtyard block) -- do NOT
+    # filter to LineString, or Multi* streets get dropped and the proposal comes back empty;
+    # _anchor_points explodes Multi* internally.
+    streets: list[BaseGeometry] = list(block.streets.geometry)
 
     committed: list[LineString] = []                        # realized geometry, in commit order
     while len(committed) < max_roads:
-        network: list[LineString] = streets + committed
-        anchors = _anchor_points(network or streets, n_anchors)
+        network: list[BaseGeometry] = [*streets, *committed]
+        anchors = _anchor_points(network, n_anchors)
         base = _planarize(committed, block.crs)
         base_val = _score(objective, block, base, adj, base_burden)
         curr_roads = base if len(committed) else None
