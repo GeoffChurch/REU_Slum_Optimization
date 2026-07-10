@@ -97,11 +97,14 @@ directness.
 
 **`greedy_arterial_buildable` is the navigability flagship.** It greedily inserts the straight
 through-road with the best directness gain per meter, one at a time, and leads the field on
-`directness` and `efficiency` (≈10× dijkstra/mesh on real blocks) — the method to reach for when
-circulation matters. The tradeoff: it is slow (minutes/block — it scores every candidate road
-honestly), and it trades a little `access` AUC for that navigability, so **dijkstra remains the
-fast default** for access-first reblocking. The compare is exactly how you see this Pareto
-tradeoff: arterial wins directness/efficiency, dijkstra wins access-per-second.
+`directness` and `efficiency` (several× dijkstra/mesh on real blocks) — the method to reach for when
+circulation matters. Add `greedy_arterial_aspirational` (ideal straight chords, not snapped to
+frontages) to `methods=[...]` to see the directness **ceiling**: it beats buildable by a wide margin,
+and the gap is the measurable *price of buildability*. The tradeoff: arterial is slow (minutes/block
+— it scores every candidate road honestly), and it trades a little `access` AUC for that
+navigability, so **dijkstra remains the fast default** for access-first reblocking. The compare is
+exactly how you see this Pareto tradeoff: arterial wins directness/efficiency, dijkstra wins
+access-per-second.
 
 ## Multi-block (region) reblocking
 
@@ -125,10 +128,10 @@ pixi run python -m reblock.compare data=dji methods=[dijkstra,mesh,greedy_arteri
 The reblock writes `region:..._before.png` / `_after.png` plus `region_map.png` (the region-builder's
 block-membership map); the compare writes the same per-metric `auc_table_{metric}.csv` /
 `curve_{metric}_{region}.png` as the single-block case, keyed by region. **This is where arterial
-pulls furthest ahead** — on a region there is room for long cross-block through-roads, so on the DJI
-pair its directness AUC (~1.08 vs ~0.19 for dijkstra/mesh, ~6×) and efficiency AUC (~6×) lead by a
-wide margin (the existing inter-block streets already give decent access, so the tree methods only
-add local spurs; arterial adds the region-spanning through-roads). dijkstra still wins access.
+pulls furthest ahead** — on a region there is room for long cross-block through-roads, so its
+directness and efficiency AUC lead dijkstra/mesh by a wide margin (the existing inter-block streets
+already give decent access, so the tree methods only add local spurs; arterial adds the
+region-spanning through-roads). dijkstra still wins access.
 
 ![region map](examples/multi-block/region_map.png)
 

@@ -117,6 +117,27 @@ def test_efficiency_and_directness_rise_with_roads() -> None:
     assert e_full > e_none and d_full > d_none
 
 
+def test_line_proximity_scores_a_sparse_straight_chord() -> None:
+    # A single 2-point straight chord has only its endpoints as graph vertices, so the OLD
+    # nearest-VERTEX entry rule scored parcels abreast of its middle as ~unreachable (~0
+    # directness) -- inverting the price-of-buildability. Line-proximity projects each parcel onto
+    # the nearest POINT on the chord, so the sparse chord genuinely serves the parcels it runs past.
+    from shapely.geometry import LineString
+
+    from reblock.budget import network_efficiency
+    polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
+             for i in range(3) for j in range(7)]     # 3x7 block, deep
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (3.0, 0.0)])], crs=UTM)  # bottom
+    block = Block(block_id="deep", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    chord = gpd.GeoDataFrame(geometry=[LineString([(1.5, 0.0), (1.5, 7.0)])], crs=UTM)  # spine
+    _, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, chord.iloc[:0]))
+    _, d_chord = network_efficiency(block, chord)
+    assert d_chord > d_none            # the chord helps
+    assert d_chord > 0.2               # ... non-trivially -- the 2-point chord IS counted, not ~0
+
+
 def test_cost_benefit_curve_accepts_a_benefit_fn() -> None:
     from reblock.budget import cost_benefit_curve, efficiency_benefit
     block = _grid_block(5)

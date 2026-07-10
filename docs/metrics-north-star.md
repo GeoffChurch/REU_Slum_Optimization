@@ -1,6 +1,10 @@
 # Reblocking metrics — north star
 
-**Status:** guiding vision (not yet implemented) · **Date:** 2026-07-09
+**Status:** guiding vision · **Date:** 2026-07-09 · **Piece 1 (line-proximity entries) ADOPTED
+2026-07-10** — `network_efficiency` now maps a parcel to the nearest point on a road edge (not the
+nearest graph vertex), fixing the sparse-chord undercount that inverted the price-of-buildability;
+this unblocked aspirational arterial as a valid directness ceiling. Piece 2 (grounded effective
+resistance) remains a prototype on branch `north-star-metric`.
 
 This is the metric we are *aiming* at. Today's three lenses — access (Σ depth²),
 network-efficiency E (mean 1/d), and directness (mean euclid/d) — are useful proxies, but

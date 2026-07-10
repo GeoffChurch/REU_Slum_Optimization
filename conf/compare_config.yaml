@@ -13,9 +13,10 @@ all_methods:
   topology: {_target_: reblock.methods.topology.TopologyMethod}
   mesh: {_target_: reblock.methods.mesh.MeshReblocker}
   greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: directness}
-  # NOTE: the aspirational mode (ideal chords) is not a valid ceiling under the current
-  # vertex-based network_efficiency scoring (it undercounts sparse-vertex chords; densifying is
-  # too slow). Deferred pending the line-proximity metric in docs/metrics-north-star.md.
+  # aspirational (ideal straight chords) is the directness ceiling -- valid now that
+  # network_efficiency scores by line-proximity entries (which count sparse chords the old
+  # nearest-vertex rule missed). buildable then reads as the measurable price of buildability.
+  greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
 methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable]
 
