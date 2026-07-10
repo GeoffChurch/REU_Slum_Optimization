@@ -1,32 +1,29 @@
 # Multi-block (region) reblocking — Design
 
-**Status:** autonomous draft (built overnight; **decisions flagged for review**) · **Date:** 2026-07-10
+**Status:** built + reviewed; model revised to **existing-egress** (2026-07-10, owner decision) · **Date:** 2026-07-10
 
 Reblock a *region* — several adjacent blocks — **jointly**, so roads (especially arterials) can
 span old block boundaries instead of stopping at them. The insight (from the roadmap
 discussion): this is mostly *plumbing* — build one region-level `Block` and run the existing
 methods on it. No new reblocking algorithm.
 
-## The model (RESOLVED — seed / augment)
+## The model (RESOLVED — existing egress)
 
-**Existing inter-block roads are kept as a pre-added "seed" road network that the methods
-*extend* — treated the same as roads we add, as if added first — not demolished.** (Owner
-decision, 2026-07-10; the clean-slate "drop interior roads and re-plan from the perimeter"
-alternative was rejected.) Concretely:
+**The existing inter-block streets are existing egress, not part of the intervention.** A region
+is just a single `Block` whose streets are the full existing road network (outer perimeter +
+inter-block streets), reblocked exactly like any single block. (Owner decision, 2026-07-10: this
+*replaced* an earlier "seed / count existing roads as first-added" model, which produced a
+misleading 'before' — a deep-access core measured only to the outer perimeter, as if the real
+inter-block streets didn't exist. No back-compat: the seed/perimeter/eval-swap machinery was
+deleted.) Concretely:
 
-- **True egress = the region's outer perimeter** (its link to the wider city). This is what the
-  cost-benefit measures reachability *to*.
-- **The inter-block roads are the first roads of the proposal** — already built, but **counted
-  as road** in the cost-benefit (they are pavement), placed first in budget/drainage order.
-- **The method extends the seed:** it routes parcels on the existing network (perimeter + seed)
-  and adds *complementary* roads (arterials for navigability, spurs for any still-deep pockets),
-  rather than re-deriving what is already there.
-- **Access/directness are measured on the full network (seed + added) against the perimeter
-  egress** — so a parcel reaches the city *through* the whole network.
-
-This is the honest model (build on what exists; count existing pavement fairly), and its
-egress-vs-internal-network split is the *same* distinction the north-star / segment-group egress
-model needs — the two converge, a good sign it's the right cut.
+- **Egress = every existing street** (outer perimeter AND inter-block). A parcel already served by
+  an inter-block street is shallow in the 'before' — the physical status quo.
+- **The intervention = only the method's added roads.** The cost-benefit grades those new roads
+  against the existing-network baseline, so a method is credited for the reachability it *adds*,
+  not for pre-existing pavement.
+- **The method extends the network:** it routes parcels on the existing streets and adds
+  *complementary* roads (arterials for navigability, spurs for any still-deep pockets).
 
 ## API (`src/reblock/region.py`)
 
@@ -36,31 +33,18 @@ or its convex hull if the union is a MultiPolygon); **crs** = the shared CRS (as
 **source_content_hash** = a deterministic hash of the sorted constituent identities (or `""` if
 any is uncacheable).
 
-The seed model is realized with three geometries and one orchestrator — **no method changes
-needed** (the trick is that the method routes on the *full existing network* while the
-evaluation counts the interior roads against the *perimeter* egress):
+**No method changes needed** — the region is a single `Block` and the existing single-block
+reblock path handles it:
 
 - **`region_block(blocks) -> Block`** — the block a method reblocks. `streets` = **union of every
-  block's existing streets** (perimeter + inter-block = the full existing road network). Routing
-  on this means seed-adjacent parcels are already served, so the method adds only *complementary*
-  roads. *(This supersedes Task 1's perimeter-only `region_block`; Task 1's perimeter computation
-  moves to `region_perimeter`.)*
-- **`region_perimeter(blocks) -> GeoDataFrame`** — the outer perimeter lines
-  (`unary_union([b.boundary for b in blocks]).boundary`), used as the **eval egress**.
-- **`region_seed_roads(blocks) -> GeoDataFrame`** — the interior existing roads = all existing
-  streets minus the perimeter (`difference` within a small buffer). These are the **counted
-  seed**, emitted first.
-- **`region_reblock(blocks, method, evals) -> Result`** —
-  1. `rb = region_block(blocks)` (streets = full existing network);
-  2. `added = method.propose(rb).roads` (the method extends the seed);
-  3. `full = concat([seed, added])` with `seed = region_seed_roads(blocks)` marked highest-drain
-     (added first);
-  4. `eval_block = replace(rb, streets=region_perimeter(blocks))` (egress = perimeter only);
-  5. score `full` on `eval_block` with each eval → `Result`.
-
-So the method sees the seed as existing (routes/extends), and the cost-benefit counts the seed
-as the first-added road against the true perimeter egress — exactly "treated as roads we add,
-added first."
+  block's existing streets** (outer perimeter + inter-block = the full existing road network).
+  Routing on this means already-served parcels stay served, so the method adds only *complementary*
+  roads; and it is the egress the evals score the method's added roads against.
+- **`region_reblock(blocks, method, evals) -> Result`** — reblock the region-block exactly like a
+  single block: `rb = region_block(blocks)`; `proposal = method.propose(rb)`; score `proposal` on
+  `rb` with each eval → `Result`. No seed/perimeter split and no eval-swap: the existing
+  inter-block streets are egress in `rb.streets`, and only the method's added roads are the
+  intervention on the cost-benefit curve.
 
 ## Region selection
 
@@ -82,7 +66,7 @@ transfer idea (thread 3) is worth building at all.
 ## Scope / testing
 
 - `region_block` builder — unit tests: N blocks → one valid `Block` (parcels = Σ parcels,
-  unique ids; streets = outer perimeter, interior edges dropped; CRS preserved; identity set).
+  unique ids; streets = full existing network, incl. the inter-block shared edges; CRS preserved).
 - **Cross-block roads** — on a region of ≥2 adjacent blocks, a method produces at least one road
   that crosses an original block-boundary line (proves *joint*, not per-block).
 - **Hypothesis** — on a real adjacent-block region, `greedy_arterial` directness/efficiency AUC

@@ -84,8 +84,10 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
                 block = region[0]
                 roads = cast(GeoDataFrame, propose(method, block).roads)
             else:
-                # Multi-block region: reblock jointly, score the seed+added roads against
-                # the region's perimeter-only egress (region_reblock's eval-block).
+                # Multi-block region: reblock jointly. The region-block's streets ARE the full
+                # existing network (perimeter + inter-block); the method's added roads are graded
+                # against that existing-network baseline (existing inter-block streets are egress,
+                # not part of the intervention).
                 result = region_reblock(region, method, [])
                 block = result.block
                 roads = cast(GeoDataFrame, result.proposal.roads)

@@ -46,6 +46,12 @@ def _draw_heatmap(block: Block, layers: pd.Series, vmax: int) -> Figure:
                  edgecolor="#999999", linewidth=0.3)
     gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
         ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
+    # The existing street network, drawn like the boundary. For a single block this is the
+    # outer ring (already drawn above); for a region it also carries the inter-block streets
+    # between members -- existing egress the 'before' access depth is measured against, so
+    # they must be visible (a parcel next to one is shallow, not deep).
+    if block.streets is not None and not block.streets.empty:
+        block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
 
     sm = plt.cm.ScalarMappable(cmap=_CMAP, norm=Normalize(vmin=1, vmax=vmax))
     fig.colorbar(sm, ax=ax).set_label("access depth (parcels from a street)")

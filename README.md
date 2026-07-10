@@ -97,9 +97,11 @@ tradeoff: arterial wins directness/efficiency, dijkstra wins access-per-second.
 ## Multi-block (region) reblocking
 
 `block_ids` is a **list of lists**: each inner list is a *region* reblocked jointly, so roads can
-span the old block boundaries. Singletons are ordinary single-block reblocking (`[[X]]`). Existing
-inter-block roads are kept as a pre-added seed the method *extends*; egress is the region's outer
-perimeter (see `docs/superpowers/specs/2026-07-10-multi-block-reblocking-design.md`).
+span the old block boundaries. Singletons are ordinary single-block reblocking (`[[X]]`). A region
+is just one block with its full existing street network (outer perimeter + the inter-block streets
+between members): the existing inter-block streets are existing egress, and only the method's
+*added* roads count as the intervention (see
+`docs/superpowers/specs/2026-07-10-multi-block-reblocking-design.md`).
 
 ```bash
 # Reblock two adjacent blocks jointly with the arterial method (roads span the old block line)
@@ -114,9 +116,10 @@ pixi run python -m reblock.compare data=dji methods=[dijkstra,mesh,greedy_arteri
 The reblock writes `region:..._before.png` / `_after.png` plus `region_map.png` (the region-builder's
 block-membership map); the compare writes the same per-metric `auc_table_{metric}.csv` /
 `curve_{metric}_{region}.png` as the single-block case, keyed by region. **This is where arterial
-pulls furthest ahead** — on a region there is room for long cross-block through-roads, so its
-directness AUC leads dijkstra/mesh by a wide margin (the seed's existing roads already give decent
-access, so the tree methods only add local spurs; arterial adds the region-spanning routes).
+pulls furthest ahead** — on a region there is room for long cross-block through-roads, so on the DJI
+pair its directness AUC (~1.08 vs ~0.19 for dijkstra/mesh, ~6×) and efficiency AUC (~6×) lead by a
+wide margin (the existing inter-block streets already give decent access, so the tree methods only
+add local spurs; arterial adds the region-spanning through-roads). dijkstra still wins access.
 
 A pluggable **`region_builder`** expands each seed group before reblocking: `identity` (default;
 reblock exactly the listed blocks) or `convex_hull` (`region_builder=convex_hull`), which fills the

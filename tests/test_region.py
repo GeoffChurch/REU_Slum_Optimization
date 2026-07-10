@@ -6,10 +6,10 @@ import geopandas as gpd
 import networkx as nx
 import pytest
 from pyproj import CRS
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
-from reblock.budget import auc, efficiency_directness_curves, road_drainage
+from reblock.budget import auc, efficiency_directness_curves
 from reblock.contracts import Block, Result
 from reblock.data.kblock import KblockSource
 from reblock.eval.kcomplexity import KComplexityEval
@@ -19,9 +19,7 @@ from reblock.region import (
     ConvexHullRegionBuilder,
     IdentityRegionBuilder,
     region_block,
-    region_perimeter,
     region_reblock,
-    region_seed_roads,
 )
 
 UTM = CRS.from_epsg(32643)
@@ -84,10 +82,10 @@ def _spans_both_sides(roads: gpd.GeoDataFrame, x_split: float, margin: float) ->
 
 
 def test_region_block_streets_are_the_full_existing_network() -> None:
-    # Under the seed model, region_block.streets = the union of every block's OWN existing
-    # streets (perimeter + inter-block), so the interior shared edge -- present in both a's and
-    # b's own streets -- is now INCLUDED, not dropped (contrast the old perimeter-only model,
-    # now `region_perimeter`, tested below).
+    # region_block.streets = the union of every block's OWN existing streets (perimeter +
+    # inter-block), so the interior shared edge -- present in both a's and b's own streets --
+    # is INCLUDED. This full existing network is what a method routes on and what the evals
+    # score the method's added roads against.
     a = _grid_block(0, 0, 3, 3, block_id="a")
     b = _grid_block(3, 0, 3, 3, block_id="b")
     rb = region_block([a, b])
@@ -101,41 +99,6 @@ def test_region_block_streets_are_the_full_existing_network() -> None:
     outer_edge = LineString([(0, 0), (0, 3)])
     assert shared_edge.within(street_union)
     assert outer_edge.within(street_union)
-
-
-def test_region_perimeter_drops_the_shared_interior_edge() -> None:
-    a = _grid_block(0, 0, 3, 3, block_id="a")
-    b = _grid_block(3, 0, 3, 3, block_id="b")
-    perim = region_perimeter([a, b])
-
-    # Streets-derived (Fix 1): the intersection of the routing streets with a STREET_TOL
-    # corridor around the true outer boundary can come back as several disjoint LineStrings
-    # (e.g. short stubs of the interior edge near the two corners it touches the outer ring),
-    # not one clean ring -- so row count isn't the invariant here, containment is.
-    assert len(perim) >= 1
-    assert perim.crs == UTM
-    perim_union = unary_union(perim.geometry).buffer(1e-6)
-    shared_edge = LineString([(3, 0), (3, 3)])
-    outer_edge = LineString([(0, 0), (0, 3)])
-    assert not shared_edge.within(perim_union)
-    assert outer_edge.within(perim_union)
-
-
-def test_region_seed_roads_is_the_interior_existing_roads() -> None:
-    a = _grid_block(0, 0, 3, 3, block_id="a")
-    b = _grid_block(3, 0, 3, 3, block_id="b")
-    seed = region_seed_roads([a, b])
-
-    assert len(seed) >= 1
-    assert seed.crs == UTM
-    seed_union = unary_union(seed.geometry).buffer(1e-6)
-    # The shared edge's midpoint (away from its corners, which the perimeter-buffer erosion
-    # legitimately eats into -- STREET_TOL either side of y=0/y=3) IS in the seed; a genuine
-    # outer-edge midpoint is NOT.
-    shared_midpoint = Point(3, 1.5)
-    outer_midpoint = Point(0, 1.5)
-    assert shared_midpoint.within(seed_union)
-    assert not outer_midpoint.within(seed_union)
 
 
 def test_region_block_rejects_empty_list() -> None:
@@ -153,97 +116,27 @@ def test_region_block_rejects_crs_mismatch() -> None:
         region_block([a, b])
 
 
-def test_region_perimeter_rejects_empty_list() -> None:
-    with pytest.raises(ValueError):
-        region_perimeter([])
-
-
-def test_region_perimeter_rejects_crs_mismatch() -> None:
-    a = _grid_block(0, 0, 3, 3, block_id="a")
-    other_crs = CRS.from_epsg(32644)
-    b = Block(block_id="b", crs=other_crs, boundary=a.boundary,
-              parcels=a.parcels.set_crs(other_crs, allow_override=True),
-              streets=a.streets.set_crs(other_crs, allow_override=True))
-    with pytest.raises(ValueError):
-        region_perimeter([a, b])
-
-
-def test_region_seed_roads_rejects_empty_list() -> None:
-    with pytest.raises(ValueError):
-        region_seed_roads([])
-
-
-def test_region_seed_roads_rejects_crs_mismatch() -> None:
-    a = _grid_block(0, 0, 3, 3, block_id="a")
-    other_crs = CRS.from_epsg(32644)
-    b = Block(block_id="b", crs=other_crs, boundary=a.boundary,
-              parcels=a.parcels.set_crs(other_crs, allow_override=True),
-              streets=a.streets.set_crs(other_crs, allow_override=True))
-    with pytest.raises(ValueError):
-        region_seed_roads([a, b])
-
-
-def test_region_reblock_scores_seed_and_added_roads_against_the_perimeter_egress() -> None:
+def test_region_reblock_reblocks_the_region_block_against_its_existing_network() -> None:
     # Two adjacent 3x3 blocks, each with its own full-perimeter streets (so the shared edge is
-    # already "existing road" on both sides) -- the seed model's simplest case.
+    # already existing inter-block street on both sides). region_reblock reblocks the region-
+    # Block directly: the Result's block IS the region-block (streets = full existing network,
+    # incl. the shared edge), the proposal is exactly the method's added roads (nothing is
+    # pre-added), and it is deterministic.
     a = _grid_block(0, 0, 3, 3, block_id="a")
     b = _grid_block(3, 0, 3, 3, block_id="b")
-    seed = region_seed_roads([a, b])
-    perim = region_perimeter([a, b])
-    assert len(seed) >= 1
+    rb = region_block([a, b])
 
     result = region_reblock([a, b], DijkstraReblocker(), [KComplexityEval()])
 
     assert isinstance(result, Result)
+    result_streets = unary_union(result.block.streets.geometry)
+    assert result_streets.equals(unary_union(rb.streets.geometry))
+    assert LineString([(3, 0), (3, 3)]).within(result_streets.buffer(1e-6))  # the shared edge
+
     assert result.proposal.roads is not None
-    assert len(result.proposal.roads) >= len(seed)
-    # region_perimeter now (Fix 1) explodes to several rows (see above), so compare the whole
-    # network, not just row 0.
-    assert unary_union(result.block.streets.geometry).equals(unary_union(perim.geometry))
-
-    again = region_reblock([a, b], DijkstraReblocker(), [KComplexityEval()])
-    assert again.proposal.roads is not None
-    assert result.proposal.roads.geometry.equals(again.proposal.roads.geometry)
-
-
-def test_region_reblock_seed_roads_carry_the_highest_drainage() -> None:
-    # Three 3x6 blocks in a row (A: x=0-3, B: x=3-6, C: x=6-9), each declaring its OWN full
-    # square boundary as street -- so region_block.streets includes the shared edges x=3 and
-    # x=6, and region_seed_roads (the "seed counted first" mechanic the review found untested)
-    # is genuinely non-empty. (The task's suggested 3x3 fixture is a degenerate case here: at
-    # STREET_TOL=0.5 and block height 3, every point on the interior seed lines lands within
-    # (or exactly at) STREET_TOL of the outer perimeter via the near-corner stubs, so
-    # road_drainage never has to route THROUGH the seed at all -- it's already street-adjacent
-    # by proximity, giving seed drainage of zero. Height 6 gives the interior seed edges genuine
-    # depth (their midpoints are ~3 units, not <=0.5, from the nearest true-perimeter point), so
-    # parcels actually route along them -- the mechanic this test exists to exercise.)
-    a = _grid_block(0, 0, 3, 6, block_id="A")
-    b = _grid_block(3, 0, 3, 6, block_id="B")
-    c = _grid_block(6, 0, 3, 6, block_id="C")
-    blocks = [a, b, c]
-
-    seed = region_seed_roads(blocks)
-    assert len(seed) >= 1
-
-    result = region_reblock(blocks, DijkstraReblocker(), [KComplexityEval()])
-    eval_block = result.block
-    full = result.proposal.roads
-    assert full is not None
-
-    # `full` is built as concat([seed, added]) (region.py's region_reblock), seed first --
-    # so the first len(seed) rows of `full` are exactly `region_seed_roads`'s rows, in order.
-    n_seed = len(seed)
-    assert unary_union(list(full.geometry)[:n_seed]).equals(unary_union(seed.geometry))
-
-    drain = road_drainage(eval_block, full)
-    seed_drain, added_drain = drain[:n_seed], drain[n_seed:]
-    assert added_drain  # the method did add roads on this fixture (center-cell spurs)
-
-    # The seed carries the highest single-segment drainage AND the higher mean -- both hold
-    # comfortably on this fixture (recorded: seed drain [0,5,0,0,3,0,0,5,0,0,3,0], mean 1.33;
-    # added drain mean 0.96).
-    assert max(drain) == max(seed_drain)
-    assert (sum(seed_drain) / len(seed_drain)) > (sum(added_drain) / len(added_drain))
+    direct = DijkstraReblocker().propose(rb).roads      # region_reblock == propose on region-block
+    assert direct is not None
+    assert result.proposal.roads.geometry.equals(direct.geometry)
 
 
 def test_region_reblock_arterial_beats_dijkstra_with_a_margin_on_a_wide_region() -> None:
@@ -257,7 +150,9 @@ def test_region_reblock_arterial_beats_dijkstra_with_a_margin_on_a_wide_region()
     b = _grid_block(4, 0, 4, 3, block_id="B")
     c = _grid_block(8, 0, 4, 3, block_id="C")
     blocks = [a, b, c]
-    assert len(region_seed_roads(blocks)) >= 1
+    # Each block declares its own full-perimeter streets, so the two shared edges (x=4, x=8) are
+    # existing inter-block streets in region_block.streets -- the existing-network baseline both
+    # methods' added roads are graded against.
 
     dij_result = region_reblock(blocks, DijkstraReblocker(), [])
     art_result = region_reblock(
@@ -278,10 +173,10 @@ def test_region_reblock_arterial_beats_dijkstra_with_a_margin_on_a_wide_region()
     auc_dij = auc(dij_directness, cap)
     auc_art = auc(art_directness, cap)
 
-    # Recorded numbers on this fixture: AUC dijkstra ~0.338, AUC arterial ~0.557 (ratio ~1.65)
-    # -- a real, non-brittle margin (the task's suggested 3x4-block fixture only cleared ~1.20,
-    # too close to the 1.2x bar to be a reliable regression guard, so this one is 4x3 instead --
-    # wider per block, same total footprint order -- which clears it comfortably).
+    # Recorded numbers under the existing-egress model: AUC dijkstra ~0.487, arterial ~0.659
+    # (ratio ~1.35). The two shared edges are now existing egress, so dijkstra's per-block trees
+    # get a better baseline and the margin narrows from the old perimeter-egress model (~1.65),
+    # but arterial's long cross-block through-roads still clear the 1.2x bar comfortably.
     assert auc_art > 1.2 * auc_dij
 
 
@@ -304,9 +199,9 @@ def test_greedy_arterial_beats_dijkstra_directness_auc_on_a_deep_region() -> Non
     )
 
     eval_block = dij_result.block
-    # region_perimeter (Fix 1) is now streets-derived, not the geometric outer ring, so on this
-    # partial-frontage fixture it's just the two declared street stubs (2 rows) -- compare the
-    # whole network (not row 0 alone, which would pass vacuously either way).
+    # This fixture has partial frontage (a: bottom stub, b: top stub) and no existing street on
+    # the shared edge x=3, so region_block.streets is just the two declared stubs -- the egress
+    # baseline. Compare the whole network (not row 0 alone, which would pass vacuously either way).
     assert unary_union(eval_block.streets.geometry).equals(
         unary_union(art_result.block.streets.geometry))
     assert dij_result.proposal.roads is not None and art_result.proposal.roads is not None
@@ -317,13 +212,10 @@ def test_greedy_arterial_beats_dijkstra_directness_auc_on_a_deep_region() -> Non
     auc_dij = auc(dij_directness, cap)
     auc_art = auc(art_directness, cap)
 
-    # Recorded numbers on this fixture POST Fix 1 (egress is now the two actual street stubs,
-    # not the full geometric outer ring the old geometry-derived region_perimeter credited it
-    # with): AUC dijkstra ~0.094, AUC arterial ~0.403 -- an even wider margin than pre-fix
-    # (~0.314 / ~0.476), because dijkstra no longer gets undeserved credit for "egress" along
-    # boundary stretches that have no actual street. Arterial wins comfortably, confirming the
-    # hypothesis. Kept as >= (not >) per the task's guidance: the real signal is the recorded
-    # numbers, not a brittle margin.
+    # Recorded numbers on this fixture: AUC dijkstra ~0.094, AUC arterial ~0.403. The seed is
+    # empty here (no interior existing street), so this fixture's egress is unchanged by the
+    # existing-egress model. Arterial wins comfortably, confirming the hypothesis. Kept as >=
+    # (not >) per guidance: the real signal is the recorded numbers, not a brittle margin.
     assert auc_art >= auc_dij
 
     # Cross-block roads (design Scope): the arterial's own proposal -- not the seed, which is
