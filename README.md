@@ -32,7 +32,9 @@ pixi run python -m reblock.run data=capetown method=dijkstra eval=kcomplexity "b
 Writes `ZAF.9.3.1_1_44882_before.png` and one `_<proposal>_after.png` into the Hydra
 run dir (`outputs/<date>/<time>/`). `dijkstra` is the default method — a buildable
 frontage-routed street network (~1 s/block); swap `method=peel` (fast through-parcel
-sketch) or `method=topology` (slow greedy optimizer). Swap `data=capetown` → `data=dji`,
+sketch), `method=topology` (slow greedy optimizer), or `method=greedy_arterial` (the
+navigability flagship — straight through-roads, best directness, minutes/block). Swap
+`data=capetown` → `data=dji`,
 or omit `block_ids` to process the first `max_blocks` blocks instead.
 
 (Quote `"block_ids=[...]"` so the shell doesn't glob the brackets.)
@@ -70,7 +72,7 @@ Rank the reblockers by *efficiency* — how much benefit each buys per meter of 
 across the whole budget range (not just at full build, where they converge):
 
 ```bash
-pixi run python -m reblock.compare data=dji eval=kcomplexity methods=[dijkstra,peel,mesh,topology] max_blocks=2
+pixi run python -m reblock.compare data=dji eval=kcomplexity methods=[dijkstra,mesh,greedy_arterial_buildable] max_blocks=2
 ```
 
 Grades every method on three lenses — `access` (fraction of access-burden removed),
@@ -78,7 +80,16 @@ Grades every method on three lenses — `access` (fraction of access-burden remo
 and writes, **per metric**, `auc_table_{metric}.csv` (mean AUC per method, higher = more
 benefit per meter of road) and `curve_{metric}_{block}.png` (overlaid cost-benefit curves:
 that metric vs road density, m/ha), for `metric ∈ {access, efficiency, directness}`. Add
-`topology` to `methods=[...]` for the full field — it's minutes/block, so keep the block
-count small (results are cached after the first run). On real data, dijkstra tracks
-topology closely at a fraction of the compute, while peel needs ~3× the road for the same
-access; `mesh` adds the dijkstra forest's cross-tree through-roads for extra directness.
+`topology` and `peel` to `methods=[...]` for the full field — topology is minutes/block, so
+keep the block count small (results are cached after the first run). On real data, dijkstra
+tracks topology closely on access at a fraction of the compute, while peel needs ~3× the road
+for the same access; `mesh` adds the dijkstra forest's cross-tree through-roads for extra
+directness.
+
+**`greedy_arterial_buildable` is the navigability flagship.** It greedily inserts the straight
+through-road with the best directness gain per meter, one at a time, and leads the field on
+`directness` and `efficiency` (≈10× dijkstra/mesh on real blocks) — the method to reach for when
+circulation matters. The tradeoff: it is slow (minutes/block — it scores every candidate road
+honestly), and it trades a little `access` AUC for that navigability, so **dijkstra remains the
+fast default** for access-first reblocking. The compare is exactly how you see this Pareto
+tradeoff: arterial wins directness/efficiency, dijkstra wins access-per-second.
