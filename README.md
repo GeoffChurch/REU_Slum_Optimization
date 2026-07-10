@@ -93,3 +93,32 @@ circulation matters. The tradeoff: it is slow (minutes/block — it scores every
 honestly), and it trades a little `access` AUC for that navigability, so **dijkstra remains the
 fast default** for access-first reblocking. The compare is exactly how you see this Pareto
 tradeoff: arterial wins directness/efficiency, dijkstra wins access-per-second.
+
+## Multi-block (region) reblocking
+
+`block_ids` is a **list of lists**: each inner list is a *region* reblocked jointly, so roads can
+span the old block boundaries. Singletons are ordinary single-block reblocking (`[[X]]`). Existing
+inter-block roads are kept as a pre-added seed the method *extends*; egress is the region's outer
+perimeter (see `docs/superpowers/specs/2026-07-10-multi-block-reblocking-design.md`).
+
+```bash
+# Reblock two adjacent blocks jointly with the arterial method (roads span the old block line)
+pixi run python -m reblock.run data=dji method=greedy_arterial \
+  "block_ids=[[DJI.3_1_1808,DJI.3_1_1809]]" eval=kcomplexity render.enabled=true region_map.enabled=true
+
+# Multi-block cost-benefit: grade the methods on the region
+pixi run python -m reblock.compare data=dji methods=[dijkstra,mesh,greedy_arterial_buildable] \
+  "block_ids=[[DJI.3_1_1808,DJI.3_1_1809]]" eval=kcomplexity
+```
+
+The reblock writes `region:..._before.png` / `_after.png` plus `region_map.png` (the region-builder's
+block-membership map); the compare writes the same per-metric `auc_table_{metric}.csv` /
+`curve_{metric}_{region}.png` as the single-block case, keyed by region. **This is where arterial
+pulls furthest ahead** — on a region there is room for long cross-block through-roads, so its
+directness AUC leads dijkstra/mesh by a wide margin (the seed's existing roads already give decent
+access, so the tree methods only add local spurs; arterial adds the region-spanning routes).
+
+A pluggable **`region_builder`** expands each seed group: `identity` (default; reblock exactly the
+listed blocks) or `convex_hull` (`region_builder=convex_hull`) which fills the blocks inside a
+disjoint group's convex hull into one contiguous region. `identity` warns if a group's blocks are
+not adjacent (a disjoint group reblocks independently, not jointly — use `convex_hull` to fill it).
