@@ -42,6 +42,13 @@ def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
     return next((m for m in metrics if m.eval == _KCOMPLEXITY), None)
 
 
+def _member_ids(block_id: str) -> list[str]:
+    """The member block ids of a render's selection: a region block_id is
+    ``region:`` + ``+``-joined sorted member ids (see ``region.region_block``); a plain block is
+    itself. Used to split own vs surrounding context by id, not by fragile boundary geometry."""
+    return block_id[len("region:"):].split("+") if block_id.startswith("region:") else [block_id]
+
+
 def render_results(results: list[Result], out_dir: Path, cfg: RenderConfig,
                    source: Source) -> None:
     """Per block: a shared-`vmax` `{block_id}_before.png` + one
@@ -221,13 +228,20 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
     # (single source of truth, frame_bbox in render.py), so the two never drift apart.
     frame = frame_bbox(block.parcels)
     outlines = source.block_geometries(frame)
+    outlines["block_id"] = outlines["block_id"].astype(str)
     pts = source.building_points(frame)
-    # Drop the selection's own block(s) from the context outlines -- else the selection would
-    # be dimmed over its own heatmap. Points split by containment in the selection's boundary:
-    # inside = own (drawn emphasised, on top), outside = context (dimmed).
-    context_outlines = cast(gpd.GeoDataFrame, outlines[~outlines.within(block.boundary)])
-    own_points = cast(gpd.GeoDataFrame, pts[pts.within(block.boundary)])
-    context_points = cast(gpd.GeoDataFrame, pts[~pts.within(block.boundary)])
+    # Split the selection's own member block(s) from the surrounding context by block_id -- robust
+    # where a geometric `within(block.boundary)` is not: `block.boundary` is the union of Voronoi
+    # PARCELS (which can poke outside the raw block polygon) or, for a disjoint convex_hull region,
+    # the bulging hull -- either would mis-split a member outline or a gap neighbour. Own outlines
+    # are dropped (else dimmed over their own heatmap); points split against the TIGHT member union
+    # (matching region_map), so a convex_hull region's gap points read as context, not own.
+    is_member = outlines["block_id"].isin(_member_ids(block.block_id))
+    context_outlines = cast(gpd.GeoDataFrame, outlines[~is_member])
+    member_union = (outlines[is_member].geometry.union_all() if is_member.any()
+                    else block.boundary)
+    own_points = cast(gpd.GeoDataFrame, pts[pts.within(member_union)])
+    context_points = cast(gpd.GeoDataFrame, pts[~pts.within(member_union)])
 
     fig_before = render_before(
         block, access_before, vmax=vmax, frame=frame,

@@ -48,6 +48,11 @@ def spec_from_cfg(cfg: DictConfig) -> PipelineSpec:
 def main(cfg: DictConfig) -> None:
     spec = spec_from_cfg(cfg)
     output = run(spec)
+    # build_regions narrows source.block_ids to the selected members; clear it once here, before
+    # ANY emitter, so the context layers (render_results' surrounding outlines + region_map's
+    # whole-metro outlines) query ALL candidate blocks, not just the selection. Order-independent:
+    # nothing below reblocks, and building_points ignores block_ids anyway.
+    spec.source.block_ids = None   # type: ignore[attr-defined]
     for r in output.results:
         log.info("%s %s", r.block.block_id, {m.eval: dict(m.values) for m in r.metrics})
 
@@ -66,7 +71,6 @@ def main(cfg: DictConfig) -> None:
         else:
             flagged_map(str(blocks_path), output.selection or [], out_dir)
     if cfg.region_map.enabled:
-        spec.source.block_ids = None   # type: ignore[attr-defined]  # -> all candidate blocks
         region_map(spec.source, output.regions, output.seed_groups, out_dir)
 
 

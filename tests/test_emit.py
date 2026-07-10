@@ -8,7 +8,7 @@ from pyproj import CRS
 from shapely.geometry import Point, Polygon
 
 from reblock.contracts import BBox, Block, Metrics, Proposal, Region, Result
-from reblock.emit import RenderConfig, region_map, render_results
+from reblock.emit import RenderConfig, _member_ids, region_map, render_results
 
 UTM = CRS.from_epsg(32643)
 
@@ -20,6 +20,14 @@ def _grid_block(n: int) -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
     return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+
+
+def test_member_ids_parses_region_id_and_passes_through_plain_id() -> None:
+    # The own/context split keys on this: a region block_id is "region:" + "+"-joined sorted
+    # members (region.region_block); a plain block is itself. A regression here would mis-split
+    # own vs surrounding context.
+    assert _member_ids("region:DJI.3_1_1808+DJI.3_1_1809") == ["DJI.3_1_1808", "DJI.3_1_1809"]
+    assert _member_ids("DJI.3_1_1808") == ["DJI.3_1_1808"]
 
 
 def _kc(block: Block) -> Metrics:
