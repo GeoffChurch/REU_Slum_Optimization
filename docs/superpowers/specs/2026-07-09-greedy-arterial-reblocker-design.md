@@ -39,9 +39,9 @@ while cumulative_road_density(roads) < density_cap:
 return roads
 ```
 
-Roads emerge in value order, so the emitted sequence is **natively budget-sliceable** by
-`cost_benefit_curve` — no drainage/shortcut-ratio proxy needed; the greedy order *is* the
-budget order.
+Roads emerge in value order (informative for analysis), but `cost_benefit_curve` slices **every**
+method uniformly by recomputed drainage — the fair, no-method-cherry-picks-its-order budget
+policy — so the greedy commit order is not the curve's slice order, and that is intentional.
 
 `realize(c)`, `length(c)`, and the scored geometry are all **mode-dependent** (below): in
 buildable mode `realize` is the snapped frontage path and `length` is that path's length (what
@@ -127,11 +127,11 @@ methods.
 
 ## Budget / emit / eval integration
 
-The greedy emits segments in value order. To slice with the *unchanged* `cost_benefit_curve`
-(which orders by the `drain` column descending), the emitted roads carry `drain` = descending
-greedy rank (first-committed segment = highest), so `drain`-descending order reproduces the
-greedy commit order. (`drain` here is the generic "budget priority" slot the curve machinery
-already keys on, not literal drainage.) Graded on all three lenses by the existing compare.
+The greedy emits its planarized segments carrying `drain` = actual road drainage (via
+`road_drainage`), exactly like `DijkstraReblocker`/`MeshReblocker`. `cost_benefit_curve`
+recomputes drainage order for every method and slices uniformly by it — a fair, method-agnostic
+budget policy — so the greedy commit order is not separately preserved in the curve. Graded on
+all three lenses by the existing compare.
 
 `GreedyArterialReblocker` is deterministic (sampling at fixed spacing, sorted candidates,
 argmax with a geometry tiebreak; no RNG). `identity = ("greedy_arterial", mode, objective)`;
@@ -184,7 +184,9 @@ streets, and region-spanning arterials become candidates with no algorithm chang
   *objective* decides character, not a candidate ban: a spur can be bought cheaply and completed
   into a through-road later. A continuation extending a spur *across its anchor* forms a true
   crossroads, which directness naturally rewards. The emitted network is **noded** at crossings.
-- **`drain` = greedy rank** so the unchanged curve machinery slices in greedy order.
+- **`drain` = actual road drainage** (like dijkstra/mesh); `cost_benefit_curve` slices all
+  methods uniformly by recomputed drainage, so the greedy commit order isn't the curve's order —
+  which keeps cross-method comparison fair.
 - **Honest full marginal re-scoring** each step (tractable because arterials are few); lazy-
   greedy (CELF, exploiting submodularity) is the escape hatch if it drags, deferred.
 

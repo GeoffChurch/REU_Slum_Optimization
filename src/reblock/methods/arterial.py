@@ -17,7 +17,7 @@ from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from reblock.budget import access_burden, network_efficiency
+from reblock.budget import access_burden, network_efficiency, road_drainage
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
@@ -141,10 +141,10 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     g = _boundary_graph(block.parcels)
     nodes = list(g.nodes)
     node_tree = STRtree([Point(nd) for nd in nodes])
+    streets = [ln for ln in block.streets.geometry if isinstance(ln, LineString)]
 
     committed: list[LineString] = []                        # realized geometry, in commit order
     while len(committed) < max_roads:
-        streets = [ln for ln in block.streets.geometry if isinstance(ln, LineString)]
         network: list[LineString] = streets + committed
         anchors = _anchor_points(network or streets, n_anchors)
         base = _planarize(committed, block.crs)
@@ -166,23 +166,6 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
             break
         committed.append(best_real)
 
-    return _planarize_ranked(committed, block.crs)
-
-
-def _planarize_ranked(committed: list[LineString], crs: CRS) -> GeoDataFrame:
-    """Planarize the committed segments and tag each noded piece with `drain` = descending
-    greedy rank of the source segment (first-committed = highest), so cost_benefit_curve slices
-    in greedy order. A piece belongs to the earliest-committed segment that covers it."""
-    gdf = _planarize(committed, crs)
-    if gdf.empty:
-        gdf["drain"] = []
-        return gdf
-    n = len(committed)
-    drains: list[int] = []
-    for geom in gdf.geometry:
-        mid = geom.interpolate(0.5, normalized=True)
-        src = next((i for i, seg in enumerate(committed)
-                    if mid.distance(seg) <= STREET_TOL), n - 1)
-        drains.append(n - src)                              # earliest source -> highest drain
-    gdf["drain"] = drains
-    return gdf.sort_values("drain", ascending=False, kind="stable").reset_index(drop=True)
+    roads = _planarize(committed, block.crs)
+    roads["drain"] = road_drainage(block, roads) if len(roads) else []
+    return roads

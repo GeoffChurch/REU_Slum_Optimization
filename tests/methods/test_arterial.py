@@ -114,14 +114,16 @@ def test_greedy_is_deterministic() -> None:
     assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
 
 
-def test_greedy_drain_is_descending_rank_and_slices_monotone() -> None:
-    from reblock.budget import cost_benefit_curve
+def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
+    from reblock.budget import cost_benefit_curve, road_drainage
     block = _grid_block(6)
-    roads = _greedy_arterials(block, mode="buildable", objective="directness", max_roads=5,
-                              n_anchors=12)
-    assert list(roads["drain"]) == sorted(roads["drain"], reverse=True)   # rank descending
-    curve = cost_benefit_curve(block, roads)                              # slices in greedy order
-    assert curve.benefit == sorted(curve.benefit)                        # monotone non-decreasing
+    roads = _greedy_arterials(block, mode="buildable", objective="directness",
+                              max_roads=5, n_anchors=12)
+    assert len(roads) >= 1
+    assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
+    curve = cost_benefit_curve(block, roads)                     # integrates with budget machinery
+    assert len(curve.cost) >= 2                                  # multiple budget points, not stub
+    assert curve.benefit[-1] >= curve.benefit[0]                 # benefit doesn't regress w/ budget
 
 
 def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
