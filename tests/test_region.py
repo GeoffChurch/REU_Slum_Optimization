@@ -1,3 +1,5 @@
+import logging
+from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
@@ -9,12 +11,30 @@ from shapely.ops import unary_union
 
 from reblock.budget import auc, efficiency_directness_curves, road_drainage
 from reblock.contracts import Block, Result
+from reblock.data.kblock import KblockSource
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.methods.arterial import GreedyArterialReblocker
 from reblock.methods.dijkstra import DijkstraReblocker
-from reblock.region import region_block, region_perimeter, region_reblock, region_seed_roads
+from reblock.region import (
+    ConvexHullRegionBuilder,
+    IdentityRegionBuilder,
+    region_block,
+    region_perimeter,
+    region_reblock,
+    region_seed_roads,
+)
 
 UTM = CRS.from_epsg(32643)
+DJI_BLOCKS = Path(__file__).resolve().parent / "data" / "kblock" / "blocks_dji_sample.parquet"
+DJI_BLD = Path(__file__).resolve().parent / "data" / "kblock" / "buildings_dji_sample.parquet"
+
+
+def _block_geoms(*specs: tuple[str, float, float]) -> gpd.GeoDataFrame:
+    """A block_id + geometry GeoDataFrame -- one unit-square "block" per (block_id, x, y)
+    offset -- the cheap geometry input a RegionBuilder operates on."""
+    ids = [block_id for block_id, _, _ in specs]
+    polys = [Polygon([(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)]) for _, x, y in specs]
+    return gpd.GeoDataFrame({"block_id": ids}, geometry=polys, crs=UTM)
 
 _SIDES = {
     "bottom": lambda x0, y0, w, h: LineString([(x0, y0), (x0 + w, y0)]),
@@ -310,3 +330,55 @@ def test_greedy_arterial_beats_dijkstra_directness_auc_on_a_deep_region() -> Non
     # empty on this fixture since no interior street exists yet -- genuinely spans from block
     # a's territory into block b's, proving joint (not per-block) reblocking.
     assert _spans_both_sides(art_result.proposal.roads, x_split=3.0, margin=1.0)
+
+
+def test_identity_region_builder_sorts_each_group_for_determinism() -> None:
+    geoms = _block_geoms(("B", 1, 0), ("A", 0, 0))   # touching squares, input order B, A
+    assert IdentityRegionBuilder().build(geoms, [["B", "A"]]) == [["A", "B"]]
+
+
+def test_identity_region_builder_no_warning_for_a_touch_adjacent_group(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))   # touching squares
+    with caplog.at_level(logging.WARNING, logger="reblock.region"):
+        result = IdentityRegionBuilder().build(geoms, [["A", "B"]])
+    assert result == [["A", "B"]]
+    assert caplog.records == []
+
+
+def test_identity_region_builder_warns_for_a_disjoint_group(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    geoms = _block_geoms(("A", 0, 0), ("C", 5, 0))   # far apart -- gap 4 >> STREET_TOL
+    with caplog.at_level(logging.WARNING, logger="reblock.region"):
+        result = IdentityRegionBuilder().build(geoms, [["A", "C"]])
+    assert result == [["A", "C"]]                     # still passed through unchanged
+    assert any("convex_hull" in r.message for r in caplog.records)
+
+
+def test_convex_hull_region_builder_fills_gaps_respects_singletons_and_allows_overlap() -> None:
+    geoms = _block_geoms(
+        ("A", 0, 0), ("B", 1.2, 0), ("C", 2.4, 0),        # a row with small (< STREET_TOL) gaps
+        ("E", 200, 0), ("F", 201, 0),                      # overlap-test pair 1
+        ("G", 200.5, 0.5), ("H", 201.5, 0.5),              # overlap-test pair 2 (overlaps E/F)
+    )
+    result = ConvexHullRegionBuilder().build(
+        geoms, [["A", "C"], ["B"], ["E", "F"], ["G", "H"]])
+
+    assert result[0] == ["A", "B", "C"]   # B sits inside hull(A, C) -- the gap is filled
+    assert result[1] == ["B"]             # a singleton's hull is its own shape -- just itself
+    # Two groups whose hulls genuinely overlap in space: each keeps (at least) its own seed
+    # members, and overlap between the two expansions is allowed, not merged/deduped away.
+    assert set(result[2]) >= {"E", "F"}
+    assert set(result[3]) >= {"G", "H"}
+    assert set(result[2]) & set(result[3])
+
+
+def test_kblock_source_block_geometries_is_cheap_and_wellformed() -> None:
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    geoms = src.block_geometries()
+
+    assert not geoms.empty
+    assert set(geoms.columns) >= {"block_id", "geometry"}
+    assert {"DJI.1_2_1267", "DJI.1_2_602"} <= set(geoms["block_id"])

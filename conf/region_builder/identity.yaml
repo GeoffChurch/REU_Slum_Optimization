@@ -1,0 +1,4 @@
+# The passthrough RegionBuilder (the default): each seed group IS the region, unchanged
+# (reduces to today's per-block behavior when every group is a singleton). Warns when a
+# group's blocks aren't mutually touch-adjacent -- region_builder=convex_hull is the fix.
+_target_: reblock.region.IdentityRegionBuilder

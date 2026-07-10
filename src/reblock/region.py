@@ -23,18 +23,23 @@ first-added road; true egress is the region's outer perimeter. Concretely:
 from __future__ import annotations
 
 import hashlib
-from dataclasses import replace
-from typing import cast
+import logging
+from dataclasses import dataclass, replace
+from typing import Protocol, cast
 
 import geopandas as gpd
+import networkx as nx
 import pandas as pd
 from pyproj import CRS
+from shapely import STRtree
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block, Eval, Method, Proposal, Result
 from reblock.derive.access import STREET_TOL
+
+logger = logging.getLogger(__name__)
 
 
 def _check(blocks: list[Block], name: str) -> CRS:
@@ -144,3 +149,74 @@ def region_reblock(blocks: list[Block], method: Method, evals: list[Eval]) -> Re
                                       block_identity=eval_block.identity)
     metrics = tuple(ev.score(eval_block, full_proposal) for ev in evals)
     return Result(block=eval_block, proposal=full_proposal, metrics=metrics)
+
+
+class RegionBuilder(Protocol):
+    """Maps user seed groups to expanded region member groups, on cheap block GEOMETRIES (no
+    Voronoi) -- so members are chosen before the expensive full-Block build. `groups` is a list
+    of seed groups (block_ids); returns the expanded groups (block_ids), each sorted for
+    determinism, group order preserved."""
+
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]: ...
+
+
+def _touch_adjacent(geoms: list[BaseGeometry]) -> bool:
+    """True iff `geoms` form a single connected component under boundary-touch (within
+    STREET_TOL of each other) -- an STRtree `dwithin` query feeds a networkx connectivity
+    check. A group of 0 or 1 blocks is trivially connected."""
+    if len(geoms) <= 1:
+        return True
+    tree = STRtree(geoms)
+    left, right = tree.query(geoms, predicate="dwithin", distance=STREET_TOL)
+    graph: nx.Graph = nx.Graph()
+    graph.add_nodes_from(range(len(geoms)))
+    graph.add_edges_from(zip(left.tolist(), right.tolist(), strict=True))
+    return bool(nx.is_connected(graph))
+
+
+@dataclass
+class IdentityRegionBuilder:
+    """Passthrough RegionBuilder (the default): each seed group IS the region -- unchanged,
+    apart from sorting for determinism. Reduces to today's per-block behavior exactly when
+    every group is a singleton.
+
+    Warns (naming `convex_hull` as the fix) when a group's blocks are not mutually
+    touch-adjacent: a disjoint group's boundary graph splits into disconnected components, so
+    every method reblocks each block's interior independently and produces no cross-gap road
+    (a buildable road can't span land outside the region) -- correct, but almost always a user
+    mistake. A warning, not a hard error, so a deliberate aggregate over scattered blocks still
+    runs."""
+
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+        by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
+        result: list[list[str]] = []
+        for group in groups:
+            if len(group) > 1 and not _touch_adjacent([by_id[b] for b in group]):
+                logger.warning(
+                    "region group %s is not mutually touch-adjacent -- each block will be "
+                    "reblocked independently with no road spanning the gap; pass "
+                    "region_builder=convex_hull to fill the gap into one contiguous region",
+                    sorted(group),
+                )
+            result.append(sorted(group))
+        return result
+
+
+@dataclass
+class ConvexHullRegionBuilder:
+    """Expands each seed group to every candidate block whose geometry intersects the convex
+    hull of the group's own block polygons (inclusive) -- fills the gap of a disjoint group
+    into one contiguous region where cross-block roads are meaningful. A singleton group's hull
+    is its own block's shape, so it returns just that block (plus any block genuinely
+    overlapping it -- for road-bounded blocks that is only itself). Overlap between different
+    groups' expansions is fine: regions are independent, with no partition/merge across
+    groups."""
+
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+        by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
+        result: list[list[str]] = []
+        for group in groups:
+            hull = unary_union([by_id[b] for b in group]).convex_hull
+            matched = cast(gpd.GeoDataFrame, block_geoms[block_geoms.intersects(hull)])
+            result.append(sorted(cast(list[str], list(matched["block_id"]))))
+        return result

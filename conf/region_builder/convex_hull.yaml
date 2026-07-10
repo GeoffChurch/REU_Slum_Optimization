@@ -1,0 +1,3 @@
+# Expands each seed group to every candidate block whose geometry intersects the convex hull
+# of the group's own blocks -- fills a disjoint group's gap into one contiguous region.
+_target_: reblock.region.ConvexHullRegionBuilder

@@ -59,6 +59,19 @@ class KblockSource:
         self.min_buildings = min_buildings
         self.block_ids = list(block_ids) if block_ids is not None else None
 
+    def block_geometries(self) -> gpd.GeoDataFrame:
+        """Cheap block_id + geometry accessor for a RegionBuilder: reads only the blocks
+        parquet (no buildings, no Voronoi), reprojected to the same UTM `region()` uses.
+        Applies `self.block_ids` as a flat filter if set (the region CLI passes a flat set of
+        candidate ids here, not the nested seed groups)."""
+        blocks = gpd.read_parquet(self.blocks_path, columns=["block_id", "geometry"])
+        blocks["block_id"] = blocks["block_id"].astype(str)
+        utm = blocks.estimate_utm_crs()
+        if self.block_ids is not None:
+            wanted = {str(b) for b in self.block_ids}
+            blocks = cast(gpd.GeoDataFrame, blocks[blocks["block_id"].isin(wanted)])
+        return cast(gpd.GeoDataFrame, blocks.to_crs(utm)[["block_id", "geometry"]])
+
     def region(self) -> Region:
         blocks = gpd.read_parquet(
             self.blocks_path, columns=["block_id", "k_complexity", "geometry"])
