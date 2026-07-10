@@ -8,6 +8,8 @@ intersections. See docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-d
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import geopandas as gpd
 import networkx as nx
 from geopandas import GeoDataFrame
@@ -18,7 +20,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from reblock.budget import access_burden, network_efficiency, road_drainage
-from reblock.contracts import Block
+from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.dijkstra import _boundary_graph, _rnd
@@ -169,3 +171,28 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     roads = _planarize(committed, block.crs)
     roads["drain"] = road_drainage(block, roads) if len(roads) else []
     return roads
+
+
+@dataclass
+class GreedyArterialReblocker:
+    mode: str = "buildable"          # "buildable" | "aspirational"
+    objective: str = "directness"    # "access" | "efficiency" | "directness"
+    n_anchors: int = 32
+    top_k: int = 8
+    lam: float = 2.0
+    max_roads: int = 15
+
+    @property
+    def identity(self) -> tuple[str, str, str]:
+        return ("greedy_arterial", self.mode, self.objective)
+
+    def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
+        del prior
+        roads = _greedy_arterials(block, mode=self.mode, objective=self.objective,
+                                  n_anchors=self.n_anchors, top_k=self.top_k, lam=self.lam,
+                                  max_roads=self.max_roads)
+        return Proposal(
+            block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+            proposal_id=f"greedy_arterial_{self.mode}_{self.objective}", method="greedy_arterial",
+            params={"segments": len(roads), "mode": self.mode, "objective": self.objective},
+            block_identity=block.identity)

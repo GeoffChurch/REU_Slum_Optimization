@@ -11,7 +11,9 @@ all_methods:
   peel: {_target_: reblock.methods.peel.PeelReblocker}
   topology: {_target_: reblock.methods.topology.TopologyMethod}
   mesh: {_target_: reblock.methods.mesh.MeshReblocker}
-methods: [dijkstra, peel, topology, mesh]
+  greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: directness}
+  greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
+methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable, greedy_arterial_aspirational]
 
 shapefile: ???
 region_id: phule

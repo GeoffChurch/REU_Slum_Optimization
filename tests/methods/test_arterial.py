@@ -9,6 +9,7 @@ from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import (
+    GreedyArterialReblocker,
     _anchor_points,
     _candidate_chords,
     _deep_targets,
@@ -135,3 +136,36 @@ def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
     # at least one interior node has degree >= 4 -> a real crossroads, not overlapping lines
     interior = [nd for nd in g.nodes if Point(nd).distance(block.boundary.boundary) > STREET_TOL]
     assert any(g.degree[nd] >= 4 for nd in interior)
+
+
+def test_identity_and_proposal_metadata() -> None:
+    m = GreedyArterialReblocker(mode="buildable", objective="directness")
+    assert m.identity == ("greedy_arterial", "buildable", "directness")
+    proposal = m.propose(_grid_block(5))
+    assert proposal.method == "greedy_arterial"
+    assert proposal.proposal_id == "greedy_arterial_buildable_directness"
+    assert proposal.roads is not None and len(proposal.roads) > 0
+    assert proposal.block_identity == _grid_block(5).identity
+
+
+def test_both_modes_produce_roads() -> None:
+    block = _grid_block(6)
+    for mode in ("buildable", "aspirational"):
+        p = GreedyArterialReblocker(mode=mode, objective="directness", max_roads=4).propose(block)
+        assert p.roads is not None and len(p.roads) > 0
+
+
+def test_config_and_derivation_wiring() -> None:
+    from pathlib import Path
+
+    from hydra import compose, initialize_config_dir
+    from hydra.utils import instantiate
+
+    from reblock.derive_graph import _DERIVATION_MODULES
+    assert any(p.name == "arterial.py" for p in _DERIVATION_MODULES)
+    conf_dir = str(Path("conf").resolve())
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="compare_config",
+                      overrides=["shapefile=x", "methods=[greedy_arterial_buildable]"])
+    m = instantiate(cfg.all_methods["greedy_arterial_buildable"])
+    assert m.identity == ("greedy_arterial", "buildable", "directness")
