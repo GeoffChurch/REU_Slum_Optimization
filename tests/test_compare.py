@@ -17,6 +17,22 @@ def test_compare_writes_table_and_curves(tmp_path: Path) -> None:
     assert list(tmp_path.glob("curve_access_*.png"))
 
 
+def test_compare_displacement_cost_axis_runs_and_writes_curves(tmp_path: Path) -> None:
+    # The headline recipe: cost=displacement grades every method on the buildings-displaced x-axis
+    # (frontage methods land near 0). dijkstra (fast) proves the axis is reachable end-to-end; the
+    # axis arithmetic itself is unit-tested in test_budget, and greedy_arterial_displacement is the
+    # slow flagship. Before the whole-branch-review fix, cost was hardcoded to "length" and this
+    # axis was unreachable from any recipe.
+    result = subprocess.run(
+        [sys.executable, "-m", "reblock.compare", "data=dji", "eval=kcomplexity",
+         "max_blocks=1", "methods=[dijkstra]", "cost=displacement", "corridor_m=3.0",
+         f"hydra.run.dir={tmp_path}"],
+        capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "auc_table_directness.csv").exists()
+    assert list(tmp_path.glob("curve_directness_*.png"))
+
+
 def test_compare_emits_per_metric_tables(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "reblock.compare", "data=dji", "eval=kcomplexity",

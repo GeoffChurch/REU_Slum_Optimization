@@ -17,7 +17,15 @@ all_methods:
   # vertex-based network_efficiency scoring (it undercounts sparse-vertex chords; densifying is
   # too slow). Deferred pending the line-proximity metric in docs/metrics-north-star.md.
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
-methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable, greedy_arterial_displacement]
+methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable]
+
+# Cost axis for the cost-benefit curves (the x every method is graded on):
+#   "length"       -> road density (m/ha), the default
+#   "displacement" -> cumulative buildings displaced (site inside corridor_m of a road); run e.g.
+#     `cost=displacement methods=[dijkstra,mesh,greedy_arterial_displacement]` to see the
+#     navigability-vs-homes-cleared tradeoff (frontage methods land near x=0, the informative contrast).
+cost: length
+corridor_m: 3.0
 
 shapefile: ???
 region_id: phule

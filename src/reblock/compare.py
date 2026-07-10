@@ -68,6 +68,8 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
     names = list(cfg.methods)   # config keys -> the AUC-table labels (not method.identity)
     methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in names]
     regions = build_regions(source, screen, region_builder, block_groups, cfg.max_blocks)
+    cost = str(cfg.get("cost", "length"))   # curve x-axis: "length" (m/ha) | "displacement"
+    corridor_m = float(cfg.get("corridor_m", 3.0))
 
     # one curve per (region, method, metric); a per-(region, metric) common cost cap = the max
     # full road density (the cost axis is metric-independent, so this cap is the same across
@@ -91,8 +93,10 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
                 result = region_reblock(region, method, [])
                 block = result.block
                 roads = cast(GeoDataFrame, result.proposal.roads)
-            access = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
-            eff, direct = efficiency_directness_curves(block, roads)   # one sweep -> both curves
+            access = cost_benefit_curve(block, roads, benefit_fn=access_benefit,
+                                        cost=cost, corridor_m=corridor_m)
+            eff, direct = efficiency_directness_curves(block, roads, cost=cost,
+                                                       corridor_m=corridor_m)   # one sweep -> both
             raw.append((name, label, "access", access))
             raw.append((name, label, "efficiency", eff))
             raw.append((name, label, "directness", direct))
@@ -110,7 +114,7 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
 def main(cfg: DictConfig) -> None:
     results = compare(cfg)
     out_dir = Path(HydraConfig.get().runtime.output_dir)
-    compare_report(results, out_dir)
+    compare_report(results, out_dir, cost=str(cfg.get("cost", "length")))
     for r in sorted(results, key=lambda r: (r.metric, -r.auc)):
         log.info("%s %s %s AUC=%.3f", r.metric, r.block_id, r.method, r.auc)
 

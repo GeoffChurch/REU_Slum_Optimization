@@ -44,10 +44,13 @@ def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
 
 def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
     """`block.building_points` sites inside `proposal`'s road corridor
-    (`proposal.params["corridor_m"]`, default 3.0) -- the render's "cost made visible" mark.
-    Empty (no crash) if there are no building points or no proposed roads."""
+    (`proposal.params["corridor_m"]`, default 3.0) -- the render's "cost made visible" mark, ONLY
+    for a displacement-cost proposal (a frontage/length method displaces nothing by design, so
+    marking sites near its roads as 'displaced' would mislead). Empty (no crash) otherwise, or if
+    there are no building points or no proposed roads."""
     pts = block.building_points
-    if pts.empty or proposal.roads is None or proposal.roads.empty:
+    if (proposal.params.get("cost") != "displacement"
+            or pts.empty or proposal.roads is None or proposal.roads.empty):
         return cast(gpd.GeoDataFrame, pts.iloc[:0])
     corridor_m = cast(float, proposal.params.get("corridor_m", 3.0))
     corridor = proposal.roads.geometry.buffer(corridor_m).union_all()
@@ -187,10 +190,11 @@ _METRIC_YLABELS = {
 }
 
 
-def compare_report(results: list[MethodCurve], out_dir: Path) -> None:
+def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "length") -> None:
     """Per metric (access, efficiency, directness): an aggregate AUC table (mean AUC per
     method) + overlaid cost-benefit curves per block. `results` is the flat
-    (method x block x metric) list from reblock.compare."""
+    (method x block x metric) list from reblock.compare. `cost` sets the x-axis label to match
+    the curves' x (road density, or buildings displaced)."""
     import csv
     from statistics import mean
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -209,12 +213,13 @@ def compare_report(results: list[MethodCurve], out_dir: Path) -> None:
             for m, aucs in sorted(by_method.items(), key=lambda kv: -mean(kv[1])):
                 w.writerow([m, f"{mean(aucs):.4f}", len(aucs)])
         ylabel = _METRIC_YLABELS[metric]
+        xlabel = "buildings displaced" if cost == "displacement" else "road density (m/ha)"
         for block_id, curves in by_block.items():
             fig, ax = plt.subplots(figsize=(7, 5))
             for mc in curves:
                 ax.plot(mc.curve.cost, mc.curve.benefit, marker="o",
                         label=f"{mc.method} (AUC {mc.auc:.2f})")
-            ax.set_xlabel("road density (m/ha)")
+            ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
             ax.set_title(f"cost-benefit ({metric}): {block_id}")
             ax.legend()

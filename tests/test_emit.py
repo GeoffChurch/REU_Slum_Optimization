@@ -153,7 +153,8 @@ def test_displaced_points_selects_sites_within_the_proposal_corridor() -> None:
                     building_points=gpd.GeoDataFrame(
                         geometry=[Point(1.0, 0.5), Point(2.9, 2.9)], crs=UTM))
     roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads, params={"corridor_m": 0.5})
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads,
+                        params={"cost": "displacement", "corridor_m": 0.5})
 
     displaced = _displaced_points(block, proposal)
 
@@ -165,9 +166,21 @@ def test_displaced_points_defaults_corridor_m_when_absent_from_params() -> None:
     block = replace(_grid_block(3),
                     building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 2.5)], crs=UTM))
     roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads)   # no corridor_m param
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads,
+                        params={"cost": "displacement"})     # cost present, corridor_m defaults 3.0
 
     assert len(_displaced_points(block, proposal)) == 1
+
+
+def test_displaced_points_empty_for_non_displacement_proposal() -> None:
+    # A frontage/length method displaces nothing by design, so its render carries no displaced
+    # rings even where sites sit near its roads (the whole-branch-review gate).
+    block = replace(_grid_block(3),
+                    building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM))
+    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads, params={"cost": "length"})
+
+    assert _displaced_points(block, proposal).empty
 
 
 def test_displaced_points_empty_without_building_points_or_roads() -> None:
