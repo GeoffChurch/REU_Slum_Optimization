@@ -5,6 +5,7 @@ from pyproj import CRS
 from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
 
+from reblock.budget import displacement_count
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
@@ -140,7 +141,7 @@ def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
 
 def test_identity_and_proposal_metadata() -> None:
     m = GreedyArterialReblocker(mode="buildable", objective="directness")
-    assert m.identity == ("greedy_arterial", "buildable", "directness")
+    assert m.identity == ("greedy_arterial", "buildable", "directness", "length", 0.0)
     proposal = m.propose(_grid_block(5))
     assert proposal.method == "greedy_arterial"
     assert proposal.proposal_id == "greedy_arterial_buildable_directness"
@@ -168,7 +169,7 @@ def test_config_and_derivation_wiring() -> None:
         cfg = compose(config_name="compare_config",
                       overrides=["shapefile=x", "methods=[greedy_arterial_buildable]"])
     m = instantiate(cfg.all_methods["greedy_arterial_buildable"])
-    assert m.identity == ("greedy_arterial", "buildable", "directness")
+    assert m.identity == ("greedy_arterial", "buildable", "directness", "length", 0.0)
 
 
 def _deep_block() -> Block:
@@ -223,3 +224,86 @@ def test_greedy_handles_multilinestring_streets() -> None:
     roads = _greedy_arterials(block, mode="buildable", objective="directness",
                               max_roads=3, n_anchors=12)
     assert len(roads) >= 1
+
+
+def test_cost_displacement_in_identity() -> None:
+    m = GreedyArterialReblocker(mode="aspirational", objective="directness", cost="displacement")
+    assert m.identity == ("greedy_arterial", "aspirational", "directness", "displacement", 3.0)
+
+
+def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 10) -> Block:
+    # Two disjoint 1-wide x h-tall columns ("arms"), each with its own street frontage at its
+    # bottom edge, separated by an empty gap -- two independent deep pockets, mirror images of
+    # each other (translated by `gap_x1` in x), so a straight arterial spanning either arm's full
+    # height has IDENTICAL objective benefit and length. building_points lets the two arms'
+    # corridors differ in displacement while their raw benefit stays tied.
+    polys = [Polygon([(0, j), (1, j), (1, j + 1), (0, j + 1)]) for j in range(h)]
+    polys += [Polygon([(gap_x1, j), (gap_x1 + 1, j), (gap_x1 + 1, j + 1), (gap_x1, j + 1)])
+             for j in range(h)]
+    ids = list(range(2 * h))
+    parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[
+        LineString([(0.0, 0.0), (1.0, 0.0)]),
+        LineString([(float(gap_x1), 0.0), (float(gap_x1 + 1), 0.0)]),
+    ], crs=UTM)
+    return Block(block_id="two_arm", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                building_points=building_points)
+
+
+def test_cost_displacement_avoids_the_denser_corridor() -> None:
+    # The discriminating test: two mirror-image deep-pocket arms give tied straight-arterial
+    # candidates (same benefit, same length) -- cost="length" can't tell them apart on anything
+    # but the deterministic wkt tie-break. Cluster building_points densely along the LEFT arm's
+    # corridor and sparsely along the RIGHT's: cost="length" ignores the points entirely (ties,
+    # tie-break picks the smaller-wkt candidate); cost="displacement" must pick whichever
+    # candidate displaces fewer buildings -- proving the denominator actually switched, not just
+    # that the method runs.
+    left_pts = [Point(0.5, y) for y in range(1, 8)]     # dense: 7 sites astride the left arm
+    right_pts = [Point(10.5, 4)]                        # sparse: 1 site astride the right arm
+    pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
+    block = _two_arm_block(pts)
+
+    roads_length = _greedy_arterials(block, mode="aspirational", objective="access", max_roads=1,
+                                     n_anchors=8, top_k=2, corridor_m=1.0, cost="length")
+    roads_disp = _greedy_arterials(block, mode="aspirational", objective="access", max_roads=1,
+                                   n_anchors=8, top_k=2, corridor_m=1.0, cost="displacement")
+
+    assert len(roads_length) == 1 and len(roads_disp) == 1
+    # the cost switch changed WHICH road is proposed:
+    assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt
+    # ... because it displaces fewer buildings, not merely a different one:
+    d_length = displacement_count(pts, roads_length, corridor_m=1.0)
+    d_disp = displacement_count(pts, roads_disp, corridor_m=1.0)
+    assert d_disp < d_length
+    assert d_disp == 0                     # the displacement-optimal pick here is fully clear
+
+
+def test_cost_displacement_is_deterministic() -> None:
+    left_pts = [Point(0.5, y) for y in range(1, 8)]
+    right_pts = [Point(10.5, 4)]
+    pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
+    block = _two_arm_block(pts)
+    r1 = _greedy_arterials(block, mode="aspirational", objective="access", cost="displacement",
+                           max_roads=1, n_anchors=8, top_k=2, corridor_m=1.0)
+    r2 = _greedy_arterials(block, mode="aspirational", objective="access", cost="displacement",
+                           max_roads=1, n_anchors=8, top_k=2, corridor_m=1.0)
+    assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
+
+
+def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None:
+    # A beneficial straight road whose corridor holds no building sites must still be committed
+    # -- the zero-marginal-displacement candidate ranks as infinite gain (strictly above any
+    # positive-denominator candidate), not skipped by an attempted division by zero. The
+    # building_points are real (non-empty) but sited far outside the block, so displacement_count
+    # exercises its actual buffer/union/within path (not the empty-input short circuit) and still
+    # returns 0 for every candidate here.
+    plain = _deep_block()
+    far_points = gpd.GeoDataFrame(geometry=[Point(1000.0, 1000.0)], crs=UTM)
+    block = Block(block_id=plain.block_id, crs=plain.crs, boundary=plain.boundary,
+                 parcels=plain.parcels, streets=plain.streets, building_points=far_points)
+    roads = _greedy_arterials(block, mode="aspirational", objective="access", cost="displacement",
+                              max_roads=1, n_anchors=12, corridor_m=1.0)
+    assert len(roads) == 1
+    assert roads.geometry.iloc[0].length > 1.0                 # a real, non-degenerate candidate
+    assert displacement_count(far_points, roads, corridor_m=1.0) == 0

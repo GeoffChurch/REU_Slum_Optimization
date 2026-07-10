@@ -26,6 +26,16 @@ def _rnd(c: tuple[float, ...]) -> tuple[float, float]:
     return (round(c[0], 2), round(c[1], 2))
 
 
+def displacement_count(building_points: GeoDataFrame, roads: GeoDataFrame,
+                       corridor_m: float) -> int:
+    """Buildings whose site lies in the road corridor (union of `roads.buffer(corridor_m)`).
+    0 if there are no points or no roads."""
+    if building_points is None or building_points.empty or roads is None or len(roads) == 0:
+        return 0
+    corridor = roads.geometry.buffer(corridor_m).union_all()
+    return int(building_points.geometry.within(corridor).sum())
+
+
 def access_burden(depths: pd.Series) -> float:
     """Sigma depth^2 -- q=2 severity-weighted access burden (kblock parcels = one building each)."""
     return float((depths.astype("float64") ** 2).sum())

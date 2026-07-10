@@ -20,7 +20,7 @@ from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from reblock.budget import access_burden, network_efficiency, road_drainage
+from reblock.budget import access_burden, displacement_count, network_efficiency, road_drainage
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
@@ -136,9 +136,16 @@ def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]
 
 
 def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
-                      top_k: int = 8, lam: float = 2.0, max_roads: int = 15) -> GeoDataFrame:
-    """Greedily commit the straight arterial with the best objective gain per meter until
-    `max_roads` are placed or no candidate improves. `mode` in {"buildable", "aspirational"}."""
+                      top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
+                      cost: str = "length", corridor_m: float = 3.0) -> GeoDataFrame:
+    """Greedily commit the straight arterial with the best objective gain per unit cost until
+    `max_roads` are placed or no candidate improves. `mode` in {"buildable", "aspirational"}.
+    `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/building newly
+    inside `corridor_m` of any committed road, via block.building_points -- see
+    budget.displacement_count)}. A beneficial candidate whose denominator is zero (a
+    zero-length road can't occur -- filtered below -- but a zero-marginal-displacement road
+    can) ranks ABOVE every positive-denominator candidate (infinite gain) rather than being
+    divided by zero or skipped: take the free navigability first."""
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     base_burden = access_burden(parcel_access_layers(
         block, None, tol=STREET_TOL, adj=adj, unreached_depth=len(block.parcels) + 1))
@@ -158,6 +165,8 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         base_val = _score(objective, block, base, adj, base_burden)
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
+        committed_disp = (displacement_count(block.building_points, base, corridor_m)
+                          if cost == "displacement" else 0)
 
         best_gain, best_real = 0.0, None
         for chord in _candidate_chords(anchors, targets):
@@ -165,7 +174,13 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
             if real is None or real.length == 0:
                 continue
             trial = _planarize(committed + [real], block.crs)
-            gain = (_score(objective, block, trial, adj, base_burden) - base_val) / real.length
+            raw = _score(objective, block, trial, adj, base_burden) - base_val
+            if cost == "displacement":
+                denom = float(displacement_count(block.building_points, trial, corridor_m)
+                             - committed_disp)
+            else:
+                denom = real.length
+            gain = float("inf") if (denom <= 0 and raw > 0) else (raw / denom if denom > 0 else 0.0)
             if gain > best_gain or (best_real is not None and gain == best_gain
                                     and real.wkt < best_real.wkt):
                 best_gain, best_real = gain, real
@@ -186,16 +201,24 @@ class GreedyArterialReblocker:
     top_k: int = 8
     lam: float = 2.0
     max_roads: int = 15
+    # "length" (Delta-benefit/metre) | "displacement" (Delta-benefit/building, see budget.py)
+    cost: str = "length"
+    corridor_m: float = 3.0   # road half-width + setback; the displacement corridor
 
     @property
-    def identity(self) -> tuple[str, str, str]:
-        return ("greedy_arterial", self.mode, self.objective)
+    def identity(self) -> tuple[str, str, str, str, float]:
+        # corridor_m changes which roads win only under cost="displacement"; hold it fixed
+        # otherwise so length-cost methods stay corridor-independent in the derive cache (two
+        # methods differing only in corridor_m must NOT share a cached proposal when it matters).
+        corridor_key = self.corridor_m if self.cost == "displacement" else 0.0
+        return ("greedy_arterial", self.mode, self.objective, self.cost, corridor_key)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
         roads = _greedy_arterials(block, mode=self.mode, objective=self.objective,
                                   n_anchors=self.n_anchors, top_k=self.top_k, lam=self.lam,
-                                  max_roads=self.max_roads)
+                                  max_roads=self.max_roads, cost=self.cost,
+                                  corridor_m=self.corridor_m)
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=f"greedy_arterial_{self.mode}_{self.objective}", method="greedy_arterial",

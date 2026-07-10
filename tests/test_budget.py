@@ -3,15 +3,30 @@ from typing import cast
 import geopandas as gpd
 import pandas as pd
 from pyproj import CRS
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, Point, Polygon
 
-from reblock.budget import Curve, access_burden, auc, cost_benefit_curve, road_drainage
+from reblock.budget import (
+    Curve,
+    access_burden,
+    auc,
+    cost_benefit_curve,
+    displacement_count,
+    road_drainage,
+)
 from reblock.contracts import Block
 from reblock.methods.dijkstra import DijkstraReblocker
 from reblock.methods.mesh import MeshReblocker
 from reblock.methods.peel import PeelReblocker
 
 UTM = CRS.from_epsg(32643)
+
+
+def _points(coords: list[tuple[float, float]]) -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(geometry=[Point(c) for c in coords], crs=UTM)
+
+
+def _roads(lines: list[LineString]) -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(geometry=lines, crs=UTM)
 
 
 def _grid_block(n: int) -> Block:
@@ -127,3 +142,26 @@ def test_efficiency_and_directness_are_monotone_across_the_full_curve() -> None:
             assert curve.benefit == sorted(curve.benefit), (
                 f"{type(method).__name__} + {benefit_fn.__name__} not monotone: {curve.benefit}"
             )
+
+
+def test_displacement_count_only_sites_within_the_corridor() -> None:
+    road = _roads([LineString([(0.0, 0.0), (10.0, 0.0)])])
+    pts = _points([(5.0, 0.5), (5.0, 0.99), (5.0, 2.0)])   # last one is outside a 1m corridor
+    assert displacement_count(pts, road, corridor_m=1.0) == 2
+
+
+def test_displacement_count_overlapping_corridors_count_a_shared_site_once() -> None:
+    road_a = LineString([(0.0, 0.0), (5.0, 0.0)])
+    road_b = LineString([(4.0, 0.0), (10.0, 0.0)])          # overlaps road_a's corridor near x=4-5
+    roads = _roads([road_a, road_b])
+    pts = _points([(1.0, 0.5), (9.0, 0.5), (4.5, 0.5)])     # last one sits in BOTH corridors
+    assert displacement_count(pts, roads, corridor_m=1.0) == 3   # each site counted once, not 4
+
+
+def test_displacement_count_zero_when_no_points_or_no_roads() -> None:
+    road = _roads([LineString([(0.0, 0.0), (10.0, 0.0)])])
+    pts = _points([(5.0, 0.0)])
+    empty_pts = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
+    empty_roads = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
+    assert displacement_count(empty_pts, road, corridor_m=1.0) == 0
+    assert displacement_count(pts, empty_roads, corridor_m=1.0) == 0
