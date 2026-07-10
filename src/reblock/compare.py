@@ -1,8 +1,10 @@
-"""Hydra entrypoint: sweep cost_benefit_curve over screened blocks x a list of methods,
-emit the aggregate AUC table + per-block curve plots. Config only at the edge (like run.py).
+"""Hydra entrypoint: sweep cost_benefit_curve over screened blocks/regions x a list of
+methods, emit the aggregate AUC table + per-region curve plots. Config only at the edge
+(like run.py).
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,10 +23,11 @@ from reblock.budget import (
     cost_benefit_curve,
     efficiency_directness_curves,
 )
-from reblock.contracts import Method, Screen, Source
+from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
 from reblock.emit import compare_report as compare_report
-from reblock.pipeline import select_blocks
+from reblock.pipeline import build_regions
+from reblock.region import RegionBuilder, region_reblock
 
 log = logging.getLogger(__name__)
 
@@ -35,39 +38,69 @@ log = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class MethodCurve:
     method: str
-    block_id: str
+    block_id: str    # a plain block_id for a singleton region, else the region label
     metric: str
     curve: Curve
     auc: float
 
 
+def _region_label(region: list[Block]) -> str:
+    """The MethodCurve row label: the plain block_id for a singleton region (unchanged from
+    before regions existed), else its members' ids joined ('+'-separated, sorted for
+    determinism) -- truncated with a stable hash suffix if that would make an unreasonably
+    long filename in compare_report's curve_{metric}_{label}.png."""
+    if len(region) == 1:
+        return region[0].block_id
+    label = "+".join(sorted(b.block_id for b in region))
+    if len(label) <= 80:
+        return label
+    return f"{label[:60]}...{hashlib.sha256(label.encode()).hexdigest()[:8]}"
+
+
 def compare(cfg: DictConfig) -> list[MethodCurve]:
     source = cast(Source, instantiate(cfg.data))
     screen = cast(Screen, instantiate(cfg.screen))
+    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
+    block_groups = (
+        [[str(b) for b in group] for group in cfg.block_ids]
+        if cfg.block_ids is not None else None
+    )
     names = list(cfg.methods)   # config keys -> the AUC-table labels (not method.identity)
     methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in names]
-    _, blocks = select_blocks(source, screen, cfg.max_blocks)
+    regions = build_regions(source, screen, region_builder, block_groups, cfg.max_blocks)
 
-    # one curve per (block, method, metric); a per-(block, metric) common cost cap = the max
+    # one curve per (region, method, metric); a per-(region, metric) common cost cap = the max
     # full road density (the cost axis is metric-independent, so this cap is the same across
-    # metrics for a given block -- grouping by (block_id, metric) is still the clean structure).
+    # metrics for a given region -- grouping by (region_label, metric) is still the clean
+    # structure).
     raw: list[tuple[str, str, str, Curve]] = []
-    for block in blocks:
+    for region in regions:
+        if not region:
+            continue
+        label = _region_label(region)
         for name, method in zip(names, methods, strict=True):
-            # every Method here always populates roads (never a None-roads Proposal).
-            roads = cast(GeoDataFrame, propose(method, block).roads)
+            if len(region) == 1:
+                # Singleton region: the exact pre-region single-block path.
+                block = region[0]
+                roads = cast(GeoDataFrame, propose(method, block).roads)
+            else:
+                # Multi-block region: reblock jointly, score the seed+added roads against
+                # the region's perimeter-only egress (region_reblock's eval-block).
+                result = region_reblock(region, method, [])
+                block = result.block
+                roads = cast(GeoDataFrame, result.proposal.roads)
             access = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
             eff, direct = efficiency_directness_curves(block, roads)   # one sweep -> both curves
-            raw.append((name, block.block_id, "access", access))
-            raw.append((name, block.block_id, "efficiency", eff))
-            raw.append((name, block.block_id, "directness", direct))
+            raw.append((name, label, "access", access))
+            raw.append((name, label, "efficiency", eff))
+            raw.append((name, label, "directness", direct))
     results: list[MethodCurve] = []
-    groups = {(b, metric) for _, b, metric, _ in raw}
-    for block_id, metric in groups:
-        group = [(m, c) for m, b, met, c in raw if b == block_id and met == metric]
+    groups = {(label, metric) for _, label, metric, _ in raw}
+    for label, metric in groups:
+        group = [(m, c) for m, lbl, met, c in raw if lbl == label and met == metric]
         cap = max((c.cost[-1] for _, c in group if c.cost), default=0.0)
         for m, c in group:
-            results.append(MethodCurve(m, block_id, metric, c, auc(c, cap)))
+            results.append(MethodCurve(m, label, metric, c, auc(c, cap)))
     return results
 
 

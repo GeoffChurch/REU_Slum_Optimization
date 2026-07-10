@@ -1,6 +1,7 @@
 defaults:
   - data: dji
   - screen: identity
+  - region_builder: identity
   - eval: kcomplexity
   - _self_
 
@@ -21,6 +22,9 @@ shapefile: ???
 region_id: phule
 assumed_crs: null
 max_blocks: 5
+# Each inner list is one region seed group (region_builder expands it); a singleton is a
+# plain single-block compare. null = no explicit groups (the screen decides; identity ->
+# all buildable blocks, max_blocks-limited).
 block_ids: null
 
 hydra:

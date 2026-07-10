@@ -6,16 +6,12 @@ splits "how many" from "which", each picked block goes through reblock_block
 """
 from __future__ import annotations
 
-import logging
-import time
 from dataclasses import dataclass, field
 from itertools import islice
 
 from reblock.contracts import Block, Eval, Method, Result, Screen, Source
 from reblock.derivations import propose
 from reblock.region import IdentityRegionBuilder, RegionBuilder, region_reblock
-
-log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -84,86 +80,70 @@ def select_blocks(source: Source, screen: Screen,
     return selection, [built[bid] for bid in picked if bid in built]
 
 
-def _seed_groups(spec: PipelineSpec) -> tuple[list[list[str]] | None, list[str] | None]:
+def _seed_groups(
+    source: Source, screen: Screen, block_groups: list[list[str]] | None,
+) -> tuple[list[list[str]] | None, list[str] | None]:
     """The seed region groups + the retained selection. Explicit `block_groups` win (each
-    inner list is one region's seed group). Otherwise the screen selects: a real selection
-    wraps as singleton seed groups; None (all blocks) returns (None, None) -- the caller's
-    signal to take the classic build-limited all-blocks path (a region builder has nothing
-    to expand over an unenumerated full metro, and that path also serves sources without a
-    block_geometries() accessor, e.g. ShapefileSource)."""
-    if spec.block_groups is not None:
-        selection = sorted({b for group in spec.block_groups for b in group})
-        return spec.block_groups, selection
-    sel = spec.screen.select(spec.source)
+    inner list is one region's seed group) -- and short-circuit without touching `screen` at
+    all, so a caller that already resolved groups (e.g. `run`, which needs the selection
+    itself) can hand them straight back in without re-invoking a possibly-expensive screen.
+    Otherwise the screen selects: a real selection wraps as singleton seed groups; None (all
+    blocks) returns (None, None) -- the caller's signal to take the classic build-limited
+    all-blocks path (a region builder has nothing to expand over an unenumerated full metro,
+    and that path also serves sources without a block_geometries() accessor, e.g.
+    ShapefileSource)."""
+    if block_groups is not None:
+        selection = sorted({b for group in block_groups for b in group})
+        return block_groups, selection
+    sel = screen.select(source)
     if sel is None:
         return None, None
     return [[b] for b in sel], sel
 
 
-def run(spec: PipelineSpec) -> RunOutput:
-    """The region-aware dataflow pipeline: resolve seed groups (explicit block_groups, or the
-    screen's selection wrapped as singletons), expand them with the region_builder over cheap
-    block geometries, build full Blocks only for the union of members, then reblock each region
-    -- a singleton region routes through the single-block `reblock_block` (behaviour identical
-    to a plain per-block reblock), a genuine multi-block region through `region_reblock`.
-    Writes no files (emitters, at the edge, do that) and touches no config or global state."""
-    groups, selection = _seed_groups(spec)
+def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
+                  block_groups: list[list[str]] | None, max_blocks: int) -> list[list[Block]]:
+    """Resolve seed groups (explicit `block_groups`, or the screen's selection wrapped as
+    singletons) into the region member Blocks to actually reblock/compare: `region_builder`
+    expands each seed group over cheap `block_geometries()`, full Blocks are then built only
+    for the union of every region's members, and each expanded group's Blocks come back as one
+    inner list (its region; a singleton list for a single-block region). A screen that passes
+    everything through (None -- no explicit groups either) takes the classic build-limited
+    all-blocks path instead: `source.region()` already filters to buildable blocks and sorts,
+    so `islice` takes the first `max_blocks` buildable ones as singleton "regions" -- no
+    `block_geometries()` accessor required, so e.g. ShapefileSource still works. Shared by
+    `pipeline.run` and `reblock.compare` so the region-resolution semantics live in one place."""
+    groups, _selection = _seed_groups(source, screen, block_groups)
     if groups is None:
-        # Screen passed everything through (no explicit groups): the classic all-blocks path.
-        # region() already filters to buildable blocks and sorts, so islice takes the first
-        # max_blocks buildable ones -- exactly the pre-region behaviour, and no block_geometries
-        # accessor is required (so ShapefileSource works). Each built block is its own singleton
-        # region.
-        blocks = list(islice(spec.source.region().blocks, spec.max_blocks))
-        results = _reblock_all(blocks, spec.method, spec.evals)
-        return RunOutput(selection=selection, results=results,
-                         regions=[[b.block_id] for b in blocks])
+        blocks = list(islice(source.region().blocks, max_blocks))
+        return [[b] for b in blocks]
 
-    spec.source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
-    block_geoms = spec.source.block_geometries()     # type: ignore[attr-defined]
-    regions = spec.region_builder.build(block_geoms, groups)[:spec.max_blocks]
+    source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
+    block_geoms = source.block_geometries()     # type: ignore[attr-defined]
+    regions = region_builder.build(block_geoms, groups)[:max_blocks]
     members = sorted({b for region in regions for b in region})
-    spec.source.block_ids = members                  # type: ignore[attr-defined]  # members only
-    built = {b.block_id: b for b in spec.source.region().blocks}
-    results = []
-    for region in regions:
-        rblocks = [built[b] for b in region if b in built]
+    source.block_ids = members                  # type: ignore[attr-defined]  # members only
+    built = {b.block_id: b for b in source.region().blocks}
+    return [[built[b] for b in region if b in built] for region in regions]
+
+
+def run(spec: PipelineSpec) -> RunOutput:
+    """The region-aware dataflow pipeline: resolve the seed groups once (for the retained
+    `selection`), build each region's member Blocks via `build_regions` (handing the already-
+    resolved groups back in as its `block_groups`, so the screen -- possibly expensive, e.g.
+    DenseCompactScreen's fine pass -- runs at most once), then reblock each region -- a
+    singleton region routes through the single-block `reblock_block` (behaviour identical to a
+    plain per-block reblock), a genuine multi-block region through `region_reblock`. Writes no
+    files (emitters, at the edge, do that) and touches no config or global state."""
+    groups, selection = _seed_groups(spec.source, spec.screen, spec.block_groups)
+    region_blocks = build_regions(spec.source, spec.screen, spec.region_builder,
+                                  groups, spec.max_blocks)
+    results: list[Result] = []
+    regions: list[list[str]] = []
+    for rblocks in region_blocks:
+        regions.append([b.block_id for b in rblocks])
         if len(rblocks) == 1:
             results.append(reblock_block(rblocks[0], spec.method, spec.evals))
         elif len(rblocks) > 1:
             results.append(region_reblock(rblocks, spec.method, spec.evals))
     return RunOutput(selection=selection, results=results, regions=regions)
-
-
-def _estimate_seconds(done: list[tuple[int, float]], n_parcels: int) -> float | None:
-    """Rough per-parcel time estimate from the blocks finished so far (None until the
-    first completes). Self-calibrating and method-agnostic; assumes reblock time scales
-    ~linearly with parcel count -- a first approximation (topology may be super-linear),
-    so it is a guide, not a guarantee."""
-    total_parcels = sum(p for p, _ in done)
-    if total_parcels == 0:
-        return None
-    rate = sum(t for _, t in done) / total_parcels
-    return rate * n_parcels
-
-
-def _reblock_all(blocks: list[Block], method: Method, evals: list[Eval]) -> list[Result]:
-    """Reblock each block, logging live per-block progress -- id, parcel count, a running
-    time estimate, and elapsed. The reblock phase is the slow step for method=topology, so
-    this turns a silent wait into visible progress (one pair of lines per reblocked block;
-    `blocks` is only the sampled max_blocks, so the volume stays bounded)."""
-    n = len(blocks)
-    results: list[Result] = []
-    done: list[tuple[int, float]] = []   # (n_parcels, seconds) per finished block
-    for i, block in enumerate(blocks, 1):
-        n_parcels = len(block.parcels)
-        est = _estimate_seconds(done, n_parcels)
-        log.info("reblocking (%d/%d) %s: %d parcels%s", i, n, block.block_id, n_parcels,
-                 "" if est is None else f" (~{est:.0f}s est)")
-        t0 = time.perf_counter()
-        result = reblock_block(block, method, evals)
-        dt = time.perf_counter() - t0
-        done.append((n_parcels, dt))
-        results.append(result)
-        log.info("  reblocked %s in %.1fs", block.block_id, dt)
-    return results
