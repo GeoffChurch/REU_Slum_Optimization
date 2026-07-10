@@ -20,6 +20,15 @@ pixi run fmt         # ruff format
 pixi run check       # lint + typecheck + test
 ```
 
+## Gallery
+
+Worked examples with committed sample data and their outputs live in [`examples/`](examples/) — one
+subdir per recipe, each with the exact command that produces it.
+
+| [single-block](examples/single-block/) | [detect → reblock](examples/detect-reblock/) | [displacement tradeoff](examples/displacement/) |
+|---|---|---|
+| ![](examples/single-block/after.png) | ![](examples/detect-reblock/flagged_map.png) | ![](examples/displacement/tradeoff.png) |
+
 ## Generate before/after visuals for one block
 
 Render a block's access-depth heatmaps (before, and after a road-building method)
@@ -120,6 +129,11 @@ pulls furthest ahead** — on a region there is room for long cross-block throug
 pair its directness AUC (~1.08 vs ~0.19 for dijkstra/mesh, ~6×) and efficiency AUC (~6×) lead by a
 wide margin (the existing inter-block streets already give decent access, so the tree methods only
 add local spurs; arterial adds the region-spanning through-roads). dijkstra still wins access.
+
+![region map](examples/multi-block/region_map.png)
+
+See [`examples/multi-block/`](examples/multi-block/) and [`examples/convex-hull/`](examples/convex-hull/)
+for the region before/after and the `convex_hull` gap-filling builder.
 
 A pluggable **`region_builder`** expands each seed group before reblocking: `identity` (default;
 reblock exactly the listed blocks) or `convex_hull` (`region_builder=convex_hull`), which fills the
