@@ -1,4 +1,3 @@
 # Real full Cape Town data: downloaded on demand, cached under ~/.cache/reblock (never committed).
 _target_: reblock.data.provision.cached_kblock_source
 city: capetown
-block_ids: ${block_ids}

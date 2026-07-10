@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import islice
 
 from reblock.contracts import Block, Eval, Method, Result, Screen, Source
 from reblock.derivations import propose
+from reblock.region import IdentityRegionBuilder, RegionBuilder, region_reblock
 
 log = logging.getLogger(__name__)
 
@@ -21,18 +22,25 @@ log = logging.getLogger(__name__)
 class PipelineSpec:
     """The typed stages of one run, composed at the edge (reblock.run.spec_from_cfg)
     from Hydra config, or directly in Python. The core pipeline (run) is exactly a
-    function of this value -- it never sees a DictConfig."""
+    function of this value -- it never sees a DictConfig.
+
+    `block_groups` is the region grouping (a list of seed groups, block_ids per group);
+    None means no explicit grouping (the screen decides). `region_builder` expands each
+    seed group into the region actually reblocked (identity = passthrough)."""
     source: Source
     screen: Screen
     method: Method
     evals: list[Eval]
     max_blocks: int = 1
+    region_builder: RegionBuilder = field(default_factory=IdentityRegionBuilder)
+    block_groups: list[list[str]] | None = None
 
 
 @dataclass(frozen=True)
 class RunOutput:
-    selection: list[str] | None   # the full block selection (None = all blocks)
-    results: list[Result]         # one per reblocked (sampled) block
+    selection: list[str] | None       # the full block selection (None = all blocks)
+    results: list[Result]             # one per reblocked region (or sampled block)
+    regions: list[list[str]] = field(default_factory=list)  # the builder's expanded groups
 
 
 def reblock_block(block: Block, method: Method, evals: list[Eval]) -> Result:
@@ -76,14 +84,55 @@ def select_blocks(source: Source, screen: Screen,
     return selection, [built[bid] for bid in picked if bid in built]
 
 
+def _seed_groups(spec: PipelineSpec) -> tuple[list[list[str]] | None, list[str] | None]:
+    """The seed region groups + the retained selection. Explicit `block_groups` win (each
+    inner list is one region's seed group). Otherwise the screen selects: a real selection
+    wraps as singleton seed groups; None (all blocks) returns (None, None) -- the caller's
+    signal to take the classic build-limited all-blocks path (a region builder has nothing
+    to expand over an unenumerated full metro, and that path also serves sources without a
+    block_geometries() accessor, e.g. ShapefileSource)."""
+    if spec.block_groups is not None:
+        selection = sorted({b for group in spec.block_groups for b in group})
+        return spec.block_groups, selection
+    sel = spec.screen.select(spec.source)
+    if sel is None:
+        return None, None
+    return [[b] for b in sel], sel
+
+
 def run(spec: PipelineSpec) -> RunOutput:
-    """The dataflow pipeline: screen the source for the selection, sample it, build only
-    the sample (in priority order), reblock each -> RunOutput(selection, results). The
-    full selection is retained (results cover only the sampled max_blocks). Writes no
-    files (emitters, at the edge, do the writing) and touches no config or global state."""
-    selection, blocks = select_blocks(spec.source, spec.screen, spec.max_blocks)
-    results = _reblock_all(blocks, spec.method, spec.evals)
-    return RunOutput(selection=selection, results=results)
+    """The region-aware dataflow pipeline: resolve seed groups (explicit block_groups, or the
+    screen's selection wrapped as singletons), expand them with the region_builder over cheap
+    block geometries, build full Blocks only for the union of members, then reblock each region
+    -- a singleton region routes through the single-block `reblock_block` (behaviour identical
+    to a plain per-block reblock), a genuine multi-block region through `region_reblock`.
+    Writes no files (emitters, at the edge, do that) and touches no config or global state."""
+    groups, selection = _seed_groups(spec)
+    if groups is None:
+        # Screen passed everything through (no explicit groups): the classic all-blocks path.
+        # region() already filters to buildable blocks and sorts, so islice takes the first
+        # max_blocks buildable ones -- exactly the pre-region behaviour, and no block_geometries
+        # accessor is required (so ShapefileSource works). Each built block is its own singleton
+        # region.
+        blocks = list(islice(spec.source.region().blocks, spec.max_blocks))
+        results = _reblock_all(blocks, spec.method, spec.evals)
+        return RunOutput(selection=selection, results=results,
+                         regions=[[b.block_id] for b in blocks])
+
+    spec.source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
+    block_geoms = spec.source.block_geometries()     # type: ignore[attr-defined]
+    regions = spec.region_builder.build(block_geoms, groups)[:spec.max_blocks]
+    members = sorted({b for region in regions for b in region})
+    spec.source.block_ids = members                  # type: ignore[attr-defined]  # members only
+    built = {b.block_id: b for b in spec.source.region().blocks}
+    results = []
+    for region in regions:
+        rblocks = [built[b] for b in region if b in built]
+        if len(rblocks) == 1:
+            results.append(reblock_block(rblocks[0], spec.method, spec.evals))
+        elif len(rblocks) > 1:
+            results.append(region_reblock(rblocks, spec.method, spec.evals))
+    return RunOutput(selection=selection, results=results, regions=regions)
 
 
 def _estimate_seconds(done: list[tuple[int, float]], n_parcels: int) -> float | None:

@@ -9,6 +9,7 @@ from pyproj import CRS
 from shapely.geometry import Polygon
 
 from reblock.contracts import Block, Eval, Result
+from reblock.data.kblock import KblockSource
 from reblock.data.shapefile import ShapefileSource
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
 from reblock.methods.topology import TopologyMethod
@@ -79,7 +80,7 @@ def test_cli_block_ids_renders_single_capetown_block(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
          "data=capetown", "method=peel", "eval=kcomplexity",
-         "block_ids=[ZAF.9.3.1_1_44882]", "render.enabled=true",
+         "block_ids=[[ZAF.9.3.1_1_44882]]", "render.enabled=true",
          f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=120,
     )
@@ -193,7 +194,7 @@ def test_block_ids_targets_one_capetown_block_through_the_pipeline() -> None:
     with initialize(version_base=None, config_path="../conf"):
         cfg = compose(config_name="config", overrides=[
             "data=capetown", "method=peel", "eval=kcomplexity",
-            "block_ids=[ZAF.9.3.1_1_44882]", "max_blocks=10",
+            "block_ids=[[ZAF.9.3.1_1_44882]]", "max_blocks=10",
         ])
         results = run(spec_from_cfg(cfg)).results
     # block_ids overrides the coarse max_blocks front-selection: exactly the one block.
@@ -260,6 +261,91 @@ def test_cli_screen_stage_end_to_end(tmp_path: Path) -> None:
     befores = list(tmp_path.glob("*_before.png"))
     afters = list(tmp_path.glob("*_after.png"))
     assert len(befores) >= 2 and len(afters) == len(befores)
+
+
+_KB = Path(__file__).resolve().parent / "data" / "kblock"
+_DJI = (str(_KB / "blocks_dji_sample.parquet"), str(_KB / "buildings_dji_sample.parquet"))
+
+
+def _dji_source() -> KblockSource:
+    return KblockSource(*_DJI, region_id="dji")
+
+
+def _dji_spec(block_groups: list[list[str]]) -> PipelineSpec:
+    from reblock.methods.dijkstra import DijkstraReblocker
+    from reblock.region import IdentityRegionBuilder
+    return PipelineSpec(
+        source=_dji_source(), screen=IdentityScreen(),
+        method=DijkstraReblocker(), evals=[KComplexityEval()],
+        region_builder=IdentityRegionBuilder(), block_groups=block_groups,
+    )
+
+
+def test_singleton_group_run_matches_single_block_reblock() -> None:
+    # The invariant: a singleton region seed group routes through the SAME single-block
+    # reblock_block path as the pre-region pipeline, so the result is identical to a plain
+    # per-block reblock of that block. (Guards that only genuine multi-block groups diverge
+    # onto region_reblock.)
+    from reblock.methods.dijkstra import DijkstraReblocker
+    from reblock.pipeline import reblock_block
+    bid = "DJI.1_2_602"
+    out = run(_dji_spec([[bid]]))
+    assert len(out.results) == 1
+    r = out.results[0]
+    assert r.block.block_id == bid   # plain block id, NOT a "region:..." block => reblock_block
+
+    direct_src = KblockSource(*_DJI, region_id="dji", block_ids=[bid])
+    block = next(b for b in direct_src.region().blocks if b.block_id == bid)
+    direct = reblock_block(block, DijkstraReblocker(), [KComplexityEval()])
+    assert r.proposal.proposal_id == direct.proposal.proposal_id
+    assert r.metric("kcomplexity", "delta_k") == direct.metric("kcomplexity", "delta_k")
+    assert r.metric("kcomplexity", "k_after") == direct.metric("kcomplexity", "k_after")
+
+
+def test_two_adjacent_block_region_reblocks_jointly() -> None:
+    # An adjacent DJI pair as ONE seed group yields ONE joint region Result (block_id
+    # "region:...") whose proposal road network reaches into BOTH original blocks -- proving
+    # they were reblocked jointly (region_reblock), not as two independent per-block reblocks.
+    from shapely.ops import unary_union
+    ids = ["DJI.3_1_1808", "DJI.3_1_1809"]
+    out = run(_dji_spec([ids]))
+    assert len(out.results) == 1
+    r = out.results[0]
+    assert r.block.block_id == "region:DJI.3_1_1808+DJI.3_1_1809"
+    assert r.proposal.roads is not None and len(r.proposal.roads) > 0
+
+    geoms = _dji_source().block_geometries()
+    by = dict(zip(geoms["block_id"], geoms.geometry, strict=True))
+    roads = unary_union(list(r.proposal.roads.geometry)).buffer(0.5)
+    assert roads.intersects(by["DJI.3_1_1808"]) and roads.intersects(by["DJI.3_1_1809"])
+
+
+def test_region_map_writes_png(tmp_path: Path) -> None:
+    from reblock.emit import region_map
+    geoms = _dji_source().block_geometries()
+    out = region_map(geoms, [["DJI.3_1_1808", "DJI.3_1_1809"]], tmp_path)
+    assert out is not None and out.exists() and out.stat().st_size > 0
+
+
+def test_region_map_none_when_no_regions(tmp_path: Path) -> None:
+    from reblock.emit import region_map
+    geoms = _dji_source().block_geometries()
+    assert region_map(geoms, [], tmp_path) is None
+
+
+def test_cli_region_path_writes_region_map(tmp_path: Path) -> None:
+    # End-to-end through the real @hydra.main edge: list-of-lists block_ids parsing, the region
+    # path (joint two-block reblock), and the region_map emitter wired on cfg.region_map.enabled.
+    result = subprocess.run(
+        [sys.executable, "-m", "reblock.run",
+         "data=dji", "method=dijkstra", "eval=kcomplexity",
+         "block_ids=[[DJI.3_1_1808,DJI.3_1_1809]]",
+         "region_map.enabled=true", f"hydra.run.dir={tmp_path}"],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "region:DJI.3_1_1808+DJI.3_1_1809" in result.stdout
+    assert (tmp_path / "region_map.png").stat().st_size > 0
 
 
 def test_topology_reblocks_a_synthetic_nested_block() -> None:

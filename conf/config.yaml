@@ -1,6 +1,7 @@
 defaults:
   - data: phule
   - screen: identity
+  - region_builder: identity
   - method: dijkstra
   - eval: kcomplexity
   - _self_
@@ -28,8 +29,15 @@ render:
 flagged_map:
   enabled: false
 
-# Optional list of block ids to build (kblock sources only); null => all blocks.
-# Filters at the source before the Voronoi build, so targeting one block is O(1).
+# Region-builder map emitter (reblock.emit.region_map): opt-in; draws every candidate
+# block light with each region's member blocks filled by region color, into the run dir.
+region_map:
+  enabled: false
+
+# Region seed groups (kblock sources only): a LIST OF LISTS of block ids -- each inner
+# list is one region's seed group (a singleton = single-block reblocking), which the
+# region_builder expands into the region actually reblocked. null => every block a
+# singleton (the classic per-block behavior). NOT the Source's flat load filter.
 block_ids: null
 
 hydra:

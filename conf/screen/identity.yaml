@@ -1,5 +1,5 @@
-# The passthrough Screen (run()'s default): selects the configured block_ids (or
-# all blocks). block_ids is interpolated from the top-level ${block_ids}, so the
-# `block_ids=[...]` CLI override flows through the identity screen unchanged.
+# The passthrough Screen (run()'s default): selects nothing of its own -> None (all
+# blocks), so the run falls to the region path's seed groups. Top-level `block_ids` is
+# now the region grouping (threaded through PipelineSpec.block_groups), NOT a screen
+# filter, so it is no longer interpolated here.
 _target_: reblock.screen.identity.IdentityScreen
-block_ids: ${block_ids}

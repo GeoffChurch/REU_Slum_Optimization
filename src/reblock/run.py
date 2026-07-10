@@ -15,8 +15,9 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from reblock.contracts import Eval, Method, Screen, Source
-from reblock.emit import flagged_map, render_results
+from reblock.emit import flagged_map, region_map, render_results
 from reblock.pipeline import PipelineSpec, run
+from reblock.region import RegionBuilder
 
 log = logging.getLogger(__name__)
 
@@ -26,13 +27,20 @@ def spec_from_cfg(cfg: DictConfig) -> PipelineSpec:
     Per-element instantiate for the eval LIST: instantiate(cfg.eval) whole would
     short-circuit a ListConfig of @dataclass _target_s to schema-validated
     DictConfig nodes instead of constructing them; cfg.data/screen/method are
-    single _target_ dicts, so instantiate(...) on each is safe."""
+    single _target_ dicts, so instantiate(...) on each is safe. `block_ids` is the
+    region grouping (a list of seed groups); it threads through as block_groups."""
+    block_groups = (
+        [[str(b) for b in group] for group in cfg.block_ids]
+        if cfg.block_ids is not None else None
+    )
     return PipelineSpec(
         source=cast(Source, instantiate(cfg.data)),
         screen=cast(Screen, instantiate(cfg.screen)),
         method=cast(Method, instantiate(cfg.method)),
         evals=cast("list[Eval]", [instantiate(e) for e in cfg.eval]),
         max_blocks=cfg.max_blocks,
+        region_builder=cast(RegionBuilder, instantiate(cfg.region_builder)),
+        block_groups=block_groups,
     )
 
 
@@ -57,6 +65,13 @@ def main(cfg: DictConfig) -> None:
                         type(spec.source).__name__)
         else:
             flagged_map(str(blocks_path), output.selection or [], out_dir)
+    if cfg.region_map.enabled:
+        if not hasattr(spec.source, "block_geometries"):
+            log.warning("region_map: source %s has no block_geometries; skipping",
+                        type(spec.source).__name__)
+        else:
+            spec.source.block_ids = None   # type: ignore[attr-defined]  # -> all candidate blocks
+            region_map(spec.source.block_geometries(), output.regions, out_dir)
 
 
 if __name__ == "__main__":

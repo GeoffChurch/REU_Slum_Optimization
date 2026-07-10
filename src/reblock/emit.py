@@ -15,6 +15,8 @@ from reblock.contracts import Metrics, Result
 from reblock.render import render_after, render_before, save_render
 
 if TYPE_CHECKING:
+    from geopandas import GeoDataFrame
+
     from reblock.compare import MethodCurve
 
 _KCOMPLEXITY = "kcomplexity"
@@ -76,6 +78,41 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
     ax.set_title(f"{int(blocks['flagged'].sum())} of {len(blocks)} blocks flagged")
     ax.set_axis_off()
     out_path = out_dir / "flagged_map.png"
+    save_render(fig, out_path)
+    plt.close(fig)
+    return out_path
+
+
+def region_map(block_geoms: GeoDataFrame, regions: list[list[str]],
+               out_dir: Path) -> Path | None:
+    """The region-builder's map: every candidate block drawn as light-grey context, then each
+    region's member blocks filled in a distinct colour (by region index) and outlined -- so you
+    can see what the builder pulled into each region (essential for convex_hull, which expands
+    past the seed). Writes `region_map.png`; returns the path, or None if there are no regions.
+    Gating is the caller's (cfg.region_map.enabled). Models `flagged_map`'s metro-context style."""
+    from matplotlib import colormaps
+    if not regions:
+        return None
+    geoms = block_geoms.copy()
+    geoms["block_id"] = geoms["block_id"].astype(str)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 10))
+    # Every candidate block as pale context (thin edge so small informal blocks stay visible),
+    # matching flagged_map; the region members are then painted over it.
+    geoms.plot(ax=ax, color="#eeeeee", edgecolor="#bdbdbd", linewidth=0.3)
+    cmap = colormaps["tab10"]
+    n_members = 0
+    for i, region in enumerate(regions):
+        members = geoms[geoms["block_id"].isin(set(region))]
+        if members.empty:
+            continue
+        n_members += len(members)
+        members.plot(ax=ax, color=cmap(i % cmap.N), edgecolor="#333333",
+                     linewidth=0.8, alpha=0.85)
+    ax.set_title(f"{len(regions)} region(s), {n_members} member block(s) "
+                 f"of {len(geoms)} candidates")
+    ax.set_axis_off()
+    out_path = out_dir / "region_map.png"
     save_render(fig, out_path)
     plt.close(fig)
     return out_path
