@@ -3,8 +3,8 @@
 **Status:** draft for review · **Date:** 2026-07-09
 
 A new `Method` that grows a road network by **greedily inserting the single best straight
-arterial** — the through-road (or interior spur) with the highest objective gain per meter —
-one at a time until a road budget runs out. Unlike the tree methods (dijkstra/peel, one myopic
+arterial** — the through-road with the highest objective gain per meter — one at a time until
+a road budget runs out. Unlike the tree methods (dijkstra/peel, one myopic
 path per parcel) and the mesh (forest + local loops), this puts *long, high-value roads where
 they help most*, which should make it a competitive baseline — especially for multi-block
 regions later, where region-spanning arterials are the whole point.
@@ -55,19 +55,35 @@ to the current connected network, which is transitively connected to egress."* S
 is egress and every committed arterial attaches to the network, any new arterial that touches
 the network at ≥1 point is transitively connected — **no floating roads**, by construction.
 
-Each step, from the *current* network (streets ∪ committed arterials):
+Every candidate is a **through-road** — both ends anchored on the current network — so each
+arterial adds a genuine route (two egress points), never a terminal cul-de-sac. Each step, from
+the *current* network (streets ∪ committed arterials):
 - **Anchor points** `A` = points sampled at fixed spacing along the current network geometry.
-- **Interior targets** `T` = the centroids (snapped to the nearest boundary node) of the
-  parcels with the deepest current access (top-k by access depth) — the places most starved
-  of a road.
-- **Candidate chords** = `{ A_i–A_j }` (through-roads: both ends on the network → loops /
-  shortcuts) `∪ { A_i–T_k }` (spurs: one end anchored, the other reaching a deep pocket).
+- **General through-roads** = `{ A_i–A_j }` — chords between anchor pairs (cross-cuts / loops /
+  shortcuts).
+- **Pocket-targeted through-roads** — for each parcel with the deepest current access (top-k by
+  depth), the chord that *passes through* that pocket and continues to the network on the far
+  side (anchor `A_i` on one side → through the pocket → the point where the line re-meets the
+  network). This is the "run it all the way through" version of what a spur would have been: it
+  serves the deep pocket *and* leaves a through-route behind. If the line does not re-meet the
+  network on the far side, the pocket is a genuine dead-end and is skipped in v1 (see below).
 
-The candidate set *grows with the network* (new arterials add anchor points), so later
-arterials can **branch off earlier ones** and drive spurs deep into the interior. Counts are
-bounded — O(B²) through-roads + O(B·k) spurs per step, and steps are few (arterials, not
-per-parcel), which is exactly why honest per-candidate marginal scoring is tractable here where
-it was not at the per-parcel scale.
+The candidate set *grows with the network* (new arterials add anchor points), so later arterials
+**branch off earlier ones**. Counts are bounded — O(B²) anchor-pair chords + O(B·k) pocket-
+targeted ones per step, and steps are few (arterials, not per-parcel), which is why honest
+per-candidate marginal scoring is tractable here where it was not at the per-parcel scale.
+
+**No dead-end spurs (deliberate).** A spur that reaches a pocket and stops is greedy-myopic: it
+has the best access-gain-per-meter at that instant (cheapest way to serve the pocket) but it is
+terminal — adds no navigability, and nothing can branch through it. A through-road running
+*through* the same pocket dominates it on everything but immediate per-meter cost, so we only
+consider through-roads. The trade this makes explicit: under the access objective the greedy
+now spends more meters per unit access (a through-road is longer than the spur it replaces),
+lowering access-AUC slightly in exchange for the directness/E and infrastructure the route buys
+— a deliberate bias toward long-run network quality that the compare will surface. The cost: a
+genuine dead-end pocket (a peninsula whose far side touches no egress) cannot be served by a
+buildable through-road at all — those stay underserved in v1 and are the motivating case for the
+segment-group egress model (backlog).
 
 ## Regime C: two modes, one code path
 
@@ -76,8 +92,8 @@ A single algorithm parameterized by `mode`:
 - **buildable** — a candidate chord `p–q` is *realized* on the parcel-boundary graph: snap
   `p`,`q` to their nearest boundary nodes, then take the boundary path between them that hugs
   the ideal line — a shortest path with edge weight `length(e) + λ·mean_dist(e, line_pq)`. The
-  emitted road is that frontage-following path; it attaches to the network at the anchored end,
-  so `street_connectivity` holds. Scoring uses the snapped path.
+  emitted road is that frontage-following path; both endpoints anchor on the network, so
+  `street_connectivity` holds. Scoring uses the snapped path.
 - **aspirational** — the candidate *is* the true straight chord (no snap). It is scored by
   treating the chord as a new linear street: parcels within `tol` of the line (including ones
   it passes through — demolition implied) are served. This is an idealization / ceiling.
@@ -149,8 +165,12 @@ streets, and region-spanning arterials become candidates with no algorithm chang
 - **Two modes as two method instances** (buildable + aspirational) → price-of-buildability via
   the existing compare, no new machinery.
 - **Pluggable objective, default access-burden.**
-- **Transitive-network anchoring** (attach to streets ∪ arterials at ≥1 point) rather than
-  direct-frontage endpoints.
+- **Transitive-network anchoring** (attach to streets ∪ arterials) rather than direct-frontage
+  endpoints — the network is transitively connected to egress, so anchored arterials are too.
+- **Through-roads only; no dead-end spurs.** A spur is myopic and terminal; the through-road
+  that runs *through* the same pocket dominates it (navigability + branch-anchor infrastructure)
+  at the cost of more meters. Deliberately trades a little access-AUC for long-run quality;
+  genuine dead-end/peninsula pockets are deferred (→ segment-group egress model).
 - **`drain` = greedy rank** so the unchanged curve machinery slices in greedy order.
 - **Honest full marginal re-scoring** each step (tractable because arterials are few); lazy-
   greedy (CELF, exploiting access submodularity) is the escape hatch if it drags, deferred.
@@ -167,6 +187,10 @@ streets, and region-spanning arterials become candidates with no algorithm chang
   "connect to the outer boundary" is wrong (an island's perimeter is mostly inert); this
   generalizes it. Applies to *every* method (dijkstra, mesh, arterial), so it belongs to the
   egress model, not here.
+- **Dead-end pockets / spurs** — peninsulas whose far side touches no egress can't be served by
+  a buildable through-road; a fallback spur (or a demolished-through arterial) would be needed.
+  Deferred, and tied to the segment-group egress model above (a "dead-end" is really "no *live*
+  egress on the far side").
 - **Lazy-greedy / CELF acceleration** and cheap incremental marginal-gain proxies — only if
   naive full re-scoring is too slow on large blocks.
 - **Fixed regular grid baseline** — dropped; the greedy arterial subsumes it.
