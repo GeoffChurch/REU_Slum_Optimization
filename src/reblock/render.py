@@ -30,10 +30,12 @@ _CONTEXT_PT = "#c9c9c9"
 _OWN_PT = "#333333"
 
 
-def _frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.6) -> BBox:
+def frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.6) -> BBox:
     """A padded square bbox centred on `geoms`' total_bounds -- the render view, and the bbox
     the context query is windowed to. Square + padded so the selection dominates with a context
-    margin.
+    margin. Public (not `_`-prefixed): the caller (emit.py) computes this ONCE per render and
+    uses it both to window the context query (`source.block_geometries`/`building_points`) and
+    to set the axes view (`frame=` below), so the two never drift apart.
     """
     minx, miny, maxx, maxy = geoms.total_bounds
     half = max(maxx - minx, maxy - miny) / 2 + 1.0
@@ -58,6 +60,7 @@ def _draw_heatmap(
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
     own_points: gpd.GeoDataFrame | None = None,
+    frame: BBox | None = None,
 ) -> Figure:
     parcels = _parcels_with_layer(block, layers)
 
@@ -65,9 +68,9 @@ def _draw_heatmap(
     parcels.plot(ax=ax, column="layer", cmap=_CMAP, vmin=1, vmax=vmax,
                  edgecolor="#999999", linewidth=0.3)
 
-    frame = _frame_bbox(block.parcels)
-    ax.set_xlim(frame[0], frame[2])
-    ax.set_ylim(frame[1], frame[3])
+    view = frame if frame is not None else frame_bbox(block.parcels)
+    ax.set_xlim(view[0], view[2])
+    ax.set_ylim(view[1], view[3])
 
     # Dimmed context (neighbouring blocks' outlines + building points), drawn under the
     # selection's own boundary/streets/points so the selection reads unambiguously on top.
@@ -101,11 +104,13 @@ def render_before(
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
     own_points: gpd.GeoDataFrame | None = None,
+    frame: BBox | None = None,
 ) -> Figure:
     """Status-quo access-depth heatmap for `block` (method-independent)."""
     fig = _draw_heatmap(
         block, layers, vmax,
         context_outlines=context_outlines, context_points=context_points, own_points=own_points,
+        frame=frame,
     )
     fig.axes[0].set_title(f"{block.block_id} — before")
     return fig
@@ -117,11 +122,13 @@ def render_after(
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
     own_points: gpd.GeoDataFrame | None = None,
+    frame: BBox | None = None,
 ) -> Figure:
     """Post-intervention access-depth heatmap for `block`, plus `proposal.roads`."""
     fig = _draw_heatmap(
         block, layers, vmax,
         context_outlines=context_outlines, context_points=context_points, own_points=own_points,
+        frame=frame,
     )
     ax = fig.axes[0]
     if proposal.roads is not None and not proposal.roads.empty:

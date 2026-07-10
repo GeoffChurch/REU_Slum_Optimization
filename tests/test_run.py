@@ -322,31 +322,43 @@ def test_two_adjacent_block_region_reblocks_jointly() -> None:
 
 def test_region_map_writes_png(tmp_path: Path) -> None:
     from reblock.emit import region_map
-    geoms = _dji_source().block_geometries()
-    out = region_map(geoms, [["DJI.3_1_1808", "DJI.3_1_1809"]],
+    out = region_map(_dji_source(), [["DJI.3_1_1808", "DJI.3_1_1809"]],
                       [["DJI.3_1_1808"]], tmp_path)
     assert out is not None and out.exists() and out.stat().st_size > 0
 
 
 def test_region_map_none_when_no_regions(tmp_path: Path) -> None:
     from reblock.emit import region_map
-    geoms = _dji_source().block_geometries()
-    assert region_map(geoms, [], [], tmp_path) is None
+    assert region_map(_dji_source(), [], [], tmp_path) is None
 
 
 def test_cli_region_path_writes_region_map(tmp_path: Path) -> None:
     # End-to-end through the real @hydra.main edge: list-of-lists block_ids parsing, the region
-    # path (joint two-block reblock), and the region_map emitter wired on cfg.region_map.enabled.
+    # path (joint two-block reblock), and BOTH emitters wired on their cfg flags -- region_map
+    # (typed Source, no hasattr) and render_results (per-block windowed context + points).
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
          "data=dji", "method=dijkstra", "eval=kcomplexity",
          "block_ids=[[DJI.3_1_1808,DJI.3_1_1809]]",
-         "region_map.enabled=true", f"hydra.run.dir={tmp_path}"],
+         "render.enabled=true", "region_map.enabled=true", f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, result.stderr
     assert "region:DJI.3_1_1808+DJI.3_1_1809" in result.stdout
     assert (tmp_path / "region_map.png").stat().st_size > 0
+    befores = list(tmp_path.glob("region*_before.png"))
+    afters = list(tmp_path.glob("region*_after.png"))
+    assert len(befores) == 1 and befores[0].stat().st_size > 0
+    assert len(afters) >= 1 and afters[0].stat().st_size > 0
+
+
+def test_run_module_never_references_hasattr() -> None:
+    # region_map/render_results now take the typed Source directly (contracts.Source
+    # guarantees block_geometries/building_points on every implementation), so run.py's old
+    # `hasattr(spec.source, "block_geometries")` capability guard is gone for good.
+    import reblock.run
+    src = Path(reblock.run.__file__).read_text()
+    assert "hasattr" not in src
 
 
 def test_topology_reblocks_a_synthetic_nested_block() -> None:

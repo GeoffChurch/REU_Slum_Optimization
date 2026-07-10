@@ -13,7 +13,7 @@ from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import Block, Metrics, Proposal
 from reblock.derive.access import parcel_access_layers
-from reblock.render import _frame_bbox, render_after, render_before, save_render
+from reblock.render import frame_bbox, render_after, render_before, save_render
 
 UTM = CRS.from_epsg(32643)
 
@@ -136,7 +136,7 @@ def test_frame_bbox_is_square_centred_and_padded() -> None:
     # than the input's half-extent (padding applied).
     geoms = gpd.GeoSeries([Polygon([(0, 0), (10, 0), (10, 2), (0, 2)])], crs=UTM)
 
-    minx, miny, maxx, maxy = _frame_bbox(geoms, pad_frac=0.6)
+    minx, miny, maxx, maxy = frame_bbox(geoms, pad_frac=0.6)
 
     width, height = maxx - minx, maxy - miny
     assert width == pytest.approx(height)
@@ -173,3 +173,18 @@ def test_draw_heatmap_with_context_and_own_points_renders_without_error(
 
     assert out.exists()
     assert out.stat().st_size > 0
+
+
+def test_render_before_uses_the_passed_frame_verbatim() -> None:
+    # The caller (emit.py) computes frame_bbox ONCE and threads it through as the `frame`
+    # kwarg, so the context query and the axes view never drift apart. Passing an explicit
+    # frame must set the view to exactly that bbox, not recompute one internally.
+    block = _grid_block(3)
+    layers = parcel_access_layers(block, None)
+    frame = (-100.0, -100.0, 200.0, 200.0)
+
+    fig = render_before(block, layers, vmax=2, frame=frame)
+
+    ax = fig.axes[0]
+    assert ax.get_xlim() == pytest.approx((frame[0], frame[2]))
+    assert ax.get_ylim() == pytest.approx((frame[1], frame[3]))

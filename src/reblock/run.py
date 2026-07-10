@@ -57,7 +57,7 @@ def main(cfg: DictConfig) -> None:
         flagged_path.write_text("".join(f"{b}\n" for b in output.selection))
         log.info("%d blocks flagged -> %s", len(output.selection), flagged_path)
     if cfg.render.enabled:
-        render_results(output.results, out_dir, cfg.render)
+        render_results(output.results, out_dir, cfg.render, spec.source)
     if cfg.flagged_map.enabled:
         blocks_path = getattr(spec.source, "blocks_path", None)
         if blocks_path is None:
@@ -66,13 +66,8 @@ def main(cfg: DictConfig) -> None:
         else:
             flagged_map(str(blocks_path), output.selection or [], out_dir)
     if cfg.region_map.enabled:
-        if not hasattr(spec.source, "block_geometries"):
-            log.warning("region_map: source %s has no block_geometries; skipping",
-                        type(spec.source).__name__)
-        else:
-            spec.source.block_ids = None   # type: ignore[attr-defined]  # -> all candidate blocks
-            region_map(spec.source.block_geometries(), output.regions, output.seed_groups,
-                      out_dir)
+        spec.source.block_ids = None   # type: ignore[attr-defined]  # -> all candidate blocks
+        region_map(spec.source, output.regions, output.seed_groups, out_dir)
 
 
 if __name__ == "__main__":

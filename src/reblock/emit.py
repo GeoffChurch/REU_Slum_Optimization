@@ -7,16 +7,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+import geopandas as gpd
 import matplotlib.pyplot as plt
 
-from reblock.contracts import Metrics, Result
-from reblock.render import render_after, render_before, save_render
+from reblock.contracts import Metrics, Result, Source
+from reblock.render import (
+    _CONTEXT_PT,
+    _OWN_PT,
+    frame_bbox,
+    render_after,
+    render_before,
+    save_render,
+)
 
 if TYPE_CHECKING:
-    from geopandas import GeoDataFrame
-
     from reblock.compare import MethodCurve
 
 _KCOMPLEXITY = "kcomplexity"
@@ -36,11 +42,15 @@ def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
     return next((m for m in metrics if m.eval == _KCOMPLEXITY), None)
 
 
-def render_results(results: list[Result], out_dir: Path, cfg: RenderConfig) -> None:
+def render_results(results: list[Result], out_dir: Path, cfg: RenderConfig,
+                   source: Source) -> None:
     """Per block: a shared-`vmax` `{block_id}_before.png` + one
     `{block_id}_{proposal}_after.png` per Result. Reads the kcomplexity
     access-depth arrays from `Result.metrics` (render never recomputes the
-    peel), so a block scored without kcomplexity is skipped."""
+    peel), so a block scored without kcomplexity is skipped. `source` supplies the
+    surrounding context (neighbouring block outlines + building points): each block's
+    render frame windows the query, so the dimmed context is only ever what's actually
+    visible in that frame."""
     if cfg.format != "png" or cfg.layout != "separate":
         raise NotImplementedError(
             f"render supports format=png/layout=separate only; "
@@ -50,7 +60,7 @@ def render_results(results: list[Result], out_dir: Path, cfg: RenderConfig) -> N
     for r in results:
         by_block.setdefault(r.block.block_id, []).append(r)
     for group in by_block.values():
-        _render_block_group(group, out_dir)
+        _render_block_group(group, out_dir, source)
 
 
 def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path | None:
@@ -58,7 +68,6 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
     flagged ones highlighted red. Re-reads the blocks parquet geometry (kept out of
     the Screen so it stays a pure selector). Returns the written path, or None if
     there are no ids. Gating is the caller's (cfg.flagged_map.enabled)."""
-    import geopandas as gpd
     if not flagged_ids:
         return None
     blocks = gpd.read_parquet(blocks_path, columns=["block_id", "geometry"])
@@ -83,20 +92,23 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
     return out_path
 
 
-def region_map(block_geoms: GeoDataFrame, regions: list[list[str]],
+def region_map(source: Source, regions: list[list[str]],
                seed_groups: list[list[str]], out_dir: Path) -> Path | None:
     """The region-builder's map: every candidate block drawn as light-grey context, then each
     region's member blocks filled in a distinct colour (by region index) and outlined, and
     finally the pre-expansion **seed** blocks (`seed_groups`, before `RegionBuilder.build`
     ran) outlined again in a heavier, high-contrast edge -- so you can see both what the
     builder pulled into each region AND which blocks were the original seed (essential for
-    `convex_hull`, which expands past the seed). Writes `region_map.png`; returns the path, or
-    None if there are no regions. Gating is the caller's (cfg.region_map.enabled). Models
-    `flagged_map`'s metro-context style."""
+    `convex_hull`, which expands past the seed) -- plus the building points: member points
+    normal, the rest dimmed. Writes `region_map.png`; returns the path, or None if there are no
+    regions. Gating is the caller's (cfg.region_map.enabled). Models `flagged_map`'s
+    metro-context style. `source` supplies all candidate outlines (`block_geometries()`, read
+    in full -- cheap) and the building points, windowed to the region's frame (the expensive
+    layer, so only it is queried narrow)."""
     from matplotlib import colormaps
     if not regions:
         return None
-    geoms = block_geoms.copy()
+    geoms = source.block_geometries()
     geoms["block_id"] = geoms["block_id"].astype(str)
     out_dir.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -124,15 +136,22 @@ def region_map(block_geoms: GeoDataFrame, regions: list[list[str]],
         seed_blocks.plot(ax=ax, facecolor="none", edgecolor="black", linewidth=2.2)
     # Frame the view on the region members (with context padding) rather than the whole
     # metro -- a small region on a wide candidate extent is otherwise an invisible speck,
-    # defeating the point of showing which blocks the builder pulled in.
+    # defeating the point of showing which blocks the builder pulled in. The same frame windows
+    # the (expensive) building-points query, so only in-frame points are ever fetched/drawn.
     all_members = geoms[geoms["block_id"].isin({b for region in regions for b in region})]
     if not all_members.empty:
-        minx, miny, maxx, maxy = all_members.total_bounds
-        half = max(maxx - minx, maxy - miny) / 2 + 1.0
-        half += half * 0.6                                  # context margin around the region
-        cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
-        ax.set_xlim(cx - half, cx + half)
-        ax.set_ylim(cy - half, cy + half)
+        frame = frame_bbox(all_members.geometry)
+        ax.set_xlim(frame[0], frame[2])
+        ax.set_ylim(frame[1], frame[3])
+        pts = source.building_points(frame)
+        if not pts.empty:
+            members_union = all_members.geometry.union_all()
+            own_pts = pts[pts.within(members_union)]
+            context_pts = pts[~pts.within(members_union)]
+            if not context_pts.empty:
+                context_pts.plot(ax=ax, color=_CONTEXT_PT, markersize=2, alpha=0.6)
+            if not own_pts.empty:
+                own_pts.plot(ax=ax, color=_OWN_PT, markersize=4)
     ax.set_title(f"{len(regions)} region(s), {n_members} member block(s) of {len(geoms)} "
                  f"candidates ({n_seeds} seed block(s) outlined)")
     ax.set_axis_off()
@@ -184,7 +203,7 @@ def compare_report(results: list[MethodCurve], out_dir: Path) -> None:
             plt.close(fig)
 
 
-def _render_block_group(group: list[Result], out_dir: Path) -> None:
+def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> None:
     block = group[0].block
     # access_before is method-independent: take it from the first Result that
     # carries kcomplexity metrics; a block scored without kcomplexity has no
@@ -198,7 +217,22 @@ def _render_block_group(group: list[Result], out_dir: Path) -> None:
     # shared color scale across the before and every after.
     vmax = int(access_before.max())
 
-    fig_before = render_before(block, access_before, vmax=vmax)
+    # One frame for the whole group: it windows the context query AND sets the axes view
+    # (single source of truth, frame_bbox in render.py), so the two never drift apart.
+    frame = frame_bbox(block.parcels)
+    outlines = source.block_geometries(frame)
+    pts = source.building_points(frame)
+    # Drop the selection's own block(s) from the context outlines -- else the selection would
+    # be dimmed over its own heatmap. Points split by containment in the selection's boundary:
+    # inside = own (drawn emphasised, on top), outside = context (dimmed).
+    context_outlines = cast(gpd.GeoDataFrame, outlines[~outlines.within(block.boundary)])
+    own_points = cast(gpd.GeoDataFrame, pts[pts.within(block.boundary)])
+    context_points = cast(gpd.GeoDataFrame, pts[~pts.within(block.boundary)])
+
+    fig_before = render_before(
+        block, access_before, vmax=vmax, frame=frame,
+        context_outlines=context_outlines, context_points=context_points, own_points=own_points,
+    )
     save_render(fig_before, out_dir / f"{block.block_id}_before.png")
     plt.close(fig_before)
 
@@ -209,7 +243,10 @@ def _render_block_group(group: list[Result], out_dir: Path) -> None:
         # proposal_id defaults to "" (a method may leave it unset); fall back to
         # a per-proposal index so multiple afters never collide/overwrite.
         name = r.proposal.proposal_id or f"proposal{i}"
-        fig_after = render_after(block, r.proposal, kc.fields["access_after"],
-                                 vmax=vmax, metrics=kc)
+        fig_after = render_after(
+            block, r.proposal, kc.fields["access_after"], vmax=vmax, metrics=kc, frame=frame,
+            context_outlines=context_outlines, context_points=context_points,
+            own_points=own_points,
+        )
         save_render(fig_after, out_dir / f"{block.block_id}_{name}_after.png")
         plt.close(fig_after)
