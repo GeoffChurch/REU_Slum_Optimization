@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, cast
 import geopandas as gpd
 import matplotlib.pyplot as plt
 
-from reblock.contracts import Metrics, Result, Source
+from reblock.contracts import Block, Metrics, Proposal, Result, Source
 from reblock.render import (
     _CONTEXT_PT,
     _OWN_PT,
@@ -40,6 +40,18 @@ def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
     that emits the per-parcel access-depth arrays render consumes
     (`fields["access_before"]` / `fields["access_after"]`)."""
     return next((m for m in metrics if m.eval == _KCOMPLEXITY), None)
+
+
+def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
+    """`block.building_points` sites inside `proposal`'s road corridor
+    (`proposal.params["corridor_m"]`, default 3.0) -- the render's "cost made visible" mark.
+    Empty (no crash) if there are no building points or no proposed roads."""
+    pts = block.building_points
+    if pts.empty or proposal.roads is None or proposal.roads.empty:
+        return cast(gpd.GeoDataFrame, pts.iloc[:0])
+    corridor_m = cast(float, proposal.params.get("corridor_m", 3.0))
+    corridor = proposal.roads.geometry.buffer(corridor_m).union_all()
+    return cast(gpd.GeoDataFrame, pts[pts.within(corridor)])
 
 
 def _member_ids(block_id: str) -> list[str]:
@@ -260,7 +272,7 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
         fig_after = render_after(
             block, r.proposal, kc.fields["access_after"], vmax=vmax, metrics=kc, frame=frame,
             context_outlines=context_outlines, context_points=context_points,
-            own_points=own_points,
+            own_points=own_points, displaced_points=_displaced_points(block, r.proposal),
         )
         save_render(fig_after, out_dir / f"{block.block_id}_{name}_after.png")
         plt.close(fig_after)

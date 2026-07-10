@@ -175,6 +175,49 @@ def test_draw_heatmap_with_context_and_own_points_renders_without_error(
     assert out.stat().st_size > 0
 
 
+def test_render_after_marks_displaced_points_and_writes_a_file(tmp_path: Path) -> None:
+    block = _grid_block(3)
+    proposal = _connector_proposal(block)
+    layers = parcel_access_layers(block, proposal.roads)
+    displaced = gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM)   # sits on the connector
+
+    fig_after = render_after(block, proposal, layers, vmax=2, displaced_points=displaced)
+    out = tmp_path / "displaced.png"
+    save_render(fig_after, out)
+
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_render_after_displaced_points_add_an_artist_over_own_points_alone() -> None:
+    # The displaced-point ring is drawn on top of own_points as its own artist, so a call with
+    # displaced_points must have strictly more collections than the same call without.
+    block = _grid_block(3)
+    proposal = _connector_proposal(block)
+    layers = parcel_access_layers(block, proposal.roads)
+    own_points = gpd.GeoDataFrame(geometry=[Point(0.5, 0.5), Point(1.0, 0.5)], crs=UTM)
+    displaced = gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM)
+
+    fig_own_only = render_after(block, proposal, layers, vmax=2, own_points=own_points)
+    fig_with_displaced = render_after(
+        block, proposal, layers, vmax=2, own_points=own_points, displaced_points=displaced)
+
+    assert len(fig_with_displaced.axes[0].collections) > len(fig_own_only.axes[0].collections)
+
+
+def test_render_after_with_empty_displaced_points_adds_no_extra_artist() -> None:
+    # Guard-empty: an empty displaced_points frame (e.g. a method whose corridor hits no site)
+    # must not add anything or raise.
+    block = _grid_block(3)
+    proposal = _connector_proposal(block)
+    layers = parcel_access_layers(block, proposal.roads)
+    empty_displaced = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
+
+    fig_without = render_after(block, proposal, layers, vmax=2)
+    fig_with_empty = render_after(block, proposal, layers, vmax=2, displaced_points=empty_displaced)
+
+    assert len(fig_with_empty.axes[0].collections) == len(fig_without.axes[0].collections)
+
+
 def test_render_before_uses_the_passed_frame_verbatim() -> None:
     # The caller (emit.py) computes frame_bbox ONCE and threads it through as the `frame`
     # kwarg, so the context query and the axes view never drift apart. Passing an explicit

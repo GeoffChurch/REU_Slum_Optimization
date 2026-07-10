@@ -1,0 +1,5 @@
+_target_: reblock.methods.arterial.GreedyArterialReblocker
+mode: aspirational
+objective: directness
+cost: displacement
+corridor_m: 3.0

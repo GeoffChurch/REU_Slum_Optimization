@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -5,10 +6,10 @@ import geopandas as gpd
 import pandas as pd
 import pytest
 from pyproj import CRS
-from shapely.geometry import Point, Polygon
+from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import BBox, Block, Metrics, Proposal, Region, Result
-from reblock.emit import RenderConfig, _member_ids, region_map, render_results
+from reblock.emit import RenderConfig, _displaced_points, _member_ids, region_map, render_results
 
 UTM = CRS.from_epsg(32643)
 
@@ -145,6 +146,54 @@ def test_render_results_guards_empty_building_points(tmp_path: Path) -> None:
     render_results([result], tmp_path, RenderConfig(enabled=True), _empty_points_source())
 
     assert (tmp_path / "g_before.png").stat().st_size > 0
+
+
+def test_displaced_points_selects_sites_within_the_proposal_corridor() -> None:
+    block = replace(_grid_block(3),
+                    building_points=gpd.GeoDataFrame(
+                        geometry=[Point(1.0, 0.5), Point(2.9, 2.9)], crs=UTM))
+    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads, params={"corridor_m": 0.5})
+
+    displaced = _displaced_points(block, proposal)
+
+    assert list(displaced.geometry) == [Point(1.0, 0.5)]   # the far point stays out
+
+
+def test_displaced_points_defaults_corridor_m_when_absent_from_params() -> None:
+    # 2.5m off the road at x=1 -- inside the default 3.0m corridor, outside a tighter one.
+    block = replace(_grid_block(3),
+                    building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 2.5)], crs=UTM))
+    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads)   # no corridor_m param
+
+    assert len(_displaced_points(block, proposal)) == 1
+
+
+def test_displaced_points_empty_without_building_points_or_roads() -> None:
+    block = _grid_block(3)   # building_points defaults to empty
+    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
+    assert _displaced_points(block, Proposal(block_id="g", crs=UTM, roads=roads)).empty
+
+    pts_block = replace(block, building_points=gpd.GeoDataFrame(
+        geometry=[Point(1.0, 0.5)], crs=UTM))
+    assert _displaced_points(pts_block, Proposal(block_id="g", crs=UTM, roads=None)).empty
+
+
+def test_render_results_marks_displaced_points(tmp_path: Path) -> None:
+    # End-to-end: a block with real building_points + a proposal whose roads corridor covers
+    # one of them must still render the after-heatmap without error.
+    block = replace(_grid_block(3),
+                    building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM))
+    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads, params={"corridor_m": 0.5})
+    result = Result(block=block, proposal=proposal, metrics=(_kc(block),))
+
+    render_results([result], tmp_path, RenderConfig(enabled=True),
+                   _source_with_neighbour_and_points())
+
+    afters = list(tmp_path.glob("g_*_after.png"))
+    assert len(afters) == 1 and afters[0].stat().st_size > 0
 
 
 def test_region_map_draws_member_and_context_points(tmp_path: Path) -> None:

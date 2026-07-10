@@ -172,6 +172,29 @@ def test_config_and_derivation_wiring() -> None:
     assert m.identity == ("greedy_arterial", "buildable", "directness", "length", 0.0)
 
 
+def test_displacement_config_instantiates_with_right_params_and_identity() -> None:
+    from pathlib import Path
+
+    from hydra import compose, initialize_config_dir
+    from hydra.utils import instantiate
+
+    conf_dir = str(Path("conf").resolve())
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="compare_config",
+                      overrides=["shapefile=x", "methods=[greedy_arterial_displacement]"])
+    m = instantiate(cfg.all_methods["greedy_arterial_displacement"])
+    assert (m.mode, m.objective, m.cost, m.corridor_m) == (
+        "aspirational", "directness", "displacement", 3.0)
+    assert m.identity == ("greedy_arterial", "aspirational", "directness", "displacement", 3.0)
+
+    # The standalone conf/method/greedy_arterial_displacement.yaml config group (config.yaml's
+    # `method=` default group), separate from compare_config's inline `all_methods` entry above.
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        method_cfg = compose(config_name="config",
+                             overrides=["shapefile=x", "method=greedy_arterial_displacement"])
+    assert instantiate(method_cfg.method).identity == m.identity
+
+
 def _deep_block() -> Block:
     # A 3x9 block with street frontage on one short end only -- a deep pocket where an arterial
     # genuinely helps (same shape as test_greedy_first_arterial_cuts_the_deep_block).

@@ -16,7 +16,8 @@ all_methods:
   # NOTE: the aspirational mode (ideal chords) is not a valid ceiling under the current
   # vertex-based network_efficiency scoring (it undercounts sparse-vertex chords; densifying is
   # too slow). Deferred pending the line-proximity metric in docs/metrics-north-star.md.
-methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable]
+  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
+methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable, greedy_arterial_displacement]
 
 shapefile: ???
 region_id: phule

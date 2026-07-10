@@ -222,5 +222,6 @@ class GreedyArterialReblocker:
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=f"greedy_arterial_{self.mode}_{self.objective}", method="greedy_arterial",
-            params={"segments": len(roads), "mode": self.mode, "objective": self.objective},
+            params={"segments": len(roads), "mode": self.mode, "objective": self.objective,
+                    "cost": self.cost, "corridor_m": self.corridor_m},
             block_identity=block.identity)

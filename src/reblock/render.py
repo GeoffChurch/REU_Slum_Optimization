@@ -28,6 +28,7 @@ _ROAD_COLOR = "#08306b"
 _CONTEXT_OUTLINE = "#dddddd"
 _CONTEXT_PT = "#c9c9c9"
 _OWN_PT = "#333333"
+_DISPLACED_PT = "#c0392b"
 
 
 def frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.6) -> BBox:
@@ -60,6 +61,7 @@ def _draw_heatmap(
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
     own_points: gpd.GeoDataFrame | None = None,
+    displaced_points: gpd.GeoDataFrame | None = None,
     frame: BBox | None = None,
 ) -> Figure:
     parcels = _parcels_with_layer(block, layers)
@@ -90,6 +92,11 @@ def _draw_heatmap(
 
     if own_points is not None and not own_points.empty:
         own_points.plot(ax=ax, color=_OWN_PT, markersize=5)
+    # Displaced sites (own_points that fall inside a committed road's corridor): a hollow ring
+    # drawn on top of own_points -- the cost of the straight road made visible next to it.
+    if displaced_points is not None and not displaced_points.empty:
+        displaced_points.plot(ax=ax, facecolor="none", edgecolor=_DISPLACED_PT,
+                              markersize=40, linewidths=1.2, zorder=5)
 
     sm = plt.cm.ScalarMappable(cmap=_CMAP, norm=Normalize(vmin=1, vmax=vmax))
     fig.colorbar(sm, ax=ax).set_label("access depth (parcels from a street)")
@@ -122,12 +129,15 @@ def render_after(
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
     own_points: gpd.GeoDataFrame | None = None,
+    displaced_points: gpd.GeoDataFrame | None = None,
     frame: BBox | None = None,
 ) -> Figure:
-    """Post-intervention access-depth heatmap for `block`, plus `proposal.roads`."""
+    """Post-intervention access-depth heatmap for `block`, plus `proposal.roads`. `displaced_points`
+    (own building sites inside the proposal's road corridor, see emit.py) are marked distinctly."""
     fig = _draw_heatmap(
         block, layers, vmax,
         context_outlines=context_outlines, context_points=context_points, own_points=own_points,
+        displaced_points=displaced_points,
         frame=frame,
     )
     ax = fig.axes[0]
