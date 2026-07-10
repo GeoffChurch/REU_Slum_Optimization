@@ -160,6 +160,16 @@ class RegionBuilder(Protocol):
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]: ...
 
 
+def _validate_group_ids(block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> None:
+    """Raise a clear `ValueError` naming any region-group block_id absent from
+    `block_geoms`, so a typo'd `block_ids` entry fails with an actionable message instead of
+    an opaque `KeyError` from a builder's `by_id[b]` lookup."""
+    known = set(block_geoms["block_id"])
+    missing = sorted({b for group in groups for b in group if b not in known})
+    if missing:
+        raise ValueError(f"unknown block_id(s) in region group(s): {missing}")
+
+
 def _touch_adjacent(geoms: list[BaseGeometry]) -> bool:
     """True iff `geoms` form a single connected component under boundary-touch (within
     STREET_TOL of each other) -- an STRtree `dwithin` query feeds a networkx connectivity
@@ -188,6 +198,7 @@ class IdentityRegionBuilder:
     runs."""
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+        _validate_group_ids(block_geoms, groups)
         by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
         result: list[list[str]] = []
         for group in groups:
@@ -207,12 +218,15 @@ class ConvexHullRegionBuilder:
     """Expands each seed group to every candidate block whose geometry intersects the convex
     hull of the group's own block polygons (inclusive) -- fills the gap of a disjoint group
     into one contiguous region where cross-block roads are meaningful. A singleton group's hull
-    is its own block's shape, so it returns just that block (plus any block genuinely
-    overlapping it -- for road-bounded blocks that is only itself). Overlap between different
-    groups' expansions is fine: regions are independent, with no partition/merge across
-    groups."""
+    is its own block's shape, so for a CONVEX block it returns just that block (plus any block
+    genuinely overlapping it -- for road-bounded blocks that is only itself); this "singleton
+    reduces to identity" reduction is not guaranteed in general, though -- a concave kblock face
+    has a hull that bulges past its own outline, and a neighbor poking into that bulge is pulled
+    in too. Overlap between different groups' expansions is fine: regions are independent, with
+    no partition/merge across groups."""
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+        _validate_group_ids(block_geoms, groups)
         by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
         result: list[list[str]] = []
         for group in groups:

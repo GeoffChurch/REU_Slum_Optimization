@@ -375,6 +375,18 @@ def test_convex_hull_region_builder_fills_gaps_respects_singletons_and_allows_ov
     assert set(result[2]) & set(result[3])
 
 
+def test_identity_region_builder_raises_clear_error_for_unknown_block_id() -> None:
+    geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))
+    with pytest.raises(ValueError, match="ZZZ"):
+        IdentityRegionBuilder().build(geoms, [["A", "ZZZ"]])
+
+
+def test_convex_hull_region_builder_raises_clear_error_for_unknown_block_id() -> None:
+    geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))
+    with pytest.raises(ValueError, match="ZZZ"):
+        ConvexHullRegionBuilder().build(geoms, [["A", "ZZZ"]])
+
+
 def test_kblock_source_block_geometries_is_cheap_and_wellformed() -> None:
     src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
     geoms = src.block_geometries()

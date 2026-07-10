@@ -323,14 +323,15 @@ def test_two_adjacent_block_region_reblocks_jointly() -> None:
 def test_region_map_writes_png(tmp_path: Path) -> None:
     from reblock.emit import region_map
     geoms = _dji_source().block_geometries()
-    out = region_map(geoms, [["DJI.3_1_1808", "DJI.3_1_1809"]], tmp_path)
+    out = region_map(geoms, [["DJI.3_1_1808", "DJI.3_1_1809"]],
+                      [["DJI.3_1_1808"]], tmp_path)
     assert out is not None and out.exists() and out.stat().st_size > 0
 
 
 def test_region_map_none_when_no_regions(tmp_path: Path) -> None:
     from reblock.emit import region_map
     geoms = _dji_source().block_geometries()
-    assert region_map(geoms, [], tmp_path) is None
+    assert region_map(geoms, [], [], tmp_path) is None
 
 
 def test_cli_region_path_writes_region_map(tmp_path: Path) -> None:

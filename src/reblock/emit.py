@@ -84,12 +84,15 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
 
 
 def region_map(block_geoms: GeoDataFrame, regions: list[list[str]],
-               out_dir: Path) -> Path | None:
+               seed_groups: list[list[str]], out_dir: Path) -> Path | None:
     """The region-builder's map: every candidate block drawn as light-grey context, then each
-    region's member blocks filled in a distinct colour (by region index) and outlined -- so you
-    can see what the builder pulled into each region (essential for convex_hull, which expands
-    past the seed). Writes `region_map.png`; returns the path, or None if there are no regions.
-    Gating is the caller's (cfg.region_map.enabled). Models `flagged_map`'s metro-context style."""
+    region's member blocks filled in a distinct colour (by region index) and outlined, and
+    finally the pre-expansion **seed** blocks (`seed_groups`, before `RegionBuilder.build`
+    ran) outlined again in a heavier, high-contrast edge -- so you can see both what the
+    builder pulled into each region AND which blocks were the original seed (essential for
+    `convex_hull`, which expands past the seed). Writes `region_map.png`; returns the path, or
+    None if there are no regions. Gating is the caller's (cfg.region_map.enabled). Models
+    `flagged_map`'s metro-context style."""
     from matplotlib import colormaps
     if not regions:
         return None
@@ -109,8 +112,18 @@ def region_map(block_geoms: GeoDataFrame, regions: list[list[str]],
         n_members += len(members)
         members.plot(ax=ax, color=cmap(i % cmap.N), edgecolor="#333333",
                      linewidth=0.8, alpha=0.85)
-    ax.set_title(f"{len(regions)} region(s), {n_members} member block(s) "
-                 f"of {len(geoms)} candidates")
+    # Outline the pre-expansion seed blocks on top, unfilled (facecolor="none" so the
+    # region-colour fill underneath stays visible) with a heavy black edge -- this is what
+    # makes a convex_hull region's fill-in legible against its original seed.
+    n_seeds = 0
+    for seeds in seed_groups:
+        seed_blocks = geoms[geoms["block_id"].isin(set(seeds))]
+        if seed_blocks.empty:
+            continue
+        n_seeds += len(seed_blocks)
+        seed_blocks.plot(ax=ax, facecolor="none", edgecolor="black", linewidth=2.2)
+    ax.set_title(f"{len(regions)} region(s), {n_members} member block(s) of {len(geoms)} "
+                 f"candidates ({n_seeds} seed block(s) outlined)")
     ax.set_axis_off()
     out_path = out_dir / "region_map.png"
     save_render(fig, out_path)

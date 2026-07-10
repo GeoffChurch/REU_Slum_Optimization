@@ -26,7 +26,7 @@ Render a block's access-depth heatmaps (before, and after a road-building method
 by targeting it with `block_ids` — no need to process the whole region:
 
 ```bash
-pixi run python -m reblock.run data=capetown method=dijkstra eval=kcomplexity "block_ids=[ZAF.9.3.1_1_44882]" render.enabled=true
+pixi run python -m reblock.run data=capetown method=dijkstra eval=kcomplexity "block_ids=[[ZAF.9.3.1_1_44882]]" render.enabled=true
 ```
 
 Writes `ZAF.9.3.1_1_44882_before.png` and one `_<proposal>_after.png` into the Hydra

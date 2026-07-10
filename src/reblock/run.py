@@ -71,7 +71,8 @@ def main(cfg: DictConfig) -> None:
                         type(spec.source).__name__)
         else:
             spec.source.block_ids = None   # type: ignore[attr-defined]  # -> all candidate blocks
-            region_map(spec.source.block_geometries(), output.regions, out_dir)
+            region_map(spec.source.block_geometries(), output.regions, output.seed_groups,
+                      out_dir)
 
 
 if __name__ == "__main__":
