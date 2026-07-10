@@ -13,7 +13,7 @@ import networkx as nx
 import pandas as pd
 from geopandas import GeoDataFrame
 from shapely import STRtree
-from shapely.geometry import Point
+from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -99,24 +99,68 @@ def _road_street_graph(block: Block, roads: GeoDataFrame | None, tol: float) -> 
     return g
 
 
-def _entry_nodes(geoms: list[BaseGeometry], nodes: list[tuple[float, float]], tree: STRtree,
-                 tol: float) -> list[tuple[float, float] | None]:
-    """Each parcel's entry: its nearest graph node that its own geometry actually touches
-    (dwithin `tol`, matching the touch tolerance `parcel_access_layers` uses) -- NOT the
-    nearest node to an interior representative point within a generous multiple of `tol`.
-    That looser variant let interior parcels several parcel-widths from any street snap
-    straight onto the boundary ring "as the crow flies" even with zero roads, so most
-    parcels already looked reachable before any road existed; adding roads then only
-    lengthened those already-short ring hops into ring+spur+ring detours, so E and
-    directness fell as roads were added -- the opposite of what the metric is meant to
-    measure. Parcels touching no node are unreached this round (still counted as targets
-    below, contributing 0)."""
+def _edge_lines(g: nx.Graph) -> list[LineString]:
+    """The graph's edges as single-segment LineStrings, one per undirected edge, in a stable
+    order (the STRtree over these is the line-proximity entry index)."""
+    return [LineString([u, v]) for u, v in g.edges()]
+
+
+def _line_entries(geoms: list[BaseGeometry], reps: list[Point], edges: list[LineString],
+                  tree: STRtree, tol: float
+                  ) -> tuple[list[tuple[float, float] | None],
+                             dict[int, list[tuple[float, tuple[float, float]]]]]:
+    """Each parcel's entry is the nearest POINT on a road/street edge within `tol` of the parcel
+    -- NOT the nearest graph VERTEX. The old nearest-vertex rule undercounted
+    sparse straight chords (aspirational arterials): a 2-point chord has only its endpoints as
+    vertices, so a parcel abreast of its middle snapped to nothing and the chord scored ~0,
+    inverting the price-of-buildability. Query by the parcel GEOMETRY, not its interior rep point:
+    a parcel's roads run along its boundary, so on real (meters-wide) parcels the rep point is far
+    from every edge and would spuriously find none. For each parcel take the nearest edge within
+    `tol` of it, project the rep point onto that edge (`P = edge.interpolate(edge.project(rep))` =
+    the boundary point where the parcel meets the road), `_rnd(P)` is the entry node, and record P
+    against its edge so `_split_graph` injects it. Returns (per-parcel entry node or None, {edge
+    index -> [(proj-distance-along-edge, _rnd(P))]}). Deterministic (nearest edge broken by index,
+    splits sorted by proj). A parcel with no edge within `tol` is unreached this round (None)."""
     entry: list[tuple[float, float] | None] = []
-    for geom in geoms:
-        near = tree.query(geom, predicate="dwithin", distance=tol)
-        entry.append(min((nodes[j] for j in near), key=lambda node: geom.distance(Point(node)),
-                         default=None))
-    return entry
+    splits: dict[int, list[tuple[float, tuple[float, float]]]] = defaultdict(list)
+    for geom, pt in zip(geoms, reps, strict=True):
+        cand = tree.query(geom, predicate="dwithin", distance=tol)
+        if len(cand) == 0:
+            entry.append(None)
+            continue
+        j = min((int(c) for c in cand), key=lambda c: (float(geom.distance(edges[c])), c))
+        ls = edges[j]
+        p = _rnd(ls.interpolate(ls.project(pt)).coords[0])
+        entry.append(p)
+        splits[j].append((ls.project(pt), p))
+    return entry, splits
+
+
+def _split_graph(g: nx.Graph, edges: list[LineString],
+                 splits: dict[int, list[tuple[float, tuple[float, float]]]]) -> nx.Graph:
+    """A copy of `g` with each edge that carries frozen line-entry projection points replaced by
+    consecutive colinear sub-edges through those points (length-weighted). An edge absent from `g`
+    (a road not in this prefix) is skipped -- its parcels' entry nodes then stay absent from the
+    graph and contribute 0, exactly like a missing vertex entry, so freezing the splits against the
+    full road set and evaluating prefixes stays monotone (edges only appear as roads are added;
+    distances from fixed entries are non-increasing)."""
+    h: nx.Graph = g.copy()
+    for j, pts in splits.items():
+        ls = edges[j]
+        u, v = _rnd(ls.coords[0]), _rnd(ls.coords[-1])
+        if not h.has_edge(u, v):
+            continue
+        h.remove_edge(u, v)
+        chain: list[tuple[float, float]] = [u]
+        for _proj, p in sorted(pts):
+            if p != chain[-1]:
+                chain.append(p)
+        if v != chain[-1]:
+            chain.append(v)
+        for a, b in zip(chain, chain[1:], strict=False):
+            if a != b:
+                h.add_edge(a, b, weight=Point(a).distance(Point(b)))
+    return h
 
 
 def _sampled_efficiency(g: nx.Graph, entry: list[tuple[float, float] | None],
@@ -146,25 +190,26 @@ def _sampled_efficiency(g: nx.Graph, entry: list[tuple[float, float] | None],
 
 def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
                        tol: float = STREET_TOL) -> tuple[float, float]:
-    """Sampled (E, directness) of the network `roads` + block.streets, with entries fixed to
-    THIS graph (i.e. `roads` serves as both the entry-node mapping and the edge set): from K
-    seeded source parcels to ALL parcels. (0, 0) if the graph is empty. Deterministic: sources
-    are evenly spaced over the parcel row order.
+    """Sampled (E, directness) of the network `roads` + block.streets. A parcel maps to the graph
+    by line-proximity -- the nearest POINT on a road/street edge within `tol`, injected as a node
+    by splitting that edge (`_line_entries`/`_split_graph`), which counts sparse straight chords the
+    old nearest-vertex rule undercounted. From K seeded source parcels to ALL parcels; (0, 0) if the
+    graph is empty. Deterministic: sources are evenly spaced over the parcel row order.
 
-    Note this function alone is NOT guaranteed monotone as `roads` grows across separate
-    calls, because each call re-derives entries against its own `roads` and entries can churn.
+    Note this function alone is NOT guaranteed monotone as `roads` grows across separate calls,
+    because each call re-derives entries against its own `roads` and entries can churn.
     `cost_benefit_curve`'s `efficiency_benefit`/`directness_benefit` factories get monotonicity
     instead by freezing entries against the FULL road set once, then only growing the edge set
-    -- see `_entry_nodes`/`_sampled_efficiency` above, which this function also uses."""
+    -- see `_efficiency_factory`."""
     g = _road_street_graph(block, roads, tol)
     n = len(block.parcels)
     if n < 2 or g.number_of_nodes() == 0:
         return 0.0, 0.0
     geoms = list(block.parcels.geometry)
     reps = [gm.representative_point() for gm in geoms]
-    nodes = list(g.nodes)
-    tree = STRtree([Point(node) for node in nodes])
-    entry = _entry_nodes(geoms, nodes, tree, tol)
+    edges = _edge_lines(g)
+    entry, splits = _line_entries(geoms, reps, edges, STRtree(edges), tol)
+    g = _split_graph(g, edges, splits)
     step = max(1, n // k)
     sources = list(range(n))[::step][:k]
     return _sampled_efficiency(g, entry, reps, sources)
@@ -191,14 +236,16 @@ def _efficiency_factory(block: Block, roads_full: GeoDataFrame | None, tol: floa
         return lambda _roads: (0.0, 0.0)
     geoms = list(block.parcels.geometry)
     reps = [gm.representative_point() for gm in geoms]
-    nodes = list(g_full.nodes)
-    tree = STRtree([Point(node) for node in nodes])
-    entry = _entry_nodes(geoms, nodes, tree, tol)
     step = max(1, n // k)
     sources = list(range(n))[::step][:k]
+    # Freeze the line entries + edge splits against the FULL graph once; each prefix's graph is
+    # split at those FROZEN points (an edge missing from a prefix is skipped -> its entries stay
+    # absent until its road appears), so E/directness are non-decreasing across prefixes.
+    edges = _edge_lines(g_full)
+    entry, splits = _line_entries(geoms, reps, edges, STRtree(edges), tol)
 
     def f(roads_prefix: GeoDataFrame | None) -> tuple[float, float]:
-        g = _road_street_graph(block, roads_prefix, tol)
+        g = _split_graph(_road_street_graph(block, roads_prefix, tol), edges, splits)
         return _sampled_efficiency(g, entry, reps, sources)
     return f
 
