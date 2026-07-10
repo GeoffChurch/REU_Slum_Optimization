@@ -39,6 +39,24 @@ The builder works on cheap geometries so it can pick members *before* the expens
 blocks parquet). The pipeline then builds full `Block`s only for the union of region members and
 `region_reblock`s each group. Regions may overlap and are reblocked/compared independently.
 
+### Disjoint groups (edge case, resolved)
+
+For **disjoint** (non-touch-adjacent) blocks in one group, the region's boundary graph splits
+into disconnected components, so every shipping method (dijkstra/mesh/buildable-arterial) reblocks
+each block's interior independently and produces **no cross-gap road** (a buildable road can't
+span land outside the region — `_snap`'s shortest path raises `NoPath`). So a disjoint group is a
+*union of independent per-block reblockings*, not joint — which is correct, but almost always a
+user mistake. Two consequences, resolved:
+- **`IdentityRegionBuilder` logs a warning** when a group's blocks aren't mutually touch-adjacent,
+  naming `convex_hull` as the fix (which *fills* the gap into a contiguous region where cross-block
+  roads are meaningful). Warning, not hard error, so a `compare`-over-scattered-blocks aggregate
+  still runs if truly intended.
+- **Density uses the true land area** (union of block polygons), not the convex-hull boundary. For
+  contiguous groups (identity-on-adjacent, and all `convex_hull` output) the union IS the boundary,
+  so nothing changes; only a disjoint group — whose `Block.boundary` falls back to the convex hull
+  (Polygon contract) and would otherwise count the empty gap as area — needs the union area so its
+  m/ha stays honest. `convex_hull` output is always contiguous, so it is never affected.
+
 ## 3. Pipeline placement
 
 `Source → (Screen or explicit block_ids → seed groups) → RegionBuilder → per-region
