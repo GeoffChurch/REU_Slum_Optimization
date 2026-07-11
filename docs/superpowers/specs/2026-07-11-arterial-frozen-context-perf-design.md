@@ -37,9 +37,12 @@ pytest, mypy --strict, ruff.
   0.24), the `directness ∈ [0,1]` bound, and the deep-region ratio (~5.5×, assertion `>1.2×`) —
   must all still pass unchanged.
 - **No dual code paths.** Per the project's "migrate, never accommodate" rule: the networkx graph
-  build + dijkstra in the hot path are *replaced*, not kept alongside a csgraph path. `networkx`
-  may remain only in genuinely cold code (e.g. `road_drainage`, run once per proposal) if
-  migrating it is out of scope; the hot scoring path must not import or call it.
+  build + K single-source dijkstra in the *metric-scoring* path are *replaced* by CSR +
+  `csgraph.dijkstra`, not kept alongside. Two networkx uses are **explicitly exempt** and remain:
+  `road_drainage` (one call per proposal, cold), and `_snap`'s `shortest_path` — kept because it
+  must reproduce networkx's exact equal-cost-path tie-break so proposed geometry stays identical
+  (see §4 / risk I4). The metric `_sampled_efficiency` + graph-build path must not import or call
+  networkx.
 - **Determinism.** Same block + roads → same score, byte-stable across runs (sorted sources,
   stable node indexing, deterministic entry tie-breaks).
 
@@ -48,7 +51,8 @@ pytest, mypy --strict, ruff.
 ## The problem (measured)
 
 `cProfile` of one `GreedyArterialReblocker(mode="buildable", objective="directness").propose` on
-block `DJI.3_1_1808` (**10 parcels**) — **43 seconds**, 8 roads placed:
+block `DJI.3_1_1808` (**10 parcels**) — **43 seconds** under the profiler, 8 roads placed
+(un-profiled wall time is **~19.5s** — cProfile inflates ~2×; the *proportions* below hold):
 
 | component | time | share | called | why |
 |---|---|---|---|---|
@@ -123,31 +127,53 @@ node indices (or `None`), the frozen `src_euclid`, and the per-parcel `legs`:
 The `[0,1]` bound and within-prefix monotonicity are unchanged (same math; distances from fixed
 entries over a growing edge set are still non-increasing).
 
-### 3. Per-candidate incrementalism (the arterial win)
+**CSR construction (exact-graph parity — see risk I3).** networkx dedups parallel edges, and
+`_split_graph` *removes* a split edge's parent `(u,v)` before adding its colinear chain; a
+COO→CSR build must replicate both or scipy's duplicate-summation doubles a weight (verified: a
+repeated edge yields distance 10 where networkx gives 5). Rule: assemble the undirected edge set
+as a dict keyed by the unordered node-index pair with **last-write-wins** weights, and when
+injecting a split chain **delete the parent pair first**; then one symmetric `csr_matrix`.
 
-`GreedyArterialReblocker` builds **one `_BlockScoringContext` per block** (not per candidate). Per
-candidate road set (`committed + [real]`):
+### 3. Two-level incrementalism (the arterial win)
 
-- **Entries (incremental):** start from the frozen street-entry base; for each parcel, compare its
-  nearest-street-edge distance with its distance to the *trial road's* few edges (via the trial
-  road's own small STRtree, or the parcels-within-`tol`-of-`real` query), and take the closer as
-  the entry — equivalent to `_line_entries` over all edges, but O(N × road-edges) instead of
-  O(N × all-edges). Exact ties between a street edge and a road edge are measure-zero on
-  continuous geometry (see Risks); the equivalence harness confirms parity.
-- **Graph (incremental):** append the trial road's edges (noded against the frozen street+committed
-  network — see planarize below) and the road-entry split nodes to the frozen base CSR arrays
-  (new nodes get appended indices); build the per-candidate CSR by concatenation.
-- **Score:** `_sampled_efficiency` on that CSR.
+The set scored inside `_greedy_arterials` is `_planarize(committed + [real])`, and `committed`
+grows by one road **per greedy step**. So the "constant" base is not the streets alone — it is
+**streets + committed roads**, which changes once per commit (~`max_roads` ≈ 8–15 times), NOT per
+candidate. Three layers:
+
+- **Per block (frozen once):** the `_BlockScoringContext` — reps, `rep_xy`, sources, `src_euclid`,
+  the street CSR + street-entry base + street edge geometry/tree.
+- **Per greedy step (rebuilt on each commit, ~`max_roads` times — cheap):** a `StepContext` that
+  extends the block base with the **committed roads** — node them into the graph (planarized, so
+  crossings with streets and each other are noded), inject their entry splits, and re-derive each
+  parcel's `(nearest_edge_distance, entry_node)` **against streets ∪ committed**. Cost
+  O(N × (street+committed) edges), paid 8–15 times total, not 7,220.
+- **Per candidate (incremental within a step):** only the single trial road `real` is new. For
+  each parcel compare its `StepContext` nearest-edge distance with its distance to `real`'s few
+  edges and take the closer → the candidate entries; append `real`'s edges (noded against
+  streets ∪ committed by the incremental planarize, §4) and its entry-split nodes to the step CSR
+  → the per-candidate CSR; then `_sampled_efficiency`.
+
+This is exactly equivalent to `network_efficiency(block, _planarize(committed+[real]))` because
+streets ∪ committed ∪ trial is the full edge set the current `_line_entries` sees. Exact distance
+ties between a `StepContext` edge and a `real` edge are measure-zero on continuous geometry and
+the entry point is `_rnd`-rounded; the **incremental-scorer equivalence test** (Correctness) pins
+parity against the full re-derivation on a block *with committed roads* — the single highest-risk
+item (I2/C1).
 
 ### 4. `_snap` and `_planarize`
 
-- **`_snap` (buildable):** the boundary graph `g = _boundary_graph(block.parcels)` is already
-  constant per block. Freeze it as a CSR + node→index + `edge_midpoint_xy (E,2)` (constant). Per
-  candidate the weight is `length + lam·dist(edge_midpoint, chord)`; compute the `dist(midpoints,
-  chord)` term for all edges with a **vectorized numpy point-to-segment distance**, form the
-  per-chord weighted CSR, and run `csgraph.dijkstra` between the two endpoint indices, then
-  reconstruct the path from predecessors. Replaces the networkx `shortest_path` with a Python
-  weight callback (the 2.38s `w`).
+- **`_snap` (buildable) — keep networkx, kill the shapely.** `_snap` returns the *path geometry*,
+  and on symmetric grids csgraph predecessor-reconstruction and networkx `shortest_path` pick
+  *different equal-cost paths* (both valid), which would change proposed roads on grid fixtures
+  (risk I4). To keep geometry **identical**, retain `nx.shortest_path` (same algorithm → same
+  tie-break) but eliminate its dominant cost — the per-edge shapely `mid.distance(chord)` in the
+  weight callback (the 2.38s `w`). Precompute all boundary-graph edge midpoints once
+  (`edge_midpoint_xy (E,2)`, constant per block); per chord compute every edge's
+  `dist(midpoint, chord)` in one **vectorized numpy point-to-segment** pass into an edge→weight
+  dict, and give `nx.shortest_path` a weight callback that only looks it up. Same weights, same
+  path, identical geometry, minus the shapely. (A csgraph `_snap` is deferred — it needs a
+  tie-break matching networkx, which is fragile.)
 - **`_planarize` (incremental):** planarize `committed` once per greedy step
   (`base_merged = unary_union(committed)`); per candidate compute `unary_union([base_merged,
   real])` and explode, instead of re-unioning the whole `committed + [real]` list each time. This
@@ -161,8 +187,11 @@ candidate road set (`committed + [real]`):
 - `_road_street_graph` / `_split_graph` / `_edge_lines` are absorbed into the context (street CSR
   build + split injection). Remove them once no caller remains, or keep private helpers the
   context uses — but no networkx `Graph` in the scoring path.
-- Delete `import networkx` from the scoring path. `road_drainage` (one call per proposal, cold)
-  may keep networkx for now; note it explicitly as out of scope.
+- Remove networkx from the **metric-scoring** path (`_sampled_efficiency` graph build + dijkstra).
+  `road_drainage` (cold) and `_snap` (identical-geometry tie-break, §4) keep networkx explicitly.
+  `tests/methods/test_arterial.py::test_aspirational_planarizes_crossings_into_true_intersections`
+  imports `_road_street_graph` directly (asserts a degree-≥4 crossroads) — migrate it to whatever
+  graph accessor survives, or to the context's CSR, as part of task 6.
 
 ---
 
@@ -177,7 +206,18 @@ implementation kept in the test), and assert the refactored path matches to `1e-
 - the deep 3×4 / 4×3 synthetic region fixture from `tests/test_region.py`.
 - a bare 2-point straight chord (the sparse-chord line-proximity case).
 - a coincident-entry case (two parcels projecting to the same node).
-Assert on: `E`, `directness`, every point of both curves, and both AUCs.
+Assert on: `E`, `directness`, every point of both curves, and both AUCs. Pin the expected values
+as literals captured from the pre-refactor code (reference: `scratchpad/ref_values_1808.json` —
+no-roads `E=0.026106 dir=0.326370`; dijkstra `E=0.023619 dir=0.239429 E_auc=0.015844
+dir_auc=0.172189`; arterial-buildable `E=0.052905 dir=0.643840 E_auc=0.024198 dir_auc=0.273571`;
+the road WKT is stored so the harness reloads the exact road sets without re-running `propose`).
+
+**Incremental-scorer parity (pins the arterial's per-candidate path — the public-metric harness
+above does NOT exercise it, so C1/I2 would ship silently otherwise):** for a block with **≥1
+committed road**, assert the arterial's incremental per-candidate score equals
+`network_efficiency(block, _planarize(committed + [real]))` for a battery of trial roads `real`.
+The public harness only ever scores *full* road sets through full re-derivation, so it cannot
+catch an incremental-entry bug (e.g. omitting committed roads); this test must.
 
 **Invariants (existing tests must stay green, unchanged):** `directness ∈ [0,1]`, within-prefix
 monotonicity, the recorded AUC ordering and region ratio.
@@ -197,19 +237,30 @@ speedup is measured, not assumed.
    `_sampled_efficiency` with one `csgraph.dijkstra(indices=sources)` on a CSR built from the
    current graph. Gate: harness parity; re-time.
 3. **`_BlockScoringContext` + migrate `network_efficiency` / `_efficiency_factory`.** Freeze the
-   street CSR + reps + entry base + sources; both callers score through it. Arterial builds ONE
-   context per block and scores each candidate with full entry re-derivation against the frozen
-   street CSR (no incremental-entry risk yet). Gate: harness parity + full suite; re-time (expect
-   the 51% graph-construction cost to collapse).
-4. **Incremental entries.** Freeze street-entries; per candidate re-project only onto the trial
-   road's edges and take the min. Gate: harness parity (this is the tie-break-sensitive step —
-   verify byte parity on the fixtures); re-time.
-5. **`_snap` (numpy weight + csgraph) and incremental `_planarize`.** Gate: arterial output
-   geometry unchanged on the fixtures (the proposed roads must be identical), full suite; re-time.
-6. **Remove networkx from the hot path + final measurement.** Delete the dead nx graph builders
-   from the scoring path; confirm no nx import in `budget.py`'s scoring path or arterial scoring.
-   Final re-measure on `DJI.3_1_1808` and a ~80-parcel region (the calibration cluster
-   `DJI.3_1_2914,2923,2925,2930`), report the speedup, and a whole-branch review.
+   street CSR + reps + `src_euclid` + street-entry base + sources (using the dedup + split-removal
+   CSR rules from §2). `network_efficiency` → `ctx.score` (re-derives entries); `_efficiency_factory`
+   → `ctx.score_frozen` (builds its own per-prefix CSR from the frozen entries/splits; an isolated
+   frozen source contributes 0). Arterial builds ONE context per block and, for now, scores each
+   candidate by **full entry re-derivation over streets ∪ committed ∪ trial** (correct, not yet
+   incremental). Gate: public harness parity + full suite; re-time (the 51% graph-construction cost
+   collapses to once-per-block + a per-candidate CSR build).
+4. **Two-level incremental scorer (the C1/I2 task — highest risk).** Add the per-step `StepContext`
+   (streets ∪ committed, rebuilt on each commit) and the per-candidate trial-road delta: re-project
+   only onto `real`'s edges, take the min vs the StepContext nearest edge, append `real`'s
+   edges/entries to the step CSR. Gate: the **incremental-scorer parity test** (block with ≥1
+   committed road, battery of trials) must match `network_efficiency(block, _planarize(committed +
+   [real]))` byte-for-byte, PLUS public harness + full suite; re-time (the big drop —
+   `_line_entries` is no longer O(N × all-edges) per candidate).
+5. **`_snap` numpy weights + incremental `_planarize`.** `_snap` keeps `nx.shortest_path` but
+   precomputes per-chord edge weights via vectorized numpy point-to-segment (identical geometry).
+   Planarize `committed` once per step; per candidate union only `[base_merged, real]`. Gate:
+   arterial proposed roads **identical** on the fixtures (WKT match) + full suite; re-time.
+6. **Remove networkx from the metric path + final measurement.** Delete the dead nx graph builders
+   from the scoring path (nx remains only in `road_drainage` + `_snap`); migrate the
+   `_road_street_graph` test import (§5). Confirm no nx in `_sampled_efficiency`/the context. Final
+   re-measure on `DJI.3_1_1808` (19.5s real baseline) and the ~80-parcel calibration cluster
+   `DJI.3_1_2914,2923,2925,2930` (currently >15-min timeout — the real proof); report speedups;
+   whole-branch review.
 
 ---
 
@@ -220,26 +271,46 @@ speedup is measured, not assumed.
 - **Memoize candidate scores across greedy steps.** The base changes each step, so most scores are
   invalid across steps; low yield versus the freezing approach, and fragile.
 - **Grounded effective-resistance metric (north-star Piece 2).** A *different metric* (Laplacian
-  solve + rank-1 marginals) that would make greedy scoring algorithmically cheap (O(1)-ish
-  marginals) and is the natural GPU target. It is being **investigated in parallel**
-  (`docs/superpowers/notes/2026-07-11-spectral-metric-investigation.md`). It is out of scope here
-  because it changes the metric semantics (just adopted door-to-door directness); this refactor
-  makes the *existing* metric fast without changing any value. If the investigation recommends it,
-  it becomes a separate follow-on.
+  solve + rank-1 marginals). The parallel investigation
+  (`docs/superpowers/notes/2026-07-11-spectral-metric-investigation.md`) **concluded**: it is 3–45×
+  faster than `network_efficiency`, its rank-1 (Sherman-Morrison) candidate marginals match a full
+  re-solve to ~1e-14 (10–547× faster greedy scoring), and it *correctly* credits connecting
+  stranded deep parcels — an action the current directness metric actually **mis-scores** (verdict:
+  *augment, not replace* — resistance is the egress axis, directness the internal-circulation axis).
+  It is **out of scope here** because it changes metric semantics and is a pending owner decision;
+  this refactor makes the *existing* directness/E metric fast without changing any value (needed
+  regardless — the compare grades every method on directness/E). If adopted, a resistance-objective
+  arterial with rank-1 marginals would be a separate, even larger speedup than this refactor.
 - **GPU.** Parked. At these graph sizes (hundreds–low-thousands of nodes) the win is in batching,
   and CPU freezing + csgraph should reach the target. The task-6 measurement decides if GPU is
   ever warranted.
 
 ## Risks
 
+- **Committed roads in the incremental base (C1 — highest risk).** The scored set is
+  `committed + [real]`, so a parcel's true nearest edge can be a *committed* road, not only a
+  street or the trial road (measured: 22/32 parcels after 2 commits). The `StepContext`
+  (streets ∪ committed, rebuilt per commit) folds committed roads into both the graph and the
+  entry base; only `real` is per-candidate incremental. Guarded by the incremental-scorer parity
+  test on a block with ≥1 committed road.
+- **CSR duplicate-edge summation (I3).** scipy *sums* duplicate `(i,j)` COO entries (repeated edge
+  → doubled weight → wrong distance), whereas networkx dedups and `_split_graph` removes a split
+  edge's parent before adding its chain. The CSR build must dedup undirected pairs
+  (last-write-wins) and delete the parent pair on split injection. Verified by harness parity.
+- **`_snap` path tie-break (I4).** csgraph and networkx pick different equal-cost paths on
+  symmetric grids → different geometry. Resolved by keeping `nx.shortest_path` for `_snap` (same
+  tie-break, identical geometry), only removing its shapely cost. Gate: WKT-identical proposals.
 - **Entry tie-breaks (task 4).** `_line_entries` breaks exact-distance ties by edge index; the
-  incremental min(street, road) approach could pick a different edge on an exact tie. Exact ties
-  are measure-zero on continuous coordinates and the entry point is `_rnd`-rounded; the
-  equivalence harness verifies parity on the fixtures. If a real divergence appears, fall back to
-  re-deriving entries over all edges for that parcel (still fast).
+  incremental `min(step-base, real)` could pick a different edge on an exact tie. Exact ties are
+  measure-zero on continuous coordinates and the entry point is `_rnd`-rounded; parity is verified
+  on the fixtures. Fallback: re-derive over all edges for that parcel (still fast).
 - **CSR node indexing.** Appending trial-road nodes must not collide with frozen indices; use a
-  copy-on-write index map per candidate. Deterministic ordering required for byte-stable output.
-- **`csgraph.dijkstra` vs networkx float parity.** Both compute exact shortest paths on the same
-  weights; differences are float-summation-order only, well within `1e-9`. Verified by the harness.
-- **`road_drainage` still uses networkx.** Acceptable (one call per proposal); explicitly out of
-  scope, but must not be on the scoring hot path.
+  copy-on-write index map per candidate; deterministic ordering for byte-stable output.
+- **`csgraph.dijkstra` vs networkx float parity.** Confirmed by the reviewer: identical to `0.0`
+  on distinct-edge graphs; differences are float-summation-order only. Verified by the harness.
+- **Speedup is block-size-dependent (M5).** Per-candidate `csr_matrix` construction is *new* work;
+  on a 10-parcel block (cheap constants) it partly offsets the freezing savings, so expect a
+  smaller multiple there. The large wins are on the big, currently-intractable blocks — the goal.
+  The task-6 measurement on the ~80-parcel cluster is the real proof, not the 10-parcel block.
+- **`road_drainage` keeps networkx.** Acceptable (one call per proposal); must not be on the
+  scoring hot path.
