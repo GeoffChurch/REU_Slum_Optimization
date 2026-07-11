@@ -161,3 +161,23 @@ pixi run python -m reblock.run data=dji method=greedy_arterial region_builder=co
 `DJI.3_1_3951` and `DJI.3_1_3956` don't touch, so `identity` would reblock them separately; the hull
 pulls in the bridging block `DJI.3_1_3952`, giving one 3-block region. `region_map.png` shows the two
 seed blocks outlined in heavy black with the filled-in block colored as the same region.
+
+A third builder, `region_builder=dense_cluster`, grows a **single** seed block (or, composed with
+`screen=dense_compact`, each of the screen's flagged blocks) into a right-sized contiguous region,
+so you don't have to hand-list neighbors: starting from the seed, it repeatedly adds the adjacent
+block with the highest building density (`building_count / area`) until the region's total
+`building_count` reaches `region_builder.max_buildings` (a parcels proxy) or it runs out of
+neighbors. Like `identity`, it warns rather than errors if a seed *group* isn't itself
+mutually adjacent (each fragment grows locally, so the output stays fragmented too).
+
+```bash
+# dense_cluster: grow one seed block into a ~150-building contiguous region, no hand-listed neighbors
+pixi run python -m reblock.run data=dji method=dijkstra region_builder=dense_cluster \
+  region_builder.max_buildings=150 eval=kcomplexity "block_ids=[[DJI.3_1_3238]]" \
+  render.enabled=true region_map.enabled=true
+```
+
+`DJI.3_1_3238` (53 buildings) touches `DJI.3_1_3243` (107) and `DJI.3_1_3240` (66); with
+`max_buildings=150`, growth picks the denser of the two neighbors first and stops as soon as the
+budget is met, giving a small 2-block region (`region:DJI.3_1_3238+DJI.3_1_3243`) instead of the
+single seed block.
