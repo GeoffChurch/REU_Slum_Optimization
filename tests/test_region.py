@@ -469,3 +469,47 @@ def test_dense_cluster_raises_clear_error_for_unknown_block_id() -> None:
     geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))
     with pytest.raises(ValueError, match="ZZZ"):
         DenseClusterRegionBuilder().build(geoms, [["A", "ZZZ"]])
+
+
+def test_dense_cluster_warns_for_a_non_adjacent_seed_group(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A 2-block SEED group whose own blocks aren't mutually touch-adjacent (gap 4 >> STREET_TOL):
+    # growth only ever adds a block already adjacent to the current cluster, so it can grow each
+    # fragment locally but can never bridge the gap between them -- the output stays disjoint,
+    # contradicting a naive "never emits a disjoint region" reading. Mirrors
+    # IdentityRegionBuilder's warning (same policy: warn, name the group, suggest convex_hull --
+    # don't error, still grow).
+    geoms = _block_geoms(("A", 0, 0), ("C", 5, 0))
+    with caplog.at_level(logging.WARNING, logger="reblock.region"):
+        result = DenseClusterRegionBuilder().build(geoms, [["A", "C"]])
+    assert result == [["A", "C"]]                      # still grown/passed through, just disjoint
+    assert any("dense_cluster" in r.message for r in caplog.records)
+    assert any("convex_hull" in r.message for r in caplog.records)
+
+
+def test_dense_cluster_no_warning_for_a_touch_adjacent_seed_group(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))      # touching squares
+    with caplog.at_level(logging.WARNING, logger="reblock.region"):
+        DenseClusterRegionBuilder(max_buildings=1).build(geoms, [["A", "B"]])
+    assert caplog.records == []
+
+
+def test_dense_cluster_guards_zero_area_and_nan_building_count() -> None:
+    # A degenerate (zero-area, collinear) frontier candidate must not raise ZeroDivisionError
+    # computing density (`_density`'s documented 0.0 convention), and a NaN building_count must
+    # not poison the budget sum or the density argmax (guarded to 0.0) -- both must just grow
+    # cleanly rather than crash or silently drop the seed.
+    seed = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    zero_area = Polygon([(1, 0), (2, 0), (3, 0)])                # collinear points -- area == 0
+    nan_neighbor = Polygon([(0, 1), (1, 1), (1, 2), (0, 2)])     # building_count is NaN
+    geoms = _dense_cluster_geoms(
+        ("seed", 10.0, seed), ("zero_area", 5.0, zero_area),
+        ("nan_neighbor", float("nan"), nan_neighbor))
+
+    out = DenseClusterRegionBuilder(max_buildings=100).build(geoms, [["seed"]])
+
+    assert len(out) == 1
+    assert set(out[0]) == {"seed", "zero_area", "nan_neighbor"}  # both absorbed, no crash

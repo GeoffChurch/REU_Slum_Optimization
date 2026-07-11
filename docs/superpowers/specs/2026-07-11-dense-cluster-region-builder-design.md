@@ -12,7 +12,7 @@
 
 - **Additive / no behavior change to existing builders.** `identity` + `convex_hull` untouched; the `block_geometries` change only ADDS a `building_count` column (existing consumers select `["block_id","geometry"]` and are unaffected).
 - **Deterministic:** growth order and output are byte-stable (sorted tie-breaks); returned member lists sorted, group order preserved (the `RegionBuilder` contract).
-- **Contiguous:** every returned region is touch-adjacent (one connected component) — `dense_cluster` never emits a disjoint region.
+- **Contiguous growth from an adjacent seed.** Given a seed group whose own blocks are mutually touch-adjacent, `dense_cluster` grows ONE touch-adjacent (one connected component) region. It does not *bridge* a disjoint seed, though: if a seed group's own blocks are not mutually touch-adjacent, growth still proceeds per fragment (grown locally, same as `identity`'s passthrough), so the output stays fragmented too — same policy as `IdentityRegionBuilder`: warns (naming the group, suggesting adjacent seeds or `region_builder=convex_hull`), not a hard error.
 - **Graceful without building counts:** if `block_geoms` lacks `building_count` (a non-kblock source), fall back to a block-count budget so the builder still works.
 - `mypy --strict`, ruff clean, `pixi run check` green.
 

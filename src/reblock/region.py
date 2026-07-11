@@ -213,6 +213,14 @@ def _block_adjacency(geoms: list[BaseGeometry]) -> list[set[int]]:
     return adj
 
 
+def _density(count: float, area: float) -> float:
+    """Building density (`count / area`), with a zero-area guard: a degenerate block
+    (`area == 0`) has undefined density -- by convention this returns 0.0, the lowest possible
+    density, so a degenerate frontier candidate sorts LAST (never preferred over a real block)
+    instead of raising `ZeroDivisionError`."""
+    return 0.0 if area == 0 else count / area
+
+
 @dataclass
 class DenseClusterRegionBuilder:
     """Grows each seed group into ONE contiguous region by block adjacency, up to a buildings
@@ -222,11 +230,11 @@ class DenseClusterRegionBuilder:
     Per group: `cluster` starts as the seed group's own block(s) -- always included, even alone
     over budget (no growth, and never dropped). It then grows greedily, one block at a time:
     among the blocks adjacent to the cluster but not in it (the "frontier"), pick the one with
-    the highest building DENSITY (`building_count / area`) -- ties broken by higher
-    `building_count`, then by `block_id` ascending (determinism) -- add it, and repeat until the
-    cluster's total `building_count` reaches `max_buildings` (the last block may push it
-    slightly over) or the frontier is exhausted (the seed's whole connected component is smaller
-    than the budget).
+    the highest building DENSITY (`building_count / area`, `_density`'s zero-area-safe) -- ties
+    broken by higher `building_count`, then by `block_id` ascending (determinism) -- add it, and
+    repeat until the cluster's total `building_count` reaches `max_buildings` (the last block may
+    push it slightly over) or the frontier is exhausted (the seed's whole connected component is
+    smaller than the budget).
 
     Densest-first: density is the closest geometry-available proxy for reblocking need (dense
     blocks are where buried parcels concentrate), so growth reaches toward the neediest
@@ -237,7 +245,14 @@ class DenseClusterRegionBuilder:
     Graceful without building counts: if `block_geoms` lacks a `building_count` column (a
     non-kblock source), every block counts as 1 -- the budget becomes a block-count budget, and
     density falls back to `1 / area` (smaller blocks first) -- so the builder still produces a
-    contiguous, deterministic region.
+    contiguous, deterministic region. A NaN `building_count` (a degenerate source row) is treated
+    as 0, so it can't poison the budget sum or win the density argmax.
+
+    Grows CONTIGUOUSLY from a mutually adjacent seed -- it does not BRIDGE a disjoint one: like
+    `IdentityRegionBuilder`, if a seed group's own blocks are not mutually touch-adjacent, this
+    warns (naming `convex_hull` as the fix) and still grows each fragment locally, so the output
+    stays disjoint too. A warning, not a hard error, so a deliberate aggregate over scattered
+    seeds still runs.
     """
 
     max_buildings: int = 150
@@ -249,7 +264,7 @@ class DenseClusterRegionBuilder:
         areas = [float(g.area) for g in geoms]
         has_count = "building_count" in block_geoms.columns
         counts = (
-            [float(c) for c in block_geoms["building_count"]] if has_count
+            [0.0 if pd.isna(c) else float(c) for c in block_geoms["building_count"]] if has_count
             else [1.0] * len(ids)
         )
         idx_by_id = {b: i for i, b in enumerate(ids)}
@@ -257,13 +272,24 @@ class DenseClusterRegionBuilder:
 
         result: list[list[str]] = []
         for group in groups:
+            if len(group) > 1 and not _touch_adjacent([geoms[idx_by_id[b]] for b in group]):
+                logger.warning(
+                    "region group %s is not mutually touch-adjacent -- dense_cluster grows each "
+                    "fragment locally and won't bridge the gap between them, so the region stays "
+                    "disjoint; pass adjacent seeds, or region_builder=convex_hull to fill the gap "
+                    "into one contiguous region",
+                    sorted(group),
+                )
             cluster = {idx_by_id[b] for b in group}
             size = sum(counts[i] for i in cluster)
             while size < self.max_buildings:
                 frontier = {j for i in cluster for j in adj[i]} - cluster
                 if not frontier:
                     break
-                best = min(frontier, key=lambda j: (-(counts[j] / areas[j]), -counts[j], ids[j]))
+                best = min(
+                    frontier,
+                    key=lambda j: (-_density(counts[j], areas[j]), -counts[j], ids[j]),
+                )
                 cluster.add(best)
                 size += counts[best]
             result.append(sorted(ids[i] for i in cluster))
