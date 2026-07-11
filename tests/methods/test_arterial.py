@@ -145,6 +145,11 @@ def test_arterial_parallel_identical_to_serial(monkeypatch: pytest.MonkeyPatch) 
             serial = GreedyArterialReblocker(mode=mode, n_anchors=6, workers=1).propose(block).roads
             par = GreedyArterialReblocker(mode=mode, n_anchors=6, workers=16).propose(block).roads
             assert serial is not None and par is not None
+            # Non-vacuity guard: both modes commit roads on this block before terminating (5
+            # buildable, 6 aspirational -- see test_arterial_serial_refactor_identical), so an
+            # empty-vs-empty comparison here would mean the fixture regressed, not that the pool
+            # matched serial.
+            assert len(serial.geometry) > 0
             assert sorted(g.wkt for g in serial.geometry) == sorted(g.wkt for g in par.geometry)
 
 
