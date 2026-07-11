@@ -1,9 +1,11 @@
 """Equivalence harness pinning `network_efficiency`/`efficiency_directness_curves`/`auc`'s
 CURRENT output on the 1808 sample block, to 1e-9. This is the correctness safety net for the
 arterial frozen-context perf refactor: every task that touches scoring must keep these green."""
+import networkx as nx
+from scipy.sparse.csgraph import dijkstra
 from scoring_fixtures import sampled_fixtures
 
-from reblock.budget import auc, efficiency_directness_curves, network_efficiency
+from reblock.budget import _graph_to_csr, auc, efficiency_directness_curves, network_efficiency
 
 
 def _close(a: float, b: float, tol: float = 1e-9) -> bool:
@@ -29,3 +31,18 @@ def test_curves_and_auc_match_reference() -> None:
         cap = min(ec.cost[-1], dc.cost[-1])
         assert _close(auc(ec, cap), exp["E_auc"]), (name, "E_auc")
         assert _close(auc(dc, cap), exp["dir_auc"]), (name, "dir_auc")
+
+
+def test_csgraph_matches_networkx_distances() -> None:
+    g = nx.Graph()
+    for a, b, w in [((0.0, 0.0), (1.0, 0.0), 1.0), ((1.0, 0.0), (2.0, 0.0), 1.0),
+                    ((0.0, 0.0), (2.0, 0.0), 3.0), ((1.0, 0.0), (1.0, 0.0), 0.0)]:
+        if a != b:
+            g.add_edge(a, b, weight=w)
+    csr, idx = _graph_to_csr(g)
+    src = idx[(0.0, 0.0)]
+    d = dijkstra(csr, directed=False, indices=src)
+    ref = nx.single_source_dijkstra_path_length(g, (0.0, 0.0))
+    for node, i in idx.items():
+        rv = ref.get(node, float("inf"))
+        assert abs(d[i] - rv) <= 1e-12, (node, d[i], rv)

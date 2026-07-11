@@ -4,7 +4,6 @@ removed) vs cost (road density, m/ha). AUC = a 0-1 efficiency score. See the des
 """
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,6 +13,8 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 from geopandas import GeoDataFrame
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import dijkstra
 from shapely import STRtree
 from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
@@ -166,11 +167,31 @@ def _split_graph(g: nx.Graph, edges: list[LineString],
     return h
 
 
-def _dist_or_inf(dist: dict[tuple[float, float], float], e: tuple[float, float] | None) -> float:
-    """`dist[e]` (a `nx.single_source_dijkstra_path_length` result) or +inf if `e` is None / not
-    reached -- the sentinel `_sampled_efficiency` uses so a missing/unreached netdist drops out of
-    a `np.isfinite` mask instead of needing a separate None check."""
-    return math.inf if e is None else dist.get(e, math.inf)
+def _graph_to_csr(g: nx.Graph) -> tuple[csr_matrix, dict[tuple[float, float], int]]:
+    """Build a symmetric CSR adjacency matrix from `g`'s edge weights once, plus a deterministic
+    node -> row/col index (nodes sorted for stable, reproducible indices). Feeds
+    `_sampled_efficiency`'s single batched `scipy.sparse.csgraph.dijkstra` call, replacing K
+    per-source `nx.single_source_dijkstra_path_length` calls. `g` is a plain `nx.Graph` (not a
+    MultiGraph) that has already deduped parallel edges, so a plain symmetric COO->CSR build
+    with no dedup pass is correct here -- dedup/split-parent handling for a CSR built directly
+    from cadastral geometry (without an intermediate nx graph) is Task 3's concern, not this
+    one's."""
+    nodes: list[tuple[float, float]] = sorted(g.nodes())
+    node_index = {node: i for i, node in enumerate(nodes)}
+    rows: list[int] = []
+    cols: list[int] = []
+    weights: list[float] = []
+    for u, v, w in g.edges(data="weight"):
+        i, j = node_index[u], node_index[v]
+        rows.append(i)
+        cols.append(j)
+        weights.append(float(w))
+        rows.append(j)
+        cols.append(i)
+        weights.append(float(w))
+    n = len(nodes)
+    csr = csr_matrix((weights, (rows, cols)), shape=(n, n))
+    return csr, node_index
 
 
 def _sampled_efficiency(g: nx.Graph, entry: list[tuple[float, float] | None],
@@ -185,9 +206,10 @@ def _sampled_efficiency(g: nx.Graph, entry: list[tuple[float, float] | None],
     in `g` -- contribute 0); (0, 0) if there are no pairs. The legs are fixed once entries are
     frozen and `netdist` is non-increasing as roads grow, so both metrics stay monotone.
 
-    Numpy-vectorized: the per-source Dijkstra call stays (networkx, over the graph `g`), but the
-    O(K*N) leg/euclid/accumulation arithmetic that used to call shapely's `Point.distance` per
-    pair is precomputed once as numpy arrays and reduced with masked sums."""
+    Numpy-vectorized, with ONE batched `scipy.sparse.csgraph.dijkstra` call over a CSR built once
+    from `g` (`_graph_to_csr`) in place of K per-source `nx.single_source_dijkstra_path_length`
+    calls -- the O(K*N) leg/euclid/accumulation arithmetic that used to call shapely's
+    `Point.distance` per pair is precomputed once as numpy arrays and reduced with masked sums."""
     n = len(entry)
     if n == 0 or not sources:
         return 0.0, 0.0
@@ -198,13 +220,30 @@ def _sampled_efficiency(g: nx.Graph, entry: list[tuple[float, float] | None],
     src_xy = rep_xy[sources]                                                     # (K, 2)
     src_euclid = np.hypot(src_xy[:, 0, None] - rep_xy[:, 0], src_xy[:, 1, None] - rep_xy[:, 1])
 
+    csr, node_index = _graph_to_csr(g)
+    # Column (per-target) node row in the CSR, or -1 if this parcel has no entry / its entry
+    # node isn't in `g` at all -- explicit sentinel, NEVER a truthiness check, so a genuine
+    # netdist == 0 (coincident entries) never gets mistaken for "missing".
+    entry_row = np.array([node_index.get(e, -1) if e is not None else -1 for e in entry],
+                         dtype=np.int64)
+    reachable = entry_row >= 0
+
+    # Only sources whose OWN entry exists in `g` can seed a Dijkstra run; the rest stay all-inf
+    # (matching the prior per-source `dist = {} if src is None or src not in g`).
+    valid_rows = [i for i, si in enumerate(sources)
+                 if entry[si] is not None and entry[si] in node_index]
+    dist_mat = np.full((len(sources), csr.shape[0]), np.inf, dtype=np.float64)
+    if valid_rows:
+        valid_indices = [node_index[cast(tuple[float, float], entry[sources[i]])]
+                         for i in valid_rows]
+        dist_mat[valid_rows] = dijkstra(csr, directed=False, indices=valid_indices)
+
     inv_sum = dir_sum = 0.0
     pairs = 0
     for i, si in enumerate(sources):
         pairs += n - 1                            # all j != si, unchanged regardless of validity
-        src = entry[si]
-        dist = nx.single_source_dijkstra_path_length(g, src) if src is not None and src in g else {}
-        nd = np.array([_dist_or_inf(dist, e) for e in entry], dtype=np.float64)
+        nd = np.full(n, np.inf, dtype=np.float64)
+        nd[reachable] = dist_mat[i, entry_row[reachable]]
         d = legs[si] + nd + legs                  # door-to-door: walk + drive + walk
         mask = (entry[si] is not None) & np.isfinite(nd) & np.isfinite(legs) & (d > 0)
         mask[si] = False                          # exclude the self pair (j == si)
