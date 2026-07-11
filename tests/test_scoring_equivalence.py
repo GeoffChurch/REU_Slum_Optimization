@@ -6,7 +6,8 @@ from pathlib import Path
 
 import networkx as nx
 from scipy.sparse.csgraph import dijkstra
-from scoring_fixtures import _block_1808, _roads, sampled_fixtures
+from scoring_fixtures import _block_1808, _grid_block, _region_deep, _roads, sampled_fixtures
+from shapely.geometry import LineString
 
 from reblock.budget import (
     _BlockScoringContext,
@@ -15,6 +16,7 @@ from reblock.budget import (
     efficiency_directness_curves,
     network_efficiency,
 )
+from reblock.methods.arterial import _planarize
 
 
 def _close(a: float, b: float, tol: float = 1e-9) -> bool:
@@ -66,6 +68,56 @@ def test_curves_and_auc_match_reference() -> None:
         cap = min(ec.cost[-1], dc.cost[-1])
         assert _close(auc(ec, cap), exp["E_auc"]), (name, "E_auc")
         assert _close(auc(dc, cap), exp["dir_auc"]), (name, "dir_auc")
+
+
+def test_incremental_scorer_matches_full_rederivation() -> None:
+    # The arterial greedy's per-candidate incremental scorer (`ctx.step(committed).score_candidate`)
+    # must equal a FULL re-derivation `network_efficiency(block, _planarize(committed + [real]))` to
+    # 1e-9 on a block WITH committed roads -- the public harness above only ever scores full road
+    # sets through full re-derivation, so it cannot catch an incremental entry/graph bug (a stale
+    # committed road, a missed crossing node, a diverging tie-break). This gate MUST cover BOTH:
+    #   (R1) an aspirational trial that crosses a committed road MID-SPAN (a diagonal meeting it
+    #        away from a shared vertex): the road subgraph re-nodes the crossing, so a bare
+    #        "append the trial's edges" would leave the committed road unsplit and mis-distance it.
+    #   (#4) a grid/region block whose parcels sit at EXACT distance ties (a parcel abuts several
+    #        edges at the identical distance), where the entry node is decided purely by the
+    #        `_line_entries` (distance, nx-edge-index) tie-break -- so the incremental min(step,
+    #        trial) must resolve ties against the SAME nx order as `.score`, or it picks a different
+    #        entry node. (Block 1808 alone would pass even with the #4 bug -- it has no exact ties.)
+    b1808 = _block_1808()
+    committed_1808 = [LineString([(297630.0, 1280300.0), (297648.0, 1280300.0)])]
+    trials_1808 = [
+        LineString([(297630.0, 1280300.0), (297635.0, 1280290.0)]),    # meets committed at a vertex
+        LineString([(297635.0, 1280290.0), (297642.0, 1280312.0)]),    # crosses committed MID-SPAN
+        LineString([(297626.0, 1280295.0), (297650.0, 1280308.0)]),    # another mid-span diagonal
+        LineString([(297628.48, 1280309.62), (297644.49, 1280299.48)]),  # buildable-style chord
+    ]
+    region = _region_deep()                       # deep 3x6|3x6 grid region -- exact distance ties
+    committed_region = [LineString([(1.0, 0.0), (1.0, 6.0)])]
+    trials_region = [
+        LineString([(2.0, 0.0), (2.0, 6.0)]),      # grid-aligned, meets committed at vertices
+        LineString([(0.0, 3.0), (6.0, 3.0)]),      # grid-aligned crossbar over the committed road
+        LineString([(4.0, 0.0), (4.0, 6.0)]),
+        LineString([(0.0, 1.0), (6.0, 5.0)]),      # diagonal crossing the committed road mid-span
+    ]
+    grid = _grid_block(0, 0, 6, 6, "bottom", "grid6")   # exact ties, exercised from empty committed
+    trials_grid = [
+        LineString([(3.0, 0.0), (3.0, 6.0)]),
+        LineString([(0.0, 3.0), (6.0, 3.0)]),
+    ]
+    cases = [
+        ("1808", b1808, committed_1808, trials_1808),
+        ("deep_region", region, committed_region, trials_region),
+        ("grid6", grid, [], trials_grid),
+    ]
+    for name, block, committed, trials in cases:
+        ctx = _BlockScoringContext(block)
+        step = ctx.step(_planarize(committed, block.crs))
+        for real in trials:
+            got = step.score_candidate(real)
+            want = network_efficiency(block, _planarize(committed + [real], block.crs))
+            assert _close(got[0], want[0]), (name, real.wkt, "E", got, want)
+            assert _close(got[1], want[1]), (name, real.wkt, "directness", got, want)
 
 
 def test_csgraph_matches_networkx_distances() -> None:

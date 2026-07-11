@@ -12,6 +12,7 @@ from typing import TypeVar, cast
 import networkx as nx
 import numpy as np
 import pandas as pd
+import shapely
 from geopandas import GeoDataFrame
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
@@ -324,6 +325,24 @@ def _build_csr(base_pairs: Iterable[_Pair],
     return csr, node_index
 
 
+def _reproject_hits(geoms_arr: np.ndarray, reps_arr: np.ndarray, lines: np.ndarray,
+                    hits: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray,
+                                               np.ndarray, np.ndarray]:
+    """Vectorize `_line_entries`'s per-hit geometry for a batched STRtree `dwithin` result. `hits`
+    is the STRtree query's 2xM array (row 0 = parcel index, row 1 = edge index into `lines`).
+    Returns per-hit arrays `(parcel_idx, edge_idx, distance, projection-along-edge, foot_xy)`:
+    `distance = parcel.distance(edge)`, `foot_xy = edge.interpolate(edge.project(rep))` (the entry
+    point), computed with shapely's own vectorized ufuncs (bit-identical to the scalar
+    `Geometry.distance`/`.project`/`.interpolate` `_line_entries` calls) in a handful of C calls
+    instead of a Python loop over every parcel x edge pair."""
+    pidx, eidx = hits[0], hits[1]
+    edge_geoms = lines[eidx]
+    dist = shapely.distance(geoms_arr[pidx], edge_geoms)
+    proj = shapely.line_locate_point(edge_geoms, reps_arr[pidx])
+    foot_xy = shapely.get_coordinates(shapely.line_interpolate_point(edge_geoms, proj))
+    return pidx, eidx, dist, proj, foot_xy
+
+
 class _BlockScoringContext:
     """Per-block scoring constants frozen ONCE, shared by `network_efficiency`, the compare's
     efficiency/directness curves (`_efficiency_factory`), and the greedy arterial loop. Freezing
@@ -351,41 +370,24 @@ class _BlockScoringContext:
         else:
             self.src_euclid = np.zeros((len(self.sources), n), dtype=np.float64)
 
-        # Frozen street edge geometry (deduped segments in scan order) + a proximity index.
+        # Frozen UN-split street edge geometry (deduped segments in scan order). The greedy's
+        # per-step `_StepContext` rebuilds its streets-∪-committed graph and entry base from these
+        # un-split segments on each commit -- deliberately NOT a pre-split street CSR: splitting the
+        # streets at streets-only projections bakes in an `_rnd`-rounded split node that goes stale
+        # (perturbing distances above the 1e-9 tolerance) the moment a parcel's entry later moves
+        # onto a committed road, so no such CSR is frozen here (task 4 review #5).
         self.street_segs: list[_Pair] = _explode_segments(block.streets.geometry)
-        self.street_edge_lines: list[LineString] = [LineString([a, b]) for a, b in self.street_segs]
-        self.street_tree = STRtree(self.street_edge_lines)
+        # Parcel geometry + rep points as object arrays, for the vectorized (batched STRtree +
+        # shapely-ufunc) entry reprojection `_StepContext` runs per candidate.
+        self.geoms_arr: np.ndarray = np.array(self.geoms, dtype=object)
+        self.reps_arr: np.ndarray = np.array(self.reps, dtype=object)
 
-        # Street-only entry base: each parcel's nearest street edge (distance + projected entry
-        # node), and the frozen STREET CSR (street edges pre-split at those projections). This is
-        # the once-per-block base the greedy's later per-step incremental scorer (task 4) extends;
-        # `.score`/`.score_frozen` do NOT reuse the pre-split street CSR -- re-deriving against
-        # streets + roads can move a parcel's entry off a street onto a road, and an EXTRA
-        # `_rnd`-rounded (hence slightly off-segment) street split node absent from the full graph
-        # would perturb distances above the 1e-9 equivalence tolerance -- so they build their CSR
-        # from scratch (bit-exact to `_split_graph`); this frozen street CSR is task 4's base.
-        if n and self.street_edge_lines:
-            s_entry, s_splits = _line_entries(self.geoms, self.reps, self.street_edge_lines,
-                                             self.street_tree, tol)
-            s_dist = self._nearest_edge_dist(self.street_edge_lines, self.street_tree)
-            s_splits_uv = {self.street_segs[j]: pts for j, pts in s_splits.items()}
-        else:
-            s_entry, s_dist, s_splits_uv = [None] * n, [float("inf")] * n, {}
-        self.base_street_entry: list[_Node | None] = s_entry
-        self.base_street_dist: list[float] = s_dist
-        self.street_csr, self.street_node_index = _build_csr(self.street_segs, s_splits_uv)
-
-    def _nearest_edge_dist(self, edge_lines: list[LineString], tree: STRtree) -> list[float]:
-        """Per-parcel distance to its nearest edge within `tol` (inf if none) -- the constant part
-        of `_line_entries`, frozen for task 4's incremental min(street, trial) entry check."""
-        dist: list[float] = []
-        for geom in self.geoms:
-            cand = tree.query(geom, predicate="dwithin", distance=self.tol)
-            if len(cand) == 0:
-                dist.append(float("inf"))
-            else:
-                dist.append(min(float(geom.distance(edge_lines[int(c)])) for c in cand))
-        return dist
+    def step(self, committed: GeoDataFrame | None) -> _StepContext:
+        """A per-greedy-step scoring context over streets ∪ `committed` (rebuilt on each commit,
+        ~max_roads times -- cheap), off which `score_candidate(real)` scores each trial road
+        incrementally. `committed` is the PLANARIZED committed road set (`_planarize(committed)`).
+        See `_StepContext`."""
+        return _StepContext(self, committed)
 
     def _derive_entries(self, roads: GeoDataFrame | None
                         ) -> tuple[list[_Node | None], dict[_Pair, list[tuple[float, _Node]]],
@@ -437,6 +439,106 @@ class _BlockScoringContext:
         csr, node_index = _build_csr(base_pairs, splits)
         return _sampled_efficiency_core(csr, node_index, entry, self.sources,
                                         self.rep_xy, self.src_euclid)
+
+
+class _StepContext:
+    """The greedy arterial's per-commit scoring context: the streets ∪ committed-roads edge set and
+    each parcel's nearest-edge entry base over it, frozen ONCE per commit (~max_roads times), so
+    `score_candidate(real)` scores a candidate trial road by reprojecting only onto `real`'s few
+    edges (+ any committed/street edges `real` splits) rather than re-deriving every parcel against
+    every edge. Built via `ctx.step(committed)`.
+
+    `score_candidate(real)` is bit-exact to `ctx.score(_planarize(committed + [real]))`: the same
+    combined edge set (streets ∪ committed ∪ trial, planarized), the same `_line_entries`
+    (distance, edge-index) tie-break resolved against the SAME `networkx.Graph.edges()` order, and
+    the same re-noding of committed×trial mid-span crossings (design risk R1 -- the road subgraph is
+    the `unary_union([base_merged, real])` explode, so a diagonal crossing a committed road mid-span
+    becomes a true node). The step's per-parcel base freezes, for each parcel, only the step edges
+    at its MINIMUM streets∪committed distance -- a farther edge can never win the final (distance,
+    nx-index) argmin, and a min-distance step edge that `real` later SPLITS is dropped from the
+    frozen candidate and its split sub-segment recovered from the per-candidate delta (the sub-
+    segment carries the same nearest point, so the entry node is unchanged, only its nx-index)."""
+
+    def __init__(self, ctx: _BlockScoringContext, committed: GeoDataFrame | None) -> None:
+        self.ctx = ctx
+        lines = (list(committed.geometry)
+                 if committed is not None and len(committed) else [])
+        # The planarized committed union, re-noded against `real` per candidate (R1).
+        self.base_merged: BaseGeometry | None = unary_union(lines) if lines else None
+        committed_segs = _explode_segments(lines)
+        step_pairs: list[_Pair] = [*committed_segs, *ctx.street_segs]
+        self.step_set: set[frozenset[_Node]] = {frozenset(p) for p in step_pairs}
+        # Per parcel: its nearest streets∪committed edge distance (inf if none within tol) and the
+        # step edges achieving it, each as (edge pair, projection-along-edge, entry node).
+        self.base_dist: list[float] = [float("inf")] * ctx.n
+        self.step_cands: list[list[tuple[_Pair, float, _Node]]] = [[] for _ in range(ctx.n)]
+        if step_pairs and ctx.n:
+            self._freeze_base(step_pairs)
+
+    def _freeze_base(self, step_pairs: list[_Pair]) -> None:
+        ctx = self.ctx
+        lines = np.array([LineString([a, b]) for a, b in step_pairs], dtype=object)
+        hits = STRtree(lines).query(ctx.geoms_arr, predicate="dwithin", distance=ctx.tol)
+        if hits.shape[1] == 0:
+            return
+        pidx, eidx, dist, proj, foot_xy = _reproject_hits(ctx.geoms_arr, ctx.reps_arr, lines, hits)
+        per: list[list[tuple[float, _Pair, float, _Node]]] = [[] for _ in range(ctx.n)]
+        for m in range(pidx.shape[0]):
+            node = (round(float(foot_xy[m, 0]), 2), round(float(foot_xy[m, 1]), 2))
+            per[int(pidx[m])].append((float(dist[m]), step_pairs[int(eidx[m])],
+                                      float(proj[m]), node))
+        for p, cands in enumerate(per):
+            if not cands:
+                continue
+            bmin = min(d for d, *_ in cands)
+            self.base_dist[p] = bmin
+            self.step_cands[p] = [(pair, pr, node) for d, pair, pr, node in cands if d == bmin]
+
+    def score_candidate(self, real: LineString) -> tuple[float, float]:
+        """(E, directness) for streets ∪ committed ∪ `real`, incrementally -- bit-exact to
+        `ctx.score(_planarize(committed + [real]))`."""
+        ctx = self.ctx
+        if ctx.n < 2:
+            return 0.0, 0.0
+        merged = (unary_union([self.base_merged, real]) if self.base_merged is not None
+                  else unary_union([real]))
+        road_parts = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
+        road_segs = _explode_segments(road_parts)
+        full_pairs = _edges_in_nx_order(road_segs, ctx.street_segs)
+        if not full_pairs:
+            return 0.0, 0.0
+        idx = {frozenset(p): i for i, p in enumerate(full_pairs)}
+        # Delta = full edges absent from the frozen step set: `real`'s edges + any committed/street
+        # edge `real` split at a mid-span crossing (the split sub-segments).
+        delta_pairs = [p for p in full_pairs if frozenset(p) not in self.step_set]
+        cands: list[list[tuple[float, int, _Pair, float, _Node]]] = [[] for _ in range(ctx.n)]
+        if delta_pairs:
+            lines = np.array([LineString([a, b]) for a, b in delta_pairs], dtype=object)
+            hits = STRtree(lines).query(ctx.geoms_arr, predicate="dwithin", distance=ctx.tol)
+            if hits.shape[1]:
+                pidx, eidx, dist, proj, foot_xy = _reproject_hits(
+                    ctx.geoms_arr, ctx.reps_arr, lines, hits)
+                for m in range(pidx.shape[0]):
+                    pair = delta_pairs[int(eidx[m])]
+                    node = (round(float(foot_xy[m, 0]), 2), round(float(foot_xy[m, 1]), 2))
+                    cands[int(pidx[m])].append((float(dist[m]), idx[frozenset(pair)], pair,
+                                                float(proj[m]), node))
+        entry: list[_Node | None] = [None] * ctx.n
+        splits: dict[_Pair, list[tuple[float, _Node]]] = defaultdict(list)
+        for p in range(ctx.n):
+            per = cands[p]
+            for pair, pr, node in self.step_cands[p]:
+                fs = frozenset(pair)
+                if fs in idx:                          # a split-away step edge is dropped here...
+                    per.append((self.base_dist[p], idx[fs], pair, pr, node))
+            if not per:                                # ...and recovered from `delta_pairs` above
+                continue
+            _d, _i, pair, pr, node = min(per, key=lambda t: (t[0], t[1]))
+            entry[p] = node
+            splits[pair].append((pr, node))
+        csr, node_index = _build_csr(full_pairs, splits)
+        return _sampled_efficiency_core(csr, node_index, entry, ctx.sources, ctx.rep_xy,
+                                        ctx.src_euclid)
 
 
 def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,

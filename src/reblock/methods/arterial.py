@@ -179,15 +179,28 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         targets = _deep_targets(block, curr_roads, top_k, adj)
         committed_disp = (displacement_count(block.building_points, base, corridor_m)
                           if cost == "displacement" else 0)
+        # For the metric objectives, score every candidate INCREMENTALLY off this commit's
+        # streets-∪-committed step context (frozen once here); only the trial road is new. This is
+        # bit-exact to `_score(objective, block, _planarize(committed + [real]), ...)` but skips
+        # re-deriving every parcel's entry against the whole graph per candidate. `access` has no
+        # context and still re-derives per candidate.
+        step = ctx.step(base) if ctx is not None else None
 
         best_gain, best_real = 0.0, None
         for chord in _candidate_chords(anchors, targets):
             real = chord if mode == "aspirational" else _snap(chord, g, node_tree, nodes, lam)
             if real is None or real.length == 0:
                 continue
-            trial = _planarize(committed + [real], block.crs)
-            raw = _score(objective, block, trial, adj, base_burden, ctx) - base_val
+            trial: GeoDataFrame | None = None
+            if step is not None:
+                e, direct = step.score_candidate(real)
+                raw = (e if objective == "efficiency" else direct) - base_val
+            else:
+                trial = _planarize(committed + [real], block.crs)
+                raw = _score(objective, block, trial, adj, base_burden, ctx) - base_val
             if cost == "displacement":
+                if trial is None:
+                    trial = _planarize(committed + [real], block.crs)
                 denom = float(displacement_count(block.building_points, trial, corridor_m)
                              - committed_disp)
             else:
