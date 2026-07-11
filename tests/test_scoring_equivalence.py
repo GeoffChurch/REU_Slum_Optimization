@@ -155,6 +155,10 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     # because `score_candidate` is NOT bit-exact for aspirational float-crossing chords ("Bug 2").
     # This is the gate that FAILS if someone routes aspirational back through `score_candidate`:
     # spy on the method and assert an aspirational run never calls it, while a buildable run does.
+    # Pin `workers=1` (serial): this routing invariant is parallelism-independent, but the spy is an
+    # in-PROCESS counter -- the default fork process pool (`workers=16`) would run `eval_candidate`
+    # (and its `score_candidate` calls) in child processes on this 833-candidates-per-step region,
+    # where the parent's `calls["n"]` never sees them. Serial keeps the scorer calls observable.
     calls = {"n": 0}
     orig = _StepContext.score_candidate
 
@@ -167,15 +171,16 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
 
     calls["n"] = 0
     roads_a1 = arterial._greedy_arterials(region, mode="aspirational", objective="directness",
-                                          max_roads=2)
+                                          max_roads=2, workers=1)
     assert calls["n"] == 0, "aspirational must NOT use the incremental scorer (Bug 2)"
 
     calls["n"] = 0
-    arterial._greedy_arterials(region, mode="buildable", objective="directness", max_roads=2)
+    arterial._greedy_arterials(region, mode="buildable", objective="directness", max_roads=2,
+                               workers=1)
     assert calls["n"] > 0, "buildable must score candidates through the incremental scorer"
 
     # Aspirational proposed geometry is deterministic/unchanged across runs (it scores through the
     # full path, which equals network_efficiency -- verified elsewhere -- so the argmax is stable).
     roads_a2 = arterial._greedy_arterials(region, mode="aspirational", objective="directness",
-                                          max_roads=2)
+                                          max_roads=2, workers=1)
     assert [g.wkt for g in roads_a1.geometry] == [g.wkt for g in roads_a2.geometry]

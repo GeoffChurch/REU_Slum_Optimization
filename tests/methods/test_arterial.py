@@ -1,6 +1,7 @@
 from typing import cast
 
 import geopandas as gpd
+import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
@@ -8,6 +9,7 @@ from reblock.budget import displacement_count
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.methods import arterial
 from reblock.methods.arterial import (
     GreedyArterialReblocker,
     _anchor_points,
@@ -124,6 +126,64 @@ def test_arterial_serial_refactor_identical() -> None:
                                         ).propose(block).roads
         assert roads is not None
         assert sorted(g.wkt for g in roads.geometry) == want
+
+
+def test_arterial_parallel_identical_to_serial(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The acceptance gate for the fork process pool: parallel roads must be WKT-identical to serial.
+    # Force the threshold to 1 so EVERY step genuinely dispatches the fork pool (>1 candidate per
+    # step here, so the 16-worker pool is truly exercised -- confirmed by the ~2x wall-clock speedup
+    # over workers=1) on this small, fast, EARLY-TERMINATING block. n_anchors=6 (the same known-fast
+    # config as test_arterial_serial_refactor_identical) keeps candidate counts modest so each step
+    # forks quickly, while the block still terminates well before max_roads=15 in BOTH modes -- so
+    # the final all-non-positive-gain step also runs through the pool. Without the forced-low
+    # threshold, candidates < 128 and the "parallel" run would silently fall back to serial, proving
+    # nothing. Repeat a few times because fork races are low-probability per run.
+    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    for _ in range(3):
+        for mode in ("buildable", "aspirational"):
+            block = _grid_block(3)
+            serial = GreedyArterialReblocker(mode=mode, n_anchors=6, workers=1).propose(block).roads
+            par = GreedyArterialReblocker(mode=mode, n_anchors=6, workers=16).propose(block).roads
+            assert serial is not None and par is not None
+            assert sorted(g.wkt for g in serial.geometry) == sorted(g.wkt for g in par.geometry)
+
+
+def test_arterial_parallel_geometry_bit_identical(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The winner geometry returned across the process boundary must be COORDINATE-exact to serial's,
+    # not merely wkt-equal (.wkt rounds at precision 6). This fails fast if a future change reverts
+    # eval_candidate's return from the shapely geometry (pickled lossless via WKB) to a lossy wkt.
+    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    block = _grid_block(3)
+    serial = GreedyArterialReblocker(mode="buildable", n_anchors=6, workers=1).propose(block).roads
+    par = GreedyArterialReblocker(mode="buildable", n_anchors=6, workers=16).propose(block).roads
+    assert serial is not None and par is not None
+    s = sorted(serial.geometry, key=lambda g: g.wkt)
+    p = sorted(par.geometry, key=lambda g: g.wkt)
+    assert len(s) == len(p) and len(s) > 0
+    for gs, gp in zip(s, p, strict=True):
+        assert list(gs.coords) == list(gp.coords)
+
+
+def test_arterial_parallel_matches_reference_1808(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Tie the pool path directly to the committed ground truth: forced-low threshold so the fork
+    # pool actually runs on the real 1808 block, and its buildable roads must WKT-set-equal the
+    # pinned reference (same guarantee the serial test_arterial_proposal_wkt_unchanged asserts).
+    from scoring_fixtures import _REF, _block_1808
+    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    roads = GreedyArterialReblocker(mode="buildable", workers=16).propose(_block_1808()).roads
+    assert roads is not None
+    assert sorted(g.wkt for g in roads.geometry) == sorted(_REF["arterial_buildable"]["wkt"])
+
+
+def test_arterial_parallel_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Two identical workers=16 proposes must produce identical sorted WKT. Forced-low threshold so
+    # the pool path (not serial) is what's being checked for determinism.
+    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    block = _grid_block(3)
+    a = GreedyArterialReblocker(mode="buildable", n_anchors=6, workers=16).propose(block).roads
+    b = GreedyArterialReblocker(mode="buildable", n_anchors=6, workers=16).propose(block).roads
+    assert a is not None and b is not None
+    assert sorted(g.wkt for g in a.geometry) == sorted(g.wkt for g in b.geometry)
 
 
 def test_planarize_nodes_two_crossing_chords() -> None:

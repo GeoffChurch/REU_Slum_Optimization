@@ -1,3 +1,4 @@
 _target_: reblock.methods.arterial.GreedyArterialReblocker
 mode: buildable
 objective: directness
+workers: 16

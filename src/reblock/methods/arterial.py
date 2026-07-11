@@ -9,7 +9,9 @@ intersections. See docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-d
 """
 from __future__ import annotations
 
+import multiprocessing
 from collections.abc import Iterable, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
 import geopandas as gpd
@@ -211,16 +213,19 @@ def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]
     return e if objective == "efficiency" else direct
 
 
-@dataclass
+@dataclass(frozen=True)
 class _StepState:
-    """Frozen per-greedy-step state, module-level so a future fork process pool (task 2 of the
+    """Frozen per-greedy-step state, module-level so the fork process pool (task 2 of the
     process-parallel-arterial design) can inherit it via copy-on-write instead of pickling the
     CSR/graph context per task -- only the small chord goes in and `(gain, geometry)` comes out.
     Set once per step by `_greedy_arterials`, read by `eval_candidate`, cleared in a `finally`.
     `committed` is needed by the aspirational branch's full `_planarize(committed + [real])`;
     `base_merged`/`adj`/`base_burden`/`ctx` by the access-objective-buildable and displacement
     branches' `_score`/incremental-`_union_with` calls -- omitting any of these breaks a scoring
-    branch silently (wrong values, not a crash)."""
+    branch silently (wrong values, not a crash). `frozen=True` makes the read-only invariant real:
+    the workers only READ this holder, and its mutable members (`committed`, `base_merged`) are
+    mutated only in the PARENT and only AFTER the holder is cleared (a fresh `_StepState` is built
+    per step), so no worker ever observes a mid-mutation copy."""
     step: _StepContext | None
     sg: _SnapGraph
     base_val: float
@@ -240,6 +245,11 @@ class _StepState:
 
 
 _STEP_STATE: _StepState | None = None
+
+# Below this many candidates in a step, the fork/pool overhead (spawn + IPC round-trips) is not
+# worth it, so the step runs the serial path over `eval_candidate` instead of the process pool.
+# Module-level so tests can monkeypatch it low to force the pool path on small, fast blocks.
+_PARALLEL_THRESHOLD = 128
 
 
 def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
@@ -296,7 +306,8 @@ def _best_candidate(results: Iterable[tuple[float, BaseGeometry | None]]
 
 def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
                       top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
-                      cost: str = "length", corridor_m: float = 3.0) -> GeoDataFrame:
+                      cost: str = "length", corridor_m: float = 3.0,
+                      workers: int = 16) -> GeoDataFrame:
     """Greedily commit the straight arterial with the best objective gain per unit cost until
     `max_roads` are placed or no candidate improves. `mode` in {"buildable", "aspirational"}.
     `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/building newly
@@ -304,7 +315,12 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     budget.displacement_count)}. A beneficial candidate whose denominator is zero (a
     zero-length road can't occur -- filtered below -- but a zero-marginal-displacement road
     can) ranks ABOVE every positive-denominator candidate (infinite gain) rather than being
-    divided by zero or skipped: take the free navigability first."""
+    divided by zero or skipped: take the free navigability first.
+
+    `workers` parallelizes each step's candidate scoring across a fork process pool (byte-identical
+    to serial). `workers <= 1`, a step with `< _PARALLEL_THRESHOLD` candidates, or a platform
+    without `fork` all take the literal serial path (a true no-op vs the pool, not a 1-worker
+    pool)."""
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     base_burden = access_burden(parcel_access_layers(
         block, None, tol=STREET_TOL, adj=adj, unreached_depth=len(block.parcels) + 1))
@@ -344,9 +360,15 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         step = ctx.step(base) if (ctx is not None and mode == "buildable") else None
 
         # Evaluate every candidate against the frozen per-step state, via the module-level holder
-        # (COW-inheritable by a future fork pool -- task 2). SERIAL for now: a plain list
-        # comprehension over `eval_candidate`, then the shared `_best_candidate` reduce -- the same
-        # two calls the parallel path will use, just without a pool in between.
+        # (COW-inheritable by the fork pool). Both the serial and pool paths funnel through the SAME
+        # holder set / `finally`-clear and the SAME `_best_candidate` reduce; the pool only replaces
+        # the comprehension with a fork `map`. Fall to serial when a pool isn't worth it or fork is
+        # unavailable: `workers <= 1` (a true no-op vs today, NOT a 1-worker pool), a small step
+        # (`< _PARALLEL_THRESHOLD` candidates -- spawn/IPC overhead dominates), or no `fork` start
+        # method (never pickle the CSR/graph context per task).
+        candidates = _candidate_chords(anchors, targets)
+        use_pool = (workers > 1 and len(candidates) >= _PARALLEL_THRESHOLD
+                    and "fork" in multiprocessing.get_all_start_methods())
         assert _STEP_STATE is None, "eval_candidate's per-step state holder is not reentrant"
         _STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
@@ -354,7 +376,16 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
             committed_disp=committed_disp, block=block, crs=block.crs, adj=adj,
             base_burden=base_burden, ctx=ctx)
         try:
-            results = [eval_candidate(chord) for chord in _candidate_chords(anchors, targets)]
+            if use_pool:
+                # Explicit fork context so children inherit `_STEP_STATE` via COW; `map` preserves
+                # input order (chunksize/worker-count-independent) so the reduce sees the serial
+                # sequence and the result is byte-identical to serial.
+                with ProcessPoolExecutor(max_workers=workers,
+                                         mp_context=multiprocessing.get_context("fork")) as ex:
+                    results = list(ex.map(eval_candidate, candidates,
+                                          chunksize=max(1, len(candidates) // (workers * 4))))
+            else:
+                results = [eval_candidate(chord) for chord in candidates]
         finally:
             _STEP_STATE = None
         _, best_real = _best_candidate(results)
@@ -382,6 +413,7 @@ class GreedyArterialReblocker:
     # "length" (Delta-benefit/metre) | "displacement" (Delta-benefit/building, see budget.py)
     cost: str = "length"
     corridor_m: float = 3.0   # road half-width + setback; the displacement corridor
+    workers: int = 16         # fork-pool size for per-step candidate scoring; 1 == serial no-op
 
     @property
     def identity(self) -> tuple[str, str, str, str, float]:
@@ -396,7 +428,7 @@ class GreedyArterialReblocker:
         roads = _greedy_arterials(block, mode=self.mode, objective=self.objective,
                                   n_anchors=self.n_anchors, top_k=self.top_k, lam=self.lam,
                                   max_roads=self.max_roads, cost=self.cost,
-                                  corridor_m=self.corridor_m)
+                                  corridor_m=self.corridor_m, workers=self.workers)
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=f"greedy_arterial_{self.mode}_{self.objective}", method="greedy_arterial",
