@@ -191,6 +191,24 @@ def test_arterial_parallel_deterministic(monkeypatch: pytest.MonkeyPatch) -> Non
     assert sorted(g.wkt for g in a.geometry) == sorted(g.wkt for g in b.geometry)
 
 
+def test_arterial_parallel_soak(monkeypatch: pytest.MonkeyPatch) -> None:
+    # NOT a correctness check (see test_arterial_parallel_identical_to_serial for that) -- guards
+    # against the fork pool leaking/accumulating semaphores or resource-tracker handles, or hanging,
+    # across many short-lived pools (the ~pools-per-propose x many-proposes churn a real multi-block
+    # pipeline run produces). Force the threshold to 1 so EVERY step of EVERY propose genuinely
+    # dispatches a fork pool: at the default threshold, _grid_block(3)'s modest candidate counts
+    # (n_anchors=6, the same known-fast config as the other parallel tests) stay under 128 and the
+    # soak would take the serial path every time, spawning zero pools and proving nothing. 30
+    # proposes x a handful of greedy steps/propose = a few hundred pool create/teardown cycles.
+    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    block = _grid_block(3)
+    for _ in range(30):
+        roads = GreedyArterialReblocker(mode="buildable", objective="directness", n_anchors=6,
+                                        workers=16).propose(block).roads
+        assert roads is not None
+        assert len(roads) > 0
+
+
 def test_planarize_nodes_two_crossing_chords() -> None:
     a = LineString([(0.0, 1.0), (2.0, 1.0)])
     b = LineString([(1.0, 0.0), (1.0, 2.0)])             # crosses a at (1, 1)

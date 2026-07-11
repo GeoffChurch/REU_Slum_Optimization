@@ -111,6 +111,12 @@ tree can't (see "Multi-block" below). The tradeoff: arterial is slow (minutes/bl
 scores every candidate road honestly), and it trades a little `access` AUC for that navigability, so
 **dijkstra remains the fast default** for access-first reblocking. The compare is exactly how you see
 this Pareto tradeoff: arterial wins directness/efficiency, dijkstra wins access-per-second.
+Each greedy step's per-candidate scoring is process-parallelized across cores via `method.workers`
+(default 16; `workers=1` runs the original serial path) — a fork pool so workers inherit the frozen
+per-step state copy-on-write (Linux only; non-fork platforms fall back to serial). Measured on a
+91-parcel block: ~8.3× at 16 workers, ~10.4× at 24, with byte-identical roads to serial — this is
+what makes big regions and the flagship neighborhood tractable at all (serial would run many
+minutes to hours).
 
 ## Multi-block (region) reblocking
 
