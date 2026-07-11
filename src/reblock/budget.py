@@ -165,22 +165,32 @@ def _split_graph(g: nx.Graph, edges: list[LineString],
 
 def _sampled_efficiency(g: nx.Graph, entry: list[tuple[float, float] | None],
                         reps: list[Point], sources: list[int]) -> tuple[float, float]:
-    """(E, directness) from each source parcel's entry node to every other parcel's entry
-    node, over graph `g`. E = mean(1/d), directness = mean(euclid/d), each averaged over the
-    FIXED set of all-parcel pairs (unreached pairs -- entry missing, or absent/unreachable in
-    `g` -- contribute 0, the standard global-efficiency definition); (0, 0) if there are no
-    pairs."""
+    """(E, directness) of the DOOR-TO-DOOR trip between every parcel pair, over graph `g`. The
+    effective distance is the whole journey `d = leg_i + netdist(entry_i, entry_j) + leg_j`, where
+    `leg_k = euclid(rep_k, entry_k)` is the last-mile walk from a parcel to where it joins the road
+    -- NOT `netdist` alone. With the walk legs included, `euclid(rep_i, rep_j) <= d` by the triangle
+    inequality (rep_i->entry_i->entry_j->rep_j, and netdist >= euclid(entry_i, entry_j)), so
+    directness = mean(euclid/d) is a true circuity ratio bounded in [0, 1]; E = mean(1/d). Averaged
+    over the FIXED all-parcel pair set (unreached pairs -- an entry missing, or absent/unreachable
+    in `g` -- contribute 0); (0, 0) if there are no pairs. The legs are fixed once entries are
+    frozen and `netdist` is non-increasing as roads grow, so both metrics stay monotone."""
     inv_sum = dir_sum = 0.0
     pairs = 0
+    legs = [reps[i].distance(Point(e)) if e is not None else None for i, e in enumerate(entry)]
     for si in sources:
         src = entry[si]
         dist = nx.single_source_dijkstra_path_length(g, src) if src is not None and src in g else {}
+        leg_i = legs[si]
         for j in range(len(entry)):
             if j == si:
                 continue
             pairs += 1
-            d = dist.get(entry[j]) if entry[j] is not None else None
-            if d and d > 0:
+            nd = dist.get(entry[j]) if entry[j] is not None else None
+            leg_j = legs[j]
+            if nd is None or leg_i is None or leg_j is None:
+                continue                          # a parcel with no entry / unreachable -> 0
+            d = leg_i + nd + leg_j                 # door-to-door: walk + drive + walk
+            if d > 0:
                 inv_sum += 1.0 / d
                 dir_sum += reps[si].distance(reps[j]) / d
     if pairs == 0:

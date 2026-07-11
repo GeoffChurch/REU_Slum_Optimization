@@ -135,7 +135,24 @@ def test_line_proximity_scores_a_sparse_straight_chord() -> None:
     _, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, chord.iloc[:0]))
     _, d_chord = network_efficiency(block, chord)
     assert d_chord > d_none            # the chord helps
-    assert d_chord > 0.2               # ... non-trivially -- the 2-point chord IS counted, not ~0
+    assert d_chord > 0.05              # ... non-trivially -- the 2-point chord IS counted, not ~0
+
+
+def test_directness_is_a_bounded_circuity_ratio() -> None:
+    # Door-to-door directness = euclid(homes) / (walk + network + walk) is bounded in [0, 1] by the
+    # triangle inequality -- >1 was the old rep-numerator / entry-denominator basis, which
+    # line-proximity entries most amplified. A bare straight chord (the worst case) must stay <= 1.
+    from shapely.geometry import LineString
+
+    from reblock.budget import network_efficiency
+    block = _grid_block(5)
+    roads = DijkstraReblocker().propose(block).roads
+    assert roads is not None
+    _, d_dijkstra = network_efficiency(block, roads)
+    chord = gpd.GeoDataFrame(geometry=[LineString([(2.5, 0.0), (2.5, 5.0)])], crs=UTM)
+    _, d_chord = network_efficiency(block, chord)
+    assert 0.0 <= d_dijkstra <= 1.0
+    assert 0.0 <= d_chord <= 1.0
 
 
 def test_cost_benefit_curve_accepts_a_benefit_fn() -> None:

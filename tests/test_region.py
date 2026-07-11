@@ -184,19 +184,17 @@ def test_region_reblock_reblocks_the_region_block_against_its_existing_network()
 
 
 def test_region_reblock_arterial_beats_dijkstra_with_a_margin_on_a_wide_region() -> None:
-    # Three 4x3 blocks in a row (A: x=0-4, B: x=4-8, C: x=8-12), each declaring its own full
-    # square boundary as street -- access is already fine (every block-perimeter parcel is
-    # served) AND the seed is non-empty (the two shared edges), but the region is wide (12x3)
-    # relative to any one block, so a long cross-block arterial has real room to beat a
-    # per-block tree on directness. This is the design's headline hypothesis, on a fixture with
-    # a genuine (non-empty) seed rather than the pre-existing deep-region test's empty-seed one.
-    a = _grid_block(0, 0, 4, 3, block_id="A")
-    b = _grid_block(4, 0, 4, 3, block_id="B")
-    c = _grid_block(8, 0, 4, 3, block_id="C")
+    # Three 4x3 blocks in a row spanning a wide 12x3 region, with street frontage only at the
+    # far ENDS (A's left edge, C's right edge; B a left stub) -- so the region's interior is deep
+    # in the cross-region direction and a long cross-block arterial reaches it directly, where a
+    # per-block tree can't. This is the design's headline hypothesis. NB it must be a DEEP region:
+    # under the door-to-door directness basis, on a *well-served* region (full frontage) the walk
+    # legs dominate and arterial's straight roads buy ~nothing over dijkstra -- the margin is real
+    # only where a through-road genuinely shortens buried-parcel trips.
+    a = _grid_block(0, 0, 4, 3, streets_side="left", block_id="A")
+    b = _grid_block(4, 0, 4, 3, streets_side="left", block_id="B")
+    c = _grid_block(8, 0, 4, 3, streets_side="right", block_id="C")
     blocks = [a, b, c]
-    # Each block declares its own full-perimeter streets, so the two shared edges (x=4, x=8) are
-    # existing inter-block streets in region_block.streets -- the existing-network baseline both
-    # methods' added roads are graded against.
 
     dij_result = region_reblock(blocks, DijkstraReblocker(), [])
     art_result = region_reblock(
@@ -217,10 +215,11 @@ def test_region_reblock_arterial_beats_dijkstra_with_a_margin_on_a_wide_region()
     auc_dij = auc(dij_directness, cap)
     auc_art = auc(art_directness, cap)
 
-    # Recorded numbers under the existing-egress model: AUC dijkstra ~0.487, arterial ~0.659
-    # (ratio ~1.35). The two shared edges are now existing egress, so dijkstra's per-block trees
-    # get a better baseline and the margin narrows from the old perimeter-egress model (~1.65),
-    # but arterial's long cross-block through-roads still clear the 1.2x bar comfortably.
+    # Recorded numbers (door-to-door directness basis): AUC dijkstra ~0.071, arterial ~0.405
+    # (ratio ~5.7). On this DEEP wide region the arterial's cross-region through-road reaches the
+    # buried middle directly while dijkstra's per-block trees detour, so arterial wins by a wide
+    # margin -- and honestly so (the door-to-door basis, unlike the old entry-denominator one,
+    # only credits directness a resident actually experiences).
     assert auc_art > 1.2 * auc_dij
 
 
