@@ -70,17 +70,21 @@ class KblockSource:
         return self._utm
 
     def block_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
-        """Cheap block_id + geometry accessor for a RegionBuilder: reads only the blocks
-        parquet (no buildings, no Voronoi), reprojected to the same UTM `region()` uses.
-        Applies `self.block_ids` as a flat filter if set (the region CLI passes a flat set of
+        """Cheap block_id + building_count + geometry accessor for a RegionBuilder: reads only
+        the blocks parquet (no buildings, no Voronoi), reprojected to the same UTM `region()`
+        uses. `building_count` is a per-block building count (present for kblock sources),
+        e.g. for budgeting region growth on buildings as a parcel proxy. Applies
+        `self.block_ids` as a flat filter if set (the region CLI passes a flat set of
         candidate ids here, not the nested seed groups). `bbox` (in the target UTM) windows
         the result via `.cx`; `bbox=None` returns everything."""
-        blocks = gpd.read_parquet(self.blocks_path, columns=["block_id", "geometry"])
+        blocks = gpd.read_parquet(
+            self.blocks_path, columns=["block_id", "building_count", "geometry"])
         blocks["block_id"] = blocks["block_id"].astype(str)
         if self.block_ids is not None:
             wanted = {str(b) for b in self.block_ids}
             blocks = cast(gpd.GeoDataFrame, blocks[blocks["block_id"].isin(wanted)])
-        out = cast(gpd.GeoDataFrame, blocks.to_crs(self._target_utm())[["block_id", "geometry"]])
+        out = cast(gpd.GeoDataFrame, blocks.to_crs(self._target_utm())[
+            ["block_id", "building_count", "geometry"]])
         return _window(out, bbox)
 
     def building_points(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
