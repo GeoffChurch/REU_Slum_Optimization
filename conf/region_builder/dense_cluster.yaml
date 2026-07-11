@@ -1,0 +1,5 @@
+# Grows each seed group into ONE contiguous region by block adjacency, greedily adding the
+# densest (building_count / area) adjacent block first, up to a buildings budget -- "plump a
+# single block into a right-sized region" as a one-knob operation.
+_target_: reblock.region.DenseClusterRegionBuilder
+max_buildings: 150

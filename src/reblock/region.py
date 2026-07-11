@@ -196,3 +196,75 @@ class ConvexHullRegionBuilder:
             matched = cast(gpd.GeoDataFrame, block_geoms[block_geoms.intersects(hull)])
             result.append(sorted(cast(list[str], list(matched["block_id"]))))
         return result
+
+
+def _block_adjacency(geoms: list[BaseGeometry]) -> list[set[int]]:
+    """Undirected block-adjacency graph over ALL of `geoms`, as an index -> neighbor-indices
+    adjacency list -- an STRtree `dwithin` query within STREET_TOL (the same touch-adjacency
+    `_touch_adjacent` checks), excluding self-adjacency."""
+    adj: list[set[int]] = [set() for _ in geoms]
+    if len(geoms) <= 1:
+        return adj
+    tree = STRtree(geoms)
+    left, right = tree.query(geoms, predicate="dwithin", distance=STREET_TOL)
+    for i, j in zip(left.tolist(), right.tolist(), strict=True):
+        if i != j:
+            adj[i].add(j)
+    return adj
+
+
+@dataclass
+class DenseClusterRegionBuilder:
+    """Grows each seed group into ONE contiguous region by block adjacency, up to a buildings
+    budget (a parcel proxy) -- turns "plump a single block (or a screen's flagged block) into a
+    right-sized region" into a one-knob operation, no hand-listing neighbors.
+
+    Per group: `cluster` starts as the seed group's own block(s) -- always included, even alone
+    over budget (no growth, and never dropped). It then grows greedily, one block at a time:
+    among the blocks adjacent to the cluster but not in it (the "frontier"), pick the one with
+    the highest building DENSITY (`building_count / area`) -- ties broken by higher
+    `building_count`, then by `block_id` ascending (determinism) -- add it, and repeat until the
+    cluster's total `building_count` reaches `max_buildings` (the last block may push it
+    slightly over) or the frontier is exhausted (the seed's whole connected component is smaller
+    than the budget).
+
+    Densest-first: density is the closest geometry-available proxy for reblocking need (dense
+    blocks are where buried parcels concentrate), so growth reaches toward the neediest
+    surrounding fabric rather than sprawling into sparse edges -- true need (access depth) isn't
+    available at block-geometry level, but the seed already carries it (via `block_ids`, or a
+    screen's worst-first ranking) and growth stays local + dense.
+
+    Graceful without building counts: if `block_geoms` lacks a `building_count` column (a
+    non-kblock source), every block counts as 1 -- the budget becomes a block-count budget, and
+    density falls back to `1 / area` (smaller blocks first) -- so the builder still produces a
+    contiguous, deterministic region.
+    """
+
+    max_buildings: int = 150
+
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+        _validate_group_ids(block_geoms, groups)
+        ids = cast(list[str], list(block_geoms["block_id"]))
+        geoms = list(block_geoms.geometry)
+        areas = [float(g.area) for g in geoms]
+        has_count = "building_count" in block_geoms.columns
+        counts = (
+            [float(c) for c in block_geoms["building_count"]] if has_count
+            else [1.0] * len(ids)
+        )
+        idx_by_id = {b: i for i, b in enumerate(ids)}
+        adj = _block_adjacency(geoms)
+
+        result: list[list[str]] = []
+        for group in groups:
+            cluster = {idx_by_id[b] for b in group}
+            size = sum(counts[i] for i in cluster)
+            while size < self.max_buildings:
+                frontier = {j for i in cluster for j in adj[i]} - cluster
+                if not frontier:
+                    break
+                best = min(frontier, key=lambda j: (-(counts[j] / areas[j]), -counts[j], ids[j]))
+                cluster.add(best)
+                size += counts[best]
+            result.append(sorted(ids[i] for i in cluster))
+        return result

@@ -19,7 +19,9 @@ from reblock.methods.arterial import GreedyArterialReblocker
 from reblock.methods.dijkstra import DijkstraReblocker
 from reblock.region import (
     ConvexHullRegionBuilder,
+    DenseClusterRegionBuilder,
     IdentityRegionBuilder,
+    _touch_adjacent,
     region_block,
     region_reblock,
 )
@@ -35,6 +37,28 @@ def _block_geoms(*specs: tuple[str, float, float]) -> gpd.GeoDataFrame:
     ids = [block_id for block_id, _, _ in specs]
     polys = [Polygon([(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)]) for _, x, y in specs]
     return gpd.GeoDataFrame({"block_id": ids}, geometry=polys, crs=UTM)
+
+
+def _dense_cluster_geoms(*specs: tuple[str, float, Polygon]) -> gpd.GeoDataFrame:
+    """A block_id + building_count + geometry GeoDataFrame -- (block_id, building_count,
+    polygon) per row -- for hand-built DenseClusterRegionBuilder fixtures where the polygon
+    shape (area) and building_count both matter (unlike `_block_geoms`'s uniform unit squares
+    with no building_count column)."""
+    ids = [block_id for block_id, _, _ in specs]
+    counts = [count for _, count, _ in specs]
+    polys = [poly for _, _, poly in specs]
+    return gpd.GeoDataFrame({"block_id": ids, "building_count": counts}, geometry=polys, crs=UTM)
+
+
+def _all_reachable(bg: gpd.GeoDataFrame, region: list[str]) -> bool:
+    """True iff `region` already IS the whole touch-adjacent connected component (in `bg`) that
+    any of its own members belongs to -- i.e. an unbounded-budget grow from that same seed would
+    reach no further. Growth is monotonic (`_block_adjacency` is fixed, and each step only adds
+    a block already touch-adjacent to the cluster), so a cluster grown with an effectively
+    unbounded budget is exactly the seed's connected component under block adjacency, and which
+    member seeds it doesn't matter -- they're already mutually reachable."""
+    unbounded = DenseClusterRegionBuilder(max_buildings=10**9).build(bg, [[region[0]]])[0]
+    return set(unbounded) == set(region)
 
 _SIDES = {
     "bottom": lambda x0, y0, w, h: LineString([(x0, y0), (x0 + w, y0)]),
@@ -363,3 +387,85 @@ def test_kblock_block_geometries_bbox_windows() -> None:
     # Strict, non-empty subset: `> 0` guards against a regression that windows to empty
     # (e.g. swapped x/y or an inverted .cx slice), which a bare `< len(allg)` would miss.
     assert 0 < len(src.block_geometries(sub)) < len(allg)
+
+
+def test_dense_cluster_grows_seed_to_buildings_budget() -> None:
+    # DJI.3_1_3238 (building_count 53) has exactly two neighbors, DJI.3_1_3243 (107) and
+    # DJI.3_1_3240 (66); at max_buildings=150 growth adds the denser of the two (3243) and stops
+    # (53 + 107 = 160 >= 150). Grew past the seed; total either hits the budget window or, on a
+    # smaller/sparser component, exhausts everything reachable.
+    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]])
+
+    assert len(out) == 1
+    region = out[0]
+    assert "DJI.3_1_3238" in region and len(region) > 1        # grew past the seed
+    total = float(bg[bg.block_id.isin(region)].building_count.sum())
+    assert total >= 150 or _all_reachable(bg, region)          # hit budget (or exhausted component)
+
+
+def test_dense_cluster_small_budget_returns_seed_only() -> None:
+    # max_buildings (40) below the seed's own building_count (53) -- seeds are always included,
+    # but the while-loop's `size < max_buildings` guard is already false, so no growth happens.
+    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    out = DenseClusterRegionBuilder(max_buildings=40).build(bg, [["DJI.3_1_3238"]])
+    assert out == [["DJI.3_1_3238"]]
+
+
+def test_dense_cluster_region_is_contiguous() -> None:
+    # The grown region (seed + its densest neighbor) must be one touch-adjacent component --
+    # dense_cluster grows strictly by adjacency, so it can never emit a disjoint region.
+    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]])
+    by_id = dict(zip(bg["block_id"], bg.geometry, strict=True))
+    assert _touch_adjacent([by_id[b] for b in out[0]])
+
+
+def test_dense_cluster_deterministic() -> None:
+    # Same inputs, two separate build() calls -- growth order is fully tie-broken (density, then
+    # building_count, then block_id), so the output is byte-stable.
+    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    builder = DenseClusterRegionBuilder(max_buildings=150)
+    assert builder.build(bg, [["DJI.3_1_3238"]]) == builder.build(bg, [["DJI.3_1_3238"]])
+
+
+def test_dense_cluster_densest_neighbor_first() -> None:
+    # A seed (count 10) with two neighbors of equal building_count (5) but different area, so
+    # only density distinguishes them: "dense" (area 0.5 -> density 10) touches the seed's right
+    # edge, "sparse" (area 2 -> density 2.5) touches its top edge. max_buildings=15 fits exactly
+    # one more block (10 + 5) -- the denser neighbor must be the one chosen.
+    seed = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    dense = Polygon([(1, 0), (1.5, 0), (1.5, 1), (1, 1)])
+    sparse = Polygon([(0, 1), (2, 1), (2, 2), (0, 2)])
+    geoms = _dense_cluster_geoms(
+        ("seed", 10.0, seed), ("dense", 5.0, dense), ("sparse", 5.0, sparse))
+
+    out = DenseClusterRegionBuilder(max_buildings=15).build(geoms, [["seed"]])
+    assert out == [["dense", "seed"]]
+
+
+def test_dense_cluster_falls_back_to_block_count_without_building_count() -> None:
+    # Drop building_count entirely (a non-kblock source) -- the budget must fall back to a
+    # block-count budget and growth must still be contiguous. The seed has exactly two
+    # neighbors, so a budget of 3 blocks pulls in both.
+    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    bg = bg.drop(columns=["building_count"])
+
+    out = DenseClusterRegionBuilder(max_buildings=3).build(bg, [["DJI.3_1_3238"]])
+    assert len(out) == 1
+    region = out[0]
+    assert "DJI.3_1_3238" in region and len(region) == 3
+
+    by_id = dict(zip(bg["block_id"], bg.geometry, strict=True))
+    assert _touch_adjacent([by_id[b] for b in region])
+
+
+def test_dense_cluster_empty_groups_returns_empty_list() -> None:
+    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    assert DenseClusterRegionBuilder().build(bg, []) == []
+
+
+def test_dense_cluster_raises_clear_error_for_unknown_block_id() -> None:
+    geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))
+    with pytest.raises(ValueError, match="ZZZ"):
+        DenseClusterRegionBuilder().build(geoms, [["A", "ZZZ"]])
