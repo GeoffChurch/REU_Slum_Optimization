@@ -144,11 +144,17 @@ def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
     block = _grid_block(6)
     roads = _greedy_arterials(block, mode="aspirational", objective="directness", max_roads=6,
                               n_anchors=12)
-    from reblock.budget import _road_street_graph
-    g = _road_street_graph(block, roads, STREET_TOL)
+    # Build the road+street graph as a CSR (the nx-free scoring path's own builders) and read
+    # node degree off the CSR's per-row nnz -- a real crossroads noded by `_planarize` shows up
+    # as one shared node where >= 4 segments meet, vs two overlapping lines that never node.
+    from reblock.budget import _build_csr, _explode_segments
+    segs = _explode_segments([*roads.geometry, *block.streets.geometry])
+    csr, node_index = _build_csr(segs, {})
+    degree = csr.getnnz(axis=1)
     # at least one interior node has degree >= 4 -> a real crossroads, not overlapping lines
-    interior = [nd for nd in g.nodes if Point(nd).distance(block.boundary.boundary) > STREET_TOL]
-    assert any(g.degree[nd] >= 4 for nd in interior)
+    interior = [nd for nd in node_index
+               if Point(nd).distance(block.boundary.boundary) > STREET_TOL]
+    assert any(degree[node_index[nd]] >= 4 for nd in interior)
 
 
 def test_identity_and_proposal_metadata() -> None:

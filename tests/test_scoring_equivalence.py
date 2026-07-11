@@ -4,15 +4,12 @@ arterial frozen-context perf refactor: every task that touches scoring must keep
 import json
 from pathlib import Path
 
-import networkx as nx
 import pytest
-from scipy.sparse.csgraph import dijkstra
 from scoring_fixtures import _block_1808, _grid_block, _region_deep, _roads, sampled_fixtures
 from shapely.geometry import LineString
 
 from reblock.budget import (
     _BlockScoringContext,
-    _graph_to_csr,
     _StepContext,
     auc,
     efficiency_directness_curves,
@@ -182,18 +179,3 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     roads_a2 = arterial._greedy_arterials(region, mode="aspirational", objective="directness",
                                           max_roads=2)
     assert [g.wkt for g in roads_a1.geometry] == [g.wkt for g in roads_a2.geometry]
-
-
-def test_csgraph_matches_networkx_distances() -> None:
-    g = nx.Graph()
-    for a, b, w in [((0.0, 0.0), (1.0, 0.0), 1.0), ((1.0, 0.0), (2.0, 0.0), 1.0),
-                    ((0.0, 0.0), (2.0, 0.0), 3.0), ((1.0, 0.0), (1.0, 0.0), 0.0)]:
-        if a != b:
-            g.add_edge(a, b, weight=w)
-    csr, idx = _graph_to_csr(g)
-    src = idx[(0.0, 0.0)]
-    d = dijkstra(csr, directed=False, indices=src)
-    ref = nx.single_source_dijkstra_path_length(g, (0.0, 0.0))
-    for node, i in idx.items():
-        rv = ref.get(node, float("inf"))
-        assert abs(d[i] - rv) <= 1e-12, (node, d[i], rv)

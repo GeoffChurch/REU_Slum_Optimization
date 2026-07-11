@@ -89,23 +89,6 @@ def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL)
 BenefitFactory = Callable[..., Callable[["GeoDataFrame | None"], float]]
 
 
-def _road_street_graph(block: Block, roads: GeoDataFrame | None, tol: float) -> nx.Graph:
-    """Graph over the road segments PLUS block.streets (so inter-parcel trips can use the
-    street), nodes = snapped endpoints. (Shared with road_drainage's graph build.)"""
-    g: nx.Graph = nx.Graph()
-    lines = [] if roads is None else list(roads.geometry)
-    lines += list(block.streets.geometry)
-    for geom in lines:
-        parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
-        for part in parts:
-            cs = list(part.coords)
-            for a, b in zip(cs, cs[1:], strict=False):
-                na, nb = _rnd(a), _rnd(b)
-                if na != nb:
-                    g.add_edge(na, nb, weight=Point(na).distance(Point(nb)))
-    return g
-
-
 def _line_entries(geoms: list[BaseGeometry], reps: list[Point], edges: list[LineString],
                   tree: STRtree, tol: float
                   ) -> tuple[list[tuple[float, float] | None],
@@ -137,32 +120,6 @@ def _line_entries(geoms: list[BaseGeometry], reps: list[Point], edges: list[Line
         entry.append(p)
         splits[j].append((ls.project(pt), p))
     return entry, splits
-
-
-def _graph_to_csr(g: nx.Graph) -> tuple[csr_matrix, dict[tuple[float, float], int]]:
-    """Build a symmetric CSR adjacency matrix from `g`'s edge weights once, plus a deterministic
-    node -> row/col index (nodes sorted for stable, reproducible indices). `g` is a plain
-    `nx.Graph` (not a MultiGraph) that has already deduped parallel edges, so a plain symmetric
-    COO->CSR build with no dedup pass is correct here -- the from-scratch, nx-free CSR build over
-    cadastral geometry (which DOES need dedup + split-parent handling) is `_build_csr`. Retained as
-    the csgraph-vs-networkx distance-parity reference exercised by the equivalence harness; the
-    scoring path itself no longer routes through here."""
-    nodes: list[tuple[float, float]] = sorted(g.nodes())
-    node_index = {node: i for i, node in enumerate(nodes)}
-    rows: list[int] = []
-    cols: list[int] = []
-    weights: list[float] = []
-    for u, v, w in g.edges(data="weight"):
-        i, j = node_index[u], node_index[v]
-        rows.append(i)
-        cols.append(j)
-        weights.append(float(w))
-        rows.append(j)
-        cols.append(i)
-        weights.append(float(w))
-    n = len(nodes)
-    csr = csr_matrix((weights, (rows, cols)), shape=(n, n))
-    return csr, node_index
 
 
 def _sampled_efficiency_core(csr: csr_matrix, node_index: dict[_Node, int],
@@ -222,8 +179,8 @@ def _sampled_efficiency_core(csr: csr_matrix, node_index: dict[_Node, int],
 
 def _explode_segments(geoms: Iterable[BaseGeometry]) -> list[_Pair]:
     """Explode geometries to `_rnd`-snapped, non-degenerate, first-seen-deduplicated undirected
-    segment endpoint pairs -- the edge extraction `_road_street_graph` feeds `nx.add_edge`, minus
-    the nx graph. Multi* geometries are exploded (a holed/courtyard block's streets)."""
+    segment endpoint pairs -- the segment extraction the old nx graph builder fed `nx.add_edge`,
+    minus the nx graph. Multi* geometries are exploded (a holed/courtyard block's streets)."""
     seen: set[frozenset[_Node]] = set()
     out: list[_Pair] = []
     for geom in geoms:
@@ -245,12 +202,12 @@ def _explode_segments(geoms: Iterable[BaseGeometry]) -> list[_Pair]:
 
 def _edges_in_nx_order(road_segs: list[_Pair], street_segs: list[_Pair]) -> list[_Pair]:
     """The combined road+street edge set in the exact order `networkx.Graph.edges()` yields it for
-    a graph built roads-first-then-streets (as `_road_street_graph` did): nodes ordered by first
-    appearance across the roads-then-streets scan, each node's neighbours in first-seen order, and
-    every undirected edge emitted at its first-inserted endpoint. This reproduces `_edge_lines(g)`'s
-    order WITHOUT building the nx graph -- and the order is load-bearing, because it sets
-    `_line_entries`'s edge-index tie-break, so it must match to keep entries (hence the metric)
-    identical on exact-distance ties (which grid geometry produces)."""
+    a graph built roads-first-then-streets (as the old nx graph builder did): nodes ordered by
+    first appearance across the roads-then-streets scan, each node's neighbours in first-seen
+    order, and every undirected edge emitted at its first-inserted endpoint. This reproduces
+    `_edge_lines(g)`'s order WITHOUT building the nx graph -- and the order is load-bearing,
+    because it sets `_line_entries`'s edge-index tie-break, so it must match to keep entries
+    (hence the metric) identical on exact-distance ties (which grid geometry produces)."""
     node_pos: dict[_Node, int] = {}
     node_order: list[_Node] = []
     adj: dict[_Node, list[_Node]] = {}
