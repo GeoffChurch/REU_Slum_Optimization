@@ -21,7 +21,12 @@ from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from reblock.budget import access_burden, displacement_count, network_efficiency, road_drainage
+from reblock.budget import (
+    _BlockScoringContext,
+    access_burden,
+    displacement_count,
+    road_drainage,
+)
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
@@ -123,16 +128,19 @@ def _planarize(lines: list[LineString], crs: CRS) -> GeoDataFrame:
 
 
 def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]],
-           base_burden: float) -> float:
+           base_burden: float, ctx: _BlockScoringContext | None) -> float:
     """Objective value of the road set (higher = better). Mirrors the budget metrics with a
-    cached parcel-adjacency for the greedy's inner loop."""
+    cached parcel-adjacency for the greedy's inner loop. For efficiency/directness, scores through
+    the per-block `ctx` (frozen constants, one context per block, full entry re-derivation per
+    candidate) -- equivalent to `network_efficiency(block, roads)`."""
     if objective == "access":
         if base_burden == 0.0:
             return 0.0
         depths = parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj,
                                       unreached_depth=len(block.parcels) + 1)
         return 1.0 - access_burden(depths) / base_burden
-    e, direct = network_efficiency(block, roads)
+    assert ctx is not None
+    e, direct = ctx.score(roads)
     return e if objective == "efficiency" else direct
 
 
@@ -157,13 +165,16 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     # filter to LineString, or Multi* streets get dropped and the proposal comes back empty;
     # _anchor_points explodes Multi* internally.
     streets: list[BaseGeometry] = list(block.streets.geometry)
+    # ONE scoring context per block (frozen reps/sources/src_euclid/street geometry), shared by
+    # every candidate score below -- only built for the metric objectives that use it.
+    ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
 
     committed: list[LineString] = []                        # realized geometry, in commit order
     while len(committed) < max_roads:
         network: list[BaseGeometry] = [*streets, *committed]
         anchors = _anchor_points(network, n_anchors)
         base = _planarize(committed, block.crs)
-        base_val = _score(objective, block, base, adj, base_burden)
+        base_val = _score(objective, block, base, adj, base_burden, ctx)
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
         committed_disp = (displacement_count(block.building_points, base, corridor_m)
@@ -175,7 +186,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
             if real is None or real.length == 0:
                 continue
             trial = _planarize(committed + [real], block.crs)
-            raw = _score(objective, block, trial, adj, base_burden) - base_val
+            raw = _score(objective, block, trial, adj, base_burden, ctx) - base_val
             if cost == "displacement":
                 denom = float(displacement_count(block.building_points, trial, corridor_m)
                              - committed_disp)
