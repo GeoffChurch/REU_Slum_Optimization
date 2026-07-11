@@ -11,6 +11,7 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import (
     GreedyArterialReblocker,
     _anchor_points,
+    _best_candidate,
     _candidate_chords,
     _deep_targets,
     _greedy_arterials,
@@ -72,6 +73,57 @@ def test_snap_returns_a_boundary_following_street_connected_path() -> None:
 
 def _round(c: tuple[float, ...]) -> tuple[float, float]:
     return (round(c[0], 2), round(c[1], 2))
+
+
+def test_best_candidate_reduce() -> None:
+    # Direct, geometry-free test of the shared reduce -- guards the critical subtlety: this is
+    # NOT a plain argmax. `(0.0, None)` init + the wkt tie-break gated on `best_real is not None`
+    # means a candidate with gain <= 0 can never win (the greedy's termination condition).
+    def L(a: tuple[float, float], b: tuple[float, float]) -> LineString:
+        return LineString([a, b])
+    # (a) all non-positive gains -> (0.0, None): a naive `best=None` argmax would wrongly let the
+    # least-negative (or the 0.0) candidate win here.
+    assert _best_candidate(
+        [(-0.1, L((0, 0), (1, 1))), (0.0, L((0, 0), (2, 2))), (-0.05, L((0, 0), (3, 3)))]
+    ) == (0.0, None)
+    # (b) positive-gain tie -> deterministic min-wkt winner, order-independent.
+    r1, r2 = L((0, 0), (1, 0)), L((0, 0), (0, 1))
+    lo = r1 if r1.wkt < r2.wkt else r2
+    fwd = _best_candidate([(0.4, r1), (0.4, r2)])
+    rev = _best_candidate([(0.4, r2), (0.4, r1)])
+    assert fwd[1] is not None and rev[1] is not None
+    assert fwd[1].wkt == lo.wkt and rev[1].wkt == lo.wkt and fwd[0] == 0.4
+    # (c) inf gain wins.
+    inf = float("inf")
+    assert _best_candidate([(0.9, r1), (inf, r2)])[0] == inf
+    # (d) a (0.0, None) skipped-candidate entry never displaces a later positive-gain real.
+    result = _best_candidate([(0.0, None), (0.5, r1)])
+    assert result[0] == 0.5 and result[1] is not None and result[1].wkt == r1.wkt
+
+
+def test_arterial_serial_refactor_identical() -> None:
+    # The task-1 acceptance gate: the extraction of `eval_candidate` + the shared `_best_candidate`
+    # reduce must be behavior-preserving. `_grid_block(3)` with a small `n_anchors` terminates
+    # (no candidate improves) well before the default `max_roads=15` for BOTH modes -- verified by
+    # comparing against a higher `max_roads` cap -- so this exercises the all-non-positive-gain
+    # reduce path (the critical sentinel), not just positive-gain steps. Expected WKT captured from
+    # the pre-refactor implementation.
+    expected = {
+        "buildable": sorted([
+            "LINESTRING (1 0, 1 1)", "LINESTRING (1 1, 1 2)", "LINESTRING (1 1, 2 1)",
+            "LINESTRING (1 2, 2 2, 2 1)", "LINESTRING (2 0, 2 1)",
+        ]),
+        "aspirational": sorted([
+            "LINESTRING (0 1, 1 2)", "LINESTRING (0 3, 1 2)", "LINESTRING (1 2, 1.5 2.5)",
+            "LINESTRING (1 2, 2.5 0.5)", "LINESTRING (1.5 2.5, 2 3)", "LINESTRING (2 0, 2.06 0)",
+        ]),
+    }
+    block = _grid_block(3)
+    for mode, want in expected.items():
+        roads = GreedyArterialReblocker(mode=mode, objective="directness", n_anchors=6
+                                        ).propose(block).roads
+        assert roads is not None
+        assert sorted(g.wkt for g in roads.geometry) == want
 
 
 def test_planarize_nodes_two_crossing_chords() -> None:

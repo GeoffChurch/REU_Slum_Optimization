@@ -9,7 +9,7 @@ intersections. See docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-d
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 import geopandas as gpd
@@ -25,6 +25,7 @@ from shapely.ops import unary_union
 
 from reblock.budget import (
     _BlockScoringContext,
+    _StepContext,
     access_burden,
     displacement_count,
     road_drainage,
@@ -210,6 +211,89 @@ def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]
     return e if objective == "efficiency" else direct
 
 
+@dataclass
+class _StepState:
+    """Frozen per-greedy-step state, module-level so a future fork process pool (task 2 of the
+    process-parallel-arterial design) can inherit it via copy-on-write instead of pickling the
+    CSR/graph context per task -- only the small chord goes in and `(gain, geometry)` comes out.
+    Set once per step by `_greedy_arterials`, read by `eval_candidate`, cleared in a `finally`.
+    `committed` is needed by the aspirational branch's full `_planarize(committed + [real])`;
+    `base_merged`/`adj`/`base_burden`/`ctx` by the access-objective-buildable and displacement
+    branches' `_score`/incremental-`_union_with` calls -- omitting any of these breaks a scoring
+    branch silently (wrong values, not a crash)."""
+    step: _StepContext | None
+    sg: _SnapGraph
+    base_val: float
+    base_merged: BaseGeometry | None
+    committed: list[LineString]
+    mode: str
+    objective: str
+    cost: str
+    lam: float
+    corridor_m: float
+    committed_disp: int
+    block: Block
+    crs: CRS
+    adj: list[set[int]]
+    base_burden: float
+    ctx: _BlockScoringContext | None
+
+
+_STEP_STATE: _StepState | None = None
+
+
+def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
+    """Pure per-candidate evaluation, module-level so it doubles as the parallel-map unit of work
+    in a later task. Mirrors `_greedy_arterials`' former inline loop body EXACTLY (mode/objective/
+    cost routing, the `cost="displacement"` denominator, the infinite-gain zero-denominator
+    escape) reading the frozen per-step state stashed in `_STEP_STATE` by `_greedy_arterials` (see
+    `_StepState`). Returns `(0.0, None)` for a None/zero-length realization. Returns the shapely
+    GEOMETRY (not wkt) -- `_best_candidate` compares `.wkt` only for its tie-break, and returning
+    the geometry keeps a future process-pool's pickled round-trip (WKB, lossless) bit-identical to
+    this serial path's `real`, unlike a lossy default-precision `to_wkt()`."""
+    st = _STEP_STATE
+    assert st is not None, "eval_candidate called with no _STEP_STATE set"
+    real = chord if st.mode == "aspirational" else _snap(chord, st.sg, st.lam)
+    if real is None or real.length == 0:
+        return 0.0, None
+    trial: GeoDataFrame | None = None
+    if st.step is not None:
+        e, direct = st.step.score_candidate(real)
+        raw = (e if st.objective == "efficiency" else direct) - st.base_val
+    elif st.mode == "buildable":
+        trial = _explode(_union_with(st.base_merged, real), st.crs)
+        raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
+    else:
+        trial = _planarize(st.committed + [real], st.crs)
+        raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
+    if st.cost == "displacement":
+        if trial is None:
+            trial = _explode(_union_with(st.base_merged, real), st.crs)  # step -> buildable
+        denom = float(displacement_count(st.block.building_points, trial, st.corridor_m)
+                     - st.committed_disp)
+    else:
+        denom = real.length
+    gain = float("inf") if (denom <= 0 and raw > 0) else (raw / denom if denom > 0 else 0.0)
+    return gain, real
+
+
+def _best_candidate(results: Iterable[tuple[float, BaseGeometry | None]]
+                    ) -> tuple[float, BaseGeometry | None]:
+    """The greedy's candidate selection as ONE shared reduce -- used by both the serial path below
+    and a future parallel-collect path (task 2). NOT a plain argmax: `(0.0, None)` init, and the
+    wkt tie-break is additionally gated on `best_real is not None`, so a candidate with `gain <=
+    0` can NEVER win -- this IS the "no candidate improves -> stop" termination. A naive `best =
+    None` argmax would instead let a zero/negative-gain candidate win on the terminating step and
+    change the geometry. Order-independent (so parallel-collect order doesn't matter): the
+    tie-break is a total order over distinct `wkt`, and `gain > best_gain` alone is order-free."""
+    best_gain, best_real = 0.0, None
+    for gain, real in results:
+        if gain > best_gain or (best_real is not None and real is not None
+                                and gain == best_gain and real.wkt < best_real.wkt):
+            best_gain, best_real = gain, real
+    return best_gain, best_real
+
+
 def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
                       top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
                       cost: str = "length", corridor_m: float = 3.0) -> GeoDataFrame:
@@ -235,6 +319,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
 
     committed: list[LineString] = []                        # realized geometry, in commit order
+    global _STEP_STATE
     while len(committed) < max_roads:
         network: list[BaseGeometry] = [*streets, *committed]
         anchors = _anchor_points(network, n_anchors)
@@ -258,34 +343,27 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         # when scored, for efficiency/directness).
         step = ctx.step(base) if (ctx is not None and mode == "buildable") else None
 
-        best_gain, best_real = 0.0, None
-        for chord in _candidate_chords(anchors, targets):
-            real = chord if mode == "aspirational" else _snap(chord, sg, lam)
-            if real is None or real.length == 0:
-                continue
-            trial: GeoDataFrame | None = None
-            if step is not None:
-                e, direct = step.score_candidate(real)
-                raw = (e if objective == "efficiency" else direct) - base_val
-            elif mode == "buildable":
-                trial = _explode(_union_with(base_merged, real), block.crs)
-                raw = _score(objective, block, trial, adj, base_burden, ctx) - base_val
-            else:
-                trial = _planarize(committed + [real], block.crs)
-                raw = _score(objective, block, trial, adj, base_burden, ctx) - base_val
-            if cost == "displacement":
-                if trial is None:
-                    trial = _explode(_union_with(base_merged, real), block.crs)  # step -> buildable
-                denom = float(displacement_count(block.building_points, trial, corridor_m)
-                             - committed_disp)
-            else:
-                denom = real.length
-            gain = float("inf") if (denom <= 0 and raw > 0) else (raw / denom if denom > 0 else 0.0)
-            if gain > best_gain or (best_real is not None and gain == best_gain
-                                    and real.wkt < best_real.wkt):
-                best_gain, best_real = gain, real
+        # Evaluate every candidate against the frozen per-step state, via the module-level holder
+        # (COW-inheritable by a future fork pool -- task 2). SERIAL for now: a plain list
+        # comprehension over `eval_candidate`, then the shared `_best_candidate` reduce -- the same
+        # two calls the parallel path will use, just without a pool in between.
+        assert _STEP_STATE is None, "eval_candidate's per-step state holder is not reentrant"
+        _STEP_STATE = _StepState(
+            step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
+            mode=mode, objective=objective, cost=cost, lam=lam, corridor_m=corridor_m,
+            committed_disp=committed_disp, block=block, crs=block.crs, adj=adj,
+            base_burden=base_burden, ctx=ctx)
+        try:
+            results = [eval_candidate(chord) for chord in _candidate_chords(anchors, targets)]
+        finally:
+            _STEP_STATE = None
+        _, best_real = _best_candidate(results)
         if best_real is None:                               # no candidate improves -> stop
             break
+        # `eval_candidate`'s `real` is always a LineString (the chord itself for aspirational, or
+        # `_snap`'s boundary-graph path for buildable) -- `_best_candidate` is typed over the wider
+        # `BaseGeometry` so it stays reusable for any future non-LineString candidate shape.
+        assert isinstance(best_real, LineString)
         committed.append(best_real)
 
     roads = _planarize(committed, block.crs)
