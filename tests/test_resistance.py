@@ -1,10 +1,13 @@
 """Tests for the resistance metric lens (see
 docs/superpowers/specs/2026-07-11-resistance-eval-design.md): `_resistance_core`, the pure
 grounded-Laplacian numeric core (tiny hand-built CSRs with known analytic effective resistances,
-task 1's scope), plus `_BlockScoringContext.resistance_frozen`/`resistance_benefit`, the
-block-scoring wiring (task 2's scope, mirroring `_efficiency_factory`/`score_frozen`)."""
+task 1's scope), `_BlockScoringContext.resistance_frozen`/`resistance_benefit`, the block-scoring
+wiring (task 2's scope, mirroring `_efficiency_factory`/`score_frozen`), and an AUC sanity check
+on real DJI blocks (task 3's scope, correctness gate #6)."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
@@ -13,6 +16,7 @@ import pytest
 from pyproj import CRS
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components, dijkstra
+from shapely import wkt
 from shapely.geometry import LineString, Polygon
 
 from reblock.budget import (
@@ -21,16 +25,33 @@ from reblock.budget import (
     _explode_segments,
     _Node,
     _resistance_core,
+    auc,
     cost_benefit_curve,
     resistance_benefit,
 )
 from reblock.contracts import Block
+from reblock.data.kblock import KblockSource
 from reblock.methods.dijkstra import DijkstraReblocker
 from reblock.methods.mesh import MeshReblocker
 from reblock.methods.peel import PeelReblocker
 
 CAP = 1000.0
 UTM = CRS.from_epsg(32643)
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_KB = _REPO_ROOT / "tests" / "data" / "kblock"
+# The greedy-arterial (buildable, directness-objective) road set for DJI.3_1_1751 -- pinned from
+# a real run (see test_resistance_auc_ranks_sensibly's docstring: recomputing it live takes ~25s
+# on this 21-parcel block, too slow to run in this suite under CPU contention).
+_ARTERIAL_1751 = json.loads(
+    (_REPO_ROOT / "tests/data/scoring/ref_resistance_1751_arterial.json").read_text())
+
+
+def _dji_block(block_id: str) -> Block:
+    """Load one real DJI sample block by id (mirrors `scoring_fixtures._block_1808`)."""
+    src = KblockSource(_KB / "blocks_dji_sample.parquet", _KB / "buildings_dji_sample.parquet",
+                       "dji", block_ids=[block_id])
+    return next(iter(src.region().blocks))
 
 
 def _grid_block(n: int) -> Block:
@@ -254,3 +275,43 @@ def test_resistance_benefit_degenerates_with_fewer_than_two_parcels() -> None:
     block = _grid_block(1)
     f = resistance_benefit(block, None)
     assert f(None) == 0.0
+
+
+def test_resistance_auc_ranks_sensibly() -> None:
+    # AUC sanity check on real data (design spec correctness gate #6). Three real DJI sample
+    # blocks -- DJI.3_1_1808 (10 parcels, compact), DJI.3_1_1751 (21 parcels, DEEP -- the
+    # investigation's deep case, docs/superpowers/notes/2026-07-11-spectral-metric-investigation.md
+    # sec 2c/2d), and DJI.1_2_602 (98 parcels, already used elsewhere in this test suite) -- each
+    # reblocked with the fast dijkstra method: resistance AUC must be finite, non-negative, and
+    # beat the empty-roads baseline (auc() of the single-point empty-roads curve is always exactly
+    # 0.0 by construction -- see the `_sweep`/`auc` len-guard -- so "beats the empty baseline"
+    # reduces to "AUC > 0").
+    for block_id in ("DJI.3_1_1808", "DJI.3_1_1751", "DJI.1_2_602"):
+        block = _dji_block(block_id)
+        roads = DijkstraReblocker().propose(block).roads
+        assert roads is not None and len(roads) > 0, block_id
+        curve = cost_benefit_curve(block, roads, benefit_fn=resistance_benefit)
+        assert all(np.isfinite(b) and b >= 0.0 for b in curve.benefit), (block_id, curve.benefit)
+        a = auc(curve, curve.cost[-1])
+        assert np.isfinite(a) and a >= 0.0, (block_id, a)
+        assert a > 0.0, f"{block_id}: resistance AUC did not beat the empty-roads baseline"
+
+    # Directional check (the investigation's headline finding, sec 2c): on the DEEP block, a real
+    # through-road (greedy arterial) credits egress at least as well as a frontage tree (dijkstra)
+    # at full build -- unlike raw directness, which does not always agree the through-road helps
+    # (sec 2c's DISAGREE rows), grounded R is expected to credit the egress shortcut here (sec 2c's
+    # AGREE row for this exact block). dijkstra is recomputed live (a few ms); the arterial road
+    # set is the PINNED `_ARTERIAL_1751` (see module docstring -- ~25s to recompute live, too slow
+    # for this suite under CPU contention).
+    deep = _dji_block("DJI.3_1_1751")
+    tree_roads = DijkstraReblocker().propose(deep).roads
+    assert tree_roads is not None
+    through_roads = gpd.GeoDataFrame(
+        geometry=[wkt.loads(w) for w in _ARTERIAL_1751["arterial_wkt"]], crs=deep.parcels.crs)
+    tree_benefit = resistance_benefit(deep, tree_roads)(tree_roads)
+    through_benefit = resistance_benefit(deep, through_roads)(through_roads)
+    assert np.isfinite(tree_benefit) and np.isfinite(through_benefit)
+    assert through_benefit >= tree_benefit, (
+        f"grounded R should credit the deep block's egress shortcut (through-road benefit "
+        f"{through_benefit} < tree benefit {tree_benefit})"
+    )

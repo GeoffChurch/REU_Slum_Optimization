@@ -530,10 +530,11 @@ class _BlockScoringContext:
         FROZEN `entry`/`splits` (derived once against the full road set) -- mirrors
         `score_frozen`'s CSR build exactly (same `base_pairs`/`_build_csr` call), but solves the
         grounded Laplacian (`_resistance_core`) instead of running `_sampled_efficiency_core`'s
-        Dijkstra. An empty base edge set (no streets, no prefix roads) or 0 parcels -> `self.cap`
-        (every parcel unreached), matching `_resistance_core`'s own unreached-cap convention."""
-        if self.n < 1:
-            return self.cap
+        Dijkstra. An empty base edge set (no streets, no prefix roads) -> `self.cap` (every parcel
+        unreached), matching `_resistance_core`'s own unreached-cap convention. (No separate
+        `self.n < 1` guard: the only caller, `resistance_benefit`, already returns a constant 0.0
+        function when `ctx.n < 2`, and `_resistance_core` itself returns 0.0 -- not `self.cap` --
+        for 0 parcels, so a guard here would be both dead and wrong.)"""
         prefix_segs = (_explode_segments(roads_prefix.geometry)
                        if roads_prefix is not None and len(roads_prefix) else [])
         base_pairs = [*prefix_segs, *self.street_segs]

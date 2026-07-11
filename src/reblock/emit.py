@@ -187,16 +187,18 @@ _METRIC_YLABELS = {
     "access": "fraction of access-burden removed",
     "efficiency": "network efficiency E",
     "directness": "directness (1/circuity)",
+    "resistance": "fraction of egress resistance removed",
 }
 
 
 def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "length") -> None:
-    """Per metric (access, efficiency, directness): a per-method summary table + overlaid
-    cost-benefit curves per block. `results` is the flat (method x block x metric) list from
-    reblock.compare. `cost` sets the x-axis (road density m/ha, or buildings displaced) AND the
-    table: for "length" a `auc_table_{metric}.csv` (mean AUC, higher = better); for "displacement"
-    a `tradeoff_table_{metric}.csv` (mean terminal benefit + mean buildings displaced) -- because
-    AUC over the displacement axis inverts (a method that displaces nothing scores 0)."""
+    """Per metric (access, efficiency, directness, resistance): a per-method summary table +
+    overlaid cost-benefit curves per block. `results` is the flat (method x block x metric) list
+    from reblock.compare. `cost` sets the x-axis (road density m/ha, or buildings displaced) AND
+    the table: for "length" a `auc_table_{metric}.csv` (mean AUC, higher = better); for
+    "displacement" a `tradeoff_table_{metric}.csv` (mean terminal benefit + mean buildings
+    displaced) -- because AUC over the displacement axis inverts (a method that displaces nothing
+    scores 0)."""
     import csv
     from statistics import mean
     out_dir.mkdir(parents=True, exist_ok=True)

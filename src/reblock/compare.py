@@ -22,6 +22,7 @@ from reblock.budget import (
     auc,
     cost_benefit_curve,
     efficiency_directness_curves,
+    resistance_benefit,
 )
 from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
@@ -31,8 +32,9 @@ from reblock.region import RegionBuilder, region_reblock
 
 log = logging.getLogger(__name__)
 
-# The three lenses every method is graded on: access (burden removed), network-efficiency
-# (E, mean 1/distance), and directness (mean euclid/distance, i.e. 1/circuity).
+# The four lenses every method is graded on: access (burden removed), network-efficiency
+# (E, mean 1/distance), directness (mean euclid/distance, i.e. 1/circuity), and resistance
+# (grounded egress resistance, redundancy-aware, benefit = fraction of egress resistance removed).
 
 
 @dataclass(frozen=True)
@@ -97,9 +99,12 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
                                         cost=cost, corridor_m=corridor_m)
             eff, direct = efficiency_directness_curves(block, roads, cost=cost,
                                                        corridor_m=corridor_m)   # one sweep -> both
+            resistance = cost_benefit_curve(block, roads, benefit_fn=resistance_benefit,
+                                            cost=cost, corridor_m=corridor_m)
             raw.append((name, label, "access", access))
             raw.append((name, label, "efficiency", eff))
             raw.append((name, label, "directness", direct))
+            raw.append((name, label, "resistance", resistance))
     results: list[MethodCurve] = []
     groups = {(label, metric) for _, label, metric, _ in raw}
     for label, metric in groups:

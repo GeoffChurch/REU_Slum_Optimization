@@ -8,8 +8,12 @@ basis the earlier "aspirational is the directness ceiling / price of buildabilit
 **not** hold: directness/E measure *internal circulation*, which frontage-hugging (buildable) tends
 to serve at least as well on a compact block; the through-road advantage is real only on
 deep/elongated regions. (Egress — getting *out* — is a separate question uniform all-pairs does not
-weight; that is Piece 2's job.) Piece 2 (demand/egress-weighted aggregation; grounded effective
-resistance) remains a prototype on branch `north-star-metric`.
+weight; that is Piece 2's job.) **Piece 2 (grounded effective resistance) ADOPTED 2026-07-11** as
+the `resistance` compare lens — a 4th cost-benefit metric alongside access/efficiency/directness in
+`reblock.compare` (see `src/reblock/budget.py`'s `resistance_benefit`/`_resistance_core` and
+`docs/superpowers/specs/2026-07-11-resistance-eval-design.md`). This ships the egress-weighted
+*grading* lens only; a resistance-objective greedy method (scoring candidates by the marginal
+resistance drop instead of directness) is still a follow-up, not yet built.
 
 This is the metric we are *aiming* at. Today's three lenses — access (Σ depth²),
 network-efficiency E (mean 1/d), and directness (mean euclid/d) — are useful proxies, but
@@ -140,10 +144,11 @@ shortest-path E does not. Movement ≈ current flow; "easy to get around" ≈ lo
 
 ## Near-term vs long-term
 
-- **Near-term:** keep the three lenses; line-proximity entries + the door-to-door basis are
-  adopted (directness is now an honest circuity ratio in [0, 1]), and the "aspirational ceiling /
-  price of buildability" framing is retired — directness/E read as internal-circulation metrics.
-- **Long-term:** replace them with demand-weighted travel cost, entries line-noded — and
-  evaluate **grounded effective resistance** as the cheap, redundancy-aware, monotone,
-  cheap-marginal spectral surrogate (which may also let the greedy methods score candidates far
-  faster than the current full re-scoring).
+- **Near-term:** keep the four lenses (access, efficiency, directness, and now `resistance`);
+  line-proximity entries + the door-to-door basis are adopted (directness is now an honest
+  circuity ratio in [0, 1]), and the "aspirational ceiling / price of buildability" framing is
+  retired — directness/E read as internal-circulation metrics, and `resistance` reads as the
+  egress metric (§ above, ADOPTED as a grading lens only).
+- **Long-term:** replace them with demand-weighted travel cost, entries line-noded; a
+  resistance-based greedy that scores candidates by their marginal resistance drop (cheap-marginal
+  Sherman-Morrison updates, instead of the current full re-scoring) remains a follow-up.

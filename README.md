@@ -84,11 +84,13 @@ across the whole budget range (not just at full build, where they converge):
 pixi run python -m reblock.compare data=dji eval=kcomplexity methods=[dijkstra,mesh,greedy_arterial_buildable] max_blocks=2
 ```
 
-Grades every method on three lenses — `access` (fraction of access-burden removed),
-`efficiency` (network efficiency E, mean 1/distance), and `directness` (1/circuity) —
-and writes, **per metric**, `auc_table_{metric}.csv` (mean AUC per method, higher = more
-benefit per meter of road) and `curve_{metric}_{block}.png` (overlaid cost-benefit curves:
-that metric vs road density, m/ha), for `metric ∈ {access, efficiency, directness}`. Add
+Grades every method on four lenses — `access` (fraction of access-burden removed),
+`efficiency` (network efficiency E, mean 1/distance), `directness` (1/circuity), and
+`resistance` (grounded effective resistance to egress, redundancy-aware — lower resistance
+is better egress, benefit = fraction of egress resistance removed) — and writes, **per
+metric**, `auc_table_{metric}.csv` (mean AUC per method, higher = more benefit per meter of
+road) and `curve_{metric}_{block}.png` (overlaid cost-benefit curves: that metric vs road
+density, m/ha), for `metric ∈ {access, efficiency, directness, resistance}`. Add
 `topology` and `peel` to `methods=[...]` for the full field — topology is minutes/block, so
 keep the block count small (results are cached after the first run). On real data, dijkstra
 tracks topology closely on access at a fraction of the compute, while peel needs ~3× the road
