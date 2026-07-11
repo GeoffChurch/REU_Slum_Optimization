@@ -4,12 +4,14 @@ removed) vs cost (road density, m/ha). AUC = a 0-1 efficiency score. See the des
 """
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar, cast
 
 import networkx as nx
+import numpy as np
 import pandas as pd
 from geopandas import GeoDataFrame
 from shapely import STRtree
@@ -164,6 +166,13 @@ def _split_graph(g: nx.Graph, edges: list[LineString],
     return h
 
 
+def _dist_or_inf(dist: dict[tuple[float, float], float], e: tuple[float, float] | None) -> float:
+    """`dist[e]` (a `nx.single_source_dijkstra_path_length` result) or +inf if `e` is None / not
+    reached -- the sentinel `_sampled_efficiency` uses so a missing/unreached netdist drops out of
+    a `np.isfinite` mask instead of needing a separate None check."""
+    return math.inf if e is None else dist.get(e, math.inf)
+
+
 def _sampled_efficiency(g: nx.Graph, entry: list[tuple[float, float] | None],
                         reps: list[Point], sources: list[int]) -> tuple[float, float]:
     """(E, directness) of the DOOR-TO-DOOR trip between every parcel pair, over graph `g`. The
@@ -174,26 +183,33 @@ def _sampled_efficiency(g: nx.Graph, entry: list[tuple[float, float] | None],
     directness = mean(euclid/d) is a true circuity ratio bounded in [0, 1]; E = mean(1/d). Averaged
     over the FIXED all-parcel pair set (unreached pairs -- an entry missing, or absent/unreachable
     in `g` -- contribute 0); (0, 0) if there are no pairs. The legs are fixed once entries are
-    frozen and `netdist` is non-increasing as roads grow, so both metrics stay monotone."""
+    frozen and `netdist` is non-increasing as roads grow, so both metrics stay monotone.
+
+    Numpy-vectorized: the per-source Dijkstra call stays (networkx, over the graph `g`), but the
+    O(K*N) leg/euclid/accumulation arithmetic that used to call shapely's `Point.distance` per
+    pair is precomputed once as numpy arrays and reduced with masked sums."""
+    n = len(entry)
+    if n == 0 or not sources:
+        return 0.0, 0.0
+    rep_xy = np.array([[p.x, p.y] for p in reps], dtype=np.float64)
+    entry_xy = np.array([[np.nan, np.nan] if e is None else [e[0], e[1]] for e in entry],
+                        dtype=np.float64)
+    legs = np.hypot(rep_xy[:, 0] - entry_xy[:, 0], rep_xy[:, 1] - entry_xy[:, 1])  # NaN if e None
+    src_xy = rep_xy[sources]                                                     # (K, 2)
+    src_euclid = np.hypot(src_xy[:, 0, None] - rep_xy[:, 0], src_xy[:, 1, None] - rep_xy[:, 1])
+
     inv_sum = dir_sum = 0.0
     pairs = 0
-    legs = [reps[i].distance(Point(e)) if e is not None else None for i, e in enumerate(entry)]
-    for si in sources:
+    for i, si in enumerate(sources):
+        pairs += n - 1                            # all j != si, unchanged regardless of validity
         src = entry[si]
         dist = nx.single_source_dijkstra_path_length(g, src) if src is not None and src in g else {}
-        leg_i = legs[si]
-        for j in range(len(entry)):
-            if j == si:
-                continue
-            pairs += 1
-            nd = dist.get(entry[j]) if entry[j] is not None else None
-            leg_j = legs[j]
-            if nd is None or leg_i is None or leg_j is None:
-                continue                          # a parcel with no entry / unreachable -> 0
-            d = leg_i + nd + leg_j                 # door-to-door: walk + drive + walk
-            if d > 0:
-                inv_sum += 1.0 / d
-                dir_sum += reps[si].distance(reps[j]) / d
+        nd = np.array([_dist_or_inf(dist, e) for e in entry], dtype=np.float64)
+        d = legs[si] + nd + legs                  # door-to-door: walk + drive + walk
+        mask = (entry[si] is not None) & np.isfinite(nd) & np.isfinite(legs) & (d > 0)
+        mask[si] = False                          # exclude the self pair (j == si)
+        inv_sum += float(np.sum(1.0 / d[mask]))
+        dir_sum += float(np.sum(src_euclid[i, mask] / d[mask]))
     if pairs == 0:
         return 0.0, 0.0
     return inv_sum / pairs, dir_sum / pairs
