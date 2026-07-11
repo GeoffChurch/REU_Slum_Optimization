@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 import geopandas as gpd
 import networkx as nx
+import numpy as np
+import shapely
 from geopandas import GeoDataFrame
 from pyproj import CRS
 from shapely import STRtree
@@ -95,36 +97,100 @@ def _candidate_chords(anchors: list[tuple[float, float]],
     return sorted(chords, key=lambda ls: ls.wkt)
 
 
-def _snap(chord: LineString, g: nx.Graph, node_tree: STRtree,
-          nodes: list[tuple[float, float]], lam: float) -> LineString | None:
+@dataclass
+class _SnapGraph:
+    """`_boundary_graph(block.parcels)` plus everything `_snap` needs precomputed ONCE per block:
+    the nearest-node lookup tree and, for every graph edge, its midpoint (as a shapely `Point`,
+    for the vectorized ufunc below) and length. Building this once per block -- instead of per
+    candidate chord -- lifts the per-edge Python-loop `mid.distance(chord)` (the profiled `_snap`
+    hot cost) out of the greedy's ~thousands-of-candidates inner loop."""
+    g: nx.Graph
+    node_tree: STRtree
+    nodes: list[tuple[float, float]]
+    edges: list[tuple[tuple[float, float], tuple[float, float]]]
+    mid_points: np.ndarray               # shapely Point per edge, aligned with `edges`
+    lengths: np.ndarray                  # edge length (== g[u][v]["weight"]), aligned with `edges`
+
+
+def _snap_graph(g: nx.Graph) -> _SnapGraph:
+    nodes = list(g.nodes)
+    node_tree = STRtree([Point(nd) for nd in nodes])
+    edges = list(g.edges())
+    xs = np.array([(u[0] + v[0]) / 2 for u, v in edges], dtype=float)
+    ys = np.array([(u[1] + v[1]) / 2 for u, v in edges], dtype=float)
+    lengths = np.array([g[u][v]["weight"] for u, v in edges], dtype=float)
+    return _SnapGraph(g, node_tree, nodes, edges, shapely.points(xs, ys), lengths)
+
+
+def _snap(chord: LineString, sg: _SnapGraph, lam: float) -> LineString | None:
     """Buildable realization: the boundary-graph path between the chord endpoints' nearest
     nodes that hugs the ideal line (edge cost = length + lam * dist(edge midpoint, chord)).
-    None if the endpoints snap to the same node or no path exists."""
+    None if the endpoints snap to the same node or no path exists.
+
+    The per-edge weight is computed ONCE per chord via shapely's vectorized `shapely.distance`
+    ufunc over the block's precomputed `edge_midpoints` (bit-identical to the scalar
+    `Point.distance(chord)` the naive per-edge loop would call -- both call into the same GEOS
+    routine) instead of a Python-loop shapely call per edge per Dijkstra relaxation. The result is
+    folded into an `{(u, v): weight}` dict (both directions, since the graph is undirected and
+    `nx.shortest_path`'s callback may see either); the weight callback only looks it up, so the
+    same `nx.shortest_path` call, weights, and (hence) equal-cost tie-break as before -- identical
+    path geometry, minus the per-edge shapely cost."""
     p, q = _rnd(_xy(chord.coords[0])), _rnd(_xy(chord.coords[-1]))
-    np_ = nodes[int(node_tree.nearest(Point(p)))]
-    nq_ = nodes[int(node_tree.nearest(Point(q)))]
+    np_ = sg.nodes[int(sg.node_tree.nearest(Point(p)))]
+    nq_ = sg.nodes[int(sg.node_tree.nearest(Point(q)))]
     if np_ == nq_:
         return None
 
+    dists = shapely.distance(sg.mid_points, chord)
+    weights = sg.lengths + lam * dists
+    weight_map: dict[tuple[tuple[float, float], tuple[float, float]], float] = {}
+    for (u, v), wt in zip(sg.edges, weights, strict=True):
+        fwt = float(wt)
+        weight_map[(u, v)] = fwt
+        weight_map[(v, u)] = fwt
+
     def w(u: tuple[float, float], v: tuple[float, float], d: dict[str, float]) -> float:
-        mid = Point((u[0] + v[0]) / 2, (u[1] + v[1]) / 2)
-        return float(d["weight"]) + lam * mid.distance(chord)
+        del d
+        return weight_map[(u, v)]
 
     try:
-        path = nx.shortest_path(g, np_, nq_, weight=w)
+        path = nx.shortest_path(sg.g, np_, nq_, weight=w)
     except (nx.NetworkXNoPath, nx.NodeNotFound):
         return None
     return LineString([tuple(node) for node in path])
 
 
-def _planarize(lines: list[LineString], crs: CRS) -> GeoDataFrame:
-    """unary_union the lines (nodes crossings), explode to LineStrings, one row each."""
-    if not lines:
+def _merge(lines: list[LineString]) -> BaseGeometry | None:
+    """`unary_union(lines)`, or `None` for an empty list (the incremental-`_planarize` base)."""
+    return unary_union(lines) if lines else None
+
+
+def _explode(merged: BaseGeometry | None, crs: CRS) -> GeoDataFrame:
+    """Explode a (possibly `None`) merged/noded geometry into a one-row-per-LineString
+    GeoDataFrame."""
+    if merged is None:
         return gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=crs)
-    merged = unary_union(lines)
     parts: list[BaseGeometry] = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
     rows = [ln for ln in parts if "LineString" in ln.geom_type and ln.length > 0]
     return gpd.GeoDataFrame({"geometry": rows}, geometry="geometry", crs=crs)
+
+
+def _planarize(lines: list[LineString], crs: CRS) -> GeoDataFrame:
+    """unary_union the lines (nodes crossings), explode to LineStrings, one row each."""
+    return _explode(_merge(lines), crs)
+
+
+def _union_with(base_merged: BaseGeometry | None, real: LineString) -> BaseGeometry:
+    """Incremental planarize: node `real` against the already-merged `base_merged` (or just
+    `real` alone if there is no base yet) instead of re-unioning the whole committed list. Matches
+    `_StepContext.score_candidate`'s road-graph merge exactly (`budget.py`) -- bit-exact for
+    BUILDABLE trials, which meet the committed/street network only at shared boundary-graph
+    vertices, so this incremental two-stage union nodes identically to a one-shot union of the
+    full list. It is NOT bit-exact for aspirational free chords crossing a committed edge at a
+    float interior point ("Bug 2" -- see `_StepContext`'s docstring), so callers must gate this
+    on `mode == "buildable"` and use the full `_planarize(committed + [real], ...)` for
+    aspirational."""
+    return unary_union([base_merged, real]) if base_merged is not None else unary_union([real])
 
 
 def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]],
@@ -159,8 +225,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     base_burden = access_burden(parcel_access_layers(
         block, None, tol=STREET_TOL, adj=adj, unreached_depth=len(block.parcels) + 1))
     g = _boundary_graph(block.parcels)
-    nodes = list(g.nodes)
-    node_tree = STRtree([Point(nd) for nd in nodes])
+    sg = _snap_graph(g)                    # precomputed once per block -- see `_snap`
     # Raw street geometries (may be a MultiLineString for a holed/courtyard block) -- do NOT
     # filter to LineString, or Multi* streets get dropped and the proposal comes back empty;
     # _anchor_points explodes Multi* internally.
@@ -173,7 +238,8 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     while len(committed) < max_roads:
         network: list[BaseGeometry] = [*streets, *committed]
         anchors = _anchor_points(network, n_anchors)
-        base = _planarize(committed, block.crs)
+        base_merged = _merge(committed)              # unary_union(committed), once per step
+        base = _explode(base_merged, block.crs)
         base_val = _score(objective, block, base, adj, base_burden, ctx)
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
@@ -182,28 +248,34 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         # Route per-candidate scoring by mode. BUILDABLE trials are boundary-snapped (they join the
         # committed/street network at shared graph vertices), so the incremental
         # `step.score_candidate` is bit-exact to `_score(objective, _planarize(committed+[real]))`
-        # while skipping the per-candidate full entry re-derivation -- the perf win. ASPIRATIONAL
-        # trials are free chords crossing committed edges at float interior points, where the
-        # incremental planarize noding is NOT bit-exact (design "Bug 2"), so those use the full
-        # `ctx.score(_planarize(committed + [real]))` reference path below (still frozen-constants
-        # fast). `access` has no context and always re-derives per candidate.
+        # while skipping the per-candidate full entry re-derivation -- the perf win. Likewise, a
+        # buildable trial's noding is bit-exact under `_union_with`'s incremental `unary_union`
+        # (§4 -- meets the network only at shared vertices), so the `access`-objective buildable
+        # path (no `ctx`, so no `step`) uses that incremental union too. ASPIRATIONAL trials are
+        # free chords crossing committed edges at float interior points, where the incremental
+        # planarize noding is NOT bit-exact (design "Bug 2"), so those always use the full
+        # `_planarize(committed + [real])` re-union below (still frozen-constants fast via `ctx`
+        # when scored, for efficiency/directness).
         step = ctx.step(base) if (ctx is not None and mode == "buildable") else None
 
         best_gain, best_real = 0.0, None
         for chord in _candidate_chords(anchors, targets):
-            real = chord if mode == "aspirational" else _snap(chord, g, node_tree, nodes, lam)
+            real = chord if mode == "aspirational" else _snap(chord, sg, lam)
             if real is None or real.length == 0:
                 continue
             trial: GeoDataFrame | None = None
             if step is not None:
                 e, direct = step.score_candidate(real)
                 raw = (e if objective == "efficiency" else direct) - base_val
+            elif mode == "buildable":
+                trial = _explode(_union_with(base_merged, real), block.crs)
+                raw = _score(objective, block, trial, adj, base_burden, ctx) - base_val
             else:
                 trial = _planarize(committed + [real], block.crs)
                 raw = _score(objective, block, trial, adj, base_burden, ctx) - base_val
             if cost == "displacement":
                 if trial is None:
-                    trial = _planarize(committed + [real], block.crs)
+                    trial = _explode(_union_with(base_merged, real), block.crs)  # step -> buildable
                 denom = float(displacement_count(block.building_points, trial, corridor_m)
                              - committed_disp)
             else:

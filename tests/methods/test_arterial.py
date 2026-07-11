@@ -2,7 +2,6 @@ from typing import cast
 
 import geopandas as gpd
 from pyproj import CRS
-from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.budget import displacement_count
@@ -17,6 +16,7 @@ from reblock.methods.arterial import (
     _greedy_arterials,
     _planarize,
     _snap,
+    _snap_graph,
 )
 from reblock.methods.dijkstra import _boundary_graph
 
@@ -62,10 +62,9 @@ def test_candidate_chords_include_through_roads_and_spurs() -> None:
 def test_snap_returns_a_boundary_following_street_connected_path() -> None:
     block = _grid_block(5)
     g = _boundary_graph(block.parcels)
-    nodes = list(g.nodes)
-    tree = STRtree([Point(nd) for nd in nodes])
+    sg = _snap_graph(g)
     chord = LineString([(0.0, 2.5), (5.0, 2.5)])          # a horizontal cut across the grid
-    path = _snap(chord, g, tree, nodes, lam=2.0)
+    path = _snap(chord, sg, lam=2.0)
     assert path is not None
     # every vertex of the snapped path is a boundary-graph node (buildable)
     assert all(_round(c) in set(g.nodes) for c in path.coords)
@@ -126,6 +125,19 @@ def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     curve = cost_benefit_curve(block, roads)                     # integrates with budget machinery
     assert len(curve.cost) >= 2                                  # multiple budget points, not stub
     assert curve.benefit[-1] >= curve.benefit[0]                 # benefit doesn't regress w/ budget
+
+
+def test_arterial_proposal_wkt_unchanged() -> None:
+    # The perf-refactor gate for `_snap`/`_planarize` (task 5 of the arterial-frozen-context perf
+    # design): buildable arterial roads on the real 1808 block must match the pinned reference WKT
+    # EXACTLY -- not merely score-equivalent. `_snap`'s shapely-ufunc weights and `_planarize`'s
+    # incremental union are perf-only changes; any drift here means a path or noding decision
+    # actually changed.
+    from scoring_fixtures import _REF, _block_1808
+    roads = GreedyArterialReblocker(mode="buildable", objective="directness").propose(
+        _block_1808()).roads
+    assert roads is not None
+    assert sorted(g.wkt for g in roads.geometry) == sorted(_REF["arterial_buildable"]["wkt"])
 
 
 def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
