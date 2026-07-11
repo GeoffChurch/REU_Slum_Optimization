@@ -148,11 +148,18 @@ candidate. Three layers:
   crossings with streets and each other are noded), inject their entry splits, and re-derive each
   parcel's `(nearest_edge_distance, entry_node)` **against streets ∪ committed**. Cost
   O(N × (street+committed) edges), paid 8–15 times total, not 7,220.
-- **Per candidate (incremental within a step):** only the single trial road `real` is new. For
-  each parcel compare its `StepContext` nearest-edge distance with its distance to `real`'s few
-  edges and take the closer → the candidate entries; append `real`'s edges (noded against
-  streets ∪ committed by the incremental planarize, §4) and its entry-split nodes to the step CSR
-  → the per-candidate CSR; then `_sampled_efficiency`.
+- **Per candidate (incremental within a step):** only the single trial road `real` is new.
+  **Entries:** for each parcel compare its `StepContext` nearest-edge distance with its distance to
+  `real`'s few edges and take the closer → the candidate entries (the entry *node* is invariant to
+  whether a committed edge is later split at a crossing — projection foot-point + `_rnd` unchanged
+  — so the StepContext base stays valid). **Graph (R1 — must re-node crossings):** build the road
+  subgraph from the incremental-planarize explode `unary_union([base_merged, real])` (§4), which
+  re-nodes **committed×trial mid-span crossings** — a bare "append `real`'s edges to the step CSR"
+  leaves the committed edge unsplit at the crossing and gives a wrong distance (measured: aspirational
+  diagonals `dir=0.333` vs the true `0.444`). Harmless for buildable (snapped roads meet only at
+  shared lattice vertices) but wrong for aspirational chords and real cadastral geometry. The
+  per-candidate graph = frozen street CSR + this freshly planarized road CSR + entry splits; then
+  `_sampled_efficiency`.
 
 This is exactly equivalent to `network_efficiency(block, _planarize(committed+[real]))` because
 streets ∪ committed ∪ trial is the full edge set the current `_line_entries` sees. Exact distance
@@ -168,12 +175,15 @@ item (I2/C1).
   *different equal-cost paths* (both valid), which would change proposed roads on grid fixtures
   (risk I4). To keep geometry **identical**, retain `nx.shortest_path` (same algorithm → same
   tie-break) but eliminate its dominant cost — the per-edge shapely `mid.distance(chord)` in the
-  weight callback (the 2.38s `w`). Precompute all boundary-graph edge midpoints once
-  (`edge_midpoint_xy (E,2)`, constant per block); per chord compute every edge's
-  `dist(midpoint, chord)` in one **vectorized numpy point-to-segment** pass into an edge→weight
-  dict, and give `nx.shortest_path` a weight callback that only looks it up. Same weights, same
-  path, identical geometry, minus the shapely. (A csgraph `_snap` is deferred — it needs a
-  tie-break matching networkx, which is fragile.)
+  weight callback (the 2.38s `w`). Precompute all boundary-graph edge midpoints once as a
+  shapely `Point` array (`edge_midpoints`, constant per block); per chord compute every edge's
+  `dist(midpoint, chord)` in one call to **shapely's own vectorized ufunc**
+  `shapely.distance(edge_midpoints, chord)` — verified **bit-identical** to the per-point
+  `Point.distance(chord)` (a numpy point-to-segment reimplementation differs by ~50 ulp and flips
+  ~1 path in 220, changing geometry — R2). Fold into an edge→weight dict and give
+  `nx.shortest_path` a weight callback that only looks it up. Same weights, same path, identical
+  geometry, minus the Python-loop shapely. (A csgraph `_snap` is deferred — it needs a tie-break
+  matching networkx, which is fragile.)
 - **`_planarize` (incremental):** planarize `committed` once per greedy step
   (`base_merged = unary_union(committed)`); per candidate compute `unary_union([base_merged,
   real])` and explode, instead of re-unioning the whole `committed + [real]` list each time. This
@@ -217,7 +227,9 @@ above does NOT exercise it, so C1/I2 would ship silently otherwise):** for a blo
 committed road**, assert the arterial's incremental per-candidate score equals
 `network_efficiency(block, _planarize(committed + [real]))` for a battery of trial roads `real`.
 The public harness only ever scores *full* road sets through full re-derivation, so it cannot
-catch an incremental-entry bug (e.g. omitting committed roads); this test must.
+catch an incremental-entry bug (e.g. omitting committed roads); this test must. **The battery MUST
+include an aspirational trial that crosses a committed road mid-span** (not just buildable grid
+trials, which meet at shared vertices), or the R1 crossing-node bug slips.
 
 **Invariants (existing tests must stay green, unchanged):** `directness ∈ [0,1]`, within-prefix
 monotonicity, the recorded AUC ordering and region ratio.
@@ -251,9 +263,10 @@ speedup is measured, not assumed.
    committed road, battery of trials) must match `network_efficiency(block, _planarize(committed +
    [real]))` byte-for-byte, PLUS public harness + full suite; re-time (the big drop —
    `_line_entries` is no longer O(N × all-edges) per candidate).
-5. **`_snap` numpy weights + incremental `_planarize`.** `_snap` keeps `nx.shortest_path` but
-   precomputes per-chord edge weights via vectorized numpy point-to-segment (identical geometry).
-   Planarize `committed` once per step; per candidate union only `[base_merged, real]`. Gate:
+5. **`_snap` shapely-ufunc weights + incremental `_planarize`.** `_snap` keeps `nx.shortest_path`
+   but computes per-chord edge weights via shapely's vectorized `shapely.distance` ufunc
+   (bit-identical to `Point.distance`, so path unchanged). Planarize `committed` once per step; per
+   candidate union only `[base_merged, real]`. Gate:
    arterial proposed roads **identical** on the fixtures (WKT match) + full suite; re-time.
 6. **Remove networkx from the metric path + final measurement.** Delete the dead nx graph builders
    from the scoring path (nx remains only in `road_drainage` + `_snap`); migrate the
@@ -293,13 +306,20 @@ speedup is measured, not assumed.
   (streets ∪ committed, rebuilt per commit) folds committed roads into both the graph and the
   entry base; only `real` is per-candidate incremental. Guarded by the incremental-scorer parity
   test on a block with ≥1 committed road.
+- **Committed×trial mid-span crossings (R1).** Appending only `real`'s edges to the step CSR leaves
+  a committed edge unsplit where `real` crosses it mid-span (aspirational diagonals) → a missing
+  crossing node and wrong distance (`dir=0.333` vs true `0.444`). Build the road subgraph from the
+  `unary_union([base_merged, real])` explode, which re-nodes the crossing. Guarded by an
+  aspirational-crossing trial in the parity battery (buildable grids meet only at shared vertices).
 - **CSR duplicate-edge summation (I3).** scipy *sums* duplicate `(i,j)` COO entries (repeated edge
   → doubled weight → wrong distance), whereas networkx dedups and `_split_graph` removes a split
   edge's parent before adding its chain. The CSR build must dedup undirected pairs
   (last-write-wins) and delete the parent pair on split injection. Verified by harness parity.
-- **`_snap` path tie-break (I4).** csgraph and networkx pick different equal-cost paths on
-  symmetric grids → different geometry. Resolved by keeping `nx.shortest_path` for `_snap` (same
-  tie-break, identical geometry), only removing its shapely cost. Gate: WKT-identical proposals.
+- **`_snap` path tie-break (I4/R2).** csgraph and networkx pick different equal-cost paths on
+  symmetric grids → different geometry; and even with `nx.shortest_path`, a numpy weight
+  reimplementation differs from shapely by ~50 ulp and flips a path. Resolved by keeping
+  `nx.shortest_path` AND computing weights via shapely's own `shapely.distance` ufunc
+  (bit-identical to `Point.distance`). Gate: WKT-identical proposals.
 - **Entry tie-breaks (task 4).** `_line_entries` breaks exact-distance ties by edge index; the
   incremental `min(step-base, real)` could pick a different edge on an exact tie. Exact ties are
   measure-zero on continuous coordinates and the entry point is `_rnd`-rounded; parity is verified
