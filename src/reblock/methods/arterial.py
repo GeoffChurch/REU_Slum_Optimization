@@ -1,7 +1,8 @@
 """GreedyArterialReblocker: greedily insert the single straight arterial with the best
 objective gain per meter, one at a time, until a road budget runs out. Two modes -- buildable
-(snapped to the parcel-boundary graph) and aspirational (ideal chords) -- so the compare reports
-the price of buildability. Candidates are through-roads (network<->network) + spurs
+(snapped to the parcel-boundary graph; the shippable navigability method) and aspirational (ideal
+chords; a diagnostic isolating the effect of frontage-snapping, NOT a universal directness ceiling
+-- see the design doc's correction note). Candidates are through-roads (network<->network) + spurs
 (network->deep pocket); continuations are through-roads from committed-segment endpoints (always
 anchors), so a spur completes into a through-road for free and crossings planarize into true
 intersections. See docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-design.md.

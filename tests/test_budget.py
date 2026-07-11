@@ -120,7 +120,7 @@ def test_efficiency_and_directness_rise_with_roads() -> None:
 def test_line_proximity_scores_a_sparse_straight_chord() -> None:
     # A single 2-point straight chord has only its endpoints as graph vertices, so the OLD
     # nearest-VERTEX entry rule scored parcels abreast of its middle as ~unreachable (~0
-    # directness) -- inverting the price-of-buildability. Line-proximity projects each parcel onto
+    # directness) -- undercounting sparse through-roads. Line-proximity projects each parcel onto
     # the nearest POINT on the chord, so the sparse chord genuinely serves the parcels it runs past.
     from shapely.geometry import LineString
 

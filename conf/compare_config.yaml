@@ -13,9 +13,12 @@ all_methods:
   topology: {_target_: reblock.methods.topology.TopologyMethod}
   mesh: {_target_: reblock.methods.mesh.MeshReblocker}
   greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: directness}
-  # aspirational (ideal straight chords) is the directness ceiling -- valid now that
-  # network_efficiency scores by line-proximity entries (which count sparse chords the old
-  # nearest-vertex rule missed). buildable then reads as the measurable price of buildability.
+  # aspirational (ideal straight chords, not snapped to frontages) is a DIAGNOSTIC -- it isolates
+  # the effect of frontage-snapping, NOT a universal directness ceiling. directness/E measure
+  # internal circulation (all-pairs, door-to-door incl. the walk-to-road legs); under that honest
+  # metric a frontage-hugging buildable road gives every parcel a short walk leg, so on a compact
+  # block buildable tends to match or beat aspirational. The through-road advantage shows on
+  # deep/elongated regions, where a straight road shortcuts trips a frontage tree can't.
   greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
 methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable]

@@ -113,7 +113,8 @@ def _line_entries(geoms: list[BaseGeometry], reps: list[Point], edges: list[Line
     -- NOT the nearest graph VERTEX. The old nearest-vertex rule undercounted
     sparse straight chords (aspirational arterials): a 2-point chord has only its endpoints as
     vertices, so a parcel abreast of its middle snapped to nothing and the chord scored ~0,
-    inverting the price-of-buildability. Query by the parcel GEOMETRY, not its interior rep point:
+    spuriously ranking sparse through-roads far below frontage-dense ones. Query by the parcel
+    GEOMETRY, not its interior rep point:
     a parcel's roads run along its boundary, so on real (meters-wide) parcels the rep point is far
     from every edge and would spuriously find none. For each parcel take the nearest edge within
     `tol` of it, project the rep point onto that edge (`P = edge.interpolate(edge.project(rep))` =

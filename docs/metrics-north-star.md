@@ -1,9 +1,14 @@
 # Reblocking metrics — north star
 
-**Status:** guiding vision · **Date:** 2026-07-09 · **Piece 1 (line-proximity entries) ADOPTED
-2026-07-10** — `network_efficiency` now maps a parcel to the nearest point on a road edge (not the
-nearest graph vertex), fixing the sparse-chord undercount that inverted the price-of-buildability;
-this unblocked aspirational arterial as a valid directness ceiling. Piece 2 (grounded effective
+**Status:** guiding vision · **Date:** 2026-07-09 · **Piece 1 (line-proximity entries) + door-to-door
+basis ADOPTED 2026-07-10** — `network_efficiency` maps a parcel to the nearest point on a road edge
+(not the nearest graph vertex), fixing the sparse-chord undercount, and scores the whole door-to-door
+trip `walk + drive + walk`, so directness is an honest circuity ratio in [0, 1]. Under that honest
+basis the earlier "aspirational is the directness ceiling / price of buildability" reading does
+**not** hold: directness/E measure *internal circulation*, which frontage-hugging (buildable) tends
+to serve at least as well on a compact block; the through-road advantage is real only on
+deep/elongated regions. (Egress — getting *out* — is a separate question uniform all-pairs does not
+weight; that is Piece 2's job.) Piece 2 (demand/egress-weighted aggregation; grounded effective
 resistance) remains a prototype on branch `north-star-metric`.
 
 This is the metric we are *aiming* at. Today's three lenses — access (Σ depth²),
@@ -54,16 +59,25 @@ with universal reachability as a hard constraint.**
 It is the "one desideratum to rule them all" we kept circling, done properly: right units,
 demand-aware, with the parcel→graph entry problem fixed at the root.
 
-### The artifact this explains
+### The artifact this explains (and its correction)
 
-We hit a concrete symptom while building the arterial method: `network_efficiency` scores a
-parcel as "served" only if a graph **vertex** sits within `tol` of it. Buildable roads (boundary
+We hit a concrete symptom while building the arterial method: `network_efficiency` scored a
+parcel as "served" only if a graph **vertex** sat within `tol` of it. Buildable roads (boundary
 paths) are vertex-dense so this ≈ line-proximity; ideal straight chords (2 vertices) are not, so
-they get massively undercounted, inverting the price-of-buildability. Densifying the chords
-was tried and **rejected** — it bloats the graph and makes scoring too slow — so the aspirational
-ceiling is currently *deferred*, not patched (the artifact stands). **The north-star's
-line-proximity noded entry would dissolve it** — every method, including the aspirational
-ceiling, "just works" — which is the real reason to move to it.
+they were massively undercounted. Line-proximity noded entries (Piece 1) fixed that — a straight
+chord now serves every parcel it passes.
+
+But fixing the entry mapping surfaced a deeper point. The old "aspirational chord is the directness
+**ceiling**, buildable pays a *price of buildability*" reading was itself an artifact — of scoring
+`netdist` between road-access points while ignoring the **walk-to-road legs**. The door-to-door basis
+(`d = walk + drive + walk`) counts those legs, and then a frontage-hugging buildable road — a short
+walk leg for every parcel — matches or beats the ideal chord on a compact block's *internal
+circulation*. So there is no universal price of buildability. A straight through-road wins where it
+should: on deep/elongated regions, where it shortcuts long trips a frontage tree cannot. (Egress —
+getting *out* — is a separate question the current uniform-all-pairs metric does not weight; that is
+the demand-weighted north-star's job.) The three lenses still disagree because they answer different
+questions (internal circulation vs egress vs redundancy) — which is exactly what the demand-weighted
+north-star metric is meant to unify.
 
 ## Cheap proxies (and yes — spectral ones are the interesting part)
 
@@ -126,8 +140,9 @@ shortest-path E does not. Movement ≈ current flow; "easy to get around" ≈ lo
 
 ## Near-term vs long-term
 
-- **Near-term:** keep the three lenses; the vertex artifact stays *unpatched* (densification
-  was evaluated and rejected as too slow), so the aspirational ceiling is deferred.
+- **Near-term:** keep the three lenses; line-proximity entries + the door-to-door basis are
+  adopted (directness is now an honest circuity ratio in [0, 1]), and the "aspirational ceiling /
+  price of buildability" framing is retired — directness/E read as internal-circulation metrics.
 - **Long-term:** replace them with demand-weighted travel cost, entries line-noded — and
   evaluate **grounded effective resistance** as the cheap, redundancy-aware, monotone,
   cheap-marginal spectral surrogate (which may also let the greedy methods score candidates far

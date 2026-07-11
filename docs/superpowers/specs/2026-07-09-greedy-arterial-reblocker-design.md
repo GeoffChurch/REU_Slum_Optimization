@@ -2,12 +2,17 @@
 
 **Status:** draft for review · **Date:** 2026-07-09
 
-> **Implementation note (2026-07-10):** the **buildable** mode shipped (it leads dijkstra/mesh
-> ~10× on directness). The **aspirational** mode + "price of buildability" are **deferred**: the
-> aspirational ceiling is not valid under the current vertex-based `network_efficiency` scoring
-> (sparse-vertex ideal chords are undercounted; densifying is too slow), so `greedy_arterial_aspirational`
-> is not in the compare. The root fix is the line-proximity metric in `docs/metrics-north-star.md`.
-> Sections below describing aspirational/price-of-buildability are the design intent, not shipped behavior.
+> **Correction note (2026-07-10):** the framing below — "aspirational is the directness *ceiling*,
+> buildable pays a *price of buildability*" — did NOT survive honest measurement, and is retired.
+> Both modes ship (`greedy_arterial_buildable`, `greedy_arterial_aspirational`), scored on
+> line-proximity entries + a **door-to-door** basis (`d = walk + drive + walk`), so directness is an
+> honest circuity ratio in [0, 1]. Under that basis the ideal chord is **not** a universal ceiling:
+> directness/E measure *internal circulation*, which frontage-hugging **buildable** roads serve best
+> on a compact block (every parcel gets a short walk leg), so there buildable matches or beats
+> aspirational — buildability costs nothing. The through-road advantage is real only on
+> deep/elongated regions and for egress. `aspirational` is kept as a **diagnostic** (isolating the
+> effect of frontage-snapping), not an upper bound. See `docs/metrics-north-star.md`
+> ("The artifact this explains (and its correction)"). Sections below are the original design intent.
 
 A new `Method` that grows a road network by **greedily inserting the single best straight
 segment** — the through-road, spur, or continuation with the highest objective gain per meter —

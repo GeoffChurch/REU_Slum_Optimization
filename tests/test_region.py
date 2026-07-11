@@ -215,8 +215,8 @@ def test_region_reblock_arterial_beats_dijkstra_with_a_margin_on_a_wide_region()
     auc_dij = auc(dij_directness, cap)
     auc_art = auc(art_directness, cap)
 
-    # Recorded numbers (door-to-door directness basis): AUC dijkstra ~0.071, arterial ~0.405
-    # (ratio ~5.7). On this DEEP wide region the arterial's cross-region through-road reaches the
+    # Recorded numbers (door-to-door directness basis): AUC dijkstra ~0.071, arterial ~0.39
+    # (ratio ~5.5). On this DEEP wide region the arterial's cross-region through-road reaches the
     # buried middle directly while dijkstra's per-block trees detour, so arterial wins by a wide
     # margin -- and honestly so (the door-to-door basis, unlike the old entry-denominator one,
     # only credits directness a resident actually experiences).

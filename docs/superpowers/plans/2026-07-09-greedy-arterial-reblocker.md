@@ -1,6 +1,14 @@
 # GreedyArterialReblocker Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **RETIRED / SUPERSEDED (2026-07-11) — do NOT execute.** This plan is COMPLETE (the method
+> shipped), and its "price of buildability / aspirational is the directness *ceiling*" framing is
+> **retired**, not live guidance. In particular the Task 4 test
+> `test_aspirational_ceiling_dominates_buildable_on_directness` and its "ceiling ≥ buildable / do not
+> weaken the assertion" instruction assert a claim that is **false** under the shipped door-to-door
+> metric: directness measures internal circulation, and a frontage-hugging buildable road matches or
+> beats the ideal chord on a compact block. See the correction notes in
+> `docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-design.md` and
+> `docs/metrics-north-star.md`. Kept only as a historical record.
 
 **Goal:** A `Method` that greedily inserts the single best straight arterial (highest objective gain per meter) one at a time until a road budget runs out, in a buildable mode (snapped to parcel frontages) and an aspirational mode (ideal chords), so the compare reports the "price of buildability."
 
