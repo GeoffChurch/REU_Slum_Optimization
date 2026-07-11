@@ -179,12 +179,15 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         targets = _deep_targets(block, curr_roads, top_k, adj)
         committed_disp = (displacement_count(block.building_points, base, corridor_m)
                           if cost == "displacement" else 0)
-        # For the metric objectives, score every candidate INCREMENTALLY off this commit's
-        # streets-∪-committed step context (frozen once here); only the trial road is new. This is
-        # bit-exact to `_score(objective, block, _planarize(committed + [real]), ...)` but skips
-        # re-deriving every parcel's entry against the whole graph per candidate. `access` has no
-        # context and still re-derives per candidate.
-        step = ctx.step(base) if ctx is not None else None
+        # Route per-candidate scoring by mode. BUILDABLE trials are boundary-snapped (they join the
+        # committed/street network at shared graph vertices), so the incremental
+        # `step.score_candidate` is bit-exact to `_score(objective, _planarize(committed+[real]))`
+        # while skipping the per-candidate full entry re-derivation -- the perf win. ASPIRATIONAL
+        # trials are free chords crossing committed edges at float interior points, where the
+        # incremental planarize noding is NOT bit-exact (design "Bug 2"), so those use the full
+        # `ctx.score(_planarize(committed + [real]))` reference path below (still frozen-constants
+        # fast). `access` has no context and always re-derives per candidate.
+        step = ctx.step(base) if (ctx is not None and mode == "buildable") else None
 
         best_gain, best_real = 0.0, None
         for chord in _candidate_chords(anchors, targets):

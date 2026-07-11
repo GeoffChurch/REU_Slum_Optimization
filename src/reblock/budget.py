@@ -448,30 +448,44 @@ class _StepContext:
     edges (+ any committed/street edges `real` splits) rather than re-deriving every parcel against
     every edge. Built via `ctx.step(committed)`.
 
-    `score_candidate(real)` is bit-exact to `ctx.score(_planarize(committed + [real]))`: the same
-    combined edge set (streets ∪ committed ∪ trial, planarized), the same `_line_entries`
-    (distance, edge-index) tie-break resolved against the SAME `networkx.Graph.edges()` order, and
-    the same re-noding of committed×trial mid-span crossings (design risk R1 -- the road subgraph is
-    the `unary_union([base_merged, real])` explode, so a diagonal crossing a committed road mid-span
-    becomes a true node). The step's per-parcel base freezes, for each parcel, only the step edges
-    at its MINIMUM streets∪committed distance -- a farther edge can never win the final (distance,
-    nx-index) argmin, and a min-distance step edge that `real` later SPLITS is dropped from the
-    frozen candidate and its split sub-segment recovered from the per-candidate delta (the sub-
-    segment carries the same nearest point, so the entry node is unchanged, only its nx-index)."""
+    PRECONDITION (see `score_candidate`): `score_candidate(real)` is bit-exact to
+    `ctx.score(_planarize(committed + [real]))` ONLY for boundary-snapped trials that meet the
+    committed/street network at SHARED graph vertices -- the buildable mode, where `_snap` returns
+    boundary-graph paths, so a new road joins committed roads at common lattice nodes and never
+    splits a committed edge at a floating-point interior point. It is NOT bit-exact for aspirational
+    free chords that cross a committed edge at an interior float point: there
+    `unary_union([base_merged, real])` does not node identically to the reference
+    `unary_union(committed + [real])` (the incremental-planarize noding diverges within `_rnd`
+    rounding -- design "Bug 2"), so the greedy routes aspirational candidates through the full
+    `ctx.score(_planarize(committed + [real]))` reference path instead (see
+    `arterial._greedy_arterials`); `score_candidate` is used only for buildable.
+
+    The step's per-parcel base freezes, for each parcel, ALL streets∪committed edges within `tol`,
+    each as `(edge pair, parcel->edge distance, projection-along-edge, entry node)`. The final entry
+    is the full `_line_entries` (distance, nx-edge-index) argmin over {frozen step edges} ∪
+    {`real`/split delta edges}, resolved against the SAME `networkx.Graph.edges()` order `.score`
+    uses (so exact-distance grid ties pick the same node). Freezing ALL near edges -- not only those
+    at the minimum distance -- is the "Bug-1" robustness fix: when `real` cleanly SPLITS a parcel's
+    nearest step edge, that edge is dropped (its pair is no longer in the noded edge set) and its
+    near sub-segment -- whose `_rnd`-rounded crossing distance can rise ABOVE a 2nd-nearest step
+    edge -- is recovered from the per-candidate delta; a min-distance-only freeze would have
+    discarded that 2nd-nearest edge and picked the wrong entry node."""
 
     def __init__(self, ctx: _BlockScoringContext, committed: GeoDataFrame | None) -> None:
         self.ctx = ctx
         lines = (list(committed.geometry)
                  if committed is not None and len(committed) else [])
-        # The planarized committed union, re-noded against `real` per candidate (R1).
+        # The planarized committed union, re-noded against `real` per candidate.
         self.base_merged: BaseGeometry | None = unary_union(lines) if lines else None
         committed_segs = _explode_segments(lines)
         step_pairs: list[_Pair] = [*committed_segs, *ctx.street_segs]
         self.step_set: set[frozenset[_Node]] = {frozenset(p) for p in step_pairs}
-        # Per parcel: its nearest streets∪committed edge distance (inf if none within tol) and the
-        # step edges achieving it, each as (edge pair, projection-along-edge, entry node).
-        self.base_dist: list[float] = [float("inf")] * ctx.n
-        self.step_cands: list[list[tuple[_Pair, float, _Node]]] = [[] for _ in range(ctx.n)]
+        # Per parcel: ALL streets∪committed edges within `tol`, each as
+        # (edge pair, parcel->edge distance, projection-along-edge, entry node). Freezing EVERY near
+        # edge (not only the minimum-distance ones) is the Bug-1 fix: when `real` splits a parcel's
+        # nearest edge, that edge is dropped and its sub-segment's `_rnd`-rounded distance can
+        # exceed a 2nd-nearest edge, which must therefore stay a live candidate.
+        self.step_cands: list[list[tuple[_Pair, float, float, _Node]]] = [[] for _ in range(ctx.n)]
         if step_pairs and ctx.n:
             self._freeze_base(step_pairs)
 
@@ -482,21 +496,18 @@ class _StepContext:
         if hits.shape[1] == 0:
             return
         pidx, eidx, dist, proj, foot_xy = _reproject_hits(ctx.geoms_arr, ctx.reps_arr, lines, hits)
-        per: list[list[tuple[float, _Pair, float, _Node]]] = [[] for _ in range(ctx.n)]
         for m in range(pidx.shape[0]):
             node = (round(float(foot_xy[m, 0]), 2), round(float(foot_xy[m, 1]), 2))
-            per[int(pidx[m])].append((float(dist[m]), step_pairs[int(eidx[m])],
-                                      float(proj[m]), node))
-        for p, cands in enumerate(per):
-            if not cands:
-                continue
-            bmin = min(d for d, *_ in cands)
-            self.base_dist[p] = bmin
-            self.step_cands[p] = [(pair, pr, node) for d, pair, pr, node in cands if d == bmin]
+            self.step_cands[int(pidx[m])].append(
+                (step_pairs[int(eidx[m])], float(dist[m]), float(proj[m]), node))
 
     def score_candidate(self, real: LineString) -> tuple[float, float]:
-        """(E, directness) for streets ∪ committed ∪ `real`, incrementally -- bit-exact to
-        `ctx.score(_planarize(committed + [real]))`."""
+        """(E, directness) for streets ∪ committed ∪ `real`, incrementally. Bit-exact to
+        `ctx.score(_planarize(committed + [real]))` ONLY when `real` meets the committed/street
+        network at shared graph vertices (buildable-snapped trials); NOT bit-exact for aspirational
+        free chords crossing a committed edge at a float interior point ("Bug 2" -- see the class
+        docstring, which is why the greedy routes aspirational through the full path). Robust to
+        `real` cleanly splitting a parcel's nearest step edge ("Bug-1" fix)."""
         ctx = self.ctx
         if ctx.n < 2:
             return 0.0, 0.0
@@ -527,10 +538,10 @@ class _StepContext:
         splits: dict[_Pair, list[tuple[float, _Node]]] = defaultdict(list)
         for p in range(ctx.n):
             per = cands[p]
-            for pair, pr, node in self.step_cands[p]:
+            for pair, sdist, pr, node in self.step_cands[p]:
                 fs = frozenset(pair)
                 if fs in idx:                          # a split-away step edge is dropped here...
-                    per.append((self.base_dist[p], idx[fs], pair, pr, node))
+                    per.append((sdist, idx[fs], pair, pr, node))
             if not per:                                # ...and recovered from `delta_pairs` above
                 continue
             _d, _i, pair, pr, node = min(per, key=lambda t: (t[0], t[1]))
