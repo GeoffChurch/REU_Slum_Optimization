@@ -54,7 +54,31 @@ access/directness per metre); **dijkstra** = buildable coverage (best resistance
 displacement); **arterial** = strategic through-roads (directness objective, slow); **topology** =
 middle, too slow to keep as-is.
 
-**Recommendation: productionize as a `Method` (spec → plan → SDD)** — a straight-line / aspirational-
-access reblocker that slots into compare/render alongside dijkstra/topology/arterial. Productionization
-to-dos: deterministic tie-breaking; a config for the depth target; decide whether to offer an optional
-loop-closing post-pass for redundancy.
+## The unification (better productionization target): repulsion-parameterized least-cost path
+`repulsion_path_demo.py`. Instead of a hard straight line, route each road as a LEAST-COST PATH on a
+cost field that repels from building points: `cost(x) = 1 + repulsion / clearance(x)`, clearance =
+distance to nearest building point. One scalar spans the whole family:
+- `repulsion = 0` -> uniform cost -> the straight line (== method A, aspirational).
+- `repulsion -> inf` -> the path hugs max-clearance ridges = the Voronoi edges (equidistant from the
+  two nearest building points) = the buildable gaps (== topology / dijkstra frontage-following).
+
+**Validated on one deep parcel (single least-cost path to street, swept):**
+| repulsion | path length | buildings hit (within 3 m) |
+|---|---|---|
+| 0 | 37.0 m | 5 (straight, crosses buildings) |
+| 10 | 37.8 m | 1 |
+| 100 / 1000 | 38.7 m | 1 (weaves the Voronoi gaps) |
+
+**+5% length buys −80% displacement**, and the knob controls it — even re-routing to a lower-
+displacement *destination* at high repulsion. The metrics detect the tradeoff (length + directness vs
+displacement). The greedy WRAPPER still needs fixing (naive `net`-growth degrades roads to stubs and
+doesn't terminate — a productionization detail; the per-path mechanism is proven). Grid + csgraph
+multi-source Dijkstra per step.
+
+**Recommendation: productionize the UNIFIED repulsion-parameterized method** (spec → plan → SDD), not
+straight-line-A alone — it subsumes A (repulsion=0), topology/buildable (repulsion=inf), and the whole
+directness↔displacement frontier between, in ONE Method with ONE physical knob. Slots into
+compare/render alongside dijkstra/arterial. Productionization to-dos: fix the greedy wrapper
+(terminate on depth target; don't let `net` degrade roads); grid resolution vs speed on big blocks
+(the incremental-depth trick from straight-line-fast still applies to the parcel-depth recompute);
+deterministic tie-breaking; config for `repulsion` + depth target.
