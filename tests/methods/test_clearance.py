@@ -1,10 +1,13 @@
 import math
 from dataclasses import replace
+from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
 import numpy as np
 import pytest
+from hydra import compose, initialize_config_dir
+from hydra.utils import instantiate
 from pyproj import CRS
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
@@ -250,3 +253,40 @@ def test_propose_achieves_target_on_real_block() -> None:
     assert roads is not None
     after = parcel_access_layers(block, roads).to_numpy()
     assert int(after.max()) <= 2  # invariant holds whether or not roads were needed
+
+
+def test_clearance_module_is_in_derivation_modules() -> None:
+    # so a change to the algorithm busts the memoized propose() cache (like dijkstra/mesh/arterial)
+    from reblock.derive_graph import _DERIVATION_MODULES
+    assert any(p.name == "clearance.py" and p.parent.name == "methods"
+               for p in _DERIVATION_MODULES)
+
+
+def test_clearance_method_yaml_instantiates_with_defaults() -> None:
+    conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="config", overrides=["method=clearance"])
+    method = instantiate(cfg.method)
+    assert isinstance(method, ClearanceReblocker)
+    assert method.identity == ("clearance", 0.0, 2, 1.5, 400)
+
+
+def test_clearance_registered_in_compare_all_methods() -> None:
+    conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="compare_config")
+    method = instantiate(cfg.all_methods["clearance"])
+    assert isinstance(method, ClearanceReblocker)
+
+
+def test_propose_routes_through_memoized_derivation() -> None:
+    # region_reblock / compare call derivations.propose; a cacheable block returns identical roads
+    from scoring_fixtures import _block_1808  # bare: see the note above on the same import
+
+    from reblock.derivations import propose
+    block = _block_1808()
+    m = ClearanceReblocker(depth_target=2, res=0.75)
+    r1 = propose(m, block).roads
+    r2 = propose(m, block).roads
+    assert r1 is not None and r2 is not None
+    assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
