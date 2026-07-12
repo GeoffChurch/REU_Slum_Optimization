@@ -81,7 +81,9 @@ class ScreenSelectionInput:
     (the source content hash + every gate param), never the paths -- so a rerun with the same
     source + gates returns the ranked block_ids from one L2 lookup instead of rebuilding the
     thousands of survivor blocks (Voronoi + access-depth) the fine pass walks. A missing source
-    hash makes it uncacheable (bypass). Bump the version tag if the selection algorithm changes."""
+    hash makes it uncacheable (bypass). The selection logic is hashed into the derive() key
+    (screen/dense_compact.py is in derive_graph._DERIVATION_MODULES), so a gating/ranking change
+    busts the cache automatically -- no hand-bumped version."""
     source_hash: str
     blocks_path: str
     buildings_path: str
