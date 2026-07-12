@@ -31,6 +31,7 @@ def main() -> None:
     screen = DenseCompactScreen(max_depth_min=6.0)         # deep informal fabric, deepest-first
     ranked = screen.select(source)                          # memoized -> instant on rerun
     geoms = source.block_geometries()                      # block_id + geometry + building_count
+    print(f"screen: flagged {len(ranked)} of {len(geoms)} blocks (dense, deep informal)")
     count = dict(zip(geoms["block_id"].astype(str), geoms["building_count"], strict=True))
 
     seed = next(b for b in ranked if SEED_MIN <= count.get(b, 0) <= SEED_MAX)

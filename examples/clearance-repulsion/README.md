@@ -70,6 +70,8 @@ a minute end-to-end for one small region.
 |---|---|---|---|---|---|
 | ![before](before.png) | ![s=-6](after_s-6.png) | ![s=-2](after_s-2.png) | ![s=0](after_s0.png) | ![s=+2](after_s+2.png) | ![s=+6](after_s+6.png) |
 
+_The s=-6 and s=-2 panels render identically: at this region's scale the cost field is near-uniform for both, below the res=1.5 grid's resolution to distinguish them._
+
 ## Metrics (actual run output)
 
 | repulsion | roads | length_m | displaced | max_depth |
@@ -97,7 +99,10 @@ fewer building footprints) while `length_m` rises from 328 to 389 (hugging the g
 buildings is less direct than a straight line, so the same coverage costs more road). The two most
 repulsion-averse settings (`s=-6, -2`) tie exactly (`71` displaced, `328` m) — at this region's
 scale the cost field is already close enough to uniform at both settings that the greedy search
-finds the same paths; the difference opens up moving toward the Voronoi-following end.
+finds the same paths; the difference opens up moving toward the Voronoi-following end. `length_m`
+is monotone non-decreasing at the extremes but dips by 1 m at `s=0` (327, below `s=-2`'s 328)
+before rising — that's grid-scale noise from the `res=1.5` search grid, not a real reversal of the
+trend.
 
 **Road count drifts down slightly, not up.** `s=-6` and `s=+6` both need roads to reach every
 parcel, but the straighter paths at negative `s` are less efficient at reusing already-built road
