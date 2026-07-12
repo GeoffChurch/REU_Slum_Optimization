@@ -220,7 +220,7 @@ def test_propose_metadata_and_identity() -> None:
     assert m.identity == ("clearance", 2.0, 3, 0.75, 50)
     p = m.propose(_column_block_with_buildings(4))
     assert p.method == "clearance"
-    assert p.proposal_id == "clearance:r2:d3:res0.75"
+    assert p.proposal_id == "clearance:r2:d3:res0.75:mr50"
     assert p.block_identity == _column_block_with_buildings(4).identity
     assert p.params["repulsion"] == 2.0 and p.params["depth_target"] == 3
 

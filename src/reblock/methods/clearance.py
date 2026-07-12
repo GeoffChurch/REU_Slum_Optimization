@@ -246,7 +246,9 @@ class ClearanceReblocker:
         roads, params = _greedy_reblock(
             block, t=t, res=self.res, depth_target=self.depth_target,
             max_roads=self.max_roads, radii=radii)
-        pid = f"clearance:r{self.repulsion:g}:d{self.depth_target}:res{self.res:g}"
+        # encode every identity field so distinct configs never share a Proposal.identity
+        pid = (f"clearance:r{self.repulsion:g}:d{self.depth_target}"
+               f":res{self.res:g}:mr{self.max_roads}")
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=pid, method="clearance",
