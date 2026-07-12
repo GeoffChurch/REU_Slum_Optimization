@@ -91,7 +91,7 @@ def _draw_heatmap(
         block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
 
     if own_points is not None and not own_points.empty:
-        own_points.plot(ax=ax, color=_OWN_PT, markersize=5)
+        own_points.plot(ax=ax, color=_OWN_PT, markersize=1.25)  # half-radius (markersize is area)
     # Displaced sites (own_points that fall inside a committed road's corridor): a hollow ring
     # drawn on top of own_points -- the cost of the straight road made visible next to it.
     if displaced_points is not None and not displaced_points.empty:

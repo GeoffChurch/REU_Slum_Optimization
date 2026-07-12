@@ -47,8 +47,22 @@ def main() -> None:
     vmax = int(before.max())
     frame = frame_bbox(region.parcels)
     own_pts = region.building_points
-    save_render(render_before(region, before, vmax=vmax, own_points=own_pts, frame=frame),
-                OUT / "before.png")
+
+    # Dimmed context = the FULL RAW block set in the render frame (NOT the screened selection),
+    # minus the region's own members -- the surrounding formal grid the informal fabric sits in.
+    # Mirrors reblock.run's render path (emit.py): block_geometries()/building_points() are the
+    # raw source, windowed to `frame`; the screen never enters here.
+    outlines = source.block_geometries(frame)
+    is_member = outlines["block_id"].astype(str).isin(members)
+    context_outlines = outlines[~is_member]
+    member_union = outlines[is_member].geometry.union_all()
+    ctx_pts = source.building_points(frame)
+    context_points = ctx_pts[~ctx_pts.geometry.within(member_union)]
+
+    save_render(
+        render_before(region, before, vmax=vmax, own_points=own_pts, frame=frame,
+                      context_outlines=context_outlines, context_points=context_points),
+        OUT / "before.png")
 
     print(f"\n{'repulsion':>9} {'roads':>5} {'length_m':>9} {'displaced':>9} {'max_depth':>9}")
     for s in REPULSIONS:
@@ -57,7 +71,8 @@ def main() -> None:
         after = parcel_access_layers(region, roads)
         length = float(sum(g.length for g in roads.geometry)) if len(roads) else 0.0
         displaced = displacement_count(region.building_points, roads, 3.0)
-        fig = render_after(region, proposal, after, vmax=vmax, own_points=own_pts, frame=frame)
+        fig = render_after(region, proposal, after, vmax=vmax, own_points=own_pts, frame=frame,
+                           context_outlines=context_outlines, context_points=context_points)
         tag = f"{s:+.0f}".replace("+0", "0")
         save_render(fig, OUT / f"after_s{tag}.png")
         print(f"{s:>9.0f} {len(roads):>5d} {length:>9.0f} {displaced:>9d} {int(after.max()):>9d}")
