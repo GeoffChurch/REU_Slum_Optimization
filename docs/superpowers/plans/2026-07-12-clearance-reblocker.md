@@ -412,7 +412,7 @@ Design notes the implementer must honour:
 - **Early exit:** compute adjacency + depth first; if `depth.max() <= depth_target`, return an empty roads GeoDataFrame (no grid needed).
 - **Deepest parcel, deterministic:** `worst = the parcel among argmax(depth) with the smallest parcel_id`.
 - **Road geometry:** `parcel representative point → grid least-cost path nodes → (conditionally) nearest actual street point`. Append the street point **only when the path terminates within `res*_NET_TOL_FACTOR` of the street** (bridging the sub-`res` grid→street gap). When the path instead terminates on a prior road's grid node (already street-connected via `net`), do **not** append a street point — that would draw a spurious segment to a far street. Drop consecutive-duplicate coords; skip any road with `< 2` distinct coords.
-- **Unreachable parcel:** if the deepest parcel's grid node is unreachable from `net` (non-finite Dijkstra distance) or degenerates to `< 2` coords, pin its depth to `depth_target` so it is not re-selected, increment an `unreached` counter, and continue (do **not** break the whole loop).
+- **Grid-unroutable parcel — a discretization artifact, NOT parcel-graph reachability:** the greedy's Dijkstra runs on the *grid* graph (the cost-field lattice), a third graph distinct from both the parcel/Voronoi-adjacency graph (always connected → `parcel_access_layers` gives every parcel a finite depth) and the road network. A grid node is unroutable only when a sub-`res` pinch in a concave boundary severs its lattice component from every street seed in `net` (a convex-hull region can't pinch, so this never fires there; lower `res` dissolves it otherwise). If the deepest parcel's nearest grid node is grid-unroutable (non-finite Dijkstra distance) or the road degenerates to `< 2` coords, set its depth to `-inf` so it is excluded from further selection, increment `n_grid_unreachable`, and continue — do **not** break the whole loop (other deep parcels are still routable). Name the param `grid_unreachable` (NOT `unreachable` — that is `DijkstraReblocker`'s distinct parcel-graph notion), and compute `max_depth_after` from one honest final `parcel_access_layers` recompute so a stranded parcel is surfaced, never masked.
 - **After adding a road:** `served = parcels within STREET_TOL of the road (STRtree dwithin)`; `_relax_depth`; extend `net` with the road's grid path nodes so later roads can join it.
 - **`proposal_id`** encodes params: `f"clearance:r{repulsion:g}:d{depth_target}:res{res:g}"`.
 
@@ -537,7 +537,7 @@ def _greedy_reblock(
     empty = gpd.GeoDataFrame(geometry=[], crs=block.crs)
     if depth.size == 0 or float(depth.max()) <= depth_target:
         return empty, {"roads": 0, "max_depth_after": int(depth.max()) if depth.size else 0,
-                       "unreached": 0, "max_roads_hit": False}
+                       "grid_unreachable": 0, "max_roads_hit": False}
 
     pts, rows, cols, edist = _build_grid(block.boundary, res)
     if len(pts) == 0:
@@ -562,7 +562,7 @@ def _greedy_reblock(
             "forest has no root")
 
     roads: list[LineString] = []
-    unreached = 0
+    n_grid_unreachable = 0
     while len(roads) < max_roads:
         maxd = float(depth.max())
         if maxd <= depth_target:
@@ -572,8 +572,8 @@ def _greedy_reblock(
         start = int(pt_tree.query(reps[worst])[1])
         d, pred, _src = dijkstra(csr, indices=net, return_predecessors=True, min_only=True)
         if not np.isfinite(d[start]):
-            depth[worst] = float(depth_target)                    # unreachable: pin, don't re-pick
-            unreached += 1
+            depth[worst] = -np.inf                                # grid-unroutable: drop from selection
+            n_grid_unreachable += 1
             continue
         pathn = [start]
         while pred[pathn[-1]] >= 0:
@@ -586,8 +586,8 @@ def _greedy_reblock(
             coords.append((sp.x, sp.y))
         coords = [c for i, c in enumerate(coords) if i == 0 or c != coords[i - 1]]
         if len(coords) < 2:
-            depth[worst] = float(depth_target)
-            unreached += 1
+            depth[worst] = -np.inf
+            n_grid_unreachable += 1
             continue
         road = LineString(coords)
         roads.append(road)
@@ -596,11 +596,13 @@ def _greedy_reblock(
         _relax_depth(depth, adj, served)
         net.extend(pathn)
 
-    max_roads_hit = len(roads) >= max_roads and float(depth.max()) > depth_target
     gdf = gpd.GeoDataFrame(geometry=roads, crs=block.crs)
+    final = parcel_access_layers(block, gdf, adj=adj)             # honest max over the ACTUAL network
+    max_depth_after = int(final.max())                            # surfaces any grid-stranded parcel
+    max_roads_hit = len(roads) >= max_roads and max_depth_after > depth_target
     params: dict[str, object] = {
-        "roads": len(roads), "max_depth_after": int(depth.max()),
-        "unreached": unreached, "max_roads_hit": bool(max_roads_hit)}
+        "roads": len(roads), "max_depth_after": max_depth_after,
+        "grid_unreachable": n_grid_unreachable, "max_roads_hit": bool(max_roads_hit)}
     return gdf, params
 
 
