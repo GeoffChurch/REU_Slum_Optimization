@@ -1,17 +1,25 @@
 import math
 from typing import cast
 
+import geopandas as gpd
 import numpy as np
 import pytest
+from pyproj import CRS
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
+from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
+from shapely.ops import unary_union
 
+from reblock.contracts import Block
+from reblock.derive.access import STREET_TOL, parcel_access_layers
+from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.clearance import (
     _build_grid,
     _edge_weights,
     _node_clearance,
+    _relax_depth,
     _sigmoid,
 )
 
@@ -97,3 +105,35 @@ def test_repulsion_bends_the_path_around_buildings() -> None:
     len_repelled, clear_repelled = route(_sigmoid(6.0))
     assert clear_straight < clear_repelled           # repelled path keeps farther from buildings
     assert len_repelled >= len_straight - 1e-9        # ...at no less than the straight length
+
+
+UTM = CRS.from_epsg(32643)
+
+
+def _column_block(h: int) -> Block:
+    """A 1-wide, h-tall column of unit parcels with street frontage only on the bottom edge ->
+    access depth 1..h from the street upward. parcel_id == row index (bottom = 0)."""
+    polys = [Polygon([(0, j), (1, j), (1, j + 1), (0, j + 1)]) for j in range(h)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(h))}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, unary_union(polys))
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (1, 0)])], crs=UTM)
+    return Block(block_id="col", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+
+
+def test_relax_depth_matches_full_recompute() -> None:
+    # A single street-connected road up the column should, incrementally, reproduce exactly what
+    # parcel_access_layers computes from scratch for that road.
+    block = _column_block(6)
+    geoms = list(block.parcels.geometry)
+    adj = parcel_adjacency(geoms, STREET_TOL)
+    depth = parcel_access_layers(block, None, adj=adj).to_numpy().astype(float)
+    assert list(depth) == [1, 2, 3, 4, 5, 6]  # sanity: deep column
+
+    road = gpd.GeoDataFrame(geometry=[LineString([(0.5, 0.0), (0.5, 6.0)])], crs=UTM)
+    served = [int(p) for p in STRtree(geoms).query(
+        road.geometry.iloc[0], predicate="dwithin", distance=STREET_TOL)]
+    _relax_depth(depth, adj, served)
+
+    naive = parcel_access_layers(block, road, adj=adj).to_numpy().astype(float)
+    assert list(depth) == list(naive)
+    assert max(depth) == 1.0  # every parcel now fronts the street-connected road

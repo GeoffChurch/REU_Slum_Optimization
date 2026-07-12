@@ -13,6 +13,8 @@ See docs/superpowers/specs/2026-07-12-clearance-reblocker-design.md.
 from __future__ import annotations
 
 import math
+from collections import deque
+from collections.abc import Iterable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -93,3 +95,23 @@ def _edge_weights(
     uniform (straight); t->1 -> cost dominated by 1/clearance (hug the high-clearance gaps)."""
     node_cost = (1.0 - t) + t / clear
     return edist * 0.5 * (node_cost[rows] + node_cost[cols])
+
+
+def _relax_depth(depth: NDArray[np.float64], adj: list[set[int]], served: Iterable[int]) -> None:
+    """In place: given parcels `served` now front a street-connected road (depth 1), lower
+    `depth` and propagate depth[j] = depth[i] + 1 outward along parcel adjacency `adj` (BFS),
+    never raising a value. Equals a full `parcel_access_layers` recompute because a road only
+    adds street frontage (parcel adjacency is unchanged), so the post-road depth is a BFS from
+    (original street seeds) union (newly served parcels)."""
+    q: deque[int] = deque()
+    for p in served:
+        if depth[p] > 1.0:
+            depth[p] = 1.0
+            q.append(int(p))
+    while q:
+        i = q.popleft()
+        di = depth[i]
+        for j in adj[i]:
+            if depth[j] > di + 1.0:
+                depth[j] = di + 1.0
+                q.append(j)
