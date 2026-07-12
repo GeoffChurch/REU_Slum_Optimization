@@ -1,4 +1,5 @@
 import math
+from dataclasses import replace
 from typing import cast
 
 import geopandas as gpd
@@ -17,8 +18,10 @@ from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.clearance import (
+    ClearanceReblocker,
     _build_grid,
     _edge_weights,
+    _greedy_reblock,
     _node_clearance,
     _relax_depth,
     _sigmoid,
@@ -170,3 +173,80 @@ def test_relax_depth_matches_recompute_on_disconnected_component() -> None:
     default_base = parcel_access_layers(block, None, adj=adj).to_numpy().astype(float)
     _relax_depth(default_base, adj, served)
     assert list(default_base) != list(naive)           # default seeding -> falsely shallow
+
+
+def _column_block_with_buildings(h: int) -> Block:
+    block = _column_block(h)
+    pts = [g.representative_point() for g in block.parcels.geometry]
+    block_bp = gpd.GeoDataFrame(geometry=pts, crs=UTM)
+    return Block(block_id="colb", crs=UTM, boundary=block.boundary, parcels=block.parcels,
+                 streets=block.streets, building_points=block_bp)
+
+
+def test_greedy_reblock_achieves_depth_target() -> None:
+    block = _column_block_with_buildings(8)  # depth 1..8
+    roads, params = _greedy_reblock(block, t=0.5, res=0.5, depth_target=2, max_roads=400,
+                                    radii=np.zeros(len(block.building_points)))
+    assert len(roads) > 0
+    after = parcel_access_layers(block, roads).to_numpy()
+    assert int(after.max()) <= 2
+    assert params["max_roads_hit"] is False
+
+
+def test_greedy_reblock_returns_empty_when_already_shallow() -> None:
+    block = _column_block_with_buildings(2)  # depth 1..2, target 2 -> nothing to do
+    roads, params = _greedy_reblock(block, t=0.5, res=0.5, depth_target=2, max_roads=400,
+                                    radii=np.zeros(len(block.building_points)))
+    assert len(roads) == 0
+    assert params["roads"] == 0
+
+
+def test_propose_is_deterministic_and_leaves_rng_untouched() -> None:
+    block = _column_block_with_buildings(8)
+    np.random.seed(123)
+    state = np.random.get_state()[1].tolist()
+    p1 = ClearanceReblocker(depth_target=2, res=0.5).propose(block)
+    p2 = ClearanceReblocker(depth_target=2, res=0.5).propose(block)
+    assert np.random.get_state()[1].tolist() == state
+    assert p1.roads is not None and p2.roads is not None and len(p1.roads) > 0
+    assert [g.wkt for g in p1.roads.geometry] == [g.wkt for g in p2.roads.geometry]
+
+
+def test_propose_metadata_and_identity() -> None:
+    m = ClearanceReblocker(repulsion=2.0, depth_target=3, res=0.75, max_roads=50)
+    assert m.identity == ("clearance", 2.0, 3, 0.75, 50)
+    p = m.propose(_column_block_with_buildings(4))
+    assert p.method == "clearance"
+    assert p.proposal_id == "clearance:r2:d3:res0.75"
+    assert p.block_identity == _column_block_with_buildings(4).identity
+    assert p.params["repulsion"] == 2.0 and p.params["depth_target"] == 3
+
+
+def test_distinct_repulsions_get_distinct_proposal_identity() -> None:
+    # so access_after / geometric_after (keyed on the proposal) never collide across the knob
+    # (res=0.5: the fixture's unit-width column needs a sub-1 grid resolution, like every other
+    # _column_block_with_buildings test here -- the default res=1.5 is for real meter-scale blocks.
+    # source_content_hash gives the block a non-None identity, matching the real (Source-loaded)
+    # blocks this collision concern is actually about -- Block.identity is None for the bare
+    # synthetic fixture, which would make Proposal.identity collapse to None regardless of
+    # proposal_id and the second assertion vacuously fail.)
+    block = replace(_column_block_with_buildings(6), source_content_hash="test-hash")
+    a = ClearanceReblocker(repulsion=-6.0, res=0.5).propose(block)
+    b = ClearanceReblocker(repulsion=6.0, res=0.5).propose(block)
+    assert a.proposal_id != b.proposal_id
+    assert a.identity != b.identity
+
+
+def test_propose_achieves_target_on_real_block() -> None:
+    # bare (not `tests.scoring_fixtures`): pyproject.toml deliberately keeps tests/ without an
+    # __init__.py (a tests.__init__ would collide with ext/topology's own "tests" package under
+    # mypy), so this file is a top-level module -- matching test_scoring_equivalence.py /
+    # test_arterial.py's existing imports of the same fixture.
+    from scoring_fixtures import _block_1808
+
+    block = _block_1808()
+    m = ClearanceReblocker(depth_target=2, res=0.75)
+    roads = m.propose(block).roads
+    assert roads is not None
+    after = parcel_access_layers(block, roads).to_numpy()
+    assert int(after.max()) <= 2  # invariant holds whether or not roads were needed
