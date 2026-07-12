@@ -102,3 +102,43 @@ def test_propose_matches_direct_and_caches(monkeypatch: pytest.MonkeyPatch) -> N
     assert out1.roads is not None and out2.roads is not None and direct.roads is not None
     assert (sorted(g.wkt for g in out1.roads.geometry)
             == sorted(g.wkt for g in direct.roads.geometry))
+
+
+def _member_block(block_id: str, hash_: str, x0: int) -> Block:
+    # A cacheable 3x3 grid member at x-offset x0 with a non-empty source hash, so the
+    # region_block built from two of these has a non-empty (deterministic) identity.
+    polys = [Polygon([(x0 + i, j), (x0 + i + 1, j), (x0 + i + 1, j + 1), (x0 + i, j + 1)])
+             for i in range(3) for j in range(3)]
+    parcels = gpd.GeoDataFrame({"parcel_id": [f"{block_id}-{k}" for k in range(9)]},
+                               geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
+    return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=streets, source_content_hash=hash_)
+
+
+def test_region_reblock_routes_through_the_propose_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    # region_reblock must reblock via the memoized derivations.propose so a region's (expensive)
+    # proposal is computed once and shared by both compare and render, and re-runs hit the L2 disk
+    # cache. The region Block's source_content_hash is deterministic in its members, so its
+    # identity is stable across the two region_block() rebuilds inside the two region_reblock()
+    # calls -> the second call is a cache hit and the method's propose runs exactly once.
+    from reblock.methods.peel import PeelReblocker
+    from reblock.region import region_reblock
+
+    box = {"n": 0}
+    method = PeelReblocker()
+    real_propose = method.propose
+
+    def spy(block: Block, prior: Proposal | None = None) -> Proposal:
+        box["n"] += 1
+        return real_propose(block, prior)
+    monkeypatch.setattr(method, "propose", spy)
+
+    members = [_member_block("a", "cafe01", x0=0), _member_block("b", "cafe02", x0=3)]
+    r1 = region_reblock(members, method, [])
+    r2 = region_reblock(members, method, [])      # cache hit -> spy not called a second time
+    assert box["n"] == 1
+    assert r1.proposal.roads is not None and r2.proposal.roads is not None
+    assert (sorted(g.wkt for g in r1.proposal.roads.geometry)
+            == sorted(g.wkt for g in r2.proposal.roads.geometry))

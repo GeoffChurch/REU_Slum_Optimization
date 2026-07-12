@@ -27,6 +27,7 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block, Eval, Method, Result
+from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,11 @@ def region_reblock(blocks: list[Block], method: Method, evals: list[Eval]) -> Re
     like reblocking any single Block. The existing inter-block streets are existing egress, not
     part of the intervention, so the cost-benefit curve reflects only the method's added roads."""
     rb = region_block(blocks)
-    proposal = method.propose(rb)
+    # Route through the memoized derivations.propose (keyed on method.identity + the region
+    # block's deterministic identity) so a region's proposal is computed once and shared by
+    # compare + render, and re-runs hit the L2 disk cache. Uncacheable regions (empty member
+    # hash -> identity None) transparently fall back to a direct compute.
+    proposal = propose(method, rb)
     metrics = tuple(ev.score(rb, proposal) for ev in evals)
     return Result(block=rb, proposal=proposal, metrics=metrics)
 
