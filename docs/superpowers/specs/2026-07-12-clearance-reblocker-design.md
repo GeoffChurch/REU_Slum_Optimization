@@ -1,6 +1,6 @@
 # Clearance Reblocker — Design
 
-**Status:** draft for review · **Date:** 2026-07-12 · **Working name:** `clearance` (confirm below)
+**Status:** approved (name + defaults confirmed 2026-07-12) · **Date:** 2026-07-12 · **Name:** `clearance`
 
 **Goal:** A fast, sparse reblocker that adds a few long roads and exposes ONE physical knob spanning
 **aspirational straight roads** (best directness, crosses parcels) → **buildable Voronoi-following
@@ -91,7 +91,36 @@ class ClearanceReblocker:
 - **Weighted footprints** end-to-end (needs the footprint-area column in the source).
 - Grid alternatives (parcel-adjacency substrate) if `res`-vs-speed on very large regions needs it.
 
-## Decision to confirm
-- **Name.** `clearance` (mechanism: clearance-from-buildings cost field). Alternatives: `flow`,
-  `repel`, `weave`, `leastcost`. Pick one.
-- **Default `res`** (1.5 m) and **`depth_target`** (2) — reasonable from the spikes; adjustable.
+## Examples gallery — the repulsion knob on a real region (true end-to-end)
+A committed gallery `examples/clearance-repulsion/` that shows ONE auto-detected deep Cape Town
+region reblocked at **five repulsion values** — the two extremes, two moderates, and the balanced
+default — so the knob's effect (straight aspirational chords → gap-weaving Voronoi-following roads)
+is visible on real fabric. Mirrors `examples/capetown-flagship/` (reproduces from `capetown_full`,
+commits the PNGs + a README; the underlying data is downloaded on demand, never committed).
+
+- **Repulsion sweep:** `repulsion ∈ {−6, −2, 0, +2, +6}` (logit `s`; `t = sigmoid(s)` = 0.002, 0.12,
+  0.5, 0.88, 0.998). `−6` ≈ straight (aspirational), `0` = balanced default, `+6` ≈ Voronoi
+  (buildable). Depth target fixed at the default `2`, so coverage is held constant across panels —
+  what changes panel-to-panel is road **geometry** and **displacement**, not road count. That IS the
+  story: same reachability, different directness↔displacement point on the knob.
+- **Auto-detected region (no hand-picked block_id):** run `DenseCompactScreen` on `capetown_full`
+  (deepest-first ranked, memoized → instant on rerun); pick the **deepest seed whose own
+  `building_count` is in a tractable window** (so growth genuinely pulls in neighbors and the region
+  stays legible — the deepest blocks alone are 1000–3000-building giants); grow it with
+  `DenseClusterRegionBuilder(max_buildings=…)` into a contiguous multi-block neighborhood sized so
+  the road count per panel stays modest (a bounded few-hundred-parcel region → ~a dozen roads, not
+  the 162 a 2017-parcel block needs). Build the region via `region.region_block`. The seed window
+  and region budget are constants in the generator, chosen (and printed) so the gallery is legible.
+- **Rendering:** reuse `render.render_before` / `render_after` (access-depth heatmap + roads) for a
+  `before` panel and one `after` panel per repulsion; lay the five side-by-side in the README with a
+  metrics table (repulsion → roads, length m, buildings displaced, directness AUC, max depth after).
+  No `render.py` changes — the existing helpers suffice.
+- **Reproducible generator:** `examples/clearance-repulsion/generate.py`, runnable with
+  `pixi run python examples/clearance-repulsion/generate.py`; the README documents the command and
+  the auto-detected region it lands on. This is a genuine end-to-end (real screen on the full metro
+  → real region growth → the new Method → real renders), just orchestrated in a script because a
+  five-value knob sweep with auto-seed-selection is not a single `compare` invocation.
+
+## Decisions (confirmed)
+- **Name:** `clearance` (mechanism: the clearance-from-buildings cost field).
+- **Defaults:** `res = 1.5 m`, `depth_target = 2`, `repulsion = 0.0` (balanced), `max_roads = 400`.
