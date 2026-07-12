@@ -100,9 +100,17 @@ def _edge_weights(
 def _relax_depth(depth: NDArray[np.float64], adj: list[set[int]], served: Iterable[int]) -> None:
     """In place: given parcels `served` now front a street-connected road (depth 1), lower
     `depth` and propagate depth[j] = depth[i] + 1 outward along parcel adjacency `adj` (BFS),
-    never raising a value. Equals a full `parcel_access_layers` recompute because a road only
+    never raising a value.
+
+    PRECONDITION: `depth` must be a proper BFS distance labelling in which any parcel with no
+    adjacency path to a street is pinned to a sentinel >= every possible true in-block distance
+    -- build it with `parcel_access_layers(..., unreached_depth=len(parcels)+1)`. Given that,
+    this equals a full `parcel_access_layers` recompute for the post-road network: a road only
     adds street frontage (parcel adjacency is unchanged), so the post-road depth is a BFS from
-    (original street seeds) union (newly served parcels)."""
+    (original street seeds) union (newly served parcels), and every stale placeholder is high
+    enough that the strict-decrease guard always re-propagates through it. WITHOUT that seeding,
+    a disconnected component's default `max(reached)+1` placeholder can coincide with a true
+    depth and halt propagation early, leaving parcels beyond it falsely shallow."""
     q: deque[int] = deque()
     for p in served:
         if depth[p] > 1.0:

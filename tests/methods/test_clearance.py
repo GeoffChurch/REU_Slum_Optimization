@@ -10,6 +10,7 @@ from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block
@@ -137,3 +138,35 @@ def test_relax_depth_matches_full_recompute() -> None:
     naive = parcel_access_layers(block, road, adj=adj).to_numpy().astype(float)
     assert list(depth) == list(naive)
     assert max(depth) == 1.0  # every parcel now fronts the street-connected road
+
+
+def test_relax_depth_matches_recompute_on_disconnected_component() -> None:
+    # The relax equals a full recompute ONLY when the base array pins unreached parcels to a
+    # high sentinel (len+1). This locks in that precondition and shows the default-seeded base
+    # (unreached = max(reached)+1) diverges -- which is exactly why Task 3's greedy seeds with
+    # unreached_depth=len+1. Row A (3 parcels) fronts the street; column B (5 parcels, disjoint
+    # from A) is unreached until a road connects its near end.
+    a = [Polygon([(i, 0), (i + 1, 0), (i + 1, 1), (i, 1)]) for i in range(3)]
+    b = [Polygon([(0, y), (1, y), (1, y + 1), (0, y + 1)]) for y in range(5, 10)]  # gap at y=1..5
+    polys = a + b
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, unary_union(polys))
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (3, 0)])], crs=UTM)
+    block = Block(block_id="disc", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    adj = parcel_adjacency(cast(list[BaseGeometry], polys), STREET_TOL)
+    n = len(polys)
+
+    # street-connected road reaching ONLY B's near end (top at y=5.4 -> >0.5 from B[1] at y=6)
+    road = gpd.GeoDataFrame(geometry=[LineString([(0.5, 0.0), (0.5, 5.4)])], crs=UTM)
+    served = [int(p) for p in STRtree(polys).query(
+        road.geometry.iloc[0], predicate="dwithin", distance=STREET_TOL)]
+    naive = parcel_access_layers(block, road, adj=adj).to_numpy().astype(float)
+
+    seeded = parcel_access_layers(
+        block, None, adj=adj, unreached_depth=n + 1).to_numpy().astype(float)
+    _relax_depth(seeded, adj, served)
+    assert list(seeded) == list(naive)                 # correct precondition -> exact
+
+    default_base = parcel_access_layers(block, None, adj=adj).to_numpy().astype(float)
+    _relax_depth(default_base, adj, served)
+    assert list(default_base) != list(naive)           # default seeding -> falsely shallow
