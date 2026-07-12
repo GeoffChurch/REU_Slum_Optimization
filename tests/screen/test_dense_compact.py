@@ -1,11 +1,18 @@
+from collections.abc import Iterator
 from pathlib import Path
 
 import geopandas as gpd
+import joblib
+import pandas as pd
+import pytest
 from pyproj import CRS
 from shapely.geometry import Point, box
 
+import reblock.derive_graph as dg
+from reblock.contracts import Block
 from reblock.data.kblock import KblockSource
-from reblock.screen.dense_compact import DenseCompactScreen
+from reblock.derivations import access_before
+from reblock.screen.dense_compact import DenseCompactScreen, _cheap_survivors
 
 ROOT = Path(__file__).resolve().parents[1]
 CT_BLOCKS = str(ROOT / "data" / "kblock" / "blocks_capetown_sample.parquet")
@@ -38,9 +45,8 @@ def _write_synth(tmp: Path) -> tuple[str, str]:
 
 def test_cheap_survivors_gate(tmp_path: Path) -> None:
     bp, _ = _write_synth(tmp_path)
-    s = DenseCompactScreen(density_min=50.0, min_buildings=10)
     # density/ha: A=25/(2500/1e4)=100, B=30/(60/1e4)=5000, C=2/(900/1e4)=22
-    assert s._cheap_survivors(gpd.read_parquet(bp)) == ["A", "B"]   # C (22) fails; sorted
+    assert _cheap_survivors(gpd.read_parquet(bp), density_min=50.0, k_min=None) == ["A", "B"]
 
 
 def test_select_two_tier_drops_shallow(tmp_path: Path) -> None:
@@ -98,3 +104,39 @@ def test_select_ranks_by_max_depth_descending(tmp_path: Path) -> None:
     # deep "zzz" (max-depth 3) outranks shallow "aaa" (max-depth 1) -> reverse-alphabetical,
     # which alphabetical sorted() could never produce -> proves the severity sort.
     assert s.select(src) == ["zzz", "aaa"]
+
+
+@pytest.fixture
+def _isolate(tmp_path_factory: pytest.TempPathFactory,
+             monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    # Repoint derive_graph's L2 disk cache to a fresh dir + clear L1, so this test's
+    # cache-HIT assertion is not silently served by an entry a sibling test (same
+    # synthetic source content -> same source_hash + gates -> same key) already wrote.
+    loc = tmp_path_factory.mktemp("l2")
+    monkeypatch.setattr(dg, "memory", joblib.Memory(location=str(loc), verbose=0))
+    monkeypatch.setattr(dg, "_l2", dg.memory.cache(dg._l2_impl, ignore=["fn", "inputs"]))
+    dg.clear_l1()
+    yield
+    dg.clear_l1()
+
+
+def test_select_result_is_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                 _isolate: None) -> None:
+    # The whole ranked selection is memoized: a rerun with the same source + gates must NOT
+    # re-walk the survivors (no further access_before calls) and must return the same ids.
+    bp, dp = _write_synth(tmp_path)
+    box_ = {"n": 0}
+
+    def spy(blk: Block) -> pd.Series:
+        box_["n"] += 1
+        return access_before(blk)
+    monkeypatch.setattr("reblock.screen.dense_compact.access_before", spy)
+
+    s = DenseCompactScreen(density_min=50.0, mean_depth_min=1.2, min_buildings=10)
+    src = KblockSource(bp, dp, region_id="test", min_buildings=10)
+    first = s.select(src)
+    after_first = box_["n"]
+    second = s.select(src)                 # (source_hash + gates)-keyed cache hit
+    assert first == second == ["A"]
+    assert after_first > 0                  # first run walked the survivors (computed depths)
+    assert box_["n"] == after_first         # second run added zero -> whole selection cached

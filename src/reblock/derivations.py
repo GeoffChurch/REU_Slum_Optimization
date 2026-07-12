@@ -73,3 +73,34 @@ def _voronoi_impl(vin: VoronoiInput) -> Any:
 
 def voronoi(vin: VoronoiInput) -> Any:
     return derive(_voronoi_impl, vin)
+
+
+@dataclass(frozen=True)
+class ScreenSelectionInput:
+    """Identified carrier for a DenseCompactScreen selection: derive() keys on .identity
+    (the source content hash + every gate param), never the paths -- so a rerun with the same
+    source + gates returns the ranked block_ids from one L2 lookup instead of rebuilding the
+    thousands of survivor blocks (Voronoi + access-depth) the fine pass walks. A missing source
+    hash makes it uncacheable (bypass). Bump the version tag if the selection algorithm changes."""
+    source_hash: str
+    blocks_path: str
+    buildings_path: str
+    density_min: float
+    mean_depth_min: float
+    max_depth_min: float | None
+    k_min: float | None
+    min_buildings: int
+
+    @property
+    def identity(self) -> tuple[str, str, float, float, float | None, float | None, int] | None:
+        return (("dense-compact-screen", self.source_hash, self.density_min, self.mean_depth_min,
+                 self.max_depth_min, self.k_min, self.min_buildings) if self.source_hash else None)
+
+
+def _screen_selection_impl(inp: ScreenSelectionInput) -> list[str]:
+    from reblock.screen.dense_compact import _compute_selection  # local import avoids a cycle
+    return _compute_selection(inp)
+
+
+def screen_selection(inp: ScreenSelectionInput) -> list[str]:
+    return derive(_screen_selection_impl, inp)
