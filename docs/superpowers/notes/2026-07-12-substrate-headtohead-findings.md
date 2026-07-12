@@ -340,3 +340,163 @@ routes funnel through very few corridors regardless of the worst parcel's locati
 a bug in `greedy_on_substrate` — both are direct, generalizable consequences of choosing
 "nodes = buildings" as a substrate's node source, worth flagging clearly if a building-anchored
 substrate is ever considered for real use.
+
+## Any-angle smoothing + Θ-spanner
+
+Follow-up spike (`substrate_funnel_followup.py`, imports `substrate_headtohead.py` and
+`substrate_cdt_followup.py` — the substrate-agnostic greedy, `cdt_gap`'s builder/node set, the
+region loader, the metric helpers, and the results cache are all reused, never reimplemented)
+tests whether any-angle ("funnel"/string-pulling) path smoothing can beat raw `chord_diag`, the
+prior spike's directness leader, and adds a Θ-graph (Yao/Theta) spanner substrate. Same region,
+`depth_target=2`, `max_roads=400`, s ∈ {−6,−2,0,+2,+6}, 3-point edge-cost sampling. Cache reuse
+confirmed: `grid`/`chord_diag`/`cdt_gap`'s 25 rows all `[cache hit]`; only `theta_spanner`'s 5
+rows and the three smoothed variants' 15 rows computed fresh. Total elapsed 4.0s.
+
+**Smoothing**: greedy string-pulling spliced into the greedy loop between "road routed on the
+substrate graph" and "served set computed for the depth relax" (`greedy_on_substrate_smoothed`,
+a necessary near-duplicate of `sh.greedy_on_substrate`'s loop body — every other piece is called
+via `sh.*`, not recopied). For each road's node path, repeatedly finds the largest reachable
+straight shortcut whose cost-field integral (`_node_clearance`-sampled Riemann sum, resolution =
+`RES`=1.5m) is ≤ the original sub-polyline's, and that stays within `block.boundary`. Applied to
+`grid`, `chord_diag`, `cdt_gap` → `grid_smooth`, `chord_diag_smooth`, `cdt_gap_smooth`.
+
+**Θ-spanner**: same 548-node point set as `chord_diag`/`cdt_gap` (`cf.build_cdt_gap`'s own
+points, reused directly); k=6 angular cones per node, connect to the nearest node in each
+non-empty cone. 2,200 edges — 28% fewer than `chord_diag` (3,056), 60% more than `cdt_gap`
+(1,376). Routed raw (no smoothing) through the unmodified `sh.greedy_on_substrate`.
+
+### Raw (grid/chord_diag/cdt_gap/theta_spanner × s)
+
+| substrate | s | roads | length_m | displaced | max_depth_after | n_unroutable | directness_AUC | n_edges |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| chord_diag | -6 | 19 | 347.7 | 67 | 2 | 0 | 0.0798 | 3056 |
+| chord_diag | -2 | 18 | 337.1 | 64 | 2 | 0 | 0.0793 | 3056 |
+| chord_diag | +0 | 18 | 329.3 | 62 | 2 | 0 | 0.0633 | 3056 |
+| chord_diag | +2 | 17 | 344.3 | 58 | 2 | 0 | 0.0612 | 3056 |
+| chord_diag | +6 | 18 | 380.8 | 64 | 2 | 0 | 0.0531 | 3056 |
+| cdt_gap | -6 | 19 | 362.1 | 71 | 2 | 0 | 0.0536 | 1376 |
+| cdt_gap | -2 | 19 | 362.4 | 71 | 2 | 0 | 0.0533 | 1376 |
+| cdt_gap | +0 | 18 | 349.1 | 67 | 2 | 0 | 0.0538 | 1376 |
+| cdt_gap | +2 | 16 | 333.6 | 55 | 2 | 0 | 0.0559 | 1376 |
+| cdt_gap | +6 | 17 | 367.6 | 55 | 2 | 0 | 0.0690 | 1376 |
+| theta_spanner | -6 | 19 | 343.9 | 66 | 2 | 0 | 0.0674 | 2200 |
+| theta_spanner | -2 | 19 | 345.9 | 66 | 2 | 0 | 0.0539 | 2200 |
+| theta_spanner | +0 | 19 | 347.0 | 66 | 2 | 0 | 0.0542 | 2200 |
+| theta_spanner | +2 | 17 | 345.7 | 57 | 2 | 0 | 0.0545 | 2200 |
+| theta_spanner | +6 | 18 | 379.1 | 66 | 2 | 0 | 0.0506 | 2200 |
+
+`theta_spanner` is fully connected (1 component) and hits `max_depth_after=2`/`n_unroutable=0`
+at every s — a fully valid, apples-to-apples comparison to `chord_diag`/`cdt_gap` raw.
+
+### Any-angle smoothed (grid_smooth/chord_diag_smooth/cdt_gap_smooth × s)
+
+| substrate | s | roads | length_m | displaced | max_depth_after | n_unroutable | directness_AUC |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| grid_smooth | -6 | 23 | 313.5 | 70 | **3** | 0 | 0.0385 |
+| grid_smooth | -2 | 23 | 313.5 | 70 | **3** | 0 | 0.0385 |
+| grid_smooth | +0 | 23 | 309.0 | 65 | **4** | 0 | 0.0401 |
+| grid_smooth | +2 | 22 | 327.7 | 64 | **4** | 0 | 0.0392 |
+| grid_smooth | +6 | 21 | 341.1 | 59 | **4** | 0 | 0.0349 |
+| chord_diag_smooth | -6 | 23 | 315.9 | 74 | **4** | 0 | 0.0500 |
+| chord_diag_smooth | -2 | 23 | 314.0 | 73 | **4** | 0 | 0.0500 |
+| chord_diag_smooth | +0 | 20 | 318.5 | 64 | **3** | 0 | 0.0386 |
+| chord_diag_smooth | +2 | 21 | 327.3 | 60 | **4** | 0 | 0.0473 |
+| chord_diag_smooth | +6 | 20 | 362.3 | 54 | **3** | 0 | 0.0512 |
+| cdt_gap_smooth | -6 | 22 | 311.0 | 72 | **4** | 0 | 0.0398 |
+| cdt_gap_smooth | -2 | 22 | 312.1 | 73 | **4** | 0 | 0.0401 |
+| cdt_gap_smooth | +0 | 21 | 309.7 | 70 | **4** | 0 | 0.0399 |
+| cdt_gap_smooth | +2 | 20 | 319.7 | 59 | **4** | 0 | 0.0412 |
+| cdt_gap_smooth | +6 | 17 | 321.6 | 52 | **4** | 0 | 0.0628 |
+
+`(cap = 380.8m, shared across raw+smoothed rows)`. **Every single one of the 15 smoothed rows
+misses `depth_target=2`** (`max_depth_after` ∈ {3, 4} throughout), despite `n_unroutable=0`
+everywhere and every run terminating well under `max_roads=400` (17–23 roads) — i.e. the loop
+is not exhausting its budget, it is **stopping while genuinely believing it is done and being
+wrong**.
+
+### Root cause: smoothing severs touch-connectivity to the street network
+
+Diagnosed directly (not a hypothesis): `reblock.derive.access.street_connectivity` — the
+function `parcel_access_layers` uses to build its access-depth seed geometry — grants access
+**only** to roads whose touching-component (segments within `STREET_TOL` of each other) reaches
+a street; "floating interior roads grant no access" per its own docstring. The greedy loop's
+incremental depth relax has no notion of this: it just asks "is this parcel within `STREET_TOL`
+of *a* smoothed road", so it happily marks a parcel served even when that road is later judged
+disconnected from the network by the honest recompute used for `max_depth_after`.
+
+Raw substrates never hit this: each new road's polyline is literally built from the routed
+substrate-graph node sequence (`pathn`), which — by construction — always includes the exact
+node where a previous road (or `net`'s original street seed) was already appended, so consecutive
+roads always share a coincident vertex (distance 0 ≤ `STREET_TOL`). Greedy string-pulling breaks
+this guarantee: it is free to skip straight past that exact junction node, so the smoothed road
+can end up farther than `STREET_TOL` from the road/street it used to touch.
+
+Measured for every smoothed row (`street_connectivity(region.streets, gdf, STREET_TOL)`):
+
+| substrate | s | roads | touch-components | connected_len_frac |
+|---|---:|---:|---:|---:|
+| grid_smooth | -6 | 23 | 14 | 0.773 |
+| grid_smooth | +0 | 23 | 15 | 0.616 |
+| grid_smooth | +6 | 21 | 17 | 0.674 |
+| chord_diag_smooth | -6 | 23 | 20 | 0.573 |
+| chord_diag_smooth | +0 | 20 | 11 | 0.859 |
+| chord_diag_smooth | +6 | 20 | 15 | 0.777 |
+| cdt_gap_smooth | -6 | 22 | 18 | 0.657 |
+| cdt_gap_smooth | +0 | 21 | 16 | 0.691 |
+| cdt_gap_smooth | +6 | 17 | 12 | 0.859 |
+
+(full 15-row table in `_funnel_followup_section.md`.) Across all 15 smoothed rows,
+`touch-components` ranges 11–21 for 17–23 roads (i.e. most roads are their own isolated
+component) and `connected_len_frac` ranges 0.48–0.86 — as little as 48% of the smoothed
+network's total length actually counts toward access. This is a structural consequence of naive
+string-pulling, not a coding bug: confirmed directly via the same connectivity function the
+depth accounting itself calls, reproduced at every s for every smoothed substrate.
+
+One more symptom worth naming: smoothed runs use *more* roads than their raw counterpart at
+every matching s (e.g. `chord_diag`: 19/18/18/17/18 raw vs 23/23/20/21/20 smoothed) while
+covering *less* (`max_depth_after` 2 vs 3–4) — not the "roads↑ for coverage↑" tradeoff the
+design anticipated, but roads↑ *and* coverage↓ simultaneously, because each additional road
+routed to patch a "still-uncovered" parcel is itself smoothed and can again land as a floating
+component.
+
+### Verdicts
+
+**Does any-angle smoothing lift directness_AUC above raw chord_diag?** No — and the numbers
+that look competitive are not a valid comparison. At every s except +6, every smoothed variant's
+directness_AUC is well below raw chord_diag's (e.g. s=-6: 0.0798 raw vs 0.0385/0.0500/0.0398
+smoothed; s=0: 0.0633 raw vs 0.0401/0.0386/0.0399 smoothed) — roughly half, not an improvement.
+At s=+6 only, `cdt_gap_smooth` numerically exceeds raw chord_diag (0.0628 vs 0.0531), but
+`cdt_gap_smooth` at that s has `max_depth_after=4` against chord_diag's `max_depth_after=2`: a
+network that leaves parcels stranded at depth 4 is trivially shorter/"more direct" than one
+required to actually reach every parcel, so this is not a fair win either. Straightening does
+shrink road length on its own terms — `cdt_gap_smooth` is 11–16% shorter than raw `cdt_gap` at
+every matching s (e.g. s=-6: 311.0m vs 362.1m) — but that gain is an artifact of silently doing
+less coverage work, not genuine efficiency. **No smoothed variant beats raw chord_diag on a
+like-for-like (target-reaching) basis; raw chord_diag remains the incumbent leader.**
+
+**Does cdt_gap+funnel specifically beat raw chord_diag (the "exact straight crossings"
+hypothesis)?** No. Its directness_AUC is lower than raw chord_diag's at 4 of 5 s values, and its
+one nominal "win" (s=+6) is invalidated by the coverage-target miss above. The hypothesis that
+straight-line crossings through a Delaunay-legal navmesh would out-perform chord_diag's full
+diagonal set is not supported here — smoothing's connectivity failure dominates whatever
+straightness gain the exact crossings would otherwise buy.
+
+**Where does theta_spanner sit on the quality-vs-edges frontier?** A legitimate middle ground,
+and — unlike the smoothed variants — a fully valid comparison (connected, target met at every
+s). At 2,200 edges (28% fewer than chord_diag's 3,056, 60% more than cdt_gap's 1,376), its
+directness_AUC (0.0674/0.0539/0.0542/0.0545/0.0506) sits below chord_diag at every s but
+roughly matches or slightly beats cdt_gap at low |s| (s=-6: 0.0674 vs 0.0536) while trailing it
+at s=+6 (0.0506 vs 0.0690). It does not unseat chord_diag as the directness leader, but it is a
+robust, connectivity-safe alternative with no failure modes observed.
+
+**Failure modes.** The any-angle smoothing experiment's dominant, universal failure mode: 15/15
+smoothed rows (100%, every substrate × every s) miss `depth_target=2`, root-caused to
+`street_connectivity`'s touch-component filter discarding smoothed roads that skip their
+junction vertex with the existing network (11–21 disconnected components per run,
+`connected_len_frac` as low as 0.48). `theta_spanner` shows the opposite: fully connected (1
+component) at construction time and target-reaching at every s — no disconnection risk, since
+it isn't derived from a routed path that gets post-hoc straightened.
+
+Overlay: `substrate_overlay_funnel_s-6.png` — raw `chord_diag` (solid, target-reaching) vs
+`cdt_gap`+funnel (dashed, `max_depth_after=4`, not target-reaching) at s=-6, over parcels and
+buildings, illustrating both the visible straightening and the coverage gap side by side.
