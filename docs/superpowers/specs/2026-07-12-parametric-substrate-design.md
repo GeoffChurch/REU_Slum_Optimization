@@ -98,22 +98,14 @@ side-by-side on the four lenses; the rest are reachable via override.
 ## Examples
 
 - **Regenerate `examples/clearance-repulsion/`** (the repulsion-knob demo) under the new default
-  (chord_diag + 3-point) — new PNGs, refreshed README numbers, same auto-detected region + 5-repulsion
-  sweep.
-- **New flagship `examples/clearance-flagship/`** — the end-to-end recipe on a **massive multi-block
-  region** where the grid would be intractable but chord_diag is not:
-  - Screen `capetown_full` (`DenseCompactScreen`), take the deepest seed, and grow it with
-    `DenseClusterRegionBuilder` (large building budget) into a **massive ~3-block neighborhood** (the
-    generator prints the actual seed + members + parcel count; the budget is tuned so it lands ~3 blocks).
-  - Reblock with `ClearanceReblocker()` (chord_diag default) and render with dimmed full-raw context
-    (via `source.block_geometries(frame)`, as the fixed gallery now does).
-  - The README carries the reproduce command **and the scaling payoff**: region parcels/buildings, the
-    chord substrate's node count + build+propose time, contrasted with the grid's *would-be* node count
-    (≈ block area / res²) — the concrete "chord makes this region tractable" story. It **complements** the
-    existing `capetown-flagship` (the dijkstra/mesh/arterial four-lens comparison), which stays.
-  - Reproduces from `capetown_full` (auto-downloaded to `~/.cache/reblock`, never committed), commits the
-    PNGs + README + generator, mirroring the flagship pattern. Runnable via
-    `PYTHONPATH=. pixi run python examples/clearance-flagship/generate.py`.
+  (chord_diag + 3-point) — new PNGs + refreshed README numbers, same auto-detected region + 5-repulsion
+  sweep. This is a **migration necessity** (the committed output changes with the new default), not new
+  example work. No other example uses `ClearanceReblocker`, so nothing else regenerates.
+
+The broader examples/README rework — a massive-region **flagship**, de-embedding the root `README.md`'s
+example galleries/recipes down to links into the already-links-only `examples/README.md`, and pruning the
+set for redundancy — is a **separate follow-up** (see Out of scope), deliberately kept out of this
+refactor.
 
 ## Migration (no-legacy — change, don't dual-path)
 
@@ -123,7 +115,7 @@ side-by-side on the four lenses; the rest are reachable via override.
   precondition / weighted-`radii` tests are substrate-agnostic and stay.
 - Add `reblock/methods/substrates.py` to `reblock.derive_graph._DERIVATION_MODULES` (busts the memoized
   `propose` cache on substrate-algorithm changes, like the method modules).
-- Regenerate both example galleries.
+- Regenerate the `clearance-repulsion` gallery (the new default changes its committed output).
 
 ## Correctness strategy / testing
 
@@ -143,6 +135,12 @@ side-by-side on the four lenses; the rest are reachable via override.
 - **Funnel / portal navmesh** — the any-angle substrate. The spike proved naive string-pulling breaks the
   greedy's vertex-*coincidence* connectivity (roads disconnect, coverage fails); doing it right needs a
   corridor/portal connectivity model — a separate project.
+- **Examples & README rework (its own follow-up spec):** a massive-region **flagship**
+  (`examples/clearance-flagship`, chord_diag on a ~3-block `capetown_full` region, with the reproduce
+  recipe + the "chord makes this tractable; grid's node count ≈ area/res²" scaling payoff); de-embedding
+  the root `README.md`'s ~150 lines of example galleries/recipes down to links into the already-links-only
+  `examples/README.md`; and auditing the set for redundancy (e.g. `convex-hull` is a narrow region-builder
+  demo overlapping `multi-block`; `single-block`/`detect-reblock`/`multi-block` share a pattern).
 - **`cdt_bldg`** (building-point nodes) — degenerate (knob no-op), excluded.
 - Subdividing very long edges for finer-than-3-point field sampling.
 
@@ -150,8 +148,9 @@ side-by-side on the four lenses; the rest are reachable via override.
 
 - **`chord_diag` is the default** substrate; grid retained as an opt-in fallback + field-fidelity
   reference.
-- **3-point edge sampling everywhere** (one rule; the grid's high-repulsion output changes; galleries
-  regenerate).
+- **3-point edge sampling everywhere** (one rule; the grid's high-repulsion output changes; the
+  repulsion gallery regenerates).
 - **Ship four connected substrates** (grid, chord_diag, theta_spanner, cdt_gap); exclude cdt_bldg + funnel.
-- **New flagship example** on a massive ~3-block `capetown_full` region, complementing (not replacing) the
-  existing `capetown-flagship`.
+- **Examples/README rework is deferred** to its own follow-up spec (the massive-region flagship, root-README
+  de-embedding, and set audit) — this refactor only regenerates the `clearance-repulsion` gallery as a
+  migration step.
