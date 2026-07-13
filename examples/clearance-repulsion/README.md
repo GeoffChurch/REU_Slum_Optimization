@@ -1,7 +1,8 @@
 # Clearance reblocker: one knob, one region, five repulsions
 
 `ClearanceReblocker` grows each new road as a least-cost path from the deepest remaining parcel
-to the existing street network on an 8-connected grid. The cost field blends a uniform term with
+to the existing street network on a pluggable routing substrate (`chord_diag` by default — the
+parcel-boundary graph plus all within-cell diagonals). The cost field blends a uniform term with
 a repulsion-from-buildings term:
 
 ```
@@ -70,17 +71,18 @@ a minute end-to-end for one small region.
 |---|---|---|---|---|---|
 | ![before](before.png) | ![s=-6](after_s-6.png) | ![s=-2](after_s-2.png) | ![s=0](after_s0.png) | ![s=+2](after_s+2.png) | ![s=+6](after_s+6.png) |
 
-_The s=-6 and s=-2 panels render identically: at this region's scale the cost field is near-uniform for both, below the res=1.5 grid's resolution to distinguish them._
-
 ## Metrics (actual run output)
+
+The routing substrate is `chord_diag` (the default winner from the substrate sweep) with 3-point
+edge-cost sampling (both endpoints plus the midpoint), not the older `res=1.5` search grid.
 
 | repulsion | roads | length_m | displaced | max_depth |
 |---:|---:|---:|---:|---:|
-| -6 | 22 | 328 | 71 | 2 |
-| -2 | 22 | 328 | 71 | 2 |
-| 0 | 22 | 327 | 68 | 2 |
-| +2 | 21 | 341 | 65 | 2 |
-| +6 | 21 | 389 | 59 | 2 |
+| -6 | 19 | 348 | 67 | 2 |
+| -2 | 18 | 337 | 64 | 2 |
+| 0 | 18 | 329 | 62 | 2 |
+| +2 | 17 | 344 | 58 | 2 |
+| +6 | 18 | 381 | 64 | 2 |
 
 (`roads`: road segments added. `length_m`: total road length. `displaced`: buildings within 3 m of
 a new road, from `displacement_count`. `max_depth`: worst remaining access depth after reblocking,
@@ -93,23 +95,22 @@ adding least-cost roads from the deepest remaining parcel until no parcel is mor
 from a street, regardless of `repulsion`. So the panels aren't a coverage comparison; they isolate
 what the knob actually changes: *how* each road gets there.
 
-**The knob trades displacement for length, monotonically at the extremes.** From `s=-6` to
-`s=+6`, `displaced` falls from 71 to 59 (roads pulled toward the max-clearance Voronoi ridges cross
-fewer building footprints) while `length_m` rises from 328 to 389 (hugging the gaps between
-buildings is less direct than a straight line, so the same coverage costs more road). The two most
-repulsion-averse settings (`s=-6, -2`) tie exactly (`71` displaced, `328` m) — at this region's
-scale the cost field is already close enough to uniform at both settings that the greedy search
-finds the same paths; the difference opens up moving toward the Voronoi-following end. `length_m`
-is monotone non-decreasing at the extremes but dips by 1 m at `s=0` (327, below `s=-2`'s 328)
-before rising — that's grid-scale noise from the `res=1.5` search grid, not a real reversal of the
-trend.
+**Displacement falls as repulsion rises, up to a point.** From `s=-6` to `s=+2`, `displaced` falls
+monotonically (67 -> 64 -> 62 -> 58) as roads are pulled toward the max-clearance Voronoi ridges and
+cross fewer building footprints. But at the most repulsive setting, `s=+6`, `displaced` jumps back
+up to 64: hugging the gap network on `chord_diag`'s sparser, straighter road candidates can route a
+path past one cluster of buildings only by threading closer to another, so the trend is not
+monotonic across the full range — the extremes aren't guaranteed to be the best or worst case on
+every substrate.
 
-**Road count drifts down slightly, not up.** `s=-6` and `s=+6` both need roads to reach every
-parcel, but the straighter paths at negative `s` are less efficient at reusing already-built road
-(more redundant crossings), so they end up needing one more segment (22 vs 21) despite being
-individually more direct — a second-order effect underneath the primary length/displacement trade.
+**Length and road count track the same non-monotonic shape.** `length_m` falls from `s=-6` to
+`s=0` (348 -> 337 -> 329) then rises through `s=+2` and `s=+6` (344 -> 381); `roads` falls from 19
+at `s=-6` to 17 at `s=+2`, then ticks back up to 18 at `s=+6`. All three metrics turn the corner at
+the same place (`s=+2`), consistent with a single underlying cause: past a point, following the
+clearance ridges more aggressively costs extra route length and an extra road segment without
+buying further displacement reduction on this region's `chord_diag` graph.
 
-In short: `repulsion` doesn't change *whether* the block gets reblocked to depth 2, it changes
-*how much building you cut through to get there* versus *how much extra road you lay to avoid it*
-— the same trade a real implementer faces between an aspirational straight-line plan and a
-buildable one that respects what's already standing.
+In short: `repulsion` doesn't change *whether* the block gets reblocked to depth 2, it changes *how
+much building you cut through to get there* versus *how much extra road you lay to avoid it* — and
+on the sparser `chord_diag` substrate that trade isn't perfectly monotone at the repulsion-seeking
+extreme, unlike the old dense-grid substrate where it was.
