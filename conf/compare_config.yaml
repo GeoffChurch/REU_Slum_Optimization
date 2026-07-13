@@ -3,6 +3,7 @@ defaults:
   - screen: identity
   - region_builder: identity
   - eval: kcomplexity
+  - substrate: chord_diag
   - _self_
 
 # The methods available, then the names to actually run. Overriding the names via
@@ -21,7 +22,8 @@ all_methods:
   # deep/elongated regions, where a straight road shortcuts trips a frontage tree can't.
   greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
-  clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
+  clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
+  clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
 methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable]
 
 # Cost axis for the cost-benefit curves (the x every method is graded on):

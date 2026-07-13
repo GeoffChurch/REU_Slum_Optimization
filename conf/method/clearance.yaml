@@ -2,8 +2,7 @@
 # (repulsion -> -inf) .. buildable Voronoi-following roads (repulsion -> +inf). See
 # reblock.methods.clearance.ClearanceReblocker.
 _target_: reblock.methods.clearance.ClearanceReblocker
-substrate:
-  _target_: reblock.methods.substrates.ChordSubstrate
+substrate: ${substrate}
 repulsion: 0.0
 depth_target: 2
 max_roads: 400

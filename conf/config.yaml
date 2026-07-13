@@ -4,6 +4,7 @@ defaults:
   - region_builder: identity
   - method: dijkstra
   - eval: kcomplexity
+  - substrate: chord_diag
   - _self_
 
 # Top-level scalars are the interpolation sources the data/method config

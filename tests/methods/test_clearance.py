@@ -323,3 +323,31 @@ def test_propose_routes_through_memoized_derivation() -> None:
     r2 = propose(m, block).roads
     assert r1 is not None and r2 is not None
     assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
+
+
+def test_substrate_config_group_instantiates_each() -> None:
+    conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
+    expected = {"grid": ("grid", 1.5), "chord_diag": ("chord_diag",),
+                "theta_spanner": ("theta_spanner", 6), "cdt_gap": ("cdt_gap",)}
+    for name, ident in expected.items():
+        with initialize_config_dir(version_base=None, config_dir=conf_dir):
+            cfg = compose(config_name="config", overrides=[f"substrate={name}"])
+        sub = instantiate(cfg.substrate)
+        assert sub.identity == ident
+
+
+def test_clearance_method_defaults_to_chord_diag_substrate() -> None:
+    conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="config", overrides=["method=clearance"])
+    method = instantiate(cfg.method)
+    assert isinstance(method, ClearanceReblocker)
+    assert method.substrate.tag == "chord_diag"
+
+
+def test_compare_registers_clearance_and_grid_variant() -> None:
+    conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="compare_config")
+    assert instantiate(cfg.all_methods["clearance"]).substrate.tag == "chord_diag"
+    assert instantiate(cfg.all_methods["clearance_grid"]).substrate.tag == "grid"
