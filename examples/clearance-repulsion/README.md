@@ -105,10 +105,11 @@ every substrate.
 
 **Length and road count track the same non-monotonic shape.** `length_m` falls from `s=-6` to
 `s=0` (348 -> 337 -> 329) then rises through `s=+2` and `s=+6` (344 -> 381); `roads` falls from 19
-at `s=-6` to 17 at `s=+2`, then ticks back up to 18 at `s=+6`. All three metrics turn the corner at
-the same place (`s=+2`), consistent with a single underlying cause: past a point, following the
-clearance ridges more aggressively costs extra route length and an extra road segment without
-buying further displacement reduction on this region's `chord_diag` graph.
+at `s=-6` to 17 at `s=+2`, then ticks back up to 18 at `s=+6`. The turning points don't perfectly
+coincide -- `length_m` bottoms out at `s=0`, while `roads` and `displaced` bottom one step later at
+`s=+2` -- but all three share the same reversal: past a point, following the clearance ridges more
+aggressively costs extra route length and an extra road segment without buying further displacement
+reduction on this region's `chord_diag` graph.
 
 In short: `repulsion` doesn't change *whether* the block gets reblocked to depth 2, it changes *how
 much building you cut through to get there* versus *how much extra road you lay to avoid it* — and
