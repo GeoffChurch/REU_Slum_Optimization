@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from collections import deque
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import geopandas as gpd
 import numpy as np
@@ -31,10 +31,9 @@ from shapely.ops import nearest_points, unary_union
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.substrates import _build_grid as _build_grid
+from reblock.methods.substrates import GridSubstrate, RoutingGraph, Substrate
 
 _CLEARANCE_EPS = 0.3       # keeps node cost finite on a grid node sitting on a building point
-_NET_TOL_FACTOR = 1.5      # a grid node within res * this of the street seeds the network
 _SIGMOID_EPS = 1e-15       # clamps sigmoid strictly inside (0, 1); float64 underflows to exact
                            # 0.0/1.0 well before |s| = 800 (already at |s| ~ 37), which would
                            # otherwise saturate the cost field's blend weight t
@@ -124,12 +123,13 @@ def _relax_depth(depth: NDArray[np.float64], adj: list[set[int]], served: Iterab
 
 
 def _greedy_reblock(
-    block: Block, *, t: float, res: float, depth_target: int, max_roads: int,
+    block: Block, graph: RoutingGraph, *, t: float, depth_target: int, max_roads: int,
     radii: NDArray[np.float64],
 ) -> tuple[gpd.GeoDataFrame, dict[str, object]]:
-    """Greedy least-cost-path reblock: repeatedly connect the deepest parcel to the growing
-    road+street network by a Dijkstra path on the repulsion cost field, maintaining access
-    depth incrementally, until every parcel is within `depth_target` (or `max_roads` is hit)."""
+    """Greedy least-cost-path reblock on a routing substrate `graph`: repeatedly connect the
+    deepest parcel to the growing road+street network by a Dijkstra path on the repulsion cost
+    field, maintaining access depth incrementally, until every parcel is within `depth_target`
+    (or `max_roads` is hit)."""
     parcels = block.parcels
     geoms = list(parcels.geometry)
     parcel_ids = np.asarray(parcels["parcel_id"])
@@ -144,9 +144,10 @@ def _greedy_reblock(
         return empty, {"roads": 0, "max_depth_after": int(depth.max()) if depth.size else 0,
                        "grid_unreachable": 0, "max_roads_hit": False}
 
-    pts, rows, cols, edist = _build_grid(block.boundary, res)
+    pts, rows, cols, edist, net_tol = (
+        graph.pts, graph.rows, graph.cols, graph.edist, graph.net_tol)
     if len(pts) == 0:
-        raise ValueError("Block.boundary yields no grid nodes at this resolution")
+        raise ValueError("substrate yields no nodes for this block")
     building_pts = (
         shapely.get_coordinates(block.building_points.geometry.to_numpy())
         if not block.building_points.empty else np.empty((0, 2), dtype=np.float64)
@@ -158,12 +159,11 @@ def _greedy_reblock(
     reps = np.array([[g.representative_point().x, g.representative_point().y] for g in geoms])
     street = unary_union(list(block.streets.geometry))
     parcel_tree = STRtree(geoms)
-    net = np.flatnonzero(
-        shapely.dwithin(shapely.points(pts), street, res * _NET_TOL_FACTOR)).tolist()
+    net = np.flatnonzero(shapely.dwithin(shapely.points(pts), street, net_tol)).tolist()
     if not net:
         raise ValueError(
-            "Block.streets yields no grid seed nodes: with no street frontage the least-cost "
-            "forest has no root")
+            "substrate net seed empty: no node within net_tol of the street -- with no street "
+            "frontage the least-cost forest has no root")
 
     roads: list[LineString] = []
     n_grid_unreachable = 0
@@ -185,7 +185,7 @@ def _greedy_reblock(
         coords: list[tuple[float, float]] = [(float(reps[worst][0]), float(reps[worst][1]))]
         coords += [(float(pts[k][0]), float(pts[k][1])) for k in pathn]
         term = Point(pts[pathn[-1]])
-        if street.distance(term) <= res * _NET_TOL_FACTOR:        # bridge grid->street gap only
+        if street.distance(term) <= net_tol:                      # bridge grid->street gap only
             sp = nearest_points(term, street)[1]                  # when we actually reached street
             coords.append((sp.x, sp.y))
         coords = [c for i, c in enumerate(coords) if i == 0 or c != coords[i - 1]]
@@ -212,33 +212,34 @@ def _greedy_reblock(
 
 @dataclass
 class ClearanceReblocker:
-    """Greedy least-cost-path reblocker. `repulsion` is the logit knob (s): s -> -inf straight
-    (aspirational), 0 balanced, s -> +inf Voronoi-following (buildable). See module docstring."""
+    """Greedy least-cost-path reblocker on a pluggable routing substrate (default chord_diag,
+    set in a later task; here grid). `repulsion` is the logit knob (s): s -> -inf straight
+    (aspirational), 0 balanced, s -> +inf Voronoi-following (buildable)."""
 
+    substrate: Substrate = field(default_factory=GridSubstrate)
     repulsion: float = 0.0
     depth_target: int = 2
-    res: float = 1.5
     max_roads: int = 400
 
     @property
-    def identity(self) -> tuple[str, float, int, float, int]:
-        return ("clearance", float(self.repulsion), int(self.depth_target),
-                float(self.res), int(self.max_roads))
+    def identity(self) -> tuple[object, ...]:
+        return ("clearance", self.substrate.identity, float(self.repulsion),
+                int(self.depth_target), int(self.max_roads))
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; the routing is block-only
         t = _sigmoid(self.repulsion)
         n_b = 0 if block.building_points.empty else len(block.building_points)
         radii = np.zeros(n_b, dtype=np.float64)   # plain clearance; weighted footprints are future
+        graph = self.substrate.build(block)
         roads, params = _greedy_reblock(
-            block, t=t, res=self.res, depth_target=self.depth_target,
+            block, graph, t=t, depth_target=self.depth_target,
             max_roads=self.max_roads, radii=radii)
-        # encode every identity field so distinct configs never share a Proposal.identity
-        pid = (f"clearance:r{self.repulsion:g}:d{self.depth_target}"
-               f":res{self.res:g}:mr{self.max_roads}")
+        pid = (f"clearance:{self.substrate.tag}:r{self.repulsion:g}"
+               f":d{self.depth_target}:mr{self.max_roads}")
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=pid, method="clearance",
-            params={**params, "repulsion": self.repulsion,
-                    "depth_target": self.depth_target, "res": self.res},
+            params={**params, "substrate": self.substrate.tag, "repulsion": self.repulsion,
+                    "depth_target": self.depth_target},
             block_identity=block.identity)

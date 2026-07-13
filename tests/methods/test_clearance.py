@@ -22,13 +22,13 @@ from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.clearance import (
     ClearanceReblocker,
-    _build_grid,
     _edge_weights,
     _greedy_reblock,
     _node_clearance,
     _relax_depth,
     _sigmoid,
 )
+from reblock.methods.substrates import GridSubstrate, _build_grid
 
 
 def test_sigmoid_is_bounded_and_symmetric() -> None:
@@ -188,7 +188,8 @@ def _column_block_with_buildings(h: int) -> Block:
 
 def test_greedy_reblock_achieves_depth_target() -> None:
     block = _column_block_with_buildings(8)  # depth 1..8
-    roads, params = _greedy_reblock(block, t=0.5, res=0.5, depth_target=2, max_roads=400,
+    graph = GridSubstrate(res=0.5).build(block)
+    roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
                                     radii=np.zeros(len(block.building_points)))
     assert len(roads) > 0
     after = parcel_access_layers(block, roads).to_numpy()
@@ -198,7 +199,8 @@ def test_greedy_reblock_achieves_depth_target() -> None:
 
 def test_greedy_reblock_returns_empty_when_already_shallow() -> None:
     block = _column_block_with_buildings(2)  # depth 1..2, target 2 -> nothing to do
-    roads, params = _greedy_reblock(block, t=0.5, res=0.5, depth_target=2, max_roads=400,
+    graph = GridSubstrate(res=0.5).build(block)
+    roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
                                     radii=np.zeros(len(block.building_points)))
     assert len(roads) == 0
     assert params["roads"] == 0
@@ -208,19 +210,20 @@ def test_propose_is_deterministic_and_leaves_rng_untouched() -> None:
     block = _column_block_with_buildings(8)
     np.random.seed(123)
     state = np.random.get_state()[1].tolist()
-    p1 = ClearanceReblocker(depth_target=2, res=0.5).propose(block)
-    p2 = ClearanceReblocker(depth_target=2, res=0.5).propose(block)
+    p1 = ClearanceReblocker(depth_target=2, substrate=GridSubstrate(res=0.5)).propose(block)
+    p2 = ClearanceReblocker(depth_target=2, substrate=GridSubstrate(res=0.5)).propose(block)
     assert np.random.get_state()[1].tolist() == state
     assert p1.roads is not None and p2.roads is not None and len(p1.roads) > 0
     assert [g.wkt for g in p1.roads.geometry] == [g.wkt for g in p2.roads.geometry]
 
 
 def test_propose_metadata_and_identity() -> None:
-    m = ClearanceReblocker(repulsion=2.0, depth_target=3, res=0.75, max_roads=50)
-    assert m.identity == ("clearance", 2.0, 3, 0.75, 50)
+    m = ClearanceReblocker(substrate=GridSubstrate(res=0.75), repulsion=2.0,
+                           depth_target=3, max_roads=50)
+    assert m.identity == ("clearance", ("grid", 0.75), 2.0, 3, 50)
     p = m.propose(_column_block_with_buildings(4))
     assert p.method == "clearance"
-    assert p.proposal_id == "clearance:r2:d3:res0.75:mr50"
+    assert p.proposal_id == "clearance:grid:r2:d3:mr50"
     assert p.block_identity == _column_block_with_buildings(4).identity
     assert p.params["repulsion"] == 2.0 and p.params["depth_target"] == 3
 
@@ -234,8 +237,8 @@ def test_distinct_repulsions_get_distinct_proposal_identity() -> None:
     # synthetic fixture, which would make Proposal.identity collapse to None regardless of
     # proposal_id and the second assertion vacuously fail.)
     block = replace(_column_block_with_buildings(6), source_content_hash="test-hash")
-    a = ClearanceReblocker(repulsion=-6.0, res=0.5).propose(block)
-    b = ClearanceReblocker(repulsion=6.0, res=0.5).propose(block)
+    a = ClearanceReblocker(repulsion=-6.0, substrate=GridSubstrate(res=0.5)).propose(block)
+    b = ClearanceReblocker(repulsion=6.0, substrate=GridSubstrate(res=0.5)).propose(block)
     assert a.proposal_id != b.proposal_id
     assert a.identity != b.identity
 
@@ -248,7 +251,7 @@ def test_propose_achieves_target_on_real_block() -> None:
     from scoring_fixtures import _block_1808
 
     block = _block_1808()
-    m = ClearanceReblocker(depth_target=2, res=0.75)
+    m = ClearanceReblocker(depth_target=2, substrate=GridSubstrate(res=0.75))
     roads = m.propose(block).roads
     assert roads is not None
     after = parcel_access_layers(block, roads).to_numpy()
@@ -268,7 +271,7 @@ def test_clearance_method_yaml_instantiates_with_defaults() -> None:
         cfg = compose(config_name="config", overrides=["method=clearance"])
     method = instantiate(cfg.method)
     assert isinstance(method, ClearanceReblocker)
-    assert method.identity == ("clearance", 0.0, 2, 1.5, 400)
+    assert method.identity == ("clearance", ("grid", 1.5), 0.0, 2, 400)
 
 
 def test_clearance_registered_in_compare_all_methods() -> None:
@@ -305,7 +308,7 @@ def test_propose_routes_through_memoized_derivation() -> None:
 
     from reblock.derivations import propose
     block = _block_1808()
-    m = ClearanceReblocker(depth_target=2, res=0.75)
+    m = ClearanceReblocker(depth_target=2, substrate=GridSubstrate(res=0.75))
     r1 = propose(m, block).roads
     r2 = propose(m, block).roads
     assert r1 is not None and r2 is not None
