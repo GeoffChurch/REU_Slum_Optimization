@@ -67,13 +67,32 @@ def _node_clearance(
 
 
 def _edge_weights(
-    clear: NDArray[np.float64], t: float,
-    rows: NDArray[np.int64], cols: NDArray[np.int64], edist: NDArray[np.float64],
+    pts: NDArray[np.float64], rows: NDArray[np.int64], cols: NDArray[np.int64],
+    edist: NDArray[np.float64], building_pts: NDArray[np.float64],
+    radii: NDArray[np.float64], t: float,
 ) -> NDArray[np.float64]:
-    """Edge weight = length * average node cost, node cost = (1 - t) + t / clearance. t=0 ->
-    uniform (straight); t->1 -> cost dominated by 1/clearance (hug the high-clearance gaps)."""
-    node_cost = (1.0 - t) + t / clear
-    return edist * 0.5 * (node_cost[rows] + node_cost[cols])
+    """Edge weight = length * mean(node cost) sampled at BOTH endpoints AND the midpoint, node
+    cost = (1 - t) + t / clearance. 3-point (not endpoint-only) so a long edge whose midpoint
+    skims a building — but whose endpoints sit in the open — still reads as expensive. Returns
+    weights aligned to the symmetric COO `rows`/`cols` order."""
+    n = len(pts)
+    mask = rows < cols                                   # one direction per undirected edge
+    ui, uj, ulen = rows[mask], cols[mask], edist[mask]
+    e = len(ui)
+    if e == 0:
+        return np.zeros(0, dtype=np.float64)
+    mid = (pts[ui] + pts[uj]) / 2.0
+    sample_pts = np.vstack([pts[ui], pts[uj], mid])
+    clear = _node_clearance(sample_pts, building_pts, radii)
+    ci, cj, cm = clear[:e], clear[e:2 * e], clear[2 * e:]
+    mean_cost = ((1.0 - t) + t / ci) + ((1.0 - t) + t / cj) + ((1.0 - t) + t / cm)
+    uw = ulen * (mean_cost / 3.0)
+    # scatter the per-undirected-edge weight back onto BOTH directed COO entries
+    key = np.minimum(rows, cols).astype(np.int64) * n + np.maximum(rows, cols).astype(np.int64)
+    ukey = ui.astype(np.int64) * n + uj.astype(np.int64)
+    order = np.argsort(ukey)
+    pos = np.searchsorted(ukey[order], key)
+    return uw[order][pos]
 
 
 def _relax_depth(depth: NDArray[np.float64], adj: list[set[int]], served: Iterable[int]) -> None:
@@ -132,8 +151,7 @@ def _greedy_reblock(
         shapely.get_coordinates(block.building_points.geometry.to_numpy())
         if not block.building_points.empty else np.empty((0, 2), dtype=np.float64)
     )
-    clear = _node_clearance(pts, building_pts, radii)
-    w = _edge_weights(clear, t, rows, cols, edist)
+    w = _edge_weights(pts, rows, cols, edist, building_pts, radii, t)
     csr = csr_matrix((w, (rows, cols)), shape=(len(pts), len(pts)))
 
     pt_tree = cKDTree(pts)

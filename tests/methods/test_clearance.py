@@ -89,13 +89,13 @@ def test_repulsion_bends_the_path_around_buildings() -> None:
     boundary = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
     buildings = np.array([[5.0, 3.0], [5.0, 5.0], [5.0, 7.0]])
     pts, rows, cols, edist = _build_grid(boundary, 0.5)
-    clear = _node_clearance(pts, buildings, np.zeros(len(buildings)))
+    radii = np.zeros(len(buildings))
     tree = cKDTree(pts)
     src = int(tree.query([5.0, 9.0])[1])
     dst = int(tree.query([5.0, 1.0])[1])
 
     def route(t: float) -> tuple[float, float]:
-        w = _edge_weights(clear, t, rows, cols, edist)
+        w = _edge_weights(pts, rows, cols, edist, buildings, radii, t)
         csr = csr_matrix((w, (rows, cols)), shape=(len(pts), len(pts)))
         _d, pred, _s = dijkstra(csr, indices=[src], return_predecessors=True, min_only=True)
         node, path = dst, [dst]
@@ -277,6 +277,26 @@ def test_clearance_registered_in_compare_all_methods() -> None:
         cfg = compose(config_name="compare_config")
     method = instantiate(cfg.all_methods["clearance"])
     assert isinstance(method, ClearanceReblocker)
+
+
+def test_edge_weights_3point_sees_a_midspan_building() -> None:
+    # A long edge whose two endpoints sit in the clear but whose MIDPOINT skims a building must
+    # read as more expensive than a plain endpoint-only average would make it. Endpoints at
+    # (0,0) and (10,0) are far from the single building at (5,3); the midpoint (5,0) is close.
+    pts = np.array([[0.0, 0.0], [10.0, 0.0]])
+    rows = np.array([0, 1])
+    cols = np.array([1, 0])
+    edist = np.array([10.0, 10.0])
+    buildings = np.array([[5.0, 3.0]])          # nearest to the midpoint, far from endpoints
+    radii = np.zeros(1)
+    t = _sigmoid(6.0)                            # high repulsion -> clearance dominates cost
+    w = _edge_weights(pts, rows, cols, edist, buildings, radii, t)
+    # endpoint-only weight for comparison: mean of the two endpoint node costs * length
+    clear_ends = _node_clearance(pts, buildings, radii)
+    node_cost_ends = (1.0 - t) + t / clear_ends
+    endpoint_only = 10.0 * 0.5 * (node_cost_ends[0] + node_cost_ends[1])
+    assert w[0] == pytest.approx(w[1])          # symmetric COO
+    assert w[0] > endpoint_only                 # the midpoint building raised the cost
 
 
 def test_propose_routes_through_memoized_derivation() -> None:
