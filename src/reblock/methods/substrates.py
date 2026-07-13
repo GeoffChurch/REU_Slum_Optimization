@@ -8,14 +8,16 @@ from __future__ import annotations
 
 from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
+import geopandas as gpd
 import numpy as np
 from numpy.typing import NDArray
 from shapely import contains_xy
 from shapely.geometry import Polygon
 
 from reblock.contracts import Block
+from reblock.derive.access import STREET_TOL
 
 
 @dataclass(frozen=True)
@@ -109,6 +111,56 @@ class GridSubstrate:
     def build(self, block: Block) -> RoutingGraph:
         pts, rows, cols, edist = _build_grid(block.boundary, self.res)
         return RoutingGraph(pts, rows, cols, edist, net_tol=self.res * _GRID_NET_TOL_FACTOR)
+
+
+def _boundary_vertices(
+    parcels: gpd.GeoDataFrame,
+) -> tuple[NDArray[np.float64], dict[tuple[float, float], int], set[frozenset[int]]]:
+    """The parcel-tessellation boundary graph as (node coords, coord->index map, boundary-edge
+    set). Nodes are the boundary vertices (snapped to cm by dijkstra._rnd), edges the party-wall
+    segments. Shared node set for the chord / spanner / cdt substrates — nodes sit in the gaps
+    between buildings, never on them."""
+    from reblock.methods import dijkstra as dijkstra_mod
+    g = dijkstra_mod._boundary_graph(parcels)
+    nodes_sorted = sorted(g.nodes())
+    node_idx = {n: i for i, n in enumerate(nodes_sorted)}
+    pts = np.asarray(nodes_sorted, dtype=np.float64)
+    edges = {frozenset((node_idx[a], node_idx[b])) for a, b in g.edges()}
+    return pts, node_idx, edges
+
+
+@dataclass(frozen=True)
+class ChordSubstrate:
+    """Boundary-vertex graph + ALL within-cell diagonals (every non-adjacent pair in each
+    parcel's exterior ring; parcels are ~convex so every diagonal is interior/valid). Node count
+    ∝ parcels (not area); the winner of the substrate head-to-head. `net_tol = STREET_TOL`."""
+
+    @property
+    def identity(self) -> Hashable:
+        return ("chord_diag",)
+
+    @property
+    def tag(self) -> str:
+        return "chord_diag"
+
+    def build(self, block: Block) -> RoutingGraph:
+        from reblock.methods import dijkstra as dijkstra_mod
+        pts, node_idx, edges = _boundary_vertices(block.parcels)
+        for geom in block.parcels.geometry:
+            coords = list(cast(Polygon, geom).exterior.coords)[:-1]     # drop closing duplicate
+            ring = [node_idx[ni] for c in coords
+                    if (ni := dijkstra_mod._rnd(cast(tuple[float, float], c))) in node_idx]
+            m = len(ring)
+            if m < 3:
+                continue
+            for a in range(m):
+                for b in range(a + 2, m):
+                    if a == 0 and b == m - 1:
+                        continue                            # wraparound-adjacent (a boundary edge)
+                    if ring[a] != ring[b]:
+                        edges.add(frozenset((ring[a], ring[b])))
+        r, ro, co, di = _pack_edges(pts, edges)
+        return RoutingGraph(r, ro, co, di, net_tol=STREET_TOL)
 
 
 @dataclass(frozen=True)

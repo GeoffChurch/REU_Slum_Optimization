@@ -5,9 +5,13 @@ import numpy as np
 import pytest
 from pyproj import CRS
 from shapely.geometry import Polygon
+from shapely.ops import unary_union
 
 from reblock.contracts import Block
+from reblock.derive.access import parcel_access_layers
+from reblock.methods.clearance import _greedy_reblock
 from reblock.methods.substrates import (
+    ChordSubstrate,
     GridSubstrate,
     PrebuiltSubstrate,
     RoutingGraph,
@@ -57,3 +61,29 @@ def test_prebuilt_substrate_round_trips() -> None:
     sub: Substrate = PrebuiltSubstrate(g)
     assert sub.build(_grid_block(2)) is g
     assert sub.tag == "prebuilt"
+
+
+def _column_block_with_buildings(h: int) -> Block:
+    polys = [Polygon([(0, j), (1, j), (1, j + 1), (0, j + 1)]) for j in range(h)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(h))}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, unary_union(polys))
+    from shapely.geometry import LineString
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (1, 0)])], crs=UTM)
+    pts = [g.representative_point() for g in parcels.geometry]
+    bp = gpd.GeoDataFrame(geometry=pts, crs=UTM)
+    return Block(block_id="colb", crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=streets, building_points=bp)
+
+
+def test_chord_substrate_builds_connected_graph_and_hits_target() -> None:
+    block = _column_block_with_buildings(8)
+    graph = ChordSubstrate().build(block)
+    assert len(graph.pts) > 0 and len(graph.rows) == len(graph.cols) == len(graph.edist)
+    undirected = {frozenset((int(a), int(b)))
+                  for a, b in zip(graph.rows, graph.cols, strict=True)}
+    assert len(undirected) * 2 == len(graph.rows)          # symmetric
+    roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
+                                    radii=np.zeros(len(block.building_points)))
+    after = parcel_access_layers(block, roads).to_numpy()
+    assert int(after.max()) <= 2 and params["grid_unreachable"] == 0
+    assert ChordSubstrate().identity == ("chord_diag",) and ChordSubstrate().tag == "chord_diag"

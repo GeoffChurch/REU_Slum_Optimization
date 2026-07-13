@@ -186,6 +186,16 @@ def _column_block_with_buildings(h: int) -> Block:
                  streets=block.streets, building_points=block_bp)
 
 
+def test_default_substrate_is_chord_diag() -> None:
+    m = ClearanceReblocker(repulsion=0.0)
+    assert m.substrate.tag == "chord_diag"
+    p = m.propose(_column_block_with_buildings(6))
+    assert p.proposal_id == "clearance:chord_diag:r0:d2:mr400"
+    assert p.params["substrate"] == "chord_diag"
+    after = parcel_access_layers(_column_block_with_buildings(6), p.roads).to_numpy()
+    assert int(after.max()) <= 2
+
+
 def test_greedy_reblock_achieves_depth_target() -> None:
     block = _column_block_with_buildings(8)  # depth 1..8
     graph = GridSubstrate(res=0.5).build(block)
@@ -271,7 +281,7 @@ def test_clearance_method_yaml_instantiates_with_defaults() -> None:
         cfg = compose(config_name="config", overrides=["method=clearance"])
     method = instantiate(cfg.method)
     assert isinstance(method, ClearanceReblocker)
-    assert method.identity == ("clearance", ("grid", 1.5), 0.0, 2, 400)
+    assert method.identity == ("clearance", ("chord_diag",), 0.0, 2, 400)
 
 
 def test_clearance_registered_in_compare_all_methods() -> None:

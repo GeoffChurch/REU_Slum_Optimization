@@ -31,7 +31,7 @@ from shapely.ops import nearest_points, unary_union
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.substrates import GridSubstrate, RoutingGraph, Substrate
+from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 
 _CLEARANCE_EPS = 0.3       # keeps node cost finite on a grid node sitting on a building point
 _SIGMOID_EPS = 1e-15       # clamps sigmoid strictly inside (0, 1); float64 underflows to exact
@@ -213,10 +213,10 @@ def _greedy_reblock(
 @dataclass
 class ClearanceReblocker:
     """Greedy least-cost-path reblocker on a pluggable routing substrate (default chord_diag,
-    set in a later task; here grid). `repulsion` is the logit knob (s): s -> -inf straight
-    (aspirational), 0 balanced, s -> +inf Voronoi-following (buildable)."""
+    the parcel-boundary graph + all within-cell diagonals). `repulsion` is the logit knob (s):
+    s -> -inf straight (aspirational), 0 balanced, s -> +inf Voronoi-following (buildable)."""
 
-    substrate: Substrate = field(default_factory=GridSubstrate)
+    substrate: Substrate = field(default_factory=ChordSubstrate)   # chord_diag, the default winner
     repulsion: float = 0.0
     depth_target: int = 2
     max_roads: int = 400

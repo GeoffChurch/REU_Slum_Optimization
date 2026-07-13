@@ -3,8 +3,7 @@
 # reblock.methods.clearance.ClearanceReblocker.
 _target_: reblock.methods.clearance.ClearanceReblocker
 substrate:
-  _target_: reblock.methods.substrates.GridSubstrate
-  res: 1.5
+  _target_: reblock.methods.substrates.ChordSubstrate
 repulsion: 0.0
 depth_target: 2
 max_roads: 400
