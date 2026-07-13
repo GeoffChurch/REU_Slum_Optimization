@@ -12,7 +12,9 @@ from typing import Protocol, cast
 
 import geopandas as gpd
 import numpy as np
+import shapely
 from numpy.typing import NDArray
+from scipy.spatial import Delaunay
 from shapely import contains_xy
 from shapely.geometry import Polygon
 
@@ -159,6 +161,84 @@ class ChordSubstrate:
                         continue                            # wraparound-adjacent (a boundary edge)
                     if ring[a] != ring[b]:
                         edges.add(frozenset((ring[a], ring[b])))
+        r, ro, co, di = _pack_edges(pts, edges)
+        return RoutingGraph(r, ro, co, di, net_tol=STREET_TOL)
+
+
+@dataclass(frozen=True)
+class SpannerSubstrate:
+    """Theta/Yao geometric spanner on the boundary vertices: per node, partition directions into
+    `cones` angular cones and connect to the nearest node in each non-empty cone — an O(n·cones)-
+    edge spanner with bounded stretch. Sparsest of the tessellation substrates. `net_tol =
+    STREET_TOL`."""
+
+    cones: int = 6
+
+    @property
+    def identity(self) -> Hashable:
+        return ("theta_spanner", int(self.cones))
+
+    @property
+    def tag(self) -> str:
+        return "theta_spanner"
+
+    def build(self, block: Block) -> RoutingGraph:
+        pts, _node_idx, edges = _boundary_vertices(block.parcels)
+        n = len(pts)
+        two_pi = 2.0 * np.pi
+        cone_width = two_pi / self.cones
+        for i in range(n):
+            dx = pts[:, 0] - pts[i, 0]
+            dy = pts[:, 1] - pts[i, 1]
+            dist = np.hypot(dx, dy)
+            cone = np.floor(np.mod(np.arctan2(dy, dx), two_pi) / cone_width).astype(np.int64)
+            for c in range(self.cones):
+                mask = (cone == c) & (dist > 0.0)
+                if not np.any(mask):
+                    continue
+                idxs = np.flatnonzero(mask)
+                j = int(idxs[np.argmin(dist[idxs])])
+                edges.add(frozenset((i, j)))
+        r, ro, co, di = _pack_edges(pts, edges)
+        return RoutingGraph(r, ro, co, di, net_tol=STREET_TOL)
+
+
+@dataclass(frozen=True)
+class CdtSubstrate:
+    """Delaunay triangulation of the boundary vertices, edges clipped to the block (an edge is
+    kept only if its whole segment stays within the boundary, so it can't cut across a concave
+    notch). Delaunay-SELECTED diagonals — sparser edges than chord_diag. `net_tol = STREET_TOL`."""
+
+    @property
+    def identity(self) -> Hashable:
+        return ("cdt_gap",)
+
+    @property
+    def tag(self) -> str:
+        return "cdt_gap"
+
+    def build(self, block: Block) -> RoutingGraph:
+        pts, _node_idx, edges = _boundary_vertices(block.parcels)
+        pts_u = np.unique(pts, axis=0)
+        if len(pts_u) >= 4:                                 # Delaunay needs >=3 non-collinear pts
+            tri = Delaunay(pts_u)
+            tri_edges: set[frozenset[int]] = set()
+            for s in tri.simplices:
+                i0, i1, i2 = (int(x) for x in s)
+                tri_edges |= {frozenset((i0, i1)), frozenset((i1, i2)), frozenset((i0, i2))}
+            ordered = sorted(tuple(sorted(e)) for e in tri_edges)
+            from shapely.geometry import LineString
+            boundary_buf = block.boundary.buffer(1e-6)      # tolerate exact frontage-segment runs
+            segs = np.array([LineString([pts_u[i], pts_u[j]]) for i, j in ordered], dtype=object)
+            keep = shapely.covers(boundary_buf, segs)
+            # remap unique-point indices back to the boundary-vertex indices via coordinate match
+            uidx = {(round(float(x), 3), round(float(y), 3)): k for k, (x, y) in enumerate(pts)}
+            for k, ok in enumerate(keep):
+                if ok:
+                    i, j = ordered[k]
+                    a = uidx[(round(float(pts_u[i, 0]), 3), round(float(pts_u[i, 1]), 3))]
+                    b = uidx[(round(float(pts_u[j, 0]), 3), round(float(pts_u[j, 1]), 3))]
+                    edges.add(frozenset((a, b)))
         r, ro, co, di = _pack_edges(pts, edges)
         return RoutingGraph(r, ro, co, di, net_tol=STREET_TOL)
 

@@ -11,10 +11,12 @@ from reblock.contracts import Block
 from reblock.derive.access import parcel_access_layers
 from reblock.methods.clearance import _greedy_reblock
 from reblock.methods.substrates import (
+    CdtSubstrate,
     ChordSubstrate,
     GridSubstrate,
     PrebuiltSubstrate,
     RoutingGraph,
+    SpannerSubstrate,
     Substrate,
     _pack_edges,
 )
@@ -87,3 +89,21 @@ def test_chord_substrate_builds_connected_graph_and_hits_target() -> None:
     after = parcel_access_layers(block, roads).to_numpy()
     assert int(after.max()) <= 2 and params["grid_unreachable"] == 0
     assert ChordSubstrate().identity == ("chord_diag",) and ChordSubstrate().tag == "chord_diag"
+
+
+@pytest.mark.parametrize("sub,tag,ident", [
+    (SpannerSubstrate(), "theta_spanner", ("theta_spanner", 6)),
+    (CdtSubstrate(), "cdt_gap", ("cdt_gap",)),
+])
+def test_extra_substrates_build_and_hit_target(sub: Substrate, tag: str, ident: object) -> None:
+    block = _column_block_with_buildings(8)
+    graph = sub.build(block)
+    assert len(graph.pts) > 0 and len(graph.rows) == len(graph.cols) == len(graph.edist)
+    undirected = {frozenset((int(a), int(b)))
+                  for a, b in zip(graph.rows, graph.cols, strict=True)}
+    assert len(undirected) * 2 == len(graph.rows)
+    roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
+                                    radii=np.zeros(len(block.building_points)))
+    after = parcel_access_layers(block, roads).to_numpy()
+    assert int(after.max()) <= 2 and params["grid_unreachable"] == 0
+    assert sub.tag == tag and sub.identity == ident
