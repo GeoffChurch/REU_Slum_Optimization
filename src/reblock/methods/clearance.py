@@ -222,7 +222,12 @@ class ClearanceReblocker:
     max_roads: int = 400
 
     @property
-    def identity(self) -> tuple[object, ...]:
+    def identity(self) -> tuple[object, ...] | None:
+        # An uncacheable substrate (PrebuiltSubstrate: identity None) makes the whole method
+        # uncacheable -- propagate the None up so derive() bypasses the memoized propose, else two
+        # different ad-hoc graphs would key-collide in the access_after/geometric_after caches.
+        if self.substrate.identity is None:
+            return None
         return ("clearance", self.substrate.identity, float(self.repulsion),
                 int(self.depth_target), int(self.max_roads))
 

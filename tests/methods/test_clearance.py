@@ -28,7 +28,12 @@ from reblock.methods.clearance import (
     _relax_depth,
     _sigmoid,
 )
-from reblock.methods.substrates import GridSubstrate, _build_grid
+from reblock.methods.substrates import (
+    GridSubstrate,
+    PrebuiltSubstrate,
+    RoutingGraph,
+    _build_grid,
+)
 
 
 def test_sigmoid_is_bounded_and_symmetric() -> None:
@@ -351,3 +356,23 @@ def test_compare_registers_clearance_and_grid_variant() -> None:
         cfg = compose(config_name="compare_config")
     assert instantiate(cfg.all_methods["clearance"]).substrate.tag == "chord_diag"
     assert instantiate(cfg.all_methods["clearance_grid"]).substrate.tag == "grid"
+
+
+def test_default_chord_diag_propose_is_deterministic() -> None:
+    # The committed gallery default -- its determinism is load-bearing.
+    block = _column_block_with_buildings(8)
+    p1 = ClearanceReblocker().propose(block)
+    p2 = ClearanceReblocker().propose(block)
+    assert p1.roads is not None and p2.roads is not None and len(p1.roads) > 0
+    assert p1.proposal_id.startswith("clearance:chord_diag:")
+    assert [g.wkt for g in p1.roads.geometry] == [g.wkt for g in p2.roads.geometry]
+
+
+def test_prebuilt_substrate_makes_the_method_uncacheable() -> None:
+    # PrebuiltSubstrate.identity is None -> ClearanceReblocker.identity must propagate None so
+    # derive() bypasses the memoized propose (distinct ad-hoc graphs must not key-collide).
+    g = RoutingGraph(pts=np.array([[0.0, 0.0], [1.0, 0.0]]), rows=np.array([0, 1]),
+                     cols=np.array([1, 0]), edist=np.array([1.0, 1.0]), net_tol=0.5)
+    assert ClearanceReblocker(substrate=PrebuiltSubstrate(g)).identity is None
+    # a named substrate stays cacheable (non-None identity)
+    assert ClearanceReblocker().identity is not None
