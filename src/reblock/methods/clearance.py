@@ -24,13 +24,14 @@ from numpy.typing import NDArray
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
-from shapely import STRtree, contains_xy
-from shapely.geometry import LineString, Point, Polygon
+from shapely import STRtree
+from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.methods.substrates import _build_grid as _build_grid
 
 _CLEARANCE_EPS = 0.3       # keeps node cost finite on a grid node sitting on a building point
 _NET_TOL_FACTOR = 1.5      # a grid node within res * this of the street seeds the network
@@ -48,38 +49,6 @@ def _sigmoid(s: float) -> float:
         e = math.exp(s)
         z = e / (1.0 + e)
     return min(max(z, _SIGMOID_EPS), 1.0 - _SIGMOID_EPS)
-
-
-def _build_grid(
-    boundary: Polygon, res: float
-) -> tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]:
-    """8-connected grid of points inside `boundary` at spacing `res`. Returns
-    (pts (M,2), rows, cols, edist): `rows`/`cols` are symmetric COO edge endpoints (each
-    undirected edge stored both ways) and `edist` their Euclidean lengths (res or res*sqrt2)."""
-    minx, miny, maxx, maxy = boundary.bounds
-    xs = np.arange(minx, maxx + res, res)
-    ys = np.arange(miny, maxy + res, res)
-    gx, gy = np.meshgrid(xs, ys)
-    pts = np.c_[gx.ravel(), gy.ravel()]
-    pts = pts[contains_xy(boundary, pts[:, 0], pts[:, 1])]
-    idx = {(round(float(x), 3), round(float(y), 3)): k for k, (x, y) in enumerate(pts)}
-    rows: list[int] = []
-    cols: list[int] = []
-    dist: list[float] = []
-    for k, (x, y) in enumerate(pts):
-        for dx, dy in ((res, 0.0), (0.0, res), (res, res), (res, -res)):
-            nb = idx.get((round(float(x + dx), 3), round(float(y + dy), 3)))
-            if nb is not None:
-                d = float(np.hypot(dx, dy))
-                rows += [k, nb]
-                cols += [nb, k]
-                dist += [d, d]
-    return (
-        pts.astype(np.float64),
-        np.asarray(rows, dtype=np.int64),
-        np.asarray(cols, dtype=np.int64),
-        np.asarray(dist, dtype=np.float64),
-    )
 
 
 def _node_clearance(
