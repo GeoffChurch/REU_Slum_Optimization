@@ -1,98 +1,106 @@
 # Cape Town flagship: screen → grow → compare on all four lenses
 
-The full deep-dive on real Cape Town data: screen the whole metro for informal blocks, grow the
-worst *tractable* one into its neighborhood, and grade every method on all four lenses — including
-the grounded **egress-resistance** metric — with before/after renders.
+The full method-comparison deep-dive on real Cape Town data: screen the whole metro for informal
+blocks, grow a deep one into its neighborhood, and grade three fast methods on all four lenses —
+including the grounded **egress-resistance** metric — with before/after renders. Complements
+[`clearance-flagship`](../clearance-flagship/) (one whole settlement reblocked); this one is about
+*which method* and *what each lens rewards*.
 
-Unlike the rest of this gallery, this reproduces from **`capetown_full`** (the full metro,
-auto-downloaded to `~/.cache/reblock` on first use), not the committed 301-block sample.
+Reproduces from **`capetown_full`** (the full metro, auto-downloaded to `~/.cache/reblock` on first
+use), not the committed sample.
 
 ## 1. Screen the metro
 
-`dense_compact` flags **6459 of 83192** blocks as dense, deep informal fabric (density ≥ 30 bld/ha,
-mean access-depth ≥ 1.3), ranked by max access-depth. The whole ranked selection is memoized (a
-`derive()` keyed on the source content hash + gate params), so the 167 s first pass is **0.1 s** on
-every rerun.
+`dense_compact` flags **13,906 of 83,192** blocks as deep informal fabric, ranked by max
+access-depth. The cheap gate is the depth proxy `√(n·A)/P` (building count · block area ÷ perimeter),
+a closed-form estimate of parcel-rings deep (see
+[the note](../../docs/superpowers/notes/2026-07-14-depth-proxy-screen-gate.md)). The whole ranked
+selection is memoized, so the metro pass is 0.1 s on rerun.
 
-![flagged map](flagged_map.png)
+![screen](screen.jpg)
 
 ## 2. Grow a region
 
-Cape Town's *deepest* blocks are single 1000–3000-building informal blocks — too large to reblock in
-full. So we seed the deepest **arterial-tractable** block, `ZAF.9.3.1_1_21719` (the same block the
-[detect-reblock](../detect-reblock/) sample surfaces as worst-access), and let `dense_cluster` grow
-it toward its densest neighbors up to a ~1200-building budget: a contiguous **4-block neighborhood**
-(`21634 + 21710 + 21713 + 21719`, ~1594 parcels). The dark buildings packed inside the region vs the
-sparse formal grid around it are the informal fabric the screen is built to find.
+Seed a deep block, `ZAF.9.3.1_1_21719`, and let `dense_cluster` grow it toward its deepest neighbors
+(by that same proxy) up to a ~1200-building budget: a contiguous **3-block neighborhood**
+(`21602 + 21634 + 21719`, **1,886 parcels**). The dark fabric packed inside vs the sparse formal grid
+around it is what the screen is built to find. Every parcel starts up to **10** deep.
 
-![region map](region_map.png)
+![region](region.jpg)
 
 ## 3. Reblock + compare
 
 ```bash
 pixi run python -m reblock.compare \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=1200 \
-  "block_ids=[[ZAF.9.3.1_1_21719]]" methods=[dijkstra,mesh,greedy_arterial_buildable] max_blocks=1
+  "block_ids=[[ZAF.9.3.1_1_21719]]" methods=[dijkstra,mesh,clearance] max_blocks=1
 
+# per-method before/after renders (proposals reuse the compare's L2 cache -> seconds)
 pixi run python -m reblock.run \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=1200 \
-  "block_ids=[[ZAF.9.3.1_1_21719]]" method=greedy_arterial max_blocks=1 \
+  "block_ids=[[ZAF.9.3.1_1_21719]]" method=dijkstra max_blocks=1 \
   render.enabled=true region_map.enabled=true
-# swap method=dijkstra / method=mesh for the other after-renders
+# swap method=mesh / method=clearance for the other after-renders
 ```
 
-The compare computes each method's region proposal once; the render passes reuse it from the L2
-cache (a region proposal is content-addressed on its members + method), so after the one-time
-arterial compute the renders are seconds. `flagged_map.png` comes from the screen's selection
-(`data=capetown_full screen=dense_compact`).
+The whole compare runs in **~30 s** (all three methods are fast; a region proposal is
+content-addressed on its members + method, so the render passes reuse it from the L2 cache).
 
 ## What the region looks like
 
-Nearly every parcel sits ~10 parcels from a street (dark = deep). Coverage methods blanket the
-neighborhood with roads (dijkstra Δk=9); arterial adds a few strategic through-roads (Δk=3).
+Nearly every parcel sits ~10 parcels from a street (dark = deep). The coverage methods (dijkstra,
+mesh) blanket it to depth 1 (Δk=9); clearance targets depth 2 and gets there with **a third of the
+road**:
 
-| before | dijkstra (coverage) | arterial (strategic) |
+| method | depth | Δk | road length |
+|---|---|---|---|
+| dijkstra | 10 → 1 | 9 | 12,901 m |
+| mesh | 10 → 1 | 9 | 18,434 m |
+| clearance | 10 → 2 | 8 | **3,888 m** |
+
+| before | dijkstra (coverage) | clearance (sparse + direct) |
 |---|---|---|
-| ![before](before.png) | ![dijkstra](after_dijkstra.png) | ![arterial](after_arterial.png) |
+| ![before](before.jpg) | ![dijkstra](after_dijkstra.jpg) | ![clearance](after_clearance.jpg) |
 
-(mesh: [`after_mesh.png`](after_mesh.png).)
+(mesh: [`after_mesh.jpg`](after_mesh.jpg).)
 
 ## The four lenses
 
-Mean AUC per method (benefit per meter of road, integrated across the shared budget; higher = better):
+Mean AUC per method (benefit per metre of road, integrated across the shared budget; higher = better):
 
-| lens | dijkstra | mesh | arterial |
+| lens | dijkstra | mesh | clearance |
 |---|---|---|---|
-| access — burden removed | **0.82** | 0.81 | 0.42 |
-| resistance — egress removed | **0.65** | 0.62 | 0.13 |
-| directness — 1/circuity | 0.00 | 0.01 | **0.13** |
+| access — burden removed | **0.82** | 0.82 | 0.80 |
+| resistance — egress removed | **0.66** | 0.62 | 0.47 |
+| directness — 1/circuity | 0.00 | 0.01 | **0.04** |
 | efficiency — network E | 0.00 | 0.00 | 0.00 |
 
-The table reads "coverage wins access + resistance, arterial wins directness" — but the **curves**
-tell a sharper, more honest story.
+The table reads "the spanning tree wins access + resistance, clearance wins directness" — but the
+**curves** tell the sharper story.
 
-**Access + resistance are coverage-driven.** In arterial's operating regime (0–80 m/ha) all three
-curves *coincide* — every method removes access-burden and egress-resistance at the **same rate per
-meter**. dijkstra/mesh only pull ahead on AUC by committing ~10× the road to blanket every parcel;
-arterial isn't less efficient, it commits less road and stops. The AUC gap is *less road*, not lower
-efficiency.
+**Access + resistance are coverage-driven.** In the low-road regime all three curves *coincide* —
+every method removes access-burden and egress-resistance at nearly the **same rate per metre**.
+dijkstra/mesh pull ahead on AUC by committing 3–5× the road to blanket every parcel to depth 1;
+clearance isn't less efficient, it stops at depth 2 with far less road. The AUC gap is *more road*,
+not lower efficiency per metre.
 
-![resistance curve](curve_resistance.png)
+![access curve](curve_access.png) ![resistance curve](curve_resistance.png)
 
-**Directness is uniquely arterial's.** Strategic through-roads make trips direct at ~50 m/ha; a
-spanning tree (dijkstra) barely moves circuity even at 900 m/ha, and mesh needs ~1000 m/ha to reach
-a third of arterial's directness.
+**Directness is clearance's.** Its least-cost roads cut more direct interior routes than a frontage
+spanning tree, so it leads directness while dijkstra barely moves circuity. (This is the niche the
+old `greedy_arterial` method held — clearance now covers it at seconds instead of core-hours, and
+adds a `repulsion` knob to trade directness against homes displaced.)
 
 ![directness curve](curve_directness.png)
 
-So for **egress and reachability**, road density is what matters and any method delivers it
-efficiently — build the cheapest. For **navigability** (direct trips through a deep block),
-arterial's few cross-cutting roads are worth far more than blanket coverage.
+So for **egress and reachability**, road density is what matters and the cheapest coverage method
+(dijkstra) delivers it efficiently. For **navigability** (direct trips through a deep block) at a
+fraction of the road, clearance is the one to reach for.
 
 ## The resistance metric on real data
 
 This example doubles as the grounded egress-resistance metric's real-data test. On a deep informal
 region it behaves as a **coverage/redundancy** lens — tracking access, distinct from directness —
-the intended reading: it measures how easily every parcel reaches egress, and redundant road removes
-more of that resistance. (`curve_efficiency.png` — network E — is near-inert at this scale: the
-all-pairs mean 1/distance is swamped by the region's many far-apart parcel pairs.)
+the intended reading: it measures how easily every parcel reaches egress, and redundant road (the
+spanning tree's) removes more of that resistance. (`efficiency` — network E — is near-inert at this
+scale: the all-pairs mean 1/distance is swamped by the region's many far-apart parcel pairs.)
