@@ -8,9 +8,9 @@ pixi run python -m reblock.run data=capetown screen=dense_compact screen.depth_p
   method=dijkstra eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=2
 ```
 
-On the committed Cape Town sample this flags 170 blocks and reblocks the 2 worst (deepest-access).
+On the committed Cape Town sample this flags 146 blocks and reblocks the 2 worst (deepest-access).
 `flagged_map.png` shows the whole metro with flagged blocks in red; the pair below is the
-worst-access survivor `ZAF.9.3.1_1_21719`.
+worst-access survivor `ZAF.9.3.1_1_42406`.
 
 ![flagged map](flagged_map.png)
 
