@@ -67,6 +67,7 @@ lint = "ruff check ."
 fmt = "ruff format ."
 check = { depends-on = ["lint", "typecheck", "test"] }
 run = "python -m reblock.run"
+compare = "python -m reblock.compare"
 
 # ---------------------------------------------------------------------------
 # Tooling config

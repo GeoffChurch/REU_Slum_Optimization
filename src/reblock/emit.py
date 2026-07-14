@@ -133,7 +133,20 @@ def region_map(source: Source, regions: list[list[str]],
     geoms = source.block_geometries()
     geoms["block_id"] = geoms["block_id"].astype(str)
     out_dir.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, (ax_macro, ax) = plt.subplots(1, 2, figsize=(20, 10))
+
+    # 1. Macro view: City choropleth (matches flagged_map)
+    all_seed_ids = {b for seeds in seed_groups for b in seeds}
+    unflagged = geoms[~geoms["block_id"].isin(all_seed_ids)]
+    flagged = geoms[geoms["block_id"].isin(all_seed_ids)]
+    if not unflagged.empty:
+        unflagged.plot(ax=ax_macro, color="#cccccc", edgecolor="#9a9a9a", linewidth=0.3)
+    if not flagged.empty:
+        flagged.plot(ax=ax_macro, color="#c0392b", edgecolor="#7b241c", linewidth=0.5)
+    ax_macro.set_title(f"{len(all_seed_ids)} of {len(geoms)} blocks flagged")
+    ax_macro.set_axis_off()
+
+    # 2. Micro view: Region builder results
     # Every candidate block as pale context (thin edge so small informal blocks stay visible),
     # matching flagged_map; the region members are then painted over it.
     geoms.plot(ax=ax, color="#eeeeee", edgecolor="#bdbdbd", linewidth=0.3)
@@ -145,17 +158,13 @@ def region_map(source: Source, regions: list[list[str]],
             continue
         n_members += len(members)
         members.plot(ax=ax, color=cmap(i % cmap.N), edgecolor="#333333",
-                     linewidth=0.8, alpha=0.85)
+                     linewidth=0.8, alpha=0.4)
     # Outline the pre-expansion seed blocks on top, unfilled (facecolor="none" so the
     # region-colour fill underneath stays visible) with a heavy black edge -- this is what
     # makes a convex_hull region's fill-in legible against its original seed.
-    n_seeds = 0
-    for seeds in seed_groups:
-        seed_blocks = geoms[geoms["block_id"].isin(set(seeds))]
-        if seed_blocks.empty:
-            continue
-        n_seeds += len(seed_blocks)
-        seed_blocks.plot(ax=ax, facecolor="none", edgecolor="black", linewidth=2.2)
+    seed_blocks = geoms[geoms["block_id"].isin(all_seed_ids)]
+    n_seeds = len(seed_blocks)
+    seed_blocks.plot(ax=ax, facecolor="none", edgecolor="black", linewidth=2.2)
     # Frame the view on the region members (with context padding) rather than the whole
     # metro -- a small region on a wide candidate extent is otherwise an invisible speck,
     # defeating the point of showing which blocks the builder pulled in. The same frame windows
@@ -165,6 +174,12 @@ def region_map(source: Source, regions: list[list[str]],
         frame = frame_bbox(all_members.geometry)
         ax.set_xlim(frame[0], frame[2])
         ax.set_ylim(frame[1], frame[3])
+        
+        import matplotlib.patches as patches
+        rect = patches.Rectangle((frame[0], frame[1]), frame[2]-frame[0], frame[3]-frame[1],
+                                 linewidth=2, edgecolor='black', facecolor='none', zorder=10)
+        ax_macro.add_patch(rect)
+        
         pts = source.building_points(frame)
         if not pts.empty:
             members_union = all_members.geometry.union_all()
@@ -174,8 +189,8 @@ def region_map(source: Source, regions: list[list[str]],
                 context_pts.plot(ax=ax, color=_CONTEXT_PT, markersize=2, alpha=0.6)
             if not own_pts.empty:
                 own_pts.plot(ax=ax, color=_OWN_PT, markersize=4)
-    ax.set_title(f"{len(regions)} region(s), {n_members} member block(s) of {len(geoms)} "
-                 f"candidates ({n_seeds} seed block(s) outlined)")
+    ax.set_title(f"{len(regions)} region(s), {n_members} member block(s) "
+                 f"({n_seeds} seed block(s) outlined in black)")
     ax.set_axis_off()
     out_path = out_dir / "region_map.png"
     save_render(fig, out_path)

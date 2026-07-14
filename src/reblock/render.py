@@ -10,6 +10,7 @@ put on one shared colour scale.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import matplotlib
 
@@ -24,7 +25,7 @@ from reblock.contracts import BBox, Block, Metrics, Proposal
 
 _CMAP = "YlOrRd"
 _BOUNDARY_COLOR = "#222222"
-_ROAD_COLOR = "#08306b"
+_ROAD_COLOR = "#1E90FF"
 _CONTEXT_OUTLINE = "#dddddd"
 _CONTEXT_PT = "#c9c9c9"
 _OWN_PT = "#333333"
@@ -66,7 +67,7 @@ def _draw_heatmap(
 ) -> Figure:
     parcels = _parcels_with_layer(block, layers)
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(10, 10))
     parcels.plot(ax=ax, column="layer", cmap=_CMAP, vmin=1, vmax=vmax,
                  edgecolor="#999999", linewidth=0.3)
 
@@ -91,12 +92,11 @@ def _draw_heatmap(
         block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
 
     if own_points is not None and not own_points.empty:
-        own_points.plot(ax=ax, color=_OWN_PT, markersize=1.25)  # half-radius (markersize is area)
-    # Displaced sites (own_points that fall inside a committed road's corridor): a hollow ring
-    # drawn on top of own_points -- the cost of the straight road made visible next to it.
+        own_points.plot(ax=ax, color=_OWN_PT, markersize=4)
+    # Displaced sites (own_points that fall inside a committed road's corridor): drawn on top
+    # of own_points -- the cost of the straight road made visible next to it.
     if displaced_points is not None and not displaced_points.empty:
-        displaced_points.plot(ax=ax, facecolor="none", edgecolor=_DISPLACED_PT,
-                              markersize=40, linewidths=1.2, zorder=5)
+        displaced_points.plot(ax=ax, color="red", markersize=20, zorder=5)
 
     sm = plt.cm.ScalarMappable(cmap=_CMAP, norm=Normalize(vmin=1, vmax=vmax))
     fig.colorbar(sm, ax=ax).set_label("access depth (parcels from a street)")
@@ -142,7 +142,10 @@ def render_after(
     )
     ax = fig.axes[0]
     if proposal.roads is not None and not proposal.roads.empty:
-        proposal.roads.plot(ax=ax, color=_ROAD_COLOR, linewidth=2.0)
+        corridor_m = float(cast(float, proposal.params.get("corridor_m", 3.0)))
+        roads_buffered = gpd.GeoDataFrame(
+            geometry=proposal.roads.geometry.buffer(corridor_m), crs=block.crs)
+        roads_buffered.plot(ax=ax, color=_ROAD_COLOR, zorder=4)
 
     title = f"{block.block_id} — after"
     if metrics is not None:
@@ -154,4 +157,4 @@ def render_after(
 
 
 def save_render(fig: Figure, path: str | Path) -> None:
-    fig.savefig(path, dpi=140, bbox_inches="tight")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
