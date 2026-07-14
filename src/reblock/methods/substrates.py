@@ -16,7 +16,7 @@ import shapely
 from numpy.typing import NDArray
 from scipy.spatial import Delaunay
 from shapely import contains_xy
-from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon, Polygon
 
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
@@ -61,7 +61,7 @@ def _pack_edges(
 
 
 def _build_grid(
-    boundary: Polygon, res: float
+    boundary: Polygon | MultiPolygon, res: float
 ) -> tuple[NDArray[np.float64], NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]:
     """8-connected grid of points inside `boundary` at spacing `res`. Returns
     (pts (M,2), rows, cols, edist): `rows`/`cols` are symmetric COO edge endpoints (each

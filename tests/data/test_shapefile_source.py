@@ -38,6 +38,7 @@ def test_streets_excludes_interior_gap_rings() -> None:
     raw = gpd.GeoDataFrame(geometry=squares, crs=utm)
     block = next(ShapefileSource("unused", region_id="donut")._iter_blocks(
         raw, utm, source_content_hash=""))
+    assert isinstance(block.boundary, Polygon)    # a single block is a Polygon (holes and all)
     assert len(block.boundary.interiors) == 1     # the central hole really exists
     assert len(block.streets) == 1                # ...but streets = the outer ring only
 

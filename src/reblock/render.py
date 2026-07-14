@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
+from shapely.geometry import Polygon
 
 from reblock.contracts import BBox, Block, Metrics, Proposal
 
@@ -96,12 +97,17 @@ def _draw_heatmap(
         _point_disks(context_points, _POINT_RADIUS_M).plot(
             ax=ax, color=_CONTEXT_PT, alpha=0.6, linewidth=0)
 
-    gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
-        ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
-    # The existing street network, drawn like the boundary. For a single block this is the
-    # outer ring (already drawn above); for a region it also carries the inter-block streets
-    # between members -- existing egress the 'before' access depth is measured against, so
-    # they must be visible (a parcel next to one is shallow, not deep).
+    # Outline. A single block (or a gap-free region) is a Polygon -- draw its ring. A gappy
+    # multi-block region's boundary is a MultiPolygon whose `.boundary` is one ring PER member:
+    # redundant with the inter-block streets drawn below, so skip it there (drawing it added a
+    # misleading convex-hull-like outline across the empty gaps between members).
+    if isinstance(block.boundary, Polygon):
+        gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
+            ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
+    # The existing street network. For a single block this is the outer ring; for a region it also
+    # carries the inter-block streets between members -- existing egress the 'before' access depth
+    # is measured against, so they must be visible (a parcel next to one is shallow, not deep). For
+    # a gappy region this IS the region outline (the boundary above is skipped).
     if block.streets is not None and not block.streets.empty:
         block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
 

@@ -230,7 +230,7 @@ def throughput_ratio(graph: nx.Graph, block: Block, tol: float = STREET_TOL) -> 
         flow.add_edge(u, v, capacity=1.0)
         flow.add_edge(v, u, capacity=1.0)
 
-    perim = block.boundary.exterior
+    perim = block.boundary.boundary   # ring(s); .boundary (not .exterior) handles a MultiPolygon
     sink = "__SINK__"
     for n, pt in zip(nodes, node_pts, strict=True):
         if pt.distance(perim) <= tol:

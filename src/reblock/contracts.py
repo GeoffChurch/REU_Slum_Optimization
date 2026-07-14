@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 import geopandas as gpd
 from geopandas import GeoDataFrame
 from pyproj import CRS
-from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon, Polygon
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -42,7 +42,7 @@ class Region:
 class Block:
     block_id: str
     crs: CRS
-    boundary: Polygon
+    boundary: Polygon | MultiPolygon   # a block is a Polygon; a gappy region is a MultiPolygon
     parcels: GeoDataFrame
     streets: GeoDataFrame
     source_content_hash: str = ""   # content hash of the Source's file(s); "" => uncacheable

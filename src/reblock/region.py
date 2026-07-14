@@ -23,7 +23,7 @@ import networkx as nx
 import pandas as pd
 from pyproj import CRS
 from shapely import STRtree
-from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -51,19 +51,19 @@ def _union_streets(blocks: list[Block]) -> BaseGeometry:
     return unary_union([g for b in blocks for g in b.streets.geometry])
 
 
-def _shared_parts(blocks: list[Block]) -> tuple[gpd.GeoDataFrame, Polygon, CRS, str]:
+def _shared_parts(blocks: list[Block]) -> tuple[gpd.GeoDataFrame, Polygon | MultiPolygon, CRS, str]:
     """Common region pieces every builder needs: parcels (unioned + re-parcel_id'ed), boundary
-    (union, or its convex hull if the union is a MultiPolygon), crs (asserted shared), and
-    source_content_hash (a deterministic hash of the sorted constituent identities, or "" if
-    any is uncacheable)."""
+    (the true union of member boundaries -- a MultiPolygon when members are separated by street
+    gaps, NOT a convex hull, which would enclose the empty gaps and inflate the area), crs
+    (asserted shared), and source_content_hash (a deterministic hash of the sorted constituent
+    identities, or "" if any is uncacheable)."""
     crs = _check(blocks, "region_block")
 
     parcels = pd.concat([b.parcels for b in blocks], ignore_index=True)
     parcels["parcel_id"] = range(len(parcels))
     parcels = gpd.GeoDataFrame(parcels, geometry="geometry", crs=crs)
 
-    union = unary_union([b.boundary for b in blocks])
-    boundary = union if isinstance(union, Polygon) else cast(Polygon, union.convex_hull)
+    boundary = cast("Polygon | MultiPolygon", unary_union([b.boundary for b in blocks]))
 
     hashes = sorted(f"{b.source_content_hash}:{b.block_id}" for b in blocks)
     source_content_hash = (
