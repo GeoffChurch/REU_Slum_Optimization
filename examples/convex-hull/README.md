@@ -10,10 +10,10 @@ pixi run python -m reblock.run data=dji method=dijkstra region_builder=convex_hu
 ```
 
 `DJI.3_1_3951` and `DJI.3_1_3956` don't touch, so `identity` would reblock them separately; the hull
-pulls in the bridging block `DJI.3_1_3952`, giving one 3-block region. In `region_map.png` the two
+pulls in the bridging block `DJI.3_1_3952`, giving one 3-block region. In `region.png` the two
 seed blocks are outlined in heavy black, the hull-filled block coloured as the same region.
 
-![region map](region_map.png)
+![region](region.png)
 
 | before | after |
 |---|---|

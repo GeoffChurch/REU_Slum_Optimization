@@ -2,7 +2,7 @@
 
 `block_ids` is a list of lists: each inner list is a *region* reblocked jointly, so roads can span
 the old block boundaries. Existing inter-block streets are existing egress; the method adds
-complementary roads. `region_map.png` shows which blocks were pulled into the region.
+complementary roads. `region.png` shows which blocks were pulled into the region.
 
 ```bash
 pixi run python -m reblock.run data=dji method=dijkstra \
@@ -13,7 +13,7 @@ Two adjacent DJI blocks reblocked as one region. The inner inter-block street is
 egress), and building points + dimmed neighbours are overlaid. Swap `method=greedy_arterial` for the
 navigability flagship — on a region it adds long cross-block through-roads a tree method won't.
 
-![region map](region_map.png)
+![region](region.png)
 
 | before | after |
 |---|---|
