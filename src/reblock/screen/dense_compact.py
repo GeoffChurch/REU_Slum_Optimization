@@ -12,7 +12,10 @@ lookup), not the minutes the fine pass takes to walk thousands of survivor block
 from __future__ import annotations
 
 import logging
+import multiprocessing
+import os
 import time
+from concurrent.futures import ProcessPoolExecutor
 
 import geopandas as gpd
 import numpy as np
@@ -24,6 +27,8 @@ from reblock.derivations import ScreenSelectionInput, access_before, screen_sele
 from reblock.derive_graph import source_hash
 
 log = logging.getLogger(__name__)
+
+_FINE_PASS_THRESHOLD = 32   # below this many survivors, fork/IPC overhead isn't worth it -> serial
 
 
 def _depth_proxy(blocks: gpd.GeoDataFrame) -> pd.Series:
@@ -51,6 +56,44 @@ def _cheap_survivors(blocks: gpd.GeoDataFrame, *, depth_proxy_min: float,
     return sorted(bid[mask.to_numpy()])
 
 
+def _chunk_depths(
+    args: tuple[str, str, int, list[str]],
+) -> list[tuple[str, float, float]]:
+    """Build a chunk of survivor blocks and return `(block_id, max_depth, mean_depth)` for each.
+    Module-level (not a closure) so a fork `ProcessPoolExecutor` can dispatch it. Reads the parquet
+    once for the whole chunk (`block_ids` windows the read), amortizing per-block I/O; each block's
+    Voronoi tessellation is local, so a chunked build is identical to building all at once."""
+    blocks_path, buildings_path, min_buildings, block_ids = args
+    src = KblockSource(blocks_path, buildings_path, region_id="screen",
+                       min_buildings=min_buildings, block_ids=block_ids)
+    out: list[tuple[str, float, float]] = []
+    for blk in src.region().blocks:
+        d = access_before(blk)
+        out.append((str(blk.block_id), float(d.max()), float(d.mean())))
+    return out
+
+
+def _survivor_depths(
+    survivors: list[str], blocks_path: str, buildings_path: str, min_buildings: int,
+) -> list[tuple[str, float, float]]:
+    """`(block_id, max_depth, mean_depth)` for every survivor. Each block's Voronoi+peel+access is
+    independent, so fork a process pool across survivor chunks (mirrors `arterial`'s fork-pool
+    pattern) with a serial fallback -- `< _FINE_PASS_THRESHOLD` survivors, `workers <= 1`, or no
+    `fork` start method. Result order is irrelevant (the caller sorts). access_before still memoizes
+    per block inside each worker, so a later rerun is a cache hit."""
+    workers = min(16, max(1, (os.cpu_count() or 2) - 1))
+    use_pool = (workers > 1 and len(survivors) >= _FINE_PASS_THRESHOLD
+                and "fork" in multiprocessing.get_all_start_methods())
+    if not use_pool:
+        return _chunk_depths((blocks_path, buildings_path, min_buildings, survivors))
+    chunks = [survivors[i::workers] for i in range(workers)]   # round-robin -> even load
+    args = [(blocks_path, buildings_path, min_buildings, c) for c in chunks if c]
+    log.info("fine pass: %d survivors across %d fork workers", len(survivors), len(args))
+    with ProcessPoolExecutor(max_workers=workers,
+                             mp_context=multiprocessing.get_context("fork")) as ex:
+        return [row for chunk in ex.map(_chunk_depths, args) for row in chunk]
+
+
 def _compute_selection(inp: ScreenSelectionInput) -> list[str]:
     """The full screen (cheap density prune + fine access-depth pass), ranked deepest-first.
     Run via derivations.screen_selection's derive() so its (source-hash + gates)-keyed result
@@ -68,27 +111,21 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[str]:
         return []
     n_surv = len(survivors)
     log.info("fine pass: building %d survivor blocks (Voronoi + peel) -- the slow step", n_surv)
-    src = KblockSource(inp.blocks_path, inp.buildings_path, region_id="screen",
-                       min_buildings=inp.min_buildings, block_ids=survivors)
-    # One access-depth series per block; keep those clearing the mean gate (and the
-    # optional max gate), ranked deepest-parcel-first so a downstream max_blocks picks
-    # the worst-access blocks rather than an alphabetical slice. Count per-gate drops
-    # and log coarse progress (~10 lines) so the slow fine pass isn't silent.
+    # One access-depth series per block (parallel across survivors), keeping those clearing the
+    # mean gate (and the optional max gate), ranked deepest-parcel-first so a downstream max_blocks
+    # picks the worst-access blocks rather than an alphabetical slice. Count per-gate drops.
     t1 = time.perf_counter()
+    depths = _survivor_depths(
+        survivors, inp.blocks_path, inp.buildings_path, inp.min_buildings)
     ranked: list[tuple[float, str]] = []
     dropped_mean = dropped_max = 0
-    step = max(1, n_surv // 10)
-    for i, blk in enumerate(src.region().blocks, 1):
-        depths = access_before(blk)
-        mean_d, max_d = float(depths.mean()), float(depths.max())
+    for bid, max_d, mean_d in depths:
         if mean_d < inp.mean_depth_min:
             dropped_mean += 1
         elif inp.max_depth_min is not None and max_d < inp.max_depth_min:
             dropped_max += 1
         else:
-            ranked.append((max_d, blk.block_id))
-        if i % step == 0 or i == n_surv:
-            log.info("fine pass: built %d/%d (%d kept so far)", i, n_surv, len(ranked))
+            ranked.append((max_d, bid))
     ranked.sort(key=lambda r: (-r[0], r[1]))   # max-depth desc; ties by block_id asc
     drops = f"{dropped_mean} on mean<{inp.mean_depth_min:.2f}"
     if inp.max_depth_min is not None:
