@@ -147,7 +147,9 @@ def region_map(source: Source, regions: list[list[str]],
         area = geoms["block_area_m2"] if "block_area_m2" in geoms.columns else utm.geometry.area
         perim = utm.geometry.length
         geoms["proxy"] = np.sqrt(geoms["building_count"] * area) / perim.where(perim > 0)
-        vmax = float(geoms["proxy"].quantile(0.97)) or 1.0   # robust cap; ignore outliers
+        # Cap high (p99, not p97): the proxy is heavy-tailed, so a lower cap saturates most of the
+        # metro at max colour; p99 keeps the deep fabric standing out against a paler background.
+        vmax = float(geoms["proxy"].quantile(0.99)) or 1.0
     members = geoms[geoms["block_id"].isin(all_member_ids)]
     seeds = geoms[geoms["block_id"].isin(all_seed_ids)]
     frame = frame_bbox(members.geometry) if not members.empty else None
