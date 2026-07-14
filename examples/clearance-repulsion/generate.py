@@ -71,8 +71,14 @@ def main() -> None:
         after = parcel_access_layers(region, roads)
         length = float(sum(g.length for g in roads.geometry)) if len(roads) else 0.0
         displaced = displacement_count(region.building_points, roads, 3.0)
+        # buildings displaced (within the 3 m road corridor) -- clearance cuts through parcels, so
+        # unlike a frontage method this IS meaningful; mark them red on the road.
+        corridor = roads.geometry.buffer(3.0).union_all() if len(roads) else None
+        displaced_pts = (region.building_points[region.building_points.geometry.within(corridor)]
+                         if corridor is not None else region.building_points.iloc[:0])
         fig = render_after(region, proposal, after, vmax=vmax, own_points=own_pts, frame=frame,
-                           context_outlines=context_outlines, context_points=context_points)
+                           context_outlines=context_outlines, context_points=context_points,
+                           displaced_points=displaced_pts)
         tag = f"{s:+.0f}".replace("+0", "0")
         save_render(fig, OUT / f"after_s{tag}.png")
         print(f"{s:>9.0f} {len(roads):>5d} {length:>9.0f} {displaced:>9d} {int(after.max()):>9d}")
