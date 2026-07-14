@@ -30,9 +30,10 @@ _CONTEXT_OUTLINE = "#dddddd"
 _CONTEXT_PT = "#c9c9c9"
 _OWN_PT = "#333333"
 _DISPLACED_PT = "#c0392b"
+_POINT_RADIUS_M = 2.0   # geographic radius (m) of a building/parcel point marker (x sqrt(weight))
 
 
-def frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.6) -> BBox:
+def frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.3) -> BBox:
     """A padded square bbox centred on `geoms`' total_bounds -- the render view, and the bbox
     the context query is windowed to. Square + padded so the selection dominates with a context
     margin. Public (not `_`-prefixed): the caller (emit.py) computes this ONCE per render and
@@ -55,6 +56,18 @@ def _parcels_with_layer(block: Block, layers: pd.Series) -> gpd.GeoDataFrame:
     parcels = block.parcels.copy()
     parcels["layer"] = parcels["parcel_id"].map(layers)
     return parcels
+
+
+def _point_disks(points: gpd.GeoDataFrame, radius_m: float) -> gpd.GeoDataFrame:
+    """Building/parcel points as fixed GEOGRAPHIC-size disks: each point buffered to `radius_m`
+    metres, so markers scale with the map extent -- a dense region no longer collapses into a
+    screen-size (matplotlib `markersize`) thicket the way fixed-point markers do. If a `weight`
+    column is present, each disk's radius is scaled by sqrt(weight) so its AREA is proportional to
+    the weight (the footprint generalization); absent, all disks share `radius_m`."""
+    if "weight" in points.columns:
+        radii = radius_m * (points["weight"].to_numpy() ** 0.5)
+        return gpd.GeoDataFrame(geometry=points.geometry.buffer(radii), crs=points.crs)
+    return gpd.GeoDataFrame(geometry=points.geometry.buffer(radius_m), crs=points.crs)
 
 
 def _draw_heatmap(
@@ -80,7 +93,8 @@ def _draw_heatmap(
     if context_outlines is not None and not context_outlines.empty:
         context_outlines.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.3)
     if context_points is not None and not context_points.empty:
-        context_points.plot(ax=ax, color=_CONTEXT_PT, markersize=2, alpha=0.6)
+        _point_disks(context_points, _POINT_RADIUS_M).plot(
+            ax=ax, color=_CONTEXT_PT, alpha=0.6, linewidth=0)
 
     gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
         ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
@@ -92,11 +106,12 @@ def _draw_heatmap(
         block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
 
     if own_points is not None and not own_points.empty:
-        own_points.plot(ax=ax, color=_OWN_PT, markersize=4)
-    # Displaced sites (own_points that fall inside a committed road's corridor): drawn on top
-    # of own_points -- the cost of the straight road made visible next to it.
+        _point_disks(own_points, _POINT_RADIUS_M).plot(ax=ax, color=_OWN_PT, linewidth=0)
+    # Displaced sites (own_points inside a committed road's corridor): drawn on top of own_points
+    # -- the cost of the road made visible next to it. A larger disk so it pops.
     if displaced_points is not None and not displaced_points.empty:
-        displaced_points.plot(ax=ax, color="red", markersize=20, zorder=5)
+        _point_disks(displaced_points, _POINT_RADIUS_M * 2.0).plot(
+            ax=ax, color="red", zorder=5, linewidth=0)
 
     sm = plt.cm.ScalarMappable(cmap=_CMAP, norm=Normalize(vmin=1, vmax=vmax))
     fig.colorbar(sm, ax=ax).set_label("access depth (parcels from a street)")

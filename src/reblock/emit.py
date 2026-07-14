@@ -16,6 +16,8 @@ from reblock.contracts import Block, Metrics, Proposal, Result, Source
 from reblock.render import (
     _CONTEXT_PT,
     _OWN_PT,
+    _POINT_RADIUS_M,
+    _point_disks,
     frame_bbox,
     render_after,
     render_before,
@@ -116,85 +118,93 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
 
 def region_map(source: Source, regions: list[list[str]],
                seed_groups: list[list[str]], out_dir: Path) -> Path | None:
-    """The region-builder's map: every candidate block drawn as light-grey context, then each
-    region's member blocks filled in a distinct colour (by region index) and outlined, and
-    finally the pre-expansion **seed** blocks (`seed_groups`, before `RegionBuilder.build`
-    ran) outlined again in a heavier, high-contrast edge -- so you can see both what the
-    builder pulled into each region AND which blocks were the original seed (essential for
-    `convex_hull`, which expands past the seed) -- plus the building points: member points
-    normal, the rest dimmed. Writes `region_map.png`; returns the path, or None if there are no
-    regions. Gating is the caller's (cfg.region_map.enabled). Models `flagged_map`'s
-    metro-context style. `source` supplies all candidate outlines (`block_geometries()`, read
-    in full -- cheap) and the building points, windowed to the region's frame (the expensive
-    layer, so only it is queried narrow)."""
-    from matplotlib import colormaps
+    """Two maps for a region build. `screen.png`: the city parcel-density choropleth (bld/ha --
+    what the screen keys on), with the WHOLE expanded region located (dark member outline + a
+    locator box), the view clipped to the bulk block extent. `region.png`: the region's member
+    blocks coloured by that same density against dimmed context, the pre-expansion **seed**
+    (`seed_groups`, before `RegionBuilder.build` ran) outlined in a heavy edge (essential for
+    `convex_hull`, which expands past the seed), plus the building points (member points normal,
+    the rest dimmed). Writes both; returns the `region.png` path, or None if there are no regions.
+    Gating is the caller's (cfg.region_map.enabled). `source` supplies all candidate outlines
+    (`block_geometries()`, read in full -- cheap) and the building points, windowed to the region's
+    frame (the expensive layer, so only it is queried narrow)."""
+    from matplotlib.patches import Rectangle
     if not regions:
         return None
     geoms = source.block_geometries()
     geoms["block_id"] = geoms["block_id"].astype(str)
     out_dir.mkdir(parents=True, exist_ok=True)
-    fig, (ax_macro, ax) = plt.subplots(1, 2, figsize=(20, 10))
-
-    # 1. Macro view: City choropleth (matches flagged_map)
     all_seed_ids = {b for seeds in seed_groups for b in seeds}
-    unflagged = geoms[~geoms["block_id"].isin(all_seed_ids)]
-    flagged = geoms[geoms["block_id"].isin(all_seed_ids)]
-    if not unflagged.empty:
-        unflagged.plot(ax=ax_macro, color="#cccccc", edgecolor="#9a9a9a", linewidth=0.3)
-    if not flagged.empty:
-        flagged.plot(ax=ax_macro, color="#c0392b", edgecolor="#7b241c", linewidth=0.5)
-    ax_macro.set_title(f"{len(all_seed_ids)} of {len(geoms)} blocks flagged")
-    ax_macro.set_axis_off()
+    all_member_ids = {b for region in regions for b in region}
 
-    # 2. Micro view: Region builder results
-    # Every candidate block as pale context (thin edge so small informal blocks stay visible),
-    # matching flagged_map; the region members are then painted over it.
-    geoms.plot(ax=ax, color="#eeeeee", edgecolor="#bdbdbd", linewidth=0.3)
-    cmap = colormaps["tab10"]
-    n_members = 0
-    for i, region in enumerate(regions):
-        members = geoms[geoms["block_id"].isin(set(region))]
-        if members.empty:
-            continue
-        n_members += len(members)
-        members.plot(ax=ax, color=cmap(i % cmap.N), edgecolor="#333333",
-                     linewidth=0.8, alpha=0.4)
-    # Outline the pre-expansion seed blocks on top, unfilled (facecolor="none" so the
-    # region-colour fill underneath stays visible) with a heavy black edge -- this is what
-    # makes a convex_hull region's fill-in legible against its original seed.
-    seed_blocks = geoms[geoms["block_id"].isin(all_seed_ids)]
-    n_seeds = len(seed_blocks)
-    seed_blocks.plot(ax=ax, facecolor="none", edgecolor="black", linewidth=2.2)
-    # Frame the view on the region members (with context padding) rather than the whole
-    # metro -- a small region on a wide candidate extent is otherwise an invisible speck,
-    # defeating the point of showing which blocks the builder pulled in. The same frame windows
-    # the (expensive) building-points query, so only in-frame points are ever fetched/drawn.
-    all_members = geoms[geoms["block_id"].isin({b for region in regions for b in region})]
-    if not all_members.empty:
-        frame = frame_bbox(all_members.geometry)
-        ax.set_xlim(frame[0], frame[2])
-        ax.set_ylim(frame[1], frame[3])
-        
-        import matplotlib.patches as patches
-        rect = patches.Rectangle((frame[0], frame[1]), frame[2]-frame[0], frame[3]-frame[1],
-                                 linewidth=2, edgecolor='black', facecolor='none', zorder=10)
-        ax_macro.add_patch(rect)
-        
+    # Per-block building density (bld/ha) -- the shared colour scale for both maps.
+    has_density = "building_count" in geoms.columns
+    vmax = 1.0
+    if has_density:
+        if "block_area_m2" in geoms.columns:
+            geoms["density"] = geoms["building_count"] / (geoms["block_area_m2"] / 1e4)
+        else:
+            geoms["density"] = geoms["building_count"] / (
+                geoms.to_crs(geoms.estimate_utm_crs()).geometry.area / 1e4)
+        vmax = float(geoms["density"].quantile(0.97)) or 1.0   # robust cap; ignore outliers
+    members = geoms[geoms["block_id"].isin(all_member_ids)]
+    seeds = geoms[geoms["block_id"].isin(all_seed_ids)]
+    frame = frame_bbox(members.geometry) if not members.empty else None
+
+    # --- screen.png: the city parcel-density choropleth (what the screen detects), with the WHOLE
+    # expanded region located (dark outline + locator box) -- not just the seed. ---
+    fig_s, ax_s = plt.subplots(figsize=(10, 10))
+    if has_density:
+        geoms.plot(ax=ax_s, column="density", cmap="YlOrRd", vmin=0, vmax=vmax,
+                   linewidth=0, missing_kwds={"color": "#e6e6e6"})
+    else:
+        geoms.plot(ax=ax_s, color="#e6e6e6", linewidth=0)
+    if not members.empty:
+        members.plot(ax=ax_s, facecolor="none", edgecolor="#111111", linewidth=0.5)
+    if frame is not None:
+        ax_s.add_patch(Rectangle((frame[0], frame[1]), frame[2] - frame[0], frame[3] - frame[1],
+                                 linewidth=1.6, edgecolor="#111111", facecolor="none", zorder=10))
+    # Clip to the bulk block extent so a few far-flung outlier blocks don't pad the view with
+    # whitespace; equal aspect keeps the city's true shape.
+    bnd = geoms.geometry.bounds
+    ax_s.set_xlim(float(bnd["minx"].quantile(0.01)), float(bnd["maxx"].quantile(0.99)))
+    ax_s.set_ylim(float(bnd["miny"].quantile(0.01)), float(bnd["maxy"].quantile(0.99)))
+    ax_s.set_aspect("equal")
+    ax_s.set_axis_off()
+    ax_s.set_title(f"parcel density (bld/ha); {len(all_member_ids)} blocks reblocked")
+    save_render(fig_s, out_dir / "screen.png")
+    plt.close(fig_s)
+
+    # --- region.png: the region's member blocks coloured by that same density against dimmed
+    # context, the pre-expansion seed outlined heavily, plus the building points. ---
+    fig_r, ax_r = plt.subplots(figsize=(10, 10))
+    geoms.plot(ax=ax_r, color="#eeeeee", edgecolor="#cccccc", linewidth=0.3)
+    if not members.empty and has_density:
+        members.plot(ax=ax_r, column="density", cmap="YlOrRd", vmin=0, vmax=vmax,
+                     edgecolor="#8a8a8a", linewidth=0.4)
+    elif not members.empty:
+        members.plot(ax=ax_r, color="#c0392b", edgecolor="#8a8a8a", linewidth=0.4)
+    if not seeds.empty:
+        seeds.plot(ax=ax_r, facecolor="none", edgecolor="black", linewidth=2.2)
+    if frame is not None:
+        ax_r.set_xlim(frame[0], frame[2])
+        ax_r.set_ylim(frame[1], frame[3])
         pts = source.building_points(frame)
         if not pts.empty:
-            members_union = all_members.geometry.union_all()
-            own_pts = pts[pts.within(members_union)]
-            context_pts = pts[~pts.within(members_union)]
+            members_union = members.geometry.union_all()
+            own_pts = cast(gpd.GeoDataFrame, pts[pts.within(members_union)])
+            context_pts = cast(gpd.GeoDataFrame, pts[~pts.within(members_union)])
             if not context_pts.empty:
-                context_pts.plot(ax=ax, color=_CONTEXT_PT, markersize=2, alpha=0.6)
+                _point_disks(context_pts, _POINT_RADIUS_M).plot(
+                    ax=ax_r, color=_CONTEXT_PT, alpha=0.6, linewidth=0)
             if not own_pts.empty:
-                own_pts.plot(ax=ax, color=_OWN_PT, markersize=4)
-    ax.set_title(f"{len(regions)} region(s), {n_members} member block(s) "
-                 f"({n_seeds} seed block(s) outlined in black)")
-    ax.set_axis_off()
-    out_path = out_dir / "region_map.png"
-    save_render(fig, out_path)
-    plt.close(fig)
+                _point_disks(own_pts, _POINT_RADIUS_M).plot(ax=ax_r, color=_OWN_PT, linewidth=0)
+    ax_r.set_aspect("equal")
+    ax_r.set_axis_off()
+    ax_r.set_title(f"{len(all_member_ids)} member block(s); {len(seeds)} seed(s) outlined")
+    out_path = out_dir / "region.png"
+    save_render(fig_r, out_path)
+    plt.close(fig_r)
     return out_path
 
 

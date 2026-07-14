@@ -345,7 +345,8 @@ def test_cli_region_path_writes_region_map(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "region:DJI.3_1_1808+DJI.3_1_1809" in result.stdout
-    assert (tmp_path / "region_map.png").stat().st_size > 0
+    assert (tmp_path / "screen.png").stat().st_size > 0
+    assert (tmp_path / "region.png").stat().st_size > 0
     befores = list(tmp_path.glob("region*_before.png"))
     afters = list(tmp_path.glob("region*_after.png"))
     assert len(befores) == 1 and befores[0].stat().st_size > 0
