@@ -245,7 +245,7 @@ def test_cli_screen_stage_end_to_end(tmp_path: Path) -> None:
     # reblock (peel) -> both visuals (per-block before/after heatmaps + city map).
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
-         "data=capetown", "screen=dense_compact", "screen.density_min=35",
+         "data=capetown", "screen=dense_compact", "screen.depth_proxy_min=1.5",
          "method=peel", "eval=kcomplexity", "max_blocks=3",
          "render.enabled=true", "flagged_map.enabled=true",
          f"hydra.run.dir={tmp_path}"],

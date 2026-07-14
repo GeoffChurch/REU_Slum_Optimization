@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, cast
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import numpy as np
 
 from reblock.contracts import Block, Metrics, Proposal, Result, Source
 from reblock.render import (
@@ -118,11 +119,11 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
 
 def region_map(source: Source, regions: list[list[str]],
                seed_groups: list[list[str]], out_dir: Path) -> Path | None:
-    """Two maps for a region build. `screen.png`: the city parcel-density choropleth (bld/ha --
-    what the screen keys on), with the WHOLE expanded region located (dark member outline + a
-    locator box), the view clipped to the bulk block extent. `region.png`: the region's member
-    blocks coloured by that same density against dimmed context, the pre-expansion **seed**
-    (`seed_groups`, before `RegionBuilder.build` ran) outlined in a heavy edge (essential for
+    """Two maps for a region build. `screen.png`: the city depth-proxy choropleth (sqrt(n*A)/P --
+    what the screen keys on to find deep fabric), with the WHOLE expanded region located (dark
+    member outline + a locator box), the view clipped to the bulk block extent. `region.png`: the
+    region's member blocks coloured by that same proxy against dimmed context, the pre-expansion
+    **seed** (`seed_groups`, before `RegionBuilder.build` ran) outlined in a heavy edge (needed for
     `convex_hull`, which expands past the seed), plus the building points (member points normal,
     the rest dimmed). Writes both; returns the `region.png` path, or None if there are no regions.
     Gating is the caller's (cfg.region_map.enabled). `source` supplies all candidate outlines
@@ -137,25 +138,24 @@ def region_map(source: Source, regions: list[list[str]],
     all_seed_ids = {b for seeds in seed_groups for b in seeds}
     all_member_ids = {b for region in regions for b in region}
 
-    # Per-block building density (bld/ha) -- the shared colour scale for both maps.
-    has_density = "building_count" in geoms.columns
+    # Per-block depth proxy sqrt(n*A)/P (what the screen keys on) -- the shared colour scale.
+    has_proxy = "building_count" in geoms.columns
     vmax = 1.0
-    if has_density:
-        if "block_area_m2" in geoms.columns:
-            geoms["density"] = geoms["building_count"] / (geoms["block_area_m2"] / 1e4)
-        else:
-            geoms["density"] = geoms["building_count"] / (
-                geoms.to_crs(geoms.estimate_utm_crs()).geometry.area / 1e4)
-        vmax = float(geoms["density"].quantile(0.97)) or 1.0   # robust cap; ignore outliers
+    if has_proxy:
+        utm = geoms.to_crs(geoms.estimate_utm_crs())
+        area = geoms["block_area_m2"] if "block_area_m2" in geoms.columns else utm.geometry.area
+        perim = utm.geometry.length
+        geoms["proxy"] = np.sqrt(geoms["building_count"] * area) / perim.where(perim > 0)
+        vmax = float(geoms["proxy"].quantile(0.97)) or 1.0   # robust cap; ignore outliers
     members = geoms[geoms["block_id"].isin(all_member_ids)]
     seeds = geoms[geoms["block_id"].isin(all_seed_ids)]
     frame = frame_bbox(members.geometry) if not members.empty else None
 
-    # --- screen.png: the city parcel-density choropleth (what the screen detects), with the WHOLE
+    # --- screen.png: the city depth-proxy choropleth (what the screen detects), with the WHOLE
     # expanded region located (dark outline + locator box) -- not just the seed. ---
     fig_s, ax_s = plt.subplots(figsize=(10, 10))
-    if has_density:
-        geoms.plot(ax=ax_s, column="density", cmap="YlOrRd", vmin=0, vmax=vmax,
+    if has_proxy:
+        geoms.plot(ax=ax_s, column="proxy", cmap="YlOrRd", vmin=0, vmax=vmax,
                    linewidth=0, missing_kwds={"color": "#e6e6e6"})
     else:
         geoms.plot(ax=ax_s, color="#e6e6e6", linewidth=0)
@@ -171,16 +171,16 @@ def region_map(source: Source, regions: list[list[str]],
     ax_s.set_ylim(float(bnd["miny"].quantile(0.01)), float(bnd["maxy"].quantile(0.99)))
     ax_s.set_aspect("equal")
     ax_s.set_axis_off()
-    ax_s.set_title(f"parcel density (bld/ha); {len(all_member_ids)} blocks reblocked")
+    ax_s.set_title(f"depth proxy √(n·A)/P; {len(all_member_ids)} blocks reblocked")
     save_render(fig_s, out_dir / "screen.png")
     plt.close(fig_s)
 
-    # --- region.png: the region's member blocks coloured by that same density against dimmed
+    # --- region.png: the region's member blocks coloured by that same proxy against dimmed
     # context, the pre-expansion seed outlined heavily, plus the building points. ---
     fig_r, ax_r = plt.subplots(figsize=(10, 10))
     geoms.plot(ax=ax_r, color="#eeeeee", edgecolor="#cccccc", linewidth=0.3)
-    if not members.empty and has_density:
-        members.plot(ax=ax_r, column="density", cmap="YlOrRd", vmin=0, vmax=vmax,
+    if not members.empty and has_proxy:
+        members.plot(ax=ax_r, column="proxy", cmap="YlOrRd", vmin=0, vmax=vmax,
                      edgecolor="#8a8a8a", linewidth=0.4)
     elif not members.empty:
         members.plot(ax=ax_r, color="#c0392b", edgecolor="#8a8a8a", linewidth=0.4)

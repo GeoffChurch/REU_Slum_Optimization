@@ -54,7 +54,7 @@ Screen a city for its dense/compact informal blocks, reblock the worst survivors
 emit both the city flagged-map and per-block before/after heatmaps:
 
 ```bash
-pixi run python -m reblock.run data=capetown_full screen=dense_compact screen.density_min=35 method=dijkstra eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=5
+pixi run python -m reblock.run data=capetown_full screen=dense_compact screen.depth_proxy_min=1.5 method=dijkstra eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=5
 ```
 
 The first run downloads + caches the full Cape Town metro under `~/.cache/reblock`
@@ -67,9 +67,10 @@ Outputs land in the Hydra run dir (`outputs/<date>/<time>/`):
 `flagged_blocks.txt` (every flagged id, worst-access first), and `*_before.png` /
 `*_<proposal>_after.png` for each reblocked block.
 
-Tune the gates: `screen.density_min=50 screen.mean_depth_min=1.5 screen.max_depth_min=4`
-(keep only blocks with a parcel at least that deep). Survivors are ranked by max
-access-depth, so `max_blocks` takes the deepest/worst blocks.
+Tune the gates: `screen.depth_proxy_min=2.0 screen.mean_depth_min=1.5 screen.max_depth_min=4`
+(`depth_proxy_min` is the cheap `√(n·A)/P` depth-proxy prune; `max_depth_min` keeps only blocks
+with a parcel at least that deep). Survivors are ranked by max access-depth, so `max_blocks` takes
+the deepest/worst blocks.
 
 For a quick, no-download try, swap `data=capetown_full` → `data=capetown` (the committed
 301-block sample; its map is geographically sparse — the full metro fills in). The

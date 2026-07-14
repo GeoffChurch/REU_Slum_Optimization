@@ -4,7 +4,7 @@ Screen a city for its dense/compact informal blocks, reblock the worst survivors
 city flagged-map and per-block before/after heatmaps — in one command.
 
 ```bash
-pixi run python -m reblock.run data=capetown screen=dense_compact screen.density_min=35 \
+pixi run python -m reblock.run data=capetown screen=dense_compact screen.depth_proxy_min=1.5 \
   method=dijkstra eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=2
 ```
 

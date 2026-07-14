@@ -87,7 +87,7 @@ class ScreenSelectionInput:
     source_hash: str
     blocks_path: str
     buildings_path: str
-    density_min: float
+    depth_proxy_min: float
     mean_depth_min: float
     max_depth_min: float | None
     k_min: float | None
@@ -95,8 +95,9 @@ class ScreenSelectionInput:
 
     @property
     def identity(self) -> tuple[str, str, float, float, float | None, float | None, int] | None:
-        return (("dense-compact-screen", self.source_hash, self.density_min, self.mean_depth_min,
-                 self.max_depth_min, self.k_min, self.min_buildings) if self.source_hash else None)
+        return (("dense-compact-screen", self.source_hash, self.depth_proxy_min,
+                 self.mean_depth_min, self.max_depth_min, self.k_min, self.min_buildings)
+                if self.source_hash else None)
 
 
 def _screen_selection_impl(inp: ScreenSelectionInput) -> list[str]:
