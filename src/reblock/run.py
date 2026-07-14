@@ -18,6 +18,7 @@ from reblock.contracts import Eval, Method, Screen, Source
 from reblock.emit import flagged_map, region_map, render_results
 from reblock.pipeline import PipelineSpec, run
 from reblock.region import RegionBuilder
+from reblock.render import google_maps_url
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,7 @@ def main(cfg: DictConfig) -> None:
     spec.source.block_ids = None   # type: ignore[attr-defined]
     for r in output.results:
         log.info("%s %s", r.block.block_id, {m.eval: dict(m.values) for m in r.metrics})
+        log.info("  map: %s", google_maps_url(r.block.boundary, r.block.crs))
 
     out_dir = Path(HydraConfig.get().runtime.output_dir)
     if output.selection is not None:

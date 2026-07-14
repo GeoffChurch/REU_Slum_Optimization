@@ -10,6 +10,7 @@ put on one shared colour scale.
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 from typing import cast
 
@@ -21,7 +22,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
+from pyproj import CRS
 from shapely.geometry import Polygon
+from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import BBox, Block, Metrics, Proposal
 
@@ -44,6 +47,17 @@ def short_label(label: str, limit: int = 80) -> str:
     if len(label) <= limit:
         return label
     return f"{label[:limit - 20]}...{hashlib.sha256(label.encode()).hexdigest()[:8]}"
+
+
+def google_maps_url(geom: BaseGeometry, crs: CRS) -> str:
+    """A Google Maps link centred on `geom`, zoomed to fit its bounding box -- handy to eyeball
+    WHERE a reblocked block or region actually sits on the ground. Reprojects `geom` from `crs` to
+    lon/lat (EPSG:4326); the zoom is derived from the wider bbox span."""
+    b = gpd.GeoSeries([geom], crs=crs).to_crs(4326).total_bounds
+    lat, lon = float((b[1] + b[3]) / 2), float((b[0] + b[2]) / 2)
+    span = max(float(b[2] - b[0]), float(b[3] - b[1]))
+    zoom = 16 if span <= 0 else int(min(18, max(11, round(math.log2(720 / span)))))
+    return f"https://www.google.com/maps/@{lat:.5f},{lon:.5f},{zoom}z"
 
 
 def title_label(block_id: str) -> str:

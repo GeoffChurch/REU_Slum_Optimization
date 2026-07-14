@@ -7,6 +7,8 @@ is single-block-only, and `greedy_arterial`, which is ~55 s/road). The companion
 
 The block is **`ZAF.9.3.1_1_40972`** — the deepest block (by the depth proxy `√(n·A)/P`) in a
 topology-tractable size window: **263 parcels, up to 7 deep**, auto-picked, no hand tuning.
+📍 [See it on Google Maps](https://www.google.com/maps/@-33.97795,18.58064,18z) (every run logs this
+link for its selection).
 
 ## Reproduce (one command)
 

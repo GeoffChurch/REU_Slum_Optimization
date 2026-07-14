@@ -20,6 +20,8 @@ perimeter) — a closed-form estimate of how many parcel-rings deep a block is, 
 selection is memoized, so the one-time metro pass is 0.1 s on every rerun.
 
 The screen's deepest block is `ZAF.9.3.1_1_5810`, with parcels **24** deep.
+📍 [See the region on Google Maps](https://www.google.com/maps/@-33.84130,18.74439,15z) (every run
+logs this link for its selection).
 
 ![screen](screen.jpg)
 
