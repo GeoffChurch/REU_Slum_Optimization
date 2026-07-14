@@ -1,17 +1,28 @@
 # Clearance Flagship — Design
 
-**Status:** approved design (config confirmed 2026-07-14) · **Date:** 2026-07-14
+**Status:** realized 2026-07-14 (design evolved during build — see note) · **Date:** 2026-07-14
 
-**Goal:** A massive-region flagship example — reblock an **entire ~175-block Cape Town informal
-settlement** (~17,400 homes, up to 13 parcels deep) with the clearance reblocker (chord_diag
-default) so every home is within **3 parcels** of a road, in ~11 seconds. It's the headline
-demonstration that the substrate work makes whole-settlement reblocking tractable. Complements
-`examples/capetown-flagship/` (the dijkstra/mesh/arterial four-lens method comparison), which stays.
+**Goal:** A whole-settlement flagship example — reblock the metro's **deepest informal settlement
+core** (**23 blocks, ~10,700 homes, up to 24 parcels deep**) with the clearance reblocker
+(chord_diag default) so every home is within **3 parcels** of a road, in ~11 seconds — delivered as
+a single `reblock.run` **CLI one-liner**. The headline demonstration that the substrate + screen
+work make whole-settlement reblocking tractable. Complements `examples/capetown-flagship/` (the
+dijkstra/mesh/arterial four-lens method comparison), which stays.
 
-Feasibility was measured (`scratchpad/bigregion_spike.py`): the deepest screen seed grown to
-`max_buildings=16000` yields **175 blocks / 17,403 parcels**, reblocked to depth 3 in **~11 s with
-282 roads** (depth 4 = 113 roads/8 s; depth 2 = 1,089 roads/20 s — every target fully reached, the
-road cap never binds). The greedy is fast at this scale — no perf pass needed.
+**Design note (what changed during the build):** the original plan targeted a ~175-block region
+around seed `ZAF.9.3.1_1_38528` (depth 13). Two changes reshaped it: (1) the screen's cheap gate
+migrated from building density to the depth proxy `√(n·A)/P`, which surfaced a genuinely *deeper*
+seed, `ZAF.9.3.1_1_5810` (depth **24**), that the old density gate excluded; (2) the region builder
+now grows by that same proxy, so it follows the deep informal fabric. Growing `5810` to
+`max_buildings=3000` isolates a clean 23-block / 10,706-parcel deep core (the full `16000` budget
+spilled into shallow adjacent housing). Realized: **depth 24 → 3, ~13,700 m of road, 10.6 s**.
+
+**Delivery — a CLI one-liner (no bespoke generator):** the original plan used a bespoke `generate.py`
+purely to dodge the ~3,000-char region `block_id` overflowing output filenames (255-char limit) and
+stretching plot titles. That plumbing is now fixed centrally (`render.short_label` / `title_label`,
+reused by `run` + `compare`), so the flagship reproduces from a plain `reblock.run` command and the
+generator was deleted. Screen locator + region map come from `region_map.enabled=true`
+(`screen.png` + `region.png`); before/after from `render.enabled=true`.
 
 ## The region (auto-detected)
 
@@ -87,11 +98,12 @@ placeholders. Reproduce commands for the generator + both compares.
 - Any clearance/greedy perf work — the spike showed it is unnecessary at this scale.
 - Weighted footprints; the funnel/portal navmesh (separate projects).
 
-## Decisions (confirmed)
+## Decisions (as realized)
 
-- **Region:** deepest seed grown to `max_buildings=16000` (~175 blocks / ~17,403 parcels).
-- **Hero depth_target = 3** (~282 roads, ~11 s; legible).
+- **Region:** deepest seed `ZAF.9.3.1_1_5810` (depth 24) grown by the depth proxy to
+  `max_buildings=3000` — a **23-block / 10,706-parcel deep core**.
+- **Hero depth_target = 3** (304 roads, 13,699 m, 959 displaced, depth 24 → 3, ~11 s).
 - **Both compare sweeps:** depth_target `{2,3,4}` and repulsion `{-3,0,3}`, 4-lens AUC via
-  `method_sweep`.
-- **Bespoke generator** for the hero (explicit filenames); compares via CLI. New
-  `examples/clearance-flagship/`, complementing `capetown-flagship`.
+  `method_sweep` (`max_roads` raised so the target binds, not the road cap).
+- **CLI one-liner** for the hero (no bespoke generator — the filename/title plumbing fix removed the
+  need); compares via CLI. New `examples/clearance-flagship/`, complementing `capetown-flagship`.
