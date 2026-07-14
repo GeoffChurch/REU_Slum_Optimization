@@ -1,18 +1,12 @@
-# Examples gallery
+# Examples
 
-Each subdirectory is one recipe, with its exact command in that subdir's `README.md` and the
-visualizations it produces. Every example except the flagship reproduces from the **committed sample
-data** (the DJI sample and the 301-block Cape Town sample) — no downloads; the
-[capetown-flagship](capetown-flagship/) uses the full Cape Town metro (auto-downloaded, cached).
+Two flagships, each reproducing from the full Cape Town metro (`capetown_full`, auto-downloaded to
+`~/.cache/reblock` on first use) via plain `reblock` CLI commands — no bespoke scripts.
 
-| example | what it shows |
+| flagship | what it shows |
 |---|---|
-| [single-block](single-block/) | reblock one block; before/after access-depth heatmaps |
-| [detect-reblock](detect-reblock/) | screen a city → reblock the worst → flagged-map + before/after |
-| [compare](compare/) | cost-benefit curves ranking methods per meter of road |
-| [multi-block](multi-block/) | reblock adjacent blocks jointly (roads span the old boundary) + region-map |
-| [convex-hull](convex-hull/) | `convex_hull` region builder: fill a disjoint group into one contiguous region |
-| [displacement](displacement/) | straight roads: navigability vs buildings displaced |
-| [capetown-flagship](capetown-flagship/) | full-metro deep-dive: screen → grow region → compare all four lenses (incl. egress-resistance) |
+| [method-comparison](method-comparison/) | **every** reblocker (dijkstra, peel, topology, mesh, greedy_arterial, clearance) graded on the four lenses, on one deep block small enough that all six run — including the two that don't scale |
+| [multiblock](multiblock/) | reblock a whole informal settlement (depth 24 → 3) with clearance, and compare the **scalable** methods on it — the pipeline + method comparison at settlement scale, with clearance's depth/repulsion knobs and the substrate scaling payoff |
 
-Building points and dimmed surrounding blocks are overlaid on every heatmap automatically.
+The small one is the comprehensive method bake-off; the large one shows what runs at scale on a real
+settlement. Building points and dimmed surrounding blocks are overlaid on every heatmap automatically.

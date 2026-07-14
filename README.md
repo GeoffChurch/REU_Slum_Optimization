@@ -70,20 +70,14 @@ Each stage is a swappable Hydra config group; a run composes them left to right:
 
 ## Examples
 
-Worked recipes with committed sample data and their outputs live in [`examples/`](examples/) — each
-subdir has the exact command that produces it.
+Two flagships in [`examples/`](examples/), each reproducing from the full Cape Town metro via plain
+`reblock` CLI commands (no bespoke scripts):
 
-| Example | What it shows |
+| flagship | what it shows |
 |---|---|
-| [single-block](examples/single-block/) | Before/after access-depth heatmaps for one block |
-| [detect-reblock](examples/detect-reblock/) | Screen a metro, reblock the worst-access survivors |
-| [multi-block](examples/multi-block/) | Reblock adjacent blocks jointly as one region |
-| [convex-hull](examples/convex-hull/) | Bridge two disjoint blocks into one contiguous region |
-| [displacement](examples/displacement/) | The homes-displaced ↔ navigability tradeoff |
-| [compare](examples/compare/) | Cost-benefit curves ranking methods per metre of road |
-| [capetown-flagship](examples/capetown-flagship/) | The full four-lens method comparison on real Cape Town data |
-| [clearance-flagship](examples/clearance-flagship/) | Reblock a whole informal settlement (depth 24 → 3) as one CLI command |
+| [method-comparison](examples/method-comparison/) | Every reblocker (dijkstra, peel, topology, mesh, greedy_arterial, clearance) graded on the four lenses, on one deep block small enough that all six run |
+| [multiblock](examples/multiblock/) | Reblock a whole informal settlement (depth 24 → 3) with clearance, and compare the methods that scale to it — with clearance's depth/repulsion knobs and the substrate scaling payoff |
 
-| [single-block](examples/single-block/) | [detect → reblock](examples/detect-reblock/) | [clearance flagship](examples/clearance-flagship/) |
-|---|---|---|
-| ![](examples/single-block/after.png) | ![](examples/detect-reblock/flagged_map.png) | ![](examples/clearance-flagship/after.jpg) |
+| [method-comparison](examples/method-comparison/) | [multiblock](examples/multiblock/) |
+|---|---|
+| ![](examples/method-comparison/curve_directness.png) | ![](examples/multiblock/after.jpg) |

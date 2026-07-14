@@ -1,13 +1,14 @@
-# Clearance flagship: one whole informal settlement, reblocked
+# Multiblock: a whole settlement reblocked, and the methods that scale to it
 
 The headline demonstration that the substrate + screen work make **whole-settlement** reblocking
-tractable: screen the entire Cape Town metro, grow its **deepest** informal core, and thread roads
-through it with the clearance reblocker so every home lands within **3 parcels of a street** — as a
-single `reblock.run` command.
+tractable: screen the entire Cape Town metro, grow its **deepest** informal core, thread roads
+through it so every home lands within **3 parcels of a street** — then compare, on that same
+10,700-home region, the methods that actually run at this scale, and show clearance's tuning knobs.
 
-Like [`capetown-flagship`](../capetown-flagship/) (the four-lens method comparison), this reproduces
-from **`capetown_full`** (the full metro, auto-downloaded to `~/.cache/reblock` on first use), not
-the committed sample.
+Reproduces from **`capetown_full`** (the full metro, auto-downloaded to `~/.cache/reblock` on first
+use) via plain CLI commands. For the *comprehensive* method bake-off — all six reblockers, including
+the two that don't scale to a region (`topology`, `greedy_arterial`) — see
+[`method-comparison`](../method-comparison/) on a single deep block.
 
 ## 1. Screen the metro
 
@@ -53,7 +54,35 @@ takes the screen's deepest block as the seed; `region_map.enabled` writes `scree
 |---|---|
 | ![before](before.jpg) | ![after](after.jpg) |
 
-## 4. The depth_target tradeoff — why 3
+## 4. Compare the methods that scale
+
+The same 10,700-home region, graded on the four lenses for the methods that run at settlement scale.
+`topology` (single-block only) and full `greedy_arterial` (~55 s/road) don't — for the six-method
+bake-off on a small block, see [`method-comparison`](../method-comparison/).
+
+```bash
+pixi run python -m reblock.compare \
+  data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
+  "block_ids=[[ZAF.9.3.1_1_5810]]" methods=[dijkstra,peel,mesh,clearance] max_blocks=1 \
+  all_methods.clearance.max_roads=3000
+```
+
+| lens | dijkstra | peel | mesh | clearance |
+|---|---|---|---|---|
+| access — burden removed | 0.94 | 0.94 | 0.94 | **0.96** |
+| resistance — egress removed | **0.64** | 0.50 | 0.61 | 0.42 |
+| directness — 1/circuity | 0.00 | 0.00 | 0.05 | **0.08** |
+| efficiency — network E | 0.00 | 0.00 | 0.00 | 0.00 |
+
+At this scale every method blankets access near-perfectly (~0.94–0.96) — a deep region is exactly
+where roads matter most. **clearance is the best all-rounder**: it edges out the coverage methods on
+access *and* leads directness (its least-cost roads cut more direct interior routes). **dijkstra wins
+resistance** — its frontage spanning tree gives the most redundant egress. So at scale: clearance for
+a navigable, well-covered reblock; dijkstra when egress redundancy is the goal.
+
+![access](compare_access.png) ![resistance](compare_resistance.png) ![directness](compare_directness.png)
+
+## 5. The depth_target tradeoff — why 3
 
 `depth_target` is the road-budget dial: the looser the target, the fewer roads. On the deep core:
 
@@ -70,7 +99,7 @@ committing road to shave the last two rings. Depth 4 saves more road still, but 
 
 ![depth access](depth_access.png) ![depth resistance](depth_resistance.png)
 
-## 5. The repulsion knob — displacement vs directness
+## 6. The repulsion knob — displacement vs directness
 
 At depth 3, `repulsion` (the logit knob steering roads toward gaps vs straight through buildings)
 trades **homes displaced** against **route directness**:
@@ -88,7 +117,7 @@ through the fabric: more direct internal trips, but more homes cleared. Same cov
 
 ![repulsion directness](repulsion_directness.png)
 
-## 6. Why it's tractable — the scaling payoff
+## 7. Why it's tractable — the scaling payoff
 
 The whole settlement is reblockable at all because the **chord-diagonal substrate scales with the
 fabric, not the area**. The routing graph the reblocker searches has **22,088 nodes** (one region of
@@ -100,13 +129,13 @@ resolution would be intractable at this scale.
 ## Reproduce the compare panels
 
 ```bash
-# §4 depth_target tradeoff
+# §5 depth_target tradeoff
 pixi run python -m reblock.compare \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
   "block_ids=[[ZAF.9.3.1_1_5810]]" methods=[] max_blocks=1 all_methods.clearance.max_roads=3000 \
   'method_sweep={base: clearance, param: depth_target, values: [2, 3, 4]}'
 
-# §5 repulsion knob (depth pinned to 3)
+# §6 repulsion knob (depth pinned to 3)
 pixi run python -m reblock.compare \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
   "block_ids=[[ZAF.9.3.1_1_5810]]" methods=[] max_blocks=1 \
