@@ -23,6 +23,7 @@ from reblock.render import (
     render_after,
     render_before,
     save_render,
+    short_label,
 )
 
 if TYPE_CHECKING:
@@ -310,7 +311,7 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
         block, access_before, vmax=vmax, frame=frame,
         context_outlines=context_outlines, context_points=context_points, own_points=own_points,
     )
-    save_render(fig_before, out_dir / f"{block.block_id}_before.png")
+    save_render(fig_before, out_dir / f"{short_label(block.block_id)}_before.png")
     plt.close(fig_before)
 
     for i, r in enumerate(group):
@@ -325,5 +326,5 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
             context_outlines=context_outlines, context_points=context_points,
             own_points=own_points, displaced_points=_displaced_points(block, r.proposal),
         )
-        save_render(fig_after, out_dir / f"{block.block_id}_{name}_after.png")
+        save_render(fig_after, out_dir / f"{short_label(block.block_id)}_{name}_after.png")
         plt.close(fig_after)

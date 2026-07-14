@@ -9,6 +9,7 @@ put on one shared colour scale.
 """
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import cast
 
@@ -32,6 +33,27 @@ _CONTEXT_PT = "#c9c9c9"
 _OWN_PT = "#333333"
 _DISPLACED_PT = "#c0392b"
 _POINT_RADIUS_M = 2.0   # geographic radius (m) of a building/parcel point marker (x sqrt(weight))
+
+
+def short_label(label: str, limit: int = 80) -> str:
+    """A filesystem-safe shortening of a (possibly huge) block/region label: kept verbatim when
+    short, else truncated to `limit-ish` chars with a stable hash suffix for uniqueness. A region's
+    block_id is `region:` + `+`.join(member ids), which for a big region is thousands of chars and
+    blows past the 255-char filename limit -- this keeps `run`'s output filenames (and compare's
+    curve filenames) bounded while staying unique + deterministic."""
+    if len(label) <= limit:
+        return label
+    return f"{label[:limit - 20]}...{hashlib.sha256(label.encode()).hexdigest()[:8]}"
+
+
+def title_label(block_id: str) -> str:
+    """A short, non-stretching plot title for a block or region. A region's block_id
+    (`region:` + `+`.join(member ids)) is up to thousands of chars, which stretches the whole figure
+    to fit the title on one line -- so collapse it to `region of N blocks`. A single block keeps its
+    own (already short) id."""
+    if block_id.startswith("region:"):
+        return f"region of {block_id[len('region:'):].count('+') + 1} blocks"
+    return block_id
 
 
 def frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.3) -> BBox:
@@ -140,7 +162,7 @@ def render_before(
         context_outlines=context_outlines, context_points=context_points, own_points=own_points,
         frame=frame,
     )
-    fig.axes[0].set_title(f"{block.block_id} — before")
+    fig.axes[0].set_title(f"{title_label(block.block_id)} — before")
     return fig
 
 
@@ -168,7 +190,7 @@ def render_after(
             geometry=proposal.roads.geometry.buffer(corridor_m), crs=block.crs)
         roads_buffered.plot(ax=ax, color=_ROAD_COLOR, zorder=4)
 
-    title = f"{block.block_id} — after"
+    title = f"{title_label(block.block_id)} — after"
     if metrics is not None:
         delta_k = metrics.values.get("delta_k")
         if delta_k is not None:
