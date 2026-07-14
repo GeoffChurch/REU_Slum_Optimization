@@ -21,6 +21,23 @@ One `reblock.compare` line grades all six methods on four lenses and writes the 
 `greedy_arterial`'s budget is capped at 8 roads (`max_roads` is a first-class key; ~55 s/road, so
 the cap keeps it to a couple minutes); the whole run is ~14 min, topology + arterial being the poles.
 
+## The roads each method builds
+
+Before — every parcel up to 7 deep (dark = deep):
+
+![before](before.jpg)
+
+After, per method (blue = added roads; black = building sites; the depth heatmap goes pale as roads
+reach every parcel). The coverage methods blanket the fabric; `greedy_arterial`'s few through-roads
+wind between the building clusters (tracing the gaps); `clearance` threads least-cost roads to the
+deep interior:
+
+| dijkstra (coverage) | mesh | topology (access-optimal) |
+|---|---|---|
+| ![dijkstra](after_dijkstra.jpg) | ![mesh](after_mesh.jpg) | ![topology](after_topology.jpg) |
+| **peel** (rough sketch) | **greedy_arterial** (directness) | **clearance** (least-cost) |
+| ![peel](after_peel.jpg) | ![arterial](after_greedy_arterial.jpg) | ![clearance](after_clearance.jpg) |
+
 ## The four lenses
 
 Mean AUC per method (benefit per metre of road, integrated across the shared budget; higher = better):
