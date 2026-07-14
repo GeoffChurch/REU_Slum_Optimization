@@ -416,12 +416,16 @@ class GreedyArterialReblocker:
     workers: int = 16         # fork-pool size for per-step candidate scoring; 1 == serial no-op
 
     @property
-    def identity(self) -> tuple[str, str, str, str, float]:
-        # corridor_m changes which roads win only under cost="displacement"; hold it fixed
-        # otherwise so length-cost methods stay corridor-independent in the derive cache (two
-        # methods differing only in corridor_m must NOT share a cached proposal when it matters).
+    def identity(self) -> tuple[str, str, str, str, float, int, int, int, float]:
+        # Every field that changes the proposed roads must be in the derive-cache key. corridor_m
+        # changes which roads win only under cost="displacement"; hold it fixed otherwise so
+        # length-cost methods stay corridor-independent (two methods differing only in corridor_m
+        # must NOT share a cached proposal when it matters). max_roads / n_anchors / top_k / lam all
+        # change the greedy search, so they belong in the key too -- otherwise a budget/candidate
+        # sweep silently returns another setting's cached proposal.
         corridor_key = self.corridor_m if self.cost == "displacement" else 0.0
-        return ("greedy_arterial", self.mode, self.objective, self.cost, corridor_key)
+        return ("greedy_arterial", self.mode, self.objective, self.cost, corridor_key,
+                self.max_roads, self.n_anchors, self.top_k, self.lam)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior

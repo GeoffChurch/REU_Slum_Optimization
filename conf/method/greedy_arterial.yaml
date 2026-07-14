@@ -1,4 +1,11 @@
 _target_: reblock.methods.arterial.GreedyArterialReblocker
 mode: buildable
 objective: directness
+# Greedy budget + candidate-generation knobs (first-class so they're plain `method.<k>=` overrides).
+# Cost is ~fixed per road (~1 step scores n_anchors^2 + n_anchors*top_k candidates), so max_roads is
+# a near-linear runtime dial -- lower it to keep arterial tractable on a big region.
+max_roads: 15
+n_anchors: 32
+top_k: 8
+lam: 2.0
 workers: 16

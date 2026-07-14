@@ -294,7 +294,12 @@ def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
 
 def test_identity_and_proposal_metadata() -> None:
     m = GreedyArterialReblocker(mode="buildable", objective="directness")
-    assert m.identity == ("greedy_arterial", "buildable", "directness", "length", 0.0)
+    assert m.identity == (
+        "greedy_arterial", "buildable", "directness", "length", 0.0, 15, 32, 8, 2.0)
+    # max_roads / n_anchors / top_k / lam change the proposed roads -> must change the cache key,
+    # else a budget/candidate sweep silently returns another setting's cached proposal.
+    assert GreedyArterialReblocker(max_roads=3).identity != m.identity
+    assert GreedyArterialReblocker(n_anchors=16).identity != m.identity
     proposal = m.propose(_grid_block(5))
     assert proposal.method == "greedy_arterial"
     assert proposal.proposal_id == "greedy_arterial_buildable_directness"
@@ -322,7 +327,8 @@ def test_config_and_derivation_wiring() -> None:
         cfg = compose(config_name="compare_config",
                       overrides=["shapefile=x", "methods=[greedy_arterial_buildable]"])
     m = instantiate(cfg.all_methods["greedy_arterial_buildable"])
-    assert m.identity == ("greedy_arterial", "buildable", "directness", "length", 0.0)
+    assert m.identity == (
+        "greedy_arterial", "buildable", "directness", "length", 0.0, 15, 32, 8, 2.0)
 
 
 def test_displacement_config_instantiates_with_right_params_and_identity() -> None:
@@ -338,7 +344,8 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
     m = instantiate(cfg.all_methods["greedy_arterial_displacement"])
     assert (m.mode, m.objective, m.cost, m.corridor_m) == (
         "aspirational", "directness", "displacement", 3.0)
-    assert m.identity == ("greedy_arterial", "aspirational", "directness", "displacement", 3.0)
+    assert m.identity == (
+        "greedy_arterial", "aspirational", "directness", "displacement", 3.0, 15, 32, 8, 2.0)
 
     # The standalone conf/method/greedy_arterial_displacement.yaml config group (config.yaml's
     # `method=` default group), separate from compare_config's inline `all_methods` entry above.
@@ -404,7 +411,8 @@ def test_greedy_handles_multilinestring_streets() -> None:
 
 def test_cost_displacement_in_identity() -> None:
     m = GreedyArterialReblocker(mode="aspirational", objective="directness", cost="displacement")
-    assert m.identity == ("greedy_arterial", "aspirational", "directness", "displacement", 3.0)
+    assert m.identity == (
+        "greedy_arterial", "aspirational", "directness", "displacement", 3.0, 15, 32, 8, 2.0)
 
 
 def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 10) -> Block:
