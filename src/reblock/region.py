@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -218,12 +219,17 @@ def _block_adjacency(geoms: list[BaseGeometry]) -> list[set[int]]:
     return adj
 
 
-def _density(count: float, area: float) -> float:
-    """Building density (`count / area`), with a zero-area guard: a degenerate block
-    (`area == 0`) has undefined density -- by convention this returns 0.0, the lowest possible
-    density, so a degenerate frontier candidate sorts LAST (never preferred over a real block)
-    instead of raising `ZeroDivisionError`."""
-    return 0.0 if area == 0 else count / area
+def _depth_proxy(count: float, area: float, perim: float) -> float:
+    """Cheap depth proxy `sqrt(count * area) / perimeter` -- a block-geometry estimate of parcel
+    access depth in rings (inradius / parcel-width), the region builder's growth metric. It ranks
+    true access depth ~5x better than building density (`count / area`), which is nearly
+    uncorrelated with depth -- see `screen.dense_compact._depth_proxy` and
+    docs/superpowers/notes/2026-07-14-depth-proxy-screen-gate.md. A degenerate block (`area == 0`
+    or `perim == 0`) returns 0.0, the lowest score, so it sorts LAST as a frontier candidate
+    instead of raising. `area`/`perim` must be in metres (the caller reprojects)."""
+    if area <= 0 or perim <= 0:
+        return 0.0
+    return math.sqrt(count * area) / perim
 
 
 @dataclass
@@ -234,24 +240,26 @@ class DenseClusterRegionBuilder:
 
     Per group: `cluster` starts as the seed group's own block(s) -- always included, even alone
     over budget (no growth, and never dropped). It then grows greedily, one block at a time:
-    among the blocks adjacent to the cluster but not in it (the "frontier"), pick the one with
-    the highest building DENSITY (`building_count / area`, `_density`'s zero-area-safe) -- ties
-    broken by higher `building_count`, then by `block_id` ascending (determinism) -- add it, and
-    repeat until the cluster's total `building_count` reaches `max_buildings` (the last block may
-    push it slightly over) or the frontier is exhausted (the seed's whole connected component is
-    smaller than the budget).
+    among the blocks adjacent to the cluster but not in it (the "frontier"), pick the one with the
+    highest DEPTH PROXY (`sqrt(building_count * area) / perimeter`, `_depth_proxy`'s zero-safe) --
+    ties broken by higher `building_count`, then by `block_id` ascending (determinism) -- add it,
+    and repeat until the cluster's total `building_count` reaches `max_buildings` (the last block
+    may push it slightly over) or the frontier is exhausted (the seed's whole connected component
+    is smaller than the budget).
 
-    Densest-first: density is the closest geometry-available proxy for reblocking need (dense
-    blocks are where buried parcels concentrate), so growth reaches toward the neediest
-    surrounding fabric rather than sprawling into sparse edges -- true need (access depth) isn't
-    available at block-geometry level, but the seed already carries it (via `block_ids`, or a
-    screen's worst-first ranking) and growth stays local + dense.
+    Deepest-first: the depth proxy sqrt(n*A)/P is a cheap block-geometry estimate of parcel access
+    depth (frontage-starvation), so growth reaches toward the deepest surrounding fabric -- the
+    informal core -- rather than wandering into shallow formal housing the way building density
+    does (density is nearly uncorrelated with true depth, even within one neighborhood; the proxy
+    ranks it ~5x better). True access depth isn't available at block-geometry level, and the seed
+    already carries it (via `block_ids`, or a screen's worst-first ranking); the proxy keeps growth
+    local AND deep. Area/perimeter are measured in metres (reprojected from a geographic CRS).
 
     Graceful without building counts: if `block_geoms` lacks a `building_count` column (a
     non-kblock source), every block counts as 1 -- the budget becomes a block-count budget, and
-    density falls back to `1 / area` (smaller blocks first) -- so the builder still produces a
-    contiguous, deterministic region. A NaN `building_count` (a degenerate source row) is treated
-    as 0, so it can't poison the budget sum or win the density argmax.
+    the proxy falls back to `sqrt(area) / perimeter` (bigger, compacter blocks first) -- so the
+    builder still produces a contiguous, deterministic region. A NaN `building_count` (a degenerate
+    source row) is treated as 0, so it can't poison the budget sum or win the proxy argmax.
 
     Grows CONTIGUOUSLY from a mutually adjacent seed -- it does not BRIDGE a disjoint one: like
     `IdentityRegionBuilder`, if a seed group's own blocks are not mutually touch-adjacent, this
@@ -266,7 +274,14 @@ class DenseClusterRegionBuilder:
         _validate_group_ids(block_geoms, groups)
         ids = cast(list[str], list(block_geoms["block_id"]))
         geoms = list(block_geoms.geometry)
-        areas = [float(g.area) for g in geoms]
+        # The growth metric is the depth proxy sqrt(n*A)/P, so A and P must be in METRES -- the
+        # block geometries are usually lon/lat, where raw .area/.length are anisotropic. Reproject
+        # for the metric only (when geographic); `geoms` (original CRS) still drives adjacency.
+        metric = block_geoms
+        if metric.crs is not None and metric.crs.is_geographic:
+            metric = metric.to_crs(metric.estimate_utm_crs())
+        areas = [float(g.area) for g in metric.geometry]
+        perims = [float(g.length) for g in metric.geometry]
         has_count = "building_count" in block_geoms.columns
         counts = (
             [0.0 if pd.isna(c) else float(c) for c in block_geoms["building_count"]] if has_count
@@ -293,7 +308,8 @@ class DenseClusterRegionBuilder:
                     break
                 best = min(
                     frontier,
-                    key=lambda j: (-_density(counts[j], areas[j]), -counts[j], ids[j]),
+                    key=lambda j: (-_depth_proxy(counts[j], areas[j], perims[j]), -counts[j],
+                                   ids[j]),
                 )
                 cluster.add(best)
                 size += counts[best]

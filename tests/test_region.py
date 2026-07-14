@@ -391,9 +391,9 @@ def test_kblock_block_geometries_bbox_windows() -> None:
 
 def test_dense_cluster_grows_seed_to_buildings_budget() -> None:
     # DJI.3_1_3238 (building_count 53) has exactly two neighbors, DJI.3_1_3243 (107) and
-    # DJI.3_1_3240 (66); at max_buildings=150 growth adds the denser of the two (3243) and stops
-    # (53 + 107 = 160 >= 150). Grew past the seed; total either hits the budget window or, on a
-    # smaller/sparser component, exhausts everything reachable.
+    # DJI.3_1_3240 (66); at max_buildings=150 growth pulls in neighbor(s) ranked by depth proxy
+    # until the total reaches the budget window. Grew past the seed; total either hits the budget
+    # window or, on a smaller/sparser component, exhausts everything reachable.
     bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
     out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]])
 
@@ -422,26 +422,27 @@ def test_dense_cluster_region_is_contiguous() -> None:
 
 
 def test_dense_cluster_deterministic() -> None:
-    # Same inputs, two separate build() calls -- growth order is fully tie-broken (density, then
-    # building_count, then block_id), so the output is byte-stable.
+    # Same inputs, two separate build() calls -- growth order is fully tie-broken (depth proxy,
+    # then building_count, then block_id), so the output is byte-stable.
     bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
     builder = DenseClusterRegionBuilder(max_buildings=150)
     assert builder.build(bg, [["DJI.3_1_3238"]]) == builder.build(bg, [["DJI.3_1_3238"]])
 
 
-def test_dense_cluster_densest_neighbor_first() -> None:
-    # A seed (count 10) with two neighbors of equal building_count (5) but different area, so
-    # only density distinguishes them: "dense" (area 0.5 -> density 10) touches the seed's right
-    # edge, "sparse" (area 2 -> density 2.5) touches its top edge. max_buildings=15 fits exactly
-    # one more block (10 + 5) -- the denser neighbor must be the one chosen.
+def test_dense_cluster_deepest_neighbor_first() -> None:
+    # A seed (count 10) with two neighbors of EQUAL building_count (5) AND equal area (1.0), so
+    # building density (5/1 for both) can't tell them apart -- but the depth proxy sqrt(n*A)/P can:
+    # "deep" is a compact 1x1 square (perim 4 -> proxy sqrt(5)/4 = 0.56) touching the seed's right
+    # edge, "shallow" is a 4x0.25 strip (same area, perim 8.5 -> proxy 0.26) touching its top edge.
+    # max_buildings=15 fits exactly one more block (10 + 5) -- the deeper (compact) one is chosen.
     seed = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
-    dense = Polygon([(1, 0), (1.5, 0), (1.5, 1), (1, 1)])
-    sparse = Polygon([(0, 1), (2, 1), (2, 2), (0, 2)])
+    deep = Polygon([(1, 0), (2, 0), (2, 1), (1, 1)])
+    shallow = Polygon([(0, 1), (4, 1), (4, 1.25), (0, 1.25)])
     geoms = _dense_cluster_geoms(
-        ("seed", 10.0, seed), ("dense", 5.0, dense), ("sparse", 5.0, sparse))
+        ("seed", 10.0, seed), ("deep", 5.0, deep), ("shallow", 5.0, shallow))
 
     out = DenseClusterRegionBuilder(max_buildings=15).build(geoms, [["seed"]])
-    assert out == [["dense", "seed"]]
+    assert out == [["deep", "seed"]]
 
 
 def test_dense_cluster_falls_back_to_block_count_without_building_count() -> None:
@@ -499,9 +500,9 @@ def test_dense_cluster_no_warning_for_a_touch_adjacent_seed_group(
 
 def test_dense_cluster_guards_zero_area_and_nan_building_count() -> None:
     # A degenerate (zero-area, collinear) frontier candidate must not raise ZeroDivisionError
-    # computing density (`_density`'s documented 0.0 convention), and a NaN building_count must
-    # not poison the budget sum or the density argmax (guarded to 0.0) -- both must just grow
-    # cleanly rather than crash or silently drop the seed.
+    # computing the depth proxy (`_depth_proxy`'s documented 0.0 convention), and a NaN
+    # building_count must not poison the budget sum or the proxy argmax (guarded to 0.0) -- both
+    # must just grow cleanly rather than crash or silently drop the seed.
     seed = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
     zero_area = Polygon([(1, 0), (2, 0), (3, 0)])                # collinear points -- area == 0
     nan_neighbor = Polygon([(0, 1), (1, 1), (1, 2), (0, 2)])     # building_count is NaN
