@@ -23,9 +23,6 @@ all_methods:
   greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
-  clearance_rep_minus3: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: -3.0, depth_target: 2, max_roads: 200}
-  clearance_rep_0: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 200}
-  clearance_rep_plus3: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 3.0, depth_target: 2, max_roads: 200}
   clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
 methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable]
 
@@ -36,6 +33,11 @@ methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable]
 #     navigability-vs-homes-cleared tradeoff (frontage methods land near x=0, the informative contrast).
 cost: length
 corridor_m: 3.0
+
+# Optional: sweep ONE base method over a param's values without hand-writing an all_methods entry
+# per value. Expands to `{base}_{param}{value}` methods appended to the run list, e.g.
+#   methods=[] 'method_sweep={base: clearance, param: repulsion, values: [-3, 0, 3]}'
+method_sweep: null
 
 shapefile: ???
 region_id: phule

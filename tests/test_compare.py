@@ -103,3 +103,18 @@ def test_compare_report_writes(tmp_path: Path) -> None:
     compare_report(results, tmp_path)
     assert (tmp_path / "auc_table_access.csv").exists()
     assert (tmp_path / "curve_access_b1.png").exists()
+
+
+def test_compare_method_sweep_expands_over_param_values(tmp_path: Path) -> None:
+    # method_sweep expands ONE base method over a param's values -> `{base}_{param}{value}` methods,
+    # replacing hand-written all_methods entries. Here: clearance at repulsion -3/0/3, one plot.
+    result = subprocess.run(
+        [sys.executable, "-m", "reblock.compare", "data=dji", "eval=kcomplexity", "max_blocks=1",
+         "methods=[]", "method_sweep={base: clearance, param: repulsion, values: [-3, 0, 3]}",
+         f"hydra.run.dir={tmp_path}"],
+        capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stderr
+    table = (tmp_path / "auc_table_directness.csv").read_text()
+    assert "clearance_repulsion-3" in table
+    assert "clearance_repulsion0" in table
+    assert "clearance_repulsion3" in table

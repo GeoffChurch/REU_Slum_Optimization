@@ -14,7 +14,7 @@ import hydra
 from geopandas import GeoDataFrame
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 from reblock.budget import (
     Curve,
@@ -59,6 +59,28 @@ def _region_label(region: list[Block]) -> str:
     return f"{label[:60]}...{hashlib.sha256(label.encode()).hexdigest()[:8]}"
 
 
+def _expand_method_sweep(cfg: DictConfig, names: list[str], methods: list[Method]) -> None:
+    """Optional `cfg.method_sweep` ({base, param, values}): expand ONE base method config over a
+    param's values -- one instantiated method per value, labelled `{base}_{param}{value}` -- and
+    append to `names`/`methods`. Avoids a hand-written `all_methods` entry per swept value, e.g.
+    `method_sweep={base: clearance, param: repulsion, values: [-3, 0, 3]}` replaces three
+    `clearance_rep_*` entries. The variant is merged INTO `cfg.all_methods` so a `${...}`
+    interpolation in the base (e.g. `substrate: ${substrate}`) still resolves against the root."""
+    sweep = cfg.get("method_sweep")
+    if not sweep:
+        return
+    # item access, not attribute: `sweep.values` would hit DictConfig's `.values()` method.
+    base_key = str(sweep["base"])
+    param = str(sweep["param"])
+    with open_dict(cfg.all_methods):   # the composed config is struct-locked; allow new keys
+        for v in sweep["values"]:
+            vname = f"{base_key}_{param}{float(v):g}"
+            cfg.all_methods[vname] = OmegaConf.merge(cfg.all_methods[base_key], {})
+            OmegaConf.update(cfg.all_methods[vname], param, v)
+            names.append(vname)
+            methods.append(cast(Method, instantiate(cfg.all_methods[vname])))
+
+
 def compare(cfg: DictConfig) -> list[MethodCurve]:
     source = cast(Source, instantiate(cfg.data))
     screen = cast(Screen, instantiate(cfg.screen))
@@ -69,6 +91,7 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
     )
     names = list(cfg.methods)   # config keys -> the AUC-table labels (not method.identity)
     methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in names]
+    _expand_method_sweep(cfg, names, methods)   # optional: sweep one base method over a param
     regions = build_regions(source, screen, region_builder, block_groups, cfg.max_blocks)
     cost = str(cfg.get("cost", "length"))   # curve x-axis: "length" (m/ha) | "displacement"
     corridor_m = float(cfg.get("corridor_m", 3.0))
