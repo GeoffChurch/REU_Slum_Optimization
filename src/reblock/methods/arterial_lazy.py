@@ -13,7 +13,7 @@ from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
 import reblock.methods.arterial as _art
-from reblock.budget import _BlockScoringContext, access_burden
+from reblock.budget import _BlockScoringContext, access_burden, road_drainage
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
@@ -24,6 +24,7 @@ from reblock.methods.arterial import (
     _deep_targets,
     _explode,
     _merge,
+    _planarize,
     _snap_graph,
     _StepState,
     _xy,
@@ -241,4 +242,6 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
             live.discard(k)
         pending = added
 
-    return _explode(_merge(committed), block.crs)
+    roads = _planarize(committed, block.crs)
+    roads["drain"] = road_drainage(block, roads) if len(roads) else []
+    return roads

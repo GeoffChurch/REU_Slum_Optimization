@@ -126,6 +126,21 @@ def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
     assert lazy_calls < exact_calls / 2, (lazy_calls, exact_calls)
 
 
+def test_lazy_roads_carry_drain_column_like_exact():
+    # The lazy engine's tail must match the exact path's tail (`_planarize` + `road_drainage`),
+    # not just produce equivalent geometry -- `.roads` is a schema, not just a geometry column,
+    # and downstream consumers (e.g. rendering) read `drain`. Regression test for the schema
+    # divergence where the lazy engine ended on `_explode(_merge(committed))` with no `drain`.
+    block = _grid_block(5)
+    roads = GreedyArterialReblocker(mode="buildable", objective="directness", n_anchors=6,
+                                    max_roads=4, lazy=True,
+                                    candidate_policy="grow").propose(block).roads
+    assert "drain" in roads.columns
+    if len(roads):
+        assert len(roads["drain"]) == len(roads)
+        assert (roads["drain"] >= 0).all()
+
+
 def test_lazy_quality_within_tolerance():
     from scoring_fixtures import _block_1808
 
