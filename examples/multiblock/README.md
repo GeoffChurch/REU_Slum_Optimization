@@ -6,10 +6,10 @@ through it so every home lands within **3 parcels of a street** — then compare
 10,700-home region, the methods that actually run at this scale, and show clearance's tuning knobs.
 
 Reproduces from **`capetown_full`** (the full metro, auto-downloaded to `~/.cache/reblock` on first
-use) via plain CLI commands. For the *comprehensive* method bake-off — all five reblockers, including
-`topology`, which is single-block-only — see [`method-comparison`](../method-comparison/) on a single
-deep block. (`greedy_arterial` used to be region-intractable too; **CELF/lazy now brings it back** —
-it's in the §4 comparison below.)
+use) via plain CLI commands. For the *comprehensive* method bake-off — the scalable reblockers plus
+`topology` (single-block-only) — see [`method-comparison`](../method-comparison/) on a single deep
+block. (`greedy_arterial` used to be region-intractable too; **CELF/lazy now brings it back** — it's
+in the §4 comparison below.)
 
 ## 1. Screen the metro
 
@@ -59,50 +59,66 @@ takes the screen's deepest block as the seed; `region_map.enabled` writes `scree
 
 ## 4. Compare the methods that scale
 
-The same 10,700-home region, graded on the four lenses for the methods that run at settlement scale.
-Only `topology` (single-block-only) is excluded now — **`greedy_arterial` rejoins** via CELF/lazy
-(`candidate_policy=fixed` + `max_anchors=64` bound its candidate pass, so its 15 through-roads take
-~30 s on the whole region instead of the ~48 min the uncapped greedy needed). For the five-method
-bake-off on a small block, see [`method-comparison`](../method-comparison/).
+The same 10,700-home region, graded on the four lenses for the methods that run at settlement scale:
+**`clearance`**, **`greedy_arterial`** (rejoining via CELF/lazy — `candidate_policy=fixed` +
+`max_anchors=64` bound its candidate pass, so its 15 through-roads take ~30 s on the whole region
+instead of the ~48 min the uncapped greedy needed), and **`dream_come_true`** — a reblocker whose
+roads are the REAL informal footpaths mapped from OpenStreetMap, not a synthetic construction. The
+coverage baselines `dijkstra`/`mesh` (which just pave everything) are dropped from this comparison;
+only `topology` (single-block-only) stays excluded at region scale. For the four-method bake-off on a
+small block, see [`method-comparison`](../method-comparison/).
 
 ```bash
 pixi run python -m reblock.compare \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
   "block_ids=[[ZAF.9.3.1_1_5810]]" \
-  methods=[dijkstra,mesh,clearance,greedy_arterial_buildable] max_blocks=1 \
+  methods=[clearance,greedy_arterial_buildable,dream_come_true] max_blocks=1 \
   all_methods.clearance.max_roads=3000 \
   all_methods.greedy_arterial_buildable.candidate_policy=fixed \
-  +all_methods.greedy_arterial_buildable.max_anchors=64
+  +all_methods.greedy_arterial_buildable.max_anchors=64 \
+  desire_source.snapshot=examples/multiblock/desire_lines_5810.geojson
 ```
 
+`dream_come_true` loads the committed snapshot
+[`desire_lines_5810.geojson`](desire_lines_5810.geojson) — 154 mapped OSM ways for the region (see
+`scripts/fetch_desire_lines_snapshot.py`) — instead of synthesizing roads.
+
 Every command in this example logs its console output — each selection's locator link, the reblock
-summary, and the per-method AUCs / displacement counts — to [`run.log`](run.log).
+summary, and the per-method frontier terminal points / displacement counts — to
+[`run.log`](run.log).
 
-Mean AUC per method (benefit per metre of road; higher = better), with **`% paved`** = fraction of
-the region's area under the road corridor:
+Terminal frontier point per method per lens — benefit reached, and the road density (m/ha) plus
+**`% paved`** (fraction of the region's area under the road corridor) it took to get there:
 
-| lens | dijkstra | mesh | clearance | arterial |
-|---|---|---|---|---|
-| access — burden removed | 0.95 | 0.94 | **0.96** | 0.57 |
-| resistance — egress removed | **0.64** | 0.61 | 0.42 | 0.09 |
-| directness — 1/circuity | 0.00 | 0.05 | 0.08 | **0.09** |
-| efficiency — network E | 0.00 | 0.00 | 0.00 | 0.00 |
-| **% paved** | 50% | 57% | 15% | **3%** |
+| lens | clearance | greedy_arterial | dream_come_true |
+|---|---|---|---|
+| access — burden removed | **0.970** | 0.582 | 0.026 |
+| resistance — egress removed | **0.477** | 0.097 | 0.041 |
+| directness — 1/circuity | 0.088 | **0.092** | 0.010 |
+| efficiency — network E | ~0.00 | ~0.00 | ~0.00 |
+| road density | 260 m/ha | 56 m/ha | 61 m/ha |
+| **% paved** | 15.5% | **3.3%** | 3.7% |
 
-At this scale the coverage methods blanket access near-perfectly (~0.94–0.96) — a deep region is
-exactly where roads matter most. **clearance is the best all-rounder**: it wins access, is nearly tied
-for directness, and paves a quarter of what the frontage methods do (15% vs 50–57%). **dijkstra wins
-resistance** — its frontage spanning tree gives the most redundant egress. And **`greedy_arterial`,
-now scalable via CELF, wins directness** (0.089, just ahead of clearance's 0.078) at the **sparsest
-paving of all (3%)** — its handful of straight through-roads cut the most direct interior routes,
-though that sparseness costs it on access/resistance (it doesn't try to cover). So at scale: clearance
-for a navigable, well-covered reblock; dijkstra for egress redundancy; arterial for maximal directness
-at minimal road.
+**`clearance` dominates coverage:** access 0.970 and resistance 0.477 at 15.5% paved — the best
+all-round reblock at region scale.
+
+**`greedy_arterial`** (CELF-scalable) **wins directness** (0.092, edging clearance's 0.088) at the
+sparsest paving of all (3.3%) and low displacement (216 homes, see below) — a handful of straight
+through-roads.
+
+**`dream_come_true` is the honest reality check.** Its roads are the mapped OSM footpaths that
+ALREADY exist across the region. And they barely touch the deep interior: access **0.026** at 3.7%
+paved, displacing just 97 homes. The real as-built paths are a thin skeleton that leaves almost the
+whole 10,700-home fabric buried — which is precisely why reblocking is needed. (On a single small
+block the same method does far better — see [`method-comparison`](../method-comparison/) — because a
+small block's paths actually cover it; a deep 23-block core they do not.) This is a feature of the
+example: it shows what's on the ground vs. what the synthetic methods achieve.
 
 ![access](compare_access.png) ![resistance](compare_resistance.png)
 ![directness](compare_directness.png) ![efficiency](compare_efficiency.png)
 
-`efficiency` (network E) is near-inert at this scale — the many far-apart parcel pairs swamp it.
+`efficiency` (network E) is near-inert at this scale for every method — the many far-apart parcel
+pairs swamp it.
 
 ### Displacement at scale
 
@@ -113,43 +129,45 @@ the §4 compare with `cost=displacement` appended:
 pixi run python -m reblock.compare \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
   "block_ids=[[ZAF.9.3.1_1_5810]]" \
-  methods=[dijkstra,mesh,clearance,greedy_arterial_buildable] max_blocks=1 \
+  methods=[clearance,greedy_arterial_buildable,dream_come_true] max_blocks=1 \
   all_methods.clearance.max_roads=3000 \
   all_methods.greedy_arterial_buildable.candidate_policy=fixed \
-  +all_methods.greedy_arterial_buildable.max_anchors=64 cost=displacement
+  +all_methods.greedy_arterial_buildable.max_anchors=64 \
+  desire_source.snapshot=examples/multiblock/desire_lines_5810.geojson cost=displacement
 ```
 
-Across a 10,700-home region the sparse-vs-dense gap is stark:
+Across a 10,700-home region:
 
 | method | terminal directness | buildings displaced | % displaced |
 |---|---|---|---|
-| **greedy_arterial** | 0.09 | **216** | **2.0%** |
-| clearance | 0.09 | 2,056 | 19.2% |
-| dijkstra | 0.00 | 3,121 | 29.2% |
-| mesh | 0.23 | 4,573 | 42.7% |
+| **dream_come_true** | 0.010 | **97** | **0.9%** |
+| greedy_arterial | 0.092 | 216 | 2.0% |
+| clearance | 0.088 | 2,056 | 19.2% |
 
-**Arterial reaches clearance's directness (0.09) displacing just 216 homes — clearance displaces
-2,056, and the dense frontage methods far more (dijkstra 3,121, mesh 4,573).** Displacement tracks
-road footprint, so the sparse through-road / least-cost methods are dramatically gentler on the
-fabric. `mesh` reaches higher *absolute* directness (0.23) but at 21× arterial's displacement. (AUC
-over the displacement axis is meaningless, so this is read from the terminal points.)
+`dream_come_true` displaces almost nothing (97 homes, 0.9%) — but that's the flip side of barely
+helping: its footpaths never reach the deep interior (access 0.026 above), so there's little there
+left to clear. `greedy_arterial` reaches near-clearance directness (0.092 vs 0.088) while displacing a
+tenth as many homes (216 vs 2,056) — its handful of through-roads. `clearance`'s dense coverage
+displaces 2,056 homes (19.2%) — the price of the access/resistance coverage it wins above.
+Displacement tracks road footprint, not virtue on its own — read this table alongside the full
+frontier table above, not in isolation.
 
 ![directness vs displacement](compare_directness_displacement.png)
 
 ## 5. The depth_target tradeoff — why 3
 
-`depth_target` is the road-budget dial: the looser the target, the fewer roads. On the deep core:
+`depth_target` is the road-budget dial: the looser the target, the fewer roads. On the deep core,
+each depth's terminal frontier point (benefit reached, road density spent, % paved):
 
-| depth_target | roads | road length | displaced | reached | access AUC | resistance AUC |
+| depth_target | road density | % paved | access | directness | resistance | displaced |
 |---|---|---|---|---|---|---|
-| 2 | 876 | 26,326 m | 2,056 | depth 2 | **0.903** | **0.233** |
-| **3** | **304** | **13,699 m** | **959** | **depth 3** | **0.903** | 0.184 |
-| 4 | 137 | 8,345 m | 532 | depth 4 | 0.892 | 0.126 |
+| 2 | 260 m/ha | 15.5% | **0.970** | 0.088 | **0.477** | 2,056 |
+| **3** | **135 m/ha** | **8.0%** | 0.952 | 0.045 | 0.251 | **959** |
+| 4 | 83 m/ha | 4.9% | 0.931 | 0.036 | 0.150 | 532 |
 
-Depth 3 is the sweet spot: it removes access-burden at the **same rate per metre** as depth 2
-(access AUC 0.903 for both) but with **⅓ the road and half the displacement** — depth 2 just keeps
-committing road to shave the last two rings. Depth 4 saves more road still, but leaves parcels 4 deep.
-(The resistance lens — egress redundancy — is the one thing depth 2's extra road buys: 0.233 vs 0.184.)
+Depth 3 is the sweet spot: it reaches **0.952 access** — ≈98% of depth 2's 0.970 — at **HALF the
+road** (135 vs 260 m/ha) and half the displacement (959 vs 2,056). Depth 2 just keeps paving to shave
+the last two rings. Depth 4 saves more road still, but leaves parcels 4 deep.
 
 ![depth access](depth_access.png) ![depth resistance](depth_resistance.png)
 
@@ -158,16 +176,16 @@ committing road to shave the last two rings. Depth 4 saves more road still, but 
 At depth 3, `repulsion` (the logit knob steering roads toward gaps vs straight through buildings)
 trades **homes displaced** against **route directness**:
 
-| repulsion | roads | road length | displaced | directness AUC |
-|---|---|---|---|---|
-| −3 (seek clearance) | 295 | 13,387 m | 1,035 | **0.045** |
-| 0 (balanced) | 304 | 13,699 m | 959 | 0.029 |
-| +3 (repel buildings) | 285 | 14,484 m | **543** | 0.018 |
+| repulsion | road density | % paved | directness | access | displaced |
+|---|---|---|---|---|---|
+| −3 (seek clearance) | 132 m/ha | 7.8% | **0.077** | 0.951 | 1,035 |
+| 0 (balanced) | 135 m/ha | 8.0% | 0.045 | 0.952 | 959 |
+| +3 (repel buildings) | 143 m/ha | 8.6% | 0.026 | 0.951 | **543** |
 
 Turning repulsion up **nearly halves displacement** (1,035 → 543) by routing roads around buildings
-through the gaps — at the cost of slightly longer, less direct roads. Turning it down cuts straighter
-through the fabric: more direct internal trips, but more homes cleared. Same coverage either way
-(access AUC ≈ 0.86); the knob is purely *how* the roads get there.
+through the gaps — at the cost of less direct roads. Turning it down cuts straighter through the
+fabric: more direct internal trips, but more homes cleared. Same coverage either way (access ≈ 0.95);
+the knob is purely *how* the roads get there.
 
 ![repulsion directness](repulsion_directness.png)
 
@@ -197,5 +215,6 @@ pixi run python -m reblock.compare \
   'method_sweep={base: clearance, param: repulsion, values: [-3, 0, 3]}'
 ```
 
-(AUCs are comparable *within* a sweep, not across the two — each normalizes to its own shared
-road-density axis, and the depth sweep's axis runs much further because depth 2 commits ~3× the road.)
+(Frontier values are comparable *within* a sweep, not across the two — each normalizes to its own
+shared road-density axis, and the depth sweep's axis runs much further because depth 2 commits ~3× the
+road.)

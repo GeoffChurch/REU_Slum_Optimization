@@ -1,5 +1,4 @@
 method,mean_terminal_benefit,mean_buildings_displaced,mean_pct_displaced,n_blocks
-mesh,0.2265,4573.0,0.4272,1
 greedy_arterial_buildable,0.0916,216.0,0.0202,1
 clearance,0.0879,2056.0,0.1921,1
-dijkstra,0.0033,3121.0,0.2916,1
+dream_come_true,0.0103,97.0,0.0091,1

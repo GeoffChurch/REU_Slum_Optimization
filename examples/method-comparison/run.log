@@ -1,47 +1,32 @@
-# Reproduce log for examples/method-comparison (see README.md "## Reproduce")
-
-### length cost — the four lenses + % paved
-$ pixi run python -m reblock.compare data=capetown_full "block_ids=[[ZAF.9.3.1_1_40972]]" methods=[dijkstra,topology,mesh,greedy_arterial_buildable,clearance] max_blocks=1 all_methods.greedy_arterial_buildable.max_roads=8
-
-[2026-07-15 15:53:18,435][__main__][INFO] - ZAF.9.3.1_1_40972 map: https://www.google.com/maps/@-33.97795,18.58064,18z
-[2026-07-15 15:53:20,783][__main__][INFO] - access ZAF.9.3.1_1_40972 topology AUC=0.839
-[2026-07-15 15:53:20,783][__main__][INFO] - access ZAF.9.3.1_1_40972 dijkstra AUC=0.822
-[2026-07-15 15:53:20,783][__main__][INFO] - access ZAF.9.3.1_1_40972 mesh AUC=0.820
-[2026-07-15 15:53:20,783][__main__][INFO] - access ZAF.9.3.1_1_40972 clearance AUC=0.787
-[2026-07-15 15:53:20,783][__main__][INFO] - access ZAF.9.3.1_1_40972 greedy_arterial_buildable AUC=0.715
-[2026-07-15 15:53:20,783][__main__][INFO] - directness ZAF.9.3.1_1_40972 greedy_arterial_buildable AUC=0.227
-[2026-07-15 15:53:20,783][__main__][INFO] - directness ZAF.9.3.1_1_40972 topology AUC=0.087
-[2026-07-15 15:53:20,783][__main__][INFO] - directness ZAF.9.3.1_1_40972 mesh AUC=0.068
-[2026-07-15 15:53:20,783][__main__][INFO] - directness ZAF.9.3.1_1_40972 clearance AUC=0.047
-[2026-07-15 15:53:20,783][__main__][INFO] - directness ZAF.9.3.1_1_40972 dijkstra AUC=0.015
-[2026-07-15 15:53:20,783][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 greedy_arterial_buildable AUC=0.005
-[2026-07-15 15:53:20,783][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 topology AUC=0.003
-[2026-07-15 15:53:20,783][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 mesh AUC=0.002
-[2026-07-15 15:53:20,783][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 clearance AUC=0.002
-[2026-07-15 15:53:20,783][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 dijkstra AUC=0.001
-[2026-07-15 15:53:20,783][__main__][INFO] - resistance ZAF.9.3.1_1_40972 dijkstra AUC=0.620
-[2026-07-15 15:53:20,783][__main__][INFO] - resistance ZAF.9.3.1_1_40972 mesh AUC=0.609
-[2026-07-15 15:53:20,783][__main__][INFO] - resistance ZAF.9.3.1_1_40972 topology AUC=0.480
-[2026-07-15 15:53:20,783][__main__][INFO] - resistance ZAF.9.3.1_1_40972 clearance AUC=0.377
-[2026-07-15 15:53:20,783][__main__][INFO] - resistance ZAF.9.3.1_1_40972 greedy_arterial_buildable AUC=0.348
-
-### displacement cost — buildings displaced + % displaced (topology dropped)
-$ ... methods=[dijkstra,mesh,greedy_arterial_buildable,clearance] ... cost=displacement
-
-[2026-07-15 15:53:25,511][__main__][INFO] - ZAF.9.3.1_1_40972 map: https://www.google.com/maps/@-33.97795,18.58064,18z
-[2026-07-15 15:53:30,075][__main__][INFO] - access ZAF.9.3.1_1_40972 dijkstra: benefit=0.921, 116 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - access ZAF.9.3.1_1_40972 mesh: benefit=0.921, 156 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - access ZAF.9.3.1_1_40972 clearance: benefit=0.827, 53 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - access ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.764, 32 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - directness ZAF.9.3.1_1_40972 mesh: benefit=0.429, 156 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - directness ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.257, 32 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - directness ZAF.9.3.1_1_40972 clearance: benefit=0.053, 53 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - directness ZAF.9.3.1_1_40972 dijkstra: benefit=0.022, 116 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 mesh: benefit=0.010, 156 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.006, 32 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 clearance: benefit=0.002, 53 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 dijkstra: benefit=0.002, 116 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - resistance ZAF.9.3.1_1_40972 mesh: benefit=0.939, 156 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - resistance ZAF.9.3.1_1_40972 dijkstra: benefit=0.866, 116 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - resistance ZAF.9.3.1_1_40972 clearance: benefit=0.425, 53 displaced
-[2026-07-15 15:53:30,076][__main__][INFO] - resistance ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.389, 32 displaced
+### method-comparison — length (frontier: topology, clearance, arterial, dream_come_true)
+[2026-07-15 17:48:02,834][__main__][INFO] - ZAF.9.3.1_1_40972 map: https://www.google.com/maps/@-33.97795,18.58064,18z
+[2026-07-15 17:48:04,206][__main__][INFO] - access ZAF.9.3.1_1_40972 topology: benefit=0.921 at 620 m/ha (38.7% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - access ZAF.9.3.1_1_40972 clearance: benefit=0.827 at 323 m/ha (20.4% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - access ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.764 at 267 m/ha (16.2% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - access ZAF.9.3.1_1_40972 dream_come_true: benefit=0.761 at 425 m/ha (25.2% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - directness ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.257 at 267 m/ha (16.2% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - directness ZAF.9.3.1_1_40972 topology: benefit=0.121 at 620 m/ha (38.7% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - directness ZAF.9.3.1_1_40972 dream_come_true: benefit=0.069 at 425 m/ha (25.2% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - directness ZAF.9.3.1_1_40972 clearance: benefit=0.053 at 323 m/ha (20.4% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.006 at 267 m/ha (16.2% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 topology: benefit=0.004 at 620 m/ha (38.7% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 clearance: benefit=0.002 at 323 m/ha (20.4% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 dream_come_true: benefit=0.002 at 425 m/ha (25.2% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - resistance ZAF.9.3.1_1_40972 topology: benefit=0.626 at 620 m/ha (38.7% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - resistance ZAF.9.3.1_1_40972 clearance: benefit=0.425 at 323 m/ha (20.4% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - resistance ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.389 at 267 m/ha (16.2% paved)
+[2026-07-15 17:48:04,206][__main__][INFO] - resistance ZAF.9.3.1_1_40972 dream_come_true: benefit=0.365 at 425 m/ha (25.2% paved)
+### method-comparison — displacement (clearance, arterial, dream_come_true)
+[2026-07-15 17:48:09,043][__main__][INFO] - ZAF.9.3.1_1_40972 map: https://www.google.com/maps/@-33.97795,18.58064,18z
+[2026-07-15 17:48:10,169][__main__][INFO] - access ZAF.9.3.1_1_40972 clearance: benefit=0.827, 53 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - access ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.764, 32 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - access ZAF.9.3.1_1_40972 dream_come_true: benefit=0.761, 49 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - directness ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.257, 32 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - directness ZAF.9.3.1_1_40972 dream_come_true: benefit=0.069, 49 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - directness ZAF.9.3.1_1_40972 clearance: benefit=0.053, 53 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.006, 32 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 clearance: benefit=0.002, 53 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 dream_come_true: benefit=0.002, 49 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - resistance ZAF.9.3.1_1_40972 clearance: benefit=0.425, 53 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - resistance ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.389, 32 displaced
+[2026-07-15 17:48:10,169][__main__][INFO] - resistance ZAF.9.3.1_1_40972 dream_come_true: benefit=0.365, 49 displaced
