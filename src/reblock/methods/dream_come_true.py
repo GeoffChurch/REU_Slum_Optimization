@@ -59,8 +59,15 @@ class DreamComeTrueReblocker:
         lines = self.source.desire_lines(
             (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])), block.crs)
         roads = _interior_desire_lines(lines, block)
+        # Encode the config into proposal_id so Proposal.identity distinguishes configs on a block
+        # (mirrors clearance) -- else two DreamComeTrue configs would key-collide in the eval cache.
+        # A live (uncacheable) source has drift-prone roads, so its eval must also bypass: drop
+        # block_identity to None, making it uncacheable end-to-end, consistent with Method.identity.
+        cacheable = self.source.identity is not None
+        pid = (f"dream_come_true:{self.source.identity}:c{self.corridor_m:g}"
+               if cacheable else "dream_come_true")
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
-            proposal_id="dream_come_true", method="dream_come_true",
+            proposal_id=pid, method="dream_come_true",
             params={"segments": len(roads), "corridor_m": self.corridor_m},
-            block_identity=block.identity)
+            block_identity=block.identity if cacheable else None)
