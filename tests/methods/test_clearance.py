@@ -258,6 +258,20 @@ def test_distinct_repulsions_get_distinct_proposal_identity() -> None:
     assert a.identity != b.identity
 
 
+def test_prebuilt_substrate_makes_proposal_uncacheable_even_on_a_real_block() -> None:
+    # A PrebuiltSubstrate is an ad-hoc graph (identity None, fixed tag "prebuilt"), so proposal_id
+    # can't distinguish two prebuilt graphs -- its eval must bypass the cache too, else the second
+    # graph's metrics get served from the first's cache entry. Proposal.identity must be None even
+    # on a block with a real (Source) identity.
+    block = replace(_column_block_with_buildings(6), source_content_hash="test-hash")
+    assert block.identity is not None
+    graph = GridSubstrate(res=0.5).build(block)
+    method = ClearanceReblocker(substrate=PrebuiltSubstrate(graph), depth_target=2)
+    proposal = method.propose(block)
+    assert method.identity is None       # Method already uncacheable (substrate identity None)
+    assert proposal.identity is None     # ...and now the Proposal too (block_identity dropped)
+
+
 def test_propose_achieves_target_on_real_block() -> None:
     # bare (not `tests.scoring_fixtures`): pyproject.toml deliberately keeps tests/ without an
     # __init__.py (a tests.__init__ would collide with ext/topology's own "tests" package under
