@@ -29,6 +29,24 @@ def test_grow_policy_only_adds():
     assert all(ls.wkt not in base_keys for ls in added)   # only genuinely new candidates
 
 
+def test_lazy_faithful_rescore1_equals_exact():
+    # The engine-correctness gate (the oracle): rescore_every=1 + faithful policy re-scores every
+    # candidate every step, so the heap's top IS the true per-step argmax over arterial's OWN
+    # candidate set -- byte-identical road sequence to the exact greedy. A failure here is a
+    # bookkeeping bug (a _StepState field, the heap tie-break, or termination), NOT submodularity.
+    from reblock.methods.arterial import _greedy_arterials
+    from reblock.methods.arterial_lazy import _greedy_arterials_lazy
+    for mode in ("buildable", "aspirational"):
+        block = _grid_block(5)
+        exact = _greedy_arterials(block, mode=mode, objective="directness", n_anchors=6,
+                                  max_roads=4, workers=1)
+        lazy = _greedy_arterials_lazy(block, mode=mode, objective="directness", n_anchors=6,
+                                      top_k=8, lam=2.0, max_roads=4, cost="length",
+                                      corridor_m=3.0, workers=1,
+                                      candidate_policy="faithful", rescore_every=1)
+        assert [g.wkt for g in exact.geometry] == [g.wkt for g in lazy.geometry], mode
+
+
 def test_faithful_policy_matches_arterial_candidate_set():
     # faithful's set after committing a road must equal arterial's own regeneration for that network
     from reblock.methods.arterial import _anchor_points, _candidate_chords
