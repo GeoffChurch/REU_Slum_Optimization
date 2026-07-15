@@ -414,9 +414,12 @@ class GreedyArterialReblocker:
     cost: str = "length"
     corridor_m: float = 3.0   # road half-width + setback; the displacement corridor
     workers: int = 16         # fork-pool size for per-step candidate scoring; 1 == serial no-op
+    lazy: bool = False               # False -> exact _greedy_arterials (byte-identical)
+    candidate_policy: str = "grow"   # "grow" | "fixed" | "faithful" (only used when lazy)
+    rescore_every: int = 0           # 0 = pure lazy; N = full re-score every N commits (safety)
 
     @property
-    def identity(self) -> tuple[str, str, str, str, float, int, int, int, float]:
+    def identity(self) -> tuple[str, str, str, str, float, int, int, int, float, bool, str, int]:
         # Every field that changes the proposed roads must be in the derive-cache key. corridor_m
         # changes which roads win only under cost="displacement"; hold it fixed otherwise so
         # length-cost methods stay corridor-independent (two methods differing only in corridor_m
@@ -425,7 +428,8 @@ class GreedyArterialReblocker:
         # sweep silently returns another setting's cached proposal.
         corridor_key = self.corridor_m if self.cost == "displacement" else 0.0
         return ("greedy_arterial", self.mode, self.objective, self.cost, corridor_key,
-                self.max_roads, self.n_anchors, self.top_k, self.lam)
+                self.max_roads, self.n_anchors, self.top_k, self.lam,
+                self.lazy, self.candidate_policy, self.rescore_every)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior

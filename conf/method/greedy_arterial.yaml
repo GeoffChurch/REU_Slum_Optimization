@@ -9,3 +9,8 @@ n_anchors: 32
 top_k: 8
 lam: 2.0
 workers: 16
+# Lazy (CELF) greedy: re-score only the heap-top candidate per commit (huge speedup at large
+# max_roads; scales with budget). lazy=False keeps the exact path byte-identical.
+lazy: false
+candidate_policy: grow   # grow (default) | fixed | faithful -- see the CELF design spec
+rescore_every: 0         # 0 = pure lazy; N = full re-score every N commits (non-submodularity safety)
