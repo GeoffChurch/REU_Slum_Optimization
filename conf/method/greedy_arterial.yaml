@@ -14,3 +14,4 @@ workers: 16
 lazy: false
 candidate_policy: grow   # grow (default) | fixed | faithful -- see the CELF design spec
 rescore_every: 0         # 0 = pure lazy; N = full re-score every N commits (non-submodularity safety)
+max_anchors: 0           # 0 = uncapped (byte-identical); >0 caps anchors to ~max_anchors samples

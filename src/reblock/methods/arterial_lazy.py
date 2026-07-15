@@ -90,6 +90,7 @@ class _FaithfulPolicy:
     top_k: int
     live: set[str]
     _initial: list[LineString]
+    max_anchors: int = 0
 
     def initial(self) -> list[LineString]:
         return self._initial
@@ -98,7 +99,7 @@ class _FaithfulPolicy:
                      ) -> tuple[list[LineString], list[str]]:
         network = [*self.streets, *committed]
         cands = _candidate_chords(
-            _anchor_points(network, self.n_anchors),
+            _anchor_points(network, self.n_anchors, self.max_anchors),
             _deep_targets(self.block, _committed_gdf(committed, self.block), self.top_k, self.adj))
         now = {ls.wkt: ls for ls in cands}
         added = [ls for k, ls in now.items() if k not in self.live]
@@ -108,9 +109,9 @@ class _FaithfulPolicy:
 
 
 def _make_policy(name: str, block: Block, streets: Sequence[BaseGeometry],
-                 n_anchors: int, top_k: int, adj: list[set[int]]
+                 n_anchors: int, top_k: int, adj: list[set[int]], max_anchors: int = 0
                  ) -> _FixedPolicy | _GrowPolicy | _FaithfulPolicy:
-    anchors0 = _anchor_points(list(streets), n_anchors)
+    anchors0 = _anchor_points(list(streets), n_anchors, max_anchors)
     targets0 = _deep_targets(block, None, top_k, adj)
     initial = _candidate_chords(anchors0, targets0)
     if name == "fixed":
@@ -119,7 +120,7 @@ def _make_policy(name: str, block: Block, streets: Sequence[BaseGeometry],
         return _GrowPolicy(block, adj, list(anchors0), top_k, {ls.wkt for ls in initial}, initial)
     if name == "faithful":
         return _FaithfulPolicy(block, list(streets), n_anchors, adj, top_k,
-                               {ls.wkt for ls in initial}, initial)
+                               {ls.wkt for ls in initial}, initial, max_anchors)
     raise ValueError(f"unknown candidate_policy {name!r}")
 
 
@@ -150,7 +151,8 @@ def _iter_live(heap: list[tuple[float, str, str, LineString, int]], live: set[st
 def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
                            top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
                            cost: str = "length", corridor_m: float = 3.0, workers: int = 16,
-                           candidate_policy: str = "grow", rescore_every: int = 0) -> GeoDataFrame:
+                           candidate_policy: str = "grow", rescore_every: int = 0,
+                           max_anchors: int = 0) -> GeoDataFrame:
     """CELF lazy-greedy driver: commit the best gain-per-cost arterial one at a time, but instead of
     re-scoring every candidate every step (the exact `_greedy_arterials`), drive selection with a
     max-heap and pop-re-score only the heap top until it is fresh under the current committed set.
@@ -162,7 +164,7 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
     sg = _snap_graph(_boundary_graph(block.parcels))
     streets = list(block.streets.geometry)
     ctx = _BlockScoringContext(block) if objective in ("efficiency", "directness") else None
-    policy = _make_policy(candidate_policy, block, streets, n_anchors, top_k, adj)
+    policy = _make_policy(candidate_policy, block, streets, n_anchors, top_k, adj, max_anchors)
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)

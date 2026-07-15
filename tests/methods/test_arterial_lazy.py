@@ -100,6 +100,18 @@ def test_lazy_dispatch_and_determinism():
     assert len(a) > 0
 
 
+def test_lazy_grow_with_max_anchors_runs_end_to_end():
+    # max_anchors bounds anchor generation (see test_arterial.py's _anchor_points tests); this is
+    # the end-to-end check that the cap threads through the lazy/grow path without breaking the
+    # proposal shape.
+    block = _grid_block(5)
+    roads = GreedyArterialReblocker(mode="buildable", lazy=True, candidate_policy="grow",
+                                    max_anchors=8, max_roads=3).propose(block).roads
+    assert roads is not None
+    assert len(roads) >= 0
+    assert "drain" in roads.columns
+
+
 def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
     # instrument eval_candidate call count on a real block where arterial runs
     from scoring_fixtures import _block_1808

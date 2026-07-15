@@ -44,17 +44,29 @@ def _xy(c: tuple[float, ...]) -> tuple[float, float]:
     return (c[0], c[1])
 
 
-def _anchor_points(network: Sequence[BaseGeometry], n: int) -> list[tuple[float, float]]:
-    """`n` points sampled evenly by arc-length along the merged network, plus every network
-    vertex (so committed-segment endpoints are always anchors -> continuations come for free).
-    `unary_union` explodes any Multi* input, so streets given as a MultiLineString (a block with
-    a hole/courtyard) are handled. _rnd-snapped, de-duplicated, sorted for determinism."""
+def _anchor_points(network: Sequence[BaseGeometry], n: int,
+                    max_anchors: int = 0) -> list[tuple[float, float]]:
+    """`n` points sampled evenly by arc-length along the merged network, plus every network vertex
+    (so committed-segment endpoints are always anchors -> continuations come for free). If
+    `max_anchors > 0`, return ONLY ~`max_anchors` arc-length samples (NOT every vertex), bounding
+    the candidate count to ~C(max_anchors, 2) for tractability on large blocks. `unary_union`
+    explodes any Multi* input, so streets given as a MultiLineString (a block with a hole/courtyard)
+    are handled. `_rnd`-snapped, de-duplicated, sorted for determinism."""
     merged = unary_union(network)
     lines = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
+    total = sum(ln.length for ln in lines)
     pts: set[tuple[float, float]] = set()
+    if max_anchors > 0:
+        if total > 0:
+            step = total / max_anchors
+            for ln in lines:
+                d = 0.0
+                while d <= ln.length:
+                    pts.add(_rnd(_xy(ln.interpolate(d).coords[0])))
+                    d += step
+        return sorted(pts)
     for ln in lines:
         pts.update(_rnd(_xy(c)) for c in ln.coords)                  # vertices
-    total = sum(ln.length for ln in lines)
     if total > 0 and n > 0:
         step = total / n
         for ln in lines:
@@ -307,7 +319,7 @@ def _best_candidate(results: Iterable[tuple[float, BaseGeometry | None]]
 def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
                       top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
                       cost: str = "length", corridor_m: float = 3.0,
-                      workers: int = 16) -> GeoDataFrame:
+                      workers: int = 16, max_anchors: int = 0) -> GeoDataFrame:
     """Greedily commit the straight arterial with the best objective gain per unit cost until
     `max_roads` are placed or no candidate improves. `mode` in {"buildable", "aspirational"}.
     `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/building newly
@@ -320,7 +332,11 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     `workers` parallelizes each step's candidate scoring across a fork process pool (byte-identical
     to serial). `workers <= 1`, a step with `< _PARALLEL_THRESHOLD` candidates, or a platform
     without `fork` all take the literal serial path (a true no-op vs the pool, not a 1-worker
-    pool)."""
+    pool).
+
+    `max_anchors` (0 = today's uncapped behavior, byte-identical) bounds anchor generation to
+    ~`max_anchors` arc-length samples instead of every network vertex, so candidate count stays
+    ~C(max_anchors, 2) regardless of block boundary complexity -- see `_anchor_points`."""
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     base_burden = access_burden(parcel_access_layers(
         block, None, tol=STREET_TOL, adj=adj, unreached_depth=len(block.parcels) + 1))
@@ -338,7 +354,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     global _STEP_STATE
     while len(committed) < max_roads:
         network: list[BaseGeometry] = [*streets, *committed]
-        anchors = _anchor_points(network, n_anchors)
+        anchors = _anchor_points(network, n_anchors, max_anchors)
         base_merged = _merge(committed)              # unary_union(committed), once per step
         base = _explode(base_merged, block.crs)
         base_val = _score(objective, block, base, adj, base_burden, ctx)
@@ -417,9 +433,14 @@ class GreedyArterialReblocker:
     lazy: bool = False               # False -> exact _greedy_arterials (byte-identical)
     candidate_policy: str = "grow"   # "grow" | "fixed" | "faithful" (only used when lazy)
     rescore_every: int = 0           # 0 = pure lazy; N = full re-score every N commits (safety)
+    # 0 = today's uncapped anchor generation (byte-identical); >0 bounds anchors to ~max_anchors
+    # arc-length samples (no per-vertex anchors), so candidate count stays ~C(max_anchors, 2)
+    # regardless of boundary complexity -- see _anchor_points.
+    max_anchors: int = 0
 
     @property
-    def identity(self) -> tuple[str, str, str, str, float, int, int, int, float, bool, str, int]:
+    def identity(self) -> tuple[str, str, str, str, float, int, int, int, float, bool, str, int,
+                                int]:
         # Every field that changes the proposed roads must be in the derive-cache key. corridor_m
         # changes which roads win only under cost="displacement"; hold it fixed otherwise so
         # length-cost methods stay corridor-independent (two methods differing only in corridor_m
@@ -429,7 +450,7 @@ class GreedyArterialReblocker:
         corridor_key = self.corridor_m if self.cost == "displacement" else 0.0
         return ("greedy_arterial", self.mode, self.objective, self.cost, corridor_key,
                 self.max_roads, self.n_anchors, self.top_k, self.lam,
-                self.lazy, self.candidate_policy, self.rescore_every)
+                self.lazy, self.candidate_policy, self.rescore_every, self.max_anchors)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
@@ -439,12 +460,13 @@ class GreedyArterialReblocker:
                 block, mode=self.mode, objective=self.objective, n_anchors=self.n_anchors,
                 top_k=self.top_k, lam=self.lam, max_roads=self.max_roads, cost=self.cost,
                 corridor_m=self.corridor_m, workers=self.workers,
-                candidate_policy=self.candidate_policy, rescore_every=self.rescore_every)
+                candidate_policy=self.candidate_policy, rescore_every=self.rescore_every,
+                max_anchors=self.max_anchors)
         else:
             roads = _greedy_arterials(
                 block, mode=self.mode, objective=self.objective, n_anchors=self.n_anchors,
                 top_k=self.top_k, lam=self.lam, max_roads=self.max_roads, cost=self.cost,
-                corridor_m=self.corridor_m, workers=self.workers)
+                corridor_m=self.corridor_m, workers=self.workers, max_anchors=self.max_anchors)
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=f"greedy_arterial_{self.mode}_{self.objective}", method="greedy_arterial",

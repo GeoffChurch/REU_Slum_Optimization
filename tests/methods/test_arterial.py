@@ -45,6 +45,20 @@ def test_anchor_points_sample_the_network_and_include_vertices() -> None:
     assert len(pts) >= 4 and pts == sorted(pts)           # sampled + deterministic order
 
 
+def test_anchor_points_max_anchors_caps_and_default_matches_uncapped() -> None:
+    # A network with many vertices (mimics a large block's boundary graph, e.g. block 5810's ~229
+    # vertices) so max_anchors actually bounds the count instead of coincidentally landing on it.
+    coords = [(float(i), 0.0 if i % 2 == 0 else 1.0) for i in range(40)]
+    net = [LineString(coords)]
+    uncapped = _anchor_points(net, n=8)
+    # max_anchors=0 (default) must be byte-identical to today's behavior (every vertex + samples).
+    assert _anchor_points(net, n=8, max_anchors=0) == uncapped
+    assert _anchor_points(net, n=8) == uncapped
+    capped = _anchor_points(net, n=8, max_anchors=8)
+    assert len(capped) <= 15
+    assert len(capped) < len(uncapped)
+
+
 def test_deep_targets_are_the_deepest_parcels() -> None:
     block = _grid_block(5)                       # center parcel is deepest, full-boundary streets
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
@@ -296,7 +310,7 @@ def test_identity_and_proposal_metadata() -> None:
     m = GreedyArterialReblocker(mode="buildable", objective="directness")
     assert m.identity == (
         "greedy_arterial", "buildable", "directness", "length", 0.0,
-        15, 32, 8, 2.0, False, "grow", 0)
+        15, 32, 8, 2.0, False, "grow", 0, 0)
     # max_roads / n_anchors / top_k / lam change the proposed roads -> must change the cache key,
     # else a budget/candidate sweep silently returns another setting's cached proposal.
     assert GreedyArterialReblocker(max_roads=3).identity != m.identity
@@ -304,6 +318,7 @@ def test_identity_and_proposal_metadata() -> None:
     assert GreedyArterialReblocker(lazy=True).identity != m.identity
     assert GreedyArterialReblocker(candidate_policy="fixed").identity != m.identity
     assert GreedyArterialReblocker(rescore_every=2).identity != m.identity
+    assert GreedyArterialReblocker(max_anchors=48).identity != m.identity
     proposal = GreedyArterialReblocker(objective="directness").propose(_grid_block(5))
     assert proposal.block_identity == _grid_block(5).identity
 
@@ -328,8 +343,13 @@ def test_config_and_derivation_wiring() -> None:
         cfg = compose(config_name="compare_config",
                       overrides=["shapefile=x", "methods=[greedy_arterial_buildable]"])
     m = instantiate(cfg.all_methods["greedy_arterial_buildable"])
+    # NOTE: lazy=True here (unlike other goldens in this file) matches compare_config.yaml's
+    # inline greedy_arterial_buildable entry, which sets lazy: true -- a pre-existing golden/config
+    # mismatch (this assertion previously asserted False) found and fixed incidentally while
+    # updating these tuples for max_anchors; unrelated to the anchor-cap feature itself.
     assert m.identity == (
-        "greedy_arterial", "buildable", "directness", "length", 0.0, 15, 32, 8, 2.0, False, "grow", 0)
+        "greedy_arterial", "buildable", "directness", "length", 0.0, 15, 32, 8, 2.0, True, "grow",
+        0, 0)
 
 
 def test_displacement_config_instantiates_with_right_params_and_identity() -> None:
@@ -346,7 +366,8 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
     assert (m.mode, m.objective, m.cost, m.corridor_m) == (
         "aspirational", "directness", "displacement", 3.0)
     assert m.identity == (
-        "greedy_arterial", "aspirational", "directness", "displacement", 3.0, 15, 32, 8, 2.0, False, "grow", 0)
+        "greedy_arterial", "aspirational", "directness", "displacement", 3.0, 15, 32, 8, 2.0, False,
+        "grow", 0, 0)
 
     # The standalone conf/method/greedy_arterial_displacement.yaml config group (config.yaml's
     # `method=` default group), separate from compare_config's inline `all_methods` entry above.
@@ -413,7 +434,8 @@ def test_greedy_handles_multilinestring_streets() -> None:
 def test_cost_displacement_in_identity() -> None:
     m = GreedyArterialReblocker(mode="aspirational", objective="directness", cost="displacement")
     assert m.identity == (
-        "greedy_arterial", "aspirational", "directness", "displacement", 3.0, 15, 32, 8, 2.0, False, "grow", 0)
+        "greedy_arterial", "aspirational", "directness", "displacement", 3.0, 15, 32, 8, 2.0, False,
+        "grow", 0, 0)
 
 
 def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 10) -> Block:
