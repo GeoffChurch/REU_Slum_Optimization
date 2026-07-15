@@ -61,6 +61,26 @@ def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
     return cast(gpd.GeoDataFrame, pts[pts.within(corridor)])
 
 
+def pct_paved(roads: gpd.GeoDataFrame | None, corridor_m: float, block_area: float) -> float:
+    """Fraction of the block's area under the roads' corridor footprint
+    (union(roads).buffer(corridor_m)) -- the same buffer the displacement metric uses. 0 for an
+    empty road set or a non-positive block area."""
+    if roads is None or len(roads) == 0 or block_area <= 0:
+        return 0.0
+    return float(roads.geometry.buffer(corridor_m).union_all().area / block_area)
+
+
+def pct_displaced(roads: gpd.GeoDataFrame | None, corridor_m: float,
+                  building_points: gpd.GeoDataFrame) -> float:
+    """Fraction of building points inside the roads' corridor (union(roads).buffer(corridor_m)).
+    0 for an empty road set or no buildings."""
+    n = len(building_points)
+    if roads is None or len(roads) == 0 or n == 0:
+        return 0.0
+    corridor = roads.geometry.buffer(corridor_m).union_all()
+    return float(int(building_points.geometry.within(corridor).sum()) / n)
+
+
 def _member_ids(block_id: str) -> list[str]:
     """The member block ids of a render's selection: a region block_id is
     ``region:`` + ``+``-joined sorted member ids (see ``region.region_block``); a plain block is
