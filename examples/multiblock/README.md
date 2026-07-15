@@ -215,6 +215,6 @@ pixi run python -m reblock.compare \
   'method_sweep={base: clearance, param: repulsion, values: [-3, 0, 3]}'
 ```
 
-(Frontier values are comparable *within* a sweep, not across the two — each normalizes to its own
-shared road-density axis, and the depth sweep's axis runs much further because depth 2 commits ~3× the
-road.)
+(These are raw frontier terminals — benefit at each variant's own road density, no normalization — so
+they read directly across both sweeps; the depth sweep just spends more road at the tight end, since
+depth 2 commits ~3× depth 4's road.)

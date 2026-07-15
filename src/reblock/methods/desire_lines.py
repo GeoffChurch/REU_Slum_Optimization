@@ -83,11 +83,11 @@ class OSMDesireLines:
         if self.snapshot is None:
             return None                                   # live: uncacheable (data can drift)
         digest = hashlib.sha256(Path(self.snapshot).read_bytes()).hexdigest()[:16]
-        return ("osm", tuple(self.tags), digest)
+        return ("osm", tuple(sorted(self.tags)), digest)   # sorted: tag order is not meaningful
 
     def _cache_path(self, bbox_wgs84: tuple[float, float, float, float]) -> Path:
         root = Path(self.cache_dir) if self.cache_dir else _default_cache_dir()
-        key = f"{'|'.join(self.tags)}@{','.join(f'{c:.5f}' for c in bbox_wgs84)}"
+        key = f"{'|'.join(sorted(self.tags))}@{','.join(f'{c:.5f}' for c in bbox_wgs84)}"
         digest = hashlib.sha256(key.encode()).hexdigest()[:16]
         return root / f"{digest}.geojson"
 

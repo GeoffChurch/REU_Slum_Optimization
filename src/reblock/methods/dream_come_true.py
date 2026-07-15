@@ -60,18 +60,18 @@ class DreamComeTrueReblocker:
         lines = self.source.desire_lines(
             (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])), block.crs)
         roads = _interior_desire_lines(lines, block)
-        # Encode the config into proposal_id so Proposal.identity distinguishes configs on a block
-        # (mirrors clearance) -- else two DreamComeTrue configs would key-collide in the eval cache.
-        # A live (uncacheable) source has drift-prone roads, so its eval must also bypass: drop
-        # block_identity to None, making it uncacheable end-to-end, consistent with Method.identity.
-        cacheable = self.source.identity is not None
-        # Hash the source identity into the id so it stays distinct-per-config yet filesystem-clean
-        # (it feeds render filenames); corridor_m is kept literal so a change to it is legible.
-        src_hash = hashlib.sha256(str(self.source.identity).encode()).hexdigest()[:8]
-        pid = (f"dream_come_true:c{self.corridor_m:g}:{src_hash}" if cacheable
-               else "dream_come_true")
+        # proposal_id encodes the config so Proposal.identity distinguishes configs on a block
+        # (mirrors clearance) -- else two DreamComeTrue configs collide in the eval cache. The
+        # source identity is hashed (distinct-per-config yet filesystem-clean -- it feeds render
+        # filenames); corridor_m stays literal for legibility. A live (uncacheable) source has
+        # drift-prone roads, so its eval must bypass too: block_identity -> None -> uncacheable.
+        if self.source.identity is not None:
+            src_hash = hashlib.sha256(str(self.source.identity).encode()).hexdigest()[:8]
+            pid, block_identity = f"dream_come_true:c{self.corridor_m:g}:{src_hash}", block.identity
+        else:
+            pid, block_identity = "dream_come_true", None
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=pid, method="dream_come_true",
             params={"segments": len(roads), "corridor_m": self.corridor_m},
-            block_identity=block.identity if cacheable else None)
+            block_identity=block_identity)

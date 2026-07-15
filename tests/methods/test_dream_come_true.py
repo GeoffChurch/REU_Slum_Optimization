@@ -84,6 +84,10 @@ def test_cacheable_source_encodes_config_into_proposal_identity() -> None:
     assert prop_a.identity is not None
     assert prop_a.proposal_id != prop_b.proposal_id      # config encoded -> no eval-cache collision
     assert prop_a.identity != prop_b.identity
+    # the Method-level identity (the propose() memo key) is likewise distinct per config
+    m_a = DreamComeTrueReblocker(source=src_a, corridor_m=3.0)
+    m_b = DreamComeTrueReblocker(source=src_a, corridor_m=5.0)
+    assert m_a.identity is not None and m_a.identity != m_b.identity
 
 
 def test_live_source_makes_proposal_uncacheable_even_on_a_real_block() -> None:
