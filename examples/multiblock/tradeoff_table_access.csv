@@ -1,0 +1,6 @@
+method,mean_terminal_benefit,mean_buildings_displaced,mean_pct_displaced,n_blocks
+dijkstra,0.9862,3121.0,0.2916,1
+peel,0.9862,9375.0,0.8758,1
+mesh,0.9862,4573.0,0.4272,1
+clearance,0.9704,2056.0,0.1921,1
+greedy_arterial_buildable,0.5819,216.0,0.0202,1
