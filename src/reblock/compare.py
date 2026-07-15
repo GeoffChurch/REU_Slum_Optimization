@@ -26,6 +26,7 @@ from reblock.budget import (
 from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
 from reblock.emit import compare_report as compare_report
+from reblock.emit import pct_displaced, pct_paved
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, region_reblock
 from reblock.render import short_label
@@ -44,6 +45,8 @@ class MethodCurve:
     metric: str
     curve: Curve
     auc: float
+    pct_paved: float = 0.0
+    pct_displaced: float = 0.0
 
 
 def _region_label(region: list[Block]) -> str:
@@ -97,7 +100,7 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
     # full road density (the cost axis is metric-independent, so this cap is the same across
     # metrics for a given region -- grouping by (region_label, metric) is still the clean
     # structure).
-    raw: list[tuple[str, str, str, Curve]] = []
+    raw: list[tuple[str, str, str, Curve, float, float]] = []
     for region in regions:
         if not region:
             continue
@@ -115,23 +118,28 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
                 result = region_reblock(region, method, [])
                 block = result.block
                 roads = cast(GeoDataFrame, result.proposal.roads)
+            block_area = float(block.parcels.geometry.union_all().area)
+            pp = pct_paved(roads, corridor_m, block_area)
+            pd_ = pct_displaced(roads, corridor_m, block.building_points)
             access = cost_benefit_curve(block, roads, benefit_fn=access_benefit,
                                         cost=cost, corridor_m=corridor_m)
             eff, direct = efficiency_directness_curves(block, roads, cost=cost,
                                                        corridor_m=corridor_m)   # one sweep -> both
             resistance = cost_benefit_curve(block, roads, benefit_fn=resistance_benefit,
                                             cost=cost, corridor_m=corridor_m)
-            raw.append((name, label, "access", access))
-            raw.append((name, label, "efficiency", eff))
-            raw.append((name, label, "directness", direct))
-            raw.append((name, label, "resistance", resistance))
+            raw.append((name, label, "access", access, pp, pd_))
+            raw.append((name, label, "efficiency", eff, pp, pd_))
+            raw.append((name, label, "directness", direct, pp, pd_))
+            raw.append((name, label, "resistance", resistance, pp, pd_))
     results: list[MethodCurve] = []
-    groups = {(label, metric) for _, label, metric, _ in raw}
+    groups = {(label, metric) for _, label, metric, _, _, _ in raw}
     for label, metric in groups:
-        group = [(m, c) for m, lbl, met, c in raw if lbl == label and met == metric]
-        cap = max((c.cost[-1] for _, c in group if c.cost), default=0.0)
-        for m, c in group:
-            results.append(MethodCurve(m, label, metric, c, auc(c, cap)))
+        group = [(m, c, pp, pd_) for m, lbl, met, c, pp, pd_ in raw
+                if lbl == label and met == metric]
+        cap = max((c.cost[-1] for _, c, _, _ in group if c.cost), default=0.0)
+        for m, c, pp, pd_ in group:
+            results.append(
+                MethodCurve(m, label, metric, c, auc(c, cap), pct_paved=pp, pct_displaced=pd_))
     return results
 
 

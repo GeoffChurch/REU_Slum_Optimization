@@ -105,6 +105,18 @@ def test_compare_report_writes(tmp_path: Path) -> None:
     assert (tmp_path / "curve_access_b1.png").exists()
 
 
+def test_auc_table_has_mean_pct_paved_column(tmp_path: Path) -> None:
+    from reblock.budget import Curve
+    from reblock.compare import MethodCurve
+    from reblock.emit import compare_report
+    c = Curve(cost=[0.0, 100.0], benefit=[0.0, 0.8])
+    mc = MethodCurve("dijkstra", "B1", "access", c, 0.5, pct_paved=0.041, pct_displaced=0.0)
+    compare_report([mc], tmp_path, cost="length")
+    with (tmp_path / "auc_table_access.csv").open() as f:
+        header = next(csv.reader(f))
+    assert "mean_pct_paved" in header
+
+
 def test_compare_method_sweep_expands_over_param_values(tmp_path: Path) -> None:
     # method_sweep expands ONE base method over a param's values -> `{base}_{param}{value}` methods,
     # replacing hand-written all_methods entries. Here: clearance at repulsion -3/0/3, one plot.

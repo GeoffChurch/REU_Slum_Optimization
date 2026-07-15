@@ -262,24 +262,28 @@ def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "lengt
             # so its curve has no width and AUC->0, ranking the BEST method worst. Report instead
             # the two numbers that matter: terminal navigability and total buildings displaced.
             by_bd: dict[str, list[tuple[float, float]]] = {}
+            by_pd: dict[str, list[float]] = {}
             for r in metric_results:
                 by_bd.setdefault(r.method, []).append((r.curve.benefit[-1], r.curve.cost[-1]))
+                by_pd.setdefault(r.method, []).append(r.pct_displaced)
             with (out_dir / f"tradeoff_table_{metric}.csv").open("w", newline="") as f:
                 w = csv.writer(f)
-                w.writerow(["method", "mean_terminal_benefit",
-                            "mean_buildings_displaced", "n_blocks"])
+                w.writerow(["method", "mean_terminal_benefit", "mean_buildings_displaced",
+                            "mean_pct_displaced", "n_blocks"])
                 for m, bd in sorted(by_bd.items(), key=lambda kv: -mean(b for b, _ in kv[1])):
-                    w.writerow([m, f"{mean(b for b, _ in bd):.4f}",
-                                f"{mean(d for _, d in bd):.1f}", len(bd)])
+                    w.writerow([m, f"{mean(b for b, _ in bd):.4f}", f"{mean(d for _, d in bd):.1f}",
+                                f"{mean(by_pd[m]):.4f}", len(bd)])
         else:
             by_method: dict[str, list[float]] = {}
+            by_pp: dict[str, list[float]] = {}
             for r in metric_results:
                 by_method.setdefault(r.method, []).append(r.auc)
+                by_pp.setdefault(r.method, []).append(r.pct_paved)
             with (out_dir / f"auc_table_{metric}.csv").open("w", newline="") as f:
                 w = csv.writer(f)
-                w.writerow(["method", "mean_auc", "n_blocks"])
+                w.writerow(["method", "mean_auc", "mean_pct_paved", "n_blocks"])
                 for m, aucs in sorted(by_method.items(), key=lambda kv: -mean(kv[1])):
-                    w.writerow([m, f"{mean(aucs):.4f}", len(aucs)])
+                    w.writerow([m, f"{mean(aucs):.4f}", f"{mean(by_pp[m]):.4f}", len(aucs)])
         ylabel = _METRIC_YLABELS[metric]
         xlabel = "buildings displaced" if cost == "displacement" else "road density (m/ha)"
         for block_id, curves in by_block.items():
