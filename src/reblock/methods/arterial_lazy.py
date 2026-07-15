@@ -136,11 +136,11 @@ def _score_all(chords: list[LineString], use_pool: bool, workers: int
     return [eval_candidate(c) for c in chords]
 
 
-def _iter_live(heap: list[tuple[float, str, LineString, int]], live: set[str]
+def _iter_live(heap: list[tuple[float, str, str, LineString, int]], live: set[str]
                ) -> Iterator[LineString]:
     """Distinct live chords currently in the heap (for a full re-score rebuild)."""
     seen: set[str] = set()
-    for _neg, key, chord, _at in heap:
+    for _neg, _real_wkt, key, chord, _at in heap:
         if key in live and key not in seen:
             seen.add(key)
             yield chord
@@ -165,7 +165,15 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
-    heap: list[tuple[float, str, LineString, int]] = []   # (-gain, wkt, chord, scored_at_step)
+    # (-gain, real.wkt, chord.wkt, chord, scored_at_step). Ordered by (-gain, real_wkt, key) to
+    # match `_best_candidate`'s tie-break on the REALIZED geometry's wkt exactly (in buildable mode
+    # `real = _snap(chord, sg, lam)` is the boundary-graph path, whose wkt differs from the chord's
+    # -- ordering by chord.wkt instead would resolve equal-gain ties differently than exact and
+    # break the `rescore_every=1` + `faithful` byte-identity oracle). `key` (== chord.wkt) is kept
+    # as the THIRD element -- after real_wkt so ties order correctly, before the raw `chord` so
+    # comparison never falls through to unorderable `LineString`s -- and remains the identity used
+    # by `live`, `real_of`, and the policies' `removed_keys` (policies emit chord.wkt keys).
+    heap: list[tuple[float, str, str, LineString, int]] = []
     live: set[str] = set()
     pending = policy.initial()
     use_pool = workers > 1
@@ -180,6 +188,7 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
             from reblock.budget import displacement_count
             committed_disp = displacement_count(block.building_points, base, corridor_m)
         stepctx = ctx.step(base) if (ctx is not None and mode == "buildable") else None
+        assert _art._STEP_STATE is None, "eval_candidate's per-step state holder is not reentrant"
         _art._STEP_STATE = _StepState(
             step=stepctx, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             mode=mode, objective=objective, cost=cost, lam=lam, corridor_m=corridor_m,
@@ -201,11 +210,11 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
                 key = chord.wkt
                 real_of[key] = real
                 live.add(key)
-                heapq.heappush(heap, (-gain, key, chord, step))
+                heapq.heappush(heap, (-gain, real.wkt, key, chord, step))
             pending = []
             # pop-and-re-score the top until it is fresh under this committed set
             while heap:
-                neg, key, chord, at = heap[0]
+                neg, real_wkt, key, chord, at = heap[0]
                 if key not in live:                # committed/removed since it was pushed -- drop
                     heapq.heappop(heap)
                     continue
@@ -217,10 +226,10 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
                     live.discard(key)
                     continue
                 real_of[key] = real
-                heapq.heappush(heap, (-gain, key, chord, step))
+                heapq.heappush(heap, (-gain, real.wkt, key, chord, step))
             if not heap or -heap[0][0] <= 0.0:
                 break
-            neg, key, chord, at = heapq.heappop(heap)
+            neg, real_wkt, key, chord, at = heapq.heappop(heap)
         finally:
             _art._STEP_STATE = None
         winner = real_of[key]                   # commit the realized geometry
