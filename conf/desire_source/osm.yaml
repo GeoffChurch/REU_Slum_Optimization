@@ -1,0 +1,7 @@
+# OpenStreetMap desire-line source for dream_come_true: the informal footpaths (worn desire-paths)
+# for a region, via Overpass. See reblock.methods.desire_lines.OSMDesireLines.
+_target_: reblock.methods.desire_lines.OSMDesireLines
+tags: [path, footway, track, steps, pedestrian, living_street]
+endpoint: https://overpass-api.de/api/interpreter
+cache_dir: null       # null -> ~/.cache/reblock/osm
+snapshot: null        # a committed GeoJSON path -> load it directly, skip Overpass

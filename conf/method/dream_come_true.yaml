@@ -1,0 +1,5 @@
+# Reblocker whose roads are the REAL informal footpaths for the region (from OSM), not synthesized.
+# See reblock.methods.dream_come_true.DreamComeTrueReblocker.
+_target_: reblock.methods.dream_come_true.DreamComeTrueReblocker
+source: ${desire_source}
+corridor_m: 3.0

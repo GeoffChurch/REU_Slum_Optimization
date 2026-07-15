@@ -5,6 +5,7 @@ defaults:
   - method: dijkstra
   - eval: kcomplexity
   - substrate: chord_diag
+  - desire_source: osm
   - _self_
 
 # Top-level scalars are the interpolation sources the data/method config

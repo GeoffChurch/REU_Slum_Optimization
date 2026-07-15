@@ -1,7 +1,10 @@
 # tests/methods/test_dream_come_true.py
 from collections.abc import Hashable
+from pathlib import Path
 
 import geopandas as gpd
+from hydra import compose, initialize_config_dir
+from hydra.utils import instantiate
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
@@ -91,3 +94,24 @@ def test_live_source_makes_proposal_uncacheable_even_on_a_real_block() -> None:
     method = DreamComeTrueReblocker(source=_StubSource([], ident=None))
     prop = method.propose(block)
     assert prop.identity is None
+
+
+def test_dream_come_true_instantiates_from_compare_config() -> None:
+    conf_dir = str(Path("conf").resolve())
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="compare_config",
+                      overrides=["shapefile=x", "methods=[dream_come_true]"])
+    method = instantiate(cfg.all_methods["dream_come_true"])
+    assert type(method).__name__ == "DreamComeTrueReblocker"
+    assert type(method.source).__name__ == "OSMDesireLines"
+    assert list(method.source.tags) == ["path", "footway", "track", "steps",
+                                         "pedestrian", "living_street"]
+    assert method.identity is None                        # live source (no snapshot) -> uncacheable
+
+
+def test_dream_come_true_instantiates_from_method_group() -> None:
+    conf_dir = str(Path("conf").resolve())
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="config",
+                      overrides=["shapefile=x", "method=dream_come_true"])
+    assert type(instantiate(cfg.method)).__name__ == "DreamComeTrueReblocker"

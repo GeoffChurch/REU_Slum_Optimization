@@ -4,6 +4,7 @@ defaults:
   - region_builder: identity
   - eval: kcomplexity
   - substrate: chord_diag
+  - desire_source: osm
   - _self_
 
 # The methods available, then the names to actually run. Overriding the names via
@@ -26,6 +27,7 @@ all_methods:
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
   clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
+  dream_come_true: {_target_: reblock.methods.dream_come_true.DreamComeTrueReblocker, source: "${desire_source}", corridor_m: 3.0}
 methods: [dijkstra, topology, mesh, greedy_arterial_buildable]
 
 # Cost axis for the cost-benefit curves (the x every method is graded on):
