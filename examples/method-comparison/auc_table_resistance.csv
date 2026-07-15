@@ -2,6 +2,5 @@ method,mean_auc,mean_pct_paved,n_blocks
 dijkstra,0.6201,0.6238,1
 mesh,0.6088,0.7017,1
 topology,0.4801,0.3873,1
-peel,0.4388,0.7741,1
 clearance,0.3775,0.2040,1
 greedy_arterial_buildable,0.3480,0.1615,1

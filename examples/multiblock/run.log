@@ -1,0 +1,75 @@
+# Reproduce log for examples/multiblock (see README.md "## Reproduce" and §3-§6)
+
+### §3 screen -> grow -> reblock -> render
+[2026-07-15 15:53:47,182][reblock.pipeline][INFO] - reblocked ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1_1_5514+ZAF.9.3.1_1_5517+ZAF.9.3.1_1_5519+ZAF.9.3.1_1_5520+ZAF.9.3.1_1_5528+ZAF.9.3.1_1_5530+ZAF.9.3.1_1_5531+ZAF.9.3.1_1_5535+ZAF.9.3.1_1_5544+ZAF.9.3.1_1_5559+ZAF.9.3.1_1_5563+ZAF.9.3.1_1_5582+ZAF.9.3.1_1_5588+ZAF.9.3.1_1_5589+ZAF.9.3.1_1_5591+ZAF.9.3.1_1_5595+ZAF.9.3.1_1_5596+ZAF.9.3.1_1_5613+ZAF.9.3.1_1_5618+ZAF.9.3.1_1_5810 (10706 parcels) in 0.0s
+[2026-07-15 15:53:47,183][__main__][INFO] - region:ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1_1_5514+ZAF.9.3.1_1_5517+ZAF.9.3.1_1_5519+ZAF.9.3.1_1_5520+ZAF.9.3.1_1_5528+ZAF.9.3.1_1_5530+ZAF.9.3.1_1_5531+ZAF.9.3.1_1_5535+ZAF.9.3.1_1_5544+ZAF.9.3.1_1_5559+ZAF.9.3.1_1_5563+ZAF.9.3.1_1_5582+ZAF.9.3.1_1_5588+ZAF.9.3.1_1_5589+ZAF.9.3.1_1_5591+ZAF.9.3.1_1_5595+ZAF.9.3.1_1_5596+ZAF.9.3.1_1_5613+ZAF.9.3.1_1_5618+ZAF.9.3.1_1_5810 {'kcomplexity': {'k_before': 24.0, 'k_after': 3.0, 'delta_k': 21.0, 'added_road_length_m': 13698.705535587758, 'n_road_components': 55.0, 'connected_road_frac': 1.0, 'geometric_access_max_m': 58.53531712471657}}
+[2026-07-15 15:53:47,184][__main__][INFO] -   map: https://www.google.com/maps/@-33.84130,18.74439,15z
+[2026-07-15 15:53:47,185][__main__][INFO] - 13906 blocks flagged -> /tmp/claude-1641171234/-home-gchurchill-src-reblock/8e45cee5-1c58-4e08-b3fd-8166cdfa5f11/scratchpad/mb3/run/flagged_blocks.txt
+
+### §4 compare the scalable methods (length cost)
+[2026-07-15 15:54:23,394][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
+[2026-07-15 16:00:55,911][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance AUC=0.956
+[2026-07-15 16:00:55,911][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dijkstra AUC=0.945
+[2026-07-15 16:00:55,911][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec mesh AUC=0.941
+[2026-07-15 16:00:55,911][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable AUC=0.574
+[2026-07-15 16:00:55,911][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable AUC=0.089
+[2026-07-15 16:00:55,911][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance AUC=0.078
+[2026-07-15 16:00:55,911][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec mesh AUC=0.051
+[2026-07-15 16:00:55,911][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dijkstra AUC=0.002
+[2026-07-15 16:00:55,911][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable AUC=0.000
+[2026-07-15 16:00:55,911][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec mesh AUC=0.000
+[2026-07-15 16:00:55,911][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance AUC=0.000
+[2026-07-15 16:00:55,911][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dijkstra AUC=0.000
+[2026-07-15 16:00:55,911][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dijkstra AUC=0.640
+[2026-07-15 16:00:55,911][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec mesh AUC=0.608
+[2026-07-15 16:00:55,911][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance AUC=0.423
+[2026-07-15 16:00:55,911][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable AUC=0.095
+
+### §4b compare on the displacement cost axis
+[2026-07-15 16:01:05,665][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
+[2026-07-15 16:11:01,199][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dijkstra: benefit=0.986, 3121 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec mesh: benefit=0.986, 4573 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.970, 2056 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.582, 216 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec mesh: benefit=0.226, 4573 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.092, 216 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.088, 2056 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dijkstra: benefit=0.003, 3121 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec mesh: benefit=0.001, 4573 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.000, 216 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.000, 2056 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dijkstra: benefit=0.000, 3121 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec mesh: benefit=0.992, 4573 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dijkstra: benefit=0.960, 3121 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.477, 2056 displaced
+[2026-07-15 16:11:01,199][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.097, 216 displaced
+
+### §5 depth_target sweep
+[2026-07-15 16:11:10,593][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
+[2026-07-15 16:11:52,061][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target3 AUC=0.903
+[2026-07-15 16:11:52,061][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target2 AUC=0.903
+[2026-07-15 16:11:52,062][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target4 AUC=0.892
+[2026-07-15 16:11:52,062][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target2 AUC=0.041
+[2026-07-15 16:11:52,062][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target3 AUC=0.036
+[2026-07-15 16:11:52,062][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target4 AUC=0.032
+[2026-07-15 16:11:52,062][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target2 AUC=0.000
+[2026-07-15 16:11:52,062][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target3 AUC=0.000
+[2026-07-15 16:11:52,062][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target4 AUC=0.000
+[2026-07-15 16:11:52,062][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target2 AUC=0.233
+[2026-07-15 16:11:52,062][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target3 AUC=0.184
+[2026-07-15 16:11:52,062][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target4 AUC=0.126
+
+### §6 repulsion sweep (depth pinned to 3)
+[2026-07-15 16:12:01,446][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
+[2026-07-15 16:12:35,721][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion0 AUC=0.864
+[2026-07-15 16:12:35,721][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion-3 AUC=0.863
+[2026-07-15 16:12:35,721][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion3 AUC=0.853
+[2026-07-15 16:12:35,721][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion-3 AUC=0.045
+[2026-07-15 16:12:35,721][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion0 AUC=0.029
+[2026-07-15 16:12:35,721][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion3 AUC=0.018
+[2026-07-15 16:12:35,721][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion-3 AUC=0.000
+[2026-07-15 16:12:35,721][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion3 AUC=0.000
+[2026-07-15 16:12:35,721][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion0 AUC=0.000
+[2026-07-15 16:12:35,721][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion-3 AUC=0.132
+[2026-07-15 16:12:35,721][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion3 AUC=0.130
+[2026-07-15 16:12:35,721][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_repulsion0 AUC=0.128

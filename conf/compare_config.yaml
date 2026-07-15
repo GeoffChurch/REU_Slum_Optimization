@@ -7,10 +7,12 @@ defaults:
   - _self_
 
 # The methods available, then the names to actually run. Overriding the names via
-# CLI is clean -- `methods=[dijkstra,peel]` (topology is slow, minutes/block).
+# CLI is clean -- `methods=[dijkstra,mesh]` (topology is slow, minutes/block).
+# NOTE: `peel` is deliberately absent -- a rough coverage sketch that underperforms, struck from the
+# comparison registry (and thus the plot colour palette, which is keyed on this list). It stays a
+# runnable method via `method=peel` (conf/method/peel.yaml) and a test fixture; just not benchmarked.
 all_methods:
   dijkstra: {_target_: reblock.methods.dijkstra.DijkstraReblocker}
-  peel: {_target_: reblock.methods.peel.PeelReblocker}
   topology: {_target_: reblock.methods.topology.TopologyMethod}
   mesh: {_target_: reblock.methods.mesh.MeshReblocker}
   greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: directness, max_roads: 15, lazy: true, candidate_policy: grow}
@@ -24,7 +26,7 @@ all_methods:
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
   clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
-methods: [dijkstra, peel, topology, mesh, greedy_arterial_buildable]
+methods: [dijkstra, topology, mesh, greedy_arterial_buildable]
 
 # Cost axis for the cost-benefit curves (the x every method is graded on):
 #   "length"       -> road density (m/ha), the default

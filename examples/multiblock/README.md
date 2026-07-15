@@ -6,7 +6,7 @@ through it so every home lands within **3 parcels of a street** — then compare
 10,700-home region, the methods that actually run at this scale, and show clearance's tuning knobs.
 
 Reproduces from **`capetown_full`** (the full metro, auto-downloaded to `~/.cache/reblock` on first
-use) via plain CLI commands. For the *comprehensive* method bake-off — all six reblockers, including
+use) via plain CLI commands. For the *comprehensive* method bake-off — all five reblockers, including
 `topology`, which is single-block-only — see [`method-comparison`](../method-comparison/) on a single
 deep block. (`greedy_arterial` used to be region-intractable too; **CELF/lazy now brings it back** —
 it's in the §4 comparison below.)
@@ -62,33 +62,36 @@ takes the screen's deepest block as the seed; `region_map.enabled` writes `scree
 The same 10,700-home region, graded on the four lenses for the methods that run at settlement scale.
 Only `topology` (single-block-only) is excluded now — **`greedy_arterial` rejoins** via CELF/lazy
 (`candidate_policy=fixed` + `max_anchors=64` bound its candidate pass, so its 15 through-roads take
-~30 s on the whole region instead of the ~48 min the uncapped greedy needed). For the six-method
+~30 s on the whole region instead of the ~48 min the uncapped greedy needed). For the five-method
 bake-off on a small block, see [`method-comparison`](../method-comparison/).
 
 ```bash
 pixi run python -m reblock.compare \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
   "block_ids=[[ZAF.9.3.1_1_5810]]" \
-  methods=[dijkstra,peel,mesh,clearance,greedy_arterial_buildable] max_blocks=1 \
+  methods=[dijkstra,mesh,clearance,greedy_arterial_buildable] max_blocks=1 \
   all_methods.clearance.max_roads=3000 \
   all_methods.greedy_arterial_buildable.candidate_policy=fixed \
   +all_methods.greedy_arterial_buildable.max_anchors=64
 ```
 
+Every command in this example logs its console output — each selection's locator link, the reblock
+summary, and the per-method AUCs / displacement counts — to [`run.log`](run.log).
+
 Mean AUC per method (benefit per metre of road; higher = better), with **`% paved`** = fraction of
 the region's area under the road corridor:
 
-| lens | dijkstra | peel | mesh | clearance | arterial |
-|---|---|---|---|---|---|
-| access — burden removed | 0.95 | 0.94 | 0.94 | **0.96** | 0.57 |
-| resistance — egress removed | **0.64** | 0.50 | 0.61 | 0.42 | 0.09 |
-| directness — 1/circuity | 0.00 | 0.00 | 0.05 | 0.08 | **0.09** |
-| efficiency — network E | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
-| **% paved** | 50% | 61% | 57% | 15% | **3%** |
+| lens | dijkstra | mesh | clearance | arterial |
+|---|---|---|---|---|
+| access — burden removed | 0.95 | 0.94 | **0.96** | 0.57 |
+| resistance — egress removed | **0.64** | 0.61 | 0.42 | 0.09 |
+| directness — 1/circuity | 0.00 | 0.05 | 0.08 | **0.09** |
+| efficiency — network E | 0.00 | 0.00 | 0.00 | 0.00 |
+| **% paved** | 50% | 57% | 15% | **3%** |
 
 At this scale the coverage methods blanket access near-perfectly (~0.94–0.96) — a deep region is
 exactly where roads matter most. **clearance is the best all-rounder**: it wins access, is nearly tied
-for directness, and paves a quarter of what the frontage methods do (15% vs 50–61%). **dijkstra wins
+for directness, and paves a quarter of what the frontage methods do (15% vs 50–57%). **dijkstra wins
 resistance** — its frontage spanning tree gives the most redundant egress. And **`greedy_arterial`,
 now scalable via CELF, wins directness** (0.089, just ahead of clearance's 0.078) at the **sparsest
 paving of all (3%)** — its handful of straight through-roads cut the most direct interior routes,
@@ -103,7 +106,19 @@ at minimal road.
 
 ### Displacement at scale
 
-Re-graded on the **displacement** cost axis (buildings whose footprint falls in the road corridor).
+Re-graded on the **displacement** cost axis (buildings whose footprint falls in the road corridor) —
+the §4 compare with `cost=displacement` appended:
+
+```bash
+pixi run python -m reblock.compare \
+  data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
+  "block_ids=[[ZAF.9.3.1_1_5810]]" \
+  methods=[dijkstra,mesh,clearance,greedy_arterial_buildable] max_blocks=1 \
+  all_methods.clearance.max_roads=3000 \
+  all_methods.greedy_arterial_buildable.candidate_policy=fixed \
+  +all_methods.greedy_arterial_buildable.max_anchors=64 cost=displacement
+```
+
 Across a 10,700-home region the sparse-vs-dense gap is stark:
 
 | method | terminal directness | buildings displaced | % displaced |
@@ -112,14 +127,12 @@ Across a 10,700-home region the sparse-vs-dense gap is stark:
 | clearance | 0.09 | 2,056 | 19.2% |
 | dijkstra | 0.00 | 3,121 | 29.2% |
 | mesh | 0.23 | 4,573 | 42.7% |
-| peel | 0.01 | 9,375 | 87.6% |
 
 **Arterial reaches clearance's directness (0.09) displacing just 216 homes — clearance displaces
-2,056, and the dense frontage methods far more (mesh 4,573, peel nearly the whole region at 9,375).**
-Displacement tracks road footprint, so the sparse through-road / least-cost methods are dramatically
-gentler on the fabric. `mesh` reaches higher *absolute* directness (0.23) but at 21× arterial's
-displacement. (AUC over the displacement axis is meaningless, so this is read from the terminal
-points.)
+2,056, and the dense frontage methods far more (dijkstra 3,121, mesh 4,573).** Displacement tracks
+road footprint, so the sparse through-road / least-cost methods are dramatically gentler on the
+fabric. `mesh` reaches higher *absolute* directness (0.23) but at 21× arterial's displacement. (AUC
+over the displacement axis is meaningless, so this is read from the terminal points.)
 
 ![directness vs displacement](compare_directness_displacement.png)
 

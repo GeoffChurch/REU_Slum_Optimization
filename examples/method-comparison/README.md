@@ -1,10 +1,10 @@
-# Method comparison: every reblocker on one deep block
+# Method comparison: five reblockers, head-to-head on one deep block
 
-All six reblockers graded head-to-head on the four lenses, on a single deep informal block small
-enough that *every* method runs — including `topology`, which is **single-block-only** (it crashes
-on a multi-block region: a gappy parcel graph gives it a disconnected source node). `greedy_arterial`
-now runs via **CELF/lazy**, so it scales too — the companion [`multiblock`](../multiblock/) flagship
-runs the scalable methods, *including arterial*, on a whole settlement.
+Five reblockers graded head-to-head on the four lenses, on a single deep informal block small enough
+that even `topology` runs — it's **single-block-only** (it crashes on a multi-block region: a gappy
+parcel graph gives it a disconnected source node). `greedy_arterial` now runs via **CELF/lazy**, so it
+scales too — the companion [`multiblock`](../multiblock/) flagship runs the scalable methods,
+*including arterial*, on a whole settlement.
 
 The block is **`ZAF.9.3.1_1_40972`** — the deepest block (by the depth proxy `√(n·A)/P`) in a
 topology-tractable size window: **263 parcels, up to 7 deep**, auto-picked, no hand tuning.
@@ -17,7 +17,7 @@ Length cost — the four lenses + `% paved`:
 ```bash
 pixi run python -m reblock.compare data=capetown_full \
   "block_ids=[[ZAF.9.3.1_1_40972]]" \
-  methods=[dijkstra,peel,topology,mesh,greedy_arterial_buildable,clearance] max_blocks=1 \
+  methods=[dijkstra,topology,mesh,greedy_arterial_buildable,clearance] max_blocks=1 \
   all_methods.greedy_arterial_buildable.max_roads=8
 ```
 Displacement cost — buildings displaced + `% displaced` (topology dropped: it's the slow pole and a
@@ -25,11 +25,13 @@ frontage method):
 ```bash
 pixi run python -m reblock.compare data=capetown_full \
   "block_ids=[[ZAF.9.3.1_1_40972]]" \
-  methods=[dijkstra,peel,mesh,greedy_arterial_buildable,clearance] max_blocks=1 \
+  methods=[dijkstra,mesh,greedy_arterial_buildable,clearance] max_blocks=1 \
   all_methods.greedy_arterial_buildable.max_roads=8 cost=displacement
 ```
 `greedy_arterial_buildable` is configured `lazy: true` (CELF), so its 8 roads take seconds, not the
-~14 min the exact greedy needed; `topology` is now the run's only slow pole.
+~14 min the exact greedy needed; `topology` is now the run's only slow pole. The console output of
+both commands — each selection's locator link plus the per-method AUCs and displacement counts — is
+captured in [`run.log`](run.log).
 
 ## The roads each method builds
 
@@ -45,8 +47,8 @@ deep interior:
 | dijkstra (coverage) | mesh | topology (access-optimal) |
 |---|---|---|
 | ![dijkstra](after_dijkstra.jpg) | ![mesh](after_mesh.jpg) | ![topology](after_topology.jpg) |
-| **peel** (rough sketch) | **greedy_arterial** (directness) | **clearance** (least-cost) |
-| ![peel](after_peel.jpg) | ![arterial](after_greedy_arterial.jpg) | ![clearance](after_clearance.jpg) |
+| **greedy_arterial** (directness) | **clearance** (least-cost) | |
+| ![arterial](after_greedy_arterial.jpg) | ![clearance](after_clearance.jpg) | |
 
 ## The four lenses
 
@@ -54,13 +56,13 @@ Mean AUC per method (benefit per metre of road, integrated across the shared bud
 better), with **`% paved`** = fraction of the block's area under the road corridor (raw road cost,
 normalized):
 
-| lens | dijkstra | peel | topology | mesh | arterial | clearance |
-|---|---|---|---|---|---|---|
-| access — burden removed | 0.82 | 0.77 | **0.84** | 0.82 | 0.71 | 0.79 |
-| resistance — egress removed | **0.62** | 0.44 | 0.48 | 0.61 | 0.35 | 0.38 |
-| directness — 1/circuity | 0.02 | 0.01 | 0.09 | 0.07 | **0.23** | 0.05 |
-| efficiency — network E | 0.00 | 0.00 | 0.00 | 0.00 | 0.01 | 0.00 |
-| **% paved** | 62% | 77% | 39% | 70% | **16%** | 20% |
+| lens | dijkstra | topology | mesh | arterial | clearance |
+|---|---|---|---|---|---|
+| access — burden removed | 0.82 | **0.84** | 0.82 | 0.71 | 0.79 |
+| resistance — egress removed | **0.62** | 0.48 | 0.61 | 0.35 | 0.38 |
+| directness — 1/circuity | 0.02 | 0.09 | 0.07 | **0.23** | 0.05 |
+| efficiency — network E | 0.00 | 0.00 | 0.00 | 0.01 | 0.00 |
+| **% paved** | 62% | 39% | 70% | **16%** | 20% |
 
 Each method earns its place on a *different* lens:
 
@@ -73,7 +75,6 @@ Each method earns its place on a *different* lens:
   most redundant egress, fast (~1 s), but paves 62%. `mesh` tracks it closely.
 - **`clearance`** is the balanced scalable option: near-dijkstra access, sparse (20% paved), with a
   depth-target + repulsion knob (see [`multiblock`](../multiblock/)).
-- **`peel`** is the fast coverage sketch — decent access, low directness, heaviest paving (77%).
 
 ![access](curve_access.png) ![resistance](curve_resistance.png)
 ![directness](curve_directness.png) ![efficiency](curve_efficiency.png)
@@ -93,13 +94,12 @@ less fabric:
 | clearance | 0.05 | 53 | 20% |
 | dijkstra | 0.02 | 116 | 44% |
 | mesh | 0.43 | 156 | 59% |
-| peel | 0.03 | 246 | 94% |
 
 **Arterial displaces the fewest buildings (32, 12%) for its directness** — the most navigability per
 building moved. The dense frontage methods reach higher *absolute* terminal directness (mesh 0.43)
-but displace 5× more; the frontage-heavy `peel` displaces nearly the whole block for little
-directness. (AUC over the displacement axis is meaningless — a road-sparing method has no curve
-width — so this is read from the terminal points, not an integral.)
+but displace ~5× more (mesh 156, dijkstra 116) — the coverage methods clear far more of the block
+for their access. (AUC over the displacement axis is meaningless — a road-sparing method has no
+curve width — so this is read from the terminal points, not an integral.)
 
 ![directness vs displacement](curve_directness_ZAF.9.3.1_1_40972_displacement.png)
 
