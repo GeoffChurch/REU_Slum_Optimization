@@ -14,6 +14,7 @@ from geopandas import GeoDataFrame
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf, open_dict
+from shapely.ops import unary_union
 
 from reblock.budget import (
     Curve,
@@ -29,7 +30,7 @@ from reblock.emit import compare_report as compare_report
 from reblock.emit import pct_displaced, pct_paved
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, region_reblock
-from reblock.render import short_label
+from reblock.render import google_maps_url, short_label
 
 log = logging.getLogger(__name__)
 
@@ -105,6 +106,10 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
         if not region:
             continue
         label = _region_label(region)
+        # Log each selection's locator link (like reblock.run does) so a captured run log is a
+        # self-documenting record of what was graded -- the READMEs point readers at this link.
+        log.info("%s map: %s", label,
+                 google_maps_url(unary_union([b.boundary for b in region]), region[0].crs))
         for name, method in zip(names, methods, strict=True):
             if len(region) == 1:
                 # Singleton region: the exact pre-region single-block path.
@@ -148,7 +153,11 @@ def main(cfg: DictConfig) -> None:
     results = compare(cfg)
     out_dir = Path(HydraConfig.get().runtime.output_dir)
     cost = str(cfg.get("cost", "length"))
-    compare_report(results, out_dir, cost=cost)
+    # The canonical registry drives per-method curve colours: `all_methods` is the global method
+    # list, and `compare()` has already merged any `method_sweep` variants into it, so this covers
+    # every method that could appear in `results`. A method's colour is its index here -- the full
+    # registry, not the run's selected subset -- so it stays put when a pass drops another method.
+    compare_report(results, out_dir, cost=cost, method_order=[str(k) for k in cfg.all_methods])
     if cost == "displacement":   # AUC inverts on the displacement axis -- log benefit + displaced
         for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
             log.info("%s %s %s: benefit=%.3f, %d displaced", r.metric, r.block_id, r.method,

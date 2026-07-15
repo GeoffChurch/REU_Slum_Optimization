@@ -8,12 +8,12 @@ def test_compare_writes_table_and_curves(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "reblock.compare",
          "data=dji", "eval=kcomplexity", "max_blocks=1",
-         "methods=[dijkstra,peel]", f"hydra.run.dir={tmp_path}"],
+         "methods=[dijkstra,mesh]", f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr
     table = (tmp_path / "auc_table_access.csv").read_text()
-    assert "dijkstra" in table and "peel" in table
+    assert "dijkstra" in table and "mesh" in table
     assert list(tmp_path.glob("curve_access_*.png"))
 
 
@@ -58,13 +58,13 @@ def test_compare_singleton_via_explicit_block_ids_matches_plain_single_block(
     # plain block_id, no "+", no region jointness).
     result = subprocess.run(
         [sys.executable, "-m", "reblock.compare",
-         "data=dji", "eval=kcomplexity", "methods=[dijkstra,peel]",
+         "data=dji", "eval=kcomplexity", "methods=[dijkstra,mesh]",
          "block_ids=[[DJI.1_2_602]]", f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr
     table = (tmp_path / "auc_table_access.csv").read_text()
-    assert "dijkstra" in table and "peel" in table
+    assert "dijkstra" in table and "mesh" in table
     assert (tmp_path / "curve_access_DJI.1_2_602.png").exists()
 
 
@@ -98,9 +98,9 @@ def test_compare_report_writes(tmp_path: Path) -> None:
     from reblock.compare import MethodCurve, compare_report
     results = [
         MethodCurve("dijkstra", "b1", "access", Curve([0.0, 1.0], [0.0, 0.9]), 0.8),
-        MethodCurve("peel", "b1", "access", Curve([0.0, 2.0], [0.0, 0.9]), 0.5),
+        MethodCurve("mesh", "b1", "access", Curve([0.0, 2.0], [0.0, 0.9]), 0.5),
     ]
-    compare_report(results, tmp_path)
+    compare_report(results, tmp_path, method_order=["dijkstra", "mesh"])
     assert (tmp_path / "auc_table_access.csv").exists()
     assert (tmp_path / "curve_access_b1.png").exists()
 
@@ -111,7 +111,7 @@ def test_auc_table_has_mean_pct_paved_column(tmp_path: Path) -> None:
     from reblock.emit import compare_report
     c = Curve(cost=[0.0, 100.0], benefit=[0.0, 0.8])
     mc = MethodCurve("dijkstra", "B1", "access", c, 0.5, pct_paved=0.041, pct_displaced=0.0)
-    compare_report([mc], tmp_path, cost="length")
+    compare_report([mc], tmp_path, cost="length", method_order=["dijkstra"])
     with (tmp_path / "auc_table_access.csv").open() as f:
         header = next(csv.reader(f))
     assert "mean_pct_paved" in header

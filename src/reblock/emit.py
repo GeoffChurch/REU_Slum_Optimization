@@ -5,6 +5,8 @@ each on its config flag. A scorecard/compare emitter is planned future work.
 """
 from __future__ import annotations
 
+import colorsys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -238,21 +240,43 @@ _METRIC_YLABELS = {
     "resistance": "fraction of egress resistance removed",
 }
 
+# Every method draws in a fixed colour, keyed on its position in the canonical method registry
+# (`list(cfg.all_methods)` -- the global list of all methods, threaded in as `method_order`), so a
+# method reads the SAME colour in every curve no matter which others share the run. Hues are spaced
+# evenly around the HSV wheel at i/N; the N points are taken from [0, 1) -- NOT [0, 1] -- because
+# the wheel wraps (hue 0 == hue 1), so an inclusive endpoint would land the last method on the
+# first's colour (the "n+1 bound"). The index is into the FULL registry, not the subset a run
+# selected, which is what makes the colour run-independent: a method dropped from one pass no
+# longer recolours the rest (the matplotlib-default-cycle bug this replaced).
+_HSV_S, _HSV_V = 0.65, 0.85
 
-def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "length") -> None:
+
+def _method_colors(method_order: Sequence[str]) -> dict[str, tuple[float, float, float]]:
+    """Map each method name to its RGB colour, hue = i/N around the HSV wheel where i is the
+    method's index in `method_order` (the canonical registry) and N = len(method_order). N hues
+    from [0, 1) so the wheel's wrap never collides two methods; see the note above `_HSV_S`."""
+    n = max(len(method_order), 1)
+    return {name: colorsys.hsv_to_rgb(i / n, _HSV_S, _HSV_V)
+            for i, name in enumerate(method_order)}
+
+
+def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "length",
+                   *, method_order: Sequence[str]) -> None:
     """Per metric (access, efficiency, directness, resistance): a per-method summary table +
     overlaid cost-benefit curves per block. `results` is the flat (method x block x metric) list
     from reblock.compare. `cost` sets the x-axis (road density m/ha, or buildings displaced) AND
     the table: for "length" a `auc_table_{metric}.csv` (mean AUC, higher = better); for
     "displacement" a `tradeoff_table_{metric}.csv` (mean terminal benefit + mean buildings
     displaced) -- because AUC over the displacement axis inverts (a method that displaces nothing
-    scores 0)."""
+    scores 0). `method_order` is the canonical method registry (`list(cfg.all_methods)`) that fixes
+    each method's curve colour run-independently -- it must cover every method in `results`."""
     import csv
     from statistics import mean
     out_dir.mkdir(parents=True, exist_ok=True)
     by_metric: dict[str, list[MethodCurve]] = {}
     for r in results:
         by_metric.setdefault(r.metric, []).append(r)
+    colors = _method_colors(method_order)   # one stable name->colour map for every plot
     for metric, metric_results in by_metric.items():
         by_block: dict[str, list[MethodCurve]] = {}
         for r in metric_results:
@@ -291,7 +315,8 @@ def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "lengt
             for mc in curves:
                 label = (f"{mc.method} ({int(mc.curve.cost[-1])} displaced)"
                          if cost == "displacement" else f"{mc.method} (AUC {mc.auc:.2f})")
-                ax.plot(mc.curve.cost, mc.curve.benefit, marker="o", label=label)
+                ax.plot(mc.curve.cost, mc.curve.benefit, marker="o", label=label,
+                        color=colors[mc.method])
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
             ax.set_title(f"cost-benefit ({metric}): {block_id}")

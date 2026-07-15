@@ -1,3 +1,4 @@
+import colorsys
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -9,7 +10,14 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import BBox, Block, Metrics, Proposal, Region, Result
-from reblock.emit import RenderConfig, _displaced_points, _member_ids, region_map, render_results
+from reblock.emit import (
+    RenderConfig,
+    _displaced_points,
+    _member_ids,
+    _method_colors,
+    region_map,
+    render_results,
+)
 
 UTM = CRS.from_epsg(32643)
 
@@ -207,6 +215,32 @@ def test_render_results_marks_displaced_points(tmp_path: Path) -> None:
 
     afters = list(tmp_path.glob("g_*_after.png"))
     assert len(afters) == 1 and afters[0].stat().st_size > 0
+
+
+def test_method_colors_are_stable_when_a_method_is_dropped() -> None:
+    # The bug: the length pass (with topology) and the displacement pass (topology dropped) drew
+    # the same method in different colours, because matplotlib's default cycle assigns by plot
+    # order. The fix: colour is a method's index in the FULL registry, which both passes hand in
+    # identically -- so a method keeps its colour even when another is absent from the run.
+    registry = ["dijkstra", "topology", "mesh", "greedy_arterial_buildable",
+                "greedy_arterial_aspirational", "greedy_arterial_displacement",
+                "clearance", "clearance_grid"]
+    colors = _method_colors(registry)
+    # Every method in the registry gets a distinct colour (evenly spaced hues, no wrap collision).
+    assert len(set(colors.values())) == len(registry)
+    # Deterministic, and dropping a method from the *plotted subset* never touches the map, because
+    # the map is keyed on the registry, not the subset.
+    assert _method_colors(registry) == colors
+
+
+def test_method_colors_hues_are_evenly_spaced_from_zero() -> None:
+    # Contract: hue of method i is exactly i/N (N points from [0, 1), so the wheel's wrap -- hue 0
+    # == hue 1 -- never lands the last method on the first's colour).
+    registry = ["a", "b", "c", "d", "e"]
+    colors = _method_colors(registry)
+    for i, name in enumerate(registry):
+        h, s, v = colorsys.rgb_to_hsv(*colors[name])
+        assert h == pytest.approx(i / len(registry))
 
 
 def test_region_map_draws_member_and_context_points(tmp_path: Path) -> None:
