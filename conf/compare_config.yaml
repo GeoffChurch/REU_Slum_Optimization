@@ -8,14 +8,13 @@ defaults:
   - _self_
 
 # The methods available, then the names to actually run. Overriding the names via
-# CLI is clean -- `methods=[dijkstra,mesh]` (topology is slow, minutes/block).
-# NOTE: `peel` is deliberately absent -- a rough coverage sketch that underperforms, struck from the
-# comparison registry (and thus the plot colour palette, which is keyed on this list). It stays a
-# runnable method via `method=peel` (conf/method/peel.yaml) and a test fixture; just not benchmarked.
+# CLI is clean -- `methods=[clearance,greedy_arterial_buildable]` (topology is slow, minutes/block).
+# NOTE: the coverage/frontage baselines `dijkstra`, `mesh`, and `peel` are deliberately absent -- they
+# "win" coverage trivially by paving everything and only clutter the sparse-method comparison (and set
+# the misleading shared cost cap the old AUC used). They stay runnable methods (conf/method/*.yaml) and
+# test fixtures; just not benchmarked. The registry order below also keys the plot colour palette.
 all_methods:
-  dijkstra: {_target_: reblock.methods.dijkstra.DijkstraReblocker}
   topology: {_target_: reblock.methods.topology.TopologyMethod}
-  mesh: {_target_: reblock.methods.mesh.MeshReblocker}
   greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: directness, max_roads: 15, lazy: true, candidate_policy: grow}
   # aspirational (ideal straight chords, not snapped to frontages) is a DIAGNOSTIC -- it isolates
   # the effect of frontage-snapping, NOT a universal directness ceiling. directness/E measure
@@ -28,13 +27,13 @@ all_methods:
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
   clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
   dream_come_true: {_target_: reblock.methods.dream_come_true.DreamComeTrueReblocker, source: "${desire_source}", corridor_m: 3.0}
-methods: [dijkstra, topology, mesh, greedy_arterial_buildable]
+methods: [topology, clearance, greedy_arterial_buildable]
 
 # Cost axis for the cost-benefit curves (the x every method is graded on):
 #   "length"       -> road density (m/ha), the default
 #   "displacement" -> cumulative buildings displaced (site inside corridor_m of a road); run e.g.
-#     `cost=displacement methods=[dijkstra,mesh,greedy_arterial_displacement]` to see the
-#     navigability-vs-homes-cleared tradeoff (frontage methods land near x=0, the informative contrast).
+#     `cost=displacement methods=[clearance,greedy_arterial_displacement]` to see the
+#     navigability-vs-homes-cleared tradeoff (sparse methods land near x=0, the informative contrast).
 cost: length
 corridor_m: 3.0
 

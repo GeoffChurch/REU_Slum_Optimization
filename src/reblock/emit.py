@@ -265,11 +265,14 @@ def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "lengt
     """Per metric (access, efficiency, directness, resistance): a per-method summary table +
     overlaid cost-benefit curves per block. `results` is the flat (method x block x metric) list
     from reblock.compare. `cost` sets the x-axis (road density m/ha, or buildings displaced) AND
-    the table: for "length" a `auc_table_{metric}.csv` (mean AUC, higher = better); for
-    "displacement" a `tradeoff_table_{metric}.csv` (mean terminal benefit + mean buildings
-    displaced) -- because AUC over the displacement axis inverts (a method that displaces nothing
-    scores 0). `method_order` is the canonical method registry (`list(cfg.all_methods)`) that fixes
-    each method's curve colour run-independently -- it must cover every method in `results`."""
+    the table: for "length" a `frontier_{metric}.csv` (the full (road density, benefit) samples per
+    method -- no scalar rank, because a single AUC to a shared road-density cap penalised the
+    road-efficient methods: one reaching high benefit at low road ranked below a pave-everything
+    method that reached slightly more at several times the road); for "displacement" a
+    `tradeoff_table_{metric}.csv` (mean terminal benefit + mean buildings displaced) -- because AUC
+    over the displacement axis inverts (a method that displaces nothing scores 0). `method_order`
+    is the canonical method registry (`list(cfg.all_methods)`) that fixes each method's curve
+    colour run-independently -- it must cover every method in `results`."""
     import csv
     from statistics import mean
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -298,23 +301,24 @@ def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "lengt
                     w.writerow([m, f"{mean(b for b, _ in bd):.4f}", f"{mean(d for _, d in bd):.1f}",
                                 f"{mean(by_pd[m]):.4f}", len(bd)])
         else:
-            by_method: dict[str, list[float]] = {}
-            by_pp: dict[str, list[float]] = {}
-            for r in metric_results:
-                by_method.setdefault(r.method, []).append(r.auc)
-                by_pp.setdefault(r.method, []).append(r.pct_paved)
-            with (out_dir / f"auc_table_{metric}.csv").open("w", newline="") as f:
+            # Frontier: no scalar rank. A single AUC (integrated to the road-hungriest method's
+            # terminal density) rewarded absolute benefit, not benefit-per-road -- so an efficient
+            # method reaching high benefit at low road ranked below a pave-everything one. Emit the
+            # full (road density, benefit) samples instead; the curves ARE the frontier.
+            with (out_dir / f"frontier_{metric}.csv").open("w", newline="") as f:
                 w = csv.writer(f)
-                w.writerow(["method", "mean_auc", "mean_pct_paved", "n_blocks"])
-                for m, aucs in sorted(by_method.items(), key=lambda kv: -mean(kv[1])):
-                    w.writerow([m, f"{mean(aucs):.4f}", f"{mean(by_pp[m]):.4f}", len(aucs)])
+                w.writerow(["method", "block", "road_density_m_per_ha", "benefit"])
+                for r in metric_results:
+                    for c, b in zip(r.curve.cost, r.curve.benefit, strict=True):
+                        w.writerow([r.method, r.block_id, f"{c:.4f}", f"{b:.4f}"])
         ylabel = _METRIC_YLABELS[metric]
         xlabel = "buildings displaced" if cost == "displacement" else "road density (m/ha)"
         for block_id, curves in by_block.items():
             fig, ax = plt.subplots(figsize=(7, 5))
             for mc in curves:
                 label = (f"{mc.method} ({int(mc.curve.cost[-1])} displaced)"
-                         if cost == "displacement" else f"{mc.method} (AUC {mc.auc:.2f})")
+                         if cost == "displacement"
+                         else f"{mc.method} ({int(mc.curve.cost[-1])} m/ha)")
                 ax.plot(mc.curve.cost, mc.curve.benefit, marker="o", label=label,
                         color=colors[mc.method])
             ax.set_xlabel(xlabel)

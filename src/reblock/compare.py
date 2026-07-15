@@ -19,7 +19,6 @@ from shapely.ops import unary_union
 from reblock.budget import (
     Curve,
     access_benefit,
-    auc,
     cost_benefit_curve,
     efficiency_directness_curves,
     resistance_benefit,
@@ -45,7 +44,6 @@ class MethodCurve:
     block_id: str    # a plain block_id for a singleton region, else the region label
     metric: str
     curve: Curve
-    auc: float
     pct_paved: float = 0.0
     pct_displaced: float = 0.0
 
@@ -136,16 +134,10 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
             raw.append((name, label, "efficiency", eff, pp, pd_))
             raw.append((name, label, "directness", direct, pp, pd_))
             raw.append((name, label, "resistance", resistance, pp, pd_))
-    results: list[MethodCurve] = []
-    groups = {(label, metric) for _, label, metric, _, _, _ in raw}
-    for label, metric in groups:
-        group = [(m, c, pp, pd_) for m, lbl, met, c, pp, pd_ in raw
-                if lbl == label and met == metric]
-        cap = max((c.cost[-1] for _, c, _, _ in group if c.cost), default=0.0)
-        for m, c, pp, pd_ in group:
-            results.append(
-                MethodCurve(m, label, metric, c, auc(c, cap), pct_paved=pp, pct_displaced=pd_))
-    return results
+    # No cross-method normalization: the frontier is reported as raw (road density, benefit)
+    # samples per method (see emit.compare_report), so there's no shared cost cap to compute.
+    return [MethodCurve(m, label, metric, c, pct_paved=pp, pct_displaced=pd_)
+            for m, label, metric, c, pp, pd_ in raw]
 
 
 @hydra.main(version_base=None, config_path="../../conf", config_name="compare_config")
@@ -162,9 +154,10 @@ def main(cfg: DictConfig) -> None:
         for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
             log.info("%s %s %s: benefit=%.3f, %d displaced", r.metric, r.block_id, r.method,
                      r.curve.benefit[-1], int(r.curve.cost[-1]))
-    else:
-        for r in sorted(results, key=lambda r: (r.metric, -r.auc)):
-            log.info("%s %s %s AUC=%.3f", r.metric, r.block_id, r.method, r.auc)
+    else:   # frontier: log each method's terminal (benefit, road density, %paved) -- no scalar rank
+        for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
+            log.info("%s %s %s: benefit=%.3f at %.0f m/ha (%.1f%% paved)", r.metric, r.block_id,
+                     r.method, r.curve.benefit[-1], r.curve.cost[-1], r.pct_paved * 100)
 
 
 if __name__ == "__main__":
