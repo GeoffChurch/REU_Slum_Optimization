@@ -3,6 +3,7 @@ from shapely.geometry import LineString
 
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.methods.arterial import GreedyArterialReblocker
 from reblock.methods.arterial_lazy import _make_policy
 from tests.methods.test_arterial import _grid_block  # reuse the fast grid fixture
 
@@ -73,3 +74,53 @@ def test_faithful_policy_matches_arterial_candidate_set():
     # deep_targets change with roads; compare through-road structure via arterial's own generator
     expect_roads = {ls.wkt for ls in _candidate_chords(_anchor_points(network, 6), [])}
     assert expect_roads <= live
+
+
+def test_lazy_dispatch_and_determinism():
+    block = _grid_block(5)
+    m = GreedyArterialReblocker(mode="buildable", objective="directness", n_anchors=6,
+                               max_roads=4, lazy=True, candidate_policy="grow")
+    a = m.propose(block).roads
+    b = m.propose(block).roads
+    assert [g.wkt for g in a.geometry] == [g.wkt for g in b.geometry]   # deterministic
+    assert len(a) > 0
+
+
+def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
+    # instrument eval_candidate call count on a real block where arterial runs
+    from scoring_fixtures import _block_1808
+
+    import reblock.methods.arterial as art
+    block = _block_1808()
+    calls = {"n": 0}
+    real_eval = art.eval_candidate
+    def counting(chord):
+        calls["n"] += 1
+        return real_eval(chord)
+    # exact
+    monkeypatch.setattr(art, "eval_candidate", counting)
+    calls["n"] = 0
+    GreedyArterialReblocker(mode="buildable", n_anchors=8, max_roads=4, workers=1).propose(block)
+    exact_calls = calls["n"]
+    # lazy grow (patch the name the lazy engine imported, too)
+    import reblock.methods.arterial_lazy as lz
+    monkeypatch.setattr(lz, "eval_candidate", counting)
+    calls["n"] = 0
+    GreedyArterialReblocker(mode="buildable", n_anchors=8, max_roads=4, workers=1,
+                            lazy=True, candidate_policy="grow", rescore_every=0).propose(block)
+    lazy_calls = calls["n"]
+    assert lazy_calls < exact_calls / 2, (lazy_calls, exact_calls)
+
+
+def test_lazy_quality_within_tolerance():
+    from scoring_fixtures import _block_1808
+
+    from reblock.budget import network_efficiency
+    block = _block_1808()
+    exact = GreedyArterialReblocker(
+        mode="buildable", n_anchors=8, max_roads=4, workers=1).propose(block).roads
+    lazy = GreedyArterialReblocker(mode="buildable", n_anchors=8, max_roads=4, workers=1,
+                                   lazy=True, candidate_policy="grow").propose(block).roads
+    _e0, d_exact = network_efficiency(block, exact)
+    _e1, d_lazy = network_efficiency(block, lazy)
+    assert d_lazy >= d_exact - 0.02, (d_lazy, d_exact)  # comparable-or-better (beats exact)

@@ -433,13 +433,21 @@ class GreedyArterialReblocker:
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
-        roads = _greedy_arterials(block, mode=self.mode, objective=self.objective,
-                                  n_anchors=self.n_anchors, top_k=self.top_k, lam=self.lam,
-                                  max_roads=self.max_roads, cost=self.cost,
-                                  corridor_m=self.corridor_m, workers=self.workers)
+        if self.lazy:
+            from reblock.methods.arterial_lazy import _greedy_arterials_lazy
+            roads = _greedy_arterials_lazy(
+                block, mode=self.mode, objective=self.objective, n_anchors=self.n_anchors,
+                top_k=self.top_k, lam=self.lam, max_roads=self.max_roads, cost=self.cost,
+                corridor_m=self.corridor_m, workers=self.workers,
+                candidate_policy=self.candidate_policy, rescore_every=self.rescore_every)
+        else:
+            roads = _greedy_arterials(
+                block, mode=self.mode, objective=self.objective, n_anchors=self.n_anchors,
+                top_k=self.top_k, lam=self.lam, max_roads=self.max_roads, cost=self.cost,
+                corridor_m=self.corridor_m, workers=self.workers)
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=f"greedy_arterial_{self.mode}_{self.objective}", method="greedy_arterial",
             params={"segments": len(roads), "mode": self.mode, "objective": self.objective,
-                    "cost": self.cost, "corridor_m": self.corridor_m},
+                    "cost": self.cost, "corridor_m": self.corridor_m, "lazy": self.lazy},
             block_identity=block.identity)
