@@ -17,22 +17,24 @@ def test_compare_writes_frontier_and_curves(tmp_path: Path) -> None:
     assert list(tmp_path.glob("curve_access_*.png"))
 
 
-def test_compare_displacement_cost_axis_runs_and_writes_curves(tmp_path: Path) -> None:
-    # cost=displacement grades methods on the buildings-displaced x-axis (sparse methods land near
-    # 0). clearance (fast) proves the axis is reachable end-to-end; the axis arithmetic is
-    # unit-tested in test_budget, and greedy_arterial_displacement is the slow flagship.
+def test_compare_displacement_metric_runs_and_writes_curves(tmp_path: Path) -> None:
+    # displacement rides the ordinary MethodCurve machinery as a metric="displacement" row --
+    # every compare() run grades it automatically (no cost= flag), alongside the four benefit
+    # frontiers. clearance (fast) proves the wiring end-to-end; the axis arithmetic itself is
+    # unit-tested in test_budget.
     result = subprocess.run(
         [sys.executable, "-m", "reblock.compare", "data=dji", "eval=kcomplexity",
-         "max_blocks=1", "methods=[clearance]", "cost=displacement", "corridor_m=3.0",
+         "max_blocks=1", "methods=[clearance]", "corridor_m=3.0",
          f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, result.stderr
-    # displacement uses a tradeoff table (terminal benefit + buildings displaced), NOT the length
-    # frontier -- AUC inverts on the displacement axis (a home-sparing method scores 0).
-    assert (tmp_path / "tradeoff_table_directness.csv").exists()
-    assert not (tmp_path / "frontier_directness.csv").exists()
-    assert "buildings_displaced" in (tmp_path / "tradeoff_table_directness.csv").read_text()
-    assert list(tmp_path.glob("curve_directness_*.png"))
+    # displacement is a rising cost, reported separately from the length frontier -- never
+    # inverted, and never a tradeoff table (that path is gone).
+    assert (tmp_path / "displacement_vs_length.csv").exists()
+    assert (tmp_path / "displacement_table.csv").exists()
+    assert not list(tmp_path.glob("tradeoff_table_*.csv"))
+    assert (tmp_path / "frontier_directness.csv").exists()
+    assert list(tmp_path.glob("displacement_*.png"))
 
 
 def test_compare_emits_per_metric_frontier_tables(tmp_path: Path) -> None:
@@ -66,12 +68,12 @@ def test_compare_singleton_via_explicit_block_ids_matches_plain_single_block(
 
 
 def _terminal_benefit_by_method(csv_path: Path) -> dict[str, float]:
-    """Benefit at the max road-density sample per method, read from a frontier CSV."""
+    """Benefit at the max road-length sample per method, read from a frontier CSV."""
     term: dict[str, tuple[float, float]] = {}
     with csv_path.open(newline="") as f:
         for r in csv.DictReader(f):
             m = r["method"]
-            rd, b = float(r["road_density_m_per_ha"]), float(r["benefit"])
+            rd, b = float(r["road_length_m"]), float(r["benefit"])
             if m not in term or rd > term[m][0]:
                 term[m] = (rd, b)
     return {m: b for m, (_, b) in term.items()}
@@ -111,18 +113,18 @@ def test_compare_report_writes_frontier(tmp_path: Path) -> None:
     assert (tmp_path / "curve_access_b1.png").exists()
 
 
-def test_frontier_csv_has_road_density_and_benefit_samples(tmp_path: Path) -> None:
+def test_frontier_csv_has_road_length_and_benefit_samples(tmp_path: Path) -> None:
     from reblock.budget import Curve
     from reblock.compare import MethodCurve
     from reblock.emit import compare_report
     c = Curve(cost=[0.0, 100.0], benefit=[0.0, 0.8])
     mc = MethodCurve("clearance", "B1", "access", c, pct_paved=0.041, pct_displaced=0.0)
-    compare_report([mc], tmp_path, cost="length", method_order=["clearance"])
+    compare_report([mc], tmp_path, method_order=["clearance"])
     with (tmp_path / "frontier_access.csv").open(newline="") as f:
         rows = list(csv.DictReader(f))
-    assert set(rows[0].keys()) == {"method", "block", "road_density_m_per_ha", "benefit"}
+    assert set(rows[0].keys()) == {"method", "block", "road_length_m", "benefit"}
     # both sampled frontier points are present, in curve order
-    assert [(r["road_density_m_per_ha"], r["benefit"]) for r in rows] == [
+    assert [(r["road_length_m"], r["benefit"]) for r in rows] == [
         ("0.0000", "0.0000"), ("100.0000", "0.8000")]
 
 

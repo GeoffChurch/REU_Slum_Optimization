@@ -95,16 +95,20 @@ def _parcels_with_layer(block: Block, layers: pd.Series) -> gpd.GeoDataFrame:
     return parcels
 
 
-def _point_disks(points: gpd.GeoDataFrame, radius_m: float) -> gpd.GeoDataFrame:
-    """Building/parcel points as fixed GEOGRAPHIC-size disks: each point buffered to `radius_m`
-    metres, so markers scale with the map extent -- a dense region no longer collapses into a
-    screen-size (matplotlib `markersize`) thicket the way fixed-point markers do. If a `weight`
-    column is present, each disk's radius is scaled by sqrt(weight) so its AREA is proportional to
-    the weight (the footprint generalization); absent, all disks share `radius_m`."""
-    if "weight" in points.columns:
-        radii = radius_m * (points["weight"].to_numpy() ** 0.5)
-        return gpd.GeoDataFrame(geometry=points.geometry.buffer(radii), crs=points.crs)
-    return gpd.GeoDataFrame(geometry=points.geometry.buffer(radius_m), crs=points.crs)
+def _point_disks(points: gpd.GeoDataFrame, radius_m: float | None = None) -> gpd.GeoDataFrame:
+    """Points as geographic-size disks, so markers scale with the map extent -- a dense region no
+    longer collapses into a screen-size (matplotlib `markersize`) thicket the way fixed-point
+    markers do. If a `radius` column is present, each disk uses it verbatim (the per-building
+    footprint disks, radius = NN/2 -- see budget.building_radii); elif a `weight` column is
+    present, each disk's radius is `radius_m` scaled by sqrt(weight) so its AREA is proportional to
+    the weight; else all disks share `radius_m`."""
+    if "radius" in points.columns:
+        radii = points["radius"].to_numpy()
+    elif "weight" in points.columns:
+        radii = (radius_m or 0.0) * (points["weight"].to_numpy() ** 0.5)
+    else:
+        radii = radius_m or 0.0
+    return gpd.GeoDataFrame(geometry=points.geometry.buffer(radii), crs=points.crs)
 
 
 def _draw_heatmap(
@@ -149,11 +153,13 @@ def _draw_heatmap(
 
     if own_points is not None and not own_points.empty:
         _point_disks(own_points, _POINT_RADIUS_M).plot(ax=ax, color=_OWN_PT, linewidth=0)
-    # Displaced sites (own_points inside a committed road's corridor): drawn on top of own_points
-    # -- the cost of the road made visible next to it. A larger disk so it pops.
+    # Displaced sites (own_points' building-footprint disks, radius = NN/2): shaded grey->red by
+    # their displacement fraction c = max(0, 1 - d/r) -- drawn on top of own_points, the cost of
+    # the road made visible next to it, magnitude and all (not just a binary in/out mark).
     if displaced_points is not None and not displaced_points.empty:
-        _point_disks(displaced_points, _POINT_RADIUS_M * 2.0).plot(
-            ax=ax, color="red", zorder=5, linewidth=0)
+        disks = _point_disks(displaced_points)                 # uses the `radius` column
+        disks["c"] = displaced_points["c"].to_numpy()
+        disks.plot(ax=ax, column="c", cmap="Reds", vmin=0.0, vmax=1.0, zorder=5, linewidth=0)
 
     sm = plt.cm.ScalarMappable(cmap=_CMAP, norm=Normalize(vmin=1, vmax=vmax))
     fig.colorbar(sm, ax=ax).set_label("access depth (parcels from a street)")
@@ -190,7 +196,8 @@ def render_after(
     frame: BBox | None = None,
 ) -> Figure:
     """Post-intervention access-depth heatmap for `block`, plus `proposal.roads`. `displaced_points`
-    (own building sites inside the proposal's road corridor, see emit.py) are marked distinctly."""
+    (own building sites, each carrying a displacement fraction `c` and disk `radius`, see emit.py)
+    are shaded grey->red by `c`."""
     fig = _draw_heatmap(
         block, layers, vmax,
         context_outlines=context_outlines, context_points=context_points, own_points=own_points,

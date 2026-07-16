@@ -19,6 +19,7 @@ import networkx as nx
 import numpy as np
 import shapely
 from geopandas import GeoDataFrame
+from numpy.typing import NDArray
 from pyproj import CRS
 from shapely import STRtree
 from shapely.geometry import LineString, Point
@@ -29,7 +30,8 @@ from reblock.budget import (
     _BlockScoringContext,
     _StepContext,
     access_burden,
-    displacement_count,
+    building_radii,
+    displacement,
     road_drainage,
 )
 from reblock.contracts import Block, Proposal
@@ -234,7 +236,9 @@ class _StepState:
     `committed` is needed by the aspirational branch's full `_planarize(committed + [real])`;
     `base_merged`/`adj`/`base_burden`/`ctx` by the access-objective-buildable and displacement
     branches' `_score`/incremental-`_union_with` calls -- omitting any of these breaks a scoring
-    branch silently (wrong values, not a crash). `frozen=True` makes the read-only invariant real:
+    branch silently (wrong values, not a crash). `radii` (per-building disk radius, r=NN/2,
+    constant across a block's steps) feeds the `cost="displacement"` denominator's disk
+    `displacement` call. `frozen=True` makes the read-only invariant real:
     the workers only READ this holder, and its mutable members (`committed`, `base_merged`) are
     mutated only in the PARENT and only AFTER the holder is cleared (a fresh `_StepState` is built
     per step), so no worker ever observes a mid-mutation copy."""
@@ -248,8 +252,9 @@ class _StepState:
     cost: str
     lam: float
     corridor_m: float
-    committed_disp: int
+    committed_disp: float
     block: Block
+    radii: NDArray[np.float64]
     crs: CRS
     adj: list[set[int]]
     base_burden: float
@@ -291,7 +296,7 @@ def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
     if st.cost == "displacement":
         if trial is None:
             trial = _explode(_union_with(st.base_merged, real), st.crs)  # step -> buildable
-        denom = float(displacement_count(st.block.building_points, trial, st.corridor_m)
+        denom = float(displacement(st.block.building_points, st.radii, trial, st.corridor_m)
                      - st.committed_disp)
     else:
         denom = real.length
@@ -322,12 +327,13 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
                       workers: int = 16, max_anchors: int = 0) -> GeoDataFrame:
     """Greedily commit the straight arterial with the best objective gain per unit cost until
     `max_roads` are placed or no candidate improves. `mode` in {"buildable", "aspirational"}.
-    `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/building newly
-    inside `corridor_m` of any committed road, via block.building_points -- see
-    budget.displacement_count)}. A beneficial candidate whose denominator is zero (a
-    zero-length road can't occur -- filtered below -- but a zero-marginal-displacement road
-    can) ranks ABOVE every positive-denominator candidate (infinite gain) rather than being
-    divided by zero or skipped: take the free navigability first.
+    `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/expected buildings
+    newly displaced within `corridor_m` of any committed road, via the extent-aware disk
+    `budget.displacement` over `block.building_points` -- see `budget.building_radii`)}. A
+    beneficial candidate whose denominator is zero (a zero-length road can't occur -- filtered
+    below -- but a zero-marginal-displacement road can) ranks ABOVE every positive-denominator
+    candidate (infinite gain) rather than being divided by zero or skipped: take the free
+    navigability first.
 
     `workers` parallelizes each step's candidate scoring across a fork process pool (byte-identical
     to serial). `workers <= 1`, a step with `< _PARALLEL_THRESHOLD` candidates, or a platform
@@ -349,6 +355,9 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     # ONE scoring context per block (frozen reps/sources/src_euclid/street geometry), shared by
     # every candidate score below -- only built for the metric objectives that use it.
     ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
+    # Constant across every step (depends only on block.building_points), so computed ONCE here
+    # rather than per-step.
+    radii = building_radii(block.building_points, corridor_m)
 
     committed: list[LineString] = []                        # realized geometry, in commit order
     global _STEP_STATE
@@ -360,8 +369,8 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         base_val = _score(objective, block, base, adj, base_burden, ctx)
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
-        committed_disp = (displacement_count(block.building_points, base, corridor_m)
-                          if cost == "displacement" else 0)
+        committed_disp = (displacement(block.building_points, radii, base, corridor_m)
+                          if cost == "displacement" else 0.0)
         # Route per-candidate scoring by mode. BUILDABLE trials are boundary-snapped (they join the
         # committed/street network at shared graph vertices), so the incremental
         # `step.score_candidate` is bit-exact to `_score(objective, _planarize(committed+[real]))`
@@ -389,7 +398,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         _STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             mode=mode, objective=objective, cost=cost, lam=lam, corridor_m=corridor_m,
-            committed_disp=committed_disp, block=block, crs=block.crs, adj=adj,
+            committed_disp=committed_disp, block=block, radii=radii, crs=block.crs, adj=adj,
             base_burden=base_burden, ctx=ctx)
         try:
             if use_pool:

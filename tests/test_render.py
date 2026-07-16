@@ -179,7 +179,9 @@ def test_render_after_marks_displaced_points_and_writes_a_file(tmp_path: Path) -
     block = _grid_block(3)
     proposal = _connector_proposal(block)
     layers = parcel_access_layers(block, proposal.roads)
-    displaced = gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM)   # sits on the connector
+    # sits on the connector; c/radius are the columns _displaced_points (emit.py) now attaches.
+    displaced = gpd.GeoDataFrame(
+        {"c": [0.8], "radius": [1.0]}, geometry=[Point(1.0, 0.5)], crs=UTM)
 
     fig_after = render_after(block, proposal, layers, vmax=2, displaced_points=displaced)
     out = tmp_path / "displaced.png"
@@ -189,13 +191,14 @@ def test_render_after_marks_displaced_points_and_writes_a_file(tmp_path: Path) -
 
 
 def test_render_after_displaced_points_add_an_artist_over_own_points_alone() -> None:
-    # The displaced-point ring is drawn on top of own_points as its own artist, so a call with
+    # The displaced-point disk is drawn on top of own_points as its own artist, so a call with
     # displaced_points must have strictly more collections than the same call without.
     block = _grid_block(3)
     proposal = _connector_proposal(block)
     layers = parcel_access_layers(block, proposal.roads)
     own_points = gpd.GeoDataFrame(geometry=[Point(0.5, 0.5), Point(1.0, 0.5)], crs=UTM)
-    displaced = gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM)
+    displaced = gpd.GeoDataFrame(
+        {"c": [0.8], "radius": [1.0]}, geometry=[Point(1.0, 0.5)], crs=UTM)
 
     fig_own_only = render_after(block, proposal, layers, vmax=2, own_points=own_points)
     fig_with_displaced = render_after(
@@ -231,3 +234,34 @@ def test_render_before_uses_the_passed_frame_verbatim() -> None:
     ax = fig.axes[0]
     assert ax.get_xlim() == pytest.approx((frame[0], frame[2]))
     assert ax.get_ylim() == pytest.approx((frame[1], frame[3]))
+
+
+def test_displaced_points_carry_fraction_and_radius(tmp_path):
+    # a proposal with roads over a couple of building points -> _displaced_points has c in (0,1]
+    import geopandas as gpd
+    from shapely.geometry import LineString, Point, Polygon
+
+    from reblock.contracts import Block, Proposal
+    from reblock.emit import _displaced_points
+    crs = "EPSG:32734"
+    boundary = Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
+    parcels = gpd.GeoDataFrame({"parcel_id": [0]}, geometry=[boundary], crs=crs)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (20, 0)])], crs=crs)
+    pts = gpd.GeoDataFrame(geometry=[Point(10, 10), Point(10, 12)], crs=crs)
+    block = Block(block_id="b", crs=crs, boundary=boundary, parcels=parcels,
+                  streets=streets, building_points=pts)
+    roads = gpd.GeoDataFrame(geometry=[LineString([(0, 10), (20, 10)])], crs=crs)
+    prop = Proposal(block_id="b", crs=crs, roads=roads, edges=None,
+                    proposal_id="x", method="m", params={"corridor_m": 1.0}, block_identity=None)
+    disp = _displaced_points(block, prop)
+    assert "c" in disp.columns and "radius" in disp.columns
+    assert (disp["c"] > 0).any() and (disp["c"] <= 1).all()
+
+
+def test_matched_budget_is_min_total_over_methods():
+    # scripts/render_methods_matched.py's fair per-method budget: the sparsest method's total
+    # road length, so every method's truncated prefix is reachable.
+    from reblock.budget import matched_budget
+    lengths = {"a": 100.0, "b": 40.0, "c": 61.0}
+    assert matched_budget(lengths) == 40.0
+    assert matched_budget({}) == 0.0

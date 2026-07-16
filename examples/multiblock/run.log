@@ -3,34 +3,23 @@
 [2026-07-15 17:48:27,654][__main__][INFO] - region:ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1_1_5514+ZAF.9.3.1_1_5517+ZAF.9.3.1_1_5519+ZAF.9.3.1_1_5520+ZAF.9.3.1_1_5528+ZAF.9.3.1_1_5530+ZAF.9.3.1_1_5531+ZAF.9.3.1_1_5535+ZAF.9.3.1_1_5544+ZAF.9.3.1_1_5559+ZAF.9.3.1_1_5563+ZAF.9.3.1_1_5582+ZAF.9.3.1_1_5588+ZAF.9.3.1_1_5589+ZAF.9.3.1_1_5591+ZAF.9.3.1_1_5595+ZAF.9.3.1_1_5596+ZAF.9.3.1_1_5613+ZAF.9.3.1_1_5618+ZAF.9.3.1_1_5810 {'kcomplexity': {'k_before': 24.0, 'k_after': 3.0, 'delta_k': 21.0, 'added_road_length_m': 13698.705535587758, 'n_road_components': 55.0, 'connected_road_frac': 1.0, 'geometric_access_max_m': 58.53531712471657}}
 [2026-07-15 17:48:27,655][__main__][INFO] -   map: https://www.google.com/maps/@-33.84130,18.74439,15z
 [2026-07-15 17:48:27,656][__main__][INFO] - 13906 blocks flagged -> /tmp/claude-1641171234/-home-gchurchill-src-reblock/8e45cee5-1c58-4e08-b3fd-8166cdfa5f11/scratchpad/mb4/run/flagged_blocks.txt
-### §4 length (frontier: clearance, arterial, dream_come_true)
-[2026-07-15 17:49:04,817][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
-[2026-07-15 17:49:40,254][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.970 at 260 m/ha (15.5% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.582 at 56 m/ha (3.3% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dream_come_true: benefit=0.026 at 61 m/ha (3.7% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.092 at 56 m/ha (3.3% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.088 at 260 m/ha (15.5% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dream_come_true: benefit=0.010 at 61 m/ha (3.7% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.000 at 56 m/ha (3.3% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.000 at 260 m/ha (15.5% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dream_come_true: benefit=0.000 at 61 m/ha (3.7% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.477 at 260 m/ha (15.5% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.097 at 56 m/ha (3.3% paved)
-[2026-07-15 17:49:40,254][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dream_come_true: benefit=0.041 at 61 m/ha (3.7% paved)
-### §4b displacement
-[2026-07-15 17:49:49,527][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
-[2026-07-15 17:50:39,220][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.970, 2056 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.582, 216 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dream_come_true: benefit=0.026, 97 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.092, 216 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.088, 2056 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dream_come_true: benefit=0.010, 97 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.000, 216 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.000, 2056 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dream_come_true: benefit=0.000, 97 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.477, 2056 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.097, 216 displaced
-[2026-07-15 17:50:39,220][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec dream_come_true: benefit=0.041, 97 displaced
+### §4 compare (frontier: clearance, arterial, osm_footpaths; displacement curve)
+[2026-07-16 12:56:54,359][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
+[2026-07-16 12:59:35,163][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.970 at 26326 m (15.5% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.582 at 5614 m (3.3% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: benefit=0.026 at 6122 m (3.7% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.092 at 5614 m (3.3% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.088 at 26326 m (15.5% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - directness ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: benefit=0.010 at 6122 m (3.7% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: 3305.7 displaced (30.9% of homes)
+[2026-07-16 12:59:35,163][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: 499.6 displaced (4.7% of homes)
+[2026-07-16 12:59:35,163][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: 257.0 displaced (2.4% of homes)
+[2026-07-16 12:59:35,163][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.000 at 5614 m (3.3% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.000 at 26326 m (15.5% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - efficiency ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: benefit=0.000 at 6122 m (3.7% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.477 at 26326 m (15.5% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.097 at 5614 m (3.3% paved)
+[2026-07-16 12:59:35,163][__main__][INFO] - resistance ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: benefit=0.041 at 6122 m (3.7% paved)
 ### §5 depth_target sweep
 [2026-07-15 17:50:48,477][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
 [2026-07-15 17:51:29,948][__main__][INFO] - access ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance_depth_target2: benefit=0.970 at 260 m/ha (15.5% paved)

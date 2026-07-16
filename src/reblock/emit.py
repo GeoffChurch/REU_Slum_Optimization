@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, cast
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 
 from reblock.contracts import Block, Metrics, Proposal, Result, Source
 from reblock.render import (
@@ -49,18 +50,23 @@ def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
 
 
 def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
-    """`block.building_points` sites inside `proposal`'s road corridor
-    (`proposal.params["corridor_m"]`, default 3.0) -- the render's "cost made visible" mark, ONLY
-    for a displacement-cost proposal (a frontage/length method displaces nothing by design, so
-    marking sites near its roads as 'displaced' would mislead). Empty (no crash) otherwise, or if
-    there are no building points or no proposed roads."""
+    """`block.building_points` with a per-point displacement fraction `c` = max(0, 1 - d/r)
+    (r = NN/2, see budget) and its disk `radius`, for the render to shade. Empty when there are no
+    points or no proposed roads."""
+    from reblock.budget import building_radii
     pts = block.building_points
-    if (proposal.params.get("cost") != "displacement"
-            or pts.empty or proposal.roads is None or proposal.roads.empty):
+    if pts.empty or proposal.roads is None or proposal.roads.empty:
         return cast(gpd.GeoDataFrame, pts.iloc[:0])
     corridor_m = cast(float, proposal.params.get("corridor_m", 3.0))
+    radii = building_radii(pts, corridor_m)
     corridor = proposal.roads.geometry.buffer(corridor_m).union_all()
-    return cast(gpd.GeoDataFrame, pts[pts.within(corridor)])
+    d = pts.geometry.distance(corridor).to_numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        c = np.where(radii > 0.0, 1.0 - d / radii, np.where(d <= 0.0, 1.0, 0.0))
+    out = pts.copy()
+    out["c"] = np.clip(c, 0.0, 1.0)
+    out["radius"] = radii
+    return cast(gpd.GeoDataFrame, out[out["c"] > 0.0])
 
 
 def pct_paved(roads: gpd.GeoDataFrame | None, corridor_m: float, block_area: float) -> float:
@@ -73,14 +79,14 @@ def pct_paved(roads: gpd.GeoDataFrame | None, corridor_m: float, block_area: flo
 
 
 def pct_displaced(roads: gpd.GeoDataFrame | None, corridor_m: float,
-                  building_points: gpd.GeoDataFrame) -> float:
-    """Fraction of building points inside the roads' corridor (union(roads).buffer(corridor_m)).
-    0 for an empty road set or no buildings."""
+                  building_points: gpd.GeoDataFrame,
+                  radii: NDArray[np.float64]) -> float:
+    """Fraction of buildings-equivalent displaced: Σcᵢ / n_buildings (see budget.displacement)."""
+    from reblock.budget import displacement
     n = len(building_points)
     if roads is None or len(roads) == 0 or n == 0:
         return 0.0
-    corridor = roads.geometry.buffer(corridor_m).union_all()
-    return float(int(building_points.geometry.within(corridor).sum()) / n)
+    return displacement(building_points, radii, roads, corridor_m) / n
 
 
 def _member_ids(block_id: str) -> list[str]:
@@ -238,6 +244,7 @@ _METRIC_YLABELS = {
     "efficiency": "network efficiency E",
     "directness": "directness (1/circuity)",
     "resistance": "fraction of egress resistance removed",
+    "displacement": "buildings displaced (Σ disk-graze probability)",
 }
 
 # Every method draws in a fixed colour, keyed on its position in the canonical method registry
@@ -260,73 +267,69 @@ def _method_colors(method_order: Sequence[str]) -> dict[str, tuple[float, float,
             for i, name in enumerate(method_order)}
 
 
-def compare_report(results: list[MethodCurve], out_dir: Path, cost: str = "length",
+def compare_report(results: list[MethodCurve], out_dir: Path,
                    *, method_order: Sequence[str]) -> None:
-    """Per metric (access, efficiency, directness, resistance): a per-method summary table +
-    overlaid cost-benefit curves per block. `results` is the flat (method x block x metric) list
-    from reblock.compare. `cost` sets the x-axis (road density m/ha, or buildings displaced) AND
-    the table: for "length" a `frontier_{metric}.csv` (the full (road density, benefit) samples per
-    method -- no scalar rank, because a single AUC to a shared road-density cap penalised the
-    road-efficient methods: one reaching high benefit at low road ranked below a pave-everything
-    method that reached slightly more at several times the road); for "displacement" a
-    `tradeoff_table_{metric}.csv` (mean terminal benefit + mean buildings displaced) -- because AUC
-    over the displacement axis inverts (a method that displaces nothing scores 0). `method_order`
-    is the canonical method registry (`list(cfg.all_methods)`) that fixes each method's curve
-    colour run-independently -- it must cover every method in `results`."""
+    """Per metric (access, efficiency, directness, resistance, displacement): a per-method
+    summary table + overlaid cost-benefit curves per block. `results` is the flat (method x block
+    x metric) list from reblock.compare. The x-axis is always cumulative added road length (m).
+    For the four benefit metrics, writes `frontier_{metric}.csv` (the full (road length, benefit)
+    samples per method -- no scalar rank, because a single AUC to a shared road-length cap
+    penalised the road-efficient methods: one reaching high benefit at low road ranked below a
+    pave-everything method that reached slightly more at several times the road). For
+    "displacement" (a RISING cost, never inverted) writes `displacement_vs_length.csv` (the full
+    (road length, Σcᵢ) samples per method) and accumulates `displacement_table.csv` (mean terminal
+    displacement + mean pct_displaced per method). `method_order` is the canonical method registry
+    (`list(cfg.all_methods)`) that fixes each method's curve colour run-independently -- it must
+    cover every method in `results`."""
     import csv
-    from statistics import mean
+    from collections import defaultdict
     out_dir.mkdir(parents=True, exist_ok=True)
     by_metric: dict[str, list[MethodCurve]] = {}
     for r in results:
         by_metric.setdefault(r.metric, []).append(r)
     colors = _method_colors(method_order)   # one stable name->colour map for every plot
+    # method -> [(terminal displacement, pct_displaced)]
+    disp_terminal: dict[str, list[tuple[float, float]]] = defaultdict(list)
     for metric, metric_results in by_metric.items():
         by_block: dict[str, list[MethodCurve]] = {}
         for r in metric_results:
             by_block.setdefault(r.block_id, []).append(r)
-        if cost == "displacement":
-            # AUC over the displacement axis is meaningless -- a home-sparing method displaces 0,
-            # so its curve has no width and AUC->0, ranking the BEST method worst. Report instead
-            # the two numbers that matter: terminal navigability and total buildings displaced.
-            by_bd: dict[str, list[tuple[float, float]]] = {}
-            by_pd: dict[str, list[float]] = {}
-            for r in metric_results:
-                by_bd.setdefault(r.method, []).append((r.curve.benefit[-1], r.curve.cost[-1]))
-                by_pd.setdefault(r.method, []).append(r.pct_displaced)
-            with (out_dir / f"tradeoff_table_{metric}.csv").open("w", newline="") as f:
+        if metric == "displacement":
+            with (out_dir / "displacement_vs_length.csv").open("w", newline="") as f:
                 w = csv.writer(f)
-                w.writerow(["method", "mean_terminal_benefit", "mean_buildings_displaced",
-                            "mean_pct_displaced", "n_blocks"])
-                for m, bd in sorted(by_bd.items(), key=lambda kv: -mean(b for b, _ in kv[1])):
-                    w.writerow([m, f"{mean(b for b, _ in bd):.4f}", f"{mean(d for _, d in bd):.1f}",
-                                f"{mean(by_pd[m]):.4f}", len(bd)])
+                w.writerow(["method", "block", "road_length_m", "displacement"])
+                for r in metric_results:
+                    for c, b in zip(r.curve.cost, r.curve.benefit, strict=True):
+                        w.writerow([r.method, r.block_id, f"{c:.4f}", f"{b:.4f}"])
+                    disp_terminal[r.method].append((r.curve.benefit[-1], r.pct_displaced))
         else:
-            # Frontier: no scalar rank. A single AUC (integrated to the road-hungriest method's
-            # terminal density) rewarded absolute benefit, not benefit-per-road -- so an efficient
-            # method reaching high benefit at low road ranked below a pave-everything one. Emit the
-            # full (road density, benefit) samples instead; the curves ARE the frontier.
             with (out_dir / f"frontier_{metric}.csv").open("w", newline="") as f:
                 w = csv.writer(f)
-                w.writerow(["method", "block", "road_density_m_per_ha", "benefit"])
+                w.writerow(["method", "block", "road_length_m", "benefit"])
                 for r in metric_results:
                     for c, b in zip(r.curve.cost, r.curve.benefit, strict=True):
                         w.writerow([r.method, r.block_id, f"{c:.4f}", f"{b:.4f}"])
         ylabel = _METRIC_YLABELS[metric]
-        xlabel = "buildings displaced" if cost == "displacement" else "road density (m/ha)"
         for block_id, curves in by_block.items():
             fig, ax = plt.subplots(figsize=(7, 5))
             for mc in curves:
-                label = (f"{mc.method} ({int(mc.curve.cost[-1])} displaced)"
-                         if cost == "displacement"
-                         else f"{mc.method} ({int(mc.curve.cost[-1])} m/ha)")
-                ax.plot(mc.curve.cost, mc.curve.benefit, marker="o", label=label,
-                        color=colors[mc.method])
-            ax.set_xlabel(xlabel)
+                ax.plot(mc.curve.cost, mc.curve.benefit, marker="o",
+                        label=f"{mc.method} ({int(mc.curve.cost[-1])} m)", color=colors[mc.method])
+            ax.set_xlabel("added road length (m)")
             ax.set_ylabel(ylabel)
             ax.set_title(f"cost-benefit ({metric}): {block_id}")
             ax.legend()
-            save_render(fig, out_dir / f"curve_{metric}_{block_id}.png")
+            stem = "displacement" if metric == "displacement" else f"curve_{metric}"
+            save_render(fig, out_dir / f"{stem}_{block_id}.png")
             plt.close(fig)
+    if disp_terminal:
+        from statistics import mean
+        with (out_dir / "displacement_table.csv").open("w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["method", "terminal_displacement", "pct_displaced", "n_blocks"])
+            for m, rows in sorted(disp_terminal.items(), key=lambda kv: -mean(d for d, _ in kv[1])):
+                w.writerow([m, f"{mean(d for d, _ in rows):.1f}",
+                            f"{mean(p for _, p in rows):.4f}", len(rows)])
 
 
 def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> None:

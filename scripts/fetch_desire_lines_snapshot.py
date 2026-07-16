@@ -1,5 +1,5 @@
 """One-off: fetch OSM desire-lines for a region/block and write a committed GeoJSON snapshot so the
-examples reproduce dream_come_true offline + byte-stable (no live Overpass call at example time).
+examples reproduce osm_footpaths offline + byte-stable (no live Overpass call at example time).
 
 Run (module form -- puts the repo root on sys.path so the data source's `from scripts...` import
 resolves): `pixi run python -m scripts.fetch_desire_lines_snapshot <out.geojson> <hydra override>...`

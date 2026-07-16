@@ -1,6 +1,7 @@
 """Cost-benefit curves for reblocking methods: add a method's roads incrementally in
 drainage order, score access at each budget, trace benefit (fraction of Sigma depth^2
-removed) vs cost (road density, m/ha). AUC = a 0-1 efficiency score. See the design spec.
+removed) vs cost (cumulative added road length, m). AUC = a 0-1 efficiency score. See the
+design spec.
 """
 from __future__ import annotations
 
@@ -14,9 +15,11 @@ import numpy as np
 import pandas as pd
 import shapely
 from geopandas import GeoDataFrame
+from numpy.typing import NDArray
 from scipy.sparse import csr_matrix, diags
 from scipy.sparse.csgraph import connected_components, dijkstra
 from scipy.sparse.linalg import factorized
+from scipy.spatial import cKDTree
 from shapely import STRtree
 from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
@@ -34,14 +37,36 @@ def _rnd(c: tuple[float, ...]) -> tuple[float, float]:
     return (round(c[0], 2), round(c[1], 2))
 
 
-def displacement_count(building_points: GeoDataFrame, roads: GeoDataFrame,
-                       corridor_m: float) -> int:
-    """Buildings whose site lies in the road corridor (union of `roads.buffer(corridor_m)`).
-    0 if there are no points or no roads."""
-    if building_points is None or building_points.empty or roads is None or len(roads) == 0:
-        return 0
+def building_radii(building_points: GeoDataFrame, corridor_m: float) -> NDArray[np.float64]:
+    """Per-building disk radius = HALF the nearest-neighbor distance among the building points (the
+    fair, non-overlapping 'as big as possible' footprint bound). Fewer than 2 points -> no neighbor,
+    so fall back to `corridor_m`. Coincident points get radius 0 (handled by `displacement`)."""
+    n = len(building_points)
+    if n == 0:
+        return np.zeros(0, dtype=np.float64)
+    if n < 2:
+        return np.full(n, float(corridor_m), dtype=np.float64)
+    xy = np.column_stack([building_points.geometry.x.to_numpy(),
+                          building_points.geometry.y.to_numpy()])
+    dist, _ = cKDTree(xy).query(xy, k=2)     # k=2: self (0) + nearest other
+    return (dist[:, 1] * 0.5).astype(np.float64)
+
+
+def displacement(building_points: GeoDataFrame, radii: NDArray[np.float64],
+                 roads: GeoDataFrame, corridor_m: float) -> float:
+    """Extent-aware expected homes displaced: each building is a disk (radius `radii[i]`); its
+    contribution is the probability the road corridor grazes it under a uniform size prior,
+    c_i = max(0, 1 - d_i/r_i), d_i = distance from the point to roads.buffer(corridor_m). r_i = 0
+    (coincident points) counts iff d_i = 0. Returns Sum c_i; 0 with no roads or no points."""
+    n = len(building_points)
+    if n == 0 or roads is None or len(roads) == 0:
+        return 0.0
     corridor = roads.geometry.buffer(corridor_m).union_all()
-    return int(building_points.geometry.within(corridor).sum())
+    d = building_points.geometry.distance(corridor).to_numpy()
+    r = np.asarray(radii, dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        c = np.where(r > 0.0, 1.0 - d / r, np.where(d <= 0.0, 1.0, 0.0))
+    return float(np.clip(c, 0.0, 1.0).sum())
 
 
 def access_burden(depths: pd.Series) -> float:
@@ -762,7 +787,7 @@ def resistance_benefit(block: Block, roads_full: GeoDataFrame | None, *,
 
 @dataclass(frozen=True)
 class Curve:
-    cost: list[float]     # cumulative road density (m/ha) OR cumulative buildings displaced
+    cost: list[float]     # cumulative added road length (m)
     benefit: list[float]  # fraction of Sigma depth^2 removed, in [0, 1]
 
 
@@ -770,22 +795,15 @@ V = TypeVar("V")
 
 
 def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | None], V],
-           n_points: int, tol: float,
-           cost_fn: Callable[[GeoDataFrame], float] | None = None) -> tuple[list[float], list[V]]:
-    """Drainage-ordered cumulative-budget sweep: returns ([cost_fn(prefix)], [value(prefix)]).
-    Order roads by drainage descending, then at n_points cumulative-length budgets evaluate
-    `value` on the empty-prefix baseline and each growing prefix (skipping budgets that add no
-    new road). `value` maps a road prefix -> any V (a float for a single metric, a tuple for
-    several -- run the whole sweep ONCE for a batched multi-metric value). `cost_fn` maps a
-    road prefix -> the reported x-axis cost; default is road density (m/ha). The road ORDER and
-    length-budget SAMPLING are unaffected by `cost_fn` -- only the reported cost changes."""
-    area_ha = block.boundary.area / 1e4
+           n_points: int, tol: float) -> tuple[list[float], list[V]]:
+    """Drainage-ordered cumulative-budget sweep: returns ([road_length_m(prefix)], [value(prefix)]).
+    Order roads by drainage descending, then at n_points cumulative-length budgets evaluate `value`
+    on the empty-prefix baseline and each growing prefix (skipping budgets that add no new road).
+    The reported x-axis is cumulative added road length in metres."""
+    def _length(prefix: GeoDataFrame) -> float:
+        return float(prefix.geometry.length.sum())
 
-    def _density(prefix: GeoDataFrame) -> float:
-        return float(prefix.geometry.length.sum()) / area_ha if area_ha > 0 else 0.0
-
-    fn = cost_fn if cost_fn is not None else _density
-    costs: list[float] = [fn(cast(GeoDataFrame, roads.iloc[:0]))]
+    costs: list[float] = [_length(cast(GeoDataFrame, roads.iloc[:0]))]
     vals: list[V] = [value(cast(GeoDataFrame, roads.iloc[:0]))]
     if len(roads) == 0 or block.boundary.area == 0.0:
         return costs, vals
@@ -800,50 +818,62 @@ def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | No
         if m <= seen:
             continue
         seen = m
-        costs.append(fn(ordered.iloc[:m]))
+        costs.append(_length(ordered.iloc[:m]))
         vals.append(value(ordered.iloc[:m]))
     return costs, vals
 
 
-def _cost_fn_for(block: Block, cost: str,
-                 corridor_m: float) -> Callable[[GeoDataFrame], float] | None:
-    """The `_sweep` cost_fn for `cost` ("length" | "displacement"): None (density default) for
-    "length", else cumulative buildings displaced (via block.building_points) for "displacement"."""
-    if cost == "length":
-        return None
-    if cost == "displacement":
-        return lambda prefix: float(displacement_count(block.building_points, prefix, corridor_m))
-    raise ValueError(f"cost must be 'length' or 'displacement', got {cost!r}")
+def truncate_to_length(block: Block, roads: GeoDataFrame, budget_m: float,
+                       tol: float = STREET_TOL) -> GeoDataFrame:
+    """The drainage-ordered prefix of `roads` whose cumulative length <= `budget_m` (the same order
+    _sweep uses). Empty for budget_m <= 0; all roads for budget_m >= total."""
+    if len(roads) == 0 or budget_m <= 0.0:
+        return cast(GeoDataFrame, roads.iloc[:0])
+    drain = road_drainage(block, roads, tol=tol)
+    order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
+    ordered = roads.iloc[order].reset_index(drop=True)
+    cum = ordered.geometry.length.to_numpy().cumsum()
+    m = int((cum <= budget_m + 1e-9).sum())
+    return cast(GeoDataFrame, ordered.iloc[:m])
+
+
+def matched_budget(total_length_by_method: dict[str, float]) -> float:
+    """The common render budget: the smallest method's total road length (every method can reach
+    it). 0.0 if empty."""
+    return min(total_length_by_method.values()) if total_length_by_method else 0.0
+
+
+def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64], *,
+                       corridor_m: float = 3.0, n_points: int = 20,
+                       tol: float = STREET_TOL) -> Curve:
+    """A Curve whose x is cumulative added road length (m) and whose y is Sum c_i displacement (a
+    rising COST). Reuses the drainage-ordered _sweep with displacement as the value."""
+    def _disp(prefix: GeoDataFrame | None) -> float:
+        if prefix is None or len(prefix) == 0:
+            return 0.0
+        return displacement(block.building_points, radii, prefix, corridor_m)
+
+    costs, vals = _sweep(block, roads, _disp, n_points, tol)
+    return Curve(costs, vals)
 
 
 def cost_benefit_curve(block: Block, roads: GeoDataFrame, *,
                        benefit_fn: BenefitFactory = access_benefit,
-                       cost: str = "length", corridor_m: float = 3.0,
                        n_points: int = 20, tol: float = STREET_TOL) -> Curve:
     """Order roads by drainage descending, then at n_points cumulative-length budgets score
-    benefit_fn's benefit vs the no-roads baseline. `benefit_fn` is a factory:
-    (block, roads_full) -> f(roads_prefix), given the FULL road set so it can freeze any
-    graph/entry state against it (see efficiency_benefit/directness_benefit); it is then
-    called with growing prefixes of `roads` (starting with the empty prefix as baseline).
-    `cost` selects the x-axis: "length" (road density, m/ha, default) or "displacement"
-    (cumulative buildings whose site lies in the union of committed roads' `corridor_m`
-    buffer, via block.building_points -- see `displacement_count`). Only the reported cost
-    changes; benefit is computed identically either way."""
-    cost_fn = _cost_fn_for(block, cost, corridor_m)
-    costs, benefit = _sweep(block, roads, benefit_fn(block, roads, tol=tol), n_points, tol, cost_fn)
+    benefit_fn's benefit vs the no-roads baseline. The x-axis is cumulative added road length
+    (m). `corridor_m` is gone: it only fed the deleted displacement cost-mode; benefit is
+    corridor-free."""
+    costs, benefit = _sweep(block, roads, benefit_fn(block, roads, tol=tol), n_points, tol)
     return Curve(costs, benefit)
 
 
-def efficiency_directness_curves(block: Block, roads: GeoDataFrame, *, cost: str = "length",
-                                 corridor_m: float = 3.0, n_points: int = 20,
+def efficiency_directness_curves(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
                                  tol: float = STREET_TOL) -> tuple[Curve, Curve]:
-    """ONE sampled shortest-path sweep yielding both E and directness curves. The efficiency
-    factory returns (E, directness) per prefix, so a single `_sweep` yields both -- avoids the
-    doubled ~n_points x K Dijkstra pass of scoring efficiency_benefit and directness_benefit
-    separately. `cost`/`corridor_m`: see `cost_benefit_curve`."""
-    f = _efficiency_factory(block, roads, tol)          # prefix -> (E, directness)
-    cost_fn = _cost_fn_for(block, cost, corridor_m)
-    costs, pairs = _sweep(block, roads, f, n_points, tol, cost_fn)
+    """ONE sampled shortest-path sweep yielding both E and directness curves (x = road
+    length, m)."""
+    f = _efficiency_factory(block, roads, tol)
+    costs, pairs = _sweep(block, roads, f, n_points, tol)
     return Curve(costs, [p[0] for p in pairs]), Curve(costs, [p[1] for p in pairs])
 
 

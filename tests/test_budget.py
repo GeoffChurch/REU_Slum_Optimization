@@ -1,18 +1,15 @@
-from dataclasses import replace
 from typing import cast
 
 import geopandas as gpd
 import pandas as pd
-import pytest
 from pyproj import CRS
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, MultiLineString, Point, Polygon
 
 from reblock.budget import (
     Curve,
     access_burden,
     auc,
     cost_benefit_curve,
-    displacement_count,
     road_drainage,
 )
 from reblock.contracts import Block
@@ -184,56 +181,167 @@ def test_efficiency_and_directness_are_monotone_across_the_full_curve() -> None:
             )
 
 
-def test_displacement_count_only_sites_within_the_corridor() -> None:
-    road = _roads([LineString([(0.0, 0.0), (10.0, 0.0)])])
-    pts = _points([(5.0, 0.5), (5.0, 0.99), (5.0, 2.0)])   # last one is outside a 1m corridor
-    assert displacement_count(pts, road, corridor_m=1.0) == 2
+def test_cost_axis_is_cumulative_road_length_metres() -> None:
+    block = _grid_block(5)
+    roads = DijkstraReblocker().propose(block).roads
+    assert roads is not None
+    curve = cost_benefit_curve(block, roads)
+    # x is cumulative added road length in METRES, non-decreasing, ending at total road length
+    assert curve.cost[0] == 0.0
+    assert curve.cost == sorted(curve.cost)
+    assert abs(curve.cost[-1] - float(roads.geometry.length.sum())) < 1e-6
 
 
-def test_displacement_count_overlapping_corridors_count_a_shared_site_once() -> None:
+def test_cost_benefit_curve_has_no_cost_param() -> None:
+    import inspect
+    assert "cost" not in inspect.signature(cost_benefit_curve).parameters
+
+
+def test_building_radii_are_half_nearest_neighbor():
+    import geopandas as gpd
+    from shapely.geometry import Point
+
+    from reblock.budget import building_radii
+    # three collinear points 10 m apart -> NN dist 10 for the ends, 10 for the middle -> r = 5
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(10, 0), Point(30, 0)], crs="EPSG:32734")
+    r = building_radii(pts, corridor_m=3.0)
+    assert list(r) == [5.0, 5.0, 10.0]      # 3rd point's NN is the 2nd, 20 m away -> r = 10
+
+
+def test_building_radii_fallback_when_fewer_than_two_points():
+    import geopandas as gpd
+    from shapely.geometry import Point
+
+    from reblock.budget import building_radii
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs="EPSG:32734")
+    assert list(building_radii(pts, corridor_m=3.0)) == [3.0]     # fallback = corridor_m
+
+
+def test_displacement_is_linear_ramp_in_distance_to_corridor():
+    import geopandas as gpd
+    import numpy as np
+    from shapely.geometry import LineString, Point
+
+    from reblock.budget import displacement
+    crs = "EPSG:32734"
+    # one road along y=0; corridor_m=1 -> corridor is the strip |y|<=1
+    roads = gpd.GeoDataFrame(geometry=[LineString([(-50, 0), (50, 0)])], crs=crs)
+    # point A on the corridor edge-ish (y=1 -> d=0 -> c=1); B at y=3 with r=4 -> d=2 -> c=0.5;
+    # C at y=10 with r=4 -> d=9 -> c=0 (far)
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 1), Point(0, 3), Point(0, 10)], crs=crs)
+    radii = np.array([4.0, 4.0, 4.0])
+    # d_A = dist(A, strip|y|<=1) = 0 ; d_B = 3-1 = 2 ; d_C = 10-1 = 9
+    got = displacement(pts, radii, roads, corridor_m=1.0)
+    assert abs(got - (1.0 + 0.5 + 0.0)) < 1e-6
+
+
+def test_displacement_zero_without_roads_or_points():
+    import geopandas as gpd
+    import numpy as np
+    from shapely.geometry import Point
+
+    from reblock.budget import displacement
+    crs = "EPSG:32734"
+    empty = gpd.GeoDataFrame(geometry=[], crs=crs)
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=crs)
+    assert displacement(pts, np.array([3.0]), empty, 1.0) == 0.0
+    assert displacement(empty, np.array([]), empty, 1.0) == 0.0
+
+
+def test_displacement_counts_a_shared_site_once_under_overlapping_corridors():
+    # A building whose disk sits in the OVERLAP of two roads' corridors must contribute once, not
+    # once per overlapping road -- guaranteed by `displacement`'s design (one `union_all` corridor,
+    # one `distance` per building), but worth a direct regression test since this exact scenario
+    # used to be covered by the now-deleted `displacement_count` overlap test.
+    from reblock.budget import building_radii, displacement
+    crs = "EPSG:32734"
     road_a = LineString([(0.0, 0.0), (5.0, 0.0)])
     road_b = LineString([(4.0, 0.0), (10.0, 0.0)])          # overlaps road_a's corridor near x=4-5
-    roads = _roads([road_a, road_b])
-    pts = _points([(1.0, 0.5), (9.0, 0.5), (4.5, 0.5)])     # last one sits in BOTH corridors
-    assert displacement_count(pts, roads, corridor_m=1.0) == 3   # each site counted once, not 4
+    roads = gpd.GeoDataFrame(geometry=[road_a, road_b], crs=crs)
+    pts = gpd.GeoDataFrame(geometry=[Point(1.0, 0.5), Point(9.0, 0.5), Point(4.5, 0.5)], crs=crs)
+    # the 3rd point sits in BOTH corridors; all 3 are >=1.75 m from every other point (r >= 1.75)
+    # and sit right on the (y=0) road line (d=0) -- each c_i = 1.0, so the sum must be exactly 3.0.
+    radii = building_radii(pts, corridor_m=1.0)
+    assert displacement(pts, radii, roads, corridor_m=1.0) == 3.0
 
 
-def test_displacement_count_zero_when_no_points_or_no_roads() -> None:
-    road = _roads([LineString([(0.0, 0.0), (10.0, 0.0)])])
-    pts = _points([(5.0, 0.0)])
-    empty_pts = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
-    empty_roads = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
-    assert displacement_count(empty_pts, road, corridor_m=1.0) == 0
-    assert displacement_count(pts, empty_roads, corridor_m=1.0) == 0
+def _straight_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
+    # Two 10m-wide parcels side by side, both fronting a street along y=0; road1 (x=5) serves
+    # the left parcel, road2 (x=15) serves the right one -- disjoint 3m corridors, so a
+    # building point only picks up displacement once ITS road is in the drainage-ordered prefix.
+    left = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    right = Polygon([(10, 0), (20, 0), (20, 10), (10, 10)])
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[left, right], crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (20, 0)])], crs=UTM)
+    points = _points([(5.0, 5.0), (15.0, 5.0)])
+    block = Block(block_id="two_roads", crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=streets, building_points=points)
+    roads = _roads([LineString([(5, 0), (5, 10)]), LineString([(15, 0), (15, 10)])])
+    return block, roads
 
 
-def test_cost_benefit_curve_displacement_cost_axis_is_cumulative_displaced() -> None:
-    # Two sites sit exactly on Dijkstra's two highest-drainage road segments (distance 0 from
-    # the merged network); a third sits ~1.27m off the whole network -- outside a 1m corridor.
-    block = replace(_grid_block(5), building_points=_points([(0.5, 2.0), (2.0, 2.5), (4.9, 4.9)]))
-    roads = DijkstraReblocker().propose(block).roads
-    assert roads is not None
-    curve_len = cost_benefit_curve(block, roads, n_points=10)
-    curve_disp = cost_benefit_curve(block, roads, cost="displacement", corridor_m=1.0, n_points=10)
-    # Only the x-axis changes: same prefixes -> identical benefit.
-    assert curve_disp.benefit == curve_len.benefit
-    assert curve_disp.cost == sorted(curve_disp.cost)          # monotone non-decreasing
-    assert curve_disp.cost[0] == 0.0
-    assert curve_disp.cost[-1] == displacement_count(block.building_points, roads, corridor_m=1.0)
-    assert curve_disp.cost[-1] == 2.0                    # the two on-network sites, not the third
+def test_truncate_to_length_keeps_drainage_prefix():
+    from reblock.budget import truncate_to_length
+    block, roads = _straight_block_with_two_roads()   # or the shared curve fixture
+    total = float(roads.geometry.length.sum())
+    assert float(truncate_to_length(block, roads, total).geometry.length.sum()) == total
+    assert len(truncate_to_length(block, roads, 0.0)) == 0
+    half = truncate_to_length(block, roads, total / 2.0)
+    assert 0.0 < float(half.geometry.length.sum()) <= total / 2.0 + 1e-6
 
 
-def test_cost_benefit_curve_displacement_degenerates_without_building_points() -> None:
-    block = _grid_block(5)   # building_points defaults to empty
-    roads = DijkstraReblocker().propose(block).roads
-    assert roads is not None
-    curve = cost_benefit_curve(block, roads, cost="displacement", corridor_m=3.0, n_points=5)
-    assert curve.cost == [0.0] * len(curve.cost)               # degenerate, no crash
+def _trunk_leaf_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
+    # Road 0 (lower index) is a leaf that drains ONE parcel; road 1 (higher index) is a trunk with
+    # a Y-branch off a shared stem that drains TWO -- so drainage order (road 1 first) DISAGREES
+    # with input-index order (road 0 first). `_straight_block_with_two_roads` can't discriminate
+    # this: both its roads score drain=0, so sort key (-drain[i], i) degenerates to index order
+    # there and a sort that silently dropped the drainage term would still pass.
+    leaf_parcel = Polygon([(5, 10), (9, 10), (9, 14), (5, 14)])       # corner at road 0's tip
+    trunk_left = Polygon([(16, 10), (20, 10), (20, 14), (16, 14)])    # corner at trunk's left tip
+    trunk_right = Polygon([(30, 10), (34, 10), (34, 14), (30, 14)])   # corner at trunk's right tip
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1, 2]},
+                               geometry=[leaf_parcel, trunk_left, trunk_right], crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (40, 0)])], crs=UTM)
+    block = Block(block_id="trunk_leaf", crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=streets)
+    roads = gpd.GeoDataFrame(geometry=[
+        LineString([(5, 0), (5, 10)]),                                # road 0: leaf, drains 1
+        MultiLineString([
+            LineString([(25, 0), (25, 5)]),
+            LineString([(25, 5), (20, 10)]),
+            LineString([(25, 5), (30, 10)]),
+        ]),                                                           # road 1: trunk, drains 4
+    ], crs=UTM)
+    return block, roads
 
 
-def test_cost_benefit_curve_rejects_an_unknown_cost() -> None:
-    block = _grid_block(3)
-    roads = DijkstraReblocker().propose(block).roads
-    assert roads is not None
-    with pytest.raises(ValueError, match="cost"):
-        cost_benefit_curve(block, roads, cost="bogus")
+def test_truncate_to_length_orders_by_drainage_not_index():
+    # Discriminator for the coverage gap above: with drainage genuinely differing across roads,
+    # a budget wide enough for exactly one road must keep the HIGHER-drainage trunk (road 1) even
+    # though it has the LARGER index -- an index-order (or drainage-ascending) sort would instead
+    # wrongly keep the lower-drainage leaf (road 0).
+    from reblock.budget import road_drainage, truncate_to_length
+    block, roads = _trunk_leaf_block_with_two_roads()
+    drain = road_drainage(block, roads)
+    assert drain[1] > drain[0]                          # drainage order disagrees with index order
+    lengths = roads.geometry.length.to_numpy()
+    budget = float(lengths.max()) + 0.5                 # room for exactly one road, whichever first
+    assert budget < float(lengths.sum())                # ... but not both
+    result = truncate_to_length(block, roads, budget)
+    assert len(result) == 1
+    assert result.geometry.iloc[0].equals(roads.geometry.iloc[1])   # kept the higher-drainage trunk
+
+
+def test_displacement_curve_is_monotonic_and_ends_at_full():
+    import numpy as np
+
+    from reblock.budget import displacement, displacement_curve
+    block, roads = _straight_block_with_two_roads()
+    radii = np.full(len(block.building_points), 3.0)
+    curve = displacement_curve(block, roads, radii, corridor_m=3.0)
+    assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
+    assert curve.benefit == sorted(curve.benefit)     # non-decreasing displacement
+    assert abs(curve.benefit[-1]
+               - displacement(block.building_points, radii, roads, 3.0)) < 1e-6

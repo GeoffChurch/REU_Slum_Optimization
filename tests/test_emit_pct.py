@@ -1,4 +1,5 @@
 import geopandas as gpd
+import numpy as np
 from shapely.geometry import LineString, Point
 
 from reblock.emit import pct_displaced, pct_paved
@@ -23,16 +24,22 @@ def test_pct_paved_empty_or_zero_area_is_zero() -> None:
     assert pct_paved(_roads([(0, 0), (100, 0)]), 3.0, 0.0) == 0.0
 
 
-def test_pct_displaced_is_fraction_of_points_in_corridor() -> None:
+def test_pct_displaced_is_mean_disk_graze_probability() -> None:
+    # pct_displaced now wires to reblock.budget.displacement (Sum c_i / n), whose disk-graze
+    # arithmetic is unit-tested in test_budget -- this just checks the wiring. Two points sit ON
+    # the corridor (d=0 -> c=1 regardless of radius), two sit well clear of it (d >> r -> c=0), so
+    # Sum c_i == 2 and pct_displaced == 2/4 == 0.5.
     roads = _roads([(0, 0), (100, 0)])          # corridor is |y| <= 3 along the x-axis
     pts = gpd.GeoDataFrame(geometry=[Point(50, 0), Point(50, 1), Point(50, 50), Point(50, 80)],
                            crs="EPSG:32734")     # first two inside, last two outside
-    assert abs(pct_displaced(roads, 3.0, pts) - 0.5) < 1e-9
+    radii = np.full(len(pts), 5.0)
+    assert abs(pct_displaced(roads, 3.0, pts, radii) - 0.5) < 1e-9
 
 
 def test_pct_displaced_empty_roads_or_no_points_is_zero() -> None:
     pts = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs="EPSG:32734")
-    assert pct_displaced(gpd.GeoDataFrame(geometry=[], crs="EPSG:32734"), 3.0, pts) == 0.0
-    assert pct_displaced(None, 3.0, pts) == 0.0
-    assert pct_displaced(_roads([(0, 0), (100, 0)]), 3.0,
-                         gpd.GeoDataFrame(geometry=[], crs="EPSG:32734")) == 0.0
+    radii = np.full(len(pts), 5.0)
+    assert pct_displaced(gpd.GeoDataFrame(geometry=[], crs="EPSG:32734"), 3.0, pts, radii) == 0.0
+    assert pct_displaced(None, 3.0, pts, radii) == 0.0
+    empty_pts = gpd.GeoDataFrame(geometry=[], crs="EPSG:32734")
+    assert pct_displaced(_roads([(0, 0), (100, 0)]), 3.0, empty_pts, np.zeros(0)) == 0.0

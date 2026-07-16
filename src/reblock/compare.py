@@ -19,7 +19,9 @@ from shapely.ops import unary_union
 from reblock.budget import (
     Curve,
     access_benefit,
+    building_radii,
     cost_benefit_curve,
+    displacement_curve,
     efficiency_directness_curves,
     resistance_benefit,
 )
@@ -92,13 +94,10 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
     methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in names]
     _expand_method_sweep(cfg, names, methods)   # optional: sweep one base method over a param
     regions = build_regions(source, screen, region_builder, block_groups, cfg.max_blocks)
-    cost = str(cfg.get("cost", "length"))   # curve x-axis: "length" (m/ha) | "displacement"
     corridor_m = float(cfg.get("corridor_m", 3.0))
 
-    # one curve per (region, method, metric); a per-(region, metric) common cost cap = the max
-    # full road density (the cost axis is metric-independent, so this cap is the same across
-    # metrics for a given region -- grouping by (region_label, metric) is still the clean
-    # structure).
+    # one curve per (region, method, metric); the cost axis is always cumulative added road
+    # length (m) -- metric-independent, so no shared cap needs computing (see emit.compare_report).
     raw: list[tuple[str, str, str, Curve, float, float]] = []
     for region in regions:
         if not region:
@@ -122,19 +121,19 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
                 block = result.block
                 roads = cast(GeoDataFrame, result.proposal.roads)
             block_area = float(block.parcels.geometry.union_all().area)
+            radii = building_radii(block.building_points, corridor_m)
             pp = pct_paved(roads, corridor_m, block_area)
-            pd_ = pct_displaced(roads, corridor_m, block.building_points)
-            access = cost_benefit_curve(block, roads, benefit_fn=access_benefit,
-                                        cost=cost, corridor_m=corridor_m)
-            eff, direct = efficiency_directness_curves(block, roads, cost=cost,
-                                                       corridor_m=corridor_m)   # one sweep -> both
-            resistance = cost_benefit_curve(block, roads, benefit_fn=resistance_benefit,
-                                            cost=cost, corridor_m=corridor_m)
+            pd_ = pct_displaced(roads, corridor_m, block.building_points, radii)
+            access = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
+            eff, direct = efficiency_directness_curves(block, roads)
+            resistance = cost_benefit_curve(block, roads, benefit_fn=resistance_benefit)
+            disp = displacement_curve(block, roads, radii, corridor_m=corridor_m)
             raw.append((name, label, "access", access, pp, pd_))
             raw.append((name, label, "efficiency", eff, pp, pd_))
             raw.append((name, label, "directness", direct, pp, pd_))
             raw.append((name, label, "resistance", resistance, pp, pd_))
-    # No cross-method normalization: the frontier is reported as raw (road density, benefit)
+            raw.append((name, label, "displacement", disp, pp, pd_))
+    # No cross-method normalization: the frontier is reported as raw (road length, benefit)
     # samples per method (see emit.compare_report), so there's no shared cost cap to compute.
     return [MethodCurve(m, label, metric, c, pct_paved=pp, pct_displaced=pd_)
             for m, label, metric, c, pp, pd_ in raw]
@@ -144,19 +143,19 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
 def main(cfg: DictConfig) -> None:
     results = compare(cfg)
     out_dir = Path(HydraConfig.get().runtime.output_dir)
-    cost = str(cfg.get("cost", "length"))
     # The canonical registry drives per-method curve colours: `all_methods` is the global method
     # list, and `compare()` has already merged any `method_sweep` variants into it, so this covers
     # every method that could appear in `results`. A method's colour is its index here -- the full
     # registry, not the run's selected subset -- so it stays put when a pass drops another method.
-    compare_report(results, out_dir, cost=cost, method_order=[str(k) for k in cfg.all_methods])
-    if cost == "displacement":   # AUC inverts on the displacement axis -- log benefit + displaced
-        for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
-            log.info("%s %s %s: benefit=%.3f, %d displaced", r.metric, r.block_id, r.method,
-                     r.curve.benefit[-1], int(r.curve.cost[-1]))
-    else:   # frontier: log each method's terminal (benefit, road density, %paved) -- no scalar rank
-        for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
-            log.info("%s %s %s: benefit=%.3f at %.0f m/ha (%.1f%% paved)", r.metric, r.block_id,
+    compare_report(results, out_dir, method_order=[str(k) for k in cfg.all_methods])
+    # Log each method's terminal: the four benefit metrics (benefit, road length, %paved) -- no
+    # scalar rank -- and the displacement metric (rising cost, never inverted) separately.
+    for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
+        if r.metric == "displacement":
+            log.info("%s %s: %.1f displaced (%.1f%% of homes)", r.block_id, r.method,
+                     r.curve.benefit[-1], r.pct_displaced * 100)
+        else:
+            log.info("%s %s %s: benefit=%.3f at %.0f m (%.1f%% paved)", r.metric, r.block_id,
                      r.method, r.curve.benefit[-1], r.curve.cost[-1], r.pct_paved * 100)
 
 
