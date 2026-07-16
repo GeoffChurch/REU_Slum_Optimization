@@ -248,6 +248,23 @@ def test_displacement_zero_without_roads_or_points():
     assert displacement(empty, np.array([]), empty, 1.0) == 0.0
 
 
+def test_displacement_counts_a_shared_site_once_under_overlapping_corridors():
+    # A building whose disk sits in the OVERLAP of two roads' corridors must contribute once, not
+    # once per overlapping road -- guaranteed by `displacement`'s design (one `union_all` corridor,
+    # one `distance` per building), but worth a direct regression test since this exact scenario
+    # used to be covered by the now-deleted `displacement_count` overlap test.
+    from reblock.budget import building_radii, displacement
+    crs = "EPSG:32734"
+    road_a = LineString([(0.0, 0.0), (5.0, 0.0)])
+    road_b = LineString([(4.0, 0.0), (10.0, 0.0)])          # overlaps road_a's corridor near x=4-5
+    roads = gpd.GeoDataFrame(geometry=[road_a, road_b], crs=crs)
+    pts = gpd.GeoDataFrame(geometry=[Point(1.0, 0.5), Point(9.0, 0.5), Point(4.5, 0.5)], crs=crs)
+    # the 3rd point sits in BOTH corridors; all 3 are >=1.75 m from every other point (r >= 1.75)
+    # and sit right on the (y=0) road line (d=0) -- each c_i = 1.0, so the sum must be exactly 3.0.
+    radii = building_radii(pts, corridor_m=1.0)
+    assert displacement(pts, radii, roads, corridor_m=1.0) == 3.0
+
+
 def _straight_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
     # Two 10m-wide parcels side by side, both fronting a street along y=0; road1 (x=5) serves
     # the left parcel, road2 (x=15) serves the right one -- disjoint 3m corridors, so a
