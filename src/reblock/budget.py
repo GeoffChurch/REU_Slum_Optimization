@@ -833,6 +833,34 @@ def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | No
     return costs, vals
 
 
+def truncate_to_length(block: Block, roads: GeoDataFrame, budget_m: float,
+                       tol: float = STREET_TOL) -> GeoDataFrame:
+    """The drainage-ordered prefix of `roads` whose cumulative length <= `budget_m` (the same order
+    _sweep uses). Empty for budget_m <= 0; all roads for budget_m >= total."""
+    if len(roads) == 0 or budget_m <= 0.0:
+        return cast(GeoDataFrame, roads.iloc[:0])
+    drain = road_drainage(block, roads, tol=tol)
+    order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
+    ordered = roads.iloc[order].reset_index(drop=True)
+    cum = ordered.geometry.length.to_numpy().cumsum()
+    m = int((cum <= budget_m + 1e-9).sum())
+    return cast(GeoDataFrame, ordered.iloc[:m])
+
+
+def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64], *,
+                       corridor_m: float = 3.0, n_points: int = 20,
+                       tol: float = STREET_TOL) -> Curve:
+    """A Curve whose x is cumulative added road length (m) and whose y is Sum c_i displacement (a
+    rising COST). Reuses the drainage-ordered _sweep with displacement as the value."""
+    def _disp(prefix: GeoDataFrame | None) -> float:
+        if prefix is None or len(prefix) == 0:
+            return 0.0
+        return displacement(block.building_points, radii, prefix, corridor_m)
+
+    costs, vals = _sweep(block, roads, _disp, n_points, tol)
+    return Curve(costs, vals)
+
+
 def cost_benefit_curve(block: Block, roads: GeoDataFrame, *,
                        benefit_fn: BenefitFactory = access_benefit,
                        n_points: int = 20, tol: float = STREET_TOL) -> Curve:

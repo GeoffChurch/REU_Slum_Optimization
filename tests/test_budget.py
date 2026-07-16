@@ -264,3 +264,41 @@ def test_displacement_zero_without_roads_or_points():
     pts = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=crs)
     assert displacement(pts, np.array([3.0]), empty, 1.0) == 0.0
     assert displacement(empty, np.array([]), empty, 1.0) == 0.0
+
+
+def _straight_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
+    # Two 10m-wide parcels side by side, both fronting a street along y=0; road1 (x=5) serves
+    # the left parcel, road2 (x=15) serves the right one -- disjoint 3m corridors, so a
+    # building point only picks up displacement once ITS road is in the drainage-ordered prefix.
+    left = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    right = Polygon([(10, 0), (20, 0), (20, 10), (10, 10)])
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[left, right], crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (20, 0)])], crs=UTM)
+    points = _points([(5.0, 5.0), (15.0, 5.0)])
+    block = Block(block_id="two_roads", crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=streets, building_points=points)
+    roads = _roads([LineString([(5, 0), (5, 10)]), LineString([(15, 0), (15, 10)])])
+    return block, roads
+
+
+def test_truncate_to_length_keeps_drainage_prefix():
+    from reblock.budget import truncate_to_length
+    block, roads = _straight_block_with_two_roads()   # or the shared curve fixture
+    total = float(roads.geometry.length.sum())
+    assert float(truncate_to_length(block, roads, total).geometry.length.sum()) == total
+    assert len(truncate_to_length(block, roads, 0.0)) == 0
+    half = truncate_to_length(block, roads, total / 2.0)
+    assert 0.0 < float(half.geometry.length.sum()) <= total / 2.0 + 1e-6
+
+
+def test_displacement_curve_is_monotonic_and_ends_at_full():
+    import numpy as np
+    from reblock.budget import displacement, displacement_curve
+    block, roads = _straight_block_with_two_roads()
+    radii = np.full(len(block.building_points), 3.0)
+    curve = displacement_curve(block, roads, radii, corridor_m=3.0)
+    assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
+    assert curve.benefit == sorted(curve.benefit)     # non-decreasing displacement
+    assert abs(curve.benefit[-1]
+               - displacement(block.building_points, radii, roads, 3.0)) < 1e-6
