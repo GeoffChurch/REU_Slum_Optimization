@@ -3,7 +3,7 @@ from typing import cast
 import geopandas as gpd
 import pandas as pd
 from pyproj import CRS
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, MultiLineString, Point, Polygon
 
 from reblock.budget import (
     Curve,
@@ -224,6 +224,7 @@ def test_cost_benefit_curve_has_no_cost_param() -> None:
 def test_building_radii_are_half_nearest_neighbor():
     import geopandas as gpd
     from shapely.geometry import Point
+
     from reblock.budget import building_radii
     # three collinear points 10 m apart -> NN dist 10 for the ends, 10 for the middle -> r = 5
     pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(10, 0), Point(30, 0)], crs="EPSG:32734")
@@ -234,14 +235,17 @@ def test_building_radii_are_half_nearest_neighbor():
 def test_building_radii_fallback_when_fewer_than_two_points():
     import geopandas as gpd
     from shapely.geometry import Point
+
     from reblock.budget import building_radii
     pts = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs="EPSG:32734")
     assert list(building_radii(pts, corridor_m=3.0)) == [3.0]     # fallback = corridor_m
 
 
 def test_displacement_is_linear_ramp_in_distance_to_corridor():
-    import geopandas as gpd, numpy as np
-    from shapely.geometry import Point, LineString
+    import geopandas as gpd
+    import numpy as np
+    from shapely.geometry import LineString, Point
+
     from reblock.budget import displacement
     crs = "EPSG:32734"
     # one road along y=0; corridor_m=1 -> corridor is the strip |y|<=1
@@ -256,8 +260,10 @@ def test_displacement_is_linear_ramp_in_distance_to_corridor():
 
 
 def test_displacement_zero_without_roads_or_points():
-    import geopandas as gpd, numpy as np
+    import geopandas as gpd
+    import numpy as np
     from shapely.geometry import Point
+
     from reblock.budget import displacement
     crs = "EPSG:32734"
     empty = gpd.GeoDataFrame(geometry=[], crs=crs)
@@ -292,8 +298,52 @@ def test_truncate_to_length_keeps_drainage_prefix():
     assert 0.0 < float(half.geometry.length.sum()) <= total / 2.0 + 1e-6
 
 
+def _trunk_leaf_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
+    # Road 0 (lower index) is a leaf that drains ONE parcel; road 1 (higher index) is a trunk with
+    # a Y-branch off a shared stem that drains TWO -- so drainage order (road 1 first) DISAGREES
+    # with input-index order (road 0 first). `_straight_block_with_two_roads` can't discriminate
+    # this: both its roads score drain=0, so sort key (-drain[i], i) degenerates to index order
+    # there and a sort that silently dropped the drainage term would still pass.
+    leaf_parcel = Polygon([(5, 10), (9, 10), (9, 14), (5, 14)])       # corner at road 0's tip
+    trunk_left = Polygon([(16, 10), (20, 10), (20, 14), (16, 14)])    # corner at trunk's left tip
+    trunk_right = Polygon([(30, 10), (34, 10), (34, 14), (30, 14)])   # corner at trunk's right tip
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1, 2]},
+                               geometry=[leaf_parcel, trunk_left, trunk_right], crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (40, 0)])], crs=UTM)
+    block = Block(block_id="trunk_leaf", crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=streets)
+    roads = gpd.GeoDataFrame(geometry=[
+        LineString([(5, 0), (5, 10)]),                                # road 0: leaf, drains 1
+        MultiLineString([
+            LineString([(25, 0), (25, 5)]),
+            LineString([(25, 5), (20, 10)]),
+            LineString([(25, 5), (30, 10)]),
+        ]),                                                           # road 1: trunk, drains 4
+    ], crs=UTM)
+    return block, roads
+
+
+def test_truncate_to_length_orders_by_drainage_not_index():
+    # Discriminator for the coverage gap above: with drainage genuinely differing across roads,
+    # a budget wide enough for exactly one road must keep the HIGHER-drainage trunk (road 1) even
+    # though it has the LARGER index -- an index-order (or drainage-ascending) sort would instead
+    # wrongly keep the lower-drainage leaf (road 0).
+    from reblock.budget import road_drainage, truncate_to_length
+    block, roads = _trunk_leaf_block_with_two_roads()
+    drain = road_drainage(block, roads)
+    assert drain[1] > drain[0]                          # drainage order disagrees with index order
+    lengths = roads.geometry.length.to_numpy()
+    budget = float(lengths.max()) + 0.5                 # room for exactly one road, whichever first
+    assert budget < float(lengths.sum())                # ... but not both
+    result = truncate_to_length(block, roads, budget)
+    assert len(result) == 1
+    assert result.geometry.iloc[0].equals(roads.geometry.iloc[1])   # kept the higher-drainage trunk
+
+
 def test_displacement_curve_is_monotonic_and_ends_at_full():
     import numpy as np
+
     from reblock.budget import displacement, displacement_curve
     block, roads = _straight_block_with_two_roads()
     radii = np.full(len(block.building_points), 3.0)
