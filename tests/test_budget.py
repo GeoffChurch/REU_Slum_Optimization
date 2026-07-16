@@ -219,3 +219,48 @@ def test_cost_axis_is_cumulative_road_length_metres() -> None:
 def test_cost_benefit_curve_has_no_cost_param() -> None:
     import inspect
     assert "cost" not in inspect.signature(cost_benefit_curve).parameters
+
+
+def test_building_radii_are_half_nearest_neighbor():
+    import geopandas as gpd
+    from shapely.geometry import Point
+    from reblock.budget import building_radii
+    # three collinear points 10 m apart -> NN dist 10 for the ends, 10 for the middle -> r = 5
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(10, 0), Point(30, 0)], crs="EPSG:32734")
+    r = building_radii(pts, corridor_m=3.0)
+    assert list(r) == [5.0, 5.0, 10.0]      # 3rd point's NN is the 2nd, 20 m away -> r = 10
+
+
+def test_building_radii_fallback_when_fewer_than_two_points():
+    import geopandas as gpd
+    from shapely.geometry import Point
+    from reblock.budget import building_radii
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs="EPSG:32734")
+    assert list(building_radii(pts, corridor_m=3.0)) == [3.0]     # fallback = corridor_m
+
+
+def test_displacement_is_linear_ramp_in_distance_to_corridor():
+    import geopandas as gpd, numpy as np
+    from shapely.geometry import Point, LineString
+    from reblock.budget import displacement
+    crs = "EPSG:32734"
+    # one road along y=0; corridor_m=1 -> corridor is the strip |y|<=1
+    roads = gpd.GeoDataFrame(geometry=[LineString([(-50, 0), (50, 0)])], crs=crs)
+    # point A on the corridor edge-ish (y=1 -> d=0 -> c=1); B at y=3 with r=4 -> d=2 -> c=0.5;
+    # C at y=10 with r=4 -> d=9 -> c=0 (far)
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 1), Point(0, 3), Point(0, 10)], crs=crs)
+    radii = np.array([4.0, 4.0, 4.0])
+    # d_A = dist(A, strip|y|<=1) = 0 ; d_B = 3-1 = 2 ; d_C = 10-1 = 9
+    got = displacement(pts, radii, roads, corridor_m=1.0)
+    assert abs(got - (1.0 + 0.5 + 0.0)) < 1e-6
+
+
+def test_displacement_zero_without_roads_or_points():
+    import geopandas as gpd, numpy as np
+    from shapely.geometry import Point
+    from reblock.budget import displacement
+    crs = "EPSG:32734"
+    empty = gpd.GeoDataFrame(geometry=[], crs=crs)
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=crs)
+    assert displacement(pts, np.array([3.0]), empty, 1.0) == 0.0
+    assert displacement(empty, np.array([]), empty, 1.0) == 0.0

@@ -15,9 +15,11 @@ import numpy as np
 import pandas as pd
 import shapely
 from geopandas import GeoDataFrame
+from numpy.typing import NDArray
 from scipy.sparse import csr_matrix, diags
 from scipy.sparse.csgraph import connected_components, dijkstra
 from scipy.sparse.linalg import factorized
+from scipy.spatial import cKDTree
 from shapely import STRtree
 from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
@@ -43,6 +45,38 @@ def displacement_count(building_points: GeoDataFrame, roads: GeoDataFrame,
         return 0
     corridor = roads.geometry.buffer(corridor_m).union_all()
     return int(building_points.geometry.within(corridor).sum())
+
+
+def building_radii(building_points: GeoDataFrame, corridor_m: float) -> NDArray[np.float64]:
+    """Per-building disk radius = HALF the nearest-neighbor distance among the building points (the
+    fair, non-overlapping 'as big as possible' footprint bound). Fewer than 2 points -> no neighbor,
+    so fall back to `corridor_m`. Coincident points get radius 0 (handled by `displacement`)."""
+    n = len(building_points)
+    if n == 0:
+        return np.zeros(0, dtype=np.float64)
+    if n < 2:
+        return np.full(n, float(corridor_m), dtype=np.float64)
+    xy = np.column_stack([building_points.geometry.x.to_numpy(),
+                          building_points.geometry.y.to_numpy()])
+    dist, _ = cKDTree(xy).query(xy, k=2)     # k=2: self (0) + nearest other
+    return (dist[:, 1] * 0.5).astype(np.float64)
+
+
+def displacement(building_points: GeoDataFrame, radii: NDArray[np.float64],
+                 roads: GeoDataFrame, corridor_m: float) -> float:
+    """Extent-aware expected homes displaced: each building is a disk (radius `radii[i]`); its
+    contribution is the probability the road corridor grazes it under a uniform size prior,
+    c_i = max(0, 1 - d_i/r_i), d_i = distance from the point to roads.buffer(corridor_m). r_i = 0
+    (coincident points) counts iff d_i = 0. Returns Sum c_i; 0 with no roads or no points."""
+    n = len(building_points)
+    if n == 0 or roads is None or len(roads) == 0:
+        return 0.0
+    corridor = roads.geometry.buffer(corridor_m).union_all()
+    d = building_points.geometry.distance(corridor).to_numpy()
+    r = np.asarray(radii, dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        c = np.where(r > 0.0, 1.0 - d / r, np.where(d <= 0.0, 1.0, 0.0))
+    return float(np.clip(c, 0.0, 1.0).sum())
 
 
 def access_burden(depths: pd.Series) -> float:
