@@ -1,32 +1,22 @@
-### method-comparison — length (frontier: topology, clearance, arterial, osm_footpaths)
-[2026-07-15 23:44:00,624][__main__][INFO] - ZAF.9.3.1_1_40972 map: https://www.google.com/maps/@-33.97795,18.58064,18z
-[2026-07-15 23:50:55,298][__main__][INFO] - access ZAF.9.3.1_1_40972 topology: benefit=0.921 at 620 m/ha (38.7% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - access ZAF.9.3.1_1_40972 clearance: benefit=0.827 at 323 m/ha (20.4% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - access ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.764 at 267 m/ha (16.2% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - access ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.761 at 425 m/ha (25.2% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - directness ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.257 at 267 m/ha (16.2% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - directness ZAF.9.3.1_1_40972 topology: benefit=0.121 at 620 m/ha (38.7% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - directness ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.069 at 425 m/ha (25.2% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - directness ZAF.9.3.1_1_40972 clearance: benefit=0.053 at 323 m/ha (20.4% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.006 at 267 m/ha (16.2% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 topology: benefit=0.004 at 620 m/ha (38.7% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 clearance: benefit=0.002 at 323 m/ha (20.4% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.002 at 425 m/ha (25.2% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - resistance ZAF.9.3.1_1_40972 topology: benefit=0.626 at 620 m/ha (38.7% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - resistance ZAF.9.3.1_1_40972 clearance: benefit=0.425 at 323 m/ha (20.4% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - resistance ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.389 at 267 m/ha (16.2% paved)
-[2026-07-15 23:50:55,298][__main__][INFO] - resistance ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.365 at 425 m/ha (25.2% paved)
-### method-comparison — displacement (clearance, arterial, osm_footpaths)
-[2026-07-15 23:52:44,958][__main__][INFO] - ZAF.9.3.1_1_40972 map: https://www.google.com/maps/@-33.97795,18.58064,18z
-[2026-07-15 23:52:46,091][__main__][INFO] - access ZAF.9.3.1_1_40972 clearance: benefit=0.827, 53 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - access ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.764, 32 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - access ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.761, 49 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - directness ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.257, 32 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - directness ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.069, 49 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - directness ZAF.9.3.1_1_40972 clearance: benefit=0.053, 53 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.006, 32 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 clearance: benefit=0.002, 53 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.002, 49 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - resistance ZAF.9.3.1_1_40972 clearance: benefit=0.425, 53 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - resistance ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.389, 32 displaced
-[2026-07-15 23:52:46,091][__main__][INFO] - resistance ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.365, 49 displaced
+### method-comparison (frontier: topology, clearance, arterial, osm_footpaths; displacement curve)
+[2026-07-16 12:46:50,077][__main__][INFO] - ZAF.9.3.1_1_40972 map: https://www.google.com/maps/@-33.97795,18.58064,18z
+[2026-07-16 12:54:13,148][__main__][INFO] - access ZAF.9.3.1_1_40972 topology: benefit=0.921 at 934 m (38.7% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - access ZAF.9.3.1_1_40972 clearance: benefit=0.827 at 486 m (20.4% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - access ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.764 at 401 m (16.2% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - access ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.761 at 639 m (25.2% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - directness ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.257 at 401 m (16.2% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - directness ZAF.9.3.1_1_40972 topology: benefit=0.121 at 934 m (38.7% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - directness ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.069 at 639 m (25.2% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - directness ZAF.9.3.1_1_40972 clearance: benefit=0.053 at 486 m (20.4% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - ZAF.9.3.1_1_40972 topology: 160.2 displaced (60.9% of homes)
+[2026-07-16 12:54:13,148][__main__][INFO] - ZAF.9.3.1_1_40972 clearance: 87.8 displaced (33.4% of homes)
+[2026-07-16 12:54:13,148][__main__][INFO] - ZAF.9.3.1_1_40972 osm_footpaths: 74.7 displaced (28.4% of homes)
+[2026-07-16 12:54:13,148][__main__][INFO] - ZAF.9.3.1_1_40972 greedy_arterial_buildable: 62.0 displaced (23.6% of homes)
+[2026-07-16 12:54:13,148][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.006 at 401 m (16.2% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 topology: benefit=0.004 at 934 m (38.7% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 clearance: benefit=0.002 at 486 m (20.4% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - efficiency ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.002 at 639 m (25.2% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - resistance ZAF.9.3.1_1_40972 topology: benefit=0.626 at 934 m (38.7% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - resistance ZAF.9.3.1_1_40972 clearance: benefit=0.425 at 486 m (20.4% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - resistance ZAF.9.3.1_1_40972 greedy_arterial_buildable: benefit=0.389 at 401 m (16.2% paved)
+[2026-07-16 12:54:13,148][__main__][INFO] - resistance ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.365 at 639 m (25.2% paved)
