@@ -80,11 +80,11 @@ def test_all_interior_parcels_connected() -> None:
 
     from reblock.derive.parcel_graph import to_parcel_graph
     ppg = to_parcel_graph(_grid(3))
-    ppg.graph.define_roads()  # type: ignore[no-untyped-call]
-    ppg.graph.define_interior_parcels()  # type: ignore[no-untyped-call]
+    ppg.graph.define_roads()
+    ppg.graph.define_interior_parcels()
     random.seed(0)
-    build_all_roads(ppg.graph, alpha=2.0, vquiet=True)  # type: ignore[no-untyped-call]
-    ppg.graph.define_interior_parcels()  # type: ignore[no-untyped-call]
+    build_all_roads(ppg.graph, alpha=2.0, vquiet=True)
+    ppg.graph.define_interior_parcels()
     assert len(ppg.graph.interior_parcels) == 0
 
 

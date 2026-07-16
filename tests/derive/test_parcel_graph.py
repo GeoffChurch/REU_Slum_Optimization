@@ -83,7 +83,7 @@ def test_clean_up_geometry_fixes_near_duplicate_shared_vertex_pinch_point() -> N
                   parcels=parcels, streets=streets)
 
     origin = parcel_origin(block.parcels)
-    raw = graphFromMyFaces(_myfaces_from_parcels(block.parcels, origin))  # type: ignore[no-untyped-call]
+    raw = graphFromMyFaces(_myfaces_from_parcels(block.parcels, origin))
     assert len(raw.inner_facelist) == 0  # the bug clean_up_geometry exists to fix
 
     ppg = to_parcel_graph(block)  # the shipped path: includes clean_up_geometry
@@ -158,14 +158,14 @@ def test_derivation_matches_topology_native_ring_construction() -> None:
     for block in blocks:
         origin = parcel_origin(block.parcels)
 
-        ours = graphFromMyFaces(_myfaces_from_parcels(block.parcels, origin))  # type: ignore[no-untyped-call]
+        ours = graphFromMyFaces(_myfaces_from_parcels(block.parcels, origin))
 
         rezero = np.array(origin)
         shapes = []
         for geom in block.parcels.geometry:
             assert isinstance(geom, Polygon)
             shapes.append(_FakeShape(np.asarray(geom.exterior.coords)))
-        native = graphFromShapes(shapes, name=block.block_id, rezero=rezero)  # type: ignore[no-untyped-call]
+        native = graphFromShapes(shapes, name=block.block_id, rezero=rezero)
 
         same = (set(ours.G.nodes()) == set(native.G.nodes())
                 and set(ours.myedges()) == set(native.myedges())
