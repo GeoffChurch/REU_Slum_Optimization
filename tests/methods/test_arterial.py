@@ -5,7 +5,7 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
-from reblock.budget import displacement_count
+from reblock.budget import building_radii, displacement
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
@@ -460,13 +460,18 @@ def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 
 
 def test_cost_displacement_avoids_the_denser_corridor() -> None:
     # cost="displacement" must select differently from cost="length": dense building points along
-    # the LEFT arm, sparse on the RIGHT. The arms are length- and benefit-tied, so cost="length" is
-    # blind to the points (it falls to the wkt tie-break); cost="displacement" steers away from the
-    # dense corridor to a road that displaces strictly fewer buildings -- here the optimum is a free
-    # (zero-displacement) chord, so it wins via the infinite-gain path. This would fail if
-    # cost="displacement" silently reused length (the two picks would coincide). The FINITE
-    # raw/denom ranking (two candidates both displacing >0, pick the cheaper) is covered by the
-    # next test.
+    # the LEFT arm, sparse (one, far-flung) on the RIGHT. The arms are length- and benefit-tied, so
+    # cost="length" is blind to the points (it falls to the wkt tie-break, landing on the LEFT arm);
+    # cost="displacement" steers away from the dense corridor to a road that displaces far fewer
+    # buildings under the disk measure. NOTE the picked road is NOT a zero-displacement escape here
+    # -- under the OLD centroid-count rule the greedy's optimum was a diagonal chord that grazed no
+    # CENTROID (count=0, an infinite-gain "free" pick); but that diagonal actually passes close
+    # enough to the lone sparse point's large disk (its radius is NN/2=5.0, since it is far from
+    # every other point) to score WORSE under the disk measure (~1.30) than the arm-serving road the
+    # disk-based greedy picks instead (1.0, the sparse point fully inside the corridor) -- exactly
+    # the degenerate "denom=0 for candidates that graze footprint edges but miss centroids" escape
+    # this migration closes. The FINITE raw/denom ranking (two candidates both displacing >0, pick
+    # the cheaper) is covered by the next test.
     left_pts = [Point(0.5, y) for y in range(1, 8)]     # dense: 7 sites astride the left arm
     right_pts = [Point(10.5, 4)]                        # sparse: 1 site astride the right arm
     pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
@@ -480,11 +485,12 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
     assert len(roads_length) == 1 and len(roads_disp) == 1
     # the cost switch changed WHICH road is proposed:
     assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt
-    # ... to one that displaces fewer buildings than the length-optimal pick:
-    d_length = displacement_count(pts, roads_length, corridor_m=1.0)
-    d_disp = displacement_count(pts, roads_disp, corridor_m=1.0)
+    # ... to one that displaces fewer buildings (disk measure) than the length-optimal pick:
+    radii = building_radii(pts, corridor_m=1.0)
+    d_length = displacement(pts, radii, roads_length, corridor_m=1.0)
+    d_disp = displacement(pts, radii, roads_disp, corridor_m=1.0)
     assert d_disp < d_length
-    assert d_disp == 0                     # this optimum is a free chord -> infinite-gain path
+    assert d_disp == 1.0    # right arm's single (large-radius) point, fully inside its corridor
 
 
 def _grid_block_with_points(building_points: gpd.GeoDataFrame, w: int = 8, h: int = 3) -> Block:
@@ -505,7 +511,7 @@ def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None
     # escape chord exists), so the pick is decided by the raw/denom comparison, NOT the inf branch.
     # A heavy cluster sits astride the access-optimal corridor (x~2): cost="length" drives straight
     # through it (many displaced); cost="displacement" must swerve to a sparser corridor that
-    # displaces far fewer while giving up a little access benefit.
+    # displaces far fewer (disk measure) while giving up a little access benefit.
     base = [Point(i + 0.5, j + 0.5) for i in range(8) for j in range(3)]     # tile: no free chord
     cluster = [Point(2.0 + dx, 1.5 + dy) for dx in (-0.4, -0.2, 0.0, 0.2, 0.4)
                for dy in (-0.6, -0.3, 0.0, 0.3, 0.6)]                        # dense at x~2
@@ -516,12 +522,13 @@ def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None
                                      n_anchors=10, top_k=4, corridor_m=1.0, cost="length")
     roads_disp = _greedy_arterials(block, mode="aspirational", objective="access", max_roads=1,
                                    n_anchors=10, top_k=4, corridor_m=1.0, cost="displacement")
-    d_length = displacement_count(pts, roads_length, corridor_m=1.0)
-    d_disp = displacement_count(pts, roads_disp, corridor_m=1.0)
+    radii = building_radii(pts, corridor_m=1.0)
+    d_length = displacement(pts, radii, roads_length, corridor_m=1.0)
+    d_disp = displacement(pts, radii, roads_disp, corridor_m=1.0)
 
     assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt   # cost changed it
-    assert d_disp >= 1               # the pick DISPLACES -> the finite raw/denom branch, not inf
-    assert d_disp < d_length         # ... and displaces strictly fewer than the length-optimal pick
+    assert d_disp > 0.0              # the pick DISPLACES -> the finite raw/denom branch, not inf
+    assert d_disp < d_length         # ... and displaces strictly fewer (disk) than the length pick
 
 
 def test_cost_displacement_is_deterministic() -> None:
@@ -540,8 +547,8 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
     # A beneficial straight road whose corridor holds no building sites must still be committed
     # -- the zero-marginal-displacement candidate ranks as infinite gain (strictly above any
     # positive-denominator candidate), not skipped by an attempted division by zero. The
-    # building_points are real (non-empty) but sited far outside the block, so displacement_count
-    # exercises its actual buffer/union/within path (not the empty-input short circuit) and still
+    # building_points are real (non-empty) but sited far outside the block, so disk `displacement`
+    # exercises its actual buffer/union/distance path (not the empty-input short circuit) and still
     # returns 0 for every candidate here.
     plain = _deep_block()
     far_points = gpd.GeoDataFrame(geometry=[Point(1000.0, 1000.0)], crs=UTM)
@@ -551,4 +558,26 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
                               max_roads=1, n_anchors=12, corridor_m=1.0)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 1.0                 # a real, non-degenerate candidate
-    assert displacement_count(far_points, roads, corridor_m=1.0) == 0
+    far_radii = building_radii(far_points, corridor_m=1.0)
+    assert displacement(far_points, far_radii, roads, corridor_m=1.0) == 0.0
+
+
+def test_displacement_objective_is_extent_aware_unlike_the_old_centroid_rule() -> None:
+    # WHY this migration matters: a road whose corridor GRAZES a building's footprint disk but
+    # misses its centroid entirely displaces 0 buildings under the old centroid rule
+    # (displacement_count's `within(corridor)` is False for every point) -- the exact degeneracy
+    # the spike found (denom=0 for candidates that graze footprint EDGES but miss centroids,
+    # block 40972: disk 2.84 -> 0.24). The disk `displacement` still credits it partial
+    # displacement because the footprint's disk (r=NN/2) reaches into the corridor even though
+    # the centroid does not.
+    road = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (10.0, 0.0)])], crs=UTM)
+    # two buildings 2 m apart -> NN dist 2 -> r = 1.0 each. Point A sits just past the 1 m
+    # corridor edge (y=1.5 -> d=0.5 < r=1.0 -> its disk grazes the corridor); point B is out of
+    # disk range entirely (y=3.5 -> d=2.5 > r=1.0 -> contributes 0 either way).
+    pts = gpd.GeoDataFrame(geometry=[Point(5.0, 1.5), Point(5.0, 3.5)], crs=UTM)
+    radii = building_radii(pts, corridor_m=1.0)
+
+    corridor = road.geometry.buffer(1.0).union_all()
+    assert not pts.geometry.within(corridor).any()          # OLD centroid rule: nobody displaced
+    d = displacement(pts, radii, road, corridor_m=1.0)
+    assert d > 0.0                                          # disk rule: A is partially displaced

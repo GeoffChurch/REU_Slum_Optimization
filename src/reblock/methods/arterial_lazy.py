@@ -13,7 +13,13 @@ from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
 import reblock.methods.arterial as _art
-from reblock.budget import _BlockScoringContext, access_burden, road_drainage
+from reblock.budget import (
+    _BlockScoringContext,
+    access_burden,
+    building_radii,
+    displacement,
+    road_drainage,
+)
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
@@ -165,6 +171,9 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
     streets = list(block.streets.geometry)
     ctx = _BlockScoringContext(block) if objective in ("efficiency", "directness") else None
     policy = _make_policy(candidate_policy, block, streets, n_anchors, top_k, adj, max_anchors)
+    # Constant across every step (depends only on block.building_points), so computed ONCE here
+    # rather than per-step.
+    radii = building_radii(block.building_points, corridor_m)
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
@@ -186,16 +195,15 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
         base_merged = _merge(committed)
         base = _explode(base_merged, block.crs)
         base_val = _art._score(objective, block, base, adj, base_burden, ctx)
-        committed_disp = 0
+        committed_disp = 0.0
         if cost == "displacement":
-            from reblock.budget import displacement_count
-            committed_disp = displacement_count(block.building_points, base, corridor_m)
+            committed_disp = displacement(block.building_points, radii, base, corridor_m)
         stepctx = ctx.step(base) if (ctx is not None and mode == "buildable") else None
         assert _art._STEP_STATE is None, "eval_candidate's per-step state holder is not reentrant"
         _art._STEP_STATE = _StepState(
             step=stepctx, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             mode=mode, objective=objective, cost=cost, lam=lam, corridor_m=corridor_m,
-            committed_disp=committed_disp, block=block, crs=block.crs, adj=adj,
+            committed_disp=committed_disp, block=block, radii=radii, crs=block.crs, adj=adj,
             base_burden=base_burden, ctx=ctx)
         try:
             # eager-score candidates entering this step

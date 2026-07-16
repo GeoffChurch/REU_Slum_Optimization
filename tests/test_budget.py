@@ -10,7 +10,6 @@ from reblock.budget import (
     access_burden,
     auc,
     cost_benefit_curve,
-    displacement_count,
     road_drainage,
 )
 from reblock.contracts import Block
@@ -180,29 +179,6 @@ def test_efficiency_and_directness_are_monotone_across_the_full_curve() -> None:
             assert curve.benefit == sorted(curve.benefit), (
                 f"{type(method).__name__} + {benefit_fn.__name__} not monotone: {curve.benefit}"
             )
-
-
-def test_displacement_count_only_sites_within_the_corridor() -> None:
-    road = _roads([LineString([(0.0, 0.0), (10.0, 0.0)])])
-    pts = _points([(5.0, 0.5), (5.0, 0.99), (5.0, 2.0)])   # last one is outside a 1m corridor
-    assert displacement_count(pts, road, corridor_m=1.0) == 2
-
-
-def test_displacement_count_overlapping_corridors_count_a_shared_site_once() -> None:
-    road_a = LineString([(0.0, 0.0), (5.0, 0.0)])
-    road_b = LineString([(4.0, 0.0), (10.0, 0.0)])          # overlaps road_a's corridor near x=4-5
-    roads = _roads([road_a, road_b])
-    pts = _points([(1.0, 0.5), (9.0, 0.5), (4.5, 0.5)])     # last one sits in BOTH corridors
-    assert displacement_count(pts, roads, corridor_m=1.0) == 3   # each site counted once, not 4
-
-
-def test_displacement_count_zero_when_no_points_or_no_roads() -> None:
-    road = _roads([LineString([(0.0, 0.0), (10.0, 0.0)])])
-    pts = _points([(5.0, 0.0)])
-    empty_pts = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
-    empty_roads = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
-    assert displacement_count(empty_pts, road, corridor_m=1.0) == 0
-    assert displacement_count(pts, empty_roads, corridor_m=1.0) == 0
 
 
 def test_cost_axis_is_cumulative_road_length_metres() -> None:

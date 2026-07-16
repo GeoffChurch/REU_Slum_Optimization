@@ -37,16 +37,6 @@ def _rnd(c: tuple[float, ...]) -> tuple[float, float]:
     return (round(c[0], 2), round(c[1], 2))
 
 
-def displacement_count(building_points: GeoDataFrame, roads: GeoDataFrame,
-                       corridor_m: float) -> int:
-    """Buildings whose site lies in the road corridor (union of `roads.buffer(corridor_m)`).
-    0 if there are no points or no roads."""
-    if building_points is None or building_points.empty or roads is None or len(roads) == 0:
-        return 0
-    corridor = roads.geometry.buffer(corridor_m).union_all()
-    return int(building_points.geometry.within(corridor).sum())
-
-
 def building_radii(building_points: GeoDataFrame, corridor_m: float) -> NDArray[np.float64]:
     """Per-building disk radius = HALF the nearest-neighbor distance among the building points (the
     fair, non-overlapping 'as big as possible' footprint bound). Fewer than 2 points -> no neighbor,
