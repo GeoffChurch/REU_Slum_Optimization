@@ -26,7 +26,7 @@ all_methods:
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
   clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
-  dream_come_true: {_target_: reblock.methods.dream_come_true.DreamComeTrueReblocker, source: "${desire_source}", corridor_m: 3.0}
+  osm_footpaths: {_target_: reblock.methods.osm_footpaths.OsmFootpathsReblocker, source: "${desire_source}", corridor_m: 3.0}
 methods: [topology, clearance, greedy_arterial_buildable]
 
 # Cost axis for the cost-benefit curves (the x every method is graded on):

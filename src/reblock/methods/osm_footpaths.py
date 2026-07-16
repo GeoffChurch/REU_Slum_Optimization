@@ -1,9 +1,10 @@
-"""DreamComeTrueReblocker: the reblocker whose 'proposed roads' are the REAL informal circulation
-network for the region -- the worn footpaths people already walk -- rather than a synthesized one.
-The desire-lines come from a pluggable DesireLineSource (OSM in Phase 1; a satellite-imagery
-detector later). The method is source-agnostic: fetch desire-lines for the region bbox, clip them
-to the block, drop the parts that merely retrace existing streets, and return the interior remainder
-as the intervention. See docs/superpowers/specs/2026-07-15-dream-come-true-design.md."""
+"""OsmFootpathsReblocker: the reblocker whose 'proposed roads' are the REAL informal circulation
+network for the region -- the worn footpaths people already walk, as mapped in OpenStreetMap --
+rather than a synthesized one. It fetches those footpaths through a pluggable DesireLineSource
+(`OSMDesireLines`), clips them to the block, drops the parts that merely retrace existing streets,
+and returns the interior remainder as the intervention. Deriving desire-lines instead from satellite
+imagery or from the building-point geometry was explored and dropped -- neither cheap signal matches
+OSM's human-mapped network (see docs/superpowers/notes/2026-07-15-desire-line-detection.md)."""
 from __future__ import annotations
 
 import hashlib
@@ -42,7 +43,7 @@ def _interior_desire_lines(lines: gpd.GeoDataFrame, block: Block) -> gpd.GeoData
 
 
 @dataclass
-class DreamComeTrueReblocker:
+class OsmFootpathsReblocker:
     source: DesireLineSource
     corridor_m: float = 3.0
 
@@ -52,7 +53,7 @@ class DreamComeTrueReblocker:
         # different live OSM pulls would key-collide (mirrors clearance + PrebuiltSubstrate).
         if self.source.identity is None:
             return None
-        return ("dream_come_true", self.source.identity, float(self.corridor_m))
+        return ("osm_footpaths", self.source.identity, float(self.corridor_m))
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; routing is block-only
@@ -61,17 +62,17 @@ class DreamComeTrueReblocker:
             (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])), block.crs)
         roads = _interior_desire_lines(lines, block)
         # proposal_id encodes the config so Proposal.identity distinguishes configs on a block
-        # (mirrors clearance) -- else two DreamComeTrue configs collide in the eval cache. The
+        # (mirrors clearance) -- else two OsmFootpaths configs collide in the eval cache. The
         # source identity is hashed (distinct-per-config yet filesystem-clean -- it feeds render
         # filenames); corridor_m stays literal for legibility. A live (uncacheable) source has
         # drift-prone roads, so its eval must bypass too: block_identity -> None -> uncacheable.
         if self.source.identity is not None:
             src_hash = hashlib.sha256(str(self.source.identity).encode()).hexdigest()[:8]
-            pid, block_identity = f"dream_come_true:c{self.corridor_m:g}:{src_hash}", block.identity
+            pid, block_identity = f"osm_footpaths:c{self.corridor_m:g}:{src_hash}", block.identity
         else:
-            pid, block_identity = "dream_come_true", None
+            pid, block_identity = "osm_footpaths", None
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
-            proposal_id=pid, method="dream_come_true",
+            proposal_id=pid, method="osm_footpaths",
             params={"segments": len(roads), "corridor_m": self.corridor_m},
             block_identity=block_identity)

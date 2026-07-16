@@ -1,4 +1,4 @@
-"""Desire-line sources for the dream_come_true reblocker: pull the real informal circulation
+"""Desire-line sources for the osm_footpaths reblocker: pull the real informal circulation
 network (worn footpaths) for a region instead of synthesizing one. `DesireLineSource` is the
 pluggable seam (like a routing Substrate); `OSMDesireLines` (Phase 1) reads OpenStreetMap via
 Overpass. A later imagery detector becomes another DesireLineSource behind the same interface.
@@ -57,7 +57,7 @@ def _parse_overpass_geom(payload: dict[str, Any], target_crs: CRS) -> gpd.GeoDat
     return gdf.to_crs(target_crs)
 
 
-_USER_AGENT = "reblock-dream-come-true/0.1 (informal-settlement research)"
+_USER_AGENT = "reblock-osm-footpaths/0.1 (informal-settlement research)"
 _DEFAULT_TAGS = ("path", "footway", "track", "steps", "pedestrian", "living_street")
 
 

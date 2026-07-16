@@ -223,7 +223,7 @@ def test_method_colors_are_stable_when_a_method_is_dropped() -> None:
     # order. The fix: colour is a method's index in the FULL registry, which both passes hand in
     # identically -- so a method keeps its colour even when another is absent from the run.
     registry = ["topology", "greedy_arterial_buildable", "greedy_arterial_aspirational",
-                "greedy_arterial_displacement", "clearance", "clearance_grid", "dream_come_true"]
+                "greedy_arterial_displacement", "clearance", "clearance_grid", "osm_footpaths"]
     colors = _method_colors(registry)
     # Every method in the registry gets a distinct colour (evenly spaced hues, no wrap collision).
     assert len(set(colors.values())) == len(registry)
