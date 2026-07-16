@@ -1,6 +1,11 @@
 """Satellite-imagery desire-line source for dream_come_true_cv: fetch an Esri World Imagery tile
-mosaic for a region bbox and detect the wide bare-earth corridors (classical CV -- no trained
-model). See docs/superpowers/specs/2026-07-15-dream-come-true-cv-design.md."""
+mosaic for a region bbox and detect the settlement's MAJOR bare-earth corridors -- its main
+thoroughfares -- with classical CV (no trained model). This deliberately does NOT recover the fine
+interior alley network: at ~0.25 m/px the narrow alleys are ~2-4 px, shadowed, and tonally identical
+to the packed metal roofs, putting them below the classical signal floor (six detection approaches
+confirmed this -- see the design doc's "Detection limits" section). The wide corridors it does find
+are the settlement's primary desire lines, which is an honest, useful reblocking input.
+See docs/superpowers/specs/2026-07-15-dream-come-true-cv-design.md."""
 from __future__ import annotations
 
 import hashlib
@@ -20,7 +25,7 @@ from PIL import Image
 from pyproj import CRS
 from scipy import ndimage
 from shapely.geometry import LineString
-from skimage.morphology import binary_opening, disk, remove_small_objects, skeletonize
+from skimage.morphology import closing, disk, skeletonize
 
 _R = 6378137.0
 _ESRI = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile"
@@ -121,31 +126,43 @@ def _skeleton_to_lines(skel: NDArray[np.bool_]) -> list[list[tuple[int, int]]]:
     return lines
 
 
+def _keep_large_components(mask: NDArray[np.bool_], min_area: int) -> NDArray[np.bool_]:
+    """Keep only connected components whose pixel area is >= `min_area` (the "wide corridor" filter:
+    a wide corridor is a large blob; scattered between-shack earth patches are small)."""
+    lbl, n = ndimage.label(mask)
+    if n == 0:
+        return mask
+    sizes = np.bincount(lbl.ravel())
+    keep = sizes >= min_area
+    keep[0] = False                                                 # label 0 is background
+    return keep[lbl]
+
+
 def detect_corridors(
     rgb: NDArray[np.uint8], extent_3857: tuple[float, float, float, float], crs: CRS, *,
-    min_corridor_m: float = 3.0, min_len_m: float = 8.0, smooth_sigma: float = 0.10,
-    shadow_v: float = 0.28, lik_thr: float = 0.35,
+    min_corridor_m: float = 3.0, min_len_m: float = 8.0, warm_thr: float = 0.05,
+    std_thr: float = 0.085,
 ) -> gpd.GeoDataFrame:
-    """Detect wide bare-earth corridors: likelihood (bright*smooth*not-green*not-shadow) ->
-    threshold
-    -> wide-disk opening (keeps only WIDE bare earth) -> skeletonize -> vectorize -> LineStrings in
-    `crs`. Only the main corridors survive; the fine interior network is out of scope by design."""
+    """Detect the settlement's MAJOR bare-earth corridors (see the module docstring for why the fine
+    interior network is out of scope). Bare earth reads WARM (red channel notably above blue) and
+    SMOOTH; a genuine corridor is a LARGE connected warm-earth component, whereas scattered
+    between-shack earth patches are small and get area-filtered out. Pipeline: warm & smooth & not-
+    green & bright -> closing (bridge ruts) -> area filter (keep corridors of at least `min_len_m` x
+    `min_corridor_m`) -> skeletonize -> vectorize -> LineStrings in `crs`."""
     h, w = rgb.shape[:2]
     f = rgb.astype(np.float64) / 255.0
+    r_ch, b_ch = f[..., 0], f[..., 2]
     gray = f.mean(2)
-    mean = ndimage.uniform_filter(gray, 7)
-    var = ndimage.uniform_filter(gray * gray, 7) - mean * mean
-    smooth = np.clip(1.0 - np.sqrt(np.clip(var, 0, None)) / smooth_sigma, 0.0, 1.0)
+    mean = ndimage.uniform_filter(gray, 9)
+    std = np.sqrt(np.clip(ndimage.uniform_filter(gray * gray, 9) - mean * mean, 0.0, None))
     hsv = rgb_to_hsv(f)
-    green = (hsv[..., 0] > 0.18) & (hsv[..., 0] < 0.45) & (hsv[..., 1] > 0.22)
-    lik = hsv[..., 2] * smooth * (~green)
-    lik[hsv[..., 2] < shadow_v] = 0.0
+    green = (hsv[..., 0] > 0.18) & (hsv[..., 0] < 0.45) & (hsv[..., 1] > 0.20)
+    mask = ((r_ch - b_ch) > warm_thr) & (std < std_thr) & (gray > 0.28) & (gray < 0.82) & (~green)
 
     mpp = _ground_mpp(extent_3857, w)
-    r = max(1, int(round((min_corridor_m / 2) / mpp)))
-    mask = lik > lik_thr
-    mask = binary_opening(mask, disk(r))
-    mask = remove_small_objects(mask, min_size=int((min_corridor_m / mpp) ** 2))
+    mask = closing(mask, disk(max(1, int(round(0.5 / mpp)))))       # bridge ruts (~0.5 m)
+    min_area = int((min_len_m / mpp) * (min_corridor_m / mpp))      # a min_len x min_corridor blob
+    mask = _keep_large_components(np.asarray(mask, dtype=bool), min_area)
     skel = skeletonize(mask)
 
     xmin, ymin, xmax, ymax = extent_3857

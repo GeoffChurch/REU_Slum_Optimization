@@ -43,15 +43,20 @@ ImageryDesireLines(DesireLineSource):
 
 ## Detection pipeline (spike-validated; production-cleaned)
 
-`ImageryDesireLines._detect(mosaic_rgb, transform) -> list[LineString]`:
+`detect_corridors(mosaic_rgb, extent_3857, crs) -> GeoDataFrame[LineString]`:
 1. **Mosaic:** fetch Esri World Imagery tiles (zoom 19 default) covering the bbox (+1 tile pad),
-   stitch to one RGB array; record the EPSG:3857 affine (pixel ↔ world). stdlib `urllib` + `PIL`.
-2. **Bare-earth likelihood** (`[0,1]`): `brightness · smoothness · not-green · not-shadow`, where
-   `smoothness = clip(1 - local_std(gray, w≈7px)/σ, 0, 1)` (corrugated roofs are textured, worn
-   earth is smooth), `not-green` excludes vegetation (HSV hue/sat), `not-shadow` drops low value.
-3. **Wide-corridor mask:** threshold the likelihood, then morphological **opening with a wide disk**
-   (radius = `min_corridor_m/2` in px, default ~3 m) so only *wide* bare-earth survives — this is
-   what drops the thin fragments and roof snags the spike showed. `skimage.morphology`.
+   stitch to one RGB array; record the EPSG:3857 extent (pixel ↔ world). stdlib `urllib` + `PIL`.
+2. **Warm bare-earth mask:** `(R − B) > warm_thr` **AND** smooth (`local_std(gray, 9px) < std_thr`)
+   **AND** bright (`0.28 < gray < 0.82`) **AND** not-green (HSV hue/sat). The discriminating signal
+   is *colour*, not brightness: bare earth is **warm** (red channel notably above blue), whereas the
+   packed metal roofs are achromatic/cool (`R ≈ B`) — so a brightness-only rule flags bright roofs,
+   but the warm rule does not. Smoothness rejects the textured roof seams; not-green rejects veg.
+3. **Wide-corridor filter (area, not opening):** `closing` with a ~0.5 m disk bridges ruts/footprints
+   within a corridor, then a **connected-component area filter** keeps only components ≥
+   `min_len_m × min_corridor_m` px². This is the "keep only WIDE corridors" step: a real corridor is
+   one large connected warm-earth blob, whereas scattered between-shack earth patches are small.
+   (Morphological *opening* with a wide disk was tried first and rejected — it erodes the bendy
+   corridors into disconnected blobs; the area filter keeps connectivity.) `skimage`/`scipy.ndimage`.
 4. **Skeletonize → vectorize:** `skimage.morphology.skeletonize` the mask → 1-px centerlines; build
    an 8-neighbour pixel graph (`networkx`, already a dep), extract junction-to-junction/endpoint
    polylines → `LineString`s in pixel space; map pixel → 3857 → `crs`; `shapely.simplify` to drop
@@ -59,9 +64,26 @@ ImageryDesireLines(DesireLineSource):
 
 The `DreamComeTrueReblocker` then clips to the block and dedupes against streets, exactly as for OSM.
 
+## Detection limits (why the fine network is out of scope — evidenced)
+
+Six classical-CV detection approaches were spiked against the block-40972 mosaic
+(`scratchpad/spike_*.py`), all trying to recover the *fine* interior alley network; all failed:
+colour-threshold, footprint-gap, Frangi vesselness, wide-disk opening, texture-gap-skeleton, and
+watershed per-shack instance segmentation. The consistent finding: **wide corridors are recoverable,
+the fine interior network is not.** Two concrete reasons, both visible in the spike imagery:
+- **Resolution floor.** At ~0.25 m/px a real 2 m path is ~8 px and a roof-to-roof seam is ~3–4 px;
+  with ±2 px segmentation error you cannot width-threshold "path" from "seam". Even watershed — which
+  *does* segment individual shacks into clean rectangles (validating the "shacks are rectangles"
+  intuition) — cannot turn shack-gaps into a path network for this reason.
+- **No colour/tone separation for narrow alleys.** The narrow interior alleys are shadowed and
+  tonally identical to the packed grey roofs; only the *wide* corridors expose enough contiguous
+  warm bare earth to separate. The full fine network needs a trained model (or a human mapper — i.e.
+  OSM, which is exactly what `dream_come_true_osm` uses). Google Open Buildings footprints are a
+  noted future route, but the resolution-floor gap→path problem persists even with perfect footprints.
+
 ## Dependency
 
-Add **`scikit-image`** (`skimage`) — `morphology` (opening/skeletonize) + `measure`. It is the
+Add **`scikit-image`** (`skimage`) — `morphology` (closing/skeletonize/disk). It is the
 standard image-processing library; the imagery detector genuinely needs it. (No `torch`/`cv2` — this
 is classical CV.) Everything else (`PIL`, `numpy`, `scipy.ndimage`, `networkx`, `shapely`) is present.
 
@@ -89,9 +111,10 @@ Now that a sibling exists, rename for the `_{osm,cv}` convention — one migrati
 ## Testing (all fixture-based; no network, no live imagery in CI)
 
 - **Mosaic math:** lon/lat→tile and tile→3857-extent round-trips (pure, no fetch).
-- **Detector on a fixture image:** a small synthetic RGB (a bright smooth "corridor" band through
+- **Detector on a fixture image:** a small synthetic RGB (a warm smooth "corridor" band through
   textured "roof" noise) → assert the detector returns a LineString tracing the corridor, and that a
-  pure-roof fixture returns none. Exercises likelihood + opening + skeletonize + vectorize.
+  textured *achromatic* grey-roof fixture (R==G==B, the real confounder) returns none — the warm gate
+  must reject it however busy the texture. Exercises warm mask + closing + area filter + skeletonize.
 - **Snapshot load:** `snapshot=<fixture.geojson>` → returns those lines, no fetch.
 - **`identity`:** None when live; stable + snapshot-hashed with a snapshot.
 - **Config conformance:** `dream_come_true_cv` (and renamed `_osm`) instantiate from `compare_config`

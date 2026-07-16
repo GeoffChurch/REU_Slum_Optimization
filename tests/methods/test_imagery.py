@@ -60,10 +60,13 @@ def test_detect_finds_the_smooth_corridor_band() -> None:
     assert (widest.bounds[2] - widest.bounds[0]) > 0.4 * (EXT[2] - EXT[0])
 
 
-def test_detect_returns_empty_on_pure_texture() -> None:
+def test_detect_returns_empty_on_grey_roof_texture() -> None:
+    # The real confounder is packed metal roofs: textured but ACHROMATIC (R==G==B). The warm-earth
+    # gate must reject them -- no bare-earth colour means no corridor, however busy the texture.
     rng = np.random.default_rng(1)
-    noise = rng.integers(70, 130, (384, 384, 3)).astype(np.uint8)
-    lines = detect_corridors(noise, EXT, UTM, min_corridor_m=1.0, min_len_m=2.0)
+    lum = rng.integers(70, 130, (384, 384, 1)).astype(np.uint8)
+    roofs = np.repeat(lum, 3, axis=2)                                # grey texture, R==G==B
+    lines = detect_corridors(roofs, EXT, UTM, min_corridor_m=1.0, min_len_m=2.0)
     assert len(lines) == 0
 
 
