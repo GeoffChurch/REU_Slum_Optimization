@@ -3,10 +3,13 @@ mosaic for a region bbox and detect the wide bare-earth corridors (classical CV 
 model). See docs/superpowers/specs/2026-07-15-dream-come-true-cv-design.md."""
 from __future__ import annotations
 
+import hashlib
 import io
 import math
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
+from dataclasses import dataclass
+from pathlib import Path
 
 import geopandas as gpd
 import networkx as nx
@@ -157,3 +160,51 @@ def detect_corridors(
     simplified = [g.simplify(mpp) for g in gdf.geometry]        # drop pixel jitter (~1 px)
     kept = [g for g in simplified if g.length >= min_len_m]
     return gpd.GeoDataFrame(geometry=kept, crs=crs)
+
+
+def _default_cache_dir() -> Path:
+    return Path.home() / ".cache" / "reblock" / "imagery"
+
+
+@dataclass
+class ImageryDesireLines:
+    """A DesireLineSource that detects wide bare-earth corridors from Esri World Imagery. Fetch
+    precedence: a committed `snapshot` GeoJSON of already-detected lines (byte-stable, offline) -> a
+    disk cache -> a live mosaic fetch + detect. `identity` is None when live (uncacheable), and a
+    stable tuple keyed on the snapshot's content hash when a snapshot is pinned (mirrors OSM)."""
+
+    zoom: int = 19
+    endpoint: str = _ESRI
+    cache_dir: str | None = None
+    snapshot: str | None = None
+    min_corridor_m: float = 3.0
+    min_len_m: float = 8.0
+
+    @property
+    def identity(self) -> Hashable:
+        if self.snapshot is None:
+            return None
+        digest = hashlib.sha256(Path(self.snapshot).read_bytes()).hexdigest()[:16]
+        return ("imagery", self.zoom, self.min_corridor_m, self.min_len_m, digest)
+
+    def _cache_path(self, bbox_wgs84: tuple[float, float, float, float]) -> Path:
+        root = Path(self.cache_dir) if self.cache_dir else _default_cache_dir()
+        bbox = ",".join(f"{c:.5f}" for c in bbox_wgs84)
+        key = f"z{self.zoom}c{self.min_corridor_m}l{self.min_len_m}@{bbox}"
+        return root / f"{hashlib.sha256(key.encode()).hexdigest()[:16]}.geojson"
+
+    def desire_lines(
+        self, bbox_wgs84: tuple[float, float, float, float], crs: CRS,
+        _tile_getter: TileGetter | None = None,
+    ) -> gpd.GeoDataFrame:
+        if self.snapshot is not None:
+            return gpd.read_file(self.snapshot).to_crs(crs)
+        cache_path = self._cache_path(bbox_wgs84)
+        if cache_path.exists():
+            return gpd.read_file(cache_path).to_crs(crs)
+        rgb, ext = fetch_mosaic(bbox_wgs84, self.zoom, self.endpoint, tile_getter=_tile_getter)
+        lines = detect_corridors(rgb, ext, crs, min_corridor_m=self.min_corridor_m,
+                                 min_len_m=self.min_len_m)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        lines.to_crs(4326).to_file(cache_path, driver="GeoJSON")
+        return lines

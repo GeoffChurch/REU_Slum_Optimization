@@ -1,9 +1,13 @@
+from pathlib import Path
+
 import geopandas as gpd
 import numpy as np
 from PIL import Image
 from pyproj import CRS
+from shapely.geometry import LineString
 
 from reblock.methods.imagery import (
+    ImageryDesireLines,
     _lonlat_to_tile,
     _mosaic_extent_3857,
     detect_corridors,
@@ -61,3 +65,36 @@ def test_detect_returns_empty_on_pure_texture() -> None:
     noise = rng.integers(70, 130, (384, 384, 3)).astype(np.uint8)
     lines = detect_corridors(noise, EXT, UTM, min_corridor_m=1.0, min_len_m=2.0)
     assert len(lines) == 0
+
+
+def _write_geojson(p: Path, lines: list[list[tuple[float, float]]]) -> None:
+    gpd.GeoDataFrame(geometry=[LineString(c) for c in lines],
+                     crs=CRS.from_epsg(4326)).to_file(p, driver="GeoJSON")
+
+
+def test_snapshot_loaded_without_fetch(tmp_path: Path) -> None:
+    # The snapshot branch returns before fetch_mosaic is reached; an unreachable endpoint proves no
+    # network is touched (it would raise if it fell through to a live fetch).
+    snap = tmp_path / "cv.geojson"
+    _write_geojson(snap, [[(18.74, -33.84), (18.741, -33.841)]])
+    src = ImageryDesireLines(snapshot=str(snap), endpoint="http://127.0.0.1:0/unreachable")
+    gdf = src.desire_lines((18.5, -34.0, 18.6, -33.9), UTM)
+    assert len(gdf) == 1 and gdf.crs == UTM
+
+
+def test_identity_none_when_live_stable_with_snapshot(tmp_path: Path) -> None:
+    assert ImageryDesireLines().identity is None
+    snap = tmp_path / "cv.geojson"
+    _write_geojson(snap, [[(18.74, -33.84), (18.741, -33.841)]])
+    ident = ImageryDesireLines(snapshot=str(snap)).identity
+    assert ident is not None and ident[0] == "imagery"
+
+
+def test_live_fetches_then_detects(tmp_path: Path) -> None:
+    def stub(z: int, x: int, y: int) -> Image.Image:
+        arr = np.full((256, 256, 3), 95, dtype=np.uint8)          # grey roof
+        arr[120:140, :, :] = (200, 185, 150)                      # tan corridor band
+        return Image.fromarray(arr)
+    src = ImageryDesireLines(cache_dir=str(tmp_path), min_corridor_m=1.0, min_len_m=2.0)
+    gdf = src.desire_lines((18.5806, -33.9780, 18.5807, -33.9779), UTM, _tile_getter=stub)
+    assert gdf.crs == UTM and len(gdf) >= 1
