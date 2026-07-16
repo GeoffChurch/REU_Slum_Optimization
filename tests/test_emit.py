@@ -156,39 +156,37 @@ def test_render_results_guards_empty_building_points(tmp_path: Path) -> None:
     assert (tmp_path / "g_before.png").stat().st_size > 0
 
 
-def test_displaced_points_selects_sites_within_the_proposal_corridor() -> None:
+def test_displaced_points_only_keeps_sites_with_positive_displacement_fraction() -> None:
+    # Two points: one on the road corridor (c > 0, kept), one far off it (c == 0, dropped) --
+    # _displaced_points no longer gates on proposal.params["cost"] (Task 5 replaced the binary
+    # within-corridor mark with a continuous disk-shading fraction, for every method).
     block = replace(_grid_block(3),
                     building_points=gpd.GeoDataFrame(
                         geometry=[Point(1.0, 0.5), Point(2.9, 2.9)], crs=UTM))
     roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads,
-                        params={"cost": "displacement", "corridor_m": 0.5})
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads, params={"corridor_m": 0.5})
 
     displaced = _displaced_points(block, proposal)
 
-    assert list(displaced.geometry) == [Point(1.0, 0.5)]   # the far point stays out
+    assert list(displaced.geometry) == [Point(1.0, 0.5)]   # the far point's c == 0, dropped
+    assert "c" in displaced.columns and "radius" in displaced.columns
+    assert (displaced["c"] > 0).all() and (displaced["c"] <= 1).all()
+    assert (displaced["radius"] > 0).all()
 
 
 def test_displaced_points_defaults_corridor_m_when_absent_from_params() -> None:
-    # 2.5m off the road at x=1 -- inside the default 3.0m corridor, outside a tighter one.
+    # 1.5m from the road at x=1, well inside the default 3.0m corridor -- a single point, so its
+    # radius falls back to corridor_m itself (building_radii, n < 2).
     block = replace(_grid_block(3),
                     building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 2.5)], crs=UTM))
     roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads,
-                        params={"cost": "displacement"})     # cost present, corridor_m defaults 3.0
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads)   # corridor_m defaults to 3.0
 
-    assert len(_displaced_points(block, proposal)) == 1
+    displaced = _displaced_points(block, proposal)
 
-
-def test_displaced_points_empty_for_non_displacement_proposal() -> None:
-    # A frontage/length method displaces nothing by design, so its render carries no displaced
-    # rings even where sites sit near its roads (the whole-branch-review gate).
-    block = replace(_grid_block(3),
-                    building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM))
-    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads, params={"cost": "length"})
-
-    assert _displaced_points(block, proposal).empty
+    assert len(displaced) == 1
+    assert displaced["radius"].iloc[0] == pytest.approx(3.0)
+    assert displaced["c"].iloc[0] == pytest.approx(1.0)
 
 
 def test_displaced_points_empty_without_building_points_or_roads() -> None:

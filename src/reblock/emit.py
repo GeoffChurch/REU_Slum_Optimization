@@ -50,18 +50,23 @@ def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
 
 
 def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
-    """`block.building_points` sites inside `proposal`'s road corridor
-    (`proposal.params["corridor_m"]`, default 3.0) -- the render's "cost made visible" mark, ONLY
-    for a displacement-cost proposal (a frontage/length method displaces nothing by design, so
-    marking sites near its roads as 'displaced' would mislead). Empty (no crash) otherwise, or if
-    there are no building points or no proposed roads."""
+    """`block.building_points` with a per-point displacement fraction `c` = max(0, 1 - d/r)
+    (r = NN/2, see budget) and its disk `radius`, for the render to shade. Empty when there are no
+    points or no proposed roads."""
+    from reblock.budget import building_radii
     pts = block.building_points
-    if (proposal.params.get("cost") != "displacement"
-            or pts.empty or proposal.roads is None or proposal.roads.empty):
+    if pts.empty or proposal.roads is None or proposal.roads.empty:
         return cast(gpd.GeoDataFrame, pts.iloc[:0])
     corridor_m = cast(float, proposal.params.get("corridor_m", 3.0))
+    radii = building_radii(pts, corridor_m)
     corridor = proposal.roads.geometry.buffer(corridor_m).union_all()
-    return cast(gpd.GeoDataFrame, pts[pts.within(corridor)])
+    d = pts.geometry.distance(corridor).to_numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        c = np.where(radii > 0.0, 1.0 - d / radii, np.where(d <= 0.0, 1.0, 0.0))
+    out = pts.copy()
+    out["c"] = np.clip(c, 0.0, 1.0)
+    out["radius"] = radii
+    return cast(gpd.GeoDataFrame, out[out["c"] > 0.0])
 
 
 def pct_paved(roads: gpd.GeoDataFrame | None, corridor_m: float, block_area: float) -> float:
