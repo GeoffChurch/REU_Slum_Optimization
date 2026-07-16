@@ -62,7 +62,7 @@ takes the screen's deepest block as the seed; `region_map.enabled` writes `scree
 The same 10,700-home region, graded on the four lenses for the methods that run at settlement scale:
 **`clearance`**, **`greedy_arterial`** (rejoining via CELF/lazy — `candidate_policy=fixed` +
 `max_anchors=64` bound its candidate pass, so its 15 through-roads take ~30 s on the whole region
-instead of the ~48 min the uncapped greedy needed), and **`dream_come_true`** — a reblocker whose
+instead of the ~48 min the uncapped greedy needed), and **`osm_footpaths`** — a reblocker whose
 roads are the REAL informal footpaths mapped from OpenStreetMap, not a synthetic construction. The
 coverage baselines `dijkstra`/`mesh` (which just pave everything) are dropped from this comparison;
 only `topology` (single-block-only) stays excluded at region scale. For the four-method bake-off on a
@@ -72,14 +72,14 @@ small block, see [`method-comparison`](../method-comparison/).
 pixi run python -m reblock.compare \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
   "block_ids=[[ZAF.9.3.1_1_5810]]" \
-  methods=[clearance,greedy_arterial_buildable,dream_come_true] max_blocks=1 \
+  methods=[clearance,greedy_arterial_buildable,osm_footpaths] max_blocks=1 \
   all_methods.clearance.max_roads=3000 \
   all_methods.greedy_arterial_buildable.candidate_policy=fixed \
   +all_methods.greedy_arterial_buildable.max_anchors=64 \
   desire_source.snapshot=examples/multiblock/desire_lines_5810.geojson
 ```
 
-`dream_come_true` loads the committed snapshot
+`osm_footpaths` loads the committed snapshot
 [`desire_lines_5810.geojson`](desire_lines_5810.geojson) — 154 mapped OSM ways for the region (see
 `scripts/fetch_desire_lines_snapshot.py`) — instead of synthesizing roads.
 
@@ -90,7 +90,7 @@ summary, and the per-method frontier terminal points / displacement counts — t
 Terminal frontier point per method per lens — benefit reached, and the road density (m/ha) plus
 **`% paved`** (fraction of the region's area under the road corridor) it took to get there:
 
-| lens | clearance | greedy_arterial | dream_come_true |
+| lens | clearance | greedy_arterial | osm_footpaths |
 |---|---|---|---|
 | access — burden removed | **0.970** | 0.582 | 0.026 |
 | resistance — egress removed | **0.477** | 0.097 | 0.041 |
@@ -106,7 +106,7 @@ all-round reblock at region scale.
 sparsest paving of all (3.3%) and low displacement (216 homes, see below) — a handful of straight
 through-roads.
 
-**`dream_come_true` is the honest reality check.** Its roads are the mapped OSM footpaths that
+**`osm_footpaths` is the honest reality check.** Its roads are the mapped OSM footpaths that
 ALREADY exist across the region. And they barely touch the deep interior: access **0.026** at 3.7%
 paved, displacing just 97 homes. The real as-built paths are a thin skeleton that leaves almost the
 whole 10,700-home fabric buried — which is precisely why reblocking is needed. (On a single small
@@ -129,7 +129,7 @@ the §4 compare with `cost=displacement` appended:
 pixi run python -m reblock.compare \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
   "block_ids=[[ZAF.9.3.1_1_5810]]" \
-  methods=[clearance,greedy_arterial_buildable,dream_come_true] max_blocks=1 \
+  methods=[clearance,greedy_arterial_buildable,osm_footpaths] max_blocks=1 \
   all_methods.clearance.max_roads=3000 \
   all_methods.greedy_arterial_buildable.candidate_policy=fixed \
   +all_methods.greedy_arterial_buildable.max_anchors=64 \
@@ -140,11 +140,11 @@ Across a 10,700-home region:
 
 | method | terminal directness | buildings displaced | % displaced |
 |---|---|---|---|
-| **dream_come_true** | 0.010 | **97** | **0.9%** |
+| **osm_footpaths** | 0.010 | **97** | **0.9%** |
 | greedy_arterial | 0.092 | 216 | 2.0% |
 | clearance | 0.088 | 2,056 | 19.2% |
 
-`dream_come_true` displaces almost nothing (97 homes, 0.9%) — but that's the flip side of barely
+`osm_footpaths` displaces almost nothing (97 homes, 0.9%) — but that's the flip side of barely
 helping: its footpaths never reach the deep interior (access 0.026 above), so there's little there
 left to clear. `greedy_arterial` reaches near-clearance directness (0.092 vs 0.088) while displacing a
 tenth as many homes (216 vs 2,056) — its handful of through-roads. `clearance`'s dense coverage

@@ -17,7 +17,7 @@ Length cost — the four lenses + the frontier:
 ```bash
 pixi run python -m reblock.compare data=capetown_full \
   "block_ids=[[ZAF.9.3.1_1_40972]]" \
-  methods=[topology,clearance,greedy_arterial_buildable,dream_come_true] max_blocks=1 \
+  methods=[topology,clearance,greedy_arterial_buildable,osm_footpaths] max_blocks=1 \
   all_methods.greedy_arterial_buildable.max_roads=8 \
   desire_source.snapshot=examples/method-comparison/desire_lines_40972.geojson
 ```
@@ -26,12 +26,12 @@ frontage method):
 ```bash
 pixi run python -m reblock.compare data=capetown_full \
   "block_ids=[[ZAF.9.3.1_1_40972]]" \
-  methods=[clearance,greedy_arterial_buildable,dream_come_true] max_blocks=1 \
+  methods=[clearance,greedy_arterial_buildable,osm_footpaths] max_blocks=1 \
   all_methods.greedy_arterial_buildable.max_roads=8 cost=displacement \
   desire_source.snapshot=examples/method-comparison/desire_lines_40972.geojson
 ```
 `greedy_arterial_buildable` is configured `lazy: true` (CELF), so its 8 roads take seconds, not the
-~14 min the exact greedy needed; `topology` is now the run's only slow pole. `dream_come_true` loads a
+~14 min the exact greedy needed; `topology` is now the run's only slow pole. `osm_footpaths` loads a
 committed OSM snapshot (`desire_lines_40972.geojson`, 22 mapped ways — see
 `scripts/fetch_desire_lines_snapshot.py`) so it reproduces offline. The console output of both
 commands — each selection's locator link plus the per-method frontier terminal points and
@@ -46,14 +46,14 @@ Before — every parcel up to 7 deep (dark = deep):
 After, per method (blue = added roads; black = building sites; the depth heatmap goes pale as roads
 reach every parcel). `topology`'s whole-graph optimizer blankets the fabric; `greedy_arterial`'s few
 through-roads wind between the building clusters (tracing the gaps); `clearance` threads least-cost
-roads to the deep interior; `dream_come_true` is the real, unoptimized informal network people already
+roads to the deep interior; `osm_footpaths` is the real, unoptimized informal network people already
 walk:
 
 | topology (access-optimal) | clearance (least-cost) |
 |---|---|
 | ![topology](after_topology.jpg) | ![clearance](after_clearance.jpg) |
-| **greedy_arterial** (directness) | **dream_come_true** (as-built) |
-| ![arterial](after_greedy_arterial.jpg) | ![dream_come_true](after_dream_come_true.jpg) |
+| **greedy_arterial** (directness) | **osm_footpaths** (as-built) |
+| ![arterial](after_greedy_arterial.jpg) | ![osm_footpaths](after_osm_footpaths.jpg) |
 
 ## The four lenses
 
@@ -66,7 +66,7 @@ described by its **terminal point**: the benefit it reached, the road density it
 
 Terminal frontier point per method per lens (benefit @ road density, % paved):
 
-| lens | topology | clearance | greedy_arterial | dream_come_true |
+| lens | topology | clearance | greedy_arterial | osm_footpaths |
 |---|---|---|---|---|
 | access — burden removed | **0.921** @ 620 m/ha | 0.827 @ 323 m/ha | 0.764 @ 267 m/ha | 0.761 @ 425 m/ha |
 | resistance — egress removed | **0.626** @ 620 m/ha | 0.425 @ 323 m/ha | 0.389 @ 267 m/ha | 0.365 @ 425 m/ha |
@@ -81,7 +81,7 @@ Each method earns a different corner of the frontier:
 - **`greedy_arterial`** owns directness (0.257, ~2× the next) at the **least paving** (16.2%) and
   least displacement (32) — straight through-roads, maximal navigability per metre. Runs via
   CELF/lazy here and now scales to the region (see [`multiblock`](../multiblock/)).
-- **`dream_come_true`** is the REAL informal network — the mapped OSM footpaths themselves, not an
+- **`osm_footpaths`** is the REAL informal network — the mapped OSM footpaths themselves, not an
   optimizer's output. On this small block the actual paths form a genuine, moderately-direct grid:
   directness 0.069 (it *beats* clearance's 0.053) and access 0.761, at 25.2% paved / 49 displaced. A
   striking reference — the worn paths people already use are a real reblock, just not an optimized
@@ -104,14 +104,14 @@ methods touch far less fabric:
 | method | terminal directness | buildings displaced | % displaced |
 |---|---|---|---|
 | **greedy_arterial** | **0.26** | **32** | **12%** |
-| dream_come_true | 0.07 | 49 | 19% |
+| osm_footpaths | 0.07 | 49 | 19% |
 | clearance | 0.05 | 53 | 20% |
 
-(Access reached on the same displacement pass: arterial 0.764/32, dream_come_true 0.761/49, clearance
+(Access reached on the same displacement pass: arterial 0.764/32, osm_footpaths 0.761/49, clearance
 0.827/53.)
 
 **Arterial displaces the fewest buildings (32, 12%) for its directness** — the most navigability per
-building moved. `dream_come_true`, the as-built footpath network, sits in between: 49 displaced (19%)
+building moved. `osm_footpaths`, the as-built footpath network, sits in between: 49 displaced (19%)
 for a directness that already beats clearance. `clearance` displaces the most of the three (53, 20%)
 for the least directness, trading displacement for its balanced access. There's no AUC on this axis —
 a road-sparing method has no curve width — so this is read from the terminal points, not an integral.
@@ -120,5 +120,5 @@ a road-sparing method has no curve width — so this is read from the terminal p
 
 **The takeaway:** pick the method by the lens *and* the road you can afford — access/egress →
 `topology` (single block); directness at minimal paving → `greedy_arterial`; the honest as-built
-baseline → `dream_come_true`; balanced least-cost → `clearance` (see [`multiblock`](../multiblock/)
+baseline → `osm_footpaths`; balanced least-cost → `clearance` (see [`multiblock`](../multiblock/)
 for the region-scale run and its depth/repulsion knobs).

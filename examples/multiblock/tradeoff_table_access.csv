@@ -1,4 +1,4 @@
 method,mean_terminal_benefit,mean_buildings_displaced,mean_pct_displaced,n_blocks
 clearance,0.9704,2056.0,0.1921,1
 greedy_arterial_buildable,0.5819,216.0,0.0202,1
-dream_come_true,0.0261,97.0,0.0091,1
+osm_footpaths,0.0261,97.0,0.0091,1
