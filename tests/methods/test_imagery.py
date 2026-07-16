@@ -1,7 +1,17 @@
+import geopandas as gpd
 import numpy as np
 from PIL import Image
+from pyproj import CRS
 
-from reblock.methods.imagery import _lonlat_to_tile, _mosaic_extent_3857, fetch_mosaic
+from reblock.methods.imagery import (
+    _lonlat_to_tile,
+    _mosaic_extent_3857,
+    detect_corridors,
+    fetch_mosaic,
+)
+
+UTM = CRS.from_epsg(32734)
+EXT = (2068156.7, -4026014.7, 2068615.3, -4025632.5)   # a plausible mosaic 3857 extent (spike box)
 
 
 def test_lonlat_to_tile_matches_web_mercator() -> None:
@@ -27,3 +37,27 @@ def test_fetch_mosaic_stitches_with_injected_tiles() -> None:
     assert rgb.dtype == np.uint8 and rgb.ndim == 3 and rgb.shape[2] == 3
     assert rgb.shape[0] % 256 == 0 and rgb.shape[1] % 256 == 0
     assert len(ext) == 4 and ext[0] < ext[2] and ext[1] < ext[3]
+
+
+def _synthetic_scene(h: int = 384, w: int = 384) -> np.ndarray:
+    # textured grey "roofs" + a bright SMOOTH tan horizontal corridor band (rows 180-205).
+    rng = np.random.default_rng(0)
+    img = rng.integers(70, 130, (h, w, 3)).astype(np.uint8)          # noisy grey roofs
+    img[180:205, :, :] = np.array([200, 185, 150], dtype=np.uint8)   # smooth bright tan corridor
+    return img
+
+
+def test_detect_finds_the_smooth_corridor_band() -> None:
+    lines = detect_corridors(_synthetic_scene(), EXT, UTM, min_corridor_m=1.0, min_len_m=2.0)
+    assert isinstance(lines, gpd.GeoDataFrame) and lines.crs == UTM
+    assert len(lines) >= 1
+    # the band is horizontal, so the detected centreline spans most of the width
+    widest = max(lines.geometry, key=lambda g: g.bounds[2] - g.bounds[0])
+    assert (widest.bounds[2] - widest.bounds[0]) > 0.4 * (EXT[2] - EXT[0])
+
+
+def test_detect_returns_empty_on_pure_texture() -> None:
+    rng = np.random.default_rng(1)
+    noise = rng.integers(70, 130, (384, 384, 3)).astype(np.uint8)
+    lines = detect_corridors(noise, EXT, UTM, min_corridor_m=1.0, min_len_m=2.0)
+    assert len(lines) == 0

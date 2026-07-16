@@ -8,9 +8,16 @@ import math
 import urllib.request
 from collections.abc import Callable
 
+import geopandas as gpd
+import networkx as nx
 import numpy as np
+from matplotlib.colors import rgb_to_hsv
 from numpy.typing import NDArray
 from PIL import Image
+from pyproj import CRS
+from scipy import ndimage
+from shapely.geometry import LineString
+from skimage.morphology import binary_opening, disk, remove_small_objects, skeletonize
 
 _R = 6378137.0
 _ESRI = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile"
@@ -61,3 +68,92 @@ def fetch_mosaic(
         for i, tx in enumerate(range(x0, x1 + 1)):
             mosaic.paste(get(zoom, tx, ty), (i * 256, j * 256))
     return np.asarray(mosaic, dtype=np.uint8), _mosaic_extent_3857(x0, y0, x1, y1, zoom)
+
+
+def _ground_mpp(extent_3857: tuple[float, float, float, float], width_px: int) -> float:
+    """Ground metres per pixel. 3857 is Web-Mercator-stretched, so correct by latitude at the
+    mosaic centre: ground = (3857 width / px) * cos(lat)."""
+    xmin, ymin, xmax, ymax = extent_3857
+    lat = 2 * math.atan(math.exp((ymin + ymax) / 2 / _R)) - math.pi / 2
+    return (xmax - xmin) / width_px * math.cos(lat)
+
+
+def _skeleton_to_lines(skel: NDArray[np.bool_]) -> list[list[tuple[int, int]]]:
+    """1-px skeleton -> polylines. Build an 8-neighbour pixel graph; each polyline is a chain of
+    degree-2 pixels between two non-degree-2 nodes (junctions/endpoints), plus any pure loops."""
+    ys, xs = np.nonzero(skel)
+    pix = set(zip((int(v) for v in ys), (int(v) for v in xs), strict=True))
+    g: nx.Graph = nx.Graph()
+    g.add_nodes_from(pix)
+    for (y, x) in pix:
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if (dy or dx) and (y + dy, x + dx) in pix:
+                    g.add_edge((y, x), (y + dy, x + dx))
+
+    def walk(a: tuple[int, int], b: tuple[int, int]) -> list[tuple[int, int]]:
+        chain, prev, cur = [a, b], a, b
+        while g.degree(cur) == 2:
+            nxts = [z for z in g.neighbors(cur) if z != prev]
+            if not nxts or nxts[0] == a:
+                break
+            prev, cur = cur, nxts[0]
+            chain.append(cur)
+        return chain
+
+    lines: list[list[tuple[int, int]]] = []
+    seen: set[frozenset[tuple[int, int]]] = set()
+    for node in [n for n in g.nodes if g.degree(n) != 2]:
+        for nb in g.neighbors(node):
+            if frozenset((node, nb)) in seen:
+                continue
+            chain = walk(node, nb)
+            seen.update(frozenset(e) for e in zip(chain, chain[1:], strict=False))
+            lines.append(chain)
+    for a, b in g.edges:                    # leftover pure loops
+        if frozenset((a, b)) not in seen:
+            chain = walk(a, b)
+            seen.update(frozenset(e) for e in zip(chain, chain[1:], strict=False))
+            lines.append(chain)
+    return lines
+
+
+def detect_corridors(
+    rgb: NDArray[np.uint8], extent_3857: tuple[float, float, float, float], crs: CRS, *,
+    min_corridor_m: float = 3.0, min_len_m: float = 8.0, smooth_sigma: float = 0.10,
+    shadow_v: float = 0.28, lik_thr: float = 0.35,
+) -> gpd.GeoDataFrame:
+    """Detect wide bare-earth corridors: likelihood (bright*smooth*not-green*not-shadow) ->
+    threshold
+    -> wide-disk opening (keeps only WIDE bare earth) -> skeletonize -> vectorize -> LineStrings in
+    `crs`. Only the main corridors survive; the fine interior network is out of scope by design."""
+    h, w = rgb.shape[:2]
+    f = rgb.astype(np.float64) / 255.0
+    gray = f.mean(2)
+    mean = ndimage.uniform_filter(gray, 7)
+    var = ndimage.uniform_filter(gray * gray, 7) - mean * mean
+    smooth = np.clip(1.0 - np.sqrt(np.clip(var, 0, None)) / smooth_sigma, 0.0, 1.0)
+    hsv = rgb_to_hsv(f)
+    green = (hsv[..., 0] > 0.18) & (hsv[..., 0] < 0.45) & (hsv[..., 1] > 0.22)
+    lik = hsv[..., 2] * smooth * (~green)
+    lik[hsv[..., 2] < shadow_v] = 0.0
+
+    mpp = _ground_mpp(extent_3857, w)
+    r = max(1, int(round((min_corridor_m / 2) / mpp)))
+    mask = lik > lik_thr
+    mask = binary_opening(mask, disk(r))
+    mask = remove_small_objects(mask, min_size=int((min_corridor_m / mpp) ** 2))
+    skel = skeletonize(mask)
+
+    xmin, ymin, xmax, ymax = extent_3857
+    geoms = []
+    for chain in _skeleton_to_lines(np.asarray(skel, dtype=bool)):
+        if len(chain) < 2:
+            continue
+        pts = [(xmin + (c + 0.5) / w * (xmax - xmin), ymax - (rr + 0.5) / h * (ymax - ymin))
+               for (rr, c) in chain]
+        geoms.append(LineString(pts))
+    gdf = gpd.GeoDataFrame(geometry=geoms, crs=CRS.from_epsg(3857)).to_crs(crs)
+    simplified = [g.simplify(mpp) for g in gdf.geometry]        # drop pixel jitter (~1 px)
+    kept = [g for g in simplified if g.length >= min_len_m]
+    return gpd.GeoDataFrame(geometry=kept, crs=crs)
