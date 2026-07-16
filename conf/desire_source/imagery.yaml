@@ -1,0 +1,7 @@
+# Satellite-imagery desire-line source for dream_come_true_cv: detect the wide bare-earth corridors
+# from Esri World Imagery. See reblock.methods.imagery.ImageryDesireLines.
+_target_: reblock.methods.imagery.ImageryDesireLines
+zoom: 19
+min_corridor_m: 3.0
+min_len_m: 8.0
+snapshot: null

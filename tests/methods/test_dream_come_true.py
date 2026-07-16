@@ -104,8 +104,8 @@ def test_dream_come_true_instantiates_from_compare_config() -> None:
     conf_dir = str(Path("conf").resolve())
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config",
-                      overrides=["shapefile=x", "methods=[dream_come_true]"])
-    method = instantiate(cfg.all_methods["dream_come_true"])
+                      overrides=["shapefile=x", "methods=[dream_come_true_osm]"])
+    method = instantiate(cfg.all_methods["dream_come_true_osm"])
     assert type(method).__name__ == "DreamComeTrueReblocker"
     assert type(method.source).__name__ == "OSMDesireLines"
     assert list(method.source.tags) == ["path", "footway", "track", "steps",

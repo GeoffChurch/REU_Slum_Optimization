@@ -98,3 +98,19 @@ def test_live_fetches_then_detects(tmp_path: Path) -> None:
     src = ImageryDesireLines(cache_dir=str(tmp_path), min_corridor_m=1.0, min_len_m=2.0)
     gdf = src.desire_lines((18.5806, -33.9780, 18.5807, -33.9779), UTM, _tile_getter=stub)
     assert gdf.crs == UTM and len(gdf) >= 1
+
+
+def test_both_variants_instantiate_from_compare_config() -> None:
+    from hydra import compose, initialize_config_dir
+    from hydra.utils import instantiate
+    conf = str(Path("conf").resolve())
+    with initialize_config_dir(version_base=None, config_dir=conf):
+        cfg = compose(config_name="compare_config",
+                      overrides=["shapefile=x", "methods=[dream_come_true_osm,dream_come_true_cv]"])
+    osm = instantiate(cfg.all_methods["dream_come_true_osm"])
+    cv = instantiate(cfg.all_methods["dream_come_true_cv"])
+    assert type(osm).__name__ == "DreamComeTrueReblocker"
+    assert type(osm.source).__name__ == "OSMDesireLines"
+    assert type(cv).__name__ == "DreamComeTrueReblocker"
+    assert type(cv.source).__name__ == "ImageryDesireLines"
+    assert "dream_come_true" not in cfg.all_methods       # bare key is gone (renamed)
