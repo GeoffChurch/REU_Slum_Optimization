@@ -1,9 +1,7 @@
-from dataclasses import replace
 from typing import cast
 
 import geopandas as gpd
 import pandas as pd
-import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
@@ -207,33 +205,17 @@ def test_displacement_count_zero_when_no_points_or_no_roads() -> None:
     assert displacement_count(pts, empty_roads, corridor_m=1.0) == 0
 
 
-def test_cost_benefit_curve_displacement_cost_axis_is_cumulative_displaced() -> None:
-    # Two sites sit exactly on Dijkstra's two highest-drainage road segments (distance 0 from
-    # the merged network); a third sits ~1.27m off the whole network -- outside a 1m corridor.
-    block = replace(_grid_block(5), building_points=_points([(0.5, 2.0), (2.0, 2.5), (4.9, 4.9)]))
+def test_cost_axis_is_cumulative_road_length_metres() -> None:
+    block = _grid_block(5)
     roads = DijkstraReblocker().propose(block).roads
     assert roads is not None
-    curve_len = cost_benefit_curve(block, roads, n_points=10)
-    curve_disp = cost_benefit_curve(block, roads, cost="displacement", corridor_m=1.0, n_points=10)
-    # Only the x-axis changes: same prefixes -> identical benefit.
-    assert curve_disp.benefit == curve_len.benefit
-    assert curve_disp.cost == sorted(curve_disp.cost)          # monotone non-decreasing
-    assert curve_disp.cost[0] == 0.0
-    assert curve_disp.cost[-1] == displacement_count(block.building_points, roads, corridor_m=1.0)
-    assert curve_disp.cost[-1] == 2.0                    # the two on-network sites, not the third
+    curve = cost_benefit_curve(block, roads)
+    # x is cumulative added road length in METRES, non-decreasing, ending at total road length
+    assert curve.cost[0] == 0.0
+    assert curve.cost == sorted(curve.cost)
+    assert abs(curve.cost[-1] - float(roads.geometry.length.sum())) < 1e-6
 
 
-def test_cost_benefit_curve_displacement_degenerates_without_building_points() -> None:
-    block = _grid_block(5)   # building_points defaults to empty
-    roads = DijkstraReblocker().propose(block).roads
-    assert roads is not None
-    curve = cost_benefit_curve(block, roads, cost="displacement", corridor_m=3.0, n_points=5)
-    assert curve.cost == [0.0] * len(curve.cost)               # degenerate, no crash
-
-
-def test_cost_benefit_curve_rejects_an_unknown_cost() -> None:
-    block = _grid_block(3)
-    roads = DijkstraReblocker().propose(block).roads
-    assert roads is not None
-    with pytest.raises(ValueError, match="cost"):
-        cost_benefit_curve(block, roads, cost="bogus")
+def test_cost_benefit_curve_has_no_cost_param() -> None:
+    import inspect
+    assert "cost" not in inspect.signature(cost_benefit_curve).parameters
