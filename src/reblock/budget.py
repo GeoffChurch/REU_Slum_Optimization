@@ -847,6 +847,12 @@ def truncate_to_length(block: Block, roads: GeoDataFrame, budget_m: float,
     return cast(GeoDataFrame, ordered.iloc[:m])
 
 
+def matched_budget(total_length_by_method: dict[str, float]) -> float:
+    """The common render budget: the smallest method's total road length (every method can reach
+    it). 0.0 if empty."""
+    return min(total_length_by_method.values()) if total_length_by_method else 0.0
+
+
 def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64], *,
                        corridor_m: float = 3.0, n_points: int = 20,
                        tol: float = STREET_TOL) -> Curve:

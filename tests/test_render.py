@@ -256,3 +256,12 @@ def test_displaced_points_carry_fraction_and_radius(tmp_path):
     disp = _displaced_points(block, prop)
     assert "c" in disp.columns and "radius" in disp.columns
     assert (disp["c"] > 0).any() and (disp["c"] <= 1).all()
+
+
+def test_matched_budget_is_min_total_over_methods():
+    # scripts/render_methods_matched.py's fair per-method budget: the sparsest method's total
+    # road length, so every method's truncated prefix is reachable.
+    from reblock.budget import matched_budget
+    lengths = {"a": 100.0, "b": 40.0, "c": 61.0}
+    assert matched_budget(lengths) == 40.0
+    assert matched_budget({}) == 0.0
