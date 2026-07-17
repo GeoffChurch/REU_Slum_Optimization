@@ -59,10 +59,12 @@ efficiency, directness, resistance, displacement) collapse to that basis:
 - **External connectivity** — reach/drainage of parcels to the *outside* street network (the fraction
   of access-burden removed). This is the former "access" metric, unchanged, just relabeled — egress
   `resistance` loaded on the same axis and is now subsumed by it.
-- **Internal connectivity** — richness/redundancy of the network *itself*: independent cycles per
-  parcel (circuit rank over the noded road∪street graph, ÷ parcel count) — how many alternative routes
-  a dwelling has, not just whether it has one. `directness`/`efficiency` (ρ=0.99 duplicates that
-  straddled both axes) are retired from reporting in favour of this cleaner, orthogonal representative.
+- **Internal connectivity** — richness/redundancy of the network *itself*: backup-route redundancy,
+  `commute_ratio` (mean 1 − R/R_geo, the effective-resistance ratio over the noded road∪street graph)
+  — how many alternative routes a dwelling has, not just whether it has one. `directness`/`efficiency`
+  (ρ=0.99 duplicates that straddled both axes) are retired from reporting in favour of this cleaner,
+  orthogonal representative. (This replaces the earlier circuit-rank `cycle_density` representative —
+  the numbers below predate that swap; see the note under the table.)
 
 Each axis is read off the **frontier** — the full `(method, block, road_length_m, benefit)` curve saved
 to `frontier_{metric}.csv` — rather than a single AUC scalar. An AUC (benefit integrated across the
@@ -77,25 +79,30 @@ Terminal frontier point per method per axis (benefit @ added road length, % pave
 | axis | topology | clearance | greedy_arterial | osm_footpaths |
 |---|---|---|---|---|
 | external connectivity — access-burden removed | **0.921** @ 934 m | 0.827 @ 486 m | 0.764 @ 401 m | 0.761 @ 639 m |
-| internal connectivity — independent cycles/parcel | 0.004 @ 934 m | 0.004 @ 486 m | **0.015** @ 401 m | 0.011 @ 639 m |
+| internal connectivity — backup-route redundancy (mean 1 − R/R_geo) | 0.004 @ 934 m | 0.004 @ 486 m | **0.015** @ 401 m | 0.011 @ 639 m |
 | **% paved** | **38.7%** | 20.4% | 16.2% | 25.2% |
+
+> **Stale (cycle-era):** the internal-connectivity row's numbers above were measured under the
+> retired circuit-rank `cycle_density` metric, not the current `commute_ratio` (ρ). External
+> connectivity and % paved are unaffected (unchanged metric). Regenerate on next `compare` run.
 
 Each method earns a different corner of the frontier:
 
 - **`topology`** reaches the most external connectivity (0.921), but at the heaviest paving (38.7%) —
-  and among the *least* internal connectivity (0.004): its whole-graph optimizer builds a
-  reach-everywhere tree, not a mesh. Single-block-only.
-- **`greedy_arterial`** owns internal connectivity (0.015, ~4× topology/clearance) at the **least
-  paving** (16.2%) and least displacement (62.0, see below) — its few through-roads reconnect back into
-  the existing street perimeter, closing real loops instead of dead-ending. Runs via CELF/lazy here and
-  now scales to the region (see [`multiblock`](../multiblock/)).
+  and among the *least* internal connectivity (0.004, cycle-era; see note above): its whole-graph
+  optimizer builds a reach-everywhere tree, not a mesh. Single-block-only.
+- **`greedy_arterial`** owns internal connectivity (0.015, ~4× topology/clearance; cycle-era, see note
+  above) at the **least paving** (16.2%) and least displacement (62.0, see below) — its few
+  through-roads reconnect back into the existing street perimeter, closing real loops instead of
+  dead-ending. Runs via CELF/lazy here and now scales to the region (see [`multiblock`](../multiblock/)).
 - **`osm_footpaths`** is the REAL informal network — the mapped OSM footpaths themselves, not an
   optimizer's output. On this small block the actual paths form a genuine, moderately redundant grid:
-  internal connectivity 0.011 (second-highest) and external connectivity 0.761, at 25.2% paved / 74.7
-  displaced. A striking reference — the worn paths people already use are a real reblock, just not an
-  optimized one (see its render above).
+  internal connectivity 0.011 (second-highest; cycle-era, see note above) and external connectivity
+  0.761, at 25.2% paved / 74.7 displaced. A striking reference — the worn paths people already use are
+  a real reblock, just not an optimized one (see its render above).
 - **`clearance`** is the balanced least-cost option: near-topology-free external connectivity (0.827)
-  at 20.4% paved, tied with topology for the least internal connectivity (0.004) — a depth-target +
+  at 20.4% paved, tied with topology for the least internal connectivity (0.004, cycle-era; see note
+  above) — a depth-target +
   repulsion knob tunes it (see [`multiblock`](../multiblock/)).
 
 ![external connectivity](curve_external_connectivity.png) ![internal connectivity](curve_internal_connectivity.png)
@@ -116,12 +123,15 @@ figures read higher than a raw centroid count.
 Terminal displacement (Σ graze-probability at each method's full road) — a rising cost, so *lower is
 better*:
 
-| method | homes displaced | % of homes | terminal internal connectivity |
+| method | homes displaced | % of homes | terminal internal connectivity (backup-route redundancy) |
 |---|---|---|---|
 | **greedy_arterial** | **62.0** | **23.6%** | **0.015** |
 | osm_footpaths | 74.7 | 28.4% | 0.011 |
 | clearance | 87.8 | 33.4% | 0.004 |
 | topology | 160.2 | 60.9% | 0.004 |
+
+(Internal-connectivity column is cycle-era; see the note under the frontier table above — regenerate
+on next `compare` run.)
 
 **Arterial displaces the fewest homes for the most internal connectivity** — the most redundancy per
 home moved. `osm_footpaths`, the as-built network, comes next; `clearance` displaces more for its

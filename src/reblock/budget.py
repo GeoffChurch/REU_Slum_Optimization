@@ -5,6 +5,7 @@ design spec.
 """
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -716,33 +717,155 @@ def _noded_graph(roads: GeoDataFrame, streets: GeoDataFrame) -> nx.Graph:
     return g
 
 
-def cycle_density(block: Block, roads: GeoDataFrame | None) -> float:
-    """Internal connectivity: circuit rank per parcel, (E - N + C) / P, over the noded road∪street
-    graph (E/N/C = edge/node/component counts, P = parcel count). The number of independent cycles
-    (redundant internal routes) per dwelling; a tree -> 0. Circuit rank is a topological invariant
-    (subdivision-insensitive), so /P (fixed, exogenous) keeps the whole metric discretization-
-    invariant. 0.0 with no roads / no parcels / an empty graph."""
-    p = len(block.parcels)
-    if roads is None or len(roads) == 0 or p < 1:
+def _entry_resistance(guu: float, gvv: float, guv: float, a: float, b: float, r: float) -> float:
+    """Exact grounded resistance R(p) at a point p subdividing an INTERIOR-INTERIOR edge (u, v) of
+    resistance r=a+b (a from u, b from v), given only the full grounded Green's function G's
+    entries at u and v (`guu`, `gvv`, `guv` = G[u,u], G[v,v], G[u,v]) -- no new matrix row needed,
+    so the dense solve never grows past the topology graph's own node count. Derivation: remove
+    the direct (u, v) edge via a Sherman-Morrison rank-1 downdate of the grounded Laplacian, then
+    solve the two-resistor pendant p attaches via (current conservation at p). Branches to the
+    exact series limit -- min(guu + a, gvv + b), matching how R_geo itself picks a route -- when
+    (u, v) is a bridge: the downdate is singular exactly when u and v have NO alternate coupling
+    (e.g. a plain tree/single-egress edge), where the general formula's individually-diverging
+    terms cancel to precisely that limit (verified analytically and, against a slower
+    node-injecting reference implementation, numerically on every test scenario below)."""
+    c = 1.0 / r
+    s = guu - 2.0 * guv + gvv
+    denom = 1.0 - c * s
+    if denom < 1e-9:                                            # (u, v) is a bridge -> series limit
+        return min(guu + a, gvv + b)
+    wu, wv = guu - guv, guv - gvv
+    k = c / denom
+    gpuu = guu + k * wu * wu
+    gpvv = gvv + k * wv * wv
+    gpuv = guv + k * wu * wv
+    big_a = gpuu + a - gpuv
+    big_b = gpvv + b - gpuv
+    if big_a + big_b <= 0.0:                                    # numerical guard, same limit
+        return min(guu + a, gvv + b)
+    iu, iv = big_b / (big_a + big_b), big_a / (big_a + big_b)
+    return (gpuu + a) * iu + gpuv * iv
+
+
+def _entry_resistance_ground(gvv: float, a: float, b: float, r: float) -> float:
+    """R(p) at a point p subdividing an edge from GROUND (a street node) to one interior node v,
+    at distance a from ground and b from v (a+b=r). p sees two parallel routes to ground: the
+    direct a-leak, or via v (b + v's own resistance to ground once this edge's leak is removed,
+    a diagonal Sherman-Morrison downdate) -- the parallel-resistor formula is stable at the bridge
+    limit (v's only ground path is this edge) with no branch needed: it reduces cleanly to `a`."""
+    c = 1.0 / r
+    denom = 1.0 - c * gvv
+    if denom < 1e-9:
+        return a
+    gpvv = gvv + c * gvv * gvv / denom
+    return a * (b + gpvv) / (a + b + gpvv)
+
+
+def commute_ratio(block: Block, roads: GeoDataFrame | None) -> float:
+    """Internal connectivity: mean over reachable parcels of 1 - R(dwelling->street)/R_geodesic on
+    the noded road-union-street graph. R = grounded effective resistance to the whole street (a
+    component-wise DENSE solve); R_geo = single-best-route (shortest-path) resistance. A
+    single-egress tree route -> 0; ->1 as parallel backup routes thicken. Clipped to [0, 1).
+    NON-MONOTONE in road length (ratio of co-decreasing R/R_geo) -- reporting ranks by terminal
+    value, never assumes rise. Rewards added redundancy via Rayleigh monotonicity (adding a
+    redundant connector to an existing loop can only help). A small tight loop can legitimately
+    outscore a large loose one, since this metric is coverage-insensitive by design (see
+    access_benefit for that). Task-1 corpus gate (2 blocks, 2026-07-17): corr(rho, access)=+0.294
+    (<= the 0.49 bar); anti-gaming holds on realistic networks -- loops ADDED
+    to clearance give rho 0.000->TINY 0.060->BIG 0.278 (BIG >> TINY); a matched-length parallel
+    bundle scores 0.00145/m vs a genuine loop's 0.00234/m and costs displacement, so corridor
+    duplication is Pareto-dominated on the {external, internal, displacement} suite.
+
+    Each parcel enters by TRUE line-proximity -- the nearest POINT on its nearest road/street edge
+    of the TOPOLOGY graph (not snapped to that edge's nearest raw VERTEX, which breaks subdivision
+    invariance and lets a far-off parcel inherit a road's resistance merely because that road is
+    its only nearby edge). Unlike `_line_entries`/`_build_csr` elsewhere in this module, the entry
+    point is NOT injected as a new graph node: `_entry_resistance`/`_entry_resistance_ground`
+    compute its exact grounded resistance analytically from the edge's two endpoints, so the dense
+    per-component solve is over the topology graph alone -- its size never grows with parcel count
+    (component-wise DENSE `np.linalg.inv` on O(parcels) more rows was tried first and rejected: on
+    a real ~2000-parcel block it made the 20-prefix sweep ~125s, about 700x the topology-only
+    sweep and ~8x over the ~15s gate, because dense inversion is cubic in matrix size). 0.0 with no
+    roads / no parcels / no interior nodes / empty reachable set."""
+    if roads is None or len(roads) == 0 or len(block.parcels) < 1:
         return 0.0
     g = _noded_graph(roads, block.streets)
-    n = g.number_of_nodes()
-    if n == 0:
+    if g.number_of_nodes() == 0:
         return 0.0
-    circuit_rank = int(g.number_of_edges() - n + nx.number_connected_components(g))
-    return circuit_rank / p
+    street_geom = unary_union(list(block.streets.geometry))
+    snodes = {n for n in g.nodes if Point(n).distance(street_geom) <= STREET_TOL}  # GEOMETRIC
+    interior = [n for n in g.nodes if n not in snodes]
+    if not snodes or not interior:
+        return 0.0
+    for u, v in g.edges():
+        g[u][v]["len"] = max(math.hypot(u[0] - v[0], u[1] - v[1]), 1e-6)
+    geo = nx.multi_source_dijkstra_path_length(g, snodes, weight="len")  # R_geo per node
+    green: dict[_Node, tuple[dict[_Node, int], NDArray[np.float64]]] = {}  # node -> (idx, G) of
+    for comp in nx.connected_components(g):                                # its OWN component
+        comp_streets = comp & snodes
+        comp_int = [n for n in comp if n not in snodes]
+        if not comp_streets or not comp_int:                            # stranded -> excluded
+            continue
+        idx = {n: i for i, n in enumerate(comp_int)}
+        m = len(comp_int)
+        lg = np.zeros((m, m))
+        for u, v in g.subgraph(comp).edges():
+            c = 1.0 / g[u][v]["len"]
+            ui, vi = idx.get(u), idx.get(v)
+            if ui is not None and vi is not None:
+                lg[ui, ui] += c
+                lg[vi, vi] += c
+                lg[ui, vi] -= c
+                lg[vi, ui] -= c
+            elif ui is not None:
+                lg[ui, ui] += c
+            elif vi is not None:
+                lg[vi, vi] += c
+        ginv = np.linalg.inv(lg)                                        # DENSE grounded solve
+        for n in comp_int:
+            green[n] = (idx, ginv)
+    edges = list(g.edges())
+    edge_lines = [LineString([u, v]) for u, v in edges]
+    tree = STRtree(edge_lines)
+    ratios: list[float] = []
+    for geom in block.parcels.geometry:
+        pt = geom.centroid
+        j = int(tree.nearest(pt))                                       # line-proximity entry
+        ls = edge_lines[j]
+        u, v = edges[j]
+        proj = ls.project(pt)
+        r = max(ls.length, 1e-6)
+        a, b = proj, r - proj
+        u_int, v_int = u in green, v in green
+        if u_int and v_int:
+            idx, ginv = green[u]
+            guu, gvv, guv = ginv[idx[u], idx[u]], ginv[idx[v], idx[v]], ginv[idx[u], idx[v]]
+            r_eff = _entry_resistance(guu, gvv, guv, a, b, r)
+        elif u_int:                                                     # v is a street node
+            idx, ginv = green[u]                                        # ground dist=b, interior=a
+            r_eff = _entry_resistance_ground(ginv[idx[u], idx[u]], b, a, r)
+        elif v_int:                                                     # u is a street node
+            idx, ginv = green[v]                                        # ground dist=a, interior=b
+            r_eff = _entry_resistance_ground(ginv[idx[v], idx[v]], a, b, r)
+        else:
+            continue                                                    # both ends on the street
+        r_geo = min(geo.get(u, math.inf) + a, geo.get(v, math.inf) + b)
+        if math.isfinite(r_geo) and r_geo > 1e-9:
+            ratios.append(min(max(1.0 - r_eff / r_geo, 0.0), 1.0 - 1e-12))  # clip [0,1)
+    return float(np.mean(ratios)) if ratios else 0.0
 
 
-def cycle_benefit(block: Block, roads_full: GeoDataFrame | None, *,
-                  tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
-    """Internal-connectivity benefit factory (shares the `access_benefit` signature so it plugs into
-    `cost_benefit_curve(..., benefit_fn=cycle_benefit)` and the `_sweep` frontier).
-    `roads_full`/`tol` are unused -- cycle_density is self-contained and needs no frozen entries --
-    but kept for the shared BenefitFactory signature."""
+def commute_ratio_benefit(block: Block, roads_full: GeoDataFrame | None, *,
+                          tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
+    """Internal-connectivity benefit factory (shares the access_benefit signature so it plugs
+    into cost_benefit_curve(..., benefit_fn=commute_ratio_benefit) and the _sweep frontier).
+    commute_ratio is self-contained per prefix; the resulting curve is NON-MONOTONE (see
+    commute_ratio) -- reporting compares at matched budget and ranks by terminal value.
+    roads_full/tol are unused, kept for the shared BenefitFactory signature."""
     del roads_full, tol
 
     def f(roads: GeoDataFrame | None) -> float:
-        return cycle_density(block, roads)
+        return commute_ratio(block, roads)
     return f
 
 
