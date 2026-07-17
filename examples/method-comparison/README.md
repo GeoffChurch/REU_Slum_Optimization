@@ -1,10 +1,11 @@
 # Method comparison: four reblockers, head-to-head on one deep block
 
-Four reblockers graded head-to-head on the four lenses, on a single deep informal block small enough
-that even `topology` runs — it's **single-block-only** (it crashes on a multi-block region: a gappy
-parcel graph gives it a disconnected source node). `greedy_arterial` now runs via **CELF/lazy**, so it
-scales too — the companion [`multiblock`](../multiblock/) flagship runs the scalable methods,
-*including arterial*, on a whole settlement.
+Four reblockers graded head-to-head on the **metric basis** — external connectivity, internal
+connectivity, and displacement — on a single deep informal block small enough that even `topology`
+runs — it's **single-block-only** (it crashes on a multi-block region: a gappy parcel graph gives it a
+disconnected source node). `greedy_arterial` now runs via **CELF/lazy**, so it scales too — the
+companion [`multiblock`](../multiblock/) flagship runs the scalable methods, *including arterial*, on
+a whole settlement.
 
 The block is **`ZAF.9.3.1_1_40972`** — the deepest block (by the depth proxy `√(n·A)/P`) in a
 topology-tractable size window: **263 parcels, up to 7 deep**, auto-picked, no hand tuning.
@@ -13,7 +14,7 @@ link for its selection).
 
 ## Reproduce
 
-One run grades the four benefit lenses AND the displacement cost, both against **added road length**:
+One run grades both connectivity axes AND the displacement cost, all against **added road length**:
 ```bash
 pixi run python -m reblock.compare data=capetown_full \
   "block_ids=[[ZAF.9.3.1_1_40972]]" \
@@ -44,56 +45,77 @@ walk:
 | topology (access-optimal) | clearance (least-cost) |
 |---|---|
 | ![topology](after_topology.jpg) | ![clearance](after_clearance.jpg) |
-| **greedy_arterial** (directness) | **osm_footpaths** (as-built) |
+| **greedy_arterial** (internal connectivity) | **osm_footpaths** (as-built) |
 | ![arterial](after_greedy_arterial.jpg) | ![osm_footpaths](after_osm_footpaths.jpg) |
 
-## The four lenses
+## The metric basis
 
-Each lens is read off the **frontier** — the full `(method, block, road_length_m, benefit)` curve
-saved to `frontier_{metric}.csv` — rather than a single AUC scalar. An AUC (benefit integrated across
-the shared road budget) rewards absolute benefit over benefit-per-road, so a road-efficient method
-could rank *below* a pave-everything one; we dropped it. Instead, each method is described by its
-**terminal point**: the benefit it reached, the **added road length** it spent (metres), and
-`% paved`. Curve legend labels read `method (NNN m)` — the terminal road length, not an AUC. (The
-x-axis is metres of added road, not m/ha density — the same budget both the benefit and displacement
-curves are graded on.)
+A spectral investigation (PCA over metric correlations across a diverse corpus of road networks — see
+[the design doc](../../docs/superpowers/specs/2026-07-16-metric-basis-reporting-design.md)) found
+road-structure quality is **two orthogonal axes** once road *quantity* is controlled (quantity is the
+displacement/cost axis below). The five entangled lenses this example used to report (access,
+efficiency, directness, resistance, displacement) collapse to that basis:
 
-Terminal frontier point per method per lens (benefit @ added road length, % paved):
+- **External connectivity** — reach/drainage of parcels to the *outside* street network (the fraction
+  of access-burden removed). This is the former "access" metric, unchanged, just relabeled — egress
+  `resistance` loaded on the same axis and is now subsumed by it.
+- **Internal connectivity** — richness/redundancy of the network *itself*: independent cycles per
+  parcel (circuit rank over the noded road∪street graph, ÷ parcel count) — how many alternative routes
+  a dwelling has, not just whether it has one. `directness`/`efficiency` (ρ=0.99 duplicates that
+  straddled both axes) are retired from reporting in favour of this cleaner, orthogonal representative.
 
-| lens | topology | clearance | greedy_arterial | osm_footpaths |
+Each axis is read off the **frontier** — the full `(method, block, road_length_m, benefit)` curve saved
+to `frontier_{metric}.csv` — rather than a single AUC scalar. An AUC (benefit integrated across the
+shared road budget) rewards absolute benefit over benefit-per-road, so a road-efficient method could
+rank *below* a pave-everything one; we dropped it. Instead, each method is described by its **terminal
+point**: the benefit it reached, the **added road length** it spent (metres), and `% paved`. Curve
+legend labels read `method (NNN m)` — the terminal road length, not an AUC. (The x-axis is metres of
+added road, not m/ha density — the same budget both the benefit and displacement curves are graded on.)
+
+Terminal frontier point per method per axis (benefit @ added road length, % paved):
+
+| axis | topology | clearance | greedy_arterial | osm_footpaths |
 |---|---|---|---|---|
-| access — burden removed | **0.921** @ 934 m | 0.827 @ 486 m | 0.764 @ 401 m | 0.761 @ 639 m |
-| resistance — egress removed | **0.626** @ 934 m | 0.425 @ 486 m | 0.389 @ 401 m | 0.365 @ 639 m |
-| directness — 1/circuity | 0.121 @ 934 m | 0.053 @ 486 m | **0.257** @ 401 m | 0.069 @ 639 m |
-| efficiency — network E | ~0.00 | ~0.00 | ~0.01 | ~0.00 |
+| external connectivity — access-burden removed | **0.921** @ 934 m | 0.827 @ 486 m | 0.764 @ 401 m | 0.761 @ 639 m |
+| internal connectivity — independent cycles/parcel | 0.004 @ 934 m | 0.004 @ 486 m | **0.015** @ 401 m | 0.011 @ 639 m |
 | **% paved** | **38.7%** | 20.4% | 16.2% | 25.2% |
 
 Each method earns a different corner of the frontier:
 
-- **`topology`** reaches the most access (0.921) and resistance (0.626), but at the heaviest paving
-  (38.7%) — its whole-graph optimizer covers best but spends the most road. Single-block-only.
-- **`greedy_arterial`** owns directness (0.257, ~2× the next) at the **least paving** (16.2%) and
-  least displacement (62.0, see below) — straight through-roads, maximal navigability per metre. Runs
-  via CELF/lazy here and now scales to the region (see [`multiblock`](../multiblock/)).
+- **`topology`** reaches the most external connectivity (0.921), but at the heaviest paving (38.7%) —
+  and among the *least* internal connectivity (0.004): its whole-graph optimizer builds a
+  reach-everywhere tree, not a mesh. Single-block-only.
+- **`greedy_arterial`** owns internal connectivity (0.015, ~4× topology/clearance) at the **least
+  paving** (16.2%) and least displacement (62.0, see below) — its few through-roads reconnect back into
+  the existing street perimeter, closing real loops instead of dead-ending. Runs via CELF/lazy here and
+  now scales to the region (see [`multiblock`](../multiblock/)).
 - **`osm_footpaths`** is the REAL informal network — the mapped OSM footpaths themselves, not an
-  optimizer's output. On this small block the actual paths form a genuine, moderately-direct grid:
-  directness 0.069 (it *beats* clearance's 0.053) and access 0.761, at 25.2% paved / 74.7 displaced. A
-  striking reference — the worn paths people already use are a real reblock, just not an optimized
-  one (see its render above).
-- **`clearance`** is the balanced least-cost option: near-topology-free access (0.827) at 20.4%
-  paved, with a depth-target + repulsion knob (see [`multiblock`](../multiblock/)).
+  optimizer's output. On this small block the actual paths form a genuine, moderately redundant grid:
+  internal connectivity 0.011 (second-highest) and external connectivity 0.761, at 25.2% paved / 74.7
+  displaced. A striking reference — the worn paths people already use are a real reblock, just not an
+  optimized one (see its render above).
+- **`clearance`** is the balanced least-cost option: near-topology-free external connectivity (0.827)
+  at 20.4% paved, tied with topology for the least internal connectivity (0.004) — a depth-target +
+  repulsion knob tunes it (see [`multiblock`](../multiblock/)).
 
-![access](curve_access.png) ![resistance](curve_resistance.png)
-![directness](curve_directness.png) ![efficiency](curve_efficiency.png)
+![external connectivity](curve_external_connectivity.png) ![internal connectivity](curve_internal_connectivity.png)
 
-`efficiency` (network E, all-pairs mean 1/distance) is near-inert at every scale for all four methods
-(~0.00–0.01) — the many far-apart parcel pairs swamp it.
+### The connectivity plane
+
+`connectivity_plane.png` plots each method's trajectory through (external, internal) connectivity space
+as road is added — marker size grows with cumulative road length, one colour per method (the same
+run-stable palette as the curves above). It's a communication figure, not a metric of its own — no
+scalar AUC — but it makes the two-axis story legible in one picture: `greedy_arterial` climbs steeply on
+the internal axis at low road length; `topology` climbs the external axis furthest but barely leaves the
+internal-connectivity floor.
+
+![connectivity plane](connectivity_plane.png)
 
 ## Displacement: the homes each road costs
 
 Displacement is now a **curve of its own**, plotted against the same added-road-length x-axis as the
-benefit lenses (`displacement.png`, `displacement_vs_length.csv`) — a rising **cost**: as a method
-lays road, how many homes does it destroy?
+two connectivity axes (`displacement.png`, `displacement_vs_length.csv`) — a rising **cost**: as a
+method lays road, how many homes does it destroy?
 
 It's **extent-aware**. Rather than counting only buildings whose *centroid* falls in the road
 corridor, each building is a disk (radius = half its nearest-neighbour distance), contributing its
@@ -105,22 +127,22 @@ figures read higher than a raw centroid count.
 Terminal displacement (Σ graze-probability at each method's full road) — a rising cost, so *lower is
 better*:
 
-| method | homes displaced | % of homes | terminal directness |
+| method | homes displaced | % of homes | terminal internal connectivity |
 |---|---|---|---|
-| **greedy_arterial** | **62.0** | **23.6%** | **0.257** |
-| osm_footpaths | 74.7 | 28.4% | 0.069 |
-| clearance | 87.8 | 33.4% | 0.053 |
-| topology | 160.2 | 60.9% | 0.121 |
+| **greedy_arterial** | **62.0** | **23.6%** | **0.015** |
+| osm_footpaths | 74.7 | 28.4% | 0.011 |
+| clearance | 87.8 | 33.4% | 0.004 |
+| topology | 160.2 | 60.9% | 0.004 |
 
-**Arterial displaces the fewest homes for its directness** — the most navigability per home moved.
-`osm_footpaths`, the as-built network, comes next; `clearance` displaces more for its balanced access,
-and `topology` the most (it paves the most road). Every curve rises from 0 with road, so you read the
-tradeoff directly: benefit *and* homes-displaced both climb as road is added — pick the point you can
-afford.
+**Arterial displaces the fewest homes for the most internal connectivity** — the most redundancy per
+home moved. `osm_footpaths`, the as-built network, comes next; `clearance` displaces more for its
+balanced external connectivity, and `topology` the most (it paves the most road). Every curve rises
+from 0 with road, so you read the tradeoff directly: benefit *and* homes-displaced both climb as road
+is added — pick the point you can afford.
 
 ![displacement vs added road length](displacement.png)
 
-**The takeaway:** pick the method by the lens *and* the road you can afford — access/egress →
-`topology` (single block); directness at minimal paving → `greedy_arterial`; the honest as-built
-baseline → `osm_footpaths`; balanced least-cost → `clearance` (see [`multiblock`](../multiblock/)
-for the region-scale run and its depth/repulsion knobs).
+**The takeaway:** pick the method by the axis *and* the road you can afford — external connectivity →
+`topology` (single block); internal connectivity at minimal paving → `greedy_arterial`; the honest
+as-built baseline → `osm_footpaths`; balanced least-cost → `clearance` (see
+[`multiblock`](../multiblock/) for the region-scale run and its depth/repulsion knobs).

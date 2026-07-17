@@ -257,18 +257,20 @@ def test_compare_report_emits_length_frontier_and_displacement_artifacts(tmp_pat
     from reblock.compare import MethodCurve
     from reblock.emit import compare_report
     curves = [
-        MethodCurve("clearance", "B", "access", Curve([0.0, 100.0], [0.0, 0.8]), 0.1, 0.2),
+        MethodCurve("clearance", "B", "external_connectivity",
+                   Curve([0.0, 100.0], [0.0, 0.8]), 0.1, 0.2),
         MethodCurve("clearance", "B", "displacement", Curve([0.0, 100.0], [0.0, 42.0]), 0.1, 0.2),
     ]
     compare_report(curves, tmp_path, method_order=["clearance"])
-    assert (tmp_path / "frontier_access.csv").exists()
-    assert "road_length_m" in (tmp_path / "frontier_access.csv").read_text()
+    assert (tmp_path / "frontier_external_connectivity.csv").exists()
+    assert "road_length_m" in (tmp_path / "frontier_external_connectivity.csv").read_text()
     assert (tmp_path / "displacement_vs_length.csv").exists()
     assert (tmp_path / "displacement_table.csv").exists()
     assert (tmp_path / "displacement_B.png").exists()
     # migrated away:
     assert not list(tmp_path.glob("tradeoff_table_*.csv"))
-    assert "road_density_m_per_ha" not in (tmp_path / "frontier_access.csv").read_text()
+    assert "road_density_m_per_ha" not in (
+        tmp_path / "frontier_external_connectivity.csv").read_text()
 
 
 def test_compare_report_has_no_cost_param():
@@ -276,3 +278,15 @@ def test_compare_report_has_no_cost_param():
 
     from reblock.emit import compare_report
     assert "cost" not in inspect.signature(compare_report).parameters
+
+
+def test_connectivity_plane_written(tmp_path):
+    from reblock.budget import Curve
+    from reblock.compare import MethodCurve
+    from reblock.emit import _connectivity_plane
+    ext = Curve([0.0, 100.0], [0.0, 0.6])
+    inn = Curve([0.0, 100.0], [0.0, 0.3])
+    rows = [MethodCurve("clearance", "blk", "external_connectivity", ext),
+            MethodCurve("clearance", "blk", "internal_connectivity", inn)]
+    _connectivity_plane(rows, tmp_path)
+    assert (tmp_path / "connectivity_plane_blk.png").exists()

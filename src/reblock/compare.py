@@ -21,9 +21,8 @@ from reblock.budget import (
     access_benefit,
     building_radii,
     cost_benefit_curve,
+    cycle_benefit,
     displacement_curve,
-    efficiency_directness_curves,
-    resistance_benefit,
 )
 from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
@@ -35,9 +34,9 @@ from reblock.render import google_maps_url, short_label
 
 log = logging.getLogger(__name__)
 
-# The four lenses every method is graded on: access (burden removed), network-efficiency
-# (E, mean 1/distance), directness (mean euclid/distance, i.e. 1/circuity), and resistance
-# (grounded egress resistance, redundancy-aware, benefit = fraction of egress resistance removed).
+# The three-metric basis every method is graded on: external connectivity (access-burden removed,
+# `access_benefit`), internal connectivity (independent cycles per parcel, `cycle_benefit`), and
+# displacement (a rising cost, never inverted -- see `displacement_curve`).
 
 
 @dataclass(frozen=True)
@@ -124,14 +123,11 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
             radii = building_radii(block.building_points, corridor_m)
             pp = pct_paved(roads, corridor_m, block_area)
             pd_ = pct_displaced(roads, corridor_m, block.building_points, radii)
-            access = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
-            eff, direct = efficiency_directness_curves(block, roads)
-            resistance = cost_benefit_curve(block, roads, benefit_fn=resistance_benefit)
+            external = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
+            internal = cost_benefit_curve(block, roads, benefit_fn=cycle_benefit)
             disp = displacement_curve(block, roads, radii, corridor_m=corridor_m)
-            raw.append((name, label, "access", access, pp, pd_))
-            raw.append((name, label, "efficiency", eff, pp, pd_))
-            raw.append((name, label, "directness", direct, pp, pd_))
-            raw.append((name, label, "resistance", resistance, pp, pd_))
+            raw.append((name, label, "external_connectivity", external, pp, pd_))
+            raw.append((name, label, "internal_connectivity", internal, pp, pd_))
             raw.append((name, label, "displacement", disp, pp, pd_))
     # No cross-method normalization: the frontier is reported as raw (road length, benefit)
     # samples per method (see emit.compare_report), so there's no shared cost cap to compute.
@@ -148,7 +144,7 @@ def main(cfg: DictConfig) -> None:
     # every method that could appear in `results`. A method's colour is its index here -- the full
     # registry, not the run's selected subset -- so it stays put when a pass drops another method.
     compare_report(results, out_dir, method_order=[str(k) for k in cfg.all_methods])
-    # Log each method's terminal: the four benefit metrics (benefit, road length, %paved) -- no
+    # Log each method's terminal: the two benefit metrics (benefit, road length, %paved) -- no
     # scalar rank -- and the displacement metric (rising cost, never inverted) separately.
     for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
         if r.metric == "displacement":
