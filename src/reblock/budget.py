@@ -326,8 +326,9 @@ def _reproject_hits(geoms_arr: np.ndarray, reps_arr: np.ndarray, lines: np.ndarr
 
 
 class _BlockScoringContext:
-    """Per-block scoring constants frozen ONCE, shared by `network_efficiency`, the compare's
-    efficiency/directness curves (`_efficiency_factory`), and the greedy arterial loop. Freezing
+    """Per-block scoring constants frozen ONCE, shared by `network_efficiency`, the arterial
+    directness/efficiency measurement curves (`_efficiency_factory`), and the greedy arterial
+    loop. Freezing
     lifts the representative points, sampled sources, the K*N euclidean matrix and the street edge
     geometry out of the per-candidate hot path (they were previously rebuilt for all ~7k
     candidates). `.score(roads)` re-derives entries against streets + `roads` and matches
