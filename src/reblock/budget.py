@@ -771,7 +771,7 @@ def commute_ratio(block: Block, roads: GeoDataFrame | None) -> float:
     redundant connector to an existing loop can only help). A small tight loop can legitimately
     outscore a large loose one, since this metric is coverage-insensitive by design (see
     access_benefit for that). Task-1 corpus gate (2 blocks, 2026-07-17): corr(rho, access)=+0.294
-    (<= the 0.49 bar, beats cycle_density); anti-gaming holds on realistic networks -- loops ADDED
+    (<= the 0.49 bar); anti-gaming holds on realistic networks -- loops ADDED
     to clearance give rho 0.000->TINY 0.060->BIG 0.278 (BIG >> TINY); a matched-length parallel
     bundle scores 0.00145/m vs a genuine loop's 0.00234/m and costs displacement, so corridor
     duplication is Pareto-dominated on the {external, internal, displacement} suite.
@@ -784,8 +784,8 @@ def commute_ratio(block: Block, roads: GeoDataFrame | None) -> float:
     compute its exact grounded resistance analytically from the edge's two endpoints, so the dense
     per-component solve is over the topology graph alone -- its size never grows with parcel count
     (component-wise DENSE `np.linalg.inv` on O(parcels) more rows was tried first and rejected: on
-    a real ~2000-parcel block it made the 20-prefix sweep ~125s, about 700x cycle_density's sweep
-    and ~8x over the ~15s gate, because dense inversion is cubic in matrix size). 0.0 with no
+    a real ~2000-parcel block it made the 20-prefix sweep ~125s, about 700x the topology-only
+    sweep and ~8x over the ~15s gate, because dense inversion is cubic in matrix size). 0.0 with no
     roads / no parcels / no interior nodes / empty reachable set."""
     if roads is None or len(roads) == 0 or len(block.parcels) < 1:
         return 0.0
@@ -868,35 +868,6 @@ def commute_ratio_benefit(block: Block, roads_full: GeoDataFrame | None, *,
         return commute_ratio(block, roads)
     return f
 
-
-def cycle_density(block: Block, roads: GeoDataFrame | None) -> float:
-    """Internal connectivity: circuit rank per parcel, (E - N + C) / P, over the noded road∪street
-    graph (E/N/C = edge/node/component counts, P = parcel count). The number of independent cycles
-    (redundant internal routes) per dwelling; a tree -> 0. Circuit rank is a topological invariant
-    (subdivision-insensitive), so /P (fixed, exogenous) keeps the whole metric discretization-
-    invariant. 0.0 with no roads / no parcels / an empty graph."""
-    p = len(block.parcels)
-    if roads is None or len(roads) == 0 or p < 1:
-        return 0.0
-    g = _noded_graph(roads, block.streets)
-    n = g.number_of_nodes()
-    if n == 0:
-        return 0.0
-    circuit_rank = int(g.number_of_edges() - n + nx.number_connected_components(g))
-    return circuit_rank / p
-
-
-def cycle_benefit(block: Block, roads_full: GeoDataFrame | None, *,
-                  tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
-    """Internal-connectivity benefit factory (shares the `access_benefit` signature so it plugs into
-    `cost_benefit_curve(..., benefit_fn=cycle_benefit)` and the `_sweep` frontier).
-    `roads_full`/`tol` are unused -- cycle_density is self-contained and needs no frozen entries --
-    but kept for the shared BenefitFactory signature."""
-    del roads_full, tol
-
-    def f(roads: GeoDataFrame | None) -> float:
-        return cycle_density(block, roads)
-    return f
 
 
 def efficiency_directness_curves(block: Block, roads: GeoDataFrame, *, n_points: int = 20,

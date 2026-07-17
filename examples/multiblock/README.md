@@ -74,8 +74,10 @@ networks found this once road *quantity* is controlled — quantity is the displ
 [the design doc](../../docs/superpowers/specs/2026-07-16-metric-basis-reporting-design.md)):
 **external connectivity** (reach/drainage to the outside street network — the former "access" metric,
 unchanged, just relabeled; the former egress-`resistance` lens loaded on this same axis and is now
-subsumed by it) and **internal connectivity** (independent cycles per parcel — the redundancy of the
-network itself, replacing the retired `directness`/`efficiency` lenses).
+subsumed by it) and **internal connectivity** (backup-route redundancy, `commute_ratio` — mean
+1 − R/R_geo, the effective-resistance ratio over the noded road∪street graph — replacing the retired
+`directness`/`efficiency` lenses and, more recently, the circuit-rank `cycle_density` representative;
+the tables below predate that latest swap, see the note under the frontier table).
 
 ```bash
 pixi run python -m reblock.compare \
@@ -102,18 +104,22 @@ plus **`% paved`** (fraction of the region's area under the road corridor) it to
 | axis | clearance | greedy_arterial | osm_footpaths |
 |---|---|---|---|
 | external connectivity — access-burden removed | **0.970** | 0.582 | 0.026 |
-| internal connectivity — independent cycles/parcel | 0.0030 | **0.0072** | 0.0035 |
+| internal connectivity — backup-route redundancy (mean 1 − R/R_geo) | 0.0030 | **0.0072** | 0.0035 |
 | added road length | 26,326 m | 5,614 m | 6,122 m |
 | **% paved** | 15.5% | **3.3%** | 3.7% |
 
-**`clearance` dominates external connectivity:** 0.970 at 15.5% paved — the best coverage at region
-scale, though its own internal connectivity (0.0030) is the lowest of the three: a dense drainage
-*tree* into the deep core, not a mesh.
+> **Stale (cycle-era):** the internal-connectivity row's numbers above were measured under the
+> retired circuit-rank `cycle_density` metric, not the current `commute_ratio` (ρ). Every other row
+> is unaffected (unchanged metric). Regenerate on next `compare` run.
 
-**`greedy_arterial`** (CELF-scalable) **wins internal connectivity** (0.0072, ~2× the others) at the
-sparsest paving of all (3.3%) and low displacement (~500 homes, see below) — its handful of
-through-roads reconnect into the existing street perimeter at both ends, closing real loops instead of
-dead-ending.
+**`clearance` dominates external connectivity:** 0.970 at 15.5% paved — the best coverage at region
+scale, though its own internal connectivity (0.0030, cycle-era; see note above) is the lowest of the
+three: a dense drainage *tree* into the deep core, not a mesh.
+
+**`greedy_arterial`** (CELF-scalable) **wins internal connectivity** (0.0072, ~2× the others;
+cycle-era, see note above) at the sparsest paving of all (3.3%) and low displacement (~500 homes, see
+below) — its handful of through-roads reconnect into the existing street perimeter at both ends,
+closing real loops instead of dead-ending.
 
 **`osm_footpaths` is the honest reality check.** Its roads are the mapped OSM footpaths that
 ALREADY exist across the region. And they barely touch the deep interior: external connectivity
@@ -146,15 +152,18 @@ building is a disk (radius = ½ its nearest-neighbour distance) contributing its
 grazed** by the road corridor, `c = max(0, 1 − d/r)`; Σc is the "expected homes displaced" — it catches
 footprint-edge clips a centroid test misses, so figures read higher than a raw count.
 
-| method | homes displaced | % of homes | terminal internal connectivity |
+| method | homes displaced | % of homes | terminal internal connectivity (backup-route redundancy) |
 |---|---|---|---|
 | **osm_footpaths** | **257.0** | **2.4%** | 0.0035 |
 | greedy_arterial | 499.6 | 4.7% | **0.0072** |
 | clearance | 3,305.7 | 30.9% | 0.0030 |
 
+(Internal-connectivity column is cycle-era; see the note under the frontier table above — regenerate
+on next `compare` run.)
+
 `osm_footpaths` displaces the least (257 homes, 2.4%) — the flip side of barely helping: its footpaths
 never reach the deep interior (external connectivity 0.026 above), so there's little there to clear.
-`greedy_arterial` reaches the highest internal connectivity of the three (0.0072) while displacing a
+`greedy_arterial` reaches the highest internal connectivity of the three (0.0072, cycle-era) while displacing a
 seventh as many homes as clearance (500 vs 3,306) — its handful of through-roads. `clearance`'s dense
 coverage displaces 3,306 homes (30.9%) — the price of the external-connectivity coverage it wins above.
 Read this alongside the frontier table above, not in isolation.
@@ -167,19 +176,22 @@ Read this alongside the frontier table above, not in isolation.
 each depth's terminal frontier point (benefit reached, added road length spent, % paved; `displaced`
 is the extent-aware Σ graze-probability of §4):
 
-| depth_target | added road length | % paved | external connectivity | internal connectivity | displaced |
+| depth_target | added road length | % paved | external connectivity | internal connectivity (backup-route redundancy) | displaced |
 |---|---|---|---|---|---|
 | 2 | 26,326 m | 15.5% | **0.970** | 0.0030 | 3,305.7 |
 | **3** | **13,699 m** | **8.0%** | 0.952 | 0.0030 | **1,614.8** |
 | 4 | 8,345 m | 4.9% | 0.931 | 0.0030 | 938.1 |
 
+(Internal-connectivity column is cycle-era; see the note under the §4 frontier table above —
+regenerate on next `compare` run.)
+
 Depth 3 is the sweet spot: it reaches **0.952 external connectivity** — ≈98% of depth 2's 0.970 — at
 **HALF the road** (13,699 vs 26,326 m) and half the displacement (1,615 vs 3,306). Depth 2 just keeps
 paving to shave the last two rings. Depth 4 saves more road still, but leaves parcels 4 deep. Internal
-connectivity is **flat at 0.0030 across all three depths** — `depth_target` only trades road (and thus
-external connectivity and displacement) against how far clearance's drainage tree reaches; it never
-changes the network's loop count, which is pinned by the region's existing street topology, not by
-clearance's own (tree-shaped, non-looping) added roads.
+connectivity reads **flat at 0.0030 across all three depths** (cycle-era number) — `depth_target` only
+trades road (and thus external connectivity and displacement) against how far clearance's drainage
+tree reaches; it never changes the network's loop count, which is pinned by the region's existing
+street topology, not by clearance's own (tree-shaped, non-looping) added roads.
 
 ![depth external connectivity](depth_external_connectivity.png) ![depth internal connectivity](depth_internal_connectivity.png)
 
@@ -188,15 +200,19 @@ clearance's own (tree-shaped, non-looping) added roads.
 At depth 3, `repulsion` (the logit knob steering roads toward gaps vs straight through buildings)
 trades **homes displaced** — for nothing on either connectivity axis:
 
-| repulsion | added road length | % paved | external connectivity | internal connectivity | displaced |
+| repulsion | added road length | % paved | external connectivity | internal connectivity (backup-route redundancy) | displaced |
 |---|---|---|---|---|---|
 | −3 (seek clearance) | 13,387 m | 7.8% | 0.951 | 0.0030 | 1,670.7 |
 | 0 (balanced) | 13,699 m | 8.0% | 0.952 | 0.0030 | 1,614.8 |
 | +3 (repel buildings) | 14,484 m | 8.6% | 0.951 | 0.0030 | **1,232.3** |
 
+(Internal-connectivity column is cycle-era; see the note under the §4 frontier table above —
+regenerate on next `compare` run.)
+
 Turning repulsion up **cuts displacement ~26%** (1,671 → 1,232) by routing roads around buildings
 through the gaps — at essentially **no cost on either connectivity axis**: external connectivity stays
-in a tight 0.951–0.952 band and internal connectivity is flat at 0.0030 across all three settings.
+in a tight 0.951–0.952 band and internal connectivity reads flat at 0.0030 across all three settings
+(cycle-era number).
 (Under the old five-lens basis this looked like a displacement-for-directness tradeoff; under the
 validated orthogonal basis, `directness` wasn't a real independent quality axis — repulsion changes
 *how* the roads route, not how well-connected the result is on either axis that matters.) Under the

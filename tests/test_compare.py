@@ -83,10 +83,14 @@ def test_compare_two_adjacent_block_region_arterial_beats_clearance_internal_con
     tmp_path: Path,
 ) -> None:
     # The multi-block region compare path: an adjacent DJI pair as ONE seed group, reblocked
-    # jointly per method, curves keyed by "DJI.3_1_1808+DJI.3_1_1809". clearance adds no roads at
-    # all on this fixture (0 m, benefit 0.000 on every metric); the buildable-arterial method's
-    # straight chords create real interior loops, so it reaches strictly higher terminal internal
-    # connectivity.
+    # jointly per method, curves keyed by "DJI.3_1_1808+DJI.3_1_1809". Internal connectivity is
+    # now commute_ratio (rho = mean 1 - R/R_geo over the noded road-union-street graph), not the
+    # old circuit-rank metric it replaced -- so this direction is MEASURED, not assumed to carry
+    # over: calling commute_ratio directly on this fixture's joint-region proposal gives clearance
+    # 0.0 (it adds no roads at all here -- 0 m, benefit 0.000 on every metric) and
+    # greedy_arterial_buildable ~0.43 (its straight chords create real interior loops, which rho
+    # rewards via Rayleigh monotonicity), so arterial still reaches strictly higher terminal
+    # internal connectivity under rho too.
     result = subprocess.run(
         [sys.executable, "-m", "reblock.compare", "data=dji", "eval=kcomplexity",
          "methods=[clearance,greedy_arterial_buildable]",

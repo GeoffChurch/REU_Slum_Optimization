@@ -72,7 +72,7 @@ def test_range_and_empty_guards() -> None:
     # NOTE: the "no parcels" guard (len(block.parcels) < 1) is not separately exercised here --
     # contracts.Block.__post_init__ raises ValueError on an empty parcels GeoDataFrame, so a
     # Block with 0 parcels cannot be constructed at all; the guard is defensive/unreachable via
-    # the public contract (matches cycle_density's identical guard, untested by its own suite too).
+    # the public contract.
 
 
 def test_stranded_spur_excluded_no_blowup() -> None:
@@ -104,7 +104,7 @@ def test_interior_interior_bridge_branch() -> None:
     assert commute_ratio(block, roads) == 0.0
 
 
-def test_crossing_is_noded_into_a_shared_vertex() -> None:  # RE-HOMED from test_cycle_density.py
+def test_crossing_is_noded_into_a_shared_vertex() -> None:  # RE-HOMED (deleted cycle-density suite)
     block = _block(4)
     roads = _roads([LineString([(20, 20), (80, 80)]), LineString([(20, 80), (80, 20)])])
     g = _noded_graph(roads, block.streets)
