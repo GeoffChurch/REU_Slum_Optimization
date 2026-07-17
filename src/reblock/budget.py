@@ -16,9 +16,8 @@ import pandas as pd
 import shapely
 from geopandas import GeoDataFrame
 from numpy.typing import NDArray
-from scipy.sparse import csr_matrix, diags
-from scipy.sparse.csgraph import connected_components, dijkstra
-from scipy.sparse.linalg import factorized
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 from shapely import STRtree
 from shapely.geometry import LineString, Point
@@ -203,111 +202,6 @@ def _sampled_efficiency_core(csr: csr_matrix, node_index: dict[_Node, int],
     return inv_sum / pairs, dir_sum / pairs
 
 
-def _resistance_core(csr: csr_matrix, node_index: dict[_Node, int],
-                     entry: list[_Node | None], rep_xy: np.ndarray,
-                     ground_idx: np.ndarray, cap: float) -> float:
-    """Mean per-parcel grounded resistance-to-egress `R_i` (metres; lower = easier egress) over the
-    graph `csr` (symmetric CSR, `data` = edge lengths) + `node_index` ((x, y) -> row) -- the
-    resistance analogue of `_sampled_efficiency_core`'s door-to-door distance. Edge conductance
-    `c_e = 1/length_e`, so a single wire's resistance equals its length, and resistance strictly
-    drops below shortest-path length wherever loops give redundant paths (the whole point of the
-    metric -- see the design spec's "The metric" section). `ground_idx` are the node rows already
-    on the block's street network (potential 0, the egress current's sink); the weighted Laplacian
-    `L = diag(deg) - C` is reduced to the FREE (non-ground) nodes reachable from ground
-    (`connected_components`), factorized ONCE (`factorized`), then `R_i = (L_G^-1)_{k,k} + leg_i`
-    for parcel i's entry node's reduced index k -- solved once per DISTINCT entry node, not once
-    per parcel. `leg_i = euclid(rep_xy[i], entry_i)` is the last-mile walk from the parcel to its
-    road-entry point (mirrors `_sampled_efficiency_core`'s door-to-door legs). An entry ON a ground
-    node -> `R_i = leg_i` (drive term 0, no solve needed); an entry missing / absent from the graph
-    / stuck in a component that never reaches ground -> `R_i = cap` (the block bbox diagonal,
-    analogous to `access_burden`'s unreached-depth cap).
-
-    Reachability is computed from the POSITIVE-conductance graph (`conductance.eliminate_zeros()`
-    before `connected_components`), NOT the raw structural CSR: a non-positive-length edge carries
-    zero conductance, so it must not be able to "ground" a component. A component whose only path
-    to ground runs through such a zero-length edge is correctly treated as unreachable (degrades
-    to `cap`) instead of handing a singular `L_G` to `factorized` (structural reach let this
-    through and raised `MatrixRankWarning`/a singular-factorization error).
-
-    Returns the INTENSIVE per-parcel mean `mean_i R_i`, NOT the extensive single-solve aggregate
-    `w^T L_G^-1 w` or the raw Kirchhoff index -- those grow with node/parcel count and rank road
-    sets WRONGLY (the investigation's caveat: they would call a road set worse purely for adding
-    nodes). `mean_i R_i` is invariant to extraneous ungrounded/unreferenced nodes added to `csr`
-    (see `test_intensive_mean`), because such nodes never become any parcel's entry and so never
-    enter the per-parcel sum.
-
-    Guards: 0 parcels -> 0.0 (nothing to average); 0 graph nodes, or an empty `free` set (every
-    node is either grounded or unreachable) -> every parcel falls to `cap` (or `leg_i` if its entry
-    happens to sit ON a ground node) and no linear solve runs."""
-    n = len(entry)
-    if n == 0:
-        return 0.0
-    num_nodes = csr.shape[0]
-
-    ground_mask = np.zeros(num_nodes, dtype=bool)
-    if ground_idx.size and num_nodes:
-        ground_mask[ground_idx] = True
-
-    # Conductance built up front (not just inside the `if free.size` solve branch): a zero- or
-    # negative-length edge maps to zero conductance, and `eliminate_zeros` drops it from the
-    # sparsity structure entirely, so `connected_components` below sees only positive-conductance
-    # edges -- see the zero-conductance-reach guard in the docstring above.
-    conductance = csr.copy()
-    with np.errstate(divide="ignore"):
-        conductance.data = np.where(conductance.data > 0, 1.0 / conductance.data, 0.0)
-    conductance.eliminate_zeros()
-
-    reach = np.zeros(num_nodes, dtype=bool)
-    if num_nodes:
-        _n_comp, labels = connected_components(conductance, directed=False)
-        grounded_labels = set(labels[ground_idx].tolist()) if ground_idx.size else set()
-        if grounded_labels:
-            reach = np.isin(labels, list(grounded_labels))
-
-    free = np.flatnonzero(reach & ~ground_mask)
-    free_pos = {int(gi): k for k, gi in enumerate(free)}
-
-    solve: Callable[[np.ndarray], np.ndarray] | None = None
-    if free.size:
-        deg = np.asarray(conductance.sum(axis=1)).ravel()
-        laplacian = (diags(deg) - conductance).tocsc()
-        lg = laplacian[free][:, free].tocsc()
-        solve = factorized(lg)
-
-    entry_xy = np.array([[np.nan, np.nan] if e is None else [e[0], e[1]] for e in entry],
-                        dtype=np.float64)
-    legs = np.hypot(rep_xy[:, 0] - entry_xy[:, 0], rep_xy[:, 1] - entry_xy[:, 1])
-    gi_arr = np.array([node_index.get(e, -1) if e is not None else -1 for e in entry],
-                      dtype=np.int64)
-
-    need = sorted({free_pos[int(gi)] for gi in gi_arr if int(gi) in free_pos})
-    diag: dict[int, float] = {}
-    if solve is not None:
-        for k in need:
-            unit = np.zeros(free.size, dtype=np.float64)
-            unit[k] = 1.0
-            diag[k] = float(solve(unit)[k])
-
-    R = np.full(n, cap, dtype=np.float64)
-    for i in range(n):
-        gi = int(gi_arr[i])
-        leg = legs[i]
-        if gi < 0 or not np.isfinite(leg):
-            continue                                   # no entry / not in graph -> cap
-        if ground_mask[gi]:
-            R[i] = leg                                 # entry ON the street: drive term 0
-        else:
-            pos = free_pos.get(gi)
-            # invariant: `need` (hence `diag`) is built from every `free_pos` value that any
-            # entry's gi maps to, so `pos in diag` always holds when `pos is not None` (given
-            # `solve is not None`, guaranteed here since `free_pos` is only ever nonempty when
-            # `free.size` -- the same condition that built `solve`).
-            if pos is not None:
-                R[i] = diag[pos] + leg
-            # else: entry not reachable to ground -> stays cap
-    return float(np.mean(R))
-
-
 def _explode_segments(geoms: Iterable[BaseGeometry]) -> list[_Pair]:
     """Explode geometries to `_rnd`-snapped, non-degenerate, first-seen-deduplicated undirected
     segment endpoint pairs -- the segment extraction the old nx graph builder fed `nx.add_edge`,
@@ -470,13 +364,6 @@ class _BlockScoringContext:
         self.geoms_arr: np.ndarray = np.array(self.geoms, dtype=object)
         self.reps_arr: np.ndarray = np.array(self.reps, dtype=object)
 
-        # For `resistance_frozen`/`_resistance_core`: the block bbox diagonal (the unreached-egress
-        # cap, analogous to `access_burden`'s unreached-depth cap) and the streets union (the
-        # ground-test geometry for `_ground_indices`), each frozen once per block.
-        bounds = np.array(block.boundary.bounds, dtype=np.float64)
-        self.cap: float = float(np.hypot(*(bounds[2:] - bounds[:2])))
-        self.streets_geom: BaseGeometry = unary_union(list(block.streets.geometry))
-
     def step(self, committed: GeoDataFrame | None) -> _StepContext:
         """A per-greedy-step scoring context over streets ∪ `committed` (rebuilt on each commit,
         ~max_roads times -- cheap), off which `score_candidate(real)` scores each trial road
@@ -534,40 +421,6 @@ class _BlockScoringContext:
         csr, node_index = _build_csr(base_pairs, splits)
         return _sampled_efficiency_core(csr, node_index, entry, self.sources,
                                         self.rep_xy, self.src_euclid)
-
-    def _ground_indices(self, node_index: dict[_Node, int]) -> np.ndarray:
-        """Node rows (into a CSR built with `node_index`) whose (x, y) lies within `self.tol` of
-        `self.streets_geom` -- the ground set S (potential 0) `resistance_frozen` grounds its
-        Laplacian solve on. Vectorized: one batched `shapely.distance` call over every node, not a
-        per-node python loop."""
-        if not node_index:
-            return np.zeros(0, dtype=np.int64)
-        nodes = list(node_index.keys())
-        pts = shapely.points(np.array(nodes, dtype=np.float64))
-        dist = shapely.distance(pts, self.streets_geom)
-        rows = np.array([node_index[nd] for nd in nodes], dtype=np.int64)
-        return rows[dist <= self.tol]
-
-    def resistance_frozen(self, roads_prefix: GeoDataFrame | None, *,
-                          entry: list[_Node | None],
-                          splits: dict[_Pair, list[tuple[float, _Node]]]) -> float:
-        """Mean per-parcel grounded resistance-to-egress over streets + `roads_prefix`, using the
-        FROZEN `entry`/`splits` (derived once against the full road set) -- mirrors
-        `score_frozen`'s CSR build exactly (same `base_pairs`/`_build_csr` call), but solves the
-        grounded Laplacian (`_resistance_core`) instead of running `_sampled_efficiency_core`'s
-        Dijkstra. An empty base edge set (no streets, no prefix roads) -> `self.cap` (every parcel
-        unreached), matching `_resistance_core`'s own unreached-cap convention. (No separate
-        `self.n < 1` guard: the only caller, `resistance_benefit`, already returns a constant 0.0
-        function when `ctx.n < 2`, and `_resistance_core` itself returns 0.0 -- not `self.cap` --
-        for 0 parcels, so a guard here would be both dead and wrong.)"""
-        prefix_segs = (_explode_segments(roads_prefix.geometry)
-                       if roads_prefix is not None and len(roads_prefix) else [])
-        base_pairs = [*prefix_segs, *self.street_segs]
-        if not base_pairs:
-            return self.cap
-        csr, node_index = _build_csr(base_pairs, splits)
-        return _resistance_core(csr, node_index, entry, self.rep_xy,
-                                self._ground_indices(node_index), self.cap)
 
 
 class _StepContext:
@@ -755,34 +608,6 @@ def directness_benefit(block: Block, roads_full: GeoDataFrame | None, *,
                        tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
     f = _efficiency_factory(block, roads_full, tol)
     return lambda roads: f(roads)[1]
-
-
-def resistance_benefit(block: Block, roads_full: GeoDataFrame | None, *,
-                       tol: float = STREET_TOL,
-                       k: int = 40) -> Callable[[GeoDataFrame | None], float]:
-    """Grounded egress-resistance benefit -- mirrors `_efficiency_factory` exactly (freeze the
-    parcel->entry-node mapping against the FULL road set ONCE, in a `_BlockScoringContext`, so
-    edges only ever get ADDED across `roads_prefix` growth): by Rayleigh monotonicity, adding
-    conductance to a network can only lower every grounded resistance, so `benefit` is
-    non-decreasing across `cost_benefit_curve`'s prefixes, same guarantee as
-    efficiency_benefit/directness_benefit.
-
-    `R0` is the no-roads (streets-only) score under those frozen entries; `benefit(prefix) =
-    (R0 - R(prefix)) / R0`, so `benefit(empty) == 0` and it rises toward 1 as resistance drops
-    with added roads. `ctx.n < 2` or no edges at all -> constant 0.0 (degenerate, matches
-    `_efficiency_factory`); `R0 <= 0` (every parcel already ON the street) -> constant 0.0 too,
-    since there is no resistance left to remove."""
-    ctx = _BlockScoringContext(block, k=k, tol=tol)
-    entry, splits, edge_pairs = ctx._derive_entries(roads_full)
-    if ctx.n < 2 or not edge_pairs:
-        return lambda _roads: 0.0
-    r0 = ctx.resistance_frozen(None, entry=entry, splits=splits)
-
-    def f(roads_prefix: GeoDataFrame | None) -> float:
-        if r0 <= 0:
-            return 0.0
-        return (r0 - ctx.resistance_frozen(roads_prefix, entry=entry, splits=splits)) / r0
-    return f
 
 
 @dataclass(frozen=True)
