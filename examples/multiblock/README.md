@@ -125,16 +125,6 @@ of the example: it shows what's on the ground vs. what the synthetic methods ach
 
 ![external connectivity](compare_external_connectivity.png) ![internal connectivity](compare_internal_connectivity.png)
 
-### The connectivity plane
-
-`connectivity_plane.png` plots each method's trajectory through (external, internal) connectivity space
-as road grows — marker size grows with cumulative road length, one colour per method (the same
-run-stable palette the curves above use). `clearance` climbs steeply on the external axis while barely
-lifting off the internal-connectivity floor; `greedy_arterial` does the opposite, gaining internal
-connectivity fastest per metre of road.
-
-![connectivity plane](connectivity_plane.png)
-
 ### Where each method puts its roads — matched budget
 
 One after-render per method, every method's roads truncated to the **same** added-road-length budget —
