@@ -705,22 +705,14 @@ def cost_benefit_curve(block: Block, roads: GeoDataFrame, *,
 
 
 def _noded_graph(roads: GeoDataFrame, streets: GeoDataFrame) -> nx.Graph:
-    """The PLANARIZED road∪street graph: unary_union nodes every crossing/touch into shared
-    vertices, then each _rnd-snapped (2-dp) segment becomes one undirected edge (deduped). Non-
-    LineString union fragments (stray points) are skipped. Empty input -> empty graph."""
-    geoms = list(roads.geometry) + list(streets.geometry)
+    """The PLANARIZED road∪street graph: `unary_union` nodes every crossing/touch into shared
+    vertices, then `_explode_segments` turns the merged geometry into `_rnd`-snapped (2-dp),
+    deduped, non-degenerate undirected edges (a stray point yields no segment, so it drops out).
+    Empty input -> empty graph."""
     g: nx.Graph = nx.Graph()
-    if not geoms:
-        return g
-    merged = unary_union(geoms)
-    parts = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
-    for part in parts:
-        if not hasattr(part, "coords"):
-            continue
-        cs = [_rnd(c) for c in part.coords]
-        for a, b in zip(cs, cs[1:], strict=False):
-            if a != b:
-                g.add_edge(a, b)
+    geoms = list(roads.geometry) + list(streets.geometry)
+    if geoms:
+        g.add_edges_from(_explode_segments([unary_union(geoms)]))
     return g
 
 
