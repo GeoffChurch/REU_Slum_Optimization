@@ -109,7 +109,7 @@ memoized after). From [`lens_a_depth.csv`](lens_a_depth.csv):
 | osm_footpaths | ❌ floor **depth 23** | 6,122 m | 257.0 (2.4%) | 0.1 s |
 
 **Only `clearance` can hit a coverage target.** It's the one method built to reach *every* parcel: a
-drainage tree that threads 304 roads / 13,699 m into the deep core, taking depth 24 → 3 in **5.5 s**,
+drainage tree that threads 13,699 m of road into the deep core, taking depth 24 → 3 in **5.5 s**,
 at the cost of displacing **15.1%** of homes. `greedy_arterial` and `osm_footpaths` cannot reach
 depth 3 *at any prefix of their output* — arterial's few through-roads floor the region at **depth
 20** (they close big loops, they don't cover the interior), and the as-built OSM footpaths floor it
