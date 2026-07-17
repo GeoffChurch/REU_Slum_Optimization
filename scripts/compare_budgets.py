@@ -1,4 +1,4 @@
-"""Two-lens method comparison for the multiblock example (replaces render_methods_matched.py).
+"""Two-lens method comparison for the multiblock example.
 
 Reblocks each method once over the region (timed), then reports it under two budgets:
 
@@ -12,10 +12,11 @@ Reblocks each method once over the region (timed), then reports it under two bud
     both axes (external + internal connectivity) + displacement.
 
 Both lenses render one after-heatmap per method (Lens A at the depth-D prefix, Lens B at the
-matched budget), re-scoring access-depth on the truncated roads exactly as render_methods_matched
-did.
+matched budget), re-scoring access-depth on each truncated road set via `KComplexityEval` (the same
+eval `region_reblock`/`pipeline.run` invoke, called directly on a Proposal wrapping the truncated
+roads with `block_identity=None` so the derive memo never hands back the untruncated depth).
 
-Run (module form -- mirrors scripts/render_methods_matched.py's Hydra bootstrapping):
+Run (module form -- mirrors scripts/fetch_desire_lines_snapshot.py's Hydra bootstrapping):
   pixi run python -m scripts.compare_budgets <out_dir> <target_depth> <m1,m2,...> \
        <hydra override>...
 
@@ -121,7 +122,7 @@ def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: 
                  ) -> tuple[list[LensARow], list[LensBRow]]:
     """Reblock each method once over `region` (timed), compute both lens tables, write the two CSVs,
     and render one after-heatmap per method per lens. The region block is method-independent (same
-    parcels/streets every reblock), so the first method's block scores every method and fixes the
+    parcels/streets every reblock), so any method's block scores every method and fixes the
     shared render `vmax`."""
     out_dir.mkdir(parents=True, exist_ok=True)
     roads_by_method: dict[str, GeoDataFrame] = {}
