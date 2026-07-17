@@ -146,11 +146,24 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
     return out_path
 
 
+def _screen_proxy(building_count: NDArray[np.float64], area: NDArray[np.float64],
+                  perim: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Per-block depth-squared proxy `n·A/P²` = building-count × compactness (`A/P²`, the
+    Polsby-Popper measure up to `4π`). The screen RANKS blocks by depth `√(nA)/P`; `region_map`
+    COLORS by this squared form -- monotone in the depth proxy (so the flagged/ranked set is
+    identical) but with far better slum-vs-formal contrast on the metro choropleth (the `√` form
+    saturates most dense fabric at max colour). `perim <= 0` -> nan (drawn as `missing`, never a
+    divide-by-zero)."""
+    safe = np.where(perim > 0.0, perim, np.nan)
+    return cast(NDArray[np.float64], (building_count * area) / (safe ** 2))
+
+
 def region_map(source: Source, regions: list[list[str]],
                seed_groups: list[list[str]], out_dir: Path) -> Path | None:
-    """Two maps for a region build. `screen.png`: the city depth-proxy choropleth (sqrt(n*A)/P --
-    what the screen keys on to find deep fabric), with the WHOLE expanded region located (dark
-    member outline + a locator box), the view clipped to the bulk block extent. `region.png`: the
+    """Two maps for a region build. `screen.png`: the city depth-proxy choropleth (n·A/P², the
+    SQUARED depth proxy -- monotone in what the screen ranks by, sharper slum contrast), with the
+    WHOLE expanded region located (dark member outline + a locator box), the view clipped to the
+    bulk block extent. `region.png`: the
     region's member blocks coloured by that same proxy against dimmed context, the pre-expansion
     **seed** (`seed_groups`, before `RegionBuilder.build` ran) outlined in a heavy edge (needed for
     `convex_hull`, which expands past the seed), plus the building points (member points normal,
@@ -167,16 +180,19 @@ def region_map(source: Source, regions: list[list[str]],
     all_seed_ids = {b for seeds in seed_groups for b in seeds}
     all_member_ids = {b for region in regions for b in region}
 
-    # Per-block depth proxy sqrt(n*A)/P (what the screen keys on) -- the shared colour scale.
+    # Per-block SQUARED depth proxy n*A/P^2 (monotone in sqrt(n*A)/P, what the screen keys on)
+    # -- the shared colour scale.
     has_proxy = "building_count" in geoms.columns
     vmax = 1.0
     if has_proxy:
         utm = geoms.to_crs(geoms.estimate_utm_crs())
-        area = geoms["block_area_m2"] if "block_area_m2" in geoms.columns else utm.geometry.area
-        perim = utm.geometry.length
-        geoms["proxy"] = np.sqrt(geoms["building_count"] * area) / perim.where(perim > 0)
-        # Cap high (p99, not p97): the proxy is heavy-tailed, so a lower cap saturates most of the
-        # metro at max colour; p99 keeps the deep fabric standing out against a paler background.
+        area = (geoms["block_area_m2"].to_numpy(dtype=float) if "block_area_m2" in geoms.columns
+                else utm.geometry.area.to_numpy())
+        perim = utm.geometry.length.to_numpy()
+        geoms["proxy"] = _screen_proxy(geoms["building_count"].to_numpy(dtype=float), area, perim)
+        # Cap high (p99, not p97): the squared proxy is heavy-tailed, so a lower cap saturates most
+        # of the metro at max colour; p99 keeps the deep fabric standing out against a paler
+        # background.
         vmax = float(geoms["proxy"].quantile(0.99)) or 1.0
     members = geoms[geoms["block_id"].isin(all_member_ids)]
     seeds = geoms[geoms["block_id"].isin(all_seed_ids)]
@@ -202,7 +218,7 @@ def region_map(source: Source, regions: list[list[str]],
     ax_s.set_ylim(float(bnd["miny"].quantile(0.01)), float(bnd["maxy"].quantile(0.99)))
     ax_s.set_aspect("equal")
     ax_s.set_axis_off()
-    ax_s.set_title(f"depth proxy √(n·A)/P; {len(all_member_ids)} blocks reblocked")
+    ax_s.set_title(f"depth² proxy n·A/P²; {len(all_member_ids)} blocks reblocked")
     save_render(fig_s, out_dir / "screen.png")
     plt.close(fig_s)
 
