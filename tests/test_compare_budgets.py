@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
@@ -68,7 +69,7 @@ def _street_block(x0: int, block_id: str) -> Block:
     return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
 
 
-def test_run_two_lens_writes_tables_and_renders(tmp_path) -> None:
+def test_run_two_lens_writes_tables_and_renders(tmp_path: Path) -> None:
     # End-to-end glue smoke test on a tiny region with a real reblocker (DijkstraReblocker paves
     # everything, so it reaches a shallow depth). Asserts the two CSVs + a render per lens are
     # written and wall-clock propose time is captured.
