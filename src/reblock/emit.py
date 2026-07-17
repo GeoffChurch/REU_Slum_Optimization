@@ -240,10 +240,8 @@ def region_map(source: Source, regions: list[list[str]],
 
 
 _METRIC_YLABELS = {
-    "access": "fraction of access-burden removed",
-    "efficiency": "network efficiency E",
-    "directness": "directness (1/circuity)",
-    "resistance": "fraction of egress resistance removed",
+    "external_connectivity": "external connectivity (fraction of access-burden removed)",
+    "internal_connectivity": "internal connectivity (independent cycles per parcel)",
     "displacement": "buildings displaced (Σ disk-graze probability)",
 }
 
@@ -269,10 +267,10 @@ def _method_colors(method_order: Sequence[str]) -> dict[str, tuple[float, float,
 
 def compare_report(results: list[MethodCurve], out_dir: Path,
                    *, method_order: Sequence[str]) -> None:
-    """Per metric (access, efficiency, directness, resistance, displacement): a per-method
+    """Per metric (external_connectivity, internal_connectivity, displacement): a per-method
     summary table + overlaid cost-benefit curves per block. `results` is the flat (method x block
     x metric) list from reblock.compare. The x-axis is always cumulative added road length (m).
-    For the four benefit metrics, writes `frontier_{metric}.csv` (the full (road length, benefit)
+    For the two benefit metrics, writes `frontier_{metric}.csv` (the full (road length, benefit)
     samples per method -- no scalar rank, because a single AUC to a shared road-length cap
     penalised the road-efficient methods: one reaching high benefit at low road ranked below a
     pave-everything method that reached slightly more at several times the road). For

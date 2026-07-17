@@ -12,14 +12,14 @@ def test_compare_writes_frontier_and_curves(tmp_path: Path) -> None:
         capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr
-    table = (tmp_path / "frontier_access.csv").read_text()
+    table = (tmp_path / "frontier_external_connectivity.csv").read_text()
     assert "clearance" in table and "greedy_arterial_buildable" in table
-    assert list(tmp_path.glob("curve_access_*.png"))
+    assert list(tmp_path.glob("curve_external_connectivity_*.png"))
 
 
 def test_compare_displacement_metric_runs_and_writes_curves(tmp_path: Path) -> None:
     # displacement rides the ordinary MethodCurve machinery as a metric="displacement" row --
-    # every compare() run grades it automatically (no cost= flag), alongside the four benefit
+    # every compare() run grades it automatically (no cost= flag), alongside the two benefit
     # frontiers. clearance (fast) proves the wiring end-to-end; the axis arithmetic itself is
     # unit-tested in test_budget.
     result = subprocess.run(
@@ -33,7 +33,7 @@ def test_compare_displacement_metric_runs_and_writes_curves(tmp_path: Path) -> N
     assert (tmp_path / "displacement_vs_length.csv").exists()
     assert (tmp_path / "displacement_table.csv").exists()
     assert not list(tmp_path.glob("tradeoff_table_*.csv"))
-    assert (tmp_path / "frontier_directness.csv").exists()
+    assert (tmp_path / "frontier_internal_connectivity.csv").exists()
     assert list(tmp_path.glob("displacement_*.png"))
 
 
@@ -44,7 +44,7 @@ def test_compare_emits_per_metric_frontier_tables(tmp_path: Path) -> None:
          f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, result.stderr
-    for metric in ("access", "efficiency", "directness"):
+    for metric in ("external_connectivity", "internal_connectivity"):
         assert (tmp_path / f"frontier_{metric}.csv").exists()
         assert list(tmp_path.glob(f"curve_{metric}_*.png"))
 
@@ -62,9 +62,9 @@ def test_compare_singleton_via_explicit_block_ids_matches_plain_single_block(
         capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr
-    table = (tmp_path / "frontier_access.csv").read_text()
+    table = (tmp_path / "frontier_external_connectivity.csv").read_text()
     assert "clearance" in table and "greedy_arterial_buildable" in table
-    assert (tmp_path / "curve_access_DJI.1_2_602.png").exists()
+    assert (tmp_path / "curve_external_connectivity_DJI.1_2_602.png").exists()
 
 
 def _terminal_benefit_by_method(csv_path: Path) -> dict[str, float]:
@@ -79,13 +79,14 @@ def _terminal_benefit_by_method(csv_path: Path) -> dict[str, float]:
     return {m: b for m, (_, b) in term.items()}
 
 
-def test_compare_two_adjacent_block_region_arterial_beats_clearance_directness(
+def test_compare_two_adjacent_block_region_arterial_beats_clearance_internal_connectivity(
     tmp_path: Path,
 ) -> None:
-    # The multi-block region compare path: an adjacent DJI pair as ONE seed group, reblocked jointly
-    # per method, curves keyed by "DJI.3_1_1808+DJI.3_1_1809". On directness the buildable-arterial
-    # method (straight chords) reaches a higher terminal directness than clearance (least-cost) --
-    # same reason it wins directness in the flagship examples.
+    # The multi-block region compare path: an adjacent DJI pair as ONE seed group, reblocked
+    # jointly per method, curves keyed by "DJI.3_1_1808+DJI.3_1_1809". clearance adds no roads at
+    # all on this fixture (0 m, benefit 0.000 on every metric); the buildable-arterial method's
+    # straight chords create real interior loops, so it reaches strictly higher terminal internal
+    # connectivity.
     result = subprocess.run(
         [sys.executable, "-m", "reblock.compare", "data=dji", "eval=kcomplexity",
          "methods=[clearance,greedy_arterial_buildable]",
@@ -94,10 +95,10 @@ def test_compare_two_adjacent_block_region_arterial_beats_clearance_directness(
     )
     assert result.returncode == 0, result.stderr
     label = "DJI.3_1_1808+DJI.3_1_1809"
-    for metric in ("access", "efficiency", "directness"):
+    for metric in ("external_connectivity", "internal_connectivity"):
         assert (tmp_path / f"frontier_{metric}.csv").exists()
         assert (tmp_path / f"curve_{metric}_{label}.png").exists()
-    term = _terminal_benefit_by_method(tmp_path / "frontier_directness.csv")
+    term = _terminal_benefit_by_method(tmp_path / "frontier_internal_connectivity.csv")
     assert term["greedy_arterial_buildable"] > term["clearance"]
 
 
@@ -105,12 +106,12 @@ def test_compare_report_writes_frontier(tmp_path: Path) -> None:
     from reblock.budget import Curve
     from reblock.compare import MethodCurve, compare_report
     results = [
-        MethodCurve("clearance", "b1", "access", Curve([0.0, 1.0], [0.0, 0.9])),
-        MethodCurve("topology", "b1", "access", Curve([0.0, 2.0], [0.0, 0.9])),
+        MethodCurve("clearance", "b1", "external_connectivity", Curve([0.0, 1.0], [0.0, 0.9])),
+        MethodCurve("topology", "b1", "external_connectivity", Curve([0.0, 2.0], [0.0, 0.9])),
     ]
     compare_report(results, tmp_path, method_order=["clearance", "topology"])
-    assert (tmp_path / "frontier_access.csv").exists()
-    assert (tmp_path / "curve_access_b1.png").exists()
+    assert (tmp_path / "frontier_external_connectivity.csv").exists()
+    assert (tmp_path / "curve_external_connectivity_b1.png").exists()
 
 
 def test_frontier_csv_has_road_length_and_benefit_samples(tmp_path: Path) -> None:
@@ -118,9 +119,10 @@ def test_frontier_csv_has_road_length_and_benefit_samples(tmp_path: Path) -> Non
     from reblock.compare import MethodCurve
     from reblock.emit import compare_report
     c = Curve(cost=[0.0, 100.0], benefit=[0.0, 0.8])
-    mc = MethodCurve("clearance", "B1", "access", c, pct_paved=0.041, pct_displaced=0.0)
+    mc = MethodCurve("clearance", "B1", "external_connectivity", c,
+                     pct_paved=0.041, pct_displaced=0.0)
     compare_report([mc], tmp_path, method_order=["clearance"])
-    with (tmp_path / "frontier_access.csv").open(newline="") as f:
+    with (tmp_path / "frontier_external_connectivity.csv").open(newline="") as f:
         rows = list(csv.DictReader(f))
     assert set(rows[0].keys()) == {"method", "block", "road_length_m", "benefit"}
     # both sampled frontier points are present, in curve order
@@ -137,7 +139,7 @@ def test_compare_method_sweep_expands_over_param_values(tmp_path: Path) -> None:
          f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=300)
     assert result.returncode == 0, result.stderr
-    table = (tmp_path / "frontier_directness.csv").read_text()
+    table = (tmp_path / "frontier_external_connectivity.csv").read_text()
     assert "clearance_repulsion-3" in table
     assert "clearance_repulsion0" in table
     assert "clearance_repulsion3" in table
