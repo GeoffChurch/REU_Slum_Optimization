@@ -83,12 +83,36 @@ files = ["src", "tests", "scripts/crossblock_probe.py"]
 # registers a sys.meta_path finder at runtime rather than a plain sys.path
 # entry — mypy's static .pth scan can't see through that, so point it at the
 # source tree directly (this is not an ignore_missing_imports shim: topology
-# ships py.typed and a fully typed public surface).
-# WARNING: do NOT add a tests/__init__.py to reblock's own tests/ -- mypy_path
-# exposes ext/topology's top-level "tests" package too, and turning ours into a
-# package as well collides with it (mypy treats both as module "tests"),
-# making mypy fatal with a duplicate-module error.
-mypy_path = ["ext/topology"]
+# ships py.typed, so mypy reads its real source — though parts of the graph
+# layer are unannotated, see the tests.* override below). `src` is on the path so
+# `reblock.*` (src layout) resolves canonically; `explicit_package_bases` then
+# names every file from these bases + the cwd, so a namespace `tests/` file gets
+# exactly ONE module name (`tests.methods.foo`) — not also a rootless top-level
+# `foo`. Without it, `mypy tests` was fatal with a duplicate-module error
+# ("test_arterial" vs "tests.methods.test_arterial") and silently checked nothing.
+explicit_package_bases = true
+mypy_path = ["src", "ext/topology"]
+
+[[tool.mypy.overrides]]
+# Tests were never actually strict-checked (the duplicate-module error above made
+# `mypy tests` fatal, silently). Rather than annotate every test with `-> None`,
+# relax the def/call-annotation strictness for tests; genuine type errors
+# (arg-type, union-attr, index, ...) in tests ARE still checked.
+# disallow_untyped_calls = false is also what lets tests call topology's
+# unannotated graph helpers (graphFromMyFaces, define_roads, build_all_roads, ...)
+# without a per-call `# type: ignore[no-untyped-call]` — NOT topology's py.typed,
+# which alone would not silence no-untyped-call for an unannotated function.
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+# tests/scoring_fixtures.py is imported bare (`from scoring_fixtures import ...`), not as
+# `tests.scoring_fixtures` — a deliberate pattern so pytest's sys.path (not a package name)
+# resolves it at runtime. mypy can't resolve the bare name from mypy_path/explicit_package_bases;
+# this override silences that import-not-found without touching the import itself.
+module = ["scoring_fixtures"]
+ignore_missing_imports = true
 
 # topology's pre-existing (unannotated) graph implementation transitively
 # imports untyped third-party libraries. These overrides target *those*

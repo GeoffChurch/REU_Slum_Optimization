@@ -16,14 +16,19 @@ def _policy(name, block):
 def test_lazy_fixed_and_faithful_run_and_differ_from_exact_is_ok():
     block = _grid_block(5)
     for pol in ("fixed", "grow", "faithful"):
-        roads = GreedyArterialReblocker(mode="buildable", objective="directness", n_anchors=6,
-                                        max_roads=4, lazy=True, candidate_policy=pol).propose(block).roads
+        roads = GreedyArterialReblocker(
+            mode="buildable", objective="directness", n_anchors=6,
+            max_roads=4, lazy=True, candidate_policy=pol,
+        ).propose(block).roads
+        assert roads is not None
         assert len(roads) >= 0            # all policies produce a valid proposal
-    # rescore_every=1 with grow/fixed equals a full-rescore greedy over that policy's set: determinism
+    # rescore_every=1 with grow/fixed equals a full-rescore greedy over that policy's
+    # set: determinism
     a = GreedyArterialReblocker(mode="buildable", n_anchors=6, max_roads=3, lazy=True,
                                 candidate_policy="fixed", rescore_every=1).propose(block).roads
     b = GreedyArterialReblocker(mode="buildable", n_anchors=6, max_roads=3, lazy=True,
                                 candidate_policy="fixed", rescore_every=1).propose(block).roads
+    assert a is not None and b is not None
     assert [g.wkt for g in a.geometry] == [g.wkt for g in b.geometry]
 
 
@@ -96,6 +101,7 @@ def test_lazy_dispatch_and_determinism():
                                max_roads=4, lazy=True, candidate_policy="grow")
     a = m.propose(block).roads
     b = m.propose(block).roads
+    assert a is not None and b is not None
     assert [g.wkt for g in a.geometry] == [g.wkt for g in b.geometry]   # deterministic
     assert len(a) > 0
 
@@ -147,6 +153,7 @@ def test_lazy_roads_carry_drain_column_like_exact():
     roads = GreedyArterialReblocker(mode="buildable", objective="directness", n_anchors=6,
                                     max_roads=4, lazy=True,
                                     candidate_policy="grow").propose(block).roads
+    assert roads is not None
     assert "drain" in roads.columns
     if len(roads):
         assert len(roads["drain"]) == len(roads)

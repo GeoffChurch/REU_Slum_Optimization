@@ -243,7 +243,7 @@ def test_displaced_points_carry_fraction_and_radius(tmp_path):
 
     from reblock.contracts import Block, Proposal
     from reblock.emit import _displaced_points
-    crs = "EPSG:32734"
+    crs = CRS.from_epsg(32734)
     boundary = Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
     parcels = gpd.GeoDataFrame({"parcel_id": [0]}, geometry=[boundary], crs=crs)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (20, 0)])], crs=crs)
