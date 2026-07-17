@@ -134,10 +134,10 @@ open-ended "hunt for variants"):
   add k near-parallel stubs and confirm that although ρ rises, the network is **dominated on the
   joint suite** (higher displacement and/or road length at equal or worse external — i.e. a bundler
   is not Pareto-competitive with a genuine looper on {external, internal, displacement-vs-length});
-  (b) the **monotonicity** check — a drainage-ordered `commute_ratio_benefit` sweep on a
-  spur+stranded-pocket fixture must be non-decreasing (validates the §3.3.1 freezing). If the
-  duplication vector shows a bundler IS competitive on the suite, add the near-parallel edge-collapse
-  fallback (merge edges parallel within ε≈3–5 m before the solve) and re-run.
+  (b) a **curve-behaviour** characterization — record the drainage-ordered `commute_ratio_benefit`
+  curve and confirm freezing reduces remap churn (do NOT require monotonicity; ρ is non-monotone per
+  §3.3.1). If the duplication vector shows a bundler IS competitive on the suite, add the
+  near-parallel edge-collapse fallback (merge edges parallel within ε≈3–5 m before the solve) and re-run.
 
 Task 1 records the chosen aggregation and the measured loading / orthogonality / BIG-vs-TINY /
 duplication-suite / monotonicity numbers in the metric's module docstring.
@@ -159,29 +159,32 @@ def commute_ratio_benefit(block: Block, roads_full: GeoDataFrame | None, *,
                           tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
     """Internal-connectivity benefit factory (shares the access_benefit signature so it plugs into
     cost_benefit_curve(..., benefit_fn=commute_ratio_benefit) and the _sweep frontier). Unlike a bare
-    per-prefix call, this FREEZES the parcel->entry map and the reachable/averaged set against
-    `roads_full` and only grows the edge set across prefixes -- required for a non-jagged frontier
-    curve (see §3.3.1)."""
+    per-prefix call, it FREEZES the parcel->entry map against `roads_full` (only the edge set grows
+    across prefixes) to remove nearest-node remap churn -- NOT to force monotonicity (rho is
+    non-monotone by construction; see 3.3.1)."""
 ```
 
-`commute_ratio` returns a value in `[0, 1)`. **It does NOT "drop straight in" to `_sweep` unchanged**
-— see §3.3.1 (monotonicity) below; the benefit factory must freeze entries.
+`commute_ratio` returns a value in `[0, 1)`. The curve it produces is **non-monotone** (§3.3.1) —
+compared at matched budget and ranked by terminal value, never assumed to rise.
 
 #### 3.3.1 Implementation: restore the deleted sparse+frozen resistance engine — do NOT write new dense code
 
-The grounded resistance-to-street `R(v)` is *exactly* what the deleted egress-resistance engine
-computed (`resistance_benefit`/`_resistance_core`/`resistance_frozen`/`_ground_indices`, removed in
-PR #4, recoverable from commit `fe4180c`; design at
-`docs/superpowers/specs/2026-07-11-resistance-eval-design.md`). **Plan 1 restores and adapts that
-machinery rather than writing a fresh dense inverse.** This is not a back-compat resurrection of the
-deleted *metric* (egress-resistance loaded external and stays deleted) — only its computational core,
-which ρ legitimately needs. Restoring it fixes five red-team findings at once:
+Reuse the deleted egress-resistance engine's *correctness* conventions (geometric ground set,
+line-proximity entries — `_ground_indices`/`_line_entries`, recoverable from commit `fe4180c`), but
+**NOT** its sparse solver: a de-risk benchmark (`spike_sparse_cost.py`) overturned the sparse-speed
+premise. Findings that shape the implementation:
 
-- **Cost (mandatory — see §5.1 gate).** `_resistance_core` factorizes `L_g` ONCE via
-  `scipy.sparse.linalg.factorized` and back-substitutes per distinct entry node — the spike note
-  clocks a 3425-parcel region at 55 s doing hundreds of solves. A dense per-prefix inverse (what the
-  original spec implied) is ~1–2 orders slower and walls at region scale, where `cost_benefit_curve`
-  calls the benefit ~20× per method per block.
+- **Cost — use a plain DENSE grounded solve; do NOT restore the sparse factorization.** Ground truth
+  (`spike_sparse_cost.py`): `np.linalg.inv(L_g)` (taking the entry diagonal) is *faster* than a
+  sparse `splu` factorize + per-entry back-substitution at every size measured — because we need the
+  diagonal at essentially every interior node (#parcels ≥ #graph-nodes, so entries are not sparse),
+  and LAPACK's dense inverse beats per-column back-substitution for the full diagonal. Absolute cost
+  is modest: **~0.12 ms at block scale (cheaper than `cycle_density`), ~0.5 s at m≈3700 interior
+  nodes** (the adversary's "3–13 s per region solve" was ~10–25× high). Over a ~20-prefix frontier
+  that's ~10 s per method per region-block — comparable to `cycle_density`'s graph-build-dominated
+  cost, not a wall. The §6 Task-0 gate still *measures* this on a real region and blocks if it
+  regresses, but the implementation is a component-wise dense solve (as the gate spikes already do),
+  not the deleted machinery.
 - **Ground set S — geometric, not combinatorial.** Define street nodes by proximity,
   `Point(node).distance(street_geom) <= tol` (as `_ground_indices`/`road_drainage` already do), NOT
   "nodes appearing in raw `block.streets`". Planarization *creates* on-street nodes at road/street
@@ -192,13 +195,19 @@ which ρ legitimately needs. Restoring it fixes five red-team findings at once:
   a `cKDTree` from parcel centroids to graph vertices — the latter is the exact mapping `_line_entries`
   documents as wrong (undercounts chords; a wide parcel's centroid is far from every edge), and using
   it would also compute ρ and access on *different* parcel maps, muddying the §3.2 orthogonality read.
-- **Frozen entries → non-jagged sweep (§3.3.1 monotonicity).** Freeze the parcel→entry map and the
-  reachable/averaged set against `roads_full`, then only grow the edge set across prefixes (mirror
-  `_efficiency_factory`, budget.py:559–585). Without this, a re-mapped parcel or a newly-reachable
-  stranded parcel makes the block-mean *drop* as roads are added → the internal curve regresses.
-  **Caveat that must be stated in code:** even frozen, ρ = 1 − R/R_geo is a ratio of two co-decreasing
-  quantities, so monotonicity is NOT structural (unlike `directness`) — Plan 1 asserts it empirically
-  on a drainage-ordered prefix sweep over a spur+stranded-pocket fixture, and never assumes it.
+- **ρ is NON-MONOTONE over the sweep — report it truthfully; do not engineer for monotonicity.**
+  Ground truth (`spike_sparse_cost.py`, Part C): a drainage-ordered `commute_ratio_benefit` sweep
+  dips ~7–8 times in 17 steps, and **freezing the parcel→entry map does not fix it** (frozen dipped
+  8×, non-frozen 7×). The reason is structural: ρ = 1 − R/R_geo is a ratio of two *co-decreasing*
+  quantities (both fall as edges are added), so unlike `directness` (fixed numerator / non-increasing
+  denominator) it has no monotonicity guarantee — and no aggregation choice confers one. This is the
+  honest price of a non-perverse redundancy metric (2ec is non-monotone too; only a pure cycle
+  *count* rises monotonically, which is why the perverse `cycle_density` was). Consequences the spec
+  commits to: (a) the internal curve is compared **at matched budget** and methods are ranked by
+  **terminal** ρ (already how `compare.py` sorts post-PR #6 — no scalar AUC assumes monotonicity);
+  (b) still **freeze the parcel→entry map** against `roads_full` (mirror `_efficiency_factory`) — not
+  for monotonicity but to remove the nearest-node *remap churn* so the curve reflects real structure,
+  not mapping noise; (c) the metric docstring states plainly that ρ is non-monotone in road length.
 - **`[0,1)` clip + range guards.** R(v) (matrix solve) and R_geo(v) (Dijkstra sum) reach the same
   number by different float paths, so on bridge routes ρ can compute to −ε; ill-conditioning
   (0.01 m edges @ conductance 100 vs 200 m depths) can push it past 1. Clip
@@ -258,10 +267,11 @@ Per the standing directive — **no dual path, no back-compat shim**:
 - Disconnection: a spur reaching no street → those parcels excluded from the reachable-conditioned
   mean, no blow-up. Empty roads / `None` / no parcels / **no interior nodes** / **all-stranded
   (empty reachable set)** → `0.0` (each guarded explicitly).
-- **Frontier monotonicity (the real path, not a hand-picked case):** a drainage-ordered
-  `commute_ratio_benefit` sweep (via `cost_benefit_curve`) over a fixture containing dead-end spurs
-  **and** a stranded pocket must return a **non-decreasing** benefit list — this is what validates the
-  §3.3.1 freezing; the old "monotone-ish, adding a parallel route" check is insufficient.
+- **Frontier behaviour (characterize, do NOT assert monotone — ρ isn't):** a drainage-ordered
+  `commute_ratio_benefit` sweep returns a finite, NaN-free benefit list whose **terminal** value
+  matches `commute_ratio` on the full road set; and freezing the parcel→entry map yields a curve at
+  least as smooth as the unfrozen one (fewer remap-churn artifacts). Do NOT assert non-decreasing —
+  §3.3.1 establishes ρ is non-monotone by construction.
 
 ## 4. Part 2 — Loop-closure refiner
 
@@ -382,11 +392,11 @@ regenerated comparison figure/curve, reviewed by eye, in the refiner plan's fina
 ## 5. Global constraints (bind every task)
 
 - **Scalability is a first-class, blocking requirement** (not an optimization to defer). ρ runs ~20×
-  per method per block during *reporting*, so a slow ρ slows the whole compare pipeline for every
-  method at region scale — it MUST use the restored sparse+frozen engine (§3.3.1). The refiner MUST
-  use lazy-greedy + an incremental bridge-tree (§4.3). Each plan opens with a benchmark gate (§6)
-  that blocks the rest of the plan until met. (The flagship *methods'* own propose cost is unchanged
-  by this work; ρ is a metric and the refiner is opt-in.)
+  per method per block during *reporting*; a dense grounded solve is benchmarked fine (~0.5 s at
+  region scale, §3.3.1), but the Task-0 gate (§6) still measures it on a real region and blocks if it
+  regresses. The refiner MUST use lazy-greedy + an incremental bridge-tree (§4.3) — its naive form is
+  benchmarked at ~hours/region. (The flagship *methods'* own propose cost is unchanged by this work;
+  ρ is a metric and the refiner is opt-in.)
 - **Migrate, don't accommodate:** delete `cycle_density`, `cycle_benefit`, `tests/test_cycle_density.py`;
   no dual path, no deprecated alias.
 - `pixi run check` (ruff lint + mypy --strict + pytest) stays green.
@@ -399,11 +409,13 @@ regenerated comparison figure/curve, reviewed by eye, in the refiner plan's fina
 Two sequenced plans (writing-plans produces them one at a time):
 
 1. **Metric migration.**
-   - **Task 0 — scalability gate (blocking):** implement `commute_ratio` on the restored sparse+frozen
-     engine (§3.3.1) and benchmark it vs `cycle_density` on a real region block (~2000–3400 parcels,
-     per the spike note's `ZAF.9.3.1_1_38528` / 6-block region). Gate: a full `commute_ratio_benefit`
-     frontier sweep stays within a small factor of `cycle_density`'s reporting cost (seconds, not
-     minutes). If it doesn't, stop and fix before wiring.
+   - **Task 0 — scalability gate (blocking):** implement `commute_ratio` on a component-wise **dense**
+     grounded solve (§3.3.1) and benchmark a full `commute_ratio_benefit` frontier sweep vs
+     `cycle_density` on a real region block (~2000–3400 parcels, e.g. `ZAF.9.3.1_1_38528` / a 6-block
+     region). Gate: within a small factor of `cycle_density`'s reporting cost (the de-risk spike
+     predicts ~10 s of solve over a 20-prefix sweep at m≈3700 — acceptable). If it regresses, stop
+     and fix before wiring. (The de-risk `spike_sparse_cost.py` already showed dense beats sparse
+     here, so no sparse solver is expected.)
    - **Task 1 — metric gate (blocking):** run the §3.2 gate (aggregation, orthogonality exit branch,
      BIG/TINY, corridor-duplication-suite, monotonicity) on the corpus; commit the chosen aggregation
      or fall back to 2ec per the committed rule.
