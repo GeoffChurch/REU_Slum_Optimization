@@ -631,6 +631,16 @@ class Curve:
 V = TypeVar("V")
 
 
+def _drainage_ordered(block: Block, roads: GeoDataFrame, tol: float) -> GeoDataFrame:
+    """`roads` reindexed in drainage-descending order (ties by original index), reset to a fresh
+    RangeIndex -- the single canonical prefix order shared by `_sweep`, `truncate_to_length`, and
+    `prefix_to_depth`, so every budget/prefix walk grows the road set in the same sequence. Callers
+    guard `len(roads) == 0` before calling (an empty road set has no drainage to order)."""
+    drain = road_drainage(block, roads, tol=tol)
+    order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
+    return cast(GeoDataFrame, roads.iloc[order].reset_index(drop=True))
+
+
 def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | None], V],
            n_points: int, tol: float) -> tuple[list[float], list[V]]:
     """Drainage-ordered cumulative-budget sweep: returns ([road_length_m(prefix)], [value(prefix)]).
@@ -644,9 +654,7 @@ def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | No
     vals: list[V] = [value(cast(GeoDataFrame, roads.iloc[:0]))]
     if len(roads) == 0 or block.boundary.area == 0.0:
         return costs, vals
-    drain = road_drainage(block, roads, tol=tol)
-    order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
-    ordered = roads.iloc[order].reset_index(drop=True)
+    ordered = _drainage_ordered(block, roads, tol)
     cum = ordered.geometry.length.to_numpy().cumsum()
     total = float(cum[-1])
     seen = 0
@@ -655,8 +663,8 @@ def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | No
         if m <= seen:
             continue
         seen = m
-        costs.append(_length(ordered.iloc[:m]))
-        vals.append(value(ordered.iloc[:m]))
+        costs.append(_length(cast(GeoDataFrame, ordered.iloc[:m])))
+        vals.append(value(cast(GeoDataFrame, ordered.iloc[:m])))
     return costs, vals
 
 
@@ -666,12 +674,51 @@ def truncate_to_length(block: Block, roads: GeoDataFrame, budget_m: float,
     _sweep uses). Empty for budget_m <= 0; all roads for budget_m >= total."""
     if len(roads) == 0 or budget_m <= 0.0:
         return cast(GeoDataFrame, roads.iloc[:0])
-    drain = road_drainage(block, roads, tol=tol)
-    order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
-    ordered = roads.iloc[order].reset_index(drop=True)
+    ordered = _drainage_ordered(block, roads, tol)
     cum = ordered.geometry.length.to_numpy().cumsum()
     m = int((cum <= budget_m + 1e-9).sum())
     return cast(GeoDataFrame, ordered.iloc[:m])
+
+
+def max_access_depth(block: Block, roads: GeoDataFrame | None, *, tol: float = STREET_TOL,
+                     adj: list[set[int]] | None = None) -> int:
+    """The block's deepest BFS access-depth (`parcel_access_layers`) given `roads` -- 1 = every
+    parcel fronts a street, higher = buried. `adj` (parcel adjacency) may be passed to avoid
+    rebuilding it across repeated calls on the same block."""
+    return int(parcel_access_layers(block, roads, tol=tol, adj=adj).max())
+
+
+def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
+                    tol: float = STREET_TOL) -> tuple[GeoDataFrame, int]:
+    """The minimal drainage-ordered prefix of `roads` whose max BFS access-depth is
+    <= `target_depth`, paired with that prefix's actual max depth. Access-depth is monotone
+    non-increasing as drainage-ordered roads are added (a larger street seed only shrinks depths),
+    so a binary search over the prefix length finds the smallest sufficient prefix in O(log R)
+    peels. If even all `roads` cannot reach `target_depth`, returns (all roads in drainage order,
+    floor depth) with floor depth > `target_depth` -- the caller reports that as unreached (an
+    `osm_footpaths`-style fixed input that never reaches the deep interior). Empty `roads` returns
+    (empty, the no-road peel's max depth)."""
+    adj = parcel_adjacency(list(block.parcels.geometry), tol)
+    if len(roads) == 0:
+        empty = cast(GeoDataFrame, roads.iloc[:0])
+        return empty, max_access_depth(block, empty, tol=tol, adj=adj)
+    ordered = _drainage_ordered(block, roads, tol)
+
+    def depth_at(m: int) -> int:
+        return max_access_depth(block, cast(GeoDataFrame, ordered.iloc[:m]), tol=tol, adj=adj)
+
+    n = len(ordered)
+    full_depth = depth_at(n)
+    if full_depth > target_depth:                 # unreachable: best effort is all roads
+        return ordered, full_depth
+    lo, hi = 0, n                                 # smallest m with depth_at(m) <= target_depth
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if depth_at(mid) <= target_depth:
+            hi = mid
+        else:
+            lo = mid + 1
+    return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), depth_at(lo)
 
 
 def matched_budget(total_length_by_method: dict[str, float]) -> float:
