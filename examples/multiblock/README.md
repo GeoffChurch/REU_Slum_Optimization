@@ -3,7 +3,7 @@
 The headline demonstration that the substrate + screen work make **whole-settlement** reblocking
 tractable: screen the entire Cape Town metro, grow its **deepest** informal core, thread roads
 through it so every home lands within **3 parcels of a street** — then compare, on that same
-10,700-home region, the methods that actually run at this scale, and show clearance's tuning knobs.
+10,700-home region, the methods that actually run at this scale, and why the substrate makes it tractable.
 
 Reproduces from **`capetown_full`** (the full metro, auto-downloaded to `~/.cache/reblock` on first
 use) via plain CLI commands. For the *comprehensive* method bake-off — the scalable reblockers plus
@@ -48,12 +48,13 @@ pixi run python -m reblock.run \
 
 One command: screen → grow → reblock → render. The clearance reblocker (chord-diagonal substrate)
 threads **304 roads / 13,699 m** through the settlement, bringing every parcel from **depth 24 to
-depth 3** and displacing **959** homes (sites inside a road corridor), in **~11 s**. `max_blocks=1`
+depth 3** and displacing **≈1,615** homes (the extent-aware Σ graze-probability measure of §4, not a
+raw centroid count), in **~11 s**. `max_blocks=1`
 takes the screen's deepest block as the seed; `region_map.enabled` writes `screen.png` + `region.png`
 (shown above); `render.enabled` writes the before/after heatmaps below (as `region:…_before.png` /
 `…_after.png`). The four dense maps are downsized to JPEG here for the gallery.
 
-| before (depth ≤ 24) | after — depth 3 (304 roads, 959 displaced) |
+| before (depth ≤ 24) | after — depth 3 (304 roads, ≈1,615 displaced) |
 |---|---|
 | ![before](before.jpg) | ![after](after.jpg) |
 
@@ -71,20 +72,20 @@ footpaths mapped from OpenStreetMap, not a synthetic construction. The coverage 
 
 Road-structure quality is **two orthogonal axes** (a spectral PCA across a diverse corpus of road
 networks found this once road *quantity* is controlled — quantity is the displacement/cost axis; see
-[the design doc](../../docs/superpowers/specs/2026-07-16-metric-basis-reporting-design.md)):
+the [basis derivation](../../docs/superpowers/specs/2026-07-16-metric-basis-reporting-design.md) and
+[ρ metric migration](../../docs/superpowers/specs/2026-07-17-redundancy-metric-and-refiner-design.md)):
 **external connectivity** (reach/drainage to the outside street network — the former "access" metric,
 unchanged, just relabeled; the former egress-`resistance` lens loaded on this same axis and is now
 subsumed by it) and **internal connectivity** (backup-route redundancy, `commute_ratio` — mean
 1 − R/R_geo, the effective-resistance ratio over the noded road∪street graph — replacing the retired
-`directness`/`efficiency` lenses and, more recently, the circuit-rank `cycle_density` representative;
-the tables below predate that latest swap, see the note under the frontier table).
+`directness`/`efficiency` lenses and the size-blind circuit-rank `cycle_density` representative).
 
 ```bash
 pixi run python -m reblock.compare \
   data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
   "block_ids=[[ZAF.9.3.1_1_5810]]" \
   methods=[clearance,greedy_arterial_buildable,osm_footpaths] max_blocks=1 \
-  all_methods.clearance.max_roads=3000 \
+  all_methods.clearance.max_roads=3000 all_methods.clearance.depth_target=3 \
   all_methods.greedy_arterial_buildable.candidate_policy=fixed \
   +all_methods.greedy_arterial_buildable.max_anchors=64 \
   desire_source.snapshot=examples/multiblock/desire_lines_5810.geojson
@@ -103,31 +104,28 @@ plus **`% paved`** (fraction of the region's area under the road corridor) it to
 
 | axis | clearance | greedy_arterial | osm_footpaths |
 |---|---|---|---|
-| external connectivity — access-burden removed | **0.970** | 0.582 | 0.026 |
-| internal connectivity — backup-route redundancy (mean 1 − R/R_geo) | 0.0030 | **0.0072** | 0.0035 |
-| added road length | 26,326 m | 5,614 m | 6,122 m |
-| **% paved** | 15.5% | **3.3%** | 3.7% |
+| external connectivity — access-burden removed | **0.952** | 0.582 | 0.026 |
+| internal connectivity — backup-route redundancy (mean 1 − R/R_geo) | 0.000 | **0.402** | 0.092 |
+| added road length | 13,699 m | 5,614 m | 6,122 m |
+| % paved | 8.0% | **3.3%** | 3.7% |
 
-> **Stale (cycle-era):** the internal-connectivity row's numbers above were measured under the
-> retired circuit-rank `cycle_density` metric, not the current `commute_ratio` (ρ). Every other row
-> is unaffected (unchanged metric). Regenerate on next `compare` run.
+**`clearance` dominates external connectivity:** 0.952 at 8.0% paved — the best coverage at region
+scale, but the **lowest internal connectivity (0.000)**: a dense drainage *tree* into the deep core has
+no backup routes by construction — every parcel reaches a street exactly one way.
 
-**`clearance` dominates external connectivity:** 0.970 at 15.5% paved — the best coverage at region
-scale, though its own internal connectivity (0.0030, cycle-era; see note above) is the lowest of the
-three: a dense drainage *tree* into the deep core, not a mesh.
-
-**`greedy_arterial`** (CELF-scalable) **wins internal connectivity** (0.0072, ~2× the others;
-cycle-era, see note above) at the sparsest paving of all (3.3%) and low displacement (~500 homes, see
+**`greedy_arterial`** (CELF-scalable) **wins internal connectivity** (0.402, ~4× osm_footpaths and
+unbounded over clearance's 0) at the sparsest paving of all (3.3%) and low displacement (~500 homes, see
 below) — its handful of through-roads reconnect into the existing street perimeter at both ends,
-closing real loops instead of dead-ending.
+closing real loops instead of dead-ending. (Note the scale flip: on a single small block it's
+`osm_footpaths` that's loopiest — see [`method-comparison`](../method-comparison/) — but on a deep
+23-block core the mapped paths are too sparse, and arterial's long chords close the big loops.)
 
 **`osm_footpaths` is the honest reality check.** Its roads are the mapped OSM footpaths that
-ALREADY exist across the region. And they barely touch the deep interior: external connectivity
-**0.026** at 3.7% paved, displacing ~257 homes. The real as-built paths are a thin skeleton that leaves
-almost the whole 10,700-home fabric buried — which is precisely why reblocking is needed. (On a single
-small block the same method does far better — see [`method-comparison`](../method-comparison/) —
-because a small block's paths actually cover it; a deep 23-block core they do not.) This is a feature
-of the example: it shows what's on the ground vs. what the synthetic methods achieve.
+ALREADY exist across the region, and they barely touch the deep interior: external connectivity
+**0.026** at 3.7% paved, internal connectivity **0.092**, displacing ~257 homes. The real as-built paths
+are a thin skeleton that leaves almost the whole 10,700-home fabric buried — which is precisely why
+reblocking is needed. This is a feature of the example: it shows what's on the ground vs. what the
+synthetic methods achieve.
 
 ![external connectivity](compare_external_connectivity.png) ![internal connectivity](compare_internal_connectivity.png)
 
@@ -154,75 +152,20 @@ footprint-edge clips a centroid test misses, so figures read higher than a raw c
 
 | method | homes displaced | % of homes | terminal internal connectivity (backup-route redundancy) |
 |---|---|---|---|
-| **osm_footpaths** | **257.0** | **2.4%** | 0.0035 |
-| greedy_arterial | 499.6 | 4.7% | **0.0072** |
-| clearance | 3,305.7 | 30.9% | 0.0030 |
-
-(Internal-connectivity column is cycle-era; see the note under the frontier table above — regenerate
-on next `compare` run.)
+| **osm_footpaths** | **257.0** | **2.4%** | 0.092 |
+| greedy_arterial | 499.6 | 4.7% | **0.402** |
+| clearance | 1,614.8 | 15.1% | 0.000 |
 
 `osm_footpaths` displaces the least (257 homes, 2.4%) — the flip side of barely helping: its footpaths
 never reach the deep interior (external connectivity 0.026 above), so there's little there to clear.
-`greedy_arterial` reaches the highest internal connectivity of the three (0.0072, cycle-era) while displacing a
-seventh as many homes as clearance (500 vs 3,306) — its handful of through-roads. `clearance`'s dense
-coverage displaces 3,306 homes (30.9%) — the price of the external-connectivity coverage it wins above.
+`greedy_arterial` reaches the highest internal connectivity of the three (0.402) while displacing a
+third as many homes as clearance (500 vs 1,615) — its handful of through-roads. `clearance`'s dense
+coverage displaces 1,615 homes (15.1%) — the price of the external-connectivity coverage it wins above.
 Read this alongside the frontier table above, not in isolation.
 
 ![displacement vs added road length](displacement.png)
 
-## 5. The depth_target tradeoff — why 3
-
-`depth_target` is the road-budget dial: the looser the target, the fewer roads. On the deep core,
-each depth's terminal frontier point (benefit reached, added road length spent, % paved; `displaced`
-is the extent-aware Σ graze-probability of §4):
-
-| depth_target | added road length | % paved | external connectivity | internal connectivity (backup-route redundancy) | displaced |
-|---|---|---|---|---|---|
-| 2 | 26,326 m | 15.5% | **0.970** | 0.0030 | 3,305.7 |
-| **3** | **13,699 m** | **8.0%** | 0.952 | 0.0030 | **1,614.8** |
-| 4 | 8,345 m | 4.9% | 0.931 | 0.0030 | 938.1 |
-
-(Internal-connectivity column is cycle-era; see the note under the §4 frontier table above —
-regenerate on next `compare` run.)
-
-Depth 3 is the sweet spot: it reaches **0.952 external connectivity** — ≈98% of depth 2's 0.970 — at
-**HALF the road** (13,699 vs 26,326 m) and half the displacement (1,615 vs 3,306). Depth 2 just keeps
-paving to shave the last two rings. Depth 4 saves more road still, but leaves parcels 4 deep. Internal
-connectivity reads **flat at 0.0030 across all three depths** (cycle-era number) — `depth_target` only
-trades road (and thus external connectivity and displacement) against how far clearance's drainage
-tree reaches; it never changes the network's loop count, which is pinned by the region's existing
-street topology, not by clearance's own (tree-shaped, non-looping) added roads.
-
-![depth external connectivity](depth_external_connectivity.png) ![depth internal connectivity](depth_internal_connectivity.png)
-
-## 6. The repulsion knob — displacement, for free
-
-At depth 3, `repulsion` (the logit knob steering roads toward gaps vs straight through buildings)
-trades **homes displaced** — for nothing on either connectivity axis:
-
-| repulsion | added road length | % paved | external connectivity | internal connectivity (backup-route redundancy) | displaced |
-|---|---|---|---|---|---|
-| −3 (seek clearance) | 13,387 m | 7.8% | 0.951 | 0.0030 | 1,670.7 |
-| 0 (balanced) | 13,699 m | 8.0% | 0.952 | 0.0030 | 1,614.8 |
-| +3 (repel buildings) | 14,484 m | 8.6% | 0.951 | 0.0030 | **1,232.3** |
-
-(Internal-connectivity column is cycle-era; see the note under the §4 frontier table above —
-regenerate on next `compare` run.)
-
-Turning repulsion up **cuts displacement ~26%** (1,671 → 1,232) by routing roads around buildings
-through the gaps — at essentially **no cost on either connectivity axis**: external connectivity stays
-in a tight 0.951–0.952 band and internal connectivity reads flat at 0.0030 across all three settings
-(cycle-era number).
-(Under the old five-lens basis this looked like a displacement-for-directness tradeoff; under the
-validated orthogonal basis, `directness` wasn't a real independent quality axis — repulsion changes
-*how* the roads route, not how well-connected the result is on either axis that matters.) Under the
-extent-aware disk measure the displacement drop is gentler than a bare centroid count would show: a
-road that dodges a building's *centre* still often grazes its *footprint*, so the disks keep it partly
-displaced.
-
-![repulsion external connectivity](repulsion_external_connectivity.png) ![repulsion internal connectivity](repulsion_internal_connectivity.png)
-
-## 7. Why it's tractable — the scaling payoff
+## 5. Why it's tractable — the scaling payoff
 
 The whole settlement is reblockable at all because the **chord-diagonal substrate scales with the
 fabric, not the area**. The routing graph the reblocker searches has **22,088 nodes** (one region of
@@ -230,24 +173,3 @@ parcel-boundary chords). A fixed `res = 1.5 m` grid over the settlement's **232 
 would be **≈ 1,033,034 nodes — 47× more** — and most of them empty space. That O(parcels) vs
 O(area/res²) gap is why 10,700 homes reblock in ~11 s on the chord substrate; a grid at the same
 resolution would be intractable at this scale.
-
-## Reproduce the compare panels
-
-```bash
-# §5 depth_target tradeoff
-pixi run python -m reblock.compare \
-  data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
-  "block_ids=[[ZAF.9.3.1_1_5810]]" methods=[] max_blocks=1 all_methods.clearance.max_roads=3000 \
-  'method_sweep={base: clearance, param: depth_target, values: [2, 3, 4]}'
-
-# §6 repulsion knob (depth pinned to 3)
-pixi run python -m reblock.compare \
-  data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \
-  "block_ids=[[ZAF.9.3.1_1_5810]]" methods=[] max_blocks=1 \
-  all_methods.clearance.depth_target=3 all_methods.clearance.max_roads=2000 \
-  'method_sweep={base: clearance, param: repulsion, values: [-3, 0, 3]}'
-```
-
-(These are raw frontier terminals — benefit at each variant's own added road length, no normalization
-— so they read directly across both sweeps; the depth sweep just spends more road at the tight end,
-since depth 2 commits ~3× depth 4's road.)
