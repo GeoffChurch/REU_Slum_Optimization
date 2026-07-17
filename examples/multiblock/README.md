@@ -59,14 +59,23 @@ takes the screen's deepest block as the seed; `region_map.enabled` writes `scree
 
 ## 4. Compare the methods that scale
 
-The same 10,700-home region, graded on the four lenses for the methods that run at settlement scale:
-**`clearance`**, **`greedy_arterial`** (rejoining via CELF/lazy — `candidate_policy=fixed` +
-`max_anchors=64` bound its candidate pass, so its 15 through-roads take ~30 s on the whole region
-instead of the ~48 min the uncapped greedy needed), and **`osm_footpaths`** — a reblocker whose
-roads are the REAL informal footpaths mapped from OpenStreetMap, not a synthetic construction. The
-coverage baselines `dijkstra`/`mesh` (which just pave everything) are dropped from this comparison;
-only `topology` (single-block-only) stays excluded at region scale. For the four-method bake-off on a
-small block, see [`method-comparison`](../method-comparison/).
+The same 10,700-home region, graded on the **metric basis** — external connectivity, internal
+connectivity, displacement — for the methods that run at settlement scale: **`clearance`**,
+**`greedy_arterial`** (rejoining via CELF/lazy — `candidate_policy=fixed` + `max_anchors=64` bound its
+candidate pass, so its 15 through-roads take ~30 s on the whole region instead of the ~48 min the
+uncapped greedy needed), and **`osm_footpaths`** — a reblocker whose roads are the REAL informal
+footpaths mapped from OpenStreetMap, not a synthetic construction. The coverage baselines
+`dijkstra`/`mesh` (which just pave everything) are dropped from this comparison; only `topology`
+(single-block-only) stays excluded at region scale. For the four-method bake-off on a small block, see
+[`method-comparison`](../method-comparison/).
+
+Road-structure quality is **two orthogonal axes** (a spectral PCA across a diverse corpus of road
+networks found this once road *quantity* is controlled — quantity is the displacement/cost axis; see
+[the design doc](../../docs/superpowers/specs/2026-07-16-metric-basis-reporting-design.md)):
+**external connectivity** (reach/drainage to the outside street network — the former "access" metric,
+unchanged, just relabeled; the former egress-`resistance` lens loaded on this same axis and is now
+subsumed by it) and **internal connectivity** (independent cycles per parcel — the redundancy of the
+network itself, replacing the retired `directness`/`efficiency` lenses).
 
 ```bash
 pixi run python -m reblock.compare \
@@ -87,38 +96,44 @@ Every command in this example logs its console output — each selection's locat
 summary, and the per-method frontier terminal points / displacement figures — to
 [`run.log`](run.log).
 
-Terminal frontier point per method per lens — benefit reached, and the **added road length** (metres)
+Terminal frontier point per method per axis — benefit reached, and the **added road length** (metres)
 plus **`% paved`** (fraction of the region's area under the road corridor) it took to get there:
 
-| lens | clearance | greedy_arterial | osm_footpaths |
+| axis | clearance | greedy_arterial | osm_footpaths |
 |---|---|---|---|
-| access — burden removed | **0.970** | 0.582 | 0.026 |
-| resistance — egress removed | **0.477** | 0.097 | 0.041 |
-| directness — 1/circuity | 0.088 | **0.092** | 0.010 |
-| efficiency — network E | ~0.00 | ~0.00 | ~0.00 |
+| external connectivity — access-burden removed | **0.970** | 0.582 | 0.026 |
+| internal connectivity — independent cycles/parcel | 0.0030 | **0.0072** | 0.0035 |
 | added road length | 26,326 m | 5,614 m | 6,122 m |
 | **% paved** | 15.5% | **3.3%** | 3.7% |
 
-**`clearance` dominates coverage:** access 0.970 and resistance 0.477 at 15.5% paved — the best
-all-round reblock at region scale.
+**`clearance` dominates external connectivity:** 0.970 at 15.5% paved — the best coverage at region
+scale, though its own internal connectivity (0.0030) is the lowest of the three: a dense drainage
+*tree* into the deep core, not a mesh.
 
-**`greedy_arterial`** (CELF-scalable) **wins directness** (0.092, edging clearance's 0.088) at the
-sparsest paving of all (3.3%) and low displacement (~500 homes, see below) — a handful of straight
-through-roads.
+**`greedy_arterial`** (CELF-scalable) **wins internal connectivity** (0.0072, ~2× the others) at the
+sparsest paving of all (3.3%) and low displacement (~500 homes, see below) — its handful of
+through-roads reconnect into the existing street perimeter at both ends, closing real loops instead of
+dead-ending.
 
 **`osm_footpaths` is the honest reality check.** Its roads are the mapped OSM footpaths that
-ALREADY exist across the region. And they barely touch the deep interior: access **0.026** at 3.7%
-paved, displacing ~257 homes. The real as-built paths are a thin skeleton that leaves almost the
-whole 10,700-home fabric buried — which is precisely why reblocking is needed. (On a single small
-block the same method does far better — see [`method-comparison`](../method-comparison/) — because a
-small block's paths actually cover it; a deep 23-block core they do not.) This is a feature of the
-example: it shows what's on the ground vs. what the synthetic methods achieve.
+ALREADY exist across the region. And they barely touch the deep interior: external connectivity
+**0.026** at 3.7% paved, displacing ~257 homes. The real as-built paths are a thin skeleton that leaves
+almost the whole 10,700-home fabric buried — which is precisely why reblocking is needed. (On a single
+small block the same method does far better — see [`method-comparison`](../method-comparison/) —
+because a small block's paths actually cover it; a deep 23-block core they do not.) This is a feature
+of the example: it shows what's on the ground vs. what the synthetic methods achieve.
 
-![access](compare_access.png) ![resistance](compare_resistance.png)
-![directness](compare_directness.png) ![efficiency](compare_efficiency.png)
+![external connectivity](compare_external_connectivity.png) ![internal connectivity](compare_internal_connectivity.png)
 
-`efficiency` (network E) is near-inert at this scale for every method — the many far-apart parcel
-pairs swamp it.
+### The connectivity plane
+
+`connectivity_plane.png` plots each method's trajectory through (external, internal) connectivity space
+as road grows — marker size grows with cumulative road length, one colour per method (the same
+run-stable palette the curves above use). `clearance` climbs steeply on the external axis while barely
+lifting off the internal-connectivity floor; `greedy_arterial` does the opposite, gaining internal
+connectivity fastest per metre of road.
+
+![connectivity plane](connectivity_plane.png)
 
 ### Where each method puts its roads — matched budget
 
@@ -141,18 +156,18 @@ building is a disk (radius = ½ its nearest-neighbour distance) contributing its
 grazed** by the road corridor, `c = max(0, 1 − d/r)`; Σc is the "expected homes displaced" — it catches
 footprint-edge clips a centroid test misses, so figures read higher than a raw count.
 
-| method | homes displaced | % of homes | terminal directness |
+| method | homes displaced | % of homes | terminal internal connectivity |
 |---|---|---|---|
-| **osm_footpaths** | **257.0** | **2.4%** | 0.010 |
-| greedy_arterial | 499.6 | 4.7% | 0.092 |
-| clearance | 3,305.7 | 30.9% | 0.088 |
+| **osm_footpaths** | **257.0** | **2.4%** | 0.0035 |
+| greedy_arterial | 499.6 | 4.7% | **0.0072** |
+| clearance | 3,305.7 | 30.9% | 0.0030 |
 
 `osm_footpaths` displaces the least (257 homes, 2.4%) — the flip side of barely helping: its footpaths
-never reach the deep interior (access 0.026 above), so there's little there to clear. `greedy_arterial`
-reaches near-clearance directness (0.092 vs 0.088) while displacing a seventh as many homes (500 vs
-3,306) — its handful of through-roads. `clearance`'s dense coverage displaces 3,306 homes (30.9%) — the
-price of the access/resistance coverage it wins above. Read this alongside the frontier table above,
-not in isolation.
+never reach the deep interior (external connectivity 0.026 above), so there's little there to clear.
+`greedy_arterial` reaches the highest internal connectivity of the three (0.0072) while displacing a
+seventh as many homes as clearance (500 vs 3,306) — its handful of through-roads. `clearance`'s dense
+coverage displaces 3,306 homes (30.9%) — the price of the external-connectivity coverage it wins above.
+Read this alongside the frontier table above, not in isolation.
 
 ![displacement vs added road length](displacement.png)
 
@@ -162,37 +177,44 @@ not in isolation.
 each depth's terminal frontier point (benefit reached, added road length spent, % paved; `displaced`
 is the extent-aware Σ graze-probability of §4):
 
-| depth_target | added road length | % paved | access | directness | resistance | displaced |
-|---|---|---|---|---|---|---|
-| 2 | 26,326 m | 15.5% | **0.970** | 0.088 | **0.477** | 3,305.7 |
-| **3** | **13,699 m** | **8.0%** | 0.952 | 0.045 | 0.251 | **1,614.8** |
-| 4 | 8,345 m | 4.9% | 0.931 | 0.036 | 0.150 | 938.1 |
+| depth_target | added road length | % paved | external connectivity | internal connectivity | displaced |
+|---|---|---|---|---|---|
+| 2 | 26,326 m | 15.5% | **0.970** | 0.0030 | 3,305.7 |
+| **3** | **13,699 m** | **8.0%** | 0.952 | 0.0030 | **1,614.8** |
+| 4 | 8,345 m | 4.9% | 0.931 | 0.0030 | 938.1 |
 
-Depth 3 is the sweet spot: it reaches **0.952 access** — ≈98% of depth 2's 0.970 — at **HALF the
-road** (13,699 vs 26,326 m) and half the displacement (1,615 vs 3,306). Depth 2 just keeps paving to
-shave the last two rings. Depth 4 saves more road still, but leaves parcels 4 deep.
+Depth 3 is the sweet spot: it reaches **0.952 external connectivity** — ≈98% of depth 2's 0.970 — at
+**HALF the road** (13,699 vs 26,326 m) and half the displacement (1,615 vs 3,306). Depth 2 just keeps
+paving to shave the last two rings. Depth 4 saves more road still, but leaves parcels 4 deep. Internal
+connectivity is **flat at 0.0030 across all three depths** — `depth_target` only trades road (and thus
+external connectivity and displacement) against how far clearance's drainage tree reaches; it never
+changes the network's loop count, which is pinned by the region's existing street topology, not by
+clearance's own (tree-shaped, non-looping) added roads.
 
-![depth access](depth_access.png) ![depth resistance](depth_resistance.png)
+![depth external connectivity](depth_external_connectivity.png) ![depth internal connectivity](depth_internal_connectivity.png)
 
-## 6. The repulsion knob — displacement vs directness
+## 6. The repulsion knob — displacement, for free
 
 At depth 3, `repulsion` (the logit knob steering roads toward gaps vs straight through buildings)
-trades **homes displaced** against **route directness**:
+trades **homes displaced** — for nothing on either connectivity axis:
 
-| repulsion | added road length | % paved | directness | access | displaced |
+| repulsion | added road length | % paved | external connectivity | internal connectivity | displaced |
 |---|---|---|---|---|---|
-| −3 (seek clearance) | 13,387 m | 7.8% | **0.077** | 0.951 | 1,670.7 |
-| 0 (balanced) | 13,699 m | 8.0% | 0.045 | 0.952 | 1,614.8 |
-| +3 (repel buildings) | 14,484 m | 8.6% | 0.026 | 0.951 | **1,232.3** |
+| −3 (seek clearance) | 13,387 m | 7.8% | 0.951 | 0.0030 | 1,670.7 |
+| 0 (balanced) | 13,699 m | 8.0% | 0.952 | 0.0030 | 1,614.8 |
+| +3 (repel buildings) | 14,484 m | 8.6% | 0.951 | 0.0030 | **1,232.3** |
 
 Turning repulsion up **cuts displacement ~26%** (1,671 → 1,232) by routing roads around buildings
-through the gaps — at the cost of less direct roads. (Under the extent-aware disk measure the drop is
-gentler than a bare centroid count would show: a road that dodges a building's *centre* still often
-grazes its *footprint*, so the disks keep it partly displaced.) Turning it down cuts straighter
-through the fabric: more direct internal trips, but more homes cleared. Same coverage either way
-(access ≈ 0.95); the knob is purely *how* the roads get there.
+through the gaps — at essentially **no cost on either connectivity axis**: external connectivity stays
+in a tight 0.951–0.952 band and internal connectivity is flat at 0.0030 across all three settings.
+(Under the old five-lens basis this looked like a displacement-for-directness tradeoff; under the
+validated orthogonal basis, `directness` wasn't a real independent quality axis — repulsion changes
+*how* the roads route, not how well-connected the result is on either axis that matters.) Under the
+extent-aware disk measure the displacement drop is gentler than a bare centroid count would show: a
+road that dodges a building's *centre* still often grazes its *footprint*, so the disks keep it partly
+displaced.
 
-![repulsion directness](repulsion_directness.png)
+![repulsion external connectivity](repulsion_external_connectivity.png) ![repulsion internal connectivity](repulsion_internal_connectivity.png)
 
 ## 7. Why it's tractable — the scaling payoff
 
