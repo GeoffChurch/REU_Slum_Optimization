@@ -868,6 +868,56 @@ def cost_benefit_curve(block: Block, roads: GeoDataFrame, *,
     return Curve(costs, benefit)
 
 
+def _noded_graph(roads: GeoDataFrame, streets: GeoDataFrame) -> nx.Graph:
+    """The PLANARIZED road∪street graph: unary_union nodes every crossing/touch into shared
+    vertices, then each _rnd-snapped (2-dp) segment becomes one undirected edge (deduped). Non-
+    LineString union fragments (stray points) are skipped. Empty input -> empty graph."""
+    geoms = list(roads.geometry) + list(streets.geometry)
+    g: nx.Graph = nx.Graph()
+    if not geoms:
+        return g
+    merged = unary_union(geoms)
+    parts = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
+    for part in parts:
+        if not hasattr(part, "coords"):
+            continue
+        cs = [_rnd(c) for c in part.coords]
+        for a, b in zip(cs, cs[1:], strict=False):
+            if a != b:
+                g.add_edge(a, b)
+    return g
+
+
+def cycle_density(block: Block, roads: GeoDataFrame | None) -> float:
+    """Internal connectivity: circuit rank per parcel, (E - N + C) / P, over the noded road∪street
+    graph (E/N/C = edge/node/component counts, P = parcel count). The number of independent cycles
+    (redundant internal routes) per dwelling; a tree -> 0. Circuit rank is a topological invariant
+    (subdivision-insensitive), so /P (fixed, exogenous) keeps the whole metric discretization-
+    invariant. 0.0 with no roads / no parcels / an empty graph."""
+    p = len(block.parcels)
+    if roads is None or len(roads) == 0 or p < 1:
+        return 0.0
+    g = _noded_graph(roads, block.streets)
+    n = g.number_of_nodes()
+    if n == 0:
+        return 0.0
+    circuit_rank = int(g.number_of_edges() - n + nx.number_connected_components(g))
+    return circuit_rank / p
+
+
+def cycle_benefit(block: Block, roads_full: GeoDataFrame | None, *,
+                  tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
+    """Internal-connectivity benefit factory (shares the `access_benefit` signature so it plugs into
+    `cost_benefit_curve(..., benefit_fn=cycle_benefit)` and the `_sweep` frontier).
+    `roads_full`/`tol` are unused -- cycle_density is self-contained and needs no frozen entries --
+    but kept for the shared BenefitFactory signature."""
+    del roads_full, tol
+
+    def f(roads: GeoDataFrame | None) -> float:
+        return cycle_density(block, roads)
+    return f
+
+
 def efficiency_directness_curves(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
                                  tol: float = STREET_TOL) -> tuple[Curve, Curve]:
     """ONE sampled shortest-path sweep yielding both E and directness curves (x = road
