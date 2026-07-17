@@ -278,7 +278,9 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     (road length, Σcᵢ) samples per method) and accumulates `displacement_table.csv` (mean terminal
     displacement + mean pct_displaced per method). `method_order` is the canonical method registry
     (`list(cfg.all_methods)`) that fixes each method's curve colour run-independently -- it must
-    cover every method in `results`."""
+    cover every method in `results`. Finally writes `connectivity_plane_{block_id}.png` per block
+    (see `_connectivity_plane`): each method's trajectory through (external, internal) connectivity
+    space, in the same run-stable colours as the per-metric curves above."""
     import csv
     from collections import defaultdict
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -328,6 +330,47 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
             for m, rows in sorted(disp_terminal.items(), key=lambda kv: -mean(d for d, _ in kv[1])):
                 w.writerow([m, f"{mean(d for d, _ in rows):.1f}",
                             f"{mean(p for _, p in rows):.4f}", len(rows)])
+    _connectivity_plane(results, out_dir, colors)
+
+
+def _connectivity_plane(results: list[MethodCurve], out_dir: Path,
+                        colors: dict[str, tuple[float, float, float]] | None = None) -> None:
+    """Per block/region: every method's trajectory through (external, internal) connectivity
+    space as road grows (marker size grows with cumulative road length). A communication figure,
+    not a metric -- no scalar summary. Pairs the `external_connectivity` and `internal_connectivity`
+    curves per (block, method); a method missing either is skipped for that block, though the
+    block's figure is still written (possibly empty) if at least one method has an
+    external_connectivity row. `colors` is the run's method->colour map (from `_method_colors`,
+    the same one the per-metric curve plots use) so a method reads the same colour across every
+    figure; when absent (e.g. this function called standalone, without a `method_order` registry
+    in scope) falls back to `plt.cm.tab10` keyed on the method's position within THIS plot only."""
+    paired: dict[str, dict[str, dict[str, MethodCurve]]] = {}
+    for r in results:
+        if r.metric in ("external_connectivity", "internal_connectivity"):
+            paired.setdefault(r.block_id, {}).setdefault(r.method, {})[r.metric] = r
+    for block_id, by_method in paired.items():
+        fig, ax = plt.subplots(figsize=(8, 6.5))
+        plotted = False
+        for i, (method, mc) in enumerate(sorted(by_method.items())):
+            ext, inn = mc.get("external_connectivity"), mc.get("internal_connectivity")
+            if ext is None or inn is None:
+                continue
+            x, y, cost = ext.curve.benefit, inn.curve.benefit, ext.curve.cost
+            colour = colors[method] if colors is not None else plt.cm.tab10(i % 10)
+            ax.plot(x, y, "-", color=colour, lw=1.2, alpha=0.6)
+            cmax = max(cost) or 1.0
+            sizes = [20 + 120 * (c / cmax) for c in cost]
+            ax.scatter(x, y, s=sizes, color=colour, label=method, zorder=3,
+                       edgecolors="white", linewidths=0.4)
+            plotted = True
+        ax.set_xlabel("External connectivity (reach to the street)")
+        ax.set_ylabel("Internal connectivity (cycles per parcel)")
+        ax.set_title(f"connectivity plane: {block_id}")
+        ax.grid(alpha=0.3)
+        if plotted:   # ax.legend() with no labelled artists warns ("No artists with labels...")
+            ax.legend(loc="upper left", fontsize=8)
+        save_render(fig, out_dir / f"connectivity_plane_{block_id}.png")
+        plt.close(fig)
 
 
 def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> None:
