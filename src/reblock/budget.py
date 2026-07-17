@@ -557,16 +557,20 @@ def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
 
 def _efficiency_factory(block: Block, roads_full: GeoDataFrame | None, tol: float,
                         k: int = 40) -> Callable[[GeoDataFrame | None], tuple[float, float]]:
-    """Freeze the parcel->entry-node mapping and the K sampled sources against the FULL
-    graph (`roads_full` + block.streets), built ONCE, in a `_BlockScoringContext`. The returned
-    f(roads_prefix) computes (E, directness) from those FIXED entries via `ctx.score_frozen`, over
-    a graph containing only `roads_prefix` + block.streets edges (rounded coordinates keep node
-    identity stable across subsets). A source/dest whose fixed entry node's parent edge is absent
-    from that prefix contributes 0.
+    """Shared machinery behind `efficiency_directness_curves` (the frontier-sweep measurement of
+    arterial's kept `objective=directness|efficiency`, backing the arterial-vs-dijkstra
+    directness tests and the 1e-9 scoring-equivalence net) and `efficiency_benefit`/
+    `directness_benefit` (fed to `cost_benefit_curve` by budget.py's own monotonicity tests, not
+    the deleted cost-benefit reporting). Freezes the parcel->entry-node mapping and the K sampled
+    sources against the FULL graph (`roads_full` + block.streets), built ONCE, in a
+    `_BlockScoringContext`. The returned f(roads_prefix) computes (E, directness) from those
+    FIXED entries via `ctx.score_frozen`, over a graph containing only `roads_prefix` +
+    block.streets edges (rounded coordinates keep node identity stable across subsets). A
+    source/dest whose fixed entry node's parent edge is absent from that prefix contributes 0.
 
     Since the entry mapping, sources, and the all-parcel pair set never change while the
     edge set only grows as `roads_prefix` grows, shortest-path distances from fixed entries
-    are non-increasing -- so E and directness are non-decreasing across cost_benefit_curve's
+    are non-increasing -- so E and directness are non-decreasing across the frontier sweep's
     prefixes, unlike calling `network_efficiency(block, roads_prefix)` per prefix (which
     re-derives entries against each prefix and can regress, see budget.py module docstring
     history / the review this fixes)."""
@@ -600,12 +604,18 @@ def access_benefit(block: Block, roads_full: GeoDataFrame | None, *,
 
 def efficiency_benefit(block: Block, roads_full: GeoDataFrame | None, *,
                        tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
+    """The E (global efficiency) half of `_efficiency_factory`, wrapped as a `cost_benefit_curve`
+    `benefit_fn`. Not part of the deleted cost-benefit reporting -- exercised directly by
+    budget.py's own monotonicity tests (`tests/test_budget.py`)."""
     f = _efficiency_factory(block, roads_full, tol)
     return lambda roads: f(roads)[0]
 
 
 def directness_benefit(block: Block, roads_full: GeoDataFrame | None, *,
                        tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
+    """The directness half of `_efficiency_factory`, wrapped as a `cost_benefit_curve`
+    `benefit_fn`. Not part of the deleted cost-benefit reporting -- exercised directly by
+    budget.py's own monotonicity tests (`tests/test_budget.py`)."""
     f = _efficiency_factory(block, roads_full, tol)
     return lambda roads: f(roads)[1]
 
@@ -745,8 +755,10 @@ def cycle_benefit(block: Block, roads_full: GeoDataFrame | None, *,
 
 def efficiency_directness_curves(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
                                  tol: float = STREET_TOL) -> tuple[Curve, Curve]:
-    """ONE sampled shortest-path sweep yielding both E and directness curves (x = road
-    length, m)."""
+    """ONE sampled shortest-path sweep yielding both E and directness curves (x = road length,
+    m) -- the frontier-sweep measurement of arterial's kept `objective=directness|efficiency`,
+    backing the arterial-vs-dijkstra directness margin tests and the 1e-9 scoring-equivalence
+    net. Not part of the deleted cost-benefit reporting."""
     f = _efficiency_factory(block, roads, tol)
     costs, pairs = _sweep(block, roads, f, n_points, tol)
     return Curve(costs, [p[0] for p in pairs]), Curve(costs, [p[1] for p in pairs])
