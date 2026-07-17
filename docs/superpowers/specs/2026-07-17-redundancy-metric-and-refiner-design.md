@@ -167,7 +167,7 @@ def commute_ratio_benefit(block: Block, roads_full: GeoDataFrame | None, *,
 `commute_ratio` returns a value in `[0, 1)`. The curve it produces is **non-monotone** (§3.3.1) —
 compared at matched budget and ranked by terminal value, never assumed to rise.
 
-#### 3.3.1 Implementation: restore the deleted sparse+frozen resistance engine — do NOT write new dense code
+#### 3.3.1 Implementation: dense grounded solve + frozen entries + the deleted engine's correctness conventions
 
 Reuse the deleted egress-resistance engine's *correctness* conventions (geometric ground set,
 line-proximity entries — `_ground_indices`/`_line_entries`, recoverable from commit `fe4180c`), but
