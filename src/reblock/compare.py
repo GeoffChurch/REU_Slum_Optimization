@@ -20,8 +20,8 @@ from reblock.budget import (
     Curve,
     access_benefit,
     building_radii,
+    commute_ratio_benefit,
     cost_benefit_curve,
-    cycle_benefit,
     displacement_curve,
 )
 from reblock.contracts import Block, Method, Screen, Source
@@ -35,7 +35,7 @@ from reblock.render import google_maps_url, short_label
 log = logging.getLogger(__name__)
 
 # The three-metric basis every method is graded on: external connectivity (access-burden removed,
-# `access_benefit`), internal connectivity (independent cycles per parcel, `cycle_benefit`), and
+# `access_benefit`), internal connectivity (backup-route redundancy, `commute_ratio_benefit`), and
 # displacement (a rising cost, never inverted -- see `displacement_curve`).
 
 
@@ -124,7 +124,7 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
             pp = pct_paved(roads, corridor_m, block_area)
             pd_ = pct_displaced(roads, corridor_m, block.building_points, radii)
             external = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
-            internal = cost_benefit_curve(block, roads, benefit_fn=cycle_benefit)
+            internal = cost_benefit_curve(block, roads, benefit_fn=commute_ratio_benefit)
             disp = displacement_curve(block, roads, radii, corridor_m=corridor_m)
             raw.append((name, label, "external_connectivity", external, pp, pd_))
             raw.append((name, label, "internal_connectivity", internal, pp, pd_))

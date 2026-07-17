@@ -125,9 +125,10 @@ def test_frontier_csv_has_road_length_and_benefit_samples(tmp_path: Path) -> Non
     with (tmp_path / "frontier_external_connectivity.csv").open(newline="") as f:
         rows = list(csv.DictReader(f))
     assert set(rows[0].keys()) == {"method", "block", "road_length_m", "benefit"}
-    # both sampled frontier points are present, in curve order
+    # both sampled frontier points are present, in curve order (benefit is %.6g -- see emit.py --
+    # so small ratio values don't round to 0)
     assert [(r["road_length_m"], r["benefit"]) for r in rows] == [
-        ("0.0000", "0.0000"), ("100.0000", "0.8000")]
+        ("0.0000", "0"), ("100.0000", "0.8")]
 
 
 def test_compare_method_sweep_expands_over_param_values(tmp_path: Path) -> None:

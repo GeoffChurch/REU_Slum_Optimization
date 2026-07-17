@@ -3,7 +3,7 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
-from reblock.budget import _noded_graph, commute_ratio
+from reblock.budget import _noded_graph, commute_ratio, commute_ratio_benefit, cost_benefit_curve
 from reblock.contracts import Block
 
 UTM = CRS.from_epsg(32734)
@@ -110,3 +110,13 @@ def test_crossing_is_noded_into_a_shared_vertex() -> None:  # RE-HOMED from test
     g = _noded_graph(roads, block.streets)
     assert (50.0, 50.0) in g.nodes
     assert g.degree[(50.0, 50.0)] == 4
+
+
+def test_benefit_factory_terminal_matches_metric() -> None:
+    block = _block(4, _parcels_at([(20, 40), (40, 40), (60, 40), (80, 40)]))
+    roads = _roads([LineString([(10, 0), (10, 60), (90, 60), (90, 0)])])
+    f = commute_ratio_benefit(block, roads)
+    assert f(roads) == commute_ratio(block, roads)          # factory delegates to the metric
+    curve = cost_benefit_curve(block, roads, benefit_fn=commute_ratio_benefit)
+    assert curve.benefit[-1] == commute_ratio(block, roads)  # terminal == full-roads metric
+    assert all(0.0 <= b < 1.0 for b in curve.benefit)        # do NOT assert monotone (rho isn't)

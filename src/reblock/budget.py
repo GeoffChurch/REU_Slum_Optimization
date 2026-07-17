@@ -855,6 +855,20 @@ def commute_ratio(block: Block, roads: GeoDataFrame | None) -> float:
     return float(np.mean(ratios)) if ratios else 0.0
 
 
+def commute_ratio_benefit(block: Block, roads_full: GeoDataFrame | None, *,
+                          tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
+    """Internal-connectivity benefit factory (shares the access_benefit signature so it plugs
+    into cost_benefit_curve(..., benefit_fn=commute_ratio_benefit) and the _sweep frontier).
+    commute_ratio is self-contained per prefix; the resulting curve is NON-MONOTONE (see
+    commute_ratio) -- reporting compares at matched budget and ranks by terminal value.
+    roads_full/tol are unused, kept for the shared BenefitFactory signature."""
+    del roads_full, tol
+
+    def f(roads: GeoDataFrame | None) -> float:
+        return commute_ratio(block, roads)
+    return f
+
+
 def cycle_density(block: Block, roads: GeoDataFrame | None) -> float:
     """Internal connectivity: circuit rank per parcel, (E - N + C) / P, over the noded road∪street
     graph (E/N/C = edge/node/component counts, P = parcel count). The number of independent cycles

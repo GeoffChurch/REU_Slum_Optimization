@@ -241,7 +241,7 @@ def region_map(source: Source, regions: list[list[str]],
 
 _METRIC_YLABELS = {
     "external_connectivity": "external connectivity (fraction of access-burden removed)",
-    "internal_connectivity": "internal connectivity (independent cycles per parcel)",
+    "internal_connectivity": "internal connectivity (backup-route redundancy, mean 1 − R/R_geo)",
     "displacement": "buildings displaced (Σ disk-graze probability)",
 }
 
@@ -306,7 +306,7 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
                 w.writerow(["method", "block", "road_length_m", "benefit"])
                 for r in metric_results:
                     for c, b in zip(r.curve.cost, r.curve.benefit, strict=True):
-                        w.writerow([r.method, r.block_id, f"{c:.4f}", f"{b:.4f}"])
+                        w.writerow([r.method, r.block_id, f"{c:.4f}", f"{b:.6g}"])
         ylabel = _METRIC_YLABELS[metric]
         for block_id, curves in by_block.items():
             fig, ax = plt.subplots(figsize=(7, 5))
