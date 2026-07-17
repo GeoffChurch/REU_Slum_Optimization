@@ -100,17 +100,6 @@ Each method earns a different corner of the frontier:
 
 ![external connectivity](curve_external_connectivity.png) ![internal connectivity](curve_internal_connectivity.png)
 
-### The connectivity plane
-
-`connectivity_plane.png` plots each method's trajectory through (external, internal) connectivity space
-as road is added — marker size grows with cumulative road length, one colour per method (the same
-run-stable palette as the curves above). It's a communication figure, not a metric of its own — no
-scalar AUC — but it makes the two-axis story legible in one picture: `greedy_arterial` climbs steeply on
-the internal axis at low road length; `topology` climbs the external axis furthest but barely leaves the
-internal-connectivity floor.
-
-![connectivity plane](connectivity_plane.png)
-
 ## Displacement: the homes each road costs
 
 Displacement is now a **curve of its own**, plotted against the same added-road-length x-axis as the

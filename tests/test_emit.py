@@ -278,15 +278,3 @@ def test_compare_report_has_no_cost_param():
 
     from reblock.emit import compare_report
     assert "cost" not in inspect.signature(compare_report).parameters
-
-
-def test_connectivity_plane_written(tmp_path):
-    from reblock.budget import Curve
-    from reblock.compare import MethodCurve
-    from reblock.emit import _connectivity_plane
-    ext = Curve([0.0, 100.0], [0.0, 0.6])
-    inn = Curve([0.0, 100.0], [0.0, 0.3])
-    rows = [MethodCurve("clearance", "blk", "external_connectivity", ext),
-            MethodCurve("clearance", "blk", "internal_connectivity", inn)]
-    _connectivity_plane(rows, tmp_path)
-    assert (tmp_path / "connectivity_plane_blk.png").exists()
