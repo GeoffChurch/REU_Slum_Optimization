@@ -99,9 +99,20 @@ has no scalar AUC. It is emitted alongside the per-metric curves for the flagshi
 **Delete:**
 - `budget.py`: `resistance_benefit`, `_resistance_core`, `resistance_frozen`,
   `_BlockScoringContext._ground_indices` (the whole egress-resistance engine — reporting-only, now
-  subsumed by access); `efficiency_directness_curves`, `efficiency_benefit`, `directness_benefit`, and
-  `_efficiency_factory` **iff** it falls unused after those go (verify: arterial uses
-  `_BlockScoringContext.score`, not `_efficiency_factory`).
+  subsumed by access) + the `_BlockScoringContext` state used only by it (`self.cap`, `self.streets_geom`)
+  + the now-unused scipy imports (`diags`, `connected_components`, `factorized` — but KEEP `dijkstra`,
+  still used by `_sampled_efficiency_core`).
+
+**KEEP — CORRECTION (implementation found these were mis-scoped, owner-confirmed 2026-07-16):**
+`efficiency_directness_curves`, `efficiency_benefit`, `directness_benefit`, `_efficiency_factory` are
+**NOT deleted.** They are not dead reporting — they are the frontier-sweep *measurement* of arterial's
+still-kept `objective=directness` and back the 1e-9 scoring-equivalence safety net. They are used
+directly (not via `compare.py`) by `tests/methods/test_arterial.py` (arterial's headline
+directness-beats-dijkstra test), `tests/test_region.py` (2 margin tests),
+`tests/test_scoring_equivalence.py` + `tests/scoring_fixtures.py` (the frozen-context correctness net),
+and `tests/test_budget.py` (2 monotonicity tests). They are pure functions over the already-kept scoring
+core (add no state), so keeping them is cost-free; deleting them would strip arterial's own directness
+coverage. Their docstrings are relabeled from "reporting" to "arterial-objective/scoring measurement".
 - `tests/test_resistance.py` — entire file (tests deleted machinery).
 - `compare.py`: the lines emitting the `efficiency`/`directness`/`resistance` curves; the raw-tuple
   metric rows for them; imports of the deleted symbols.
