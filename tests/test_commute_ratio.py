@@ -91,6 +91,19 @@ def test_subdivision_invariance() -> None:
     assert abs(commute_ratio(block, loop) - commute_ratio(block, sub)) < 1e-9
 
 
+def test_interior_interior_bridge_branch() -> None:
+    # A vertical tree-stem road with a mid-vertex (50, 30), and a single parcel centered at
+    # (50, 50): its nearest edge is the INTERIOR-INTERIOR span (50, 30)-(50, 60) (both endpoints
+    # are interior nodes -- neither touches the street), and that span is a bridge (the road is a
+    # tree), so this drives _entry_resistance's singular (denom < 1e-9) branch -- returning
+    # min(guu + a, gvv + b) -- which no other test in this file reaches (the other bridge tests
+    # only hit _entry_resistance_ground's ground-to-interior branch). Still a single-egress tree,
+    # so rho = 0 regardless.
+    block = _block(1, _parcels_at([(50, 50)]))
+    roads = _roads([LineString([(50, 0), (50, 30), (50, 60)])])
+    assert commute_ratio(block, roads) == 0.0
+
+
 def test_crossing_is_noded_into_a_shared_vertex() -> None:  # RE-HOMED from test_cycle_density.py
     block = _block(4)
     roads = _roads([LineString([(20, 20), (80, 80)]), LineString([(20, 80), (80, 20)])])

@@ -767,10 +767,11 @@ def commute_ratio(block: Block, roads: GeoDataFrame | None) -> float:
     component-wise DENSE solve); R_geo = single-best-route (shortest-path) resistance. A
     single-egress tree route -> 0; ->1 as parallel backup routes thicken. Clipped to [0, 1).
     NON-MONOTONE in road length (ratio of co-decreasing R/R_geo) -- reporting ranks by terminal
-    value, never assumes rise. Resists loop-COUNT gaming (adding a redundant connector to an
-    existing loop can only help, per Rayleigh's monotonicity law) but not corridor-duplication
-    (the suite's cost axes penalize that); a small tight loop can legitimately outscore a large
-    loose one, since this metric is coverage-insensitive by design (see access_benefit for that).
+    value, never assumes rise. Rewards added redundancy via Rayleigh monotonicity (adding a
+    redundant connector to an existing loop can only help); loop-count/duplication gaming
+    behavior is characterized in the Task-1 corpus gate, not here. A small tight loop can
+    legitimately outscore a large loose one, since this metric is coverage-insensitive by design
+    (see access_benefit for that).
 
     Each parcel enters by TRUE line-proximity -- the nearest POINT on its nearest road/street edge
     of the TOPOLOGY graph (not snapped to that edge's nearest raw VERTEX, which breaks subdivision
