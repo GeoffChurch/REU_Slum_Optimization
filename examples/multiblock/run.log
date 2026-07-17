@@ -1,16 +1,30 @@
-### §3 screen -> grow -> reblock -> render
-[2026-07-15 17:48:27,654][reblock.pipeline][INFO] - reblocked ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1_1_5514+ZAF.9.3.1_1_5517+ZAF.9.3.1_1_5519+ZAF.9.3.1_1_5520+ZAF.9.3.1_1_5528+ZAF.9.3.1_1_5530+ZAF.9.3.1_1_5531+ZAF.9.3.1_1_5535+ZAF.9.3.1_1_5544+ZAF.9.3.1_1_5559+ZAF.9.3.1_1_5563+ZAF.9.3.1_1_5582+ZAF.9.3.1_1_5588+ZAF.9.3.1_1_5589+ZAF.9.3.1_1_5591+ZAF.9.3.1_1_5595+ZAF.9.3.1_1_5596+ZAF.9.3.1_1_5613+ZAF.9.3.1_1_5618+ZAF.9.3.1_1_5810 (10706 parcels) in 0.0s
-[2026-07-15 17:48:27,654][__main__][INFO] - region:ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1_1_5514+ZAF.9.3.1_1_5517+ZAF.9.3.1_1_5519+ZAF.9.3.1_1_5520+ZAF.9.3.1_1_5528+ZAF.9.3.1_1_5530+ZAF.9.3.1_1_5531+ZAF.9.3.1_1_5535+ZAF.9.3.1_1_5544+ZAF.9.3.1_1_5559+ZAF.9.3.1_1_5563+ZAF.9.3.1_1_5582+ZAF.9.3.1_1_5588+ZAF.9.3.1_1_5589+ZAF.9.3.1_1_5591+ZAF.9.3.1_1_5595+ZAF.9.3.1_1_5596+ZAF.9.3.1_1_5613+ZAF.9.3.1_1_5618+ZAF.9.3.1_1_5810 {'kcomplexity': {'k_before': 24.0, 'k_after': 3.0, 'delta_k': 21.0, 'added_road_length_m': 13698.705535587758, 'n_road_components': 55.0, 'connected_road_frac': 1.0, 'geometric_access_max_m': 58.53531712471657}}
-[2026-07-15 17:48:27,655][__main__][INFO] -   map: https://www.google.com/maps/@-33.84130,18.74439,15z
-[2026-07-15 17:48:27,656][__main__][INFO] - 13906 blocks flagged -> /tmp/claude-1641171234/-home-gchurchill-src-reblock/8e45cee5-1c58-4e08-b3fd-8166cdfa5f11/scratchpad/mb4/run/flagged_blocks.txt
-### §4 compare (frontier: clearance, arterial, osm_footpaths; displacement curve)
-[2026-07-17 16:17:03,170][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
-[2026-07-17 16:18:46,742][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: 1614.8 displaced (15.1% of homes)
-[2026-07-17 16:18:46,742][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: 499.6 displaced (4.7% of homes)
-[2026-07-17 16:18:46,742][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: 257.0 displaced (2.4% of homes)
-[2026-07-17 16:18:46,742][__main__][INFO] - external_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.952 at 13699 m (8.0% paved)
-[2026-07-17 16:18:46,742][__main__][INFO] - external_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.582 at 5614 m (3.3% paved)
-[2026-07-17 16:18:46,742][__main__][INFO] - external_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: benefit=0.026 at 6122 m (3.7% paved)
-[2026-07-17 16:18:46,742][__main__][INFO] - internal_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.402 at 5614 m (3.3% paved)
-[2026-07-17 16:18:46,742][__main__][INFO] - internal_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: benefit=0.092 at 6122 m (3.7% paved)
-[2026-07-17 16:18:46,742][__main__][INFO] - internal_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.000 at 13699 m (8.0% paved)
+=== Screen the metro + grow the deep core + reblock to depth 3 (reblock.run) ===
+[2026-07-17 18:43:17,621][reblock.screen.dense_compact][INFO] - cheap pass: 14463/83192 blocks pass depth_proxy_min=1.50 (17.4%, 0.7s)
+[2026-07-17 18:43:17,621][reblock.screen.dense_compact][INFO] - fine pass: building 14463 survivor blocks (Voronoi + peel) -- the slow step
+[2026-07-17 18:43:17,621][reblock.screen.dense_compact][INFO] - fine pass: 14463 survivors across 16 fork workers
+[2026-07-17 18:43:41,099][reblock.screen.dense_compact][INFO] - fine pass: kept 13906/14463 in 23.5s (dropped 527 on mean<1.30), ranked by max access-depth
+[2026-07-17 18:43:41,099][reblock.screen.dense_compact][INFO] - fine pass: kept blocks span max access-depth 24 (deepest) .. 2
+[2026-07-17 18:44:01,281][reblock.pipeline][INFO] - reblocked ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1_1_5514+ZAF.9.3.1_1_5517+ZAF.9.3.1_1_5519+ZAF.9.3.1_1_5520+ZAF.9.3.1_1_5528+ZAF.9.3.1_1_5530+ZAF.9.3.1_1_5531+ZAF.9.3.1_1_5535+ZAF.9.3.1_1_5544+ZAF.9.3.1_1_5559+ZAF.9.3.1_1_5563+ZAF.9.3.1_1_5582+ZAF.9.3.1_1_5588+ZAF.9.3.1_1_5589+ZAF.9.3.1_1_5591+ZAF.9.3.1_1_5595+ZAF.9.3.1_1_5596+ZAF.9.3.1_1_5613+ZAF.9.3.1_1_5618+ZAF.9.3.1_1_5810 (10706 parcels) in 2.8s
+[2026-07-17 18:44:01,282][__main__][INFO] - region:ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1_1_5514+ZAF.9.3.1_1_5517+ZAF.9.3.1_1_5519+ZAF.9.3.1_1_5520+ZAF.9.3.1_1_5528+ZAF.9.3.1_1_5530+ZAF.9.3.1_1_5531+ZAF.9.3.1_1_5535+ZAF.9.3.1_1_5544+ZAF.9.3.1_1_5559+ZAF.9.3.1_1_5563+ZAF.9.3.1_1_5582+ZAF.9.3.1_1_5588+ZAF.9.3.1_1_5589+ZAF.9.3.1_1_5591+ZAF.9.3.1_1_5595+ZAF.9.3.1_1_5596+ZAF.9.3.1_1_5613+ZAF.9.3.1_1_5618+ZAF.9.3.1_1_5810 {'kcomplexity': {'k_before': 24.0, 'k_after': 3.0, 'delta_k': 21.0, 'added_road_length_m': 13698.705535587758, 'n_road_components': 55.0, 'connected_road_frac': 1.0, 'geometric_access_max_m': 58.53531712471657}}
+[2026-07-17 18:44:01,283][__main__][INFO] -   map: https://www.google.com/maps/@-33.84130,18.74439,15z
+[2026-07-17 18:44:01,285][__main__][INFO] - 13906 blocks flagged -> <run_dir>/flagged_blocks.txt
+
+=== Two-lens comparison, cold cache -> real per-method propose timing (scripts.compare_budgets) ===
+[lens A d<=3] clearance: reached at 13699 m, 1615 displaced, 5.5 s
+[lens A d<=3] greedy_arterial_buildable: FLOOR depth 20 at 5614 m, 500 displaced, 86.3 s
+[lens A d<=3] osm_footpaths: FLOOR depth 23 at 6122 m, 257 displaced, 0.1 s
+[lens B 5614 m] clearance: ext=0.904 int=0.000 596 displaced
+[lens B 5614 m] greedy_arterial_buildable: ext=0.582 int=0.402 500 displaced
+[lens B 5614 m] osm_footpaths: ext=0.026 int=0.092 210 displaced
+
+=== Frontier curves + displacement (reblock.compare) ===
+[2026-07-17 18:44:43,851][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec map: https://www.google.com/maps/@-33.84130,18.74439,15z
+[2026-07-17 18:45:40,617][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: 1614.8 displaced (15.1% of homes)
+[2026-07-17 18:45:40,617][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: 499.6 displaced (4.7% of homes)
+[2026-07-17 18:45:40,617][__main__][INFO] - ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: 257.0 displaced (2.4% of homes)
+[2026-07-17 18:45:40,617][__main__][INFO] - external_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.952 at 13699 m (8.0% paved)
+[2026-07-17 18:45:40,617][__main__][INFO] - external_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.582 at 5614 m (3.3% paved)
+[2026-07-17 18:45:40,617][__main__][INFO] - external_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: benefit=0.026 at 6122 m (3.7% paved)
+[2026-07-17 18:45:40,617][__main__][INFO] - internal_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec greedy_arterial_buildable: benefit=0.402 at 5614 m (3.3% paved)
+[2026-07-17 18:45:40,617][__main__][INFO] - internal_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec osm_footpaths: benefit=0.092 at 6122 m (3.7% paved)
+[2026-07-17 18:45:40,617][__main__][INFO] - internal_connectivity ZAF.9.3.1_1_5378+ZAF.9.3.1_1_5379+ZAF.9.3.1_1_5513+ZAF.9.3.1...663d08ec clearance: benefit=0.000 at 13699 m (8.0% paved)
