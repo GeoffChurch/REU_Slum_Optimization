@@ -120,3 +120,11 @@ def test_benefit_factory_terminal_matches_metric() -> None:
     curve = cost_benefit_curve(block, roads, benefit_fn=commute_ratio_benefit)
     assert curve.benefit[-1] == commute_ratio(block, roads)  # terminal == full-roads metric
     assert all(0.0 <= b < 1.0 for b in curve.benefit)        # do NOT assert monotone (rho isn't)
+
+
+def test_no_interior_nodes_returns_zero() -> None:
+    # roads lying ENTIRELY on the street -> every graph node is a street node -> no interior nodes
+    # -> the `not interior` guard returns 0.0 (spec §3.6 guarded case).
+    block = _block(3, _parcels_at([(30, 40), (50, 40), (70, 40)]))
+    on_street = _roads([LineString([(10, 0), (90, 0)])])     # on the south street (y=0)
+    assert commute_ratio(block, on_street) == 0.0

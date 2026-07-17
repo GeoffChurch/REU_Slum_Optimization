@@ -869,7 +869,6 @@ def commute_ratio_benefit(block: Block, roads_full: GeoDataFrame | None, *,
     return f
 
 
-
 def efficiency_directness_curves(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
                                  tol: float = STREET_TOL) -> tuple[Curve, Curve]:
     """ONE sampled shortest-path sweep yielding both E and directness curves (x = road length,
