@@ -19,3 +19,8 @@ character legible: `depth` finds deep-but-sparse fabric, `depth_density` the cro
 snapshot) on the benefit-vs-road frontier — the as-built footpaths need far more road to reach far
 less connectivity than the optimised methods. Building points and dimmed surrounding blocks are
 overlaid on every heatmap automatically.
+
+A second city, **[Nairobi](nairobi/)**, runs the same three variants on central Nairobi data. It's
+shipped as-is: the screens and metric behaviour carry over, but Nairobi's block-size distribution and
+OSM footpath coverage differ from Cape Town's, so its regions come out unevenly sized and one variant
+has no osm baseline — see [`nairobi/README.md`](nairobi/README.md).
