@@ -1,0 +1,11 @@
+{
+  "metric": "depth",
+  "flagged": 13793,
+  "total_blocks": 83192,
+  "deepest_block": "ZAF.9.3.1_1_5810",
+  "deepest_depth": 24.0,
+  "region_members": 12,
+  "region_parcels": 11006,
+  "region_mean_depth": 6.416666666666667,
+  "region_mean_density_per_ha": 99.05410999609732
+}

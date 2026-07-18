@@ -37,7 +37,7 @@ _FORMULA = {
 _BLURB = {
     "depth": "The deepest street-access fabric: how many parcels a home sits from a street, "
              "regardless of crowding.",
-    "depth_density": "Deep *and* crowded — the metric that isolates the genuine informal "
+    "depth_density": "Deep and crowded at once — the metric that isolates the genuine informal "
                      "settlements and fades the deep-but-sparse blocks.",
 }
 
