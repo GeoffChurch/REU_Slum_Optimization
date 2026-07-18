@@ -9,13 +9,22 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import islice
 
+import pandas as pd
+
 from reblock.contracts import Block, Eval, Method, Result, Screen, Source
 from reblock.derivations import propose
-from reblock.region import IdentityRegionBuilder, RegionBuilder, block_max_depth, region_reblock
+from reblock.region import (
+    IdentityRegionBuilder,
+    RegionBuilder,
+    _block_adjacency,
+    block_depths,
+    region_reblock,
+)
 
 log = logging.getLogger(__name__)
 
@@ -74,24 +83,45 @@ def _seed_groups(
     return [[b] for b in sel], sel
 
 
-def _depth_fn(source: Source, screen: Screen) -> Callable[[str], float] | None:
-    """The region builder's true-depth growth metric. For a peel-capable source it PREFERS the
-    screen's already-computed fine-pass depths (`selection_depths`, a free dict lookup for the ~14k
-    flagged blocks growth walks) and only peels a NON-flagged candidate on demand via
-    `block_max_depth` (rare in a dense neighbourhood, and expensive -- it re-reads the parquet). The
-    two are the same quantity (`access_before(block).max()`), so this is a pure speed-up: the growth
-    choice is identical to peeling every candidate, just without re-reading the parquet for a block
-    the screen already peeled. `None` for a source that can't be peeled -> the builder's proxy
-    fallback."""
-    if getattr(source, "blocks_path", None) is None:
-        return None
-    sd = getattr(screen, "selection_depths", None)
-    screen_depths: dict[str, float] = sd(source) if sd is not None else {}
+def _reachable_blocks(block_geoms: pd.DataFrame, groups: list[list[str]],
+                      bound_buildings: float) -> list[str]:
+    """The seed groups' blocks plus their adjacency neighbourhood, BFS-expanded (accumulating
+    `building_count`) until the cumulative count reaches `bound_buildings` -- a generous superset of
+    everything the greedy DenseCluster growth can reach from the seed, so ALL of its candidates land
+    in one batched peel. `bound_buildings` is a multiple of the growth budget; a candidate beyond it
+    is simply un-peeled (the caller defaults it to 0.0 = shallow, which a non-survivor essentially
+    always is, and survivors that matter are near the seed)."""
+    ids = [str(b) for b in block_geoms["block_id"]]
+    idx = {b: i for i, b in enumerate(ids)}
+    has_count = "building_count" in block_geoms.columns
+    counts = ([0.0 if pd.isna(c) else float(c) for c in block_geoms["building_count"]] if has_count
+              else [1.0] * len(ids))
+    adj = _block_adjacency(list(block_geoms.geometry))
+    seed = {idx[b] for group in groups for b in group if b in idx}
+    seen = set(seed)
+    total = sum(counts[i] for i in seed)
+    frontier = deque(seed)
+    while frontier and total < bound_buildings:
+        i = frontier.popleft()
+        for j in adj[i]:
+            if j not in seen:
+                seen.add(j)
+                total += counts[j]
+                frontier.append(j)
+    return [ids[i] for i in seen]
 
-    def depth(bid: str) -> float:
-        d = screen_depths.get(bid)
-        return d if d is not None else block_max_depth(source, bid)
-    return depth
+
+def _region_depth_map(source: Source, block_geoms: pd.DataFrame, groups: list[list[str]],
+                      bound_buildings: float) -> dict[str, float]:
+    """True max access-depth for every block the DenseCluster growth could reach from `groups`,
+    computed in ONE batched `block_depths` peel of the seed's reachable neighbourhood
+    (`_reachable_blocks`). Survivors the screen already peeled are cache hits inside that single
+    call; non-survivors are peeled in the same batch -- so the one expensive buildings read is
+    amortized across the whole neighbourhood instead of paid per candidate. `{}` for a
+    non-peel-capable source."""
+    if getattr(source, "blocks_path", None) is None:
+        return {}
+    return block_depths(source, _reachable_blocks(block_geoms, groups, bound_buildings))
 
 
 def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
@@ -114,7 +144,15 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
 
     source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
     block_geoms = source.block_geometries()
-    regions = region_builder.build(block_geoms, groups, _depth_fn(source, screen))[:max_blocks]
+    # Only a growing builder (DenseCluster: has a `max_buildings` budget) ranks by depth; precompute
+    # its candidate depths in ONE batched peel of the seed's reachable neighbourhood (bound ~3x the
+    # growth budget). Non-growing builders (identity/convex_hull) ignore depth_fn -> skip the peel.
+    mb = getattr(region_builder, "max_buildings", None)
+    depth_map = (_region_depth_map(source, block_geoms, groups, 3.0 * mb)
+                 if isinstance(mb, int) and mb > 0 else {})
+    depth_fn: Callable[[str], float] | None = (
+        (lambda bid: depth_map.get(bid, 0.0)) if depth_map else None)
+    regions = region_builder.build(block_geoms, groups, depth_fn)[:max_blocks]
     members = sorted({b for region in regions for b in region})
     source.block_ids = members                  # type: ignore[attr-defined]  # members only
     built = {b.block_id: b for b in source.region().blocks}

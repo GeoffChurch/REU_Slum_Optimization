@@ -516,33 +516,37 @@ def test_dense_cluster_guards_zero_area_and_nan_building_count() -> None:
     assert set(out[0]) == {"seed", "zero_area", "nan_neighbor"}  # both absorbed, no crash
 
 
-def test_block_max_depth_matches_access_before_peel() -> None:
-    # On the committed DJI sample, block_max_depth(source, id) equals access_before(block).max()
-    # -- the true BFS peel depth -- and a second call returns the same value (memoized).
+def test_block_depths_matches_access_before_peel() -> None:
+    # On the committed DJI sample, block_depths(source, [id]) maps id -> access_before(block).max()
+    # -- the true BFS peel depth -- in ONE batched region() call.
     from reblock.data.kblock import KblockSource
     from reblock.derivations import access_before
-    from reblock.region import block_max_depth
+    from reblock.region import block_depths
     root = Path(__file__).resolve().parent
     src = KblockSource(root / "data/kblock/blocks_dji_sample.parquet",
                        root / "data/kblock/buildings_dji_sample.parquet", "dji",
                        block_ids=["DJI.3_1_1808"])
     block = next(iter(src.region().blocks))
     expected = float(access_before(block).max())
-    assert block_max_depth(src, "DJI.3_1_1808") == expected
-    assert block_max_depth(src, "DJI.3_1_1808") == expected   # cache hit, same value
+    assert block_depths(src, ["DJI.3_1_1808"]) == {"DJI.3_1_1808": expected}
 
 
-def test_block_max_depth_zero_for_non_peelable_source() -> None:
-    # A source with no blocks_path (not a KblockSource) can't be peeled -> 0.0, so it never wins a
-    # "deepest" argmax in the region builder.
-    from reblock.region import block_max_depth
+def test_block_depths_empty_for_non_peelable_or_empty() -> None:
+    # No blocks_path (not a KblockSource) -> {}; an empty id list -> {}. A missing id defaults to
+    # 0.0 at the call site (absent from the dict), so it never wins a "deepest" argmax.
+    from reblock.data.kblock import KblockSource
+    from reblock.region import block_depths
 
     class _Bare:
         def region(self): raise NotImplementedError
         def block_geometries(self, bbox=None): raise NotImplementedError
         def building_points(self, bbox=None): raise NotImplementedError
 
-    assert block_max_depth(_Bare(), "anything") == 0.0
+    assert block_depths(_Bare(), ["anything"]) == {}
+    root = Path(__file__).resolve().parent
+    src = KblockSource(root / "data/kblock/blocks_dji_sample.parquet",
+                       root / "data/kblock/buildings_dji_sample.parquet", "dji")
+    assert block_depths(src, []) == {}
 
 
 def _fork_gdf():

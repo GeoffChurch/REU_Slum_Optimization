@@ -162,7 +162,7 @@ def region_map(source: Source, regions: list[list[str]],
     Writes both; returns the `region.png` path, or None if there are no regions."""
     from matplotlib.patches import Rectangle
 
-    from reblock.region import block_max_depth
+    from reblock.region import block_depths
     if not regions:
         return None
     geoms = source.block_geometries()
@@ -208,9 +208,12 @@ def region_map(source: Source, regions: list[list[str]],
     plt.close(fig_s)
 
     # --- region.png: members by true depth against dimmed context + seed outline + points ---
-    # member depths: from `depths` where present, else peel on demand (memoized; few members).
-    member_depth = {b: dmap.get(b) if b in dmap else block_max_depth(source, b)
-                    for b in all_member_ids}
+    # member depths: from `depths` where present; any members the screen didn't map are peeled
+    # together in ONE batched `block_depths` call (never per-member -- each call re-reads the
+    # buildings parquet).
+    missing = [b for b in all_member_ids if b not in dmap]
+    peeled = block_depths(source, missing) if missing else {}
+    member_depth = {b: dmap.get(b, peeled.get(b, 0.0)) for b in all_member_ids}
     m_vmax = float(max([v for v in member_depth.values() if v] or [1.0]))
     members = members.copy()
     members["depth"] = members["block_id"].map(member_depth)

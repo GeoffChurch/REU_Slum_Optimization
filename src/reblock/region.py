@@ -238,24 +238,25 @@ def _depth_proxy(count: float, area: float, perim: float) -> float:
     return math.sqrt(count * area) / perim
 
 
-def block_max_depth(source: Source, block_id: str) -> float:
-    """True max BFS access-depth (parcel rings from a street) of one block, built via a
-    `KblockSource` windowed to `block_id` (from `source`'s parquet paths) and peeled with the
-    memoized `access_before` -- so a block the screen already peeled is an end-to-end cache hit and
-    a never-seen block is peeled once, then cached. Returns `0.0` for a non-peel-capable source (no
-    `blocks_path`) or a block that can't be built/peeled, so it never wins a `deepest` argmax. This
-    is the single source of true depth for the region builder's growth and the `region_map`
-    colorings."""
+def block_depths(source: Source, block_ids: list[str]) -> dict[str, float]:
+    """True max BFS access-depth (parcel rings from a street) for each of `block_ids`, built in ONE
+    `KblockSource(block_ids=...).region()` call, peeled with the memoized `access_before` ->
+    `{block_id: max_depth}`. BATCHING is load-bearing: `KblockSource.region()` reads and
+    spatial-joins the WHOLE ~49 MB buildings parquet on every call regardless of `block_ids`, so a
+    per-block accessor pays that ~2.7 s read PER block (profiled). One batched call amortizes it
+    across all `block_ids`, as the screen's fine pass peels ~900 blocks per read. Blocks the screen
+    already peeled are cache hits (`_voronoi_impl`/`access_before` are memoized). A block that can't
+    be built/peeled (below `min_buildings`, bad geometry) is simply ABSENT from the returned
+    dict -- callers default a missing id to 0.0, so it never wins a `deepest` argmax. Returns `{}`
+    for a non-peel-capable source (no `blocks_path`) or an empty `block_ids`."""
     from reblock.data.kblock import KblockSource
     from reblock.derivations import access_before
-    if not isinstance(source, KblockSource):
-        return 0.0
+    if not isinstance(source, KblockSource) or not block_ids:
+        return {}
     sub = KblockSource(source.blocks_path, source.buildings_path, "depth",
-                       min_buildings=getattr(source, "min_buildings", 10), block_ids=[block_id])
-    blocks = list(sub.region().blocks)
-    if not blocks:
-        return 0.0
-    return float(access_before(blocks[0]).max())
+                       min_buildings=getattr(source, "min_buildings", 10),
+                       block_ids=list(block_ids))
+    return {str(b.block_id): float(access_before(b).max()) for b in sub.region().blocks}
 
 
 @dataclass
