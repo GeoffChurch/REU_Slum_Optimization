@@ -5,3 +5,4 @@ tags: [path, footway, track, steps, pedestrian, living_street]
 endpoint: https://overpass-api.de/api/interpreter
 cache_dir: null       # null -> ~/.cache/reblock/osm
 snapshot: null        # a committed GeoJSON path -> load it directly, skip Overpass
+timeout_s: 60.0       # client read timeout; raise for a large region's bbox (e.g. 240)

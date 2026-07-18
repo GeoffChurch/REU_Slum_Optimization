@@ -77,6 +77,7 @@ class OSMDesireLines:
     endpoint: str = "https://overpass-api.de/api/interpreter"
     cache_dir: str | None = None
     snapshot: str | None = None
+    timeout_s: float = 60.0            # client read timeout; raise for a large region's bbox
 
     @property
     def identity(self) -> Hashable:
@@ -97,7 +98,8 @@ class OSMDesireLines:
         data = urllib.parse.urlencode({"data": query}).encode()
         req = urllib.request.Request(
             self.endpoint, data=data, headers={"User-Agent": _USER_AGENT})
-        with urllib.request.urlopen(req, timeout=60) as resp:   # noqa: S310 (trusted endpoint)
+        with urllib.request.urlopen(  # noqa: S310 (trusted endpoint)
+                req, timeout=self.timeout_s) as resp:
             payload: dict[str, Any] = json.loads(resp.read().decode())
             return payload
 
