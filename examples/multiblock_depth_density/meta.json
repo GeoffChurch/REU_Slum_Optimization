@@ -7,5 +7,6 @@
   "region_members": 3,
   "region_parcels": 2690,
   "region_mean_depth": 8.666666666666666,
-  "region_mean_density_per_ha": 117.09923787080102
+  "region_mean_density_per_ha": 117.09923787080102,
+  "maps_url": "https://www.google.com/maps/@-34.00410,18.61263,17z"
 }
