@@ -22,9 +22,9 @@ The metric grows a **12-block** region (**11,006 parcels**), mean depth 6.4 ring
 
 Each method's benefit as cumulative added road grows — the full trade-off whose fixed-depth and matched-budget slices are tabulated in `lens_a_depth.csv` and `lens_b_matched.csv` (this dir). External connectivity (access burden removed), internal connectivity (backup-route redundancy), and displacement (a rising cost):
 
-![external connectivity](curve_external_connectivity_ZAF.9.3.1_1_5531.png)
+![external connectivity](curve_external_connectivity_ZAF.9.3.1_1_5810.png)
 
-![internal connectivity](curve_internal_connectivity_ZAF.9.3.1_1_5531.png)
+![internal connectivity](curve_internal_connectivity_ZAF.9.3.1_1_5810.png)
 
-![displacement](displacement_ZAF.9.3.1_1_5531.png)
+![displacement](displacement_ZAF.9.3.1_1_5810.png)
 
