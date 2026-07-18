@@ -6,7 +6,7 @@
 
 ## 1. Screen the metro
 
-`depth_density` flagged **13,822 of 83,192** blocks. Deepest: `ZAF.9.3.1_1_38528` at 13 rings.
+`depth_density` flagged **13,822 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_38528` (peel depth 13).
 
 ![screen](screen.jpg)
 

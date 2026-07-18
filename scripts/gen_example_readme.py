@@ -26,19 +26,26 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
     parts.append(f"*{blurb}*\n")
     parts.append(f"**Metric:** `{formula}` — one metric drives the screen, region growth, and "
                  f"colouring end to end.\n")
-    if meta:
+    flagged, total_blocks = meta.get("flagged"), meta.get("total_blocks")
+    top_block, top_depth = meta.get("deepest_block"), meta.get("deepest_depth")
+    if (flagged is not None and total_blocks is not None
+            and top_block is not None and top_depth is not None):
         parts.append("## 1. Screen the metro\n")
         parts.append(f"`{metric_name}` flagged "
-                     f"**{_n(meta['flagged'])} of {_n(meta['total_blocks'])}** blocks. "
-                     f"Deepest: `{meta['deepest_block']}` at "
-                     f"{meta['deepest_depth']:.0f} rings.\n")
+                     f"**{_n(flagged)} of {_n(total_blocks)}** blocks. "
+                     f"Top-scoring: `{top_block}` (peel depth {top_depth:.0f}).\n")
         if (run_dir / "screen.jpg").exists():
             parts.append("![screen](screen.jpg)\n")
+    region_members, region_parcels = meta.get("region_members"), meta.get("region_parcels")
+    region_mean_depth = meta.get("region_mean_depth")
+    region_mean_density = meta.get("region_mean_density_per_ha")
+    if (region_members is not None and region_parcels is not None
+            and region_mean_depth is not None and region_mean_density is not None):
         parts.append("## 2. Grow the region\n")
-        parts.append(f"The metric grows a **{meta['region_members']}-block** region "
-                     f"(**{_n(meta['region_parcels'])} parcels**), mean depth "
-                     f"{meta['region_mean_depth']:.1f} rings, mean density "
-                     f"{meta['region_mean_density_per_ha']:.0f} bldg/ha.\n")
+        parts.append(f"The metric grows a **{region_members}-block** region "
+                     f"(**{_n(region_parcels)} parcels**), mean depth "
+                     f"{region_mean_depth:.1f} rings, mean density "
+                     f"{region_mean_density:.0f} bldg/ha.\n")
         if (run_dir / "region.jpg").exists():
             parts.append("![region](region.jpg)\n")
     lens_a, lens_b = run_dir / "lens_a_depth.csv", run_dir / "lens_b_matched.csv"
