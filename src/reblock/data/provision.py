@@ -16,8 +16,11 @@ from scripts.fetch_kblock_fixtures import (
 )
 
 DEFAULT_CACHE = Path.home() / ".cache" / "reblock"
-_ISO3 = {"capetown": "ZAF"}
-_BBOX = {"capetown": CT_BBOX}
+# Central Nairobi metro (lon_min, lat_min, lon_max, lat_max) -- covers the core city incl. the major
+# informal settlements (Kibera, Mathare, Mukuru); clips the country-wide KEN geodata.
+NAIROBI_BBOX = (36.75, -1.35, 36.95, -1.20)
+_ISO3 = {"capetown": "ZAF", "nairobi": "KEN"}
+_BBOX = {"capetown": CT_BBOX, "nairobi": NAIROBI_BBOX}
 _BLOCK_COLS = ["block_id", "k_complexity", "building_count", "block_area_m2", "geometry"]
 
 

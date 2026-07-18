@@ -1,0 +1,4 @@
+method,terminal_displacement,pct_displaced,n_blocks
+clearance,521.9,0.1027,1
+greedy_arterial_buildable,151.9,0.0299,1
+osm_footpaths,64.9,0.0128,1
