@@ -51,11 +51,15 @@ _BLURB = {
 
 def main() -> None:
     metric_name = sys.argv[1]
-    out = Path(f"examples/multiblock_{metric_name}")
+    city = sys.argv[2] if len(sys.argv) > 2 else "capetown"
+    # Cape Town examples live flat (examples/multiblock_<metric>); other cities nest under
+    # examples/<city>/ so a metro's three variants stay grouped.
+    out = (Path(f"examples/multiblock_{metric_name}") if city == "capetown"
+           else Path(f"examples/{city}/multiblock_{metric_name}"))
     out.mkdir(parents=True, exist_ok=True)
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=[
-            f"metric={metric_name}", "data=capetown_full", "screen=dense_compact",
+            f"metric={metric_name}", f"data={city}_full", "screen=dense_compact",
             "region_builder=dense_cluster", "region_builder.max_buildings=3000", "max_blocks=1",
             "all_methods.clearance.max_roads=3000", "all_methods.clearance.depth_target=3",
             "all_methods.greedy_arterial_buildable.candidate_policy=fixed",

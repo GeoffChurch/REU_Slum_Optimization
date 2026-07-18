@@ -5,11 +5,13 @@ Run (module form -- puts the repo root on sys.path so the data source's `from sc
 import resolves): `pixi run python -m scripts.fetch_desire_lines_snapshot <out.geojson>
 <hydra override>...`
 
-  # multiblock flagship (23-block region grown from 5810):
-  ... examples/multiblock/desire_lines_5810.geojson \
-      block_ids=[[ZAF.9.3.1_1_5810]] region_builder=dense_cluster region_builder.max_buildings=3000
+  # multiblock variant (screen-selected region for a metric+city -- matches the orchestrator):
+  ... examples/nairobi/multiblock_depth/desire_lines_<seed>.geojson \
+      data=nairobi_full metric=depth screen=dense_compact \
+      region_builder=dense_cluster region_builder.max_buildings=3000
   # method-comparison (single deep block 40972):
-  ... examples/method-comparison/desire_lines_40972.geojson block_ids=[[ZAF.9.3.1_1_40972]]
+  ... examples/method-comparison/desire_lines_40972.geojson data=capetown_full \
+      block_ids=[[ZAF.9.3.1_1_40972]]
 """
 import sys
 from pathlib import Path
@@ -24,7 +26,9 @@ from reblock.pipeline import build_regions
 
 def main() -> None:
     out = Path(sys.argv[1])
-    overrides = ["data=capetown_full", "max_blocks=1", *sys.argv[2:]]
+    # `data=<city>_full` is required (no default) so a snapshot is never silently fetched for the
+    # wrong city; `max_blocks=1` builds the single top region.
+    overrides = ["max_blocks=1", *sys.argv[2:]]
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=overrides)
     source = instantiate(cfg.data)

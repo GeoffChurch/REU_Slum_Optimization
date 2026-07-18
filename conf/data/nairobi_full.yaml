@@ -1,0 +1,4 @@
+# Real central-Nairobi data: the country-wide KEN geodata clipped to the Nairobi metro bbox +
+# Open Buildings, downloaded on demand and cached under ~/.cache/reblock (never committed).
+_target_: reblock.data.provision.cached_kblock_source
+city: nairobi
