@@ -58,6 +58,8 @@ def main() -> None:
     region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
 
     selection = screen.select(source) or []
+    if not selection:
+        raise SystemExit(f"metric={metric_name!r} flagged 0 blocks — check its gate/pre-filter")
     scores = cast("dict[str, float]", screen.selection_scores(source))   # type: ignore[attr-defined]
     total = len(source.block_geometries())
 
