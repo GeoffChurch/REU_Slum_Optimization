@@ -150,16 +150,19 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
 def region_map(source: Source, regions: list[list[str]],
                seed_groups: list[list[str]], out_dir: Path, *,
                selection: list[str] | None = None,
-               depths: dict[str, float] | None = None) -> Path | None:
-    """Two maps for a region build. `screen.png`: the metro coloured by TRUE peel max access-depth
-    (`depths`, from the screen's fine pass) on the absolute 0..max ring scale -- a continuous ramp,
-    no bucketing -- with screen-DESELECTED blocks blanked, and the whole expanded region located
-    (dark member outline + a locator box), clipped to the bulk block extent. `region.png`: the
-    region's member blocks coloured by that same true depth against dimmed context, the
-    pre-expansion seed outlined heavily, plus building points. When `depths` is None/empty (no
-    depth-capable screen), both maps fall back to a flat located fill (NO proxy colouring).
-    `selection` is the screen's flagged block_ids; `depths` maps block_id -> true max access-depth.
-    Writes both; returns the `region.png` path, or None if there are no regions."""
+               depths: dict[str, float] | None = None,
+               metric_name: str = "score") -> Path | None:
+    """Two maps for a region build. `screen.png`: the metro coloured by the configured metric's
+    fine score (`depths`, from the screen's fine pass) on the absolute 0..max scale -- a
+    continuous ramp, no bucketing -- with screen-DESELECTED blocks blanked, and the whole expanded
+    region located (dark member outline + a locator box), clipped to the bulk block extent.
+    `region.png`: the region's member blocks coloured by that same score against dimmed context,
+    the pre-expansion seed outlined heavily, plus building points. When `depths` is None/empty (no
+    scoring screen), both maps fall back to a flat located fill (NO proxy colouring). `selection`
+    is the screen's flagged block_ids; `depths` maps block_id -> the metric's fine score;
+    `metric_name` labels the colorbar/title (default "score", the generic fallback for a screen
+    without a metric). Writes both; returns the `region.png` path, or None if there are no
+    regions."""
     from matplotlib.patches import Rectangle
 
     from reblock.region import block_depths
@@ -172,26 +175,25 @@ def region_map(source: Source, regions: list[list[str]],
     all_member_ids = {b for region in regions for b in region}
 
     sel = set(selection) if selection else set()
-    dmap: dict[str, float] = dict(depths) if depths else {}
-    vmax = float(max(dmap.values())) if dmap else 1.0
-    geoms["depth"] = geoms["block_id"].map(dmap)          # NaN where deselected / unknown
+    score_map: dict[str, float] = dict(depths) if depths else {}
+    vmax = float(max(score_map.values())) if score_map else 1.0
+    geoms["score"] = geoms["block_id"].map(score_map)      # NaN where deselected / unknown
     flagged = geoms[geoms["block_id"].isin(sel)] if sel else geoms.iloc[:0]
     blanked = geoms[~geoms["block_id"].isin(sel)] if sel else geoms
     members = geoms[geoms["block_id"].isin(all_member_ids)]
     seeds = geoms[geoms["block_id"].isin(all_seed_ids)]
     frame = frame_bbox(members.geometry) if not members.empty else None
 
-    # --- screen.png: flagged blocks by true depth (0..max, continuous), deselected blanked ---
+    # --- screen.png: flagged blocks by the metric's score (0..max, continuous), deselected blanked
     fig_s, ax_s = plt.subplots(figsize=(10, 10))
     if not blanked.empty:
         blanked.plot(ax=ax_s, color="white", edgecolor="#dcdcdc", linewidth=0.12)
-    if not flagged.empty and dmap:
-        flagged.plot(ax=ax_s, column="depth", cmap="YlOrRd", vmin=0, vmax=vmax,
+    if not flagged.empty and score_map:
+        flagged.plot(ax=ax_s, column="score", cmap="YlOrRd", vmin=0, vmax=vmax,
                      edgecolor="#33333330", linewidth=0.12)
         sm = plt.cm.ScalarMappable(cmap="YlOrRd", norm=Normalize(vmin=0, vmax=vmax))
         sm.set_array([])
-        fig_s.colorbar(sm, ax=ax_s, fraction=0.03, pad=0.01,
-                       label="access depth (parcels from a street)")
+        fig_s.colorbar(sm, ax=ax_s, fraction=0.03, pad=0.01, label=metric_name)
     if not members.empty:
         members.plot(ax=ax_s, facecolor="none", edgecolor="#111111", linewidth=0.5)
     if frame is not None:
@@ -202,25 +204,25 @@ def region_map(source: Source, regions: list[list[str]],
     ax_s.set_ylim(float(bnd["miny"].quantile(0.01)), float(bnd["maxy"].quantile(0.99)))
     ax_s.set_aspect("equal")
     ax_s.set_axis_off()
-    ax_s.set_title(
-        f"true access-depth (0..{vmax:.0f} rings); {len(all_member_ids)} blocks reblocked")
+    ax_s.set_title(f"{metric_name} (0..{vmax:.0f}); {len(all_member_ids)} blocks reblocked")
     save_render(fig_s, out_dir / "screen.png")
     plt.close(fig_s)
 
-    # --- region.png: members by true depth against dimmed context + seed outline + points ---
-    # member depths: from `depths` where present; any members the screen didn't map are peeled
-    # together in ONE batched `block_depths` call (never per-member -- each call re-reads the
-    # buildings parquet).
-    missing = [b for b in all_member_ids if b not in dmap]
+    # --- region.png: members by score against dimmed context + seed outline + points ---
+    # member scores: from `depths` where present; any members the screen didn't map are peeled for
+    # their true depth together in ONE batched `block_depths` call (never per-member -- each call
+    # re-reads the buildings parquet) -- the best available signal when the metric itself didn't
+    # score them (e.g. DenseCluster growth reaching beyond the screen's flagged set).
+    missing = [b for b in all_member_ids if b not in score_map]
     peeled = block_depths(source, missing) if missing else {}
-    member_depth = {b: dmap.get(b, peeled.get(b, 0.0)) for b in all_member_ids}
-    m_vmax = float(max([v for v in member_depth.values() if v] or [1.0]))
+    member_score = {b: score_map.get(b, peeled.get(b, 0.0)) for b in all_member_ids}
+    m_vmax = float(max([v for v in member_score.values() if v] or [1.0]))
     members = members.copy()
-    members["depth"] = members["block_id"].map(member_depth)
+    members["score"] = members["block_id"].map(member_score)
     fig_r, ax_r = plt.subplots(figsize=(10, 10))
     geoms.plot(ax=ax_r, color="#eeeeee", edgecolor="#cccccc", linewidth=0.3)
-    if not members.empty and member_depth:
-        members.plot(ax=ax_r, column="depth", cmap="YlOrRd", vmin=0, vmax=m_vmax,
+    if not members.empty and member_score:
+        members.plot(ax=ax_r, column="score", cmap="YlOrRd", vmin=0, vmax=m_vmax,
                      edgecolor="#8a8a8a", linewidth=0.4)
     elif not members.empty:
         members.plot(ax=ax_r, color="#c0392b", edgecolor="#8a8a8a", linewidth=0.4)

@@ -5,7 +5,7 @@ from pyproj import CRS
 from shapely.geometry import Polygon
 
 from reblock.contracts import Source
-from reblock.pipeline import RunOutput, _reachable_blocks, _region_depth_map
+from reblock.pipeline import RunOutput, _reachable_blocks, _region_score_map
 
 _UTM = CRS.from_epsg(32643)
 
@@ -38,9 +38,64 @@ def test_reachable_blocks_covers_whole_component_with_generous_bound() -> None:
     assert set(_reachable_blocks(_chain_gdf(), [["s"]], 10_000.0)) == {"s", "a", "b", "c"}
 
 
-def test_region_depth_map_empty_for_non_peelable_source() -> None:
+class _MetricScreen:
+    """A minimal Screen stand-in that just carries a metric, mirrors DenseCompactScreen."""
+
+    def __init__(self, m):
+        self.metric = m
+
+    def select(self, s):
+        return []
+
+
+def test_region_score_map_empty_for_non_peelable_source() -> None:
     # No blocks_path -> not peel-capable -> {} (the builder falls back to its proxy).
+    from reblock.metric import Depth
+
     class _Bare:
         pass
 
-    assert _region_depth_map(cast(Source, _Bare()), _chain_gdf(), [["s"]], 100.0) == {}
+    assert _region_score_map(cast(Source, _Bare()), _MetricScreen(Depth()), _chain_gdf(),
+                             [["s"]], 100.0) == {}
+
+
+def test_region_score_map_empty_when_screen_has_no_metric() -> None:
+    # IdentityScreen (no `.metric`) -> {} (the builder falls back to its proxy), even for a
+    # peel-capable source.
+    class _Src:
+        blocks_path = "x"
+
+    class _NoMetricScreen:
+        def select(self, s):
+            return []
+
+    assert _region_score_map(cast(Source, _Src()), _NoMetricScreen(), _chain_gdf(),
+                             [["s"]], 100.0) == {}
+
+
+def test_region_score_map_uses_metric_fine_and_skips_peel_when_geometry_only() -> None:
+    # A density_compactness metric (needs_peel=False) -> _region_score_map must NOT call
+    # block_depths; scores come from columns. A depth metric (needs_peel=True) -> block_depths
+    # supplies the depth.
+    import reblock.pipeline as pl
+    from reblock.metric import Compactness, Density, Depth, Product
+
+    class _Screen:            # carries the metric, mirrors DenseCompactScreen
+        def __init__(self, m): self.metric = m
+        def select(self, s): return []
+
+    class _Src:
+        blocks_path = "x"
+
+    calls = {"n": 0}
+    real = pl.block_depths  # type: ignore[attr-defined]
+    pl.block_depths = lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1) or {})  # type: ignore
+    try:
+        gdf = _chain_gdf()
+        pl._region_score_map(cast(Source, _Src()), _Screen(Product([Density(), Compactness()])),
+                             gdf, [["s"]], 100.0)
+        assert calls["n"] == 0        # geometry-only: no peel
+        pl._region_score_map(cast(Source, _Src()), _Screen(Depth()), gdf, [["s"]], 100.0)
+        assert calls["n"] == 1        # depth: one batched block_depths call
+    finally:
+        pl.block_depths = real        # type: ignore

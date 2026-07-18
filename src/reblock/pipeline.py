@@ -111,17 +111,30 @@ def _reachable_blocks(block_geoms: pd.DataFrame, groups: list[list[str]],
     return [ids[i] for i in seen]
 
 
-def _region_depth_map(source: Source, block_geoms: pd.DataFrame, groups: list[list[str]],
-                      bound_buildings: float) -> dict[str, float]:
-    """True max access-depth for every block the DenseCluster growth could reach from `groups`,
-    computed in ONE batched `block_depths` peel of the seed's reachable neighbourhood
-    (`_reachable_blocks`). Survivors the screen already peeled are cache hits inside that single
-    call; non-survivors are peeled in the same batch -- so the one expensive buildings read is
-    amortized across the whole neighbourhood instead of paid per candidate. `{}` for a
-    non-peel-capable source."""
-    if getattr(source, "blocks_path", None) is None:
+def _region_score_map(source: Source, screen: Screen, block_geoms: pd.DataFrame,
+                      groups: list[list[str]], bound_buildings: float) -> dict[str, float]:
+    """metric.fine for every block the DenseCluster growth could reach from `groups`. Peels the
+    reachable neighbourhood in ONE `block_depths` call ONLY when the metric needs depth; otherwise
+    scores from columns alone (no peel). `{}` for a non-peel-capable source with a depth metric."""
+    metric = getattr(screen, "metric", None)
+    if metric is None or getattr(source, "blocks_path", None) is None:
         return {}
-    return block_depths(source, _reachable_blocks(block_geoms, groups, bound_buildings))
+    reach = _reachable_blocks(block_geoms, groups, bound_buildings)
+    cols = {str(b): (c, a, p) for b, c, a, p in _reach_cols(block_geoms, reach)}
+    depths = block_depths(source, reach) if metric.needs_peel else {}
+    return {b: metric.fine(depths.get(b, 0.0), *cols[b]) for b in reach if b in cols}
+
+
+def _reach_cols(block_geoms: pd.DataFrame, ids: list[str]
+                ) -> list[tuple[str, float, float, float]]:
+    """(block_id, count, area_m2, perim_m) for `ids`, from the cheap columns (perimeter in UTM)."""
+    want = set(ids)
+    sub = block_geoms[block_geoms["block_id"].astype(str).isin(want)]
+    utm = sub.to_crs(sub.estimate_utm_crs())
+    area = (sub["block_area_m2"].astype(float) if "block_area_m2" in sub.columns
+            else utm.geometry.area)
+    return [(str(b), float(c), float(ar), float(pe)) for b, c, ar, pe in
+            zip(sub["block_id"], sub["building_count"], area, utm.geometry.length, strict=True)]
 
 
 def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
@@ -144,14 +157,15 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
 
     source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
     block_geoms = source.block_geometries()
-    # Only a growing builder (DenseCluster: has a `max_buildings` budget) ranks by depth; precompute
-    # its candidate depths in ONE batched peel of the seed's reachable neighbourhood (bound ~3x the
-    # growth budget). Non-growing builders (identity/convex_hull) ignore depth_fn -> skip the peel.
+    # Only a growing builder (DenseCluster: has a `max_buildings` budget) ranks candidates by the
+    # configured metric's score; precompute it in ONE batched pass (peeling only if the metric
+    # needs depth) of the seed's reachable neighbourhood (bound ~3x the growth budget). Non-growing
+    # builders (identity/convex_hull) ignore depth_fn -> skip this precompute.
     mb = getattr(region_builder, "max_buildings", None)
-    depth_map = (_region_depth_map(source, block_geoms, groups, 3.0 * mb)
-                 if isinstance(mb, int) and mb > 0 else {})
+    score_map = (_region_score_map(source, screen, block_geoms, groups, 3.0 * mb)
+                if isinstance(mb, int) and mb > 0 else {})
     depth_fn: Callable[[str], float] | None = (
-        (lambda bid: depth_map.get(bid, 0.0)) if depth_map else None)
+        (lambda bid: score_map.get(bid, 0.0)) if score_map else None)
     regions = region_builder.build(block_geoms, groups, depth_fn)[:max_blocks]
     members = sorted({b for region in regions for b in region})
     source.block_ids = members                  # type: ignore[attr-defined]  # members only
