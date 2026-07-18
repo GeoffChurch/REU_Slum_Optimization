@@ -4,7 +4,7 @@ Four reblockers graded head-to-head on the **metric basis** — external connect
 connectivity, and displacement — on a single deep informal block small enough that even `topology`
 runs — it's **single-block-only** (it crashes on a multi-block region: a gappy parcel graph gives it a
 disconnected source node). `greedy_arterial` now runs via **CELF/lazy**, so it scales too — the
-companion [`multiblock`](../multiblock/) flagship runs the scalable methods, *including arterial*, on
+companion [`multiblock_depth`](../multiblock_depth/) flagship runs the scalable methods, *including arterial*, on
 a whole settlement.
 
 The block is **`ZAF.9.3.1_1_40972`** — the deepest block (by the depth proxy `√(n·A)/P`) in a
@@ -93,14 +93,14 @@ Each method earns a different corner of the frontier:
 - **`greedy_arterial`** is a close second on internal connectivity (0.270) and buys it at the **least
   paving** (16.2%) and least displacement (62.0, see below): its few through-roads reconnect into the
   street perimeter, closing real loops instead of dead-ending — the most redundancy *per metre of
-  road*. Runs via CELF/lazy here and scales to the region (see [`multiblock`](../multiblock/)).
+  road*. Runs via CELF/lazy here and scales to the region (see [`multiblock_depth`](../multiblock_depth/)).
 - **`topology`** reaches the most external connectivity (0.921) but at the heaviest paving (38.7%),
   with only middling internal connectivity (0.037): its whole-graph optimizer builds a
   reach-everywhere tree, not a mesh. Single-block-only.
 - **`clearance`** is the balanced least-cost option — near-topology external connectivity (0.827) at
   20.4% paved — but the **least internal connectivity (0.000)**: a least-cost drainage tree has no
   backup routes *by construction* (every dwelling reaches the street exactly one way). See
-  [`multiblock`](../multiblock/) for its region-scale run.
+  [`multiblock_depth`](../multiblock_depth/) for its region-scale run.
 
 ![external connectivity](curve_external_connectivity.png) ![internal connectivity](curve_internal_connectivity.png)
 
@@ -139,4 +139,4 @@ directly: benefit *and* homes-displaced both climb as road is added — pick the
 **The takeaway:** pick the method by the axis *and* the road you can afford — external connectivity →
 `topology` (single block); the most backup-route redundancy → `osm_footpaths` (or `greedy_arterial` for
 the most redundancy *per metre of road*); balanced least-cost → `clearance` (see
-[`multiblock`](../multiblock/) for the region-scale run).
+[`multiblock_depth`](../multiblock_depth/) for the region-scale run).

@@ -514,3 +514,70 @@ def test_dense_cluster_guards_zero_area_and_nan_building_count() -> None:
 
     assert len(out) == 1
     assert set(out[0]) == {"seed", "zero_area", "nan_neighbor"}  # both absorbed, no crash
+
+
+def test_block_depths_matches_access_before_peel() -> None:
+    # On the committed DJI sample, block_depths(source, [id]) maps id -> access_before(block).max()
+    # -- the true BFS peel depth -- in ONE batched region() call.
+    from reblock.data.kblock import KblockSource
+    from reblock.derivations import access_before
+    from reblock.region import block_depths
+    root = Path(__file__).resolve().parent
+    src = KblockSource(root / "data/kblock/blocks_dji_sample.parquet",
+                       root / "data/kblock/buildings_dji_sample.parquet", "dji",
+                       block_ids=["DJI.3_1_1808"])
+    block = next(iter(src.region().blocks))
+    expected = float(access_before(block).max())
+    assert block_depths(src, ["DJI.3_1_1808"]) == {"DJI.3_1_1808": expected}
+
+
+def test_block_depths_empty_for_non_peelable_or_empty() -> None:
+    # No blocks_path (not a KblockSource) -> {}; an empty id list -> {}. A missing id defaults to
+    # 0.0 at the call site (absent from the dict), so it never wins a "deepest" argmax.
+    from reblock.data.kblock import KblockSource
+    from reblock.region import block_depths
+
+    class _Bare:
+        def region(self): raise NotImplementedError
+        def block_geometries(self, bbox=None): raise NotImplementedError
+        def building_points(self, bbox=None): raise NotImplementedError
+
+    assert block_depths(_Bare(), ["anything"]) == {}
+    root = Path(__file__).resolve().parent
+    src = KblockSource(root / "data/kblock/blocks_dji_sample.parquet",
+                       root / "data/kblock/buildings_dji_sample.parquet", "dji")
+    assert block_depths(src, []) == {}
+
+
+def _fork_gdf():
+    # Seed "s" (centre) adjacent to BOTH "a" (east) and "b" (west); a and b are NOT adjacent to each
+    # other (s separates them). All three identical unit squares -> identical proxy score. A budget
+    # of seed + exactly one more forces a CHOICE between a and b: proxy ties and breaks to "a" (id
+    # ascending); a depth_fn ranking b highest picks "b" instead. So the region MEMBERSHIP differs.
+    import geopandas as gpd
+    from pyproj import CRS
+    from shapely.geometry import Polygon
+    utm = CRS.from_epsg(32643)
+    polys = {"s": Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+             "a": Polygon([(1, 0), (2, 0), (2, 1), (1, 1)]),      # east, touches s at x=1
+             "b": Polygon([(-1, 0), (0, 0), (0, 1), (-1, 1)])}    # west, touches s at x=0
+    return gpd.GeoDataFrame({"block_id": list(polys), "building_count": [10.0, 10.0, 10.0]},
+                            geometry=list(polys.values()), crs=utm)
+
+
+def test_dense_cluster_grows_by_depth_fn_not_proxy() -> None:
+    from reblock.region import DenseClusterRegionBuilder
+    gdf = _fork_gdf()
+    builder = DenseClusterRegionBuilder(max_buildings=15)        # seed(10) + exactly one more
+    depth = {"s": 5.0, "a": 1.0, "b": 9.0}
+    # depth-growth picks the deeper neighbor b; proxy-growth (equal proxy) ties to a by id.
+    assert builder.build(gdf, [["s"]], depth_fn=lambda bid: depth[bid]) == [["b", "s"]]
+    assert builder.build(gdf, [["s"]]) == [["a", "s"]]           # proxy tie -> "a"
+
+
+def test_dense_cluster_depth_fn_none_is_proxy_behaviour() -> None:
+    # depth_fn=None must be byte-identical to omitting it (both the proxy path).
+    from reblock.region import DenseClusterRegionBuilder
+    gdf = _fork_gdf()
+    builder = DenseClusterRegionBuilder(max_buildings=15)
+    assert builder.build(gdf, [["s"]], depth_fn=None) == builder.build(gdf, [["s"]])

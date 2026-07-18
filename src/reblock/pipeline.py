@@ -9,12 +9,23 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import islice
 
+import pandas as pd
+from pyproj import CRS
+
 from reblock.contracts import Block, Eval, Method, Result, Screen, Source
 from reblock.derivations import propose
-from reblock.region import IdentityRegionBuilder, RegionBuilder, region_reblock
+from reblock.region import (
+    IdentityRegionBuilder,
+    RegionBuilder,
+    _block_adjacency,
+    block_depths,
+    region_reblock,
+)
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +84,62 @@ def _seed_groups(
     return [[b] for b in sel], sel
 
 
+def _reachable_blocks(block_geoms: pd.DataFrame, groups: list[list[str]],
+                      bound_buildings: float) -> list[str]:
+    """The seed groups' blocks plus their adjacency neighbourhood, BFS-expanded (accumulating
+    `building_count`) until the cumulative count reaches `bound_buildings` -- a generous superset of
+    everything the greedy DenseCluster growth can reach from the seed, so ALL of its candidates land
+    in one batched peel. `bound_buildings` is a multiple of the growth budget; a candidate beyond it
+    is simply un-peeled (the caller defaults it to 0.0 = shallow, which a non-survivor essentially
+    always is, and survivors that matter are near the seed)."""
+    ids = [str(b) for b in block_geoms["block_id"]]
+    idx = {b: i for i, b in enumerate(ids)}
+    has_count = "building_count" in block_geoms.columns
+    counts = ([0.0 if pd.isna(c) else float(c) for c in block_geoms["building_count"]] if has_count
+              else [1.0] * len(ids))
+    adj = _block_adjacency(list(block_geoms.geometry))
+    seed = {idx[b] for group in groups for b in group if b in idx}
+    seen = set(seed)
+    total = sum(counts[i] for i in seed)
+    frontier = deque(seed)
+    while frontier and total < bound_buildings:
+        i = frontier.popleft()
+        for j in adj[i]:
+            if j not in seen:
+                seen.add(j)
+                total += counts[j]
+                frontier.append(j)
+    return [ids[i] for i in seen]
+
+
+def _region_score_map(source: Source, screen: Screen, block_geoms: pd.DataFrame,
+                      groups: list[list[str]], bound_buildings: float) -> dict[str, float]:
+    """metric.fine for every block the DenseCluster growth could reach from `groups`. Peels the
+    reachable neighbourhood in ONE `block_depths` call ONLY when the metric needs depth; otherwise
+    scores from columns alone (no peel). `{}` for a non-peel-capable source with a depth metric."""
+    metric = getattr(screen, "metric", None)
+    if metric is None or getattr(source, "blocks_path", None) is None:
+        return {}
+    reach = _reachable_blocks(block_geoms, groups, bound_buildings)
+    cols = {str(b): (c, a, p) for b, c, a, p in _reach_cols(block_geoms, reach)}
+    depths = block_depths(source, reach) if metric.needs_peel else {}
+    return {b: metric.fine(depths.get(b, 0.0), *cols[b]) for b in reach if b in cols}
+
+
+def _reach_cols(block_geoms: pd.DataFrame, ids: list[str]
+                ) -> list[tuple[str, float, float, float]]:
+    """(block_id, count, area_m2, perim_m) for `ids`, from the cheap columns (perimeter in UTM)."""
+    want = set(ids)
+    sub = block_geoms[block_geoms["block_id"].astype(str).isin(want)]
+    crs = sub.crs
+    already_projected = crs is not None and CRS.from_user_input(crs).is_projected
+    utm = sub if already_projected else sub.to_crs(sub.estimate_utm_crs())
+    area = (sub["block_area_m2"].astype(float) if "block_area_m2" in sub.columns
+            else utm.geometry.area)
+    return [(str(b), float(c), float(ar), float(pe)) for b, c, ar, pe in
+            zip(sub["block_id"], sub["building_count"], area, utm.geometry.length, strict=True)]
+
+
 def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
                   block_groups: list[list[str]] | None, max_blocks: int) -> list[list[Block]]:
     """Resolve seed groups (explicit `block_groups`, or the screen's selection wrapped as
@@ -93,7 +160,16 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
 
     source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
     block_geoms = source.block_geometries()
-    regions = region_builder.build(block_geoms, groups)[:max_blocks]
+    # Only a growing builder (DenseCluster: has a `max_buildings` budget) ranks candidates by the
+    # configured metric's score; precompute it in ONE batched pass (peeling only if the metric
+    # needs depth) of the seed's reachable neighbourhood (bound ~3x the growth budget). Non-growing
+    # builders (identity/convex_hull) ignore depth_fn -> skip this precompute.
+    mb = getattr(region_builder, "max_buildings", None)
+    score_map = (_region_score_map(source, screen, block_geoms, groups, 3.0 * mb)
+                if isinstance(mb, int) and mb > 0 else {})
+    depth_fn: Callable[[str], float] | None = (
+        (lambda bid: score_map.get(bid, 0.0)) if score_map else None)
+    regions = region_builder.build(block_geoms, groups, depth_fn)[:max_blocks]
     members = sorted({b for region in regions for b in region})
     source.block_ids = members                  # type: ignore[attr-defined]  # members only
     built = {b.block_id: b for b in source.region().blocks}

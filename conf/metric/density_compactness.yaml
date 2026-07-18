@@ -1,0 +1,13 @@
+# @package _global_
+# Dense, compact fabric from geometry alone (no peel): density × compactness = n/P². This is a
+# peel-free metric (needs_peel=False), so the proxy pre-filter is SKIPPED and the gate is the ONLY
+# selector -- it must be a real cut, not a pass-through. Percentile 30 keeps the tightest-densest
+# ~third of eligible blocks by n/P².
+metric:
+  _target_: reblock.metric.Product
+  name: density_compactness
+  terms:
+    - {_target_: reblock.metric.Density}
+    - {_target_: reblock.metric.Compactness}
+  _convert_: all
+metric_gate: {_target_: reblock.metric.Gate, kind: percentile, value: 30.0}

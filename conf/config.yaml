@@ -6,6 +6,7 @@ defaults:
   - eval: kcomplexity
   - substrate: chord_diag
   - desire_source: osm
+  - metric: depth
   - _self_
 
 # Top-level scalars are the interpolation sources the data/method config
@@ -41,6 +42,10 @@ region_map:
 # region_builder expands into the region actually reblocked. null => every block a
 # singleton (the classic per-block behavior). NOT the Source's flat load filter.
 block_ids: null
+
+# Screen selection gate (applied to the metric's fine score) + the cheap recall pre-filter
+# (keep top-% by proxy before the peel). Calibrated for the default `depth` metric.
+proxy_keep_pct: 50.0
 
 hydra:
   job:

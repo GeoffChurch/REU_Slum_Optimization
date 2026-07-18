@@ -12,7 +12,8 @@ import reblock.derive_graph as dg
 from reblock.contracts import Block
 from reblock.data.kblock import KblockSource
 from reblock.derivations import access_before
-from reblock.screen.dense_compact import DenseCompactScreen, _cheap_survivors
+from reblock.metric import Depth, Gate
+from reblock.screen.dense_compact import DenseCompactScreen
 
 ROOT = Path(__file__).resolve().parents[1]
 CT_BLOCKS = str(ROOT / "data" / "kblock" / "blocks_capetown_sample.parquet")
@@ -43,36 +44,37 @@ def _write_synth(tmp: Path) -> tuple[str, str]:
     return str(bp), str(dp)
 
 
-def test_cheap_survivors_gate(tmp_path: Path) -> None:
+def test_depth_proxy_formula(tmp_path: Path) -> None:
     bp, _ = _write_synth(tmp_path)
-    # depth_proxy sqrt(nA)/P: A=sqrt(25*2500)/200=1.25, B=sqrt(30*60)/64=0.66, C=0.35 -> 0.4 drops C
-    assert _cheap_survivors(gpd.read_parquet(bp), depth_proxy_min=0.4, k_min=None) == ["A", "B"]
+    # depth_proxy sqrt(nA)/P: A=sqrt(25*2500)/200=1.25, B=sqrt(30*60)/64=0.66, C=0.35 (see fixture)
+    proxy = Depth().proxy(gpd.read_parquet(bp)).to_numpy()
+    assert proxy == pytest.approx([1.25, 0.6629126073623883, 0.3535533905932738])
 
 
 def test_select_two_tier_drops_shallow(tmp_path: Path) -> None:
     bp, dp = _write_synth(tmp_path)
-    # cheap keeps A (proxy 1.25), B (0.66); fine mean_depth_min=1.2 keeps A (~1.4), drops B (~1.0)
-    s = DenseCompactScreen(depth_proxy_min=0.4, mean_depth_min=1.2, min_buildings=10)
+    # proxy_keep_pct=100 -> both A, B survive the (permissive) pre-filter; the metric.fine (max
+    # depth) gate at 2.0 keeps A (max-depth 3), drops B (max-depth 1).
+    s = DenseCompactScreen(Depth(), Gate("absolute", 2.0), proxy_keep_pct=100.0, min_buildings=10)
     src = KblockSource(bp, dp, region_id="test", min_buildings=10)
     assert s.select(src) == ["A"]
 
 
 def test_select_flags_flagship_on_real_fixture() -> None:
-    # depth_proxy_min=1.5 (the production default) clears the flagship's real proxy (~3.75 =
-    # sqrt(n*A)/P over the free columns). Returned order is max-access-depth descending (not
-    # alphabetical), so assert membership, not sort.
-    s = DenseCompactScreen(depth_proxy_min=1.5, mean_depth_min=1.3)
+    # DenseCompactScreen's default proxy_keep_pct=30% (the production default) clears the flagship's
+    # real proxy (~3.75 = sqrt(n*A)/P over the free columns -- well within the top 30%). Returned
+    # order is max-access-depth descending (not alphabetical), so assert membership, not sort.
+    s = DenseCompactScreen(Depth(), Gate("absolute", 1.3))
     src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown")
     ids = s.select(src)
     assert ids is not None and "ZAF.9.3.1_1_44882" in ids
 
 
-def test_max_depth_min_gate_drops_blocks_without_a_deep_parcel(tmp_path: Path) -> None:
+def test_gate_drops_blocks_without_a_deep_parcel(tmp_path: Path) -> None:
     bp, dp = _write_synth(tmp_path)
-    # A: max-depth 3; B: max-depth 1. mean_depth_min=1.0 passes BOTH on the mean gate,
-    # so max_depth_min=3 is the deciding gate -> only A (has a parcel at depth 3) survives.
-    s = DenseCompactScreen(depth_proxy_min=0.4, mean_depth_min=1.0,
-                           max_depth_min=3.0, min_buildings=10)
+    # A: max-depth 3; B: max-depth 1. The gate operates directly on the metric's fine score (for
+    # Depth, the true max peel depth) -- Gate("absolute", 3.0) keeps only A.
+    s = DenseCompactScreen(Depth(), Gate("absolute", 3.0), proxy_keep_pct=100.0, min_buildings=10)
     src = KblockSource(bp, dp, region_id="test", min_buildings=10)
     assert s.select(src) == ["A"]
 
@@ -99,7 +101,7 @@ def _write_sort_fixture(tmp: Path) -> tuple[str, str]:
 
 def test_select_ranks_by_max_depth_descending(tmp_path: Path) -> None:
     bp, dp = _write_sort_fixture(tmp_path)
-    s = DenseCompactScreen(depth_proxy_min=0.4, mean_depth_min=1.0, min_buildings=10)
+    s = DenseCompactScreen(Depth(), Gate("absolute", 1.0), proxy_keep_pct=100.0, min_buildings=10)
     src = KblockSource(bp, dp, region_id="test", min_buildings=10)
     # deep "zzz" (max-depth 3) outranks shallow "aaa" (max-depth 1) -> reverse-alphabetical,
     # which alphabetical sorted() could never produce -> proves the severity sort.
@@ -132,7 +134,7 @@ def test_select_result_is_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         return access_before(blk)
     monkeypatch.setattr("reblock.screen.dense_compact.access_before", spy)
 
-    s = DenseCompactScreen(depth_proxy_min=0.4, mean_depth_min=1.2, min_buildings=10)
+    s = DenseCompactScreen(Depth(), Gate("absolute", 2.0), proxy_keep_pct=100.0, min_buildings=10)
     src = KblockSource(bp, dp, region_id="test", min_buildings=10)
     first = s.select(src)
     after_first = box_["n"]

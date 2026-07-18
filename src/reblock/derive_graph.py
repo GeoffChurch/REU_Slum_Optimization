@@ -47,6 +47,7 @@ _DERIVATION_MODULES: tuple[Path, ...] = (
     Path(__file__).with_name("derivations.py"),      # derive()-wrapper bodies
     Path(__file__).parent / "data" / "kblock.py",    # _voronoi_parcels (the voronoi derivation)
     Path(__file__).parent / "screen" / "dense_compact.py",  # _compute_selection (screen cache)
+    Path(__file__).with_name("metric.py"),                  # BlockMetric proxy/fine/Gate (screen)
 )
 
 

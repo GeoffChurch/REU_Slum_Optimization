@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -27,7 +28,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from reblock.contracts import Block, Eval, Method, Result
+from reblock.contracts import Block, Eval, Method, Result, Source
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
 
@@ -125,7 +126,8 @@ class RegionBuilder(Protocol):
     of seed groups (block_ids); returns the expanded groups (block_ids), each sorted for
     determinism, group order preserved."""
 
-    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]: ...
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]: ...
 
 
 def _validate_group_ids(block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> None:
@@ -165,7 +167,9 @@ class IdentityRegionBuilder:
     mistake. A warning, not a hard error, so a deliberate aggregate over scattered blocks still
     runs."""
 
-    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
+        del depth_fn   # these builders don't rank by depth
         _validate_group_ids(block_geoms, groups)
         by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
         result: list[list[str]] = []
@@ -193,7 +197,9 @@ class ConvexHullRegionBuilder:
     in too. Overlap between different groups' expansions is fine: regions are independent, with
     no partition/merge across groups."""
 
-    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
+        del depth_fn   # these builders don't rank by depth
         _validate_group_ids(block_geoms, groups)
         by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
         result: list[list[str]] = []
@@ -223,13 +229,34 @@ def _depth_proxy(count: float, area: float, perim: float) -> float:
     """Cheap depth proxy `sqrt(count * area) / perimeter` -- a block-geometry estimate of parcel
     access depth in rings (inradius / parcel-width), the region builder's growth metric. It ranks
     true access depth ~5x better than building density (`count / area`), which is nearly
-    uncorrelated with depth -- see `screen.dense_compact._depth_proxy` and
+    uncorrelated with depth -- see `metric.Depth` (the canonical closed form) and
     docs/superpowers/notes/2026-07-14-depth-proxy-screen-gate.md. A degenerate block (`area == 0`
     or `perim == 0`) returns 0.0, the lowest score, so it sorts LAST as a frontier candidate
     instead of raising. `area`/`perim` must be in metres (the caller reprojects)."""
     if area <= 0 or perim <= 0:
         return 0.0
     return math.sqrt(count * area) / perim
+
+
+def block_depths(source: Source, block_ids: list[str]) -> dict[str, float]:
+    """True max BFS access-depth (parcel rings from a street) for each of `block_ids`, built in ONE
+    `KblockSource(block_ids=...).region()` call, peeled with the memoized `access_before` ->
+    `{block_id: max_depth}`. BATCHING is load-bearing: `KblockSource.region()` reads and
+    spatial-joins the WHOLE ~49 MB buildings parquet on every call regardless of `block_ids`, so a
+    per-block accessor pays that ~2.7 s read PER block (profiled). One batched call amortizes it
+    across all `block_ids`, as the screen's fine pass peels ~900 blocks per read. Blocks the screen
+    already peeled are cache hits (`_voronoi_impl`/`access_before` are memoized). A block that can't
+    be built/peeled (below `min_buildings`, bad geometry) is simply ABSENT from the returned
+    dict -- callers default a missing id to 0.0, so it never wins a `deepest` argmax. Returns `{}`
+    for a non-peel-capable source (no `blocks_path`) or an empty `block_ids`."""
+    from reblock.data.kblock import KblockSource
+    from reblock.derivations import access_before
+    if not isinstance(source, KblockSource) or not block_ids:
+        return {}
+    sub = KblockSource(source.blocks_path, source.buildings_path, "depth",
+                       min_buildings=getattr(source, "min_buildings", 10),
+                       block_ids=list(block_ids))
+    return {str(b.block_id): float(access_before(b).max()) for b in sub.region().blocks}
 
 
 @dataclass
@@ -270,7 +297,8 @@ class DenseClusterRegionBuilder:
 
     max_buildings: int = 150
 
-    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
         _validate_group_ids(block_geoms, groups)
         ids = cast(list[str], list(block_geoms["block_id"]))
         geoms = list(block_geoms.geometry)
@@ -290,6 +318,16 @@ class DenseClusterRegionBuilder:
         idx_by_id = {b: i for i, b in enumerate(ids)}
         adj = _block_adjacency(geoms)
 
+        depth_cache: dict[str, float] = {}
+
+        def _score(j: int) -> float:
+            if depth_fn is None:
+                return _depth_proxy(counts[j], areas[j], perims[j])
+            bid = ids[j]
+            if bid not in depth_cache:
+                depth_cache[bid] = depth_fn(bid)
+            return depth_cache[bid]
+
         result: list[list[str]] = []
         for group in groups:
             if len(group) > 1 and not _touch_adjacent([geoms[idx_by_id[b]] for b in group]):
@@ -308,8 +346,7 @@ class DenseClusterRegionBuilder:
                     break
                 best = min(
                     frontier,
-                    key=lambda j: (-_depth_proxy(counts[j], areas[j], perims[j]), -counts[j],
-                                   ids[j]),
+                    key=lambda j: (-_score(j), -counts[j], ids[j]),
                 )
                 cluster.add(best)
                 size += counts[best]
