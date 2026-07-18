@@ -1,3 +1,4 @@
 method,terminal_displacement,pct_displaced,n_blocks
+osm_footpaths,1506.6,0.3223,1
 clearance,736.6,0.1576,1
 greedy_arterial_buildable,241.9,0.0517,1
