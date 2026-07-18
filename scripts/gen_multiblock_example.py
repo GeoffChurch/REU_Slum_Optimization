@@ -79,7 +79,8 @@ def main() -> None:
     maps_url = google_maps_url(unary_union([b.boundary for b in region]), region[0].crs)
 
     region_map(source, [members], [[seed]], out,
-               selection=selection, depths=scores, metric_name=metric_name)
+               selection=selection, depths=scores, metric_name=metric_name,
+               metric=getattr(screen, "metric", None))
     for name in ("screen", "region"):
         png = out / f"{name}.png"
         if png.exists():

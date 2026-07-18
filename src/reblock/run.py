@@ -78,7 +78,7 @@ def main(cfg: DictConfig) -> None:
         m = getattr(spec.screen, "metric", None)
         region_map(spec.source, output.regions, output.seed_groups, out_dir,
                    selection=output.selection, depths=scores,
-                   metric_name=m.name if m is not None else "score")
+                   metric_name=m.name if m is not None else "score", metric=m)
 
 
 if __name__ == "__main__":

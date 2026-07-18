@@ -32,6 +32,7 @@ from reblock.render import (
 
 if TYPE_CHECKING:
     from reblock.compare import MethodCurve
+    from reblock.metric import BlockMetric
 
 _KCOMPLEXITY = "kcomplexity"
 
@@ -151,7 +152,8 @@ def region_map(source: Source, regions: list[list[str]],
                seed_groups: list[list[str]], out_dir: Path, *,
                selection: list[str] | None = None,
                depths: dict[str, float] | None = None,
-               metric_name: str = "score") -> Path | None:
+               metric_name: str = "score",
+               metric: BlockMetric | None = None) -> Path | None:
     """Two maps for a region build. `screen.png`: the metro coloured by the configured metric's
     fine score (`depths`, from the screen's fine pass) on the absolute 0..max scale -- a
     continuous ramp, no bucketing -- with screen-DESELECTED blocks blanked, and the whole expanded
@@ -161,8 +163,10 @@ def region_map(source: Source, regions: list[list[str]],
     scoring screen), both maps fall back to a flat located fill (NO proxy colouring). `selection`
     is the screen's flagged block_ids; `depths` maps block_id -> the metric's fine score;
     `metric_name` labels the colorbar/title (default "score", the generic fallback for a screen
-    without a metric). Writes both; returns the `region.png` path, or None if there are no
-    regions."""
+    without a metric). `metric` (the same BlockMetric) scores any member the screen didn't flag
+    (region growth reaching beyond the flagged set) by its own `fine`, so the region map is one
+    metric end to end; without it those members fall back to true peel depth. Writes both; returns
+    the `region.png` path, or None if there are no regions."""
     from matplotlib.patches import Rectangle
 
     from reblock.region import block_depths
@@ -209,13 +213,23 @@ def region_map(source: Source, regions: list[list[str]],
     plt.close(fig_s)
 
     # --- region.png: members by score against dimmed context + seed outline + points ---
-    # member scores: from `depths` where present; any members the screen didn't map are peeled for
-    # their true depth together in ONE batched `block_depths` call (never per-member -- each call
-    # re-reads the buildings parquet) -- the best available signal when the metric itself didn't
-    # score them (e.g. DenseCluster growth reaching beyond the screen's flagged set).
+    # member scores: from `depths` where present; any members the screen didn't map (DenseCluster
+    # growth reaching beyond the flagged set) are scored by the SAME `metric` -- its `fine` from the
+    # member's count/area/perim (geoms is in UTM, so area/length are metres) + peel depth, peeled in
+    # ONE batched `block_depths` call only when the metric needs it. So the region map is one metric
+    # end to end. Without a metric (IdentityScreen) they fall back to true peel depth.
     missing = [b for b in all_member_ids if b not in score_map]
-    peeled = block_depths(source, missing) if missing else {}
-    member_score = {b: score_map.get(b, peeled.get(b, 0.0)) for b in all_member_ids}
+    fallback: dict[str, float] = {}
+    if missing and metric is not None:
+        mg = geoms[geoms["block_id"].isin(missing)]
+        md = block_depths(source, missing) if metric.needs_peel else {}
+        fallback = {str(bid): metric.fine(md.get(str(bid), 0.0), float(cnt),
+                                          float(g.area), float(g.length))
+                    for bid, cnt, g in zip(mg["block_id"], mg["building_count"], mg.geometry,
+                                           strict=True)}
+    elif missing:
+        fallback = block_depths(source, missing)
+    member_score = {b: score_map.get(b, fallback.get(b, 0.0)) for b in all_member_ids}
     m_vmax = float(max([v for v in member_score.values() if v] or [1.0]))
     members = members.copy()
     members["score"] = members["block_id"].map(member_score)
