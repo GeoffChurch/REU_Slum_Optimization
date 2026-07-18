@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
+import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
@@ -71,8 +72,8 @@ def _street_block(x0: int, block_id: str) -> Block:
 
 def test_run_two_lens_writes_tables_and_renders(tmp_path: Path) -> None:
     # End-to-end glue smoke test on a tiny region with a real reblocker (DijkstraReblocker paves
-    # everything, so it reaches a shallow depth). Asserts the two CSVs + a render per lens are
-    # written and wall-clock propose time is captured.
+    # everything, so it reaches a shallow depth). Asserts the two CSVs + a render per lens + the
+    # frontier curves (built from the SAME reblock) are written and wall-clock propose is captured.
     from reblock.methods.dijkstra import DijkstraReblocker
     from scripts.compare_budgets import run_two_lens
 
@@ -83,5 +84,31 @@ def test_run_two_lens_writes_tables_and_renders(tmp_path: Path) -> None:
     assert (tmp_path / "lens_b_matched.csv").exists()
     assert (tmp_path / "after_dijkstra_depth2.jpg").exists()
     assert (tmp_path / "after_dijkstra_matched.jpg").exists()
+    # frontier curves + CSVs emitted from the same reblock (no second propose)
+    assert list(tmp_path.glob("curve_external_connectivity_*.png"))
+    assert list(tmp_path.glob("curve_internal_connectivity_*.png"))
+    assert list(tmp_path.glob("displacement_*.png"))
+    assert (tmp_path / "frontier_external_connectivity.csv").exists()
     assert len(lens_a) == 1 and lens_a[0].propose_seconds > 0.0
     assert len(lens_b) == 1
+
+
+def test_run_two_lens_reblocks_once_per_method_not_twice(monkeypatch: pytest.MonkeyPatch,
+                                                         tmp_path: Path) -> None:
+    # The frontier curves must reuse the two-lens reblock -- region_reblock is called exactly ONCE
+    # per method, never a second time to build the curves (which would silently double wall-clock
+    # on a real thousands-of-buildings region).
+    import scripts.compare_budgets as cb
+    from reblock.methods.dijkstra import DijkstraReblocker
+    from reblock.region import region_reblock as real  # same object cb re-imported
+
+    calls = {"n": 0}
+
+    def counting(*a: object, **k: object) -> object:
+        calls["n"] += 1
+        return real(*a, **k)   # type: ignore[arg-type]
+
+    monkeypatch.setattr(cb, "region_reblock", counting)
+    region = [_street_block(0, "a"), _street_block(4, "b")]
+    cb.run_two_lens(region, {"dijkstra": DijkstraReblocker()}, target_depth=2, out_dir=tmp_path)
+    assert calls["n"] == 1        # one method -> one reblock; curves reuse it, no second pass

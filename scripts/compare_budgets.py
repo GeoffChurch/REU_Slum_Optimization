@@ -46,17 +46,21 @@ from reblock.budget import (
     access_benefit,
     building_radii,
     commute_ratio,
+    commute_ratio_benefit,
+    cost_benefit_curve,
     displacement,
+    displacement_curve,
     matched_budget,
     prefix_to_depth,
     truncate_to_length,
 )
+from reblock.compare import MethodCurve
 from reblock.contracts import Block, Method, Proposal, Screen, Source
-from reblock.emit import _displaced_points, pct_displaced
+from reblock.emit import _displaced_points, compare_report, pct_displaced, pct_paved
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, region_reblock
-from reblock.render import frame_bbox, render_after, save_render
+from reblock.render import frame_bbox, render_after, save_render, short_label
 
 
 @dataclass(frozen=True)
@@ -118,7 +122,7 @@ def _write_csv(path: Path, header: list[str], rows: list[list[object]]) -> None:
 
 
 def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: int,
-                 out_dir: Path, *, corridor_m: float = 3.0
+                 out_dir: Path, *, corridor_m: float = 3.0, label: str | None = None
                  ) -> tuple[list[LensARow], list[LensBRow]]:
     """Reblock each method once over `region` (timed), compute both lens tables, write the two CSVs,
     and render one after-heatmap per method per lens. The region block is method-independent (same
@@ -170,6 +174,27 @@ def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: 
                  f"{r.internal_connectivity:.6g}", f"{r.displacement:.1f}",
                  f"{r.pct_displaced:.4f}"]
                 for r in lens_b])
+
+    # Frontier curves: each method's full (added-road-length, benefit) trade-off, built from the
+    # SAME reblock as the two lenses above (`roads_by_method`) -- no second propose. The fixed-depth
+    # and matched-budget lens rows are just points on these curves. `compare_report` writes
+    # curve_{external,internal}_connectivity_<label>.png + displacement_<label>.png + frontier CSVs.
+    radii = building_radii(block.building_points, corridor_m)
+    block_area = float(block.parcels.geometry.union_all().area)
+    # Label the curve files by the caller-supplied id (the region's seed/top-scoring block, so they
+    # correlate with the README's §1 block), falling back to the first member for standalone runs.
+    curve_label = short_label(label if label is not None else str(region[0].block_id))
+    curves: list[MethodCurve] = []
+    for name, roads in roads_by_method.items():
+        pp = pct_paved(roads, corridor_m, block_area)
+        pd_ = pct_displaced(roads, corridor_m, block.building_points, radii)
+        ext = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
+        internal = cost_benefit_curve(block, roads, benefit_fn=commute_ratio_benefit)
+        disp = displacement_curve(block, roads, radii, corridor_m=corridor_m)
+        curves.append(MethodCurve(name, curve_label, "external_connectivity", ext, pp, pd_))
+        curves.append(MethodCurve(name, curve_label, "internal_connectivity", internal, pp, pd_))
+        curves.append(MethodCurve(name, curve_label, "displacement", disp, pp, pd_))
+    compare_report(curves, out_dir, method_order=list(methods))
     return lens_a, lens_b
 
 

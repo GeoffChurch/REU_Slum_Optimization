@@ -10,26 +10,21 @@
 
 ![screen](screen.jpg)
 
+**Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-34.01690,18.58833,16z).
+
 ## 2. Grow the region
 
 The metric grows a **19-block** region (**4,677 parcels**), mean depth 5.1 rings, mean density 142 bldg/ha.
 
 ![region](region.jpg)
 
-## 3. Compare the methods (two lenses)
+## 3. The method frontier (benefit vs added road)
 
-**Lens A — every parcel to the depth target:**
+Each method's benefit as cumulative added road grows — the full trade-off whose fixed-depth and matched-budget slices are tabulated in `lens_a_depth.csv` and `lens_b_matched.csv` (this dir). External connectivity (access burden removed), internal connectivity (backup-route redundancy), and displacement (a rising cost):
 
-| method | target_depth | reached | reached_depth | road_length_m | displacement | pct_displaced | propose_seconds |
-|---|---|---|---|---|---|---|---|
-| clearance | 3 | True | 3 | 4037.8 | 736.6 | 0.1576 | 0.0 |
-| greedy_arterial_buildable | 3 | False | 8 | 1576.0 | 241.9 | 0.0517 | 223.9 |
+![external connectivity](curve_external_connectivity_ZAF.9.3.1_1_44531.png)
 
+![internal connectivity](curve_internal_connectivity_ZAF.9.3.1_1_44531.png)
 
-**Lens B — matched road budget:**
-
-| method | budget_m | external_connectivity | internal_connectivity | displacement | pct_displaced |
-|---|---|---|---|---|---|
-| clearance | 1576.0 | 0.480567 | 2.66732e-14 | 281.5 | 0.0602 |
-| greedy_arterial_buildable | 1576.0 | 0.226954 | 0.323752 | 241.9 | 0.0517 |
+![displacement](displacement_ZAF.9.3.1_1_44531.png)
 
