@@ -30,38 +30,44 @@ showing or ranking by the estimate instead is both less accurate and, for the ma
 
 ## 3. Design
 
-### 3.1 One true-depth accessor
+### 3.1 One BATCHED true-depth accessor
 
-`block_max_depth(source, block_id) -> float` — build the one block (a KblockSource windowed to
-`block_id`, from `source`'s `blocks_path`/`buildings_path` — the same construction the screen's
-`_chunk_depths` uses) and return `access_before(block).max()`. Both the Voronoi build
-(`_voronoi_impl`) and `access_before` are already `derive()`-memoized, so a survivor block is an
-end-to-end cache hit; a never-seen block is peeled once, then cached. Returns `0.0` for a block that
-cannot be built/peeled (no buildings), so it never wins a "deepest" argmax. Requires a peel-capable
-source (`blocks_path`/`buildings_path`, i.e. `KblockSource`); this is the single source of true depth
-for the region builder and the colorings.
+`block_depths(source, block_ids) -> dict[str, float]` — build the given blocks in **one**
+`KblockSource(block_ids=block_ids).region()` call (from `source`'s `blocks_path`/`buildings_path`) and
+return `{block_id: access_before(block).max()}`. **Batching is load-bearing:** `KblockSource.region()`
+reads and spatial-joins the *entire* buildings parquet (~49 MB) on every call regardless of
+`block_ids` (kblock.py:109,119), so a per-block accessor pays that ~2.7 s read *per block* — profiled:
+one block = 2.7 s, three blocks in one call = 2.7 s *total*. The screen's fine pass is fast precisely
+because it peels ~900 blocks per read; this mirrors that. Both the Voronoi build (`_voronoi_impl`) and
+`access_before` are `derive()`-memoized, so already-peeled (survivor) blocks are cache hits.
+Blocks that can't be built/peeled (below `min_buildings`, bad geometry) are simply absent from the
+returned dict — callers default a missing id to `0.0` (never wins a "deepest" argmax). Returns `{}`
+for a non-peel-capable source (no `blocks_path`, i.e. not a `KblockSource`).
 
 ### 3.2 Region builder → true depth (peel non-flagged candidates on demand)
 
 `DenseClusterRegionBuilder.build` currently ranks adjacent candidate blocks by `_depth_proxy(count,
 area, perim)`. Replace the growth metric with true max access-depth via an injected
-`depth_fn: Callable[[str], float]`:
+`depth_fn: Callable[[str], float]` that is a **pure lookup into a pre-computed depth map** (no peeling
+inside the growth loop — that would re-read the buildings per candidate):
 
-- `RegionBuilder.build(block_geoms, groups, depth_fn=None)` — `depth_fn` maps a `block_id` to its
-  true max access-depth. The builder keeps using `block_geoms` for **adjacency** and the
+- `RegionBuilder.build(block_geoms, groups, depth_fn=None)` — `depth_fn(bid)` returns the block's true
+  max access-depth (a dict lookup). The builder keeps using `block_geoms` for **adjacency** and the
   **building-count budget**, but ranks candidates by `depth_fn(bid)` (ties by `building_count`, then
-  `block_id` — unchanged).
-- The pipeline injects `depth_fn = lambda bid: block_max_depth(source, bid)` **when the source is
-  peel-capable** (has `blocks_path`/`buildings_path`, i.e. `KblockSource`). Candidates the screen
-  never peeled (non-survivors) are peeled on demand here (memoized) — **growth is NOT restricted to
-  flagged neighbors** (owner directive).
+  `block_id` — unchanged). `convex_hull` / `identity` builders accept and ignore `depth_fn`.
+- **The pipeline precomputes the depth map ONCE** (`build_regions` → `_region_depth_map`): the
+  survivors' depths come free from the screen (`selection_depths`, a dict lookup for the ~14k flagged
+  blocks); the reachable **non-survivors** are peeled together in a SINGLE `block_depths` call (one
+  buildings read). The reachable set is a BFS from the seed groups over block adjacency, accumulating
+  `building_count` to a generous multiple of the growth budget (≈ 3× `max_buildings`) so it locally
+  covers everything the greedy growth can reach. `depth_fn = lambda bid: depth_map.get(bid, 0.0)`.
+- **Growth is NOT restricted to flagged neighbors** (owner directive): non-survivors within the BFS
+  bound get their true peeled depth; a non-survivor beyond the bound defaults to `0.0` (shallow) —
+  harmless, because non-survivors failed the depth gate and are essentially never the deepest pick,
+  and survivors (the real growth targets) are always covered by `selection_depths`.
 - For a source that can't be peeled (geometry-only shapefile), the pipeline passes `depth_fn=None`
   and the builder falls back to the existing `_depth_proxy`. The proxy code in `region.py` stays only
-  as this fallback.
-- `convex_hull` / `identity` builders accept and ignore the new `depth_fn` parameter (protocol
-  conformance).
-
-Delete nothing from the proxy path yet in `region.py` — it remains the documented no-peel fallback.
+  as this fallback. Delete nothing from the proxy path in `region.py`.
 
 ### 3.3 Screen exposes the depths it already computes (protocol unchanged)
 
@@ -94,8 +100,9 @@ returning only ranked ids. Stop discarding — **without touching the `Screen` p
   faint per-block outline. Add a colorbar labelled "access depth (parcels from a street)". The whole
   expanded region is still located (dark member outline + locator box).
 - **`region.png`:** fill the region **members** by their true depth (same ramp/scale). Member depths
-  come from `depths` where present (flagged members) and from `block_max_depth(source, bid)` for any
-  builder-added non-flagged member (memoized). Seed outline + building points unchanged.
+  come from `depths` where present (flagged members); any builder-added non-flagged members are peeled
+  together in ONE `block_depths(source, missing_member_ids)` call (batched — never per-member).
+  Seed outline + building points unchanged.
 - When `depths` is `None`/empty (a screen that selects all, or a non-kblock source), fall back to a
   single flat fill (no proxy coloring) — the squared/`√` proxy coloring is **removed**, not retained.
 - **Delete `emit._screen_proxy`** and its test (superseded; migrate-not-accommodate).
@@ -109,16 +116,19 @@ numbers/figures are unaffected.
 
 ## 4. Components & interfaces
 
-- `reblock.region` — `block_max_depth(source, block_id) -> float`; `DenseClusterRegionBuilder.build`
-  and the `RegionBuilder` protocol + `Identity`/`ConvexHull` builders gain a `depth_fn` param;
-  `_depth_proxy` retained as the no-peel fallback.
+- `reblock.region` — `block_depths(source, block_ids) -> dict[str, float]` (BATCHED, one buildings
+  read); `DenseClusterRegionBuilder.build` and the `RegionBuilder` protocol + `Identity`/`ConvexHull`
+  builders gain a `depth_fn` param (a pure map lookup); `_depth_proxy` retained as the no-peel fallback.
 - `reblock.contracts` — **unchanged** (`Screen.select` stays `list[str] | None`).
 - `reblock.derivations` — `screen_selection` / `_screen_selection_impl` return `list[tuple[str, float]]`.
 - `reblock.screen.dense_compact` — `_compute_selection` returns pairs; `select` projects ids; add
   `selection_depths(source) -> dict[str, float]`.
-- `reblock.pipeline` — `build_regions` injects `depth_fn` into `region_builder.build`.
+- `reblock.pipeline` — `build_regions` precomputes the depth map via `_region_depth_map` (screen
+  depths + one batched `block_depths` peel of the reachable non-survivors) and passes
+  `depth_fn = depth_map.get` (0.0 default) to `region_builder.build`.
 - `reblock.run` — duck-type the screen's `selection_depths`; pass `selection` + `depths` to `region_map`.
-- `reblock.emit` — `region_map` colors by true depth + blanks deselected; `_screen_proxy` deleted.
+- `reblock.emit` — `region_map` colors by true depth (batched `block_depths` for any un-mapped
+  members) + blanks deselected; `_screen_proxy` deleted.
 
 ## 5. Scope boundaries (YAGNI)
 
@@ -131,11 +141,14 @@ numbers/figures are unaffected.
 
 ## 6. Testing
 
-- `block_max_depth`: on a fixture block, equals `access_before(block).max()`; `0.0` for an unpeelable
-  block; a second call is a cache hit (same value).
-- Region builder: on a small fixture with an injected `depth_fn`, growth adds the **highest-true-depth**
-  adjacent block (a fixture where proxy-order and depth-order disagree, so the test discriminates);
-  with `depth_fn=None`, behavior is byte-identical to today (proxy fallback).
+- `block_depths`: on fixture ids, returns `{id: access_before(block).max()}` for each buildable block;
+  `{}` for a non-peel-capable source; peels a MULTI-id batch in one call (missing/unbuildable ids
+  simply absent).
+- `_region_depth_map`: prefers screen `selection_depths` for survivors (no peel) and batches the
+  non-survivor peel; a block outside the BFS bound is absent (caller defaults 0.0).
+- Region builder: on a small fixture with an injected `depth_fn` (a map lookup), growth adds the
+  **highest-true-depth** adjacent block (a fixture where proxy-order and depth-order disagree, so the
+  test discriminates); with `depth_fn=None`, behavior is byte-identical to today (proxy fallback).
 - Screen: `screen_selection` returns `(id, depth)` pairs, deepest-first; `DenseCompactScreen.select`
   still returns plain ids (same order/values as before); `selection_depths` returns the id→depth map;
   `IdentityScreen.select` is untouched (still ids/`None`, no `selection_depths`).
@@ -162,7 +175,7 @@ head so the `_screen_proxy` deletion applies cleanly.
 
 ## 9. Implementation phasing
 
-1. `block_max_depth` accessor + test.
+1. `block_depths` batched accessor + test.
 2. Screen exposes depths (`screen_selection` returns pairs; `select` projects ids;
    `DenseCompactScreen.selection_depths`) + tests; `run.py` duck-types the map. Protocol unchanged.
 3. Region builder `depth_fn` (+ pipeline injection) + tests; proxy fallback preserved.
