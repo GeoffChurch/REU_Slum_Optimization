@@ -245,7 +245,7 @@ def test_cli_screen_stage_end_to_end(tmp_path: Path) -> None:
     # reblock (peel) -> both visuals (per-block before/after heatmaps + city map).
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
-         "data=capetown", "screen=dense_compact", "screen.gate.value=1.3",
+         "data=capetown", "screen=dense_compact", "metric_gate.value=1.3",
          "method=peel", "eval=kcomplexity", "max_blocks=3",
          "render.enabled=true", "flagged_map.enabled=true",
          f"hydra.run.dir={tmp_path}"],
@@ -360,6 +360,22 @@ def test_run_module_never_references_hasattr() -> None:
     import reblock.run
     src = Path(reblock.run.__file__).read_text()
     assert "hasattr" not in src
+
+
+def test_metric_config_group_instantiates_each_preset() -> None:
+    from pathlib import Path
+
+    from hydra import compose, initialize_config_dir
+    from hydra.utils import instantiate
+
+    from reblock.metric import BlockMetric
+    cfgdir = str(Path(__file__).resolve().parent.parent / "conf")
+    for name, needs_peel in [("depth", True), ("depth_density", True),
+                             ("density_compactness", False)]:
+        with initialize_config_dir(version_base=None, config_dir=cfgdir):
+            cfg = compose(config_name="config", overrides=[f"metric={name}"])
+        metric = instantiate(cfg.metric)
+        assert isinstance(metric, BlockMetric) and metric.needs_peel is needs_peel
 
 
 def test_topology_reblocks_a_synthetic_nested_block() -> None:

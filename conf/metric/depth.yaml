@@ -1,0 +1,2 @@
+# The `depth` metric: score = true max access-depth (rings). Proxy = sqrt(nA)/P.
+_target_: reblock.metric.Depth

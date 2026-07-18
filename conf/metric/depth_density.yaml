@@ -1,0 +1,5 @@
+# Deep AND crowded: depth * density.
+_target_: reblock.metric.Product
+terms:
+  - {_target_: reblock.metric.Depth}
+  - {_target_: reblock.metric.Density}

@@ -1,15 +1,8 @@
 # A Screen (selectable like conf/method, conf/eval). Reads paths from the run's Source (a
-# KblockSource) at select() time; the metric + gate below decide what's flagged.
-# TODO(pluggable-block-metric Task 3): wire `metric: ${metric}` / `gate: ${metric_gate}` to a
-# top-level config group instead of the literal defaults below (which are provisional -- Task 5
-# calibrates the real gate value against the full Cape Town metro).
+# KblockSource) at select() time; the top-level `metric` + `metric_gate` decide what's flagged
+# (pluggable via `metric=depth|depth_density|density_compactness` at the CLI).
 _target_: reblock.screen.dense_compact.DenseCompactScreen
-metric:
-  _target_: reblock.metric.Depth
-gate:
-  _target_: reblock.metric.Gate
-  kind: absolute
-  # Applied to the metric's fine score (for `depth`, the true max peel access-depth in rings).
-  value: 1.3
-# proxy_keep_pct: the cheap recall pre-filter -- keep the top-% of blocks by metric.proxy before the
-# peel (DenseCompactScreen's default, 30.0, is used when omitted here).
+metric: ${metric}
+gate: ${metric_gate}
+proxy_keep_pct: ${proxy_keep_pct}
+min_buildings: 10
