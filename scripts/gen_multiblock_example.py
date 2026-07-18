@@ -21,6 +21,7 @@ from typing import cast
 
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
+from omegaconf import open_dict
 from PIL import Image
 from shapely.ops import unary_union
 
@@ -89,6 +90,13 @@ def main() -> None:
 
     methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
                for n in ("clearance", "greedy_arterial_buildable")}
+    # osm_footpaths: the real as-built informal network, from a committed per-region OSM snapshot
+    # (fetched once by scripts.fetch_desire_lines_snapshot) so the example reproduces offline.
+    snapshot = out / f"desire_lines_{seed}.geojson"
+    if snapshot.exists():
+        with open_dict(cfg):
+            cfg.desire_source.snapshot = str(snapshot)
+        methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
     run_two_lens(region, methods, 3, out, label=seed)
 
     depths = block_depths(source, members)
