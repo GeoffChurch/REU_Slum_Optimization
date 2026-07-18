@@ -1,0 +1,3 @@
+method,budget_m,external_connectivity,internal_connectivity,displacement,pct_displaced
+clearance,1576.0,0.480567,2.66732e-14,281.5,0.0602
+greedy_arterial_buildable,1576.0,0.226954,0.323752,241.9,0.0517

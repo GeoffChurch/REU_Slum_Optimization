@@ -33,12 +33,16 @@ from scripts.gen_example_readme import write_readme
 _FORMULA = {
     "depth": "depth = √(n·A)/P  →  true peel rings from a street",
     "depth_density": "depth × density  —  deep AND crowded",
+    "density_compactness": "density × compactness = n/P²  —  dense, compact fabric (no peel)",
 }
 _BLURB = {
     "depth": "The deepest street-access fabric: how many parcels a home sits from a street, "
              "regardless of crowding.",
     "depth_density": "Deep and crowded at once — the metric that isolates the genuine informal "
                      "settlements and fades the deep-but-sparse blocks.",
+    "density_compactness": "Dense and compact from geometry alone — the tightest, most built-up "
+                           "blocks by building count per perimeter², found without ever peeling a "
+                           "single parcel ring.",
 }
 
 

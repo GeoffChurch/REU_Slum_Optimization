@@ -78,6 +78,7 @@ Flagships in [`examples/`](examples/), each reproducing from the full Cape Town 
 | [method-comparison](examples/method-comparison/) | Every reblocker (dijkstra, peel, topology, mesh, greedy_arterial, clearance) graded on the four lenses, on one deep block small enough that all six run |
 | [multiblock_depth](examples/multiblock_depth/) | Settlement-scale reblock driven end to end by the `depth` metric, comparing the scalable methods under two budgets — a fixed access-depth and a matched road budget — with per-method timing |
 | [multiblock_depth_density](examples/multiblock_depth_density/) | The same pipeline driven by `depth × density` instead — one swap of the pluggable `BlockMetric` re-aims screen, growth, and colouring at the genuinely *crowded* deep fabric |
+| [multiblock_density_compactness](examples/multiblock_density_compactness/) | The same pipeline driven by the peel-free `density × compactness = n/P²` — lands on the *densest* region (142 bldg/ha) yet the *shallowest*, because it scores geometry alone and ignores access depth |
 
 | [method-comparison](examples/method-comparison/) | [multiblock_depth_density](examples/multiblock_depth_density/) |
 |---|---|
