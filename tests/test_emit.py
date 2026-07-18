@@ -274,6 +274,32 @@ def test_region_map_without_depths_still_writes(tmp_path: Path) -> None:
     assert out is not None and out.exists()
 
 
+def test_region_map_scores_unflagged_members_by_metric_not_depth(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A member the screen didn't flag ("neighbour", not in `depths`) is coloured by the SAME
+    # metric's fine, not peeled for depth. With a geometry-only metric (needs_peel=False),
+    # block_depths is never called for the fallback -- the region map stays single-metric.
+    import reblock.region as region_mod
+    from reblock.metric import Compactness
+    calls = {"n": 0}
+    real = region_mod.block_depths
+
+    def spy(*a: object, **k: object) -> object:
+        calls["n"] += 1
+        return real(*a, **k)   # type: ignore[arg-type]
+
+    monkeypatch.setattr(region_mod, "block_depths", spy)
+    blocks = gpd.GeoDataFrame(
+        {"block_id": ["g", "neighbour"], "building_count": [5.0, 9.0]},
+        geometry=[Polygon([(0, 0), (3, 0), (3, 3), (0, 3)]),
+                  Polygon([(4, 0), (6, 0), (6, 3), (4, 3)])], crs=UTM)
+    points = gpd.GeoDataFrame(geometry=[Point(1, 1), Point(5, 1.5)], crs=UTM)
+    out = region_map(_FakeSource(blocks, points), [["g", "neighbour"]], [["g"]], tmp_path,
+                     selection=["g"], depths={"g": 0.5}, metric=Compactness())
+    assert out is not None and out.exists()
+    assert calls["n"] == 0     # geometry-only metric -> no depth peel for the unflagged member
+
+
 def test_compare_report_emits_length_frontier_and_displacement_artifacts(tmp_path):
     from reblock.budget import Curve
     from reblock.compare import MethodCurve
