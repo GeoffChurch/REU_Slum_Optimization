@@ -204,7 +204,7 @@ def region_map(source: Source, regions: list[list[str]],
     ax_s.set_ylim(float(bnd["miny"].quantile(0.01)), float(bnd["maxy"].quantile(0.99)))
     ax_s.set_aspect("equal")
     ax_s.set_axis_off()
-    ax_s.set_title(f"{metric_name} (0..{vmax:.0f}); {len(all_member_ids)} blocks reblocked")
+    ax_s.set_title(f"{metric_name} (0..{vmax:.3g}); {len(all_member_ids)} blocks reblocked")
     save_render(fig_s, out_dir / "screen.png")
     plt.close(fig_s)
 
