@@ -122,7 +122,7 @@ def _write_csv(path: Path, header: list[str], rows: list[list[object]]) -> None:
 
 
 def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: int,
-                 out_dir: Path, *, corridor_m: float = 3.0
+                 out_dir: Path, *, corridor_m: float = 3.0, label: str | None = None
                  ) -> tuple[list[LensARow], list[LensBRow]]:
     """Reblock each method once over `region` (timed), compute both lens tables, write the two CSVs,
     and render one after-heatmap per method per lens. The region block is method-independent (same
@@ -181,7 +181,9 @@ def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: 
     # curve_{external,internal}_connectivity_<label>.png + displacement_<label>.png + frontier CSVs.
     radii = building_radii(block.building_points, corridor_m)
     block_area = float(block.parcels.geometry.union_all().area)
-    label = short_label(str(region[0].block_id))
+    # Label the curve files by the caller-supplied id (the region's seed/top-scoring block, so they
+    # correlate with the README's §1 block), falling back to the first member for standalone runs.
+    curve_label = short_label(label if label is not None else str(region[0].block_id))
     curves: list[MethodCurve] = []
     for name, roads in roads_by_method.items():
         pp = pct_paved(roads, corridor_m, block_area)
@@ -189,9 +191,9 @@ def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: 
         ext = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
         internal = cost_benefit_curve(block, roads, benefit_fn=commute_ratio_benefit)
         disp = displacement_curve(block, roads, radii, corridor_m=corridor_m)
-        curves.append(MethodCurve(name, label, "external_connectivity", ext, pp, pd_))
-        curves.append(MethodCurve(name, label, "internal_connectivity", internal, pp, pd_))
-        curves.append(MethodCurve(name, label, "displacement", disp, pp, pd_))
+        curves.append(MethodCurve(name, curve_label, "external_connectivity", ext, pp, pd_))
+        curves.append(MethodCurve(name, curve_label, "internal_connectivity", internal, pp, pd_))
+        curves.append(MethodCurve(name, curve_label, "displacement", disp, pp, pd_))
     compare_report(curves, out_dir, method_order=list(methods))
     return lens_a, lens_b
 

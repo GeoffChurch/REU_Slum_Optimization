@@ -88,7 +88,7 @@ def main() -> None:
 
     methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
                for n in ("clearance", "greedy_arterial_buildable")}
-    run_two_lens(region, methods, 3, out)
+    run_two_lens(region, methods, 3, out, label=seed)
 
     depths = block_depths(source, members)
     dens = {b.block_id: len(b.parcels) / b.parcels.geometry.union_all().area * 1e4 for b in region}

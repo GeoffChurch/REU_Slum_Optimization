@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
+import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
@@ -90,3 +91,24 @@ def test_run_two_lens_writes_tables_and_renders(tmp_path: Path) -> None:
     assert (tmp_path / "frontier_external_connectivity.csv").exists()
     assert len(lens_a) == 1 and lens_a[0].propose_seconds > 0.0
     assert len(lens_b) == 1
+
+
+def test_run_two_lens_reblocks_once_per_method_not_twice(monkeypatch: pytest.MonkeyPatch,
+                                                         tmp_path: Path) -> None:
+    # The frontier curves must reuse the two-lens reblock -- region_reblock is called exactly ONCE
+    # per method, never a second time to build the curves (which would silently double wall-clock
+    # on a real thousands-of-buildings region).
+    import scripts.compare_budgets as cb
+    from reblock.methods.dijkstra import DijkstraReblocker
+    from reblock.region import region_reblock as real  # same object cb re-imported
+
+    calls = {"n": 0}
+
+    def counting(*a: object, **k: object) -> object:
+        calls["n"] += 1
+        return real(*a, **k)   # type: ignore[arg-type]
+
+    monkeypatch.setattr(cb, "region_reblock", counting)
+    region = [_street_block(0, "a"), _street_block(4, "b")]
+    cb.run_two_lens(region, {"dijkstra": DijkstraReblocker()}, target_depth=2, out_dir=tmp_path)
+    assert calls["n"] == 1        # one method -> one reblock; curves reuse it, no second pass
