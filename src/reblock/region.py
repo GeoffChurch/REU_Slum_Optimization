@@ -229,7 +229,7 @@ def _depth_proxy(count: float, area: float, perim: float) -> float:
     """Cheap depth proxy `sqrt(count * area) / perimeter` -- a block-geometry estimate of parcel
     access depth in rings (inradius / parcel-width), the region builder's growth metric. It ranks
     true access depth ~5x better than building density (`count / area`), which is nearly
-    uncorrelated with depth -- see `screen.dense_compact._depth_proxy` and
+    uncorrelated with depth -- see `metric.Depth` (the canonical closed form) and
     docs/superpowers/notes/2026-07-14-depth-proxy-screen-gate.md. A degenerate block (`area == 0`
     or `perim == 0`) returns 0.0, the lowest score, so it sorts LAST as a frontier candidate
     instead of raising. `area`/`perim` must be in metres (the caller reprojects)."""
