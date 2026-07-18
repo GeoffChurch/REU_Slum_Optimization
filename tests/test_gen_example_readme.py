@@ -10,14 +10,18 @@ _FULL_META = {"metric": "depth", "flagged": 5, "total_blocks": 10, "deepest_bloc
               "region_mean_depth": 2.0, "region_mean_density_per_ha": 9.0}
 
 
-def test_generated_readme_reflects_meta_and_lens_csvs() -> None:
+def test_generated_readme_reflects_meta_and_curves() -> None:
     md = gen_example_readme(_FIX, metric_name="depth", formula="depth = √(nA)/P",
                             blurb="Deepest street-access fabric.")
     assert "depth = √(nA)/P" in md                     # formula line
     assert "13,800" in md and "83,192" in md           # screen stat from meta.json (thousands-sep)
     assert "12" in md and "11,006" in md               # region stats
-    assert "clearance" in md                            # a lens-CSV row rendered
+    assert "google.com/maps" in md                     # the Google Maps location link (from meta)
+    assert "The method frontier" in md                 # §3 frontier section
+    assert "![external connectivity](curve_external_connectivity_test.png)" in md  # a curve embed
+    assert "![displacement](displacement_test.png)" in md
     assert "![screen](screen.jpg)" in md               # figure embed (present file)
+    assert "Lens A" not in md                           # two-lens TABLES no longer in the README
 
 
 def test_top_scoring_wording_is_metric_neutral() -> None:
@@ -29,11 +33,11 @@ def test_top_scoring_wording_is_metric_neutral() -> None:
 
 
 def test_sections_are_data_gated(tmp_path: Path) -> None:
-    # a dir with meta.json but NO lens CSVs omits the two-lens section, without erroring.
+    # a dir with meta.json but NO curve PNGs omits the frontier section, without erroring.
     (tmp_path / "meta.json").write_text(json.dumps(_FULL_META))
     md = gen_example_readme(tmp_path, metric_name="depth", formula="f", blurb="b")
-    assert "two-lens" not in md.lower() and "Lens A" not in md   # no lens CSVs -> no section
-    assert "flagged" in md.lower()                                # screen section still present
+    assert "frontier" not in md.lower()                # no curve PNGs -> no §3
+    assert "flagged" in md.lower()                      # screen section still present
 
 
 def test_partial_meta_omits_affected_section_without_raising(tmp_path: Path) -> None:

@@ -1,21 +1,15 @@
 """Machine-generated README for a metric example variant. PURE dir-reader: reads the run outputs
-already on disk (meta.json of structured stats, the two-lens lens_*.csv, frontier CSVs, figure
-files) and returns the markdown. Each section is emitted only if its artifacts are present, so the
-numbers can never drift from the data and a partial run yields a partial (never-erroring) README."""
+already on disk (meta.json of structured stats, the frontier curve PNGs, figure files) and returns
+the markdown. Each section is emitted only if its artifacts are present, so the numbers can never
+drift from the data and a partial run yields a partial (never-erroring) README."""
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
 
 def _n(x: float) -> str:
     return f"{x:,.0f}"
-
-
-def _read_csv(path: Path) -> list[dict[str, str]]:
-    with path.open() as f:
-        return list(csv.DictReader(f))
 
 
 def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: str) -> str:
@@ -36,6 +30,9 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                      f"Top-scoring: `{top_block}` (peel depth {top_depth:.0f}).\n")
         if (run_dir / "screen.jpg").exists():
             parts.append("![screen](screen.jpg)\n")
+        maps_url = meta.get("maps_url")
+        if maps_url:
+            parts.append(f"**Location:** [see the grown region on Google Maps]({maps_url}).\n")
     region_members, region_parcels = meta.get("region_members"), meta.get("region_parcels")
     region_mean_depth = meta.get("region_mean_depth")
     region_mean_density = meta.get("region_mean_density_per_ha")
@@ -48,24 +45,22 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                      f"{region_mean_density:.0f} bldg/ha.\n")
         if (run_dir / "region.jpg").exists():
             parts.append("![region](region.jpg)\n")
-    lens_a, lens_b = run_dir / "lens_a_depth.csv", run_dir / "lens_b_matched.csv"
-    if lens_a.exists() and lens_b.exists():
-        parts.append("## 3. Compare the methods (two lenses)\n")
-        parts.append("**Lens A — every parcel to the depth target:**\n")
-        parts.append(_md_table(_read_csv(lens_a)))
-        parts.append("\n**Lens B — matched road budget:**\n")
-        parts.append(_md_table(_read_csv(lens_b)))
+    curve_ext = sorted(run_dir.glob("curve_external_connectivity_*.png"))
+    curve_int = sorted(run_dir.glob("curve_internal_connectivity_*.png"))
+    curve_disp = sorted(run_dir.glob("displacement_*.png"))
+    if curve_ext or curve_int or curve_disp:
+        parts.append("## 3. The method frontier (benefit vs added road)\n")
+        parts.append("Each method's benefit as cumulative added road grows — the full trade-off "
+                     "whose fixed-depth and matched-budget slices are tabulated in "
+                     "`lens_a_depth.csv` and `lens_b_matched.csv` (this dir). External "
+                     "connectivity (access burden removed), internal connectivity (backup-route "
+                     "redundancy), and displacement (a rising cost):\n")
+        for caption, pngs in (("external connectivity", curve_ext),
+                              ("internal connectivity", curve_int),
+                              ("displacement", curve_disp)):
+            for p in pngs:
+                parts.append(f"![{caption}]({p.name})\n")
     return "\n".join(parts) + "\n"
-
-
-def _md_table(rows: list[dict[str, str]]) -> str:
-    if not rows:
-        return ""
-    cols = list(rows[0])
-    head = "| " + " | ".join(cols) + " |"
-    sep = "|" + "|".join(["---"] * len(cols)) + "|"
-    body = "\n".join("| " + " | ".join(r[c] for c in cols) + " |" for r in rows)
-    return f"{head}\n{sep}\n{body}\n"
 
 
 def write_readme(run_dir: Path, out_dir: Path, *,

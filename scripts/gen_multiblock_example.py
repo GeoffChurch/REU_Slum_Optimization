@@ -22,11 +22,13 @@ from typing import cast
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from PIL import Image
+from shapely.ops import unary_union
 
 from reblock.contracts import Method, Screen, Source
 from reblock.emit import region_map
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, block_depths
+from reblock.render import google_maps_url
 from scripts.compare_budgets import run_two_lens
 from scripts.gen_example_readme import write_readme
 
@@ -71,6 +73,10 @@ def main() -> None:
     region = build_regions(source, screen, region_builder, None, 1)[0]
     members = [b.block_id for b in region]
     seed = selection[0]
+    # build_regions narrowed source.block_ids to the members; clear it again (like run.py) so the
+    # screen map spans the whole metro, not just the region neighbourhood.
+    source.block_ids = None                                              # type: ignore[attr-defined]
+    maps_url = google_maps_url(unary_union([b.boundary for b in region]), region[0].crs)
 
     region_map(source, [members], [[seed]], out,
                selection=selection, depths=scores, metric_name=metric_name)
@@ -92,6 +98,7 @@ def main() -> None:
         "region_members": len(members), "region_parcels": sum(len(b.parcels) for b in region),
         "region_mean_depth": sum(depths.values()) / max(len(depths), 1),
         "region_mean_density_per_ha": sum(dens.values()) / max(len(dens), 1),
+        "maps_url": maps_url,
     }
     (out / "meta.json").write_text(json.dumps(meta, indent=2))
     write_readme(out, out, metric_name=metric_name, formula=_FORMULA[metric_name],

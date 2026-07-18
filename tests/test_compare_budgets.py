@@ -71,8 +71,8 @@ def _street_block(x0: int, block_id: str) -> Block:
 
 def test_run_two_lens_writes_tables_and_renders(tmp_path: Path) -> None:
     # End-to-end glue smoke test on a tiny region with a real reblocker (DijkstraReblocker paves
-    # everything, so it reaches a shallow depth). Asserts the two CSVs + a render per lens are
-    # written and wall-clock propose time is captured.
+    # everything, so it reaches a shallow depth). Asserts the two CSVs + a render per lens + the
+    # frontier curves (built from the SAME reblock) are written and wall-clock propose is captured.
     from reblock.methods.dijkstra import DijkstraReblocker
     from scripts.compare_budgets import run_two_lens
 
@@ -83,5 +83,10 @@ def test_run_two_lens_writes_tables_and_renders(tmp_path: Path) -> None:
     assert (tmp_path / "lens_b_matched.csv").exists()
     assert (tmp_path / "after_dijkstra_depth2.jpg").exists()
     assert (tmp_path / "after_dijkstra_matched.jpg").exists()
+    # frontier curves + CSVs emitted from the same reblock (no second propose)
+    assert list(tmp_path.glob("curve_external_connectivity_*.png"))
+    assert list(tmp_path.glob("curve_internal_connectivity_*.png"))
+    assert list(tmp_path.glob("displacement_*.png"))
+    assert (tmp_path / "frontier_external_connectivity.csv").exists()
     assert len(lens_a) == 1 and lens_a[0].propose_seconds > 0.0
     assert len(lens_b) == 1
