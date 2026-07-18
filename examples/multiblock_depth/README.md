@@ -28,3 +28,19 @@ Each method's benefit as cumulative added road grows — the full trade-off whos
 
 ![displacement](displacement_ZAF.9.3.1_1_5810.png)
 
+## 4. Each method on the ground
+
+The same region on the same access-depth colour scale (blue = at a street, red = deep) with displaced buildings marked — so the maps are directly comparable. Each row shows every method at one **matched** condition:
+
+**Matched road budget** — every method truncated to the same total added road, so this compares the access each *buys for the same cost*:
+
+| clearance | greedy_arterial_buildable | osm_footpaths |
+|---|---|---|
+| ![clearance](after_clearance_matched.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_matched.jpg) | ![osm_footpaths](after_osm_footpaths_matched.jpg) |
+
+**Matched access target** — every method truncated where access-depth reaches the target, so this compares the *road each takes* for the same outcome:
+
+| clearance | greedy_arterial_buildable | osm_footpaths |
+|---|---|---|
+| ![clearance](after_clearance_depth3.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_depth3.jpg) | ![osm_footpaths](after_osm_footpaths_depth3.jpg) |
+
