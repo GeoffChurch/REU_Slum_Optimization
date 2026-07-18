@@ -22,6 +22,10 @@ def test_generated_readme_reflects_meta_and_curves() -> None:
     assert "![displacement](displacement_test.png)" in md
     assert "![screen](screen.jpg)" in md               # figure embed (present file)
     assert "Lens A" not in md                           # two-lens TABLES no longer in the README
+    assert "Each method on the ground" in md           # §4 apples-to-apples after-images
+    assert "Matched road budget" in md and "Matched access target" in md  # both matched conditions
+    assert "| clearance | greedy_arterial_buildable |" in md               # aligned method columns
+    assert "![clearance](after_clearance_matched.jpg)" in md               # a method after-image
 
 
 def test_top_scoring_wording_is_metric_neutral() -> None:
@@ -33,10 +37,11 @@ def test_top_scoring_wording_is_metric_neutral() -> None:
 
 
 def test_sections_are_data_gated(tmp_path: Path) -> None:
-    # a dir with meta.json but NO curve PNGs omits the frontier section, without erroring.
+    # a dir with meta.json but NO curve PNGs / after-images omits §3 and §4, without erroring.
     (tmp_path / "meta.json").write_text(json.dumps(_FULL_META))
     md = gen_example_readme(tmp_path, metric_name="depth", formula="f", blurb="b")
     assert "frontier" not in md.lower()                # no curve PNGs -> no §3
+    assert "Each method on the ground" not in md       # no after-images -> no §4
     assert "flagged" in md.lower()                      # screen section still present
 
 

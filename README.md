@@ -79,6 +79,7 @@ Flagships in [`examples/`](examples/), each reproducing from the full Cape Town 
 | [multiblock_depth](examples/multiblock_depth/) | Settlement-scale reblock driven end to end by the `depth` metric, grading `clearance`, `greedy_arterial`, and the as-built `osm_footpaths` baseline on the benefit-vs-added-road frontier |
 | [multiblock_depth_density](examples/multiblock_depth_density/) | The same pipeline driven by `depth × density` instead — one swap of the pluggable `BlockMetric` re-aims screen, growth, and colouring at the genuinely *crowded* deep fabric |
 | [multiblock_density_compactness](examples/multiblock_density_compactness/) | The same pipeline driven by the peel-free `density × compactness = n/P²` — lands on the *densest* region (142 bldg/ha) yet the *shallowest*, because it scores geometry alone and ignores access depth |
+| [nairobi/](examples/nairobi/) | The same three metric variants on a **second city** (central Nairobi). Shipped as-is — the screens carry over, but Nairobi's block sizes and OSM coverage make its regions uneven; see [`nairobi/README.md`](examples/nairobi/README.md) |
 
 | [method-comparison](examples/method-comparison/) | [multiblock_depth_density](examples/multiblock_depth_density/) |
 |---|---|

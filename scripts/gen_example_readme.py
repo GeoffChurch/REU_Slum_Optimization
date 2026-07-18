@@ -12,6 +12,20 @@ def _n(x: float) -> str:
     return f"{x:,.0f}"
 
 
+def _after_method(name: str) -> str:
+    # after_<method>_<tag>.jpg -> <method> (tag = matched | depthN; method may contain underscores)
+    return name[len("after_"):-len(".jpg")].rpartition("_")[0]
+
+
+def _img_table(paths: list[Path]) -> str:
+    # one markdown table: each method a column (sorted, so rows align), its after-image in the row.
+    labels = [_after_method(p.name) for p in paths]
+    head = "| " + " | ".join(labels) + " |"
+    sep = "|" + "|".join(["---"] * len(paths)) + "|"
+    cells = " | ".join(f"![{lbl}]({p.name})" for lbl, p in zip(labels, paths, strict=True))
+    return f"{head}\n{sep}\n| {cells} |\n"
+
+
 def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: str) -> str:
     parts: list[str] = []
     meta_path = run_dir / "meta.json"
@@ -60,6 +74,22 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                               ("displacement", curve_disp)):
             for p in pngs:
                 parts.append(f"![{caption}]({p.name})\n")
+    matched = sorted(run_dir.glob("after_*_matched.jpg"))
+    depth_imgs = sorted(run_dir.glob("after_*_depth*.jpg"))
+    if matched or depth_imgs:
+        parts.append("## 4. Each method on the ground\n")
+        parts.append("The same region on the same access-depth colour scale (blue = at a street, "
+                     "red = deep) with displaced buildings marked — so the maps are directly "
+                     "comparable. Each row shows every method at one **matched** condition:\n")
+        if matched:
+            parts.append("**Matched road budget** — every method truncated to the same total added "
+                         "road, so this compares the access each *buys for the same cost*:\n")
+            parts.append(_img_table(matched))
+        if depth_imgs:
+            parts.append("**Matched access target** — every method truncated where access-depth "
+                         "reaches the target, so this compares the *road each takes* for the same "
+                         "outcome:\n")
+            parts.append(_img_table(depth_imgs))
     return "\n".join(parts) + "\n"
 
 
