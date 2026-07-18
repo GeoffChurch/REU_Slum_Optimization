@@ -23,6 +23,8 @@ def test_generated_readme_reflects_meta_and_curves() -> None:
     assert "![screen](screen.jpg)" in md               # figure embed (present file)
     assert "Lens A" not in md                           # two-lens TABLES no longer in the README
     assert "Each method on the ground" in md           # §4 apples-to-apples after-images
+    assert "Watch each method reblock" in md            # the animated GIF row
+    assert "![clearance](reblock_clearance.gif)" in md  # a per-method GIF, method as column
     assert "Matched road budget" in md and "Matched access target" in md  # both matched conditions
     assert "| clearance | greedy_arterial_buildable |" in md               # aligned method columns
     assert "![clearance](after_clearance_matched.jpg)" in md               # a method after-image

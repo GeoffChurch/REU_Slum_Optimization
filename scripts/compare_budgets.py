@@ -42,6 +42,7 @@ from geopandas import GeoDataFrame
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 
+from reblock.animate import reblock_gif
 from reblock.budget import (
     access_benefit,
     building_radii,
@@ -160,6 +161,13 @@ def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: 
                                displaced_points=_displaced_points(block, truncated))
             save_render(fig, out_dir / f"after_{name}_{tag}.jpg")
             plt.close(fig)
+
+    # Per-method reblock GIF: the method's full road set added in drainage order, the region
+    # draining on the same access-depth scale. Frames render across a fork pool (reblock.animate).
+    assert vmax is not None                        # set by the loop above (methods is non-empty)
+    frame = frame_bbox(block.parcels)
+    for name, roads in roads_by_method.items():
+        reblock_gif(block, roads, out_dir / f"reblock_{name}.gif", vmax=vmax, frame=frame)
 
     _write_csv(out_dir / "lens_a_depth.csv",
                ["method", "target_depth", "reached", "reached_depth", "road_length_m",

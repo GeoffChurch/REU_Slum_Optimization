@@ -17,12 +17,15 @@ def _after_method(name: str) -> str:
     return name[len("after_"):-len(".jpg")].rpartition("_")[0]
 
 
-def _img_table(paths: list[Path]) -> str:
-    # one markdown table: each method a column (sorted, so rows align), its after-image in the row.
-    labels = [_after_method(p.name) for p in paths]
-    head = "| " + " | ".join(labels) + " |"
-    sep = "|" + "|".join(["---"] * len(paths)) + "|"
-    cells = " | ".join(f"![{lbl}]({p.name})" for lbl, p in zip(labels, paths, strict=True))
+def _gif_method(name: str) -> str:
+    return name[len("reblock_"):-len(".gif")]                # reblock_<method>.gif -> <method>
+
+
+def _img_table(items: list[tuple[str, str]]) -> str:
+    # one markdown table: each method a column (in list order, so rows align), its image in the row.
+    head = "| " + " | ".join(lbl for lbl, _ in items) + " |"
+    sep = "|" + "|".join(["---"] * len(items)) + "|"
+    cells = " | ".join(f"![{lbl}]({fn})" for lbl, fn in items)
     return f"{head}\n{sep}\n| {cells} |\n"
 
 
@@ -74,22 +77,27 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                               ("displacement", curve_disp)):
             for p in pngs:
                 parts.append(f"![{caption}]({p.name})\n")
+    gifs = sorted(run_dir.glob("reblock_*.gif"))
     matched = sorted(run_dir.glob("after_*_matched.jpg"))
     depth_imgs = sorted(run_dir.glob("after_*_depth*.jpg"))
-    if matched or depth_imgs:
+    if gifs or matched or depth_imgs:
         parts.append("## 4. Each method on the ground\n")
         parts.append("The same region on the same access-depth colour scale (blue = at a street, "
                      "red = deep) with displaced buildings marked — so the maps are directly "
-                     "comparable. Each row shows every method at one **matched** condition:\n")
+                     "comparable across methods.\n")
+        if gifs:
+            parts.append("**Watch each method reblock** — its full road set added in drainage "
+                         "order, the deep interior draining as the network reaches in:\n")
+            parts.append(_img_table([(_gif_method(p.name), p.name) for p in gifs]))
         if matched:
             parts.append("**Matched road budget** — every method truncated to the same total added "
                          "road, so this compares the access each *buys for the same cost*:\n")
-            parts.append(_img_table(matched))
+            parts.append(_img_table([(_after_method(p.name), p.name) for p in matched]))
         if depth_imgs:
             parts.append("**Matched access target** — every method truncated where access-depth "
                          "reaches the target, so this compares the *road each takes* for the same "
                          "outcome:\n")
-            parts.append(_img_table(depth_imgs))
+            parts.append(_img_table([(_after_method(p.name), p.name) for p in depth_imgs]))
     return "\n".join(parts) + "\n"
 
 
