@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, cast
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import Normalize
 from numpy.typing import NDArray
 
 from reblock.contracts import Block, Metrics, Proposal, Result, Source
@@ -146,32 +147,22 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
     return out_path
 
 
-def _screen_proxy(building_count: NDArray[np.float64], area: NDArray[np.float64],
-                  perim: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Per-block depth-squared proxy `n·A/P²` = building-count × compactness (`A/P²`, the
-    Polsby-Popper measure up to `4π`). The screen RANKS blocks by depth `√(nA)/P`; `region_map`
-    COLORS by this squared form -- monotone in the depth proxy (so the flagged/ranked set is
-    identical) but with far better slum-vs-formal contrast on the metro choropleth (the `√` form
-    saturates most dense fabric at max colour). `perim <= 0` -> nan (drawn as `missing`, never a
-    divide-by-zero)."""
-    safe = np.where(perim > 0.0, perim, np.nan)
-    return cast(NDArray[np.float64], (building_count * area) / (safe ** 2))
-
-
 def region_map(source: Source, regions: list[list[str]],
-               seed_groups: list[list[str]], out_dir: Path) -> Path | None:
-    """Two maps for a region build. `screen.png`: the city depth-proxy choropleth (n·A/P², the
-    SQUARED depth proxy -- monotone in what the screen ranks by, sharper slum contrast), with the
-    WHOLE expanded region located (dark member outline + a locator box), the view clipped to the
-    bulk block extent. `region.png`: the
-    region's member blocks coloured by that same proxy against dimmed context, the pre-expansion
-    **seed** (`seed_groups`, before `RegionBuilder.build` ran) outlined in a heavy edge (needed for
-    `convex_hull`, which expands past the seed), plus the building points (member points normal,
-    the rest dimmed). Writes both; returns the `region.png` path, or None if there are no regions.
-    Gating is the caller's (cfg.region_map.enabled). `source` supplies all candidate outlines
-    (`block_geometries()`, read in full -- cheap) and the building points, windowed to the region's
-    frame (the expensive layer, so only it is queried narrow)."""
+               seed_groups: list[list[str]], out_dir: Path, *,
+               selection: list[str] | None = None,
+               depths: dict[str, float] | None = None) -> Path | None:
+    """Two maps for a region build. `screen.png`: the metro coloured by TRUE peel max access-depth
+    (`depths`, from the screen's fine pass) on the absolute 0..max ring scale -- a continuous ramp,
+    no bucketing -- with screen-DESELECTED blocks blanked, and the whole expanded region located
+    (dark member outline + a locator box), clipped to the bulk block extent. `region.png`: the
+    region's member blocks coloured by that same true depth against dimmed context, the
+    pre-expansion seed outlined heavily, plus building points. When `depths` is None/empty (no
+    depth-capable screen), both maps fall back to a flat located fill (NO proxy colouring).
+    `selection` is the screen's flagged block_ids; `depths` maps block_id -> true max access-depth.
+    Writes both; returns the `region.png` path, or None if there are no regions."""
     from matplotlib.patches import Rectangle
+
+    from reblock.region import block_max_depth
     if not regions:
         return None
     geoms = source.block_geometries()
@@ -180,54 +171,53 @@ def region_map(source: Source, regions: list[list[str]],
     all_seed_ids = {b for seeds in seed_groups for b in seeds}
     all_member_ids = {b for region in regions for b in region}
 
-    # Per-block SQUARED depth proxy n*A/P^2 (monotone in sqrt(n*A)/P, what the screen keys on)
-    # -- the shared colour scale.
-    has_proxy = "building_count" in geoms.columns
-    vmax = 1.0
-    if has_proxy:
-        utm = geoms.to_crs(geoms.estimate_utm_crs())
-        area = (geoms["block_area_m2"].to_numpy(dtype=float) if "block_area_m2" in geoms.columns
-                else utm.geometry.area.to_numpy())
-        perim = utm.geometry.length.to_numpy()
-        geoms["proxy"] = _screen_proxy(geoms["building_count"].to_numpy(dtype=float), area, perim)
-        # Cap high (p99, not p97): the squared proxy is heavy-tailed, so a lower cap saturates most
-        # of the metro at max colour; p99 keeps the deep fabric standing out against a paler
-        # background.
-        vmax = float(geoms["proxy"].quantile(0.99)) or 1.0
+    sel = set(selection) if selection else set()
+    dmap: dict[str, float] = dict(depths) if depths else {}
+    vmax = float(max(dmap.values())) if dmap else 1.0
+    geoms["depth"] = geoms["block_id"].map(dmap)          # NaN where deselected / unknown
+    flagged = geoms[geoms["block_id"].isin(sel)] if sel else geoms.iloc[:0]
+    blanked = geoms[~geoms["block_id"].isin(sel)] if sel else geoms
     members = geoms[geoms["block_id"].isin(all_member_ids)]
     seeds = geoms[geoms["block_id"].isin(all_seed_ids)]
     frame = frame_bbox(members.geometry) if not members.empty else None
 
-    # --- screen.png: the city depth-proxy choropleth (what the screen detects), with the WHOLE
-    # expanded region located (dark outline + locator box) -- not just the seed. ---
+    # --- screen.png: flagged blocks by true depth (0..max, continuous), deselected blanked ---
     fig_s, ax_s = plt.subplots(figsize=(10, 10))
-    if has_proxy:
-        geoms.plot(ax=ax_s, column="proxy", cmap="YlOrRd", vmin=0, vmax=vmax,
-                   linewidth=0, missing_kwds={"color": "#e6e6e6"})
-    else:
-        geoms.plot(ax=ax_s, color="#e6e6e6", linewidth=0)
+    if not blanked.empty:
+        blanked.plot(ax=ax_s, color="white", edgecolor="#dcdcdc", linewidth=0.12)
+    if not flagged.empty and dmap:
+        flagged.plot(ax=ax_s, column="depth", cmap="YlOrRd", vmin=0, vmax=vmax,
+                     edgecolor="#33333330", linewidth=0.12)
+        sm = plt.cm.ScalarMappable(cmap="YlOrRd", norm=Normalize(vmin=0, vmax=vmax))
+        sm.set_array([])
+        fig_s.colorbar(sm, ax=ax_s, fraction=0.03, pad=0.01,
+                       label="access depth (parcels from a street)")
     if not members.empty:
         members.plot(ax=ax_s, facecolor="none", edgecolor="#111111", linewidth=0.5)
     if frame is not None:
         ax_s.add_patch(Rectangle((frame[0], frame[1]), frame[2] - frame[0], frame[3] - frame[1],
                                  linewidth=1.6, edgecolor="#111111", facecolor="none", zorder=10))
-    # Clip to the bulk block extent so a few far-flung outlier blocks don't pad the view with
-    # whitespace; equal aspect keeps the city's true shape.
     bnd = geoms.geometry.bounds
     ax_s.set_xlim(float(bnd["minx"].quantile(0.01)), float(bnd["maxx"].quantile(0.99)))
     ax_s.set_ylim(float(bnd["miny"].quantile(0.01)), float(bnd["maxy"].quantile(0.99)))
     ax_s.set_aspect("equal")
     ax_s.set_axis_off()
-    ax_s.set_title(f"depth² proxy n·A/P²; {len(all_member_ids)} blocks reblocked")
+    ax_s.set_title(
+        f"true access-depth (0..{vmax:.0f} rings); {len(all_member_ids)} blocks reblocked")
     save_render(fig_s, out_dir / "screen.png")
     plt.close(fig_s)
 
-    # --- region.png: the region's member blocks coloured by that same proxy against dimmed
-    # context, the pre-expansion seed outlined heavily, plus the building points. ---
+    # --- region.png: members by true depth against dimmed context + seed outline + points ---
+    # member depths: from `depths` where present, else peel on demand (memoized; few members).
+    member_depth = {b: dmap.get(b) if b in dmap else block_max_depth(source, b)
+                    for b in all_member_ids}
+    m_vmax = float(max([v for v in member_depth.values() if v] or [1.0]))
+    members = members.copy()
+    members["depth"] = members["block_id"].map(member_depth)
     fig_r, ax_r = plt.subplots(figsize=(10, 10))
     geoms.plot(ax=ax_r, color="#eeeeee", edgecolor="#cccccc", linewidth=0.3)
-    if not members.empty and has_proxy:
-        members.plot(ax=ax_r, column="proxy", cmap="YlOrRd", vmin=0, vmax=vmax,
+    if not members.empty and member_depth:
+        members.plot(ax=ax_r, column="depth", cmap="YlOrRd", vmin=0, vmax=m_vmax,
                      edgecolor="#8a8a8a", linewidth=0.4)
     elif not members.empty:
         members.plot(ax=ax_r, color="#c0392b", edgecolor="#8a8a8a", linewidth=0.4)
