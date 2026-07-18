@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -125,7 +126,8 @@ class RegionBuilder(Protocol):
     of seed groups (block_ids); returns the expanded groups (block_ids), each sorted for
     determinism, group order preserved."""
 
-    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]: ...
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]: ...
 
 
 def _validate_group_ids(block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> None:
@@ -165,7 +167,9 @@ class IdentityRegionBuilder:
     mistake. A warning, not a hard error, so a deliberate aggregate over scattered blocks still
     runs."""
 
-    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
+        del depth_fn   # these builders don't rank by depth
         _validate_group_ids(block_geoms, groups)
         by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
         result: list[list[str]] = []
@@ -193,7 +197,9 @@ class ConvexHullRegionBuilder:
     in too. Overlap between different groups' expansions is fine: regions are independent, with
     no partition/merge across groups."""
 
-    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
+        del depth_fn   # these builders don't rank by depth
         _validate_group_ids(block_geoms, groups)
         by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
         result: list[list[str]] = []
@@ -290,7 +296,8 @@ class DenseClusterRegionBuilder:
 
     max_buildings: int = 150
 
-    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> list[list[str]]:
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
         _validate_group_ids(block_geoms, groups)
         ids = cast(list[str], list(block_geoms["block_id"]))
         geoms = list(block_geoms.geometry)
@@ -310,6 +317,16 @@ class DenseClusterRegionBuilder:
         idx_by_id = {b: i for i, b in enumerate(ids)}
         adj = _block_adjacency(geoms)
 
+        depth_cache: dict[str, float] = {}
+
+        def _score(j: int) -> float:
+            if depth_fn is None:
+                return _depth_proxy(counts[j], areas[j], perims[j])
+            bid = ids[j]
+            if bid not in depth_cache:
+                depth_cache[bid] = depth_fn(bid)
+            return depth_cache[bid]
+
         result: list[list[str]] = []
         for group in groups:
             if len(group) > 1 and not _touch_adjacent([geoms[idx_by_id[b]] for b in group]):
@@ -328,8 +345,7 @@ class DenseClusterRegionBuilder:
                     break
                 best = min(
                     frontier,
-                    key=lambda j: (-_depth_proxy(counts[j], areas[j], perims[j]), -counts[j],
-                                   ids[j]),
+                    key=lambda j: (-_score(j), -counts[j], ids[j]),
                 )
                 cluster.add(best)
                 size += counts[best]

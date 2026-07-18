@@ -14,7 +14,7 @@ from itertools import islice
 
 from reblock.contracts import Block, Eval, Method, Result, Screen, Source
 from reblock.derivations import propose
-from reblock.region import IdentityRegionBuilder, RegionBuilder, region_reblock
+from reblock.region import IdentityRegionBuilder, RegionBuilder, block_max_depth, region_reblock
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +93,9 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
 
     source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
     block_geoms = source.block_geometries()
-    regions = region_builder.build(block_geoms, groups)[:max_blocks]
+    depth_fn = ((lambda bid: block_max_depth(source, bid))
+                if getattr(source, "blocks_path", None) is not None else None)
+    regions = region_builder.build(block_geoms, groups, depth_fn)[:max_blocks]
     members = sorted({b for region in regions for b in region})
     source.block_ids = members                  # type: ignore[attr-defined]  # members only
     built = {b.block_id: b for b in source.region().blocks}

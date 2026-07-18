@@ -543,3 +543,37 @@ def test_block_max_depth_zero_for_non_peelable_source() -> None:
         def building_points(self, bbox=None): raise NotImplementedError
 
     assert block_max_depth(_Bare(), "anything") == 0.0
+
+
+def _fork_gdf():
+    # Seed "s" (centre) adjacent to BOTH "a" (east) and "b" (west); a and b are NOT adjacent to each
+    # other (s separates them). All three identical unit squares -> identical proxy score. A budget
+    # of seed + exactly one more forces a CHOICE between a and b: proxy ties and breaks to "a" (id
+    # ascending); a depth_fn ranking b highest picks "b" instead. So the region MEMBERSHIP differs.
+    import geopandas as gpd
+    from pyproj import CRS
+    from shapely.geometry import Polygon
+    utm = CRS.from_epsg(32643)
+    polys = {"s": Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+             "a": Polygon([(1, 0), (2, 0), (2, 1), (1, 1)]),      # east, touches s at x=1
+             "b": Polygon([(-1, 0), (0, 0), (0, 1), (-1, 1)])}    # west, touches s at x=0
+    return gpd.GeoDataFrame({"block_id": list(polys), "building_count": [10.0, 10.0, 10.0]},
+                            geometry=list(polys.values()), crs=utm)
+
+
+def test_dense_cluster_grows_by_depth_fn_not_proxy() -> None:
+    from reblock.region import DenseClusterRegionBuilder
+    gdf = _fork_gdf()
+    builder = DenseClusterRegionBuilder(max_buildings=15)        # seed(10) + exactly one more
+    depth = {"s": 5.0, "a": 1.0, "b": 9.0}
+    # depth-growth picks the deeper neighbor b; proxy-growth (equal proxy) ties to a by id.
+    assert builder.build(gdf, [["s"]], depth_fn=lambda bid: depth[bid]) == [["b", "s"]]
+    assert builder.build(gdf, [["s"]]) == [["a", "s"]]           # proxy tie -> "a"
+
+
+def test_dense_cluster_depth_fn_none_is_proxy_behaviour() -> None:
+    # depth_fn=None must be byte-identical to omitting it (both the proxy path).
+    from reblock.region import DenseClusterRegionBuilder
+    gdf = _fork_gdf()
+    builder = DenseClusterRegionBuilder(max_buildings=15)
+    assert builder.build(gdf, [["s"]], depth_fn=None) == builder.build(gdf, [["s"]])
