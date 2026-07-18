@@ -117,7 +117,7 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
     proxy = metric.proxy(blocks).to_numpy()
 
     if not metric.needs_peel:
-        scores = {bid[i]: metric.fine(0.0, count[i], area[i], perim[i])
+        scores = {str(bid[i]): metric.fine(0.0, count[i], area[i], perim[i])
                   for i in range(len(bid)) if eligible[i] and np.isfinite(proxy[i])}
     else:
         # recall pre-filter: keep the top proxy_keep_pct% by proxy among eligible blocks, then peel.
