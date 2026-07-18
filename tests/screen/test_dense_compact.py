@@ -13,7 +13,7 @@ from reblock.contracts import Block
 from reblock.data.kblock import KblockSource
 from reblock.derivations import access_before
 from reblock.metric import Depth, Gate
-from reblock.screen.dense_compact import DenseCompactScreen, _cheap_survivors
+from reblock.screen.dense_compact import DenseCompactScreen
 
 ROOT = Path(__file__).resolve().parents[1]
 CT_BLOCKS = str(ROOT / "data" / "kblock" / "blocks_capetown_sample.parquet")
@@ -44,10 +44,11 @@ def _write_synth(tmp: Path) -> tuple[str, str]:
     return str(bp), str(dp)
 
 
-def test_cheap_survivors_gate(tmp_path: Path) -> None:
+def test_depth_proxy_formula(tmp_path: Path) -> None:
     bp, _ = _write_synth(tmp_path)
-    # depth_proxy sqrt(nA)/P: A=sqrt(25*2500)/200=1.25, B=sqrt(30*60)/64=0.66, C=0.35 -> 0.4 drops C
-    assert _cheap_survivors(gpd.read_parquet(bp), depth_proxy_min=0.4, k_min=None) == ["A", "B"]
+    # depth_proxy sqrt(nA)/P: A=sqrt(25*2500)/200=1.25, B=sqrt(30*60)/64=0.66, C=0.35 (see fixture)
+    proxy = Depth().proxy(gpd.read_parquet(bp)).to_numpy()
+    assert proxy == pytest.approx([1.25, 0.6629126073623883, 0.3535533905932738])
 
 
 def test_select_two_tier_drops_shallow(tmp_path: Path) -> None:
