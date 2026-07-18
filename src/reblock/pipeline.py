@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from itertools import islice
 
@@ -73,6 +74,26 @@ def _seed_groups(
     return [[b] for b in sel], sel
 
 
+def _depth_fn(source: Source, screen: Screen) -> Callable[[str], float] | None:
+    """The region builder's true-depth growth metric. For a peel-capable source it PREFERS the
+    screen's already-computed fine-pass depths (`selection_depths`, a free dict lookup for the ~14k
+    flagged blocks growth walks) and only peels a NON-flagged candidate on demand via
+    `block_max_depth` (rare in a dense neighbourhood, and expensive -- it re-reads the parquet). The
+    two are the same quantity (`access_before(block).max()`), so this is a pure speed-up: the growth
+    choice is identical to peeling every candidate, just without re-reading the parquet for a block
+    the screen already peeled. `None` for a source that can't be peeled -> the builder's proxy
+    fallback."""
+    if getattr(source, "blocks_path", None) is None:
+        return None
+    sd = getattr(screen, "selection_depths", None)
+    screen_depths: dict[str, float] = sd(source) if sd is not None else {}
+
+    def depth(bid: str) -> float:
+        d = screen_depths.get(bid)
+        return d if d is not None else block_max_depth(source, bid)
+    return depth
+
+
 def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
                   block_groups: list[list[str]] | None, max_blocks: int) -> list[list[Block]]:
     """Resolve seed groups (explicit `block_groups`, or the screen's selection wrapped as
@@ -93,9 +114,7 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
 
     source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
     block_geoms = source.block_geometries()
-    depth_fn = ((lambda bid: block_max_depth(source, bid))
-                if getattr(source, "blocks_path", None) is not None else None)
-    regions = region_builder.build(block_geoms, groups, depth_fn)[:max_blocks]
+    regions = region_builder.build(block_geoms, groups, _depth_fn(source, screen))[:max_blocks]
     members = sorted({b for region in regions for b in region})
     source.block_ids = members                  # type: ignore[attr-defined]  # members only
     built = {b.block_id: b for b in source.region().blocks}
