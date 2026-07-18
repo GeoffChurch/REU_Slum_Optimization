@@ -48,7 +48,6 @@ block_ids: null
 
 # Screen selection gate (applied to the metric's fine score) + the cheap recall pre-filter
 # (keep top-% by proxy before the peel). Calibrated for the default `depth` metric.
-metric_gate: {_target_: reblock.metric.Gate, kind: absolute, value: 2.0}
 proxy_keep_pct: 50.0
 
 hydra:

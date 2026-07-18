@@ -1,6 +1,9 @@
-# Dense, compact fabric from geometry alone (no peel): density * compactness.
-_target_: reblock.metric.Product
-terms:
-  - {_target_: reblock.metric.Density}
-  - {_target_: reblock.metric.Compactness}
-_convert_: all
+# @package _global_
+# Dense, compact fabric from geometry alone (no peel): density × compactness = n/P². Percentile gate.
+metric:
+  _target_: reblock.metric.Product
+  terms:
+    - {_target_: reblock.metric.Density}
+    - {_target_: reblock.metric.Compactness}
+  _convert_: all
+metric_gate: {_target_: reblock.metric.Gate, kind: percentile, value: 100.0}

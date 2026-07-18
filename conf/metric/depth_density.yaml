@@ -1,6 +1,10 @@
-# Deep AND crowded: depth * density.
-_target_: reblock.metric.Product
-terms:
-  - {_target_: reblock.metric.Depth}
-  - {_target_: reblock.metric.Density}
-_convert_: all
+# @package _global_
+# Deep AND crowded: depth × density. Its score has no natural absolute cutoff, so the gate is a
+# percentile (keep the top % of survivors by score) -- portable across metrics of any scale.
+metric:
+  _target_: reblock.metric.Product
+  terms:
+    - {_target_: reblock.metric.Depth}
+    - {_target_: reblock.metric.Density}
+  _convert_: all
+metric_gate: {_target_: reblock.metric.Gate, kind: percentile, value: 100.0}

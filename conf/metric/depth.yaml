@@ -1,3 +1,7 @@
-# The `depth` metric: score = true max access-depth (rings). Proxy = sqrt(nA)/P.
-_target_: reblock.metric.Depth
-_convert_: all
+# @package _global_
+# The `depth` metric: true max peel access-depth (rings). Proxy = √(nA)/P. Its gate is an absolute
+# ring floor (portable across cities); the top-proxy_keep_pct% pre-filter does the bulk of the cut.
+metric:
+  _target_: reblock.metric.Depth
+  _convert_: all
+metric_gate: {_target_: reblock.metric.Gate, kind: absolute, value: 2.0}
