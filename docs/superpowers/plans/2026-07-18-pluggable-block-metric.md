@@ -750,61 +750,206 @@ Claude-Session: https://claude.ai/code/session_0125mCca6BQaTXiLZPMyFa8x"
 
 ---
 
-## Task 5: Calibrate the `depth` gate + regenerate the multiblock example
+> **NOTE (calibration done):** the `depth` gate calibration is already committed (`a2277e3`):
+> `proxy_keep_pct=50` (≈ old `proxy≥1.5`; metro eligible-proxy median ~1.53) + `metric_gate` absolute
+> `max_depth≥2` → ~13,800 flagged. Tasks 5–6 below build the example generator + emit the two variants.
+
+## Task 5: The dir-reader README generator
 
 **Files:**
-- Modify: `conf/config.yaml`/`conf/compare_config.yaml` (`metric_gate` value + `proxy_keep_pct`, calibrated)
-- Modify: `examples/multiblock/` (screen.jpg, region.jpg, README §1 prose, run.log)
+- Create: `scripts/gen_example_readme.py`
+- Test: `tests/test_gen_example_readme.py` (+ a fixture dir under `tests/data/example_fixture/`)
 
 **Interfaces:**
-- Consumes: Tasks 1–4.
+- Produces: `gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: str) -> str`
+  — reads the artifacts on disk and returns the README markdown; **each section is emitted iff its
+  artifacts are present** (data-gated). Also a `write_readme(run_dir, out_dir, *, metric_name, formula,
+  blurb)` that writes `out_dir/README.md`.
 
-- [ ] **Step 1: Calibrate the `depth` gate to ~13,906 flagged**
+- [ ] **Step 1: Write the failing test (fixture directory, no compute)**
 
-Run the screen on `capetown_full` with `metric=depth` and sweep the gate/pre-filter to land the
-flagged count near the shipped **13,906 of 83,192** (spec §5 allows a small shift):
+Create `tests/data/example_fixture/` with: `meta.json` =
+`{"metric": "depth", "flagged": 13800, "total_blocks": 83192, "deepest_block": "ZAF.9.3.1_1_5810", "deepest_depth": 24, "region_members": 12, "region_parcels": 11006, "region_mean_depth": 8.7, "region_mean_density_per_ha": 62.0}`;
+`lens_a_depth.csv` + `lens_b_matched.csv` (two rows each, the columns the two-lens driver emits); a
+zero-byte `screen.jpg`, `region.jpg`. Then `tests/test_gen_example_readme.py`:
 
-```bash
-pixi run python -m reblock.run \
-  data=capetown_full screen=dense_compact max_blocks=1 metric=depth \
-  region_builder=dense_cluster region_builder.max_buildings=3000 \
-  method=clearance method.depth_target=3 method.max_roads=2000 \
-  eval=kcomplexity region_map.enabled=true \
-  hydra.run.dir=/tmp/pbm_cal 2>&1 | grep -E "screen:|flagged"
+```python
+import json
+from pathlib import Path
+
+from scripts.gen_example_readme import gen_example_readme
+
+_FIX = Path(__file__).resolve().parent / "data/example_fixture"
+
+
+def test_generated_readme_reflects_meta_and_lens_csvs() -> None:
+    md = gen_example_readme(_FIX, metric_name="depth", formula="depth = √(nA)/P",
+                            blurb="Deepest street-access fabric.")
+    assert "depth = √(nA)/P" in md                     # formula line
+    assert "13,800" in md and "83,192" in md           # screen stat from meta.json (thousands-sep)
+    assert "12" in md and "11,006" in md               # region stats
+    assert "clearance" in md                            # a lens-CSV row rendered
+    assert "![screen](screen.jpg)" in md               # figure embed (present file)
+
+
+def test_sections_are_data_gated(tmp_path) -> None:
+    # a dir with meta.json but NO lens CSVs omits the two-lens section, without erroring.
+    (tmp_path / "meta.json").write_text(json.dumps(
+        {"metric": "depth", "flagged": 5, "total_blocks": 10, "deepest_block": "b",
+         "deepest_depth": 3, "region_members": 1, "region_parcels": 2,
+         "region_mean_depth": 2.0, "region_mean_density_per_ha": 9.0}))
+    md = gen_example_readme(tmp_path, metric_name="depth", formula="f", blurb="b")
+    assert "two-lens" not in md.lower() and "Lens A" not in md   # no lens CSVs -> no section
+    assert "flagged" in md.lower()                                # screen section still present
 ```
 
-Adjust `metric_gate.value` (absolute on max depth; start 2.0) and `proxy_keep_pct` (start 30) until
-the flagged count is ~13,906 (±a few hundred is fine). Record the chosen values in
-`conf/config.yaml`/`conf/compare_config.yaml`.
+- [ ] **Step 2: Run to verify it fails**
 
-- [ ] **Step 2: Regenerate the maps**
+Run: `pixi run pytest tests/test_gen_example_readme.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'scripts.gen_example_readme'`.
 
-```bash
-pixi run python -m reblock.run \
-  data=capetown_full screen=dense_compact max_blocks=1 metric=depth \
-  region_builder=dense_cluster region_builder.max_buildings=3000 \
-  method=clearance method.depth_target=3 method.max_roads=2000 \
-  eval=kcomplexity render.enabled=true region_map.enabled=true \
-  hydra.run.dir=/tmp/pbm_run 2>&1 | tee examples/multiblock/run.log
+- [ ] **Step 3: Implement `scripts/gen_example_readme.py`**
+
+A pure dir-reader. Structure (fill the templating; keep it a real report — headers, captioned
+tables, thousands-separated numbers):
+
+```python
+"""Machine-generated README for a metric example variant. PURE dir-reader: reads the run outputs
+already on disk (meta.json of structured stats, the two-lens lens_*.csv, frontier CSVs, figure
+files) and returns the markdown. Each section is emitted only if its artifacts are present, so the
+numbers can never drift from the data and a partial run yields a partial (never-erroring) README."""
+from __future__ import annotations
+
+import csv
+import json
+from pathlib import Path
+
+
+def _n(x: float) -> str:
+    return f"{x:,.0f}"
+
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    with path.open() as f:
+        return list(csv.DictReader(f))
+
+
+def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: str) -> str:
+    parts: list[str] = []
+    meta = json.loads((run_dir / "meta.json").read_text()) if (run_dir / "meta.json").exists() else {}
+    parts.append(f"# Multiblock, screened by `{metric_name}`\n")
+    parts.append(f"*{blurb}*\n")
+    parts.append(f"**Metric:** `{formula}` — one metric drives the screen, region growth, and "
+                 f"colouring end to end.\n")
+    if meta:
+        parts.append("## 1. Screen the metro\n")
+        parts.append(f"`{metric_name}` flags **{_n(meta['flagged'])} of {_n(meta['total_blocks'])}** "
+                     f"blocks. Deepest: `{meta['deepest_block']}` at {meta['deepest_depth']:.0f} rings.\n")
+        if (run_dir / "screen.jpg").exists():
+            parts.append("![screen](screen.jpg)\n")
+        parts.append("## 2. Grow the region\n")
+        parts.append(f"The metric grows a **{meta['region_members']}-block** region "
+                     f"(**{_n(meta['region_parcels'])} parcels**), mean depth "
+                     f"{meta['region_mean_depth']:.1f} rings, mean density "
+                     f"{meta['region_mean_density_per_ha']:.0f} bldg/ha.\n")
+        if (run_dir / "region.jpg").exists():
+            parts.append("![region](region.jpg)\n")
+    lens_a, lens_b = run_dir / "lens_a_depth.csv", run_dir / "lens_b_matched.csv"
+    if lens_a.exists() and lens_b.exists():
+        parts.append("## 3. Compare the methods (two lenses)\n")
+        parts.append("**Lens A — every parcel to the depth target:**\n")
+        parts.append(_md_table(_read_csv(lens_a)))
+        parts.append("\n**Lens B — matched road budget:**\n")
+        parts.append(_md_table(_read_csv(lens_b)))
+    return "\n".join(parts) + "\n"
+
+
+def _md_table(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return ""
+    cols = list(rows[0])
+    head = "| " + " | ".join(cols) + " |"
+    sep = "|" + "|".join(["---"] * len(cols)) + "|"
+    body = "\n".join("| " + " | ".join(r[c] for c in cols) + " |" for r in rows)
+    return f"{head}\n{sep}\n{body}\n"
+
+
+def write_readme(run_dir: Path, out_dir: Path, *, metric_name: str, formula: str, blurb: str) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    md = gen_example_readme(run_dir, metric_name=metric_name, formula=formula, blurb=blurb)
+    path = out_dir / "README.md"
+    path.write_text(md)
+    return path
 ```
 
-Convert `/tmp/pbm_run/screen.png`,`region.png` → `examples/multiblock/screen.jpg`,`region.jpg`
-(`Image.open(...).convert("RGB").save(..., quality=85)`), as the current figures are made.
+- [ ] **Step 4: Run to verify it passes + lint/type**
 
-- [ ] **Step 3: Update README §1**
+Run: `pixi run pytest tests/test_gen_example_readme.py -v && pixi run ruff check scripts/gen_example_readme.py tests/test_gen_example_readme.py && pixi run mypy --strict scripts/gen_example_readme.py`
+Expected: PASS + no errors.
 
-In `examples/multiblock/README.md` §1, note the screen is now metric-driven (`metric=depth` default;
-`depth_density`/`density_compactness` selectable), the map colors by the metric's fine score, and the
-flagged count is whatever calibration landed (update the "13,906 of 83,192" if it shifted). Keep §2–§4.
+- [ ] **Step 5: Commit**
+
+```bash
+git add scripts/gen_example_readme.py tests/test_gen_example_readme.py tests/data/example_fixture
+git commit -m "feat: dir-reader README generator for metric example variants (data-gated sections)
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0125mCca6BQaTXiLZPMyFa8x"
+```
+
+---
+
+## Task 6: Orchestrate + emit the two example variants
+
+**Files:**
+- Create: `scripts/gen_multiblock_example.py`
+- Create: `examples/multiblock_depth/`, `examples/multiblock_depthdensity/`
+- Delete: `examples/multiblock/`
+- Modify: `examples/README.md`
+
+**Interfaces:**
+- Consumes: Task 5 `write_readme`; the existing example commands.
+
+- [ ] **Step 1: Write the orchestrator**
+
+`scripts/gen_multiblock_example.py` — `main()` takes a metric name (`depth`|`depth_density`), a
+formula, and a blurb (a small authored map in the script for the two shipped variants), runs the
+example's commands with `metric=<name>` into `examples/multiblock_<name>/`, captures the structured
+stats into `meta.json`, converts the run's `screen.png`/`region.png` → `.jpg`, then calls
+`write_readme`. Reuse the existing example command lines (the `reblock.run` screen/region/map command
+with `metric=<name>` added; `scripts.compare_budgets` for the two lenses; `reblock.compare` for the
+frontier), all pointed at the variant dir. The two blurbs (authored):
+- `depth`: "The deepest street-access fabric — how many parcels a home sits from a street, regardless of crowding."
+- `depth_density`: "Deep *and* crowded — the metric that isolates the genuine informal settlements, fading the deep-but-sparse blocks."
+
+- [ ] **Step 2: Emit both variants**
+
+```bash
+pixi run python -m scripts.gen_multiblock_example depth
+pixi run python -m scripts.gen_multiblock_example depth_density
+```
+
+Each writes `examples/multiblock_<name>/` with `screen.jpg`, `region.jpg`, the lens/frontier CSVs +
+figures, `meta.json`, `run.log`, and the generated `README.md`. Verify each README's numbers match its
+CSVs and figures resolve.
+
+- [ ] **Step 3: Delete the old example + update the index**
+
+```bash
+git rm -r examples/multiblock
+```
+Update `examples/README.md`: replace the single `multiblock` row with the two variant rows, noting
+they demonstrate the swappable block metric (same pipeline, `metric=depth` vs `metric=depth_density`).
 
 - [ ] **Step 4: Verify + commit**
 
 Run: `pixi run check`
-Expected: green. Confirm `screen.jpg` exists and the README numbers match `run.log`.
+Expected: green. Confirm both variant READMEs render, figures resolve, `examples/multiblock/` is gone.
 
 ```bash
-git add conf/config.yaml conf/compare_config.yaml examples/multiblock
-git commit -m "docs: regenerate multiblock example on metric=depth; calibrate the depth gate
+git add examples scripts/gen_multiblock_example.py
+git rm -r examples/multiblock
+git commit -m "docs: emit multiblock_depth + multiblock_depthdensity example variants (generated READMEs)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_0125mCca6BQaTXiLZPMyFa8x"

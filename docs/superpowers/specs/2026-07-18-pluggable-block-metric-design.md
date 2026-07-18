@@ -127,6 +127,38 @@ The gate has two distinct roles (per the design discussion), handled separately:
 single vectorized pass over the columns for the whole metro (sub-second), and region growth needs no
 `block_depths` call. Peel cost is paid *only* by metrics that actually use depth.
 
+### 3.5 Example variants (one metric end-to-end each) + a generated README
+
+Because the metric now drives the screen, region growth, AND coloring, the multiblock example is
+**re-cut as one variant per metric** — `examples/multiblock_depth/` and
+`examples/multiblock_depthdensity/` — each run with a SINGLE metric end-to-end (no decoupling). Put
+side by side they *are* the demonstration of swappability (depth ships its true-depth region; the
+denser depth_density region is the visibly-better slum target). This replaces the single
+`examples/multiblock/`.
+
+Each variant's `README.md` is **machine-generated from the run outputs** so its numbers can never
+drift from the CSVs (the class of error hand-editing kept introducing), via a two-layer split:
+
+- **Generator (pure, dir-reader):** `gen_example_readme(run_dir, *, metric_name, formula, blurb) ->
+  README.md` reads the artifacts already on disk (the two-lens `lens_*.csv`, `frontier_*.csv`,
+  `displacement_table.csv`, a small `meta.json` of structured stats the orchestrator writes, and the
+  figure filenames). **Sections are data-gated** — a section is emitted iff its artifacts are present
+  (screen section if `meta.json` has screen stats; two-lens section if the lens CSVs exist; frontier
+  section if those exist). Pure function of the directory → tested on a fixture dir with zero compute,
+  and re-emittable from cached outputs without re-running. Templated for a real report (headers, a
+  metric formula + `blurb` line, captioned tables, honest stat callouts), not a data dump.
+- **Orchestrator (end-to-end):** `gen_multiblock_example(metric)` runs the example's commands
+  (`reblock.run` for screen/region/maps, `scripts.compare_budgets` for the two lenses,
+  `reblock.compare` for the frontier) into `examples/multiblock_<metric>/`, writes `meta.json`
+  (flagged count, region members/parcels, mean depth + density), then calls the generator. One command
+  per variant.
+
+A per-run README emitter (a `readme.enabled` emitter on `reblock.run` with flag-gated sections) is a
+*different artifact* (an ad-hoc single-run summary, not the multi-command example) and is **out of
+scope** here (YAGNI) — the dir-reader covers the example. The short authored `blurb` (2–3 sentences of
+framing per variant) is the only hand-written prose; it's supplied to the orchestrator per metric
+(a small authored map — NOT a field on the metric node, which is a pure scorer).
+
 ## 4. Config
 
 `conf/metric/{depth,depth_density,density_compactness}.yaml` — each a Hydra-instantiated expression
@@ -193,7 +225,10 @@ the `depth` preset's implementation.
 - Region growth / coloring: `_region_score_map` and `region_map` use `metric.fine`; the depth preset
   grows/colors by max peel depth (the true-depth branch's region + colors, modulo the mean-vs-max
   gate caveat in §5).
-- `pixi run check` green. The heavy metro regeneration (the example) is the final task.
+- README generator: on a fixture directory (sample `meta.json` + `lens_*.csv` + figure files) emits a
+  README whose numbers match the CSVs; a section is present iff its artifacts are (data-gated); a dir
+  missing the lens CSVs omits the two-lens section without erroring.
+- `pixi run check` green. The heavy metro regeneration (the two example variants) is the final task.
 
 ## 8. Global constraints
 
@@ -210,5 +245,8 @@ the `depth` preset's implementation.
 3. Screen consumes the metric (cheap proxy gate + recall pre-filter; fine pass with `needs_peel` skip;
    `selection_scores`).
 4. Region growth + `region_map` consume the metric (`_region_score_map`, coloring + label).
-5. Regenerate the multiblock example on `metric=depth` (default); spot-check `depth_density` /
-   `density_compactness` render. Compute-heavy — last.
+5. The pure dir-reader README generator (`gen_example_readme`) — data-gated sections — tested on a
+   fixture directory (no compute).
+6. The per-variant orchestrator (`gen_multiblock_example`) — run `depth` and `depth_density`
+   end-to-end into `examples/multiblock_depth/` + `examples/multiblock_depthdensity/`, delete
+   `examples/multiblock/`, update `examples/README.md`. Compute-heavy — last.
