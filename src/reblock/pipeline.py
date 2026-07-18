@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from itertools import islice
 
 import pandas as pd
+from pyproj import CRS
 
 from reblock.contracts import Block, Eval, Method, Result, Screen, Source
 from reblock.derivations import propose
@@ -130,7 +131,9 @@ def _reach_cols(block_geoms: pd.DataFrame, ids: list[str]
     """(block_id, count, area_m2, perim_m) for `ids`, from the cheap columns (perimeter in UTM)."""
     want = set(ids)
     sub = block_geoms[block_geoms["block_id"].astype(str).isin(want)]
-    utm = sub.to_crs(sub.estimate_utm_crs())
+    crs = sub.crs
+    already_projected = crs is not None and CRS.from_user_input(crs).is_projected
+    utm = sub if already_projected else sub.to_crs(sub.estimate_utm_crs())
     area = (sub["block_area_m2"].astype(float) if "block_area_m2" in sub.columns
             else utm.geometry.area)
     return [(str(b), float(c), float(ar), float(pe)) for b, c, ar, pe in
