@@ -73,7 +73,7 @@ def main(cfg: DictConfig) -> None:
         else:
             flagged_map(str(blocks_path), output.selection or [], out_dir)
     if cfg.region_map.enabled:
-        sd = getattr(spec.screen, "selection_depths", None)
+        sd = getattr(spec.screen, "selection_scores", None)
         depths = sd(spec.source) if sd is not None else None
         region_map(spec.source, output.regions, output.seed_groups, out_dir,
                    selection=output.selection, depths=depths)

@@ -8,7 +8,7 @@ F2's four per-function cache wrappers).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from shapely.geometry import Point, Polygon
@@ -17,6 +17,9 @@ from reblock.contracts import Block, Method, Proposal
 from reblock.derive.access import parcel_access_layers
 from reblock.derive.geometric_access import geometric_access_distances
 from reblock.derive_graph import derive
+
+if TYPE_CHECKING:
+    from reblock.metric import BlockMetric, Gate
 
 
 def _access_before_impl(block: Block) -> pd.Series:
@@ -78,25 +81,24 @@ def voronoi(vin: VoronoiInput) -> Any:
 @dataclass(frozen=True)
 class ScreenSelectionInput:
     """Identified carrier for a DenseCompactScreen selection: derive() keys on .identity
-    (the source content hash + every gate param), never the paths -- so a rerun with the same
-    source + gates returns the ranked block_ids from one L2 lookup instead of rebuilding the
-    thousands of survivor blocks (Voronoi + access-depth) the fine pass walks. A missing source
-    hash makes it uncacheable (bypass). The selection logic is hashed into the derive() key
-    (screen/dense_compact.py is in derive_graph._DERIVATION_MODULES), so a gating/ranking change
-    busts the cache automatically -- no hand-bumped version."""
+    (the source content hash + the metric + gate + pre-filter), never the paths -- so a rerun
+    with the same source + metric + gate returns the ranked block_ids from one L2 lookup instead
+    of rebuilding the thousands of survivor blocks (Voronoi + access-depth) the fine pass walks.
+    A missing source hash makes it uncacheable (bypass). The selection logic is hashed into the
+    derive() key (screen/dense_compact.py is in derive_graph._DERIVATION_MODULES), so a
+    gating/ranking change busts the cache automatically -- no hand-bumped version."""
     source_hash: str
     blocks_path: str
     buildings_path: str
-    depth_proxy_min: float
-    mean_depth_min: float
-    max_depth_min: float | None
-    k_min: float | None
+    metric: BlockMetric             # the scorer (carried for _compute_selection; identity below)
+    gate: Gate                      # the selection gate
+    proxy_keep_pct: float          # cheap recall pre-filter: keep top-% by proxy (peel metrics)
     min_buildings: int
 
     @property
-    def identity(self) -> tuple[str, str, float, float, float | None, float | None, int] | None:
-        return (("dense-compact-screen", self.source_hash, self.depth_proxy_min,
-                 self.mean_depth_min, self.max_depth_min, self.k_min, self.min_buildings)
+    def identity(self) -> tuple[object, ...] | None:
+        return (("dense-compact-screen", self.source_hash, self.metric.identity,
+                 self.gate.identity, self.proxy_keep_pct, self.min_buildings)
                 if self.source_hash else None)
 
 

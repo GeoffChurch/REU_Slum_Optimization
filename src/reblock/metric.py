@@ -37,8 +37,14 @@ def _cols(blocks: GeoDataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
 
 @runtime_checkable
 class BlockMetric(Protocol):
-    name: str
-    needs_peel: bool
+    # `@property`, not plain attributes: every implementation is a frozen dataclass field (or,
+    # for Power/Product's needs_peel, an actual @property) -- both read-only under mypy's
+    # structural check, so the protocol must declare them read-only too (mirrors `identity` below).
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def needs_peel(self) -> bool: ...
 
     def proxy(self, blocks: GeoDataFrame) -> pd.Series: ...
 

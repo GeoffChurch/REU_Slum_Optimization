@@ -1,20 +1,24 @@
-"""DenseCompactScreen: flag dense/compact informal blocks. Cheap pass = vectorized
-density (+ optional k) gate over free kblock columns; fine pass = build only survivors
-(reusing the source's KblockSource paths) and keep those whose mean parcel access-depth
-clears mean_depth_min. The fine-pass depth goes through reblock.derivations.access_before
-(a derive() call), so building a survivor here is an L1 hit when run() later scores it.
+"""DenseCompactScreen: flag blocks by a configured BlockMetric. Cheap pass = the metric's
+vectorized `proxy` over free kblock columns, pre-filtering to the top `proxy_keep_pct`% by proxy
+(peel metrics only); fine pass = build only survivors (reusing the source's KblockSource paths),
+score them with the metric's `fine` (using the real peel depth when `needs_peel`), and keep those
+the `gate` selects. The fine-pass depth goes through reblock.derivations.access_before (a
+derive() call), so building a survivor here is an L1 hit when run() later scores it. A metric
+with `needs_peel=False` (pure geometry/density) skips the peel entirely -- fine is scored
+straight from the cheap columns.
 
 The whole selection is itself memoized: select() routes through derivations.screen_selection
-(a derive() keyed on the source content hash + gate params), so a rerun with the same source
-and gates returns the ranked block_ids from one L2 lookup -- seconds (a content hash + a
-lookup), not the minutes the fine pass takes to walk thousands of survivor blocks.
+(a derive() keyed on the source content hash + metric + gate + pre-filter), so a rerun with the
+same source, metric, and gate returns the ranked block_ids from one L2 lookup -- seconds (a
+content hash + a lookup), not the minutes the fine pass takes to walk thousands of survivor
+blocks.
 """
 from __future__ import annotations
 
 import logging
+import math
 import multiprocessing
 import os
-import time
 from concurrent.futures import ProcessPoolExecutor
 
 import geopandas as gpd
@@ -25,6 +29,7 @@ from reblock.contracts import Source
 from reblock.data.kblock import KblockSource
 from reblock.derivations import ScreenSelectionInput, access_before, screen_selection
 from reblock.derive_graph import source_hash
+from reblock.metric import BlockMetric, Gate
 
 log = logging.getLogger(__name__)
 
@@ -95,57 +100,50 @@ def _survivor_depths(
 
 
 def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
-    """The full screen (cheap density prune + fine access-depth pass), ranked deepest-first.
-    Run via derivations.screen_selection's derive() so its (source-hash + gates)-keyed result
-    is memoized; the per-survivor depth here also goes through the cached access_before."""
-    t0 = time.perf_counter()
+    """Full screen under the configured metric: proxy over all blocks -> recall pre-filter (peel
+    metrics only) -> (peel survivors iff metric.needs_peel) -> metric.fine -> gate -> ranked
+    (block_id, fine_score) highest-first. Memoized via screen_selection.identity (metric + gate)."""
+    metric, gate = inp.metric, inp.gate
     blocks = gpd.read_parquet(
         inp.blocks_path,
-        columns=["block_id", "k_complexity", "building_count", "block_area_m2", "geometry"])
-    survivors = _cheap_survivors(blocks, depth_proxy_min=inp.depth_proxy_min, k_min=inp.k_min)
-    log.info("cheap pass: %d/%d blocks pass depth_proxy_min=%.2f%s (%.1f%%, %.1fs)",
-             len(survivors), len(blocks), inp.depth_proxy_min,
-             f", k_min={inp.k_min}" if inp.k_min is not None else "",
-             100.0 * len(survivors) / len(blocks), time.perf_counter() - t0)
-    if not survivors:
-        return []
-    n_surv = len(survivors)
-    log.info("fine pass: building %d survivor blocks (Voronoi + peel) -- the slow step", n_surv)
-    # One access-depth series per block (parallel across survivors), keeping those clearing the
-    # mean gate (and the optional max gate), ranked deepest-parcel-first so a downstream max_blocks
-    # picks the worst-access blocks rather than an alphabetical slice. Count per-gate drops.
-    t1 = time.perf_counter()
-    depths = _survivor_depths(
-        survivors, inp.blocks_path, inp.buildings_path, inp.min_buildings)
-    ranked: list[tuple[float, str]] = []
-    dropped_mean = dropped_max = 0
-    for bid, max_d, mean_d in depths:
-        if mean_d < inp.mean_depth_min:
-            dropped_mean += 1
-        elif inp.max_depth_min is not None and max_d < inp.max_depth_min:
-            dropped_max += 1
-        else:
-            ranked.append((max_d, bid))
-    ranked.sort(key=lambda r: (-r[0], r[1]))   # max-depth desc; ties by block_id asc
-    drops = f"{dropped_mean} on mean<{inp.mean_depth_min:.2f}"
-    if inp.max_depth_min is not None:
-        drops += f", {dropped_max} on max<{inp.max_depth_min:.1f}"
-    log.info("fine pass: kept %d/%d in %.1fs (dropped %s), ranked by max access-depth",
-             len(ranked), n_surv, time.perf_counter() - t1, drops)
-    if ranked:
-        log.info("fine pass: kept blocks span max access-depth %.0f (deepest) .. %.0f",
-                 ranked[0][0], ranked[-1][0])
-    return [(bid, max_d) for max_d, bid in ranked]
+        columns=["block_id", "building_count", "block_area_m2", "geometry"])
+    bid = blocks["block_id"].astype(str).to_numpy()
+    count = blocks["building_count"].to_numpy(dtype=float)
+    utm = blocks.to_crs(blocks.estimate_utm_crs())
+    area = (blocks["block_area_m2"].to_numpy(dtype=float) if "block_area_m2" in blocks.columns
+            else utm.geometry.area.to_numpy())
+    perim = utm.geometry.length.to_numpy()
+    eligible = count >= inp.min_buildings
+    proxy = metric.proxy(blocks).to_numpy()
+
+    if not metric.needs_peel:
+        scores = {bid[i]: metric.fine(0.0, count[i], area[i], perim[i])
+                  for i in range(len(bid)) if eligible[i] and np.isfinite(proxy[i])}
+    else:
+        # recall pre-filter: keep the top proxy_keep_pct% by proxy among eligible blocks, then peel.
+        order = [i for i in np.argsort(proxy)[::-1] if eligible[i] and np.isfinite(proxy[i])]
+        k = max(1, math.ceil(len(order) * inp.proxy_keep_pct / 100.0))
+        survivors = [str(bid[i]) for i in order[:k]]
+        idx = {b: i for i, b in enumerate(bid)}
+        depth_by = {b: mx for b, mx, _ in                                   # {bid: max_depth}
+                    _survivor_depths(survivors, inp.blocks_path, inp.buildings_path,
+                                     inp.min_buildings)}
+        scores = {b: metric.fine(depth_by.get(b, 0.0), count[idx[b]], area[idx[b]], perim[idx[b]])
+                  for b in survivors}
+
+    kept = gate.keep(scores)
+    ranked = sorted(((scores[b], b) for b in kept), key=lambda r: (-r[0], r[1]))
+    log.info("screen: %d/%d blocks selected by metric=%s (needs_peel=%s)",
+             len(ranked), len(bid), metric.name, metric.needs_peel)
+    return [(b, s) for s, b in ranked]
 
 
 class DenseCompactScreen:
-    def __init__(self, *, depth_proxy_min: float = 1.5, mean_depth_min: float = 1.3,
-                 max_depth_min: float | None = None, k_min: float | None = None,
+    def __init__(self, metric: BlockMetric, gate: Gate, *, proxy_keep_pct: float = 30.0,
                  min_buildings: int = 10) -> None:
-        self.depth_proxy_min = depth_proxy_min
-        self.mean_depth_min = mean_depth_min
-        self.max_depth_min = max_depth_min
-        self.k_min = k_min
+        self.metric = metric
+        self.gate = gate
+        self.proxy_keep_pct = proxy_keep_pct
         self.min_buildings = min_buildings
 
     def _selection_input(self, source: Source) -> ScreenSelectionInput:
@@ -156,14 +154,13 @@ class DenseCompactScreen:
         return ScreenSelectionInput(
             source_hash=source_hash(source.blocks_path, source.buildings_path),
             blocks_path=str(source.blocks_path), buildings_path=str(source.buildings_path),
-            depth_proxy_min=self.depth_proxy_min, mean_depth_min=self.mean_depth_min,
-            max_depth_min=self.max_depth_min, k_min=self.k_min,
+            metric=self.metric, gate=self.gate, proxy_keep_pct=self.proxy_keep_pct,
             min_buildings=self.min_buildings)
 
     def select(self, source: Source) -> list[str]:
         return [bid for bid, _ in screen_selection(self._selection_input(source))]
 
-    def selection_depths(self, source: Source) -> dict[str, float]:
-        """block_id -> true max access-depth for the flagged blocks (a memoized `screen_selection`
-        L2 lookup, no recompute) -- what `region_map`'s screen.png coloring keys on."""
+    def selection_scores(self, source: Source) -> dict[str, float]:
+        """block_id -> the metric's fine score for the flagged blocks (memoized screen_selection
+        lookup) -- what region_map's coloring keys on."""
         return dict(screen_selection(self._selection_input(source)))
