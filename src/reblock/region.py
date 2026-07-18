@@ -27,7 +27,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from reblock.contracts import Block, Eval, Method, Result
+from reblock.contracts import Block, Eval, Method, Result, Source
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
 
@@ -230,6 +230,26 @@ def _depth_proxy(count: float, area: float, perim: float) -> float:
     if area <= 0 or perim <= 0:
         return 0.0
     return math.sqrt(count * area) / perim
+
+
+def block_max_depth(source: Source, block_id: str) -> float:
+    """True max BFS access-depth (parcel rings from a street) of one block, built via a
+    `KblockSource` windowed to `block_id` (from `source`'s parquet paths) and peeled with the
+    memoized `access_before` -- so a block the screen already peeled is an end-to-end cache hit and
+    a never-seen block is peeled once, then cached. Returns `0.0` for a non-peel-capable source (no
+    `blocks_path`) or a block that can't be built/peeled, so it never wins a `deepest` argmax. This
+    is the single source of true depth for the region builder's growth and the `region_map`
+    colorings."""
+    from reblock.data.kblock import KblockSource
+    from reblock.derivations import access_before
+    if not isinstance(source, KblockSource):
+        return 0.0
+    sub = KblockSource(source.blocks_path, source.buildings_path, "depth",
+                       min_buildings=getattr(source, "min_buildings", 10), block_ids=[block_id])
+    blocks = list(sub.region().blocks)
+    if not blocks:
+        return 0.0
+    return float(access_before(blocks[0]).max())
 
 
 @dataclass

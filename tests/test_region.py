@@ -514,3 +514,32 @@ def test_dense_cluster_guards_zero_area_and_nan_building_count() -> None:
 
     assert len(out) == 1
     assert set(out[0]) == {"seed", "zero_area", "nan_neighbor"}  # both absorbed, no crash
+
+
+def test_block_max_depth_matches_access_before_peel() -> None:
+    # On the committed DJI sample, block_max_depth(source, id) equals access_before(block).max()
+    # -- the true BFS peel depth -- and a second call returns the same value (memoized).
+    from reblock.data.kblock import KblockSource
+    from reblock.derivations import access_before
+    from reblock.region import block_max_depth
+    root = Path(__file__).resolve().parent
+    src = KblockSource(root / "data/kblock/blocks_dji_sample.parquet",
+                       root / "data/kblock/buildings_dji_sample.parquet", "dji",
+                       block_ids=["DJI.3_1_1808"])
+    block = next(iter(src.region().blocks))
+    expected = float(access_before(block).max())
+    assert block_max_depth(src, "DJI.3_1_1808") == expected
+    assert block_max_depth(src, "DJI.3_1_1808") == expected   # cache hit, same value
+
+
+def test_block_max_depth_zero_for_non_peelable_source() -> None:
+    # A source with no blocks_path (not a KblockSource) can't be peeled -> 0.0, so it never wins a
+    # "deepest" argmax in the region builder.
+    from reblock.region import block_max_depth
+
+    class _Bare:
+        def region(self): raise NotImplementedError
+        def block_geometries(self, bbox=None): raise NotImplementedError
+        def building_points(self, bbox=None): raise NotImplementedError
+
+    assert block_max_depth(_Bare(), "anything") == 0.0
