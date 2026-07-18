@@ -94,7 +94,7 @@ def _survivor_depths(
         return [row for chunk in ex.map(_chunk_depths, args) for row in chunk]
 
 
-def _compute_selection(inp: ScreenSelectionInput) -> list[str]:
+def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
     """The full screen (cheap density prune + fine access-depth pass), ranked deepest-first.
     Run via derivations.screen_selection's derive() so its (source-hash + gates)-keyed result
     is memoized; the per-survivor depth here also goes through the cached access_before."""
@@ -135,7 +135,7 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[str]:
     if ranked:
         log.info("fine pass: kept blocks span max access-depth %.0f (deepest) .. %.0f",
                  ranked[0][0], ranked[-1][0])
-    return [bid for _, bid in ranked]
+    return [(bid, max_d) for max_d, bid in ranked]
 
 
 class DenseCompactScreen:
@@ -148,15 +148,22 @@ class DenseCompactScreen:
         self.k_min = k_min
         self.min_buildings = min_buildings
 
-    def select(self, source: Source) -> list[str]:
+    def _selection_input(self, source: Source) -> ScreenSelectionInput:
         if not isinstance(source, KblockSource):
             raise TypeError(
                 f"DenseCompactScreen needs a KblockSource (kblock columns); "
                 f"got {type(source).__name__}")
-        inp = ScreenSelectionInput(
+        return ScreenSelectionInput(
             source_hash=source_hash(source.blocks_path, source.buildings_path),
             blocks_path=str(source.blocks_path), buildings_path=str(source.buildings_path),
             depth_proxy_min=self.depth_proxy_min, mean_depth_min=self.mean_depth_min,
             max_depth_min=self.max_depth_min, k_min=self.k_min,
             min_buildings=self.min_buildings)
-        return screen_selection(inp)
+
+    def select(self, source: Source) -> list[str]:
+        return [bid for bid, _ in screen_selection(self._selection_input(source))]
+
+    def selection_depths(self, source: Source) -> dict[str, float]:
+        """block_id -> true max access-depth for the flagged blocks (a memoized `screen_selection`
+        L2 lookup, no recompute) -- what `region_map`'s screen.png coloring keys on."""
+        return dict(screen_selection(self._selection_input(source)))

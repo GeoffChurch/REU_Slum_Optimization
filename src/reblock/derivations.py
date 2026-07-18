@@ -100,10 +100,10 @@ class ScreenSelectionInput:
                 if self.source_hash else None)
 
 
-def _screen_selection_impl(inp: ScreenSelectionInput) -> list[str]:
+def _screen_selection_impl(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
     from reblock.screen.dense_compact import _compute_selection  # local import avoids a cycle
     return _compute_selection(inp)
 
 
-def screen_selection(inp: ScreenSelectionInput) -> list[str]:
+def screen_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
     return derive(_screen_selection_impl, inp)
