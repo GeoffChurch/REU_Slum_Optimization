@@ -30,7 +30,13 @@ Each method's benefit as cumulative added road grows — the full trade-off whos
 
 ## 4. Each method on the ground
 
-The same region on the same access-depth colour scale (blue = at a street, red = deep) with displaced buildings marked — so the maps are directly comparable. Each row shows every method at one **matched** condition:
+The same region on the same access-depth colour scale (blue = at a street, red = deep) with displaced buildings marked — so the maps are directly comparable across methods.
+
+**Watch each method reblock** — its full road set added in drainage order, the deep interior draining as the network reaches in:
+
+| clearance | greedy_arterial_buildable |
+|---|---|
+| ![clearance](reblock_clearance.gif) | ![greedy_arterial_buildable](reblock_greedy_arterial_buildable.gif) |
 
 **Matched road budget** — every method truncated to the same total added road, so this compares the access each *buys for the same cost*:
 
