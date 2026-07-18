@@ -1,8 +1,11 @@
 # @package _global_
-# Deep AND crowded: depth × density. Its score has no natural absolute cutoff, so the gate is a
-# percentile (keep the top % of survivors by score) -- portable across metrics of any scale.
+# Deep AND crowded: depth × density -- isolates genuine informal settlements, fading deep-but-sparse
+# blocks. This is a peel metric (needs_peel via Depth), so the shared top-`proxy_keep_pct`% proxy
+# pre-filter is the real selector; the gate is a permissive pass-through (percentile 100 = keep all
+# survivors). A calibrated absolute depth*density floor is legitimate future work.
 metric:
   _target_: reblock.metric.Product
+  name: depth_density
   terms:
     - {_target_: reblock.metric.Depth}
     - {_target_: reblock.metric.Density}
