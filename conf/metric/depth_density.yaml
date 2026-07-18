@@ -3,3 +3,4 @@ _target_: reblock.metric.Product
 terms:
   - {_target_: reblock.metric.Depth}
   - {_target_: reblock.metric.Density}
+_convert_: all

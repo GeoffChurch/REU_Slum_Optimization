@@ -365,17 +365,28 @@ def test_run_module_never_references_hasattr() -> None:
 def test_metric_config_group_instantiates_each_preset() -> None:
     from pathlib import Path
 
+    import geopandas as gpd
     from hydra import compose, initialize_config_dir
     from hydra.utils import instantiate
+    from pyproj import CRS
+    from shapely.geometry import Polygon
 
     from reblock.metric import BlockMetric
     cfgdir = str(Path(__file__).resolve().parent.parent / "conf")
+    # a one-block frame so we can call proxy() on the built metric -- a Product's terms must be a
+    # PLAIN list of real nodes (needs `_convert_: all` in the config), or `terms[0].proxy` resolves
+    # `.proxy` as an OmegaConf key and raises. Field access (needs_peel) alone wouldn't catch that.
+    blocks = gpd.GeoDataFrame({"block_id": ["a"], "building_count": [16.0], "block_area_m2": [4.0]},
+                              geometry=[Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])],
+                              crs=CRS.from_epsg(32643))
     for name, needs_peel in [("depth", True), ("depth_density", True),
                              ("density_compactness", False)]:
         with initialize_config_dir(version_base=None, config_dir=cfgdir):
             cfg = compose(config_name="config", overrides=[f"metric={name}"])
         metric = instantiate(cfg.metric)
         assert isinstance(metric, BlockMetric) and metric.needs_peel is needs_peel
+        assert float(metric.proxy(blocks).iloc[0]) >= 0.0      # a runtime call, not just a field
+        assert metric.fine(3.0, 16.0, 4.0, 8.0) >= 0.0
 
 
 def test_topology_reblocks_a_synthetic_nested_block() -> None:
