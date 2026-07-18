@@ -1,4 +1,4 @@
-"""A composable BlockMetric algebra: primitives (Depth/Density/Compactness) and combinators
+"""A composable BlockMetric algebra: primitives (Depth/Density/Compactness/Count) and combinators
 (Power/Product), each a node exposing `proxy` (fast, from cheap columns), `fine` (true, uses the
 peel depth), `needs_peel`, and `identity` (a hashable cache key). A per-metric `Gate` selects.
 Only `Depth`'s proxy and fine differ (proxy estimates depth as sqrt(nA)/P; fine uses the real peel);
@@ -103,6 +103,23 @@ class Compactness:
     @property
     def identity(self) -> _Identity:
         return ("compactness",)
+
+
+@dataclass(frozen=True)
+class Count:
+    name: str = "count"
+    needs_peel: bool = False
+
+    def proxy(self, blocks: GeoDataFrame) -> pd.Series:
+        count, _, _ = _cols(blocks)
+        return count
+
+    def fine(self, depth: float, count: float, area: float, perim: float) -> float:
+        return count
+
+    @property
+    def identity(self) -> _Identity:
+        return ("count",)
 
 
 @dataclass(frozen=True)

@@ -3,7 +3,7 @@ import numpy as np
 from pyproj import CRS
 from shapely.geometry import Polygon
 
-from reblock.metric import Compactness, Density, Depth, Gate, Power, Product
+from reblock.metric import Compactness, Count, Density, Depth, Gate, Power, Product
 
 _UTM = CRS.from_epsg(32643)
 
@@ -30,6 +30,10 @@ def test_primitive_proxy_and_fine_closed_forms() -> None:
     assert np.allclose(Compactness().proxy(b).to_numpy(), [4 / 64, 1 / 16])
     assert Compactness().fine(0.0, 16.0, 4.0, 8.0) == 4 / 64
     assert Compactness().needs_peel is False
+    # Count = n (proxy == fine, no peel) -- a total-building-count factor for composition
+    assert np.allclose(Count().proxy(b).to_numpy(), [16.0, 4.0])
+    assert Count().fine(0.0, 16.0, 4.0, 8.0) == 16.0
+    assert Count().needs_peel is False
 
 
 def test_combinators_fold_proxy_fine_and_needs_peel() -> None:
@@ -46,6 +50,10 @@ def test_combinators_fold_proxy_fine_and_needs_peel() -> None:
     root = Power(Product([Depth(), Density()]), 0.5)
     assert root.fine(9.0, 16.0, 4.0, 8.0) == (9.0 * (16 / 4)) ** 0.5
     assert np.allclose(root.proxy(b).to_numpy(), dd.proxy(b).to_numpy() ** 0.5)
+    # Count weights density x compactness by total building count -> n^2 / P^2
+    ndc = Product([Count(), Density(), Compactness()])
+    assert ndc.fine(0.0, 16.0, 4.0, 8.0) == 16.0 * (16 / 4) * (4 / 64)
+    assert ndc.needs_peel is False
 
 
 def test_identity_distinguishes_expressions() -> None:
