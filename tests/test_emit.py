@@ -252,6 +252,24 @@ def test_region_map_guards_empty_building_points(tmp_path: Path) -> None:
     assert out is not None and out.exists() and out.stat().st_size > 0
 
 
+def test_screen_proxy_is_squared_depth_and_rank_preserving() -> None:
+    # region_map colors by the SQUARED depth proxy n*A/P^2 (= building-count x compactness A/P^2),
+    # which is monotone in the depth proxy sqrt(nA)/P the screen ranks by -- so the flagged/ranked
+    # set is identical, only the color contrast sharpens. Non-positive perimeter -> nan (drawn as
+    # missing, never a divide-by-zero).
+    import numpy as np
+
+    from reblock.emit import _screen_proxy
+    n = np.array([100.0, 400.0, 50.0])
+    a = np.array([1000.0, 4000.0, 500.0])
+    p = np.array([100.0, 200.0, 80.0])
+    proxy = _screen_proxy(n, a, p)
+    assert np.allclose(proxy, (n * a) / (p ** 2))
+    depth = np.sqrt(n * a) / p                       # the screen's depth proxy
+    assert list(np.argsort(proxy)) == list(np.argsort(depth))   # squaring preserves rank
+    assert np.isnan(_screen_proxy(np.array([1.0]), np.array([1.0]), np.array([0.0]))[0])
+
+
 def test_compare_report_emits_length_frontier_and_displacement_artifacts(tmp_path):
     from reblock.budget import Curve
     from reblock.compare import MethodCurve

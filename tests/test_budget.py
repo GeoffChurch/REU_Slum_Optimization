@@ -334,6 +334,57 @@ def test_truncate_to_length_orders_by_drainage_not_index():
     assert result.geometry.iloc[0].equals(roads.geometry.iloc[1])   # kept the higher-drainage trunk
 
 
+def _deep_column_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
+    # A 1-wide, 4-deep column of unit parcels fronting a street at y=0. With no roads the peel is
+    # 1,2,3,4 (max depth 4). Road A runs up the right edge for the bottom half (touches the street
+    # at (1,0)); it seeds parcels 0,1 directly, AND its tip at (1,2) exactly meets parcel 2's
+    # corner vertex (distance 0, so within any tol), seeding parcel 2 too -- the peel becomes
+    # 1,1,1,2 (max depth 2). Road B extends the right edge to the top; it only reaches the street
+    # THROUGH road A (touch-component), so {A,B} seeds all four parcels as layer 1 (max depth 1).
+    # Drainage: A is the trunk (every parcel routes through it), so A sorts before B.
+    polys = [Polygon([(0, j), (1, j), (1, j + 1), (0, j + 1)]) for j in range(4)]
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1, 2, 3]}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (1, 0)])], crs=UTM)
+    block = Block(block_id="deep_col", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    road_a = LineString([(1, 0), (1, 2)])
+    road_b = LineString([(1, 2), (1, 4)])
+    roads = gpd.GeoDataFrame(geometry=[road_a, road_b], crs=UTM)
+    return block, roads
+
+
+def test_max_access_depth_matches_the_peel() -> None:
+    from reblock.budget import max_access_depth
+    block, roads = _deep_column_block_with_two_roads()
+    assert max_access_depth(block, gpd.GeoDataFrame(geometry=[], crs=UTM)) == 4   # no roads
+    assert max_access_depth(block, roads) == 1                                     # both roads
+
+
+def test_prefix_to_depth_returns_minimal_prefix_that_reaches_target() -> None:
+    from reblock.budget import prefix_to_depth
+    block, roads = _deep_column_block_with_two_roads()
+    prefix, reached = prefix_to_depth(block, roads, 2)
+    assert reached == 2                        # road A alone brings max depth to 2
+    assert len(prefix) == 1                    # the MINIMAL prefix, not both roads
+    assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])   # road A (the drainage trunk)
+
+
+def test_prefix_to_depth_reaches_a_deeper_target_only_with_all_roads() -> None:
+    from reblock.budget import prefix_to_depth
+    block, roads = _deep_column_block_with_two_roads()
+    prefix, reached = prefix_to_depth(block, roads, 1)
+    assert reached == 1
+    assert len(prefix) == 2                    # needs both roads to reach depth 1
+
+
+def test_prefix_to_depth_reports_floor_when_target_unreachable() -> None:
+    from reblock.budget import prefix_to_depth
+    block, roads = _deep_column_block_with_two_roads()
+    prefix, reached = prefix_to_depth(block, roads, 0)   # depth 0 is impossible (min is 1)
+    assert reached == 1                        # the floor depth (> target), reported honestly
+    assert len(prefix) == len(roads)           # best effort = all roads in drainage order
+
+
 def test_displacement_curve_is_monotonic_and_ends_at_full():
     import numpy as np
 
