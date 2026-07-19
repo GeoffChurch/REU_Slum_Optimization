@@ -129,7 +129,8 @@ def _write_csv(path: Path, header: list[str], rows: list[list[object]]) -> None:
 
 
 def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: int,
-                 out_dir: Path, *, corridor_m: float = 3.0, label: str | None = None
+                 out_dir: Path, *, corridor_m: float = 3.0, label: str | None = None,
+                 extend: dict[str, Method] | None = None
                  ) -> tuple[list[LensARow], list[LensBRow]]:
     """Reblock each method once over `region` (timed), compute both lens tables, write the two CSVs,
     and render one after-heatmap per method per lens. The region block is method-independent (same
@@ -209,9 +210,20 @@ def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: 
         curves.append(MethodCurve(name, curve_label, "internal_connectivity", internal, pp, pd_))
         curves.append(MethodCurve(name, curve_label, "displacement", disp, pp, pd_))
     compare_report(curves, out_dir, method_order=list(methods))
-    # Access-depth vs road: where each method reaches each integer max-depth (osm plateaus).
-    depth_vs_road_report(block, roads_by_method, out_dir, method_order=list(methods),
-                         label=curve_label)
+    # Access-depth vs road. `extend` supplies over-provisioned re-runs of the method(s) to continue;
+    # each is truncated in drainage order to L_max = the longest CONVERGED road (max over the normal
+    # proposals), so it keeps clearing past its depth target out to L_max. A method NOT in `extend`
+    # (osm_footpaths, which is fixed; arterial, sparse by design) stops at its own converged length.
+    curve_roads = dict(roads_by_method)
+    if extend:
+        converged = {n: float(r.geometry.length.sum()) for n, r in roads_by_method.items()}
+        l_max = max(converged.values())
+        for name, xmethod in extend.items():
+            if converged.get(name, 0.0) >= l_max - 1e-6:
+                continue      # already the longest -> its own road is the curve road; no re-run
+            xroads = cast(GeoDataFrame, region_reblock(region, xmethod, []).proposal.roads)
+            curve_roads[name] = truncate_to_length(block, xroads, l_max)
+    depth_vs_road_report(block, curve_roads, out_dir, method_order=list(methods), label=curve_label)
     return lens_a, lens_b
 
 

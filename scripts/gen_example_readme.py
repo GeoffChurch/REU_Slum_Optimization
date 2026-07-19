@@ -70,9 +70,11 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
         parts.append("## 3. The method frontier (benefit vs added road)\n")
         if depth_curve:
             parts.append("How far each method's road drives the region's **max access depth** — a "
-                         "dot marks where it first reaches each new integer depth. The as-built "
-                         "`osm_footpaths` network plateaus at its floor; the optimised methods "
-                         "keep clearing (this is why the matched-road comparison matters):\n")
+                         "dot marks where it first reaches each new integer depth. `clearance` is "
+                         "**continued past its depth target** (a full-drainage run) out to the "
+                         "longest method's road, so every method is compared at the same budget: "
+                         "the as-built `osm_footpaths` network plateaus at its floor while "
+                         "`clearance` reaches the same depth for a fraction of the road:\n")
             for p in depth_curve:
                 parts.append(f"![access depth vs added road]({p.name})\n")
     if curve_ext or curve_int or curve_disp:
