@@ -1,0 +1,10 @@
+# Bridge-tree greedy loop-closure refiner: composes on a base method's proposal (default
+# ClearanceReblocker, a deeper depth_target so the looped result wins on external too) and adds
+# bridge-removing loop-closing connectors, greedily, up to budget_m / max_loops. See
+# reblock.methods.loop_closure.LoopClosureRefiner.
+_target_: reblock.methods.loop_closure.LoopClosureRefiner
+base: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}",
+       repulsion: 0.0, depth_target: 1, max_roads: 400}   # depth_target 1 = deeper base (best-of-both)
+budget_m: 200.0
+max_loops: 20
+min_loop_len_m: 40.0
