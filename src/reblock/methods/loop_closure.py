@@ -7,6 +7,7 @@ lookup, not a fresh `nx.bridges` call.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import cast
 
 import geopandas as gpd
@@ -18,7 +19,8 @@ from scipy.spatial import cKDTree
 from shapely.geometry import LineString
 
 from reblock.budget import _noded_graph
-from reblock.contracts import Block
+from reblock.contracts import Block, Method, Proposal
+from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
 from reblock.methods.arterial import _snap, _snap_graph
 from reblock.methods.dijkstra import _boundary_graph
@@ -160,3 +162,52 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
         seen.add(key)
         out.append((connector, u, v))
     return out
+
+
+@dataclass
+class LoopClosureRefiner:
+    """Method wrapper composing `loop_candidates` + `greedy_close_loops` behind the `Method.propose`
+    `prior` seam: refines a base method's (e.g. `ClearanceReblocker`) tree-ish proposal by adding
+    bridge-removing loop-closing connectors, greedily, up to `budget_m` added length / `max_loops`.
+    NOT frozen: `base` is an arbitrary (unhashable) `Method`, and `@dataclass(frozen=True)` would
+    auto-generate a `__hash__` over it -- mirrors the sibling `ClearanceReblocker`."""
+
+    base: Method
+    budget_m: float | None = 200.0
+    max_loops: int = 20
+    min_loop_len_m: float = 40.0
+    search_radius_m: float = 60.0
+    snap_lam: float = 2.0
+
+    @property
+    def identity(self) -> tuple[object, ...] | None:
+        # An uncacheable base (identity None) makes the whole refiner uncacheable -- propagate the
+        # None up so derive() bypasses the memoized propose, matching ClearanceReblocker's
+        # uncacheable-substrate handling.
+        bid = getattr(self.base, "identity", None)
+        if bid is None:
+            return None
+        return ("loop_closure", bid, self.budget_m, self.max_loops, self.min_loop_len_m,
+                self.search_radius_m, self.snap_lam)
+
+    def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
+        # `prior`, when given, IS the base proposal to refine -- skip recomputing/re-fetching it
+        # (and, in particular, never call self.base.propose again).
+        base_prop = prior if prior is not None else propose(self.base, block)
+        base_roads = (base_prop.roads if base_prop.roads is not None
+                     else gpd.GeoDataFrame(geometry=[], crs=block.crs))
+        candidates = loop_candidates(
+            base_roads, block, search_radius_m=self.search_radius_m,
+            min_loop_len_m=self.min_loop_len_m, snap_lam=self.snap_lam)
+        all_roads = greedy_close_loops(
+            base_roads, block.streets, candidates,
+            budget_m=self.budget_m, max_loops=self.max_loops)
+        roads = gpd.GeoDataFrame(geometry=all_roads, crs=block.crs)
+        pid = f"loop_closure:{base_prop.proposal_id}:b{self.budget_m}:ml{self.max_loops}"
+        return Proposal(
+            block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+            proposal_id=pid, method="loop_closure",
+            params={"budget_m": self.budget_m, "max_loops": self.max_loops,
+                    "min_loop_len_m": self.min_loop_len_m, "search_radius_m": self.search_radius_m,
+                    "snap_lam": self.snap_lam, "n_added": len(all_roads) - len(base_roads)},
+            block_identity=base_prop.block_identity)
