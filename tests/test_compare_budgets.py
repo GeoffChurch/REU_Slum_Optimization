@@ -34,11 +34,11 @@ def test_two_lens_rows_reports_reached_target_and_matched_budget() -> None:
 
     block, roads = _deep_column_block_with_two_roads()
     budget_a = float(roads.geometry.iloc[0].length)          # room for road A only
-    lens_a, lens_b = two_lens_rows(block, {"m": roads}, {"m": 0.5}, target_depth=3,
+    lens_a, lens_b = two_lens_rows(block, {"m": roads}, {"m": 0.5}, target_ext=0.5,
                                    budget_m=budget_a, corridor_m=3.0)
     assert len(lens_a) == 1 and len(lens_b) == 1
     (a,) = lens_a
-    assert a.method == "m" and a.reached is True and a.reached_depth == 2
+    assert a.method == "m" and a.reached is True and a.reached_ext >= 0.5
     assert a.propose_seconds == 0.5                          # timing passed through, not remeasured
     assert a.road_length_m > 0.0 and a.displacement >= 0.0
     (b,) = lens_b
@@ -49,14 +49,14 @@ def test_two_lens_rows_reports_reached_target_and_matched_budget() -> None:
     assert len(truncate_to_length(block, roads, budget_a)) == 1
 
 
-def test_two_lens_rows_reports_floor_when_depth_target_unreachable() -> None:
+def test_two_lens_rows_reports_floor_when_ext_target_unreachable() -> None:
     from scripts.compare_budgets import two_lens_rows
 
     block, roads = _deep_column_block_with_two_roads()
-    lens_a, _ = two_lens_rows(block, {"m": roads}, {"m": 0.1}, target_depth=0,
+    lens_a, _ = two_lens_rows(block, {"m": roads}, {"m": 0.1}, target_ext=1.5,
                               budget_m=1.0, corridor_m=3.0)
     (a,) = lens_a
-    assert a.reached is False and a.reached_depth == 1       # floor depth (> target 0)
+    assert a.reached is False and a.reached_ext < 1.5        # floor ext (< unreachable target)
 
 
 def _street_block(x0: int, block_id: str) -> Block:
@@ -78,11 +78,11 @@ def test_run_two_lens_writes_tables_and_renders(tmp_path: Path) -> None:
     from scripts.compare_budgets import run_two_lens
 
     region = [_street_block(0, "a"), _street_block(4, "b")]
-    lens_a, lens_b = run_two_lens(region, {"dijkstra": DijkstraReblocker()}, target_depth=2,
+    lens_a, lens_b = run_two_lens(region, {"dijkstra": DijkstraReblocker()}, target_ext=0.3,
                                   out_dir=tmp_path)
-    assert (tmp_path / "lens_a_depth.csv").exists()
+    assert (tmp_path / "lens_a_external.csv").exists()
     assert (tmp_path / "lens_b_matched.csv").exists()
-    assert (tmp_path / "after_dijkstra_depth2.jpg").exists()
+    assert (tmp_path / "after_dijkstra_ext30.jpg").exists()
     assert (tmp_path / "after_dijkstra_matched.jpg").exists()
     # frontier curves + CSVs emitted from the same reblock (no second propose)
     assert list(tmp_path.glob("curve_external_connectivity_*.png"))
@@ -110,5 +110,5 @@ def test_run_two_lens_reblocks_once_per_method_not_twice(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(cb, "region_reblock", counting)
     region = [_street_block(0, "a"), _street_block(4, "b")]
-    cb.run_two_lens(region, {"dijkstra": DijkstraReblocker()}, target_depth=2, out_dir=tmp_path)
+    cb.run_two_lens(region, {"dijkstra": DijkstraReblocker()}, target_ext=0.3, out_dir=tmp_path)
     assert calls["n"] == 1        # one method -> one reblock; curves reuse it, no second pass
