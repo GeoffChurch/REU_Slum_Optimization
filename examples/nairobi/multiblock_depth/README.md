@@ -20,7 +20,7 @@ The metric grows a **1-block** region (**4,365 parcels**), mean depth 15.0 rings
 
 ## 3. The method frontier (benefit vs added road)
 
-How far each method's road drives the region's **max access depth** — a dot marks where it first reaches each new integer depth. The as-built `osm_footpaths` network plateaus at its floor; the optimised methods keep clearing (this is why the matched-road comparison matters):
+How far each method's road drives the region's **max access depth** — a dot marks where it first reaches each new integer depth. `clearance` is **continued past its depth target** (a full-drainage run) out to the longest method's road, so every method is compared at the same budget: the as-built `osm_footpaths` network plateaus at its floor while `clearance` reaches the same depth for a fraction of the road:
 
 ![access depth vs added road](depth_vs_road_KEN.30.6_1_80.png)
 
