@@ -130,6 +130,22 @@ def test_greedy_close_loops_max_loops_caps_the_count() -> None:
     assert len(added2) == 2
 
 
+def test_greedy_close_loops_min_bridges_per_m_forces_early_stop() -> None:
+    # cand3 (len 38) only ever removes 3 bridges -> score ~0.079, well under a 0.1 floor; cand1
+    # (score 1.5) and cand2 (score 0.75) both clear it. budget_m=None/max_loops=20 so nothing but
+    # the efficiency floor itself can stop the greedy early.
+    base = _teeth_roads()
+    baseline = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=20)
+    added_baseline = [ls for ls in baseline if ls.wkt not in {g.wkt for g in base.geometry}]
+    assert len(added_baseline) == 3   # sanity: all three candidates go in with no floor
+
+    out = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=20,
+                             min_bridges_per_m=0.1)
+    added = [ls for ls in out if ls.wkt not in {g.wkt for g in base.geometry}]
+    assert len(added) < len(added_baseline)
+    assert len(added) == 2   # cand1 + cand2 only; cand3's ~0.079 score falls below the 0.1 floor
+
+
 # --- loop_candidates -------------------------------------------------------------------------
 # Fixture: a 4x1 row of unit-square parcels [0,4]x[0,1], street along the bottom (0,0)-(4,0).
 # base_roads is a TREE (every edge a bridge): two spurs (1,0)-(1,1) and (3,0)-(3,1). The parcel
@@ -358,12 +374,17 @@ def _base_proposal(block: Block, roads: gpd.GeoDataFrame, *,
                     block_identity=("test", block.block_id))
 
 
+# budget_frac large enough that budget_m (= budget_frac * base road length) never binds on any
+# fixture below -- the refiner-level stand-in for the old budget_m=None ("unlimited") calls.
+_UNLIMITED_BUDGET_FRAC = 10.0
+
+
 def test_loop_closure_refiner_adds_loop_reduces_bridges_and_raises_commute_ratio() -> None:
     block = _ratio_block()
     base_roads = _ratio_base_roads()
     base_prop = _base_proposal(block, base_roads)
     refiner = LoopClosureRefiner(
-        base=_FakeBase(base_prop), budget_m=None, max_loops=5, **_REFINER_KW)
+        base=_FakeBase(base_prop), budget_frac=_UNLIMITED_BUDGET_FRAC, max_loops=5, **_REFINER_KW)
     out = refiner.propose(block)
     assert out.roads is not None
     before_bridges = len(list(nx.bridges(_noded_graph(base_roads, block.streets))))
@@ -372,22 +393,26 @@ def test_loop_closure_refiner_adds_loop_reduces_bridges_and_raises_commute_ratio
     assert commute_ratio(block, out.roads) > commute_ratio(block, base_roads)
 
 
-def test_loop_closure_refiner_budget_m_caps_added_length() -> None:
+def test_loop_closure_refiner_budget_frac_caps_added_length() -> None:
     block = _gap_block()
     base_roads = _gap_roads()
     base_prop = _base_proposal(block, base_roads)
     base_wkts = {g.wkt for g in base_roads.geometry}
+    base_len = float(base_roads.geometry.length.sum())
 
-    tight = LoopClosureRefiner(base=_FakeBase(base_prop), budget_m=1.0, max_loops=5, **_REFINER_KW)
+    tight = LoopClosureRefiner(base=_FakeBase(base_prop), budget_frac=0.5, max_loops=5,
+                               **_REFINER_KW)
     out_tight = tight.propose(block)
     assert out_tight.roads is not None
     assert {g.wkt for g in out_tight.roads.geometry} == base_wkts   # connector (len 2) doesn't fit
+                                                                     # (0.5 * base_len == 1.0 < 2)
 
-    loose = LoopClosureRefiner(base=_FakeBase(base_prop), budget_m=10.0, max_loops=5, **_REFINER_KW)
+    loose = LoopClosureRefiner(base=_FakeBase(base_prop), budget_frac=5.0, max_loops=5,
+                               **_REFINER_KW)
     out_loose = loose.propose(block)
     assert out_loose.roads is not None
     added_len = float(out_loose.roads.geometry.length.sum() - base_roads.geometry.length.sum())
-    assert 0.0 < added_len <= 10.0
+    assert 0.0 < added_len <= loose.budget_frac * base_len
 
 
 def test_loop_closure_refiner_max_loops_caps_the_count() -> None:
@@ -396,15 +421,42 @@ def test_loop_closure_refiner_max_loops_caps_the_count() -> None:
     base_prop = _base_proposal(block, base_roads)
     base_wkts = {g.wkt for g in base_roads.geometry}
 
-    zero = LoopClosureRefiner(base=_FakeBase(base_prop), budget_m=None, max_loops=0, **_REFINER_KW)
+    zero = LoopClosureRefiner(base=_FakeBase(base_prop), budget_frac=_UNLIMITED_BUDGET_FRAC,
+                              max_loops=0, **_REFINER_KW)
     out_zero = zero.propose(block)
     assert out_zero.roads is not None
     assert {g.wkt for g in out_zero.roads.geometry} == base_wkts
 
-    one = LoopClosureRefiner(base=_FakeBase(base_prop), budget_m=None, max_loops=1, **_REFINER_KW)
+    one = LoopClosureRefiner(base=_FakeBase(base_prop), budget_frac=_UNLIMITED_BUDGET_FRAC,
+                             max_loops=1, **_REFINER_KW)
     out_one = one.propose(block)
     assert out_one.roads is not None
     assert len(out_one.roads) - len(base_roads) == 1
+
+
+def test_loop_closure_refiner_min_bridges_per_m_forces_early_stop() -> None:
+    # The gap fixture's winning candidate ((1,1)-(2,1)-(3,1), len 2.0) removes 3 bridges -> score
+    # 1.5 (verified directly against `greedy_close_loops`' ranking). A floor comfortably above that
+    # (2.0) must reject it outright -- no loop added at all -- while a 0.0 floor accepts it, same
+    # as `test_loop_closure_refiner_roads_are_superset_of_base_roads` below.
+    block = _gap_block()
+    base_roads = _gap_roads()
+    base_prop = _base_proposal(block, base_roads)
+    base_wkts = {g.wkt for g in base_roads.geometry}
+
+    permissive = LoopClosureRefiner(
+        base=_FakeBase(base_prop), budget_frac=_UNLIMITED_BUDGET_FRAC, max_loops=5,
+        min_bridges_per_m=0.0, **_REFINER_KW)
+    out_permissive = permissive.propose(block)
+    assert out_permissive.roads is not None
+    assert {g.wkt for g in out_permissive.roads.geometry} != base_wkts   # the one loop goes in
+
+    strict = LoopClosureRefiner(
+        base=_FakeBase(base_prop), budget_frac=_UNLIMITED_BUDGET_FRAC, max_loops=5,
+        min_bridges_per_m=2.0, **_REFINER_KW)
+    out_strict = strict.propose(block)
+    assert out_strict.roads is not None
+    assert {g.wkt for g in out_strict.roads.geometry} == base_wkts   # floor rejects it: no loop
 
 
 def test_loop_closure_refiner_no_admissible_candidate_returns_base_unchanged() -> None:
@@ -412,7 +464,7 @@ def test_loop_closure_refiner_no_admissible_candidate_returns_base_unchanged() -
     base_roads = _closed_loop_roads()
     base_prop = _base_proposal(block, base_roads)
     refiner = LoopClosureRefiner(
-        base=_FakeBase(base_prop), budget_m=None, max_loops=5,
+        base=_FakeBase(base_prop), budget_frac=_UNLIMITED_BUDGET_FRAC, max_loops=5,
         search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0)
     out = refiner.propose(block)
     assert out.roads is not None
@@ -428,7 +480,8 @@ def test_loop_closure_refiner_prior_bypasses_base_propose() -> None:
         roads=gpd.GeoDataFrame(geometry=[], crs=block.crs), proposal_id="should-not-be-used",
         block_identity=("test", block.block_id))
     fake = _FakeBase(unused_prop)
-    refiner = LoopClosureRefiner(base=fake, budget_m=None, max_loops=5, **_REFINER_KW)
+    refiner = LoopClosureRefiner(base=fake, budget_frac=_UNLIMITED_BUDGET_FRAC, max_loops=5,
+                                 **_REFINER_KW)
     out = refiner.propose(block, prior=prior_prop)
     assert fake.calls == 0
     assert out.roads is not None
@@ -440,7 +493,7 @@ def test_loop_closure_refiner_roads_are_superset_of_base_roads() -> None:
     base_roads = _gap_roads()
     base_prop = _base_proposal(block, base_roads)
     refiner = LoopClosureRefiner(
-        base=_FakeBase(base_prop), budget_m=None, max_loops=5, **_REFINER_KW)
+        base=_FakeBase(base_prop), budget_frac=_UNLIMITED_BUDGET_FRAC, max_loops=5, **_REFINER_KW)
     out = refiner.propose(block)
     assert out.roads is not None
     assert {g.wkt for g in base_roads.geometry}.issubset({g.wkt for g in out.roads.geometry})
@@ -466,8 +519,8 @@ def test_loop_closure_refiner_identity_none_when_base_identity_none() -> None:
 def test_loop_closure_refiner_identity_changes_with_params() -> None:
     base_prop = Proposal(block_id="b", crs=UTM, block_identity=("t", "b"))
     fake = _FakeBase(base_prop, ident=("fake", 1))
-    r1 = LoopClosureRefiner(base=fake, budget_m=100.0)
-    r2 = LoopClosureRefiner(base=fake, budget_m=200.0)
+    r1 = LoopClosureRefiner(base=fake, budget_frac=0.10)
+    r2 = LoopClosureRefiner(base=fake, budget_frac=0.20)
     assert r1.identity != r2.identity
     r3 = LoopClosureRefiner(base=fake, min_loop_len_m=10.0)
     r4 = LoopClosureRefiner(base=fake, min_loop_len_m=20.0)
@@ -475,6 +528,9 @@ def test_loop_closure_refiner_identity_changes_with_params() -> None:
     r5 = LoopClosureRefiner(base=fake, max_candidates=1000)
     r6 = LoopClosureRefiner(base=fake, max_candidates=2000)
     assert r5.identity != r6.identity
+    r7 = LoopClosureRefiner(base=fake, min_bridges_per_m=0.01)
+    r8 = LoopClosureRefiner(base=fake, min_bridges_per_m=0.02)
+    assert r7.identity != r8.identity
 
 
 def test_loop_closure_registered_in_derivation_modules() -> None:

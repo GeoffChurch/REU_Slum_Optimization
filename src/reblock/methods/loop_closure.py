@@ -71,11 +71,16 @@ def _nearest_node(nodes: list[Node], kdt: cKDTree, point: tuple[float, float], t
 def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
                        candidates: list[tuple[LineString, tuple[float, float],
                                               tuple[float, float]]],
-                       *, budget_m: float | None, max_loops: int) -> list[LineString]:
+                       *, budget_m: float | None, max_loops: int,
+                       min_bridges_per_m: float = 0.0) -> list[LineString]:
     """Greedily add the candidate connector with the highest bridges-removed-per-metre, one at a
     time, stopping at `budget_m` cumulative added length, `max_loops` additions, or once the best
-    remaining marginal gain is <= 0 -- whichever comes first. Each step recomputes the bridge-tree
-    ONCE (over the current `base_roads` + already-added connectors, noded against `streets`), then
+    remaining marginal gain (bridges removed per metre) drops below `max(min_bridges_per_m, 1e-9)`
+    -- whichever comes first. `min_bridges_per_m=0.0` (the default) preserves the original
+    stop-when-nothing-left-to-gain behavior; a positive value is a diminishing-returns early stop
+    that bails out once the best remaining loop is inefficient (e.g. removes fewer than 1 bridge
+    per 100 m -> gain < 0.01), even with budget left. Each step recomputes the bridge-tree ONCE
+    (over the current `base_roads` + already-added connectors, noded against `streets`), then
     scores every remaining candidate with a single `bridges_removed` lookup apiece; candidate
     endpoints are snapped to the nearest road-graph node within `STREET_TOL`. Returns the full road
     list: `base_roads`'s geometries plus whichever connectors were committed."""
@@ -84,6 +89,7 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
     remaining = list(candidates)
     added_len = 0.0
     n_added = 0
+    min_gain = max(min_bridges_per_m, 1e-9)
     while remaining and n_added < max_loops:
         roads_gdf = gpd.GeoDataFrame(geometry=current, crs=crs)
         g = _noded_graph(roads_gdf, streets)
@@ -108,7 +114,7 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
                 best_score = score
                 best_idx = i
                 best_len = connector.length
-        if best_idx < 0:
+        if best_idx < 0 or best_score < min_gain:
             break
         if budget_m is not None and added_len + best_len > budget_m:
             break
@@ -209,13 +215,27 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
 class LoopClosureRefiner:
     """Method wrapper composing `loop_candidates` + `greedy_close_loops` behind the `Method.propose`
     `prior` seam: refines a base method's (e.g. `ClearanceReblocker`) tree-ish proposal by adding
-    bridge-removing loop-closing connectors, greedily, up to `budget_m` added length / `max_loops`.
-    NOT frozen: `base` is an arbitrary (unhashable) `Method`, and `@dataclass(frozen=True)` would
-    auto-generate a `__hash__` over it -- mirrors the sibling `ClearanceReblocker`."""
+    bridge-removing loop-closing connectors, greedily, up to `budget_frac`'s share of the base
+    proposal's road length / `max_loops`, with a `min_bridges_per_m` diminishing-returns early
+    stop. NOT frozen: `base` is an arbitrary (unhashable) `Method`, and `@dataclass(frozen=True)`
+    would auto-generate a `__hash__` over it -- mirrors the sibling `ClearanceReblocker`."""
 
     base: Method
-    budget_m: float | None = 200.0
-    max_loops: int = 20
+    budget_frac: float = 0.12
+    # Loops may add up to this FRACTION of the base proposal's total road length, region-adaptive
+    # in place of a fixed absolute budget_m: on an 11k-parcel region a 200 m absolute budget was
+    # ~1% of the base road and added negligible redundancy (commute_ratio 0.009). Calibrated on a
+    # 1724-parcel block (base road 8622 m): 0.05 -> ρ 0.31, 0.10 -> 0.375, 0.12 -> ~0.39, 0.15 ->
+    # 0.40 (diminishing returns past ~0.12 -- the knee), all with external held ~0.949 and
+    # ~8-11 s runtime.
+    min_bridges_per_m: float = 0.01
+    # Early-stop threshold on the greedy ranking objective (bridges removed per metre): once the
+    # best remaining candidate's efficiency falls below this, stop adding loops even if budget
+    # remains -- a diminishing-returns guard so a large budget_frac doesn't get spent on
+    # increasingly marginal connectors. 0.01 = 1 bridge per 100 m.
+    max_loops: int = 400
+    # A high safety cap, not the real bound -- budget_frac (via the resolved budget_m) and
+    # min_bridges_per_m now do the real work of stopping the greedy loop.
     min_loop_len_m: float = 40.0
     # 20 m (down from an initial 60 m default): on a dense region-scale clearance mesh, 60 m put
     # `loop_candidates` at ~28k pairs / ~155s wall-clock end to end -- 20 m lands in the low
@@ -239,8 +259,8 @@ class LoopClosureRefiner:
         bid = getattr(self.base, "identity", None)
         if bid is None:
             return None
-        return ("loop_closure", bid, self.budget_m, self.max_loops, self.min_loop_len_m,
-                self.search_radius_m, self.snap_lam, self.max_candidates)
+        return ("loop_closure", bid, self.budget_frac, self.min_bridges_per_m, self.max_loops,
+                self.min_loop_len_m, self.search_radius_m, self.snap_lam, self.max_candidates)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         # `prior`, when given, IS the base proposal to refine -- skip recomputing/re-fetching it
@@ -248,19 +268,26 @@ class LoopClosureRefiner:
         base_prop = prior if prior is not None else propose(self.base, block)
         base_roads = (base_prop.roads if base_prop.roads is not None
                      else gpd.GeoDataFrame(geometry=[], crs=block.crs))
+        # Region-adaptive budget: a fixed absolute length is block-scale and vanishes on a big
+        # region's base road (see budget_frac's field comment); scaling to the base proposal's own
+        # road length keeps the added redundancy proportional regardless of region size.
+        base_len = float(base_roads.geometry.length.sum())
+        budget_m = self.budget_frac * base_len
         candidates = loop_candidates(
             base_roads, block, search_radius_m=self.search_radius_m,
             min_loop_len_m=self.min_loop_len_m, snap_lam=self.snap_lam,
             max_candidates=self.max_candidates)
         all_roads = greedy_close_loops(
             base_roads, block.streets, candidates,
-            budget_m=self.budget_m, max_loops=self.max_loops)
+            budget_m=budget_m, max_loops=self.max_loops,
+            min_bridges_per_m=self.min_bridges_per_m)
         roads = gpd.GeoDataFrame(geometry=all_roads, crs=block.crs)
-        pid = f"loop_closure:{base_prop.proposal_id}:b{self.budget_m}:ml{self.max_loops}"
+        pid = f"loop_closure:{base_prop.proposal_id}:bf{self.budget_frac}:ml{self.max_loops}"
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=pid, method="loop_closure",
-            params={"budget_m": self.budget_m, "max_loops": self.max_loops,
+            params={"budget_frac": self.budget_frac, "min_bridges_per_m": self.min_bridges_per_m,
+                    "max_loops": self.max_loops,
                     "min_loop_len_m": self.min_loop_len_m, "search_radius_m": self.search_radius_m,
                     "snap_lam": self.snap_lam, "max_candidates": self.max_candidates,
                     "n_added": len(all_roads) - len(base_roads)},

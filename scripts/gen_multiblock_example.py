@@ -93,7 +93,7 @@ def main() -> None:
             png.unlink()
 
     methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
-               for n in ("clearance", "greedy_arterial_buildable")}
+               for n in ("clearance", "greedy_arterial_buildable", "clearance_looped")}
     # osm_footpaths: the real as-built informal network, from a committed per-region OSM snapshot
     # (fetched once by scripts.fetch_desire_lines_snapshot) so the example reproduces offline.
     snapshot = out / f"desire_lines_{seed}.geojson"
