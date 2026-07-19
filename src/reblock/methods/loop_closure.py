@@ -1,22 +1,27 @@
-"""Bridge-tree greedy loop-closure engine. Pure functions only -- candidate generation and the
-Method wrapper are later tasks. Scalability core: the bridge-tree (2-edge-connected components of
-the current road graph, contracted to a tree over one edge per bridge) is computed ONCE per greedy
-step, not once per candidate -- a candidate's bridges-removed count is then a single bridge-tree
-shortest-path-length lookup, not a fresh `nx.bridges` call.
+"""Bridge-tree greedy loop-closure engine. Pure functions only -- the Method wrapper is a later
+task. Scalability core: the bridge-tree (2-edge-connected components of the current road graph,
+contracted to a tree over one edge per bridge) is computed ONCE per greedy step, not once per
+candidate -- a candidate's bridges-removed count is then a single bridge-tree shortest-path-length
+lookup, not a fresh `nx.bridges` call.
 """
 from __future__ import annotations
 
+import math
 from typing import cast
 
 import geopandas as gpd
 import networkx as nx
 import numpy as np
+import shapely
 from geopandas import GeoDataFrame
 from scipy.spatial import cKDTree
 from shapely.geometry import LineString
 
 from reblock.budget import _noded_graph
+from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
+from reblock.methods.arterial import _snap, _snap_graph
+from reblock.methods.dijkstra import _boundary_graph
 
 Node = tuple[float, float]
 
@@ -110,3 +115,48 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
         added_len += best_len
         n_added += 1
     return current
+
+
+def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: float,
+                    min_loop_len_m: float, snap_lam: float
+                    ) -> list[tuple[LineString, Node, Node]]:
+    """Candidate loop-closing connectors: for every pair of `base_roads`' road-graph node coords
+    (`_noded_graph(base_roads, block.streets)`) within `search_radius_m` (`cKDTree.query_pairs`),
+    the gap-following BUILDABLE connector `_snap` routes along the block's parcel-boundary graph
+    (`_snap_graph(_boundary_graph(block.parcels))`, precomputed once -- not the road graph itself,
+    since a real connector must be a buildable path along parcel frontage). A pair survives only if
+    its connector is realizable (non-None, length >= 1 m -- filters coincident-node snap artifacts)
+    AND it would close a loop of GEOMETRIC perimeter >= `min_loop_len_m`: connector length + the
+    road graph's OWN shortest-path distance between the two endpoints, weighted by euclidean edge
+    length ("len") -- NEVER a hop count, which would score the same physical gap differently
+    depending on how finely `base_roads` happens to be noded/subdivided. A pair whose endpoints fall
+    in different components of the base road graph has no such path -- not loop-closing on this
+    component -- and is dropped. Deduplicated by rounded (0.1 m) WKB, so numerically-identical
+    connectors reached via different candidate node pairs collapse to one entry."""
+    g = _noded_graph(base_roads, block.streets)
+    for u, v in g.edges():
+        g[u][v]["len"] = math.hypot(u[0] - v[0], u[1] - v[1])
+    nodes = list(g.nodes())
+    if len(nodes) < 2:
+        return []
+    kdt = cKDTree(np.array(nodes, dtype=float))
+    sg = _snap_graph(_boundary_graph(block.parcels))
+    seen: set[bytes] = set()
+    out: list[tuple[LineString, Node, Node]] = []
+    for i, j in sorted(kdt.query_pairs(search_radius_m)):
+        u, v = nodes[i], nodes[j]
+        connector = _snap(LineString([u, v]), sg, snap_lam)
+        if connector is None or connector.length < 1.0:
+            continue
+        try:
+            gap_len = float(nx.shortest_path_length(g, u, v, weight="len"))
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            continue                                       # unreachable on this component
+        if connector.length + gap_len < min_loop_len_m:
+            continue
+        key = shapely.to_wkb(shapely.set_precision(connector, 0.1))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((connector, u, v))
+    return out

@@ -1,9 +1,19 @@
+import math
+from typing import cast
+
 import geopandas as gpd
 import networkx as nx
 from pyproj import CRS
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Polygon
 
-from reblock.methods.loop_closure import _bridge_tree, bridges_removed, greedy_close_loops
+from reblock.budget import _noded_graph
+from reblock.contracts import Block
+from reblock.methods.loop_closure import (
+    _bridge_tree,
+    bridges_removed,
+    greedy_close_loops,
+    loop_candidates,
+)
 
 UTM = CRS.from_epsg(32734)
 
@@ -111,3 +121,66 @@ def test_greedy_close_loops_max_loops_caps_the_count() -> None:
     out2 = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=2)
     added2 = [ls for ls in out2 if ls.wkt not in {g.wkt for g in base.geometry}]
     assert len(added2) == 2
+
+
+# --- loop_candidates -------------------------------------------------------------------------
+# Fixture: a 4x1 row of unit-square parcels [0,4]x[0,1], street along the bottom (0,0)-(4,0).
+# base_roads is a TREE (every edge a bridge): two spurs (1,0)-(1,1) and (3,0)-(3,1). The parcel
+# boundary graph (from block.parcels) has grid nodes at every integer (x,y) in [0,4]x{0,1}, so
+# _snap can route a buildable connector straight across the tooth-tops (1,1)-(2,1)-(3,1), len=2,
+# closing a loop with the base tree path (1,1)-(1,0)-(3,0)-(3,1), len=4 -> perimeter 6.
+
+def _gap_parcels() -> gpd.GeoDataFrame:
+    polys = [Polygon([(i, 0), (i + 1, 0), (i + 1, 1), (i, 1)]) for i in range(4)]
+    return gpd.GeoDataFrame({"parcel_id": list(range(4))}, geometry=polys, crs=UTM)
+
+
+def _gap_streets() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(geometry=[LineString([(0, 0), (4, 0)])], crs=UTM)
+
+
+def _gap_block() -> Block:
+    parcels = _gap_parcels()
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    return Block(block_id="gap", crs=UTM, boundary=boundary, parcels=parcels,
+                streets=_gap_streets())
+
+
+def _gap_roads() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        geometry=[LineString([(1, 0), (1, 1)]), LineString([(3, 0), (3, 1)])], crs=UTM)
+
+
+def _weighted_road_graph(base_roads: gpd.GeoDataFrame, streets: gpd.GeoDataFrame) -> nx.Graph:
+    g = _noded_graph(base_roads, streets)
+    for u, v in g.edges():
+        g[u][v]["len"] = math.hypot(u[0] - v[0], u[1] - v[1])
+    return g
+
+
+def test_loop_candidates_returns_gap_closing_connectors_meeting_the_perimeter_floor() -> None:
+    block = _gap_block()
+    base = _gap_roads()
+    min_len = 5.0
+    cands = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=min_len, snap_lam=2.0)
+    assert cands != []
+    g = _weighted_road_graph(base, block.streets)
+    node_set = set(g.nodes())
+    for connector, u, v in cands:
+        assert u in node_set and v in node_set     # endpoints are base road-graph nodes
+        gap_len = nx.shortest_path_length(g, u, v, weight="len")
+        assert connector.length + gap_len >= min_len - 1e-9   # implied loop perimeter >= floor
+
+
+def test_loop_candidates_min_loop_len_past_block_size_returns_empty() -> None:
+    block = _gap_block()
+    base = _gap_roads()
+    cands = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1000.0, snap_lam=2.0)
+    assert cands == []
+
+
+def test_loop_candidates_no_pair_within_radius_returns_empty() -> None:
+    block = _gap_block()
+    base = _gap_roads()
+    cands = loop_candidates(base, block, search_radius_m=0.05, min_loop_len_m=1.0, snap_lam=2.0)
+    assert cands == []
