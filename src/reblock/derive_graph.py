@@ -37,6 +37,8 @@ _DERIVATION_MODULES: tuple[Path, ...] = (
     Path(__file__).parent / "derive" / "geometric_access.py",
     Path(__file__).parent / "derive" / "adjacency.py",
     Path(__file__).parent / "derive" / "parcel_graph.py",
+    # _noded_graph/access_burden/displacement -- used by arterial + loop_closure
+    Path(__file__).with_name("budget.py"),
     Path(__file__).parent / "methods" / "topology.py",
     Path(__file__).parent / "methods" / "peel.py",
     Path(__file__).parent / "methods" / "dijkstra.py",

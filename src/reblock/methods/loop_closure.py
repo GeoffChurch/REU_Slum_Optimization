@@ -18,7 +18,7 @@ from geopandas import GeoDataFrame
 from scipy.spatial import cKDTree
 from shapely.geometry import LineString
 
-from reblock.budget import _noded_graph
+from reblock.budget import _explode_segments, _noded_graph
 from reblock.contracts import Block, Method, Proposal
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
@@ -122,23 +122,27 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
 def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: float,
                     min_loop_len_m: float, snap_lam: float
                     ) -> list[tuple[LineString, Node, Node]]:
-    """Candidate loop-closing connectors: for every pair of `base_roads`' road-graph node coords
-    (`_noded_graph(base_roads, block.streets)`) within `search_radius_m` (`cKDTree.query_pairs`),
-    the gap-following BUILDABLE connector `_snap` routes along the block's parcel-boundary graph
+    """Candidate loop-closing connectors: for every pair of `base_roads`' OWN node coords
+    (`_explode_segments(base_roads)`'s unique endpoints -- the few-hundred base-road nodes, NOT the
+    thousands of perimeter street nodes a region's `_noded_graph` would otherwise contribute, which
+    made candidate generation explode) within `search_radius_m` (`cKDTree.query_pairs`), the
+    gap-following BUILDABLE connector `_snap` routes along the block's parcel-boundary graph
     (`_snap_graph(_boundary_graph(block.parcels))`, precomputed once -- not the road graph itself,
     since a real connector must be a buildable path along parcel frontage). A pair survives only if
     its connector is realizable (non-None, length >= 1 m -- filters coincident-node snap artifacts)
     AND it would close a loop of GEOMETRIC perimeter >= `min_loop_len_m`: connector length + the
     road graph's OWN shortest-path distance between the two endpoints, weighted by euclidean edge
     length ("len") -- NEVER a hop count, which would score the same physical gap differently
-    depending on how finely `base_roads` happens to be noded/subdivided. A pair whose endpoints fall
-    in different components of the base road graph has no such path -- not loop-closing on this
-    component -- and is dropped. Deduplicated by rounded (0.1 m) WKB, so numerically-identical
-    connectors reached via different candidate node pairs collapse to one entry."""
+    depending on how finely `base_roads` happens to be noded/subdivided. This floor's shortest path
+    still runs over the FULL `_noded_graph(base_roads, block.streets)` (road nodes are a subset of
+    it, so both endpoints always resolve). A pair whose endpoints fall in different components of
+    the base road graph has no such path -- not loop-closing on this component -- and is dropped.
+    Deduplicated by rounded (0.1 m) WKB, so numerically-identical connectors reached via different
+    candidate node pairs collapse to one entry."""
     g = _noded_graph(base_roads, block.streets)
     for u, v in g.edges():
         g[u][v]["len"] = math.hypot(u[0] - v[0], u[1] - v[1])
-    nodes = list(g.nodes())
+    nodes = sorted({n for pair in _explode_segments(base_roads.geometry) for n in pair})
     if len(nodes) < 2:
         return []
     kdt = cKDTree(np.array(nodes, dtype=float))
