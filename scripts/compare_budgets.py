@@ -57,7 +57,13 @@ from reblock.budget import (
 )
 from reblock.compare import MethodCurve
 from reblock.contracts import Block, Method, Proposal, Screen, Source
-from reblock.emit import _displaced_points, compare_report, pct_displaced, pct_paved
+from reblock.emit import (
+    _displaced_points,
+    compare_report,
+    depth_vs_road_report,
+    pct_displaced,
+    pct_paved,
+)
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, region_reblock
@@ -203,6 +209,9 @@ def run_two_lens(region: list[Block], methods: dict[str, Method], target_depth: 
         curves.append(MethodCurve(name, curve_label, "internal_connectivity", internal, pp, pd_))
         curves.append(MethodCurve(name, curve_label, "displacement", disp, pp, pd_))
     compare_report(curves, out_dir, method_order=list(methods))
+    # Access-depth vs road: where each method reaches each integer max-depth (osm plateaus).
+    depth_vs_road_report(block, roads_by_method, out_dir, method_order=list(methods),
+                         label=curve_label)
     return lens_a, lens_b
 
 

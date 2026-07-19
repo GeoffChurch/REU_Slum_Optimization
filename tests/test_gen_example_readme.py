@@ -18,6 +18,8 @@ def test_generated_readme_reflects_meta_and_curves() -> None:
     assert "12" in md and "11,006" in md               # region stats
     assert "google.com/maps" in md                     # the Google Maps location link (from meta)
     assert "The method frontier" in md                 # §3 frontier section
+    assert "max access depth" in md                    # the depth-vs-road curve intro
+    assert "![access depth vs added road](depth_vs_road_test.png)" in md
     assert "![external connectivity](curve_external_connectivity_test.png)" in md  # a curve embed
     assert "![displacement](displacement_test.png)" in md
     assert "![screen](screen.jpg)" in md               # figure embed (present file)
