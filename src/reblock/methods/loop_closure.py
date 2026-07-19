@@ -119,8 +119,33 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
     return current
 
 
+def _knn_bounded_pairs(nodes: list[Node], kdt: cKDTree, search_radius_m: float, max_candidates: int
+                       ) -> list[tuple[int, int]]:
+    """Bound `query_pairs(search_radius_m)`'s pair volume to roughly `max_candidates`, WITHOUT
+    truncating the pair list by distance: a hard truncation would keep only the globally shortest
+    pairs -- tiny same-branch loops the geometric loop-floor in `loop_candidates` already rejects,
+    wasting the whole budget on candidates that can never survive. Instead every node contributes
+    its own up-to-`k` nearest OTHER nodes within `search_radius_m` (`k` sized so `n * k` lands near
+    `max_candidates`), so distant/cross-branch pairs -- the ones that actually close big loops --
+    stay represented regardless of local mesh density."""
+    n = len(nodes)
+    k = max(1, max_candidates // max(n, 1))
+    kk = min(k + 1, n)                                     # +1: query includes each node itself
+    dists, idxs = kdt.query(np.array(nodes, dtype=float), k=kk)
+    if kk == 1:                                            # scipy squeezes the k=1 case to 1-D
+        dists, idxs = dists[:, None], idxs[:, None]
+    out: set[tuple[int, int]] = set()
+    for i in range(n):
+        for d, j in zip(dists[i], idxs[i], strict=True):
+            jj = int(j)
+            if jj == i or d > search_radius_m:
+                continue
+            out.add((i, jj) if i < jj else (jj, i))
+    return sorted(out)
+
+
 def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: float,
-                    min_loop_len_m: float, snap_lam: float
+                    min_loop_len_m: float, snap_lam: float, max_candidates: int | None = None
                     ) -> list[tuple[LineString, Node, Node]]:
     """Candidate loop-closing connectors: for every pair of `base_roads`' OWN node coords
     (`_explode_segments(base_roads)`'s unique endpoints -- the few-hundred base-road nodes, NOT the
@@ -138,7 +163,16 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
     it, so both endpoints always resolve). A pair whose endpoints fall in different components of
     the base road graph has no such path -- not loop-closing on this component -- and is dropped.
     Deduplicated by rounded (0.1 m) WKB, so numerically-identical connectors reached via different
-    candidate node pairs collapse to one entry."""
+    candidate node pairs collapse to one entry.
+
+    `max_candidates` bounds the PAIR VOLUME `query_pairs` hands to the expensive per-pair `_snap`
+    Dijkstra + shortest-path below -- both scale with pair count, so this is where the volume must
+    be capped, before either runs. On a dense clearance mesh, `query_pairs(search_radius_m)` can
+    return tens of thousands of pairs; past `max_candidates`, `_knn_bounded_pairs` swaps in a
+    k-nearest-neighbours-per-node scheme that keeps the pair count near `max_candidates` while still
+    representing cross-branch loops (see `_knn_bounded_pairs`). `None` (the default) leaves
+    `query_pairs`' own radius cutoff as the only bound -- unchanged behavior for callers that don't
+    opt in."""
     g = _noded_graph(base_roads, block.streets)
     for u, v in g.edges():
         g[u][v]["len"] = math.hypot(u[0] - v[0], u[1] - v[1])
@@ -146,10 +180,13 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
     if len(nodes) < 2:
         return []
     kdt = cKDTree(np.array(nodes, dtype=float))
+    pairs = sorted(kdt.query_pairs(search_radius_m))
+    if max_candidates is not None and len(pairs) > max_candidates:
+        pairs = _knn_bounded_pairs(nodes, kdt, search_radius_m, max_candidates)
     sg = _snap_graph(_boundary_graph(block.parcels))
     seen: set[bytes] = set()
     out: list[tuple[LineString, Node, Node]] = []
-    for i, j in sorted(kdt.query_pairs(search_radius_m)):
+    for i, j in pairs:
         u, v = nodes[i], nodes[j]
         connector = _snap(LineString([u, v]), sg, snap_lam)
         if connector is None or connector.length < 1.0:
@@ -180,8 +217,19 @@ class LoopClosureRefiner:
     budget_m: float | None = 200.0
     max_loops: int = 20
     min_loop_len_m: float = 40.0
-    search_radius_m: float = 60.0
+    # 20 m (down from an initial 60 m default): on a dense region-scale clearance mesh, 60 m put
+    # `loop_candidates` at ~28k pairs / ~155s wall-clock end to end -- 20 m lands in the low
+    # hundreds-to-low-thousands of pairs (single-digit-to-teens seconds) while still lifting
+    # commute_ratio well above the bare clearance base (region-measured, see loop_closure.py's
+    # module docstring companion in the task report -- ρ 0.0 -> >0.10 preserved at this radius).
+    search_radius_m: float = 45.0
     snap_lam: float = 2.0
+    # A second, independent bound on top of `search_radius_m`: even a modest radius can still
+    # explode on a denser-than-tested mesh (finer substrate, bigger region), since pair count grows
+    # with LOCAL node density, not just radius. `max_candidates` caps `loop_candidates`' pair volume
+    # via `_knn_bounded_pairs` regardless of density -- a belt-and-suspenders guard, not the primary
+    # lever (search_radius_m's cut is what keeps the common case fast).
+    max_candidates: int | None = 4000
 
     @property
     def identity(self) -> tuple[object, ...] | None:
@@ -192,7 +240,7 @@ class LoopClosureRefiner:
         if bid is None:
             return None
         return ("loop_closure", bid, self.budget_m, self.max_loops, self.min_loop_len_m,
-                self.search_radius_m, self.snap_lam)
+                self.search_radius_m, self.snap_lam, self.max_candidates)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         # `prior`, when given, IS the base proposal to refine -- skip recomputing/re-fetching it
@@ -202,7 +250,8 @@ class LoopClosureRefiner:
                      else gpd.GeoDataFrame(geometry=[], crs=block.crs))
         candidates = loop_candidates(
             base_roads, block, search_radius_m=self.search_radius_m,
-            min_loop_len_m=self.min_loop_len_m, snap_lam=self.snap_lam)
+            min_loop_len_m=self.min_loop_len_m, snap_lam=self.snap_lam,
+            max_candidates=self.max_candidates)
         all_roads = greedy_close_loops(
             base_roads, block.streets, candidates,
             budget_m=self.budget_m, max_loops=self.max_loops)
@@ -213,5 +262,6 @@ class LoopClosureRefiner:
             proposal_id=pid, method="loop_closure",
             params={"budget_m": self.budget_m, "max_loops": self.max_loops,
                     "min_loop_len_m": self.min_loop_len_m, "search_radius_m": self.search_radius_m,
-                    "snap_lam": self.snap_lam, "n_added": len(all_roads) - len(base_roads)},
+                    "snap_lam": self.snap_lam, "max_candidates": self.max_candidates,
+                    "n_added": len(all_roads) - len(base_roads)},
             block_identity=base_prop.block_identity)

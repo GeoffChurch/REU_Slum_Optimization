@@ -1,11 +1,13 @@
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 
 import geopandas as gpd
 import networkx as nx
+import numpy as np
 from pyproj import CRS
+from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Polygon
 
 from reblock import derive_graph
@@ -14,6 +16,7 @@ from reblock.contracts import Block, Proposal
 from reblock.methods.loop_closure import (
     LoopClosureRefiner,
     _bridge_tree,
+    _knn_bounded_pairs,
     bridges_removed,
     greedy_close_loops,
     loop_candidates,
@@ -225,13 +228,80 @@ def test_loop_candidates_closed_loop_rejected_by_perimeter_floor_not_radius() ->
     assert raised == []
 
 
+# --- _knn_bounded_pairs / max_candidates cap ----------------------------------------------------
+# Fixture: a 3x3 unit grid (9 nodes). At radius=3.0 `query_pairs` finds most of the C(9,2)=36
+# pairs -- generous enough that capping to a small `max_candidates` visibly shrinks the set.
+
+def _grid_nodes() -> list[tuple[float, float]]:
+    return [(float(x), float(y)) for x in range(3) for y in range(3)]
+
+
+def test_knn_bounded_pairs_shrinks_volume_and_stays_valid() -> None:
+    nodes = _grid_nodes()
+    kdt = cKDTree(np.array(nodes, dtype=float))
+    radius = 3.0
+    uncapped = sorted(kdt.query_pairs(radius))
+    bounded = _knn_bounded_pairs(nodes, kdt, radius, max_candidates=6)
+    assert 0 < len(bounded) < len(uncapped)
+    for i, j in bounded:
+        assert i != j
+        assert 0 <= i < len(nodes)
+        assert 0 <= j < len(nodes)
+        assert math.hypot(nodes[i][0] - nodes[j][0], nodes[i][1] - nodes[j][1]) <= radius
+
+
+def test_knn_bounded_pairs_every_node_gets_at_least_one_neighbour() -> None:
+    # k = max(1, max_candidates // n) is floored at 1 -- a tiny max_candidates still gives every
+    # node a shot at its single nearest neighbour rather than starving some nodes entirely.
+    nodes = _grid_nodes()
+    kdt = cKDTree(np.array(nodes, dtype=float))
+    bounded = _knn_bounded_pairs(nodes, kdt, search_radius_m=3.0, max_candidates=1)
+    touched = {i for pair in bounded for i in pair}
+    assert touched == set(range(len(nodes)))
+
+
+def test_loop_candidates_max_candidates_caps_pairs_and_stays_valid() -> None:
+    block = _gap_block()
+    base = _gap_roads()
+    uncapped = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0)
+    capped = loop_candidates(
+        base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0, max_candidates=1)
+    assert len(capped) <= len(uncapped)
+    assert capped != []                         # the cap still lets the one real loop through
+    g = _weighted_road_graph(base, block.streets)
+    node_set = set(g.nodes())
+    for connector, u, v in capped:
+        assert u in node_set and v in node_set
+        gap_len = nx.shortest_path_length(g, u, v, weight="len")
+        assert connector.length + gap_len >= 1.0 - 1e-9
+
+
+def test_loop_candidates_max_candidates_none_is_unbounded_default() -> None:
+    block = _gap_block()
+    base = _gap_roads()
+    explicit_none = loop_candidates(
+        base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0, max_candidates=None)
+    default = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0)
+    assert {c.wkt for c, _u, _v in explicit_none} == {c.wkt for c, _u, _v in default}
+
+
 # --- LoopClosureRefiner ------------------------------------------------------------------------
 # Reuses the "gap" fixtures above: `_gap_block()`/`_gap_roads()` is a TREE (street + two spurs,
 # every edge a bridge) with one admissible loop-closing connector across the tooth-tops
 # ((1,1)-(2,1)-(3,1), len=2, perimeter 6 against the floor of 5.0); `_closed_loop_roads()` is
 # already fully 2-edge-connected (no bridges to remove -- no admissible gap).
 
-_REFINER_KW = {"search_radius_m": 2.5, "min_loop_len_m": 5.0, "snap_lam": 2.0}
+class _RefinerKw(TypedDict):
+    """A precise key/type map for `**_REFINER_KW` call sites below -- a plain `dict[str, float]`
+    would widen its value type and make mypy treat the unpacked kwargs as a possible (invalid)
+    source for `LoopClosureRefiner`'s `int | None`-typed `max_candidates` field too."""
+
+    search_radius_m: float
+    min_loop_len_m: float
+    snap_lam: float
+
+
+_REFINER_KW: _RefinerKw = {"search_radius_m": 2.5, "min_loop_len_m": 5.0, "snap_lam": 2.0}
 
 # A dedicated fixture for the commute_ratio assertion: taller (1x2, not 1x1) parcels than
 # `_gap_parcels()` so each parcel's centroid is strictly closer to its spur than to the street
@@ -402,6 +472,9 @@ def test_loop_closure_refiner_identity_changes_with_params() -> None:
     r3 = LoopClosureRefiner(base=fake, min_loop_len_m=10.0)
     r4 = LoopClosureRefiner(base=fake, min_loop_len_m=20.0)
     assert r3.identity != r4.identity
+    r5 = LoopClosureRefiner(base=fake, max_candidates=1000)
+    r6 = LoopClosureRefiner(base=fake, max_candidates=2000)
+    assert r5.identity != r6.identity
 
 
 def test_loop_closure_registered_in_derivation_modules() -> None:
