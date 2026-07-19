@@ -184,3 +184,38 @@ def test_loop_candidates_no_pair_within_radius_returns_empty() -> None:
     base = _gap_roads()
     cands = loop_candidates(base, block, search_radius_m=0.05, min_loop_len_m=1.0, snap_lam=2.0)
     assert cands == []
+
+
+# Fixture: the SAME 4x1 block as above, but base_roads is a CLOSED RING around it -- left side
+# (0,0)-(0,1), the top (0,1)-(1,1)-(2,1)-(3,1)-(4,1), and the right side (4,1)-(4,0) -- which,
+# noded together with the bottom street (0,0)-(4,0), forms one 7-node cycle with NO bridges (every
+# node is 2-edge-connected to every other). At search_radius_m=2.5, `query_pairs` finds plenty of
+# node pairs and `_snap` realizes connectors for all of them -- so the radius/snap path is not what
+# empties the result. But because the base is already a closed, short ring, every pair's implied
+# loop perimeter (connector length + the ring's own shortest gap) tops out at 6.0 m (verified via
+# `_weighted_road_graph` below across all candidates at a permissive floor); a `min_loop_len_m`
+# past that (6.5) rejects every one of them on the geometric-loop-floor check specifically.
+
+def _closed_loop_roads() -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(
+        geometry=[
+            LineString([(0, 0), (0, 1)]),
+            LineString([(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)]),
+            LineString([(4, 1), (4, 0)]),
+        ], crs=UTM)
+
+
+def test_loop_candidates_closed_loop_rejected_by_perimeter_floor_not_radius() -> None:
+    block = _gap_block()
+    base = _closed_loop_roads()
+    g = _weighted_road_graph(base, block.streets)
+    assert list(nx.bridges(g)) == []              # fully 2-edge-connected: no gaps to bridge
+    assert nx.number_connected_components(g) == 1
+    # Tiny floor: query_pairs finds pairs and _snap succeeds -> non-empty. This pins down that the
+    # radius/snap path is working, so the empty result below can only come from the floor check.
+    tiny = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0)
+    assert tiny != []
+    # Raised floor, same radius and base: every candidate found above is rejected because its own
+    # perimeter falls short of min_loop_len_m -- not because no pairs were found.
+    raised = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=6.5, snap_lam=2.0)
+    assert raised == []
