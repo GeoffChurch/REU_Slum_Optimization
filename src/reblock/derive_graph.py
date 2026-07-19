@@ -37,6 +37,8 @@ _DERIVATION_MODULES: tuple[Path, ...] = (
     Path(__file__).parent / "derive" / "geometric_access.py",
     Path(__file__).parent / "derive" / "adjacency.py",
     Path(__file__).parent / "derive" / "parcel_graph.py",
+    # _noded_graph/access_burden/displacement -- used by arterial + loop_closure
+    Path(__file__).with_name("budget.py"),
     Path(__file__).parent / "methods" / "topology.py",
     Path(__file__).parent / "methods" / "peel.py",
     Path(__file__).parent / "methods" / "dijkstra.py",
@@ -44,6 +46,7 @@ _DERIVATION_MODULES: tuple[Path, ...] = (
     Path(__file__).parent / "methods" / "arterial.py",
     Path(__file__).parent / "methods" / "clearance.py",
     Path(__file__).parent / "methods" / "substrates.py",
+    Path(__file__).parent / "methods" / "loop_closure.py",
     Path(__file__).with_name("derivations.py"),      # derive()-wrapper bodies
     Path(__file__).parent / "data" / "kblock.py",    # _voronoi_parcels (the voronoi derivation)
     Path(__file__).parent / "screen" / "dense_compact.py",  # _compute_selection (screen cache)
