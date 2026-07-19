@@ -1,3 +1,3 @@
-method,target_depth,reached,reached_depth,road_length_m,displacement,pct_displaced,propose_seconds
-clearance,3,True,3,1842.6,12.0,0.0431,4.2
-osm_footpaths,3,False,5,2210.3,18.0,0.0602,1.1
+method,target_ext,reached,reached_ext,road_length_m,displacement,pct_displaced,propose_seconds
+clearance,0.70,True,0.7213,1842.6,12.0,0.0431,4.2
+osm_footpaths,0.70,False,0.6402,2210.3,18.0,0.0602,1.1

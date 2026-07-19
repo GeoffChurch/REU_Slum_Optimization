@@ -13,7 +13,7 @@ def _n(x: float) -> str:
 
 
 def _after_method(name: str) -> str:
-    # after_<method>_<tag>.jpg -> <method> (tag = matched | depthN; method may contain underscores)
+    # after_<method>_<tag>.jpg -> <method> (tag = matched | extNN; method may contain underscores)
     return name[len("after_"):-len(".jpg")].rpartition("_")[0]
 
 
