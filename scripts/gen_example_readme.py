@@ -62,11 +62,20 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                      f"{region_mean_density:.0f} bldg/ha.\n")
         if (run_dir / "region.jpg").exists():
             parts.append("![region](region.jpg)\n")
+    depth_curve = sorted(run_dir.glob("depth_vs_road_*.png"))
     curve_ext = sorted(run_dir.glob("curve_external_connectivity_*.png"))
     curve_int = sorted(run_dir.glob("curve_internal_connectivity_*.png"))
     curve_disp = sorted(run_dir.glob("displacement_*.png"))
-    if curve_ext or curve_int or curve_disp:
+    if depth_curve or curve_ext or curve_int or curve_disp:
         parts.append("## 3. The method frontier (benefit vs added road)\n")
+        if depth_curve:
+            parts.append("How far each method's road drives the region's **max access depth** — a "
+                         "dot marks where it first reaches each new integer depth. The as-built "
+                         "`osm_footpaths` network plateaus at its floor; the optimised methods "
+                         "keep clearing (this is why the matched-road comparison matters):\n")
+            for p in depth_curve:
+                parts.append(f"![access depth vs added road]({p.name})\n")
+    if curve_ext or curve_int or curve_disp:
         parts.append("Each method's benefit as cumulative added road grows — the full trade-off "
                      "whose fixed-depth and matched-budget slices are tabulated in "
                      "`lens_a_depth.csv` and `lens_b_matched.csv` (this dir). External "

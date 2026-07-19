@@ -20,6 +20,10 @@ The metric grows a **19-block** region (**4,677 parcels**), mean depth 5.1 rings
 
 ## 3. The method frontier (benefit vs added road)
 
+How far each method's road drives the region's **max access depth** — a dot marks where it first reaches each new integer depth. The as-built `osm_footpaths` network plateaus at its floor; the optimised methods keep clearing (this is why the matched-road comparison matters):
+
+![access depth vs added road](depth_vs_road_ZAF.9.3.1_1_44531.png)
+
 Each method's benefit as cumulative added road grows — the full trade-off whose fixed-depth and matched-budget slices are tabulated in `lens_a_depth.csv` and `lens_b_matched.csv` (this dir). External connectivity (access burden removed), internal connectivity (backup-route redundancy), and displacement (a rising cost):
 
 ![external connectivity](curve_external_connectivity_ZAF.9.3.1_1_44531.png)
