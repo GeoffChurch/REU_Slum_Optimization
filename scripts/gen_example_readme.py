@@ -69,18 +69,20 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
     if depth_curve or curve_ext or curve_int or curve_disp:
         parts.append("## 3. The method frontier (benefit vs added road)\n")
         if depth_curve:
-            parts.append("How far each method's road drives the region's **max access depth** — a "
-                         "dot marks where it first reaches each new integer depth. `clearance` is "
-                         "**continued past its depth target** (a full-drainage run) out to the "
-                         "longest method's road, so every method is compared at the same budget: "
-                         "the as-built `osm_footpaths` network plateaus at its floor while "
-                         "`clearance` reaches the same depth for a fraction of the road:\n")
+            parts.append("How far each method's road drives the region's **max access depth**, "
+                         "shown **for reference** (the method budget below is now the "
+                         "external-connectivity outcome) — a dot marks where it first reaches each "
+                         "new integer depth. `clearance` is **continued past its depth target** (a "
+                         "full-drainage run) out to the longest method's road, so every method is "
+                         "compared at the same budget: the as-built `osm_footpaths` network "
+                         "plateaus at its floor while `clearance` reaches the same depth for a "
+                         "fraction of the road:\n")
             for p in depth_curve:
                 parts.append(f"![access depth vs added road]({p.name})\n")
     if curve_ext or curve_int or curve_disp:
         parts.append("Each method's benefit as cumulative added road grows — the full trade-off "
                      "whose fixed-depth and matched-budget slices are tabulated in "
-                     "`lens_a_depth.csv` and `lens_b_matched.csv` (this dir). External "
+                     "`lens_a_external.csv` and `lens_b_matched.csv` (this dir). External "
                      "connectivity (access burden removed), internal connectivity (backup-route "
                      "redundancy), and displacement (a rising cost):\n")
         for caption, pngs in (("external connectivity", curve_ext),
@@ -90,7 +92,7 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                 parts.append(f"![{caption}]({p.name})\n")
     gifs = sorted(run_dir.glob("reblock_*.gif"))
     matched = sorted(run_dir.glob("after_*_matched.jpg"))
-    depth_imgs = sorted(run_dir.glob("after_*_depth*.jpg"))
+    depth_imgs = sorted(run_dir.glob("after_*_ext*.jpg"))
     if gifs or matched or depth_imgs:
         parts.append("## 4. Each method on the ground\n")
         parts.append("The same region on the same access-depth colour scale (blue = at a street, "
@@ -105,9 +107,9 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                          "road, so this compares the access each *buys for the same cost*:\n")
             parts.append(_img_table([(_after_method(p.name), p.name) for p in matched]))
         if depth_imgs:
-            parts.append("**Matched access target** — every method truncated where access-depth "
-                         "reaches the target, so this compares the *road each takes* for the same "
-                         "outcome:\n")
+            parts.append("**Matched external-connectivity target** — every method truncated where "
+                         "external connectivity (access-burden removed) reaches 0.70, so this "
+                         "compares the *road each takes* for the same outcome:\n")
             parts.append(_img_table([(_after_method(p.name), p.name) for p in depth_imgs]))
     return "\n".join(parts) + "\n"
 

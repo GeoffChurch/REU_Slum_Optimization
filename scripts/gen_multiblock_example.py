@@ -110,7 +110,7 @@ def main() -> None:
         cfg.all_methods.clearance.depth_target = 1     # clear to full drainage (bounded), not 0
         cfg.all_methods.clearance.max_roads = 10000
     extend = {"clearance": cast(Method, instantiate(cfg.all_methods.clearance))}
-    run_two_lens(region, methods, 3, out, label=seed, extend=extend)
+    run_two_lens(region, methods, 0.70, out, label=seed, extend=extend)
 
     depths = block_depths(source, members)
     dens = {b.block_id: len(b.parcels) / b.parcels.geometry.union_all().area * 1e4 for b in region}

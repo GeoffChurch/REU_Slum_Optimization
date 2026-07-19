@@ -27,7 +27,7 @@ def test_generated_readme_reflects_meta_and_curves() -> None:
     assert "Each method on the ground" in md           # §4 apples-to-apples after-images
     assert "Watch each method reblock" in md            # the animated GIF row
     assert "![clearance](reblock_clearance.gif)" in md  # a per-method GIF, method as column
-    assert "Matched road budget" in md and "Matched access target" in md  # both matched conditions
+    assert "Matched road budget" in md and "Matched external-connectivity target" in md  # both
     assert "| clearance | greedy_arterial_buildable |" in md               # aligned method columns
     assert "![clearance](after_clearance_matched.jpg)" in md               # a method after-image
 
