@@ -20,11 +20,11 @@ The metric grows a **12-block** region (**11,006 parcels**), mean depth 6.4 ring
 
 ## 3. The method frontier (benefit vs added road)
 
-How far each method's road drives the region's **max access depth** — a dot marks where it first reaches each new integer depth. `clearance` is **continued past its depth target** (a full-drainage run) out to the longest method's road, so every method is compared at the same budget: the as-built `osm_footpaths` network plateaus at its floor while `clearance` reaches the same depth for a fraction of the road:
+How far each method's road drives the region's **max access depth**, shown **for reference** (the method budget below is now the external-connectivity outcome) — a dot marks where it first reaches each new integer depth. `clearance` is **continued past its depth target** (a full-drainage run) out to the longest method's road, so every method is compared at the same budget: the as-built `osm_footpaths` network plateaus at its floor while `clearance` reaches the same depth for a fraction of the road:
 
 ![access depth vs added road](depth_vs_road_ZAF.9.3.1_1_5810.png)
 
-Each method's benefit as cumulative added road grows — the full trade-off whose fixed-depth and matched-budget slices are tabulated in `lens_a_depth.csv` and `lens_b_matched.csv` (this dir). External connectivity (access burden removed), internal connectivity (backup-route redundancy), and displacement (a rising cost):
+Each method's benefit as cumulative added road grows — the full trade-off whose fixed-depth and matched-budget slices are tabulated in `lens_a_external.csv` and `lens_b_matched.csv` (this dir). External connectivity (access burden removed), internal connectivity (backup-route redundancy), and displacement (a rising cost):
 
 ![external connectivity](curve_external_connectivity_ZAF.9.3.1_1_5810.png)
 
@@ -48,9 +48,9 @@ The same region on the same access-depth colour scale (blue = at a street, red =
 |---|---|---|
 | ![clearance](after_clearance_matched.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_matched.jpg) | ![osm_footpaths](after_osm_footpaths_matched.jpg) |
 
-**Matched access target** — every method truncated where access-depth reaches the target, so this compares the *road each takes* for the same outcome:
+**Matched external-connectivity target** — every method truncated where external connectivity (access-burden removed) reaches 0.70, so this compares the *road each takes* for the same outcome:
 
 | clearance | greedy_arterial_buildable | osm_footpaths |
 |---|---|---|
-| ![clearance](after_clearance_depth3.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_depth3.jpg) | ![osm_footpaths](after_osm_footpaths_depth3.jpg) |
+| ![clearance](after_clearance_ext70.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_ext70.jpg) | ![osm_footpaths](after_osm_footpaths_ext70.jpg) |
 

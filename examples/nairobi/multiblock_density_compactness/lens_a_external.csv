@@ -1,0 +1,3 @@
+method,target_ext,reached,reached_ext,road_length_m,displacement,pct_displaced,propose_seconds
+clearance,0.70,False,0.1200,390.2,22.9,0.0082,0.0
+greedy_arterial_buildable,0.70,False,0.1066,1607.0,58.4,0.0208,0.0

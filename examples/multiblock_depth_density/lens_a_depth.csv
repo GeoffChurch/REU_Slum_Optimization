@@ -1,4 +1,0 @@
-method,target_depth,reached,reached_depth,road_length_m,displacement,pct_displaced,propose_seconds
-clearance,3,True,3,3955.5,505.2,0.1878,0.9
-greedy_arterial_buildable,3,False,7,4340.5,483.3,0.1797,9.4
-osm_footpaths,3,False,9,6504.7,485.8,0.1806,0.0

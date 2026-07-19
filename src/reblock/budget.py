@@ -721,6 +721,39 @@ def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
     return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), depth_at(lo)
 
 
+def prefix_to_external_connectivity(block: Block, roads: GeoDataFrame, target_ext: float, *,
+                                    tol: float = STREET_TOL) -> tuple[GeoDataFrame, float]:
+    """The minimal drainage-ordered prefix of `roads` whose external connectivity
+    (`access_benefit`, fraction of access-burden Sigma-d^2 removed) is >= `target_ext`, paired with
+    that prefix's actual external connectivity. Connectivity is monotone NON-DECREASING as
+    drainage-ordered roads are added (access_burden's unreached-depth cap makes access_benefit
+    monotone), so a binary search over the prefix length finds the smallest sufficient prefix in
+    O(log R) peels. If even all `roads` cannot reach `target_ext`, returns (all roads in drainage
+    order, full connectivity) with that value < `target_ext` -- the caller reports unreached (an
+    osm_footpaths-style fixed input that never reaches the target). Empty `roads` returns
+    (empty, 0.0)."""
+    ext = access_benefit(block, None, tol=tol)
+    if len(roads) == 0:
+        return cast(GeoDataFrame, roads.iloc[:0]), 0.0
+    ordered = _drainage_ordered(block, roads, tol)
+
+    def ext_at(m: int) -> float:
+        return ext(cast(GeoDataFrame, ordered.iloc[:m]))
+
+    n = len(ordered)
+    full_ext = ext_at(n)
+    if full_ext < target_ext:                     # unreachable: best effort is all roads
+        return ordered, full_ext
+    lo, hi = 0, n                                 # smallest m with ext_at(m) >= target_ext
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if ext_at(mid) >= target_ext:
+            hi = mid
+        else:
+            lo = mid + 1
+    return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), ext_at(lo)
+
+
 def matched_budget(total_length_by_method: dict[str, float]) -> float:
     """The common render budget: the smallest method's total road length (every method can reach
     it). 0.0 if empty."""
