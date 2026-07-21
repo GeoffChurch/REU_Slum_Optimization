@@ -137,10 +137,12 @@ def _subsample_pairs(pairs: list[tuple[int, int]], max_candidates: int
     that clear the loop floor is retained: a cap of C yields ~C valid candidates, not a handful
     (same region -> ~1300 candidates / commute_ratio ~0.50). `pairs` is assumed sorted (as
     `sorted(query_pairs(...))` returns), so the stride samples evenly across the node-index
-    space."""
-    if len(pairs) <= max_candidates:
+    space. A non-positive `max_candidates` is clamped to 1 (never a division by zero or a
+    reversed-stride slice)."""
+    cap = max(max_candidates, 1)
+    if len(pairs) <= cap:
         return pairs
-    stride = math.ceil(len(pairs) / max_candidates)
+    stride = math.ceil(len(pairs) / cap)
     return pairs[::stride]
 
 

@@ -270,6 +270,14 @@ def test_subsample_pairs_preserves_distance_spread_not_just_shortest() -> None:
     assert min(seconds) < 100 and max(seconds) > 900  # spans low AND high, not just the head
 
 
+def test_subsample_pairs_nonpositive_cap_clamps_to_one_no_crash() -> None:
+    # max_candidates=0 must not ZeroDivisionError, and a negative must not reverse-stride -- both
+    # are clamped to a cap of 1 (the floor the old nearest-k helper carried).
+    pairs = [(0, j) for j in range(1, 11)]
+    assert _subsample_pairs(pairs, max_candidates=0) == [pairs[0]]
+    assert _subsample_pairs(pairs, max_candidates=-5) == [pairs[0]]
+
+
 def test_loop_candidates_max_candidates_caps_pairs_and_stays_valid() -> None:
     block = _gap_block()
     base = _gap_roads()
