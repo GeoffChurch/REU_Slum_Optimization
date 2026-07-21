@@ -373,6 +373,14 @@ def _base_proposal(block: Block, roads: gpd.GeoDataFrame, *,
 _UNLIMITED_BUDGET_FRAC = 10.0
 
 
+def test_loop_closure_refiner_default_max_candidates_is_the_plateau() -> None:
+    # The ρ-plateau default -- documents the calibrated cap so a silent regression to the old
+    # starving value is caught.
+    block = _gap_block()
+    refiner = LoopClosureRefiner(base=_FakeBase(_base_proposal(block, _gap_roads())))
+    assert refiner.max_candidates == 1500
+
+
 def test_loop_closure_refiner_adds_loop_reduces_bridges_and_raises_commute_ratio() -> None:
     block = _ratio_block()
     base_roads = _ratio_base_roads()

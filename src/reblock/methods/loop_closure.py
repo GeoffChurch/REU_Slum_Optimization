@@ -231,11 +231,8 @@ class LoopClosureRefiner:
     # A high safety cap, not the real bound -- budget_frac (via the resolved budget_m) and
     # min_bridges_per_m now do the real work of stopping the greedy loop.
     min_loop_len_m: float = 40.0
-    # 20 m (down from an initial 60 m default): on a dense region-scale clearance mesh, 60 m put
-    # `loop_candidates` at ~28k pairs / ~155s wall-clock end to end -- 20 m lands in the low
-    # hundreds-to-low-thousands of pairs (single-digit-to-teens seconds) while still lifting
-    # commute_ratio well above the bare clearance base (region-measured, see loop_closure.py's
-    # module docstring companion in the task report -- ρ 0.0 -> >0.10 preserved at this radius).
+    # 45 m: sufficient for block-scale bases with the uniform `max_candidates` cap, which bounds the
+    # expensive per-pair snap volume regardless of mesh density (see `_subsample_pairs`).
     search_radius_m: float = 45.0
     snap_lam: float = 2.0
     # A second, independent bound on top of `search_radius_m`: even a modest radius can still
@@ -243,7 +240,13 @@ class LoopClosureRefiner:
     # with LOCAL node density, not just radius. `max_candidates` caps `loop_candidates`' pair volume
     # via `_subsample_pairs` regardless of density -- a belt-and-suspenders guard, not the primary
     # lever (search_radius_m's cut is what keeps the common case fast).
-    max_candidates: int | None = 4000
+    max_candidates: int | None = 1500
+    # Uniform-subsample cap on `loop_candidates`' pair volume (see `_subsample_pairs`): bounds the
+    # per-pair `_snap` cost regardless of mesh density. 1500 is the commute_ratio PLATEAU -- caps
+    # 1500/2500/4000 all reach ~the same ρ on an 11k-parcel region (budget-bound past ~1300 valid
+    # candidates), and 1500 is ~6x faster than uncapped. search_radius_m stays 45 by default (that
+    # already recovers large blocks with the uniform cap); the sparse dt=3 REGION base overrides to
+    # 60 (see scripts/gen_multiblock_example.py).
 
     @property
     def identity(self) -> tuple[object, ...] | None:
