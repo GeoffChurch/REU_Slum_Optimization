@@ -17,6 +17,7 @@ defaults:
 all_methods:
   topology: {_target_: reblock.methods.topology.TopologyMethod}
   greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: directness, max_roads: 15, lazy: true, candidate_policy: grow}
+  greedy_arterial_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: directness, cost: repulsion, max_roads: 15, lazy: true, candidate_policy: grow}
   # aspirational (ideal straight chords, not snapped to frontages) is a DIAGNOSTIC -- it isolates
   # the effect of frontage-snapping, NOT a universal directness ceiling. directness/E measure
   # internal circulation (all-pairs, door-to-door incl. the walk-to-road legs); under that honest

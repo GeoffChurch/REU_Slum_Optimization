@@ -19,8 +19,8 @@ gen_method_comparison() {
   local dir="examples/method-comparison"
   run pixi run python -m reblock.compare data=capetown_full \
     "block_ids=[[ZAF.9.3.1_1_40972]]" \
-    "methods=[topology,clearance,greedy_arterial_buildable,osm_footpaths]" max_blocks=1 \
-    all_methods.greedy_arterial_buildable.max_roads=8 \
+    "methods=[topology,clearance,greedy_arterial_repulsion,osm_footpaths]" max_blocks=1 \
+    all_methods.greedy_arterial_repulsion.max_roads=8 \
     "desire_source.snapshot=$dir/desire_lines_40972.geojson" \
     "hydra.run.dir=$dir"
   # Hydra writes <job>.log (job name 'compare') into the run dir; rename to run.log.

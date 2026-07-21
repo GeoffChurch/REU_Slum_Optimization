@@ -3,4 +3,4 @@ euclidean_grid,1040.2,0.3867,1
 clearance_looped,582.8,0.2166,1
 clearance,505.2,0.1878,1
 osm_footpaths,485.8,0.1806,1
-greedy_arterial_buildable,483.3,0.1797,1
+greedy_arterial_repulsion,429.3,0.1596,1
