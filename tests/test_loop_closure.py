@@ -12,6 +12,7 @@ from reblock import derive_graph
 from reblock.budget import _noded_graph, commute_ratio
 from reblock.contracts import Block, Proposal
 from reblock.methods.loop_closure import (
+    LoopClosureIdentity,
     LoopClosureRefiner,
     _bridge_tree,
     _subsample_pairs,
@@ -515,8 +516,8 @@ def test_loop_closure_refiner_identity_folds_in_base_identity() -> None:
     refiner = LoopClosureRefiner(base=fake)
     ident = refiner.identity
     assert ident is not None
-    assert ident[0] == "loop_closure"
-    assert ident[1] == fake.identity
+    assert isinstance(ident, LoopClosureIdentity)
+    assert ident.base == fake.identity
 
 
 def test_loop_closure_refiner_identity_none_when_base_identity_none() -> None:

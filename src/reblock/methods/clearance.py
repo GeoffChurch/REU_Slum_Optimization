@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Hashable, Iterable
 from dataclasses import dataclass, field
 
 import geopandas as gpd
@@ -210,6 +210,17 @@ def _greedy_reblock(
     return gdf, params
 
 
+@dataclass(frozen=True)
+class ClearanceIdentity:
+    """Cache-key identity for ClearanceReblocker. The dataclass type discriminates the method (no
+    string tag). `substrate` holds the child substrate's own identity verbatim (whatever it
+    returns -- a tuple today); frozen -> hashable, usable as an L1 dict key and joblib-picklable."""
+    substrate: Hashable            # the nested Substrate.identity (not converted in this pass)
+    repulsion: float
+    depth_target: int
+    max_roads: int
+
+
 @dataclass
 class ClearanceReblocker:
     """Greedy least-cost-path reblocker on a pluggable routing substrate (default chord_diag,
@@ -222,14 +233,15 @@ class ClearanceReblocker:
     max_roads: int = 400
 
     @property
-    def identity(self) -> tuple[object, ...] | None:
+    def identity(self) -> ClearanceIdentity | None:
         # An uncacheable substrate (PrebuiltSubstrate: identity None) makes the whole method
         # uncacheable -- propagate the None up so derive() bypasses the memoized propose, else two
         # different ad-hoc graphs would key-collide in the access_after/geometric_after caches.
         if self.substrate.identity is None:
             return None
-        return ("clearance", self.substrate.identity, float(self.repulsion),
-                int(self.depth_target), int(self.max_roads))
+        return ClearanceIdentity(
+            substrate=self.substrate.identity, repulsion=float(self.repulsion),
+            depth_target=int(self.depth_target), max_roads=int(self.max_roads))
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; the routing is block-only

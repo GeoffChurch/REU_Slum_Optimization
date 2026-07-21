@@ -7,6 +7,7 @@ lookup, not a fresh `nx.bridges` call.
 from __future__ import annotations
 
 import math
+from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import cast
 
@@ -207,6 +208,21 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
     return out
 
 
+@dataclass(frozen=True)
+class LoopClosureIdentity:
+    """Cache-key identity for LoopClosureRefiner. The dataclass type discriminates the refiner (no
+    string tag). `base` holds the wrapped base method's own identity verbatim (whatever it returns);
+    frozen -> hashable, usable as an L1 dict key and joblib-picklable."""
+    base: Hashable                 # the nested base Method.identity (not converted in this pass)
+    budget_frac: float
+    min_bridges_per_m: float
+    max_loops: int
+    min_loop_len_m: float
+    search_radius_m: float
+    snap_lam: float
+    max_candidates: int | None
+
+
 @dataclass
 class LoopClosureRefiner:
     """Method wrapper composing `loop_candidates` + `greedy_close_loops` behind the `Method.propose`
@@ -251,15 +267,18 @@ class LoopClosureRefiner:
     # 60 (see scripts/gen_multiblock_example.py).
 
     @property
-    def identity(self) -> tuple[object, ...] | None:
+    def identity(self) -> LoopClosureIdentity | None:
         # An uncacheable base (identity None) makes the whole refiner uncacheable -- propagate the
         # None up so derive() bypasses the memoized propose, matching ClearanceReblocker's
         # uncacheable-substrate handling.
         bid = getattr(self.base, "identity", None)
         if bid is None:
             return None
-        return ("loop_closure", bid, self.budget_frac, self.min_bridges_per_m, self.max_loops,
-                self.min_loop_len_m, self.search_radius_m, self.snap_lam, self.max_candidates)
+        return LoopClosureIdentity(
+            base=bid, budget_frac=self.budget_frac, min_bridges_per_m=self.min_bridges_per_m,
+            max_loops=self.max_loops, min_loop_len_m=self.min_loop_len_m,
+            search_radius_m=self.search_radius_m, snap_lam=self.snap_lam,
+            max_candidates=self.max_candidates)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         # `prior`, when given, IS the base proposal to refine -- skip recomputing/re-fetching it
