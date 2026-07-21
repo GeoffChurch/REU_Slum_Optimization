@@ -17,7 +17,7 @@ where they are sparse, phased onto the densest cluster -- combined with the hugg
 Independently of those, every candidate line is trimmed to hug the parcels: after being clipped
 to the block's extent it is intersected with the parcel geometry buffered by `parcel_hug_buffer`,
 so the portions running through empty gaps (with no parcels nearby) are dropped rather than drawn
-edge-to-edge. This is always on -- it is not a toggle. `parcel_hug_buffer` (and the `parcel_bridge_gap`
+edge-to-edge. This is always on -- it is not a toggle. `parcel_hug_buffer` (and `parcel_bridge_gap`
 below) default to a multiple of the block's *own* median parcel nearest-neighbour distance, so the
 hug is as tight on a dense 5 m-spaced block as on a sparse 50 m-spaced one, with no per-dataset
 tuning; both remain explicitly override-able. To avoid needlessly fragmenting the road network, the
@@ -138,7 +138,7 @@ def _shared_boundary(gi: BaseGeometry, gj: BaseGeometry, tol: float) -> BaseGeom
 def _straight_segments(line: LineString) -> list[LineString]:
     """Split `line` into its individual straight vertex-to-vertex segments. Keeps candidate roads at
     single parcel-edge scale rather than long multi-vertex runs, so nothing is ever concatenated
-    into a long straight chain (a Voronoi edge is already one segment and passes through unchanged)."""
+    into a long straight chain (a Voronoi edge is already one segment and passes through as-is)."""
     cs = list(line.coords)
     return [LineString([cs[k], cs[k + 1]]) for k in range(len(cs) - 1) if cs[k] != cs[k + 1]]
 
@@ -163,10 +163,11 @@ def _connect_to_street(
          scattered by the sparse density floor, not worth a road (nor the connector each would drag
          to the street). Only the genuine dense-area sub-networks survive.
       2. Wire the survivors to a *shared backbone* that starts at the street and grows: each cluster
-         (largest first) takes the shortest path to whatever is already connected -- the street or an
-         earlier cluster's connector -- so connectors are reused into a tree instead of every cluster
-         drawing its own path to the frontage. A cluster with no path to the street at all is an
-         isolated sliver and is dropped. In the spirit of peel.py's street-reaching guarantee."""
+         (largest first) takes the shortest path to whatever is already connected -- the street or
+         an earlier cluster's connector -- so connectors are reused into a tree instead of every
+         cluster drawing its own path to the frontage. A cluster with no path to the street at
+         all is an isolated sliver and is dropped. In the spirit of peel.py's street-reaching
+         guarantee."""
     street_geom = union_all(list(streets.geometry)) if len(streets) else None
     node_of: dict[tuple[int, int], int] = {}
     node_pt: dict[int, tuple[float, float]] = {}
@@ -240,7 +241,8 @@ def _connect_to_street(
             continue
         _, target = min(reachable)
         path = paths[target]
-        for a, b in zip(path, path[1:]):
+        # pairwise over the path: path[1:] is intentionally one shorter, so strict=False
+        for a, b in zip(path, path[1:], strict=False):
             idx = graph[a][b]["idx"]
             if idx not in result:
                 result.add(idx)
@@ -503,7 +505,7 @@ class EuclideanGridReblocker:
         hug_region = parcel_union.buffer(parcel_hug_buffer).intersection(block.boundary)
         hug_length_before = float(sum(ln.length for ln in candidates))
         hugged: list[LineString] = []
-        for ln in candidates:   # min_seg_len re-applied here so a trim can't leave a sub-length span
+        for ln in candidates:   # min_seg_len re-applied here so a trim leaves no sub-length span
             hugged.extend(_hug_line(ln, hug_region, parcel_bridge_gap, self.min_seg_len))
         hug_length_after = float(sum(ln.length for ln in hugged))
 
@@ -568,8 +570,8 @@ class EuclideanGridReblocker:
         #    parcels), normalised to [0, 1] against the densest cell -> a continuous field
         res = max(_FOLLOW_DENSITY_RES_FACTOR * parcel_scale, 1e-6)
         raster = _density_raster(block, res)
-        cell_count = {(int(c), int(r)): int(n)
-                      for (c, r), n in zip(raster.cells, raster.counts)}
+        cell_count = {(int(c), int(r)): int(n)   # cells & counts are same-length by construction
+                      for (c, r), n in zip(raster.cells, raster.counts, strict=True)}
         max_count = float(raster.counts.max()) if len(raster.counts) else 1.0
 
         def density_score(x: float, y: float) -> float:
@@ -578,7 +580,7 @@ class EuclideanGridReblocker:
             return cell_count.get((col, row), 0) / max_count
 
         # 3. density-weighted selection: probability rises continuously with local density from
-        #    `follow_min_coverage` (sparse) to `follow_max_coverage` (dense) -- a gradient, not a cut
+        #    `follow_min_coverage` (sparse) to `follow_max_coverage` (dense) -- gradient, not a cut
         lo, hi, gamma = (self.follow_min_coverage, self.follow_max_coverage,
                          self.follow_density_gamma)
         scores: list[float] = []

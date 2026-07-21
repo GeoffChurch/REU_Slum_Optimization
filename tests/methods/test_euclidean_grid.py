@@ -421,7 +421,7 @@ def test_parcel_hug_buffer_scales_with_the_blocks_own_parcel_spacing() -> None:
                      streets=streets)
 
     # identical layout, one 10x sparser than the other, SAME spacing -> the derived hug buffer
-    # tracks the block's own parcel scale, not `spacing` (dataset-agnostic: dense 1 m or sparse 10 m)
+    # tracks the block's own parcel scale, not `spacing` (dataset-agnostic across dense/sparse)
     dense = EuclideanGridReblocker(spacing=5.0, seek_density=False).propose(block_at(1.0))
     sparse = EuclideanGridReblocker(spacing=5.0, seek_density=False).propose(block_at(10.0))
     assert cast(float, dense.params["parcel_scale"]) == pytest.approx(1.0, abs=0.2)
@@ -537,7 +537,8 @@ def test_follow_parcels_min_component_drops_noise_for_a_sparser_network() -> Non
     # the sparse floor scatters through low-density areas, leaving a sparser network than keeping
     # every cluster (follow_min_component=0.0) would
     default = EuclideanGridReblocker(follow_parcels=True).propose(block)
-    unfiltered = EuclideanGridReblocker(follow_parcels=True, follow_min_component=0.0).propose(block)
+    unfiltered = EuclideanGridReblocker(
+        follow_parcels=True, follow_min_component=0.0).propose(block)
     assert cast(int, default.params["connectivity_edges_dropped"]) > 0
     assert cast(float, default.params["follow_min_component"]) > 0.0
     assert len(default.roads) < len(unfiltered.roads)          # a genuinely sparser final network
