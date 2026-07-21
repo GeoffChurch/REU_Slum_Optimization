@@ -1,5 +1,7 @@
 import json
 import logging
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -59,3 +61,15 @@ def test_example_command_capetown_omits_city():
 def test_example_command_other_city_appends_it():
     assert example_command("depth_density", "nairobi") == \
         "pixi run python -m scripts.gen_multiblock_example depth_density nairobi"
+
+
+def test_regenerate_dry_run_lists_all(tmp_path):
+    env = {**os.environ}
+    r = subprocess.run(["bash", "scripts/regenerate_examples.sh", "--dry-run"],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0, r.stderr
+    out = r.stdout
+    for m in ("depth", "depth_density", "density_compactness"):
+        assert f"gen_multiblock_example {m}" in out            # capetown
+        assert f"gen_multiblock_example {m} nairobi" in out    # nairobi
+    assert "reblock.compare" in out and "method-comparison" in out

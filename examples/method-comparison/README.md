@@ -30,6 +30,10 @@ selection's locator link plus the per-method frontier terminal points and displa
 captured in [`run.log`](run.log). (Displacement is now a curve emitted every run, not a separate
 `cost=displacement` pass — see the displacement section below.)
 
+> Regenerated in-place by `pixi run regen-examples` (or the command above with
+> `hydra.run.dir=examples/method-comparison`); its Hydra log becomes `run.log`. The tables below are
+> hand-written and can lag a fresh run — see `run.log` for the current figures.
+
 ## The roads each method builds
 
 Before — every parcel up to 7 deep (dark = deep):

@@ -69,6 +69,7 @@ fmt = "ruff format ."
 check = { depends-on = ["lint", "typecheck", "test"] }
 run = "python -m reblock.run"
 compare = "python -m reblock.compare"
+regen-examples = "bash scripts/regenerate_examples.sh"
 
 # ---------------------------------------------------------------------------
 # Tooling config
