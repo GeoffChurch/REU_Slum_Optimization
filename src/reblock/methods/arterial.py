@@ -443,7 +443,7 @@ class ArterialIdentity:
     mode: str
     objective: str
     cost: str
-    # corridor_m when cost=="displacement" else 0.0 -- a DERIVED value (see the property).
+    # corridor_m when cost in {displacement, repulsion} else 0.0 -- DERIVED (see the property).
     corridor_key: float
     max_roads: int
     n_anchors: int
@@ -479,12 +479,12 @@ class GreedyArterialReblocker:
     @property
     def identity(self) -> ArterialIdentity:
         # Every field that changes the proposed roads must be in the derive-cache key. corridor_m
-        # changes which roads win only under cost="displacement"; hold it fixed otherwise so
+        # changes which roads win only under cost="displacement"/"repulsion"; hold it fixed so
         # length-cost methods stay corridor-independent (two methods differing only in corridor_m
         # must NOT share a cached proposal when it matters). max_roads / n_anchors / top_k / lam all
         # change the greedy search, so they belong in the key too -- otherwise a budget/candidate
         # sweep silently returns another setting's cached proposal.
-        corridor_key = self.corridor_m if self.cost == "displacement" else 0.0
+        corridor_key = self.corridor_m if self.cost in ("displacement", "repulsion") else 0.0
         return ArterialIdentity(
             mode=self.mode, objective=self.objective, cost=self.cost, corridor_key=corridor_key,
             max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k, lam=self.lam,

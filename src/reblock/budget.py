@@ -73,7 +73,7 @@ def repulsion(building_points: GeoDataFrame, radii: NDArray[np.float64],
               geom: BaseGeometry) -> float:
     """Soft per-road intrusion cost: a road's OWN proximity to the building field, summed over
     building points as the quadratic-tail kernel r^2/(r^2 + d^2) (d = point-to-road distance,
-    r = the building's disk radius from `building_radii`). ALWAYS > 0 (the tail never reaches
+    r = the building's disk radius from `building_radii`). > 0 whenever any building has r>0 (the tail never reaches
     zero) so no road is 'free' -- unlike `displacement`, whose hard 0-beyond-r cutoff makes
     gap-hugging roads free and degenerate. Depends ONLY on `geom` and the fixed building field
     (not on other committed roads), so it is CONSTANT per candidate -> a well-behaved,

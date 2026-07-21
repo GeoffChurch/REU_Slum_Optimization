@@ -19,14 +19,14 @@ def test_write_maps_qr_makes_a_png(tmp_path: Path) -> None:
 
 def test_tee_to_file_captures_print_and_logging(tmp_path):
     log = tmp_path / "run.log"
+    before_out, before_err = sys.stdout, sys.stderr
     with _tee_to_file(log):
         print("hello-stdout")
         sys.stderr.write("hello-stderr\n")
         logging.getLogger("x").info("hello-logging")
     text = log.read_text()
     assert "hello-stdout" in text and "hello-stderr" in text and "hello-logging" in text
-    # streams restored:
-    assert sys.stdout is sys.__stdout__ or hasattr(sys.stdout, "write")
+    assert sys.stdout is before_out and sys.stderr is before_err   # streams restored, not a _Tee
 
 
 def _seed_run_dir(d, **meta):
