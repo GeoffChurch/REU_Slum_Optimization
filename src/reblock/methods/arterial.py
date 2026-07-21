@@ -32,6 +32,7 @@ from reblock.budget import (
     access_burden,
     building_radii,
     displacement,
+    repulsion,
     road_drainage,
 )
 from reblock.contracts import Block, Proposal
@@ -238,7 +239,8 @@ class _StepState:
     branches' `_score`/incremental-`_union_with` calls -- omitting any of these breaks a scoring
     branch silently (wrong values, not a crash). `radii` (per-building disk radius, r=NN/2,
     constant across a block's steps) feeds the `cost="displacement"` denominator's disk
-    `displacement` call. `frozen=True` makes the read-only invariant real:
+    `displacement` call. `frozen=True` makes the
+    read-only invariant real:
     the workers only READ this holder, and its mutable members (`committed`, `base_merged`) are
     mutated only in the PARENT and only AFTER the holder is cleared (a fresh `_StepState` is built
     per step), so no worker ever observes a mid-mutation copy."""
@@ -298,6 +300,8 @@ def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
             trial = _explode(_union_with(st.base_merged, real), st.crs)  # step -> buildable
         denom = float(displacement(st.block.building_points, st.radii, trial, st.corridor_m)
                      - st.committed_disp)
+    elif st.cost == "repulsion":
+        denom = repulsion(st.block.building_points, st.radii, real)
     else:
         denom = real.length
     gain = float("inf") if (denom <= 0 and raw > 0) else (raw / denom if denom > 0 else 0.0)
@@ -329,7 +333,10 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     `max_roads` are placed or no candidate improves. `mode` in {"buildable", "aspirational"}.
     `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/expected buildings
     newly displaced within `corridor_m` of any committed road, via the extent-aware disk
-    `budget.displacement` over `block.building_points` -- see `budget.building_radii`)}. A
+    `budget.displacement` over `block.building_points` -- see `budget.building_radii`), "repulsion"
+    (Delta-benefit per the road's OWN quadratic-tail proximity to the building field via
+    `budget.repulsion` -- a constant-per-candidate, never-zero soft cost, so CELF-safe and never
+    degenerate)}. A
     beneficial candidate whose denominator is zero (a zero-length road can't occur -- filtered
     below -- but a zero-marginal-displacement road can) ranks ABOVE every positive-denominator
     candidate (infinite gain) rather than being divided by zero or skipped: take the free
@@ -398,8 +405,8 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         _STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             mode=mode, objective=objective, cost=cost, lam=lam, corridor_m=corridor_m,
-            committed_disp=committed_disp, block=block, radii=radii, crs=block.crs, adj=adj,
-            base_burden=base_burden, ctx=ctx)
+            committed_disp=committed_disp, block=block, radii=radii,
+            crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             if use_pool:
                 # Explicit fork context so children inherit `_STEP_STATE` via COW; `map` preserves
@@ -427,6 +434,27 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     return roads
 
 
+@dataclass(frozen=True)
+class ArterialIdentity:
+    """Cache-key identity for GreedyArterialReblocker: one named field per proposal-affecting
+    knob. The dataclass type itself discriminates the method (no string tag needed -- a frozen
+    dataclass compares type before fields, so this never equals another identity type). Frozen ->
+    hashable, so it works as an L1 dict key and pickles into the joblib L2 key."""
+    mode: str
+    objective: str
+    cost: str
+    # corridor_m when cost=="displacement" else 0.0 -- a DERIVED value (see the property).
+    corridor_key: float
+    max_roads: int
+    n_anchors: int
+    top_k: int
+    lam: float
+    lazy: bool
+    candidate_policy: str
+    rescore_every: int
+    max_anchors: int
+
+
 @dataclass
 class GreedyArterialReblocker:
     mode: str = "buildable"          # "buildable" | "aspirational"
@@ -436,6 +464,7 @@ class GreedyArterialReblocker:
     lam: float = 2.0
     max_roads: int = 15
     # "length" (Delta-benefit/metre) | "displacement" (Delta-benefit/building, see budget.py)
+    # | "repulsion" (Delta-benefit / soft quadratic-tail proximity cost, never-zero & CELF-safe)
     cost: str = "length"
     corridor_m: float = 3.0   # road half-width + setback; the displacement corridor
     workers: int = 16         # fork-pool size for per-step candidate scoring; 1 == serial no-op
@@ -448,8 +477,7 @@ class GreedyArterialReblocker:
     max_anchors: int = 0
 
     @property
-    def identity(self) -> tuple[str, str, str, str, float, int, int, int, float, bool, str, int,
-                                int]:
+    def identity(self) -> ArterialIdentity:
         # Every field that changes the proposed roads must be in the derive-cache key. corridor_m
         # changes which roads win only under cost="displacement"; hold it fixed otherwise so
         # length-cost methods stay corridor-independent (two methods differing only in corridor_m
@@ -457,9 +485,11 @@ class GreedyArterialReblocker:
         # change the greedy search, so they belong in the key too -- otherwise a budget/candidate
         # sweep silently returns another setting's cached proposal.
         corridor_key = self.corridor_m if self.cost == "displacement" else 0.0
-        return ("greedy_arterial", self.mode, self.objective, self.cost, corridor_key,
-                self.max_roads, self.n_anchors, self.top_k, self.lam,
-                self.lazy, self.candidate_policy, self.rescore_every, self.max_anchors)
+        return ArterialIdentity(
+            mode=self.mode, objective=self.objective, cost=self.cost, corridor_key=corridor_key,
+            max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k, lam=self.lam,
+            lazy=self.lazy, candidate_policy=self.candidate_policy,
+            rescore_every=self.rescore_every, max_anchors=self.max_anchors)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
@@ -475,7 +505,8 @@ class GreedyArterialReblocker:
             roads = _greedy_arterials(
                 block, mode=self.mode, objective=self.objective, n_anchors=self.n_anchors,
                 top_k=self.top_k, lam=self.lam, max_roads=self.max_roads, cost=self.cost,
-                corridor_m=self.corridor_m, workers=self.workers, max_anchors=self.max_anchors)
+                corridor_m=self.corridor_m, workers=self.workers,
+                max_anchors=self.max_anchors)
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=f"greedy_arterial_{self.mode}_{self.objective}", method="greedy_arterial",

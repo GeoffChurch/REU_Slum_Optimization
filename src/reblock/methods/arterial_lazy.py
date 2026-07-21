@@ -156,8 +156,8 @@ def _iter_live(heap: list[tuple[float, str, str, LineString, int]], live: set[st
 
 def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
                            top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
-                           cost: str = "length", corridor_m: float = 3.0, workers: int = 16,
-                           candidate_policy: str = "grow", rescore_every: int = 0,
+                           cost: str = "length", corridor_m: float = 3.0,
+                           workers: int = 16, candidate_policy: str = "grow", rescore_every: int = 0,
                            max_anchors: int = 0) -> GeoDataFrame:
     """CELF lazy-greedy driver: commit the best gain-per-cost arterial one at a time, but instead of
     re-scoring every candidate every step (the exact `_greedy_arterials`), drive selection with a
@@ -203,8 +203,8 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
         _art._STEP_STATE = _StepState(
             step=stepctx, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             mode=mode, objective=objective, cost=cost, lam=lam, corridor_m=corridor_m,
-            committed_disp=committed_disp, block=block, radii=radii, crs=block.crs, adj=adj,
-            base_burden=base_burden, ctx=ctx)
+            committed_disp=committed_disp, block=block, radii=radii,
+            crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             # eager-score candidates entering this step
             if rescore_every and step > 0 and step % rescore_every == 0:

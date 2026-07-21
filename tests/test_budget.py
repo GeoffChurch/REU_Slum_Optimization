@@ -265,6 +265,37 @@ def test_displacement_counts_a_shared_site_once_under_overlapping_corridors():
     assert displacement(pts, radii, roads, corridor_m=1.0) == 3.0
 
 
+def test_repulsion_is_positive_even_far_from_all_buildings():
+    from shapely.geometry import LineString, Point
+
+    from reblock.budget import building_radii, displacement, repulsion
+    crs = "EPSG:32734"
+    # three buildings clustered near the origin
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(0, 5), Point(5, 0)], crs=crs)
+    radii = building_radii(pts, corridor_m=3.0)
+    far_road = LineString([(1000.0, 1000.0), (1000.0, 1010.0)])   # nowhere near any building
+    # the quadratic tail r^2/(r^2+d^2) never reaches zero -> repulsion stays strictly positive even
+    # for a road far from every building (the key non-degeneracy property)...
+    assert repulsion(pts, radii, far_road) > 0.0
+    # ... whereas displacement's hard 0-beyond-r cutoff makes the very same far road cost 0 -- the
+    # degeneracy repulsion is designed to avoid.
+    far_roads = gpd.GeoDataFrame(geometry=[far_road], crs=crs)
+    assert displacement(pts, radii, far_roads, corridor_m=3.0) == 0.0
+
+
+def test_repulsion_higher_for_a_road_closer_to_buildings():
+    from shapely.geometry import LineString, Point
+
+    from reblock.budget import building_radii, repulsion
+    crs = "EPSG:32734"
+    pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(0, 10), Point(0, 20)], crs=crs)
+    radii = building_radii(pts, corridor_m=3.0)
+    near = LineString([(2.0, 0.0), (2.0, 20.0)])      # 2 m from the building column
+    far = LineString([(50.0, 0.0), (50.0, 20.0)])     # 50 m away
+    r_near, r_far = repulsion(pts, radii, near), repulsion(pts, radii, far)
+    assert r_near > r_far > 0.0                        # closer road intrudes strictly more
+
+
 def _straight_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
     # Two 10m-wide parcels side by side, both fronting a street along y=0; road1 (x=5) serves
     # the left parcel, road2 (x=15) serves the right one -- disjoint 3m corridors, so a
