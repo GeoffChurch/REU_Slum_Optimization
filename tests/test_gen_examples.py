@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from scripts.gen_example_readme import gen_example_readme
-from scripts.gen_multiblock_example import _tee_to_file, write_maps_qr
+from scripts.gen_multiblock_example import _tee_to_file, example_command, write_maps_qr
 
 
 def test_write_maps_qr_makes_a_png(tmp_path: Path) -> None:
@@ -49,3 +49,13 @@ def test_readme_omits_provenance_when_absent(tmp_path):
     (tmp_path / "meta.json").write_text("{}")
     md = gen_example_readme(tmp_path, metric_name="depth", formula="f", blurb="b")
     assert "## How this was generated" not in md
+
+
+def test_example_command_capetown_omits_city():
+    assert example_command("depth", "capetown") == \
+        "pixi run python -m scripts.gen_multiblock_example depth"
+
+
+def test_example_command_other_city_appends_it():
+    assert example_command("depth_density", "nairobi") == \
+        "pixi run python -m scripts.gen_multiblock_example depth_density nairobi"
