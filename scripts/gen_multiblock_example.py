@@ -14,7 +14,9 @@ Run:  pixi run python -m scripts.gen_multiblock_example <depth|depth_density>
 """
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import cast
@@ -38,6 +40,38 @@ from scripts.gen_example_readme import write_readme
 def write_maps_qr(url: str, path: Path, *, scale: int = 4, border: int = 2) -> None:
     """Write a PNG QR code of `url` (e.g. the Google Maps locator) to `path`."""
     segno.make(url, error="m").save(str(path), scale=scale, border=border)
+
+
+@contextlib.contextmanager
+def _tee_to_file(path: Path):
+    """Mirror stdout+stderr (and root logging at INFO) into `path` for the duration; restore after."""
+    f = open(path, "w", encoding="utf-8", buffering=1)
+
+    class _Tee:
+        def __init__(self, *streams): self._streams = streams
+        def write(self, s):
+            for st in self._streams: st.write(s)
+        def flush(self):
+            for st in self._streams: st.flush()
+
+    orig_out, orig_err = sys.stdout, sys.stderr
+    root = logging.getLogger()
+    handler = logging.StreamHandler(f)
+    handler.setFormatter(logging.Formatter("[%(name)s][%(levelname)s] %(message)s"))
+    prev_level = root.level
+    root.addHandler(handler)
+    if prev_level == logging.NOTSET or prev_level > logging.INFO:
+        root.setLevel(logging.INFO)
+    try:
+        sys.stdout = _Tee(orig_out, f)
+        sys.stderr = _Tee(orig_err, f)
+        yield
+    finally:
+        sys.stdout, sys.stderr = orig_out, orig_err
+        root.removeHandler(handler)
+        root.setLevel(prev_level)
+        f.flush()
+        f.close()
 
 _FORMULA = {
     "depth": "depth = √(n·A)/P  →  true peel rings from a street",
