@@ -125,29 +125,23 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
     return current
 
 
-def _knn_bounded_pairs(nodes: list[Node], kdt: cKDTree, search_radius_m: float, max_candidates: int
-                       ) -> list[tuple[int, int]]:
-    """Bound `query_pairs(search_radius_m)`'s pair volume to roughly `max_candidates`, WITHOUT
-    truncating the pair list by distance: a hard truncation would keep only the globally shortest
-    pairs -- tiny same-branch loops the geometric loop-floor in `loop_candidates` already rejects,
-    wasting the whole budget on candidates that can never survive. Instead every node contributes
-    its own up-to-`k` nearest OTHER nodes within `search_radius_m` (`k` sized so `n * k` lands near
-    `max_candidates`), so distant/cross-branch pairs -- the ones that actually close big loops --
-    stay represented regardless of local mesh density."""
-    n = len(nodes)
-    k = max(1, max_candidates // max(n, 1))
-    kk = min(k + 1, n)                                     # +1: query includes each node itself
-    dists, idxs = kdt.query(np.array(nodes, dtype=float), k=kk)
-    if kk == 1:                                            # scipy squeezes the k=1 case to 1-D
-        dists, idxs = dists[:, None], idxs[:, None]
-    out: set[tuple[int, int]] = set()
-    for i in range(n):
-        for d, j in zip(dists[i], idxs[i], strict=True):
-            jj = int(j)
-            if jj == i or d > search_radius_m:
-                continue
-            out.add((i, jj) if i < jj else (jj, i))
-    return sorted(out)
+def _subsample_pairs(pairs: list[tuple[int, int]], max_candidates: int
+                     ) -> list[tuple[int, int]]:
+    """Uniformly subsample the index-sorted `pairs` to ~`max_candidates`, bounding the pair volume
+    handed to `loop_candidates`' expensive per-pair `_snap` + shortest-path WITHOUT biasing which
+    pairs survive. The previous nearest-k scheme kept each node's CLOSEST neighbours -- exactly the
+    short, low-perimeter pairs the `min_loop_len_m` floor rejects -- so on a dense mesh (many nodes
+    -> k collapses to 1-2) it starved the candidate pool to near-zero valid loop-closers (an
+    11k-parcel region fell to 63 candidates / commute_ratio 0.06). A uniform stride over the
+    index-sorted list preserves the straight-line-distance distribution, so the fraction of pairs
+    that clear the loop floor is retained: a cap of C yields ~C valid candidates, not a handful
+    (same region -> ~1300 candidates / commute_ratio ~0.50). `pairs` is assumed sorted (as
+    `sorted(query_pairs(...))` returns), so the stride samples evenly across the node-index
+    space."""
+    if len(pairs) <= max_candidates:
+        return pairs
+    stride = math.ceil(len(pairs) / max_candidates)
+    return pairs[::stride]
 
 
 def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: float,
@@ -173,12 +167,12 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
 
     `max_candidates` bounds the PAIR VOLUME `query_pairs` hands to the expensive per-pair `_snap`
     Dijkstra + shortest-path below -- both scale with pair count, so this is where the volume must
-    be capped, before either runs. On a dense clearance mesh, `query_pairs(search_radius_m)` can
-    return tens of thousands of pairs; past `max_candidates`, `_knn_bounded_pairs` swaps in a
-    k-nearest-neighbours-per-node scheme that keeps the pair count near `max_candidates` while still
-    representing cross-branch loops (see `_knn_bounded_pairs`). `None` (the default) leaves
-    `query_pairs`' own radius cutoff as the only bound -- unchanged behavior for callers that don't
-    opt in."""
+    be capped, before either runs. On a dense clearance mesh `query_pairs(search_radius_m)` can
+    return tens of thousands of pairs; past `max_candidates`, `_subsample_pairs` takes a uniform
+    stride over the index-sorted pairs, preserving the distance distribution so real
+    (floor-clearing) loop-closers survive the cap (see `_subsample_pairs`). `None` (the default)
+    leaves `query_pairs`' own radius cutoff as the only bound -- unchanged behavior for callers
+    that don't opt in."""
     g = _noded_graph(base_roads, block.streets)
     for u, v in g.edges():
         g[u][v]["len"] = math.hypot(u[0] - v[0], u[1] - v[1])
@@ -188,7 +182,7 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
     kdt = cKDTree(np.array(nodes, dtype=float))
     pairs = sorted(kdt.query_pairs(search_radius_m))
     if max_candidates is not None and len(pairs) > max_candidates:
-        pairs = _knn_bounded_pairs(nodes, kdt, search_radius_m, max_candidates)
+        pairs = _subsample_pairs(pairs, max_candidates)
     sg = _snap_graph(_boundary_graph(block.parcels))
     seen: set[bytes] = set()
     out: list[tuple[LineString, Node, Node]] = []
@@ -247,7 +241,7 @@ class LoopClosureRefiner:
     # A second, independent bound on top of `search_radius_m`: even a modest radius can still
     # explode on a denser-than-tested mesh (finer substrate, bigger region), since pair count grows
     # with LOCAL node density, not just radius. `max_candidates` caps `loop_candidates`' pair volume
-    # via `_knn_bounded_pairs` regardless of density -- a belt-and-suspenders guard, not the primary
+    # via `_subsample_pairs` regardless of density -- a belt-and-suspenders guard, not the primary
     # lever (search_radius_m's cut is what keeps the common case fast).
     max_candidates: int | None = 4000
 

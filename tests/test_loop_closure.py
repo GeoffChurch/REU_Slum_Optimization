@@ -5,9 +5,7 @@ from typing import TypedDict, cast
 
 import geopandas as gpd
 import networkx as nx
-import numpy as np
 from pyproj import CRS
-from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Polygon
 
 from reblock import derive_graph
@@ -16,7 +14,7 @@ from reblock.contracts import Block, Proposal
 from reblock.methods.loop_closure import (
     LoopClosureRefiner,
     _bridge_tree,
-    _knn_bounded_pairs,
+    _subsample_pairs,
     bridges_removed,
     greedy_close_loops,
     loop_candidates,
@@ -244,36 +242,32 @@ def test_loop_candidates_closed_loop_rejected_by_perimeter_floor_not_radius() ->
     assert raised == []
 
 
-# --- _knn_bounded_pairs / max_candidates cap ----------------------------------------------------
-# Fixture: a 3x3 unit grid (9 nodes). At radius=3.0 `query_pairs` finds most of the C(9,2)=36
-# pairs -- generous enough that capping to a small `max_candidates` visibly shrinks the set.
+# --- _subsample_pairs / max_candidates cap ------------------------------------------------------
+# A uniform stride bounds pair volume WITHOUT the nearest-k bias that starved dense meshes (kept
+# only the short, floor-rejected pairs). It must preserve the distance SPREAD -- keep long pairs,
+# not just short ones -- so real (min_loop_len-clearing) loop-closers survive the cap.
 
-def _grid_nodes() -> list[tuple[float, float]]:
-    return [(float(x), float(y)) for x in range(3) for y in range(3)]
-
-
-def test_knn_bounded_pairs_shrinks_volume_and_stays_valid() -> None:
-    nodes = _grid_nodes()
-    kdt = cKDTree(np.array(nodes, dtype=float))
-    radius = 3.0
-    uncapped = sorted(kdt.query_pairs(radius))
-    bounded = _knn_bounded_pairs(nodes, kdt, radius, max_candidates=6)
-    assert 0 < len(bounded) < len(uncapped)
-    for i, j in bounded:
-        assert i != j
-        assert 0 <= i < len(nodes)
-        assert 0 <= j < len(nodes)
-        assert math.hypot(nodes[i][0] - nodes[j][0], nodes[i][1] - nodes[j][1]) <= radius
+def test_subsample_pairs_noop_when_within_cap() -> None:
+    pairs = [(0, 1), (0, 2), (1, 2)]
+    assert _subsample_pairs(pairs, max_candidates=10) == pairs
 
 
-def test_knn_bounded_pairs_every_node_gets_at_least_one_neighbour() -> None:
-    # k = max(1, max_candidates // n) is floored at 1 -- a tiny max_candidates still gives every
-    # node a shot at its single nearest neighbour rather than starving some nodes entirely.
-    nodes = _grid_nodes()
-    kdt = cKDTree(np.array(nodes, dtype=float))
-    bounded = _knn_bounded_pairs(nodes, kdt, search_radius_m=3.0, max_candidates=1)
-    touched = {i for pair in bounded for i in pair}
-    assert touched == set(range(len(nodes)))
+def test_subsample_pairs_shrinks_volume_to_about_cap() -> None:
+    pairs = [(0, j) for j in range(1, 101)]           # 100 sorted pairs
+    bounded = _subsample_pairs(pairs, max_candidates=10)
+    assert 0 < len(bounded) <= 10
+    for p in bounded:
+        assert p in pairs                             # subset, no fabricated pairs
+
+
+def test_subsample_pairs_preserves_distance_spread_not_just_shortest() -> None:
+    # Regression guard for the kNN starvation bug: the cap must retain pairs from ACROSS the list
+    # (which, index-sorted, spans the node-coordinate space), not collapse to the shortest/first
+    # few.
+    pairs = [(0, j) for j in range(1, 1001)]          # 1000 sorted pairs
+    bounded = _subsample_pairs(pairs, max_candidates=50)
+    seconds = [j for _i, j in bounded]
+    assert min(seconds) < 100 and max(seconds) > 900  # spans low AND high, not just the head
 
 
 def test_loop_candidates_max_candidates_caps_pairs_and_stays_valid() -> None:
@@ -281,7 +275,7 @@ def test_loop_candidates_max_candidates_caps_pairs_and_stays_valid() -> None:
     base = _gap_roads()
     uncapped = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0)
     capped = loop_candidates(
-        base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0, max_candidates=1)
+        base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0, max_candidates=4)
     assert len(capped) <= len(uncapped)
     assert capped != []                         # the cap still lets the one real loop through
     g = _weighted_road_graph(base, block.streets)
