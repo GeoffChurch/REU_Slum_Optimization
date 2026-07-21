@@ -199,7 +199,7 @@ def region_map(source: Source, regions: list[list[str]],
         sm.set_array([])
         fig_s.colorbar(sm, ax=ax_s, fraction=0.03, pad=0.01, label=metric_name)
     if not members.empty:
-        members.plot(ax=ax_s, facecolor="none", edgecolor="#111111", linewidth=0.5)
+        members.plot(ax=ax_s, facecolor="none", edgecolor="black", linewidth=0.2)
     if frame is not None:
         ax_s.add_patch(Rectangle((frame[0], frame[1]), frame[2] - frame[0], frame[3] - frame[1],
                                  linewidth=1.6, edgecolor="#111111", facecolor="none", zorder=10))
