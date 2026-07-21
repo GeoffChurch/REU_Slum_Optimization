@@ -7,6 +7,7 @@ F2's four per-function cache wrappers).
 """
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -79,6 +80,19 @@ def voronoi(vin: VoronoiInput) -> Any:
 
 
 @dataclass(frozen=True)
+class ScreenSelectionIdentity:
+    """Cache-key identity for a ScreenSelectionInput. The dataclass type discriminates the
+    derivation (no string tag). `metric`/`gate` hold the child BlockMetric.identity /
+    Gate.identity verbatim (not converted in this pass); frozen -> hashable, usable as an L1 dict
+    key and joblib-picklable."""
+    source_hash: str
+    metric: Hashable               # BlockMetric.identity
+    gate: Hashable                 # Gate.identity
+    proxy_keep_pct: float
+    min_buildings: int
+
+
+@dataclass(frozen=True)
 class ScreenSelectionInput:
     """Identified carrier for a DenseCompactScreen selection: derive() keys on .identity
     (the source content hash + the metric + gate + pre-filter), never the paths -- so a rerun
@@ -96,9 +110,11 @@ class ScreenSelectionInput:
     min_buildings: int
 
     @property
-    def identity(self) -> tuple[object, ...] | None:
-        return (("dense-compact-screen", self.source_hash, self.metric.identity,
-                 self.gate.identity, self.proxy_keep_pct, self.min_buildings)
+    def identity(self) -> ScreenSelectionIdentity | None:
+        return (ScreenSelectionIdentity(
+                    source_hash=self.source_hash, metric=self.metric.identity,
+                    gate=self.gate.identity, proxy_keep_pct=self.proxy_keep_pct,
+                    min_buildings=self.min_buildings)
                 if self.source_hash else None)
 
 

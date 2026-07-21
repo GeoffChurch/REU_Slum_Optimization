@@ -50,6 +50,9 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
         maps_url = meta.get("maps_url")
         if maps_url:
             parts.append(f"**Location:** [see the grown region on Google Maps]({maps_url}).\n")
+        if meta.get("maps_qr") and (run_dir / meta["maps_qr"]).exists():
+            parts.append(f'\n<a href="{meta.get("maps_url","")}">'
+                         f'<img src="{meta["maps_qr"]}" alt="Google Maps QR" width="120"></a>\n')
     region_members, region_parcels = meta.get("region_members"), meta.get("region_parcels")
     region_mean_depth = meta.get("region_mean_depth")
     region_mean_density = meta.get("region_mean_density_per_ha")
@@ -111,6 +114,13 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                          "external connectivity (access-burden removed) reaches 0.70, so this "
                          "compares the *road each takes* for the same outcome:\n")
             parts.append(_img_table([(_after_method(p.name), p.name) for p in depth_imgs]))
+    cmd = meta.get("command")
+    if cmd:
+        log_link = "\nThe full run log is in [`run.log`](run.log)." if (run_dir / "run.log").exists() else ""
+        parts.append("\n## How this was generated\n\n"
+                     "This example is machine-generated — one self-logging command emits the data, "
+                     "maps, curves, and this README:\n\n"
+                     f"```bash\n{cmd}\n```{log_link}\n")
     return "\n".join(parts) + "\n"
 
 

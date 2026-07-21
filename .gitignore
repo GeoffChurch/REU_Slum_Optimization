@@ -31,3 +31,6 @@ coverage.xml
 # Data (uncomment / refine as the pipeline grows)
 # data/
 outputs/
+
+# Hydra scratch dir left behind by in-place regeneration of examples/method-comparison
+examples/method-comparison/.hydra/

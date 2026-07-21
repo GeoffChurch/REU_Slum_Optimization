@@ -69,6 +69,28 @@ def displacement(building_points: GeoDataFrame, radii: NDArray[np.float64],
     return float(np.clip(c, 0.0, 1.0).sum())
 
 
+def repulsion(building_points: GeoDataFrame, radii: NDArray[np.float64],
+              geom: BaseGeometry) -> float:
+    """Soft per-road intrusion cost: a road's OWN proximity to the building field, summed over
+    building points as the quadratic-tail kernel r^2/(r^2 + d^2) (d = point-to-road distance,
+    r = the building's disk radius from `building_radii`). > 0 whenever any building has r>0 (the tail never reaches
+    zero) so no road is 'free' -- unlike `displacement`, whose hard 0-beyond-r cutoff makes
+    gap-hugging roads free and degenerate. Depends ONLY on `geom` and the fixed building field
+    (not on other committed roads), so it is CONSTANT per candidate -> a well-behaved,
+    CELF-safe greedy cost denominator (marginal displacement is not). r==0 (coincident points):
+    1.0 if the road touches the point (d<=0) else 0.0, matching displacement's r==0 handling.
+    0.0 with no building points."""
+    n = len(building_points)
+    if n == 0:
+        return 0.0
+    d = building_points.geometry.distance(geom).to_numpy()
+    r = np.asarray(radii, dtype=np.float64)
+    r2 = r * r
+    with np.errstate(divide="ignore", invalid="ignore"):
+        k = np.where(r > 0.0, r2 / (r2 + d * d), np.where(d <= 0.0, 1.0, 0.0))
+    return float(np.clip(k, 0.0, 1.0).sum())
+
+
 def access_burden(depths: pd.Series) -> float:
     """Sigma depth^2 -- q=2 severity-weighted access burden (kblock parcels = one building each)."""
     return float((depths.astype("float64") ** 2).sum())

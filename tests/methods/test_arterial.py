@@ -11,6 +11,7 @@ from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods import arterial
 from reblock.methods.arterial import (
+    ArterialIdentity,
     GreedyArterialReblocker,
     _anchor_points,
     _best_candidate,
@@ -308,9 +309,10 @@ def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
 
 def test_identity_and_proposal_metadata() -> None:
     m = GreedyArterialReblocker(mode="buildable", objective="directness")
-    assert m.identity == (
-        "greedy_arterial", "buildable", "directness", "length", 0.0,
-        15, 32, 8, 2.0, False, "grow", 0, 0)
+    assert m.identity == ArterialIdentity(
+        mode="buildable", objective="directness", cost="length", corridor_key=0.0,
+        max_roads=15, n_anchors=32, top_k=8, lam=2.0, lazy=False,
+        candidate_policy="grow", rescore_every=0, max_anchors=0)
     # max_roads / n_anchors / top_k / lam change the proposed roads -> must change the cache key,
     # else a budget/candidate sweep silently returns another setting's cached proposal.
     assert GreedyArterialReblocker(max_roads=3).identity != m.identity
@@ -347,9 +349,10 @@ def test_config_and_derivation_wiring() -> None:
     # inline greedy_arterial_buildable entry, which sets lazy: true -- a pre-existing golden/config
     # mismatch (this assertion previously asserted False) found and fixed incidentally while
     # updating these tuples for max_anchors; unrelated to the anchor-cap feature itself.
-    assert m.identity == (
-        "greedy_arterial", "buildable", "directness", "length", 0.0, 15, 32, 8, 2.0, True, "grow",
-        0, 0)
+    assert m.identity == ArterialIdentity(
+        mode="buildable", objective="directness", cost="length", corridor_key=0.0,
+        max_roads=15, n_anchors=32, top_k=8, lam=2.0, lazy=True,
+        candidate_policy="grow", rescore_every=0, max_anchors=0)
 
 
 def test_displacement_config_instantiates_with_right_params_and_identity() -> None:
@@ -365,9 +368,10 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
     m = instantiate(cfg.all_methods["greedy_arterial_displacement"])
     assert (m.mode, m.objective, m.cost, m.corridor_m) == (
         "aspirational", "directness", "displacement", 3.0)
-    assert m.identity == (
-        "greedy_arterial", "aspirational", "directness", "displacement", 3.0, 15, 32, 8, 2.0, False,
-        "grow", 0, 0)
+    assert m.identity == ArterialIdentity(
+        mode="aspirational", objective="directness", cost="displacement", corridor_key=3.0,
+        max_roads=15, n_anchors=32, top_k=8, lam=2.0, lazy=False,
+        candidate_policy="grow", rescore_every=0, max_anchors=0)
 
     # The standalone conf/method/greedy_arterial_displacement.yaml config group (config.yaml's
     # `method=` default group), separate from compare_config's inline `all_methods` entry above.
@@ -433,9 +437,10 @@ def test_greedy_handles_multilinestring_streets() -> None:
 
 def test_cost_displacement_in_identity() -> None:
     m = GreedyArterialReblocker(mode="aspirational", objective="directness", cost="displacement")
-    assert m.identity == (
-        "greedy_arterial", "aspirational", "directness", "displacement", 3.0, 15, 32, 8, 2.0, False,
-        "grow", 0, 0)
+    assert m.identity == ArterialIdentity(
+        mode="aspirational", objective="directness", cost="displacement", corridor_key=3.0,
+        max_roads=15, n_anchors=32, top_k=8, lam=2.0, lazy=False,
+        candidate_policy="grow", rescore_every=0, max_anchors=0)
 
 
 def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 10) -> Block:
@@ -581,3 +586,60 @@ def test_displacement_objective_is_extent_aware_unlike_the_old_centroid_rule() -
     assert not pts.geometry.within(corridor).any()          # OLD centroid rule: nobody displaced
     d = displacement(pts, radii, road, corridor_m=1.0)
     assert d > 0.0                                          # disk rule: A is partially displaced
+
+
+def test_cost_repulsion_identity_and_valid_proposal() -> None:
+    # (i) cost="repulsion" is a cache key distinct from BOTH cost="length" and cost="displacement"
+    # (cost is a named field on ArterialIdentity).
+    rep = GreedyArterialReblocker(mode="aspirational", objective="access", cost="repulsion")
+    length = GreedyArterialReblocker(mode="aspirational", objective="access", cost="length")
+    disp = GreedyArterialReblocker(mode="aspirational", objective="access", cost="displacement")
+    assert rep.identity != length.identity
+    assert rep.identity != disp.identity
+    assert rep.identity.cost == "repulsion"
+    # (ii) it produces a valid (non-crashing) proposal on a small synthetic block with buildings.
+    pts = gpd.GeoDataFrame(geometry=[Point(i + 0.5, j + 0.5) for i in range(8) for j in range(3)],
+                           crs=UTM)
+    block = _grid_block_with_points(pts)
+    roads = _greedy_arterials(block, mode="aspirational", objective="access", cost="repulsion",
+                              max_roads=1, n_anchors=8, top_k=4)
+    assert len(roads) == 1
+    assert roads.geometry.iloc[0].length > 0.0             # a real, non-degenerate committed road
+
+
+def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
+    # Non-degeneracy under the SHIPPABLE (buildable) path: repulsion's soft never-zero proximity
+    # cost must still route arterials INTO a genuinely deep pocket and improve access, not settle
+    # for zero-benefit gap roads. A 3-wide x 9-tall block with street frontage on the SHORT bottom
+    # end only -> access depth grows all the way down the 9-tall spine (max depth 9 with no roads),
+    # so a road that fails to reach the interior leaves the deep parcels untouched. One building
+    # point per parcel makes `repulsion` a real, positive, spatially-varying cost (not the
+    # empty-field 0.0 short circuit that would let every candidate rank as free/infinite gain).
+    polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
+             for i in range(3) for j in range(9)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (3.0, 0.0)])], crs=UTM)
+    pts = gpd.GeoDataFrame(geometry=[Point(i + 0.5, j + 0.5) for i in range(3) for j in range(9)],
+                           crs=UTM)
+    block = Block(block_id="deep_pts", crs=UTM, boundary=boundary, parcels=parcels,
+                  streets=streets, building_points=pts)
+
+    from reblock.derive.access import parcel_access_layers
+    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    base_depth = parcel_access_layers(block, None, tol=STREET_TOL, adj=adj).max()
+    assert base_depth >= 5                                     # precondition: a genuinely deep pocket
+
+    roads = _greedy_arterials(block, mode="buildable", objective="directness", cost="repulsion",
+                              max_roads=4, n_anchors=12)
+    # (i) non-degeneracy: repulsion commits real, access-improving road(s) -- it reaches the
+    # interior rather than building zero-benefit gap roads (a zero-benefit road has raw=0 -> gain=0
+    # under the always-positive repulsion denominator, so it can never win).
+    assert len(roads) >= 1
+    depth_with_roads = parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj).max()
+    assert depth_with_roads < base_depth                      # access strictly improves
+    # (ii) the committed roads' total displacement is finite and non-trivial (a real corridor
+    # through the building field), not degenerate.
+    radii = building_radii(pts, corridor_m=3.0)
+    disp = displacement(pts, radii, roads, corridor_m=3.0)
+    assert 0.0 < disp < float("inf")

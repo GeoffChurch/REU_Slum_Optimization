@@ -38,6 +38,7 @@ pyshp = "*"
 hydra-core = "*"
 # Backs reblock.cache's content-addressed L2 derivation cache (joblib.Memory).
 joblib = "*"
+segno = "*"
 
 # Install the reblock package itself, editable, from this directory.
 [tool.pixi.pypi-dependencies]
@@ -68,6 +69,7 @@ fmt = "ruff format ."
 check = { depends-on = ["lint", "typecheck", "test"] }
 run = "python -m reblock.run"
 compare = "python -m reblock.compare"
+regen-examples = "bash scripts/regenerate_examples.sh"
 
 # ---------------------------------------------------------------------------
 # Tooling config
