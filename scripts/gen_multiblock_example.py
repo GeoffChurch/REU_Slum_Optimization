@@ -63,7 +63,11 @@ def main() -> None:
             "region_builder=dense_cluster", "region_builder.max_buildings=3000", "max_blocks=1",
             "all_methods.clearance.max_roads=3000", "all_methods.clearance.depth_target=3",
             "all_methods.greedy_arterial_buildable.candidate_policy=fixed",
-            "+all_methods.greedy_arterial_buildable.max_anchors=64"])
+            "+all_methods.greedy_arterial_buildable.max_anchors=64",
+            "all_methods.clearance_looped.base.depth_target=3",
+            "all_methods.clearance_looped.base.max_roads=3000",
+            "all_methods.clearance_looped.budget_frac=0.30",
+            "all_methods.clearance_looped.search_radius_m=60"])
     source = cast(Source, instantiate(cfg.data))
     screen = cast(Screen, instantiate(cfg.screen))
     region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
@@ -93,7 +97,7 @@ def main() -> None:
             png.unlink()
 
     methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
-               for n in ("clearance", "greedy_arterial_buildable")}
+               for n in ("clearance", "greedy_arterial_buildable", "clearance_looped")}
     # osm_footpaths: the real as-built informal network, from a committed per-region OSM snapshot
     # (fetched once by scripts.fetch_desire_lines_snapshot) so the example reproduces offline.
     snapshot = out / f"desire_lines_{seed}.geojson"

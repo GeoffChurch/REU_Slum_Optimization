@@ -1,15 +1,16 @@
 # Bridge-tree greedy loop-closure refiner: composes on a base method's proposal (default
 # ClearanceReblocker, a deeper depth_target so the looped result wins on external too) and adds
-# bridge-removing loop-closing connectors, greedily, up to budget_m / max_loops. See
+# bridge-removing loop-closing connectors, greedily, up to budget_frac (region-adaptive share of
+# the base road length) / max_loops, with a min_bridges_per_m diminishing-returns early stop. See
 # reblock.methods.loop_closure.LoopClosureRefiner.
 _target_: reblock.methods.loop_closure.LoopClosureRefiner
 base: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}",
        repulsion: 0.0, depth_target: 1, max_roads: 400}   # depth_target 1 = deeper base (best-of-both)
-budget_m: 200.0
-max_loops: 20
+budget_frac: 0.12
+min_bridges_per_m: 0.01
+max_loops: 400
 min_loop_len_m: 40.0
-# 20 m: region-safe against dense clearance meshes (60 m put a ~1700-parcel region's candidate
-# generation at ~27.7k pairs / ~155s; 20 m keeps pair count in the low thousands, seconds-scale).
-# max_candidates is a second, density-independent bound (see LoopClosureRefiner's docstring).
+# search_radius_m 45 m: sufficient for block-scale bases with the uniform max_candidates cap,
+# which bounds the expensive per-pair snap volume regardless of mesh density (see _subsample_pairs).
 search_radius_m: 45.0
-max_candidates: 4000
+max_candidates: 1500

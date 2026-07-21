@@ -71,11 +71,16 @@ def _nearest_node(nodes: list[Node], kdt: cKDTree, point: tuple[float, float], t
 def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
                        candidates: list[tuple[LineString, tuple[float, float],
                                               tuple[float, float]]],
-                       *, budget_m: float | None, max_loops: int) -> list[LineString]:
+                       *, budget_m: float | None, max_loops: int,
+                       min_bridges_per_m: float = 0.0) -> list[LineString]:
     """Greedily add the candidate connector with the highest bridges-removed-per-metre, one at a
     time, stopping at `budget_m` cumulative added length, `max_loops` additions, or once the best
-    remaining marginal gain is <= 0 -- whichever comes first. Each step recomputes the bridge-tree
-    ONCE (over the current `base_roads` + already-added connectors, noded against `streets`), then
+    remaining marginal gain (bridges removed per metre) drops below `max(min_bridges_per_m, 1e-9)`
+    -- whichever comes first. `min_bridges_per_m=0.0` (the default) preserves the original
+    stop-when-nothing-left-to-gain behavior; a positive value is a diminishing-returns early stop
+    that bails out once the best remaining loop is inefficient (e.g. removes fewer than 1 bridge
+    per 100 m -> gain < 0.01), even with budget left. Each step recomputes the bridge-tree ONCE
+    (over the current `base_roads` + already-added connectors, noded against `streets`), then
     scores every remaining candidate with a single `bridges_removed` lookup apiece; candidate
     endpoints are snapped to the nearest road-graph node within `STREET_TOL`. Returns the full road
     list: `base_roads`'s geometries plus whichever connectors were committed."""
@@ -84,6 +89,7 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
     remaining = list(candidates)
     added_len = 0.0
     n_added = 0
+    min_gain = max(min_bridges_per_m, 1e-9)
     while remaining and n_added < max_loops:
         roads_gdf = gpd.GeoDataFrame(geometry=current, crs=crs)
         g = _noded_graph(roads_gdf, streets)
@@ -108,7 +114,7 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
                 best_score = score
                 best_idx = i
                 best_len = connector.length
-        if best_idx < 0:
+        if best_idx < 0 or best_score < min_gain:
             break
         if budget_m is not None and added_len + best_len > budget_m:
             break
@@ -119,29 +125,25 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
     return current
 
 
-def _knn_bounded_pairs(nodes: list[Node], kdt: cKDTree, search_radius_m: float, max_candidates: int
-                       ) -> list[tuple[int, int]]:
-    """Bound `query_pairs(search_radius_m)`'s pair volume to roughly `max_candidates`, WITHOUT
-    truncating the pair list by distance: a hard truncation would keep only the globally shortest
-    pairs -- tiny same-branch loops the geometric loop-floor in `loop_candidates` already rejects,
-    wasting the whole budget on candidates that can never survive. Instead every node contributes
-    its own up-to-`k` nearest OTHER nodes within `search_radius_m` (`k` sized so `n * k` lands near
-    `max_candidates`), so distant/cross-branch pairs -- the ones that actually close big loops --
-    stay represented regardless of local mesh density."""
-    n = len(nodes)
-    k = max(1, max_candidates // max(n, 1))
-    kk = min(k + 1, n)                                     # +1: query includes each node itself
-    dists, idxs = kdt.query(np.array(nodes, dtype=float), k=kk)
-    if kk == 1:                                            # scipy squeezes the k=1 case to 1-D
-        dists, idxs = dists[:, None], idxs[:, None]
-    out: set[tuple[int, int]] = set()
-    for i in range(n):
-        for d, j in zip(dists[i], idxs[i], strict=True):
-            jj = int(j)
-            if jj == i or d > search_radius_m:
-                continue
-            out.add((i, jj) if i < jj else (jj, i))
-    return sorted(out)
+def _subsample_pairs(pairs: list[tuple[int, int]], max_candidates: int
+                     ) -> list[tuple[int, int]]:
+    """Uniformly subsample the index-sorted `pairs` to ~`max_candidates`, bounding the pair volume
+    handed to `loop_candidates`' expensive per-pair `_snap` + shortest-path WITHOUT biasing which
+    pairs survive. The previous nearest-k scheme kept each node's CLOSEST neighbours -- exactly the
+    short, low-perimeter pairs the `min_loop_len_m` floor rejects -- so on a dense mesh (many nodes
+    -> k collapses to 1-2) it starved the candidate pool to near-zero valid loop-closers (an
+    11k-parcel region fell to 63 candidates / commute_ratio 0.06). A uniform stride over the
+    index-sorted list preserves the straight-line-distance distribution, so the fraction of pairs
+    that clear the loop floor is retained: a cap of C yields ~C valid candidates, not a handful
+    (same region -> ~1300 candidates / commute_ratio ~0.50). `pairs` is assumed sorted (as
+    `sorted(query_pairs(...))` returns), so the stride samples evenly across the node-index
+    space. A non-positive `max_candidates` is clamped to 1 (never a division by zero or a
+    reversed-stride slice)."""
+    cap = max(max_candidates, 1)
+    if len(pairs) <= cap:
+        return pairs
+    stride = math.ceil(len(pairs) / cap)
+    return pairs[::stride]
 
 
 def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: float,
@@ -167,12 +169,12 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
 
     `max_candidates` bounds the PAIR VOLUME `query_pairs` hands to the expensive per-pair `_snap`
     Dijkstra + shortest-path below -- both scale with pair count, so this is where the volume must
-    be capped, before either runs. On a dense clearance mesh, `query_pairs(search_radius_m)` can
-    return tens of thousands of pairs; past `max_candidates`, `_knn_bounded_pairs` swaps in a
-    k-nearest-neighbours-per-node scheme that keeps the pair count near `max_candidates` while still
-    representing cross-branch loops (see `_knn_bounded_pairs`). `None` (the default) leaves
-    `query_pairs`' own radius cutoff as the only bound -- unchanged behavior for callers that don't
-    opt in."""
+    be capped, before either runs. On a dense clearance mesh `query_pairs(search_radius_m)` can
+    return tens of thousands of pairs; past `max_candidates`, `_subsample_pairs` takes a uniform
+    stride over the index-sorted pairs, preserving the distance distribution so real
+    (floor-clearing) loop-closers survive the cap (see `_subsample_pairs`). `None` (the default)
+    leaves `query_pairs`' own radius cutoff as the only bound -- unchanged behavior for callers
+    that don't opt in."""
     g = _noded_graph(base_roads, block.streets)
     for u, v in g.edges():
         g[u][v]["len"] = math.hypot(u[0] - v[0], u[1] - v[1])
@@ -182,7 +184,7 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
     kdt = cKDTree(np.array(nodes, dtype=float))
     pairs = sorted(kdt.query_pairs(search_radius_m))
     if max_candidates is not None and len(pairs) > max_candidates:
-        pairs = _knn_bounded_pairs(nodes, kdt, search_radius_m, max_candidates)
+        pairs = _subsample_pairs(pairs, max_candidates)
     sg = _snap_graph(_boundary_graph(block.parcels))
     seen: set[bytes] = set()
     out: list[tuple[LineString, Node, Node]] = []
@@ -209,27 +211,44 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
 class LoopClosureRefiner:
     """Method wrapper composing `loop_candidates` + `greedy_close_loops` behind the `Method.propose`
     `prior` seam: refines a base method's (e.g. `ClearanceReblocker`) tree-ish proposal by adding
-    bridge-removing loop-closing connectors, greedily, up to `budget_m` added length / `max_loops`.
-    NOT frozen: `base` is an arbitrary (unhashable) `Method`, and `@dataclass(frozen=True)` would
-    auto-generate a `__hash__` over it -- mirrors the sibling `ClearanceReblocker`."""
+    bridge-removing loop-closing connectors, greedily, up to `budget_frac`'s share of the base
+    proposal's road length / `max_loops`, with a `min_bridges_per_m` diminishing-returns early
+    stop. NOT frozen: `base` is an arbitrary (unhashable) `Method`, and `@dataclass(frozen=True)`
+    would auto-generate a `__hash__` over it -- mirrors the sibling `ClearanceReblocker`."""
 
     base: Method
-    budget_m: float | None = 200.0
-    max_loops: int = 20
+    budget_frac: float = 0.12
+    # Loops may add up to this FRACTION of the base proposal's total road length, region-adaptive
+    # in place of a fixed absolute budget_m: on an 11k-parcel region a 200 m absolute budget was
+    # ~1% of the base road and added negligible redundancy (commute_ratio 0.009). Calibrated on a
+    # 1724-parcel block (base road 8622 m): 0.05 -> ρ 0.31, 0.10 -> 0.375, 0.12 -> ~0.39, 0.15 ->
+    # 0.40 (diminishing returns past ~0.12 -- the knee), all with external held ~0.949 and
+    # ~8-11 s runtime.
+    min_bridges_per_m: float = 0.01
+    # Early-stop threshold on the greedy ranking objective (bridges removed per metre): once the
+    # best remaining candidate's efficiency falls below this, stop adding loops even if budget
+    # remains -- a diminishing-returns guard so a large budget_frac doesn't get spent on
+    # increasingly marginal connectors. 0.01 = 1 bridge per 100 m.
+    max_loops: int = 400
+    # A high safety cap, not the real bound -- budget_frac (via the resolved budget_m) and
+    # min_bridges_per_m now do the real work of stopping the greedy loop.
     min_loop_len_m: float = 40.0
-    # 20 m (down from an initial 60 m default): on a dense region-scale clearance mesh, 60 m put
-    # `loop_candidates` at ~28k pairs / ~155s wall-clock end to end -- 20 m lands in the low
-    # hundreds-to-low-thousands of pairs (single-digit-to-teens seconds) while still lifting
-    # commute_ratio well above the bare clearance base (region-measured, see loop_closure.py's
-    # module docstring companion in the task report -- ρ 0.0 -> >0.10 preserved at this radius).
+    # 45 m: sufficient for block-scale bases with the uniform `max_candidates` cap, which bounds the
+    # expensive per-pair snap volume regardless of mesh density (see `_subsample_pairs`).
     search_radius_m: float = 45.0
     snap_lam: float = 2.0
     # A second, independent bound on top of `search_radius_m`: even a modest radius can still
     # explode on a denser-than-tested mesh (finer substrate, bigger region), since pair count grows
     # with LOCAL node density, not just radius. `max_candidates` caps `loop_candidates`' pair volume
-    # via `_knn_bounded_pairs` regardless of density -- a belt-and-suspenders guard, not the primary
+    # via `_subsample_pairs` regardless of density -- a belt-and-suspenders guard, not the primary
     # lever (search_radius_m's cut is what keeps the common case fast).
-    max_candidates: int | None = 4000
+    max_candidates: int | None = 1500
+    # Uniform-subsample cap on `loop_candidates`' pair volume (see `_subsample_pairs`): bounds the
+    # per-pair `_snap` cost regardless of mesh density. 1500 is the commute_ratio PLATEAU -- caps
+    # 1500/2500/4000 all reach ~the same ρ on an 11k-parcel region (budget-bound past ~1300 valid
+    # candidates), and 1500 is ~6x faster than uncapped. search_radius_m stays 45 by default (that
+    # already recovers large blocks with the uniform cap); the sparse dt=3 REGION base overrides to
+    # 60 (see scripts/gen_multiblock_example.py).
 
     @property
     def identity(self) -> tuple[object, ...] | None:
@@ -239,8 +258,8 @@ class LoopClosureRefiner:
         bid = getattr(self.base, "identity", None)
         if bid is None:
             return None
-        return ("loop_closure", bid, self.budget_m, self.max_loops, self.min_loop_len_m,
-                self.search_radius_m, self.snap_lam, self.max_candidates)
+        return ("loop_closure", bid, self.budget_frac, self.min_bridges_per_m, self.max_loops,
+                self.min_loop_len_m, self.search_radius_m, self.snap_lam, self.max_candidates)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         # `prior`, when given, IS the base proposal to refine -- skip recomputing/re-fetching it
@@ -248,19 +267,26 @@ class LoopClosureRefiner:
         base_prop = prior if prior is not None else propose(self.base, block)
         base_roads = (base_prop.roads if base_prop.roads is not None
                      else gpd.GeoDataFrame(geometry=[], crs=block.crs))
+        # Region-adaptive budget: a fixed absolute length is block-scale and vanishes on a big
+        # region's base road (see budget_frac's field comment); scaling to the base proposal's own
+        # road length keeps the added redundancy proportional regardless of region size.
+        base_len = float(base_roads.geometry.length.sum())
+        budget_m = self.budget_frac * base_len
         candidates = loop_candidates(
             base_roads, block, search_radius_m=self.search_radius_m,
             min_loop_len_m=self.min_loop_len_m, snap_lam=self.snap_lam,
             max_candidates=self.max_candidates)
         all_roads = greedy_close_loops(
             base_roads, block.streets, candidates,
-            budget_m=self.budget_m, max_loops=self.max_loops)
+            budget_m=budget_m, max_loops=self.max_loops,
+            min_bridges_per_m=self.min_bridges_per_m)
         roads = gpd.GeoDataFrame(geometry=all_roads, crs=block.crs)
-        pid = f"loop_closure:{base_prop.proposal_id}:b{self.budget_m}:ml{self.max_loops}"
+        pid = f"loop_closure:{base_prop.proposal_id}:bf{self.budget_frac}:ml{self.max_loops}"
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=pid, method="loop_closure",
-            params={"budget_m": self.budget_m, "max_loops": self.max_loops,
+            params={"budget_frac": self.budget_frac, "min_bridges_per_m": self.min_bridges_per_m,
+                    "max_loops": self.max_loops,
                     "min_loop_len_m": self.min_loop_len_m, "search_radius_m": self.search_radius_m,
                     "snap_lam": self.snap_lam, "max_candidates": self.max_candidates,
                     "n_added": len(all_roads) - len(base_roads)},
