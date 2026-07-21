@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Do NOT commit or branch.** This repo is on `main` with substantial uncommitted work; per session policy, implementers make + test changes only and are reviewed via the working-tree diff. (This overrides the generic "commit" step in the skill template.)
+- **Commit per task on the current branch `repulsion-and-example-harness`** (do NOT create new branches). Each task: implement, tests green, then `git commit` that task's files. End every commit message with the two trailers `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>` and `Claude-Session: https://claude.ai/code/session_01MLHAJnMJzWeR7xN725dFkg`.
 - `segno` is added to `[tool.pixi.dependencies]` (conda-forge), then `pixi install`.
 - `gen_example_readme.py` MUST stay a **pure `meta.json`/dir reader** — no new *required* kwargs; provenance (command, QR path) flows through `meta.json`, so the "numbers can't drift" property holds.
 - README-embedded images are **PNG** (GitHub-render parity with the existing jpg/png/gif artifacts).
