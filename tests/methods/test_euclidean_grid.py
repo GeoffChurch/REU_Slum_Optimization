@@ -436,9 +436,11 @@ def test_parcel_hug_buffer_scales_with_the_blocks_own_parcel_spacing() -> None:
 def test_hug_bridges_small_gaps_but_severs_wide_ones() -> None:
     # unit parcels -> nn ~ 1 m, so the default buffer ~ 0.5 m and bridge gap ~ 3 m: gaps up to
     # roughly bridge + 2*buffer (~ 4 m) are spanned to keep the network whole, wider ones are cut.
-    def propose(gap: float, **kw: object) -> gpd.GeoDataFrame:
-        p = EuclideanGridReblocker(spacing=2.0, min_seg_len=0.1, seek_density=False,
-                                   adaptive=False, **kw).propose(_two_cluster_block(gap))
+    def propose(gap: float, parcel_bridge_gap: float | None = None) -> gpd.GeoDataFrame:
+        # parcel_bridge_gap=None -> the reblocker's derived default; 0.0 -> bridging off
+        p = EuclideanGridReblocker(
+            spacing=2.0, min_seg_len=0.1, seek_density=False, adaptive=False,
+            parcel_bridge_gap=parcel_bridge_gap).propose(_two_cluster_block(gap))
         assert p.roads is not None
         return p.roads
 
@@ -539,6 +541,7 @@ def test_follow_parcels_min_component_drops_noise_for_a_sparser_network() -> Non
     default = EuclideanGridReblocker(follow_parcels=True).propose(block)
     unfiltered = EuclideanGridReblocker(
         follow_parcels=True, follow_min_component=0.0).propose(block)
+    assert default.roads is not None and unfiltered.roads is not None
     assert cast(int, default.params["connectivity_edges_dropped"]) > 0
     assert cast(float, default.params["follow_min_component"]) > 0.0
     assert len(default.roads) < len(unfiltered.roads)          # a genuinely sparser final network
@@ -553,8 +556,10 @@ def test_follow_parcels_min_component_drops_noise_for_a_sparser_network() -> Non
 def test_follow_parcels_is_deterministic() -> None:
     block = _street_bounded_tiling(6)
     m = EuclideanGridReblocker(follow_parcels=True, street_buffer=0.1, min_seg_len=0.1)
-    a = sorted(g.wkt for g in m.propose(block).roads.geometry)
-    b = sorted(g.wkt for g in m.propose(block).roads.geometry)
+    pa, pb = m.propose(block), m.propose(block)
+    assert pa.roads is not None and pb.roads is not None
+    a = sorted(g.wkt for g in pa.roads.geometry)
+    b = sorted(g.wkt for g in pb.roads.geometry)
     assert a == b and len(a) > 0
 
 
@@ -566,6 +571,7 @@ def test_follow_parcels_off_preserves_grid_behaviour() -> None:
     p_default = grid.propose(block)
     p_explicit = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False,
                                         follow_parcels=False).propose(block)
+    assert p_default.roads is not None and p_explicit.roads is not None
     assert "follow_parcels" not in p_default.params        # grid path records no follow-mode keys
     assert "spacing" in p_default.params
     assert (sorted(g.wkt for g in p_default.roads.geometry)

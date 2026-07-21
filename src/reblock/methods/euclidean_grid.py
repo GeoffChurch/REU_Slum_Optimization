@@ -109,7 +109,13 @@ def _hug_line(line: LineString, hug_region: BaseGeometry, bridge_gap: float,
             merged[-1][1] = max(merged[-1][1], end)
         else:
             merged.append([start, end])
-    return [substring(line, a, b) for a, b in merged if b - a >= min_len and b - a > 0.0]
+    out: list[LineString] = []
+    for a, b in merged:
+        if b - a >= min_len and b - a > 0.0:
+            seg = substring(line, a, b)   # a != b, so this is a LineString (never a Point)
+            if isinstance(seg, LineString):
+                out.append(seg)
+    return out
 
 
 def _line_parts(geom: BaseGeometry, min_len: float) -> list[LineString]:
@@ -182,7 +188,8 @@ def _connect_to_street(
     graph: nx.Graph = nx.Graph()
     edge_nodes: list[tuple[int, int]] = []
     for idx, seg in enumerate(edges):
-        u, v = nid(seg.coords[0]), nid(seg.coords[-1])
+        c0, c1 = seg.coords[0], seg.coords[-1]   # shapely coords are tuple[float, ...]; take x, y
+        u, v = nid((c0[0], c0[1])), nid((c1[0], c1[1]))
         edge_nodes.append((u, v))
         if u == v:
             continue
