@@ -40,6 +40,7 @@ all_methods:
     search_radius_m: 45.0
     max_candidates: 1500
   osm_footpaths: {_target_: reblock.methods.osm_footpaths.OsmFootpathsReblocker, source: "${desire_source}", corridor_m: 3.0}
+  euclidean_grid: {_target_: reblock.methods.euclidean_grid.EuclideanGridReblocker, spacing: 60.0, angle: 0.0, min_seg_len: 1.0, street_buffer: 0.5, seek_density: true, adaptive: true}
 methods: [topology, clearance, greedy_arterial_buildable]
 
 corridor_m: 3.0

@@ -1,0 +1,9 @@
+# Fixed, evenly-spaced orthogonal grid of candidate roads (NYC/Manhattan-style), phased through
+# the block's densest parcel cluster by default. See
+# reblock.methods.euclidean_grid.EuclideanGridReblocker.
+_target_: reblock.methods.euclidean_grid.EuclideanGridReblocker
+spacing: 60.0
+angle: 0.0
+min_seg_len: 1.0
+street_buffer: 0.5
+seek_density: true
