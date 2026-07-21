@@ -1,7 +1,9 @@
+import json
 import logging
 import sys
 from pathlib import Path
 
+from scripts.gen_example_readme import gen_example_readme
 from scripts.gen_multiblock_example import _tee_to_file, write_maps_qr
 
 
@@ -23,3 +25,27 @@ def test_tee_to_file_captures_print_and_logging(tmp_path):
     assert "hello-stdout" in text and "hello-stderr" in text and "hello-logging" in text
     # streams restored:
     assert sys.stdout is sys.__stdout__ or hasattr(sys.stdout, "write")
+
+
+def _seed_run_dir(d, **meta):
+    (d / "meta.json").write_text(json.dumps(meta))
+    (d / "run.log").write_text("some log\n")
+    (d / "maps_qr.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+
+def test_readme_includes_command_and_qr(tmp_path):
+    _seed_run_dir(tmp_path,
+        command="pixi run python -m scripts.gen_multiblock_example depth",
+        maps_qr="maps_qr.png", maps_url="https://maps.example/x",
+        flagged=3, total_blocks=100, deepest_block="B1", deepest_depth=7.0)
+    md = gen_example_readme(tmp_path, metric_name="depth", formula="f", blurb="b")
+    assert "## How this was generated" in md
+    assert "pixi run python -m scripts.gen_multiblock_example depth" in md
+    assert "run.log" in md
+    assert "maps_qr.png" in md
+
+
+def test_readme_omits_provenance_when_absent(tmp_path):
+    (tmp_path / "meta.json").write_text("{}")
+    md = gen_example_readme(tmp_path, metric_name="depth", formula="f", blurb="b")
+    assert "## How this was generated" not in md
