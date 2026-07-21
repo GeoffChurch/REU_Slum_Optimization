@@ -12,6 +12,9 @@
 
 **Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-33.84562,18.74451,15z).
 
+
+<a href="https://www.google.com/maps/@-33.84562,18.74451,15z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
+
 ## 2. Grow the region
 
 The metric grows a **12-block** region (**11,006 parcels**), mean depth 6.4 rings, mean density 99 bldg/ha.
@@ -53,4 +56,14 @@ The same region on the same access-depth colour scale (blue = at a street, red =
 | clearance | clearance_looped | euclidean_grid | greedy_arterial_buildable | osm_footpaths |
 |---|---|---|---|---|
 | ![clearance](after_clearance_ext70.jpg) | ![clearance_looped](after_clearance_looped_ext70.jpg) | ![euclidean_grid](after_euclidean_grid_ext70.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_ext70.jpg) | ![osm_footpaths](after_osm_footpaths_ext70.jpg) |
+
+
+## How this was generated
+
+This example is machine-generated — one self-logging command emits the data, maps, curves, and this README:
+
+```bash
+pixi run python -m scripts.gen_multiblock_example depth
+```
+The full run log is in [`run.log`](run.log).
 

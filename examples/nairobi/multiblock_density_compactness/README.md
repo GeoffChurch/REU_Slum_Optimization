@@ -12,6 +12,9 @@
 
 **Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-1.24565,36.90874,16z).
 
+
+<a href="https://www.google.com/maps/@-1.24565,36.90874,16z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
+
 ## 2. Grow the region
 
 The metric grows a **89-block** region (**2,809 parcels**), mean depth 2.5 rings, mean density 63 bldg/ha.
@@ -38,19 +41,29 @@ The same region on the same access-depth colour scale (blue = at a street, red =
 
 **Watch each method reblock** — its full road set added in drainage order, the deep interior draining as the network reaches in:
 
-| clearance | greedy_arterial_buildable |
-|---|---|
-| ![clearance](reblock_clearance.gif) | ![greedy_arterial_buildable](reblock_greedy_arterial_buildable.gif) |
+| clearance | clearance_looped | euclidean_grid | greedy_arterial_buildable |
+|---|---|---|---|
+| ![clearance](reblock_clearance.gif) | ![clearance_looped](reblock_clearance_looped.gif) | ![euclidean_grid](reblock_euclidean_grid.gif) | ![greedy_arterial_buildable](reblock_greedy_arterial_buildable.gif) |
 
 **Matched road budget** — every method truncated to the same total added road, so this compares the access each *buys for the same cost*:
 
-| clearance | greedy_arterial_buildable |
-|---|---|
-| ![clearance](after_clearance_matched.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_matched.jpg) |
+| clearance_looped | clearance | euclidean_grid | greedy_arterial_buildable |
+|---|---|---|---|
+| ![clearance_looped](after_clearance_looped_matched.jpg) | ![clearance](after_clearance_matched.jpg) | ![euclidean_grid](after_euclidean_grid_matched.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_matched.jpg) |
 
 **Matched external-connectivity target** — every method truncated where external connectivity (access-burden removed) reaches 0.70, so this compares the *road each takes* for the same outcome:
 
-| clearance | greedy_arterial_buildable |
-|---|---|
-| ![clearance](after_clearance_ext70.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_ext70.jpg) |
+| clearance | clearance_looped | euclidean_grid | greedy_arterial_buildable |
+|---|---|---|---|
+| ![clearance](after_clearance_ext70.jpg) | ![clearance_looped](after_clearance_looped_ext70.jpg) | ![euclidean_grid](after_euclidean_grid_ext70.jpg) | ![greedy_arterial_buildable](after_greedy_arterial_buildable_ext70.jpg) |
+
+
+## How this was generated
+
+This example is machine-generated — one self-logging command emits the data, maps, curves, and this README:
+
+```bash
+pixi run python -m scripts.gen_multiblock_example density_compactness nairobi
+```
+The full run log is in [`run.log`](run.log).
 
