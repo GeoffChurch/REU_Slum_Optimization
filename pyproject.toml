@@ -38,6 +38,7 @@ pyshp = "*"
 hydra-core = "*"
 # Backs reblock.cache's content-addressed L2 derivation cache (joblib.Memory).
 joblib = "*"
+segno = "*"
 
 # Install the reblock package itself, editable, from this directory.
 [tool.pixi.pypi-dependencies]

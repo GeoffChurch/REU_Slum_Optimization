@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 from typing import cast
 
+import segno
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from omegaconf import open_dict
@@ -32,6 +33,11 @@ from reblock.region import RegionBuilder, block_depths
 from reblock.render import google_maps_url
 from scripts.compare_budgets import run_two_lens
 from scripts.gen_example_readme import write_readme
+
+
+def write_maps_qr(url: str, path: Path, *, scale: int = 4, border: int = 2) -> None:
+    """Write a PNG QR code of `url` (e.g. the Google Maps locator) to `path`."""
+    segno.make(url, error="m").save(str(path), scale=scale, border=border)
 
 _FORMULA = {
     "depth": "depth = √(n·A)/P  →  true peel rings from a street",
