@@ -8,5 +8,7 @@
   "region_parcels": 5095,
   "region_mean_depth": 7.285714285714286,
   "region_mean_density_per_ha": 67.9570386164049,
-  "maps_url": "https://www.google.com/maps/@-1.31999,36.87177,15z"
+  "maps_url": "https://www.google.com/maps/@-1.31999,36.87177,15z",
+  "command": "pixi run python -m scripts.gen_multiblock_example depth_density nairobi",
+  "maps_qr": "maps_qr.png"
 }

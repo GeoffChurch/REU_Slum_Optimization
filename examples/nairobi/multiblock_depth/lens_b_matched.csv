@@ -1,4 +1,6 @@
 method,budget_m,external_connectivity,internal_connectivity,displacement,pct_displaced
 clearance,2885.0,0.731677,4.5354e-14,165.9,0.0381
 greedy_arterial_buildable,2885.0,0.407405,3.25376e-14,128.2,0.0295
+clearance_looped,2885.0,0.717326,0.00621742,162.7,0.0374
+euclidean_grid,2885.0,0.419976,0.170527,140.0,0.0322
 osm_footpaths,2885.0,0.013131,0.00663434,71.2,0.0164
