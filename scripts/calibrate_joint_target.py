@@ -103,9 +103,19 @@ def region_specs() -> list[RegionSpec]:
 def _over_provision_overrides(over_provision: dict[str, dict[str, object]]) -> list[str]:
     """Flatten `conf/joint_target.yaml`'s `over_provision.<method>` dotted-key knobs into hydra
     override strings `all_methods.<method>.<key>=<value>`, for every configured method at once (a
-    single compose call configures all methods, mirroring gen_multiblock_example.py's pattern)."""
-    return [f"all_methods.{method}.{key}={value}"
-            for method, knobs in over_provision.items() for key, value in knobs.items()]
+    single compose call configures all methods, mirroring gen_multiblock_example.py's pattern). A
+    key starting with `+` (e.g. `"+max_anchors"`) is a key ABSENT from the inline `all_methods.*`
+    config -- hydra's add-new-key `+` override form is required to set it (plain `key=value` only
+    works for a key the base config already has), exactly why gen_multiblock_example.py writes
+    `+all_methods.greedy_arterial_repulsion.max_anchors=64` rather than a plain override."""
+    out = []
+    for method, knobs in over_provision.items():
+        for key, value in knobs.items():
+            if key.startswith("+"):
+                out.append(f"+all_methods.{method}.{key[1:]}={value}")
+            else:
+                out.append(f"all_methods.{method}.{key}={value}")
+    return out
 
 
 def _compose_region(spec: RegionSpec, method_overrides: list[str]) -> DictConfig:

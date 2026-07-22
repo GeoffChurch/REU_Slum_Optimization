@@ -7,6 +7,11 @@ d_max: 0.45
 # d_max displacement. Values are hydra overrides applied to all_methods.<name> for the probe + the
 # example generators.
 over_provision:
-  greedy_arterial_repulsion: {max_roads: 40}
+  # candidate_policy=fixed + max_anchors=64 are the tractability knobs the example generators use
+  # (scripts/gen_multiblock_example.py) -- without them arterial runs the expensive default
+  # candidate_policy=grow with an uncapped candidate set, and 40+ over-provisioned roads on that
+  # path does not finish in reasonable time. max_roads 30 (down from an earlier 40): plenty past
+  # arterial's internal plateau, and tractable with the fixed policy + anchor cap.
+  greedy_arterial_repulsion: {max_roads: 30, candidate_policy: fixed, "+max_anchors": 64}
   clearance_looped: {base.max_roads: 3000, budget_frac: 0.30}
   euclidean_grid: {spacing: 120}
