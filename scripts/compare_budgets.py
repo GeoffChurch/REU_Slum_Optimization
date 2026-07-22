@@ -9,8 +9,11 @@ it three ways, all from that SAME reblock (no second propose):
 
   Lens A -- matched displacement (a universal displacement fraction `D`): the drainage-ordered road
     prefix that first brings the displacement fraction to >= `D` (`budget.prefix_to_displacement`);
-    reports the permeability reached at that equal home-cost. Displacement is monotone, so every
-    method reaches `D`.
+    reports the permeability reached at that equal home-cost. The METRIC is monotone (a longer
+    prefix never displaces fewer homes), but a method's own network can still exhaust itself short
+    of `D` -- many methods converge well below a demanding `D` (see the calibration probe) -- so
+    `OutcomeRow.at_budget`/the after-image title report that honestly ("converged at X% (< D%
+    budget)") rather than implying every method landed AT `D`.
 
   Lens B -- matched permeability (a universal permeability level `P*`): the drainage-ordered road
     prefix that first brings permeability to >= `P*` (`budget.prefix_to_permeability`); reports the
@@ -86,6 +89,10 @@ class OutcomeRow:
     method: str
     disp_road_m: float        # Lens A: road length at the matched-displacement prefix
     disp_permeability: float  # Lens A: permeability reached at that prefix
+    at_budget: bool           # Lens A: True iff the method's prefix actually reached D (not just
+                               # converged below it and shown at its own terminal -- displacement
+                               # is monotone, but a method can still exhaust its OWN roads short of
+                               # D; see `prefix_to_displacement`'s "unreachable: best effort" path)
     perm_road_m: float        # Lens B: road length at the matched-permeability prefix
     perm_displacement: float  # Lens B: displacement fraction spent to reach it
     reached: bool             # Lens B: whether matched_permeability was actually reached
@@ -161,8 +168,9 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                                   displacement_curve(block, roads, radii, corridor_m=corridor_m)))
     compare_report(curves, out_dir, method_order=list(methods))
 
-    # Lens prefixes -- Lens A always reaches D (displacement is monotone); Lens B may not reach P*
-    # (a fixed/sparse method), in which case `prefix_b` is its best-effort full network.
+    # Lens prefixes -- either lens can fall short of its target with a fixed/sparse method's own
+    # network (Lens A: `at_budget=False` below, prefix_a is that method's full network shown at its
+    # own terminal; Lens B: `reached=False`, prefix_b is likewise its full network).
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     p0, _ = egress_power(block, None, params, adj=adj)
     prefix_a: dict[str, GeoDataFrame] = {}
@@ -202,32 +210,43 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         perm_at_a = permeability(block, pa, params, p0=p0, adj=adj)
         disp_frac_b = _disp_frac(pb)
         perm_at_b = permeability(block, pb, params, p0=p0, adj=adj)
+        # Displacement is monotone, but a method can still exhaust its OWN roads short of D (many
+        # methods converge well below matched_displacement -- see the calibration probe): a method
+        # is only genuinely "at the budget" if its Lens-A prefix's actual displacement reached D,
+        # not merely shown at its own terminal. Framed POSITIVELY when short of it ("converged"),
+        # never "unreached"/"failed" -- that framing is Lens B's, for a permeability standard a
+        # method genuinely never clears.
+        at_budget = disp_frac_a >= matched_displacement - 1e-9
+        disp_title = (None if at_budget else
+                     f"converged at {disp_frac_a * 100:.1f}% "
+                     f"(< {matched_displacement * 100:.0f}% budget)")
+        perm_title = None if reached else "unreached"
 
-        for prefix, tag, unreached_title in ((pa, "disp", False), (pb, "perm", not reached)):
+        for prefix, tag, title_override in ((pa, "disp", disp_title), (pb, "perm", perm_title)):
             truncated = replace(proposals[name], roads=prefix, block_identity=None)
             kc = kc_eval.score(block, truncated)
             fig = render_after(block, truncated, kc.fields["access_after"], vmax=depth_vmax,
                                metrics=kc, field="depth", frame=frame,
                                displaced_points=_displaced_points(block, truncated))
-            if unreached_title:
-                fig.axes[0].set_title("unreached", fontsize=16)
+            if title_override is not None:
+                fig.axes[0].set_title(title_override, fontsize=16)
             save_render(fig, out_dir / f"after_{name}_{tag}_depth.jpg")
             plt.close(fig)
 
             potentials = parcel_potentials(block, prefix, params)
             fig = render_after(block, truncated, potentials, vmax=perm_vmax, field="perm",
                                frame=frame, displaced_points=_displaced_points(block, truncated))
-            if unreached_title:
-                fig.axes[0].set_title("unreached", fontsize=16)
+            if title_override is not None:
+                fig.axes[0].set_title(title_override, fontsize=16)
             save_render(fig, out_dir / f"after_{name}_{tag}_perm.jpg")
             plt.close(fig)
 
         rows.append(OutcomeRow(
             method=name, disp_road_m=float(pa.geometry.length.sum()), disp_permeability=perm_at_a,
-            perm_road_m=float(pb.geometry.length.sum()), perm_displacement=disp_frac_b,
-            reached=reached))
+            at_budget=at_budget, perm_road_m=float(pb.geometry.length.sum()),
+            perm_displacement=disp_frac_b, reached=reached))
         disp_csv_rows.append([name, f"{rows[-1].disp_road_m:.1f}", f"{disp_frac_a:.4f}",
-                              f"{perm_at_a:.6g}"])
+                              f"{perm_at_a:.6g}", at_budget])
         perm_csv_rows.append([name, f"{rows[-1].perm_road_m:.1f}", f"{disp_frac_b:.4f}",
                               f"{perm_at_b:.6g}", reached])
 
@@ -237,7 +256,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         reblock_gif(block, roads, out_dir / f"reblock_{name}.gif", vmax=depth_vmax, frame=frame)
 
     _write_csv(out_dir / "lens_displacement.csv",
-              ["method", "road_m", "displacement", "permeability"], disp_csv_rows)
+              ["method", "road_m", "displacement", "permeability", "at_budget"], disp_csv_rows)
     _write_csv(out_dir / "lens_permeability.csv",
               ["method", "road_m", "displacement", "permeability", "reached"], perm_csv_rows)
     return rows

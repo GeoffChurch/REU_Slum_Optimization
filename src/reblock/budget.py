@@ -656,9 +656,9 @@ V = TypeVar("V")
 
 def _drainage_ordered(block: Block, roads: GeoDataFrame, tol: float) -> GeoDataFrame:
     """`roads` reindexed in drainage-descending order (ties by original index), reset to a fresh
-    RangeIndex -- the single canonical prefix order shared by `_sweep`, `truncate_to_length`, and
-    `prefix_to_depth`, so every budget/prefix walk grows the road set in the same sequence. Callers
-    guard `len(roads) == 0` before calling (an empty road set has no drainage to order)."""
+    RangeIndex -- the single canonical prefix order shared by `_sweep` and `prefix_to_depth`, so
+    every budget/prefix walk grows the road set in the same sequence. Callers guard
+    `len(roads) == 0` before calling (an empty road set has no drainage to order)."""
     drain = road_drainage(block, roads, tol=tol)
     order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
     return cast(GeoDataFrame, roads.iloc[order].reset_index(drop=True))
@@ -689,18 +689,6 @@ def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | No
         costs.append(_length(cast(GeoDataFrame, ordered.iloc[:m])))
         vals.append(value(cast(GeoDataFrame, ordered.iloc[:m])))
     return costs, vals
-
-
-def truncate_to_length(block: Block, roads: GeoDataFrame, budget_m: float,
-                       tol: float = STREET_TOL) -> GeoDataFrame:
-    """The drainage-ordered prefix of `roads` whose cumulative length <= `budget_m` (the same order
-    _sweep uses). Empty for budget_m <= 0; all roads for budget_m >= total."""
-    if len(roads) == 0 or budget_m <= 0.0:
-        return cast(GeoDataFrame, roads.iloc[:0])
-    ordered = _drainage_ordered(block, roads, tol)
-    cum = ordered.geometry.length.to_numpy().cumsum()
-    m = int((cum <= budget_m + 1e-9).sum())
-    return cast(GeoDataFrame, ordered.iloc[:m])
 
 
 def max_access_depth(block: Block, roads: GeoDataFrame | None, *, tol: float = STREET_TOL,

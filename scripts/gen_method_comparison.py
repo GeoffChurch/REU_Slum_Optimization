@@ -42,11 +42,20 @@ log = logging.getLogger("gen_method_comparison")
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    # Clear stale renders so a changed method set leaves no orphans (all regenerated below); leaves
-    # the committed OSM snapshot + README untouched.
-    for stale in (*OUT.glob("after_*.jpg"), *OUT.glob("before_*.jpg"), *OUT.glob("frontier_*.png"),
-                  *OUT.glob("reblock_*.gif")):
-        stale.unlink()
+    # Clear stale renders -- including the retired three-curve/single-before-image surface the
+    # committed dir predates (before.jpg with no coloring suffix, curve_{external,internal}_
+    # connectivity_*.png, displacement_*.png/*.csv, frontier_{external,internal}_connectivity.csv)
+    # -- so a changed method set leaves no orphans (all regenerated below); leaves the committed
+    # OSM snapshot + README untouched.
+    for pattern in ("after_*.jpg", "before_*.jpg", "frontier_*.png", "reblock_*.gif", "curve_*.png",
+                    "displacement_*.png"):
+        for stale in OUT.glob(pattern):
+            stale.unlink()
+    for name in ("before.jpg", "displacement_table.csv", "displacement_vs_length.csv",
+                "frontier_external_connectivity.csv", "frontier_internal_connectivity.csv"):
+        stale_path = OUT / name
+        if stale_path.exists():
+            stale_path.unlink()
     with _tee_to_file(OUT / "run.log"):
         with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
             cfg = compose(config_name="compare_config", overrides=[

@@ -1,13 +1,16 @@
+import csv
 from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
 import pytest
+from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
-from reblock.contracts import Block
+from reblock.contracts import Block, Proposal
 from reblock.permeability import PermeabilityParams
+from reblock.render import save_render as _real_save_render
 
 UTM = CRS.from_epsg(32643)
 
@@ -21,6 +24,49 @@ def _street_block(x0: int, block_id: str) -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(x0, 0), (x0 + 3, 0)])], crs=UTM)
     return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+
+
+def _sparse_stub_block() -> tuple[Block, gpd.GeoDataFrame]:
+    # A 6x6 grid of 10m parcels fronting a street at y=0 (10m spacing keeps the default
+    # corridor_m=3.0 a strictly LOCAL band -- unlike 1m-cell fixtures, which corridor-saturate; see
+    # test_budget.py's `_permeability_grid_block_and_roads` for the same trap/fix), one building
+    # point per parcel centroid (36 total). A single short stub road near one corner reaches only
+    # its own immediate neighbourhood: at most 1 of 36 points falls inside its 3m corridor, so its
+    # terminal displacement fraction is a few percent and its permeability is far below any
+    # near-ceiling target -- deliberately sparse, to exercise the "converged below budget" (Lens A)
+    # / "unreached" (Lens B) paths without depending on exact electrical-flow/displacement numbers.
+    k, cell = 6, 10.0
+    polys, ids = [], []
+    for r in range(k):
+        for c in range(k):
+            x0, x1, y0, y1 = c * cell, (c + 1) * cell, r * cell, (r + 1) * cell
+            polys.append(Polygon([(x0, y0), (x1, y0), (x1, y1), (x0, y1)]))
+            ids.append(r * k + c)
+    parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
+    boundary = Polygon([(0, 0), (k * cell, 0), (k * cell, k * cell), (0, k * cell)])
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k * cell, 0)])], crs=UTM)
+    points = gpd.GeoDataFrame(geometry=[p.centroid for p in polys], crs=UTM)
+    block = Block(block_id="sparse_stub", crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=streets, building_points=points)
+    roads = gpd.GeoDataFrame(geometry=[LineString([(5.0, 0.0), (5.0, 5.0)])], crs=UTM)
+    return block, roads
+
+
+class _FixedRoadMethod:
+    """A trivial `Method` that always proposes the SAME fixed road set, regardless of block --
+    used to exercise `run_permeability_lenses`'s "converged below budget" / "unreached" paths
+    without a real reblocker's search."""
+
+    def __init__(self, roads: gpd.GeoDataFrame) -> None:
+        self._roads = roads
+
+    @property
+    def identity(self) -> tuple[str, int]:
+        return ("fixed_road_test", id(self))
+
+    def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
+        del prior
+        return Proposal(block_id=block.block_id, crs=block.crs, roads=self._roads)
 
 
 def test_load_permeability_config_reads_the_committed_yaml() -> None:
@@ -134,3 +180,59 @@ def test_run_permeability_lenses_singleton_region_skips_region_reblock(
     cb.run_permeability_lenses(region, {"dijkstra": DijkstraReblocker()}, tmp_path,
                                matched_displacement=0.3, matched_permeability=0.1,
                                params=PermeabilityParams())
+
+
+def test_run_permeability_lenses_reports_below_budget_and_unreached_honestly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    # A deliberately sparse fixed road proves out BOTH honesty paths at once:
+    # - Lens A: the method's own network converges well below a demanding matched_displacement
+    #   (0.5) -- `at_budget=False`, and the after-image title reads "converged at X% (< 50%
+    #   budget)", POSITIVELY framed, never "unreached"/"failed" (that framing belongs to Lens B).
+    # - Lens B: permeability is always < 1 by construction (see permeability.py's module
+    #   docstring), so a near-ceiling matched_permeability (0.999) is unreachable for ANY finite
+    #   network -- `reached=False`, and the after-image title reads exactly "unreached".
+    import scripts.compare_budgets as cb
+
+    captured: dict[str, Figure] = {}
+
+    def spy(fig: Figure, path: str | Path) -> None:
+        captured[Path(path).name] = fig
+        _real_save_render(fig, path)
+
+    monkeypatch.setattr(cb, "save_render", spy)
+
+    block, roads = _sparse_stub_block()
+    rows = cb.run_permeability_lenses(
+        [block], {"sparse": _FixedRoadMethod(roads)}, tmp_path,
+        matched_displacement=0.5, matched_permeability=0.999, params=PermeabilityParams())
+
+    (row,) = rows
+    assert row.method == "sparse"
+    assert row.at_budget is False
+    assert row.reached is False
+
+    # Lens A after-images: positively framed, below-budget title -- on BOTH colorings.
+    for coloring in ("depth", "perm"):
+        title = captured[f"after_sparse_disp_{coloring}.jpg"].axes[0].get_title()
+        assert "converged at" in title
+        assert "50%" in title and "budget" in title
+        assert "unreached" not in title.lower()
+
+    # Lens B after-images: exactly "unreached" -- on BOTH colorings.
+    for coloring in ("depth", "perm"):
+        title = captured[f"after_sparse_perm_{coloring}.jpg"].axes[0].get_title()
+        assert title == "unreached"
+
+    # lens_displacement.csv carries the new at_budget column, False here.
+    with (tmp_path / "lens_displacement.csv").open(newline="") as f:
+        (disp_row,) = list(csv.DictReader(f))
+    assert disp_row["method"] == "sparse"
+    assert disp_row["at_budget"] == "False"
+    assert 0.0 < float(disp_row["displacement"]) < 0.5   # converged short of the 50% budget
+
+    # lens_permeability.csv's reached column, False here.
+    with (tmp_path / "lens_permeability.csv").open(newline="") as f:
+        (perm_row,) = list(csv.DictReader(f))
+    assert perm_row["method"] == "sparse"
+    assert perm_row["reached"] == "False"

@@ -339,40 +339,6 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
         plt.close(fig)
 
 
-def depth_vs_road_report(block: Block, roads_by_method: dict[str, gpd.GeoDataFrame], out_dir: Path,
-                         *, method_order: Sequence[str], label: str) -> None:
-    """A max-access-depth vs added-road curve per method (roads added in drainage order), with a dot
-    each time a method first drives the region's MAX depth to a new integer floor -- so "road to
-    reach depth D" reads straight off it, and a fixed network (osm_footpaths) plateaus at its floor
-    instead of ever crossing lower. Writes `depth_vs_road_<label>.png`."""
-    from reblock.animate import depth_sweep
-    colors = _method_colors(method_order)
-    fig, ax = plt.subplots(figsize=(12, 9))
-    for name, roads in roads_by_method.items():
-        cutoffs, depths = depth_sweep(block, roads)
-        col = colors[name]
-        ax.plot(cutoffs, depths, drawstyle="steps-post", color=col, lw=2.5,
-                label=f"{name} ({int(cutoffs[-1])} m)")
-        prev: int | None = None
-        mx: list[float] = []
-        my: list[float] = []
-        for c, d in zip(cutoffs, depths, strict=True):     # dot at each new integer-depth floor
-            if prev is None or int(d) < prev:
-                mx.append(float(c))
-                my.append(float(d))
-                prev = int(d)
-        ax.plot(mx, my, "o", color=col, ms=9)
-    ax.set_xlabel("added road length (m)", fontsize=16)
-    ax.set_ylabel("max access depth (parcels from a street)", fontsize=16)
-    ax.set_title("access depth vs added road", fontsize=16)   # no block_id/region label
-    ax.set_ylim(bottom=0)
-    ax.grid(axis="y", alpha=0.3)
-    ax.tick_params(labelsize=13)
-    ax.legend(fontsize=13)
-    save_render(fig, out_dir / f"depth_vs_road_{label}.png")
-    plt.close(fig)
-
-
 def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> None:
     block = group[0].block
     # access_before is method-independent: take it from the first Result that
