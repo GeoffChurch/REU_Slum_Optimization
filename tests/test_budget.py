@@ -483,10 +483,11 @@ def test_displacement_curve_is_home_fraction() -> None:
 
 def test_external_internal_displacement_curves_share_cost_samples():
     # emit.compare_report re-bases the two benefit curves' plotted x-axis onto the displacement
-    # curve's cumulative Σcᵢ, which is only valid if all three curves are INDEX-ALIGNED: same
-    # drainage-ordered _sweep, same n_points=20, over the same roads, so their `.cost` samples
-    # (still cumulative added road length, m, for all three) land at identical budgets. A future
-    # change making _sweep's sampling value-dependent would silently misalign every plot.
+    # curve's cumulative Σcᵢ/n_buildings, which is only valid if all three curves are
+    # INDEX-ALIGNED: same drainage-ordered _sweep, same n_points=20, over the same roads, so their
+    # `.cost` samples (still cumulative added road length, m, for all three) land at identical
+    # budgets. A future change making _sweep's sampling value-dependent would silently misalign
+    # every plot.
     from reblock.budget import (
         access_benefit,
         building_radii,

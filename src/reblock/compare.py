@@ -150,8 +150,8 @@ def main(cfg: DictConfig) -> None:
     # scalar rank -- and the displacement metric (rising cost, never inverted) separately.
     for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
         if r.metric == "displacement":
-            log.info("%s %s: %.1f displaced (%.1f%% of homes)", r.block_id, r.method,
-                     r.curve.benefit[-1], r.pct_displaced * 100)
+            log.info("%s %s: %.1f%% of homes displaced", r.block_id, r.method,
+                     r.pct_displaced * 100)
         else:
             log.info("%s %s %s: benefit=%.3f at %.0f m (%.1f%% paved)", r.metric, r.block_id,
                      r.method, r.curve.benefit[-1], r.curve.cost[-1], r.pct_paved * 100)
