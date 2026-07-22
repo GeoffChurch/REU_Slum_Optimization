@@ -1015,15 +1015,18 @@ def commute_ratio(block: Block, roads: GeoDataFrame | None, *,
 
 def commute_ratio_benefit(block: Block, roads_full: GeoDataFrame | None, *,
                           tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
-    """Internal-connectivity benefit factory (shares the access_benefit signature so it plugs
-    into cost_benefit_curve(..., benefit_fn=commute_ratio_benefit) and the _sweep frontier).
-    commute_ratio is self-contained per prefix; the resulting curve is NON-MONOTONE (see
-    commute_ratio) -- reporting compares at matched budget and ranks by terminal value.
-    roads_full/tol are unused, kept for the shared BenefitFactory signature."""
-    del roads_full, tol
+    """Internal-connectivity benefit factory (shares the access_benefit signature so it plugs into
+    cost_benefit_curve(..., benefit_fn=commute_ratio_benefit) and the _sweep frontier). Freezes the
+    averaged parcel set S to `roads_full` -- the terminal network of the sweep -- via
+    _commute_membership, so every prefix scores commute_ratio over the SAME denominator. This
+    removes the composition churn that made the per-prefix curve non-monotone; the terminal value
+    is unchanged (frozen-to-self == the dynamic metric). `tol` is unused, kept for the shared
+    BenefitFactory signature."""
+    del tol
+    membership = _commute_membership(block, roads_full)
 
     def f(roads: GeoDataFrame | None) -> float:
-        return commute_ratio(block, roads)
+        return commute_ratio(block, roads, membership=membership)
     return f
 
 
