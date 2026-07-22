@@ -44,10 +44,11 @@ def test_monotone_under_added_roads():
 def test_loop_beats_spur_at_equal_length():
     # A 15x15 grid of 10m parcels (225 parcels; centroid spacing 10m) -- large enough, at the
     # PermeabilityParams() default corridor_m=3.0, that a road's buffered corridor stays THIN
-    # (covers a local band, not the whole grid): see the coverage-fraction asserts below, both
-    # well under 100%. (A 6x6 grid of 1m unit parcels -- this repo's earlier attempt -- fails
-    # this: corridor_m=3.0 blankets ~all footpath edges of a 1m-spaced grid regardless of road
-    # shape, so spur and loop tie to floating-point noise; see task-1-report.md.)
+    # (covers a local band, not the whole grid): measured coverage is 10.0% of footpath edges
+    # for spur, 8.6% for loop -- both well under 100% (see task-1-report.md for the full
+    # measurement). (A 6x6 grid of 1m unit parcels -- this repo's earlier attempt -- fails this:
+    # corridor_m=3.0 blankets ~all footpath edges of a 1m-spaced grid regardless of road shape,
+    # so spur and loop tie to floating-point noise; see task-1-report.md.)
     #
     # spur: a single straight road up column x=15 from the street to depth 135 -- ONE egress
     # route the whole way; deep parcels' only fast path to ground.
