@@ -158,8 +158,10 @@ def _draw_heatmap(
     # the road made visible next to it, magnitude and all (not just a binary in/out mark).
     if displaced_points is not None and not displaced_points.empty:
         disks = _point_disks(displaced_points)                 # uses the `radius` column
-        disks["c"] = displaced_points["c"].to_numpy()
-        disks.plot(ax=ax, column="c", cmap="Reds", vmin=0.0, vmax=1.0, zorder=5, linewidth=0)
+        # Fixed red, opacity = graze probability c: a barely-grazed home is nearly transparent, a
+        # certainly-displaced one solid red.
+        colors = [(1.0, 0.0, 0.0, float(ci)) for ci in displaced_points["c"].to_numpy()]
+        disks.plot(ax=ax, color=colors, zorder=5, linewidth=0)
 
     sm = plt.cm.ScalarMappable(cmap=_CMAP, norm=Normalize(vmin=1, vmax=vmax))
     fig.colorbar(sm, ax=ax).set_label("access depth (parcels from a street)")
