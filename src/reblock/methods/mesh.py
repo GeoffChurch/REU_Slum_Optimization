@@ -18,7 +18,8 @@ from shapely.ops import unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
-from reblock.methods.dijkstra import _boundary_graph, _reblock_dijkstra, _rnd
+from reblock.methods.boundary_graph import _boundary_graph, _rnd
+from reblock.methods.dijkstra import _reblock_dijkstra
 
 
 def _mesh_roads(block: Block) -> gpd.GeoDataFrame:

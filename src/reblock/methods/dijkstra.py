@@ -20,31 +20,9 @@ from shapely.ops import unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
+from reblock.methods.boundary_graph import _boundary_graph
 
 INF = float("inf")
-
-
-def _rnd(c: tuple[float, float]) -> tuple[float, float]:
-    return (round(c[0], 2), round(c[1], 2))   # snap to cm so shared vertices coincide
-
-
-def _boundary_graph(parcels: gpd.GeoDataFrame) -> nx.Graph:
-    """Planar graph of the tessellation: nodes = boundary vertices, edges = parcel
-    boundary segments (shared party-walls dedup via unary_union), weight = length.
-    Edges are added in sorted order for determinism."""
-    noded = unary_union([g.boundary for g in parcels.geometry])
-    lines = list(noded.geoms) if hasattr(noded, "geoms") else [noded]
-    edges: set[tuple[tuple[float, float], tuple[float, float]]] = set()
-    for ln in lines:
-        cs = list(ln.coords)
-        for a, b in zip(cs, cs[1:], strict=False):
-            na, nb = _rnd(a), _rnd(b)
-            if na != nb:
-                edges.add((min(na, nb), max(na, nb)))
-    g = nx.Graph()
-    for na, nb in sorted(edges):
-        g.add_edge(na, nb, weight=Point(na).distance(Point(nb)))
-    return g
 
 
 def _reblock_dijkstra(block: Block) -> gpd.GeoDataFrame:

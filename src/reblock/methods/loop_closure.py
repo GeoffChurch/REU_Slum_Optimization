@@ -24,7 +24,7 @@ from reblock.contracts import Block, Method, Proposal
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
 from reblock.methods.arterial import _snap, _snap_graph
-from reblock.methods.dijkstra import _boundary_graph
+from reblock.methods.boundary_graph import _boundary_graph
 
 Node = tuple[float, float]
 

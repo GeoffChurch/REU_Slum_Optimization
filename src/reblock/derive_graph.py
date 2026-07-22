@@ -41,6 +41,7 @@ _DERIVATION_MODULES: tuple[Path, ...] = (
     Path(__file__).with_name("budget.py"),
     Path(__file__).parent / "methods" / "topology.py",
     Path(__file__).parent / "methods" / "peel.py",
+    Path(__file__).parent / "methods" / "boundary_graph.py",
     Path(__file__).parent / "methods" / "dijkstra.py",
     Path(__file__).parent / "methods" / "mesh.py",
     Path(__file__).parent / "methods" / "arterial.py",

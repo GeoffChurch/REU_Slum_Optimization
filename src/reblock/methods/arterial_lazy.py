@@ -36,7 +36,7 @@ from reblock.methods.arterial import (
     _xy,
     eval_candidate,
 )
-from reblock.methods.dijkstra import _boundary_graph, _rnd
+from reblock.methods.boundary_graph import _boundary_graph, _rnd
 
 
 def _road_vertices(road: LineString) -> list[tuple[float, float]]:
