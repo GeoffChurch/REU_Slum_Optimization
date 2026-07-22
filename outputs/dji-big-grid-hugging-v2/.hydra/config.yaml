@@ -1,0 +1,37 @@
+data:
+  _target_: reblock.data.kblock.KblockSource
+  blocks_path: tests/data/kblock/blocks_dji_sample.parquet
+  buildings_path: tests/data/kblock/buildings_dji_sample.parquet
+  region_id: dji
+screen:
+  _target_: reblock.screen.identity.IdentityScreen
+region_builder:
+  _target_: reblock.region.IdentityRegionBuilder
+method:
+  _target_: reblock.methods.euclidean_grid.EuclideanGridReblocker
+  spacing: 60.0
+  angle: 0.0
+  min_seg_len: 1.0
+  street_buffer: 0.5
+  seek_density: true
+  adaptive: true
+eval:
+- _target_: reblock.eval.kcomplexity.KComplexityEval
+substrate:
+  _target_: reblock.methods.substrates.ChordSubstrate
+shapefile: ???
+region_id: phule
+alpha: 2.0
+seed: 0
+assumed_crs: null
+max_blocks: 1
+render:
+  enabled: true
+  format: png
+  layout: separate
+flagged_map:
+  enabled: false
+region_map:
+  enabled: false
+block_ids:
+- - DJI.3_1_3182

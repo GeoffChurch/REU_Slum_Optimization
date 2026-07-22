@@ -1,0 +1,21 @@
+data:
+  _target_: reblock.data.kblock.KblockSource
+  blocks_path: tests/data/kblock/blocks_capetown_sample.parquet
+  buildings_path: tests/data/kblock/buildings_capetown_sample.parquet
+  region_id: capetown
+  block_ids: ${block_ids}
+method:
+- _target_: reblock.methods.topology.TopologyMethod
+  alpha: ${alpha}
+  seed: ${seed}
+eval:
+- _target_: reblock.eval.kcomplexity.KComplexityEval
+shapefile: ???
+region_id: phule
+alpha: 2.0
+seed: 0
+assumed_crs: null
+max_blocks: 1
+render_dir: renders
+block_ids:
+- ZAF.9.1.4_1_4359

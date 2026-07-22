@@ -1,0 +1,51 @@
+data:
+  _target_: reblock.data.provision.cached_kblock_source
+  city: capetown
+screen:
+  _target_: reblock.screen.identity.IdentityScreen
+region_builder:
+  _target_: reblock.region.DenseClusterRegionBuilder
+  max_buildings: 150
+method:
+  _target_: reblock.methods.dijkstra.DijkstraReblocker
+eval:
+- _target_: reblock.eval.kcomplexity.KComplexityEval
+substrate:
+  _target_: reblock.methods.substrates.ChordSubstrate
+desire_source:
+  _target_: reblock.methods.desire_lines.OSMDesireLines
+  tags:
+  - path
+  - footway
+  - track
+  - steps
+  - pedestrian
+  - living_street
+  endpoint: https://overpass-api.de/api/interpreter
+  cache_dir: null
+  snapshot: null
+  timeout_s: 60.0
+metric:
+  _target_: reblock.metric.Depth
+  _convert_: all
+metric_gate:
+  _target_: reblock.metric.Gate
+  kind: absolute
+  value: 2.0
+shapefile: ???
+region_id: phule
+alpha: 2.0
+seed: 0
+assumed_crs: null
+max_blocks: 1
+render:
+  enabled: true
+  format: png
+  layout: separate
+flagged_map:
+  enabled: false
+region_map:
+  enabled: true
+block_ids:
+- - ZAF.9.3.1_1_5810
+proxy_keep_pct: 50.0

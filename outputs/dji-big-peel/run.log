@@ -1,0 +1,3 @@
+[2026-07-15 12:04:03,722][reblock.pipeline][INFO] - reblocked DJI.3_1_3182 (649 parcels) in 0.4s
+[2026-07-15 12:04:03,722][__main__][INFO] - DJI.3_1_3182 {'kcomplexity': {'k_before': 9.0, 'k_after': 1.0, 'delta_k': 8.0, 'added_road_length_m': 5582.888731011708, 'n_road_components': 60.0, 'connected_road_frac': 1.0, 'geometric_access_max_m': 0.0}}
+[2026-07-15 12:04:03,723][__main__][INFO] - 1 blocks flagged -> /home/ejmende/dev/REU_Slum_Optimization/outputs/dji-big-peel/flagged_blocks.txt

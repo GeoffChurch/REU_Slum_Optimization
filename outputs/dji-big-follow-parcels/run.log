@@ -1,0 +1,4 @@
+[2026-07-16 13:33:31,119][reblock.pipeline][INFO] - reblocked DJI.3_1_3182 (649 parcels) in 0.5s
+[2026-07-16 13:33:31,119][__main__][INFO] - DJI.3_1_3182 {'kcomplexity': {'k_before': 9.0, 'k_after': 2.0, 'delta_k': 7.0, 'added_road_length_m': 6177.080684831133, 'n_road_components': 44.0, 'connected_road_frac': 0.8448869536983031, 'geometric_access_max_m': 11.530332104286021}}
+[2026-07-16 13:33:31,121][__main__][INFO] -   map: https://www.google.com/maps/@11.55535,43.12165,18z
+[2026-07-16 13:33:31,121][__main__][INFO] - 1 blocks flagged -> /home/ejmende/dev/REU_Slum_Optimization/outputs/dji-big-follow-parcels/flagged_blocks.txt

@@ -1,0 +1,32 @@
+data:
+  _target_: reblock.data.kblock.KblockSource
+  blocks_path: tests/data/kblock/blocks_capetown_sample.parquet
+  buildings_path: tests/data/kblock/buildings_capetown_sample.parquet
+  region_id: capetown
+screen:
+  _target_: reblock.screen.identity.IdentityScreen
+region_builder:
+  _target_: reblock.region.IdentityRegionBuilder
+method:
+  _target_: reblock.methods.peel.PeelReblocker
+eval:
+- _target_: reblock.eval.kcomplexity.KComplexityEval
+substrate:
+  _target_: reblock.methods.substrates.ChordSubstrate
+shapefile: ???
+region_id: phule
+alpha: 2.0
+seed: 0
+assumed_crs: null
+max_blocks: 1
+render:
+  enabled: false
+  format: png
+  layout: separate
+flagged_map:
+  enabled: false
+region_map:
+  enabled: false
+block_ids:
+- - ZAF.9.3.1_1_44882
+render_dir: renders

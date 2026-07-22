@@ -1,6 +1,7 @@
 # Build the MkDocs site and deploy it to GitHub Pages (Settings -> Pages -> Source: GitHub Actions).
-# CI only runs `mkdocs build` -- it does NOT rerun scripts/gen_site_pages.py, because that generator
-# also reads the gitignored outputs/ run logs; the generated pages are committed instead.
+# CI regenerates the data-driven pages (scripts/gen_site_pages.py, stdlib-only) from examples/ and
+# the tracked outputs/ eval snapshot (see .gitignore), then builds -- so pushing new run artifacts
+# is the only manual step; generated pages and docs/assets are not committed.
 name: Deploy site
 
 on:
@@ -8,6 +9,9 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "examples/**"
+      - "outputs/**"
+      - "scripts/gen_site_pages.py"
       - "mkdocs.yml"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
@@ -30,6 +34,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install "mkdocs-material>=9,<10"
+      - run: python3 scripts/gen_site_pages.py
       - run: mkdocs build
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -30,7 +30,27 @@ coverage.xml
 
 # Data (uncomment / refine as the pipeline grows)
 # data/
-outputs/
+
+# outputs/ is scratch, EXCEPT the tiny eval snapshot the site generator reads
+# (scripts/gen_site_pages.py): each run's log + config, plus the four render PNGs the method
+# pages show. New single-block eval runs auto-track once `git add`ed - no gitignore edit needed.
+outputs/*
+!outputs/*/
+outputs/*/*
+!outputs/*/run.log
+!outputs/*/.hydra/
+outputs/*/.hydra/*
+!outputs/*/.hydra/config.yaml
+!outputs/ct-peel-render/ZAF.9.3.1_1_44882_before.png
+!outputs/ct-peel-render/ZAF.9.3.1_1_44882_peel_tol0.5_after.png
+!outputs/capetown-dense-cluster-euclidgrid-adaptivefalse-test/ZAF.9.3.1_1_5810_before.png
+!outputs/capetown-dense-cluster-euclidgrid-adaptivefalse-test/ZAF.9.3.1_1_5810_euclidean_grid-sp60-a0-msl1-sb0.5-sd1-ad0-fs30-dtp75-phb3.21867-pbg19.312_after.png
+
+# Generated site pages + assets: CI regenerates them from examples/ + the outputs snapshot
+# (see .github/workflows/deploy-site.yml); run scripts/gen_site_pages.py for a local preview.
+docs/methods/
+docs/benchmark.md
+docs/assets/
 
 # Hydra scratch dir left behind by in-place regeneration of examples/method-comparison
 examples/method-comparison/.hydra/

@@ -1,0 +1,4 @@
+[2026-07-21 13:54:03,999][reblock.pipeline][INFO] - reblocked ZAF.9.3.1_1_5810 (6619 parcels) in 10.2s
+[2026-07-21 13:54:03,999][__main__][INFO] - ZAF.9.3.1_1_5810 {'kcomplexity': {'k_before': 24.0, 'k_after': 1.0, 'delta_k': 23.0, 'added_road_length_m': 56270.42670005634, 'n_road_components': 362.0, 'connected_road_frac': 1.0, 'geometric_access_max_m': 0.0}}
+[2026-07-21 13:54:04,001][__main__][INFO] -   map: https://www.google.com/maps/@-33.84091,18.74436,15z
+[2026-07-21 13:54:04,002][__main__][INFO] - 1 blocks flagged -> /home/ejmende/dev/REU_Slum_Optimization/outputs/capetown-dense-cluster-test/flagged_blocks.txt

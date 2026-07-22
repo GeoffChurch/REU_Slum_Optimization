@@ -1,6 +1,8 @@
-# Project site (GitHub Pages). Build locally with:
+# Project site (GitHub Pages; deployed by .github/workflows/deploy-site.yml, which regenerates
+# the data-driven pages in CI -- docs/methods/, docs/benchmark.md, and docs/assets/ are NOT
+# committed). For a local preview:
 #   python3 scripts/gen_site_pages.py   # regenerate data-driven pages from run artifacts
-#   mkdocs build                        # needs mkdocs-material (e.g. `pixi exec --spec mkdocs-material mkdocs build`)
+#   mkdocs serve                        # needs mkdocs-material (e.g. `pixi exec --spec mkdocs-material mkdocs serve`)
 site_name: reblock · REU Slum Optimization
 site_description: >-
   Generating and evaluating road-network proposals for informal urban settlements —

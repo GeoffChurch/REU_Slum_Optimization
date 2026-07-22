@@ -1,0 +1,5 @@
+[2026-07-21 13:40:15,817][reblock.region][WARNING] - region group ['DJI.3_1_1789', 'DJI.3_1_1812'] is not mutually touch-adjacent -- each block will be reblocked independently with no road spanning the gap; pass region_builder=convex_hull to fill the gap into one contiguous region
+[2026-07-21 13:40:16,096][reblock.pipeline][INFO] - reblocked DJI.3_1_1789+DJI.3_1_1812 (575 parcels) in 0.2s
+[2026-07-21 13:40:16,096][__main__][INFO] - region:DJI.3_1_1789+DJI.3_1_1812 {'kcomplexity': {'k_before': 8.0, 'k_after': 4.0, 'delta_k': 4.0, 'added_road_length_m': 1444.6077451891615, 'n_road_components': 2.0, 'connected_road_frac': 1.0, 'geometric_access_max_m': 23.3595958176531}}
+[2026-07-21 13:40:16,097][__main__][INFO] -   map: https://www.google.com/maps/@11.57649,43.14434,18z
+[2026-07-21 13:40:16,097][__main__][INFO] - 2 blocks flagged -> /home/ejmende/dev/REU_Slum_Optimization/outputs/dji-multiblock-grid/flagged_blocks.txt
