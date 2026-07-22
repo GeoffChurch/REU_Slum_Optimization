@@ -313,6 +313,11 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     colors = _method_colors(method_order)   # one stable name->colour map for every plot
     # method -> [(terminal displacement, pct_displaced)]
     disp_terminal: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    # The two benefit curves are plotted against cumulative DISPLACEMENT (homes displaced), not road
+    # length: the displacement curve is index-aligned (same drainage-ordered _sweep over the same
+    # roads), so its per-prefix Σcᵢ is the x-axis. (The displacement metric itself stays vs length.)
+    disp_x: dict[tuple[str, str], list[float]] = {
+        (r.block_id, r.method): list(r.curve.benefit) for r in by_metric.get("displacement", [])}
     for metric, metric_results in by_metric.items():
         by_block: dict[str, list[MethodCurve]] = {}
         for r in metric_results:
@@ -336,9 +341,14 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
         for block_id, curves in by_block.items():
             fig, ax = plt.subplots(figsize=(7, 5))
             for mc in curves:
-                ax.plot(mc.curve.cost, mc.curve.benefit, marker="o",
-                        label=f"{mc.method} ({int(mc.curve.cost[-1])} m)", color=colors[mc.method])
-            ax.set_xlabel("added road length (m)")
+                if metric == "displacement":
+                    xs, lab = mc.curve.cost, f"{mc.method} ({int(mc.curve.cost[-1])} m)"
+                else:                                    # benefit vs homes displaced
+                    xs = disp_x.get((block_id, mc.method), mc.curve.cost)
+                    lab = f"{mc.method} ({xs[-1]:.0f} homes)"
+                ax.plot(xs, mc.curve.benefit, marker="o", label=lab, color=colors[mc.method])
+            ax.set_xlabel("added road length (m)" if metric == "displacement"
+                          else "buildings displaced (Σ disk-graze probability)")
             ax.set_ylabel(ylabel)
             ax.set_title(f"cost-benefit ({metric}): {block_id}")
             ax.legend()

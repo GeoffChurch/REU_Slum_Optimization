@@ -116,7 +116,8 @@ def main() -> None:
                 "all_methods.clearance_looped.base.depth_target=3",
                 "all_methods.clearance_looped.base.max_roads=3000",
                 "all_methods.clearance_looped.budget_frac=0.30",
-                "all_methods.clearance_looped.search_radius_m=60"])
+                "all_methods.clearance_looped.search_radius_m=60",
+                "all_methods.euclidean_grid.spacing=250"])   # coarser grid -> budget in the pack
         source = cast(Source, instantiate(cfg.data))
         screen = cast(Screen, instantiate(cfg.screen))
         region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
@@ -147,8 +148,7 @@ def main() -> None:
                 png.unlink()
 
         methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
-                   for n in ("clearance", "greedy_arterial_repulsion", "clearance_looped",
-                             "euclidean_grid")}
+                   for n in ("greedy_arterial_repulsion", "clearance_looped", "euclidean_grid")}
         # osm_footpaths: the real as-built informal network, from a committed per-region OSM snapshot
         # (fetched once by scripts.fetch_desire_lines_snapshot) so the example reproduces offline.
         snapshot = out / f"desire_lines_{seed}.geojson"
@@ -156,16 +156,7 @@ def main() -> None:
             with open_dict(cfg):
                 cfg.desire_source.snapshot = str(snapshot)
             methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
-        # Continue clearance past its depth target on the depth curve ("to the longest road"): with
-        # depth_target 0 it keeps clearing until the region is fully drained, so it reaches L_max. Only
-        # clearance is extended -- it's the thorough clearer whose line is the point (it drains to ~1 at
-        # the longest budget); arterial (sparse by design) and the fixed osm_footpaths stop at their own
-        # converged lengths. Over-provisioning arterial's CELF doesn't scale to the big regions.
-        with open_dict(cfg):
-            cfg.all_methods.clearance.depth_target = 1     # clear to full drainage (bounded), not 0
-            cfg.all_methods.clearance.max_roads = 10000
-        extend = {"clearance": cast(Method, instantiate(cfg.all_methods.clearance))}
-        run_two_lens(region, methods, 0.70, out, label=seed, extend=extend)
+        run_two_lens(region, methods, 0.70, out, label=seed)
 
         depths = block_depths(source, members)
         dens = {b.block_id: len(b.parcels) / b.parcels.geometry.union_all().area * 1e4 for b in region}
