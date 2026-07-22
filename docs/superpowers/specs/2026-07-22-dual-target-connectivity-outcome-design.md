@@ -108,6 +108,10 @@ reviewed; the chosen constants land in `conf/` (e.g. `conf/joint_target.yaml`).
 
 Per method, a single **outcome view** replaces the two lens truncations:
 
+- **Before-image** (once per example): the region's status-quo access-depth heatmap with NO roads
+  (`render_before` on `access_before`), so every example carries the before/after pair. Method-
+  comparison already renders `before.jpg`; the multiblock examples gain it. `run_dual_target` renders
+  it once (it already computes `access_before` for the shared `vmax`).
 - **After-image** at the outcome prefix (`truncate_to_length` to `external.cost[i*]`). Killed methods
   render at the `D_max`-capped prefix, titled with the failure reason (`internal X < I_min` or
   `displaced Y% > budget`).
