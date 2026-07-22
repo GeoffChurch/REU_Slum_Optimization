@@ -1,5 +1,12 @@
 # Dual-Target Connectivity Outcome — Design
 
+> **SUPERSEDED (2026-07-22)** by `2026-07-22-permeability-metric-design.md`. The internal-connectivity
+> metric this design depends on was replaced by a single flow-based **permeability** metric (monotone,
+> contention-aware, one sparse solve), which retires the internal/external split, the freeze, and the
+> over-provisioning. Task 1 (displacement-as-fraction) from its plan survives; the rest is superseded.
+> Kept for history.
+
+
 **Status:** design approved (brainstorming 2026-07-22); pending spec review → implementation plan.
 
 ## Goal
