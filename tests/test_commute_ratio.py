@@ -4,8 +4,11 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.budget import (
-    _noded_graph, commute_ratio, commute_ratio_benefit, cost_benefit_curve,
     _commute_membership,
+    _noded_graph,
+    commute_ratio,
+    commute_ratio_benefit,
+    cost_benefit_curve,
 )
 from reblock.contracts import Block
 
@@ -138,7 +141,7 @@ def test_frozen_membership_matches_dynamic_inclusion() -> None:
     block = _block(3, _parcels_at([(40, 40), (50, 40), (60, 40)]))
     loop = _roads([LineString([(30, 0), (30, 50), (70, 50), (70, 0)])])
     S = _commute_membership(block, loop)
-    assert len(S) == 3                                         # all three served parcels are members
+    assert len(S) == 3                          # all three served parcels are members
     assert commute_ratio(block, loop, membership=S) == commute_ratio(block, loop)
 
 
@@ -146,7 +149,8 @@ def test_frozen_membership_includes_zeros_for_unconnected() -> None:
     # A frozen member with no interior entry under `roads` contributes 0.0 (not skipped), so a
     # denominator that includes it drags the mean DOWN vs the dynamic (skip-it) metric.
     served = _parcels_at([(40, 40), (50, 40), (60, 40)])
-    on_street = Polygon([(9, -1), (11, -1), (11, 1), (9, 1)])  # centroid ~(10, 0): nearest edge is the street
+    # centroid ~(10, 0): nearest edge is the street
+    on_street = Polygon([(9, -1), (11, -1), (11, 1), (9, 1)])
     block = _block(4, served + [on_street])
     loop = _roads([LineString([(30, 0), (30, 50), (70, 50), (70, 0)])])
     dyn = commute_ratio(block, loop)                          # averages the 3 served only
@@ -163,4 +167,5 @@ def test_frozen_empty_and_missing_guards() -> None:
     assert _commute_membership(block, _roads([])) == frozenset()
     assert _commute_membership(block, None) == frozenset()
     assert commute_ratio(block, loop, membership=frozenset()) == 0.0      # empty S -> 0.0
-    assert commute_ratio(block, None, membership=_commute_membership(block, loop)) == 0.0  # no graph -> 0.0
+    # no graph -> 0.0
+    assert commute_ratio(block, None, membership=_commute_membership(block, loop)) == 0.0

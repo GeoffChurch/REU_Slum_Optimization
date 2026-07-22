@@ -864,11 +864,12 @@ def _entry_resistance_ground(gvv: float, a: float, b: float, r: float) -> float:
 
 
 _CommuteSetup = tuple[
-    dict[_Node, tuple[dict[_Node, int], NDArray[np.float64]]],  # interior node -> (idx map, its component's grounded G)
-    dict[_Node, float],                                          # R_geo per node (multi-source dijkstra)
-    list[tuple[_Node, _Node]],                                   # edges
-    list[LineString],                                            # edge_lines (index-aligned to edges)
-    STRtree,                                                     # STRtree over edge_lines
+    # interior node -> (idx map, its component's grounded G)
+    dict[_Node, tuple[dict[_Node, int], NDArray[np.float64]]],
+    dict[_Node, float],           # R_geo per node (multi-source dijkstra)
+    list[tuple[_Node, _Node]],    # edges
+    list[LineString],             # edge_lines (index-aligned to edges)
+    STRtree,                      # STRtree over edge_lines
 ]
 
 
