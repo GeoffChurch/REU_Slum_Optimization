@@ -13,8 +13,9 @@ UTM = CRS.from_epsg(32734)
 def _grid_block(k=4, cell=1.0):
     # k x k `cell`-sized parcels tiling a k*cell x k*cell square; south edge (y=0) is the
     # street. `cell` defaults to 1.0 (unit parcels, unchanged from the brief) for every test
-    # except test_loop_beats_spur_at_equal_length, which needs a larger cell so the default
-    # corridor_m=3.0 is thin relative to parcel spacing (see that test's comment).
+    # except test_monotone_under_added_roads and test_loop_beats_spur_at_equal_length, which
+    # need a larger cell so the default corridor_m=3.0 is thin relative to parcel spacing (see
+    # those tests' comments).
     polys, ids = [], []
     for r in range(k):
         for c in range(k):
