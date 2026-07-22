@@ -28,6 +28,7 @@ from shapely.ops import unary_union
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.permeability import PermeabilityParams, egress_power, permeability
 
 _Node = tuple[float, float]      # an _rnd-snapped (x, y) graph node
 _Pair = tuple[_Node, _Node]      # an undirected edge as its two endpoints
@@ -743,59 +744,6 @@ def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
     return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), depth_at(lo)
 
 
-@dataclass(frozen=True)
-class JointTargetOutcome:
-    """The road prefix at which a method first meets the joint connectivity target, or the
-    displacement-capped prefix if it never does. `reason`: "reached" | "internal_below" |
-    "over_budget". external/internal/displacement are the values at the chosen sample; displacement
-    is the home fraction. `sample_index` indexes the shared curve sample grid."""
-    prefix: GeoDataFrame
-    reached: bool
-    reason: str
-    external: float
-    internal: float
-    displacement: float
-    sample_index: int
-    road_m: float
-
-
-def prefix_to_joint_target(block: Block, roads: GeoDataFrame, external: Curve, internal: Curve,
-                           displacement: Curve, *, i_min: float, e_min: float,
-                           d_max: float) -> JointTargetOutcome:
-    """First sample index i with external[i] >= e_min AND internal[i] >= i_min AND
-    displacement[i] <= d_max (displacement = home fraction). The three curves are index-aligned
-    (same drainage-ordered _sweep grid; see test_curves_share_cost_samples), so this is a pure scan.
-    Touch-and-go: the first qualifying index wins even if internal later dips. If no in-budget index
-    qualifies, the outcome is killed at the last index with displacement <= d_max, with reason
-    "over_budget" (external and internal are jointly met at SOME sample, in-budget or not, so the
-    target was reachable -- just past d_max) or "internal_below" (external and internal are never
-    jointly met at any sample, in or out of budget). The outcome prefix is `roads` truncated to that
-    sample's cumulative road length."""
-    n = len(external.cost)
-    last_in_budget = -1
-    joint_ever = False
-    for i in range(n):
-        in_budget = displacement.benefit[i] <= d_max
-        if in_budget:
-            last_in_budget = i
-        if external.benefit[i] >= e_min and internal.benefit[i] >= i_min:
-            joint_ever = True
-            if in_budget:
-                prefix = truncate_to_length(block, roads, external.cost[i])
-                return JointTargetOutcome(prefix, True, "reached", external.benefit[i],
-                                          internal.benefit[i], displacement.benefit[i], i,
-                                          external.cost[i])
-    j = last_in_budget if last_in_budget >= 0 else 0
-    reason = "over_budget" if joint_ever else "internal_below"
-    prefix = (truncate_to_length(block, roads, external.cost[j]) if n
-              else cast(GeoDataFrame, roads.iloc[:0]))
-    return JointTargetOutcome(prefix, False, reason,
-                              external.benefit[j] if n else 0.0,
-                              internal.benefit[j] if n else 0.0,
-                              displacement.benefit[j] if n else 0.0,
-                              j, external.cost[j] if n else 0.0)
-
-
 def prefix_to_external_connectivity(block: Block, roads: GeoDataFrame, target_ext: float, *,
                                     tol: float = STREET_TOL) -> tuple[GeoDataFrame, float]:
     """The minimal drainage-ordered prefix of `roads` whose external connectivity
@@ -827,6 +775,82 @@ def prefix_to_external_connectivity(block: Block, roads: GeoDataFrame, target_ex
         else:
             lo = mid + 1
     return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), ext_at(lo)
+
+
+def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64],
+                           d_frac: float, *, corridor_m: float = 3.0,
+                           tol: float = STREET_TOL) -> GeoDataFrame:
+    """The minimal drainage-ordered prefix of `roads` whose displacement FRACTION
+    (`displacement(block.building_points, radii, prefix, corridor_m) / n_buildings`) is
+    >= `d_frac`. Displacement is monotone non-decreasing as drainage-ordered roads are added (a
+    growing prefix's buffered corridor union only grows, so every building's distance to it is
+    non-increasing, hence each cᵢ is non-decreasing), so a binary search over the prefix length
+    finds the smallest sufficient prefix in O(log R) peels -- mirroring
+    `prefix_to_external_connectivity`. n_buildings == 0 makes the fraction always 0.0 (matching
+    `displacement_curve`'s `_disp`), so a positive `d_frac` is then unreachable. If even all
+    `roads` cannot reach `d_frac`, returns all roads in drainage order. Empty `roads` returns
+    empty."""
+    n = len(block.building_points)
+    if len(roads) == 0:
+        return cast(GeoDataFrame, roads.iloc[:0])
+    ordered = _drainage_ordered(block, roads, tol)
+
+    def frac_at(m: int) -> float:
+        if n == 0:
+            return 0.0
+        return displacement(block.building_points, radii,
+                            cast(GeoDataFrame, ordered.iloc[:m]), corridor_m) / n
+
+    total = len(ordered)
+    if frac_at(total) < d_frac:                   # unreachable: best effort is all roads
+        return ordered
+    lo, hi = 0, total                              # smallest m with frac_at(m) >= d_frac
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if frac_at(mid) >= d_frac:
+            hi = mid
+        else:
+            lo = mid + 1
+    return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True))
+
+
+def prefix_to_permeability(
+    block: Block,
+    roads: GeoDataFrame,
+    p_star: float,
+    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
+    *,
+    tol: float = STREET_TOL,
+) -> tuple[GeoDataFrame, bool]:
+    """The minimal drainage-ordered prefix of `roads` whose `permeability` is >= `p_star`, paired
+    with whether that target was reached. Permeability is monotone non-decreasing as
+    drainage-ordered roads are added (roads only add conductance -- never remove it -- so the
+    dissipated power is monotone non-increasing by Rayleigh's monotonicity theorem; see
+    permeability.py's module docstring), so a binary search over the prefix length finds the
+    smallest sufficient prefix in O(log R) peels, mirroring `prefix_to_external_connectivity`.
+    The no-roads baseline p0 is frozen ONCE via `egress_power` rather than recomputed per probed
+    prefix. If even all `roads` cannot reach `p_star` (including an ungrounded block, where
+    permeability is nan and every comparison is False), returns (all roads in drainage order,
+    False). Empty `roads` returns (empty, False)."""
+    if len(roads) == 0:
+        return cast(GeoDataFrame, roads.iloc[:0]), False
+    p0, _ = egress_power(block, None, params)
+    ordered = _drainage_ordered(block, roads, tol)
+
+    def perm_at(m: int) -> float:
+        return permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0)
+
+    n = len(ordered)
+    if not (perm_at(n) >= p_star):                 # unreachable (incl. nan): best effort all roads
+        return ordered, False
+    lo, hi = 0, n                                  # smallest m with perm_at(m) >= p_star
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if perm_at(mid) >= p_star:
+            hi = mid
+        else:
+            lo = mid + 1
+    return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), True
 
 
 def matched_budget(total_length_by_method: dict[str, float]) -> float:

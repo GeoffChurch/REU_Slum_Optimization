@@ -384,6 +384,35 @@ def _deep_column_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
     return block, roads
 
 
+def _permeability_grid_block_and_roads() -> tuple[Block, gpd.GeoDataFrame]:
+    # `_deep_column_block_with_two_roads`'s 1-unit-cell spacing corridor-SATURATES at
+    # PermeabilityParams()'s default corridor_m=3.0 (a 3m corridor blankets the whole 1m-spaced
+    # column regardless of road extent -- see test_permeability.py's test_monotone_under_added_roads
+    # docstring for the measured trap), so road B there adds ZERO marginal permeability and can't
+    # discriminate `prefix_to_permeability`'s binary search. Reuse that same test's proven-thin-
+    # corridor fixture instead: a 15x15 grid of 10m parcels (large spacing keeps corridor_m=3.0 a
+    # local band) with a drainage-trunk spur (x=15, depth 135) + a short cross-connector near its
+    # top (y=115, x=0..30) that upgrades additional footpath edges the spur alone doesn't reach --
+    # MEASURED (not assumed) strict marginal gain: 10.00% -> 11.19% footpath-edge coverage.
+    k, cell = 15, 10.0
+    polys, ids = [], []
+    for r in range(k):
+        for c in range(k):
+            x0, x1, y0, y1 = c * cell, (c + 1) * cell, r * cell, (r + 1) * cell
+            polys.append(Polygon([(x0, y0), (x1, y0), (x1, y1), (x0, y1)]))
+            ids.append(r * k + c)
+    parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k * cell, 0)])], crs=UTM)
+    boundary = Polygon([(0, 0), (k * cell, 0), (k * cell, k * cell), (0, k * cell)])
+    block = Block(block_id="perm_grid", crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=streets)
+    roads = gpd.GeoDataFrame(geometry=[
+        LineString([(15, 0), (15, 135)]),           # the drainage trunk (spur)
+        LineString([(0, 115), (30, 115)]),          # cross-connector, grounded only via the spur
+    ], crs=UTM)
+    return block, roads
+
+
 def test_max_access_depth_matches_the_peel() -> None:
     from reblock.budget import max_access_depth
     block, roads = _deep_column_block_with_two_roads()
@@ -455,6 +484,50 @@ def test_prefix_to_external_connectivity_empty_roads_returns_empty() -> None:
     assert reached == 0.0
 
 
+def test_prefix_to_permeability_returns_minimal_prefix_that_reaches_target() -> None:
+    from reblock.budget import prefix_to_permeability
+    from reblock.permeability import permeability
+    block, roads = _permeability_grid_block_and_roads()
+    p1 = permeability(block, cast(gpd.GeoDataFrame, roads.iloc[:1]))
+    p2 = permeability(block, roads)
+    assert 0.0 < p1 < p2                       # spur alone helps but the pair does strictly more
+    prefix, reached = prefix_to_permeability(block, roads, p1)
+    assert reached
+    assert len(prefix) == 1                    # the MINIMAL prefix, not both roads
+    assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])   # the spur (the drainage trunk)
+
+
+def test_prefix_to_permeability_reaches_a_higher_target_only_with_all_roads() -> None:
+    from reblock.budget import prefix_to_permeability
+    from reblock.permeability import permeability
+    block, roads = _permeability_grid_block_and_roads()
+    p1 = permeability(block, cast(gpd.GeoDataFrame, roads.iloc[:1]))
+    p2 = permeability(block, roads)
+    target = (p1 + p2) / 2.0                   # strictly between: needs both roads
+    prefix, reached = prefix_to_permeability(block, roads, target)
+    assert reached
+    assert len(prefix) == 2
+
+
+def test_prefix_to_permeability_reports_unreached_when_target_unreachable() -> None:
+    from reblock.budget import prefix_to_permeability
+    block, roads = _permeability_grid_block_and_roads()
+    prefix, reached = prefix_to_permeability(block, roads, 1.5)   # 1.5 exceeds max (permeability<1)
+    assert not reached
+    assert len(prefix) == len(roads)           # best effort = all roads in drainage order
+    assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])
+    assert prefix.geometry.iloc[1].equals(roads.geometry.iloc[1])
+
+
+def test_prefix_to_permeability_empty_roads_returns_empty_unreached() -> None:
+    from reblock.budget import prefix_to_permeability
+    block, _roads = _permeability_grid_block_and_roads()
+    empty_roads = gpd.GeoDataFrame(geometry=[], crs=UTM)
+    prefix, reached = prefix_to_permeability(block, empty_roads, 0.1)
+    assert len(prefix) == 0
+    assert not reached
+
+
 def test_displacement_curve_is_monotonic_and_ends_at_full():
     import numpy as np
 
@@ -479,6 +552,58 @@ def test_displacement_curve_is_home_fraction() -> None:
     # terminal fraction == displacement(full roads)/n_buildings
     assert abs(curve.benefit[-1]
                - displacement(block.building_points, radii, roads, 3.0) / n) < 1e-9
+
+
+def test_prefix_to_displacement_returns_minimal_prefix_that_reaches_fraction() -> None:
+    import numpy as np
+
+    from reblock.budget import displacement, prefix_to_displacement
+    block, roads = _straight_block_with_two_roads()
+    radii = np.full(len(block.building_points), 3.0)
+    n = len(block.building_points)
+    frac1 = displacement(block.building_points, radii,
+                         cast(gpd.GeoDataFrame, roads.iloc[:1]), 3.0) / n
+    frac2 = displacement(block.building_points, radii, roads, 3.0) / n
+    assert 0.0 < frac1 < frac2                  # road 0 alone displaces only its own building
+    prefix = prefix_to_displacement(block, roads, radii, frac1, corridor_m=3.0)
+    assert len(prefix) == 1                     # the MINIMAL prefix, not both roads
+    assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])
+
+
+def test_prefix_to_displacement_needs_all_roads_for_a_higher_fraction() -> None:
+    import numpy as np
+
+    from reblock.budget import displacement, prefix_to_displacement
+    block, roads = _straight_block_with_two_roads()
+    radii = np.full(len(block.building_points), 3.0)
+    n = len(block.building_points)
+    frac1 = displacement(block.building_points, radii,
+                         cast(gpd.GeoDataFrame, roads.iloc[:1]), 3.0) / n
+    frac2 = displacement(block.building_points, radii, roads, 3.0) / n
+    target = (frac1 + frac2) / 2.0              # strictly between: needs both roads
+    prefix = prefix_to_displacement(block, roads, radii, target, corridor_m=3.0)
+    assert len(prefix) == 2
+
+
+def test_prefix_to_displacement_returns_all_roads_when_fraction_unreachable() -> None:
+    import numpy as np
+
+    from reblock.budget import prefix_to_displacement
+    block, roads = _straight_block_with_two_roads()
+    radii = np.full(len(block.building_points), 3.0)
+    prefix = prefix_to_displacement(block, roads, radii, 1.5, corridor_m=3.0)   # > 1.0, impossible
+    assert len(prefix) == len(roads)            # best effort = all roads in drainage order
+
+
+def test_prefix_to_displacement_empty_roads_returns_empty() -> None:
+    import numpy as np
+
+    from reblock.budget import prefix_to_displacement
+    block, _roads = _straight_block_with_two_roads()
+    radii = np.full(len(block.building_points), 3.0)
+    empty_roads = gpd.GeoDataFrame(geometry=[], crs=UTM)
+    prefix = prefix_to_displacement(block, empty_roads, radii, 0.5, corridor_m=3.0)
+    assert len(prefix) == 0
 
 
 def test_external_internal_displacement_curves_share_cost_samples():

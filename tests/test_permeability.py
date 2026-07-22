@@ -6,7 +6,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.contracts import Block
-from reblock.permeability import egress_power, permeability
+from reblock.permeability import egress_power, permeability, permeability_curve
 
 UTM = CRS.from_epsg(32734)
 
@@ -90,3 +90,34 @@ def test_ungrounded_returns_zero_benefit_or_guarded():
     P, v = egress_power(b, None)
     assert not np.isfinite(P)     # +inf; permeability() guards this (returns nan) -- assert guard
     assert math.isnan(permeability(b, None))          # exercise the actual nan guard, not just P
+
+def test_permeability_curve_terminal_matches_full_permeability():
+    # Two segments (a spur + a cross-connector) on the thin-corridor 15x15/10m grid, so the
+    # drainage sweep has real intermediate prefixes (see test_monotone_under_added_roads for why
+    # this grid, not the 1m-unit default, is needed to avoid corridor saturation).
+    b = _grid_block(15, cell=10.0)
+    roads = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
+    curve = permeability_curve(b, roads, n_points=10)
+    assert abs(curve.benefit[-1] - permeability(b, roads)) < 1e-9
+
+def test_permeability_curve_starts_at_zero_and_is_bounded():
+    b = _grid_block(15, cell=10.0)
+    roads = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
+    curve = permeability_curve(b, roads, n_points=10)
+    assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
+    assert all(0.0 <= v < 1.0 for v in curve.benefit)
+
+def test_permeability_curve_is_monotone_non_decreasing():
+    b = _grid_block(15, cell=10.0)
+    roads = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
+    curve = permeability_curve(b, roads, n_points=10)
+    assert curve.benefit == sorted(curve.benefit)
+
+def test_permeability_curve_freezes_p0_matching_a_manual_baseline():
+    # p0 is frozen once via egress_power(block, None, params)[0] -- every sample must equal
+    # permeability(block, prefix, params, p0=p0_manual) computed against that SAME baseline.
+    b = _grid_block(15, cell=10.0)
+    roads = _roads([LineString([(15, 0), (15, 135)])])
+    p0, _ = egress_power(b, None)
+    curve = permeability_curve(b, roads, n_points=4)
+    assert abs(curve.benefit[-1] - permeability(b, roads, p0=p0)) < 1e-9

@@ -22,7 +22,7 @@ assembly and sparse solve are transcribed verbatim; do not re-derive.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pandas as pd
@@ -37,6 +37,9 @@ from shapely.ops import unary_union
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
+
+if TYPE_CHECKING:
+    from reblock.budget import Curve
 
 
 @dataclass(frozen=True)
@@ -165,6 +168,33 @@ def permeability(
     if not np.isfinite(p1):
         return float("-inf")
     return 1.0 - p1 / p0
+
+
+def permeability_curve(
+    block: Block,
+    roads: GeoDataFrame,
+    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
+    *,
+    n_points: int = 20,
+    tol: float = STREET_TOL,
+) -> Curve:
+    """A Curve whose x is cumulative added road length (m) and whose y is `permeability` per
+    drainage-ordered prefix (monotone non-decreasing; see the module docstring -- roads only add
+    conductance, so P is monotone non-increasing under Rayleigh monotonicity and permeability
+    monotone non-decreasing). Mirrors `budget.displacement_curve`'s structure: reuses the
+    drainage-ordered `_sweep`. The no-roads baseline p0 is computed ONCE via
+    `egress_power(block, None, params)` and frozen across every sample (rather than recomputed
+    per prefix inside `permeability`). Deferred import of `reblock.budget` avoids a module-level
+    import cycle (budget.py imports `permeability`/`PermeabilityParams` from this module)."""
+    from reblock.budget import Curve, _sweep  # deferred: breaks the budget<->permeability cycle
+
+    p0, _ = egress_power(block, None, params)
+
+    def f(prefix: GeoDataFrame | None) -> float:
+        return permeability(block, prefix, params, p0=p0)
+
+    costs, vals = _sweep(block, roads, f, n_points, tol)
+    return Curve(costs, vals)
 
 
 def parcel_potentials(
