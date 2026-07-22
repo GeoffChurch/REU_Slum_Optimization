@@ -184,14 +184,19 @@ def permeability_curve(
     monotone non-decreasing). Mirrors `budget.displacement_curve`'s structure: reuses the
     drainage-ordered `_sweep`. The no-roads baseline p0 is computed ONCE via
     `egress_power(block, None, params)` and frozen across every sample (rather than recomputed
-    per prefix inside `permeability`). Deferred import of `reblock.budget` avoids a module-level
-    import cycle (budget.py imports `permeability`/`PermeabilityParams` from this module)."""
+    per prefix inside `permeability`). `adj` (parcel_adjacency, an STRtree spatial join -- costly
+    at region scale) is likewise built ONCE here and threaded through every `egress_power`/
+    `permeability` call: adjacency is a function of `block.parcels` geometry alone, invariant
+    across road prefixes, exactly the precomputed-adj pattern `access_benefit`/`prefix_to_depth`
+    already use. Deferred import of `reblock.budget` avoids a module-level import cycle (budget.py
+    imports `permeability`/`PermeabilityParams` from this module)."""
     from reblock.budget import Curve, _sweep  # deferred: breaks the budget<->permeability cycle
 
-    p0, _ = egress_power(block, None, params)
+    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    p0, _ = egress_power(block, None, params, adj=adj)
 
     def f(prefix: GeoDataFrame | None) -> float:
-        return permeability(block, prefix, params, p0=p0)
+        return permeability(block, prefix, params, p0=p0, adj=adj)
 
     costs, vals = _sweep(block, roads, f, n_points, tol)
     return Curve(costs, vals)

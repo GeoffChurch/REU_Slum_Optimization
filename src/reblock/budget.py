@@ -829,16 +829,21 @@ def prefix_to_permeability(
     permeability.py's module docstring), so a binary search over the prefix length finds the
     smallest sufficient prefix in O(log R) peels, mirroring `prefix_to_external_connectivity`.
     The no-roads baseline p0 is frozen ONCE via `egress_power` rather than recomputed per probed
-    prefix. If even all `roads` cannot reach `p_star` (including an ungrounded block, where
-    permeability is nan and every comparison is False), returns (all roads in drainage order,
-    False). Empty `roads` returns (empty, False)."""
+    prefix. `adj` (parcel_adjacency, an STRtree spatial join -- costly at region scale) is
+    likewise built ONCE and threaded through every `egress_power`/`permeability` call: adjacency
+    is a function of `block.parcels` geometry alone, invariant across road prefixes, exactly the
+    precomputed-adj pattern `access_benefit`/`prefix_to_depth` already use. If even all `roads`
+    cannot reach `p_star` (including an ungrounded block, where permeability is nan and every
+    comparison is False), returns (all roads in drainage order, False). Empty `roads` returns
+    (empty, False)."""
     if len(roads) == 0:
         return cast(GeoDataFrame, roads.iloc[:0]), False
-    p0, _ = egress_power(block, None, params)
+    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    p0, _ = egress_power(block, None, params, adj=adj)
     ordered = _drainage_ordered(block, roads, tol)
 
     def perm_at(m: int) -> float:
-        return permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0)
+        return permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0, adj=adj)
 
     n = len(ordered)
     if not (perm_at(n) >= p_star):                 # unreachable (incl. nan): best effort all roads
