@@ -863,47 +863,36 @@ def _entry_resistance_ground(gvv: float, a: float, b: float, r: float) -> float:
     return a * (b + gpvv) / (a + b + gpvv)
 
 
-def commute_ratio(block: Block, roads: GeoDataFrame | None) -> float:
-    """Internal connectivity: mean over reachable parcels of 1 - R(dwelling->street)/R_geodesic on
-    the noded road-union-street graph. R = grounded effective resistance to the whole street (a
-    component-wise DENSE solve); R_geo = single-best-route (shortest-path) resistance. A
-    single-egress tree route -> 0; ->1 as parallel backup routes thicken. Clipped to [0, 1).
-    NON-MONOTONE in road length (ratio of co-decreasing R/R_geo) -- reporting ranks by terminal
-    value, never assumes rise. Rewards added redundancy via Rayleigh monotonicity (adding a
-    redundant connector to an existing loop can only help). A small tight loop can legitimately
-    outscore a large loose one, since this metric is coverage-insensitive by design (see
-    access_benefit for that). Task-1 corpus gate (2 blocks, 2026-07-17): corr(rho, access)=+0.294
-    (<= the 0.49 bar); anti-gaming holds on realistic networks -- loops ADDED
-    to clearance give rho 0.000->TINY 0.060->BIG 0.278 (BIG >> TINY); a matched-length parallel
-    bundle scores 0.00145/m vs a genuine loop's 0.00234/m and costs displacement, so corridor
-    duplication is Pareto-dominated on the {external, internal, displacement} suite.
+_CommuteSetup = tuple[
+    dict[_Node, tuple[dict[_Node, int], NDArray[np.float64]]],  # interior node -> (idx map, its component's grounded G)
+    dict[_Node, float],                                          # R_geo per node (multi-source dijkstra)
+    list[tuple[_Node, _Node]],                                   # edges
+    list[LineString],                                            # edge_lines (index-aligned to edges)
+    STRtree,                                                     # STRtree over edge_lines
+]
 
-    Each parcel enters by TRUE line-proximity -- the nearest POINT on its nearest road/street edge
-    of the TOPOLOGY graph (not snapped to that edge's nearest raw VERTEX, which breaks subdivision
-    invariance and lets a far-off parcel inherit a road's resistance merely because that road is
-    its only nearby edge). Unlike `_line_entries`/`_build_csr` elsewhere in this module, the entry
-    point is NOT injected as a new graph node: `_entry_resistance`/`_entry_resistance_ground`
-    compute its exact grounded resistance analytically from the edge's two endpoints, so the dense
-    per-component solve is over the topology graph alone -- its size never grows with parcel count
-    (component-wise DENSE `np.linalg.inv` on O(parcels) more rows was tried first and rejected: on
-    a real ~2000-parcel block it made the 20-prefix sweep ~125s, about 700x the topology-only
-    sweep and ~8x over the ~15s gate, because dense inversion is cubic in matrix size). 0.0 with no
-    roads / no parcels / no interior nodes / empty reachable set."""
-    if roads is None or len(roads) == 0 or len(block.parcels) < 1:
-        return 0.0
-    g = _noded_graph(roads, block.streets)
+
+def _commute_setup(roads: GeoDataFrame | None, streets: GeoDataFrame) -> _CommuteSetup | None:
+    """Build the planarized road-union-street graph and, per connected component, its grounded
+    Green's function (dense inverse of the interior-node Laplacian) + R_geo (multi-source dijkstra
+    from the street nodes), plus an STRtree of edges for line-proximity parcel entry. Returns None
+    when there is no usable graph: no/empty roads, no graph nodes, or no street node / no interior
+    node. Street nodes are those within STREET_TOL of the street geometry (GEOMETRIC test)."""
+    if roads is None or len(roads) == 0:
+        return None
+    g = _noded_graph(roads, streets)
     if g.number_of_nodes() == 0:
-        return 0.0
-    street_geom = unary_union(list(block.streets.geometry))
-    snodes = {n for n in g.nodes if Point(n).distance(street_geom) <= STREET_TOL}  # GEOMETRIC
+        return None
+    street_geom = unary_union(list(streets.geometry))
+    snodes = {n for n in g.nodes if Point(n).distance(street_geom) <= STREET_TOL}
     interior = [n for n in g.nodes if n not in snodes]
     if not snodes or not interior:
-        return 0.0
+        return None
     for u, v in g.edges():
         g[u][v]["len"] = max(math.hypot(u[0] - v[0], u[1] - v[1]), 1e-6)
-    geo = nx.multi_source_dijkstra_path_length(g, snodes, weight="len")  # R_geo per node
-    green: dict[_Node, tuple[dict[_Node, int], NDArray[np.float64]]] = {}  # node -> (idx, G) of
-    for comp in nx.connected_components(g):                                # its OWN component
+    geo = nx.multi_source_dijkstra_path_length(g, snodes, weight="len")
+    green: dict[_Node, tuple[dict[_Node, int], NDArray[np.float64]]] = {}
+    for comp in nx.connected_components(g):
         comp_streets = comp & snodes
         comp_int = [n for n in comp if n not in snodes]
         if not comp_streets or not comp_int:                            # stranded -> excluded
@@ -928,32 +917,98 @@ def commute_ratio(block: Block, roads: GeoDataFrame | None) -> float:
             green[n] = (idx, ginv)
     edges = list(g.edges())
     edge_lines = [LineString([u, v]) for u, v in edges]
-    tree = STRtree(edge_lines)
-    ratios: list[float] = []
-    for geom in block.parcels.geometry:
-        pt = geom.centroid
-        j = int(tree.nearest(pt))                                       # line-proximity entry
-        ls = edge_lines[j]
-        u, v = edges[j]
-        proj = ls.project(pt)
-        r = max(ls.length, 1e-6)
-        a, b = proj, r - proj
-        u_int, v_int = u in green, v in green
-        if u_int and v_int:
-            idx, ginv = green[u]
-            guu, gvv, guv = ginv[idx[u], idx[u]], ginv[idx[v], idx[v]], ginv[idx[u], idx[v]]
-            r_eff = _entry_resistance(guu, gvv, guv, a, b, r)
-        elif u_int:                                                     # v is a street node
-            idx, ginv = green[u]                                        # ground dist=b, interior=a
-            r_eff = _entry_resistance_ground(ginv[idx[u], idx[u]], b, a, r)
-        elif v_int:                                                     # u is a street node
-            idx, ginv = green[v]                                        # ground dist=a, interior=b
-            r_eff = _entry_resistance_ground(ginv[idx[v], idx[v]], a, b, r)
-        else:
-            continue                                                    # both ends on the street
-        r_geo = min(geo.get(u, math.inf) + a, geo.get(v, math.inf) + b)
-        if math.isfinite(r_geo) and r_geo > 1e-9:
-            ratios.append(min(max(1.0 - r_eff / r_geo, 0.0), 1.0 - 1e-12))  # clip [0,1)
+    return green, geo, edges, edge_lines, STRtree(edge_lines)
+
+
+def _nearest_edge_ratio(setup: _CommuteSetup, pt: Point) -> tuple[bool, float]:
+    """(included, ratio) for parcel point `pt` entering via its single geometrically-nearest
+    topology edge. included=False (ratio 0.0) when that edge has NO interior endpoint (the parcel's
+    closest frontage is the bare street) or R_geo is non-finite/zero. The caller decides what
+    False means: 'skip' (dynamic membership) or 'contribute 0.0' (frozen membership)."""
+    green, geo, edges, edge_lines, tree = setup
+    j = int(tree.nearest(pt))                                           # line-proximity entry
+    ls = edge_lines[j]
+    u, v = edges[j]
+    proj = ls.project(pt)
+    r = max(ls.length, 1e-6)
+    a, b = proj, r - proj
+    u_int, v_int = u in green, v in green
+    if u_int and v_int:
+        idx, ginv = green[u]
+        guu, gvv, guv = ginv[idx[u], idx[u]], ginv[idx[v], idx[v]], ginv[idx[u], idx[v]]
+        r_eff = _entry_resistance(guu, gvv, guv, a, b, r)
+    elif u_int:                                                         # v is a street node
+        idx, ginv = green[u]                                           # ground dist=b, interior=a
+        r_eff = _entry_resistance_ground(ginv[idx[u], idx[u]], b, a, r)
+    elif v_int:                                                         # u is a street node
+        idx, ginv = green[v]                                           # ground dist=a, interior=b
+        r_eff = _entry_resistance_ground(ginv[idx[v], idx[v]], a, b, r)
+    else:
+        return False, 0.0                                              # both ends on the street
+    r_geo = min(geo.get(u, math.inf) + a, geo.get(v, math.inf) + b)
+    if not (math.isfinite(r_geo) and r_geo > 1e-9):
+        return False, 0.0
+    return True, min(max(1.0 - r_eff / r_geo, 0.0), 1.0 - 1e-12)       # clip [0, 1)
+
+
+def _commute_membership(block: Block, roads: GeoDataFrame | None) -> frozenset[int]:
+    """The frozen averaged-parcel set S: indices of parcels with a valid interior entry under
+    `roads` (the sweep's terminal/superset network), computed ONCE. A prefix sweep that averages
+    over this fixed S has a fixed denominator, which removes the composition churn (parcels
+    flickering in/out of the mean) that makes the per-prefix curve non-monotone. Empty if `roads`
+    yields no usable graph."""
+    setup = _commute_setup(roads, block.streets)
+    if setup is None:
+        return frozenset()
+    return frozenset(i for i, geom in enumerate(block.parcels.geometry)
+                     if _nearest_edge_ratio(setup, geom.centroid)[0])
+
+
+def commute_ratio(block: Block, roads: GeoDataFrame | None, *,
+                  membership: frozenset[int] | None = None) -> float:
+    """Internal connectivity: mean over parcels of 1 - R(dwelling->street)/R_geodesic on the noded
+    road-union-street graph. R = grounded effective resistance to the whole street (a component-wise
+    DENSE solve); R_geo = single-best-route (shortest-path) resistance. A single-egress tree route
+    -> 0; ->1 as parallel backup routes thicken. Clipped to [0, 1). Rewards added redundancy via
+    Rayleigh monotonicity (adding a redundant connector to an existing loop can only help). A small
+    tight loop can legitimately outscore a large loose one -- coverage-insensitive by design (see
+    access_benefit for coverage). Task-1 corpus gate (2026-07-17): corr(rho, access)=+0.294;
+    anti-gaming holds on realistic networks -- loops ADDED to clearance give rho 0.000->TINY
+    0.060->BIG 0.278 (BIG >> TINY); a matched-length parallel bundle scores 0.00145/m vs a genuine
+    loop's 0.00234/m and costs displacement, so corridor duplication is Pareto-dominated on the
+    {external, internal, displacement} suite.
+
+    Each parcel enters by TRUE line-proximity -- the nearest POINT on its nearest topology edge
+    (via _entry_resistance/_entry_resistance_ground, computed analytically from the edge's two
+    endpoints, so the dense per-component solve never grows with parcel count).
+
+    `membership` selects the averaged set:
+    - None (default): DYNAMIC -- exactly the parcels with a valid interior entry under THIS `roads`,
+      each contributing its real ratio; a parcel whose nearest edge is a bare street segment, or
+      that is unreachable, is skipped. Self-contained per road set. The raw metric is NON-MONOTONE
+      across different road sets (a ratio of co-decreasing R/R_geo AND a changing averaged set) --
+      standalone reporting ranks by terminal value, never assumes rise.
+    - a frozen index set S (from `_commute_membership(block, terminal_roads)`): FROZEN -- every
+      parcel in S contributes on EVERY call, its real ratio if it has an interior entry under
+      `roads`, else 0.0 ('not yet connected', NOT skipped). Members are averaged in ascending index
+      order so a frozen-to-self call (S from the same `roads`) is byte-identical to the dynamic
+      default; freezing changes ONLY intermediate prefixes of a sweep, never the terminal value,
+      and removes the composition churn so the swept curve reads monotone.
+
+    0.0 with no roads / no parcels / no interior nodes / no usable graph / empty membership."""
+    if roads is None or len(roads) == 0 or len(block.parcels) < 1:
+        return 0.0
+    setup = _commute_setup(roads, block.streets)
+    if setup is None:
+        return 0.0
+    if membership is None:
+        ratios = [ratio for geom in block.parcels.geometry
+                  for included, ratio in [_nearest_edge_ratio(setup, geom.centroid)] if included]
+        return float(np.mean(ratios)) if ratios else 0.0
+    if not membership:
+        return 0.0
+    ratios = [_nearest_edge_ratio(setup, block.parcels.geometry.iloc[i].centroid)[1]
+              for i in sorted(membership)]
     return float(np.mean(ratios)) if ratios else 0.0
 
 

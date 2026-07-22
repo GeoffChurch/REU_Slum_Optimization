@@ -3,7 +3,10 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
-from reblock.budget import _noded_graph, commute_ratio, commute_ratio_benefit, cost_benefit_curve
+from reblock.budget import (
+    _noded_graph, commute_ratio, commute_ratio_benefit, cost_benefit_curve,
+    _commute_membership,
+)
 from reblock.contracts import Block
 
 UTM = CRS.from_epsg(32734)
@@ -128,3 +131,36 @@ def test_no_interior_nodes_returns_zero() -> None:
     block = _block(3, _parcels_at([(30, 40), (50, 40), (70, 40)]))
     on_street = _roads([LineString([(10, 0), (90, 0)])])     # on the south street (y=0)
     assert commute_ratio(block, on_street) == 0.0
+
+
+def test_frozen_membership_matches_dynamic_inclusion() -> None:
+    # freeze-to-self is a no-op: S from `roads`, evaluated at `roads`, == the dynamic metric.
+    block = _block(3, _parcels_at([(40, 40), (50, 40), (60, 40)]))
+    loop = _roads([LineString([(30, 0), (30, 50), (70, 50), (70, 0)])])
+    S = _commute_membership(block, loop)
+    assert len(S) == 3                                         # all three served parcels are members
+    assert commute_ratio(block, loop, membership=S) == commute_ratio(block, loop)
+
+
+def test_frozen_membership_includes_zeros_for_unconnected() -> None:
+    # A frozen member with no interior entry under `roads` contributes 0.0 (not skipped), so a
+    # denominator that includes it drags the mean DOWN vs the dynamic (skip-it) metric.
+    served = _parcels_at([(40, 40), (50, 40), (60, 40)])
+    on_street = Polygon([(9, -1), (11, -1), (11, 1), (9, 1)])  # centroid ~(10, 0): nearest edge is the street
+    block = _block(4, served + [on_street])
+    loop = _roads([LineString([(30, 0), (30, 50), (70, 50), (70, 0)])])
+    dyn = commute_ratio(block, loop)                          # averages the 3 served only
+    S = _commute_membership(block, loop)
+    assert 3 not in S and len(S) == 3                         # the on-street parcel is not a member
+    assert commute_ratio(block, loop, membership=S) == dyn    # freeze-to-self identity
+    frozen_all = commute_ratio(block, loop, membership=frozenset(range(4)))
+    assert frozen_all < dyn                                   # forcing the 0.0 in lowers the mean
+
+
+def test_frozen_empty_and_missing_guards() -> None:
+    block = _block(3, _parcels_at([(40, 40), (50, 40), (60, 40)]))
+    loop = _roads([LineString([(30, 0), (30, 50), (70, 50), (70, 0)])])
+    assert _commute_membership(block, _roads([])) == frozenset()
+    assert _commute_membership(block, None) == frozenset()
+    assert commute_ratio(block, loop, membership=frozenset()) == 0.0      # empty S -> 0.0
+    assert commute_ratio(block, None, membership=_commute_membership(block, loop)) == 0.0  # no graph -> 0.0
