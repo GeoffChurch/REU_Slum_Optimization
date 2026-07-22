@@ -466,3 +466,23 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
     assert curve.benefit == sorted(curve.benefit)     # non-decreasing displacement
     assert abs(curve.benefit[-1]
                - displacement(block.building_points, radii, roads, 3.0)) < 1e-6
+
+
+def test_external_internal_displacement_curves_share_cost_samples():
+    # emit.compare_report re-bases the two benefit curves' plotted x-axis onto the displacement
+    # curve's cumulative Σcᵢ, which is only valid if all three curves are INDEX-ALIGNED: same
+    # drainage-ordered _sweep, same n_points=20, over the same roads, so their `.cost` samples
+    # (still cumulative added road length, m, for all three) land at identical budgets. A future
+    # change making _sweep's sampling value-dependent would silently misalign every plot.
+    from reblock.budget import (
+        access_benefit,
+        building_radii,
+        commute_ratio_benefit,
+        displacement_curve,
+    )
+    block, roads = _straight_block_with_two_roads()
+    radii = building_radii(block.building_points, corridor_m=3.0)
+    external = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
+    internal = cost_benefit_curve(block, roads, benefit_fn=commute_ratio_benefit)
+    disp = displacement_curve(block, roads, radii, corridor_m=3.0)
+    assert list(external.cost) == list(internal.cost) == list(disp.cost)

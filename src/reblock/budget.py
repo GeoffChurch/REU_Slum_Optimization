@@ -878,7 +878,14 @@ def _commute_setup(roads: GeoDataFrame | None, streets: GeoDataFrame) -> _Commut
     Green's function (dense inverse of the interior-node Laplacian) + R_geo (multi-source dijkstra
     from the street nodes), plus an STRtree of edges for line-proximity parcel entry. Returns None
     when there is no usable graph: no/empty roads, no graph nodes, or no street node / no interior
-    node. Street nodes are those within STREET_TOL of the street geometry (GEOMETRIC test)."""
+    node. Street nodes are those within STREET_TOL of the street geometry (GEOMETRIC test).
+
+    A component-wise DENSE `np.linalg.inv` on O(parcels) more rows (injecting each parcel as a new
+    graph node) was tried first and rejected: on a real ~2000-parcel block it made the 20-prefix
+    sweep ~125s, about 700x the topology-only sweep and ~8x over the ~15s gate, because dense
+    inversion is cubic in matrix size. Instead the parcel entry point is computed analytically from
+    the edge's two endpoints (see `_nearest_edge_ratio` / `_entry_resistance`), so this solve is
+    over the topology graph alone and never grows with parcel count."""
     if roads is None or len(roads) == 0:
         return None
     g = _noded_graph(roads, streets)
@@ -925,7 +932,12 @@ def _nearest_edge_ratio(setup: _CommuteSetup, pt: Point) -> tuple[bool, float]:
     """(included, ratio) for parcel point `pt` entering via its single geometrically-nearest
     topology edge. included=False (ratio 0.0) when that edge has NO interior endpoint (the parcel's
     closest frontage is the bare street) or R_geo is non-finite/zero. The caller decides what
-    False means: 'skip' (dynamic membership) or 'contribute 0.0' (frozen membership)."""
+    False means: 'skip' (dynamic membership) or 'contribute 0.0' (frozen membership).
+
+    The parcel enters by TRUE line-proximity -- the nearest POINT on its nearest topology edge, NOT
+    that edge's nearest raw VERTEX: snapping to the nearest vertex would break subdivision
+    invariance and let a far-off parcel inherit a road's resistance merely because that road is its
+    only nearby edge."""
     green, geo, edges, edge_lines, tree = setup
     j = int(tree.nearest(pt))                                           # line-proximity entry
     ls = edge_lines[j]

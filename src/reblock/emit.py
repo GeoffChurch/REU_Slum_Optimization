@@ -294,7 +294,12 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
                    *, method_order: Sequence[str]) -> None:
     """Per metric (external_connectivity, internal_connectivity, displacement): a per-method
     summary table + overlaid cost-benefit curves per block. `results` is the flat (method x block
-    x metric) list from reblock.compare. The x-axis is always cumulative added road length (m).
+    x metric) list from reblock.compare. The PLOTTED x-axis differs by metric: for the two benefit
+    metrics (external_connectivity, internal_connectivity) it is cumulative DISPLACEMENT (homes
+    displaced, from the index-aligned displacement curve's Σcᵢ -- see `disp_x` below); for
+    "displacement" it stays cumulative added road length (m). The stored `Curve.cost` (and every
+    CSV written below) remain cumulative added road length (m) for every metric regardless --
+    only the plotted x-axis for the two benefit metrics is re-based onto displacement.
     For the two benefit metrics, writes `frontier_{metric}.csv` (the full (road length, benefit)
     samples per method -- no scalar rank, because a single AUC to a shared road-length cap
     penalised the road-efficient methods: one reaching high benefit at low road ranked below a

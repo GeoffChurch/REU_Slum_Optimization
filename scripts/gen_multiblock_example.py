@@ -110,7 +110,6 @@ def main() -> None:
             cfg = compose(config_name="compare_config", overrides=[
                 f"metric={metric_name}", f"data={city}_full", "screen=dense_compact",
                 "region_builder=dense_cluster", "region_builder.max_buildings=3000", "max_blocks=1",
-                "all_methods.clearance.max_roads=3000", "all_methods.clearance.depth_target=3",
                 "all_methods.greedy_arterial_repulsion.candidate_policy=fixed",
                 "+all_methods.greedy_arterial_repulsion.max_anchors=64",
                 "all_methods.clearance_looped.base.depth_target=3",
