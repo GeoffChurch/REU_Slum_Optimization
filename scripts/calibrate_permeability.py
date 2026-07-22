@@ -41,13 +41,35 @@ Run one region (fast; also the smoke-test / debugging entry point):
 Run the full probe (SLOW -- 3-4 methods x 7 regions, each a subprocess reblock + curve build; the
 controller should budget real wall-clock time, not assume a quick turnaround):
     pixi run python -m scripts.calibrate_permeability
+
+PARALLELISM (two independent levels, both embarrassingly parallel -- no shared mutable state
+crosses a region or a method, so results are IDENTICAL to a fully serial run, just faster):
+  - Level 1 (across regions): the no-arg orchestrator runs the up-to-7 `--region` subprocesses
+    CONCURRENTLY on a `ThreadPoolExecutor` (threads are fine -- each just blocks on
+    `subprocess.run`, releasing the GIL) capped at `--max-region-concurrency`
+    (default `DEFAULT_MAX_REGION_CONCURRENCY`). Each region STAYS a fresh isolated subprocess --
+    this only changes how many run at once, never collapses them into one process (that would
+    reintroduce the cross-region state bleed bug (1) above).
+  - Level 2 (across methods, inside one region): `run_region` builds each method's frontier (a
+    reblock + up to 21 independent sparse solves -- CPU-bound) on a `ProcessPoolExecutor` (fork
+    context, mirrors `reblock.screen.dense_compact`'s worker-pool pattern) capped at
+    `METHOD_WORKERS`. The methods share the region's `Block` read-only (each worker gets its own
+    pickled copy; nothing is mutated), so this is safe.
+  - Progress: STARTED/DONE + elapsed for every region and every method, plus a live
+    "solve i/total" counter per method's `permeability_curve` sweep, all on STDERR (so they never
+    interleave with a `--region` subprocess's STDOUT `_MARKER` JSON line).
 """
 from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
+import os
 import subprocess
 import sys
+import threading
+import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -78,10 +100,28 @@ PINNED_SNAPSHOT = ROOT / "examples" / "method-comparison" / "desire_lines_40972.
 DISPLACEMENT_PCTS = (0.10, 0.20, 0.30, 0.40)     # Lens A candidates: "permeability at D%"
 PERMEABILITY_LEVELS = (0.3, 0.4, 0.5)            # Lens B candidates: "displacement to reach P*"
 
+# Level 2 cap: at most this many methods' frontiers build concurrently within one region (there
+# are at most 4 -- 3 synthetic + osm_footpaths -- so this never actually queues).
+METHOD_WORKERS = 4
+# Level 1 default cap: at most this many region subprocesses run concurrently. Each region briefly
+# forks its OWN 16-worker screen fine-pass pool (reblock.screen.dense_compact) before settling
+# into its <=4 method workers, so 5 regions concurrent can brief-spike to ~80 processes during
+# that screening phase -- acceptable on 48 cores per the coordinator's guidance; tune via
+# `--max-region-concurrency` if it thrashes.
+DEFAULT_MAX_REGION_CONCURRENCY = 5
+
 # Prefixes the one stdout line a `--region` subprocess uses to hand its JSON result back to the
 # orchestrator; every other line that process prints is the human-readable table (ignored by the
-# orchestrator, which reprints from the parsed JSON instead).
+# orchestrator, which reprints from the parsed JSON instead). All progress/STARTED/DONE logging
+# goes to STDERR instead (see `_log`), so it never lands on this stdout channel.
 _MARKER = "###RESULT_JSON### "
+
+
+def _log(msg: str) -> None:
+    """Progress logging -- always STDERR (never stdout, which carries only the human table + the
+    one `_MARKER` JSON line a `--region` subprocess's caller parses) and always flushed (the
+    controller watches this live during the slow full run)."""
+    print(msg, file=sys.stderr, flush=True)
 
 
 @dataclass(frozen=True)
@@ -214,18 +254,24 @@ def displacement_at_permeability(perm_curve: Curve, disp_curve: Curve, p: float)
     return float("inf")
 
 
-def _method_frontier(block: Block, method: Method,
-                     params: PermeabilityParams) -> MethodFrontier | None:
+def _method_frontier(block: Block, method: Method, params: PermeabilityParams, *,
+                     label: str) -> MethodFrontier | None:
     """One method's frontier summary on `block`: reblock once (natural config, already baked into
     `method`), build the index-aligned permeability/displacement curves, and read off the table
     cells. `None` if the method proposes no roads (skip, matching `calibrate_joint_target.py`'s
-    precedent)."""
+    precedent). `label` (e.g. `"depth/capetown · clearance_looped"`) prefixes the live
+    "solve i/total" progress line `permeability_curve`'s sparse-solve sweep emits -- the only
+    per-sample-granular part of the pipeline (`displacement_curve` is pure geometry, no solve)."""
     prop = propose(method, block)
     roads = prop.roads
     if roads is None or roads.empty:
         return None
     radii = building_radii(block.building_points, params.corridor_m)
-    perm_curve = permeability_curve(block, roads, params, n_points=20)
+
+    def _report(i: int, total: int) -> None:
+        _log(f"    {label}: solve {i}/{total}")
+
+    perm_curve = permeability_curve(block, roads, params, n_points=20, progress=_report)
     disp_curve = displacement_curve(block, roads, radii, corridor_m=params.corridor_m, n_points=20)
     return MethodFrontier(
         n_roads=int(len(roads)),
@@ -242,13 +288,44 @@ def _method_frontier(block: Block, method: Method,
     )
 
 
+def _frontier_worker(label: str, block: Block, method: Method,
+                     params: PermeabilityParams) -> MethodFrontier | None:
+    """Module-level (NOT a closure) so a fork `ProcessPoolExecutor` can dispatch it -- mirrors
+    `reblock.screen.dense_compact._chunk_depths`'s pattern. Runs entirely inside the forked child;
+    STARTED/DONE/solve-progress `_log` calls print to that child's inherited stderr fd, so they
+    land in the region subprocess's own stderr stream with no extra plumbing back to the parent."""
+    t0 = time.monotonic()
+    _log(f"  {label}: STARTED")
+    result = _method_frontier(block, method, params, label=label)
+    elapsed = time.monotonic() - t0
+    roads_note = "no roads proposed" if result is None else f"{result.n_roads} roads"
+    _log(f"  {label}: DONE in {elapsed:.1f}s ({roads_note})")
+    return result
+
+
 def run_region(name: str) -> RegionResult:
-    """Load + reblock + score ONE region, entirely within this process -- the unit of subprocess
-    isolation (see the module docstring's bug (1))."""
+    """Load + reblock + score ONE region, entirely within this process -- the unit of Level-1
+    subprocess isolation (see the module docstring's bug (1)). The methods' frontiers build on a
+    Level-2 fork pool (`METHOD_WORKERS` workers, capped to the actual method count) when forking is
+    available; a plain serial loop otherwise (e.g. a single method, or no `fork` start method) --
+    same code path `_method_frontier` runs either way, so results are identical."""
     block, methods = _load_region(name)
     params = _load_permeability_params()
-    method_results = {mname: _method_frontier(block, method, params)
-                      for mname, method in methods.items()}
+    workers = min(METHOD_WORKERS, len(methods), os.cpu_count() or 1)
+    if workers > 1 and "fork" in multiprocessing.get_all_start_methods():
+        ctx = multiprocessing.get_context("fork")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
+            futures = {
+                ex.submit(_frontier_worker, f"{name} · {mname}", block, method, params): mname
+                for mname, method in methods.items()
+            }
+            unordered = {futures[fut]: fut.result() for fut in as_completed(futures)}
+    else:
+        unordered = {mname: _frontier_worker(f"{name} · {mname}", block, method, params)
+                    for mname, method in methods.items()}
+    # Reassemble in the original method order (as_completed finishes out of order) so the printed
+    # table reads identically to a serial run.
+    method_results = {mname: unordered[mname] for mname in methods}
     return RegionResult(region=name, block_id=block.block_id, n_parcels=int(len(block.parcels)),
                         methods=method_results)
 
@@ -361,7 +438,10 @@ def _propose(all_results: list[RegionResult]) -> None:
 def _run_region_subprocess(name: str, *, timeout_s: float | None) -> RegionResult:
     """Run region `name` in a FRESH subprocess and parse its `_MARKER`-prefixed JSON result line --
     the isolation the module docstring's bug (1) requires. On failure, relay the child's stdout/
-    stderr before raising, so the failure is diagnosable without re-running by hand."""
+    stderr before raising, so the failure is diagnosable without re-running by hand. The child's
+    own STARTED/DONE/solve-progress lines land directly on ITS stderr (inherited, unbuffered by
+    `capture_output` only insofar as we don't relay them live here -- see `_run_all_regions`,
+    which wraps this call with the Level-1 region-level STARTED/DONE logging instead)."""
     proc = subprocess.run(
         [sys.executable, "-m", "scripts.calibrate_permeability", "--region", name],
         cwd=str(ROOT), capture_output=True, text=True, timeout=timeout_s,
@@ -376,6 +456,36 @@ def _run_region_subprocess(name: str, *, timeout_s: float | None) -> RegionResul
     return _from_jsonable(cast("dict[str, Any]", json.loads(marker_line[len(_MARKER):])))
 
 
+def _run_all_regions(names: list[str], *, timeout_s: float | None,
+                     max_region_concurrency: int) -> list[RegionResult]:
+    """Level 1: run every region's `_run_region_subprocess` CONCURRENTLY on a `ThreadPoolExecutor`
+    capped at `max_region_concurrency` (threads block on `subprocess.run`, so this only bounds how
+    many child processes are in flight, not CPU -- each region stays its own fresh, isolated OS
+    subprocess). Logs region STARTED/DONE + elapsed + a running `k/total` completion count to
+    stderr; returns results in `names` order regardless of completion order, so downstream printing
+    reads identically to a serial run."""
+    total = len(names)
+    done = 0
+    lock = threading.Lock()
+
+    def _run_one(name: str) -> tuple[str, RegionResult]:
+        nonlocal done
+        t0 = time.monotonic()
+        _log(f">>> region {name}: STARTED")
+        result = _run_region_subprocess(name, timeout_s=timeout_s)
+        elapsed = time.monotonic() - t0
+        with lock:
+            done += 1
+            k = done
+        _log(f"<<< region {name}: DONE in {elapsed:.1f}s ({k}/{total})")
+        return name, result
+
+    with ThreadPoolExecutor(max_workers=max_region_concurrency) as ex:
+        futures = [ex.submit(_run_one, name) for name in names]
+        by_name = dict(fut.result() for fut in as_completed(futures))
+    return [by_name[name] for name in names]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -384,6 +494,10 @@ def main() -> None:
                              "unit the no-arg orchestrator below shells out to)")
     parser.add_argument("--timeout", type=float, default=None,
                         help="per-region subprocess timeout in seconds (orchestrator mode only)")
+    parser.add_argument("--max-region-concurrency", type=int,
+                        default=DEFAULT_MAX_REGION_CONCURRENCY,
+                        help="Level-1 cap on concurrently-running region subprocesses "
+                             f"(orchestrator mode only; default {DEFAULT_MAX_REGION_CONCURRENCY})")
     args = parser.parse_args()
 
     if args.region is not None:
@@ -392,12 +506,10 @@ def main() -> None:
         print(f"{_MARKER}{json.dumps(_to_jsonable(result))}")
         return
 
-    all_results: list[RegionResult] = []
-    for name in region_names():
-        print(f"\n>>> region {name}: launching isolated subprocess...")
-        result = _run_region_subprocess(name, timeout_s=args.timeout)
+    all_results = _run_all_regions(region_names(), timeout_s=args.timeout,
+                                   max_region_concurrency=args.max_region_concurrency)
+    for result in all_results:
         _print_table(result)
-        all_results.append(result)
     _propose(all_results)
 
 

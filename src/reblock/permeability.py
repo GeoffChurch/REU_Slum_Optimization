@@ -21,6 +21,7 @@ assembly and sparse solve are transcribed verbatim; do not re-derive.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -177,6 +178,7 @@ def permeability_curve(
     *,
     n_points: int = 20,
     tol: float = STREET_TOL,
+    progress: Callable[[int, int], None] | None = None,
 ) -> Curve:
     """A Curve whose x is cumulative added road length (m) and whose y is `permeability` per
     drainage-ordered prefix (monotone non-decreasing; see the module docstring -- roads only add
@@ -189,14 +191,28 @@ def permeability_curve(
     `permeability` call: adjacency is a function of `block.parcels` geometry alone, invariant
     across road prefixes, exactly the precomputed-adj pattern `access_benefit`/`prefix_to_depth`
     already use. Deferred import of `reblock.budget` avoids a module-level import cycle (budget.py
-    imports `permeability`/`PermeabilityParams` from this module)."""
+    imports `permeability`/`PermeabilityParams` from this module).
+
+    `progress`, if given, is called `progress(call_index, total_calls)` (1-indexed) after each
+    per-prefix `permeability` solve -- `total_calls = n_points + 1` (the no-roads baseline plus
+    every sample point `_sweep` requests; a budget step that adds no new road is deduped by
+    `_sweep` itself, so the last observed `call_index` can be < `total_calls`). Purely a
+    progress-reporting hook for slow, many-region batch callers (e.g.
+    `scripts/calibrate_permeability.py`) -- it has no effect on the returned Curve, and `None`
+    (the default) adds no overhead."""
     from reblock.budget import Curve, _sweep  # deferred: breaks the budget<->permeability cycle
 
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     p0, _ = egress_power(block, None, params, adj=adj)
+    calls = 0
 
     def f(prefix: GeoDataFrame | None) -> float:
-        return permeability(block, prefix, params, p0=p0, adj=adj)
+        nonlocal calls
+        calls += 1
+        value = permeability(block, prefix, params, p0=p0, adj=adj)
+        if progress is not None:
+            progress(calls, n_points + 1)
+        return value
 
     costs, vals = _sweep(block, roads, f, n_points, tol)
     return Curve(costs, vals)
