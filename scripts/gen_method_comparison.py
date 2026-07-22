@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import cast
 
 import matplotlib.pyplot as plt
-from geopandas import GeoDataFrame
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from shapely.ops import unary_union
@@ -85,7 +84,8 @@ def main() -> None:
 
         curves: list[MethodCurve] = []
         for name, prop in proposals.items():
-            roads = cast(GeoDataFrame, prop.roads)   # every method here yields roads (non-empty)
+            assert prop.roads is not None and not prop.roads.empty, f"{name}: no roads proposed"
+            roads = prop.roads   # narrowed to a non-empty GeoDataFrame by the assert
             pp = pct_paved(roads, CORRIDOR_M, block_area)
             pd_ = pct_displaced(roads, CORRIDOR_M, block.building_points, radii)
             ext = cost_benefit_curve(block, roads, benefit_fn=access_benefit)

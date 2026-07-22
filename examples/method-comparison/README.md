@@ -102,8 +102,8 @@ Each method earns a different corner of the frontier:
   paved. Runs via CELF/lazy and scales to the region (see [`multiblock_depth`](../multiblock_depth/)).
 - **`euclidean_grid`** takes **second on internal connectivity (0.410)** — a regular grid is loops by
   construction — but it bulldozes to get them: **42.4% of homes displaced** (111.6, third-highest) and
-  the **lowest external connectivity of the six (0.789)**, because a blind grid ignores where the deep
-  parcels actually are.
+  a **low external connectivity (0.789, second-lowest — only osm_footpaths's 0.761 is worse)**, because
+  a blind grid ignores where the deep parcels actually are.
 - **`osm_footpaths`** — the REAL informal network (mapped OSM footpaths, not an optimizer's output) — is
   the loopiest network people *actually walk* (internal 0.327, external 0.761 at 25.2% paved). It held
   the redundancy crown until the repulsion arterial beat it: the worn paths are a real, redundant
