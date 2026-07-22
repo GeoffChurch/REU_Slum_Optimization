@@ -95,8 +95,10 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
     regions = build_regions(source, screen, region_builder, block_groups, cfg.max_blocks)
     corridor_m = float(cfg.get("corridor_m", 3.0))
 
-    # one curve per (region, method, metric); the cost axis is always cumulative added road
-    # length (m) -- metric-independent, so no shared cap needs computing (see emit.compare_report).
+    # one curve per (region, method, metric); the stored Curve.cost is always cumulative added
+    # road length (m) -- metric-independent, so no shared cap needs computing. (emit.compare_report
+    # re-plots the two benefit metrics' curves against cumulative displacement instead, for
+    # display only -- this stored cost is unaffected.)
     raw: list[tuple[str, str, str, Curve, float, float]] = []
     for region in regions:
         if not region:

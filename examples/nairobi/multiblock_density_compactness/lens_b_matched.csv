@@ -1,5 +1,4 @@
 method,budget_m,external_connectivity,internal_connectivity,displacement,pct_displaced
-clearance,390.2,0.119972,4.11837e-16,22.9,0.0082
-greedy_arterial_repulsion,390.2,0.0182516,0.304553,11.0,0.0039
-clearance_looped,390.2,0.119972,4.11837e-16,22.9,0.0082
-euclidean_grid,390.2,0.00197628,0,31.0,0.0110
+greedy_arterial_repulsion,485.2,0.0301093,0.0826629,17.9,0.0064
+clearance_looped,485.2,0.122065,0.0926266,25.1,0.0089
+euclidean_grid,485.2,0.0216229,0,38.6,0.0138

@@ -45,6 +45,7 @@ from hydra.utils import instantiate
 
 from reblock.animate import reblock_gif
 from reblock.budget import (
+    _commute_membership,
     access_benefit,
     building_radii,
     commute_ratio,
@@ -99,8 +100,10 @@ def two_lens_rows(block: Block, roads_by_method: dict[str, GeoDataFrame],
     Lens A truncates to the external-connectivity-`target_ext` prefix
     (`prefix_to_external_connectivity`); Lens B truncates to the shared `budget_m`
     (`truncate_to_length`) and scores external (`access_benefit`) + internal (`commute_ratio`)
-    connectivity. `propose_seconds` is the caller-measured reblock time per method, reported
-    verbatim (kept out of this function so it stays deterministic)."""
+    connectivity -- the internal scalar is frozen to the method's full network (membership from
+    `roads`), matching the (now frozen) internal curve. `propose_seconds` is the caller-measured
+    reblock time per method, reported verbatim (kept out of this function so it stays
+    deterministic)."""
     radii = building_radii(block.building_points, corridor_m)
     ext_factory = access_benefit(block, None)
     lens_a: list[LensARow] = []
@@ -114,10 +117,11 @@ def two_lens_rows(block: Block, roads_by_method: dict[str, GeoDataFrame],
             pct_displaced=pct_displaced(prefix_a, corridor_m, block.building_points, radii),
             propose_seconds=propose_seconds[name]))
         prefix_b = truncate_to_length(block, roads, budget_m)
+        internal_membership = _commute_membership(block, roads)  # freeze to method's FULL network
         lens_b.append(LensBRow(
             method=name, budget_m=budget_m,
             external_connectivity=ext_factory(prefix_b),
-            internal_connectivity=commute_ratio(block, prefix_b),
+            internal_connectivity=commute_ratio(block, prefix_b, membership=internal_membership),
             displacement=displacement(block.building_points, radii, prefix_b, corridor_m),
             pct_displaced=pct_displaced(prefix_b, corridor_m, block.building_points, radii)))
     return lens_a, lens_b

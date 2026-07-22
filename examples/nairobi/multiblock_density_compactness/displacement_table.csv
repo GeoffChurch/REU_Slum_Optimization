@@ -1,5 +1,4 @@
 method,terminal_displacement,pct_displaced,n_blocks
-euclidean_grid,1177.2,0.4192,1
+euclidean_grid,313.6,0.1117,1
 greedy_arterial_repulsion,56.7,0.0202,1
 clearance_looped,25.1,0.0089,1
-clearance,22.9,0.0082,1

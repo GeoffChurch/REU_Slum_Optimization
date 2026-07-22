@@ -294,7 +294,12 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
                    *, method_order: Sequence[str]) -> None:
     """Per metric (external_connectivity, internal_connectivity, displacement): a per-method
     summary table + overlaid cost-benefit curves per block. `results` is the flat (method x block
-    x metric) list from reblock.compare. The x-axis is always cumulative added road length (m).
+    x metric) list from reblock.compare. The PLOTTED x-axis differs by metric: for the two benefit
+    metrics (external_connectivity, internal_connectivity) it is cumulative DISPLACEMENT (homes
+    displaced, from the index-aligned displacement curve's Σcᵢ -- see `disp_x` below); for
+    "displacement" it stays cumulative added road length (m). The stored `Curve.cost` (and every
+    CSV written below) remain cumulative added road length (m) for every metric regardless --
+    only the plotted x-axis for the two benefit metrics is re-based onto displacement.
     For the two benefit metrics, writes `frontier_{metric}.csv` (the full (road length, benefit)
     samples per method -- no scalar rank, because a single AUC to a shared road-length cap
     penalised the road-efficient methods: one reaching high benefit at low road ranked below a
@@ -313,6 +318,11 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     colors = _method_colors(method_order)   # one stable name->colour map for every plot
     # method -> [(terminal displacement, pct_displaced)]
     disp_terminal: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    # The two benefit curves are plotted against cumulative DISPLACEMENT (homes displaced), not road
+    # length: the displacement curve is index-aligned (same drainage-ordered _sweep over the same
+    # roads), so its per-prefix Σcᵢ is the x-axis. (The displacement metric itself stays vs length.)
+    disp_x: dict[tuple[str, str], list[float]] = {
+        (r.block_id, r.method): list(r.curve.benefit) for r in by_metric.get("displacement", [])}
     for metric, metric_results in by_metric.items():
         by_block: dict[str, list[MethodCurve]] = {}
         for r in metric_results:
@@ -336,9 +346,14 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
         for block_id, curves in by_block.items():
             fig, ax = plt.subplots(figsize=(7, 5))
             for mc in curves:
-                ax.plot(mc.curve.cost, mc.curve.benefit, marker="o",
-                        label=f"{mc.method} ({int(mc.curve.cost[-1])} m)", color=colors[mc.method])
-            ax.set_xlabel("added road length (m)")
+                if metric == "displacement":
+                    xs, lab = mc.curve.cost, f"{mc.method} ({int(mc.curve.cost[-1])} m)"
+                else:                                    # benefit vs homes displaced
+                    xs = disp_x.get((block_id, mc.method), mc.curve.cost)
+                    lab = f"{mc.method} ({xs[-1]:.0f} homes)"
+                ax.plot(xs, mc.curve.benefit, marker="o", label=lab, color=colors[mc.method])
+            ax.set_xlabel("added road length (m)" if metric == "displacement"
+                          else "buildings displaced (Σ disk-graze probability)")
             ax.set_ylabel(ylabel)
             ax.set_title(f"cost-benefit ({metric}): {block_id}")
             ax.legend()
