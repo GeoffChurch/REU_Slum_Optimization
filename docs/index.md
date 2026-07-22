@@ -46,9 +46,9 @@ region graded along the full benefit-vs-added-road frontier. The
 
 ## Team
 
-- **Javier Mendoza** — Stony Brook University REU
-- **[sancd1](https://github.com/sancd1)** — Farmingdale State College
 - **Mentor: Geoffrey Churchill**
+- **Javier Mendoza** — Suffolk County Community College
+- **Daisy Sanchez** — Farmingdale State College
 
 Built on research from the Santa Fe Institute's
 [Open Reblock](https://github.com/mansueto-institute/prclz) line of work, with informal footpath
