@@ -462,10 +462,23 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
     block, roads = _straight_block_with_two_roads()
     radii = np.full(len(block.building_points), 3.0)
     curve = displacement_curve(block, roads, radii, corridor_m=3.0)
+    n = len(block.building_points)
     assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
     assert curve.benefit == sorted(curve.benefit)     # non-decreasing displacement
     assert abs(curve.benefit[-1]
-               - displacement(block.building_points, radii, roads, 3.0)) < 1e-6
+               - displacement(block.building_points, radii, roads, 3.0) / n) < 1e-6
+
+
+def test_displacement_curve_is_home_fraction() -> None:
+    from reblock.budget import building_radii, displacement, displacement_curve
+    block, roads = _straight_block_with_two_roads()   # existing helper with building_points
+    radii = building_radii(block.building_points, 3.0)
+    curve = displacement_curve(block, roads, radii, corridor_m=3.0)
+    n = len(block.building_points)
+    assert all(0.0 <= b <= 1.0 for b in curve.benefit)          # fraction, not a count
+    # terminal fraction == displacement(full roads)/n_buildings
+    assert abs(curve.benefit[-1]
+               - displacement(block.building_points, radii, roads, 3.0) / n) < 1e-9
 
 
 def test_external_internal_displacement_curves_share_cost_samples():

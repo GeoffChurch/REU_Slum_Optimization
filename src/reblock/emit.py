@@ -267,7 +267,7 @@ def region_map(source: Source, regions: list[list[str]],
 _METRIC_YLABELS = {
     "external_connectivity": "external connectivity (fraction of access-burden removed)",
     "internal_connectivity": "internal connectivity (backup-route redundancy, mean 1 − R/R_geo)",
-    "displacement": "buildings displaced (Σ disk-graze probability)",
+    "displacement": "fraction of homes displaced",
 }
 
 # Every method draws in a fixed colour, keyed on its position in the canonical method registry
@@ -295,18 +295,18 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     """Per metric (external_connectivity, internal_connectivity, displacement): a per-method
     summary table + overlaid cost-benefit curves per block. `results` is the flat (method x block
     x metric) list from reblock.compare. The PLOTTED x-axis differs by metric: for the two benefit
-    metrics (external_connectivity, internal_connectivity) it is cumulative DISPLACEMENT (homes
-    displaced, from the index-aligned displacement curve's Σcᵢ -- see `disp_x` below); for
-    "displacement" it stays cumulative added road length (m). The stored `Curve.cost` (and every
-    CSV written below) remain cumulative added road length (m) for every metric regardless --
-    only the plotted x-axis for the two benefit metrics is re-based onto displacement.
+    metrics (external_connectivity, internal_connectivity) it is cumulative DISPLACEMENT (fraction
+    of homes displaced, from the index-aligned displacement curve's Σcᵢ/n_buildings -- see `disp_x`
+    below); for "displacement" it stays cumulative added road length (m). The stored `Curve.cost`
+    (and every CSV written below) remain cumulative added road length (m) for every metric
+    regardless -- only the plotted x-axis for the two benefit metrics is re-based onto displacement.
     For the two benefit metrics, writes `frontier_{metric}.csv` (the full (road length, benefit)
     samples per method -- no scalar rank, because a single AUC to a shared road-length cap
     penalised the road-efficient methods: one reaching high benefit at low road ranked below a
     pave-everything method that reached slightly more at several times the road). For
     "displacement" (a RISING cost, never inverted) writes `displacement_vs_length.csv` (the full
-    (road length, Σcᵢ) samples per method) and accumulates `displacement_table.csv` (mean terminal
-    displacement + mean pct_displaced per method). `method_order` is the canonical method registry
+    (road length, Σcᵢ/n_buildings) samples per method) and accumulates `displacement_table.csv`
+    (mean terminal displaced_fraction per method). `method_order` is the canonical method registry
     (`list(cfg.all_methods)`) that fixes each method's curve colour run-independently -- it must
     cover every method in `results`."""
     import csv
@@ -316,11 +316,12 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     for r in results:
         by_metric.setdefault(r.metric, []).append(r)
     colors = _method_colors(method_order)   # one stable name->colour map for every plot
-    # method -> [(terminal displacement, pct_displaced)]
-    disp_terminal: dict[str, list[tuple[float, float]]] = defaultdict(list)
-    # The two benefit curves are plotted against cumulative DISPLACEMENT (homes displaced), not road
-    # length: the displacement curve is index-aligned (same drainage-ordered _sweep over the same
-    # roads), so its per-prefix Σcᵢ is the x-axis. (The displacement metric itself stays vs length.)
+    # method -> [terminal displaced_fraction, ...]
+    disp_terminal: dict[str, list[float]] = defaultdict(list)
+    # The two benefit curves are plotted against cumulative DISPLACEMENT (fraction of homes
+    # displaced), not road length: the displacement curve is index-aligned (same drainage-ordered
+    # _sweep over the same roads), so its per-prefix Σcᵢ/n_buildings is the x-axis. (The
+    # displacement metric itself stays vs length.)
     disp_x: dict[tuple[str, str], list[float]] = {
         (r.block_id, r.method): list(r.curve.benefit) for r in by_metric.get("displacement", [])}
     for metric, metric_results in by_metric.items():
@@ -334,7 +335,7 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
                 for r in metric_results:
                     for c, b in zip(r.curve.cost, r.curve.benefit, strict=True):
                         w.writerow([r.method, r.block_id, f"{c:.4f}", f"{b:.4f}"])
-                    disp_terminal[r.method].append((r.curve.benefit[-1], r.pct_displaced))
+                    disp_terminal[r.method].append(r.curve.benefit[-1])
         else:
             with (out_dir / f"frontier_{metric}.csv").open("w", newline="") as f:
                 w = csv.writer(f)
@@ -348,12 +349,12 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
             for mc in curves:
                 if metric == "displacement":
                     xs, lab = mc.curve.cost, f"{mc.method} ({int(mc.curve.cost[-1])} m)"
-                else:                                    # benefit vs homes displaced
+                else:                                    # benefit vs fraction of homes displaced
                     xs = disp_x.get((block_id, mc.method), mc.curve.cost)
-                    lab = f"{mc.method} ({xs[-1]:.0f} homes)"
+                    lab = f"{mc.method} ({xs[-1] * 100:.0f}% homes)"
                 ax.plot(xs, mc.curve.benefit, marker="o", label=lab, color=colors[mc.method])
             ax.set_xlabel("added road length (m)" if metric == "displacement"
-                          else "buildings displaced (Σ disk-graze probability)")
+                          else "fraction of homes displaced")
             ax.set_ylabel(ylabel)
             ax.set_title(f"cost-benefit ({metric}): {block_id}")
             ax.legend()
@@ -364,10 +365,9 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
         from statistics import mean
         with (out_dir / "displacement_table.csv").open("w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["method", "terminal_displacement", "pct_displaced", "n_blocks"])
-            for m, rows in sorted(disp_terminal.items(), key=lambda kv: -mean(d for d, _ in kv[1])):
-                w.writerow([m, f"{mean(d for d, _ in rows):.1f}",
-                            f"{mean(p for _, p in rows):.4f}", len(rows)])
+            w.writerow(["method", "displaced_fraction", "n_blocks"])
+            for m, rows in sorted(disp_terminal.items(), key=lambda kv: -mean(kv[1])):
+                w.writerow([m, f"{mean(rows):.4f}", len(rows)])
 
 
 def depth_vs_road_report(block: Block, roads_by_method: dict[str, gpd.GeoDataFrame], out_dir: Path,

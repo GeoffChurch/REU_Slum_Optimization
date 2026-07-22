@@ -785,12 +785,15 @@ def matched_budget(total_length_by_method: dict[str, float]) -> float:
 def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64], *,
                        corridor_m: float = 3.0, n_points: int = 20,
                        tol: float = STREET_TOL) -> Curve:
-    """A Curve whose x is cumulative added road length (m) and whose y is Sum c_i displacement (a
-    rising COST). Reuses the drainage-ordered _sweep with displacement as the value."""
+    """A Curve whose x is cumulative added road length (m) and whose y is the FRACTION of homes
+    displaced, Σcᵢ / n_buildings (a rising COST in [0, 1]). Reuses the drainage-ordered _sweep.
+    n_buildings = len(block.building_points) (buildings, not parcels)."""
+    n = len(block.building_points)
+
     def _disp(prefix: GeoDataFrame | None) -> float:
-        if prefix is None or len(prefix) == 0:
+        if prefix is None or len(prefix) == 0 or n == 0:
             return 0.0
-        return displacement(block.building_points, radii, prefix, corridor_m)
+        return displacement(block.building_points, radii, prefix, corridor_m) / n
 
     costs, vals = _sweep(block, roads, _disp, n_points, tol)
     return Curve(costs, vals)
