@@ -32,10 +32,14 @@ and lets a single universal `D_max` fraction apply to every region without resca
 
 - The raw `displacement()` stays as the `Σcᵢ` primitive (needed to form the fraction; the absolute
   "≈75 homes" remains usable in prose).
-- `displacement_curve` yields the **fraction** per prefix; the connectivity curves' displacement x-axis,
-  `displacement_table.csv` / `displacement_vs_length.csv`, all axis labels ("fraction of homes
-  displaced"), and `D_max` are the fraction. This is a **global** change — the existing examples'
-  displacement axes/tables switch to the fraction too (folded into the regeneration).
+- `displacement_curve` yields the **fraction** per prefix, and `D_max` is the fraction — the stored
+  values are fractions `[0,1]` (so the joint-target math is unaffected). This is a **global** change:
+  the existing examples' displacement axes/tables switch too (folded into the regeneration).
+- **Display as a percentage**: everywhere displacement is shown to a human — plotted axis ticks
+  (matplotlib `PercentFormatter`), axis labels ("homes displaced (%)"), log lines, README prose,
+  human-facing tables — it renders as a percentage (0–100%). Raw data CSVs (`frontier_*.csv`,
+  `displacement_vs_length.csv`, the outcome table) keep the underlying fraction. Values are fractions;
+  presentation is percent.
 
 ## The stopping rule
 

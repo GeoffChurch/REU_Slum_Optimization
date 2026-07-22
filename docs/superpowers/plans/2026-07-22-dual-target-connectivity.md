@@ -86,7 +86,7 @@ def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.floa
 - [ ] **Step 3: Update `compare_report` labels + consolidate `displacement_table`**
 
 In `src/reblock/emit.py`:
-- The x-label branch (~L350) and the `disp_x` benefit-metric x-label (~L351): the displacement metric plot's x-axis stays "added road length (m)"; its Y-label (`_METRIC_YLABELS["displacement"]`, L270) changes from `"buildings displaced (Σ disk-graze probability)"` to `"fraction of homes displaced"`. The two benefit metrics' x-label (currently `"buildings displaced (Σ disk-graze probability)"`) changes to `"fraction of homes displaced"`.
+- Displacement is DISPLAYED as a percentage (values stay fractions [0,1]): the displacement metric plot's x-axis stays "added road length (m)"; its Y-label (`_METRIC_YLABELS["displacement"]`, L270) becomes `"homes displaced (%)"`, and the two benefit metrics' x-label (currently `"buildings displaced (Σ disk-graze probability)"`) becomes `"homes displaced (%)"`. Apply `matplotlib.ticker.PercentFormatter(xmax=1)` to the displacement axes (the displacement plot's y-axis and the two benefit plots' x-axis) so a [0,1] value renders as `45%`. The curve legend already reads `% homes` (keep). Log lines / README prose show percent; raw CSVs keep the fraction.
 - `displacement_table.csv` writer (~L358-365): `r.curve.benefit[-1]` is now the terminal fraction, which equals `r.pct_displaced`. Drop the redundant column — header becomes `["method", "displaced_fraction", "n_blocks"]`, value `mean(fraction)` (keep sorting by it). Update the docstring line mentioning the columns.
 
 - [ ] **Step 4: Run tests**
