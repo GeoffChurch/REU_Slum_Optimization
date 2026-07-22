@@ -63,7 +63,7 @@ default = { features = ["dev"], solve-group = "default" }
 
 [tool.pixi.tasks]
 test = "pytest"
-typecheck = "mypy --strict src tests scripts/crossblock_probe.py"
+typecheck = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_joint_target.py"
 lint = "ruff check ."
 fmt = "ruff format ."
 check = { depends-on = ["lint", "typecheck", "test"] }
@@ -77,10 +77,10 @@ regen-examples = "bash scripts/regenerate_examples.sh"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-# scripts/crossblock_probe.py only, NOT the whole scripts/ dir: the pre-existing
-# scripts/fetch_kblock_fixtures.py (Task 0, out of scope here) has its own
+# scripts/crossblock_probe.py + scripts/calibrate_joint_target.py only, NOT the whole scripts/
+# dir: the pre-existing scripts/fetch_kblock_fixtures.py (Task 0, out of scope here) has its own
 # pre-existing --strict findings and was never covered by this config before.
-files = ["src", "tests", "scripts/crossblock_probe.py"]
+files = ["src", "tests", "scripts/crossblock_probe.py", "scripts/calibrate_joint_target.py"]
 # topology is installed via a PEP 660 "strict" editable install, whose .pth
 # registers a sys.meta_path finder at runtime rather than a plain sys.path
 # entry — mypy's static .pth scan can't see through that, so point it at the
