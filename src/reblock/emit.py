@@ -15,6 +15,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import Normalize
+from matplotlib.ticker import PercentFormatter
 from numpy.typing import NDArray
 
 from reblock.contracts import Block, Metrics, Proposal, Result, Source
@@ -267,7 +268,7 @@ def region_map(source: Source, regions: list[list[str]],
 _METRIC_YLABELS = {
     "external_connectivity": "external connectivity (fraction of access-burden removed)",
     "internal_connectivity": "internal connectivity (backup-route redundancy, mean 1 − R/R_geo)",
-    "displacement": "fraction of homes displaced",
+    "displacement": "homes displaced (%)",
 }
 
 # Every method draws in a fixed colour, keyed on its position in the canonical method registry
@@ -353,8 +354,12 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
                     xs = disp_x.get((block_id, mc.method), mc.curve.cost)
                     lab = f"{mc.method} ({xs[-1] * 100:.0f}% homes)"
                 ax.plot(xs, mc.curve.benefit, marker="o", label=lab, color=colors[mc.method])
-            ax.set_xlabel("added road length (m)" if metric == "displacement"
-                          else "fraction of homes displaced")
+            if metric == "displacement":
+                ax.set_xlabel("added road length (m)")
+                ax.yaxis.set_major_formatter(PercentFormatter(xmax=1))    # stored [0,1] -> "45%"
+            else:
+                ax.set_xlabel("homes displaced (%)")
+                ax.xaxis.set_major_formatter(PercentFormatter(xmax=1))    # disp_x is [0,1]
             ax.set_ylabel(ylabel)
             ax.set_title(f"cost-benefit ({metric}): {block_id}")
             ax.legend()
