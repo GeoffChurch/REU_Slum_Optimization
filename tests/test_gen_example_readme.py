@@ -28,6 +28,10 @@ def test_generated_readme_reflects_meta_and_curves() -> None:
     assert "Watch each method reblock" in md            # the animated GIF row
     assert "![clearance](reblock_clearance.gif)" in md  # a per-method GIF, method as column
     assert "Matched displacement" in md and "Matched permeability" in md  # both lens headings
+    assert "| clearance | greedy_arterial_buildable |" in md  # aligned method columns (image table
+                                                               # header) -- _lens_methods' one order
+                                                               # shared by the CSV table + both
+                                                               # coloring image tables
     assert "| clearance |" in md                # a lens-table row (from lens_displacement.csv)
     assert "converged below budget" in md       # greedy_arterial_buildable: at_budget=False
     assert "unreached" in md                    # greedy_arterial_buildable: reached=False

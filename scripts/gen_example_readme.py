@@ -127,15 +127,18 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                      "per-method samples are in `frontier_permeability.csv`, this dir):\n")
         for p in frontier_pngs:
             parts.append(f"![permeability vs displacement]({p.name})\n")
-        before = [(lbl, fn) for lbl, fn in
-                 (("access-depth", "before_depth.jpg"),
-                  ("permeability potential", "before_perm.jpg"))
-                 if (run_dir / fn).exists()]
-        if before:
-            parts.append("**Before any road is added**, the same region in both colorings: "
-                         "access-depth (blue = at a street, red = deep interior) vs permeability "
-                         "potential (dark = hard to escape, light = easy):\n")
-            parts.append(_img_table(before))
+
+    # Before-images: gated on their own files existing (independent of the frontier PNG), so a
+    # partial run that produced these but not the frontier still renders them.
+    before = [(lbl, fn) for lbl, fn in
+             (("access-depth", "before_depth.jpg"),
+              ("permeability potential", "before_perm.jpg"))
+             if (run_dir / fn).exists()]
+    if before:
+        parts.append("**Before any road is added**, the same region in both colorings: "
+                     "access-depth (blue = at a street, red = deep interior) vs permeability "
+                     "potential (dark = hard to escape, light = easy):\n")
+        parts.append(_img_table(before))
 
     # §4: each method on the ground -- the GIF row, then the two lenses. Lens A (matched
     # displacement) truncates every method to the same home-cost and compares the permeability
