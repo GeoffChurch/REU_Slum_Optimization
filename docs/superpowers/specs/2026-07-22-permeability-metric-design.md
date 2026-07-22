@@ -45,7 +45,7 @@ Only permeability and displacement are shown. Per example:
   With permeability monotone + always-defined, there is **no "kill" machinery** — a weak method simply reads low on the curve / unreached on Lens B.
 - **Before-image (once per example)** — the status-quo heatmap with no roads. **After-image (per method per lens).** **Generate BOTH heatmap colorings** for every before/after render (both fields are computed anyway): (1) **access-depth** (parcels-from-a-street, the intuitive "deep interior becomes reachable" story) and (2) **per-parcel egress potential `vᵢ`** from the permeability flow (dark = hard escape, light = easy — the metric-aligned view). Suffix the files to distinguish them (e.g. `before_depth.jpg`/`before_perm.jpg`, `after_<method>_<lens>_depth.jpg`/`..._perm.jpg`). Roads overlaid in blue; displaced homes as red disks with opacity = graze fraction (shipped style). The README shows both (or is trivially switchable).
 - **Per-method reblock GIF** — unchanged (current low-res, current dimensions).
-- **Screen map** — drop the heatmap **colorbar and title** (keep the region-selection visual). Selection logic (the `depth` proxy `√(nA)/P`) is unchanged.
+- **Screen map** — drop the heatmap **colorbar and title**, and remove the **region boundary-following outline** (the per-member black outline that occludes the metric colors); **keep only the thick black bounding box**. Selection logic (the `depth` proxy `√(nA)/P`) is unchanged.
 - **No `block_id`/parcel name on any plot** (it's in the README).
 - **Poster-grade static images** — every static PNG/JPG at **300 dpi** and large figure dimensions (target ≳ 3000 px on the long edge, crisp on a 3′×4′ poster). GIFs excepted (stay low-res / current dims).
 
