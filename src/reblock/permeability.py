@@ -189,8 +189,8 @@ def permeability_curve(
     per prefix inside `permeability`). `adj` (parcel_adjacency, an STRtree spatial join -- costly
     at region scale) is likewise built ONCE here and threaded through every `egress_power`/
     `permeability` call: adjacency is a function of `block.parcels` geometry alone, invariant
-    across road prefixes, exactly the precomputed-adj pattern `access_benefit`/`prefix_to_depth`
-    already use. Deferred import of `reblock.budget` avoids a module-level import cycle (budget.py
+    across road prefixes, exactly the precomputed-adj pattern `prefix_to_depth` already uses.
+    Deferred import of `reblock.budget` avoids a module-level import cycle (budget.py
     imports `permeability`/`PermeabilityParams` from this module).
 
     `progress`, if given, is called `progress(call_index, total_calls)` (1-indexed) after each

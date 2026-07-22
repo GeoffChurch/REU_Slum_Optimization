@@ -9,13 +9,10 @@ from reblock.budget import (
     Curve,
     access_burden,
     auc,
-    cost_benefit_curve,
     road_drainage,
 )
 from reblock.contracts import Block
 from reblock.methods.dijkstra import DijkstraReblocker
-from reblock.methods.mesh import MeshReblocker
-from reblock.methods.peel import PeelReblocker
 
 UTM = CRS.from_epsg(32643)
 
@@ -50,16 +47,6 @@ def test_road_drainage_trunks_exceed_leaves() -> None:
     assert len(drain) == len(roads) and max(drain) > min(drain) and max(drain) >= 2
 
 
-def test_cost_benefit_curve_is_monotonic_and_reaches_full() -> None:
-    block = _grid_block(5)
-    roads = DijkstraReblocker().propose(block).roads
-    assert roads is not None
-    curve = cost_benefit_curve(block, roads, n_points=10)
-    assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
-    assert curve.benefit == sorted(curve.benefit)          # monotonic non-decreasing
-    assert curve.benefit[-1] > 0.5                         # flattens the block substantially
-
-
 def test_auc_rewards_reaching_benefit_at_lower_cost() -> None:
     cheap = Curve(cost=[0.0, 1.0], benefit=[0.0, 1.0])     # full benefit by cost 1
     dear = Curve(cost=[0.0, 4.0], benefit=[0.0, 1.0])      # full benefit only by cost 4
@@ -72,28 +59,6 @@ def test_auc_interpolates_a_cap_straddling_segment() -> None:
     # not drop the whole segment (regression: dropped it -> 0.30 instead of 0.5125).
     c = Curve(cost=[0.0, 3.0, 5.0], benefit=[0.0, 0.8, 1.0])
     assert abs(auc(c, cost_cap=4.0) - 0.5125) < 1e-6
-
-
-def test_cost_benefit_curve_monotonic_with_disconnected_pocket() -> None:
-    # One street-fronting parcel T + a chain P0..P3 across a GAP from T (adjacency-disconnected),
-    # reachable only via a road to P0 -- then P1..P3 chain DEEP via parcel adjacency. Bridging the
-    # pocket makes those deep parcels exceed the moving unreached-placeholder, so benefit would DIP
-    # without a stable per-block depth cap; with the cap the curve is monotonic.
-    from shapely.geometry import LineString
-
-    t = Polygon([(0, 0), (2, 0), (2, 1), (0, 1)])
-    pocket = [Polygon([(0, 3 + y), (2, 3 + y), (2, 4 + y), (0, 4 + y)]) for y in range(4)]
-    parcels = gpd.GeoDataFrame({"parcel_id": list(range(5))}, geometry=[t, *pocket], crs=UTM)
-    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (2, 0)])], crs=UTM)
-    boundary = cast(Polygon, parcels.geometry.union_all())
-    block = Block(block_id="pk", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
-    roads = gpd.GeoDataFrame(geometry=[
-        LineString([(1, 0), (1, 3)]),    # bridge street -> P0 (P0=depth1; P1..P3 chain deep)
-        LineString([(1, 3), (1, 4)]),    # a leaf inside the pocket
-    ], crs=UTM)
-    curve = cost_benefit_curve(block, roads, n_points=6)
-    assert curve.benefit == sorted(curve.benefit)    # monotonic (would dip without the cap)
-    assert curve.benefit[-1] > 0.0
 
 
 def test_road_drainage_floating_roads_get_zero() -> None:
@@ -150,51 +115,6 @@ def test_directness_is_a_bounded_circuity_ratio() -> None:
     _, d_chord = network_efficiency(block, chord)
     assert 0.0 <= d_dijkstra <= 1.0
     assert 0.0 <= d_chord <= 1.0
-
-
-def test_cost_benefit_curve_accepts_a_benefit_fn() -> None:
-    from reblock.budget import cost_benefit_curve, efficiency_benefit
-    block = _grid_block(5)
-    roads = DijkstraReblocker().propose(block).roads
-    assert roads is not None
-    curve = cost_benefit_curve(block, roads, benefit_fn=efficiency_benefit, n_points=8)
-    assert curve.benefit[-1] >= curve.benefit[0]      # efficiency non-decreasing with roads
-    assert len(curve.cost) == len(curve.benefit)
-
-
-def test_efficiency_and_directness_are_monotone_across_the_full_curve() -> None:
-    # Regression for the review finding: efficiency_benefit/directness_benefit re-derived each
-    # parcel's entry node against the CURRENT road subset, so entries churned as roads were
-    # added and E/directness could FALL mid-curve (reproduced ~9% drops for PeelReblocker, and
-    # mid-curve dips even for DijkstraReblocker). The fix freezes entries against the FULL road
-    # set once; only edge availability grows across prefixes, so both metrics must be
-    # non-decreasing over every point of the curve, for both methods' road layouts.
-    from reblock.budget import directness_benefit, efficiency_benefit
-    block = _grid_block(5)
-    for method in (DijkstraReblocker(), PeelReblocker(), MeshReblocker()):
-        roads = method.propose(block).roads
-        assert roads is not None
-        for benefit_fn in (efficiency_benefit, directness_benefit):
-            curve = cost_benefit_curve(block, roads, benefit_fn=benefit_fn, n_points=40)
-            assert curve.benefit == sorted(curve.benefit), (
-                f"{type(method).__name__} + {benefit_fn.__name__} not monotone: {curve.benefit}"
-            )
-
-
-def test_cost_axis_is_cumulative_road_length_metres() -> None:
-    block = _grid_block(5)
-    roads = DijkstraReblocker().propose(block).roads
-    assert roads is not None
-    curve = cost_benefit_curve(block, roads)
-    # x is cumulative added road length in METRES, non-decreasing, ending at total road length
-    assert curve.cost[0] == 0.0
-    assert curve.cost == sorted(curve.cost)
-    assert abs(curve.cost[-1] - float(roads.geometry.length.sum())) < 1e-6
-
-
-def test_cost_benefit_curve_has_no_cost_param() -> None:
-    import inspect
-    assert "cost" not in inspect.signature(cost_benefit_curve).parameters
 
 
 def test_building_radii_are_half_nearest_neighbor():
@@ -448,6 +368,12 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
     assert curve.benefit == sorted(curve.benefit)     # non-decreasing displacement
     assert abs(curve.benefit[-1]
                - displacement(block.building_points, radii, roads, 3.0) / n) < 1e-6
+    # cost axis = cumulative added road length in METRES, non-decreasing, ending at the full
+    # road length -- a `_sweep` property formerly pinned only by the retired
+    # test_cost_axis_is_cumulative_road_length_metres (via cost_benefit_curve); migrated here
+    # onto displacement_curve (the lightest live _sweep vehicle) to keep it covered.
+    assert curve.cost == sorted(curve.cost)
+    assert abs(curve.cost[-1] - float(roads.geometry.length.sum())) < 1e-6
 
 
 def test_displacement_curve_is_home_fraction() -> None:
@@ -514,22 +440,16 @@ def test_prefix_to_displacement_empty_roads_returns_empty() -> None:
     assert len(prefix) == 0
 
 
-def test_external_internal_displacement_curves_share_cost_samples():
-    # emit.compare_report re-bases the two benefit curves' plotted x-axis onto the displacement
-    # curve's cumulative Σcᵢ/n_buildings, which is only valid if all three curves are
-    # INDEX-ALIGNED: same drainage-ordered _sweep, same n_points=20, over the same roads, so their
-    # `.cost` samples (still cumulative added road length, m, for all three) land at identical
-    # budgets. A future change making _sweep's sampling value-dependent would silently misalign
-    # every plot.
-    from reblock.budget import (
-        access_benefit,
-        building_radii,
-        commute_ratio_benefit,
-        displacement_curve,
-    )
+def test_permeability_and_displacement_curves_share_cost_samples():
+    # emit.compare_report pairs (displacement[i], permeability[i]) on the plotted frontier, which
+    # is only valid if both curves are INDEX-ALIGNED: same drainage-ordered _sweep, same
+    # n_points=20, over the same roads, so their `.cost` samples (cumulative added road length, m,
+    # for both) land at identical budgets. A future change making _sweep's sampling
+    # value-dependent would silently misalign every plot.
+    from reblock.budget import building_radii, displacement_curve
+    from reblock.permeability import PermeabilityParams, permeability_curve
     block, roads = _straight_block_with_two_roads()
     radii = building_radii(block.building_points, corridor_m=3.0)
-    external = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
-    internal = cost_benefit_curve(block, roads, benefit_fn=commute_ratio_benefit)
+    perm = permeability_curve(block, roads, PermeabilityParams())
     disp = displacement_curve(block, roads, radii, corridor_m=3.0)
-    assert list(external.cost) == list(internal.cost) == list(disp.cost)
+    assert list(perm.cost) == list(disp.cost)
