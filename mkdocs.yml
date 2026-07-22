@@ -11,9 +11,11 @@ site_url: https://jmendoza167.github.io/REU_Slum_Optimization/
 repo_url: https://github.com/jmendoza167/REU_Slum_Optimization
 repo_name: jmendoza167/REU_Slum_Optimization
 
-# Internal working notes stay out of the published site (the files themselves are untouched).
+# Internal working notes stay out of the published site (the files themselves are untouched);
+# _intro.md is the handwritten partial the generator folds into index.md, not a page of its own.
 exclude_docs: |
   superpowers/
+  _intro.md
 
 theme:
   name: material
@@ -22,9 +24,9 @@ theme:
     primary: custom
     accent: custom
   features:
-    - navigation.sections
     - navigation.top
     - navigation.footer
+    - toc.integrate      # single-page site: the sidebar IS the anchor table of contents
     - toc.follow
     - content.code.copy
   icon:
@@ -42,13 +44,4 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Methods:
-      - Peel: methods/peel.md
-      - Clearance: methods/clearance.md
-      - Clearance (looped): methods/clearance_looped.md
-      - Greedy Arterial (buildable): methods/greedy_arterial_buildable.md
-      - OSM Footpaths: methods/osm_footpaths.md
-      - Euclidean Grid: methods/euclidean_grid.md
-      - Dream Come True: methods/dream_come_true.md
-  - Benchmarks: benchmark.md
   - Metrics — North Star: metrics-north-star.md

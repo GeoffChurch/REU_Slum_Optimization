@@ -46,8 +46,10 @@ outputs/*/.hydra/*
 !outputs/capetown-dense-cluster-euclidgrid-adaptivefalse-test/ZAF.9.3.1_1_5810_before.png
 !outputs/capetown-dense-cluster-euclidgrid-adaptivefalse-test/ZAF.9.3.1_1_5810_euclidean_grid-sp60-a0-msl1-sb0.5-sd1-ad0-fs30-dtp75-phb3.21867-pbg19.312_after.png
 
-# Generated site pages + assets: CI regenerates them from examples/ + the outputs snapshot
+# Generated site page + assets: CI regenerates them from examples/ + the outputs snapshot
 # (see .github/workflows/deploy-site.yml); run scripts/gen_site_pages.py for a local preview.
+# The handwritten intro lives in docs/_intro.md (tracked); index.md is assembled from it.
+docs/index.md
 docs/methods/
 docs/benchmark.md
 docs/assets/
