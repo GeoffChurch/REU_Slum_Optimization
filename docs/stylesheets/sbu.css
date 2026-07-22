@@ -1,0 +1,67 @@
+/* Stony Brook University palette: SBU red (#990000) as the accent on a white, academic page.
+   Material's `primary: custom` / `accent: custom` hand color control to these variables. */
+:root {
+  --sbu-red: #990000;
+  --sbu-red-dark: #7a0000;
+  --sbu-red-light: #b03030;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--sbu-red);
+  --md-primary-fg-color--light: var(--sbu-red-light);
+  --md-primary-fg-color--dark: var(--sbu-red-dark);
+  --md-accent-fg-color: var(--sbu-red-dark);
+  --md-typeset-a-color: var(--sbu-red);
+}
+
+/* Keep the body calm: white paper, near-black ink, red reserved for links, header, and rules. */
+.md-typeset h1,
+.md-typeset h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  color: #1b1f23;
+}
+
+.md-typeset h2 {
+  border-bottom: 1px solid #e3ddd4;
+  padding-bottom: 0.3rem;
+}
+
+/* Data tables: quiet header band instead of a solid color flood. */
+.md-typeset table:not([class]) th {
+  background-color: #faf7f5;
+  color: #1b1f23;
+  border-bottom: 2px solid var(--sbu-red);
+}
+
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}
+
+/* Images in comparison grids sit on white cards. */
+.md-typeset img {
+  background: #fff;
+  border: 1px solid #e3ddd4;
+  border-radius: 4px;
+}
+
+/* Small status pills used on the home page. */
+.pill {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.pill-done {
+  color: #3a7d44;
+  border: 1px solid #3a7d44;
+}
+
+.pill-progress {
+  color: var(--sbu-red);
+  border: 1px solid var(--sbu-red);
+}

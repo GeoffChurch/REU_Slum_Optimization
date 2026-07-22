@@ -34,3 +34,4 @@ outputs/
 
 # Hydra scratch dir left behind by in-place regeneration of examples/method-comparison
 examples/method-comparison/.hydra/
+site/
