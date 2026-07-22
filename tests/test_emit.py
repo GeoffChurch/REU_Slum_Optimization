@@ -6,6 +6,7 @@ from typing import cast
 import geopandas as gpd
 import pandas as pd
 import pytest
+from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
@@ -18,6 +19,7 @@ from reblock.emit import (
     region_map,
     render_results,
 )
+from reblock.render import save_render as _real_save_render
 
 UTM = CRS.from_epsg(32643)
 
@@ -268,6 +270,35 @@ def test_region_map_colors_by_depth_and_blanks_deselected(tmp_path: Path) -> Non
     assert (tmp_path / "screen.png").stat().st_size > 0
 
 
+def test_region_map_screen_has_no_colorbar_title_or_member_outline(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # screen.png must show only the coloured fills + the thick black bounding-box locator: no
+    # colorbar (a second Axes matplotlib appends via fig.colorbar), no title, and no per-member
+    # outline collection (the old `edgecolor="black"` trace over every member's own fill, which
+    # occluded the metric colours it was meant to show). Intercept save_render to inspect the
+    # Figure/Axes before it's written+closed.
+    import reblock.emit as emit
+    captured: dict[str, Figure] = {}
+
+    def spy(fig: Figure, path: str | Path) -> None:
+        name = Path(path).name
+        if name not in captured:
+            captured[name] = fig
+        _real_save_render(fig, path)
+
+    monkeypatch.setattr(emit, "save_render", spy)
+    region_map(_source_with_neighbour_and_points(), [["g"]], [["g"]], tmp_path,
+              selection=["g"], depths={"g": 7.0})
+
+    ax_s = captured["screen.png"].axes[0]
+    assert ax_s.get_title() == ""
+    assert len(captured["screen.png"].axes) == 1     # no colorbar axes appended
+    # blanked ("neighbour") + flagged ("g") = 2 fill collections; a 3rd would be the removed
+    # per-member outline.
+    assert len(ax_s.collections) == 2
+    assert len(ax_s.patches) == 1                     # only the bounding-box Rectangle survives
+
+
 def test_region_map_without_depths_still_writes(tmp_path: Path) -> None:
     # depths=None (a non-DenseCompact screen) falls back to a flat located map -- no proxy coloring.
     out = region_map(_source_with_neighbour_and_points(), [["g"]], [["g"]], tmp_path)
@@ -300,25 +331,64 @@ def test_region_map_scores_unflagged_members_by_metric_not_depth(
     assert calls["n"] == 0     # geometry-only metric -> no depth peel for the unflagged member
 
 
-def test_compare_report_emits_length_frontier_and_displacement_artifacts(tmp_path):
+def _permeability_and_displacement_curves():
+    from reblock.budget import Curve
+    from reblock.compare import MethodCurve
+    return [
+        MethodCurve("clearance", "B", "permeability",
+                   Curve([0.0, 100.0], [0.0, 0.8]), 0.1, 0.2),
+        MethodCurve("clearance", "B", "displacement", Curve([0.0, 100.0], [0.0, 0.42]), 0.1, 0.2),
+    ]
+
+
+def test_compare_report_emits_one_permeability_vs_displacement_frontier(tmp_path):
+    from reblock.emit import compare_report
+    compare_report(_permeability_and_displacement_curves(), tmp_path, method_order=["clearance"])
+    assert (tmp_path / "frontier_permeability.csv").exists()
+    text = (tmp_path / "frontier_permeability.csv").read_text()
+    assert "displacement" in text and "permeability" in text
+    assert (tmp_path / "frontier_B.png").exists()
+    # the old three-curve/displacement-table surface is gone -- ONE frontier now, not several:
+    assert not (tmp_path / "frontier_external_connectivity.csv").exists()
+    assert not (tmp_path / "frontier_internal_connectivity.csv").exists()
+    assert not (tmp_path / "displacement_vs_length.csv").exists()
+    assert not (tmp_path / "displacement_table.csv").exists()
+    assert not (tmp_path / "displacement_B.png").exists()
+    assert not list(tmp_path.glob("curve_*_B.png"))
+    assert not list(tmp_path.glob("tradeoff_table_*.csv"))
+
+
+def test_compare_report_frontier_has_no_title_and_percent_axes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # x/y axes are "displacement"/"permeability" (both [0,1) fractions, PercentFormatter'd), and
+    # the curve carries no title -- no block_id, no method-comparison boilerplate.
+    import reblock.emit as emit
+    captured: dict[str, Figure] = {}
+
+    def spy(fig: Figure, path: str | Path) -> None:
+        captured["fig"] = fig
+        _real_save_render(fig, path)
+
+    monkeypatch.setattr(emit, "save_render", spy)
+    emit.compare_report(_permeability_and_displacement_curves(), tmp_path,
+                        method_order=["clearance"])
+
+    ax = captured["fig"].axes[0]
+    assert ax.get_title() == ""
+    assert ax.get_xlabel() == "displacement"
+    assert ax.get_ylabel() == "permeability"
+    assert "B" not in ax.get_title()
+    assert tuple(captured["fig"].get_size_inches()) == (12.0, 9.0)
+
+
+def test_compare_report_without_permeability_rows_writes_nothing(tmp_path: Path) -> None:
+    # A results list with only "displacement" (no benefit metric) has no frontier to plot.
     from reblock.budget import Curve
     from reblock.compare import MethodCurve
     from reblock.emit import compare_report
-    curves = [
-        MethodCurve("clearance", "B", "external_connectivity",
-                   Curve([0.0, 100.0], [0.0, 0.8]), 0.1, 0.2),
-        MethodCurve("clearance", "B", "displacement", Curve([0.0, 100.0], [0.0, 42.0]), 0.1, 0.2),
-    ]
+    curves = [MethodCurve("clearance", "B", "displacement", Curve([0.0, 100.0], [0.0, 0.42]))]
     compare_report(curves, tmp_path, method_order=["clearance"])
-    assert (tmp_path / "frontier_external_connectivity.csv").exists()
-    assert "road_length_m" in (tmp_path / "frontier_external_connectivity.csv").read_text()
-    assert (tmp_path / "displacement_vs_length.csv").exists()
-    assert (tmp_path / "displacement_table.csv").exists()
-    assert (tmp_path / "displacement_B.png").exists()
-    # migrated away:
-    assert not list(tmp_path.glob("tradeoff_table_*.csv"))
-    assert "road_density_m_per_ha" not in (
-        tmp_path / "frontier_external_connectivity.csv").read_text()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_compare_report_has_no_cost_param():
