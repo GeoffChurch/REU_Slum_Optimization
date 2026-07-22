@@ -47,8 +47,8 @@ region graded along the full benefit-vs-added-road frontier. The
 ## Team
 
 - **Mentor: Geoffrey Churchill**
-- **Javier Mendoza** — Suffolk County Community College
 - **Daisy Sanchez** — Farmingdale State College
+- **Elvin Mendoza** — Suffolk County Community College
 
 Built on research from the Santa Fe Institute's
 [Open Reblock](https://github.com/mansueto-institute/prclz) line of work, with informal footpath
