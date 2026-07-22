@@ -7,56 +7,9 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.contracts import Block
+from reblock.permeability import PermeabilityParams
 
 UTM = CRS.from_epsg(32643)
-
-
-def _deep_column_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
-    # Same fixture shape as tests/test_budget.py: a 4-deep column fronting a street at y=0. No roads
-    # -> max depth 4; road A (right edge, bottom half) -> depth 2; {A,B} -> depth 1. One building
-    # point per parcel so displacement/benefit are exercised.
-    from shapely.geometry import Point
-    polys = [Polygon([(0, j), (1, j), (1, j + 1), (0, j + 1)]) for j in range(4)]
-    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1, 2, 3]}, geometry=polys, crs=UTM)
-    boundary = cast(Polygon, parcels.geometry.union_all())
-    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (1, 0)])], crs=UTM)
-    points = gpd.GeoDataFrame(geometry=[Point(0.5, j + 0.5) for j in range(4)], crs=UTM)
-    block = Block(block_id="deep_col", crs=UTM, boundary=boundary, parcels=parcels,
-                  streets=streets, building_points=points)
-    roads = gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 2)]), LineString([(1, 2), (1, 4)])],
-                             crs=UTM)
-    return block, roads
-
-
-def test_two_lens_rows_reports_reached_target_and_matched_budget() -> None:
-    from reblock.budget import truncate_to_length
-    from scripts.compare_budgets import two_lens_rows
-
-    block, roads = _deep_column_block_with_two_roads()
-    budget_a = float(roads.geometry.iloc[0].length)          # room for road A only
-    lens_a, lens_b = two_lens_rows(block, {"m": roads}, {"m": 0.5}, target_ext=0.5,
-                                   budget_m=budget_a, corridor_m=3.0)
-    assert len(lens_a) == 1 and len(lens_b) == 1
-    (a,) = lens_a
-    assert a.method == "m" and a.reached is True and a.reached_ext >= 0.5
-    assert a.propose_seconds == 0.5                          # timing passed through, not remeasured
-    assert a.road_length_m > 0.0 and a.displacement >= 0.0
-    (b,) = lens_b
-    assert b.budget_m == budget_a
-    assert 0.0 <= b.external_connectivity <= 1.0
-    assert b.internal_connectivity >= 0.0
-    # Lens B scores the matched-budget prefix (road A only), matching truncate_to_length.
-    assert len(truncate_to_length(block, roads, budget_a)) == 1
-
-
-def test_two_lens_rows_reports_floor_when_ext_target_unreachable() -> None:
-    from scripts.compare_budgets import two_lens_rows
-
-    block, roads = _deep_column_block_with_two_roads()
-    lens_a, _ = two_lens_rows(block, {"m": roads}, {"m": 0.1}, target_ext=1.5,
-                              budget_m=1.0, corridor_m=3.0)
-    (a,) = lens_a
-    assert a.reached is False and a.reached_ext < 1.5        # floor ext (< unreachable target)
 
 
 def _street_block(x0: int, block_id: str) -> Block:
@@ -70,34 +23,80 @@ def _street_block(x0: int, block_id: str) -> Block:
     return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
 
 
-def test_run_two_lens_writes_tables_and_renders(tmp_path: Path) -> None:
-    # End-to-end glue smoke test on a tiny region with a real reblocker (DijkstraReblocker paves
-    # everything, so it reaches a shallow depth). Asserts the two CSVs + a render per lens + the
-    # frontier curves (built from the SAME reblock) are written and wall-clock propose is captured.
+def test_load_permeability_config_reads_the_committed_yaml() -> None:
+    from scripts.compare_budgets import load_permeability_config
+
+    params, matched_displacement, matched_permeability = load_permeability_config()
+
+    assert params.g_walk == 1.0 and params.g_road == 20.0 and params.g_street == 20.0
+    assert params.corridor_m == 3.0
+    assert 0.0 < matched_displacement < 1.0
+    assert 0.0 < matched_permeability < 1.0
+
+
+def test_run_permeability_lenses_writes_tables_and_renders(tmp_path: Path) -> None:
+    # End-to-end glue smoke test on a tiny 2-block region with a real reblocker (DijkstraReblocker
+    # paves everything, so it reaches a shallow depth / high permeability). Asserts the frontier +
+    # the two lens tables + a before/after render per lens per coloring + the per-method GIF are
+    # all written from the SAME reblock (no second propose), and that no retired two-lens/
+    # external-internal artifact reappears.
     from reblock.methods.dijkstra import DijkstraReblocker
-    from scripts.compare_budgets import run_two_lens
+    from scripts.compare_budgets import run_permeability_lenses
 
     region = [_street_block(0, "a"), _street_block(4, "b")]
-    lens_a, lens_b = run_two_lens(region, {"dijkstra": DijkstraReblocker()}, target_ext=0.3,
-                                  out_dir=tmp_path)
-    assert (tmp_path / "lens_a_external.csv").exists()
-    assert (tmp_path / "lens_b_matched.csv").exists()
-    assert (tmp_path / "after_dijkstra_ext30.jpg").exists()
-    assert (tmp_path / "after_dijkstra_matched.jpg").exists()
-    # frontier curves + CSVs emitted from the same reblock (no second propose)
-    assert list(tmp_path.glob("curve_external_connectivity_*.png"))
-    assert list(tmp_path.glob("curve_internal_connectivity_*.png"))
-    assert list(tmp_path.glob("displacement_*.png"))
-    assert (tmp_path / "frontier_external_connectivity.csv").exists()
-    assert len(lens_a) == 1 and lens_a[0].propose_seconds > 0.0
-    assert len(lens_b) == 1
+    rows = run_permeability_lenses(
+        region, {"dijkstra": DijkstraReblocker()}, tmp_path,
+        matched_displacement=0.3, matched_permeability=0.1, params=PermeabilityParams())
+
+    assert len(rows) == 1
+    (row,) = rows
+    assert row.method == "dijkstra"
+    assert row.disp_road_m >= 0.0 and row.perm_road_m >= 0.0
+    assert 0.0 <= row.disp_permeability
+    assert 0.0 <= row.perm_displacement <= 1.0
+    assert isinstance(row.reached, bool)
+
+    # the frontier (permeability + displacement curves), from the SAME reblock as the lenses below
+    assert (tmp_path / "frontier_permeability.csv").exists()
+    assert list(tmp_path.glob("frontier_*.png"))
+
+    # the two lens outcome tables
+    assert (tmp_path / "lens_displacement.csv").exists()
+    assert (tmp_path / "lens_permeability.csv").exists()
+    disp_text = (tmp_path / "lens_displacement.csv").read_text()
+    assert "dijkstra" in disp_text
+    perm_text = (tmp_path / "lens_permeability.csv").read_text()
+    assert "dijkstra" in perm_text and "reached" in perm_text
+
+    # before, both colorings, once per region
+    assert (tmp_path / "before_depth.jpg").exists()
+    assert (tmp_path / "before_perm.jpg").exists()
+
+    # after, per method per lens, both colorings
+    for tag in ("disp", "perm"):
+        assert (tmp_path / f"after_dijkstra_{tag}_depth.jpg").exists()
+        assert (tmp_path / f"after_dijkstra_{tag}_perm.jpg").exists()
+
+    # per-method reblock GIF (unchanged)
+    assert (tmp_path / "reblock_dijkstra.gif").exists()
+
+    # retired two-lens / external-internal artifacts must not reappear
+    assert not (tmp_path / "lens_a_external.csv").exists()
+    assert not (tmp_path / "lens_b_matched.csv").exists()
+    assert not (tmp_path / "frontier_external_connectivity.csv").exists()
+    assert not (tmp_path / "frontier_internal_connectivity.csv").exists()
+    assert not (tmp_path / "displacement_vs_length.csv").exists()
+    assert not list(tmp_path.glob("curve_*.png"))
+    assert not list(tmp_path.glob("displacement_*.png"))
+    assert not list(tmp_path.glob("depth_vs_road_*.png"))
 
 
-def test_run_two_lens_reblocks_once_per_method_not_twice(monkeypatch: pytest.MonkeyPatch,
-                                                         tmp_path: Path) -> None:
-    # The frontier curves must reuse the two-lens reblock -- region_reblock is called exactly ONCE
-    # per method, never a second time to build the curves (which would silently double wall-clock
-    # on a real thousands-of-buildings region).
+def test_run_permeability_lenses_reblocks_once_per_method_not_twice(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    # The frontier + both lenses must all reuse the SAME reblock -- region_reblock is called
+    # exactly ONCE per method, never a second time (which would silently double wall-clock on a
+    # real thousands-of-buildings region).
     import scripts.compare_budgets as cb
     from reblock.methods.dijkstra import DijkstraReblocker
     from reblock.region import region_reblock as real  # same object cb re-imported
@@ -110,5 +109,28 @@ def test_run_two_lens_reblocks_once_per_method_not_twice(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(cb, "region_reblock", counting)
     region = [_street_block(0, "a"), _street_block(4, "b")]
-    cb.run_two_lens(region, {"dijkstra": DijkstraReblocker()}, target_ext=0.3, out_dir=tmp_path)
-    assert calls["n"] == 1        # one method -> one reblock; curves reuse it, no second pass
+    cb.run_permeability_lenses(region, {"dijkstra": DijkstraReblocker()}, tmp_path,
+                               matched_displacement=0.3, matched_permeability=0.1,
+                               params=PermeabilityParams())
+    assert calls["n"] == 1        # one method -> one reblock; frontier + both lenses reuse it
+
+
+def test_run_permeability_lenses_singleton_region_skips_region_reblock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    # A singleton region takes the exact pre-region single-block `propose()` path (mirrors
+    # `reblock.compare.compare`'s own singleton branch), NOT `region_reblock`: `region_reblock`/
+    # `region_block` unions a single block's `streets` rows into ONE (Multi)LineString row, which a
+    # method that filters `streets.geometry` by `isinstance(..., LineString)` (e.g. TopologyMethod,
+    # used single-block-only by gen_method_comparison.py) would then see as empty street geometry.
+    import scripts.compare_budgets as cb
+    from reblock.methods.dijkstra import DijkstraReblocker
+
+    def _boom(*a: object, **k: object) -> object:
+        raise AssertionError("region_reblock must not be called for a singleton region")
+
+    monkeypatch.setattr(cb, "region_reblock", _boom)
+    region = [_street_block(0, "a")]
+    cb.run_permeability_lenses(region, {"dijkstra": DijkstraReblocker()}, tmp_path,
+                               matched_displacement=0.3, matched_permeability=0.1,
+                               params=PermeabilityParams())

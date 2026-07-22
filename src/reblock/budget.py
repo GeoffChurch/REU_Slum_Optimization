@@ -744,39 +744,6 @@ def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
     return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), depth_at(lo)
 
 
-def prefix_to_external_connectivity(block: Block, roads: GeoDataFrame, target_ext: float, *,
-                                    tol: float = STREET_TOL) -> tuple[GeoDataFrame, float]:
-    """The minimal drainage-ordered prefix of `roads` whose external connectivity
-    (`access_benefit`, fraction of access-burden Sigma-d^2 removed) is >= `target_ext`, paired with
-    that prefix's actual external connectivity. Connectivity is monotone NON-DECREASING as
-    drainage-ordered roads are added (access_burden's unreached-depth cap makes access_benefit
-    monotone), so a binary search over the prefix length finds the smallest sufficient prefix in
-    O(log R) peels. If even all `roads` cannot reach `target_ext`, returns (all roads in drainage
-    order, full connectivity) with that value < `target_ext` -- the caller reports unreached (an
-    osm_footpaths-style fixed input that never reaches the target). Empty `roads` returns
-    (empty, 0.0)."""
-    ext = access_benefit(block, None, tol=tol)
-    if len(roads) == 0:
-        return cast(GeoDataFrame, roads.iloc[:0]), 0.0
-    ordered = _drainage_ordered(block, roads, tol)
-
-    def ext_at(m: int) -> float:
-        return ext(cast(GeoDataFrame, ordered.iloc[:m]))
-
-    n = len(ordered)
-    full_ext = ext_at(n)
-    if full_ext < target_ext:                     # unreachable: best effort is all roads
-        return ordered, full_ext
-    lo, hi = 0, n                                 # smallest m with ext_at(m) >= target_ext
-    while lo < hi:
-        mid = (lo + hi) // 2
-        if ext_at(mid) >= target_ext:
-            hi = mid
-        else:
-            lo = mid + 1
-    return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), ext_at(lo)
-
-
 def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64],
                            d_frac: float, *, corridor_m: float = 3.0,
                            tol: float = STREET_TOL) -> GeoDataFrame:
@@ -785,8 +752,8 @@ def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.
     >= `d_frac`. Displacement is monotone non-decreasing as drainage-ordered roads are added (a
     growing prefix's buffered corridor union only grows, so every building's distance to it is
     non-increasing, hence each cᵢ is non-decreasing), so a binary search over the prefix length
-    finds the smallest sufficient prefix in O(log R) peels -- mirroring
-    `prefix_to_external_connectivity`. n_buildings == 0 makes the fraction always 0.0 (matching
+    finds the smallest sufficient prefix in O(log R) peels -- mirroring `prefix_to_permeability`'s
+    binary search. n_buildings == 0 makes the fraction always 0.0 (matching
     `displacement_curve`'s `_disp`), so a positive `d_frac` is then unreachable. If even all
     `roads` cannot reach `d_frac`, returns all roads in drainage order. Empty `roads` returns
     empty."""
@@ -827,9 +794,9 @@ def prefix_to_permeability(
     drainage-ordered roads are added (roads only add conductance -- never remove it -- so the
     dissipated power is monotone non-increasing by Rayleigh's monotonicity theorem; see
     permeability.py's module docstring), so a binary search over the prefix length finds the
-    smallest sufficient prefix in O(log R) peels, mirroring `prefix_to_external_connectivity`.
-    The no-roads baseline p0 is frozen ONCE via `egress_power` rather than recomputed per probed
-    prefix. `adj` (parcel_adjacency, an STRtree spatial join -- costly at region scale) is
+    smallest sufficient prefix in O(log R) peels, mirroring `prefix_to_displacement`'s binary
+    search. The no-roads baseline p0 is frozen ONCE via `egress_power` rather than recomputed per
+    probed prefix. `adj` (parcel_adjacency, an STRtree spatial join -- costly at region scale) is
     likewise built ONCE and threaded through every `egress_power`/`permeability` call: adjacency
     is a function of `block.parcels` geometry alone, invariant across road prefixes, exactly the
     precomputed-adj pattern `access_benefit`/`prefix_to_depth` already use. If even all `roads`
@@ -856,12 +823,6 @@ def prefix_to_permeability(
         else:
             lo = mid + 1
     return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), True
-
-
-def matched_budget(total_length_by_method: dict[str, float]) -> float:
-    """The common render budget: the smallest method's total road length (every method can reach
-    it). 0.0 if empty."""
-    return min(total_length_by_method.values()) if total_length_by_method else 0.0
 
 
 def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64], *,

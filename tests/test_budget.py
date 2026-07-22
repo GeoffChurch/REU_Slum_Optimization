@@ -445,45 +445,6 @@ def test_prefix_to_depth_reports_floor_when_target_unreachable() -> None:
     assert len(prefix) == len(roads)           # best effort = all roads in drainage order
 
 
-def test_prefix_to_external_connectivity_returns_minimal_prefix_that_reaches_target() -> None:
-    from reblock.budget import access_benefit, prefix_to_external_connectivity
-    block, roads = _deep_column_block_with_two_roads()
-    prefix, reached = prefix_to_external_connectivity(block, roads, 0.7)
-    full = access_benefit(block, None)(roads)
-    assert reached >= 0.7                      # meets the target
-    assert reached <= full                     # never exceeds the full-road connectivity
-    assert len(prefix) <= len(roads)           # no longer than all roads
-    assert len(prefix) == 1                    # road A alone clears 0.7 (the MINIMAL prefix)
-    assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])   # road A (the drainage trunk)
-
-
-def test_prefix_to_external_connectivity_reaches_a_higher_target_only_with_all_roads() -> None:
-    from reblock.budget import prefix_to_external_connectivity
-    block, roads = _deep_column_block_with_two_roads()
-    prefix, reached = prefix_to_external_connectivity(block, roads, 0.8)
-    assert reached >= 0.8
-    assert len(prefix) == len(roads)           # needs both roads to reach 0.8
-
-
-def test_prefix_to_external_connectivity_reports_floor_when_target_unreachable() -> None:
-    from reblock.budget import prefix_to_external_connectivity
-    block, roads = _deep_column_block_with_two_roads()
-    prefix, reached = prefix_to_external_connectivity(block, roads, 1.5)   # 1.5 exceeds max (1.0)
-    assert reached < 1.5                       # unreached, reported honestly
-    assert len(prefix) == len(roads)           # best effort = all roads in drainage order
-    assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])
-    assert prefix.geometry.iloc[1].equals(roads.geometry.iloc[1])
-
-
-def test_prefix_to_external_connectivity_empty_roads_returns_empty() -> None:
-    from reblock.budget import prefix_to_external_connectivity
-    block, _roads = _deep_column_block_with_two_roads()
-    empty_roads = gpd.GeoDataFrame(geometry=[], crs=UTM)
-    prefix, reached = prefix_to_external_connectivity(block, empty_roads, 0.5)
-    assert len(prefix) == 0
-    assert reached == 0.0
-
-
 def test_prefix_to_permeability_returns_minimal_prefix_that_reaches_target() -> None:
     from reblock.budget import prefix_to_permeability
     from reblock.permeability import permeability

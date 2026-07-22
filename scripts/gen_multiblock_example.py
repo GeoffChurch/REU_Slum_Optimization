@@ -34,7 +34,7 @@ from reblock.emit import region_map
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, block_depths
 from reblock.render import google_maps_url
-from scripts.compare_budgets import run_two_lens
+from scripts.compare_budgets import load_permeability_config, run_permeability_lenses
 from scripts.gen_example_readme import write_readme
 
 
@@ -156,7 +156,10 @@ def main() -> None:
             with open_dict(cfg):
                 cfg.desire_source.snapshot = str(snapshot)
             methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
-        run_two_lens(region, methods, 0.70, out, label=seed)
+        params, matched_displacement, matched_permeability = load_permeability_config()
+        run_permeability_lenses(region, methods, out, matched_displacement=matched_displacement,
+                                matched_permeability=matched_permeability, params=params,
+                                label=seed)
 
         depths = block_depths(source, members)
         dens = {b.block_id: len(b.parcels) / b.parcels.geometry.union_all().area * 1e4 for b in region}
