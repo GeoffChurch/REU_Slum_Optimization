@@ -1,9 +1,1 @@
-[reblock.screen.dense_compact][INFO] fine pass: 13822 survivors across 16 fork workers
-/home/gchurchill/src/reblock/src/reblock/screen/dense_compact.py:50: UserWarning: screen:ZAF.9.5.2_1_2690: dissolve is MultiPolygon, not Polygon; skipping
-  for blk in src.region().blocks:
-/home/gchurchill/src/reblock/src/reblock/screen/dense_compact.py:50: UserWarning: screen:ZAF.9.5.2_1_3714: dissolve is GeometryCollection, not Polygon; skipping
-  for blk in src.region().blocks:
-/home/gchurchill/src/reblock/src/reblock/screen/dense_compact.py:50: UserWarning: screen:ZAF.9.6.5_1_5801: dissolve is GeometryCollection, not Polygon; skipping
-  for blk in src.region().blocks:
-[reblock.screen.dense_compact][INFO] screen: 13793/83192 blocks selected by metric=depth (needs_peel=True)
 wrote examples/multiblock_depth: 12 blocks / 11006 parcels; flagged 13793/83192; README + maps + lens CSVs
