@@ -72,4 +72,4 @@ def test_regenerate_dry_run_lists_all(tmp_path):
     for m in ("depth", "depth_density", "density_compactness"):
         assert f"gen_multiblock_example {m}" in out            # capetown
         assert f"gen_multiblock_example {m} nairobi" in out    # nairobi
-    assert "reblock.compare" in out and "method-comparison" in out
+    assert "scripts.gen_method_comparison" in out            # the method-comparison flagship
