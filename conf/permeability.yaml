@@ -1,0 +1,14 @@
+# Permeability metric params + the two universal calibration thresholds. The thresholds are set
+# once from scripts/calibrate_permeability.py -- see docs/superpowers/plans/
+# 2026-07-22-permeability-metric.md Task 3's human checkpoint. PLACEHOLDERS until then.
+g_walk: 1.0
+g_road: 20.0
+g_street: 20.0
+corridor_m: 3.0
+# Lens A -- matched displacement %: truncate every method to its first prefix at/after this
+# displacement fraction, then compare permeability reached at that equal home-cost.
+matched_displacement: null
+# Lens B -- matched permeability: truncate every method to its first prefix reaching this
+# permeability level, then compare displacement cost to get there (a method whose full network
+# never reaches it reads as "unreached").
+matched_permeability: null

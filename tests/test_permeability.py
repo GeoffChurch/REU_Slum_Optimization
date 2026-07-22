@@ -121,3 +121,13 @@ def test_permeability_curve_freezes_p0_matching_a_manual_baseline():
     p0, _ = egress_power(b, None)
     curve = permeability_curve(b, roads, n_points=4)
     assert abs(curve.benefit[-1] - permeability(b, roads, p0=p0)) < 1e-9
+
+def test_permeability_at_displacement_first_crossing_and_unreached():
+    from reblock.budget import Curve
+    from scripts.calibrate_permeability import permeability_at_displacement
+    perm = Curve([0, 1, 2, 3], [0.0, 0.20, 0.35, 0.50])
+    disp = Curve([0, 1, 2, 3], [0.0, 0.10, 0.25, 0.45])
+    # first sample with disp >= 0.20 is i=2 (disp .25) -> perm .35
+    assert permeability_at_displacement(perm, disp, 0.20) == 0.35
+    assert permeability_at_displacement(perm, disp, 0.45) == 0.50
+    assert permeability_at_displacement(perm, disp, 0.50) == float("-inf")
