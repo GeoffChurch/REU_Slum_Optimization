@@ -1,3 +1,5 @@
+import math
+
 import geopandas as gpd
 import numpy as np
 from pyproj import CRS
@@ -36,10 +38,20 @@ def test_permeability_in_unit_interval_and_positive_with_a_road():
     assert 0.0 < p < 1.0
 
 def test_monotone_under_added_roads():
-    b = _grid_block(6)
-    r1 = _roads([LineString([(3, 0), (3, 6)])])
-    r2 = _roads([LineString([(3, 0), (3, 6)]), LineString([(0, 3), (6, 3)])])   # superset
-    assert permeability(b, r2) >= permeability(b, r1) - 1e-12    # adding roads never lowers it
+    # Same corridor-saturation trap as test_loop_beats_spur_at_equal_length: on the 6x6
+    # 1m-unit grid, corridor_m=3.0 blankets 100% (60/60) of footpath edges for BOTH r1 and its
+    # superset r2, so the added road has zero marginal coverage and the old `>=` assertion was
+    # an exact tie -- passing vacuously, not exercising monotonicity at all. Reuse the
+    # thin-corridor 15x15/10m grid from the loop-vs-spur test instead, and pick a superset road
+    # pair whose second road genuinely adds coverage: r1 = the same spur (x=15, depth 135);
+    # r2 = r1 plus a short cross-road near its top (y=115, x=0..30) that upgrades additional
+    # footpath edges neither road alone covers. Coverage: r1 42/420=10.00%, r2 47/420=11.19%
+    # (measured, not both 100%) -- confirms the added road has real marginal effect, so a
+    # STRICT increase is the honest assertion (not just `>=`).
+    b = _grid_block(15, cell=10.0)
+    r1 = _roads([LineString([(15, 0), (15, 135)])])
+    r2 = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
+    assert permeability(b, r2) > permeability(b, r1)   # adding a road with real coverage helps
 
 def test_loop_beats_spur_at_equal_length():
     # A 15x15 grid of 10m parcels (225 parcels; centroid spacing 10m) -- large enough, at the
@@ -76,3 +88,4 @@ def test_ungrounded_returns_zero_benefit_or_guarded():
     b.streets.geometry = gpd.GeoSeries([], crs=UTM)   # no street -> no ground
     P, v = egress_power(b, None)
     assert not np.isfinite(P)     # +inf; permeability() guards this (returns nan) -- assert guard
+    assert math.isnan(permeability(b, None))          # exercise the actual nan guard, not just P
