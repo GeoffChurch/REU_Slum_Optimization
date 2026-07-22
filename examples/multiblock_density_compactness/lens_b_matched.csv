@@ -1,6 +1,5 @@
 method,budget_m,external_connectivity,internal_connectivity,displacement,pct_displaced
-clearance,2443.6,0.575993,1.93013e-14,436.4,0.0934
 greedy_arterial_repulsion,2443.6,0.213733,0.249322,188.7,0.0404
-clearance_looped,2443.6,0.548419,1.59007e-14,425.1,0.0909
-euclidean_grid,2443.6,0.192004,0.0859885,344.2,0.0736
-osm_footpaths,2443.6,0.305262,0.0454721,355.2,0.0760
+clearance_looped,2443.6,0.548419,1.20738e-14,425.1,0.0909
+euclidean_grid,2443.6,0.312837,0.0252542,291.7,0.0624
+osm_footpaths,2443.6,0.305262,0.0183267,355.2,0.0760

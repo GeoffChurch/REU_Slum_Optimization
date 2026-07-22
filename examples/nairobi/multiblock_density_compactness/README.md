@@ -41,21 +41,21 @@ The same region on the same access-depth colour scale (blue = at a street, red =
 
 **Watch each method reblock** — its full road set added in drainage order, the deep interior draining as the network reaches in:
 
-| clearance | clearance_looped | euclidean_grid | greedy_arterial_repulsion |
-|---|---|---|---|
-| ![clearance](reblock_clearance.gif) | ![clearance_looped](reblock_clearance_looped.gif) | ![euclidean_grid](reblock_euclidean_grid.gif) | ![greedy_arterial_repulsion](reblock_greedy_arterial_repulsion.gif) |
+| clearance_looped | euclidean_grid | greedy_arterial_repulsion |
+|---|---|---|
+| ![clearance_looped](reblock_clearance_looped.gif) | ![euclidean_grid](reblock_euclidean_grid.gif) | ![greedy_arterial_repulsion](reblock_greedy_arterial_repulsion.gif) |
 
 **Matched road budget** — every method truncated to the same total added road, so this compares the access each *buys for the same cost*:
 
-| clearance_looped | clearance | euclidean_grid | greedy_arterial_repulsion |
-|---|---|---|---|
-| ![clearance_looped](after_clearance_looped_matched.jpg) | ![clearance](after_clearance_matched.jpg) | ![euclidean_grid](after_euclidean_grid_matched.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_matched.jpg) |
+| clearance_looped | euclidean_grid | greedy_arterial_repulsion |
+|---|---|---|
+| ![clearance_looped](after_clearance_looped_matched.jpg) | ![euclidean_grid](after_euclidean_grid_matched.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_matched.jpg) |
 
 **Matched external-connectivity target** — every method truncated where external connectivity (access-burden removed) reaches 0.70, so this compares the *road each takes* for the same outcome:
 
-| clearance | clearance_looped | euclidean_grid | greedy_arterial_repulsion |
-|---|---|---|---|
-| ![clearance](after_clearance_ext70.jpg) | ![clearance_looped](after_clearance_looped_ext70.jpg) | ![euclidean_grid](after_euclidean_grid_ext70.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_ext70.jpg) |
+| clearance_looped | euclidean_grid | greedy_arterial_repulsion |
+|---|---|---|
+| ![clearance_looped](after_clearance_looped_ext70.jpg) | ![euclidean_grid](after_euclidean_grid_ext70.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_ext70.jpg) |
 
 
 ## How this was generated
