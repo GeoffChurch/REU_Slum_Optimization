@@ -1,2 +1,1 @@
-[reblock.screen.dense_compact][INFO] screen: 8293/83192 blocks selected by metric=density_compactness (needs_peel=False)
 wrote examples/multiblock_density_compactness: 19 blocks / 4677 parcels; flagged 8293/83192; README + maps + lens CSVs
