@@ -18,8 +18,9 @@ import contextlib
 import json
 import logging
 import sys
+from collections.abc import Iterator
 from pathlib import Path
-from typing import cast
+from typing import TextIO, cast
 
 import segno
 from hydra import compose, initialize_config_dir
@@ -43,15 +44,15 @@ def write_maps_qr(url: str, path: Path, *, scale: int = 4, border: int = 2) -> N
 
 
 @contextlib.contextmanager
-def _tee_to_file(path: Path):
+def _tee_to_file(path: Path) -> Iterator[None]:
     """Mirror stdout+stderr (and root logging at INFO) into `path` for the duration; restore after."""
     f = open(path, "w", encoding="utf-8", buffering=1)
 
     class _Tee:
-        def __init__(self, *streams): self._streams = streams
-        def write(self, s):
+        def __init__(self, *streams: TextIO) -> None: self._streams = streams
+        def write(self, s: str) -> None:
             for st in self._streams: st.write(s)
-        def flush(self):
+        def flush(self) -> None:
             for st in self._streams: st.flush()
 
     orig_out, orig_err = sys.stdout, sys.stderr
