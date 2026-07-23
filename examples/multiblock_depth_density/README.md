@@ -47,10 +47,10 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| clearance_looped | 2,334 m | 10.0% | 47.3% |  |
-| euclidean_grid | 2,696 m | 10.5% | 43.7% |  |
-| greedy_arterial_repulsion | 3,431 m | 10.1% | 42.4% |  |
-| osm_footpaths | 4,607 m | 10.1% | 43.2% |  |
+| clearance_looped | 2,334 m | 10.0% | 78.2% |  |
+| euclidean_grid | 2,696 m | 10.5% | 70.6% |  |
+| greedy_arterial_repulsion | 3,431 m | 10.1% | 71.0% |  |
+| osm_footpaths | 4,607 m | 10.1% | 58.5% |  |
 
 Access-depth coloring:
 
@@ -70,10 +70,10 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| clearance_looped | 1,291 m | 6.0% | 40.3% |  |
-| euclidean_grid | 2,371 m | 9.0% | 43.0% |  |
-| greedy_arterial_repulsion | 3,250 m | 9.4% | 40.3% |  |
-| osm_footpaths | 3,850 m | 8.7% | 40.0% |  |
+| clearance_looped | 924 m | 4.5% | 62.1% |  |
+| euclidean_grid | 2,068 m | 7.8% | 66.1% |  |
+| greedy_arterial_repulsion | 1,860 m | 6.1% | 61.9% |  |
+| osm_footpaths | 4,760 m | 11.1% | 61.8% |  |
 
 Access-depth coloring:
 
