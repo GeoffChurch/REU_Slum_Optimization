@@ -28,6 +28,9 @@ coverage.xml
 .DS_Store
 *.swp
 
+# Superpowers/SDD agent scratch (progress ledger, task briefs, findings) — never repo content
+/.superpowers/
+
 # Data (uncomment / refine as the pipeline grows)
 # data/
 
