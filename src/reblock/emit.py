@@ -18,6 +18,7 @@ from matplotlib.ticker import PercentFormatter
 from numpy.typing import NDArray
 
 from reblock.contracts import Block, Metrics, Proposal, Result, Source
+from reblock.method_labels import friendly_method_name
 from reblock.render import (
     _CONTEXT_PT,
     _OWN_PT,
@@ -337,7 +338,7 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
         for mc in curves:
             xs = disp_x.get((block_id, mc.method), mc.curve.cost)
             ax.plot(xs, mc.curve.benefit, marker="o", ms=9, lw=2.5,
-                    label=mc.method, color=colors[mc.method])
+                    label=friendly_method_name(mc.method), color=colors[mc.method])
         # The two calibrated lens cutoffs (conf/permeability.yaml) as thin dashed guides, drawn
         # UNDER the curves (low zorder) so they read as reference lines, not data -- Lens A's
         # matched displacement (vertical) and Lens B's matched permeability (horizontal); see
