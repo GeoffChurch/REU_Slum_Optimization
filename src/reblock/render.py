@@ -25,7 +25,6 @@ matplotlib.use("Agg")
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import pandas as pd
-from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import Polygon
@@ -109,10 +108,6 @@ def _point_disks(points: gpd.GeoDataFrame, radius_m: float | None = None) -> gpd
 
 _FIELD_CMAP: dict[str, str] = {"depth": _CMAP, "perm": _PERM_CMAP}
 _FIELD_VMIN: dict[str, float] = {"depth": 1, "perm": 0}
-_FIELD_LABEL: dict[str, str] = {
-    "depth": "access depth (parcels from a street)",
-    "perm": "egress potential (higher = harder to escape)",
-}
 
 
 def _draw_heatmap(
@@ -129,9 +124,11 @@ def _draw_heatmap(
     vmin = _FIELD_VMIN[field]
 
     # 13, not a bare 12: empirically (a real shipped before.jpg at the old figsize=(10,10) crops
-    # to ~0.80 of its nominal canvas under bbox_inches="tight" -- the colorbar + margins are a
-    # roughly fixed inches-fraction of the figure, not data-dependent) a bare (12, 12) tight-crops
-    # to ~2880 px long edge, just under the >=3000 px poster target; 13 clears it with margin.
+    # to ~0.80 of its nominal canvas under bbox_inches="tight" -- margins eat a roughly fixed
+    # inches-fraction of the figure, not data-dependent) a bare (12, 12) tight-crops to ~2880 px
+    # long edge, just under the >=3000 px poster target; 13 clears it with margin. No colorbar now
+    # (removed -- the coloring's meaning lives in the READMEs), so the bare map fills the canvas
+    # and this only clears the target by more.
     fig, ax = plt.subplots(figsize=(13, 13))
     parcels.plot(ax=ax, column="layer", cmap=cmap, vmin=vmin, vmax=vmax,
                  edgecolor="#999999", linewidth=0.4)
@@ -174,11 +171,6 @@ def _draw_heatmap(
         colors = [(1.0, 0.0, 0.0, float(ci)) for ci in displaced_points["c"].to_numpy()]
         disks.plot(ax=ax, color=colors, zorder=5, linewidth=0)
 
-    sm = plt.cm.ScalarMappable(cmap=cmap, norm=Normalize(vmin=vmin, vmax=vmax))
-    cb = fig.colorbar(sm, ax=ax)
-    cb.set_label(_FIELD_LABEL[field], fontsize=13)
-    cb.ax.tick_params(labelsize=11)
-
     ax.set_aspect("equal")
     ax.axis("off")
     return fig
@@ -200,7 +192,6 @@ def render_before(
         context_outlines=context_outlines, context_points=context_points, own_points=own_points,
         frame=frame,
     )
-    fig.axes[0].set_title("before", fontsize=16)
     return fig
 
 
@@ -230,12 +221,6 @@ def render_after(
             geometry=proposal.roads.geometry.buffer(corridor_m), crs=block.crs)
         roads_buffered.plot(ax=ax, color=_ROAD_COLOR, zorder=4)
 
-    title = "after"
-    if metrics is not None:
-        delta_k = metrics.values.get("delta_k")
-        if delta_k is not None:
-            title += f" (Δk={delta_k:.0f})"
-    ax.set_title(title, fontsize=16)
     return fig
 
 

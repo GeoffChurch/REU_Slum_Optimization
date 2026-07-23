@@ -298,6 +298,9 @@ def test_region_map_screen_has_no_colorbar_title_or_member_outline(
     assert len(ax_s.collections) == 2
     assert len(ax_s.patches) == 1                     # only the bounding-box Rectangle survives
 
+    # region.png is now bare too: no member-count/seed-count title.
+    assert captured["region.png"].axes[0].get_title() == ""
+
 
 def test_region_map_without_depths_still_writes(tmp_path: Path) -> None:
     # depths=None (a non-DenseCompact screen) falls back to a flat located map -- no proxy coloring.
