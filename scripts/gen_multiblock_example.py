@@ -18,6 +18,7 @@ import contextlib
 import json
 import logging
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TextIO, cast
@@ -35,6 +36,8 @@ from reblock.region import RegionBuilder, block_depths
 from reblock.render import google_maps_url
 from scripts.compare_budgets import load_permeability_config, run_permeability_lenses
 from scripts.gen_example_readme import write_readme
+
+log = logging.getLogger(__name__)
 
 
 def write_maps_qr(url: str, path: Path, *, scale: int = 4, border: int = 2) -> None:
@@ -135,15 +138,22 @@ def main() -> None:
         screen = cast(Screen, instantiate(cfg.screen))
         region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
 
+        t0 = time.perf_counter()
         selection = screen.select(source) or []
         if not selection:
             raise SystemExit(f"metric={metric_name!r} flagged 0 blocks — check its gate/pre-filter")
         scores = cast("dict[str, float]", screen.selection_scores(source))   # type: ignore[attr-defined]
         total = len(source.block_geometries())
+        log.info("screen: flagged %d/%d blocks (%.1fs)", len(selection), total,
+                 time.perf_counter() - t0)
 
         source.block_ids = None                                              # type: ignore[attr-defined]
+        t0 = time.perf_counter()
         region = build_regions(source, screen, region_builder, None, 1)[0]
         members = [b.block_id for b in region]
+        region_parcels = sum(len(b.parcels) for b in region)
+        log.info("region built: %d blocks / %d parcels (%.1fs)", len(members), region_parcels,
+                 time.perf_counter() - t0)
         seed = selection[0]
         # build_regions narrowed source.block_ids to the members; clear it again (like run.py)
         # so the screen map spans the whole metro, not just the region neighbourhood.
@@ -178,7 +188,7 @@ def main() -> None:
         meta = {
             "metric": metric_name, "flagged": len(selection), "total_blocks": total,
             "deepest_block": seed, "deepest_depth": depths.get(seed, 0.0),
-            "region_members": len(members), "region_parcels": sum(len(b.parcels) for b in region),
+            "region_members": len(members), "region_parcels": region_parcels,
             "region_mean_depth": sum(depths.values()) / max(len(depths), 1),
             "region_mean_density_per_ha": sum(dens.values()) / max(len(dens), 1),
             "maps_url": maps_url,

@@ -46,7 +46,9 @@ Run (module form -- mirrors scripts/fetch_desire_lines_snapshot.py's Hydra boots
 from __future__ import annotations
 
 import csv
+import logging
 import sys
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
@@ -82,6 +84,8 @@ from reblock.permeability import (
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, region_reblock
 from reblock.render import frame_bbox, render_after, render_before, save_render, short_label
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -144,10 +148,14 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     proposals: dict[str, Proposal] = {}
     block: Block | None = None
     for name, method in methods.items():
+        t0 = time.perf_counter()
         blk, proposal = _reblock_once(region, method)
         block = blk
         proposals[name] = proposal
-        roads_by_method[name] = cast(GeoDataFrame, proposal.roads)
+        roads = cast(GeoDataFrame, proposal.roads)
+        roads_by_method[name] = roads
+        log.info("reblocked %s: %d segments, %.0f m (%.1fs)", name, len(roads),
+                 float(roads.geometry.length.sum()), time.perf_counter() - t0)
     assert block is not None
 
     radii = building_radii(block.building_points, corridor_m)
@@ -161,6 +169,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     # Frontier: permeability + displacement curves per method, from the SAME reblock above -- no
     # second propose. `compare_report` writes frontier_permeability.csv + frontier_<label>.png.
     curve_label = short_label(label if label is not None else str(region[0].block_id))
+    lens_t0 = time.perf_counter()
     curves: list[MethodCurve] = []
     for name, roads in roads_by_method.items():
         curves.append(MethodCurve(name, curve_label, "permeability",
@@ -185,6 +194,8 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         pb, reached = prefix_to_permeability(block, roads, matched_permeability, params)
         prefix_b[name] = pb
         reached_b[name] = reached
+    log.info("lens/frontier curves computed for %d methods (%.1fs)", len(methods),
+             time.perf_counter() - lens_t0)
 
     # Before images (both colorings), once per region, on a frame + vmax shared with every after.
     kc_eval = KComplexityEval()
