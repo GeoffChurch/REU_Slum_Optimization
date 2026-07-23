@@ -338,7 +338,35 @@ weighted consensus to approximate it without ever seeing the recipient's own map
   rather than bulldozing), and the OSM-donor consensus preserved much of that advantage, while the
   clearance-donor consensus converged back toward clearance's higher-displacement solution.
 
-## 7. Verdict and next steps
+## 7. Variant-1 first cut — region street-form consensus (tested 2026-07-23)
+
+Built the full region-level chain the "next steps" below proposed (accretion → geometry-derived
+inter-block street network → rotation/scale-invariant distance-spectrum features → GEP-decorrelated
+retrieval → GW+UOT weighted-barycenter consensus → scoring), on one recipient region
+(`ZAF.9.3.1_1_40972+40976`, 716 parcels, own internal streets 87 m = 16th percentile of a 45-region
+donor pool). **The chain holds end-to-end, and two pieces are validated — but the donor type fails.**
+
+- **GEP decorrelation works** (the crux). The feature direction most correlated with road provision
+  (+0.73) was projected out, after which the recipient's k-NN mean internal-street-length rose +11–55%
+  at 4 of 5 tested `k` (k=8: 361→561 m). So a road-poor recipient *does* surface road-richer,
+  shape-similar donors instead of near-duplicates of its own under-service. **Caveat:** it required
+  PCA-whitening first — naively z-scoring the 60-dim eigenvalue spectrum made raw and decorrelated
+  retrieval byte-identical, because ~58 noise dimensions swamped the ~2 real signal ones. Lesson:
+  whiten, or use far fewer, more-informative spectral features.
+- **Consensus beats the recipient's own sparse streets 2–6×** and beats the best single donor.
+- **But the consensus loses to direct clearance** — 0.233 vs 0.348 permeability at the donor budget
+  (349 m); 0.081 vs 0.212 at the thin own-network budget (87 m). The map shows a dense but *fragmented*
+  network, not clearance's coherent interior-reaching tree. The **free inter-block-street donor is a
+  materially weaker ingredient than the OSM footpaths of §5**: block-level OSM consensus reached ~92%
+  of clearance, this region street-form only ~67%. Streets are formal boundaries; footpaths are
+  access-optimized, and it shows. (Also n=1, plus a thin-budget truncation artifact where consensus
+  dipped below the best single donor.)
+
+**Verdict on street-form donors: not a green light** — the chain and the GEP are proven, but this donor
+type isn't competitive with a from-scratch clearance solve; the free-data advantage costs too much
+quality. The GEP is now a reusable retrieval primitive; the remaining leverage is donor quality.
+
+## 8. Verdict and next steps
 
 **Single-donor transplant: shelved.** Literal geometric OT transplant — from a single donor,
 however well-matched — is dominated by direct `clearance` and by the recipient's own OSM on every
@@ -363,20 +391,13 @@ Next steps, in rough priority order:
    or relaxing the donor-pool's anchor/size window to grow the coverage-filtered pool — is needed
    before treating the 93.7%/92.2% result as a generalizable rate rather than one strong data
    point.
-2. **The natural culmination: region-level transplant.** Accrete blocks into compact/isoperimetric
-   regions of ≥N parcels, vectorize them rotation/scale-invariantly using GW-aligned features (a
-   cheap shortlist, then re-ranked by real GW distance — per the heat-trace lesson in section 4,
-   *not* a "cleaner" local-graph signature), and consensus-transplant the weighted barycenter of
-   similar regions' **inter-block street networks** onto a recipient region. Inter-block streets
-   are free from the block-boundary-geometry constraint this whole study fought (no OSM fetch
-   dependency, no coverage-gap problem) — this also matches the region-level reframing
-   `transfer-idea-feasibility.md` (2026-07-10) already argued the transfer idea needs, since a
-   single block has no internal roads to copy in the kblock model; only the inter-block grid is
-   copyable structure.
-3. **A GEP that projects out road-length/block-count-correlated feature directions**, so a
-   road-poor recipient (a slum) doesn't only retrieve equally road-poor donors as its "closest
-   match" — surfacing road-richer, shape-similar candidates instead of near-duplicates of its own
-   under-service.
+2. **Region-level street-form transplant — TESTED (§7), mixed.** The full chain holds, but the free
+   inter-block-street donor loses to direct clearance (~67% of it), so street-form is not a competitive
+   donor on its own. Region-level accretion is a viable substrate; the *donor material* is the problem.
+3. **GEP road-provision decorrelation — VALIDATED (§7).** Projecting out the road-provision-correlated
+   feature direction does pull road-richer, shape-similar donors for a road-poor recipient (+11–55%
+   neighbor street-length). It is now a reusable retrieval primitive for whichever donor type is used —
+   but whiten the spectrum first (naive z-scoring is swamped by noise dimensions).
 4. **Consensus-as-seed + light greedy refine**, to close the remaining gap to direct
    clearance/own-OSM: treat the barycenter consensus network as an initialization for a hill-climb
    refiner (the codebase already has one on the unused `prior` seam) rather than as the final
