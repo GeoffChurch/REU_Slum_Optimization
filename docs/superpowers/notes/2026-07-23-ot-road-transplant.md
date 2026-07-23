@@ -1,4 +1,4 @@
-# OT road transplant: single-donor is a dead end, barycenter consensus is promising
+# OT road transplant: thoroughly explored, closed as a reblocker — keepers are footpath-prediction (OSM-consensus) + a GEP retrieval primitive
 
 **Date:** 2026-07-23
 **Status:** scratchpad-only feasibility exploration. Nothing here touched `src/` — no repo source
@@ -67,7 +67,9 @@ problem.
 | v3 — single-donor k=5 amortization | 1 clearance donor → 5 NN × 3 featurizations | 14 unique neighbors | median perm gap −0.14 (13/15 collapse); rank-1 sometimes wins (+0.098, +0.029) | direct clearance, length-matched | Mostly dead; narrow rank-1-only regime |
 | v3 — heat-trace featurization | same donor | 5 | median perm gap −0.334, 0/5 avoid collapse, correlation flips to +0.60 (n.s.) | raw-signature's −0.130, ρ=−0.90 | Worse than raw signature |
 | v4 — barycenter consensus, clearance donors | k=6 clearance-solved neighbors, real-GW-cost selected | 3 (25th/50th/75th %ile) | 43% / 91% / 73% of direct clearance; 2–10× best single donor | direct clearance, length-matched | Promising, not yet a replacement |
-| v5 — barycenter consensus, real OSM donors | k=7 real-OSM-footpath neighbors | 1 (40972) | perm 0.722 = 93.7% of own OSM, 92.2% of direct clearance, at *lower* displacement (40.1% vs 43.9%) | own OSM 0.77@28%; direct clearance 0.78@44% | Strongest result; n=1 |
+| v5 — barycenter consensus, real OSM donors | k=7 real-OSM-footpath neighbors | 1 (40972) | perm 0.722 = 93.7% of own OSM, 92.2% of direct clearance, at *lower* displacement (40.1% vs 43.9%) | own OSM 0.77@28%; direct clearance 0.78@44% | Strongest result; n=1; a *predictor*, not a reblocker |
+| v6 — barycenter consensus, region street-form (§7) | k=6 inter-block-street donors (free, no OSM) | 1 (40972+40976) | perm 0.233 = 67% of direct clearance; beats own streets 2–6× | direct clearance 0.348; own streets 0.039 | Not competitive (weak donor); GEP decorrelation validated |
+| Consensus-as-seed + refine (§8.4) | OSM consensus as `LoopClosureRefiner` prior | 1 (40972) | perm 0.706 — below clearance 0.783 *and* below an info-free cold-refine 0.751 | direct clearance; cold-refine | No-go (seed adds *negative* value) |
 
 ## 3. Single-donor transplant is a dead end
 
@@ -376,7 +378,7 @@ featurization: a transplant reproduces the *donor's* coverage pattern, not the *
 Only a single-nearest-neighbor-by-real-GW-cost regime shows occasional wins, and it's too narrow
 (1–2 of 5 candidates per pool) to productionize on its own.
 
-**Barycenter consensus: the promising direction.** Pooling several good, close neighbors' networks
+**Barycenter consensus: the strongest result — but a *predictor*, not a reblocker.** Pooling several good, close neighbors' networks
 into a demand-weighted consensus, extracted along the recipient's own gap graph, beats any single
 donor by 2–10× and gets meaningfully close to direct clearance (43–91% with clearance donors, n=3)
 — and with real OSM donors, reaches 93.7% of a block's own real network and 92.2% of direct
@@ -398,8 +400,21 @@ Next steps, in rough priority order:
    feature direction does pull road-richer, shape-similar donors for a road-poor recipient (+11–55%
    neighbor street-length). It is now a reusable retrieval primitive for whichever donor type is used —
    but whiten the spectrum first (naive z-scoring is swamped by noise dimensions).
-4. **Consensus-as-seed + light greedy refine**, to close the remaining gap to direct
-   clearance/own-OSM: treat the barycenter consensus network as an initialization for a hill-climb
-   refiner (the codebase already has one on the unused `prior` seam) rather than as the final
-   network, recovering some of the "home efficiency" a from-scratch solve gets that a pure
-   consensus doesn't.
+4. **Consensus-as-seed + light greedy refine — TESTED, NO-GO (2026-07-23).** Seeding the codebase's
+   `LoopClosureRefiner` (the `Method.propose(block, prior)` seam) with the strong OSM consensus on
+   40972: consensus+refine reaches only **0.706** permeability — below direct clearance (0.783), and
+   *below the unrefined consensus itself* (0.722), because the refiner cannot dig out of the
+   consensus's fragmented structure. Worse, the **same refiner started from a cheap, information-free
+   clearance-partial seed scored 0.751 — higher than consensus+refine on every axis** (more
+   permeability, less displacement, less road). So the GW/UOT/barycenter machinery adds *negative*
+   value as a prior: you are better off seeding the refiner with nothing.
+
+**Final verdict (2026-07-23): the arc is closed as a reblocker.** With consensus-as-seed ruled out, no
+OT-transplant variant beats a cold `clearance` solve — the transplant reproduces borrowed coverage that
+a from-scratch solver (or even a naive refiner seed) matches or beats. Two things survive as reusable:
+(1) **OSM-footpath consensus as a *prediction* tool** — it reconstructs a block's *own* real footpaths
+to ~94% from its mapped neighbors, a genuine "fill in footpaths where OSM coverage is missing"
+complement to the `osm_footpaths` method (not a competitive reblocker); (2) the **GEP road-provision
+decorrelation**, a validated, reusable retrieval primitive. Of the next steps above, only #1 remains
+open — and only for that OSM-*prediction* use case (validating it on n>1 recipients), not for beating
+a reblocker.
