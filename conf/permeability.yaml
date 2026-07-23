@@ -3,10 +3,20 @@
 # methods converge at low displacement (mostly <20%), so D=10% is the matched level where >=2
 # methods are still building; P*=0.4 is reached by 16/21 (method,region) pairs, cheaply for the
 # strong methods, and honestly missed by the sparse/weak ones.
-g_walk: 1.0
+#
+# g_walk lowered 1.0 -> 0.1 and the footpath edge switched from a plain g_walk/dist model to the
+# r0-corridor open-corridor-fraction model (r0_frac below) 2026-07-23: scratchpad experiments
+# (conductance_variants.py / combination_experiment.py / r0_sweep.py) on
+# multiblock_density_compactness found this combination massively improves method discrimination
+# (D=10% method-spread ~0.9pts -> ~11.8pts) -- see reblock.permeability's module docstring for
+# the formula. matched_displacement/matched_permeability are UNCHANGED here (a separate
+# recalibration step).
+g_walk: 0.1
 g_road: 20.0
 g_street: 20.0
 corridor_m: 3.0
+r0_frac: 0.55   # r0 = r0_frac * median(building nearest-neighbour distance) -- adaptive corridor
+                # half-width; 0.55 lands r0~3m on multiblock_density_compactness (median NN~5.2m).
 # Lens A -- matched displacement %: truncate every method to its first prefix at/after this
 # displacement fraction, then compare permeability reached at that equal home-cost.
 matched_displacement: 0.10   # 10% of homes (Lens A)

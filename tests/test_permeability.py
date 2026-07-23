@@ -1,12 +1,21 @@
 import math
+from dataclasses import replace
 
 import geopandas as gpd
 import numpy as np
+import pytest
 from pyproj import CRS
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import Block
-from reblock.permeability import egress_power, permeability, permeability_curve
+from reblock.permeability import (
+    PermeabilityParams,
+    _adaptive_r0,
+    _footpath_conductance,
+    egress_power,
+    permeability,
+    permeability_curve,
+)
 
 UTM = CRS.from_epsg(32734)
 
@@ -77,12 +86,24 @@ def test_loop_beats_spur_at_equal_length():
     # a SHORT redundant loop at the base (where every deep parcel's current must funnel through
     # regardless of depth) and spending the rest of the budget on reach, exactly like this
     # repo's own LoopClosureRefiner (src/reblock/methods/loop_closure.py) does post-hoc.
+    #
+    # Uses an explicit g_walk=1.0 (this test's ORIGINAL calibration level, pre-2026-07-23 metric
+    # change): this is a topological property (loop redundancy beats single-arm reach at equal
+    # road length) that empirically FLIPS at the new production default g_walk=0.1/g_road=20 (a
+    # 200x ratio makes REACH dominate REDUNDANCY on this single-arm grid -- verified directly, not
+    # assumed). That is not a regression in the r0-corridor formula itself: this fixture has no
+    # `building_points`, so r0=0 and `_footpath_conductance` reduces exactly to the pre-change
+    # g_walk/dist baseline (see `_adaptive_r0`'s docstring) -- it is the production g_walk LEVEL
+    # this task lowers, independent of the r0-corridor change, that this particular topological
+    # demonstration is sensitive to. Pin the level explicitly so this test keeps demonstrating the
+    # principle it is named for, independent of whatever g_walk the production default is tuned to.
     b = _grid_block(15, cell=10.0)
     spur = _roads([LineString([(15, 0), (15, 135)])])
     loop = _roads([LineString([(15, 0), (15, 103)]),
                     LineString([(15, 22), (5, 22), (5, 0)])])
     assert spur.geometry.length.sum() == loop.geometry.length.sum() == 135.0
-    assert permeability(b, loop) > permeability(b, spur)
+    params = PermeabilityParams(g_walk=1.0)
+    assert permeability(b, loop, params) > permeability(b, spur, params)
 
 def test_ungrounded_returns_zero_benefit_or_guarded():
     b = _grid_block()
@@ -131,3 +152,72 @@ def test_permeability_at_displacement_first_crossing_and_unreached():
     assert permeability_at_displacement(perm, disp, 0.20) == 0.35
     assert permeability_at_displacement(perm, disp, 0.45) == 0.50
     assert permeability_at_displacement(perm, disp, 0.50) == float("-inf")
+
+# --- r0-corridor footpath conductance + adaptive r0 (2026-07-23 metric change) -----------------
+
+def test_footpath_conductance_cramped_edge_lower_than_open_edge():
+    # r0=3m -> 2*r0=6m: dist=4m is CRAMPED (inside the corridor -- most of the direct line between
+    # the two centroids sits within r0 of an obstruction on either end), hits the eps floor;
+    # dist=40m is OPEN (well beyond 2*r0), reads near the raw shape's ceiling of 1. Hand-computed:
+    #   shape = [max(0.02, 1-6/4), max(0.02, 1-6/40)] = [0.02, 0.85]
+    #   median(shape) = 0.435; median(1/dist) = median([0.25, 0.025]) = 0.1375
+    #   target_median = g_walk * median(1/dist) = 0.1 * 0.1375 = 0.01375
+    #   scale = target_median / median(shape) = 0.01375 / 0.435 = 0.0316091...
+    #   g = scale * shape = [0.000632184, 0.026868]
+    dist = np.array([4.0, 40.0])
+    g = _footpath_conductance(dist, r0=3.0, g_walk=0.1)
+    assert g[0] < g[1]                            # cramped strictly less permeable than open
+    assert g[0] > 0.0                              # eps floor: never literally zero
+    assert g[0] == pytest.approx(0.000632184, rel=1e-5)
+    assert g[1] == pytest.approx(0.026868, rel=1e-5)
+
+def test_footpath_conductance_empty_dist_returns_empty():
+    assert _footpath_conductance(np.zeros(0), r0=3.0, g_walk=0.1).shape == (0,)
+
+def _points_block(n_points: int, spacing: float) -> Block:
+    # A trivial valid Block whose PARCEL geometry is irrelevant -- only `building_points` (a row
+    # of `n_points` points `spacing` apart, so every point's nearest-neighbour distance is exactly
+    # `spacing`, including the two endpoints) matters for `_adaptive_r0`.
+    boundary = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    parcels = gpd.GeoDataFrame({"parcel_id": [0]}, geometry=[boundary], crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (10, 0)])], crs=UTM)
+    pts = gpd.GeoDataFrame(geometry=[Point(float(i) * spacing, 0.0) for i in range(n_points)],
+                           crs=UTM)
+    block = Block(block_id="pts", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return replace(block, building_points=pts)
+
+def test_adaptive_r0_scales_with_median_nearest_neighbor_distance():
+    params = PermeabilityParams()   # r0_frac=0.55
+    dense = _points_block(6, spacing=4.0)
+    sparse = _points_block(6, spacing=12.0)
+    r0_dense = _adaptive_r0(dense, params)
+    r0_sparse = _adaptive_r0(sparse, params)
+    assert r0_dense == pytest.approx(params.r0_frac * 4.0)
+    assert r0_sparse == pytest.approx(params.r0_frac * 12.0)
+    assert r0_sparse == pytest.approx(3.0 * r0_dense)   # NN scales 1:1 with point spacing
+
+def test_adaptive_r0_falls_back_to_zero_without_enough_building_points():
+    params = PermeabilityParams()
+    b = _grid_block()   # building_points defaults to empty
+    assert _adaptive_r0(b, params) == 0.0
+
+def test_footpath_conductance_can_exceed_road_conductance_without_a_clamp():
+    # Sanity check on WHY `egress_power` clamps footpath conductance at g_road/dist (see its
+    # docstring): the raw r0-corridor shape asymptotes to a nonzero constant (the fair-normalized
+    # `scale`) as dist -> infinity, while g_road/dist -> 0, so for a sufficiently long edge the
+    # UNCLAMPED footpath conductance would exceed the road conductance -- a real failure mode, not
+    # hypothetical. Hand-verified with r0=3 (2*r0=6), g_walk=0.1, g_road=20, dist=[1, 10, 1000]:
+    #   shape = [max(0.02, 1-6/1), max(0.02, 1-6/10), max(0.02, 1-6/1000)] = [0.02, 0.4, 0.994]
+    #   median(shape) = 0.4 (the dist=10 point); median(1/dist) = 0.1 (the dist=10 point)
+    #   scale = (0.1 * 0.1) / 0.4 = 0.025
+    #   raw = scale * shape = [0.0005, 0.01, 0.02485]; road_g = 20/dist = [20, 2, 0.02]
+    #   at dist=1000: raw=0.02485 > road_g=0.02 -- EXCEEDS.
+    params = PermeabilityParams()
+    dist = np.array([1.0, 10.0, 1000.0])
+    raw = _footpath_conductance(dist, r0=3.0, g_walk=params.g_walk)
+    road_g = params.g_road / dist
+    assert raw[2] > road_g[2]                # the long edge: unclamped footpath beats the road
+    assert (raw[:2] < road_g[:2]).all()       # the shorter edges never come close
+    clamped = np.minimum(raw, road_g)
+    assert (clamped <= road_g + 1e-12).all()  # the guard `egress_power` actually applies
+

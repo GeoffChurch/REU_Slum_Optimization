@@ -74,8 +74,9 @@ def test_load_permeability_config_reads_the_committed_yaml() -> None:
 
     params, matched_displacement, matched_permeability = load_permeability_config()
 
-    assert params.g_walk == 1.0 and params.g_road == 20.0 and params.g_street == 20.0
+    assert params.g_walk == 0.1 and params.g_road == 20.0 and params.g_street == 20.0
     assert params.corridor_m == 3.0
+    assert params.r0_frac == 0.55
     assert 0.0 < matched_displacement < 1.0
     assert 0.0 < matched_permeability < 1.0
 
