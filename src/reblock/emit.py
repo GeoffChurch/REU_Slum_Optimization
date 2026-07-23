@@ -162,8 +162,10 @@ def region_map(source: Source, regions: list[list[str]],
     the pre-expansion seed outlined heavily, plus building points. When `depths` is None/empty (no
     scoring screen), both maps fall back to a flat located fill (NO proxy colouring). `selection`
     is the screen's flagged block_ids; `depths` maps block_id -> the metric's fine score.
-    `screen.png` has no colorbar, no title, and no per-member outline -- just the coloured fills
-    and the thick black bounding-box locator -- so the metric colours read unoccluded; `metric_name`
+    Neither map has a colorbar or title (`region.png`'s member-count/seed-count title is gone too,
+    matching the bare `screen.png`); `screen.png` also has no per-member outline -- just the
+    coloured fills and the thick black bounding-box locator -- so the metric colours read
+    unoccluded; `metric_name`
     is kept for signature compatibility with callers (default "score", the generic fallback for a
     screen without a metric) but is no longer rendered onto either map. `metric` (the same
     BlockMetric) scores any member the screen didn't flag
@@ -257,7 +259,6 @@ def region_map(source: Source, regions: list[list[str]],
                 _point_disks(own_pts, _POINT_RADIUS_M).plot(ax=ax_r, color=_OWN_PT, linewidth=0)
     ax_r.set_aspect("equal")
     ax_r.set_axis_off()
-    ax_r.set_title(f"{len(all_member_ids)} member block(s); {len(seeds)} seed(s) outlined")
     out_path = out_dir / "region.png"
     save_render(fig_r, out_path)
     plt.close(fig_r)

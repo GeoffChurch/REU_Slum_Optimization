@@ -46,7 +46,7 @@ def test_render_before_returns_figure_with_axes() -> None:
     fig = render_before(block, layers, vmax=2)
 
     assert isinstance(fig, Figure)
-    assert len(fig.axes) >= 1
+    assert len(fig.axes) == 1
 
 
 def test_render_after_returns_figure_with_axes() -> None:
@@ -57,7 +57,7 @@ def test_render_after_returns_figure_with_axes() -> None:
     fig = render_after(block, proposal, layers, vmax=2)
 
     assert isinstance(fig, Figure)
-    assert len(fig.axes) >= 1
+    assert len(fig.axes) == 1
 
 
 def test_render_after_adds_a_roads_artist_over_render_before() -> None:
@@ -166,8 +166,8 @@ def test_render_after_perm_field_renders_and_writes_a_file(tmp_path: Path) -> No
     assert out.exists() and out.stat().st_size > 0
 
 
-def test_render_before_and_after_titles_have_no_block_id() -> None:
-    # Global cleanup: no plot title identifies the block/region by id.
+def test_render_before_and_after_have_no_title() -> None:
+    # Global cleanup: bare heatmaps, no decorative title (matches the already-bare screen map).
     block = _grid_block(3)
     proposal = _connector_proposal(block)
     layers = parcel_access_layers(block, proposal.roads)
@@ -175,10 +175,8 @@ def test_render_before_and_after_titles_have_no_block_id() -> None:
     fig_before = render_before(block, layers, vmax=2)
     fig_after = render_after(block, proposal, layers, vmax=2)
 
-    assert fig_before.axes[0].get_title() == "before"
-    assert fig_after.axes[0].get_title() == "after"
-    assert block.block_id not in fig_before.axes[0].get_title()
-    assert block.block_id not in fig_after.axes[0].get_title()
+    assert fig_before.axes[0].get_title() == ""
+    assert fig_after.axes[0].get_title() == ""
 
 
 def test_draw_heatmap_uses_poster_figsize() -> None:
