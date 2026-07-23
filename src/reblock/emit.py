@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, cast
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import Normalize
+from matplotlib.ticker import PercentFormatter
 from numpy.typing import NDArray
 
 from reblock.contracts import Block, Metrics, Proposal, Result, Source
@@ -161,9 +161,12 @@ def region_map(source: Source, regions: list[list[str]],
     `region.png`: the region's member blocks coloured by that same score against dimmed context,
     the pre-expansion seed outlined heavily, plus building points. When `depths` is None/empty (no
     scoring screen), both maps fall back to a flat located fill (NO proxy colouring). `selection`
-    is the screen's flagged block_ids; `depths` maps block_id -> the metric's fine score;
-    `metric_name` labels the colorbar/title (default "score", the generic fallback for a screen
-    without a metric). `metric` (the same BlockMetric) scores any member the screen didn't flag
+    is the screen's flagged block_ids; `depths` maps block_id -> the metric's fine score.
+    `screen.png` has no colorbar, no title, and no per-member outline -- just the coloured fills
+    and the thick black bounding-box locator -- so the metric colours read unoccluded; `metric_name`
+    is kept for signature compatibility with callers (default "score", the generic fallback for a
+    screen without a metric) but is no longer rendered onto either map. `metric` (the same
+    BlockMetric) scores any member the screen didn't flag
     (region growth reaching beyond the flagged set) by its own `fine`, so the region map is one
     metric end to end; without it those members fall back to true peel depth. Writes both; returns
     the `region.png` path, or None if there are no regions."""
@@ -188,18 +191,16 @@ def region_map(source: Source, regions: list[list[str]],
     seeds = geoms[geoms["block_id"].isin(all_seed_ids)]
     frame = frame_bbox(members.geometry) if not members.empty else None
 
-    # --- screen.png: flagged blocks by the metric's score (0..max, continuous), deselected blanked
+    # --- screen.png: flagged blocks by the metric's score (0..max, continuous), deselected blanked.
+    # No colorbar, no title, and no per-member outline (`edgecolor="black"` used to trace every
+    # member's own boundary on top of its fill, occluding the metric colors it's meant to show) --
+    # only the thick black bounding-box `Rectangle` below locates the region.
     fig_s, ax_s = plt.subplots(figsize=(10, 10))
     if not blanked.empty:
         blanked.plot(ax=ax_s, color="white", edgecolor="#dcdcdc", linewidth=0.12)
     if not flagged.empty and score_map:
         flagged.plot(ax=ax_s, column="score", cmap="YlOrRd", vmin=0, vmax=vmax,
                      edgecolor="#33333330", linewidth=0.12)
-        sm = plt.cm.ScalarMappable(cmap="YlOrRd", norm=Normalize(vmin=0, vmax=vmax))
-        sm.set_array([])
-        fig_s.colorbar(sm, ax=ax_s, fraction=0.03, pad=0.01, label=metric_name)
-    if not members.empty:
-        members.plot(ax=ax_s, facecolor="none", edgecolor="black", linewidth=0.2)
     if frame is not None:
         ax_s.add_patch(Rectangle((frame[0], frame[1]), frame[2] - frame[0], frame[3] - frame[1],
                                  linewidth=1.6, edgecolor="#111111", facecolor="none", zorder=10))
@@ -208,7 +209,6 @@ def region_map(source: Source, regions: list[list[str]],
     ax_s.set_ylim(float(bnd["miny"].quantile(0.01)), float(bnd["maxy"].quantile(0.99)))
     ax_s.set_aspect("equal")
     ax_s.set_axis_off()
-    ax_s.set_title(f"{metric_name} (0..{vmax:.3g}); {len(all_member_ids)} blocks reblocked")
     save_render(fig_s, out_dir / "screen.png")
     plt.close(fig_s)
 
@@ -264,12 +264,6 @@ def region_map(source: Source, regions: list[list[str]],
     return out_path
 
 
-_METRIC_YLABELS = {
-    "external_connectivity": "external connectivity (fraction of access-burden removed)",
-    "internal_connectivity": "internal connectivity (backup-route redundancy, mean 1 − R/R_geo)",
-    "displacement": "buildings displaced (Σ disk-graze probability)",
-}
-
 # Every method draws in a fixed colour, keyed on its position in the canonical method registry
 # (`list(cfg.all_methods)` -- the global list of all methods, threaded in as `method_order`), so a
 # method reads the SAME colour in every curve no matter which others share the run. Hues are spaced
@@ -292,115 +286,57 @@ def _method_colors(method_order: Sequence[str]) -> dict[str, tuple[float, float,
 
 def compare_report(results: list[MethodCurve], out_dir: Path,
                    *, method_order: Sequence[str]) -> None:
-    """Per metric (external_connectivity, internal_connectivity, displacement): a per-method
-    summary table + overlaid cost-benefit curves per block. `results` is the flat (method x block
-    x metric) list from reblock.compare. The PLOTTED x-axis differs by metric: for the two benefit
-    metrics (external_connectivity, internal_connectivity) it is cumulative DISPLACEMENT (homes
-    displaced, from the index-aligned displacement curve's Σcᵢ -- see `disp_x` below); for
-    "displacement" it stays cumulative added road length (m). The stored `Curve.cost` (and every
-    CSV written below) remain cumulative added road length (m) for every metric regardless --
-    only the plotted x-axis for the two benefit metrics is re-based onto displacement.
-    For the two benefit metrics, writes `frontier_{metric}.csv` (the full (road length, benefit)
-    samples per method -- no scalar rank, because a single AUC to a shared road-length cap
-    penalised the road-efficient methods: one reaching high benefit at low road ranked below a
-    pave-everything method that reached slightly more at several times the road). For
-    "displacement" (a RISING cost, never inverted) writes `displacement_vs_length.csv` (the full
-    (road length, Σcᵢ) samples per method) and accumulates `displacement_table.csv` (mean terminal
-    displacement + mean pct_displaced per method). `method_order` is the canonical method registry
-    (`list(cfg.all_methods)`) that fixes each method's curve colour run-independently -- it must
-    cover every method in `results`."""
+    """ONE frontier curve per block/region: permeability (y) vs displacement (x), every method
+    overlaid, no title. `results` is the flat (method x block x metric) list from reblock.compare,
+    where `metric` is either "permeability" (`curve.cost` = cumulative added road length (m),
+    `curve.benefit` = permeability per drainage-ordered prefix) or "displacement" (`curve.benefit`
+    = cumulative Σcᵢ/n_buildings, the homes-displaced fraction). The two curves are index-aligned
+    (same drainage-ordered `_sweep` over the same roads), so the displacement curve's per-prefix
+    benefit re-bases the permeability curve's x-axis from raw road length onto displacement -- see
+    `disp_x` below. Writes `frontier_permeability.csv` (the full (displacement, permeability)
+    samples per method) and one `frontier_{block_id}.png` per block/region -- x-axis
+    "displacement", y-axis "permeability", both `PercentFormatter`'d (both are [0,1) fractions).
+    `method_order` is the canonical method registry (`list(cfg.all_methods)`) that fixes each
+    method's curve colour run-independently -- it must cover every method in `results`. A
+    `results` with no "permeability" rows writes nothing (no benefit metric to plot)."""
     import csv
-    from collections import defaultdict
     out_dir.mkdir(parents=True, exist_ok=True)
     by_metric: dict[str, list[MethodCurve]] = {}
     for r in results:
         by_metric.setdefault(r.metric, []).append(r)
+    perm_results = by_metric.get("permeability", [])
+    if not perm_results:
+        return
     colors = _method_colors(method_order)   # one stable name->colour map for every plot
-    # method -> [(terminal displacement, pct_displaced)]
-    disp_terminal: dict[str, list[tuple[float, float]]] = defaultdict(list)
-    # The two benefit curves are plotted against cumulative DISPLACEMENT (homes displaced), not road
-    # length: the displacement curve is index-aligned (same drainage-ordered _sweep over the same
-    # roads), so its per-prefix Σcᵢ is the x-axis. (The displacement metric itself stays vs length.)
+    # permeability is plotted against cumulative DISPLACEMENT (fraction of homes displaced), not
+    # road length: the displacement curve is index-aligned, so its per-prefix Σcᵢ/n_buildings is
+    # the x-axis.
     disp_x: dict[tuple[str, str], list[float]] = {
         (r.block_id, r.method): list(r.curve.benefit) for r in by_metric.get("displacement", [])}
-    for metric, metric_results in by_metric.items():
-        by_block: dict[str, list[MethodCurve]] = {}
-        for r in metric_results:
-            by_block.setdefault(r.block_id, []).append(r)
-        if metric == "displacement":
-            with (out_dir / "displacement_vs_length.csv").open("w", newline="") as f:
-                w = csv.writer(f)
-                w.writerow(["method", "block", "road_length_m", "displacement"])
-                for r in metric_results:
-                    for c, b in zip(r.curve.cost, r.curve.benefit, strict=True):
-                        w.writerow([r.method, r.block_id, f"{c:.4f}", f"{b:.4f}"])
-                    disp_terminal[r.method].append((r.curve.benefit[-1], r.pct_displaced))
-        else:
-            with (out_dir / f"frontier_{metric}.csv").open("w", newline="") as f:
-                w = csv.writer(f)
-                w.writerow(["method", "block", "road_length_m", "benefit"])
-                for r in metric_results:
-                    for c, b in zip(r.curve.cost, r.curve.benefit, strict=True):
-                        w.writerow([r.method, r.block_id, f"{c:.4f}", f"{b:.6g}"])
-        ylabel = _METRIC_YLABELS[metric]
-        for block_id, curves in by_block.items():
-            fig, ax = plt.subplots(figsize=(7, 5))
-            for mc in curves:
-                if metric == "displacement":
-                    xs, lab = mc.curve.cost, f"{mc.method} ({int(mc.curve.cost[-1])} m)"
-                else:                                    # benefit vs homes displaced
-                    xs = disp_x.get((block_id, mc.method), mc.curve.cost)
-                    lab = f"{mc.method} ({xs[-1]:.0f} homes)"
-                ax.plot(xs, mc.curve.benefit, marker="o", label=lab, color=colors[mc.method])
-            ax.set_xlabel("added road length (m)" if metric == "displacement"
-                          else "buildings displaced (Σ disk-graze probability)")
-            ax.set_ylabel(ylabel)
-            ax.set_title(f"cost-benefit ({metric}): {block_id}")
-            ax.legend()
-            stem = "displacement" if metric == "displacement" else f"curve_{metric}"
-            save_render(fig, out_dir / f"{stem}_{block_id}.png")
-            plt.close(fig)
-    if disp_terminal:
-        from statistics import mean
-        with (out_dir / "displacement_table.csv").open("w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["method", "terminal_displacement", "pct_displaced", "n_blocks"])
-            for m, rows in sorted(disp_terminal.items(), key=lambda kv: -mean(d for d, _ in kv[1])):
-                w.writerow([m, f"{mean(d for d, _ in rows):.1f}",
-                            f"{mean(p for _, p in rows):.4f}", len(rows)])
-
-
-def depth_vs_road_report(block: Block, roads_by_method: dict[str, gpd.GeoDataFrame], out_dir: Path,
-                         *, method_order: Sequence[str], label: str) -> None:
-    """A max-access-depth vs added-road curve per method (roads added in drainage order), with a dot
-    each time a method first drives the region's MAX depth to a new integer floor -- so "road to
-    reach depth D" reads straight off it, and a fixed network (osm_footpaths) plateaus at its floor
-    instead of ever crossing lower. Writes `depth_vs_road_<label>.png`."""
-    from reblock.animate import depth_sweep
-    colors = _method_colors(method_order)
-    fig, ax = plt.subplots(figsize=(7, 5))
-    for name, roads in roads_by_method.items():
-        cutoffs, depths = depth_sweep(block, roads)
-        col = colors[name]
-        ax.plot(cutoffs, depths, drawstyle="steps-post", color=col,
-                label=f"{name} ({int(cutoffs[-1])} m)")
-        prev: int | None = None
-        mx: list[float] = []
-        my: list[float] = []
-        for c, d in zip(cutoffs, depths, strict=True):     # dot at each new integer-depth floor
-            if prev is None or int(d) < prev:
-                mx.append(float(c))
-                my.append(float(d))
-                prev = int(d)
-        ax.plot(mx, my, "o", color=col, ms=5)
-    ax.set_xlabel("added road length (m)")
-    ax.set_ylabel("max access depth (parcels from a street)")
-    ax.set_title(f"access depth vs added road: {label}")
-    ax.set_ylim(bottom=0)
-    ax.grid(axis="y", alpha=0.3)
-    ax.legend()
-    save_render(fig, out_dir / f"depth_vs_road_{label}.png")
-    plt.close(fig)
+    with (out_dir / "frontier_permeability.csv").open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["method", "block", "displacement", "permeability"])
+        for r in perm_results:
+            xs = disp_x.get((r.block_id, r.method), r.curve.cost)
+            for x, y in zip(xs, r.curve.benefit, strict=True):
+                w.writerow([r.method, r.block_id, f"{x:.4f}", f"{y:.6g}"])
+    by_block: dict[str, list[MethodCurve]] = {}
+    for r in perm_results:
+        by_block.setdefault(r.block_id, []).append(r)
+    for block_id, curves in by_block.items():
+        fig, ax = plt.subplots(figsize=(12, 9))
+        for mc in curves:
+            xs = disp_x.get((block_id, mc.method), mc.curve.cost)
+            ax.plot(xs, mc.curve.benefit, marker="o", ms=9, lw=2.5,
+                    label=mc.method, color=colors[mc.method])
+        ax.set_xlabel("displacement", fontsize=16)
+        ax.set_ylabel("permeability", fontsize=16)
+        ax.xaxis.set_major_formatter(PercentFormatter(xmax=1))
+        ax.yaxis.set_major_formatter(PercentFormatter(xmax=1))
+        ax.tick_params(labelsize=13)
+        ax.legend(fontsize=13)
+        save_render(fig, out_dir / f"frontier_{block_id}.png")
+        plt.close(fig)
 
 
 def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> None:

@@ -1,11 +1,13 @@
-"""Cost-benefit curves for reblocking methods: add a method's roads incrementally in
-drainage order, score access at each budget, trace benefit (fraction of Sigma depth^2
-removed) vs cost (cumulative added road length, m). AUC = a 0-1 efficiency score. See the
-design spec.
+"""Budget-sweep and scoring primitives for reblocking. `_sweep` adds a method's roads
+incrementally in drainage order and samples a value at each budget, yielding a `Curve` of value
+vs cost (cumulative added road length, m); `displacement_curve` and (in `permeability.py`)
+`permeability_curve` ride it, and the matched-displacement / matched-permeability lens
+truncations read the resulting index-aligned curves. Also holds the retained road/parcel scoring
+primitives (`road_drainage`, `building_radii`, `displacement`, `repulsion`, `access_burden`,
+`network_efficiency` + `_BlockScoringContext`).
 """
 from __future__ import annotations
 
-import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -28,6 +30,7 @@ from shapely.ops import unary_union
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.permeability import PermeabilityParams, egress_power, permeability
 
 _Node = tuple[float, float]      # an _rnd-snapped (x, y) graph node
 _Pair = tuple[_Node, _Node]      # an undirected edge as its two endpoints
@@ -132,9 +135,6 @@ def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL)
             if row is not None:
                 counts[row] += 1
     return [counts.get(i, 0) for i in range(n)]
-
-
-BenefitFactory = Callable[..., Callable[["GeoDataFrame | None"], float]]
 
 
 def _line_entries(geoms: list[BaseGeometry], reps: list[Point], edges: list[LineString],
@@ -349,14 +349,11 @@ def _reproject_hits(geoms_arr: np.ndarray, reps_arr: np.ndarray, lines: np.ndarr
 
 
 class _BlockScoringContext:
-    """Per-block scoring constants frozen ONCE, shared by `network_efficiency`, the arterial
-    directness/efficiency measurement curves (`_efficiency_factory`), and the greedy arterial
-    loop. Freezing
-    lifts the representative points, sampled sources, the K*N euclidean matrix and the street edge
-    geometry out of the per-candidate hot path (they were previously rebuilt for all ~7k
-    candidates). `.score(roads)` re-derives entries against streets + `roads` and matches
-    `network_efficiency` exactly; `.score_frozen(prefix, ...)` scores a prefix against FROZEN
-    entries/splits and matches `_efficiency_factory` (monotone across prefixes)."""
+    """Per-block scoring constants frozen ONCE, shared by `network_efficiency` and the greedy
+    arterial loop. Freezing lifts the representative points, sampled sources, the K*N euclidean
+    matrix and the street edge geometry out of the per-candidate hot path (they were previously
+    rebuilt for all ~7k candidates). `.score(roads)` re-derives entries against streets + `roads`
+    and matches `network_efficiency` exactly."""
 
     def __init__(self, block: Block, *, k: int = 40, tol: float = STREET_TOL) -> None:
         self.block = block
@@ -425,27 +422,6 @@ class _BlockScoringContext:
         csr, node_index = _build_csr(edge_pairs, splits_uv)
         return _sampled_efficiency_core(csr, node_index, entry, self.sources,
                                         self.rep_xy, self.src_euclid)
-
-    def score_frozen(self, roads_prefix: GeoDataFrame | None, *,
-                     entry: list[_Node | None],
-                     splits: dict[_Pair, list[tuple[float, _Node]]]) -> tuple[float, float]:
-        """(E, directness) over streets + `roads_prefix` using the FROZEN `entry`/`splits` (keyed
-        by parent edge pair, derived once against the full road set) -- builds its own per-prefix
-        CSR (streets + prefix roads, split at the frozen parents that are present) and matches
-        `_efficiency_factory`. A frozen source whose entry's parent edge is absent from the prefix
-        contributes 0, so distances from fixed entries are non-increasing and the sweep is
-        monotone across prefixes."""
-        if self.n < 2:
-            return 0.0, 0.0
-        prefix_segs = (_explode_segments(roads_prefix.geometry)
-                       if roads_prefix is not None and len(roads_prefix) else [])
-        base_pairs = [*prefix_segs, *self.street_segs]
-        if not base_pairs:
-            return 0.0, 0.0
-        csr, node_index = _build_csr(base_pairs, splits)
-        return _sampled_efficiency_core(csr, node_index, entry, self.sources,
-                                        self.rep_xy, self.src_euclid)
-
 
 class _StepContext:
     """The greedy arterial's per-commit scoring context: the streets ∪ committed-roads edge set and
@@ -572,82 +548,14 @@ def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
     per candidate.
 
     Note this function alone is NOT guaranteed monotone as `roads` grows across separate calls,
-    because each call re-derives entries against its own `roads` and entries can churn.
-    `cost_benefit_curve`'s `efficiency_benefit`/`directness_benefit` factories get monotonicity
-    instead by freezing entries against the FULL road set once, then only growing the edge set
-    -- see `_efficiency_factory`."""
+    because each call re-derives entries against its own `roads` and entries can churn."""
     return _BlockScoringContext(block, k=k, tol=tol).score(roads)
-
-
-def _efficiency_factory(block: Block, roads_full: GeoDataFrame | None, tol: float,
-                        k: int = 40) -> Callable[[GeoDataFrame | None], tuple[float, float]]:
-    """Shared machinery behind `efficiency_directness_curves` (the frontier-sweep measurement of
-    arterial's kept `objective=directness|efficiency`, backing the arterial-vs-dijkstra
-    directness tests and the 1e-9 scoring-equivalence net) and `efficiency_benefit`/
-    `directness_benefit` (fed to `cost_benefit_curve` by budget.py's own monotonicity tests, not
-    the deleted cost-benefit reporting). Freezes the parcel->entry-node mapping and the K sampled
-    sources against the FULL graph (`roads_full` + block.streets), built ONCE, in a
-    `_BlockScoringContext`. The returned f(roads_prefix) computes (E, directness) from those
-    FIXED entries via `ctx.score_frozen`, over a graph containing only `roads_prefix` +
-    block.streets edges (rounded coordinates keep node identity stable across subsets). A
-    source/dest whose fixed entry node's parent edge is absent from that prefix contributes 0.
-
-    Since the entry mapping, sources, and the all-parcel pair set never change while the
-    edge set only grows as `roads_prefix` grows, shortest-path distances from fixed entries
-    are non-increasing -- so E and directness are non-decreasing across the frontier sweep's
-    prefixes, unlike calling `network_efficiency(block, roads_prefix)` per prefix (which
-    re-derives entries against each prefix and can regress, see budget.py module docstring
-    history / the review this fixes)."""
-    ctx = _BlockScoringContext(block, k=k, tol=tol)
-    entry, splits, edge_pairs = ctx._derive_entries(roads_full)
-    if ctx.n < 2 or not edge_pairs:
-        return lambda _roads: (0.0, 0.0)
-
-    def f(roads_prefix: GeoDataFrame | None) -> tuple[float, float]:
-        return ctx.score_frozen(roads_prefix, entry=entry, splits=splits)
-    return f
-
-
-def access_benefit(block: Block, roads_full: GeoDataFrame | None, *,
-                   tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
-    """`roads_full` is unused here: access_burden's per-block unreached_depth cap (N+1)
-    already makes this benefit monotone as roads are added. The param exists so this matches
-    the shared benefit-factory signature (see efficiency_benefit/directness_benefit, which do
-    need the full road set to freeze entries)."""
-    adj = parcel_adjacency(list(block.parcels.geometry), tol)
-    cap = len(block.parcels) + 1
-    base = access_burden(parcel_access_layers(block, None, tol=tol, adj=adj, unreached_depth=cap))
-
-    def f(roads: GeoDataFrame | None) -> float:
-        if base == 0.0:
-            return 0.0
-        return 1.0 - access_burden(
-            parcel_access_layers(block, roads, tol=tol, adj=adj, unreached_depth=cap)) / base
-    return f
-
-
-def efficiency_benefit(block: Block, roads_full: GeoDataFrame | None, *,
-                       tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
-    """The E (global efficiency) half of `_efficiency_factory`, wrapped as a `cost_benefit_curve`
-    `benefit_fn`. Not part of the deleted cost-benefit reporting -- exercised directly by
-    budget.py's own monotonicity tests (`tests/test_budget.py`)."""
-    f = _efficiency_factory(block, roads_full, tol)
-    return lambda roads: f(roads)[0]
-
-
-def directness_benefit(block: Block, roads_full: GeoDataFrame | None, *,
-                       tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
-    """The directness half of `_efficiency_factory`, wrapped as a `cost_benefit_curve`
-    `benefit_fn`. Not part of the deleted cost-benefit reporting -- exercised directly by
-    budget.py's own monotonicity tests (`tests/test_budget.py`)."""
-    f = _efficiency_factory(block, roads_full, tol)
-    return lambda roads: f(roads)[1]
 
 
 @dataclass(frozen=True)
 class Curve:
     cost: list[float]     # cumulative added road length (m)
-    benefit: list[float]  # fraction of Sigma depth^2 removed, in [0, 1]
+    benefit: list[float]  # value per budget (permeability or displacement fraction), in [0, 1)
 
 
 V = TypeVar("V")
@@ -655,9 +563,9 @@ V = TypeVar("V")
 
 def _drainage_ordered(block: Block, roads: GeoDataFrame, tol: float) -> GeoDataFrame:
     """`roads` reindexed in drainage-descending order (ties by original index), reset to a fresh
-    RangeIndex -- the single canonical prefix order shared by `_sweep`, `truncate_to_length`, and
-    `prefix_to_depth`, so every budget/prefix walk grows the road set in the same sequence. Callers
-    guard `len(roads) == 0` before calling (an empty road set has no drainage to order)."""
+    RangeIndex -- the single canonical prefix order shared by `_sweep` and `prefix_to_depth`, so
+    every budget/prefix walk grows the road set in the same sequence. Callers guard
+    `len(roads) == 0` before calling (an empty road set has no drainage to order)."""
     drain = road_drainage(block, roads, tol=tol)
     order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
     return cast(GeoDataFrame, roads.iloc[order].reset_index(drop=True))
@@ -688,18 +596,6 @@ def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | No
         costs.append(_length(cast(GeoDataFrame, ordered.iloc[:m])))
         vals.append(value(cast(GeoDataFrame, ordered.iloc[:m])))
     return costs, vals
-
-
-def truncate_to_length(block: Block, roads: GeoDataFrame, budget_m: float,
-                       tol: float = STREET_TOL) -> GeoDataFrame:
-    """The drainage-ordered prefix of `roads` whose cumulative length <= `budget_m` (the same order
-    _sweep uses). Empty for budget_m <= 0; all roads for budget_m >= total."""
-    if len(roads) == 0 or budget_m <= 0.0:
-        return cast(GeoDataFrame, roads.iloc[:0])
-    ordered = _drainage_ordered(block, roads, tol)
-    cum = ordered.geometry.length.to_numpy().cumsum()
-    m = int((cum <= budget_m + 1e-9).sum())
-    return cast(GeoDataFrame, ordered.iloc[:m])
 
 
 def max_access_depth(block: Block, roads: GeoDataFrame | None, *, tol: float = STREET_TOL,
@@ -743,68 +639,102 @@ def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
     return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), depth_at(lo)
 
 
-def prefix_to_external_connectivity(block: Block, roads: GeoDataFrame, target_ext: float, *,
-                                    tol: float = STREET_TOL) -> tuple[GeoDataFrame, float]:
-    """The minimal drainage-ordered prefix of `roads` whose external connectivity
-    (`access_benefit`, fraction of access-burden Sigma-d^2 removed) is >= `target_ext`, paired with
-    that prefix's actual external connectivity. Connectivity is monotone NON-DECREASING as
-    drainage-ordered roads are added (access_burden's unreached-depth cap makes access_benefit
-    monotone), so a binary search over the prefix length finds the smallest sufficient prefix in
-    O(log R) peels. If even all `roads` cannot reach `target_ext`, returns (all roads in drainage
-    order, full connectivity) with that value < `target_ext` -- the caller reports unreached (an
-    osm_footpaths-style fixed input that never reaches the target). Empty `roads` returns
-    (empty, 0.0)."""
-    ext = access_benefit(block, None, tol=tol)
+def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64],
+                           d_frac: float, *, corridor_m: float = 3.0,
+                           tol: float = STREET_TOL) -> GeoDataFrame:
+    """The minimal drainage-ordered prefix of `roads` whose displacement FRACTION
+    (`displacement(block.building_points, radii, prefix, corridor_m) / n_buildings`) is
+    >= `d_frac`. Displacement is monotone non-decreasing as drainage-ordered roads are added (a
+    growing prefix's buffered corridor union only grows, so every building's distance to it is
+    non-increasing, hence each cᵢ is non-decreasing), so a binary search over the prefix length
+    finds the smallest sufficient prefix in O(log R) peels -- mirroring `prefix_to_permeability`'s
+    binary search. n_buildings == 0 makes the fraction always 0.0 (matching
+    `displacement_curve`'s `_disp`), so a positive `d_frac` is then unreachable. If even all
+    `roads` cannot reach `d_frac`, returns all roads in drainage order. Empty `roads` returns
+    empty."""
+    n = len(block.building_points)
     if len(roads) == 0:
-        return cast(GeoDataFrame, roads.iloc[:0]), 0.0
+        return cast(GeoDataFrame, roads.iloc[:0])
     ordered = _drainage_ordered(block, roads, tol)
 
-    def ext_at(m: int) -> float:
-        return ext(cast(GeoDataFrame, ordered.iloc[:m]))
+    def frac_at(m: int) -> float:
+        if n == 0:
+            return 0.0
+        return displacement(block.building_points, radii,
+                            cast(GeoDataFrame, ordered.iloc[:m]), corridor_m) / n
 
-    n = len(ordered)
-    full_ext = ext_at(n)
-    if full_ext < target_ext:                     # unreachable: best effort is all roads
-        return ordered, full_ext
-    lo, hi = 0, n                                 # smallest m with ext_at(m) >= target_ext
+    total = len(ordered)
+    if frac_at(total) < d_frac:                   # unreachable: best effort is all roads
+        return ordered
+    lo, hi = 0, total                              # smallest m with frac_at(m) >= d_frac
     while lo < hi:
         mid = (lo + hi) // 2
-        if ext_at(mid) >= target_ext:
+        if frac_at(mid) >= d_frac:
             hi = mid
         else:
             lo = mid + 1
-    return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), ext_at(lo)
+    return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True))
 
 
-def matched_budget(total_length_by_method: dict[str, float]) -> float:
-    """The common render budget: the smallest method's total road length (every method can reach
-    it). 0.0 if empty."""
-    return min(total_length_by_method.values()) if total_length_by_method else 0.0
+def prefix_to_permeability(
+    block: Block,
+    roads: GeoDataFrame,
+    p_star: float,
+    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
+    *,
+    tol: float = STREET_TOL,
+) -> tuple[GeoDataFrame, bool]:
+    """The minimal drainage-ordered prefix of `roads` whose `permeability` is >= `p_star`, paired
+    with whether that target was reached. Permeability is monotone non-decreasing as
+    drainage-ordered roads are added (roads only add conductance -- never remove it -- so the
+    dissipated power is monotone non-increasing by Rayleigh's monotonicity theorem; see
+    permeability.py's module docstring), so a binary search over the prefix length finds the
+    smallest sufficient prefix in O(log R) peels, mirroring `prefix_to_displacement`'s binary
+    search. The no-roads baseline p0 is frozen ONCE via `egress_power` rather than recomputed per
+    probed prefix. `adj` (parcel_adjacency, an STRtree spatial join -- costly at region scale) is
+    likewise built ONCE and threaded through every `egress_power`/`permeability` call: adjacency
+    is a function of `block.parcels` geometry alone, invariant across road prefixes, exactly the
+    precomputed-adj pattern `prefix_to_depth` already uses. If even all `roads`
+    cannot reach `p_star` (including an ungrounded block, where permeability is nan and every
+    comparison is False), returns (all roads in drainage order, False). Empty `roads` returns
+    (empty, False)."""
+    if len(roads) == 0:
+        return cast(GeoDataFrame, roads.iloc[:0]), False
+    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    p0, _ = egress_power(block, None, params, adj=adj)
+    ordered = _drainage_ordered(block, roads, tol)
+
+    def perm_at(m: int) -> float:
+        return permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0, adj=adj)
+
+    n = len(ordered)
+    if not (perm_at(n) >= p_star):                 # unreachable (incl. nan): best effort all roads
+        return ordered, False
+    lo, hi = 0, n                                  # smallest m with perm_at(m) >= p_star
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if perm_at(mid) >= p_star:
+            hi = mid
+        else:
+            lo = mid + 1
+    return cast(GeoDataFrame, ordered.iloc[:lo].reset_index(drop=True)), True
 
 
 def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64], *,
                        corridor_m: float = 3.0, n_points: int = 20,
                        tol: float = STREET_TOL) -> Curve:
-    """A Curve whose x is cumulative added road length (m) and whose y is Sum c_i displacement (a
-    rising COST). Reuses the drainage-ordered _sweep with displacement as the value."""
+    """A Curve whose x is cumulative added road length (m) and whose y is the FRACTION of homes
+    displaced, Σcᵢ / n_buildings (a rising COST in [0, 1]). Reuses the drainage-ordered _sweep.
+    n_buildings = len(block.building_points) (buildings, not parcels)."""
+    n = len(block.building_points)
+
     def _disp(prefix: GeoDataFrame | None) -> float:
-        if prefix is None or len(prefix) == 0:
+        if prefix is None or len(prefix) == 0 or n == 0:
             return 0.0
-        return displacement(block.building_points, radii, prefix, corridor_m)
+        return displacement(block.building_points, radii, prefix, corridor_m) / n
 
     costs, vals = _sweep(block, roads, _disp, n_points, tol)
     return Curve(costs, vals)
-
-
-def cost_benefit_curve(block: Block, roads: GeoDataFrame, *,
-                       benefit_fn: BenefitFactory = access_benefit,
-                       n_points: int = 20, tol: float = STREET_TOL) -> Curve:
-    """Order roads by drainage descending, then at n_points cumulative-length budgets score
-    benefit_fn's benefit vs the no-roads baseline. The x-axis is cumulative added road length
-    (m). `corridor_m` is gone: it only fed the deleted displacement cost-mode; benefit is
-    corridor-free."""
-    costs, benefit = _sweep(block, roads, benefit_fn(block, roads, tol=tol), n_points, tol)
-    return Curve(costs, benefit)
 
 
 def _noded_graph(roads: GeoDataFrame, streets: GeoDataFrame) -> nx.Graph:
@@ -819,256 +749,3 @@ def _noded_graph(roads: GeoDataFrame, streets: GeoDataFrame) -> nx.Graph:
     return g
 
 
-def _entry_resistance(guu: float, gvv: float, guv: float, a: float, b: float, r: float) -> float:
-    """Exact grounded resistance R(p) at a point p subdividing an INTERIOR-INTERIOR edge (u, v) of
-    resistance r=a+b (a from u, b from v), given only the full grounded Green's function G's
-    entries at u and v (`guu`, `gvv`, `guv` = G[u,u], G[v,v], G[u,v]) -- no new matrix row needed,
-    so the dense solve never grows past the topology graph's own node count. Derivation: remove
-    the direct (u, v) edge via a Sherman-Morrison rank-1 downdate of the grounded Laplacian, then
-    solve the two-resistor pendant p attaches via (current conservation at p). Branches to the
-    exact series limit -- min(guu + a, gvv + b), matching how R_geo itself picks a route -- when
-    (u, v) is a bridge: the downdate is singular exactly when u and v have NO alternate coupling
-    (e.g. a plain tree/single-egress edge), where the general formula's individually-diverging
-    terms cancel to precisely that limit (verified analytically and, against a slower
-    node-injecting reference implementation, numerically on every test scenario below)."""
-    c = 1.0 / r
-    s = guu - 2.0 * guv + gvv
-    denom = 1.0 - c * s
-    if denom < 1e-9:                                            # (u, v) is a bridge -> series limit
-        return min(guu + a, gvv + b)
-    wu, wv = guu - guv, guv - gvv
-    k = c / denom
-    gpuu = guu + k * wu * wu
-    gpvv = gvv + k * wv * wv
-    gpuv = guv + k * wu * wv
-    big_a = gpuu + a - gpuv
-    big_b = gpvv + b - gpuv
-    if big_a + big_b <= 0.0:                                    # numerical guard, same limit
-        return min(guu + a, gvv + b)
-    iu, iv = big_b / (big_a + big_b), big_a / (big_a + big_b)
-    return (gpuu + a) * iu + gpuv * iv
-
-
-def _entry_resistance_ground(gvv: float, a: float, b: float, r: float) -> float:
-    """R(p) at a point p subdividing an edge from GROUND (a street node) to one interior node v,
-    at distance a from ground and b from v (a+b=r). p sees two parallel routes to ground: the
-    direct a-leak, or via v (b + v's own resistance to ground once this edge's leak is removed,
-    a diagonal Sherman-Morrison downdate) -- the parallel-resistor formula is stable at the bridge
-    limit (v's only ground path is this edge) with no branch needed: it reduces cleanly to `a`."""
-    c = 1.0 / r
-    denom = 1.0 - c * gvv
-    if denom < 1e-9:
-        return a
-    gpvv = gvv + c * gvv * gvv / denom
-    return a * (b + gpvv) / (a + b + gpvv)
-
-
-_CommuteSetup = tuple[
-    # interior node -> (idx map, its component's grounded G)
-    dict[_Node, tuple[dict[_Node, int], NDArray[np.float64]]],
-    dict[_Node, float],           # R_geo per node (multi-source dijkstra)
-    list[tuple[_Node, _Node]],    # edges
-    list[LineString],             # edge_lines (index-aligned to edges)
-    STRtree,                      # STRtree over edge_lines
-]
-
-
-def _commute_setup(roads: GeoDataFrame | None, streets: GeoDataFrame) -> _CommuteSetup | None:
-    """Build the planarized road-union-street graph and, per connected component, its grounded
-    Green's function (dense inverse of the interior-node Laplacian) + R_geo (multi-source dijkstra
-    from the street nodes), plus an STRtree of edges for line-proximity parcel entry. Returns None
-    when there is no usable graph: no/empty roads, no graph nodes, or no street node / no interior
-    node. Street nodes are those within STREET_TOL of the street geometry (GEOMETRIC test).
-
-    A component-wise DENSE `np.linalg.inv` on O(parcels) more rows (injecting each parcel as a new
-    graph node) was tried first and rejected: on a real ~2000-parcel block it made the 20-prefix
-    sweep ~125s, about 700x the topology-only sweep and ~8x over the ~15s gate, because dense
-    inversion is cubic in matrix size. Instead the parcel entry point is computed analytically from
-    the edge's two endpoints (see `_nearest_edge_ratio` / `_entry_resistance`), so this solve is
-    over the topology graph alone and never grows with parcel count."""
-    if roads is None or len(roads) == 0:
-        return None
-    g = _noded_graph(roads, streets)
-    if g.number_of_nodes() == 0:
-        return None
-    street_geom = unary_union(list(streets.geometry))
-    snodes = {n for n in g.nodes if Point(n).distance(street_geom) <= STREET_TOL}
-    interior = [n for n in g.nodes if n not in snodes]
-    if not snodes or not interior:
-        return None
-    for u, v in g.edges():
-        g[u][v]["len"] = max(math.hypot(u[0] - v[0], u[1] - v[1]), 1e-6)
-    geo = nx.multi_source_dijkstra_path_length(g, snodes, weight="len")
-    green: dict[_Node, tuple[dict[_Node, int], NDArray[np.float64]]] = {}
-    for comp in nx.connected_components(g):
-        comp_streets = comp & snodes
-        comp_int = [n for n in comp if n not in snodes]
-        if not comp_streets or not comp_int:                            # stranded -> excluded
-            continue
-        idx = {n: i for i, n in enumerate(comp_int)}
-        m = len(comp_int)
-        lg = np.zeros((m, m))
-        for u, v in g.subgraph(comp).edges():
-            c = 1.0 / g[u][v]["len"]
-            ui, vi = idx.get(u), idx.get(v)
-            if ui is not None and vi is not None:
-                lg[ui, ui] += c
-                lg[vi, vi] += c
-                lg[ui, vi] -= c
-                lg[vi, ui] -= c
-            elif ui is not None:
-                lg[ui, ui] += c
-            elif vi is not None:
-                lg[vi, vi] += c
-        ginv = np.linalg.inv(lg)                                        # DENSE grounded solve
-        for n in comp_int:
-            green[n] = (idx, ginv)
-    edges = list(g.edges())
-    edge_lines = [LineString([u, v]) for u, v in edges]
-    return green, geo, edges, edge_lines, STRtree(edge_lines)
-
-
-def _nearest_edge_ratio(setup: _CommuteSetup, pt: Point) -> tuple[bool, float]:
-    """(included, ratio) for parcel point `pt` entering via its single geometrically-nearest
-    topology edge. included=False (ratio 0.0) when that edge has NO interior endpoint (the parcel's
-    closest frontage is the bare street) or R_geo is non-finite/zero. The caller decides what
-    False means: 'skip' (dynamic membership) or 'contribute 0.0' (frozen membership).
-
-    The parcel enters by TRUE line-proximity -- the nearest POINT on its nearest topology edge, NOT
-    that edge's nearest raw VERTEX: snapping to the nearest vertex would break subdivision
-    invariance and let a far-off parcel inherit a road's resistance merely because that road is its
-    only nearby edge."""
-    green, geo, edges, edge_lines, tree = setup
-    j = int(tree.nearest(pt))                                           # line-proximity entry
-    ls = edge_lines[j]
-    u, v = edges[j]
-    proj = ls.project(pt)
-    r = max(ls.length, 1e-6)
-    a, b = proj, r - proj
-    u_int, v_int = u in green, v in green
-    if u_int and v_int:
-        idx, ginv = green[u]
-        guu, gvv, guv = ginv[idx[u], idx[u]], ginv[idx[v], idx[v]], ginv[idx[u], idx[v]]
-        r_eff = _entry_resistance(guu, gvv, guv, a, b, r)
-    elif u_int:                                                         # v is a street node
-        idx, ginv = green[u]                                           # ground dist=b, interior=a
-        r_eff = _entry_resistance_ground(ginv[idx[u], idx[u]], b, a, r)
-    elif v_int:                                                         # u is a street node
-        idx, ginv = green[v]                                           # ground dist=a, interior=b
-        r_eff = _entry_resistance_ground(ginv[idx[v], idx[v]], a, b, r)
-    else:
-        return False, 0.0                                              # both ends on the street
-    r_geo = min(geo.get(u, math.inf) + a, geo.get(v, math.inf) + b)
-    if not (math.isfinite(r_geo) and r_geo > 1e-9):
-        return False, 0.0
-    return True, min(max(1.0 - r_eff / r_geo, 0.0), 1.0 - 1e-12)       # clip [0, 1)
-
-
-def _commute_membership(block: Block, roads: GeoDataFrame | None) -> frozenset[int]:
-    """The frozen averaged-parcel set S: indices of parcels with a valid interior entry under
-    `roads` (the sweep's terminal/superset network), computed ONCE. A prefix sweep that averages
-    over this fixed S has a fixed denominator, which removes the composition churn (parcels
-    flickering in/out of the mean) that makes the per-prefix curve non-monotone. Empty if `roads`
-    yields no usable graph."""
-    setup = _commute_setup(roads, block.streets)
-    if setup is None:
-        return frozenset()
-    return frozenset(i for i, geom in enumerate(block.parcels.geometry)
-                     if _nearest_edge_ratio(setup, geom.centroid)[0])
-
-
-def commute_ratio(block: Block, roads: GeoDataFrame | None, *,
-                  membership: frozenset[int] | None = None) -> float:
-    """Internal connectivity: mean over parcels of 1 - R(dwelling->street)/R_geodesic on the noded
-    road-union-street graph. R = grounded effective resistance to the whole street (a component-wise
-    DENSE solve); R_geo = single-best-route (shortest-path) resistance. A single-egress tree route
-    -> 0; ->1 as parallel backup routes thicken. Clipped to [0, 1). Rewards added redundancy via
-    Rayleigh monotonicity (adding a redundant connector to an existing loop can only help). A small
-    tight loop can legitimately outscore a large loose one -- coverage-insensitive by design (see
-    access_benefit for coverage). Task-1 corpus gate (2026-07-17): corr(rho, access)=+0.294;
-    anti-gaming holds on realistic networks -- loops ADDED to clearance give rho 0.000->TINY
-    0.060->BIG 0.278 (BIG >> TINY); a matched-length parallel bundle scores 0.00145/m vs a genuine
-    loop's 0.00234/m and costs displacement, so corridor duplication is Pareto-dominated on the
-    {external, internal, displacement} suite.
-
-    Each parcel enters by TRUE line-proximity -- the nearest POINT on its nearest topology edge
-    (via _entry_resistance/_entry_resistance_ground, computed analytically from the edge's two
-    endpoints, so the dense per-component solve never grows with parcel count).
-
-    `membership` selects the averaged set:
-    - None (default): DYNAMIC -- exactly the parcels with a valid interior entry under THIS `roads`,
-      each contributing its real ratio; a parcel whose nearest edge is a bare street segment, or
-      that is unreachable, is skipped. Self-contained per road set. The raw metric is NON-MONOTONE
-      across different road sets (a ratio of co-decreasing R/R_geo AND a changing averaged set) --
-      standalone reporting ranks by terminal value, never assumes rise.
-    - a frozen index set S (from `_commute_membership(block, terminal_roads)`): FROZEN -- every
-      parcel in S contributes on EVERY call, its real ratio if it has an interior entry under
-      `roads`, else 0.0 ('not yet connected', NOT skipped). Members are averaged in ascending index
-      order so a frozen-to-self call (S from the same `roads`) is byte-identical to the dynamic
-      default; freezing changes ONLY intermediate prefixes of a sweep, never the terminal value,
-      and removes the composition churn so the swept curve reads monotone.
-
-    0.0 with no roads / no parcels / no interior nodes / no usable graph / empty membership."""
-    if roads is None or len(roads) == 0 or len(block.parcels) < 1:
-        return 0.0
-    setup = _commute_setup(roads, block.streets)
-    if setup is None:
-        return 0.0
-    if membership is None:
-        ratios = [ratio for geom in block.parcels.geometry
-                  for included, ratio in [_nearest_edge_ratio(setup, geom.centroid)] if included]
-        return float(np.mean(ratios)) if ratios else 0.0
-    if not membership:
-        return 0.0
-    ratios = [_nearest_edge_ratio(setup, block.parcels.geometry.iloc[i].centroid)[1]
-              for i in sorted(membership)]
-    return float(np.mean(ratios)) if ratios else 0.0
-
-
-def commute_ratio_benefit(block: Block, roads_full: GeoDataFrame | None, *,
-                          tol: float = STREET_TOL) -> Callable[[GeoDataFrame | None], float]:
-    """Internal-connectivity benefit factory (shares the access_benefit signature so it plugs into
-    cost_benefit_curve(..., benefit_fn=commute_ratio_benefit) and the _sweep frontier). Freezes the
-    averaged parcel set S to `roads_full` -- the terminal network of the sweep -- via
-    _commute_membership, so every prefix scores commute_ratio over the SAME denominator. This
-    removes the composition churn that made the per-prefix curve non-monotone; the terminal value
-    is unchanged (frozen-to-self == the dynamic metric). `tol` is unused, kept for the shared
-    BenefitFactory signature."""
-    del tol
-    membership = _commute_membership(block, roads_full)
-
-    def f(roads: GeoDataFrame | None) -> float:
-        return commute_ratio(block, roads, membership=membership)
-    return f
-
-
-def efficiency_directness_curves(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
-                                 tol: float = STREET_TOL) -> tuple[Curve, Curve]:
-    """ONE sampled shortest-path sweep yielding both E and directness curves (x = road length,
-    m) -- the frontier-sweep measurement of arterial's kept `objective=directness|efficiency`,
-    backing the arterial-vs-dijkstra directness margin tests and the 1e-9 scoring-equivalence
-    net. Not part of the deleted cost-benefit reporting."""
-    f = _efficiency_factory(block, roads, tol)
-    costs, pairs = _sweep(block, roads, f, n_points, tol)
-    return Curve(costs, [p[0] for p in pairs]), Curve(costs, [p[1] for p in pairs])
-
-
-def auc(curve: Curve, cost_cap: float) -> float:
-    """Normalized area under benefit-vs-cost over [0, cost_cap] (curve held at its terminal
-    benefit beyond its own max cost) -> 0-1 efficiency; higher = more access per meter."""
-    if cost_cap <= 0.0 or len(curve.cost) < 2:
-        return 0.0
-    cs, bs = list(curve.cost), list(curve.benefit)
-    if cs[-1] < cost_cap:                       # extend the plateau to the common cap
-        cs, bs = cs + [cost_cap], bs + [bs[-1]]
-    area = 0.0
-    pairs = zip(zip(cs, bs, strict=False), zip(cs[1:], bs[1:], strict=False), strict=False)
-    for (c0, b0), (c1, b1) in pairs:
-        if c0 >= cost_cap:
-            break
-        if c1 > cost_cap:                       # segment straddles the cap: interpolate to it
-            b_cap = b0 + (b1 - b0) * (cost_cap - c0) / (c1 - c0) if c1 > c0 else b0
-            area += 0.5 * (b0 + b_cap) * (cost_cap - c0)
-            break
-        area += 0.5 * (b0 + b1) * (c1 - c0)
-    return area / cost_cap

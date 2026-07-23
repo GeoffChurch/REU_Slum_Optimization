@@ -1,165 +1,172 @@
 # Method comparison: six reblockers, head-to-head on one deep block
 
-Six reblockers graded head-to-head on the **metric basis** — external connectivity, internal
-connectivity, and displacement — on a single deep informal block small enough that even `topology`
-runs (it's **single-block-only**: a multi-block region gives it a disconnected source node and it
-crashes). The six span the families this project ships: whole-graph `topology`, least-cost
-`clearance` and its loop-closing refinement `clearance_looped`, the repulsion-cost arterial
-`greedy_arterial_repulsion` (it scores benefit **per home displaced** — a soft, never-zero proximity
-cost — so it routes *around* homes, and runs via **CELF/lazy** so it scales), a Manhattan
-`euclidean_grid`, and the real as-built `osm_footpaths`. The companion
-[`multiblock_depth`](../multiblock_depth/) flagship runs the scalable methods on a whole settlement.
+Six reblockers graded head-to-head by a single flow metric — **permeability** — against a single cost
+— **displacement** — on one deep informal block small enough that even `topology` runs (it's
+**single-block-only**: a multi-block region gives it a disconnected source node and it crashes). The
+six span the families this project ships: whole-graph `topology`, least-cost `clearance` and its
+loop-closing refinement `clearance_looped`, the repulsion-cost arterial `greedy_arterial_repulsion`
+(it scores benefit **per home displaced** — a soft, never-zero proximity cost — so it routes *around*
+homes, and runs via **CELF/lazy** so it scales), a Manhattan `euclidean_grid`, and the real as-built
+`osm_footpaths`. The companion [`multiblock_depth`](../multiblock_depth/) flagship runs the scalable
+methods on a whole settlement.
 
 The block is **`ZAF.9.3.1_1_40972`** — the deepest block (by the depth proxy `√(n·A)/P`) in a
 topology-tractable size window: **263 parcels, up to 7 deep**, auto-picked, no hand tuning.
 📍 [See it on Google Maps](https://www.google.com/maps/@-33.97795,18.58064,18z) (every run logs this
 link for its selection).
 
+## The metric: permeability
+
+Everything is graded on **one** number. Model collective egress as an electrical flow: every parcel
+injects one unit of "escape current"; the existing street is ground. Parcels sit on an always-present
+high-resistance **footpath mesh** (walkable but slow); roads are low-resistance shortcuts that
+*upgrade* the mesh where they run. The total dissipated power of that flow measures how hard it is for
+*everyone* to get out at once — folding **distance**, **contention** (many parcels sharing one road,
+penalised quadratically), and **redundancy** (loops spread the current) into a single scalar.
+
+> **permeability = 1 − P(roads) / P(no roads)** ∈ [0, 1)
+
+0 = the walkable status quo; higher = a more permeable network. It is **monotone** (roads only add
+conductance, so permeability only rises — Rayleigh), **all-parcels** (no membership, no on/off), and a
+**single sparse solve**. It rewards reach and loops and punishes bare drainage trees, which funnel all
+egress through one root. Cost is **displacement** — the expected fraction of homes a road set grazes
+(`Σcᵢ / n_buildings`, each building a disk of radius = ½ its nearest-neighbour distance, contributing
+its probability of being clipped). Both axes are fractions in [0, 1); nothing else is reported.
+
 ## Reproduce
 
-One command reblocks all six methods and emits the curves, frontier CSVs, **and** every before/after
-render — no hand-placed assets, the whole example reproduces offline:
+One command reblocks all six methods and emits the frontier, both lens tables, **and** every
+before/after render (both colourings), no hand-placed assets — the whole example reproduces offline:
 ```bash
 pixi run python -m scripts.gen_method_comparison
 ```
 It reblocks the pinned block with each method (from ONE propose each), renders a before-heatmap plus
-one after-heatmap per method, and builds the three metric curves. `topology` is the slow pole
-(~7 min); `greedy_arterial_repulsion` is capped to 8 roads and runs via CELF/lazy in seconds — its
-`cost: repulsion` denominator (`Σ r²/(r²+d²)` over building points) is **constant per candidate**, so
-lazy stays well-behaved. `osm_footpaths` loads a committed OSM snapshot (`desire_lines_40972.geojson`,
-22 mapped ways — see `scripts/fetch_desire_lines_snapshot.py`). The console output — the locator link
-plus the per-method frontier terminal points and displacement figures — is captured in
-[`run.log`](run.log), the source of truth for the tables below.
+per-method after-heatmaps in both colourings, and builds the permeability-vs-displacement frontier.
+`topology` is the slow pole (~7 min); `greedy_arterial_repulsion` runs via CELF/lazy in seconds.
+`osm_footpaths` loads a committed OSM snapshot (`desire_lines_40972.geojson`, 22 mapped ways — see
+`scripts/fetch_desire_lines_snapshot.py`). The console output is captured in [`run.log`](run.log), the
+source of truth for the tables below.
 
-## The roads each method builds
+## Before: the block with no roads
 
-Before — every parcel up to 7 deep (dark = deep interior, pale = fronting a street):
+The same block in **both colourings** — access-depth (blue = at a street, red = deep interior) and the
+metric-aligned **permeability potential** (light = easy to escape, dark = hard). The dark core is the
+reblocking target: a compact ring of deep parcels every method has to reach.
 
-![before](before.jpg)
+| access depth | permeability potential |
+|---|---|
+| ![before depth](before_depth.jpg) | ![before permeability](before_perm.jpg) |
 
-After, per method (blue = added roads; disks = building sites shaded grey→red by displacement risk;
-the depth heatmap goes pale as roads reach every parcel):
+## The frontier: permeability bought per home displaced
 
-| topology (access-optimal) | clearance (least-cost) | greedy_arterial_repulsion (most redundancy) |
-|---|---|---|
-| ![topology](after_topology.jpg) | ![clearance](after_clearance.jpg) | ![arterial](after_greedy_arterial_repulsion.jpg) |
-| **clearance_looped** (least-cost + loops) | **euclidean_grid** (Manhattan) | **osm_footpaths** (as-built, loopy) |
-| ![clearance_looped](after_clearance_looped.jpg) | ![euclidean_grid](after_euclidean_grid.jpg) | ![osm_footpaths](after_osm_footpaths.jpg) |
+The whole trade-off, one line per method — **permeability** (y) against **displacement** (x). Pareto
+dominance reads straight off it: up-and-to-the-left is better (more permeability, fewer homes moved).
 
-`topology`'s whole-graph optimizer blankets the fabric; the **repulsion arterial** threads its
-through-roads along the gaps *between* building clusters — its cost is literally proximity to homes —
-closing loops while grazing few footprints; `clearance` threads least-cost roads to the deep interior;
-`clearance_looped` adds redundant connectors on top of a clearance base; `euclidean_grid` lays a fixed
-orthogonal grid regardless of where the deep parcels are; `osm_footpaths` is the real, unoptimized
-network people already walk.
+![permeability vs displacement](frontier_ZAF.9.3.1_1_40972.png)
 
-## The metric basis
+The shape tells the story. **`osm_footpaths` (magenta) and `greedy_arterial_repulsion` (green) own the
+efficient low-displacement frontier** — the loopy real network and the gap-threading optimiser buy the
+most permeability for the fewest homes. **`clearance` (yellow) is the lowest curve throughout**: a
+least-cost drainage *tree* has no redundancy by construction, so every parcel escapes exactly one way
+and the shared trunks choke — permeability lags at every budget. `euclidean_grid`, `clearance_looped`,
+and `topology` climb to high absolute permeability but spend far more displacement to get there.
 
-A spectral investigation (PCA over metric correlations across a diverse corpus of road networks — see
-the [basis derivation](../../docs/superpowers/specs/2026-07-16-metric-basis-reporting-design.md) and
-[ρ metric migration](../../docs/superpowers/specs/2026-07-17-redundancy-metric-and-refiner-design.md)
-design docs) found road-structure quality is **two orthogonal axes** once road *quantity* is controlled
-(quantity is the displacement/cost axis below). The five entangled lenses this example used to report
-(access, efficiency, directness, resistance, displacement) collapse to that basis:
+## Lens A — matched displacement: permeability at an equal home-cost
 
-- **External connectivity** — reach/drainage of parcels to the *outside* street network (the fraction
-  of access-burden removed). This is the former "access" metric, unchanged, just relabeled — egress
-  `resistance` loaded on the same axis and is now subsumed by it.
-- **Internal connectivity** — richness/redundancy of the network *itself*: backup-route redundancy,
-  `commute_ratio` (mean 1 − R/R_geo, the effective-resistance ratio over the noded road∪street graph)
-  — how many alternative routes a dwelling has, not just whether it has one. `directness`/`efficiency`
-  (ρ=0.99 duplicates that straddled both axes) are retired from reporting in favour of this cleaner,
-  orthogonal representative. (It replaced the earlier circuit-rank `cycle_density` representative,
-  which was size-blind — it rewarded many tiny loops over a few big useful ones.)
+Truncate every method to its first road prefix that displaces **≥ 10% of homes**, then compare the
+**permeability** each buys for that shared cost (every method reaches 10%, so all are compared honestly
+at the budget):
 
-Each axis is read off the **frontier** — the full `(method, block, road_length_m, benefit)` curve saved
-to `frontier_{metric}.csv` — rather than a single AUC scalar. An AUC (benefit integrated across the
-shared road budget) rewards absolute benefit over benefit-per-road, so a road-efficient method could
-rank *below* a pave-everything one; we dropped it. Instead, each method is described by its **terminal
-point**: the benefit it reached, the **added road length** it spent (metres), and `% paved`.
-
-Terminal frontier point per method per axis (benefit @ added road length, % paved):
-
-| axis | topology | clearance | greedy_arterial_repulsion | clearance_looped | euclidean_grid | osm_footpaths |
-|---|---|---|---|---|---|---|
-| external connectivity — access-burden removed | **0.921** @ 934 m | 0.827 @ 486 m | 0.840 @ 703 m | **0.921** @ 1300 m | 0.789 @ 741 m | 0.761 @ 639 m |
-| internal connectivity — backup-route redundancy (mean 1 − R/R_geo) | 0.037 | 0.000 | **0.468** | 0.316 | 0.410 | 0.327 |
-| % paved | 38.7% | **20.4%** | 26.7% | 46.7% | 28.7% | 25.2% |
-
-The two connectivity **curves** are plotted against **cumulative displacement** (homes displaced) — not
-road length — so you read **redundancy (or reach) per home displaced** directly; the displacement metric
-itself is the rising cost, plotted against added road length. Curve legend labels read `method (NNN
-homes)` — the terminal homes displaced. (The stored `frontier_*.csv` keep cumulative added road length
-as the cost column regardless; only the plotted x-axis is re-based onto displacement.)
-
-Each method earns a different corner of the frontier:
-
-- **`greedy_arterial_repulsion`** wins the **most internal connectivity (0.468)** — the striking result:
-  the *optimizer out-loops the as-built footpaths and the regular grid alike*. Because its cost is
-  proximity to homes, it spends its 8 roads on longer through-corridors that thread the gaps and
-  reconnect into the street perimeter, closing real loops instead of dead-ending. It also reaches the
-  **second-highest external connectivity (0.840)**, behind only topology and clearance_looped, at 26.7%
-  paved. Runs via CELF/lazy and scales to the region (see [`multiblock_depth`](../multiblock_depth/)).
-- **`euclidean_grid`** takes **second on internal connectivity (0.410)** — a regular grid is loops by
-  construction — but it bulldozes to get them: **42.4% of homes displaced** (111.6, third-highest) and
-  a **low external connectivity (0.789, second-lowest — only osm_footpaths's 0.761 is worse)**, because
-  a blind grid ignores where the deep parcels actually are.
-- **`osm_footpaths`** — the REAL informal network (mapped OSM footpaths, not an optimizer's output) — is
-  the loopiest network people *actually walk* (internal 0.327, external 0.761 at 25.2% paved). It held
-  the redundancy crown until the repulsion arterial beat it: the worn paths are a real, redundant
-  reblock, just not an optimized one.
-- **`clearance_looped`** ties topology for the **most external connectivity (0.921)** and adds genuine
-  loops over its clearance base (internal 0.316 vs plain clearance's 0.000) — but it is a **region-scale**
-  method, and on this single dense block its region-tuned defaults **over-build**: the heaviest paving
-  (46.7%, 1300 m) and the most displacement (203 homes, 77.2%). See
-  [`multiblock_depth`](../multiblock_depth/) for its intended region-scale run.
-- **`topology`** reaches the most external connectivity (0.921) but at heavy paving (38.7%), with only
-  middling internal connectivity (0.037): its whole-graph optimizer builds a reach-everywhere tree, not
-  a mesh. Single-block-only.
-- **`clearance`** is the balanced least-cost option — the **least paving (20.4%)** and near-topology
-  external connectivity (0.827) — but the **least internal connectivity (0.000)**: a least-cost drainage
-  tree has no backup routes *by construction* (every dwelling reaches the street exactly one way).
-
-![external connectivity](curve_external_connectivity_ZAF.9.3.1_1_40972.png) ![internal connectivity](curve_internal_connectivity_ZAF.9.3.1_1_40972.png)
-
-## Displacement: the homes each road costs
-
-Displacement is a **curve of its own** (`displacement_ZAF.9.3.1_1_40972.png`,
-`displacement_vs_length.csv`), plotted against added road length — a rising **cost**: as a method lays
-road, how many homes does it destroy?
-
-It's **extent-aware**. Rather than counting only buildings whose *centroid* falls in the road corridor,
-each building is a disk (radius = half its nearest-neighbour distance), contributing its **probability of
-being grazed**, `c = max(0, 1 − d/r)` (`d` = distance from the point to the road corridor, `r` = the disk
-radius). Summed over all 263 buildings, that Σc is the "expected homes displaced" — it catches roads that
-clip a footprint's *edge*, which a centroid test misses, so these figures read higher than a raw centroid
-count.
-
-Terminal displacement (Σ graze-probability at each method's full road) — a rising cost, so *lower is
-better*:
-
-| method | homes displaced | % of homes | terminal internal connectivity (backup-route redundancy) |
+| method | road | displacement | **permeability** |
 |---|---|---|---|
-| **greedy_arterial_repulsion** | 74.6 | 28.4% | **0.468** |
-| osm_footpaths | 74.7 | 28.4% | 0.327 |
-| clearance | 87.8 | 33.4% | 0.000 |
-| euclidean_grid | 111.6 | 42.4% | 0.410 |
-| topology | 160.2 | 60.9% | 0.037 |
-| clearance_looped | 203.0 | 77.2% | 0.316 |
+| **osm_footpaths** | 274 m | 12.8% | **0.581** |
+| greedy_arterial_repulsion | 183 m | 11.5% | 0.535 |
+| euclidean_grid | 270 m | 13.1% | 0.521 |
+| clearance_looped | 139 m | 11.3% | 0.429 |
+| topology | 186 m | 10.4% | 0.390 |
+| clearance | 143 m | 10.2% | **0.273** |
 
-**The repulsion arterial leads redundancy-per-home outright.** At the lowest displacement of any method
-(74.6 homes, tied with the as-built footpaths), it delivers the most internal connectivity (0.468) —
-≈**0.0063 redundancy per home displaced**, vs 0.0044 for `osm_footpaths` and 0.0037 for `euclidean_grid`
-(0.410 at 111.6 homes). That's the payoff of scoring benefit-per-home-displaced instead of per-metre: the
-optimizer routes through the gaps, so every road it lays buys loops at the fewest homes moved. `clearance`
-(0.000) and `topology` (0.037) build trees, not meshes, so they add little redundancy however much road
-they lay. Every curve rises from 0 with road, so you read the tradeoff directly.
+At an equal ~10% home-cost, **the real footpaths are the most permeable network** (0.581) — the paths
+people already walk form a loopy mesh no optimiser here beats at this budget — with the repulsion
+arterial a close second (0.535) at the least road and fewest homes of the leaders. The bare
+`clearance` tree is worst (0.273): same homes moved, half the permeability, because a tree can't spread
+egress.
 
-![displacement vs added road length](displacement_ZAF.9.3.1_1_40972.png)
+Access-depth colouring (deep interior draining as roads reach in):
 
-**The takeaway:** pick the method by the axis *and* the road you can afford — most external connectivity →
-`topology` (single block) or `clearance_looped` (region-scale, at a heavy displacement cost here);
-**the most backup-route redundancy per home → `greedy_arterial_repulsion`**, which leads internal
-connectivity outright, beating both the as-built footpaths and the regular grid at the lowest
-displacement; balanced least-cost → `clearance`. See [`multiblock_depth`](../multiblock_depth/) for the
-region-scale run of the scalable methods.
+| topology | clearance | greedy_arterial_repulsion |
+|---|---|---|
+| ![topology](after_topology_disp_depth.jpg) | ![clearance](after_clearance_disp_depth.jpg) | ![arterial](after_greedy_arterial_repulsion_disp_depth.jpg) |
+| **clearance_looped** | **euclidean_grid** | **osm_footpaths** |
+| ![clearance_looped](after_clearance_looped_disp_depth.jpg) | ![euclidean_grid](after_euclidean_grid_disp_depth.jpg) | ![osm_footpaths](after_osm_footpaths_disp_depth.jpg) |
+
+Permeability-potential colouring (dark core lightening as escape gets easier):
+
+| topology | clearance | greedy_arterial_repulsion |
+|---|---|---|
+| ![topology](after_topology_disp_perm.jpg) | ![clearance](after_clearance_disp_perm.jpg) | ![arterial](after_greedy_arterial_repulsion_disp_perm.jpg) |
+| **clearance_looped** | **euclidean_grid** | **osm_footpaths** |
+| ![clearance_looped](after_clearance_looped_disp_perm.jpg) | ![euclidean_grid](after_euclidean_grid_disp_perm.jpg) | ![osm_footpaths](after_osm_footpaths_disp_perm.jpg) |
+
+## Lens B — matched permeability: homes displaced to reach a standard
+
+Truncate every method to its first prefix reaching **permeability ≥ 0.40**, then compare the
+**displacement** each spends to get there (lower is better). Every method clears the bar on this block:
+
+| method | **displacement to P ≥ 0.40** | road |
+|---|---|---|
+| **osm_footpaths** | **6.2%** | 161 m |
+| topology | 10.4% | 192 m |
+| clearance_looped | 11.3% | 139 m |
+| greedy_arterial_repulsion | 11.5% | 183 m |
+| euclidean_grid | 13.1% | 270 m |
+| clearance | **21.1%** | 321 m |
+
+To reach the same permeability standard, **`osm_footpaths` moves the fewest homes (6.2%)** and
+**`clearance` moves the most (21.1%)** — 3.4× as many for an identical outcome. A bare tree has to pave
+its way to a permeability that a loop gets for free.
+
+Access-depth colouring:
+
+| topology | clearance | greedy_arterial_repulsion |
+|---|---|---|
+| ![topology](after_topology_perm_depth.jpg) | ![clearance](after_clearance_perm_depth.jpg) | ![arterial](after_greedy_arterial_repulsion_perm_depth.jpg) |
+| **clearance_looped** | **euclidean_grid** | **osm_footpaths** |
+| ![clearance_looped](after_clearance_looped_perm_depth.jpg) | ![euclidean_grid](after_euclidean_grid_perm_depth.jpg) | ![osm_footpaths](after_osm_footpaths_perm_depth.jpg) |
+
+Permeability-potential colouring:
+
+| topology | clearance | greedy_arterial_repulsion |
+|---|---|---|
+| ![topology](after_topology_perm_perm.jpg) | ![clearance](after_clearance_perm_perm.jpg) | ![arterial](after_greedy_arterial_repulsion_perm_perm.jpg) |
+| **clearance_looped** | **euclidean_grid** | **osm_footpaths** |
+| ![clearance_looped](after_clearance_looped_perm_perm.jpg) | ![euclidean_grid](after_euclidean_grid_perm_perm.jpg) | ![osm_footpaths](after_osm_footpaths_perm_perm.jpg) |
+
+## Each method under permeability
+
+- **`osm_footpaths`** — the REAL informal network (mapped OSM footpaths, not an optimiser's output) —
+  is the **most permeable per home displaced** on both lenses: 0.581 at a matched 10%, and it reaches
+  the 0.40 standard at just **6.2% of homes**. The worn paths people already walk are a genuine,
+  loop-rich, low-displacement mesh — a hard baseline to beat.
+- **`greedy_arterial_repulsion`** is the **best optimiser here** and the low-road, low-home leader:
+  second-highest permeability at matched displacement (0.535) for the least road (183 m). Because its
+  cost is proximity to homes, it threads through-corridors along the gaps *between* clusters, closing
+  loops while grazing few footprints — and it scales to the region (see
+  [`multiblock_depth`](../multiblock_depth/)).
+- **`euclidean_grid`** reaches high permeability (0.521 at matched displacement) — a regular grid is
+  loops by construction — but it bulldozes to get them (270 m of road, 13.1% homes), ignoring where the
+  deep parcels actually are.
+- **`clearance_looped`** adds redundant connectors on top of a clearance base, lifting permeability
+  well above plain clearance (0.429 vs 0.273 at matched displacement) at little extra cost — the loops
+  are exactly what the metric rewards. On the whole settlement it is the region-scale workhorse.
+- **`topology`** blankets the fabric with a whole-graph optimiser: it reaches the 0.40 standard cheaply
+  (10.4%) but its curve then plateaus low — it builds a reach-everywhere tree, not a mesh, so extra
+  road buys little extra permeability. Single-block-only.
+- **`clearance`** is the balanced least-cost option and the **least permeable**: a drainage tree has no
+  backup routes *by construction*, so it lags at every budget (0.273 at matched displacement) and pays
+  the most homes (21.1%) to reach the standard. Cheap road, expensive permeability.
+
+**The takeaway:** permeability rewards **reach and loops** and punishes **bare drainage trees**. The
+real footpaths and the repulsion arterial deliver the most escape for the fewest homes moved; the
+least-cost tree delivers the least. Pick the method by where you can afford to sit on the frontier —
+and see [`multiblock_depth`](../multiblock_depth/) for the region-scale run of the scalable methods.

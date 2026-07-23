@@ -1,18 +1,23 @@
-"""render: per-parcel access-depth heatmaps, before and after an intervention.
+"""render: per-parcel heatmaps, before and after an intervention.
 
-`render_before` draws a block's status-quo access depth (method-independent);
-`render_after` draws the post-intervention depth plus the proposed new roads.
-Both take the caller's already-computed `layers` (see
-`reblock.derive.access.parcel_access_layers`) rather than recomputing them, and
-both take an explicit `vmax` so a before/after pair for the same block can be
-put on one shared colour scale.
+`render_before` draws a block's status-quo heatmap (method-independent); `render_after` draws the
+post-intervention heatmap plus the proposed new roads. Both take the caller's already-computed
+`layers` (a `pd.Series` indexed by `parcel_id`) rather than recomputing them, and both take an
+explicit `vmax` so a before/after pair for the same block can be put on one shared colour scale.
+
+Two colorings (`field=`): `"depth"` (default) is the access-depth layers from
+`reblock.derive.access.parcel_access_layers` -- an integer count of parcels-from-a-street, `_CMAP`,
+`vmin=1`. `"perm"` is the continuous per-parcel egress potential from
+`reblock.permeability.parcel_potentials` -- a HIGHER potential means a HARDER escape, `_PERM_CMAP`,
+`vmin=0`. Both are drawn dark = hard/deep, light = easy/shallow, so the two colorings read the same
+way despite one being an integer depth and the other a continuous potential.
 """
 from __future__ import annotations
 
 import hashlib
 import math
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 import matplotlib
 
@@ -28,7 +33,8 @@ from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import BBox, Block, Metrics, Proposal
 
-_CMAP = "YlOrRd"
+_CMAP = "YlOrRd"          # depth coloring: pale -> dark red as access depth grows
+_PERM_CMAP = "PuBu"       # perm coloring: pale -> dark blue as egress potential grows
 _BOUNDARY_COLOR = "#222222"
 _ROAD_COLOR = "#1E90FF"
 _CONTEXT_OUTLINE = "#dddddd"
@@ -58,16 +64,6 @@ def google_maps_url(geom: BaseGeometry, crs: CRS) -> str:
     span = max(float(b[2] - b[0]), float(b[3] - b[1]))
     zoom = 16 if span <= 0 else int(min(18, max(11, round(math.log2(720 / span)))))
     return f"https://www.google.com/maps/@{lat:.5f},{lon:.5f},{zoom}z"
-
-
-def title_label(block_id: str) -> str:
-    """A short, non-stretching plot title for a block or region. A region's block_id
-    (`region:` + `+`.join(member ids)) is up to thousands of chars, which stretches the whole figure
-    to fit the title on one line -- so collapse it to `region of N blocks`. A single block keeps its
-    own (already short) id."""
-    if block_id.startswith("region:"):
-        return f"region of {block_id[len('region:'):].count('+') + 1} blocks"
-    return block_id
 
 
 def frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.3) -> BBox:
@@ -111,8 +107,17 @@ def _point_disks(points: gpd.GeoDataFrame, radius_m: float | None = None) -> gpd
     return gpd.GeoDataFrame(geometry=points.geometry.buffer(radii), crs=points.crs)
 
 
+_FIELD_CMAP: dict[str, str] = {"depth": _CMAP, "perm": _PERM_CMAP}
+_FIELD_VMIN: dict[str, float] = {"depth": 1, "perm": 0}
+_FIELD_LABEL: dict[str, str] = {
+    "depth": "access depth (parcels from a street)",
+    "perm": "egress potential (higher = harder to escape)",
+}
+
+
 def _draw_heatmap(
-    block: Block, layers: pd.Series, vmax: int, *,
+    block: Block, layers: pd.Series, vmax: float, *,
+    field: Literal["depth", "perm"] = "depth",
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
     own_points: gpd.GeoDataFrame | None = None,
@@ -120,10 +125,16 @@ def _draw_heatmap(
     frame: BBox | None = None,
 ) -> Figure:
     parcels = _parcels_with_layer(block, layers)
+    cmap = _FIELD_CMAP[field]
+    vmin = _FIELD_VMIN[field]
 
-    fig, ax = plt.subplots(figsize=(10, 10))
-    parcels.plot(ax=ax, column="layer", cmap=_CMAP, vmin=1, vmax=vmax,
-                 edgecolor="#999999", linewidth=0.3)
+    # 13, not a bare 12: empirically (a real shipped before.jpg at the old figsize=(10,10) crops
+    # to ~0.80 of its nominal canvas under bbox_inches="tight" -- the colorbar + margins are a
+    # roughly fixed inches-fraction of the figure, not data-dependent) a bare (12, 12) tight-crops
+    # to ~2880 px long edge, just under the >=3000 px poster target; 13 clears it with margin.
+    fig, ax = plt.subplots(figsize=(13, 13))
+    parcels.plot(ax=ax, column="layer", cmap=cmap, vmin=vmin, vmax=vmax,
+                 edgecolor="#999999", linewidth=0.4)
 
     view = frame if frame is not None else frame_bbox(block.parcels)
     ax.set_xlim(view[0], view[2])
@@ -132,7 +143,7 @@ def _draw_heatmap(
     # Dimmed context (neighbouring blocks' outlines + building points), drawn under the
     # selection's own boundary/streets/points so the selection reads unambiguously on top.
     if context_outlines is not None and not context_outlines.empty:
-        context_outlines.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.3)
+        context_outlines.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.4)
     if context_points is not None and not context_points.empty:
         _point_disks(context_points, _POINT_RADIUS_M).plot(
             ax=ax, color=_CONTEXT_PT, alpha=0.6, linewidth=0)
@@ -143,13 +154,13 @@ def _draw_heatmap(
     # misleading convex-hull-like outline across the empty gaps between members).
     if isinstance(block.boundary, Polygon):
         gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
-            ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
+            ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
     # The existing street network. For a single block this is the outer ring; for a region it also
     # carries the inter-block streets between members -- existing egress the 'before' access depth
     # is measured against, so they must be visible (a parcel next to one is shallow, not deep). For
     # a gappy region this IS the region outline (the boundary above is skipped).
     if block.streets is not None and not block.streets.empty:
-        block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.0)
+        block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
 
     if own_points is not None and not own_points.empty:
         _point_disks(own_points, _POINT_RADIUS_M).plot(ax=ax, color=_OWN_PT, linewidth=0)
@@ -163,8 +174,10 @@ def _draw_heatmap(
         colors = [(1.0, 0.0, 0.0, float(ci)) for ci in displaced_points["c"].to_numpy()]
         disks.plot(ax=ax, color=colors, zorder=5, linewidth=0)
 
-    sm = plt.cm.ScalarMappable(cmap=_CMAP, norm=Normalize(vmin=1, vmax=vmax))
-    fig.colorbar(sm, ax=ax).set_label("access depth (parcels from a street)")
+    sm = plt.cm.ScalarMappable(cmap=cmap, norm=Normalize(vmin=vmin, vmax=vmax))
+    cb = fig.colorbar(sm, ax=ax)
+    cb.set_label(_FIELD_LABEL[field], fontsize=13)
+    cb.ax.tick_params(labelsize=11)
 
     ax.set_aspect("equal")
     ax.axis("off")
@@ -172,24 +185,28 @@ def _draw_heatmap(
 
 
 def render_before(
-    block: Block, layers: pd.Series, *, vmax: int,
+    block: Block, layers: pd.Series, *, vmax: float,
+    field: Literal["depth", "perm"] = "depth",
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
     own_points: gpd.GeoDataFrame | None = None,
     frame: BBox | None = None,
 ) -> Figure:
-    """Status-quo access-depth heatmap for `block` (method-independent)."""
+    """Status-quo heatmap for `block` (method-independent). `field` selects the coloring:
+    `"depth"` (default) colors by the access-depth `layers`; `"perm"` colors by per-parcel egress
+    potential (see the module docstring)."""
     fig = _draw_heatmap(
-        block, layers, vmax,
+        block, layers, vmax, field=field,
         context_outlines=context_outlines, context_points=context_points, own_points=own_points,
         frame=frame,
     )
-    fig.axes[0].set_title(f"{title_label(block.block_id)} — before")
+    fig.axes[0].set_title("before", fontsize=16)
     return fig
 
 
 def render_after(
-    block: Block, proposal: Proposal, layers: pd.Series, *, vmax: int,
+    block: Block, proposal: Proposal, layers: pd.Series, *, vmax: float,
+    field: Literal["depth", "perm"] = "depth",
     metrics: Metrics | None = None,
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
@@ -197,11 +214,11 @@ def render_after(
     displaced_points: gpd.GeoDataFrame | None = None,
     frame: BBox | None = None,
 ) -> Figure:
-    """Post-intervention access-depth heatmap for `block`, plus `proposal.roads`. `displaced_points`
-    (own building sites, each carrying a displacement fraction `c` and disk `radius`, see emit.py)
-    are shaded grey->red by `c`."""
+    """Post-intervention heatmap for `block`, plus `proposal.roads`. `field` selects the coloring
+    (see `render_before`). `displaced_points` (own building sites, each carrying a displacement
+    fraction `c` and disk `radius`, see emit.py) are shaded grey->red by `c`."""
     fig = _draw_heatmap(
-        block, layers, vmax,
+        block, layers, vmax, field=field,
         context_outlines=context_outlines, context_points=context_points, own_points=own_points,
         displaced_points=displaced_points,
         frame=frame,
@@ -213,12 +230,12 @@ def render_after(
             geometry=proposal.roads.geometry.buffer(corridor_m), crs=block.crs)
         roads_buffered.plot(ax=ax, color=_ROAD_COLOR, zorder=4)
 
-    title = f"{title_label(block.block_id)} — after"
+    title = "after"
     if metrics is not None:
         delta_k = metrics.values.get("delta_k")
         if delta_k is not None:
             title += f" (Δk={delta_k:.0f})"
-    ax.set_title(title)
+    ax.set_title(title, fontsize=16)
     return fig
 
 

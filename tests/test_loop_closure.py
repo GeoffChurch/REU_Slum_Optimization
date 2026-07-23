@@ -9,7 +9,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock import derive_graph
-from reblock.budget import _noded_graph, commute_ratio
+from reblock.budget import _noded_graph
 from reblock.contracts import Block, Proposal
 from reblock.methods.loop_closure import (
     LoopClosureIdentity,
@@ -322,12 +322,12 @@ class _RefinerKw(TypedDict):
 
 _REFINER_KW: _RefinerKw = {"search_radius_m": 2.5, "min_loop_len_m": 5.0, "snap_lam": 2.0}
 
-# A dedicated fixture for the commute_ratio assertion: taller (1x2, not 1x1) parcels than
-# `_gap_parcels()` so each parcel's centroid is strictly closer to its spur than to the street
-# (0.5 m vs 1.0 m) -- `_gap_parcels()`'s 1x1 squares are EXACTLY tied (0.5 m to both), and
-# `commute_ratio`'s `STRtree.nearest` line-proximity pick breaks that tie in an
-# implementation-defined way that (here) always lands on a street-only edge, making every parcel
-# skip (both endpoints already street nodes) and the metric read 0.0 for every road set.
+# A dedicated fixture, historically built for a since-retired internal-connectivity-ratio
+# assertion: taller (1x2, not 1x1) parcels than `_gap_parcels()` so each parcel's centroid is
+# strictly closer to its spur than to the street (0.5 m vs 1.0 m) -- `_gap_parcels()`'s 1x1
+# squares are EXACTLY tied (0.5 m to both), which broke that retired metric's line-proximity
+# entry pick. Kept as the fixture for the loop-closure/bridge-count assertion below (geometry-
+# only; unaffected by the tie).
 
 
 def _ratio_parcels() -> gpd.GeoDataFrame:
@@ -390,7 +390,7 @@ def test_loop_closure_refiner_default_max_candidates_is_the_plateau() -> None:
     assert refiner.max_candidates == 1500
 
 
-def test_loop_closure_refiner_adds_loop_reduces_bridges_and_raises_commute_ratio() -> None:
+def test_loop_closure_refiner_adds_loop_and_reduces_bridges() -> None:
     block = _ratio_block()
     base_roads = _ratio_base_roads()
     base_prop = _base_proposal(block, base_roads)
@@ -401,7 +401,6 @@ def test_loop_closure_refiner_adds_loop_reduces_bridges_and_raises_commute_ratio
     before_bridges = len(list(nx.bridges(_noded_graph(base_roads, block.streets))))
     after_bridges = len(list(nx.bridges(_noded_graph(out.roads, block.streets))))
     assert after_bridges < before_bridges
-    assert commute_ratio(block, out.roads) > commute_ratio(block, base_roads)
 
 
 def test_loop_closure_refiner_budget_frac_caps_added_length() -> None:

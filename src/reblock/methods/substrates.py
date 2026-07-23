@@ -119,11 +119,11 @@ def _boundary_vertices(
     parcels: gpd.GeoDataFrame,
 ) -> tuple[NDArray[np.float64], dict[tuple[float, float], int], set[frozenset[int]]]:
     """The parcel-tessellation boundary graph as (node coords, coord->index map, boundary-edge
-    set). Nodes are the boundary vertices (snapped to cm by dijkstra._rnd), edges the party-wall
-    segments. Shared node set for the chord / spanner / cdt substrates — nodes sit in the gaps
-    between buildings, never on them."""
-    from reblock.methods import dijkstra as dijkstra_mod
-    g = dijkstra_mod._boundary_graph(parcels)
+    set). Nodes are the boundary vertices (snapped to cm by boundary_graph._rnd), edges the
+    party-wall segments. Shared node set for the chord / spanner / cdt substrates — nodes sit in
+    the gaps between buildings, never on them."""
+    from reblock.methods import boundary_graph
+    g = boundary_graph._boundary_graph(parcels)
     nodes_sorted = sorted(g.nodes())
     node_idx = {n: i for i, n in enumerate(nodes_sorted)}
     pts = np.asarray(nodes_sorted, dtype=np.float64)
@@ -146,12 +146,12 @@ class ChordSubstrate:
         return "chord_diag"
 
     def build(self, block: Block) -> RoutingGraph:
-        from reblock.methods import dijkstra as dijkstra_mod
+        from reblock.methods import boundary_graph
         pts, node_idx, edges = _boundary_vertices(block.parcels)
         for geom in block.parcels.geometry:
             coords = list(cast(Polygon, geom).exterior.coords)[:-1]     # drop closing duplicate
             ring = [node_idx[ni] for c in coords
-                    if (ni := dijkstra_mod._rnd(cast(tuple[float, float], c))) in node_idx]
+                    if (ni := boundary_graph._rnd(cast(tuple[float, float], c))) in node_idx]
             m = len(ring)
             if m < 3:
                 continue

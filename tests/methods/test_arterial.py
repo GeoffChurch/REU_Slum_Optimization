@@ -22,7 +22,7 @@ from reblock.methods.arterial import (
     _snap,
     _snap_graph,
 )
-from reblock.methods.dijkstra import _boundary_graph
+from reblock.methods.boundary_graph import _boundary_graph
 
 UTM = CRS.from_epsg(32643)
 
@@ -266,13 +266,14 @@ def test_greedy_is_deterministic() -> None:
 
 
 def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
-    from reblock.budget import cost_benefit_curve, road_drainage
+    from reblock.budget import road_drainage
+    from reblock.permeability import PermeabilityParams, permeability_curve
     block = _grid_block(6)
     roads = _greedy_arterials(block, mode="buildable", objective="directness",
                               max_roads=5, n_anchors=12)
     assert len(roads) >= 1
     assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
-    curve = cost_benefit_curve(block, roads)                     # integrates with budget machinery
+    curve = permeability_curve(block, roads, PermeabilityParams())  # integrates w/ budget machinery
     assert len(curve.cost) >= 2                                  # multiple budget points, not stub
     assert curve.benefit[-1] >= curve.benefit[0]                 # benefit doesn't regress w/ budget
 
@@ -390,23 +391,6 @@ def _deep_block() -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (0.0, 9.0)])], crs=UTM)
     return Block(block_id="deep", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
-
-
-def test_buildable_arterial_more_direct_than_dijkstra() -> None:
-    # The buildable arterial's raison d'etre: on a deep block it beats the tree method's tendrils
-    # on directness (demonstrated ~10x on a real DJI block; asserted here on a fast synthetic
-    # deep block). This is the sub-project's headline value claim.
-    from reblock.budget import auc, efficiency_directness_curves
-    from reblock.methods.dijkstra import DijkstraReblocker
-    block = _deep_block()
-    art = GreedyArterialReblocker(mode="buildable", objective="directness",
-                                  n_anchors=12, max_roads=4).propose(block).roads
-    dij = DijkstraReblocker().propose(block).roads
-    assert art is not None and dij is not None
-    _, dc_art = efficiency_directness_curves(block, art)
-    _, dc_dij = efficiency_directness_curves(block, dij)
-    cap = max(dc_art.cost[-1], dc_dij.cost[-1])
-    assert auc(dc_art, cap) > auc(dc_dij, cap)
 
 
 def _holed_block() -> Block:

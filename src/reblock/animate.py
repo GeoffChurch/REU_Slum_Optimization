@@ -1,5 +1,5 @@
-"""Prefix sweeps over a method's roads added in drainage order: render them into a per-method GIF
-(`reblock_gif`) or read the region's max access-depth at each budget (`depth_sweep`).
+"""Prefix sweeps over a method's roads added in drainage order, rendered into a per-method GIF
+(`reblock_gif`).
 
 Every prefix is an independent access peel, so the sweep runs across a fork `ProcessPoolExecutor`
 (a 16-frame GIF collapses to ~one frame's wall-clock). The block is shared into workers by fork
@@ -69,13 +69,6 @@ def _frame_png(task: tuple[int, float]) -> tuple[int, bytes]:
     return idx, buf.getvalue()
 
 
-def _max_depth(task: tuple[int, float]) -> tuple[int, float]:
-    idx, cutoff = task
-    k, prefix = _prefix_at(cutoff)
-    layers = parcel_access_layers(_CTX["block"], prefix if k else None)
-    return idx, (float(layers.max()) if len(layers) else 0.0)
-
-
 def reblock_gif(block: Block, roads: GeoDataFrame, out_path: Path, *, vmax: int,
                 frame: tuple[float, float, float, float], frames: int = 16,
                 tol: float = STREET_TOL, dpi: int = 68, hold_last: int = 4) -> None:
@@ -93,18 +86,3 @@ def reblock_gif(block: Block, roads: GeoDataFrame, out_path: Path, *, vmax: int,
     durations[-1] = 220 * hold_last                  # hold the finished network before looping
     imgs[0].save(out_path, save_all=True, append_images=imgs[1:], duration=durations,
                  loop=0, optimize=True, disposal=2)
-
-
-def depth_sweep(block: Block, roads: GeoDataFrame, *, n_points: int = 24,
-                tol: float = STREET_TOL) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """`(cutoffs, max_depths)`: the region's MAX access-depth as `roads` is added in drainage order,
-    at `n_points` cumulative-length budgets. Empty roads -> a single (0, max-depth) sample."""
-    if roads is None or len(roads) == 0:
-        base = parcel_access_layers(block, None)
-        d = float(base.max()) if len(base) else 0.0
-        return np.array([0.0]), np.array([d])
-    ordered, cumlen, cutoffs = _prefixes(block, roads, n_points, tol)
-    _CTX.update(block=block, ordered=ordered, cumlen=cumlen)
-    res = _run_parallel(_max_depth, list(enumerate(cutoffs)))
-    depths = np.array([d for _, d in sorted(res)], dtype=np.float64)
-    return cutoffs, depths

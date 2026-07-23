@@ -2,7 +2,7 @@ defaults:
   - data: phule
   - screen: identity
   - region_builder: identity
-  - method: dijkstra
+  - method: clearance
   - eval: kcomplexity
   - substrate: chord_diag
   - desire_source: osm

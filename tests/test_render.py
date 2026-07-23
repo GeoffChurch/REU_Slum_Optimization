@@ -3,6 +3,7 @@ from typing import cast
 
 import geopandas as gpd
 import matplotlib
+import pandas as pd
 import pytest
 
 matplotlib.use("Agg")
@@ -116,6 +117,80 @@ def test_render_after_accepts_optional_metrics() -> None:
     fig = render_after(block, proposal, layers, vmax=2, metrics=metrics)
 
     assert isinstance(fig, Figure)
+
+
+def _potentials(block: Block) -> pd.Series:
+    # A stand-in for permeability.parcel_potentials: a continuous, non-integer per-parcel series
+    # indexed by parcel_id, monotonically increasing so vmax = its max is unambiguous.
+    return pd.Series(
+        [0.1 * i for i in range(len(block.parcels))],
+        index=pd.Index(block.parcels["parcel_id"], name="parcel_id"))
+
+
+def test_render_before_defaults_to_depth_field() -> None:
+    # Backward-friendly: an existing caller that never passes `field=` still gets the depth
+    # coloring (vmin=1, YlOrRd), unchanged from before the perm coloring was added.
+    block = _grid_block(3)
+    layers = parcel_access_layers(block, None)
+
+    fig = render_before(block, layers, vmax=2)
+
+    fill = cast(PatchCollection, fig.axes[0].collections[0])
+    assert fill.get_clim() == (1, 2)
+    assert fill.get_cmap().name == "YlOrRd"
+
+
+def test_render_before_perm_field_uses_perm_cmap_and_zero_vmin() -> None:
+    # field="perm" colors by the continuous egress-potential series (Task 5 supplies it from
+    # permeability.parcel_potentials), normalized to [0, series.max()] -- a different vmin/cmap
+    # from the depth coloring.
+    block = _grid_block(3)
+    potentials = _potentials(block)
+
+    fig = render_before(block, potentials, vmax=float(potentials.max()), field="perm")
+
+    fill = cast(PatchCollection, fig.axes[0].collections[0])
+    assert fill.get_clim() == pytest.approx((0.0, float(potentials.max())))
+    assert fill.get_cmap().name != "YlOrRd"    # visually distinct from the depth coloring
+
+
+def test_render_after_perm_field_renders_and_writes_a_file(tmp_path: Path) -> None:
+    block = _grid_block(3)
+    proposal = _connector_proposal(block)
+    potentials = _potentials(block)
+
+    fig = render_after(block, proposal, potentials, vmax=float(potentials.max()), field="perm")
+    out = tmp_path / "perm_after.png"
+    save_render(fig, out)
+
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_render_before_and_after_titles_have_no_block_id() -> None:
+    # Global cleanup: no plot title identifies the block/region by id.
+    block = _grid_block(3)
+    proposal = _connector_proposal(block)
+    layers = parcel_access_layers(block, proposal.roads)
+
+    fig_before = render_before(block, layers, vmax=2)
+    fig_after = render_after(block, proposal, layers, vmax=2)
+
+    assert fig_before.axes[0].get_title() == "before"
+    assert fig_after.axes[0].get_title() == "after"
+    assert block.block_id not in fig_before.axes[0].get_title()
+    assert block.block_id not in fig_after.axes[0].get_title()
+
+
+def test_draw_heatmap_uses_poster_figsize() -> None:
+    # Bumped from the pre-poster (10, 10) -- 13 (not a bare 12) so the saved PNG still clears
+    # >=3000 px on the long edge at save_render's dpi=300 after bbox_inches="tight" cropping
+    # (empirically ~0.80 of nominal canvas; see the comment at the figsize call site).
+    block = _grid_block(3)
+    layers = parcel_access_layers(block, None)
+
+    fig = render_before(block, layers, vmax=2)
+
+    assert tuple(fig.get_size_inches()) == (13.0, 13.0)
 
 
 def test_save_render_writes_a_nonempty_file(tmp_path: Path) -> None:
@@ -257,11 +332,3 @@ def test_displaced_points_carry_fraction_and_radius(tmp_path):
     assert "c" in disp.columns and "radius" in disp.columns
     assert (disp["c"] > 0).any() and (disp["c"] <= 1).all()
 
-
-def test_matched_budget_is_min_total_over_methods():
-    # The two-lens compare driver's fair per-method budget (scripts/compare_budgets.py, Lens B):
-    # the sparsest method's total road length, so every method's truncated prefix is reachable.
-    from reblock.budget import matched_budget
-    lengths = {"a": 100.0, "b": 40.0, "c": 61.0}
-    assert matched_budget(lengths) == 40.0
-    assert matched_budget({}) == 0.0

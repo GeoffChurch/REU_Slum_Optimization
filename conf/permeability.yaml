@@ -1,0 +1,16 @@
+# Permeability metric params + the two universal calibration thresholds. The thresholds were set
+# 2026-07-22 from scripts/calibrate_permeability.py's frontiers (Task 3 checkpoint, owner sign-off):
+# methods converge at low displacement (mostly <20%), so D=10% is the matched level where >=2
+# methods are still building; P*=0.4 is reached by 16/21 (method,region) pairs, cheaply for the
+# strong methods, and honestly missed by the sparse/weak ones.
+g_walk: 1.0
+g_road: 20.0
+g_street: 20.0
+corridor_m: 3.0
+# Lens A -- matched displacement %: truncate every method to its first prefix at/after this
+# displacement fraction, then compare permeability reached at that equal home-cost.
+matched_displacement: 0.10   # 10% of homes (Lens A)
+# Lens B -- matched permeability: truncate every method to its first prefix reaching this
+# permeability level, then compare displacement cost to get there (a method whose full network
+# never reaches it reads as "unreached").
+matched_permeability: 0.40   # permeability >= 0.40 (Lens B)

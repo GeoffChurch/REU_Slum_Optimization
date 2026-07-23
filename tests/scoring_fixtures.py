@@ -1,13 +1,13 @@
 """Fixture builders shared by the scoring-equivalence harness (tests/test_scoring_equivalence.py)
 and reused by later perf-refactor tasks. Reloads the 1808 sample block + its road sets (no
-`propose()` calls) and pairs them with the reference (E, directness, curves, AUC) values pinned
-in `tests/data/scoring/ref_values_1808.json`.
+`propose()` calls) and pairs them with the reference (E, directness) values pinned in
+`tests/data/scoring/ref_values_1808.json`.
 
 Also builds the three fixture families the design's "Correctness strategy" requires beyond 1808
 (a coincident-entry case, a sparse straight chord, and the deep 2-block region), pinned in
 `tests/data/scoring/ref_values_extra.json`. Values in both JSON files were captured from the
-CURRENT (pre-refactor, verified-correct) `network_efficiency`/`efficiency_directness_curves`/`auc`
--- that output IS the ground truth this harness protects."""
+CURRENT (pre-refactor, verified-correct) `network_efficiency` -- that output IS the ground truth
+this harness protects."""
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -101,10 +101,9 @@ def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str, block_id: s
 
 
 def _region_deep() -> Block:
-    """The deep region fixture from `test_region.py`
-    (`test_greedy_arterial_beats_dijkstra_directness_auc_on_a_deep_region`): two 3x6 blocks
-    joined by `region_block`, frontage on opposite outer short ends, so the joined interior is
-    deep/meshy -- deeper than the compact 10-parcel 1808 block."""
+    """A deep 2-block region fixture: two 3x6 blocks joined by `region_block`, frontage on
+    opposite outer short ends, so the joined interior is deep/meshy -- deeper than the compact
+    10-parcel 1808 block."""
     a = _grid_block(0, 0, 3, 6, "bottom", "a")
     b = _grid_block(3, 0, 3, 6, "top", "b")
     return region_block([a, b])
@@ -113,7 +112,7 @@ def _region_deep() -> Block:
 def sampled_fixtures() -> list[tuple[str, Block, gpd.GeoDataFrame | None, dict[str, Any]]]:
     b1808 = _block_1808()
     fixtures = [(k, b1808, _roads(b1808, _REF, k), _REF[k])
-               for k in ("no_roads", "dijkstra", "arterial_buildable")]
+               for k in ("no_roads", "least_cost", "arterial_buildable")]
 
     coincident = _block_coincident()
     fixtures.append(("coincident", coincident, None, _REF_EXTRA["coincident"]))
@@ -123,7 +122,7 @@ def sampled_fixtures() -> list[tuple[str, Block, gpd.GeoDataFrame | None, dict[s
     fixtures.append(("sparse_chord", sparse_chord_block, chord, _REF_EXTRA["sparse_chord"]))
 
     region = _region_deep()
-    for k in ("deep_region_dijkstra", "deep_region_arterial"):
+    for k in ("deep_region_least_cost", "deep_region_arterial"):
         fixtures.append((k, region, _roads(region, _REF_EXTRA, k), _REF_EXTRA[k]))
 
     return fixtures

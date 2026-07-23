@@ -34,7 +34,7 @@ from reblock.emit import region_map
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, block_depths
 from reblock.render import google_maps_url
-from scripts.compare_budgets import run_two_lens
+from scripts.compare_budgets import load_permeability_config, run_permeability_lenses
 from scripts.gen_example_readme import write_readme
 
 
@@ -103,9 +103,20 @@ def main() -> None:
     out = (Path(f"examples/multiblock_{metric_name}") if city == "capetown"
            else Path(f"examples/{city}/multiblock_{metric_name}"))
     out.mkdir(parents=True, exist_ok=True)
-    # Clear stale per-method artifacts so a changed method set leaves no orphans (all regenerated below).
-    for stale in (*out.glob("reblock_*.gif"), *out.glob("after_*.jpg")):
-        stale.unlink()
+    # Clear stale artifacts so a changed method set -- or the retired two-lens/external-internal
+    # surface a committed example dir predates (lens_a_external.csv, curve_{external,internal}_
+    # connectivity_*.png, depth_vs_road_*.png, displacement_*.png/*.csv,
+    # frontier_{external,internal}_connectivity.csv) -- leaves no orphans (all regenerated below).
+    for pattern in ("reblock_*.gif", "after_*.jpg", "curve_*.png", "depth_vs_road_*.png",
+                    "displacement_*.png"):
+        for stale in out.glob(pattern):
+            stale.unlink()
+    for name in ("displacement_table.csv", "displacement_vs_length.csv",
+                "frontier_external_connectivity.csv", "frontier_internal_connectivity.csv",
+                "lens_a_external.csv", "lens_b_matched.csv"):
+        stale_path = out / name
+        if stale_path.exists():
+            stale_path.unlink()
     with _tee_to_file(out / "run.log"):
         with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
             cfg = compose(config_name="compare_config", overrides=[
@@ -156,7 +167,10 @@ def main() -> None:
             with open_dict(cfg):
                 cfg.desire_source.snapshot = str(snapshot)
             methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
-        run_two_lens(region, methods, 0.70, out, label=seed)
+        params, matched_displacement, matched_permeability = load_permeability_config()
+        run_permeability_lenses(region, methods, out, matched_displacement=matched_displacement,
+                                matched_permeability=matched_permeability, params=params,
+                                label=seed)
 
         depths = block_depths(source, members)
         dens = {b.block_id: len(b.parcels) / b.parcels.geometry.union_all().area * 1e4 for b in region}

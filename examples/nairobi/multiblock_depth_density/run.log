@@ -1,1 +1,3 @@
+[reblock.screen.dense_compact][INFO] fine pass: 3354 survivors across 16 fork workers
+[reblock.screen.dense_compact][INFO] screen: 3354/16200 blocks selected by metric=depth_density (needs_peel=True)
 wrote examples/nairobi/multiblock_depth_density: 7 blocks / 5095 parcels; flagged 3354/16200; README + maps + lens CSVs

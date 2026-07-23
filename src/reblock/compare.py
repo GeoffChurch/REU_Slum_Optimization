@@ -1,6 +1,6 @@
-"""Hydra entrypoint: sweep cost_benefit_curve over screened blocks/regions x a list of
-methods, emit the aggregate AUC table + per-region curve plots. Config only at the edge
-(like run.py).
+"""Hydra entrypoint: sweep permeability_curve/displacement_curve over screened blocks/regions x a
+list of methods, emit the permeability-vs-displacement frontier + per-region curve plot. Config
+only at the edge (like run.py).
 """
 from __future__ import annotations
 
@@ -16,27 +16,31 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf, open_dict
 from shapely.ops import unary_union
 
-from reblock.budget import (
-    Curve,
-    access_benefit,
-    building_radii,
-    commute_ratio_benefit,
-    cost_benefit_curve,
-    displacement_curve,
-)
+from reblock.budget import Curve, building_radii, displacement_curve
 from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
 from reblock.emit import compare_report as compare_report
 from reblock.emit import pct_displaced, pct_paved
+from reblock.permeability import PermeabilityParams, permeability_curve
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, region_reblock
 from reblock.render import google_maps_url, short_label
 
 log = logging.getLogger(__name__)
 
-# The three-metric basis every method is graded on: external connectivity (access-burden removed,
-# `access_benefit`), internal connectivity (backup-route redundancy, `commute_ratio_benefit`), and
-# displacement (a rising cost, never inverted -- see `displacement_curve`).
+# The two-metric basis every method is graded on: permeability (collective-egress benefit, a
+# grounded electrical flow -- see reblock.permeability) and displacement (a rising cost, never
+# inverted -- see `displacement_curve`). One frontier: permeability (y) vs displacement (x).
+
+
+def _load_permeability_params(config_dir: Path = Path("conf")) -> PermeabilityParams:
+    """`conf/permeability.yaml`'s metric params (`g_walk`/`g_road`/`g_street`/`corridor_m`) --
+    mirrors `scripts.compare_budgets.load_permeability_config`'s params half; `compare()` has no
+    use for the two lens thresholds (matched_displacement/matched_permeability), which only the
+    two-lens driver consumes."""
+    raw = cast(DictConfig, OmegaConf.load(config_dir / "permeability.yaml"))
+    return PermeabilityParams(g_walk=float(raw.g_walk), g_road=float(raw.g_road),
+                              g_street=float(raw.g_street), corridor_m=float(raw.corridor_m))
 
 
 @dataclass(frozen=True)
@@ -53,7 +57,7 @@ def _region_label(region: list[Block]) -> str:
     """The MethodCurve row label: the plain block_id for a singleton region (unchanged from
     before regions existed), else its members' ids joined ('+'-separated, sorted for
     determinism) -- `short_label`-truncated with a stable hash suffix if that would make an
-    unreasonably long filename in compare_report's curve_{metric}_{label}.png."""
+    unreasonably long filename in compare_report's frontier_{label}.png."""
     if len(region) == 1:
         return region[0].block_id
     return short_label("+".join(sorted(b.block_id for b in region)))
@@ -94,11 +98,12 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
     _expand_method_sweep(cfg, names, methods)   # optional: sweep one base method over a param
     regions = build_regions(source, screen, region_builder, block_groups, cfg.max_blocks)
     corridor_m = float(cfg.get("corridor_m", 3.0))
+    params = _load_permeability_params()
 
     # one curve per (region, method, metric); the stored Curve.cost is always cumulative added
     # road length (m) -- metric-independent, so no shared cap needs computing. (emit.compare_report
-    # re-plots the two benefit metrics' curves against cumulative displacement instead, for
-    # display only -- this stored cost is unaffected.)
+    # re-plots the permeability curve against cumulative displacement instead, for display only --
+    # this stored cost is unaffected.)
     raw: list[tuple[str, str, str, Curve, float, float]] = []
     for region in regions:
         if not region:
@@ -125,11 +130,9 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
             radii = building_radii(block.building_points, corridor_m)
             pp = pct_paved(roads, corridor_m, block_area)
             pd_ = pct_displaced(roads, corridor_m, block.building_points, radii)
-            external = cost_benefit_curve(block, roads, benefit_fn=access_benefit)
-            internal = cost_benefit_curve(block, roads, benefit_fn=commute_ratio_benefit)
+            perm = permeability_curve(block, roads, params)
             disp = displacement_curve(block, roads, radii, corridor_m=corridor_m)
-            raw.append((name, label, "external_connectivity", external, pp, pd_))
-            raw.append((name, label, "internal_connectivity", internal, pp, pd_))
+            raw.append((name, label, "permeability", perm, pp, pd_))
             raw.append((name, label, "displacement", disp, pp, pd_))
     # No cross-method normalization: the frontier is reported as raw (road length, benefit)
     # samples per method (see emit.compare_report), so there's no shared cost cap to compute.
@@ -146,12 +149,12 @@ def main(cfg: DictConfig) -> None:
     # every method that could appear in `results`. A method's colour is its index here -- the full
     # registry, not the run's selected subset -- so it stays put when a pass drops another method.
     compare_report(results, out_dir, method_order=[str(k) for k in cfg.all_methods])
-    # Log each method's terminal: the two benefit metrics (benefit, road length, %paved) -- no
-    # scalar rank -- and the displacement metric (rising cost, never inverted) separately.
+    # Log each method's terminal: permeability (benefit, road length, %paved) -- no scalar rank --
+    # and displacement (rising cost, never inverted) separately.
     for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):
         if r.metric == "displacement":
-            log.info("%s %s: %.1f displaced (%.1f%% of homes)", r.block_id, r.method,
-                     r.curve.benefit[-1], r.pct_displaced * 100)
+            log.info("%s %s: %.1f%% of homes displaced", r.block_id, r.method,
+                     r.pct_displaced * 100)
         else:
             log.info("%s %s %s: benefit=%.3f at %.0f m (%.1f%% paved)", r.metric, r.block_id,
                      r.method, r.curve.benefit[-1], r.curve.cost[-1], r.pct_paved * 100)

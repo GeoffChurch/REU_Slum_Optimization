@@ -38,7 +38,7 @@ from reblock.budget import (
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.dijkstra import _boundary_graph, _rnd
+from reblock.methods.boundary_graph import _boundary_graph, _rnd
 
 
 def _xy(c: tuple[float, ...]) -> tuple[float, float]:

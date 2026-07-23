@@ -1,5 +1,0 @@
-method,target_ext,reached,reached_ext,road_length_m,displacement,pct_displaced,propose_seconds
-greedy_arterial_repulsion,0.70,True,0.7089,3430.7,272.2,0.1012,0.0
-clearance_looped,0.70,True,0.7053,1769.6,206.7,0.0768,0.0
-euclidean_grid,0.70,True,0.7006,2931.5,304.2,0.1131,0.0
-osm_footpaths,0.70,False,0.6396,6504.7,485.8,0.1806,0.0

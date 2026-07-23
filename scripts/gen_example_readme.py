@@ -1,9 +1,11 @@
 """Machine-generated README for a metric example variant. PURE dir-reader: reads the run outputs
-already on disk (meta.json of structured stats, the frontier curve PNGs, figure files) and returns
-the markdown. Each section is emitted only if its artifacts are present, so the numbers can never
-drift from the data and a partial run yields a partial (never-erroring) README."""
+already on disk (meta.json of structured stats, the frontier curve PNG, the two lens CSVs, and
+figure files) and returns the markdown. Each section is emitted only if its artifacts are present,
+so the numbers can never drift from the data and a partial run yields a partial (never-erroring)
+README."""
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -12,9 +14,15 @@ def _n(x: float) -> str:
     return f"{x:,.0f}"
 
 
-def _after_method(name: str) -> str:
-    # after_<method>_<tag>.jpg -> <method> (tag = matched | extNN; method may contain underscores)
-    return name[len("after_"):-len(".jpg")].rpartition("_")[0]
+def _pct(x: str) -> str:
+    return f"{float(x) * 100:.1f}%"
+
+
+def _after_method(name: str, lens: str, coloring: str) -> str:
+    # after_<method>_<lens>_<coloring>.jpg -> <method> (method may itself contain underscores, so
+    # strip the exact known prefix/suffix rather than splitting on "_").
+    suffix = f"_{lens}_{coloring}.jpg"
+    return name[len("after_"):-len(suffix)]
 
 
 def _gif_method(name: str) -> str:
@@ -27,6 +35,45 @@ def _img_table(items: list[tuple[str, str]]) -> str:
     sep = "|" + "|".join(["---"] * len(items)) + "|"
     cells = " | ".join(f"![{lbl}]({fn})" for lbl, fn in items)
     return f"{head}\n{sep}\n| {cells} |\n"
+
+
+def _lens_rows(csv_path: Path) -> dict[str, dict[str, str]]:
+    with csv_path.open(newline="") as f:
+        return {row["method"]: row for row in csv.DictReader(f)}
+
+
+def _lens_methods(run_dir: Path, lens: str, rows: dict[str, dict[str, str]]) -> list[str]:
+    # canonical method order for a lens: the "depth"-coloring image glob if present (so the two
+    # coloring image tables AND the CSV-derived table below all share one column order); falls
+    # back to the CSV's own row order if no images are present (partial run).
+    depth_imgs = sorted(run_dir.glob(f"after_*_{lens}_depth.jpg"))
+    if depth_imgs:
+        return [_after_method(p.name, lens, "depth") for p in depth_imgs]
+    return list(rows)
+
+
+def _lens_table(rows: dict[str, dict[str, str]], methods: list[str], *,
+                flag_col: str, unmet_note: str) -> str:
+    lines = ["| Method | Road | Displacement | Permeability | Note |", "|---|---|---|---|---|"]
+    for m in methods:
+        row = rows.get(m)
+        if row is None:
+            continue
+        met = row[flag_col] == "True"
+        note = "" if met else unmet_note
+        lines.append(f"| {m} | {_n(float(row['road_m']))} m | {_pct(row['displacement'])} | "
+                     f"{_pct(row['permeability'])} | {note} |")
+    return "\n".join(lines) + "\n"
+
+
+def _lens_images(run_dir: Path, lens: str, coloring: str,
+                 methods: list[str]) -> list[tuple[str, str]]:
+    items: list[tuple[str, str]] = []
+    for m in methods:
+        fn = f"after_{m}_{lens}_{coloring}.jpg"
+        if (run_dir / fn).exists():
+            items.append((m, fn))
+    return items
 
 
 def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: str) -> str:
@@ -65,55 +112,82 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                      f"{region_mean_density:.0f} bldg/ha.\n")
         if (run_dir / "region.jpg").exists():
             parts.append("![region](region.jpg)\n")
-    depth_curve = sorted(run_dir.glob("depth_vs_road_*.png"))
-    curve_ext = sorted(run_dir.glob("curve_external_connectivity_*.png"))
-    curve_int = sorted(run_dir.glob("curve_internal_connectivity_*.png"))
-    curve_disp = sorted(run_dir.glob("displacement_*.png"))
-    if depth_curve or curve_ext or curve_int or curve_disp:
-        parts.append("## 3. The method frontier (benefit vs added road)\n")
-        if depth_curve:
-            parts.append("How far each method's road drives the region's **max access depth**, "
-                         "shown **for reference** (the method budget below is now the "
-                         "external-connectivity outcome) — a dot marks where it first reaches each "
-                         "new integer depth. `clearance` is **continued past its depth target** (a "
-                         "full-drainage run) out to the longest method's road, so every method is "
-                         "compared at the same budget: the as-built `osm_footpaths` network "
-                         "plateaus at its floor while `clearance` reaches the same depth for a "
-                         "fraction of the road:\n")
-            for p in depth_curve:
-                parts.append(f"![access depth vs added road]({p.name})\n")
-    if curve_ext or curve_int or curve_disp:
-        parts.append("Each method's benefit as cumulative added road grows — the full trade-off "
-                     "whose fixed-depth and matched-budget slices are tabulated in "
-                     "`lens_a_external.csv` and `lens_b_matched.csv` (this dir). External "
-                     "connectivity (access burden removed), internal connectivity (backup-route "
-                     "redundancy), and displacement (a rising cost):\n")
-        for caption, pngs in (("external connectivity", curve_ext),
-                              ("internal connectivity", curve_int),
-                              ("displacement", curve_disp)):
-            for p in pngs:
-                parts.append(f"![{caption}]({p.name})\n")
+
+    # §3: the single permeability frontier -- permeability (benefit, the only benefit axis) vs
+    # displacement (cost, the only cost axis), one line per method; Pareto-dominance reads straight
+    # off it. Gated on the frontier PNG existing (the raw per-method samples backing every point
+    # are in frontier_permeability.csv, alongside it -- not embedded, just present).
+    frontier_pngs = sorted(run_dir.glob("frontier_*.png"))
+    if frontier_pngs:
+        parts.append("## 3. The permeability frontier (benefit vs added road)\n")
+        parts.append("The frontier is the whole trade-off: **permeability** (benefit — the only "
+                     "benefit axis) on the y-axis against **displacement** (cost — the only cost "
+                     "axis) on the x-axis, one line per method. Pareto-dominance — which method "
+                     "buys more permeability for less displacement — reads straight off it (raw "
+                     "per-method samples are in `frontier_permeability.csv`, this dir):\n")
+        for p in frontier_pngs:
+            parts.append(f"![permeability vs displacement]({p.name})\n")
+
+    # Before-images: gated on their own files existing (independent of the frontier PNG), so a
+    # partial run that produced these but not the frontier still renders them.
+    before = [(lbl, fn) for lbl, fn in
+             (("access-depth", "before_depth.jpg"),
+              ("permeability potential", "before_perm.jpg"))
+             if (run_dir / fn).exists()]
+    if before:
+        parts.append("**Before any road is added**, the same region in both colorings: "
+                     "access-depth (blue = at a street, red = deep interior) vs permeability "
+                     "potential (dark = hard to escape, light = easy):\n")
+        parts.append(_img_table(before))
+
+    # §4: each method on the ground -- the GIF row, then the two lenses. Lens A (matched
+    # displacement) truncates every method to the same home-cost and compares the permeability
+    # each buys; Lens B (matched permeability) truncates every method to the same permeability
+    # outcome and compares the displacement each spends. Each lens's table comes straight from its
+    # CSV; its two after-image tables (access-depth coloring, permeability-potential coloring)
+    # share one method order with that table.
     gifs = sorted(run_dir.glob("reblock_*.gif"))
-    matched = sorted(run_dir.glob("after_*_matched.jpg"))
-    depth_imgs = sorted(run_dir.glob("after_*_ext*.jpg"))
-    if gifs or matched or depth_imgs:
+    disp_csv, perm_csv = run_dir / "lens_displacement.csv", run_dir / "lens_permeability.csv"
+    disp_rows = _lens_rows(disp_csv) if disp_csv.exists() else {}
+    perm_rows = _lens_rows(perm_csv) if perm_csv.exists() else {}
+    if gifs or disp_rows or perm_rows:
         parts.append("## 4. Each method on the ground\n")
-        parts.append("The same region on the same access-depth colour scale (blue = at a street, "
-                     "red = deep) with displaced buildings marked — so the maps are directly "
-                     "comparable across methods.\n")
         if gifs:
             parts.append("**Watch each method reblock** — its full road set added in drainage "
                          "order, the deep interior draining as the network reaches in:\n")
             parts.append(_img_table([(_gif_method(p.name), p.name) for p in gifs]))
-        if matched:
-            parts.append("**Matched road budget** — every method truncated to the same total added "
-                         "road, so this compares the access each *buys for the same cost*:\n")
-            parts.append(_img_table([(_after_method(p.name), p.name) for p in matched]))
-        if depth_imgs:
-            parts.append("**Matched external-connectivity target** — every method truncated where "
-                         "external connectivity (access-burden removed) reaches 0.70, so this "
-                         "compares the *road each takes* for the same outcome:\n")
-            parts.append(_img_table([(_after_method(p.name), p.name) for p in depth_imgs]))
+        if disp_rows:
+            methods = _lens_methods(run_dir, "disp", disp_rows)
+            parts.append("### Matched displacement\n")
+            parts.append("Every method truncated to the same displacement %, so this compares the "
+                         "**permeability each buys for the same home-cost**:\n")
+            parts.append(_lens_table(disp_rows, methods, flag_col="at_budget",
+                                     unmet_note="converged below budget"))
+            depth_imgs = _lens_images(run_dir, "disp", "depth", methods)
+            if depth_imgs:
+                parts.append("Access-depth coloring:\n")
+                parts.append(_img_table(depth_imgs))
+            perm_imgs = _lens_images(run_dir, "disp", "perm", methods)
+            if perm_imgs:
+                parts.append("Permeability-potential coloring:\n")
+                parts.append(_img_table(perm_imgs))
+        if perm_rows:
+            methods = _lens_methods(run_dir, "perm", perm_rows)
+            parts.append("### Matched permeability\n")
+            parts.append("Every method truncated where permeability first reaches the standard "
+                         "target, so this compares the **displacement each spends** for the same "
+                         "permeability outcome:\n")
+            parts.append(_lens_table(perm_rows, methods, flag_col="reached",
+                                     unmet_note="unreached"))
+            depth_imgs = _lens_images(run_dir, "perm", "depth", methods)
+            if depth_imgs:
+                parts.append("Access-depth coloring:\n")
+                parts.append(_img_table(depth_imgs))
+            perm_imgs = _lens_images(run_dir, "perm", "perm", methods)
+            if perm_imgs:
+                parts.append("Permeability-potential coloring:\n")
+                parts.append(_img_table(perm_imgs))
+
     cmd = meta.get("command")
     if cmd:
         log_link = "\nThe full run log is in [`run.log`](run.log)." if (run_dir / "run.log").exists() else ""

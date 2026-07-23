@@ -17,19 +17,25 @@ def test_generated_readme_reflects_meta_and_curves() -> None:
     assert "13,800" in md and "83,192" in md           # screen stat from meta.json (thousands-sep)
     assert "12" in md and "11,006" in md               # region stats
     assert "google.com/maps" in md                     # the Google Maps location link (from meta)
-    assert "The method frontier" in md                 # §3 frontier section
-    assert "max access depth" in md                    # the depth-vs-road curve intro
-    assert "![access depth vs added road](depth_vs_road_test.png)" in md
-    assert "![external connectivity](curve_external_connectivity_test.png)" in md  # a curve embed
-    assert "![displacement](displacement_test.png)" in md
+    assert "permeability frontier" in md.lower()        # §3 frontier section
+    assert "permeability" in md.lower() and "displacement" in md.lower()  # the two frontier axes
+    assert "![permeability vs displacement](frontier_test.png)" in md    # the frontier embed
     assert "![screen](screen.jpg)" in md               # figure embed (present file)
-    assert "Lens A" not in md                           # two-lens TABLES no longer in the README
+    assert "Lens A" not in md and "Lens B" not in md    # headings say "matched displacement/perm."
+    assert "![access-depth](before_depth.jpg)" in md    # before-image, access-depth coloring
+    assert "![permeability potential](before_perm.jpg)" in md  # before-image, permeability coloring
     assert "Each method on the ground" in md           # §4 apples-to-apples after-images
     assert "Watch each method reblock" in md            # the animated GIF row
     assert "![clearance](reblock_clearance.gif)" in md  # a per-method GIF, method as column
-    assert "Matched road budget" in md and "Matched external-connectivity target" in md  # both
-    assert "| clearance | greedy_arterial_buildable |" in md               # aligned method columns
-    assert "![clearance](after_clearance_matched.jpg)" in md               # a method after-image
+    assert "Matched displacement" in md and "Matched permeability" in md  # both lens headings
+    assert "| clearance | greedy_arterial_buildable |" in md  # aligned method columns (image table
+                                                               # header) -- _lens_methods' one order
+                                                               # shared by the CSV table + both
+                                                               # coloring image tables
+    assert "| clearance |" in md                # a lens-table row (from lens_displacement.csv)
+    assert "converged below budget" in md       # greedy_arterial_buildable: at_budget=False
+    assert "unreached" in md                    # greedy_arterial_buildable: reached=False
+    assert "![clearance](after_clearance_disp_depth.jpg)" in md    # a method after-image, new name
 
 
 def test_top_scoring_wording_is_metric_neutral() -> None:
@@ -44,7 +50,7 @@ def test_sections_are_data_gated(tmp_path: Path) -> None:
     # a dir with meta.json but NO curve PNGs / after-images omits §3 and §4, without erroring.
     (tmp_path / "meta.json").write_text(json.dumps(_FULL_META))
     md = gen_example_readme(tmp_path, metric_name="depth", formula="f", blurb="b")
-    assert "frontier" not in md.lower()                # no curve PNGs -> no §3
+    assert "frontier" not in md.lower()                # no frontier PNG -> no §3
     assert "Each method on the ground" not in md       # no after-images -> no §4
     assert "flagged" in md.lower()                      # screen section still present
 

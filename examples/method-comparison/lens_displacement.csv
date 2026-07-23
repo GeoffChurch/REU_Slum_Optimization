@@ -1,0 +1,7 @@
+method,road_m,displacement,permeability,at_budget
+topology,186.3,0.1037,0.389856,True
+clearance,143.0,0.1024,0.273224,True
+greedy_arterial_repulsion,183.5,0.1148,0.535196,True
+clearance_looped,139.3,0.1130,0.428767,True
+euclidean_grid,270.0,0.1310,0.521094,True
+osm_footpaths,273.5,0.1280,0.58123,True

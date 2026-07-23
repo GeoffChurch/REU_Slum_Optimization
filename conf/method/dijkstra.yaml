@@ -1,3 +1,0 @@
-# Boundary-routed street network (shortest-path forest rooted at the street).
-# Deterministic, no params -- see reblock.methods.dijkstra.DijkstraReblocker.
-_target_: reblock.methods.dijkstra.DijkstraReblocker
