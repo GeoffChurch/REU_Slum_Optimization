@@ -9,6 +9,8 @@ import csv
 import json
 from pathlib import Path
 
+from reblock.method_labels import friendly_method_name
+
 
 def _n(x: float) -> str:
     return f"{x:,.0f}"
@@ -61,8 +63,8 @@ def _lens_table(rows: dict[str, dict[str, str]], methods: list[str], *,
             continue
         met = row[flag_col] == "True"
         note = "" if met else unmet_note
-        lines.append(f"| {m} | {_n(float(row['road_m']))} m | {_pct(row['displacement'])} | "
-                     f"{_pct(row['permeability'])} | {note} |")
+        lines.append(f"| {friendly_method_name(m)} | {_n(float(row['road_m']))} m | "
+                     f"{_pct(row['displacement'])} | {_pct(row['permeability'])} | {note} |")
     return "\n".join(lines) + "\n"
 
 
@@ -72,7 +74,7 @@ def _lens_images(run_dir: Path, lens: str, coloring: str,
     for m in methods:
         fn = f"after_{m}_{lens}_{coloring}.png"
         if (run_dir / fn).exists():
-            items.append((m, fn))
+            items.append((friendly_method_name(m), fn))
     return items
 
 
@@ -155,7 +157,8 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
         if gifs:
             parts.append("**Watch each method reblock** — its full road set added in drainage "
                          "order, the deep interior draining as the network reaches in:\n")
-            parts.append(_img_table([(_gif_method(p.name), p.name) for p in gifs]))
+            parts.append(_img_table([(friendly_method_name(_gif_method(p.name)), p.name)
+                                     for p in gifs]))
         if disp_rows:
             methods = _lens_methods(run_dir, "disp", disp_rows)
             parts.append("### Matched displacement\n")
