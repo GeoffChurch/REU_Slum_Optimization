@@ -33,7 +33,7 @@ from shapely.geometry.base import BaseGeometry
 from reblock.contracts import BBox, Block, Metrics, Proposal
 
 _CMAP = "YlOrRd"          # depth coloring: pale -> dark red as access depth grows
-_PERM_CMAP = "PuBu"       # perm coloring: pale -> dark blue as egress potential grows
+_PERM_CMAP = _CMAP        # perm now shares the depth red (YlOrRd) scale (was "PuBu" blue)
 _BOUNDARY_COLOR = "#222222"
 _ROAD_COLOR = "#1E90FF"
 _CONTEXT_OUTLINE = "#dddddd"

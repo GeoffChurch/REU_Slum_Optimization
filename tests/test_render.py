@@ -142,8 +142,8 @@ def test_render_before_defaults_to_depth_field() -> None:
 
 def test_render_before_perm_field_uses_perm_cmap_and_zero_vmin() -> None:
     # field="perm" colors by the continuous egress-potential series (Task 5 supplies it from
-    # permeability.parcel_potentials), normalized to [0, series.max()] -- a different vmin/cmap
-    # from the depth coloring.
+    # permeability.parcel_potentials), normalized to [0, series.max()] -- a different vmin
+    # from the depth coloring, but the same red YlOrRd cmap.
     block = _grid_block(3)
     potentials = _potentials(block)
 
@@ -151,7 +151,7 @@ def test_render_before_perm_field_uses_perm_cmap_and_zero_vmin() -> None:
 
     fill = cast(PatchCollection, fig.axes[0].collections[0])
     assert fill.get_clim() == pytest.approx((0.0, float(potentials.max())))
-    assert fill.get_cmap().name != "YlOrRd"    # visually distinct from the depth coloring
+    assert fill.get_cmap().name == "YlOrRd"    # same red scale as the depth coloring
 
 
 def test_render_after_perm_field_renders_and_writes_a_file(tmp_path: Path) -> None:
