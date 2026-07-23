@@ -167,7 +167,9 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                                   permeability_curve(block, roads, params)))
         curves.append(MethodCurve(name, curve_label, "displacement",
                                   displacement_curve(block, roads, radii, corridor_m=corridor_m)))
-    compare_report(curves, out_dir, method_order=list(methods))
+    compare_report(curves, out_dir, method_order=list(methods),
+                   matched_displacement=matched_displacement,
+                   matched_permeability=matched_permeability)
 
     # Lens prefixes -- either lens can fall short of its target with a fixed/sparse method's own
     # network (Lens A: `at_budget=False` below, prefix_a is that method's full network shown at its

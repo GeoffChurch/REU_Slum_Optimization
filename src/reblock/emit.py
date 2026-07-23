@@ -289,7 +289,8 @@ def _method_colors(method_order: Sequence[str]) -> dict[str, tuple[float, float,
 
 
 def compare_report(results: list[MethodCurve], out_dir: Path,
-                   *, method_order: Sequence[str]) -> None:
+                   *, method_order: Sequence[str],
+                   matched_displacement: float, matched_permeability: float) -> None:
     """ONE frontier curve per block/region: permeability (y) vs displacement (x), every method
     overlaid, no title. `results` is the flat (method x block x metric) list from reblock.compare,
     where `metric` is either "permeability" (`curve.cost` = cumulative added road length (m),
@@ -301,8 +302,12 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     samples per method) and one `frontier_{block_id}.png` per block/region -- x-axis
     "displacement", y-axis "permeability", both `PercentFormatter`'d (both are [0,1) fractions).
     `method_order` is the canonical method registry (`list(cfg.all_methods)`) that fixes each
-    method's curve colour run-independently -- it must cover every method in `results`. A
-    `results` with no "permeability" rows writes nothing (no benefit metric to plot)."""
+    method's curve colour run-independently -- it must cover every method in `results`. Each
+    frontier also draws the two calibrated lens cutoffs from `conf/permeability.yaml` (the same
+    thresholds `scripts.compare_budgets`'s two-lens driver grades methods against) as thin dashed
+    guide lines: `matched_displacement` (Lens A, vertical) and `matched_permeability` (Lens B,
+    horizontal). A `results` with no "permeability" rows writes nothing (no benefit metric to
+    plot)."""
     import csv
     out_dir.mkdir(parents=True, exist_ok=True)
     by_metric: dict[str, list[MethodCurve]] = {}
@@ -333,6 +338,15 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
             xs = disp_x.get((block_id, mc.method), mc.curve.cost)
             ax.plot(xs, mc.curve.benefit, marker="o", ms=9, lw=2.5,
                     label=mc.method, color=colors[mc.method])
+        # The two calibrated lens cutoffs (conf/permeability.yaml) as thin dashed guides, drawn
+        # UNDER the curves (low zorder) so they read as reference lines, not data -- Lens A's
+        # matched displacement (vertical) and Lens B's matched permeability (horizontal); see
+        # scripts/compare_budgets.py's two-lens driver, which grades every method against these
+        # exact thresholds.
+        ax.axvline(matched_displacement, ls="--", lw=1.0, color="gray", zorder=0.5,
+                   label=f"matched displacement = {matched_displacement:.0%}")
+        ax.axhline(matched_permeability, ls="--", lw=1.0, color="gray", zorder=0.5,
+                   label=f"matched permeability = {matched_permeability:.0%}")
         ax.set_xlabel("displacement", fontsize=16)
         ax.set_ylabel("permeability", fontsize=16)
         ax.xaxis.set_major_formatter(PercentFormatter(xmax=1))

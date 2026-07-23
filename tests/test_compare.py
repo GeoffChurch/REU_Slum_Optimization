@@ -67,7 +67,8 @@ def test_compare_report_writes_frontier(tmp_path: Path) -> None:
         MethodCurve("clearance", "b1", "permeability", Curve([0.0, 1.0], [0.0, 0.9])),
         MethodCurve("topology", "b1", "permeability", Curve([0.0, 2.0], [0.0, 0.9])),
     ]
-    compare_report(results, tmp_path, method_order=["clearance", "topology"])
+    compare_report(results, tmp_path, method_order=["clearance", "topology"],
+                   matched_displacement=0.10, matched_permeability=0.60)
     assert (tmp_path / "frontier_permeability.csv").exists()
     assert (tmp_path / "frontier_b1.png").exists()
 
@@ -78,7 +79,8 @@ def test_frontier_csv_has_displacement_and_permeability_samples(tmp_path: Path) 
     from reblock.emit import compare_report
     c = Curve(cost=[0.0, 100.0], benefit=[0.0, 0.8])
     mc = MethodCurve("clearance", "B1", "permeability", c, pct_paved=0.041, pct_displaced=0.0)
-    compare_report([mc], tmp_path, method_order=["clearance"])
+    compare_report([mc], tmp_path, method_order=["clearance"],
+                   matched_displacement=0.10, matched_permeability=0.60)
     with (tmp_path / "frontier_permeability.csv").open(newline="") as f:
         rows = list(csv.DictReader(f))
     assert set(rows[0].keys()) == {"method", "block", "displacement", "permeability"}
