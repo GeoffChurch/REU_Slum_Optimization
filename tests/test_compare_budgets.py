@@ -116,13 +116,13 @@ def test_run_permeability_lenses_writes_tables_and_renders(tmp_path: Path) -> No
     assert "clearance" in perm_text and "reached" in perm_text
 
     # before, both colorings, once per region
-    assert (tmp_path / "before_depth.jpg").exists()
-    assert (tmp_path / "before_perm.jpg").exists()
+    assert (tmp_path / "before_depth.png").exists()
+    assert (tmp_path / "before_perm.png").exists()
 
     # after, per method per lens, both colorings
     for tag in ("disp", "perm"):
-        assert (tmp_path / f"after_clearance_{tag}_depth.jpg").exists()
-        assert (tmp_path / f"after_clearance_{tag}_perm.jpg").exists()
+        assert (tmp_path / f"after_clearance_{tag}_depth.png").exists()
+        assert (tmp_path / f"after_clearance_{tag}_perm.png").exists()
 
     # per-method reblock GIF (unchanged)
     assert (tmp_path / "reblock_clearance.gif").exists()
@@ -215,14 +215,14 @@ def test_run_permeability_lenses_reports_below_budget_and_unreached_honestly(
 
     # Lens A after-images: positively framed, below-budget title -- on BOTH colorings.
     for coloring in ("depth", "perm"):
-        title = captured[f"after_sparse_disp_{coloring}.jpg"].axes[0].get_title()
+        title = captured[f"after_sparse_disp_{coloring}.png"].axes[0].get_title()
         assert "converged at" in title
         assert "50%" in title and "budget" in title
         assert "unreached" not in title.lower()
 
     # Lens B after-images: exactly "unreached" -- on BOTH colorings.
     for coloring in ("depth", "perm"):
-        title = captured[f"after_sparse_perm_{coloring}.jpg"].axes[0].get_title()
+        title = captured[f"after_sparse_perm_{coloring}.png"].axes[0].get_title()
         assert title == "unreached"
 
     # lens_displacement.csv carries the new at_budget column, False here.

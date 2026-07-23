@@ -223,4 +223,4 @@ def render_after(
 
 
 def save_render(fig: Figure, path: str | Path) -> None:
-    fig.savefig(path, dpi=300, bbox_inches="tight", pad_inches=0)
+    fig.savefig(path, dpi=300, bbox_inches="tight", pad_inches=0, transparent=True)

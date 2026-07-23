@@ -26,7 +26,6 @@ import segno
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from omegaconf import open_dict
-from PIL import Image
 from shapely.ops import unary_union
 
 from reblock.contracts import Method, Screen, Source
@@ -110,7 +109,7 @@ def main() -> None:
     # surface a committed example dir predates (lens_a_external.csv, curve_{external,internal}_
     # connectivity_*.png, depth_vs_road_*.png, displacement_*.png/*.csv,
     # frontier_{external,internal}_connectivity.csv) -- leaves no orphans (all regenerated below).
-    for pattern in ("reblock_*.gif", "after_*.jpg", "curve_*.png", "depth_vs_road_*.png",
+    for pattern in ("reblock_*.gif", "after_*.png", "curve_*.png", "depth_vs_road_*.png",
                     "displacement_*.png"):
         for stale in out.glob(pattern):
             stale.unlink()
@@ -155,11 +154,8 @@ def main() -> None:
         region_map(source, [members], [[seed]], out,
                    selection=selection, depths=scores, metric_name=metric_name,
                    metric=getattr(screen, "metric", None))
-        for name in ("screen", "region"):
-            png = out / f"{name}.png"
-            if png.exists():
-                Image.open(png).convert("RGB").save(out / f"{name}.jpg", quality=85)
-                png.unlink()
+        # region_map already writes screen.png/region.png (transparent, via save_render) at the
+        # example naming -- no JPG flatten step needed.
 
         methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
                    for n in ("greedy_arterial_repulsion", "clearance_looped", "euclidean_grid")}

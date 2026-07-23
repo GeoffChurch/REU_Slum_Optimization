@@ -19,9 +19,9 @@ def _pct(x: str) -> str:
 
 
 def _after_method(name: str, lens: str, coloring: str) -> str:
-    # after_<method>_<lens>_<coloring>.jpg -> <method> (method may itself contain underscores, so
+    # after_<method>_<lens>_<coloring>.png -> <method> (method may itself contain underscores, so
     # strip the exact known prefix/suffix rather than splitting on "_").
-    suffix = f"_{lens}_{coloring}.jpg"
+    suffix = f"_{lens}_{coloring}.png"
     return name[len("after_"):-len(suffix)]
 
 
@@ -46,7 +46,7 @@ def _lens_methods(run_dir: Path, lens: str, rows: dict[str, dict[str, str]]) -> 
     # canonical method order for a lens: the "depth"-coloring image glob if present (so the two
     # coloring image tables AND the CSV-derived table below all share one column order); falls
     # back to the CSV's own row order if no images are present (partial run).
-    depth_imgs = sorted(run_dir.glob(f"after_*_{lens}_depth.jpg"))
+    depth_imgs = sorted(run_dir.glob(f"after_*_{lens}_depth.png"))
     if depth_imgs:
         return [_after_method(p.name, lens, "depth") for p in depth_imgs]
     return list(rows)
@@ -70,7 +70,7 @@ def _lens_images(run_dir: Path, lens: str, coloring: str,
                  methods: list[str]) -> list[tuple[str, str]]:
     items: list[tuple[str, str]] = []
     for m in methods:
-        fn = f"after_{m}_{lens}_{coloring}.jpg"
+        fn = f"after_{m}_{lens}_{coloring}.png"
         if (run_dir / fn).exists():
             items.append((m, fn))
     return items
@@ -92,8 +92,8 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
         parts.append(f"`{metric_name}` flagged "
                      f"**{_n(flagged)} of {_n(total_blocks)}** blocks. "
                      f"Top-scoring: `{top_block}` (peel depth {top_depth:.0f}).\n")
-        if (run_dir / "screen.jpg").exists():
-            parts.append("![screen](screen.jpg)\n")
+        if (run_dir / "screen.png").exists():
+            parts.append("![screen](screen.png)\n")
         maps_url = meta.get("maps_url")
         if maps_url:
             parts.append(f"**Location:** [see the grown region on Google Maps]({maps_url}).\n")
@@ -110,8 +110,8 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                      f"(**{_n(region_parcels)} parcels**), mean depth "
                      f"{region_mean_depth:.1f} rings, mean density "
                      f"{region_mean_density:.0f} bldg/ha.\n")
-        if (run_dir / "region.jpg").exists():
-            parts.append("![region](region.jpg)\n")
+        if (run_dir / "region.png").exists():
+            parts.append("![region](region.png)\n")
 
     # §3: the single permeability frontier -- permeability (benefit, the only benefit axis) vs
     # displacement (cost, the only cost axis), one line per method; Pareto-dominance reads straight
@@ -131,8 +131,8 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
     # Before-images: gated on their own files existing (independent of the frontier PNG), so a
     # partial run that produced these but not the frontier still renders them.
     before = [(lbl, fn) for lbl, fn in
-             (("access-depth", "before_depth.jpg"),
-              ("permeability potential", "before_perm.jpg"))
+             (("access-depth", "before_depth.png"),
+              ("permeability potential", "before_perm.png"))
              if (run_dir / fn).exists()]
     if before:
         parts.append("**Before any road is added**, the same region in both colorings: "

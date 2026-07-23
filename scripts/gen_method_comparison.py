@@ -47,7 +47,7 @@ def main() -> None:
     # connectivity_*.png, displacement_*.png/*.csv, frontier_{external,internal}_connectivity.csv)
     # -- so a changed method set leaves no orphans (all regenerated below); leaves the committed
     # OSM snapshot + README untouched.
-    for pattern in ("after_*.jpg", "before_*.jpg", "frontier_*.png", "reblock_*.gif", "curve_*.png",
+    for pattern in ("after_*.png", "before_*.png", "frontier_*.png", "reblock_*.gif", "curve_*.png",
                     "displacement_*.png"):
         for stale in OUT.glob(pattern):
             stale.unlink()

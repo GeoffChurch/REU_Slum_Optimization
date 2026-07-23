@@ -287,8 +287,8 @@ Design and plan documents live in the repository under `docs/superpowers/specs/`
 
 def _mc_section(m: M) -> list[str]:
     parts: list[str] = []
-    before = _copy_asset(MC / "before.jpg", "method-comparison")
-    after = _copy_asset(MC / f"after_{m.mc_key}.jpg", "method-comparison")
+    before = _copy_asset(MC / "before.png", "method-comparison")
+    after = _copy_asset(MC / f"after_{m.mc_key}.png", "method-comparison")
     summary = _mc_summary(m.mc_key or "")
     if not (before or after or summary):
         return parts
@@ -310,8 +310,8 @@ def _mc_section(m: M) -> list[str]:
 
 def _mb_section(m: M) -> list[str]:
     parts: list[str] = []
-    matched = _copy_asset(MB / f"after_{m.mb_key}_matched.jpg", "multiblock_depth")
-    ext70 = _copy_asset(MB / f"after_{m.mb_key}_ext70.jpg", "multiblock_depth")
+    matched = _copy_asset(MB / f"after_{m.mb_key}_matched.png", "multiblock_depth")
+    ext70 = _copy_asset(MB / f"after_{m.mb_key}_ext70.png", "multiblock_depth")
     gif = _copy_asset(MB / f"reblock_{m.mb_key}.gif", "multiblock_depth")
     lens_a, lens_b = _mb_lens_rows(m.mb_key or "")
     if not (matched or ext70 or gif or lens_a or lens_b):
@@ -401,11 +401,11 @@ def gen_benchmark_section() -> str:
         parts.append("Block `ZAF.9.3.1_1_40972` — the deepest block (by the depth proxy "
                      "`sqrt(n*A)/P`) small enough for `topology` to run: 263 parcels, up to 7 "
                      "rings deep, auto-picked with no hand tuning.\n")
-        before = _copy_asset(MC / "before.jpg", "method-comparison")
+        before = _copy_asset(MC / "before.png", "method-comparison")
         if before:
             parts.append(f"![before]({before})\n")
-        afters = [(p.name[len("after_"):-len(".jpg")], _copy_asset(p, "method-comparison"))
-                  for p in sorted(MC.glob("after_*.jpg"))]
+        afters = [(p.name[len("after_"):-len(".png")], _copy_asset(p, "method-comparison"))
+                  for p in sorted(MC.glob("after_*.png"))]
         afters = [(lbl, url) for lbl, url in afters if url]
         if afters:
             parts.append("After, per method:\n")
@@ -447,7 +447,7 @@ def gen_benchmark_section() -> str:
                      f"{meta['region_mean_density_per_ha']:.0f} buildings/ha.\n")
         if meta.get("maps_url"):
             parts.append(f"[See the region on Google Maps]({meta['maps_url']})\n")
-        for name in ("screen.jpg", "region.jpg"):
+        for name in ("screen.png", "region.png"):
             url = _copy_asset(MB / name, "multiblock_depth")
             if url:
                 parts.append(f"![{name}]({url})\n")
@@ -481,8 +481,8 @@ def gen_benchmark_section() -> str:
                 [[f"`{r['method']}`", f"{float(r['external_connectivity']):.2f}",
                   f"{float(r['internal_connectivity']):.2f}", _num(float(r["displacement"])),
                   _pct(float(r["pct_displaced"]))] for r in lens_b]))
-        matched = sorted(MB.glob("after_*_matched.jpg"))
-        ext70 = sorted(MB.glob("after_*_ext*.jpg"))
+        matched = sorted(MB.glob("after_*_matched.png"))
+        ext70 = sorted(MB.glob("after_*_ext*.png"))
         if matched or ext70:
             parts.append("#### Each method on the ground\n")
             parts.append("Same region, same access-depth colour scale (blue = at a street, red = "
@@ -493,7 +493,7 @@ def gen_benchmark_section() -> str:
             for p in files:
                 url = _copy_asset(p, "multiblock_depth")
                 if url:
-                    items.append((p.name[len("after_"):-len(".jpg")].rpartition("_")[0], url))
+                    items.append((p.name[len("after_"):-len(".png")].rpartition("_")[0], url))
             if items:
                 parts.append(f"**{title}:**\n")
                 for i in range(0, len(items), 2):

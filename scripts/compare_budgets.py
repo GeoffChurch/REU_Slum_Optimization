@@ -194,13 +194,13 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     depth_vmax = int(kc0.fields["access_before"].max())
     fig = render_before(block, kc0.fields["access_before"], vmax=depth_vmax, field="depth",
                         frame=frame)
-    save_render(fig, out_dir / "before_depth.jpg")
+    save_render(fig, out_dir / "before_depth.png")
     plt.close(fig)
 
     potentials0 = parcel_potentials(block, None, params)
     perm_vmax = float(potentials0.max()) if len(potentials0) else 0.0
     fig = render_before(block, potentials0, vmax=perm_vmax, field="perm", frame=frame)
-    save_render(fig, out_dir / "before_perm.jpg")
+    save_render(fig, out_dir / "before_perm.png")
     plt.close(fig)
 
     # After images per method per lens, both colorings; the two outcome tables' rows.
@@ -233,7 +233,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                                displaced_points=_displaced_points(block, truncated))
             if title_override is not None:
                 fig.axes[0].set_title(title_override, fontsize=16)
-            save_render(fig, out_dir / f"after_{name}_{tag}_depth.jpg")
+            save_render(fig, out_dir / f"after_{name}_{tag}_depth.png")
             plt.close(fig)
 
             potentials = parcel_potentials(block, prefix, params)
@@ -241,7 +241,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                                frame=frame, displaced_points=_displaced_points(block, truncated))
             if title_override is not None:
                 fig.axes[0].set_title(title_override, fontsize=16)
-            save_render(fig, out_dir / f"after_{name}_{tag}_perm.jpg")
+            save_render(fig, out_dir / f"after_{name}_{tag}_perm.png")
             plt.close(fig)
 
         rows.append(OutcomeRow(
