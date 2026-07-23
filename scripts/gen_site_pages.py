@@ -78,10 +78,12 @@ def _frontier_terminal(rows: list[dict[str, str]], method: str) -> tuple[float, 
 
 
 def _mc_summary(method: str) -> dict[str, str] | None:
-    """Terminal-point row for the single-block head-to-head, from the frontier + displacement CSVs."""
+    """Terminal-point row for the single-block head-to-head, from the frontier + displacement
+    CSVs."""
     ext = _frontier_terminal(_read_csv(MC / "frontier_external_connectivity.csv"), method)
     intr = _frontier_terminal(_read_csv(MC / "frontier_internal_connectivity.csv"), method)
-    disp = next((r for r in _read_csv(MC / "displacement_table.csv") if r["method"] == method), None)
+    disp = next((r for r in _read_csv(MC / "displacement_table.csv") if r["method"] == method),
+                None)
     if ext is None and disp is None:
         return None
     row: dict[str, str] = {}

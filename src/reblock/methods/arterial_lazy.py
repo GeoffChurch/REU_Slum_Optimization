@@ -157,8 +157,8 @@ def _iter_live(heap: list[tuple[float, str, str, LineString, int]], live: set[st
 def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
                            top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
                            cost: str = "length", corridor_m: float = 3.0,
-                           workers: int = 16, candidate_policy: str = "grow", rescore_every: int = 0,
-                           max_anchors: int = 0) -> GeoDataFrame:
+                           workers: int = 16, candidate_policy: str = "grow",
+                           rescore_every: int = 0, max_anchors: int = 0) -> GeoDataFrame:
     """CELF lazy-greedy driver: commit the best gain-per-cost arterial one at a time, but instead of
     re-scoring every candidate every step (the exact `_greedy_arterials`), drive selection with a
     max-heap and pop-re-score only the heap top until it is fresh under the current committed set.

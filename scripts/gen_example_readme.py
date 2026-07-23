@@ -190,7 +190,8 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
 
     cmd = meta.get("command")
     if cmd:
-        log_link = "\nThe full run log is in [`run.log`](run.log)." if (run_dir / "run.log").exists() else ""
+        log_link = ("\nThe full run log is in [`run.log`](run.log)."
+                    if (run_dir / "run.log").exists() else "")
         parts.append("\n## How this was generated\n\n"
                      "This example is machine-generated — one self-logging command emits the data, "
                      "maps, curves, and this README:\n\n"
