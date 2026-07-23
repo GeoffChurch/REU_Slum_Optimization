@@ -157,17 +157,21 @@ def test_hydra_compose_wires_peel_method() -> None:
     assert r.metric("kcomplexity", "k_after") <= r.metric("kcomplexity", "k_before")
 
 
-def test_hydra_compose_wires_dijkstra_method() -> None:
+def test_hydra_compose_wires_clearance_method() -> None:
     with initialize(version_base=None, config_path="../conf"):
         cfg = compose(config_name="config", overrides=[
-            "data=dji", "method=dijkstra", "eval=kcomplexity", "max_blocks=1",
+            "data=dji", "method=clearance", "eval=kcomplexity", "max_blocks=1",
         ])
         results = run(spec_from_cfg(cfg)).results
     assert len(results) >= 1
     r = results[0]
-    assert r.proposal.method == "dijkstra"
+    assert r.proposal.method == "clearance"
+    # ClearanceReblocker grows each road as a Dijkstra path from the deepest unserved parcel to
+    # the ALREADY street-connected network (see clearance.py's docstring) -- every road segment is
+    # grounded by construction, so connected_road_frac == 1.0 same as the retired dijkstra method
+    # (verified on this fixture: DJI.1_2_602, roads=4, connected_road_frac=1.0).
     assert r.metric("kcomplexity", "connected_road_frac") == 1.0
-    assert r.metric("kcomplexity", "delta_k") > 0     # boundary network flattens a real block
+    assert r.metric("kcomplexity", "delta_k") > 0   # depth_target=2 flattens a real block
 
 
 def test_hydra_compose_wires_kblock_source_and_peel_pipeline() -> None:
@@ -271,12 +275,12 @@ def _dji_source() -> KblockSource:
     return KblockSource(*_DJI, region_id="dji")
 
 
-def _dji_spec(block_groups: list[list[str]]) -> PipelineSpec:
-    from reblock.methods.dijkstra import DijkstraReblocker
+def _dji_spec(block_groups: list[list[str]], *, depth_target: int = 2) -> PipelineSpec:
+    from reblock.methods.clearance import ClearanceReblocker
     from reblock.region import IdentityRegionBuilder
     return PipelineSpec(
         source=_dji_source(), screen=IdentityScreen(),
-        method=DijkstraReblocker(), evals=[KComplexityEval()],
+        method=ClearanceReblocker(depth_target=depth_target), evals=[KComplexityEval()],
         region_builder=IdentityRegionBuilder(), block_groups=block_groups,
     )
 
@@ -286,7 +290,7 @@ def test_singleton_group_run_matches_single_block_reblock() -> None:
     # reblock_block path as the pre-region pipeline, so the result is identical to a plain
     # per-block reblock of that block. (Guards that only genuine multi-block groups diverge
     # onto region_reblock.)
-    from reblock.methods.dijkstra import DijkstraReblocker
+    from reblock.methods.clearance import ClearanceReblocker
     from reblock.pipeline import reblock_block
     bid = "DJI.1_2_602"
     out = run(_dji_spec([[bid]]))
@@ -296,7 +300,7 @@ def test_singleton_group_run_matches_single_block_reblock() -> None:
 
     direct_src = KblockSource(*_DJI, region_id="dji", block_ids=[bid])
     block = next(b for b in direct_src.region().blocks if b.block_id == bid)
-    direct = reblock_block(block, DijkstraReblocker(), [KComplexityEval()])
+    direct = reblock_block(block, ClearanceReblocker(), [KComplexityEval()])
     assert r.proposal.proposal_id == direct.proposal.proposal_id
     assert r.metric("kcomplexity", "delta_k") == direct.metric("kcomplexity", "delta_k")
     assert r.metric("kcomplexity", "k_after") == direct.metric("kcomplexity", "k_after")
@@ -306,9 +310,11 @@ def test_two_adjacent_block_region_reblocks_jointly() -> None:
     # An adjacent DJI pair as ONE seed group yields ONE joint region Result (block_id
     # "region:...") whose proposal road network reaches into BOTH original blocks -- proving
     # they were reblocked jointly (region_reblock), not as two independent per-block reblocks.
+    # depth_target=1: the pair's combined existing street network already satisfies the default
+    # depth_target=2 with zero new roads, too trivial to prove the cross-block reach below.
     from shapely.ops import unary_union
     ids = ["DJI.3_1_1808", "DJI.3_1_1809"]
-    out = run(_dji_spec([ids]))
+    out = run(_dji_spec([ids], depth_target=1))
     assert len(out.results) == 1
     r = out.results[0]
     assert r.block.block_id == "region:DJI.3_1_1808+DJI.3_1_1809"
@@ -338,7 +344,7 @@ def test_cli_region_path_writes_region_map(tmp_path: Path) -> None:
     # (typed Source, no hasattr) and render_results (per-block windowed context + points).
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
-         "data=dji", "method=dijkstra", "eval=kcomplexity",
+         "data=dji", "method=clearance", "eval=kcomplexity",
          "block_ids=[[DJI.3_1_1808,DJI.3_1_1809]]",
          "render.enabled=true", "region_map.enabled=true", f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=120,

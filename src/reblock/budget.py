@@ -1,7 +1,6 @@
 """Cost-benefit curves for reblocking methods: add a method's roads incrementally in
 drainage order, score access at each budget, trace benefit (fraction of Sigma depth^2
-removed) vs cost (cumulative added road length, m). AUC = a 0-1 efficiency score. See the
-design spec.
+removed) vs cost (cumulative added road length, m). See the design spec.
 """
 from __future__ import annotations
 
@@ -346,14 +345,11 @@ def _reproject_hits(geoms_arr: np.ndarray, reps_arr: np.ndarray, lines: np.ndarr
 
 
 class _BlockScoringContext:
-    """Per-block scoring constants frozen ONCE, shared by `network_efficiency`, the arterial
-    directness/efficiency measurement curves (`_efficiency_factory`), and the greedy arterial
-    loop. Freezing
-    lifts the representative points, sampled sources, the K*N euclidean matrix and the street edge
-    geometry out of the per-candidate hot path (they were previously rebuilt for all ~7k
-    candidates). `.score(roads)` re-derives entries against streets + `roads` and matches
-    `network_efficiency` exactly; `.score_frozen(prefix, ...)` scores a prefix against FROZEN
-    entries/splits and matches `_efficiency_factory` (monotone across prefixes)."""
+    """Per-block scoring constants frozen ONCE, shared by `network_efficiency` and the greedy
+    arterial loop. Freezing lifts the representative points, sampled sources, the K*N euclidean
+    matrix and the street edge geometry out of the per-candidate hot path (they were previously
+    rebuilt for all ~7k candidates). `.score(roads)` re-derives entries against streets + `roads`
+    and matches `network_efficiency` exactly."""
 
     def __init__(self, block: Block, *, k: int = 40, tol: float = STREET_TOL) -> None:
         self.block = block
@@ -422,27 +418,6 @@ class _BlockScoringContext:
         csr, node_index = _build_csr(edge_pairs, splits_uv)
         return _sampled_efficiency_core(csr, node_index, entry, self.sources,
                                         self.rep_xy, self.src_euclid)
-
-    def score_frozen(self, roads_prefix: GeoDataFrame | None, *,
-                     entry: list[_Node | None],
-                     splits: dict[_Pair, list[tuple[float, _Node]]]) -> tuple[float, float]:
-        """(E, directness) over streets + `roads_prefix` using the FROZEN `entry`/`splits` (keyed
-        by parent edge pair, derived once against the full road set) -- builds its own per-prefix
-        CSR (streets + prefix roads, split at the frozen parents that are present) and matches
-        `_efficiency_factory`. A frozen source whose entry's parent edge is absent from the prefix
-        contributes 0, so distances from fixed entries are non-increasing and the sweep is
-        monotone across prefixes."""
-        if self.n < 2:
-            return 0.0, 0.0
-        prefix_segs = (_explode_segments(roads_prefix.geometry)
-                       if roads_prefix is not None and len(roads_prefix) else [])
-        base_pairs = [*prefix_segs, *self.street_segs]
-        if not base_pairs:
-            return 0.0, 0.0
-        csr, node_index = _build_csr(base_pairs, splits)
-        return _sampled_efficiency_core(csr, node_index, entry, self.sources,
-                                        self.rep_xy, self.src_euclid)
-
 
 class _StepContext:
     """The greedy arterial's per-commit scoring context: the streets ∪ committed-roads edge set and
@@ -569,37 +544,8 @@ def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
     per candidate.
 
     Note this function alone is NOT guaranteed monotone as `roads` grows across separate calls,
-    because each call re-derives entries against its own `roads` and entries can churn.
-    `efficiency_directness_curves` gets monotonicity instead by freezing entries against the
-    FULL road set once, then only growing the edge set -- see `_efficiency_factory`."""
+    because each call re-derives entries against its own `roads` and entries can churn."""
     return _BlockScoringContext(block, k=k, tol=tol).score(roads)
-
-
-def _efficiency_factory(block: Block, roads_full: GeoDataFrame | None, tol: float,
-                        k: int = 40) -> Callable[[GeoDataFrame | None], tuple[float, float]]:
-    """Shared machinery behind `efficiency_directness_curves` (the frontier-sweep measurement of
-    arterial's kept `objective=directness|efficiency`, backing the arterial-vs-dijkstra
-    directness tests and the 1e-9 scoring-equivalence net). Freezes the parcel->entry-node
-    mapping and the K sampled sources against the FULL graph (`roads_full` + block.streets),
-    built ONCE, in a `_BlockScoringContext`. The returned f(roads_prefix) computes (E, directness)
-    from those FIXED entries via `ctx.score_frozen`, over a graph containing only `roads_prefix` +
-    block.streets edges (rounded coordinates keep node identity stable across subsets). A
-    source/dest whose fixed entry node's parent edge is absent from that prefix contributes 0.
-
-    Since the entry mapping, sources, and the all-parcel pair set never change while the
-    edge set only grows as `roads_prefix` grows, shortest-path distances from fixed entries
-    are non-increasing -- so E and directness are non-decreasing across the frontier sweep's
-    prefixes, unlike calling `network_efficiency(block, roads_prefix)` per prefix (which
-    re-derives entries against each prefix and can regress, see budget.py module docstring
-    history / the review this fixes)."""
-    ctx = _BlockScoringContext(block, k=k, tol=tol)
-    entry, splits, edge_pairs = ctx._derive_entries(roads_full)
-    if ctx.n < 2 or not edge_pairs:
-        return lambda _roads: (0.0, 0.0)
-
-    def f(roads_prefix: GeoDataFrame | None) -> tuple[float, float]:
-        return ctx.score_frozen(roads_prefix, entry=entry, splits=splits)
-    return f
 
 
 @dataclass(frozen=True)
@@ -799,33 +745,3 @@ def _noded_graph(roads: GeoDataFrame, streets: GeoDataFrame) -> nx.Graph:
     return g
 
 
-def efficiency_directness_curves(block: Block, roads: GeoDataFrame, *, n_points: int = 20,
-                                 tol: float = STREET_TOL) -> tuple[Curve, Curve]:
-    """ONE sampled shortest-path sweep yielding both E and directness curves (x = road length,
-    m) -- the frontier-sweep measurement of arterial's kept `objective=directness|efficiency`,
-    backing the arterial-vs-dijkstra directness margin tests and the 1e-9 scoring-equivalence
-    net. Not part of the deleted cost-benefit reporting."""
-    f = _efficiency_factory(block, roads, tol)
-    costs, pairs = _sweep(block, roads, f, n_points, tol)
-    return Curve(costs, [p[0] for p in pairs]), Curve(costs, [p[1] for p in pairs])
-
-
-def auc(curve: Curve, cost_cap: float) -> float:
-    """Normalized area under benefit-vs-cost over [0, cost_cap] (curve held at its terminal
-    benefit beyond its own max cost) -> 0-1 efficiency; higher = more access per meter."""
-    if cost_cap <= 0.0 or len(curve.cost) < 2:
-        return 0.0
-    cs, bs = list(curve.cost), list(curve.benefit)
-    if cs[-1] < cost_cap:                       # extend the plateau to the common cap
-        cs, bs = cs + [cost_cap], bs + [bs[-1]]
-    area = 0.0
-    pairs = zip(zip(cs, bs, strict=False), zip(cs[1:], bs[1:], strict=False), strict=False)
-    for (c0, b0), (c1, b1) in pairs:
-        if c0 >= cost_cap:
-            break
-        if c1 > cost_cap:                       # segment straddles the cap: interpolate to it
-            b_cap = b0 + (b1 - b0) * (cost_cap - c0) / (c1 - c0) if c1 > c0 else b0
-            area += 0.5 * (b0 + b_cap) * (cost_cap - c0)
-            break
-        area += 0.5 * (b0 + b1) * (c1 - c0)
-    return area / cost_cap

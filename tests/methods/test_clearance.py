@@ -290,7 +290,7 @@ def test_propose_achieves_target_on_real_block() -> None:
 
 
 def test_clearance_module_is_in_derivation_modules() -> None:
-    # so a change to the algorithm busts the memoized propose() cache (like dijkstra/mesh/arterial)
+    # so a change to the algorithm busts the memoized propose() cache (like arterial/peel/topology)
     from reblock.derive_graph import _DERIVATION_MODULES
     assert any(p.name == "clearance.py" and p.parent.name == "methods"
                for p in _DERIVATION_MODULES)

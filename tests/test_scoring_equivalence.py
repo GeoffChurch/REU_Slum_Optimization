@@ -1,6 +1,6 @@
-"""Equivalence harness pinning `network_efficiency`/`efficiency_directness_curves`/`auc`'s
-CURRENT output on the 1808 sample block, to 1e-9. This is the correctness safety net for the
-arterial frozen-context perf refactor: every task that touches scoring must keep these green."""
+"""Equivalence harness pinning `network_efficiency`'s CURRENT output on the 1808 sample block, to
+1e-9. This is the correctness safety net for the arterial frozen-context perf refactor: every task
+that touches scoring must keep these green."""
 import json
 from pathlib import Path
 
@@ -11,8 +11,6 @@ from shapely.geometry import LineString
 from reblock.budget import (
     _BlockScoringContext,
     _StepContext,
-    auc,
-    efficiency_directness_curves,
     network_efficiency,
 )
 from reblock.methods import arterial
@@ -49,25 +47,11 @@ def test_one_context_scores_many_road_sets() -> None:
     ref = json.loads((Path(__file__).resolve().parent
                       / "data/scoring/ref_values_1808.json").read_text())
     ctx = _BlockScoringContext(block)
-    for key in ("no_roads", "dijkstra", "arterial_buildable"):
+    for key in ("no_roads", "least_cost", "arterial_buildable"):
         roads = _roads(block, ref, key)
         e, d = ctx.score(roads)
         assert _close(e, ref[key]["E"]), (key, "E", e, ref[key]["E"])
         assert _close(d, ref[key]["directness"]), (key, "directness", d, ref[key]["directness"])
-
-
-def test_curves_and_auc_match_reference() -> None:
-    for name, block, roads, exp in sampled_fixtures():
-        if roads is None or "E_auc" not in exp:
-            continue
-        ec, dc = efficiency_directness_curves(block, roads)
-        for got, want in zip(ec.benefit, exp["E_curve_benefit"], strict=True):
-            assert _close(got, want), (name, "E_curve", got, want)
-        for got, want in zip(dc.benefit, exp["dir_curve_benefit"], strict=True):
-            assert _close(got, want), (name, "dir_curve", got, want)
-        cap = min(ec.cost[-1], dc.cost[-1])
-        assert _close(auc(ec, cap), exp["E_auc"]), (name, "E_auc")
-        assert _close(auc(dc, cap), exp["dir_auc"]), (name, "dir_auc")
 
 
 def test_incremental_scorer_matches_full_rederivation() -> None:

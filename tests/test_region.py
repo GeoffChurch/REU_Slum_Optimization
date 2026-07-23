@@ -5,18 +5,15 @@ from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
-import networkx as nx
 import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
-from reblock.budget import auc, efficiency_directness_curves
 from reblock.contracts import Block, Result
 from reblock.data.kblock import KblockSource
 from reblock.eval.kcomplexity import KComplexityEval
-from reblock.methods.arterial import GreedyArterialReblocker
-from reblock.methods.dijkstra import DijkstraReblocker
+from reblock.methods.clearance import ClearanceReblocker
 from reblock.region import (
     ConvexHullRegionBuilder,
     DenseClusterRegionBuilder,
@@ -91,25 +88,6 @@ def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str = "all",
                     streets=streets)
     return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
                 building_points=points)
-
-
-def _spans_both_sides(roads: gpd.GeoDataFrame, x_split: float, margin: float) -> bool:
-    """True if `roads`, viewed as a touch-graph on rounded endpoints, has a connected
-    component reaching both x <= x_split - margin and x >= x_split + margin -- i.e. some road
-    (or chain of touching roads) genuinely spans across the original block boundary at
-    x=x_split, proving joint (not per-block) reblocking."""
-    g: nx.Graph = nx.Graph()
-    for geom in roads.geometry:
-        parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
-        for part in parts:
-            cs = [(round(x, 2), round(y, 2)) for x, y in part.coords]
-            for p, q in zip(cs, cs[1:], strict=False):
-                if p != q:
-                    g.add_edge(p, q)
-    return any(
-        min(n[0] for n in comp) <= x_split - margin and max(n[0] for n in comp) >= x_split + margin
-        for comp in nx.connected_components(g)
-    )
 
 
 def test_region_block_streets_are_the_full_existing_network() -> None:
@@ -194,101 +172,21 @@ def test_region_reblock_reblocks_the_region_block_against_its_existing_network()
     b = _grid_block(3, 0, 3, 3, block_id="b")
     rb = region_block([a, b])
 
-    result = region_reblock([a, b], DijkstraReblocker(), [KComplexityEval()])
+    # depth_target=1: the lone center parcel of a 3x3 all-perimeter-frontage grid is already at
+    # depth 2 (the default target), which would let ClearanceReblocker propose zero roads -- too
+    # trivial to prove the region_reblock == propose(region-block) plumbing invariant below.
+    method = ClearanceReblocker(depth_target=1)
+    result = region_reblock([a, b], method, [KComplexityEval()])
 
     assert isinstance(result, Result)
     result_streets = unary_union(result.block.streets.geometry)
     assert result_streets.equals(unary_union(rb.streets.geometry))
     assert LineString([(3, 0), (3, 3)]).within(result_streets.buffer(1e-6))  # the shared edge
 
-    assert result.proposal.roads is not None
-    direct = DijkstraReblocker().propose(rb).roads      # region_reblock == propose on region-block
+    assert result.proposal.roads is not None and len(result.proposal.roads) > 0
+    direct = method.propose(rb).roads      # region_reblock == propose on region-block
     assert direct is not None
     assert result.proposal.roads.geometry.equals(direct.geometry)
-
-
-def test_region_reblock_arterial_beats_dijkstra_with_a_margin_on_a_wide_region() -> None:
-    # Three 4x3 blocks in a row spanning a wide 12x3 region, with street frontage only at the
-    # far ENDS (A's left edge, C's right edge; B a left stub) -- so the region's interior is deep
-    # in the cross-region direction and a long cross-block arterial reaches it directly, where a
-    # per-block tree can't. This is the design's headline hypothesis. NB it must be a DEEP region:
-    # under the door-to-door directness basis, on a *well-served* region (full frontage) the walk
-    # legs dominate and arterial's straight roads buy ~nothing over dijkstra -- the margin is real
-    # only where a through-road genuinely shortens buried-parcel trips.
-    a = _grid_block(0, 0, 4, 3, streets_side="left", block_id="A")
-    b = _grid_block(4, 0, 4, 3, streets_side="left", block_id="B")
-    c = _grid_block(8, 0, 4, 3, streets_side="right", block_id="C")
-    blocks = [a, b, c]
-
-    dij_result = region_reblock(blocks, DijkstraReblocker(), [])
-    art_result = region_reblock(
-        blocks,
-        GreedyArterialReblocker(mode="buildable", objective="directness",
-                                n_anchors=12, max_roads=6),
-        [],
-    )
-
-    eval_block = dij_result.block
-    assert unary_union(eval_block.streets.geometry).equals(
-        unary_union(art_result.block.streets.geometry))
-    assert dij_result.proposal.roads is not None and art_result.proposal.roads is not None
-
-    _, dij_directness = efficiency_directness_curves(eval_block, dij_result.proposal.roads)
-    _, art_directness = efficiency_directness_curves(eval_block, art_result.proposal.roads)
-    cap = max(dij_directness.cost[-1], art_directness.cost[-1])
-    auc_dij = auc(dij_directness, cap)
-    auc_art = auc(art_directness, cap)
-
-    # Recorded numbers (door-to-door directness basis): AUC dijkstra ~0.071, arterial ~0.39
-    # (ratio ~5.5). On this DEEP wide region the arterial's cross-region through-road reaches the
-    # buried middle directly while dijkstra's per-block trees detour, so arterial wins by a wide
-    # margin -- and honestly so (the door-to-door basis, unlike the old entry-denominator one,
-    # only credits directness a resident actually experiences).
-    assert auc_art > 1.2 * auc_dij
-
-
-def test_greedy_arterial_beats_dijkstra_directness_auc_on_a_deep_region() -> None:
-    # Two 3x6 blocks side by side (sharing the interior edge x=3), each with street frontage
-    # only on its OUTER short end -- opposite ends (a: bottom y=0, b: top y=6) so the joined
-    # interior is deep and reaching the far corners genuinely benefits from a road that crosses
-    # the old block boundary, not just a per-block tree. This is the design's headline
-    # hypothesis: greedy_arterial should beat dijkstra even more decisively at region scale
-    # than per-block, because a region has more room for long cross-block through-roads.
-    a = _grid_block(0, 0, 3, 6, streets_side="bottom", block_id="a")
-    b = _grid_block(3, 0, 3, 6, streets_side="top", block_id="b")
-
-    dij_result = region_reblock([a, b], DijkstraReblocker(), [])
-    art_result = region_reblock(
-        [a, b],
-        GreedyArterialReblocker(mode="buildable", objective="directness",
-                                n_anchors=12, max_roads=6),
-        [],
-    )
-
-    eval_block = dij_result.block
-    # This fixture has partial frontage (a: bottom stub, b: top stub) and no existing street on
-    # the shared edge x=3, so region_block.streets is just the two declared stubs -- the egress
-    # baseline. Compare the whole network (not row 0 alone, which would pass vacuously either way).
-    assert unary_union(eval_block.streets.geometry).equals(
-        unary_union(art_result.block.streets.geometry))
-    assert dij_result.proposal.roads is not None and art_result.proposal.roads is not None
-
-    _, dij_directness = efficiency_directness_curves(eval_block, dij_result.proposal.roads)
-    _, art_directness = efficiency_directness_curves(eval_block, art_result.proposal.roads)
-    cap = max(dij_directness.cost[-1], art_directness.cost[-1])
-    auc_dij = auc(dij_directness, cap)
-    auc_art = auc(art_directness, cap)
-
-    # Recorded numbers on this fixture: AUC dijkstra ~0.094, AUC arterial ~0.403. The seed is
-    # empty here (no interior existing street), so this fixture's egress is unchanged by the
-    # existing-egress model. Arterial wins comfortably, confirming the hypothesis. Kept as >=
-    # (not >) per guidance: the real signal is the recorded numbers, not a brittle margin.
-    assert auc_art >= auc_dij
-
-    # Cross-block roads (design Scope): the arterial's own proposal -- not the seed, which is
-    # empty on this fixture since no interior street exists yet -- genuinely spans from block
-    # a's territory into block b's, proving joint (not per-block) reblocking.
-    assert _spans_both_sides(art_result.proposal.roads, x_split=3.0, margin=1.0)
 
 
 def test_identity_region_builder_sorts_each_group_for_determinism() -> None:

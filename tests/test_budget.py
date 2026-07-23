@@ -6,13 +6,11 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.budget import (
-    Curve,
     access_burden,
-    auc,
     road_drainage,
 )
 from reblock.contracts import Block
-from reblock.methods.dijkstra import DijkstraReblocker
+from reblock.methods.clearance import ClearanceReblocker
 
 UTM = CRS.from_epsg(32643)
 
@@ -39,26 +37,15 @@ def test_access_burden_is_sum_of_squared_depths() -> None:
 
 
 def test_road_drainage_trunks_exceed_leaves() -> None:
-    # dijkstra's roads on a 5x5 grid: a segment near the street carries more parcels than a leaf.
+    # clearance's roads on a 5x5 grid: a segment near the street carries more parcels than a leaf.
+    # depth_target=1 (not the default 2): the grid's only depth>2 parcel is the single center
+    # cell, so the default target is satisfied by ONE road (no trunk/leaf branching to measure);
+    # depth_target=1 forces every parcel to the street, producing a genuine branching tree.
     block = _grid_block(5)
-    roads = DijkstraReblocker().propose(block).roads
+    roads = ClearanceReblocker(depth_target=1).propose(block).roads
     assert roads is not None
     drain = road_drainage(block, roads)
     assert len(drain) == len(roads) and max(drain) > min(drain) and max(drain) >= 2
-
-
-def test_auc_rewards_reaching_benefit_at_lower_cost() -> None:
-    cheap = Curve(cost=[0.0, 1.0], benefit=[0.0, 1.0])     # full benefit by cost 1
-    dear = Curve(cost=[0.0, 4.0], benefit=[0.0, 1.0])      # full benefit only by cost 4
-    assert auc(cheap, cost_cap=4.0) > auc(dear, cost_cap=4.0)
-    assert 0.0 <= auc(dear, cost_cap=4.0) <= 1.0
-
-
-def test_auc_interpolates_a_cap_straddling_segment() -> None:
-    # A curve whose data crosses the cap BETWEEN points must interpolate the partial area,
-    # not drop the whole segment (regression: dropped it -> 0.30 instead of 0.5125).
-    c = Curve(cost=[0.0, 3.0, 5.0], benefit=[0.0, 0.8, 1.0])
-    assert abs(auc(c, cost_cap=4.0) - 0.5125) < 1e-6
 
 
 def test_road_drainage_floating_roads_get_zero() -> None:
@@ -72,7 +59,7 @@ def test_road_drainage_floating_roads_get_zero() -> None:
 def test_efficiency_and_directness_rise_with_roads() -> None:
     from reblock.budget import network_efficiency
     block = _grid_block(5)
-    roads = DijkstraReblocker().propose(block).roads
+    roads = ClearanceReblocker().propose(block).roads
     assert roads is not None
     e_none, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, roads.iloc[:0]))   # no roads
     e_full, d_full = network_efficiency(block, roads)
@@ -108,12 +95,12 @@ def test_directness_is_a_bounded_circuity_ratio() -> None:
 
     from reblock.budget import network_efficiency
     block = _grid_block(5)
-    roads = DijkstraReblocker().propose(block).roads
+    roads = ClearanceReblocker().propose(block).roads
     assert roads is not None
-    _, d_dijkstra = network_efficiency(block, roads)
+    _, d_roads = network_efficiency(block, roads)
     chord = gpd.GeoDataFrame(geometry=[LineString([(2.5, 0.0), (2.5, 5.0)])], crs=UTM)
     _, d_chord = network_efficiency(block, chord)
-    assert 0.0 <= d_dijkstra <= 1.0
+    assert 0.0 <= d_roads <= 1.0
     assert 0.0 <= d_chord <= 1.0
 
 
