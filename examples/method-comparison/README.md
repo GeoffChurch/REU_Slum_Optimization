@@ -19,10 +19,14 @@ link for its selection).
 
 Everything is graded on **one** number. Model collective egress as an electrical flow: every parcel
 injects one unit of "escape current"; the existing street is ground. Parcels sit on an always-present
-high-resistance **footpath mesh** (walkable but slow); roads are low-resistance shortcuts that
-*upgrade* the mesh where they run. The total dissipated power of that flow measures how hard it is for
-*everyone* to get out at once — folding **distance**, **contention** (many parcels sharing one road,
-penalised quadratically), and **redundancy** (loops spread the current) into a single scalar.
+**footpath mesh** whose resistance rises where buildings crowd the path — an open gap is easy to walk,
+a cramped alley between tight footprints is not (each footpath edge carries an *open-corridor* factor
+`max(ε, 1 − 2r₀/d)`, `d` the parcel spacing and `r₀` a building half-width that scales with local
+density). Roads are low-resistance shortcuts that *upgrade* the mesh where they run — so roads matter
+most exactly where the fabric is densest and the footpaths are worst. The total dissipated power of
+that flow measures how hard it is for *everyone* to get out at once — folding **distance**,
+**contention** (many parcels sharing one road, penalised quadratically), **redundancy** (loops spread
+the current), and now **local crowding** into a single scalar.
 
 > **permeability = 1 − P(roads) / P(no roads)** ∈ [0, 1)
 
@@ -64,12 +68,14 @@ dominance reads straight off it: up-and-to-the-left is better (more permeability
 
 ![permeability vs displacement](frontier_ZAF.9.3.1_1_40972.png)
 
-The shape tells the story. **`osm_footpaths` (magenta) and `greedy_arterial_repulsion` (green) own the
-efficient low-displacement frontier** — the loopy real network and the gap-threading optimiser buy the
-most permeability for the fewest homes. **`clearance` (yellow) is the lowest curve throughout**: a
-least-cost drainage *tree* has no redundancy by construction, so every parcel escapes exactly one way
-and the shared trunks choke — permeability lags at every budget. `euclidean_grid`, `clearance_looped`,
-and `topology` climb to high absolute permeability but spend far more displacement to get there.
+The shape tells the story. **`osm_footpaths` (magenta) owns the efficient low-displacement frontier** —
+the loopy real network buys the most permeability for the fewest homes across the whole cheap range,
+with **`greedy_arterial_repulsion` (green) just behind it** as the best optimiser. **`clearance`
+(yellow) is the laggard through the critical mid-range** — a least-cost drainage *tree* has no
+redundancy by construction, so it visibly *plateaus* around 10–20% displacement while every looped
+network keeps climbing. `euclidean_grid` (blue) starts slowest of all (a blind grid wastes its first
+roads far from the deep core), and `clearance_looped` (cyan) runs longest, reaching the highest
+*absolute* permeability but only by paving to heavy displacement.
 
 ## Lens A — matched displacement: permeability at an equal home-cost
 
@@ -79,18 +85,17 @@ at the budget):
 
 | method | road | displacement | **permeability** |
 |---|---|---|---|
-| **osm_footpaths** | 274 m | 12.8% | **0.581** |
-| greedy_arterial_repulsion | 183 m | 11.5% | 0.535 |
-| euclidean_grid | 270 m | 13.1% | 0.521 |
-| clearance_looped | 139 m | 11.3% | 0.429 |
-| topology | 186 m | 10.4% | 0.390 |
-| clearance | 143 m | 10.2% | **0.273** |
+| **osm_footpaths** | 274 m | 12.8% | **0.823** |
+| greedy_arterial_repulsion | 183 m | 11.5% | 0.709 |
+| euclidean_grid | 270 m | 13.1% | 0.699 |
+| clearance_looped | 139 m | 11.3% | 0.661 |
+| topology | 186 m | 10.4% | 0.646 |
+| clearance | 143 m | 10.2% | **0.588** |
 
-At an equal ~10% home-cost, **the real footpaths are the most permeable network** (0.581) — the paths
+At an equal ~10% home-cost, **the real footpaths are the most permeable network** (0.823) — the paths
 people already walk form a loopy mesh no optimiser here beats at this budget — with the repulsion
-arterial a close second (0.535) at the least road and fewest homes of the leaders. The bare
-`clearance` tree is worst (0.273): same homes moved, half the permeability, because a tree can't spread
-egress.
+arterial second (0.709) at the least road and fewest homes of the leaders. The bare `clearance` tree is
+worst (0.588): same homes moved, a quarter less permeability, because a tree can't spread egress.
 
 Access-depth colouring (deep interior draining as roads reach in):
 
@@ -110,21 +115,22 @@ Permeability-potential colouring (dark core lightening as escape gets easier):
 
 ## Lens B — matched permeability: homes displaced to reach a standard
 
-Truncate every method to its first prefix reaching **permeability ≥ 0.40**, then compare the
+Truncate every method to its first prefix reaching **permeability ≥ 0.60**, then compare the
 **displacement** each spends to get there (lower is better). Every method clears the bar on this block:
 
-| method | **displacement to P ≥ 0.40** | road |
+| method | **displacement to P ≥ 0.60** | road |
 |---|---|---|
-| **osm_footpaths** | **6.2%** | 161 m |
-| topology | 10.4% | 192 m |
-| clearance_looped | 11.3% | 139 m |
+| **osm_footpaths** | **4.3%** | 120 m |
+| topology | 7.4% | 109 m |
+| clearance_looped | 9.2% | 101 m |
 | greedy_arterial_repulsion | 11.5% | 183 m |
-| euclidean_grid | 13.1% | 270 m |
-| clearance | **21.1%** | 321 m |
+| clearance | 12.2% | 174 m |
+| euclidean_grid | **13.1%** | 270 m |
 
-To reach the same permeability standard, **`osm_footpaths` moves the fewest homes (6.2%)** and
-**`clearance` moves the most (21.1%)** — 3.4× as many for an identical outcome. A bare tree has to pave
-its way to a permeability that a loop gets for free.
+To reach the same permeability standard, **`osm_footpaths` moves the fewest homes (4.3%)** and
+**`euclidean_grid` moves the most (13.1%)** — 3× as many for an identical outcome, because a blind grid
+spends its first roads away from the deep core. The bare `clearance` tree is nearly as expensive
+(12.2%): it has to pave its way to a permeability a loop gets for free.
 
 Access-depth colouring:
 
@@ -145,28 +151,32 @@ Permeability-potential colouring:
 ## Each method under permeability
 
 - **`osm_footpaths`** — the REAL informal network (mapped OSM footpaths, not an optimiser's output) —
-  is the **most permeable per home displaced** on both lenses: 0.581 at a matched 10%, and it reaches
-  the 0.40 standard at just **6.2% of homes**. The worn paths people already walk are a genuine,
+  is the **most permeable per home displaced** on both lenses: 0.823 at a matched 10%, and it reaches
+  the 0.60 standard at just **4.3% of homes**. The worn paths people already walk are a genuine,
   loop-rich, low-displacement mesh — a hard baseline to beat.
-- **`greedy_arterial_repulsion`** is the **best optimiser here** and the low-road, low-home leader:
-  second-highest permeability at matched displacement (0.535) for the least road (183 m). Because its
+- **`greedy_arterial_repulsion`** is the **best optimiser here** and the low-road, low-home runner-up:
+  second-highest permeability at matched displacement (0.709) for the least road (183 m). Because its
   cost is proximity to homes, it threads through-corridors along the gaps *between* clusters, closing
   loops while grazing few footprints — and it scales to the region (see
   [`multiblock_depth`](../multiblock_depth/)).
-- **`euclidean_grid`** reaches high permeability (0.521 at matched displacement) — a regular grid is
-  loops by construction — but it bulldozes to get them (270 m of road, 13.1% homes), ignoring where the
-  deep parcels actually are.
-- **`clearance_looped`** adds redundant connectors on top of a clearance base, lifting permeability
-  well above plain clearance (0.429 vs 0.273 at matched displacement) at little extra cost — the loops
-  are exactly what the metric rewards. On the whole settlement it is the region-scale workhorse.
-- **`topology`** blankets the fabric with a whole-graph optimiser: it reaches the 0.40 standard cheaply
-  (10.4%) but its curve then plateaus low — it builds a reach-everywhere tree, not a mesh, so extra
-  road buys little extra permeability. Single-block-only.
+- **`euclidean_grid`** reaches high permeability eventually (0.699 at matched displacement) — a regular
+  grid is loops by construction — but it is the **most expensive to a fixed standard** (13.1% of homes
+  to hit 0.60) and the slowest starter, because a blind grid ignores where the deep parcels actually are.
+- **`clearance_looped`** adds redundant connectors on top of a clearance base, lifting permeability well
+  above plain clearance (0.661 vs 0.588 at matched displacement, and it reaches 0.60 at 9.2% vs
+  clearance's 12.2%) — the loops are exactly what the metric rewards. On the whole settlement it is the
+  region-scale workhorse.
+- **`topology`** blankets the fabric with a whole-graph optimiser: it reaches the 0.60 standard cheaply
+  (7.4%) but its curve then flattens into the pack — it builds a reach-everywhere tree, not a mesh, so
+  extra road buys little extra permeability. Single-block-only.
 - **`clearance`** is the balanced least-cost option and the **least permeable**: a drainage tree has no
-  backup routes *by construction*, so it lags at every budget (0.273 at matched displacement) and pays
-  the most homes (21.1%) to reach the standard. Cheap road, expensive permeability.
+  backup routes *by construction*, so it lags at matched displacement (0.588) and its mid-range plateau
+  is the clearest signature on the frontier of a network that can't spread egress. Cheap road, expensive
+  permeability.
 
-**The takeaway:** permeability rewards **reach and loops** and punishes **bare drainage trees**. The
-real footpaths and the repulsion arterial deliver the most escape for the fewest homes moved; the
-least-cost tree delivers the least. Pick the method by where you can afford to sit on the frontier —
-and see [`multiblock_depth`](../multiblock_depth/) for the region-scale run of the scalable methods.
+**The takeaway:** permeability rewards **reach and loops** and punishes **bare drainage trees**, and
+because footpaths are now worst exactly in the cramped core, it credits the roads that actually reach
+that core. The real footpaths and the repulsion arterial deliver the most escape for the fewest homes
+moved; the least-cost tree delivers the least. Pick the method by where you can afford to sit on the
+frontier — and see [`multiblock_depth`](../multiblock_depth/) for the region-scale run of the scalable
+methods.

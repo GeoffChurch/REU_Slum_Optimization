@@ -1,16 +1,33 @@
-# Permeability metric params + the two universal calibration thresholds. The thresholds were set
-# 2026-07-22 from scripts/calibrate_permeability.py's frontiers (Task 3 checkpoint, owner sign-off):
-# methods converge at low displacement (mostly <20%), so D=10% is the matched level where >=2
-# methods are still building; P*=0.4 is reached by 16/21 (method,region) pairs, cheaply for the
-# strong methods, and honestly missed by the sparse/weak ones.
-g_walk: 1.0
+# Permeability metric params + the two universal calibration thresholds. D was set 2026-07-22 from
+# scripts/calibrate_permeability.py's frontiers (Task 3 checkpoint, owner sign-off): methods
+# converge at low displacement (mostly <20%), so D=10% is the matched level where >=2 methods are
+# still building.
+#
+# g_walk lowered 1.0 -> 0.1 and the footpath edge switched from a plain g_walk/dist model to the
+# r0-corridor open-corridor-fraction model (r0_frac below) 2026-07-23: scratchpad experiments
+# (conductance_variants.py / combination_experiment.py / r0_sweep.py) on
+# multiblock_density_compactness found this combination massively improves method discrimination
+# (D=10% method-spread ~0.9pts -> ~11.8pts) -- see reblock.permeability's module docstring for
+# the formula.
+g_walk: 0.1
 g_road: 20.0
 g_street: 20.0
 corridor_m: 3.0
+r0_frac: 0.55   # r0 = r0_frac * median(building nearest-neighbour distance) -- adaptive corridor
+                # half-width; 0.55 lands r0~3m on multiblock_density_compactness (median NN~5.2m).
 # Lens A -- matched displacement %: truncate every method to its first prefix at/after this
 # displacement fraction, then compare permeability reached at that equal home-cost.
 matched_displacement: 0.10   # 10% of homes (Lens A)
 # Lens B -- matched permeability: truncate every method to its first prefix reaching this
 # permeability level, then compare displacement cost to get there (a method whose full network
-# never reaches it reads as "unreached").
-matched_permeability: 0.40   # permeability >= 0.40 (Lens B)
+# never reaches it reads as "unreached"). RECALIBRATED 2026-07-23 for the r0-corridor metric above
+# (owner sign-off): under the new conductance, the old P*=0.40 is reached almost immediately by
+# every capable method (~2-5% displacement on multiblock_density_compactness, a ~2pt cost spread --
+# no longer discriminating). P*=0.60 restores the original threshold's character: reached by 16/21
+# (method,region) pairs (scripts/calibrate_permeability.py, full probe across all 7 example
+# regions) -- the SAME coverage ratio the old 0.40 was calibrated to -- but now at a meaningfully
+# non-trivial, well-spread cost for the methods that do reach it (multiblock_density_compactness:
+# clearance_looped 5.9%, osm_footpaths 8.9%, euclidean_grid 9.9% displacement, a ~4pt spread), and
+# still honestly missed by the sparse/weak ones (greedy_arterial_repulsion; both weak methods on
+# density_compactness/nairobi).
+matched_permeability: 0.60   # permeability >= 0.60 (Lens B)

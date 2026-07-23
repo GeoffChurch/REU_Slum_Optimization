@@ -612,7 +612,7 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     from reblock.derive.access import parcel_access_layers
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     base_depth = parcel_access_layers(block, None, tol=STREET_TOL, adj=adj).max()
-    assert base_depth >= 5                                     # precondition: a genuinely deep pocket
+    assert base_depth >= 5                              # precondition: a genuinely deep pocket
 
     roads = _greedy_arterials(block, mode="buildable", objective="directness", cost="repulsion",
                               max_roads=4, n_anchors=12)

@@ -152,7 +152,8 @@ def region_names() -> list[str]:
 def _load_permeability_params() -> PermeabilityParams:
     raw = cast(DictConfig, OmegaConf.load(CONFIG_DIR / "permeability.yaml"))
     return PermeabilityParams(g_walk=float(raw.g_walk), g_road=float(raw.g_road),
-                              g_street=float(raw.g_street), corridor_m=float(raw.corridor_m))
+                              g_street=float(raw.g_street), corridor_m=float(raw.corridor_m),
+                              r0_frac=float(raw.r0_frac))
 
 
 def _load_pinned_block() -> tuple[Block, dict[str, Method]]:

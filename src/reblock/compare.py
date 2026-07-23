@@ -34,13 +34,14 @@ log = logging.getLogger(__name__)
 
 
 def _load_permeability_params(config_dir: Path = Path("conf")) -> PermeabilityParams:
-    """`conf/permeability.yaml`'s metric params (`g_walk`/`g_road`/`g_street`/`corridor_m`) --
-    mirrors `scripts.compare_budgets.load_permeability_config`'s params half; `compare()` has no
-    use for the two lens thresholds (matched_displacement/matched_permeability), which only the
-    two-lens driver consumes."""
+    """`conf/permeability.yaml`'s metric params (`g_walk`/`g_road`/`g_street`/`corridor_m`/
+    `r0_frac`) -- mirrors `scripts.compare_budgets.load_permeability_config`'s params half;
+    `compare()` has no use for the two lens thresholds (matched_displacement/matched_permeability),
+    which only the two-lens driver consumes."""
     raw = cast(DictConfig, OmegaConf.load(config_dir / "permeability.yaml"))
     return PermeabilityParams(g_walk=float(raw.g_walk), g_road=float(raw.g_road),
-                              g_street=float(raw.g_street), corridor_m=float(raw.corridor_m))
+                              g_street=float(raw.g_street), corridor_m=float(raw.corridor_m),
+                              r0_frac=float(raw.r0_frac))
 
 
 @dataclass(frozen=True)

@@ -45,15 +45,18 @@ def write_maps_qr(url: str, path: Path, *, scale: int = 4, border: int = 2) -> N
 
 @contextlib.contextmanager
 def _tee_to_file(path: Path) -> Iterator[None]:
-    """Mirror stdout+stderr (and root logging at INFO) into `path` for the duration; restore after."""
+    """Mirror stdout+stderr (and root logging at INFO) into `path` for the duration;
+    restore after."""
     f = open(path, "w", encoding="utf-8", buffering=1)
 
     class _Tee:
         def __init__(self, *streams: TextIO) -> None: self._streams = streams
         def write(self, s: str) -> None:
-            for st in self._streams: st.write(s)
+            for st in self._streams:
+                st.write(s)
         def flush(self) -> None:
-            for st in self._streams: st.flush()
+            for st in self._streams:
+                st.flush()
 
     orig_out, orig_err = sys.stdout, sys.stderr
     root = logging.getLogger()
@@ -143,8 +146,8 @@ def main() -> None:
         region = build_regions(source, screen, region_builder, None, 1)[0]
         members = [b.block_id for b in region]
         seed = selection[0]
-        # build_regions narrowed source.block_ids to the members; clear it again (like run.py) so the
-        # screen map spans the whole metro, not just the region neighbourhood.
+        # build_regions narrowed source.block_ids to the members; clear it again (like run.py)
+        # so the screen map spans the whole metro, not just the region neighbourhood.
         source.block_ids = None                                              # type: ignore[attr-defined]
         maps_url = google_maps_url(unary_union([b.boundary for b in region]), region[0].crs)
         write_maps_qr(maps_url, out / "maps_qr.png")
@@ -160,8 +163,9 @@ def main() -> None:
 
         methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
                    for n in ("greedy_arterial_repulsion", "clearance_looped", "euclidean_grid")}
-        # osm_footpaths: the real as-built informal network, from a committed per-region OSM snapshot
-        # (fetched once by scripts.fetch_desire_lines_snapshot) so the example reproduces offline.
+        # osm_footpaths: the real as-built informal network, from a committed per-region OSM
+        # snapshot (fetched once by scripts.fetch_desire_lines_snapshot) so the example
+        # reproduces offline.
         snapshot = out / f"desire_lines_{seed}.geojson"
         if snapshot.exists():
             with open_dict(cfg):
@@ -173,7 +177,8 @@ def main() -> None:
                                 label=seed)
 
         depths = block_depths(source, members)
-        dens = {b.block_id: len(b.parcels) / b.parcels.geometry.union_all().area * 1e4 for b in region}
+        dens = {b.block_id: len(b.parcels) / b.parcels.geometry.union_all().area * 1e4
+                 for b in region}
         meta = {
             "metric": metric_name, "flagged": len(selection), "total_blocks": total,
             "deepest_block": seed, "deepest_depth": depths.get(seed, 0.0),

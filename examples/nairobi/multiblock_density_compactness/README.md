@@ -47,9 +47,9 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| clearance_looped | 485 m | 0.9% | 15.9% | converged below budget |
-| euclidean_grid | 4,459 m | 10.1% | 38.7% |  |
-| greedy_arterial_repulsion | 1,820 m | 2.0% | 15.4% | converged below budget |
+| clearance_looped | 485 m | 0.9% | 28.9% | converged below budget |
+| euclidean_grid | 4,459 m | 10.1% | 45.5% |  |
+| greedy_arterial_repulsion | 1,820 m | 2.0% | 20.6% | converged below budget |
 
 Access-depth coloring:
 
@@ -69,9 +69,9 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| clearance_looped | 485 m | 0.9% | 15.9% | unreached |
-| euclidean_grid | 4,670 m | 10.6% | 41.4% |  |
-| greedy_arterial_repulsion | 1,820 m | 2.0% | 15.4% | unreached |
+| clearance_looped | 485 m | 0.9% | 28.9% | unreached |
+| euclidean_grid | 5,064 m | 11.2% | 50.3% | unreached |
+| greedy_arterial_repulsion | 1,820 m | 2.0% | 20.6% | unreached |
 
 Access-depth coloring:
 

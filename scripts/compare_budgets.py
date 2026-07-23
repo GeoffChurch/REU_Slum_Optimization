@@ -104,7 +104,8 @@ def load_permeability_config(config_dir: Path = Path("conf")
     (`matched_displacement` D for Lens A, `matched_permeability` P* for Lens B)."""
     raw = cast(DictConfig, OmegaConf.load(config_dir / "permeability.yaml"))
     params = PermeabilityParams(g_walk=float(raw.g_walk), g_road=float(raw.g_road),
-                                g_street=float(raw.g_street), corridor_m=float(raw.corridor_m))
+                                g_street=float(raw.g_street), corridor_m=float(raw.corridor_m),
+                                r0_frac=float(raw.r0_frac))
     return params, float(raw.matched_displacement), float(raw.matched_permeability)
 
 
