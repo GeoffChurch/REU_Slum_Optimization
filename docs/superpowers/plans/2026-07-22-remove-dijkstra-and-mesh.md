@@ -156,3 +156,49 @@ mentions — leave those). ruff + mypy: no new errors vs baseline.
   the shortest-path algorithm calls, the network_efficiency tests.
 - **No dead code:** D2.2/D2.4 grep-confirm zero callers before deleting; the fixture's auc fields +
   unused generators go with the tests that read them.
+
+---
+
+## D2 — corrections after grep-recon (2026-07-22)
+
+The first D2 pass correctly BLOCKED: grep-recon found the D2.3/D2.4/D2.5 lists incomplete. Scope is
+unchanged; these are precise additions/fixes. Apply ALL of them alongside D2.1–D2.5.
+
+1. **auc's 2 direct unit tests (D2.2/D2.3):** `tests/test_budget.py` has
+   `test_auc_rewards_reaching_benefit_at_lower_cost` (~50) and
+   `test_auc_interpolates_a_cap_straddling_segment` (~57) calling `auc()` on hand-built `Curve`s —
+   unrelated to dijkstra but they keep `auc` alive. DELETE both and drop the `auc` import from
+   `test_budget.py` (auc is fully retired). This makes D2.2's "zero callers" true.
+
+2. **`test_run.py::test_hydra_compose_wires_dijkstra_method` (~160):** D2.1 deletes
+   `conf/method/dijkstra.yaml`, breaking this. RETARGET it to `method=clearance` (rename to
+   `test_hydra_compose_wires_clearance_method`), mirroring the kept `test_hydra_compose_wires_peel_method`.
+   Do NOT assume the dijkstra-specific assertions (`connected_road_frac == 1.0`, `delta_k > 0`)
+   transfer — RUN it and set the assertions to `ClearanceReblocker`'s actual behavior on the `dji`
+   fixture (at minimum `proposal.method == "clearance"` + a metric that provably holds).
+
+3. **`test_run.py:341`** (`test_cli_region_path_writes_region_map`, CLI subprocess) also passes
+   `method=dijkstra` just to run the path → swap to `method=clearance`.
+
+4. **D2.4 CORRECTION — do NOT delete the fixture generators.** `sampled_fixtures()`, `_region_deep()`,
+   `_REF_EXTRA`, `_block_coincident`, `_block_sparse_chord`, and the local `_grid_block` in
+   `scoring_fixtures.py` are all used by KEPT tests (`test_network_efficiency_matches_reference`,
+   `test_context_score_matches_network_efficiency`, `test_incremental_scorer_matches_full_rederivation`).
+   Keep them. The ONLY dead things are the `E_curve_benefit`/`dir_curve_benefit`/`E_auc`/`dir_auc`
+   FIELDS in the ref JSONs (only the deleted `test_curves_and_auc_match_reference` read them) — strip
+   those — plus the `"dijkstra"`→`"least_cost"` key rename (in `ref_values_1808.json` + the test's key
+   tuple) which stands.
+
+5. **`tests/data/scoring/ref_values_extra.json`** (add to the file list): strip the same dead
+   auc/curve fields from its `sparse_chord`/`deep_region_*` entries. Also rename its
+   `"deep_region_dijkstra"` key → `"deep_region_least_cost"` (and the matching key in
+   `scoring_fixtures.py`'s tuple, ~line 126) for vestige consistency with #4's rename.
+
+6. **`tests/test_compare_budgets.py:99,113,115`** — downstream of the `{"dijkstra": ...}`→`{"clearance": ...}`
+   dict-label swap (D2.5), these `row.method == "dijkstra"` / `"dijkstra" in disp_text` / `... perm_text`
+   assertions must follow to `"clearance"`.
+
+7. **`_BlockScoringContext.score_frozen` (budget.py ~601)** — its ONLY caller is `_efficiency_factory`
+   (deleted in D2.2). Delete `score_frozen` too, and clean the 3 stale `_efficiency_factory`
+   cross-references in its docstring + `_BlockScoringContext`'s class docstring (~349-356). No dead
+   code left. (`.score()`/`.step()` stay live — do not touch those.)
