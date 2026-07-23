@@ -1,20 +1,14 @@
 [gen_method_comparison][INFO] ZAF.9.3.1_1_40972 map: https://www.google.com/maps/@-33.97795,18.58064,18z
-[gen_method_comparison][INFO] external_connectivity ZAF.9.3.1_1_40972 topology: benefit=0.921 at 934 m (38.7% paved)
-[gen_method_comparison][INFO] external_connectivity ZAF.9.3.1_1_40972 clearance_looped: benefit=0.921 at 1300 m (46.7% paved)
-[gen_method_comparison][INFO] external_connectivity ZAF.9.3.1_1_40972 greedy_arterial_repulsion: benefit=0.840 at 703 m (26.7% paved)
-[gen_method_comparison][INFO] external_connectivity ZAF.9.3.1_1_40972 clearance: benefit=0.827 at 486 m (20.4% paved)
-[gen_method_comparison][INFO] external_connectivity ZAF.9.3.1_1_40972 euclidean_grid: benefit=0.789 at 741 m (28.7% paved)
-[gen_method_comparison][INFO] external_connectivity ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.761 at 639 m (25.2% paved)
-[gen_method_comparison][INFO] internal_connectivity ZAF.9.3.1_1_40972 greedy_arterial_repulsion: benefit=0.468 at 703 m (26.7% paved)
-[gen_method_comparison][INFO] internal_connectivity ZAF.9.3.1_1_40972 euclidean_grid: benefit=0.410 at 741 m (28.7% paved)
-[gen_method_comparison][INFO] internal_connectivity ZAF.9.3.1_1_40972 osm_footpaths: benefit=0.327 at 639 m (25.2% paved)
-[gen_method_comparison][INFO] internal_connectivity ZAF.9.3.1_1_40972 clearance_looped: benefit=0.316 at 1300 m (46.7% paved)
-[gen_method_comparison][INFO] internal_connectivity ZAF.9.3.1_1_40972 topology: benefit=0.037 at 934 m (38.7% paved)
-[gen_method_comparison][INFO] internal_connectivity ZAF.9.3.1_1_40972 clearance: benefit=0.000 at 486 m (20.4% paved)
-[gen_method_comparison][INFO] ZAF.9.3.1_1_40972 clearance_looped: 203.0 displaced (77.2% of homes)
-[gen_method_comparison][INFO] ZAF.9.3.1_1_40972 topology: 160.2 displaced (60.9% of homes)
-[gen_method_comparison][INFO] ZAF.9.3.1_1_40972 euclidean_grid: 111.6 displaced (42.4% of homes)
-[gen_method_comparison][INFO] ZAF.9.3.1_1_40972 clearance: 87.8 displaced (33.4% of homes)
-[gen_method_comparison][INFO] ZAF.9.3.1_1_40972 osm_footpaths: 74.7 displaced (28.4% of homes)
-[gen_method_comparison][INFO] ZAF.9.3.1_1_40972 greedy_arterial_repulsion: 74.6 displaced (28.4% of homes)
-wrote examples/method-comparison: 6 methods; curves + before/after renders + run.log
+[gen_method_comparison][INFO] topology [lens A D=0.10] permeability=0.390 at 186 m
+[gen_method_comparison][INFO] topology [lens B P*=0.40] reached P*=0.40, 10.4% displaced at 192 m
+[gen_method_comparison][INFO] clearance [lens A D=0.10] permeability=0.273 at 143 m
+[gen_method_comparison][INFO] clearance [lens B P*=0.40] reached P*=0.40, 21.1% displaced at 321 m
+[gen_method_comparison][INFO] greedy_arterial_repulsion [lens A D=0.10] permeability=0.535 at 183 m
+[gen_method_comparison][INFO] greedy_arterial_repulsion [lens B P*=0.40] reached P*=0.40, 11.5% displaced at 183 m
+[gen_method_comparison][INFO] clearance_looped [lens A D=0.10] permeability=0.429 at 139 m
+[gen_method_comparison][INFO] clearance_looped [lens B P*=0.40] reached P*=0.40, 11.3% displaced at 139 m
+[gen_method_comparison][INFO] euclidean_grid [lens A D=0.10] permeability=0.521 at 270 m
+[gen_method_comparison][INFO] euclidean_grid [lens B P*=0.40] reached P*=0.40, 13.1% displaced at 270 m
+[gen_method_comparison][INFO] osm_footpaths [lens A D=0.10] permeability=0.581 at 274 m
+[gen_method_comparison][INFO] osm_footpaths [lens B P*=0.40] reached P*=0.40, 6.2% displaced at 161 m
+wrote examples/method-comparison: 6 methods; frontier + both lenses + renders + run.log

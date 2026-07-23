@@ -1,5 +1,0 @@
-method,terminal_displacement,pct_displaced,n_blocks
-euclidean_grid,519.4,0.1193,1
-clearance_looped,516.4,0.1186,1
-greedy_arterial_repulsion,215.5,0.0495,1
-osm_footpaths,71.2,0.0164,1

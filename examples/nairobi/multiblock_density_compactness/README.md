@@ -21,23 +21,19 @@ The metric grows a **89-block** region (**2,809 parcels**), mean depth 2.5 rings
 
 ![region](region.jpg)
 
-## 3. The method frontier (benefit vs added road)
+## 3. The permeability frontier (benefit vs added road)
 
-How far each method's road drives the region's **max access depth**, shown **for reference** (the method budget below is now the external-connectivity outcome) — a dot marks where it first reaches each new integer depth. `clearance` is **continued past its depth target** (a full-drainage run) out to the longest method's road, so every method is compared at the same budget: the as-built `osm_footpaths` network plateaus at its floor while `clearance` reaches the same depth for a fraction of the road:
+The frontier is the whole trade-off: **permeability** (benefit — the only benefit axis) on the y-axis against **displacement** (cost — the only cost axis) on the x-axis, one line per method. Pareto-dominance — which method buys more permeability for less displacement — reads straight off it (raw per-method samples are in `frontier_permeability.csv`, this dir):
 
-![access depth vs added road](depth_vs_road_KEN.30.9_1_3515.png)
+![permeability vs displacement](frontier_KEN.30.9_1_3515.png)
 
-Each method's benefit as cumulative added road grows — the full trade-off whose fixed-depth and matched-budget slices are tabulated in `lens_a_external.csv` and `lens_b_matched.csv` (this dir). External connectivity (access burden removed), internal connectivity (backup-route redundancy), and displacement (a rising cost):
+**Before any road is added**, the same region in both colorings: access-depth (blue = at a street, red = deep interior) vs permeability potential (dark = hard to escape, light = easy):
 
-![external connectivity](curve_external_connectivity_KEN.30.9_1_3515.png)
-
-![internal connectivity](curve_internal_connectivity_KEN.30.9_1_3515.png)
-
-![displacement](displacement_KEN.30.9_1_3515.png)
+| access-depth | permeability potential |
+|---|---|
+| ![access-depth](before_depth.jpg) | ![permeability potential](before_perm.jpg) |
 
 ## 4. Each method on the ground
-
-The same region on the same access-depth colour scale (blue = at a street, red = deep) with displaced buildings marked — so the maps are directly comparable across methods.
 
 **Watch each method reblock** — its full road set added in drainage order, the deep interior draining as the network reaches in:
 
@@ -45,17 +41,49 @@ The same region on the same access-depth colour scale (blue = at a street, red =
 |---|---|---|
 | ![clearance_looped](reblock_clearance_looped.gif) | ![euclidean_grid](reblock_euclidean_grid.gif) | ![greedy_arterial_repulsion](reblock_greedy_arterial_repulsion.gif) |
 
-**Matched road budget** — every method truncated to the same total added road, so this compares the access each *buys for the same cost*:
+### Matched displacement
+
+Every method truncated to the same displacement %, so this compares the **permeability each buys for the same home-cost**:
+
+| Method | Road | Displacement | Permeability | Note |
+|---|---|---|---|---|
+| clearance_looped | 485 m | 0.9% | 15.9% | converged below budget |
+| euclidean_grid | 4,459 m | 10.1% | 38.7% |  |
+| greedy_arterial_repulsion | 1,820 m | 2.0% | 15.4% | converged below budget |
+
+Access-depth coloring:
 
 | clearance_looped | euclidean_grid | greedy_arterial_repulsion |
 |---|---|---|
-| ![clearance_looped](after_clearance_looped_matched.jpg) | ![euclidean_grid](after_euclidean_grid_matched.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_matched.jpg) |
+| ![clearance_looped](after_clearance_looped_disp_depth.jpg) | ![euclidean_grid](after_euclidean_grid_disp_depth.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_disp_depth.jpg) |
 
-**Matched external-connectivity target** — every method truncated where external connectivity (access-burden removed) reaches 0.70, so this compares the *road each takes* for the same outcome:
+Permeability-potential coloring:
 
 | clearance_looped | euclidean_grid | greedy_arterial_repulsion |
 |---|---|---|
-| ![clearance_looped](after_clearance_looped_ext70.jpg) | ![euclidean_grid](after_euclidean_grid_ext70.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_ext70.jpg) |
+| ![clearance_looped](after_clearance_looped_disp_perm.jpg) | ![euclidean_grid](after_euclidean_grid_disp_perm.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_disp_perm.jpg) |
+
+### Matched permeability
+
+Every method truncated where permeability first reaches the standard target, so this compares the **displacement each spends** for the same permeability outcome:
+
+| Method | Road | Displacement | Permeability | Note |
+|---|---|---|---|---|
+| clearance_looped | 485 m | 0.9% | 15.9% | unreached |
+| euclidean_grid | 4,670 m | 10.6% | 41.4% |  |
+| greedy_arterial_repulsion | 1,820 m | 2.0% | 15.4% | unreached |
+
+Access-depth coloring:
+
+| clearance_looped | euclidean_grid | greedy_arterial_repulsion |
+|---|---|---|
+| ![clearance_looped](after_clearance_looped_perm_depth.jpg) | ![euclidean_grid](after_euclidean_grid_perm_depth.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_perm_depth.jpg) |
+
+Permeability-potential coloring:
+
+| clearance_looped | euclidean_grid | greedy_arterial_repulsion |
+|---|---|---|
+| ![clearance_looped](after_clearance_looped_perm_perm.jpg) | ![euclidean_grid](after_euclidean_grid_perm_perm.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_perm_perm.jpg) |
 
 
 ## How this was generated
