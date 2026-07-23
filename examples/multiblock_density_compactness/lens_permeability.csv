@@ -1,5 +1,5 @@
 method,road_m,displacement,permeability,reached
-greedy_arterial_repulsion,2443.6,0.0404,0.276874,False
+greedy_arterial_repulsion,4001.3,0.1172,0.601591,True
 clearance_looped,1475.6,0.0556,0.601527,True
 euclidean_grid,3789.2,0.0931,0.603796,True
 osm_footpaths,2459.9,0.0773,0.604218,True
