@@ -5,8 +5,8 @@ matched-displacement % `D` (Lens A) and the matched-permeability `P*` (Lens B) -
 `conf/permeability.yaml` at the Task 3 checkpoint. This script writes NO repo constants; it only
 prints.
 
-Structural reference: `scripts/calibrate_joint_target.py` (the retired dual-target probe -- read it
-via `git show`, it predates this file) had two bugs this probe is built to avoid:
+Design lessons carried from an earlier (now-retired) calibration probe -- two bugs this one is
+built to avoid:
 
 1. IN-PROCESS CROSS-REGION STATE BLEED: running all 7 regions in one process previously returned
    the WRONG city's blocks for a spec (a Cape Town region spec resolved to Nairobi data). Every
@@ -258,8 +258,8 @@ def _method_frontier(block: Block, method: Method, params: PermeabilityParams, *
                      label: str) -> MethodFrontier | None:
     """One method's frontier summary on `block`: reblock once (natural config, already baked into
     `method`), build the index-aligned permeability/displacement curves, and read off the table
-    cells. `None` if the method proposes no roads (skip, matching `calibrate_joint_target.py`'s
-    precedent). `label` (e.g. `"depth/capetown · clearance_looped"`) prefixes the live
+    cells. `None` if the method proposes no roads (skip it). `label` (e.g.
+    `"depth/capetown · clearance_looped"`) prefixes the live
     "solve i/total" progress line `permeability_curve`'s sparse-solve sweep emits -- the only
     per-sample-granular part of the pipeline (`displacement_curve` is pure geometry, no solve)."""
     prop = propose(method, block)

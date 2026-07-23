@@ -1,6 +1,10 @@
-"""Cost-benefit curves for reblocking methods: add a method's roads incrementally in
-drainage order, score access at each budget, trace benefit (fraction of Sigma depth^2
-removed) vs cost (cumulative added road length, m). See the design spec.
+"""Budget-sweep and scoring primitives for reblocking. `_sweep` adds a method's roads
+incrementally in drainage order and samples a value at each budget, yielding a `Curve` of value
+vs cost (cumulative added road length, m); `displacement_curve` and (in `permeability.py`)
+`permeability_curve` ride it, and the matched-displacement / matched-permeability lens
+truncations read the resulting index-aligned curves. Also holds the retained road/parcel scoring
+primitives (`road_drainage`, `building_radii`, `displacement`, `repulsion`, `access_burden`,
+`network_efficiency` + `_BlockScoringContext`).
 """
 from __future__ import annotations
 
@@ -551,7 +555,7 @@ def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
 @dataclass(frozen=True)
 class Curve:
     cost: list[float]     # cumulative added road length (m)
-    benefit: list[float]  # fraction of Sigma depth^2 removed, in [0, 1]
+    benefit: list[float]  # value per budget (permeability or displacement fraction), in [0, 1)
 
 
 V = TypeVar("V")
