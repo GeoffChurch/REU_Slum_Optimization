@@ -123,13 +123,11 @@ def _draw_heatmap(
     cmap = _FIELD_CMAP[field]
     vmin = _FIELD_VMIN[field]
 
-    # 13, not a bare 12: empirically (a real shipped before.jpg at the old figsize=(10,10) crops
-    # to ~0.80 of its nominal canvas under bbox_inches="tight" -- margins eat a roughly fixed
-    # inches-fraction of the figure, not data-dependent) a bare (12, 12) tight-crops to ~2880 px
-    # long edge, just under the >=3000 px poster target; 13 clears it with margin. No colorbar now
-    # (removed -- the coloring's meaning lives in the READMEs), so the bare map fills the canvas
-    # and this only clears the target by more.
-    fig, ax = plt.subplots(figsize=(13, 13))
+    # (16, 16): no colorbar now (removed -- the coloring's meaning lives in the READMEs), so the
+    # bare map fills the canvas edge-to-edge. At 300 dpi this tight-crops (bbox_inches="tight",
+    # pad_inches=0 -- see save_render) to roughly a 3500-4000 px long edge, comfortably sharp when
+    # printed at 3-4 ft poster scale.
+    fig, ax = plt.subplots(figsize=(16, 16))
     parcels.plot(ax=ax, column="layer", cmap=cmap, vmin=vmin, vmax=vmax,
                  edgecolor="#999999", linewidth=0.4)
 
@@ -225,4 +223,4 @@ def render_after(
 
 
 def save_render(fig: Figure, path: str | Path) -> None:
-    fig.savefig(path, dpi=300, bbox_inches="tight")
+    fig.savefig(path, dpi=300, bbox_inches="tight", pad_inches=0, transparent=True)

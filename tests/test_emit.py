@@ -346,7 +346,8 @@ def _permeability_and_displacement_curves():
 
 def test_compare_report_emits_one_permeability_vs_displacement_frontier(tmp_path):
     from reblock.emit import compare_report
-    compare_report(_permeability_and_displacement_curves(), tmp_path, method_order=["clearance"])
+    compare_report(_permeability_and_displacement_curves(), tmp_path, method_order=["clearance"],
+                   matched_displacement=0.10, matched_permeability=0.60)
     assert (tmp_path / "frontier_permeability.csv").exists()
     text = (tmp_path / "frontier_permeability.csv").read_text()
     assert "displacement" in text and "permeability" in text
@@ -374,7 +375,8 @@ def test_compare_report_frontier_has_no_title_and_percent_axes(
 
     monkeypatch.setattr(emit, "save_render", spy)
     emit.compare_report(_permeability_and_displacement_curves(), tmp_path,
-                        method_order=["clearance"])
+                        method_order=["clearance"],
+                        matched_displacement=0.10, matched_permeability=0.60)
 
     ax = captured["fig"].axes[0]
     assert ax.get_title() == ""
@@ -384,13 +386,48 @@ def test_compare_report_frontier_has_no_title_and_percent_axes(
     assert tuple(captured["fig"].get_size_inches()) == (12.0, 9.0)
 
 
+def test_compare_report_draws_matched_threshold_guide_lines(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The frontier must mark both lens cutoffs (conf/permeability.yaml): a vertical dashed guide
+    # at matched_displacement and a horizontal dashed guide at matched_permeability, both labelled
+    # (and so present in the legend) with the threshold value they mark.
+    import reblock.emit as emit
+    captured: dict[str, Figure] = {}
+
+    def spy(fig: Figure, path: str | Path) -> None:
+        captured["fig"] = fig
+        _real_save_render(fig, path)
+
+    monkeypatch.setattr(emit, "save_render", spy)
+    matched_displacement, matched_permeability = 0.10, 0.60
+    emit.compare_report(_permeability_and_displacement_curves(), tmp_path,
+                        method_order=["clearance"],
+                        matched_displacement=matched_displacement,
+                        matched_permeability=matched_permeability)
+
+    ax = captured["fig"].axes[0]
+    vlines = [ln for ln in ax.lines if ln.get_xdata()[0] == ln.get_xdata()[1]]
+    hlines = [ln for ln in ax.lines if ln.get_ydata()[0] == ln.get_ydata()[1]]
+    assert any(ln.get_xdata()[0] == pytest.approx(matched_displacement) for ln in vlines)
+    assert any(ln.get_ydata()[0] == pytest.approx(matched_permeability) for ln in hlines)
+    labels: list[str] = [str(ln.get_label()) for ln in ax.lines]
+    assert any("matched displacement" in lbl and "10%" in lbl for lbl in labels)
+    assert any("matched permeability" in lbl and "60%" in lbl for lbl in labels)
+    legend = ax.get_legend()
+    assert legend is not None
+    legend_labels = [t.get_text() for t in legend.get_texts()]
+    assert any("matched displacement" in lbl for lbl in legend_labels)
+    assert any("matched permeability" in lbl for lbl in legend_labels)
+
+
 def test_compare_report_without_permeability_rows_writes_nothing(tmp_path: Path) -> None:
     # A results list with only "displacement" (no benefit metric) has no frontier to plot.
     from reblock.budget import Curve
     from reblock.compare import MethodCurve
     from reblock.emit import compare_report
     curves = [MethodCurve("clearance", "B", "displacement", Curve([0.0, 100.0], [0.0, 0.42]))]
-    compare_report(curves, tmp_path, method_order=["clearance"])
+    compare_report(curves, tmp_path, method_order=["clearance"],
+                   matched_displacement=0.10, matched_permeability=0.60)
     assert list(tmp_path.iterdir()) == []
 
 

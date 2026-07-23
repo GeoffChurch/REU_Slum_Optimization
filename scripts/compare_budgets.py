@@ -46,7 +46,9 @@ Run (module form -- mirrors scripts/fetch_desire_lines_snapshot.py's Hydra boots
 from __future__ import annotations
 
 import csv
+import logging
 import sys
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
@@ -82,6 +84,8 @@ from reblock.permeability import (
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, region_reblock
 from reblock.render import frame_bbox, render_after, render_before, save_render, short_label
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -144,10 +148,14 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     proposals: dict[str, Proposal] = {}
     block: Block | None = None
     for name, method in methods.items():
+        t0 = time.perf_counter()
         blk, proposal = _reblock_once(region, method)
         block = blk
         proposals[name] = proposal
-        roads_by_method[name] = cast(GeoDataFrame, proposal.roads)
+        roads = cast(GeoDataFrame, proposal.roads)
+        roads_by_method[name] = roads
+        log.info("reblocked %s: %d segments, %.0f m (%.1fs)", name, len(roads),
+                 float(roads.geometry.length.sum()), time.perf_counter() - t0)
     assert block is not None
 
     radii = building_radii(block.building_points, corridor_m)
@@ -161,13 +169,16 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     # Frontier: permeability + displacement curves per method, from the SAME reblock above -- no
     # second propose. `compare_report` writes frontier_permeability.csv + frontier_<label>.png.
     curve_label = short_label(label if label is not None else str(region[0].block_id))
+    lens_t0 = time.perf_counter()
     curves: list[MethodCurve] = []
     for name, roads in roads_by_method.items():
         curves.append(MethodCurve(name, curve_label, "permeability",
                                   permeability_curve(block, roads, params)))
         curves.append(MethodCurve(name, curve_label, "displacement",
                                   displacement_curve(block, roads, radii, corridor_m=corridor_m)))
-    compare_report(curves, out_dir, method_order=list(methods))
+    compare_report(curves, out_dir, method_order=list(methods),
+                   matched_displacement=matched_displacement,
+                   matched_permeability=matched_permeability)
 
     # Lens prefixes -- either lens can fall short of its target with a fixed/sparse method's own
     # network (Lens A: `at_budget=False` below, prefix_a is that method's full network shown at its
@@ -183,6 +194,8 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         pb, reached = prefix_to_permeability(block, roads, matched_permeability, params)
         prefix_b[name] = pb
         reached_b[name] = reached
+    log.info("lens/frontier curves computed for %d methods (%.1fs)", len(methods),
+             time.perf_counter() - lens_t0)
 
     # Before images (both colorings), once per region, on a frame + vmax shared with every after.
     kc_eval = KComplexityEval()
@@ -192,13 +205,13 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     depth_vmax = int(kc0.fields["access_before"].max())
     fig = render_before(block, kc0.fields["access_before"], vmax=depth_vmax, field="depth",
                         frame=frame)
-    save_render(fig, out_dir / "before_depth.jpg")
+    save_render(fig, out_dir / "before_depth.png")
     plt.close(fig)
 
     potentials0 = parcel_potentials(block, None, params)
     perm_vmax = float(potentials0.max()) if len(potentials0) else 0.0
     fig = render_before(block, potentials0, vmax=perm_vmax, field="perm", frame=frame)
-    save_render(fig, out_dir / "before_perm.jpg")
+    save_render(fig, out_dir / "before_perm.png")
     plt.close(fig)
 
     # After images per method per lens, both colorings; the two outcome tables' rows.
@@ -231,7 +244,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                                displaced_points=_displaced_points(block, truncated))
             if title_override is not None:
                 fig.axes[0].set_title(title_override, fontsize=16)
-            save_render(fig, out_dir / f"after_{name}_{tag}_depth.jpg")
+            save_render(fig, out_dir / f"after_{name}_{tag}_depth.png")
             plt.close(fig)
 
             potentials = parcel_potentials(block, prefix, params)
@@ -239,7 +252,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                                frame=frame, displaced_points=_displaced_points(block, truncated))
             if title_override is not None:
                 fig.axes[0].set_title(title_override, fontsize=16)
-            save_render(fig, out_dir / f"after_{name}_{tag}_perm.jpg")
+            save_render(fig, out_dir / f"after_{name}_{tag}_perm.png")
             plt.close(fig)
 
         rows.append(OutcomeRow(

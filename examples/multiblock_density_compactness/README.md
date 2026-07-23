@@ -8,7 +8,7 @@
 
 `density_compactness` flagged **8,293 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_44531` (peel depth 4).
 
-![screen](screen.jpg)
+![screen](screen.png)
 
 **Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-34.01690,18.58833,16z).
 
@@ -19,7 +19,7 @@
 
 The metric grows a **19-block** region (**4,677 parcels**), mean depth 5.1 rings, mean density 142 bldg/ha.
 
-![region](region.jpg)
+![region](region.png)
 
 ## 3. The permeability frontier (benefit vs added road)
 
@@ -31,7 +31,7 @@ The frontier is the whole trade-off: **permeability** (benefit — the only bene
 
 | access-depth | permeability potential |
 |---|---|
-| ![access-depth](before_depth.jpg) | ![permeability potential](before_perm.jpg) |
+| ![access-depth](before_depth.png) | ![permeability potential](before_perm.png) |
 
 ## 4. Each method on the ground
 
@@ -49,20 +49,20 @@ Every method truncated to the same displacement %, so this compares the **permea
 |---|---|---|---|---|
 | clearance_looped | 2,710 m | 10.1% | 73.6% |  |
 | euclidean_grid | 4,056 m | 10.1% | 61.9% |  |
-| greedy_arterial_repulsion | 2,444 m | 4.0% | 27.7% | converged below budget |
+| greedy_arterial_repulsion | 3,427 m | 10.0% | 56.0% |  |
 | osm_footpaths | 3,244 m | 10.1% | 67.0% |  |
 
 Access-depth coloring:
 
 | clearance_looped | euclidean_grid | greedy_arterial_repulsion | osm_footpaths |
 |---|---|---|---|
-| ![clearance_looped](after_clearance_looped_disp_depth.jpg) | ![euclidean_grid](after_euclidean_grid_disp_depth.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_disp_depth.jpg) | ![osm_footpaths](after_osm_footpaths_disp_depth.jpg) |
+| ![clearance_looped](after_clearance_looped_disp_depth.png) | ![euclidean_grid](after_euclidean_grid_disp_depth.png) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_disp_depth.png) | ![osm_footpaths](after_osm_footpaths_disp_depth.png) |
 
 Permeability-potential coloring:
 
 | clearance_looped | euclidean_grid | greedy_arterial_repulsion | osm_footpaths |
 |---|---|---|---|
-| ![clearance_looped](after_clearance_looped_disp_perm.jpg) | ![euclidean_grid](after_euclidean_grid_disp_perm.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_disp_perm.jpg) | ![osm_footpaths](after_osm_footpaths_disp_perm.jpg) |
+| ![clearance_looped](after_clearance_looped_disp_perm.png) | ![euclidean_grid](after_euclidean_grid_disp_perm.png) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_disp_perm.png) | ![osm_footpaths](after_osm_footpaths_disp_perm.png) |
 
 ### Matched permeability
 
@@ -72,20 +72,20 @@ Every method truncated where permeability first reaches the standard target, so 
 |---|---|---|---|---|
 | clearance_looped | 1,476 m | 5.6% | 60.2% |  |
 | euclidean_grid | 3,789 m | 9.3% | 60.4% |  |
-| greedy_arterial_repulsion | 2,444 m | 4.0% | 27.7% | unreached |
+| greedy_arterial_repulsion | 4,001 m | 11.7% | 60.2% |  |
 | osm_footpaths | 2,460 m | 7.7% | 60.4% |  |
 
 Access-depth coloring:
 
 | clearance_looped | euclidean_grid | greedy_arterial_repulsion | osm_footpaths |
 |---|---|---|---|
-| ![clearance_looped](after_clearance_looped_perm_depth.jpg) | ![euclidean_grid](after_euclidean_grid_perm_depth.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_perm_depth.jpg) | ![osm_footpaths](after_osm_footpaths_perm_depth.jpg) |
+| ![clearance_looped](after_clearance_looped_perm_depth.png) | ![euclidean_grid](after_euclidean_grid_perm_depth.png) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_perm_depth.png) | ![osm_footpaths](after_osm_footpaths_perm_depth.png) |
 
 Permeability-potential coloring:
 
 | clearance_looped | euclidean_grid | greedy_arterial_repulsion | osm_footpaths |
 |---|---|---|---|
-| ![clearance_looped](after_clearance_looped_perm_perm.jpg) | ![euclidean_grid](after_euclidean_grid_perm_perm.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_perm_perm.jpg) | ![osm_footpaths](after_osm_footpaths_perm_perm.jpg) |
+| ![clearance_looped](after_clearance_looped_perm_perm.png) | ![euclidean_grid](after_euclidean_grid_perm_perm.png) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_perm_perm.png) | ![osm_footpaths](after_osm_footpaths_perm_perm.png) |
 
 
 ## How this was generated

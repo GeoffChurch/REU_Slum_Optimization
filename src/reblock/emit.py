@@ -130,7 +130,7 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
     blocks["block_id"] = blocks["block_id"].astype(str)
     blocks["flagged"] = blocks["block_id"].isin(set(flagged_ids))
     out_dir.mkdir(parents=True, exist_ok=True)
-    fig, ax = plt.subplots(figsize=(10, 10))
+    fig, ax = plt.subplots(figsize=(16, 16))
     unflagged = blocks[~blocks["flagged"]]
     flagged = blocks[blocks["flagged"]]
     # Informal blocks are small polygons on a wide metro extent, so a thin edge (not
@@ -142,6 +142,7 @@ def flagged_map(blocks_path: str, flagged_ids: list[str], out_dir: Path) -> Path
         flagged.plot(ax=ax, color="#c0392b", edgecolor="#7b241c", linewidth=0.5)
     ax.set_title(f"{int(blocks['flagged'].sum())} of {len(blocks)} blocks flagged")
     ax.set_axis_off()
+    ax.margins(0)
     out_path = out_dir / "flagged_map.png"
     save_render(fig, out_path)
     plt.close(fig)
@@ -197,7 +198,7 @@ def region_map(source: Source, regions: list[list[str]],
     # No colorbar, no title, and no per-member outline (`edgecolor="black"` used to trace every
     # member's own boundary on top of its fill, occluding the metric colors it's meant to show) --
     # only the thick black bounding-box `Rectangle` below locates the region.
-    fig_s, ax_s = plt.subplots(figsize=(10, 10))
+    fig_s, ax_s = plt.subplots(figsize=(16, 16))
     if not blanked.empty:
         blanked.plot(ax=ax_s, color="white", edgecolor="#dcdcdc", linewidth=0.12)
     if not flagged.empty and score_map:
@@ -211,6 +212,7 @@ def region_map(source: Source, regions: list[list[str]],
     ax_s.set_ylim(float(bnd["miny"].quantile(0.01)), float(bnd["maxy"].quantile(0.99)))
     ax_s.set_aspect("equal")
     ax_s.set_axis_off()
+    ax_s.margins(0)
     save_render(fig_s, out_dir / "screen.png")
     plt.close(fig_s)
 
@@ -235,7 +237,7 @@ def region_map(source: Source, regions: list[list[str]],
     m_vmax = float(max([v for v in member_score.values() if v] or [1.0]))
     members = members.copy()
     members["score"] = members["block_id"].map(member_score)
-    fig_r, ax_r = plt.subplots(figsize=(10, 10))
+    fig_r, ax_r = plt.subplots(figsize=(16, 16))
     geoms.plot(ax=ax_r, color="#eeeeee", edgecolor="#cccccc", linewidth=0.3)
     if not members.empty and member_score:
         members.plot(ax=ax_r, column="score", cmap="YlOrRd", vmin=0, vmax=m_vmax,
@@ -259,6 +261,7 @@ def region_map(source: Source, regions: list[list[str]],
                 _point_disks(own_pts, _POINT_RADIUS_M).plot(ax=ax_r, color=_OWN_PT, linewidth=0)
     ax_r.set_aspect("equal")
     ax_r.set_axis_off()
+    ax_r.margins(0)
     out_path = out_dir / "region.png"
     save_render(fig_r, out_path)
     plt.close(fig_r)
@@ -286,7 +289,8 @@ def _method_colors(method_order: Sequence[str]) -> dict[str, tuple[float, float,
 
 
 def compare_report(results: list[MethodCurve], out_dir: Path,
-                   *, method_order: Sequence[str]) -> None:
+                   *, method_order: Sequence[str],
+                   matched_displacement: float, matched_permeability: float) -> None:
     """ONE frontier curve per block/region: permeability (y) vs displacement (x), every method
     overlaid, no title. `results` is the flat (method x block x metric) list from reblock.compare,
     where `metric` is either "permeability" (`curve.cost` = cumulative added road length (m),
@@ -298,8 +302,12 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     samples per method) and one `frontier_{block_id}.png` per block/region -- x-axis
     "displacement", y-axis "permeability", both `PercentFormatter`'d (both are [0,1) fractions).
     `method_order` is the canonical method registry (`list(cfg.all_methods)`) that fixes each
-    method's curve colour run-independently -- it must cover every method in `results`. A
-    `results` with no "permeability" rows writes nothing (no benefit metric to plot)."""
+    method's curve colour run-independently -- it must cover every method in `results`. Each
+    frontier also draws the two calibrated lens cutoffs from `conf/permeability.yaml` (the same
+    thresholds `scripts.compare_budgets`'s two-lens driver grades methods against) as thin dashed
+    guide lines: `matched_displacement` (Lens A, vertical) and `matched_permeability` (Lens B,
+    horizontal). A `results` with no "permeability" rows writes nothing (no benefit metric to
+    plot)."""
     import csv
     out_dir.mkdir(parents=True, exist_ok=True)
     by_metric: dict[str, list[MethodCurve]] = {}
@@ -330,6 +338,15 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
             xs = disp_x.get((block_id, mc.method), mc.curve.cost)
             ax.plot(xs, mc.curve.benefit, marker="o", ms=9, lw=2.5,
                     label=mc.method, color=colors[mc.method])
+        # The two calibrated lens cutoffs (conf/permeability.yaml) as thin dashed guides, drawn
+        # UNDER the curves (low zorder) so they read as reference lines, not data -- Lens A's
+        # matched displacement (vertical) and Lens B's matched permeability (horizontal); see
+        # scripts/compare_budgets.py's two-lens driver, which grades every method against these
+        # exact thresholds.
+        ax.axvline(matched_displacement, ls="--", lw=1.0, color="gray", zorder=0.5,
+                   label=f"matched displacement = {matched_displacement:.0%}")
+        ax.axhline(matched_permeability, ls="--", lw=1.0, color="gray", zorder=0.5,
+                   label=f"matched permeability = {matched_permeability:.0%}")
         ax.set_xlabel("displacement", fontsize=16)
         ax.set_ylabel("permeability", fontsize=16)
         ax.xaxis.set_major_formatter(PercentFormatter(xmax=1))

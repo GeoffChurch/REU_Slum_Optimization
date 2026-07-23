@@ -18,6 +18,7 @@ import contextlib
 import json
 import logging
 import sys
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import TextIO, cast
@@ -26,7 +27,6 @@ import segno
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from omegaconf import open_dict
-from PIL import Image
 from shapely.ops import unary_union
 
 from reblock.contracts import Method, Screen, Source
@@ -36,6 +36,8 @@ from reblock.region import RegionBuilder, block_depths
 from reblock.render import google_maps_url
 from scripts.compare_budgets import load_permeability_config, run_permeability_lenses
 from scripts.gen_example_readme import write_readme
+
+log = logging.getLogger(__name__)
 
 
 def write_maps_qr(url: str, path: Path, *, scale: int = 4, border: int = 2) -> None:
@@ -98,6 +100,15 @@ def example_command(metric: str, city: str) -> str:
     return base if city == "capetown" else f"{base} {city}"
 
 
+# greedy_arterial_repulsion's default max_roads (15) is a fixed budget, so on large regions it
+# undershoots: on density_compactness (~4677 parcels) 15 roads reach only ~4% displacement, well
+# short of the D/P* lens thresholds, so its frontier stops mid-air. A per-region calibrated cap
+# lets it reach past both cutoffs (density_compactness: k=40 -> ~19% disp / 68% perm, ~matching the
+# other methods' extent). Regions not listed keep the default; the general
+# region-adaptive fix (a displacement-target stop instead of a fixed count) is follow-up.
+_ARTERIAL_MAX_ROADS = {"density_compactness": 40}
+
+
 def main() -> None:
     metric_name = sys.argv[1]
     city = sys.argv[2] if len(sys.argv) > 2 else "capetown"
@@ -110,7 +121,7 @@ def main() -> None:
     # surface a committed example dir predates (lens_a_external.csv, curve_{external,internal}_
     # connectivity_*.png, depth_vs_road_*.png, displacement_*.png/*.csv,
     # frontier_{external,internal}_connectivity.csv) -- leaves no orphans (all regenerated below).
-    for pattern in ("reblock_*.gif", "after_*.jpg", "curve_*.png", "depth_vs_road_*.png",
+    for pattern in ("reblock_*.gif", "after_*.png", "curve_*.png", "depth_vs_road_*.png",
                     "displacement_*.png"):
         for stale in out.glob(pattern):
             stale.unlink()
@@ -120,31 +131,42 @@ def main() -> None:
         stale_path = out / name
         if stale_path.exists():
             stale_path.unlink()
+    overrides = [
+        f"metric={metric_name}", f"data={city}_full", "screen=dense_compact",
+        "region_builder=dense_cluster", "region_builder.max_buildings=3000", "max_blocks=1",
+        "all_methods.greedy_arterial_repulsion.candidate_policy=fixed",
+        "+all_methods.greedy_arterial_repulsion.max_anchors=64",
+        "all_methods.clearance_looped.base.depth_target=3",
+        "all_methods.clearance_looped.base.max_roads=3000",
+        "all_methods.clearance_looped.budget_frac=0.30",
+        "all_methods.clearance_looped.search_radius_m=60",
+        "all_methods.euclidean_grid.spacing=250"]   # coarser grid -> budget in the pack
+    if metric_name in _ARTERIAL_MAX_ROADS:
+        overrides.append(
+            f"all_methods.greedy_arterial_repulsion.max_roads={_ARTERIAL_MAX_ROADS[metric_name]}")
     with _tee_to_file(out / "run.log"):
         with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
-            cfg = compose(config_name="compare_config", overrides=[
-                f"metric={metric_name}", f"data={city}_full", "screen=dense_compact",
-                "region_builder=dense_cluster", "region_builder.max_buildings=3000", "max_blocks=1",
-                "all_methods.greedy_arterial_repulsion.candidate_policy=fixed",
-                "+all_methods.greedy_arterial_repulsion.max_anchors=64",
-                "all_methods.clearance_looped.base.depth_target=3",
-                "all_methods.clearance_looped.base.max_roads=3000",
-                "all_methods.clearance_looped.budget_frac=0.30",
-                "all_methods.clearance_looped.search_radius_m=60",
-                "all_methods.euclidean_grid.spacing=250"])   # coarser grid -> budget in the pack
+            cfg = compose(config_name="compare_config", overrides=overrides)
         source = cast(Source, instantiate(cfg.data))
         screen = cast(Screen, instantiate(cfg.screen))
         region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
 
+        t0 = time.perf_counter()
         selection = screen.select(source) or []
         if not selection:
             raise SystemExit(f"metric={metric_name!r} flagged 0 blocks — check its gate/pre-filter")
         scores = cast("dict[str, float]", screen.selection_scores(source))   # type: ignore[attr-defined]
         total = len(source.block_geometries())
+        log.info("screen: flagged %d/%d blocks (%.1fs)", len(selection), total,
+                 time.perf_counter() - t0)
 
         source.block_ids = None                                              # type: ignore[attr-defined]
+        t0 = time.perf_counter()
         region = build_regions(source, screen, region_builder, None, 1)[0]
         members = [b.block_id for b in region]
+        region_parcels = sum(len(b.parcels) for b in region)
+        log.info("region built: %d blocks / %d parcels (%.1fs)", len(members), region_parcels,
+                 time.perf_counter() - t0)
         seed = selection[0]
         # build_regions narrowed source.block_ids to the members; clear it again (like run.py)
         # so the screen map spans the whole metro, not just the region neighbourhood.
@@ -155,11 +177,8 @@ def main() -> None:
         region_map(source, [members], [[seed]], out,
                    selection=selection, depths=scores, metric_name=metric_name,
                    metric=getattr(screen, "metric", None))
-        for name in ("screen", "region"):
-            png = out / f"{name}.png"
-            if png.exists():
-                Image.open(png).convert("RGB").save(out / f"{name}.jpg", quality=85)
-                png.unlink()
+        # region_map already writes screen.png/region.png (transparent, via save_render) at the
+        # example naming -- no JPG flatten step needed.
 
         methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
                    for n in ("greedy_arterial_repulsion", "clearance_looped", "euclidean_grid")}
@@ -182,7 +201,7 @@ def main() -> None:
         meta = {
             "metric": metric_name, "flagged": len(selection), "total_blocks": total,
             "deepest_block": seed, "deepest_depth": depths.get(seed, 0.0),
-            "region_members": len(members), "region_parcels": sum(len(b.parcels) for b in region),
+            "region_members": len(members), "region_parcels": region_parcels,
             "region_mean_depth": sum(depths.values()) / max(len(depths), 1),
             "region_mean_density_per_ha": sum(dens.values()) / max(len(dens), 1),
             "maps_url": maps_url,

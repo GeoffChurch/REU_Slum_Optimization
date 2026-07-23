@@ -180,15 +180,15 @@ def test_render_before_and_after_have_no_title() -> None:
 
 
 def test_draw_heatmap_uses_poster_figsize() -> None:
-    # Bumped from the pre-poster (10, 10) -- 13 (not a bare 12) so the saved PNG still clears
-    # >=3000 px on the long edge at save_render's dpi=300 after bbox_inches="tight" cropping
-    # (empirically ~0.80 of nominal canvas; see the comment at the figsize call site).
+    # Bumped to (16, 16) so the saved PNG clears ~3500-4000 px on the long edge at
+    # save_render's dpi=300 after bbox_inches="tight"/pad_inches=0 cropping -- sharp at
+    # 3-4 ft poster scale; see the comment at the figsize call site.
     block = _grid_block(3)
     layers = parcel_access_layers(block, None)
 
     fig = render_before(block, layers, vmax=2)
 
-    assert tuple(fig.get_size_inches()) == (13.0, 13.0)
+    assert tuple(fig.get_size_inches()) == (16.0, 16.0)
 
 
 def test_save_render_writes_a_nonempty_file(tmp_path: Path) -> None:
