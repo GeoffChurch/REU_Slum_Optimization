@@ -100,6 +100,15 @@ def example_command(metric: str, city: str) -> str:
     return base if city == "capetown" else f"{base} {city}"
 
 
+# greedy_arterial_repulsion's default max_roads (15) is a fixed budget, so on large regions it
+# undershoots: on density_compactness (~4677 parcels) 15 roads reach only ~4% displacement, well
+# short of the D/P* lens thresholds, so its frontier stops mid-air. A per-region calibrated cap
+# lets it reach past both cutoffs (density_compactness: k=40 -> ~19% disp / 68% perm, ~matching the
+# other methods' extent). Regions not listed keep the default; the general
+# region-adaptive fix (a displacement-target stop instead of a fixed count) is follow-up.
+_ARTERIAL_MAX_ROADS = {"density_compactness": 40}
+
+
 def main() -> None:
     metric_name = sys.argv[1]
     city = sys.argv[2] if len(sys.argv) > 2 else "capetown"
@@ -122,18 +131,22 @@ def main() -> None:
         stale_path = out / name
         if stale_path.exists():
             stale_path.unlink()
+    overrides = [
+        f"metric={metric_name}", f"data={city}_full", "screen=dense_compact",
+        "region_builder=dense_cluster", "region_builder.max_buildings=3000", "max_blocks=1",
+        "all_methods.greedy_arterial_repulsion.candidate_policy=fixed",
+        "+all_methods.greedy_arterial_repulsion.max_anchors=64",
+        "all_methods.clearance_looped.base.depth_target=3",
+        "all_methods.clearance_looped.base.max_roads=3000",
+        "all_methods.clearance_looped.budget_frac=0.30",
+        "all_methods.clearance_looped.search_radius_m=60",
+        "all_methods.euclidean_grid.spacing=250"]   # coarser grid -> budget in the pack
+    if metric_name in _ARTERIAL_MAX_ROADS:
+        overrides.append(
+            f"all_methods.greedy_arterial_repulsion.max_roads={_ARTERIAL_MAX_ROADS[metric_name]}")
     with _tee_to_file(out / "run.log"):
         with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
-            cfg = compose(config_name="compare_config", overrides=[
-                f"metric={metric_name}", f"data={city}_full", "screen=dense_compact",
-                "region_builder=dense_cluster", "region_builder.max_buildings=3000", "max_blocks=1",
-                "all_methods.greedy_arterial_repulsion.candidate_policy=fixed",
-                "+all_methods.greedy_arterial_repulsion.max_anchors=64",
-                "all_methods.clearance_looped.base.depth_target=3",
-                "all_methods.clearance_looped.base.max_roads=3000",
-                "all_methods.clearance_looped.budget_frac=0.30",
-                "all_methods.clearance_looped.search_radius_m=60",
-                "all_methods.euclidean_grid.spacing=250"])   # coarser grid -> budget in the pack
+            cfg = compose(config_name="compare_config", overrides=overrides)
         source = cast(Source, instantiate(cfg.data))
         screen = cast(Screen, instantiate(cfg.screen))
         region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
