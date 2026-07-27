@@ -96,7 +96,7 @@ Qualified-pool size, measured from columns already on disk (no download):
 **~65,000 qualified blocks against 111 used — ~590×.** Gated on an Open Buildings tile download
 that is already 90% implemented (public S2 level-4 tiles with a `tiles.geojson` index,
 `fetch_kblock_fixtures.py:62-67`; the current code takes only the tile containing the bbox
-centroid, `:216-223`). ZAF+KEN is on the order of 10–15 tiles.
+centroid, `:216-223`). Measured: **20 tiles cover ZAF+KEN, 3.78 GB gzipped** (see 1b).
 
 **`k_complexity` is a proxy, not the screen.** It is kblock's own metric, and the backlog records
 peel-k ≈ √(building count) on Voronoi — a count proxy, not morphology. The repo's BFS-peel depth
@@ -477,16 +477,25 @@ donor material. The originally-specified "accrete into compact/isoperimetric reg
 never implemented, and its record was overwritten by the commit reporting the substitute
 (`3df147a`). If a retrieval unit is needed in Phase 2, three candidates: fixed squares (FFT-native),
 disks (rotation-symmetric outline, so all orientation signal comes from fabric), or a
-compactness-preserving accretion builder — which respects real block boundaries so roads aren't
+shape-standardizing accretion builder — which respects real block boundaries so roads aren't
 sliced, while still standardizing outline. **Retrieval unit need not equal intervention unit**;
 extraction happens on the recipient's own substrate regardless.
 
-The compactness-preserving builder is **no longer optional if the Phase 3 donor-material test
+A **shape-standardizing** builder is **no longer optional if the Phase 3 donor-material test
 runs**: street-form donors force accretion (a single block has no internal streets), so a clean
 material comparison needs outline control, which is precisely what §7 lacked. It is a prerequisite
-of that test, not a Phase 2 nicety. Note the builder scores the *union's* isoperimetric quotient
-as it grows — distinct from today's `√(n × compactness)`, which scores each candidate block in
-isolation and never looks at the shape being assembled.
+of that test, not a Phase 2 nicety. Whatever the objective, it must score the *union's* shape as it
+grows — distinct from today's `√(n × compactness)`, which scores each candidate block in isolation
+and never looks at the shape being assembled.
+
+**The objective is open, and compactness is only the obvious first guess.** The requirement is that
+outline variance across candidates be small enough not to dominate GW distance — *not* that regions
+be maximally circular. Squareness or rectangularity may well win: squares tile, they are FFT-native
+if Phase 2 goes that way, and settlement fabric often carries a dominant orientation a circle
+discards. A regular-n-gon target, or a data-driven objective fitted to the corpus, are equally
+admissible. Choose it **empirically against a measurable criterion** — the outline's share of
+inter-region GW distance variance, which 1d's matrix can measure directly — rather than assuming
+isoperimetric quotient is the right target because it is the familiar one.
 
 ## Phase 3 donor-material test (promoted from "not revisited")
 
@@ -513,8 +522,8 @@ street-form is *not* equal cost overall, for a structural reason:
 **Street donors force accretion.** A kblock block is a street-bounded face (`KblockSource` sets
 `streets = poly.boundary`), so a single block has **no internal streets to copy**; only a
 multi-block region has an internal grid. This is recorded in the 2026-07-10 feasibility doc and it
-means street-form cannot be run block-level at all. Testing it cleanly therefore requires the
-compactness-preserving region builder as a prerequisite, which footpath donors do not need.
+means street-form cannot be run block-level at all. Testing it cleanly therefore requires a
+shape-standardizing region builder as a prerequisite, which footpath donors do not need.
 
 **Expected value:** footpaths stay well ahead on the prior. What makes the test worth running
 anyway is that street-form needs no OSM — and the coverage spike measured that **34.5% of
