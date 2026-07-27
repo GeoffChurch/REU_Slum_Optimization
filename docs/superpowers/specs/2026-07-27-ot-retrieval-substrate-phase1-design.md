@@ -30,9 +30,16 @@ produced both the first draft's over-claim and the review's under-claim.
 
 | tier | needs | usable size | status |
 |---|---|---|---|
-| **T1 · OSM census** | blocks parquet + OSM linework | **all 1,813,575** | free today, behind one refactor |
-| **T2 · Retrieval / index** | building **points** only — no Voronoi, no `Block` | ~65k qualified | after a targeted tile download |
-| **T3 · Scoring / solving** | points + Voronoi parcels + substrate | grows with T2 | the genuinely expensive tier |
+| **T1 · OSM census** | blocks parquet + OSM linework | **all 1,813,575** | free of building data, behind one refactor |
+| **T2 · Retrieval / index** | building **points**; Voronoi/peel computed in memory for the screen, never stored | ≤65k qualified (pre-screen) | after a targeted tile download |
+| **T3 · Scoring / solving** | points + persisted parcels + substrate | grows with T2 | the genuinely expensive tier |
+
+**T2's "no parcels" is a claim about storage, not computation.** The BFS-peel depth screen is the
+real qualifying gate, and `screen/dense_compact.py:_chunk_depths` builds full `Block`s through
+`KblockSource.region()` — Voronoi included — before calling `access_before`. Two of the note's
+morphological features (compactness, access depth) need the same pass. Measured at 135 ms/block,
+that is ~2.45 single-core hours for 65,364 blocks: cheap, but real, and it means **65,364 is a
+pre-screen upper bound**, not the qualified pool.
 
 **T1 is free because kblock `streets` *is* the block boundary.** `_interior_desire_lines`
 currently takes a `Block` (`osm_footpaths.py:23`), and `Block.__post_init__` raises
@@ -41,23 +48,35 @@ building points, which exist only for the Cape Town and Nairobi bboxes. That is 
 limit masquerading as a data limit**: refactored to `(lines, boundary, streets, crs)`, the census
 runs country-wide with zero building downloads.
 
-**T2 never needs parcels.** Parcels are `Voronoi(building_points)` clipped — a deterministic
-function, so the points carry strictly more information and routing a descriptor through Voronoi
-is a lossy detour that also introduces a boundary-clipping artifact. Measured on six real Cape
-Town blocks, parcel centroid → nearest building point:
+**T2 does not need parcels *stored*.** Parcels are `Voronoi(building_points)` clipped to the block
+— a deterministic function of the points plus the block polygon — so the points carry the
+information and a descriptor can be built from them directly, avoiding a boundary-clipping
+artifact.
 
-| block | n | diagonal | median | p90 | median / diagonal |
-|---|---|---|---|---|---|
-| …1_3934 | 211 | 279.5 m | 1.08 m | 3.15 m | 0.39% |
-| …1_3968 | 894 | 965.7 m | 0.90 m | 2.41 m | 0.09% |
-| …1_2698 | 67 | 133.1 m | 1.93 m | 5.20 m | 1.45% |
-| …1_2701 | 82 | 185.1 m | 1.21 m | 2.34 m | 0.65% |
-| …1_4310 | 147 | 176.2 m | 0.87 m | 1.92 m | 0.49% |
-| …1_4314 | 86 | 158.4 m | 0.98 m | 2.95 m | 0.62% |
+Measured on a random draw of 12 blocks from the **actual qualified pool** (Cape Town,
+`building_count` 60–300, `k_complexity ≥ 4`, n=1,136), parcel centroid → nearest building point:
 
-For scale, the OT note treats a GW barycentric recovery error of **6.24 m (3.2% of diagonal)** as
-a *successful* mechanism check. The substitution sits several times below the transport
-machinery's own validated noise floor.
+| statistic | value |
+|---|---|
+| median-of-medians | 2.13 m |
+| **median / block diagonal** | **0.31 – 1.26%** |
+| per-block p90 | 2.19 – 14.19 m |
+
+An independent draw by a reviewer gave a median-of-medians of 3.21 m over the same relative range
+(0.42–1.18%), with per-block p90 reaching 402.8 m on a 5.1 km-diagonal block. **The absolute
+displacement is draw-dependent because it tracks block size; the ratio is stable.** The claim this
+tier rests on is therefore the *relative* one — the substitution perturbs a normalized
+pairwise-distance descriptor by ~1% of block scale — and not any comparison against the note's
+6.24 m GW recovery error, which is an absolute figure on one small block and does not transfer.
+
+An earlier version of this table was measured on `blocks_capetown_sample.parquet`, a fixture built
+with `MAX_AREA_KM2 = 0.5` and a density floor — small compact blocks by construction, not the
+target population. The numbers above replace it.
+
+**Cardinality caveat.** Clipped Voronoi explodes multi-lobe cells, so parcels and points do not
+agree on n (observed 205/191 and 92/87 in the draw above). Any descriptor must be defined so this
+does not matter — a normalized distance spectrum over whichever set is used, not a per-element
+correspondence.
 
 **One honest limit on T1.** A block with OSM linework but no building points can be *counted*, but
 cannot be GW-coupled to transport its roads — coupling needs both point clouds. T1 sizes the
@@ -114,9 +133,12 @@ Phase 1 answers three questions and produces four artifacts. It is *not* trying 
 3. What does a pair cost, in wall-clock? → makes any later scale claim budgetable.
 
 The Phase 3a deliverable this serves is a **mapping/data product** — predicted footpaths for
-blocks OSM has not mapped — not a reblocker. The note is explicit that `osm_footpaths`' own *real*
-network is at best comparable to a clearance solve on permeability (0.77 vs 0.78 in v5; 0.80 vs
-0.91 in v2), so a *predicted* network is capped by a ceiling that is already not a reblocking win.
+blocks OSM has not mapped — not a reblocker. The ceiling argument: `osm_footpaths`' own *real*
+network reaches comparable permeability to a clearance solve at materially lower displacement
+(v5: 0.7702 @ 28.4% vs 0.7830 @ 43.9%; v2: 0.8017 @ 28.4% vs 0.9094 @ 69.3%). On this repo's
+two-axis basis the real network is Pareto-non-dominated in v5 and not dominated on both axes in
+v2 — so a predicted network inherits a ceiling that is *attractive on cost and unremarkable on
+benefit*, which supports the mapping-product framing without claiming the real network loses.
 
 ## 1a — country-wide OSM footpath census
 
@@ -147,9 +169,14 @@ scale here. Required specifics the first draft omitted:
   asserting agreement within tolerance is part of this unit. Without that, two sources is
   accommodation rather than a Strategy.
 - **Read with OGR-side filtering** — `pyogrio.read_dataframe(path, layer="lines", where="highway
-  IN (...)", use_arrow=True)` — so a country PBF does not materialize every South African
-  `highway=track`. The GDAL `OSM` driver is present in the env (no new dependency) but builds a
-  multi-GB temp SQLite DB; budget disk for it.
+  IN (...)", use_arrow=True)`, verified working at 0.1 s on a real `.osm.pbf`. This reduces what
+  materializes in Python; it does **not** avoid the GDAL `OSM` driver's multi-GB temp SQLite build,
+  which happens regardless. Budget disk for both. Geofabrik inputs are 417 MB (ZAF) + 349 MB (KEN).
+- **Load once per batch, not once per block.** `DesireLineSource.desire_lines(bbox, crs)` is a
+  per-bbox API; the census must not call it 1.8M times. Read and index the country layer once per
+  UTM batch and query the STRtree per block.
+- **Stream the blocks parquet.** `ZAF_geodata.parquet` (833 MB) and `KEN_geodata.parquet` (386 MB)
+  are single-row-group, so `gpd.read_parquet` will not stream a column — use `iter_batches`.
 
 **Interiority is reported as a tolerance sweep, not a number.** `_interior_desire_lines` subtracts
 `streets.buffer(STREET_TOL)` with `STREET_TOL = 0.5 m`, and for kblock `streets` is the block
@@ -158,6 +185,12 @@ outlines, so a genuinely boundary-running path more than 0.5 m off the outline i
 *interior* — inflating the exact column that gates "which blocks have real coverage." Emit
 interiority at **0.5 / 2 / 5 m** and decide after looking. Same instinct as the near-miss tags
 below, applied to the thing that actually matters.
+
+**Report segment count and length at every tolerance, not just length.** On block 40972 the sweep
+gives 639.3 / 626.5 / 600.7 m while the segment count stays at **13 throughout** — the tolerance
+trims the boundary-adjacent ends of paths without eliminating any. Since coverage is gated on
+*count* (does this block have any interior footpath?) and donor quality on *length*, a
+length-only sweep would misrepresent how much the tolerance choice actually moves the gate.
 
 **Outputs** (`~/.cache/reblock/osm_coverage_{iso}.parquet`):
 `block_id, settlement_id, n_interior_segments_{0.5,2,5}, interior_length_m_{0.5,2,5},
@@ -176,11 +209,20 @@ already in hand.
 
 Extend `provision.py` from single-tile to multi-tile: enumerate `tiles.geojson` features
 intersecting the **shortlist** — blocks passing the `k_complexity` cut *and* carrying real interior
-coverage from 1a — download each tile, filter to `OB_MIN_CONFIDENCE = 0.7` and the shortlist's
-extent, write per-ISO GeoParquet.
+coverage from 1a — download each, filter to `OB_MIN_CONFIDENCE = 0.7`, and **spatially join
+against the shortlist's block polygons**.
+
+The polygon join is the load-bearing part. `download_capetown_buildings` currently filters with a
+lon/lat rectangle (`between()`), and a *rectangle* around a ZAF+KEN shortlist is both countries —
+which would retain essentially every Open Buildings row and defeat the point of being
+query-driven. It is the filter that must change, not the tile loop.
+
+**Measured, not estimated:** `tiles.geojson` has 333 features, of which **20 cover ZAF+KEN and 19
+cover the k≥4 band**. HEAD requests on the `points_s2_level_4_gzip` URLs total **3.78 GB**
+gzipped (the polygon variants total 14.09 GB). Budget hours of streaming CSV parse, not minutes.
 
 Query-driven, not country-wide: the census tells us which blocks matter before we pay for any of
-them. This is what makes T2 and T3 real, and it is the only genuinely new download in Phase 1.
+them. This is the only genuinely new download in Phase 1.
 
 ## 1c — agreement primitives and holdout protocol
 
@@ -198,13 +240,29 @@ measures function, and it is a primary scorer.
   reference→proposal is recall (real paths missed). Never averaged; a blend hides which way a
   prediction fails, which is the only thing this measures.
 
-**Holdout protocol — leave-one-settlement-out is primary.** Leave-one-*block*-out is not safe
-here: donors are immediate neighbours, frequently the same continuous OSM way clipped at a block
-edge, often one mapper in one session. That is a live explanation for v5's 94% requiring no
-generalization at all, and it threatens the existing headline retroactively. Report:
+**Holdout protocol — a hard metric exclusion radius is primary.** Leave-one-*block*-out is not
+safe here: donors are immediate neighbours, frequently the same continuous OSM way clipped at a
+block edge, often one mapper in one session. That is a live explanation for v5's 94% requiring no
+generalization at all, and it threatens the existing headline retroactively.
 
-- **primary** — leave-one-settlement-out (or a hard metric exclusion radius),
-- **secondary, labelled an optimistic bound** — block-adjacent donors permitted,
+The obvious fix — leave-one-*settlement*-out — turns out not to be well-defined. Connected
+components over Cape Town's 1,136 qualified blocks: at 0 m, 596 components with 424 singletons; at
+100 m, 417 components, 256 singletons (23%), and a largest component of **150 blocks (13% of the
+corpus) spanning 5.7 km**; at 200 m the largest is 207 blocks spanning 8.6 km. One threshold
+simultaneously chains distinct Cape Flats settlements into a metro-scale blob and strands a
+quarter of blocks alone — labelling by known centroids at 100 m puts Gugulethu inside the blob
+while Nyanga, Langa, Delft, Mitchells Plain and Kraaifontein are each size 1. Transitive chaining
+has no natural stopping point, and there is no free label to fall back on: `gadm_code` is just the
+`block_id` prefix (one value for all Cape Town qualified blocks) and `urban_id` is metro-scale
+(121 for all of ZAF).
+
+So:
+
+- **primary** — a hard metric exclusion radius per recipient. Monotone in leakage, no chaining,
+  one interpretable number, sweepable.
+- **secondary, labelled an optimistic bound** — block-adjacent donors permitted.
+- `settlement_id` is retained as a **stratification/reporting label only**, with its threshold
+  stated wherever it appears. It is not a fold definition.
 - stratified by donor distance in **metres**, not only feature distance.
 
 **1c-i (primitives) is independent of 1a; 1c-ii (harness) is fully gated on it** — it needs both
@@ -239,15 +297,23 @@ note.
 pool-size→rank-1-distance exponent (measured by subsampling at 10/30/100/300/1000, not assumed
 from N^(−1/d)), and the per-pair cost. Decide in discussion.
 
-**One secondary readout, replacing two.** Score a **fixed-n-resampled** raw signature against the
-current 30-point subsample — the note's own open recommendation ("resample to a fixed n, or
-re-rank a shortlist by actual GW distance"), which the first draft omitted in favour of two
-re-tests that don't earn their place. The raw-vs-heat-trace bake-off is dropped: the n=5 critique
-cuts both ways, the note's case against heat-trace rested on effect sizes (median gap −0.334 vs
-−0.130; 0/5 vs 1/5 avoiding collapse) plus a mechanistic argument this spec endorses, so re-running
-it is misallocated power. The pairwise-OT trim re-test is dropped: in a denser pool the k
-neighbours are closer to each other, so the trim converges toward a no-op — it predicts its own
-null, and the best case is a tie with a component the note recommends deleting.
+**No secondary readouts.** All three candidates are cut.
+
+- *Raw-vs-heat-trace bake-off* — the n=5 critique cuts both ways, and the note's case against
+  heat-trace rested on effect sizes (median gap −0.334 vs −0.130; 0/5 vs 1/5 avoiding collapse)
+  plus a mechanistic argument this spec endorses. Re-running it is misallocated power.
+- *Pairwise-OT trim* — in a denser pool the k neighbours are closer to each other, so the trim
+  converges toward a no-op. It predicts its own null, and the best case is a tie with a component
+  the note recommends deleting.
+- *Fixed-n resampling* — proposed in an earlier draft of this spec and withdrawn on a closer read
+  of note §4. The signature is *already* "eigenvalues of the max-normalized pairwise-distance
+  matrix of a **fixed-size (30-point) random subsample**", so "fixed-n resampled vs the 30-point
+  subsample" has no defined contrast — it compares the thing to itself. The note's actual
+  complaint is about the sampled *fraction* (46% of a 65-parcel block vs 11% of a 280-parcel one),
+  and its second recommendation, re-ranking by real GW distance, is recorded in the same paragraph
+  as *already adopted* by the v4/v5 barycenter spikes. A fixed-*fraction* variant would be a real
+  contrast, but the downstream real-GW re-rank absorbs shortlist noise anyway, so it does not earn
+  a slot here.
 
 ## Testing
 
@@ -272,15 +338,25 @@ null, and the best case is a tie with a component the note recommends deleting.
   than 65k, and 1a is precisely the measurement that reveals it — before 1b spends on downloads.
 - **`k_complexity` is not the depth screen.** Run the real BFS-peel screen on the shortlist before
   treating 65,364 as the pool.
-- **PBF disk cost.** The GDAL OSM driver builds a multi-GB temp SQLite DB per country. Mitigated
-  by OGR-side `where` filtering; still needs headroom.
+- **Census wall clock — "free" refers to the data, not the compute.** Measured at 3.31 ms/block
+  (clip + corridor difference + filter, preloaded STRtree): **1.67 single-core hours per tolerance
+  over 1.813M blocks**, so ~5 h for the 0.5/2/5 m sweep and ~10 h once the near-miss tag set is
+  included. Roughly 1–2 h on a fork pool. Plus the peel screen's ~2.45 core-hours on the
+  shortlist. Budget it explicitly rather than discovering it.
+- **PBF disk cost.** The GDAL OSM driver builds a multi-GB temp SQLite DB per country regardless
+  of OGR-side filtering. Needs headroom.
 - **Committed-example churn.** A stable `PbfDesireLines.identity` changes `proposal_id`s for the
   six committed examples. Check before landing.
 - **Scratchpad loss.** Salvage is step zero of 1d; the pair matrix is committed rather than left
   in scratch.
-- **Multi-UTM extents.** `Block.crs` must be projected and `STREET_TOL` is metres, but ZAF+KEN
-  spans several UTM zones. The census must batch by zone. (The backlog's "continental scale" entry
-  covers the general form of this.)
+- **Multi-UTM extents fail *silently*, which is the actual hazard.** `estimate_utm_crs()` returns
+  EPSG:32735 for the ZAF bbox and EPSG:32637 for KEN with no error, and 32735 for the combined
+  extent — nothing crashes. What you get is a scale bias: measured projected/true length ratio
+  under a single country-wide UTM is **+0.72% at Cape Town, +1.23% at lon 16.5, +3.46% at lon
+  41.9**. That biases `interior_length_m` by 1–3%; it is negligible against the 0.5 m `STREET_TOL`
+  itself. Mitigation: derive the zone per block from its centroid and `groupby` it, **plus an
+  assertion that |centroid lon − central meridian| ≤ 3.5°**, so a forgotten batch is loud instead
+  of a quiet 3% drift. (The backlog's "continental scale" entry covers the general form.)
 
 ## Noted, not scoped
 
@@ -374,5 +450,23 @@ absent entirely.
 It also concluded the usable pool was ~1,650 blocks and that the country rows were unusable. That
 holds for "what runs today with zero new work" and is the wrong denominator for the strategic
 question: Open Buildings is public, tile-indexed, and already 90% wired, so the ~65k figure is
-scope rather than a ceiling — and per T1/T2 above, the census needs no buildings at all and
-retrieval needs no parcels. That is what this revision is built on.
+scope rather than a ceiling — and per T1/T2 above, the census needs no buildings at all. That is
+what this revision is built on.
+
+**Second pass — verification review of the revision.** The load-bearing T1 claim was demonstrated,
+not merely argued: the census path run on a raw `ZAF_geodata.parquet` row with no `Block`, no
+parcels and no building points returned **13 segments / 639.3 m**, byte-identical to the `Block`
+path on the same block. Both country parquets are 100% Polygon with zero invalid geometries. Every
+corpus-size figure reproduced exactly, and both contested overrides went to this spec — the
+Overpass-vs-PBF one by an order of magnitude (one 0.25° Cape Flats tile is 29.2 MB / 40,640 ways /
+7.1 s; ZAF+KEN is ~4,598 such tiles against Overpass's ~1 GB/day fair-use policy, versus 766 MB of
+PBF once).
+
+What did not hold up, and is fixed above: the parcel-centroid evidence came from a curated test
+fixture rather than the qualified pool and does not survive a random redraw in *absolute* terms
+(only the ratio does); the T2 tier row contradicted this spec's own insistence that the BFS-peel
+screen is the real gate; 1b's "shortlist's extent" would have downloaded both countries in full;
+the tile count was 20, not 10–15, at 3.78 GB; `settlement_id` was named but never defined, and
+measurement showed it cannot be; the census wall clock and the silent multi-UTM scale bias were
+unbudgeted; the reblocking-ceiling argument dropped displacement, the co-primary metric; and the
+1d secondary readout rested on a misreading of note §4 and specified no contrast, so it is cut.
