@@ -44,7 +44,7 @@ WGS = CRS.from_epsg(4326)
 def _tiles() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(
         {"tile_url": ["a.csv.gz", "b.csv.gz", "c.csv.gz"]},
-        geometry=[box(18, -34, 19, -33), box(36, -2, 37, -1), box(0, 0, 1, 1)],
+        geometry=[box(18, -34, 19, -33), box(36, -2, 37, -1), box(25, -20, 26, -19)],
         crs=WGS)
 
 
@@ -71,3 +71,19 @@ def test_filter_to_shortlist_keeps_only_points_inside_a_block() -> None:
     assert len(kept) == 1
     point_geom = kept.geometry.iloc[0]
     assert point_geom.x == pytest.approx(18.55)  # type: ignore[attr-defined]
+
+
+def test_filter_to_shortlist_deduplicates_overlapping_polygons() -> None:
+    """A point inside multiple overlapping shortlist blocks is returned exactly once."""
+    # Two overlapping boxes
+    shortlist = gpd.GeoDataFrame(
+        geometry=[box(18.5, -33.9, 18.7, -33.7), box(18.6, -33.8, 18.8, -33.6)],
+        crs=WGS)
+    # One point inside both overlapping boxes
+    points = gpd.GeoDataFrame(
+        {"confidence": [0.9]},
+        geometry=[Point(18.65, -33.75)],
+        crs=WGS)
+    kept = filter_to_shortlist(points, shortlist)
+    assert len(kept) == 1
+    assert kept.iloc[0]["confidence"] == 0.9

@@ -5,6 +5,7 @@ Plain file cache (check-if-exists), not joblib. The large data is never committe
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import geopandas as gpd
 
@@ -68,7 +69,10 @@ def filter_to_shortlist(
 
     Load-bearing: filtering to the shortlist's bounding rectangle would, for a ZAF+KEN shortlist,
     retain essentially every Open Buildings row in the download and make the targeted provisioning
-    country-wide by accident.
+    country-wide by accident. De-duplicate on the left index so a point inside multiple shortlist
+    polygons is returned at most once.
     """
     joined = gpd.sjoin(points, shortlist, how="inner", predicate="within")
-    return joined.drop(columns=["index_right"])
+    # De-duplicate: keep first occurrence of each left index (point)
+    deduped = joined[~joined.index.duplicated(keep="first")]
+    return cast(gpd.GeoDataFrame, deduped.drop(columns=["index_right"]))
