@@ -454,8 +454,14 @@ def test_pbf_identity_is_stable_and_keys_on_content_and_tags(tmp_path: Path) -> 
 
 
 def test_pbf_conforms_to_desire_line_source_protocol() -> None:
+    """Structural conformance is enforced STATICALLY by this annotated binding -- mypy --strict
+    fails if PbfDesireLines does not satisfy the Protocol. Do NOT rewrite this as
+    `isinstance(..., DesireLineSource)`: DesireLineSource is a bare Protocol, not
+    @runtime_checkable, so isinstance raises TypeError rather than returning False."""
     from reblock.methods.desire_lines import DesireLineSource
-    assert isinstance(PbfDesireLines(Path("nonexistent.osm.pbf")), DesireLineSource)
+
+    source: DesireLineSource = PbfDesireLines(Path("nonexistent.osm.pbf"))
+    assert callable(source.desire_lines)
 ```
 
 - [ ] **Step 3: Run tests to verify they fail**
@@ -1199,19 +1205,21 @@ def test_disjoint_networks_score_zero_iou() -> None:
     assert buffered_iou(a, b) == pytest.approx(0.0)
 
 
-@pytest.mark.parametrize("offset", [0.0, 1.0, 3.0, 6.0, 12.0])
-def test_iou_decays_monotonically_with_offset(offset: float) -> None:
+def test_iou_decays_monotonically_with_offset() -> None:
     """A single far-offset case is vacuous -- with r=3 the buffers stop overlapping past 6 m and
-    score 0 for ANY metric. The graded series is what actually tests the metric."""
+    score 0 for ANY metric. The graded series is what actually tests the metric.
+
+    Deliberately NOT parametrized: the property under test is the ORDERING across offsets, which
+    a per-offset parametrization cannot express (each case would only see its own score)."""
     ref = _net(LineString([(0, 0), (100, 0)]))
-    prop = _net(affinity.translate(ref.geometry.iloc[0], yoff=offset))
-    scores = {}
-    for o in (0.0, 1.0, 3.0, 6.0, 12.0):
-        moved = _net(affinity.translate(ref.geometry.iloc[0], yoff=o))
-        scores[o] = buffered_iou(moved, ref, r=3.0)
+    scores = {
+        o: buffered_iou(_net(affinity.translate(ref.geometry.iloc[0], yoff=o)), ref, r=3.0)
+        for o in (0.0, 1.0, 3.0, 6.0, 12.0)
+    }
     assert scores[0.0] > scores[1.0] > scores[3.0] > scores[6.0]
+    assert scores[0.0] == pytest.approx(1.0)
     assert scores[6.0] == pytest.approx(0.0)
-    assert buffered_iou(prop, ref, r=3.0) == pytest.approx(scores[offset])
+    assert scores[12.0] == pytest.approx(0.0)
 
 
 def test_iou_at_offset_equal_to_radius_is_a_pinned_value() -> None:
