@@ -1,0 +1,5 @@
+# @package _global_
+# The ONE footpath tag list. reblock.data.osm_extract.FOOTPATH_TAGS is the Python mirror, and
+# tests/data/test_osm_extract.py::test_config_tag_list_matches_python_definition fails if they
+# drift. Every DesireLineSource config interpolates ${footpath_tags} rather than re-declaring.
+footpath_tags: [path, footway, track, steps, pedestrian, living_street]

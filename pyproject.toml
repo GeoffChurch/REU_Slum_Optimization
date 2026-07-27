@@ -57,6 +57,9 @@ ruff = "*"
 # GeoDataFrame/Polygon/CRS stays fully checked under mypy --strict.
 types-geopandas = "*"
 types-shapely = "*"
+# PyYAML ships no py.typed marker either; same upstream-stub pattern as above so
+# tests/data/test_osm_extract.py's `import yaml` stays fully checked.
+types-pyyaml = "*"
 
 [tool.pixi.environments]
 default = { features = ["dev"], solve-group = "default" }

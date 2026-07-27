@@ -1,9 +1,12 @@
+from pathlib import Path
+
 import geopandas as gpd
 import pytest
+import yaml
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
-from reblock.data.osm_extract import TOLERANCES, interiority_row
+from reblock.data.osm_extract import FOOTPATH_TAGS, TOLERANCES, interiority_row
 
 CRS_M = CRS.from_epsg(32734)
 BOUNDARY = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
@@ -48,3 +51,13 @@ def test_interiority_row_uncovered_block_is_all_zero() -> None:
     row = interiority_row("b4", BOUNDARY, _lines(), _lines(), CRS_M)
     assert row["n_interior_segments_0.5"] == 0
     assert row["interior_length_m_0.5"] == 0.0
+
+
+def test_config_tag_list_matches_python_definition() -> None:
+    """conf/ and Python must not be able to drift: one list, one place."""
+    shared = yaml.safe_load(Path("conf/desire_source/_footpath_tags.yaml").read_text())
+    assert tuple(shared["footpath_tags"]) == FOOTPATH_TAGS
+
+    osm_cfg = yaml.safe_load(Path("conf/desire_source/osm.yaml").read_text())
+    assert osm_cfg["tags"] == "${footpath_tags}", (
+        "osm.yaml must interpolate the shared list, not re-declare it")
