@@ -31,6 +31,12 @@ coverage.xml
 # Superpowers/SDD agent scratch (progress ledger, task briefs, findings) — never repo content
 /.superpowers/
 
+# Exploratory spike code (e.g. the salvaged GW/OT transplant machinery under scratchpad/ot/,
+# which docs/superpowers/plans/2026-07-27-ot-retrieval-substrate-phase1.md Task 9 imports).
+# Never repo content: it predates the test suite and is not covered by mypy/ruff. NOTE it is
+# therefore destroyed by `git clean -fdx` — anything worth keeping must graduate into src/.
+/scratchpad/
+
 # Data (uncomment / refine as the pipeline grows)
 # data/
 
