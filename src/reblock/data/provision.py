@@ -47,3 +47,28 @@ def cached_kblock_source(city: str, *, block_ids: list[str] | None = None,
     blocks_path, buildings_path = ensure_city_data(city, cache_dir=cache_dir)
     return KblockSource(blocks_path, buildings_path, region_id=city,
                         min_buildings=min_buildings, block_ids=block_ids)
+
+
+def tiles_for(shortlist: gpd.GeoDataFrame, tiles: gpd.GeoDataFrame) -> list[str]:
+    """Open Buildings point-tile URLs whose S2 cell intersects any shortlist block.
+
+    Measured: tiles.geojson has 333 features, 20 of which cover ZAF+KEN (3.78 GB gzipped as
+    points; the polygon variants are 14.09 GB). The existing single-centroid-tile lookup is
+    correct only for a bbox smaller than one cell.
+    """
+    joined = gpd.sjoin(tiles.to_crs(shortlist.crs or "EPSG:4326"), shortlist,
+                       how="inner", predicate="intersects")
+    return sorted(set(joined["tile_url"]))
+
+
+def filter_to_shortlist(
+    points: gpd.GeoDataFrame, shortlist: gpd.GeoDataFrame
+) -> gpd.GeoDataFrame:
+    """Keep only building points falling inside a shortlist block POLYGON.
+
+    Load-bearing: filtering to the shortlist's bounding rectangle would, for a ZAF+KEN shortlist,
+    retain essentially every Open Buildings row in the download and make the targeted provisioning
+    country-wide by accident.
+    """
+    joined = gpd.sjoin(points, shortlist, how="inner", predicate="within")
+    return joined.drop(columns=["index_right"])
