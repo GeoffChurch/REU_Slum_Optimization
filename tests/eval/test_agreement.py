@@ -6,7 +6,7 @@ from pyproj import CRS
 from shapely import affinity
 from shapely.geometry import LineString
 
-from reblock.eval.agreement import buffered_iou, directional_chamfer
+from reblock.eval.agreement import _sample, buffered_iou, directional_chamfer
 
 CRS_M = CRS.from_epsg(32734)
 
@@ -70,14 +70,31 @@ def test_chamfer_is_asymmetric_for_a_strict_subset() -> None:
 
 
 def test_chamfer_densification_step_is_a_quantization_floor() -> None:
-    """A 2 m step puts a ~1 m floor on Chamfer; a finer step must not raise the score."""
+    """A coarse step puts a measurable quantization gap on Chamfer above the true 4 m offset; a
+    finer step must close most of that gap, landing close to the true value, and the coarse
+    score must be measurably worse than the fine one -- not merely `<=` it.
+
+    The reference is translated with BOTH an x- and a y-offset so the two networks' sample grids
+    fall out of phase. With y-offset alone (no x-offset), colinear same-phase sampling makes the
+    coarse and fine scores come back bit-for-bit identical (4.0 == 4.0 exactly) regardless of any
+    step-dependent behaviour in the implementation -- that formulation cannot fail."""
     ref = _net(LineString([(0, 0), (100, 0)]))
-    prop = _net(cast(LineString, affinity.translate(ref.geometry.iloc[0], yoff=4.0)))
+    prop = _net(cast(LineString, affinity.translate(ref.geometry.iloc[0], xoff=1.0, yoff=4.0)))
     coarse, _ = directional_chamfer(prop, ref, step=2.0)
     fine, _ = directional_chamfer(prop, ref, step=0.5)
-    assert fine <= coarse + 1e-6
-    assert fine == pytest.approx(4.0, abs=0.2)
+    assert fine == pytest.approx(4.0, abs=0.05)
+    assert coarse - fine > 0.05
 
 
 def test_empty_proposal_scores_zero_iou() -> None:
     assert buffered_iou(_net(), _net(LineString([(0, 0), (100, 0)]))) == pytest.approx(0.0)
+
+
+def test_sample_includes_true_endpoint_for_non_multiple_length() -> None:
+    """`_sample`'s docstring promises "including both endpoints". A length that is an exact
+    multiple of `step` can't tell floor and ceil apart -- this line (length 100, step 3) is
+    deliberately not a multiple, so a floored point count would land short of the real endpoint."""
+    net = _net(LineString([(0, 0), (100, 0)]))
+    points = _sample(net, step=3.0)
+    assert tuple(points[0]) == pytest.approx((0.0, 0.0))
+    assert tuple(points[-1]) == pytest.approx((100.0, 0.0))

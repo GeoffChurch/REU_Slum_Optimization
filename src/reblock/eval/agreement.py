@@ -10,6 +10,8 @@ permeability cannot: did the prediction put the paths WHERE the real ones are.
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 from geopandas import GeoDataFrame
 from shapely.ops import unary_union
@@ -43,7 +45,7 @@ def _sample(net: GeoDataFrame, step: float) -> np.ndarray:
     for geom in net.geometry:
         if geom.is_empty or geom.length == 0:
             continue
-        n = max(int(geom.length // step), 1)
+        n = max(math.ceil(geom.length / step), 1)
         for i in range(n + 1):
             p = geom.interpolate(min(i * step, geom.length))
             points.append((p.x, p.y))
