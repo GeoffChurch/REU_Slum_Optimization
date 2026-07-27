@@ -327,11 +327,31 @@ should be sized before this number exists.
 (see "What a larger pool does not fix"), so its measurement gets a pilot, not a sweep. Recipients
 span the parcel-count range; donors span the GW-distance range.
 
-**The artifact is a committed parquet**, not a note: `(recipient, donor, features, real_gw_dist,
-perm_gap, displacement, wall_clock)`. This is the most reusable thing Phase 1 produces — a
-retrieval benchmark any future featurization can be scored against without re-solving anything.
-The first draft named scratchpad loss as a risk and then guaranteed it by making the deliverable a
-note.
+**The artifact is a committed parquet**, not a note: `(recipient, donor, donor_type, features,
+real_gw_dist, perm_gap, displacement, wall_clock)`. This is the most reusable thing Phase 1
+produces — a retrieval benchmark any future featurization or donor material can be scored against
+without re-solving anything. The first draft named scratchpad loss as a risk and then guaranteed
+it by making the deliverable a note.
+
+**`donor_type` is load-bearing, not bookkeeping.** Retrieval matches on *fabric* (building
+points) and is completely agnostic to what linework a donor carries — same index, same GW
+coupling, different material transported. Baking the matrix to one material would throw away most
+of its reuse value and make the donor-material comparison unrepeatable. The axis has four values:
+
+| `donor_type` | material | needs OSM? | unit |
+|---|---|---|---|
+| `osm_footpaths` | interior footpaths (the §5 winner) | yes | block |
+| `osm_full` | streets **and** footpaths together — untested anywhere | yes | block |
+| `street_form` | geometry-derived inter-block streets (the §7 loser) | no | region |
+| `clearance` | a solved `ClearanceReblocker` network (the §4/v4 material) | no | block |
+
+Phase 1 populates `osm_footpaths` only; the column exists so Phase 3 extends the same matrix
+rather than starting a new one.
+
+`osm_full` is worth naming because nobody has tried it. `_interior_desire_lines` subtracts the
+street corridor by construction, so §5 transported interior footpaths *only* — never a donor's
+full mapped circulation, which is arguably the truer picture of how a settlement moves and is free
+relative to what 1a already produces.
 
 **Report, do not pre-commit a rule.** Report the fidelity-vs-distance relationship, the
 pool-size→rank-1-distance exponent (measured by subsampling at 10/30/100/300/1000, not assumed
@@ -461,10 +481,49 @@ compactness-preserving accretion builder — which respects real block boundarie
 sliced, while still standardizing outline. **Retrieval unit need not equal intervention unit**;
 extraction happens on the recipient's own substrate regardless.
 
+The compactness-preserving builder is **no longer optional if the Phase 3 donor-material test
+runs**: street-form donors force accretion (a single block has no internal streets), so a clean
+material comparison needs outline control, which is precisely what §7 lacked. It is a prerequisite
+of that test, not a Phase 2 nicety. Note the builder scores the *union's* isoperimetric quotient
+as it grows — distinct from today's `√(n × compactness)`, which scores each candidate block in
+isolation and never looks at the shape being assembled.
+
+## Phase 3 donor-material test (promoted from "not revisited")
+
+An earlier draft shelved §7's street-form donors as categorically inferior. That overstated the
+evidence. The note compares §5 (OSM footpaths, ~92% of direct clearance) against §7 (street-form,
+~67%) and attributes the whole 25-point gap to donor material — but the two experiments differ in
+**three** ways at once:
+
+1. **material** — interior footpaths vs inter-block streets;
+2. **unit** — a single block vs an accreted region;
+3. **outline control** — a real block boundary vs a deepest-first tendril of 150–900 parcels whose
+   shape is a growth-algorithm artifact (§7 used `DenseClusterRegionBuilder`, *not* the
+   compactness-preserving accretion that was specified for it and never built — see "Retrieval
+   unit" below).
+
+The mechanism argument for (1) is sound and remains the prior: streets are formal boundaries,
+footpaths are access-optimized. But (2) and (3) also moved, so the gap cannot be assigned to (1)
+alone, and "categorically inferior" is not what was demonstrated.
+
+**Test both, on the same recipients and the same retrieval, with unit and outline held fixed.**
+This is cheap on the material axis — `donor_type` in 1d's matrix is the whole mechanism — but
+street-form is *not* equal cost overall, for a structural reason:
+
+**Street donors force accretion.** A kblock block is a street-bounded face (`KblockSource` sets
+`streets = poly.boundary`), so a single block has **no internal streets to copy**; only a
+multi-block region has an internal grid. This is recorded in the 2026-07-10 feasibility doc and it
+means street-form cannot be run block-level at all. Testing it cleanly therefore requires the
+compactness-preserving region builder as a prerequisite, which footpath donors do not need.
+
+**Expected value:** footpaths stay well ahead on the prior. What makes the test worth running
+anyway is that street-form needs no OSM — and the coverage spike measured that **34.5% of
+qualified blocks have no interior footpaths at all**, which is exactly the population a free donor
+would have to serve.
+
 ## Explicitly not revisited
 
-Shelved for reasons corpus size does not touch: **§7 street-form donors** (streets are formal
-boundaries, footpaths are access-optimized — categorical, not distance); **consensus-as-seed for
+Shelved for reasons corpus size does not touch: **consensus-as-seed for
 `LoopClosureRefiner`** (consensus was strong at 0.722; *refining* it produced 0.706, below even an
 information-free cold seed at 0.751 — the refiner is the defect, and this is a mechanism finding
 pool size cannot touch); **imagery detection** (physical resolution floor); **resistance-as-builder,
