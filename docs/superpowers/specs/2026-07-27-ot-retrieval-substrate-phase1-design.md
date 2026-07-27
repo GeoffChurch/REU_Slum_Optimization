@@ -122,6 +122,46 @@ over donors, which the note already found (barycenter consensus) and which Phase
 quilting re-derives locally. **The reopening is strong for the prediction branch and weak for the
 reblocker branch**, and Phase 1 is budgeted accordingly.
 
+## Measured: coverage is not the constraint (spike, 2026-07-27)
+
+Question 1 below was the one that could kill the programme, so it was measured before planning.
+A 400-block random sample of the qualified Cape Town pool (`building_count` 60–300,
+`k_complexity ≥ 4`), interiority computed straight from the country blocks parquet — **no
+`KblockSource`, no Voronoi, no building points**, which is the T1 path executed rather than argued:
+
+| interiority tolerance | ≥1 interior segment | ≥100 m | ≥300 m | median length (covered) |
+|---|---|---|---|---|
+| 0.5 m | **65.5%** | 55.4% | 37.1% | 356 m |
+| 2 m | 65.3% | 53.8% | 36.3% | 341 m |
+| 5 m | 62.9% | 46.7% | 26.9% | 226 m |
+
+n=383 measured; 6 tiles / 17 blocks lost to Overpass 504s after 5 retries each, so rates are over
+measured blocks.
+
+**Implication: the prediction branch has tens of thousands of validatable recipients, not one.**
+Against ~65k pre-screen qualified blocks, 65.5% implies ≈43,000 with some interior coverage and
+≈36,000 with ≥100 m. That is the n≫1 Phase 3a needs.
+
+**This is better than the note's 8-of-15-had-zero (≈47%)**, and the discrepancy is explicable:
+those 15 were *similarity-ranked neighbours of one block*, a narrow non-random selection. A random
+draw from the qualified pool does materially better.
+
+**The tolerance sweep overturned its own hypothesis.** `STREET_TOL = 0.5 m` was expected to
+inflate the coverage gate. It does not: the count gate moves only 2.6 points across 0.5→5 m, while
+total interior *length* drops 17.8% (207.6 → 170.7 km). This generalizes the single-block
+observation in 1a — **the tolerance choice matters for donor-quality ranking, not for the census
+gate.** Keep the sweep, but coverage counts can be read at any tolerance in this range.
+
+**New finding — the qualified filter needs an area guard.** 5 of 251 covered blocks carry >5 km of
+"interior" footpath on 90–293 buildings (max 26.5 km on 258 buildings ≈ 100 m of path per
+building), against a median of 356 m. These are geometrically huge block polygons where the clip
+captures a whole neighbourhood's network rather than one settlement's. A `building_count` band
+does not bound block *area*; 1a must add an area or density guard, and should report what it
+excludes.
+
+**Caveat:** Cape Town only. OSM footpath coverage outside major metros will be lower, so 65.5% is
+an upper bound for ZAF+KEN as a whole. The full census measures this properly.
+
 ## Success criteria
 
 Phase 1 answers three questions and produces four artifacts. It is *not* trying to beat anything.
