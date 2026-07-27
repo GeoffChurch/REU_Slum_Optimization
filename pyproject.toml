@@ -136,6 +136,15 @@ module = "joblib.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# pyogrio (backs reblock.data.osm_extract.read_pbf_lines' OGR-side `where` filter) ships no
+# py.typed marker. A types-pyogrio stub exists on PyPI but not on conda-forge, and every other
+# stub package here (types-geopandas, types-shapely, types-pyyaml) is installed as a conda-forge
+# package to match [tool.pixi.dependencies]'s binary-correct GDAL/GEOS stack -- so, like joblib
+# above, this is a plain ignore_missing_imports shim, not a preference over real stubs.
+module = "pyogrio.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # numpy 2.5's bundled stubs (a .pyi file) use PEP 695 `type` statements
 # (Python 3.12+ only syntax), which fail to parse under our
 # python_version = "3.11" target; this is a numpy/mypy version mismatch
@@ -222,6 +231,9 @@ pythonpath = ["."]
 # genuine warnings stay visible.
 filterwarnings = [
     "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:joblib.numpy_pickle",
+]
+markers = [
+    "network: hits the network (Geofabrik/Overpass/Open Buildings); deselect with -m 'not network'",
 ]
 
 [tool.ruff]

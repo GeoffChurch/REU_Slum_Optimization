@@ -5,7 +5,14 @@ docs/superpowers/specs/2026-07-27-ot-retrieval-substrate-phase1-design.md.
 """
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import cast
+
 import geopandas as gpd
+import pyogrio
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
@@ -46,3 +53,58 @@ def interiority_row(
             row[f"{label}_length_m_{tol}"] = (
                 float(kept.geometry.length.sum()) if len(kept) else 0.0)
     return row
+
+
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def read_pbf_lines(pbf_path: Path, tags: Sequence[str] = FOOTPATH_TAGS) -> gpd.GeoDataFrame:
+    """Every `highway` way of the given tag classes in a .osm.pbf, as EPSG:4326 LineStrings.
+
+    Filters OGR-side via `where` so a country extract does not materialize every South African
+    `highway=track` in Python. NOTE: this reduces what crosses into pandas; it does NOT avoid the
+    GDAL OSM driver building its multi-GB temp SQLite database, which happens regardless.
+
+    The census must call this ONCE per UTM batch and query an STRtree per block -- not once per
+    block. `DesireLineSource.desire_lines` is a per-bbox API and there are 1.81M blocks.
+    """
+    quoted = ", ".join(f"'{t}'" for t in tags)
+    return cast(gpd.GeoDataFrame, pyogrio.read_dataframe(
+        pbf_path, layer="lines", where=f"highway IN ({quoted})", use_arrow=True))
+
+
+@dataclass
+class PbfDesireLines:
+    """A DesireLineSource backed by a local Geofabrik .osm.pbf extract.
+
+    A second implementation alongside OSMDesireLines, not a replacement: the operating ranges are
+    disjoint (a PBF covers its extract; Overpass covers any bbox). At 1.81M blocks a bulk extract
+    is the only workable option -- one 0.25-degree Overpass tile is ~29 MB / 40k ways / 7 s, and
+    ZAF+KEN is ~4,598 such tiles against Overpass's ~1 GB/day fair-use policy, versus 766 MB of
+    PBF once.
+
+    `identity` is stable (unlike OSMDesireLines' None-when-live), so osm_footpaths becomes
+    cacheable when driven by this source.
+    """
+
+    pbf_path: Path
+    tags: Sequence[str] = FOOTPATH_TAGS
+    _cache: gpd.GeoDataFrame | None = field(default=None, init=False, repr=False)
+
+    def desire_lines(
+        self, bbox_wgs84: tuple[float, float, float, float], crs: CRS
+    ) -> gpd.GeoDataFrame:
+        if self._cache is None:
+            self._cache = read_pbf_lines(self.pbf_path, self.tags)
+        minx, miny, maxx, maxy = bbox_wgs84
+        window = self._cache.cx[minx:maxx, miny:maxy]
+        return window.to_crs(crs)
+
+    @property
+    def identity(self) -> tuple[str, str, tuple[str, ...]]:
+        return ("pbf", _file_sha256(self.pbf_path), tuple(self.tags))

@@ -1,0 +1,7 @@
+# Local Geofabrik .osm.pbf desire-line source -- the bulk path used by the country-wide census.
+# OSMDesireLines (conf/desire_source/osm.yaml) remains for bboxes outside the extracts.
+defaults:
+  - _footpath_tags
+_target_: reblock.data.osm_extract.PbfDesireLines
+pbf_path: ???        # e.g. ~/.cache/reblock/osm_pbf/south-africa-latest.osm.pbf
+tags: ${footpath_tags}
