@@ -130,6 +130,62 @@ def test_census_rows_emits_one_row_per_block() -> None:
         assert area > 0
 
 
+def test_census_rows_matches_each_block_to_its_own_nearby_line_by_tree_position() -> None:
+    """Regression guard for wrong-row selection. `census_rows` builds `STRtree(list(fp_m.geometry))`
+    and then does `fp_m.iloc[fp_tree.query(geom)]`: the tree is keyed by POSITION in `fp_m`, so the
+    query result must be consumed positionally (`.iloc`), not by label (`.loc`). A frame with a
+    non-default, swapped index is exactly the case that tells the two apart -- under `.iloc` each
+    block gets its own nearby line; under `.loc` (or any position/label misalignment) block "a"
+    would instead receive block "b"'s line and vice versa, which -- since the two blocks and their
+    lines are spatially disjoint -- clips to nothing, flipping every one of the counts and length
+    comparisons asserted below rather than merely tweaking a number."""
+    blocks = gpd.GeoDataFrame(
+        {"block_id": ["a", "b"]},
+        geometry=[
+            Polygon([(18.50, -33.95), (18.51, -33.95), (18.51, -33.94), (18.50, -33.94)]),
+            Polygon([(18.52, -33.95), (18.53, -33.95), (18.53, -33.94), (18.52, -33.94)]),
+        ],
+        crs=CRS.from_epsg(4326))
+    # position 0 -> label 1 -> long line inside block "a"; position 1 -> label 0 -> short line
+    # inside block "b". `.iloc[fp_tree.query(geom)]` (positional) gets this right; `.loc[...]`
+    # would instead hand block "a" the SHORT line (label 0 -> position 1) and block "b" the LONG
+    # one (label 1 -> position 0) -- geometries that don't even overlap that block's bbox, so the
+    # clip drops them and the counts go to 0 instead of 1.
+    footpaths = gpd.GeoDataFrame(
+        geometry=[
+            LineString([(18.502, -33.945), (18.508, -33.945)]),  # long, in block "a"
+            LineString([(18.522, -33.945), (18.524, -33.945)]),  # short, in block "b"
+        ],
+        index=[1, 0],
+        crs=CRS.from_epsg(4326))
+    near_miss = gpd.GeoDataFrame(
+        geometry=[
+            LineString([(18.503, -33.947), (18.507, -33.947)]),  # short, in block "a"
+            LineString([(18.521, -33.943), (18.529, -33.943)]),  # long, in block "b"
+        ],
+        index=[1, 0],
+        crs=CRS.from_epsg(4326))
+
+    rows = census_rows(blocks, footpaths, near_miss, 32734)
+    row_a, row_b = rows
+    assert row_a["block_id"] == "a"
+    assert row_b["block_id"] == "b"
+    assert row_a["n_interior_segments_0.5"] == 1
+    assert row_b["n_interior_segments_0.5"] == 1
+    assert row_a["n_near_miss_segments_0.5"] == 1
+    assert row_b["n_near_miss_segments_0.5"] == 1
+
+    fp_len_a: float = row_a["interior_length_m_0.5"]  # type: ignore[assignment]
+    fp_len_b: float = row_b["interior_length_m_0.5"]  # type: ignore[assignment]
+    nm_len_a: float = row_a["near_miss_length_m_0.5"]  # type: ignore[assignment]
+    nm_len_b: float = row_b["near_miss_length_m_0.5"]  # type: ignore[assignment]
+    # block "a" got the LONG footpath and the SHORT near-miss; block "b" the reverse. A
+    # position/label mismatch swaps these pairings (or zeroes both), flipping one or both
+    # inequalities -- so this is a real assertion on which line went where, not just presence.
+    assert fp_len_a > fp_len_b
+    assert nm_len_a < nm_len_b
+
+
 @pytest.mark.network
 def test_pbf_and_overpass_agree_on_a_pinned_bbox() -> None:
     """Two sources for the same data WILL disagree (Geofabrik extract timestamp vs live Overpass;
