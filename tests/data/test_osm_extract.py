@@ -6,7 +6,15 @@ import yaml
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
-from reblock.data.osm_extract import FOOTPATH_TAGS, TOLERANCES, PbfDesireLines, interiority_row
+from reblock.data.osm_extract import (
+    FOOTPATH_TAGS,
+    TOLERANCES,
+    PbfDesireLines,
+    assert_zone_fit,
+    census_rows,
+    interiority_row,
+    utm_zone_epsg,
+)
 
 CRS_M = CRS.from_epsg(32734)
 BOUNDARY = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
@@ -89,6 +97,37 @@ def test_pbf_conforms_to_desire_line_source_protocol() -> None:
 
     source: DesireLineSource = PbfDesireLines(Path("nonexistent.osm.pbf"))
     assert callable(source.desire_lines)
+
+
+def test_utm_zone_epsg_picks_hemisphere_and_zone() -> None:
+    assert utm_zone_epsg(18.5, -33.9) == 32734      # Cape Town, zone 34 south
+    assert utm_zone_epsg(36.8, -1.3) == 32737       # Nairobi, zone 37 south
+    assert utm_zone_epsg(36.8, 1.3) == 32637        # just north of the equator
+
+
+def test_assert_zone_fit_is_loud_about_a_forgotten_batch() -> None:
+    """A single country-wide UTM does not crash -- it silently biases lengths by up to 3.5%.
+    The assertion is what makes a missed batch loud instead of a quiet drift."""
+    assert_zone_fit(18.5, 32734)                    # zone 34 central meridian is 21E
+    with pytest.raises(ValueError, match="outside UTM zone"):
+        assert_zone_fit(41.9, 32734)
+
+
+def test_census_rows_emits_one_row_per_block() -> None:
+    blocks = gpd.GeoDataFrame(
+        {"block_id": ["a", "b"]},
+        geometry=[
+            Polygon([(18.50, -33.95), (18.51, -33.95), (18.51, -33.94), (18.50, -33.94)]),
+            Polygon([(18.52, -33.95), (18.53, -33.95), (18.53, -33.94), (18.52, -33.94)]),
+        ],
+        crs=CRS.from_epsg(4326))
+    empty = gpd.GeoDataFrame(geometry=[], crs=CRS.from_epsg(4326))
+    rows = census_rows(blocks, empty, empty, 32734)
+    assert [r["block_id"] for r in rows] == ["a", "b"]
+    assert all(r["n_interior_segments_0.5"] == 0 for r in rows)
+    for r in rows:
+        area: float = r["area_m2"]  # type: ignore[assignment]
+        assert area > 0
 
 
 @pytest.mark.network

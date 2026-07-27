@@ -14,6 +14,7 @@ from typing import cast
 import geopandas as gpd
 import pyogrio
 from pyproj import CRS
+from shapely import STRtree
 from shapely.geometry.base import BaseGeometry
 
 from reblock.methods.osm_footpaths import interior_desire_lines
@@ -108,3 +109,59 @@ class PbfDesireLines:
     @property
     def identity(self) -> tuple[str, str, tuple[str, ...]]:
         return ("pbf", _file_sha256(self.pbf_path), tuple(self.tags))
+
+
+def utm_zone_epsg(lon: float, lat: float) -> int:
+    """EPSG code of the UTM zone containing (lon, lat). 326xx north, 327xx south."""
+    zone = int((lon + 180.0) // 6.0) + 1
+    return (32600 if lat >= 0 else 32700) + zone
+
+
+def assert_zone_fit(lon: float, epsg: int) -> None:
+    """Raise if `lon` is more than 3.5 degrees from the zone's central meridian.
+
+    Load-bearing: `estimate_utm_crs()` on a whole-country extent returns a single zone with NO
+    error, and transverse Mercator stays conformal, so nothing crashes -- you just get a silent
+    scale bias (measured +0.72% at Cape Town, +1.23% at lon 16.5, +3.46% at lon 41.9 under one
+    country-wide UTM). That biases interior_length_m by 1-3%. This makes a forgotten batch loud.
+    """
+    zone = epsg - (32600 if epsg < 32700 else 32700)
+    central = 6 * zone - 183
+    if abs(lon - central) > 3.5:
+        raise ValueError(
+            f"longitude {lon} is outside UTM zone {zone} (central meridian {central}); "
+            f"batch blocks by zone via utm_zone_epsg before projecting")
+
+
+def census_rows(
+    blocks: gpd.GeoDataFrame,
+    footpaths: gpd.GeoDataFrame,
+    near_miss: gpd.GeoDataFrame,
+    epsg: int,
+) -> list[dict[str, object]]:
+    """Census rows for one UTM batch. `blocks` is in EPSG:4326; everything is reprojected to
+    `epsg` once, then each block queries an STRtree rather than re-reading the layer."""
+    crs_m = CRS.from_epsg(epsg)
+    blocks_m = blocks.to_crs(crs_m)
+    fp_m = (footpaths.to_crs(crs_m) if len(footpaths)
+             else footpaths.set_crs(crs_m, allow_override=True))
+    nm_m = (near_miss.to_crs(crs_m) if len(near_miss)
+             else near_miss.set_crs(crs_m, allow_override=True))
+    fp_tree = STRtree(list(fp_m.geometry)) if len(fp_m) else None
+    nm_tree = STRtree(list(nm_m.geometry)) if len(nm_m) else None
+
+    rows: list[dict[str, object]] = []
+    for block_id, geom in zip(blocks_m["block_id"], blocks_m.geometry, strict=True):
+        near_fp = (fp_m.iloc[fp_tree.query(geom)] if fp_tree is not None
+                   else gpd.GeoDataFrame(geometry=[], crs=crs_m))
+        near_nm = (nm_m.iloc[nm_tree.query(geom)] if nm_tree is not None
+                   else gpd.GeoDataFrame(geometry=[], crs=crs_m))
+        row = interiority_row(str(block_id), geom, near_fp, near_nm, crs_m)
+        # The qualified filter is a building-count band, which does NOT bound block AREA: the
+        # spike found 5 of 251 covered blocks carrying >5 km of "interior" footpath on 90-293
+        # buildings (max 26.5 km on 258 buildings, vs a 356 m median) -- huge polygons where the
+        # clip captures a whole neighbourhood. Emit area so the guard is applied downstream on
+        # data rather than guessed here.
+        row["area_m2"] = float(geom.area)
+        rows.append(row)
+    return rows
