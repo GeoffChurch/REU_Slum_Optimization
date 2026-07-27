@@ -1,241 +1,378 @@
 # OT retrieval substrate — Phase 1 (design)
 
-**Status: approved in brainstorming 2026-07-27.** Reopens the arc closed in
-`notes/2026-07-23-ot-road-transplant.md`, on the grounds that its two decisive limits — a
-111-block donor pool and an n=1 OSM ground-truth set — were *pool-size* limits, not mechanism
-limits. This spec covers **Phase 1 only**: the shared substrate both downstream branches need.
-Phases 2–3 are sketched for context and are **not** specced here.
+**Status: approved in brainstorming 2026-07-27; revised the same day after subagent review.**
+Reopens the arc closed in `notes/2026-07-23-ot-road-transplant.md`, on the grounds that its two
+decisive limits — a 111-block donor pool and an n=1 OSM ground-truth set — were *corpus* limits,
+not mechanism limits. Covers **Phase 1 only**; Phases 2–3 are sketched for context and are not
+specced here.
+
+The first draft of this spec was materially wrong about *which* corpus limit binds, and the
+revision is structural rather than cosmetic. See §"What the review changed".
 
 ## Goal
 
-Make the OT/transplant direction measurable at scale, and de-risk the index build before paying
-for it. Three independent units:
+Make the OT/transplant direction measurable at scale, and establish which corpus tier gates
+which downstream question. Four units:
 
-- **1a** — bulk OSM footpath extraction → a per-block coverage table over ZAF + KEN.
-- **1b** — a cheap geometric agreement metric, for the prediction branch.
-- **1c** — an experiment measuring how transplant fidelity scales with retrieval distance and
-  pool size, plus two near-free re-tests of underpowered prior results.
+- **1a** — country-wide OSM footpath **census** over all 1.8M ZAF+KEN blocks. Free of building
+  data; sizes the prediction branch.
+- **1b** — **targeted** Open Buildings provisioning for the blocks the census says matter.
+- **1c** — geometric agreement primitives plus a leakage-resistant holdout protocol.
+- **1d** — a small GW pair-matrix pilot, with a timing pilot first, committed as a reusable
+  artifact.
 
-Permeability and displacement remain the primary scorers throughout. Agreement is secondary.
+Permeability and displacement remain the primary scorers. Agreement is secondary.
 
-## Why reopen
+## The corpus is three tiers, not one
 
-The 2026-07-23 note closed OT transplant as a reblocker. Its findings stand. What changed is the
-observation that the pool it ran on was ~0.1% of the data already on disk:
+This is the central correction. Different jobs need different data, and conflating them is what
+produced both the first draft's over-claim and the review's under-claim.
 
-| corpus | blocks |
-|---|---|
-| pool actually used (v3/v4) | 111 |
-| Cape Town, 60–300 buildings (the v3 band) | 6,629 |
-| Cape Town, all | 83,192 |
-| Nairobi, all | 16,200 |
-| ZAF country-wide (`ZAF_geodata.parquet`) | 1,457,745 |
-| KEN country-wide (`KEN_geodata.parquet`) | 355,830 |
+| tier | needs | usable size | status |
+|---|---|---|---|
+| **T1 · OSM census** | blocks parquet + OSM linework | **all 1,813,575** | free today, behind one refactor |
+| **T2 · Retrieval / index** | building **points** only — no Voronoi, no `Block` | ~65k qualified | after a targeted tile download |
+| **T3 · Scoring / solving** | points + Voronoi parcels + substrate | grows with T2 | the genuinely expensive tier |
 
-Applying v3's own 37% depth-screen pass rate to the Cape Town band gives ~2,450 qualified blocks —
-22× the pool used, same city, zero new data. Two prior results are directly gated by this:
+**T1 is free because kblock `streets` *is* the block boundary.** `_interior_desire_lines`
+currently takes a `Block` (`osm_footpaths.py:23`), and `Block.__post_init__` raises
+`ValueError("Block.parcels must be non-empty")` (`contracts.py:54-56`) — parcels being Voronoi of
+building points, which exist only for the Cape Town and Nairobi bboxes. That is a **code-structure
+limit masquerading as a data limit**: refactored to `(lines, boundary, streets, crs)`, the census
+runs country-wide with zero building downloads.
 
-- **v3's rank-1 regime.** Gap correlates −0.90 with feature distance; rank-1 won in 2 of 3
-  featurizations; rank-2 collapsed. The note's own verdict is "conditional go only for a single
-  nearest-neighbor regime… too narrow to productionize." A larger pool *is* the mechanism that
-  widens it, by pulling rank-1 distance down.
+**T2 never needs parcels.** Parcels are `Voronoi(building_points)` clipped — a deterministic
+function, so the points carry strictly more information and routing a descriptor through Voronoi
+is a lossy detour that also introduces a boundary-clipping artifact. Measured on six real Cape
+Town blocks, parcel centroid → nearest building point:
+
+| block | n | diagonal | median | p90 | median / diagonal |
+|---|---|---|---|---|---|
+| …1_3934 | 211 | 279.5 m | 1.08 m | 3.15 m | 0.39% |
+| …1_3968 | 894 | 965.7 m | 0.90 m | 2.41 m | 0.09% |
+| …1_2698 | 67 | 133.1 m | 1.93 m | 5.20 m | 1.45% |
+| …1_2701 | 82 | 185.1 m | 1.21 m | 2.34 m | 0.65% |
+| …1_4310 | 147 | 176.2 m | 0.87 m | 1.92 m | 0.49% |
+| …1_4314 | 86 | 158.4 m | 0.98 m | 2.95 m | 0.62% |
+
+For scale, the OT note treats a GW barycentric recovery error of **6.24 m (3.2% of diagonal)** as
+a *successful* mechanism check. The substitution sits several times below the transport
+machinery's own validated noise floor.
+
+**One honest limit on T1.** A block with OSM linework but no building points can be *counted*, but
+cannot be GW-coupled to transport its roads — coupling needs both point clouds. T1 sizes the
+prediction branch; it does not feed it.
+
+## Why reopen, restated correctly
+
+Qualified-pool size, measured from columns already on disk (no download):
+
+| corpus | blocks | band 60–300 | k≥4 | k≥5 |
+|---|---|---|---|---|
+| ZAF (`ZAF_geodata.parquet`) | 1,457,745 | 104,533 | 32,320 | 8,896 |
+| KEN (`KEN_geodata.parquet`) | 355,830 | 54,968 | 33,044 | 11,940 |
+| **total** | **1,813,575** | **159,501** | **65,364** | **20,836** |
+| *pool actually used (v3/v4)* | | | *111* | |
+
+**~65,000 qualified blocks against 111 used — ~590×.** Gated on an Open Buildings tile download
+that is already 90% implemented (public S2 level-4 tiles with a `tiles.geojson` index,
+`fetch_kblock_fixtures.py:62-67`; the current code takes only the tile containing the bbox
+centroid, `:216-223`). ZAF+KEN is on the order of 10–15 tiles.
+
+**`k_complexity` is a proxy, not the screen.** It is kblock's own metric, and the backlog records
+peel-k ≈ √(building count) on Voronoi — a count proxy, not morphology. The repo's BFS-peel depth
+screen is the real gate and must be run on the shortlist. Treat 65,364 as an upper bound on the
+qualified pool, not a measurement of it. For reference, in Cape Town the band is 6,629 with 1,136
+(17.1%) at k≥4; the first draft's "37% depth-screen pass rate" came from v3's anchor-conditional
+300-block sample and was an upper bound.
+
+Two prior results are gated by pool size specifically:
+
+- **v3's rank-1 regime.** Gap correlates −0.90 with feature distance *in the spectral space*
+  (morphological and pairwise-histogram were −0.70); rank-1 won in 2 of 3 featurizations; rank-2
+  collapsed. A larger pool is the mechanism that widens that regime.
 - **v5's n=1.** The strongest result in the study (93.7% of a block's own OSM) rests on one
-  recipient, solely because donor discovery ran through per-block Overpass and only 40972 had
-  committed ground truth.
+  recipient, because donor discovery ran through per-block Overpass.
 
-Neither is a claim that the note was wrong. Both are claims that it was underpowered.
+**What a larger pool does *not* fix.** The note's mechanistic diagnosis — a transplant reproduces
+the donor's *coverage pattern*, not the recipient's needs — is about OSM **mapping** artifacts
+(v2's donor had an unmapped flank), which are uncorrelated with block shape. Shrinking rank-1
+shape distance does not repair an unmapped flank. A larger pool helps that diagnosis only
+indirectly, by making it affordable to *filter to well-mapped donors*. The direct fix is averaging
+over donors, which the note already found (barycenter consensus) and which Phase 3b's patch
+quilting re-derives locally. **The reopening is strong for the prediction branch and weak for the
+reblocker branch**, and Phase 1 is budgeted accordingly.
 
-## Program shape
+## Success criteria
 
-```
-Phase 1 (this spec)         Phase 2                  Phase 3
-────────────────────────    ────────────────────     ─────────────────────────────────
-1a bulk OSM coverage ─────► masked-NCC FFT index ─┬─► 3a prediction (OSM consensus, n≫1)
-                                                  │      ▲
-1b agreement metric ──────────────────────────────┼──────┘
-                                                  │
-1c distance/pool measurement ─────────────────────┴─► 3b reblocker (patch quilting,
-                                                          policy transplant)
-```
+Phase 1 answers three questions and produces four artifacts. It is *not* trying to beat anything.
 
-Dependency structure: 1a gates everything downstream; 1b and 1c are independent of each other and
-of 1a's completion; Phase 2 needs 1a; 3a needs 2 + 1b; 3b needs 2, and 1c informs its shape.
+1. How many blocks have genuine interior OSM footpaths, and how does that number move with the
+   interiority tolerance? → sizes the prediction branch, or kills it.
+2. Is the transplant-fidelity-vs-GW-distance relationship strong enough to be worth a bigger
+   index? → informs, does not gate, Phase 2.
+3. What does a pair cost, in wall-clock? → makes any later scale claim budgetable.
 
-Phase 1 is roughly a week and can redirect Phase 2 before it is paid for.
+The Phase 3a deliverable this serves is a **mapping/data product** — predicted footpaths for
+blocks OSM has not mapped — not a reblocker. The note is explicit that `osm_footpaths`' own *real*
+network is at best comparable to a clearance solve on permeability (0.77 vs 0.78 in v5; 0.80 vs
+0.91 in v2), so a *predicted* network is capped by a ceiling that is already not a reblocking win.
 
-## 1a — bulk OSM footpath coverage
+## 1a — country-wide OSM footpath census
 
-**Module:** `src/reblock/data/osm_extract.py`, following the `data/provision.py`
-`ensure_city_data` cached-download pattern.
+**Refactor first.** `_interior_desire_lines(lines, block)` → `_interior_desire_lines(lines,
+boundary, streets, crs)`, with `osm_footpaths` passing block fields at its one call site. One
+definition, one implementation, and the census no longer needs a constructible `Block`. This is
+the change that unlocks T1.
 
-**Placement decision.** The reader lands as `PbfDesireLines`, a **second implementation of the
-existing `DesireLineSource` Protocol** (`methods/desire_lines.py:22`) — the same pluggable seam
-that was always intended to host an imagery detector. `OSMDesireLines` keeps the live-Overpass
-path for arbitrary bboxes outside ZAF/KEN. This is a Strategy, not a compatibility shim: two
-sources with different operating ranges behind one interface, neither wrapping nor deprecating the
-other.
+**Module:** `src/reblock/data/osm_extract.py`, following `data/provision.py`'s cached-download
+pattern.
 
-**Pipeline.**
+**`PbfDesireLines`** lands as a second implementation of the existing `DesireLineSource` Protocol
+(`desire_lines.py:22`) — the seam whose docstring already anticipates multiple sources. At 1.8M
+blocks a bulk extract genuinely earns itself; a per-block or tiled-bbox Overpass sweep does not
+scale here. Required specifics the first draft omitted:
 
-1. Fetch Geofabrik `south-africa-latest.osm.pbf` and `kenya-latest.osm.pbf` into
-   `~/.cache/reblock/osm_pbf/`. Never committed, consistent with the existing city-data cache.
-2. Read via `pyogrio.read_dataframe(path, layer="lines")` — the GDAL `OSM` driver is already
-   available in the pixi env, so **no new dependency**. Filter on `highway` ∈
-   `desire_lines._DEFAULT_TAGS` = `("path", "footway", "track", "steps", "pedestrian",
-   "living_street")`, **imported, not re-declared**, so the bulk extract and the shipped
-   `osm_footpaths` method can never diverge on what counts as a footpath.
-3. Spatial-join the linework against the blocks parquet with a tiled STRtree pass.
-4. Compute interiority by **calling `osm_footpaths._interior_desire_lines` directly** rather than
-   reimplementing it — clip to block, subtract the `STREET_TOL` buffer of `block.streets`, keep
-   LineStrings longer than `STREET_TOL`. Same reasoning as the tag tuple: one definition, one
-   call site.
+- **`tags` is a field defaulting to `_DEFAULT_TAGS`**, mirroring `OSMDesireLines`. Note that
+  `conf/desire_source/osm.yaml` **re-declares** the tag list, so the shipped method's effective
+  tags come from Hydra, not the Python default. Both configs must interpolate one shared list, or
+  the "cannot diverge" property is fiction.
+- **`identity`** is `(pbf_sha256, tuple(tags))` — stable, unlike `OSMDesireLines`' `None` when
+  live. This flips `osm_footpaths` from uncacheable to cacheable and therefore changes
+  `proposal_id`s. The six committed `examples/*/desire_lines_*.geojson` snapshots and their
+  regenerated outputs must be checked before this lands.
+- **Default source for ZAF/KEN after Phase 1 is `PbfDesireLines`**; `OSMDesireLines` remains for
+  bboxes outside the extracts. The two *will* disagree on the same bbox (Geofabrik extract
+  timestamp vs live Overpass; GDAL `lines` layer vs Overpass `out geom`), so a pinned-bbox test
+  asserting agreement within tolerance is part of this unit. Without that, two sources is
+  accommodation rather than a Strategy.
+- **Read with OGR-side filtering** — `pyogrio.read_dataframe(path, layer="lines", where="highway
+  IN (...)", use_arrow=True)` — so a country PBF does not materialize every South African
+  `highway=track`. The GDAL `OSM` driver is present in the env (no new dependency) but builds a
+  multi-GB temp SQLite DB; budget disk for it.
 
-**Outputs.**
+**Interiority is reported as a tolerance sweep, not a number.** `_interior_desire_lines` subtracts
+`streets.buffer(STREET_TOL)` with `STREET_TOL = 0.5 m`, and for kblock `streets` is the block
+outline. OSM ways are digitized against different imagery than the Open Buildings / kblock
+outlines, so a genuinely boundary-running path more than 0.5 m off the outline is recorded as
+*interior* — inflating the exact column that gates "which blocks have real coverage." Emit
+interiority at **0.5 / 2 / 5 m** and decide after looking. Same instinct as the near-miss tags
+below, applied to the thing that actually matters.
 
-- `~/.cache/reblock/osm_coverage_{city}.parquet` — `block_id, n_interior_segments,
-  interior_length_m, boundary_length_m, n_near_miss_segments, near_miss_length_m`.
-- Per-block cached interior linework, so donor use never re-fetches.
+**Outputs** (`~/.cache/reblock/osm_coverage_{iso}.parquet`):
+`block_id, settlement_id, n_interior_segments_{0.5,2,5}, interior_length_m_{0.5,2,5},
+boundary_length_m, n_near_miss_segments, near_miss_length_m`.
 
-**The near-miss columns are deliberate.** Informal-settlement paths are sometimes mapped
-`highway=service`, `residential`, or `unclassified`. The near-miss columns count interior segments
-carrying exactly those three tags — computed by the same interiority call, over a second tag set,
-and never mixed into the primary counts. Reusing `_DEFAULT_TAGS` keeps 1a consistent with the
-shipped method, but recording what the filter drops lets us see its cost before deciding whether
-to widen it — rather than discovering the ceiling later and having to re-extract.
+Near-miss columns count interior segments tagged `service`/`residential`/`unclassified` — the
+tags informal paths are sometimes mapped under — computed by the same interiority call over a
+second tag set, never mixed into the primary counts. Recording what the filter drops lets us price
+widening it before re-extracting.
 
-**Contract:** `osm_coverage(city) -> DataFrame` and `PbfDesireLines.desire_lines(bbox, crs)`.
+`settlement_id` comes from a spatial clustering of qualified blocks (connected components under a
+distance threshold). It exists for 1c's holdout and must be produced here, where the geometry is
+already in hand.
 
-## 1b — geometric agreement metric
+## 1b — targeted Open Buildings provisioning
 
-**Module:** `src/reblock/eval/agreement.py`, an `Eval` beside `eval/kcomplexity.py` and
-`eval/structure.py`.
+Extend `provision.py` from single-tile to multi-tile: enumerate `tiles.geojson` features
+intersecting the **shortlist** — blocks passing the `k_complexity` cut *and* carrying real interior
+coverage from 1a — download each tile, filter to `OB_MIN_CONFIDENCE = 0.7` and the shortlist's
+extent, write per-ISO GeoParquet.
 
-Scoped to the **geometric half only**. A functional half (per-parcel egress-cost agreement,
-served-set Jaccard) was considered and cut: permeability already measures function, and the
-programme's primary scorers are permeability and displacement.
+Query-driven, not country-wide: the census tells us which blocks matter before we pay for any of
+them. This is what makes T2 and T3 real, and it is the only genuinely new download in Phase 1.
 
-- `buffered_iou(r)` — IoU of `proposal.buffer(r)` and `reference.buffer(r)`, with
-  `r = corridor_m = 3.0` to match the permeability corridor.
-- Symmetric Chamfer over ~2 m densified samples, reported **directionally**:
-  - proposal→reference = precision (paths drawn that aren't there),
-  - reference→proposal = recall (real paths missed).
+## 1c — agreement primitives and holdout protocol
 
-Reported as named fields, never averaged into one number. A single blended score would hide which
-way a prediction fails, which is the only thing this metric is for.
+**Plain functions in `src/reblock/eval/agreement.py` — not an `Eval`.** `Eval.score(block,
+proposal)` (`contracts.py:124`) has no slot for a reference network, and agreement is
+proposal-vs-reference. Forcing it into the Protocol would mean smuggling the reference in through
+construction and lying about the signature.
 
-**Held-out harness.** Leave-one-block-out over blocks with real interior footpaths (from 1a);
-the recipient's own OSM is excluded from its donor pool; results **stratified by
-distance-to-nearest-donor**, so the output is a curve over operating regimes rather than one
-pooled number.
+Geometric only. The functional half (per-parcel egress agreement) is cut: permeability already
+measures function, and it is a primary scorer.
 
-**Known limitation, accepted.** With the functional half cut and permeability as the headline,
-the prediction branch reports a *usefulness* claim ("this network works about as well as the real
-one"), not an *accuracy* claim ("this is the real network"). Geometric agreement is the only
-check on the latter, and it is secondary by choice.
+- `buffered_iou(proposal, reference, r)` — IoU of the two buffers.
+- `chamfer(proposal, reference, step)` — symmetric, over densified samples, reported
+  **directionally**: proposal→reference is precision (paths drawn that aren't there),
+  reference→proposal is recall (real paths missed). Never averaged; a blend hides which way a
+  prediction fails, which is the only thing this measures.
 
-## 1c — distance/pool-size measurement
+**Holdout protocol — leave-one-settlement-out is primary.** Leave-one-*block*-out is not safe
+here: donors are immediate neighbours, frequently the same continuous OSM way clipped at a block
+edge, often one mapper in one session. That is a live explanation for v5's 94% requiring no
+generalization at all, and it threatens the existing headline retroactively. Report:
 
-Scratchpad experiment. No `src/` changes. Deliverable is a note.
+- **primary** — leave-one-settlement-out (or a hard metric exclusion radius),
+- **secondary, labelled an optimistic bound** — block-adjacent donors permitted,
+- stratified by donor distance in **metres**, not only feature distance.
 
-**Step zero — salvage.** The prior OT code survives in another session's scratchpad
-(`ot_gw.py`, `transplant.py`, `select_donor.py`, `amortization_test.py`,
-`barycenter_amortization.py`, `rsc_*`, plus pickled pools). It is one `/tmp` reclaim from gone.
-Copy it into the working scratchpad before anything else. This is what makes 1c a day rather than
-a rebuild.
+**1c-i (primitives) is independent of 1a; 1c-ii (harness) is fully gated on it** — it needs both
+the coverage table and `settlement_id`. The first draft claimed the whole unit was independent;
+only the primitives are.
 
-**Primary measurement.** On a pool regrown from the 6,629-block Cape Town band: for each of ~20
-recipients spanning the parcel-count range, against ~50 donors spanning the GW-distance range
-(≈1,000 pairs — enough that the fit is not the limiting uncertainty, and affordable given v4 ran
-6 donors × 3 recipients), compute real (non-linearized) GW distance and the length-matched
-permeability gap (transplant − direct clearance). Plot gap vs distance; locate where the curve
-crosses zero. Widen if the fit is still ambiguous at that size.
+## 1d — GW pair-matrix pilot
 
-**Pool-size scaling, measured not assumed.** Subsample the pool at sizes 10/30/100/300/1000,
-measure rank-1 GW distance at each, and fit the exponent empirically. An N^(−1/d) assumption with
-a guessed effective dimension is not good enough to spend Phase 2 on.
+Scratchpad, but with a committed artifact.
 
-**No pre-committed decision rule.** Report the zero-crossing distance and the pool size that
-reaches it; decide in discussion. Note that 1c gates only the *reblocker* branch's shape — Phase
-2's index is justified for the prediction branch regardless, since bulk retrieval over OSM-covered
-blocks is the only way to run v5's method at n≫1.
+**Step zero — salvage.** The prior OT code survives in another session's scratchpad (`ot_gw.py`,
+`transplant.py`, `select_donor.py`, `barycenter_amortization.py`, `rsc_*`, pickled pools) and is
+one `/tmp` reclaim from gone. Copy it into the working scratchpad first.
 
-**Two secondary readouts, near-free on the same pair matrix:**
+**Timing pilot before the matrix.** 20 pairs, measured end to end. Each pair needs a real entropic
+GW fit at ε ≤ 0.01 (the note's ablation makes that mandatory; log-domain Sinkhorn converges slowly
+there), plus transplant, snap, a length-matched clearance solve, and permeability on both. v4's
+per-recipient cost also included real-GW fits against a 20-candidate shortlist. Nothing downstream
+should be sized before this number exists.
 
-- **Featurization bake-off, properly powered.** The raw-signature (−0.90) vs heat-trace (+0.60)
-  comparison was **n=5 per space**. A rank correlation on five points is uninformative, and
-  heat-trace's p=0.285 is explicitly noise — so "heat-trace is worse" is one draw, not a finding.
-  The mechanistic argument for the raw signature (it shares the pairwise-distance structure the GW
-  cost optimizes) is sound and remains the prior; this just settles it with real power.
-- **Pairwise-OT trim re-test.** Falsified, but for a mechanism that is explicitly pool-dependent:
-  the trim dropped the rank-1 and rank-2 neighbors *by distance to the recipient*, because they
-  were the two most different *from each other*. That decoupling requires a k=6 spanning a wide
-  distance range — what a 111-block pool forces. In a dense pool, "far from peers" is more likely
-  to mean genuinely anomalous.
+**Then ~100 pairs**, not the 1,000 the first draft proposed. The reblocker branch is the weak one
+(see "What a larger pool does not fix"), so its measurement gets a pilot, not a sweep. Recipients
+span the parcel-count range; donors span the GW-distance range.
+
+**The artifact is a committed parquet**, not a note: `(recipient, donor, features, real_gw_dist,
+perm_gap, displacement, wall_clock)`. This is the most reusable thing Phase 1 produces — a
+retrieval benchmark any future featurization can be scored against without re-solving anything.
+The first draft named scratchpad loss as a risk and then guaranteed it by making the deliverable a
+note.
+
+**Report, do not pre-commit a rule.** Report the fidelity-vs-distance relationship, the
+pool-size→rank-1-distance exponent (measured by subsampling at 10/30/100/300/1000, not assumed
+from N^(−1/d)), and the per-pair cost. Decide in discussion.
+
+**One secondary readout, replacing two.** Score a **fixed-n-resampled** raw signature against the
+current 30-point subsample — the note's own open recommendation ("resample to a fixed n, or
+re-rank a shortlist by actual GW distance"), which the first draft omitted in favour of two
+re-tests that don't earn their place. The raw-vs-heat-trace bake-off is dropped: the n=5 critique
+cuts both ways, the note's case against heat-trace rested on effect sizes (median gap −0.334 vs
+−0.130; 0/5 vs 1/5 avoiding collapse) plus a mechanistic argument this spec endorses, so re-running
+it is misallocated power. The pairwise-OT trim re-test is dropped: in a denser pool the k
+neighbours are closer to each other, so the trim converges toward a no-op — it predicts its own
+null, and the best case is a tie with a component the note recommends deleting.
 
 ## Testing
 
-- **1a** — unit tests for the join and interiority logic against the existing Cape Town sample
-  fixtures with synthetic linework; the Geofabrik download is an integration test behind a network
-  marker.
-- **1b** — synthetic pairs with known answers: identical networks → IoU 1 / Chamfer 0; disjoint →
-  IoU 0; and the discriminating case, a reference network **translated 20 m sideways**, which must
-  score poorly. That test documents the design intent — this metric is about *location*, and the
-  functional reading that would forgive the offset is deliberately not in scope.
-- **1c** — no tests. It is an experiment; the note is the artifact.
+- **1a** — unit tests for the refactored `_interior_desire_lines` (a pure-geometry signature is
+  far more testable than the `Block` version) and for the join, against existing sample fixtures
+  with synthetic linework. Pinned-bbox agreement test between `PbfDesireLines` and
+  `OSMDesireLines`. Geofabrik download behind a network marker.
+- **1b** — tile-enumeration unit test against a recorded `tiles.geojson`; download behind a
+  network marker.
+- **1c** — identical networks → IoU 1, Chamfer 0. A **graded** translation series (0/1/3/6/12 m)
+  asserting monotone decay with a pinned value near `r`; the first draft's single 20 m case is
+  vacuous, since 3 m buffers stop overlapping past 6 m and score 0 for any metric. Plus the test
+  that was actually missing: a proposal that is a strict **subset** of the reference, and its
+  transpose — the only asymmetry directional Chamfer exists to expose. Plus a densification-step
+  sensitivity check (2 m densification puts a ~1 m quantization floor on Chamfer).
+- **1d** — no tests; the parquet and the note are the artifacts.
 
 ## Risks
 
-- **Tag coverage.** Mitigated by the excluded-tag counts (above), not by widening the filter
-  speculatively.
-- **Join scale.** 1.5M ZAF blocks against country-wide linework needs the tiled STRtree pass, not
-  a naive join.
-- **Env wrinkle.** Invoking `.pixi/envs/default/bin/python` directly raises a PROJ database error;
-  go through `pixi run`.
-- **Scratchpad loss.** Addressed by making salvage step zero of 1c.
+- **Census-to-usable attrition.** The note found roughly half of similarity-ranked neighbours had
+  zero interior coverage. If that rate holds at scale the prediction branch's n is much smaller
+  than 65k, and 1a is precisely the measurement that reveals it — before 1b spends on downloads.
+- **`k_complexity` is not the depth screen.** Run the real BFS-peel screen on the shortlist before
+  treating 65,364 as the pool.
+- **PBF disk cost.** The GDAL OSM driver builds a multi-GB temp SQLite DB per country. Mitigated
+  by OGR-side `where` filtering; still needs headroom.
+- **Committed-example churn.** A stable `PbfDesireLines.identity` changes `proposal_id`s for the
+  six committed examples. Check before landing.
+- **Scratchpad loss.** Salvage is step zero of 1d; the pair matrix is committed rather than left
+  in scratch.
+- **Multi-UTM extents.** `Block.crs` must be projected and `STREET_TOL` is metres, but ZAF+KEN
+  spans several UTM zones. The census must batch by zone. (The backlog's "continental scale" entry
+  covers the general form of this.)
 
 ## Noted, not scoped
 
 **Supervised desire-line detection from building geometry.** `notes/2026-07-15-desire-line-detection.md`
 closed this at a ~0.5 recall / 0.35 precision ceiling — but all eight approaches were
-*unsupervised, hand-tuned* detectors, and the note's own stated cause for the precision ceiling is
-"people don't walk every geometric gap," which is exactly what a model learns from labels and a
-heuristic cannot. That work had one labeled block; 1a produces thousands. The note's closing line
-names the revisit condition itself ("if a trained segmentation model … becomes available"). The
-physical resolution-floor argument against **imagery** stands and is untouched by this — the
-geometry route only. **Decide after Phase 1**, when the corpus size and label quality are known.
+*unsupervised, hand-tuned* detectors, and the note's own stated cause for the precision ceiling
+("people don't walk every geometric gap") is exactly what labels teach and a heuristic cannot.
+That work had one labeled block; 1a produces the label set. The note's closing line names the
+revisit condition itself. The physical resolution-floor argument against **imagery** stands and is
+untouched — this is the geometry route only. Decide after Phase 1.
 
-**Phase 2 (sketch).** Building-point density raster (`np.histogram2d` — parcels are Voronoi of
-points, so no rasterizer is needed) → tiled **masked** normalized cross-correlation via
-`scipy.fft`, sweeping ~24–36 discrete rotations at fixed scale → GW re-rank on the top-k. Masking
-is load-bearing and is the one correction to the original "remove roads before building the FFT"
-idea: roads cannot be removed from a building-density field by deleting road geometry, because a
-road *is* a linear void in that field. Padfield-style masked NCC excludes pixels near known roads
-from the correlation and is the raster analogue of the validated GEP. No new dependencies.
+**Phase 2 (sketch), with the first draft's framing corrected.** Building-point density or KDE
+field (`np.histogram2d` — no rasterizer, and per T2 above, no parcels) → rotation sweep at fixed
+scale → GW re-rank on the top-k.
 
-**Phase 2 also carries a fix for §7's GEP.** That result was obtained with a whitener estimated
-from **45 regions over a 60-dimensional spectrum** — n < d, so the covariance was singular and the
-whitening necessarily degenerate. The GEP's +11–55% neighbor street-length gain was achieved
-*despite* this. A pool in the thousands fixes it outright.
+Three corrections to how the first draft described this:
+
+1. **Masked NCC is not "the raster analogue of the GEP."** The GEP *projects out* the
+   road-provision-correlated direction so a road-poor recipient surfaces road-**richer** donors
+   (note §7: +11–55% neighbour street-length). Masking road pixels makes the score road-**blind**
+   — invariant, with no preference for richer donors. Different operations, different effects.
+2. **It is a scan, not an index.** A masked score depends on the *intersection* of both masks at
+   each shift, so it cannot be embedded in a vector space. Phase 2 would be an FFT-accelerated
+   O(N) scan with per-block precomputation. Any framing of Phase 2 as "building an index" is
+   wrong.
+3. **Cheaper options first, in order.** (a) Do nothing raster-side: the note already validated
+   cheap-spectral-shortlist → real-GW re-rank, and brute-force feature retrieval stays trivial
+   well past 65k. (b) If a raster is wanted, **low-pass it**: a road corridor is ~3–6 m against ~5
+   m NN spacing and ~200 m block diagonals, so a Gaussian at σ ≫ corridor width washes out the
+   linear void while preserving fabric structure — zero new machinery. (c) Don't mask at all and
+   *measure* whether road voids hurt, using 1d's matrix as ground truth.
+
+The premise behind all of this is still correct and worth keeping: in a `histogram2d` of building
+points, roads are never drawn, so deleting road geometry is a no-op — a road is a linear void in
+the field, and its road-provision correlation survives deletion.
+
+**Dependency reality check.** `skimage` is **not installed** and is not in `pyproject.toml`'s
+pixi deps; `skimage.registration.phase_cross_correlation` is the off-the-shelf Padfield
+implementation. Hand-rolling masked NCC on `scipy.fft` means ~6 forward FFTs per pair plus
+shift-dependent overlap normalization and a minimum-overlap threshold — a numerically fiddly
+multi-day subproject, not a footnote. The first draft's "no new dependencies" claim was
+technically true and practically misleading.
 
 **Phase 3b candidates (sketch).** Patch quilting — tile the recipient with overlapping windows,
 give each its own best-matching donor patch, feather the demand fields, extract once with the
-existing `demand_greedy_reblock` on the recipient's own gap graph. This attacks the note's
-repeatedly-diagnosed root cause (a transplant reproduces the *donor's* coverage pattern) by
-denying any single donor global influence — the local analogue of the barycenter consensus that
-was the note's breakthrough. And policy transplant — fit the edge cost function under which a
-donor's real footpaths are near-optimal, transplant the *parameters*, solve on the recipient;
-ten numbers cannot carry a coverage gap.
+existing `demand_greedy_reblock` on the recipient's own gap graph — attacks the coverage-pattern
+diagnosis by denying any single donor global influence, the local analogue of the barycenter
+consensus that was the note's breakthrough. And policy transplant — fit the edge cost function
+under which a donor's real footpaths are near-optimal, transplant the *parameters*, solve on the
+recipient; ten numbers cannot carry a coverage gap. Both need a reason to exist that 1d has not
+yet supplied.
+
+**Retrieval unit.** Region accretion currently uses `DenseClusterRegionBuilder` — deepest-first
+greedy on `√(n·A)/P`, which is exactly `√(n × compactness)` (`metric.Compactness` = `A/P²`), scored
+on the *candidate block alone* and never on the shape of the union. §7's donor pool therefore had
+uncontrolled outlines (150–900 parcels, tendril-shaped), a confound the note attributes entirely to
+donor material. The originally-specified "accrete into compact/isoperimetric regions" builder was
+never implemented, and its record was overwritten by the commit reporting the substitute
+(`3df147a`). If a retrieval unit is needed in Phase 2, three candidates: fixed squares (FFT-native),
+disks (rotation-symmetric outline, so all orientation signal comes from fabric), or a
+compactness-preserving accretion builder — which respects real block boundaries so roads aren't
+sliced, while still standardizing outline. **Retrieval unit need not equal intervention unit**;
+extraction happens on the recipient's own substrate regardless.
 
 ## Explicitly not revisited
 
-Shelved for reasons pool size does not touch:
+Shelved for reasons corpus size does not touch: **§7 street-form donors** (streets are formal
+boundaries, footpaths are access-optimized — categorical, not distance); **consensus-as-seed for
+`LoopClosureRefiner`** (consensus was strong at 0.722; *refining* it produced 0.706, below even an
+information-free cold seed at 0.751 — the refiner is the defect, and this is a mechanism finding
+pool size cannot touch); **imagery detection** (physical resolution floor); **resistance-as-builder,
+Voronoi-adjacency partition, distributional radius displacement** (all shelved on mechanism).
 
-- **§7 street-form donors** — streets are formal boundaries, footpaths are access-optimized.
-  Categorical, not a distance problem.
-- **Consensus-as-seed for `LoopClosureRefiner`** — the consensus was strong (0.722); *refining*
-  it made it worse (0.706), below even an information-free cold seed (0.751). The refiner is the
-  defect.
-- **Imagery detection** — the resolution floor is physical (a 2 m path ≈ 8 px, a roof seam ≈ 3–4
-  px, segmentation error ±2 px).
-- **Resistance-as-builder, Voronoi-adjacency partition, distributional radius displacement** — all
-  shelved on mechanism or metrics, unrelated to pool size.
+Also dropped from the first draft: the **§7 GEP paragraph** — its claim that the whitener was
+"rank-deficient by construction" was wrong (PCA-whitening truncates to the ≤44 non-zero
+components rather than inverting a singular covariance, and the note says whitening is what *made*
+the GEP work), and its n=45 counted accreted *regions*, so a larger *block* pool does not supply
+proportionally more of them. The honest residual — re-estimate the whitener on whatever pool
+Phase 2 uses — happens anyway.
+
+## What the review changed
+
+A subagent review of the first draft found, and this revision accepts: `_interior_desire_lines`
+could not run as specified; agreement cannot be an `Eval`; the tag-coupling guarantee was already
+false via `conf/desire_source/osm.yaml`; the 20 m translation test was vacuous; the "37%" pass
+rate was anchor-conditional; masked NCC is neither a GEP analogue nor an index; `skimage` is
+absent; the PROJ risk does not reproduce; the §7 GEP paragraph was wrong; and the two best catches
+— **spatial leakage** in the holdout and **`STREET_TOL` inflation** of the coverage column — were
+absent entirely.
+
+It also concluded the usable pool was ~1,650 blocks and that the country rows were unusable. That
+holds for "what runs today with zero new work" and is the wrong denominator for the strategic
+question: Open Buildings is public, tile-indexed, and already 90% wired, so the ~65k figure is
+scope rather than a ceiling — and per T1/T2 above, the census needs no buildings at all and
+retrieval needs no parcels. That is what this revision is built on.
