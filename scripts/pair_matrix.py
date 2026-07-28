@@ -5,13 +5,22 @@ recipient's substrate, and score it against a length-matched direct clearance so
 parquet is a retrieval benchmark -- any future featurization or donor material can be scored
 against it without re-solving anything.
 
-`load_pools()` reads real Cape Town blocks directly from
-``~/.cache/reblock/{blocks,buildings}_capetown_full.parquet`` -- the plan's census -> shortlist ->
-provisioned-building-points chain never ran (Task 5 needs a 417 MB Geofabrik PBF not on this
-machine; Task 7's provisioning was implemented but never executed), so there is no shortlist to
-read instead. See docs/superpowers/notes/2026-07-27-gw-pair-matrix-findings.md for the full
-writeup, and docs/superpowers/notes/2026-07-23-ot-road-transplant.md for the GW+UOT mechanism this
-script drives.
+`load_pools()` selects through the repo's own `Screen` (`density_compactness` = n/P^2 at the
+calibrated percentile-30 gate) and `RegionBuilder`, rather than the private
+`building_count in [60,300] AND k_complexity >= 4` band it used to carry. That band was a separate
+population from the one every shipped method is scored on, which made none of this script's
+numbers comparable to theirs. See `default_screen` for why depth is reported rather than gated.
+
+It still reads Cape Town from ``~/.cache/reblock/{blocks,buildings}_capetown_full.parquet``. The
+census -> shortlist -> provisioned-points chain HAS now run (2026-07-28: 238,484 blocks censused,
+9.81M Open Buildings points over 65,364 qualified blocks, see
+notes/2026-07-28-osm-census-results.md), but pointing this pilot at it is a separate step -- the
+screen over that corpus flags ~19.6k blocks and building them all is ~44 min of Voronoi, so it
+needs a sampling decision this script does not yet make.
+
+See docs/superpowers/notes/2026-07-27-gw-pair-matrix-findings.md for the full writeup, and
+docs/superpowers/notes/2026-07-23-ot-road-transplant.md for the GW+UOT mechanism this script
+drives.
 
 Usage (module form -- puts the repo root on sys.path so `reblock.data.provision`'s
 `from scripts.fetch_kblock_fixtures import ...` resolves; see
@@ -36,6 +45,7 @@ import time
 from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from urllib.error import URLError
 
 import geopandas as gpd
@@ -48,10 +58,14 @@ from reblock.budget import building_radii, displacement
 from reblock.contracts import Block
 from reblock.data.provision import cached_kblock_source
 from reblock.data.settlements import exclusion_holdout
+from reblock.derivations import access_before
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.desire_lines import OSMDesireLines
 from reblock.methods.osm_footpaths import interior_desire_lines
+from reblock.metric import Compactness, Density, Gate, Product
 from reblock.permeability import permeability
+from reblock.region import IdentityRegionBuilder, RegionBuilder
+from reblock.screen.dense_compact import DenseCompactScreen
 
 _OT_DIR = Path("scratchpad/ot")
 _ot_ns: SimpleNamespace | None = None
@@ -95,13 +109,36 @@ def _ot() -> SimpleNamespace:
 
 CORRIDOR_M = 3.0
 DEFAULT_CACHE = Path.home() / ".cache" / "reblock"
+# COMPUTE bounds, not a quality judgement -- what a GW fit can afford, kept deliberately separate
+# from what is worth reblocking (that is the screen's job, see `default_screen`). GW is quadratic
+# in parcel count, and `select_donor.signature`'s fixed subsample (N_SUB=50) cannot sign a block
+# with fewer real parcels than that at all.
 MIN_BUILDING_COUNT = 60
 MAX_BUILDING_COUNT = 300
-MIN_K_COMPLEXITY = 4
-# select_donor.signature's fixed subsample size (N_SUB=50); a block with fewer real parcels than
-# this can't be signed at all (ValueError), so it is dropped from the pool rather than the
-# eligibility/selection logic having to special-case it downstream.
 MIN_PARCELS = 50
+
+
+def default_screen(min_buildings: int = 30) -> DenseCompactScreen:
+    """The repo's own screen, `density_compactness` = n/P^2 at the calibrated percentile-30 gate.
+
+    This replaces a hand-rolled `building_count in [60,300] AND k_complexity >= 4` band that this
+    script used to define its own pool with. That band was a private population: every number the
+    OT arc produced on it -- including the within-recipient slope -- was measured on a different
+    set of blocks from the one `clearance`, `arterial` and every other shipped method is scored
+    on, so none of the results could be compared across. Selecting through `Screen` is what makes
+    them commensurable.
+
+    `density_compactness` is also peel-free (`needs_peel=False`), so selection reads the free
+    kblock columns and never builds a Block: no Voronoi, no peel, no building points required to
+    decide the pool. Depth is deliberately NOT gated on here -- it is the direct measure of the
+    access problem and belongs in the OUTPUT as a stratifier, because gating on it would destroy
+    the ability to ask whether transplant fidelity depends on it.
+    """
+    return DenseCompactScreen(
+        Product(name="density_compactness", terms=(Density(), Compactness())),
+        Gate(kind="percentile", value=30.0),
+        min_buildings=min_buildings,
+    )
 
 
 def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
@@ -120,18 +157,25 @@ def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
 
 
 def load_pools(
-    city: str = "capetown", *, min_buildings: int = 30
+    city: str = "capetown", *, min_buildings: int = 30,
+    screen: DenseCompactScreen | None = None,
+    region_builder: RegionBuilder | None = None,
 ) -> tuple[list[Block], gpd.GeoDataFrame, dict[str, np.ndarray]]:
     """Real Cape Town blocks WITH building points, so `KblockSource` can build real `Block`s with
-    Voronoi parcels (required by `gap_snap` and `permeability`) -- read directly from the cached
-    full-city parquets rather than from a shortlist (see module docstring: the plan's shortlist
-    chain never ran).
+    Voronoi parcels (required by `gap_snap` and `permeability`).
 
-    The qualified pool is `building_count` in [60, 300] AND `k_complexity` >= 4, matching the
-    RESCOPE note (1,136 Cape Town blocks against the parquet on this machine), further restricted
-    to blocks whose real building-point join yields >= `MIN_PARCELS` parcels (a small fraction of
-    the 1,136 -- the stored `building_count` column is a proxy for the real join, and
-    `select_donor.signature`'s fixed subsample size needs a floor under it).
+    The pool is chosen by `screen` (default `default_screen()`, the repo's `density_compactness`)
+    intersected with the MIN/MAX_BUILDING_COUNT compute bounds, then restricted to blocks whose
+    real building-point join yields >= `MIN_PARCELS` parcels -- the stored `building_count` column
+    is only a proxy for that join, and `select_donor.signature`'s fixed subsample needs a floor.
+
+    `region_builder` (default `IdentityRegionBuilder`) runs over the screen's output as singleton
+    seed groups. At singleton granularity identity is a no-op, which is exactly the point: it puts
+    this experiment on the same Source -> Screen -> RegionBuilder path every shipped method uses,
+    so swapping in an accreting builder later -- which Phase 3's street-form donor material
+    REQUIRES, since a single block has no internal streets -- is a substitution here rather than a
+    rewrite. A builder that returns non-singleton groups needs `region.region_block` to fuse each
+    group before scoring; that path is deliberately not built until something needs it.
 
     Returns `(blocks, blocks_gdf, signatures)`:
       - `blocks`: the materialized pool as real `Block`s (Voronoi parcels via `KblockSource`).
@@ -143,22 +187,34 @@ def load_pools(
         before paying for a real GW fit -- never written to the output parquet in place of
         `real_gw_dist`.
     """
+    screen = screen or default_screen(min_buildings)
+    region_builder = region_builder or IdentityRegionBuilder()
+
+    flagged = screen.select(cached_kblock_source(city, min_buildings=min_buildings))
     raw = pd.read_parquet(
         DEFAULT_CACHE / f"blocks_{city}_full.parquet",
-        columns=["block_id", "k_complexity", "building_count"],
+        columns=["block_id", "building_count", "geometry"],
     )
-    qualified = raw[
-        (raw.building_count >= MIN_BUILDING_COUNT)
-        & (raw.building_count <= MAX_BUILDING_COUNT)
-        & (raw.k_complexity >= MIN_K_COMPLEXITY)
-    ]
-    ids = sorted(qualified["block_id"].astype(str).tolist())
+    raw["block_id"] = raw["block_id"].astype(str)
+    counts = dict(zip(raw["block_id"], raw["building_count"], strict=True))
+    affordable = sorted(
+        b for b in flagged
+        if MIN_BUILDING_COUNT <= float(counts.get(b, 0)) <= MAX_BUILDING_COUNT
+    )
+    print(f"  screen flagged {len(flagged):,}; {len(affordable):,} within the "
+          f"[{MIN_BUILDING_COUNT}, {MAX_BUILDING_COUNT}] compute band", flush=True)
+
+    groups = region_builder.build(
+        cast(gpd.GeoDataFrame, raw[raw["block_id"].isin(affordable)].reset_index(drop=True)),
+        [[b] for b in affordable],
+    )
+    ids = sorted({b for group in groups for b in group})
 
     src = cached_kblock_source(city, block_ids=ids, min_buildings=min_buildings)
     blocks = [b for b in src.region().blocks if len(b.parcels) >= MIN_PARCELS]
     blocks.sort(key=lambda b: b.block_id)
     if not blocks:
-        raise SystemExit(f"load_pools: no qualified {city} blocks survived construction")
+        raise SystemExit(f"load_pools: no screened {city} blocks survived construction")
 
     blocks_gdf = gpd.GeoDataFrame(
         {"block_id": [b.block_id for b in blocks]},
@@ -530,6 +586,14 @@ def score_pair(
         "recipient": recipient.block_id,
         "donor": donor.block_id,
         "donor_type": "osm_footpaths",
+        # Depth is REPORTED, never gated on. It is the direct measure of the access problem
+        # reblocking exists to fix, and the screen (`density_compactness` = n/P^2) does not
+        # capture it -- measured on Cape Town, only 29% of the screened pool reaches k>=4, where
+        # the old hand-rolled band required it of everything. Carrying it as a column is what
+        # lets the analysis ask whether transplant fidelity depends on depth; a gate would have
+        # made that question unanswerable from the matrix.
+        "recipient_depth": float(access_before(recipient).max()),
+        "donor_depth": float(access_before(donor).max()),
         "real_gw_dist": float(dist),
         "feature_dist": float(np.linalg.norm(ot.signature(d_xy) - ot.signature(r_xy))),
         "perm_gap": float(perm_prop - perm_direct),
