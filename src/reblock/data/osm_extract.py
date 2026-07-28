@@ -74,7 +74,20 @@ def read_pbf_lines(pbf_path: Path, tags: Sequence[str] = FOOTPATH_TAGS) -> gpd.G
     The census must call this ONCE per UTM batch and query an STRtree per block -- not once per
     block. `DesireLineSource.desire_lines` is a per-bbox API and there are 1.81M blocks.
     """
-    quoted = ", ".join(f"'{t}'" for t in tags)
+    if isinstance(tags, str):
+        # A bare str IS a Sequence[str], so `tags="path"` typechecks but iterates
+        # character-by-character -- silently building `highway IN ('p','a','t','h')`, which
+        # matches nothing rather than raising. Reject it explicitly.
+        raise TypeError(
+            f"tags must be a sequence of tag strings, not a bare str ({tags!r}); pass a list "
+            f"or tuple, e.g. tags=[{tags!r}]"
+        )
+    tags = tuple(tags)
+    if not tags:
+        # `highway IN ()` is invalid OGR SQL syntax -- raise our own clear message instead of
+        # letting an obscure OGR/SQL error surface from inside pyogrio.
+        raise ValueError("tags must not be empty")
+    quoted = ", ".join("'{}'".format(t.replace("'", "''")) for t in tags)
     return cast(gpd.GeoDataFrame, pyogrio.read_dataframe(
         pbf_path, layer="lines", where=f"highway IN ({quoted})", use_arrow=True))
 
@@ -95,7 +108,17 @@ class PbfDesireLines:
 
     pbf_path: Path
     tags: Sequence[str] = FOOTPATH_TAGS
-    _cache: gpd.GeoDataFrame | None = field(default=None, init=False, repr=False)
+    # compare=False on both caches: a DataFrame's truth value is ambiguous, so the
+    # dataclass-generated __eq__ would raise (`ValueError: The truth value of a DataFrame is
+    # ambiguous`) comparing two instances that have each populated their own cache -- these are
+    # memoization state, not part of what identifies a PbfDesireLines.
+    _cache: gpd.GeoDataFrame | None = field(default=None, init=False, repr=False, compare=False)
+    # (stat_signature, digest) memo for `identity`, keyed on (st_size, st_mtime_ns) so a changed
+    # file re-hashes but a repeat access on an unchanged file does not pay another full-file
+    # SHA-256 (measured 0.77s/873MB -- osm_footpaths reads .identity ~3x/block, which would
+    # otherwise cost ~1s/block of pure hashing against a 3.31ms/block budget).
+    _digest_cache: tuple[tuple[int, int], str] | None = field(
+        default=None, init=False, repr=False, compare=False)
 
     def desire_lines(
         self, bbox_wgs84: tuple[float, float, float, float], crs: CRS
@@ -108,7 +131,11 @@ class PbfDesireLines:
 
     @property
     def identity(self) -> tuple[str, str, tuple[str, ...]]:
-        return ("pbf", _file_sha256(self.pbf_path), tuple(self.tags))
+        st = self.pbf_path.stat()
+        signature = (st.st_size, st.st_mtime_ns)
+        if self._digest_cache is None or self._digest_cache[0] != signature:
+            self._digest_cache = (signature, _file_sha256(self.pbf_path))
+        return ("pbf", self._digest_cache[1], tuple(self.tags))
 
 
 def utm_zone_epsg(lon: float, lat: float) -> int:

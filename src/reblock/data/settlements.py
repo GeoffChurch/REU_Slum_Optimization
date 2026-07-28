@@ -18,12 +18,33 @@ import networkx as nx
 from shapely import STRtree
 
 
+def _require_metric_crs(blocks: gpd.GeoDataFrame, fn_name: str) -> None:
+    """Raise rather than silently produce nonsense: both `exclusion_holdout` and
+    `settlement_labels` compare a `*_m` threshold directly against `GeoDataFrame.distance`/
+    `dwithin`, which is in the GeoDataFrame's own CRS units. Under a geographic CRS (degrees)
+    every real distance is on the order of 1e-4, so a `radius_m=2000` or `tol_m=100` threshold
+    never binds -- `exclusion_holdout` returns every block as an eligible donor (maximum leakage,
+    presented as a holdout) and `settlement_labels` collapses to one giant component. Follows the
+    precedent at `reblock.data.shapefile.ShapefileSource._prepared`, which raises on a missing CRS
+    rather than guessing one.
+    """
+    crs = blocks.crs
+    if crs is None or crs.is_geographic:
+        raise ValueError(
+            f"{fn_name}: blocks must be in a projected (metres) CRS, not {crs!r} -- a geographic "
+            "CRS makes every `_m` distance threshold a no-op (degrees, not metres), silently "
+            "disabling the leakage guard this function exists to provide. Reproject first, e.g. "
+            "blocks.to_crs(blocks.estimate_utm_crs())."
+        )
+
+
 def settlement_labels(blocks: gpd.GeoDataFrame, *, tol_m: float = 100.0) -> list[int]:
     """Connected-component label per block under `tol_m` boundary proximity.
 
     REPORTING ONLY -- not a fold definition. Chains transitively, so the label depends on the
     whole corpus and on `tol_m`; always state the threshold alongside any number stratified by it.
     """
+    _require_metric_crs(blocks, "settlement_labels")
     geoms = list(blocks.geometry)
     graph: nx.Graph = nx.Graph()
     graph.add_nodes_from(range(len(geoms)))
@@ -47,6 +68,7 @@ def exclusion_holdout(
     Monotone in `radius_m`, no chaining, one interpretable number, sweepable -- which is why this
     and not a component label is the primary fold definition. The recipient is always excluded.
     """
+    _require_metric_crs(blocks, "exclusion_holdout")
     recipient = blocks.geometry.iloc[recipient_idx]
     distances = blocks.geometry.distance(recipient)
     return [i for i in range(len(blocks))

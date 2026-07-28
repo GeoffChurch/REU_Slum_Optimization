@@ -1,11 +1,13 @@
 from pathlib import Path
 
 import geopandas as gpd
+import pyogrio
 import pytest
 import yaml
 from pyproj import CRS
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, Point, Polygon
 
+from reblock.data import osm_extract
 from reblock.data.osm_extract import (
     FOOTPATH_TAGS,
     TOLERANCES,
@@ -13,6 +15,7 @@ from reblock.data.osm_extract import (
     assert_zone_fit,
     census_rows,
     interiority_row,
+    read_pbf_lines,
     utm_zone_epsg,
 )
 
@@ -86,6 +89,86 @@ def test_pbf_identity_is_stable_and_keys_on_content_and_tags(tmp_path: Path) -> 
     pbf2.write_bytes(b"different-content")
     assert PbfDesireLines(pbf2).identity != a.identity
     assert PbfDesireLines(pbf, tags=("footway",)).identity != a.identity
+
+
+def test_pbf_desire_lines_equality_ignores_populated_caches(tmp_path: Path) -> None:
+    """`_cache` is dataclass state (memoization), not identity: comparing two instances that have
+    each populated their own `_cache` with a real DataFrame must not raise. Before `compare=False`
+    on `_cache`, the dataclass-generated `__eq__` compared the two DataFrames with `==`, which
+    pandas broadcasts elementwise, and the resulting DataFrame-of-bools has an ambiguous truth
+    value -- `ValueError: The truth value of a DataFrame is ambiguous`."""
+    pbf = tmp_path / "x.osm.pbf"
+    pbf.write_bytes(b"not-a-real-pbf-but-hashable")
+    a = PbfDesireLines(pbf)
+    b = PbfDesireLines(pbf)
+    a._cache = gpd.GeoDataFrame({"v": [1]}, geometry=[Point(0, 0)], crs=4326)
+    b._cache = gpd.GeoDataFrame({"v": [2, 3]}, geometry=[Point(1, 1), Point(2, 2)], crs=4326)
+    assert a == b  # equally configured (same path/tags) despite different populated caches
+
+
+def test_pbf_identity_memoizes_digest_and_invalidates_on_content_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`identity` re-hashing the whole PBF on every access is measured at ~1s/block of pure
+    hashing against a 3.31ms/block budget (see module docstring). A second access on an unchanged
+    file must not re-read it; touching the content must still change the identity."""
+    pbf = tmp_path / "x.osm.pbf"
+    pbf.write_bytes(b"hello world")
+
+    calls = 0
+    real_sha256 = osm_extract._file_sha256
+
+    def counting_sha256(path: Path) -> str:
+        nonlocal calls
+        calls += 1
+        return real_sha256(path)
+
+    monkeypatch.setattr(osm_extract, "_file_sha256", counting_sha256)
+
+    src = PbfDesireLines(pbf)
+    first = src.identity
+    second = src.identity
+    assert first == second
+    assert calls == 1, "second access on an unchanged file must not re-hash"
+
+    pbf.write_bytes(b"hello world, but longer now")  # different size -> stat signature changes
+    third = src.identity
+    assert third != first
+    assert calls == 2, "a content change must trigger exactly one re-hash"
+
+
+def test_read_pbf_lines_rejects_bare_str_tags() -> None:
+    """A bare `str` IS a `Sequence[str]`, so `tags="path"` typechecks but would otherwise iterate
+    character-by-character, silently building `highway IN ('p','a','t','h')` -- zero rows, no
+    error. Reject it explicitly instead."""
+    with pytest.raises(TypeError, match="bare str"):
+        read_pbf_lines(Path("nonexistent.osm.pbf"), tags="path")
+
+
+def test_read_pbf_lines_rejects_empty_tags() -> None:
+    """`tags=()` would build the syntactically invalid `highway IN ()`, surfacing as an obscure
+    OGR/SQL error from inside pyogrio; raise our own clear message instead."""
+    with pytest.raises(ValueError, match="must not be empty"):
+        read_pbf_lines(Path("nonexistent.osm.pbf"), tags=())
+
+
+def test_read_pbf_lines_escapes_embedded_quotes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tag containing an embedded single quote must not break out of the SQL string literal."""
+    captured: dict[str, object] = {}
+
+    def fake_read_dataframe(
+        path: Path, *, layer: str, where: str, use_arrow: bool
+    ) -> gpd.GeoDataFrame:
+        captured["where"] = where
+        return gpd.GeoDataFrame(geometry=[], crs=4326)
+
+    # Patch the `pyogrio` module object directly (not via `osm_extract.pyogrio`, which mypy
+    # --strict's implicit-reexport check would flag): `read_pbf_lines` calls
+    # `pyogrio.read_dataframe`, and modules are singletons in `sys.modules`, so this is the exact
+    # same object `osm_extract.py`'s own `import pyogrio` resolved to.
+    monkeypatch.setattr(pyogrio, "read_dataframe", fake_read_dataframe)
+    read_pbf_lines(Path("nonexistent.osm.pbf"), tags=["o'brien's path"])
+    assert captured["where"] == "highway IN ('o''brien''s path')"
 
 
 def test_pbf_conforms_to_desire_line_source_protocol() -> None:

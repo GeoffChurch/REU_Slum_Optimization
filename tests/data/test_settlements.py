@@ -1,10 +1,12 @@
 import geopandas as gpd
+import pytest
 from pyproj import CRS
 from shapely.geometry import box
 
 from reblock.data.settlements import exclusion_holdout, settlement_labels
 
 CRS_M = CRS.from_epsg(32734)
+CRS_GEO = CRS.from_epsg(4326)
 
 
 def _blocks(*offsets: float) -> gpd.GeoDataFrame:
@@ -41,3 +43,32 @@ def test_exclusion_holdout_is_monotone_in_radius() -> None:
     blocks = _blocks(0, 60, 200, 5000)
     counts = [len(exclusion_holdout(blocks, 0, radius_m=r)) for r in (0.0, 100.0, 500.0, 10_000.0)]
     assert counts == sorted(counts, reverse=True)
+
+
+def test_exclusion_holdout_raises_on_geographic_crs() -> None:
+    """A geographic CRS makes `radius_m=2000` compare against a degree-valued distance (always
+    << 2000), so every block reads as eligible -- maximum donor leakage presented as a holdout.
+    Must raise rather than silently returning that."""
+    blocks = gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1), box(5, 5, 6, 6)], crs=CRS_GEO)
+    with pytest.raises(ValueError, match="projected"):
+        exclusion_holdout(blocks, recipient_idx=0, radius_m=2000.0)
+
+
+def test_exclusion_holdout_raises_on_missing_crs() -> None:
+    blocks = gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1), box(5, 5, 6, 6)])
+    with pytest.raises(ValueError, match="projected"):
+        exclusion_holdout(blocks, recipient_idx=0, radius_m=2000.0)
+
+
+def test_settlement_labels_raises_on_geographic_crs() -> None:
+    """A geographic CRS makes `tol_m=100` compare against a degree-valued `dwithin`, which never
+    binds at realistic block spacing -- collapsing everything into one settlement."""
+    blocks = gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1), box(5, 5, 6, 6)], crs=CRS_GEO)
+    with pytest.raises(ValueError, match="projected"):
+        settlement_labels(blocks, tol_m=100.0)
+
+
+def test_settlement_labels_raises_on_missing_crs() -> None:
+    blocks = gpd.GeoDataFrame(geometry=[box(0, 0, 1, 1), box(5, 5, 6, 6)])
+    with pytest.raises(ValueError, match="projected"):
+        settlement_labels(blocks, tol_m=100.0)
