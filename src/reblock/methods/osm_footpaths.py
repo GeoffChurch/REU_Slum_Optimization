@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from typing import cast
 
 import geopandas as gpd
+from pyproj import CRS
+from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block, Proposal
@@ -20,26 +23,39 @@ from reblock.derive.access import STREET_TOL
 from reblock.methods.desire_lines import DesireLineSource
 
 
-def _interior_desire_lines(lines: gpd.GeoDataFrame, block: Block) -> gpd.GeoDataFrame:
-    """Clip `lines` to the block, subtract the existing-street corridor (STREET_TOL buffer), and
-    keep the interior LineString remainder above the tolerance length -- the added intervention,
-    excluding the perimeter/inter-block streets that are already egress."""
-    empty = gpd.GeoDataFrame(geometry=[], crs=block.crs)
+def interior_desire_lines(
+    lines: gpd.GeoDataFrame,
+    boundary: BaseGeometry,
+    streets: BaseGeometry,
+    crs: CRS,
+    *,
+    tol: float = STREET_TOL,
+) -> gpd.GeoDataFrame:
+    """Clip `lines` to `boundary`, subtract the `streets` corridor (a `tol` buffer), and keep the
+    interior LineString remainder longer than `tol` -- the added intervention, excluding the
+    perimeter/inter-block streets that are already egress.
+
+    Pure geometry: takes boundary/streets/crs rather than a Block, so the country-wide OSM census
+    can call it for blocks that have no building points (and therefore no Voronoi parcels, and
+    therefore cannot be constructed as a Block at all). `tol` is exposed because the census sweeps
+    it -- OSM ways are digitized against different imagery than the kblock outlines, so a
+    boundary-running path more than `tol` off the outline reads as interior.
+    """
+    empty = gpd.GeoDataFrame(geometry=[], crs=crs)
     if lines.empty:
         return empty
-    clipped = lines.clip(block.boundary)
+    clipped = lines.clip(cast(Polygon | MultiPolygon, boundary))
     if clipped.empty:
         return empty
-    street_corridor = unary_union(list(block.streets.geometry)).buffer(STREET_TOL)
-    remainder = clipped.geometry.difference(street_corridor).explode(index_parts=False)
+    remainder = clipped.geometry.difference(streets.buffer(tol)).explode(index_parts=False)
     mask = ((~remainder.is_empty)
             & (remainder.geom_type == "LineString")
-            & (remainder.length > STREET_TOL))
+            & (remainder.length > tol))
     # geopandas-stubs' GeoSeries.__getitem__ resolves boolean-mask indexing to the
     # scalar-return overload (-> BaseGeometry) instead of the array-return one; cast to
     # correct it, mirroring the same fixup in reblock.data.shapefile._prepared.
     kept = cast(gpd.GeoSeries, remainder[mask])
-    return gpd.GeoDataFrame(geometry=list(kept), crs=block.crs)
+    return gpd.GeoDataFrame(geometry=list(kept), crs=crs)
 
 
 @dataclass
@@ -60,7 +76,8 @@ class OsmFootpathsReblocker:
         bbox = gpd.GeoSeries([block.boundary], crs=block.crs).to_crs(4326).total_bounds
         lines = self.source.desire_lines(
             (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])), block.crs)
-        roads = _interior_desire_lines(lines, block)
+        roads = interior_desire_lines(
+            lines, block.boundary, unary_union(list(block.streets.geometry)), block.crs)
         # proposal_id encodes the config so Proposal.identity distinguishes configs on a block
         # (mirrors clearance) -- else two OsmFootpaths configs collide in the eval cache. The
         # source identity is hashed (distinct-per-config yet filesystem-clean -- it feeds render

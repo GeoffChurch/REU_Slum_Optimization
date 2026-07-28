@@ -57,6 +57,9 @@ ruff = "*"
 # GeoDataFrame/Polygon/CRS stays fully checked under mypy --strict.
 types-geopandas = "*"
 types-shapely = "*"
+# PyYAML ships no py.typed marker either; same upstream-stub pattern as above so
+# tests/data/test_osm_extract.py's `import yaml` stays fully checked.
+types-pyyaml = "*"
 
 [tool.pixi.environments]
 default = { features = ["dev"], solve-group = "default" }
@@ -133,6 +136,15 @@ module = "joblib.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# pyogrio (backs reblock.data.osm_extract.read_pbf_lines' OGR-side `where` filter) ships no
+# py.typed marker. A types-pyogrio stub exists on PyPI but not on conda-forge, and every other
+# stub package here (types-geopandas, types-shapely, types-pyyaml) is installed as a conda-forge
+# package to match [tool.pixi.dependencies]'s binary-correct GDAL/GEOS stack -- so, like joblib
+# above, this is a plain ignore_missing_imports shim, not a preference over real stubs.
+module = "pyogrio.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # numpy 2.5's bundled stubs (a .pyi file) use PEP 695 `type` statements
 # (Python 3.12+ only syntax), which fail to parse under our
 # python_version = "3.11" target; this is a numpy/mypy version mismatch
@@ -166,6 +178,20 @@ follow_imports = "silent"
 # names have real inferred types at provision.py's call sites, not Any) but suppresses
 # its own unrelated errors, mirroring the topology.graph.my_graph* override above.
 module = "scripts.fetch_kblock_fixtures"
+follow_imports = "silent"
+
+[[tool.mypy.overrides]]
+# scripts/pair_matrix.py and scripts/osm_census.py are likewise deliberately excluded from
+# `files` (see the comment above) -- pair_matrix.py imports the gitignored `scratchpad/ot/`
+# spike (mypy can never resolve it: that directory is never on disk in CI/a fresh checkout) and
+# osm_census.py has its own pre-existing --strict findings, neither in scope here. tests/test_
+# pair_matrix.py and tests/test_osm_census.py import both scripts to exercise their real
+# functions, which -- since those test files ARE in `files` -- makes mypy's default
+# follow_imports="normal" transitively re-check both scripts' whole bodies anyway.
+# follow_imports=silent still parses them (so the imported names have real inferred types at the
+# test files' call sites, not Any) but suppresses their own unrelated errors, exactly mirroring
+# the scripts.fetch_kblock_fixtures override above.
+module = ["scripts.pair_matrix", "scripts.osm_census"]
 follow_imports = "silent"
 
 [[tool.mypy.overrides]]
@@ -219,6 +245,9 @@ pythonpath = ["."]
 # genuine warnings stay visible.
 filterwarnings = [
     "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:joblib.numpy_pickle",
+]
+markers = [
+    "network: hits the network (Geofabrik/Overpass/Open Buildings); deselect with -m 'not network'",
 ]
 
 [tool.ruff]

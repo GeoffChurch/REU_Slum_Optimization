@@ -244,6 +244,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/types-geopandas-1.1.4.20260628-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/types-pytz-2026.2.0.20260518-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/types-pyyaml-6.0.12.20260724-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/types-shapely-2.1.0.20260402-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.15.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
@@ -310,6 +311,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/tomli-2.4.1-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/types-geopandas-1.1.4.20260628-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/types-pytz-2026.2.0.20260518-pyhcf101f3_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/types-pyyaml-6.0.12.20260724-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/types-shapely-2.1.0.20260402-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2025c-hc9c84f9_1.conda
@@ -4191,6 +4193,18 @@ packages:
   run_exports: {}
   size: 20398
   timestamp: 1779096753335
+- conda: https://conda.anaconda.org/conda-forge/noarch/types-pyyaml-6.0.12.20260724-pyhcf101f3_0.conda
+  sha256: e66915e53f746eda5b1d9046d7107c10633c4884f02a6cb7059c451896c5dc97
+  md5: 407d0354f25e7dd31a1dab0bf7c82271
+  depends:
+  - python >=3.10
+  - python
+  license: Apache-2.0 AND MIT
+  purls:
+  - pkg:pypi/types-pyyaml?source=hash-mapping
+  run_exports: {}
+  size: 26866
+  timestamp: 1784994875787
 - conda: https://conda.anaconda.org/conda-forge/noarch/types-shapely-2.1.0.20260402-pyhcf101f3_0.conda
   sha256: 77814d0eb90f9686de6929ab1301adb721afdf221dd12bca2f3a28054d50b87a
   md5: 881262e1e2db2323071c4964c5028c7f
@@ -6180,7 +6194,7 @@ packages:
   license: PSF-2.0
   license_family: PSF
   purls:
-  - pkg:pypi/matplotlib?source=hash-mapping
+  - pkg:pypi/matplotlib?source=compressed-mapping
   run_exports: {}
   size: 8650165
   timestamp: 1782829632549

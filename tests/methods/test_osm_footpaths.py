@@ -3,13 +3,14 @@ from collections.abc import Hashable
 from pathlib import Path
 
 import geopandas as gpd
+import pytest
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.contracts import Block, Proposal
-from reblock.methods.osm_footpaths import OsmFootpathsReblocker
+from reblock.methods.osm_footpaths import OsmFootpathsReblocker, interior_desire_lines
 
 UTM = CRS.from_epsg(32734)
 Bbox = tuple[float, float, float, float]
@@ -119,3 +120,28 @@ def test_osm_footpaths_instantiates_from_method_group() -> None:
         cfg = compose(config_name="config",
                       overrides=["shapefile=x", "method=osm_footpaths"])
     assert type(instantiate(cfg.method)).__name__ == "OsmFootpathsReblocker"
+
+
+def test_interior_desire_lines_needs_no_block() -> None:
+    """The census path: boundary + streets + crs only, no Block, no parcels."""
+    crs = CRS.from_epsg(32734)
+    boundary = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    lines = gpd.GeoDataFrame(
+        geometry=[
+            LineString([(10, 50), (90, 50)]),   # interior: kept
+            LineString([(0, 0), (100, 0)]),     # on the boundary: dropped
+        ],
+        crs=crs,
+    )
+    out = interior_desire_lines(lines, boundary, boundary.boundary, crs)
+    assert len(out) == 1
+    assert out.geometry.iloc[0].length == pytest.approx(80.0)
+
+
+def test_interior_desire_lines_tolerance_trims_length_not_count() -> None:
+    """A path running just inside the boundary survives 0.5 m and dies at 5 m."""
+    crs = CRS.from_epsg(32734)
+    boundary = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+    lines = gpd.GeoDataFrame(geometry=[LineString([(10, 2), (90, 2)])], crs=crs)
+    assert len(interior_desire_lines(lines, boundary, boundary.boundary, crs, tol=0.5)) == 1
+    assert len(interior_desire_lines(lines, boundary, boundary.boundary, crs, tol=5.0)) == 0
