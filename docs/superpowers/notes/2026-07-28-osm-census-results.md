@@ -64,11 +64,27 @@ needing its own threshold.
 pool). It is a **pre-screen**, not the screen: the repo's real gate is BFS-peel depth, which needs
 building points and therefore runs on the shortlist, not here.
 
-## This shrinks the Open Buildings download 3.1×
+## The density floor is a retrieval filter, not a provisioning one
 
-Recipients need building points but not OSM, so the provisioning target is qualified ∩ density
-floor, regardless of coverage: **20,910 blocks** at ≥1000/km² (ZAF 15,504, KEN 5,406) against the
-spec's 65,364. The spec sized 1b's tile download against a pool that is mostly rural polygons.
+**CORRECTED.** This section originally claimed the floor "shrinks the Open Buildings download
+3.1×", from 65,364 blocks to 20,910. That is wrong. The download is **tile-granular** — S2 level-4
+cells — and measured against the real tile index the gated and ungated shortlists need **18 and 20
+tiles** respectively. The floor cuts the blocks *retained*, not the bytes fetched.
+
+The floor's substance stands: a 2,000 km² polygon holding 258 buildings is not a settlement and
+would be a poor donor. But `area_m2` is already a census column, so it belongs at **retrieval
+time**, where it costs nothing and can be changed freely. Provisioning is a **one-way door** — a
+block left un-provisioned cannot be reconsidered without another multi-GB fetch — so it should
+filter as little as possible. The same reasoning rules out a geographic filter, separately measured
+to be uninformative (geographic distance is uncorrelated with GW distance: pearson +0.028, p=0.78).
+
+So the provisioning target is the full qualified band, **65,364 blocks / 20 tiles / ~4 GB**, and
+`scripts/provision_shortlist.py` defaults `--min-density` to 0.
+
+A related fix in that script: it originally cached only each tile's *filtered* parquet and threw
+the raw `.csv.gz` away — caching the cheap step and discarding the expensive one, which is what
+made the shortlist definition feel expensive to revisit in the first place. Raw tiles are now kept
+under `ob_tiles_raw/` and `--refilter` re-derives everything from them for free.
 
 ## Operational findings
 
@@ -95,8 +111,8 @@ plus single tolerance is what removed it.
 
 ## What to do next
 
-1. Apply the density floor as the shortlist definition, and provision Open Buildings for those
-   ~21k blocks rather than 65k.
+1. Provision Open Buildings for the full qualified band (65,364 blocks, 20 tiles, ~4 GB) and
+   apply the density floor at retrieval time — see the corrected section above.
 2. Compute `settlement_labels` on that shortlist (decided 2026-07-27: not emitted by the census —
    chaining connected components over a prefiltered two-country corpus yields metro-scale blobs).
 3. Run the BFS-peel depth screen on the shortlist; `k_complexity ≥ 4` is kblock's proxy, not the
