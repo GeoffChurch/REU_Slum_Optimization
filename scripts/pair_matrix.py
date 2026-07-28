@@ -18,6 +18,14 @@ Usage (module form -- puts the repo root on sys.path so `reblock.data.provision`
 `scripts/fetch_desire_lines_snapshot.py` for the same convention):
     pixi run python -m scripts.pair_matrix --pairs 20 --timing-only
     pixi run python -m scripts.pair_matrix --pairs 100 --out data/benchmarks/gw_pair_matrix.parquet
+
+`--analyze` re-derives the headline statistics from an already-scored parquet (e.g. the committed
+`data/benchmarks/gw_pair_matrix.parquet`) and needs none of the above: no `scratchpad/ot/`, no GW/
+OSM/clearance/pool work -- just the parquet plus numpy/pandas/scipy. That guard and the OT imports
+are deferred into `_ot()`, called only from the pair-scoring path (`load_pools`, `score_pair`), so
+this reproduces the committed headline result from a fresh checkout that never populated
+`scratchpad/ot/`:
+    pixi run python -m scripts.pair_matrix --analyze --out data/benchmarks/gw_pair_matrix.parquet
 """
 from __future__ import annotations
 
@@ -27,6 +35,7 @@ import sys
 import time
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.error import URLError
 
 import geopandas as gpd
@@ -35,34 +44,51 @@ import pandas as pd
 from scipy import stats
 from shapely.ops import unary_union
 
-_OT_DIR = Path("scratchpad/ot")
-if not _OT_DIR.is_dir():
-    raise SystemExit(
-        "scratchpad/ot/ is missing. That directory holds the salvaged 2026-07-23 GW/transplant "
-        "spike (ot_gw.py, transplant.py, select_donor.py) this script depends on -- it is "
-        "gitignored scratchpad, never repo content, so it does not travel with a fresh checkout. "
-        "Rebuild it from docs/superpowers/notes/2026-07-23-ot-road-transplant.md §1 (entropic "
-        "GW: projected-gradient outer loop + log-domain Sinkhorn inner, eps=0.01, tau=1.0) before "
-        "running this script."
-    )
-sys.path.insert(0, str(_OT_DIR))
-from ot_gw import gw_cost  # noqa: E402
-from select_donor import signature  # noqa: E402
-from transplant import (  # noqa: E402
-    _normalized_dist_matrix,
-    fit_transport,
-    gap_snap,
-    transport_lines,
-)
+from reblock.budget import building_radii, displacement
+from reblock.contracts import Block
+from reblock.data.provision import cached_kblock_source
+from reblock.data.settlements import exclusion_holdout
+from reblock.methods.clearance import ClearanceReblocker
+from reblock.methods.desire_lines import OSMDesireLines
+from reblock.methods.osm_footpaths import interior_desire_lines
+from reblock.permeability import permeability
 
-from reblock.budget import building_radii, displacement  # noqa: E402
-from reblock.contracts import Block  # noqa: E402
-from reblock.data.provision import cached_kblock_source  # noqa: E402
-from reblock.data.settlements import exclusion_holdout  # noqa: E402
-from reblock.methods.clearance import ClearanceReblocker  # noqa: E402
-from reblock.methods.desire_lines import OSMDesireLines  # noqa: E402
-from reblock.methods.osm_footpaths import interior_desire_lines  # noqa: E402
-from reblock.permeability import permeability  # noqa: E402
+_OT_DIR = Path("scratchpad/ot")
+_ot_ns: SimpleNamespace | None = None
+
+
+def _ot() -> SimpleNamespace:
+    """Lazily import the salvaged 2026-07-23 GW/transplant spike from `scratchpad/ot/`.
+
+    Deferred (not module-level) so `--analyze` -- which reads an already-scored parquet plus
+    numpy/pandas/scipy only -- can run in a checkout that lacks `scratchpad/ot/` entirely: it is
+    gitignored scratchpad, never repo content, so it does not travel with a fresh checkout. Only
+    the pair-scoring path (`load_pools`, `score_pair`) actually needs this; guard + import + raise
+    now happen on first call from THAT path, not at import time of this whole module.
+    """
+    global _ot_ns
+    if _ot_ns is not None:
+        return _ot_ns
+    if not _OT_DIR.is_dir():
+        raise SystemExit(
+            "scratchpad/ot/ is missing. That directory holds the salvaged 2026-07-23 "
+            "GW/transplant spike (ot_gw.py, transplant.py, select_donor.py) this script depends "
+            "on -- it is gitignored scratchpad, never repo content, so it does not travel with a "
+            "fresh checkout. Rebuild it from "
+            "docs/superpowers/notes/2026-07-23-ot-road-transplant.md §1 (entropic GW: "
+            "projected-gradient outer loop + log-domain Sinkhorn inner, eps=0.01, tau=1.0) "
+            "before running this script."
+        )
+    if str(_OT_DIR) not in sys.path:
+        sys.path.insert(0, str(_OT_DIR))
+    from ot_gw import gw_cost
+    from select_donor import signature
+    from transplant import _normalized_dist_matrix, fit_transport, gap_snap, transport_lines
+
+    _ot_ns = SimpleNamespace(
+        gw_cost=gw_cost, signature=signature, normalized_dist_matrix=_normalized_dist_matrix,
+        fit_transport=fit_transport, gap_snap=gap_snap, transport_lines=transport_lines)
+    return _ot_ns
 
 CORRIDOR_M = 3.0
 DEFAULT_CACHE = Path.home() / ".cache" / "reblock"
@@ -142,7 +168,7 @@ def load_pools(
         xy = np.c_[
             b.parcels.geometry.centroid.x.to_numpy(), b.parcels.geometry.centroid.y.to_numpy()
         ]
-        signatures[b.block_id] = signature(xy)
+        signatures[b.block_id] = _ot().signature(xy)
     return blocks, blocks_gdf, signatures
 
 
@@ -470,17 +496,18 @@ def score_pair(
     recipient: Block, donor: Block, donor_lines: gpd.GeoDataFrame, timings: dict[str, float]
 ) -> dict[str, object]:
     """One matrix row. `recipient`/`donor` are Blocks; `donor_lines` is the donor's material."""
+    ot = _ot()
     r_xy = np.c_[recipient.parcels.geometry.centroid.x, recipient.parcels.geometry.centroid.y]
     d_xy = np.c_[donor.parcels.geometry.centroid.x, donor.parcels.geometry.centroid.y]
 
     t = time.time()
-    result = fit_transport(d_xy, r_xy, eps=0.01, tau=1.0)
+    result = ot.fit_transport(d_xy, r_xy, eps=0.01, tau=1.0)
     timings["gw"] += time.time() - t
-    dist = gw_cost(result.pi, _normalized_dist_matrix(d_xy), _normalized_dist_matrix(r_xy))
+    dist = ot.gw_cost(result.pi, ot.normalized_dist_matrix(d_xy), ot.normalized_dist_matrix(r_xy))
 
     t = time.time()
-    warped = transport_lines(donor_lines, result, out_crs=recipient.crs)
-    moved = gap_snap(warped, recipient)
+    warped = ot.transport_lines(donor_lines, result, out_crs=recipient.crs)
+    moved = ot.gap_snap(warped, recipient)
     timings["transplant"] += time.time() - t
 
     t = time.time()
@@ -501,7 +528,7 @@ def score_pair(
         "donor": donor.block_id,
         "donor_type": "osm_footpaths",
         "real_gw_dist": float(dist),
-        "feature_dist": float(np.linalg.norm(signature(d_xy) - signature(r_xy))),
+        "feature_dist": float(np.linalg.norm(ot.signature(d_xy) - ot.signature(r_xy))),
         "perm_gap": float(perm_prop - perm_direct),
         "perm_proposal": float(perm_prop),
         "perm_direct": float(perm_direct),
