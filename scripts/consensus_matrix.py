@@ -113,32 +113,54 @@ def donor_quality(donor: Block, roads: gpd.GeoDataFrame) -> float:
     return float(perm * (1.0 - disp))
 
 
+def fit_donors(
+    recipient: Block, donor_blocks: list[Block], donor_roads: dict[str, gpd.GeoDataFrame],
+) -> tuple[list[gpd.GeoDataFrame], list[float]]:
+    """(transported networks, GW distances) -- the expensive half, one GW fit per donor.
+
+    Split out from extraction so a k-sweep pays for the fits ONCE at the largest k and reuses the
+    first k of them at every smaller k. That also makes the sweep properly nested: the k=3 donor
+    set is a subset of the k=15 one, so a difference between rungs is the extra donors and not a
+    different draw.
+    """
+    ot, bc = _ot(), _bc()
+    r_xy = bc.parcel_xy(recipient)
+    c2 = ot.normalized_dist_matrix(r_xy)
+    dists, transported = [], []
+    for d in donor_blocks:
+        d_xy = bc.parcel_xy(d)
+        fit = ot.fit_transport(d_xy, r_xy, **bc.GW_FIT_KW)
+        dists.append(ot.gw_cost(fit.pi, ot.normalized_dist_matrix(d_xy), c2))
+        transported.append(ot.transport_lines(donor_roads[d.block_id], fit,
+                                              out_crs=recipient.crs))
+    return transported, dists
+
+
+def extract_consensus(
+    recipient: Block, donor_blocks: list[Block], transported: list[gpd.GeoDataFrame],
+    dists: list[float], quality: dict[str, float],
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """(consensus network, best single donor's transplant) -- the cheap half."""
+    bc = _bc()
+    tau = float(np.median(dists)) or 1.0
+    weights = [quality[d.block_id] * float(np.exp(-gw / tau))
+               for d, gw in zip(donor_blocks, dists, strict=True)]
+    field = bc.build_demand_field(transported, weights)
+    graph = ChordSubstrate().build(recipient)
+    consensus = bc.demand_greedy_reblock(recipient, graph, bc.demand_edge_weights(graph, field))
+    best = int(np.argmin(dists))
+    single = bc.gap_snap_routed(transported[best], recipient, substrate=ChordSubstrate())
+    return consensus, single
+
+
 def consensus_for(
     recipient: Block, own_roads: gpd.GeoDataFrame, donor_blocks: list[Block],
     donor_roads: dict[str, gpd.GeoDataFrame], quality: dict[str, float],
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, list[float]]:
     """(consensus network, best single donor's transplant, per-donor GW distances)."""
-    ot, bc = _ot(), _bc()
-    r_xy = bc.parcel_xy(recipient)
-    c2 = ot.normalized_dist_matrix(r_xy)
-    fits, dists, transported = [], [], []
-    for d in donor_blocks:
-        d_xy = bc.parcel_xy(d)
-        fit = ot.fit_transport(d_xy, r_xy, **bc.GW_FIT_KW)
-        fits.append(fit)
-        dists.append(ot.gw_cost(fit.pi, ot.normalized_dist_matrix(d_xy), c2))
-        transported.append(ot.transport_lines(donor_roads[d.block_id], fit,
-                                              out_crs=recipient.crs))
-    tau = float(np.median(dists)) or 1.0
-    weights = [quality[d.block_id] * float(np.exp(-gw / tau))
-               for d, gw in zip(donor_blocks, dists, strict=True)]
-
-    field = bc.build_demand_field(transported, weights)
-    graph = ChordSubstrate().build(recipient)
-    consensus = bc.demand_greedy_reblock(recipient, graph, bc.demand_edge_weights(graph, field))
-
-    best = int(np.argmin(dists))
-    single = bc.gap_snap_routed(transported[best], recipient, substrate=ChordSubstrate())
+    transported, dists = fit_donors(recipient, donor_blocks, donor_roads)
+    consensus, single = extract_consensus(
+        recipient, donor_blocks, transported, dists, quality)
     return consensus, single, dists
 
 

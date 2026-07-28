@@ -1,7 +1,15 @@
 # Barycenter consensus at n=20: functionally strong, geometrically not a reconstruction
 
 **Date:** 2026-07-28
-**Status:** measured, 20 Cape Town recipients × 15 donors, both holdout arms.
+**Status: HEADLINE CORRECTED by [`consensus-k-sweep-and-displacement`](2026-07-28-consensus-k-sweep-and-displacement.md).**
+Two claims below do not survive. (a) "beats the best single donor in 100% of blocks, +0.412" was
+measuring the EXTRACTION method, not consensus: at k=1, where averaging cannot operate,
+`demand_greedy_reblock` beats `gap_snap_routed` by +0.303 in 95% of blocks, and going from k=1 to
+k=30 is worth −0.009 (p=0.064). Averaging donors adds nothing. (b) the reblocker parity was an
+artefact of length-matching: at matched DISPLACEMENT, clearance wins (ratio 0.87–0.99, consensus
+ahead in only 30–35% of blocks). The leakage result and the IoU result below both stand.
+
+**Measured:** 20 Cape Town recipients × 15 donors, both holdout arms.
 `scripts/consensus_matrix.py`, artifact `data/benchmarks/consensus_matrix.parquet`.
 
 The single-donor question closed as a null ([`no-detectable-distance-effect`](2026-07-28-no-detectable-distance-effect.md)).
