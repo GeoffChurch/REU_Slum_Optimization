@@ -440,6 +440,43 @@ def range_restriction_summary(df: pd.DataFrame) -> dict[str, float]:
     }
 
 
+def donor_bootstrap(
+    df: pd.DataFrame, *, n_boot: int = 4000, seed: int = 0
+) -> dict[str, float]:
+    """Cluster bootstrap over the DONOR dimension: resample each recipient's donors with
+    replacement, refit the within-recipient slope, and report the distribution.
+
+    This exists because a single-draw p-value from this design was shown to be meaningless. Two
+    runs over the same pool with the SAME 20 recipients, differing only in which donors were
+    selected, gave beta=-9.59 (p=0.014) and beta=-3.97 (p=0.31) -- and the 10 pairs they shared
+    scored identically, so it was purely the draw. Re-scoring at 25 donors per recipient put the
+    5-donor design's beta interval at [-11.2, +5.4] with the published -9.58 at its 5th
+    percentile. See notes/2026-07-28-beta-was-a-lucky-draw.md.
+
+    So: report an interval, never a point. `beta_negative_frac` is the honest headline -- the
+    share of donor resamples in which the effect points the claimed way at all.
+    """
+    rng = np.random.default_rng(seed)
+    groups = [g.reset_index(drop=True) for _, g in df.groupby("recipient")]
+    betas: list[float] = []
+    for _ in range(n_boot):
+        draw = pd.concat(
+            [g.iloc[rng.integers(0, len(g), len(g))] for g in groups], ignore_index=True)
+        sub = draw[["recipient", "real_gw_dist", "perm_gap"]]
+        if sub["recipient"].nunique() < 2:
+            continue
+        betas.append(within_recipient_regression(sub)["beta"])
+    b = np.asarray(betas, dtype=np.float64)
+    return {
+        "beta_median": float(np.median(b)),
+        "beta_lo95": float(np.percentile(b, 2.5)),
+        "beta_hi95": float(np.percentile(b, 97.5)),
+        "beta_sd": float(b.std()),
+        "beta_negative_frac": float((b < 0).mean()),
+        "n_boot": float(len(b)),
+    }
+
+
 def analyze_fidelity_vs_distance(
     df: pd.DataFrame, *, n_perm: int = 5000, seed: int = 0
 ) -> dict[str, object]:
@@ -452,6 +489,7 @@ def analyze_fidelity_vs_distance(
     purely a function of an already-scored matrix's columns."""
     within = within_recipient_regression(df)
     _observed, perm_p = within_recipient_permutation_test(df, n_perm=n_perm, seed=seed)
+    bootstrap = donor_bootstrap(df, seed=seed)
     recipient_r, n_recipients = recipient_level_correlation(df)
     nonzero = df[df["road_len_m"] > 0]
     jackknife = [
@@ -470,6 +508,7 @@ def analyze_fidelity_vs_distance(
         ),
         "within_recipient": within,
         "within_recipient_permutation_p": perm_p,
+        "donor_bootstrap": bootstrap,
         "recipient_level_r": recipient_r,
         "within_recipient_excl_zero_length": within_recipient_regression(nonzero),
         "jackknife_beta_min": float(min(jackknife)),
@@ -500,6 +539,13 @@ def _print_analysis(result: dict[str, object]) -> None:
     )
     print(f"  p (t-distribution)      = {within['p']:.4f}")
     print(f"  p (cluster permutation) = {result['within_recipient_permutation_p']:.4f}")
+    bs = cast(dict[str, float], result["donor_bootstrap"])
+    print(
+        f"  DONOR BOOTSTRAP ({bs['n_boot']:.0f} resamples) -- read this, not the point estimate:\n"
+        f"    beta 95% interval [{bs['beta_lo95']:+.3f}, {bs['beta_hi95']:+.3f}]  "
+        f"median {bs['beta_median']:+.3f}  sd {bs['beta_sd']:.3f}\n"
+        f"    negative in {bs['beta_negative_frac']:.1%} of donor resamples"
+    )
     print(
         f"recipient-level aggregate r (n={result['n_recipients']}) = "
         f"{result['recipient_level_r']:.4f}  <-- the cancelling counterpart"
@@ -645,10 +691,15 @@ def score_pair(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pairs", type=int, default=100)
+    # 500 pairs / 25 donors per recipient, not the original 100 / 5. At 5 donors the design's
+    # standard error (3.81) exceeded the effect it was measuring, so which donors got drawn
+    # decided the result -- two runs over the same pool with the same recipients gave -9.59
+    # (p=0.014) and -3.97 (p=0.31). 25 donors halves the SE to 1.60. The old numbers were sized
+    # for when every donor meant an Overpass round trip; off the local PBF this is ~8 minutes.
+    ap.add_argument("--pairs", type=int, default=500)
     ap.add_argument("--timing-only", action="store_true")
     ap.add_argument("--exclusion-radius-m", type=float, default=2000.0)
-    ap.add_argument("--donors-per-recipient", type=int, default=5)
+    ap.add_argument("--donors-per-recipient", type=int, default=25)
     ap.add_argument(
         "--candidate-multiplier",
         type=int,

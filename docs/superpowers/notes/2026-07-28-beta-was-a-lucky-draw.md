@@ -71,6 +71,28 @@ this and should graduate into the benchmark script.
 Cost is not a reason not to: with donors coming off the local PBF, 500 pairs took about 8 minutes.
 The 100-pair design was inherited from when each donor meant an Overpass round trip.
 
+## Both pools, re-measured at 500 pairs each
+
+With the design fixed, the two pools can finally be compared at equal power:
+
+| pool | n | β | SE | p | donor-bootstrap 95% | negative in |
+|---|---|---|---|---|---|---|
+| legacy band (k≥4) | 500 | **−2.895** | 1.604 | 0.072 | [−6.33, +0.59] | 94.5% |
+| screened (n/P² ≥ 3.55e-4) | 500 | **+2.698** | 2.564 | 0.293 | [−2.77, +7.77] | 16.4% |
+
+**Neither is significant**, and both intervals contain zero. But they now point opposite ways with
+usable precision, and the bootstrap makes the asymmetry legible: the legacy pool is negative in
+94.5% of donor resamples, the screened pool in 16.4%.
+
+So the pool difference retracted above is **back on the table as a hypothesis** — but as something
+suggested by two properly-powered runs, not as something a single 100-pair draw established. The
+retraction was right on the evidence available at the time: the 100-pair runs could not support
+that conclusion, and the two point estimates then (−9.59, +5.37) both sat inside a single design's
+sampling interval. These do not.
+
+Separating them needs the difference itself to be estimated, not two separate nulls eyeballed side
+by side — and with the 65,364-block provisioned corpus available, that is affordable.
+
 ## What this costs the programme
 
 The bet is not dead — the sign is consistently negative and the 500-pair estimate is p = 0.07 —
