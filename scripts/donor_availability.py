@@ -6,14 +6,20 @@ and even there 8 of the 15 most-similar neighbours had ZERO interior OSM. The 20
 put national coverage at 25.2%, so before scaling that result the question is whether a typical
 recipient has enough *nearby, mapped, non-leaking* donors to form a consensus at all.
 
-Two constraints pull against each other:
-  * leakage says donors must be FAR -- neighbouring blocks share a mapper session and often the
-    same OSM way clipped at a block edge, so `exclusion_holdout(radius_m)` is the fold definition.
-  * similarity says donors should be NEAR -- morphology is regional, and a donor from another
-    metro is a worse match.
+The EXCLUSION radius is load-bearing: neighbouring blocks share a mapper session and often the
+same OSM way clipped at a block edge, so `exclusion_holdout(radius_m)` is the fold definition and
+this script's real output is how much of a recipient's nearest donor set it removes.
 
-So the number that matters is not "how many donors exist" but the DISTANCE TO THE k-TH NEAREST
-eligible donor, and how much the exclusion radius costs.
+The SEARCH radii below are a DIAGNOSTIC of spatial clustering, not a constraint on retrieval. An
+earlier version of this docstring asserted the opposite -- "similarity says donors should be NEAR,
+morphology is regional" -- and that was measured and found false: over the 100 committed pairs,
+geographic distance is uncorrelated with GW distance (pearson +0.028, p=0.78; within-recipient
+-0.055, p=0.59) and with transplant fidelity (+0.130, p=0.20; within-recipient +0.084, p=0.40).
+Retrieval therefore searches the WHOLE provisioned corpus and lets similarity rank it; a geographic
+cap would only discard better matches. Two consequences worth keeping: the exclusion holdout costs
+almost nothing in donor quality, and every recipient has ~2,400 eligible donors rather than the
+handful a radius implies. (Limit: those pairs are all Cape Town, 5.6-58 km apart, so this says
+geography is uninformative WITHIN a metro; cross-metro regional typology is untested.)
 
 Distances are chord distances on a sphere (lon/lat -> ECEF, KD-tree). At these radii the chord
 underestimates the great-circle arc by <1e-5 relative -- far below anything this decides.
