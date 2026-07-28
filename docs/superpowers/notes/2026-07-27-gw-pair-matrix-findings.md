@@ -33,6 +33,16 @@ themselves, with `perm_gap` better on 63 of the 95 rows common to both matrices 
 Full write-up, including the ε ladder showing the estimate converges by the corrected ε=0.01 and
 only vanishes at 4× that: `docs/superpowers/notes/2026-07-27-gw-pot-crossvalidation.md`.
 
+**CORRECTION 3 (2026-07-28): the headline is SCOPED TO THIS POOL, and does not survive changing
+it.** This script defined its own pool (`building_count in [60,300] AND k_complexity >= 4`) rather
+than selecting through the repo's `Screen`. Repointed at `density_compactness`, the same pipeline
+gives β=+5.37 (p=0.43) where this note reports β=-9.58 (p=0.014). The donor source is not the
+cause — a local-PBF run on the old pool reproduces -9.592 (p=0.0139) — and neither is range
+restriction, since trimming the old pool to an even narrower GW spread leaves the slope intact
+(-26.9, p=0.0028). Every number below is arithmetically correct on the population it was measured
+on; none of them is a general fact about transplant fidelity. See
+`2026-07-28-slope-is-pool-dependent.md`.
+
 ## What this is
 
 For 100 (recipient, donor) pairs of real Cape Town blocks: fit a real entropic Gromov-Wasserstein
