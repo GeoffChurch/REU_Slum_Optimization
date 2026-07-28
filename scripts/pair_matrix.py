@@ -56,11 +56,12 @@ from shapely.ops import unary_union
 
 from reblock.budget import building_radii, displacement
 from reblock.contracts import Block
+from reblock.data.osm_extract import PbfDesireLines
 from reblock.data.provision import cached_kblock_source
 from reblock.data.settlements import exclusion_holdout
 from reblock.derivations import access_before
 from reblock.methods.clearance import ClearanceReblocker
-from reblock.methods.desire_lines import OSMDesireLines
+from reblock.methods.desire_lines import DesireLineSource, OSMDesireLines
 from reblock.methods.osm_footpaths import interior_desire_lines
 from reblock.metric import (
     DENSITY_COMPACTNESS_FLOOR,
@@ -531,17 +532,43 @@ def _donor_bbox_wgs84(donor: Block) -> tuple[float, float, float, float]:
     return (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
 
 
+def desire_source(kind: str) -> DesireLineSource:
+    """`pbf` (default) reads a local Geofabrik extract; `overpass` hits the live API.
+
+    Not a fallback pair -- two live options with disjoint operating ranges. A PBF covers exactly
+    its own extract and nothing outside it; Overpass covers any bbox on earth but is a shared
+    third-party service that, measured here, failed 214 of 241 donor fetches in one run.
+    """
+    if kind == "overpass":
+        return OSMDesireLines()
+    pbf = DEFAULT_CACHE / "osm_pbf" / "south-africa-latest.osm.pbf"
+    if not pbf.exists():
+        raise SystemExit(
+            f"missing {pbf}\ndownload it from https://download.geofabrik.de/ (417 MB), or pass "
+            f"--desire-source overpass to use the live API instead.")
+    return PbfDesireLines(pbf_path=pbf)
+
+
 def fetch_donor_lines(
-    source: OSMDesireLines, donor: Block, *, max_tries: int = 4, base_backoff_s: float = 2.0
+    source: DesireLineSource, donor: Block, *, max_tries: int = 4, base_backoff_s: float = 2.0
 ) -> tuple[str, gpd.GeoDataFrame | None]:
     """Donor material: the donor block's real interior OSM footpaths (`donor_type =
-    "osm_footpaths"`), mirroring `OsmFootpathsReblocker.propose`. Overpass is flaky right now
-    (repeated 504 Gateway Timeouts observed during the coverage spike); a live fetch (cache miss)
-    is retried with exponential backoff, and a donor whose OSM can't be fetched after `max_tries`
-    is reported as `"fetch_failed"` -- the caller must skip it and count the skip, never silently
-    drop it from the totals. `"empty_interior"` means the fetch succeeded but the donor has no
-    interior footpath material once perimeter-retracing streets are subtracted -- also a skip, not
-    a zero-length row."""
+    "osm_footpaths"`), mirroring `OsmFootpathsReblocker.propose`.
+
+    `source` is any `DesireLineSource`. The default is now `PbfDesireLines` over a local Geofabrik
+    extract, because Overpass could not carry this: a 100-pair run against it returned 27 usable
+    pairs and 214 `fetch_failed`, spending 4,440 s -- 100% of wall clock -- against 15 s of actual
+    GW, transplant, clearance and permeability work. The PBF reads once into memory and every
+    donor after that is a bbox window, so the same run is one ~40 s read plus no network at all.
+
+    The retry/backoff below is dead weight against a PBF and deliberately kept: `OSMDesireLines`
+    remains a legitimate choice (Overpass covers any bbox on earth; a PBF covers its own extract),
+    so this stays useful whenever the source IS a network one. A donor whose lines can't be
+    fetched after `max_tries` is reported as `"fetch_failed"` -- the caller must skip it and count
+    the skip, never silently drop it from the totals. `"empty_interior"` means the fetch succeeded
+    but the donor has no interior footpath material once perimeter-retracing streets are
+    subtracted -- also a skip, not a zero-length row.
+    """
     bbox = _donor_bbox_wgs84(donor)
     lines = None
     for attempt in range(max_tries):
@@ -631,6 +658,10 @@ def main() -> None:
     )
     ap.add_argument("--out", type=Path, default=Path("data/benchmarks/gw_pair_matrix.parquet"))
     ap.add_argument(
+        "--desire-source", choices=("pbf", "overpass"), default="pbf",
+        help="where donor footpaths come from. pbf (default) reads the local Geofabrik extract "
+             "once into memory and windows it per donor -- no network; overpass hits the live API")
+    ap.add_argument(
         "--rank1-scaling",
         type=str,
         default=None,
@@ -672,7 +703,7 @@ def main() -> None:
     n_recipients = max(1, -(-args.pairs // args.donors_per_recipient))  # ceil
     recipient_idx = _select_recipient_indices(blocks, n_recipients)
 
-    source = OSMDesireLines()
+    source = desire_source(args.desire_source)
     donor_cache: dict[str, tuple[str, gpd.GeoDataFrame | None]] = {}
 
     # Resume support: this process has no reliable long-lived background execution in this
