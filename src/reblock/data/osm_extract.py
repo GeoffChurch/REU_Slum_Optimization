@@ -14,8 +14,10 @@ from typing import cast
 import geopandas as gpd
 import pyogrio
 from pyproj import CRS
-from shapely import STRtree
+from shapely import STRtree, get_parts, make_valid
+from shapely.errors import GEOSException
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 
 from reblock.methods.osm_footpaths import interior_desire_lines
 
@@ -39,16 +41,23 @@ def interiority_row(
     footpaths: gpd.GeoDataFrame,
     near_miss: gpd.GeoDataFrame,
     crs: CRS,
+    *,
+    tolerances: Sequence[float] = TOLERANCES,
 ) -> dict[str, object]:
-    """One census row: interior segment count and length at every tolerance, for the primary
-    footpath tags and (separately) the near-miss tags.
+    """One census row: interior segment count and length at each requested tolerance, for the
+    primary footpath tags and (separately) the near-miss tags.
+
+    `tolerances` defaults to the full diagnostic sweep. A corpus-wide run passes a single value:
+    the 400-block spike found 0.5 -> 5 m moves the coverage gate by only 2.6 points while total
+    interior length drops 17.8%, so the sweep informs donor-quality ranking, not the census, and
+    paying for it 1.8M times over buys nothing.
 
     For a kblock block `streets` IS the outline, so the street corridor is `boundary.boundary`.
     """
     streets = boundary.boundary
     row: dict[str, object] = {"block_id": block_id, "boundary_length_m": float(streets.length)}
     for label, lines in (("interior", footpaths), ("near_miss", near_miss)):
-        for tol in TOLERANCES:
+        for tol in tolerances:
             kept = interior_desire_lines(lines, boundary, streets, crs, tol=tol)
             row[f"n_{label}_segments_{tol}"] = int(len(kept))
             row[f"{label}_length_m_{tol}"] = (
@@ -160,14 +169,50 @@ def assert_zone_fit(lon: float, epsg: int) -> None:
             f"batch blocks by zone via utm_zone_epsg before projecting")
 
 
+def _areal(geom: BaseGeometry) -> BaseGeometry | None:
+    """The polygonal content of `geom`, or None if it has none.
+
+    `make_valid` repairs a self-intersecting polygon, but on a degenerate one it can return a
+    LineString, a mixed GeometryCollection, or GEOMETRYCOLLECTION EMPTY -- and an empty geometry's
+    `.boundary` is None, which is an AttributeError rather than a GEOSException, so it escapes the
+    handler in `census_rows`. Reduce to the areal part up front instead of discovering it later.
+    """
+    if geom.is_empty:
+        return None
+    if geom.geom_type in ("Polygon", "MultiPolygon"):
+        return geom
+    parts = [g for g in get_parts(geom) if g.geom_type in ("Polygon", "MultiPolygon")]
+    if not parts:
+        return None
+    merged = unary_union(parts)
+    return None if merged.is_empty else merged
+
+
+def _failed_row(block_id: str, tolerances: Sequence[float]) -> dict[str, object]:
+    """The row a block gets when its geometry defeats GEOS: same schema, zeros, and
+    `census_failed=True` so it is distinguishable from a block that genuinely has no footpaths."""
+    row: dict[str, object] = {"block_id": block_id, "boundary_length_m": 0.0,
+                              "census_failed": True}
+    for label in ("interior", "near_miss"):
+        for tol in tolerances:
+            row[f"n_{label}_segments_{tol}"] = 0
+            row[f"{label}_length_m_{tol}"] = 0.0
+    return row
+
+
 def census_rows(
     blocks: gpd.GeoDataFrame,
     footpaths: gpd.GeoDataFrame,
     near_miss: gpd.GeoDataFrame,
     epsg: int,
+    *,
+    tolerances: Sequence[float] = TOLERANCES,
 ) -> list[dict[str, object]]:
     """Census rows for one UTM batch. `blocks` is in EPSG:4326; everything is reprojected to
-    `epsg` once, then each block queries an STRtree rather than re-reading the layer."""
+    `epsg` once, then each block queries an STRtree rather than re-reading the layer.
+
+    `tolerances` is forwarded to `interiority_row` -- see there for why a corpus run passes one.
+    """
     crs_m = CRS.from_epsg(epsg)
     blocks_m = blocks.to_crs(crs_m)
     fp_m = (footpaths.to_crs(crs_m) if len(footpaths)
@@ -178,12 +223,28 @@ def census_rows(
     nm_tree = STRtree(list(nm_m.geometry)) if len(nm_m) else None
 
     rows: list[dict[str, object]] = []
-    for block_id, geom in zip(blocks_m["block_id"], blocks_m.geometry, strict=True):
-        near_fp = (fp_m.iloc[fp_tree.query(geom)] if fp_tree is not None
-                   else gpd.GeoDataFrame(geometry=[], crs=crs_m))
-        near_nm = (nm_m.iloc[nm_tree.query(geom)] if nm_tree is not None
-                   else gpd.GeoDataFrame(geometry=[], crs=crs_m))
-        row = interiority_row(str(block_id), geom, near_fp, near_nm, crs_m)
+    for block_id, raw in zip(blocks_m["block_id"], blocks_m.geometry, strict=True):
+        # `KblockSource._blocks_from` runs make_valid before building a Block; the census reaches
+        # the same geometry through a different door (straight off the country parquet) and must
+        # apply the same repair. Without it GEOS raises "TopologyException: side location
+        # conflict" from inside the clip -- observed on the Kenya corpus after 70,951 blocks.
+        repaired = _areal(make_valid(raw))
+        geom = raw if repaired is None else repaired
+        row = _failed_row(str(block_id), tolerances)
+        if repaired is not None:
+            try:
+                near_fp = (fp_m.iloc[fp_tree.query(geom)] if fp_tree is not None
+                           else gpd.GeoDataFrame(geometry=[], crs=crs_m))
+                near_nm = (nm_m.iloc[nm_tree.query(geom)] if nm_tree is not None
+                           else gpd.GeoDataFrame(geometry=[], crs=crs_m))
+                row = interiority_row(str(block_id), geom, near_fp, near_nm, crs_m,
+                                      tolerances=tolerances)
+                row["census_failed"] = False
+            except GEOSException:
+                # make_valid does not repair every pathological polygon, and one of 1.8M must not
+                # kill a 40-minute country run. Record the failure as data -- a row that reads as
+                # "uncovered" would be indistinguishable from a genuine absence of footpaths.
+                pass
         # The qualified filter is a building-count band, which does NOT bound block AREA: the
         # spike found 5 of 251 covered blocks carrying >5 km of "interior" footpath on 90-293
         # buildings (max 26.5 km on 258 buildings, vs a 356 m median) -- huge polygons where the
