@@ -11,6 +11,9 @@ FRIENDLY_METHOD_NAMES = {
     "clearance_looped": "Looped Tree",
     "euclidean_grid": "Grid",
     "greedy_arterial_repulsion": "Throughways",
+    "demand_greedy": "Desire-Line Tree",
+    "demand_greedy_uniform": "Plain Tree",
+    "demand_looped": "Looped Plain Tree",
 }
 
 

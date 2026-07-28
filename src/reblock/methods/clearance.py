@@ -122,14 +122,44 @@ def _relax_depth(depth: NDArray[np.float64], adj: list[set[int]], served: Iterab
                 q.append(j)
 
 
+def greedy_drainage(
+    block: Block, graph: RoutingGraph, edge_w: NDArray[np.float64], *,
+    depth_target: int, max_roads: int,
+) -> tuple[gpd.GeoDataFrame, dict[str, object]]:
+    """Greedy drainage-tree reblock on a routing substrate, under a PRECOMPUTED edge cost.
+
+    Repeatedly: take the deepest (worst-served) parcel, Dijkstra to it from every node already on
+    the network, emit that path as a road, mark the parcels it serves and relax their depth, and
+    add the path to the network so later roads branch off it. Stops when every parcel is within
+    `depth_target` of a road (or `max_roads` is hit).
+
+    The cost field is the ONLY thing that varies between reblockers built on this: clearance
+    passes repulsion-from-buildings weights, `demand_greedy` passes demand-attraction weights.
+    Routing is on the substrate graph either way, whose edges run through the gaps between
+    parcels, so no cost field can produce a road through a building.
+    """
+    return _drainage(block, graph, edge_w, depth_target=depth_target, max_roads=max_roads)
+
+
 def _greedy_reblock(
     block: Block, graph: RoutingGraph, *, t: float, depth_target: int, max_roads: int,
     radii: NDArray[np.float64],
 ) -> tuple[gpd.GeoDataFrame, dict[str, object]]:
-    """Greedy least-cost-path reblock on a routing substrate `graph`: repeatedly connect the
-    deepest parcel to the growing road+street network by a Dijkstra path on the repulsion cost
-    field, maintaining access depth incrementally, until every parcel is within `depth_target`
-    (or `max_roads` is hit)."""
+    """`greedy_drainage` under the clearance repulsion cost field."""
+    building_pts = (
+        shapely.get_coordinates(block.building_points.geometry.to_numpy())
+        if not block.building_points.empty else np.empty((0, 2), dtype=np.float64)
+    )
+    if len(graph.pts) == 0:
+        raise ValueError("substrate yields no nodes for this block")
+    w = _edge_weights(graph.pts, graph.rows, graph.cols, graph.edist, building_pts, radii, t)
+    return _drainage(block, graph, w, depth_target=depth_target, max_roads=max_roads)
+
+
+def _drainage(
+    block: Block, graph: RoutingGraph, edge_w: NDArray[np.float64], *,
+    depth_target: int, max_roads: int,
+) -> tuple[gpd.GeoDataFrame, dict[str, object]]:
     parcels = block.parcels
     geoms = list(parcels.geometry)
     parcel_ids = np.asarray(parcels["parcel_id"])
@@ -144,16 +174,10 @@ def _greedy_reblock(
         return empty, {"roads": 0, "max_depth_after": int(depth.max()) if depth.size else 0,
                        "grid_unreachable": 0, "max_roads_hit": False}
 
-    pts, rows, cols, edist, net_tol = (
-        graph.pts, graph.rows, graph.cols, graph.edist, graph.net_tol)
+    pts, rows, cols, net_tol = (graph.pts, graph.rows, graph.cols, graph.net_tol)
     if len(pts) == 0:
         raise ValueError("substrate yields no nodes for this block")
-    building_pts = (
-        shapely.get_coordinates(block.building_points.geometry.to_numpy())
-        if not block.building_points.empty else np.empty((0, 2), dtype=np.float64)
-    )
-    w = _edge_weights(pts, rows, cols, edist, building_pts, radii, t)
-    csr = csr_matrix((w, (rows, cols)), shape=(len(pts), len(pts)))
+    csr = csr_matrix((edge_w, (rows, cols)), shape=(len(pts), len(pts)))
 
     pt_tree = cKDTree(pts)
     reps = np.array([[g.representative_point().x, g.representative_point().y] for g in geoms])

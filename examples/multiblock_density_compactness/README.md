@@ -6,7 +6,7 @@
 
 ## 1. Screen the metro
 
-`density_compactness` flagged **8,293 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_44531` (peel depth 4).
+`density_compactness` flagged **2,865 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_44531` (peel depth 4).
 
 ![screen](screen.png)
 
@@ -17,7 +17,7 @@
 
 ## 2. Grow the region
 
-The metric grows a **19-block** region (**4,677 parcels**), mean depth 5.1 rings, mean density 142 bldg/ha.
+The metric grows a **18-block** region (**4,615 parcels**), mean depth 5.1 rings, mean density 146 bldg/ha.
 
 ![region](region.png)
 
@@ -37,9 +37,9 @@ The frontier is the whole trade-off: **permeability** (benefit — the only bene
 
 **Watch each method reblock** — its full road set added in drainage order, the deep interior draining as the network reaches in:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths |
-|---|---|---|---|
-| ![Looped Tree](reblock_clearance_looped.gif) | ![Grid](reblock_euclidean_grid.gif) | ![Throughways](reblock_greedy_arterial_repulsion.gif) | ![OSM Footpaths](reblock_osm_footpaths.gif) |
+| Looped Tree | Desire-Line Tree | Plain Tree | Looped Plain Tree | Grid | Throughways | OSM Footpaths |
+|---|---|---|---|---|---|---|
+| ![Looped Tree](reblock_clearance_looped.gif) | ![Desire-Line Tree](reblock_demand_greedy.gif) | ![Plain Tree](reblock_demand_greedy_uniform.gif) | ![Looped Plain Tree](reblock_demand_looped.gif) | ![Grid](reblock_euclidean_grid.gif) | ![Throughways](reblock_greedy_arterial_repulsion.gif) | ![OSM Footpaths](reblock_osm_footpaths.gif) |
 
 ### Matched displacement
 
@@ -47,22 +47,25 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 2,710 m | 10.1% | 73.6% |  |
-| Grid | 4,056 m | 10.1% | 61.9% |  |
-| Throughways | 3,427 m | 10.0% | 56.0% |  |
-| OSM Footpaths | 3,244 m | 10.1% | 67.0% |  |
+| Looped Tree | 2,750 m | 10.1% | 74.3% |  |
+| Desire-Line Tree | 2,830 m | 10.1% | 73.6% |  |
+| Plain Tree | 2,433 m | 10.1% | 72.7% |  |
+| Looped Plain Tree | 2,442 m | 10.0% | 71.7% |  |
+| Grid | 3,945 m | 10.1% | 61.9% |  |
+| Throughways | 3,158 m | 10.0% | 54.9% |  |
+| OSM Footpaths | 3,196 m | 10.0% | 66.5% |  |
 
 Access-depth coloring:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths |
-|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_disp_depth.png) | ![Grid](after_euclidean_grid_disp_depth.png) | ![Throughways](after_greedy_arterial_repulsion_disp_depth.png) | ![OSM Footpaths](after_osm_footpaths_disp_depth.png) |
+| Looped Tree | Desire-Line Tree | Plain Tree | Looped Plain Tree | Grid | Throughways | OSM Footpaths |
+|---|---|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_disp_depth.png) | ![Desire-Line Tree](after_demand_greedy_disp_depth.png) | ![Plain Tree](after_demand_greedy_uniform_disp_depth.png) | ![Looped Plain Tree](after_demand_looped_disp_depth.png) | ![Grid](after_euclidean_grid_disp_depth.png) | ![Throughways](after_greedy_arterial_repulsion_disp_depth.png) | ![OSM Footpaths](after_osm_footpaths_disp_depth.png) |
 
 Permeability-potential coloring:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths |
-|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_disp_perm.png) | ![Grid](after_euclidean_grid_disp_perm.png) | ![Throughways](after_greedy_arterial_repulsion_disp_perm.png) | ![OSM Footpaths](after_osm_footpaths_disp_perm.png) |
+| Looped Tree | Desire-Line Tree | Plain Tree | Looped Plain Tree | Grid | Throughways | OSM Footpaths |
+|---|---|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_disp_perm.png) | ![Desire-Line Tree](after_demand_greedy_disp_perm.png) | ![Plain Tree](after_demand_greedy_uniform_disp_perm.png) | ![Looped Plain Tree](after_demand_looped_disp_perm.png) | ![Grid](after_euclidean_grid_disp_perm.png) | ![Throughways](after_greedy_arterial_repulsion_disp_perm.png) | ![OSM Footpaths](after_osm_footpaths_disp_perm.png) |
 
 ### Matched permeability
 
@@ -70,22 +73,25 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 1,476 m | 5.6% | 60.2% |  |
-| Grid | 3,789 m | 9.3% | 60.4% |  |
-| Throughways | 4,001 m | 11.7% | 60.2% |  |
-| OSM Footpaths | 2,460 m | 7.7% | 60.4% |  |
+| Looped Tree | 1,474 m | 5.6% | 60.3% |  |
+| Desire-Line Tree | 1,788 m | 6.2% | 60.9% |  |
+| Plain Tree | 1,401 m | 5.6% | 60.8% |  |
+| Looped Plain Tree | 1,549 m | 6.3% | 60.3% |  |
+| Grid | 3,678 m | 9.3% | 60.4% |  |
+| Throughways | 3,809 m | 11.8% | 60.5% |  |
+| OSM Footpaths | 2,460 m | 7.8% | 60.6% |  |
 
 Access-depth coloring:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths |
-|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_perm_depth.png) | ![Grid](after_euclidean_grid_perm_depth.png) | ![Throughways](after_greedy_arterial_repulsion_perm_depth.png) | ![OSM Footpaths](after_osm_footpaths_perm_depth.png) |
+| Looped Tree | Desire-Line Tree | Plain Tree | Looped Plain Tree | Grid | Throughways | OSM Footpaths |
+|---|---|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_perm_depth.png) | ![Desire-Line Tree](after_demand_greedy_perm_depth.png) | ![Plain Tree](after_demand_greedy_uniform_perm_depth.png) | ![Looped Plain Tree](after_demand_looped_perm_depth.png) | ![Grid](after_euclidean_grid_perm_depth.png) | ![Throughways](after_greedy_arterial_repulsion_perm_depth.png) | ![OSM Footpaths](after_osm_footpaths_perm_depth.png) |
 
 Permeability-potential coloring:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths |
-|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_perm_perm.png) | ![Grid](after_euclidean_grid_perm_perm.png) | ![Throughways](after_greedy_arterial_repulsion_perm_perm.png) | ![OSM Footpaths](after_osm_footpaths_perm_perm.png) |
+| Looped Tree | Desire-Line Tree | Plain Tree | Looped Plain Tree | Grid | Throughways | OSM Footpaths |
+|---|---|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_perm_perm.png) | ![Desire-Line Tree](after_demand_greedy_perm_perm.png) | ![Plain Tree](after_demand_greedy_uniform_perm_perm.png) | ![Looped Plain Tree](after_demand_looped_perm_perm.png) | ![Grid](after_euclidean_grid_perm_perm.png) | ![Throughways](after_greedy_arterial_repulsion_perm_perm.png) | ![OSM Footpaths](after_osm_footpaths_perm_perm.png) |
 
 
 ## How this was generated

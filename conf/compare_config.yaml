@@ -27,6 +27,22 @@ all_methods:
   greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
+  demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", depth_target: 2, max_roads: 400}
+  # No-prior ablation: uniform demand -> every edge costs its own length -> a pure shortest-path
+  # drainage tree. The gap to demand_greedy is exactly what the desire-line prior is worth.
+  demand_greedy_uniform: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: null, substrate: "${substrate}", depth_target: 2, max_roads: 400}
+  # Looped Tree over a PLAIN-length base instead of the clearance base. The plain tree reaches
+  # matched permeability with less road than clearance does, so the same loop budget is spent
+  # from a cheaper starting point -- the obvious way to improve the flagship.
+  demand_looped:
+    _target_: reblock.methods.loop_closure.LoopClosureRefiner
+    base: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: null, substrate: "${substrate}", depth_target: 1, max_roads: 400}
+    budget_frac: 0.12
+    min_bridges_per_m: 0.01
+    max_loops: 400
+    min_loop_len_m: 40.0
+    search_radius_m: 45.0
+    max_candidates: 1500
   clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
   clearance_looped:
     _target_: reblock.methods.loop_closure.LoopClosureRefiner
