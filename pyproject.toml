@@ -61,8 +61,24 @@ types-shapely = "*"
 # tests/data/test_osm_extract.py's `import yaml` stays fully checked.
 types-pyyaml = "*"
 
+# Research/analysis stack for scripts/ and the OT retrieval work. Deliberately NOT in
+# [tool.pixi.dependencies]: no `src/reblock` module imports these, so they are not runtime
+# dependencies of the package -- same grouping-by-purpose intent as the dev feature above
+# (which is likewise always present in the default environment).
+[tool.pixi.feature.research.dependencies]
+# Reference OT/GW solvers. scratchpad/ot/ot_gw.py hand-rolled entropic GW + unbalanced
+# log-domain Sinkhorn because POT was not installed; POT is the independent implementation
+# `real_gw_dist` -- the independent variable in the pair-matrix result -- is checked against,
+# and it supplies gromov_barycenters for the barycenter-consensus work.
+pot = "*"
+# Independent check on scripts/pair_matrix.py's hand-rolled within-recipient fixed-effects
+# regression (the cluster-preserving permutation test stays the primary significance check).
+statsmodels = "*"
+# Masked normalized cross-correlation (Padfield 2012) for the Phase 2 retrieval index.
+scikit-image = "*"
+
 [tool.pixi.environments]
-default = { features = ["dev"], solve-group = "default" }
+default = { features = ["dev", "research"], solve-group = "default" }
 
 [tool.pixi.tasks]
 test = "pytest"
