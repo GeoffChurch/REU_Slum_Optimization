@@ -56,7 +56,11 @@ from shapely.ops import unary_union
 
 from reblock.budget import building_radii, displacement
 from reblock.contracts import Block
-from reblock.data.osm_extract import PbfDesireLines
+from reblock.data.kblock import KblockSource
+from reblock.data.osm_extract import (
+    PbfDesireLines,
+    utm_zone_epsg,
+)
 from reblock.data.provision import cached_kblock_source
 from reblock.data.settlements import exclusion_holdout
 from reblock.derivations import access_before
@@ -123,6 +127,8 @@ DEFAULT_CACHE = Path.home() / ".cache" / "reblock"
 MIN_BUILDING_COUNT = 60
 MAX_BUILDING_COUNT = 300
 MIN_PARCELS = 50
+CACHE_SHORTLIST_BLOCKS = DEFAULT_CACHE / "blocks_shortlist.parquet"
+CACHE_SHORTLIST_BUILDINGS = DEFAULT_CACHE / "buildings_shortlist.parquet"
 
 
 def default_screen(min_buildings: int = 30) -> DenseCompactScreen:
@@ -153,6 +159,42 @@ def default_screen(min_buildings: int = 30) -> DenseCompactScreen:
     )
 
 
+def zone_source(epsg: int, *, min_buildings: int = 30) -> KblockSource:
+    """A `KblockSource` over the provisioned ZAF+KEN shortlist, restricted to ONE UTM zone.
+
+    The restriction is not optional. `KblockSource.region()` calls `estimate_utm_crs()` on the
+    WHOLE blocks frame -- deliberately, so the CRS stays stable under `block_ids` filtering -- so
+    pointing it at a two-country shortlist would hand every block a single UTM zone and distort
+    area, perimeter and every distance for anything far from that meridian. Filtering by
+    `block_ids` does NOT fix it, precisely because of that stability guarantee; the zone subset
+    has to be its own parquet, which is what this materializes (once, then cached).
+
+    Splitting by zone costs the cross-zone donor pairs. That is a real loss -- geographic distance
+    was measured to be uninformative about GW distance, so a Gauteng donor for a Cape Town
+    recipient is not a priori worse -- but it is the honest option until scoring is made
+    CRS-aware, and each zone is a genuinely different metro, which makes zone-wise runs a
+    REPLICATION rather than merely a smaller sample.
+    """
+    blocks = CACHE_SHORTLIST_BLOCKS
+    buildings = CACHE_SHORTLIST_BUILDINGS
+    for path in (blocks, buildings):
+        if not path.exists():
+            raise SystemExit(
+                f"missing {path} -- run `python -m scripts.provision_shortlist` first")
+    zone_path = blocks.with_name(f"blocks_shortlist_z{epsg}.parquet")
+    if not zone_path.exists():
+        frame = gpd.read_parquet(blocks)
+        rep = frame.geometry.representative_point()
+        keep = np.array([utm_zone_epsg(pt.x, pt.y) == epsg for pt in rep])
+        subset = cast(gpd.GeoDataFrame, frame[keep].reset_index(drop=True))
+        if subset.empty:
+            raise SystemExit(f"no shortlist blocks in UTM zone {epsg}")
+        subset.to_parquet(zone_path)
+        print(f"  materialized {zone_path.name}: {len(subset):,} blocks", flush=True)
+    return KblockSource(zone_path, buildings, region_id=f"shortlist-z{epsg}",
+                        min_buildings=min_buildings)
+
+
 def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
     """Expected homes displaced as a fraction of the block's buildings.
 
@@ -172,6 +214,7 @@ def load_pools(
     city: str = "capetown", *, min_buildings: int = 30,
     screen: DenseCompactScreen | None = None,
     region_builder: RegionBuilder | None = None,
+    source: KblockSource | None = None,
 ) -> tuple[list[Block], gpd.GeoDataFrame, dict[str, np.ndarray]]:
     """Real Cape Town blocks WITH building points, so `KblockSource` can build real `Block`s with
     Voronoi parcels (required by `gap_snap` and `permeability`).
@@ -201,12 +244,11 @@ def load_pools(
     """
     screen = screen or default_screen(min_buildings)
     region_builder = region_builder or IdentityRegionBuilder()
+    src_all = source or cached_kblock_source(city, min_buildings=min_buildings)
 
-    flagged = screen.select(cached_kblock_source(city, min_buildings=min_buildings))
+    flagged = screen.select(src_all)
     raw = pd.read_parquet(
-        DEFAULT_CACHE / f"blocks_{city}_full.parquet",
-        columns=["block_id", "building_count", "geometry"],
-    )
+        src_all.blocks_path, columns=["block_id", "building_count", "geometry"])
     raw["block_id"] = raw["block_id"].astype(str)
     counts = dict(zip(raw["block_id"], raw["building_count"], strict=True))
     affordable = sorted(
@@ -222,7 +264,10 @@ def load_pools(
     )
     ids = sorted({b for group in groups for b in group})
 
-    src = cached_kblock_source(city, block_ids=ids, min_buildings=min_buildings)
+    src = (KblockSource(src_all.blocks_path, src_all.buildings_path,
+                        region_id=src_all.region_id, min_buildings=min_buildings, block_ids=ids)
+           if source is not None
+           else cached_kblock_source(city, block_ids=ids, min_buildings=min_buildings))
     blocks = [b for b in src.region().blocks if len(b.parcels) >= MIN_PARCELS]
     blocks.sort(key=lambda b: b.block_id)
     if not blocks:
@@ -578,8 +623,32 @@ def _donor_bbox_wgs84(donor: Block) -> tuple[float, float, float, float]:
     return (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
 
 
-def desire_source(kind: str) -> DesireLineSource:
-    """`pbf` (default) reads a local Geofabrik extract; `overpass` hits the live API.
+PBF_BY_ISO = {"ZAF": "south-africa-latest.osm.pbf", "KEN": "kenya-latest.osm.pbf"}
+
+
+def iso_of(blocks: list[Block]) -> str:
+    """The country a pool belongs to, from its kblock ids (`ZAF.9.3.1_1_44882`, `KEN.1.1_1_100`).
+
+    Load-bearing, and learned the hard way: a PBF covers EXACTLY its own extract, so pointing a
+    Kenyan pool at the South Africa extract does not error -- every donor simply comes back with
+    no interior footpaths. The first Nairobi run reported `empty_interior: 90` and zero pairs,
+    which reads as "these blocks have no footpaths" and is flatly contradicted by the census (56
+    of them carry >=100 m each). Deriving the extract from the data removes the chance to pick
+    the wrong one by hand.
+    """
+    isos = {str(b.block_id).split(".", 1)[0] for b in blocks}
+    if len(isos) != 1:
+        raise SystemExit(f"pool spans multiple countries {sorted(isos)}; one PBF cannot cover it")
+    iso = isos.pop()
+    if iso not in PBF_BY_ISO:
+        raise SystemExit(
+            f"no Geofabrik extract configured for {iso!r}; "
+            f"known: {sorted(PBF_BY_ISO)}")
+    return iso
+
+
+def desire_source(kind: str, iso: str = "ZAF") -> DesireLineSource:
+    """`pbf` (default) reads the local Geofabrik extract FOR `iso`; `overpass` hits the live API.
 
     Not a fallback pair -- two live options with disjoint operating ranges. A PBF covers exactly
     its own extract and nothing outside it; Overpass covers any bbox on earth but is a shared
@@ -587,10 +656,10 @@ def desire_source(kind: str) -> DesireLineSource:
     """
     if kind == "overpass":
         return OSMDesireLines()
-    pbf = DEFAULT_CACHE / "osm_pbf" / "south-africa-latest.osm.pbf"
+    pbf = DEFAULT_CACHE / "osm_pbf" / PBF_BY_ISO[iso]
     if not pbf.exists():
         raise SystemExit(
-            f"missing {pbf}\ndownload it from https://download.geofabrik.de/ (417 MB), or pass "
+            f"missing {pbf}\ndownload it from https://download.geofabrik.de/, or pass "
             f"--desire-source overpass to use the live API instead.")
     return PbfDesireLines(pbf_path=pbf)
 
@@ -709,6 +778,11 @@ def main() -> None:
     )
     ap.add_argument("--out", type=Path, default=Path("data/benchmarks/gw_pair_matrix.parquet"))
     ap.add_argument(
+        "--utm-zone", type=int, default=None,
+        help="run over the provisioned ZAF+KEN shortlist restricted to this UTM EPSG (e.g. 32735 "
+             "= Gauteng, 32734 = Cape Town) instead of the cached Cape Town city parquets. One "
+             "zone at a time because KblockSource assigns a single estimate_utm_crs per parquet")
+    ap.add_argument(
         "--desire-source", choices=("pbf", "overpass"), default="pbf",
         help="where donor footpaths come from. pbf (default) reads the local Geofabrik extract "
              "once into memory and windows it per donor -- no network; overpass hits the live API")
@@ -738,8 +812,10 @@ def main() -> None:
 
     print("loading pools...")
     t_load = time.time()
-    blocks, blocks_gdf, signatures = load_pools()
-    print(f"  {len(blocks)} qualified Cape Town blocks in {time.time() - t_load:.1f}s")
+    blocks, blocks_gdf, signatures = load_pools(
+        source=zone_source(args.utm_zone) if args.utm_zone else None)
+    where = f"UTM {args.utm_zone}" if args.utm_zone else "Cape Town"
+    print(f"  {len(blocks)} screened {where} blocks in {time.time() - t_load:.1f}s")
 
     if args.rank1_scaling is not None:
         sizes = [int(s) for s in args.rank1_scaling.split(",")]
@@ -754,7 +830,7 @@ def main() -> None:
     n_recipients = max(1, -(-args.pairs // args.donors_per_recipient))  # ceil
     recipient_idx = _select_recipient_indices(blocks, n_recipients)
 
-    source = desire_source(args.desire_source)
+    source = desire_source(args.desire_source, iso_of(blocks))
     donor_cache: dict[str, tuple[str, gpd.GeoDataFrame | None]] = {}
 
     # Resume support: this process has no reliable long-lived background execution in this

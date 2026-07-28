@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -67,3 +68,20 @@ def test_ot_loader_still_raises_systemexit_when_scratchpad_missing(
     monkeypatch.setattr(pair_matrix, "_ot_ns", None)
     with pytest.raises(SystemExit, match="scratchpad/ot/ is missing"):
         pair_matrix._ot()
+
+
+def test_iso_of_picks_the_extract_from_the_block_ids() -> None:
+    """A PBF covers exactly its own extract, so a Kenyan pool pointed at the South Africa file
+    does not error -- every donor comes back with no interior footpaths. The first Nairobi run
+    reported `empty_interior: 90` and zero pairs, which reads as a fact about Nairobi and is
+    contradicted by the census. Derive the extract from the data, never by hand."""
+    zaf = [SimpleNamespace(block_id="ZAF.9.3.1_1_44882"), SimpleNamespace(block_id="ZAF.9.1_1_1")]
+    ken = [SimpleNamespace(block_id="KEN.1.1_1_100")]
+    assert pair_matrix.iso_of(zaf) == "ZAF"  # type: ignore[arg-type]
+    assert pair_matrix.iso_of(ken) == "KEN"  # type: ignore[arg-type]
+    assert pair_matrix.PBF_BY_ISO["KEN"] != pair_matrix.PBF_BY_ISO["ZAF"]
+
+    with pytest.raises(SystemExit, match="spans multiple countries"):
+        pair_matrix.iso_of(zaf + ken)  # type: ignore[arg-type]
+    with pytest.raises(SystemExit, match="no Geofabrik extract"):
+        pair_matrix.iso_of([SimpleNamespace(block_id="BRA.1_1_1")])  # type: ignore[arg-type]
