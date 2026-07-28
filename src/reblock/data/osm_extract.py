@@ -14,9 +14,10 @@ from typing import cast
 import geopandas as gpd
 import pyogrio
 from pyproj import CRS
-from shapely import STRtree, make_valid
+from shapely import STRtree, get_parts, make_valid
 from shapely.errors import GEOSException
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 
 from reblock.methods.osm_footpaths import interior_desire_lines
 
@@ -168,6 +169,25 @@ def assert_zone_fit(lon: float, epsg: int) -> None:
             f"batch blocks by zone via utm_zone_epsg before projecting")
 
 
+def _areal(geom: BaseGeometry) -> BaseGeometry | None:
+    """The polygonal content of `geom`, or None if it has none.
+
+    `make_valid` repairs a self-intersecting polygon, but on a degenerate one it can return a
+    LineString, a mixed GeometryCollection, or GEOMETRYCOLLECTION EMPTY -- and an empty geometry's
+    `.boundary` is None, which is an AttributeError rather than a GEOSException, so it escapes the
+    handler in `census_rows`. Reduce to the areal part up front instead of discovering it later.
+    """
+    if geom.is_empty:
+        return None
+    if geom.geom_type in ("Polygon", "MultiPolygon"):
+        return geom
+    parts = [g for g in get_parts(geom) if g.geom_type in ("Polygon", "MultiPolygon")]
+    if not parts:
+        return None
+    merged = unary_union(parts)
+    return None if merged.is_empty else merged
+
+
 def _failed_row(block_id: str, tolerances: Sequence[float]) -> dict[str, object]:
     """The row a block gets when its geometry defeats GEOS: same schema, zeros, and
     `census_failed=True` so it is distinguishable from a block that genuinely has no footpaths."""
@@ -208,21 +228,23 @@ def census_rows(
         # the same geometry through a different door (straight off the country parquet) and must
         # apply the same repair. Without it GEOS raises "TopologyException: side location
         # conflict" from inside the clip -- observed on the Kenya corpus after 70,951 blocks.
-        geom = make_valid(raw)
+        repaired = _areal(make_valid(raw))
+        geom = raw if repaired is None else repaired
         row = _failed_row(str(block_id), tolerances)
-        try:
-            near_fp = (fp_m.iloc[fp_tree.query(geom)] if fp_tree is not None
-                       else gpd.GeoDataFrame(geometry=[], crs=crs_m))
-            near_nm = (nm_m.iloc[nm_tree.query(geom)] if nm_tree is not None
-                       else gpd.GeoDataFrame(geometry=[], crs=crs_m))
-            row = interiority_row(str(block_id), geom, near_fp, near_nm, crs_m,
-                                  tolerances=tolerances)
-            row["census_failed"] = False
-        except GEOSException:
-            # make_valid does not repair every pathological polygon, and one of 1.8M must not
-            # kill a 40-minute country run. Record the failure as data -- a row that reads as
-            # "uncovered" would be indistinguishable from a genuine absence of footpaths.
-            pass
+        if repaired is not None:
+            try:
+                near_fp = (fp_m.iloc[fp_tree.query(geom)] if fp_tree is not None
+                           else gpd.GeoDataFrame(geometry=[], crs=crs_m))
+                near_nm = (nm_m.iloc[nm_tree.query(geom)] if nm_tree is not None
+                           else gpd.GeoDataFrame(geometry=[], crs=crs_m))
+                row = interiority_row(str(block_id), geom, near_fp, near_nm, crs_m,
+                                      tolerances=tolerances)
+                row["census_failed"] = False
+            except GEOSException:
+                # make_valid does not repair every pathological polygon, and one of 1.8M must not
+                # kill a 40-minute country run. Record the failure as data -- a row that reads as
+                # "uncovered" would be indistinguishable from a genuine absence of footpaths.
+                pass
         # The qualified filter is a building-count band, which does NOT bound block AREA: the
         # spike found 5 of 251 covered blocks carrying >5 km of "interior" footpath on 90-293
         # buildings (max 26.5 km on 258 buildings, vs a 356 m median) -- huge polygons where the

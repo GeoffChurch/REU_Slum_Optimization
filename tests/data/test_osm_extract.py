@@ -6,7 +6,7 @@ import pytest
 import yaml
 from pyproj import CRS
 from shapely.errors import GEOSException
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import GeometryCollection, LineString, Point, Polygon
 
 from reblock.data import osm_extract
 from reblock.data.osm_extract import (
@@ -342,3 +342,34 @@ def test_census_rows_records_an_unrepairable_block_as_failed_not_as_uncovered(
     assert rows[1]["n_interior_segments_0.5"] == 0
     doomed_area: float = rows[1]["area_m2"]  # type: ignore[assignment]
     assert doomed_area > 0
+
+
+def test_census_rows_records_a_block_make_valid_cannot_save_as_failed() -> None:
+    """`make_valid` on a fully degenerate (zero-area) polygon returns a non-areal geometry, whose
+    `.boundary` is None -- an AttributeError, not a GEOSException, so it escapes the handler.
+    Reduce to the areal part up front: no areal content means a failed row, not a crash."""
+    degenerate = Polygon([(18.50, -33.95), (18.51, -33.95), (18.50, -33.95)])   # zero area
+    blocks = gpd.GeoDataFrame({"block_id": ["flat"]}, geometry=[degenerate],
+                              crs=CRS.from_epsg(4326))
+    empty = gpd.GeoDataFrame(geometry=[], crs=CRS.from_epsg(4326))
+
+    rows = census_rows(blocks, empty, empty, 32734, tolerances=(0.5,))
+
+    assert len(rows) == 1
+    assert rows[0]["census_failed"] is True
+    assert rows[0]["n_interior_segments_0.5"] == 0
+
+
+def test_areal_keeps_the_polygonal_part_of_a_mixed_collection() -> None:
+    """make_valid on a polygon with a dangling spike returns a GeometryCollection of the polygon
+    plus a LineString. The polygon is the block; the spike is not, and clipping to a collection
+    raises. Keep the areal part rather than treating the whole block as unusable."""
+    square = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+    mixed = GeometryCollection([square, LineString([(20, 20), (30, 30)])])
+    kept = osm_extract._areal(mixed)
+    assert kept is not None
+    assert kept.geom_type in ("Polygon", "MultiPolygon")
+    assert kept.area == pytest.approx(100.0)
+
+    assert osm_extract._areal(GeometryCollection([])) is None
+    assert osm_extract._areal(LineString([(0, 0), (1, 1)])) is None
