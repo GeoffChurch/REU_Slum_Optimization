@@ -51,6 +51,11 @@ confirms a sharp blur cliff:
 | 0.50 | 13.3 m | 0 (fully degenerate) |
 
 ε ≤ 0.01 is required: ε = 0.05 already collapses the network to ~3% of its proper length. All
+(**every ε in this note is pre-2026-07-27**, when `ot_gw._gw_gradient_cost` was found to be
+missing Prop. 2's factor of 2 — halve them to read in the corrected, POT-standard convention:
+see `2026-07-27-gw-pot-crossvalidation.md`. The conclusions here are directional and the ε
+ladder there shows the direction is stable across the window, but any *number* below should be
+re-measured before being built on.)
 subsequent spikes fix ε = 0.01, τ = 1.0.
 
 **Verdict on mechanism: sound and correctly implemented.** This was never the failure mode of any
