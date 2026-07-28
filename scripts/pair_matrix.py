@@ -6,7 +6,7 @@ parquet is a retrieval benchmark -- any future featurization or donor material c
 against it without re-solving anything.
 
 `load_pools()` selects through the repo's own `Screen` (`density_compactness` = n/P^2 at the
-calibrated percentile-30 gate) and `RegionBuilder`, rather than the private
+calibrated ABSOLUTE floor) and `RegionBuilder`, rather than the private
 `building_count in [60,300] AND k_complexity >= 4` band it used to carry. That band was a separate
 population from the one every shipped method is scored on, which made none of this script's
 numbers comparable to theirs. See `default_screen` for why depth is reported rather than gated.
@@ -62,7 +62,13 @@ from reblock.derivations import access_before
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.desire_lines import OSMDesireLines
 from reblock.methods.osm_footpaths import interior_desire_lines
-from reblock.metric import Compactness, Density, Gate, Product
+from reblock.metric import (
+    DENSITY_COMPACTNESS_FLOOR,
+    Compactness,
+    Density,
+    Gate,
+    Product,
+)
 from reblock.permeability import permeability
 from reblock.region import IdentityRegionBuilder, RegionBuilder
 from reblock.screen.dense_compact import DenseCompactScreen
@@ -119,7 +125,7 @@ MIN_PARCELS = 50
 
 
 def default_screen(min_buildings: int = 30) -> DenseCompactScreen:
-    """The repo's own screen, `density_compactness` = n/P^2 at the calibrated percentile-30 gate.
+    """The repo's own screen, `density_compactness` = n/P^2 at its calibrated absolute floor.
 
     This replaces a hand-rolled `building_count in [60,300] AND k_complexity >= 4` band that this
     script used to define its own pool with. That band was a private population: every number the
@@ -127,6 +133,11 @@ def default_screen(min_buildings: int = 30) -> DenseCompactScreen:
     set of blocks from the one `clearance`, `arterial` and every other shipped method is scored
     on, so none of the results could be compared across. Selecting through `Screen` is what makes
     them commensurable.
+
+    The gate is the ABSOLUTE calibrated floor (`DENSITY_COMPACTNESS_FLOOR`), not a percentile:
+    a percentile re-defines the population every time the corpus changes, and this pilot is meant
+    to scale from Cape Town to the ZAF+KEN corpus, where the same percentile is a four-times
+    different cut.
 
     `density_compactness` is also peel-free (`needs_peel=False`), so selection reads the free
     kblock columns and never builds a Block: no Voronoi, no peel, no building points required to
@@ -136,7 +147,7 @@ def default_screen(min_buildings: int = 30) -> DenseCompactScreen:
     """
     return DenseCompactScreen(
         Product(name="density_compactness", terms=(Density(), Compactness())),
-        Gate(kind="percentile", value=30.0),
+        Gate(kind="absolute", value=DENSITY_COMPACTNESS_FLOOR),
         min_buildings=min_buildings,
     )
 

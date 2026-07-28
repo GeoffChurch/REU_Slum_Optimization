@@ -1,9 +1,21 @@
+from pathlib import Path
+
 import geopandas as gpd
 import numpy as np
+import yaml
 from pyproj import CRS
 from shapely.geometry import Polygon
 
-from reblock.metric import Compactness, Count, Density, Depth, Gate, Power, Product
+from reblock.metric import (
+    DENSITY_COMPACTNESS_FLOOR,
+    Compactness,
+    Count,
+    Density,
+    Depth,
+    Gate,
+    Power,
+    Product,
+)
 
 _UTM = CRS.from_epsg(32643)
 
@@ -67,3 +79,20 @@ def test_gate_absolute_and_percentile() -> None:
     assert Gate("absolute", 5.0).keep(scores) == {"a", "b"}         # >= 5
     assert Gate("percentile", 50.0).keep(scores) == {"a", "b"}      # top 50%
     assert Gate("percentile", 25.0).keep(scores) == {"a"}           # top 25%
+
+
+def test_config_floor_matches_python_definition() -> None:
+    """conf/metric/density_compactness.yaml's absolute gate and DENSITY_COMPACTNESS_FLOOR are one
+    number in two files. Same mirror-plus-drift-guard as the footpath tag list -- a screen whose
+    config and code disagree about the floor silently selects a different population than the one
+    every calibration number was measured on.
+
+    The gate must also stay ABSOLUTE: a percentile re-defines the population with the corpus
+    (Cape Town's old percentile-30 cut selects 7.6% of the ZAF+KEN corpus), which is exactly what
+    calibrating an absolute floor was meant to end.
+    """
+    conf = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "conf/metric/density_compactness.yaml").read_text())
+    gate = conf["metric_gate"]
+    assert gate["kind"] == "absolute"
+    assert float(gate["value"]) == DENSITY_COMPACTNESS_FLOOR
