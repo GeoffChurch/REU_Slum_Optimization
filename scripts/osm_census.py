@@ -32,11 +32,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import cast
 
+import geopandas as gpd
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import shapely
 from geopandas import GeoDataFrame
+from shapely.geometry import Polygon
 
 from reblock.data.osm_extract import (
     FOOTPATH_TAGS,
@@ -166,17 +168,22 @@ def main() -> None:
         # discipline as scripts/pair_matrix.py's checkpoint/resume pattern.
         existing = pd.read_parquet(out)
         # A resumed run must produce the SAME columns as the rows already on disk, or the
-        # concatenated output silently carries NaN for whichever tolerances each half is missing.
-        # --tolerances makes that reachable from the command line, so check rather than trust.
-        wanted = {f"{prefix}_{tol}"
-                  for prefix in ("n_interior_segments", "interior_length_m",
-                                 "n_near_miss_segments", "near_miss_length_m")
-                  for tol in args.tolerances}
+        # concatenated output silently carries NaN for whichever columns each half is missing --
+        # reachable both from --tolerances and from a schema change between runs, so check the
+        # whole expected column set rather than trusting either.
+        wanted = set(census_rows(
+            cast(GeoDataFrame, GeoDataFrame(
+                {"block_id": ["probe"]},
+                geometry=[Polygon([(0, 0), (1, 0), (1, 1)])], crs=4326)),
+            gpd.GeoDataFrame(geometry=[], crs=4326),
+            gpd.GeoDataFrame(geometry=[], crs=4326),
+            32734, tolerances=args.tolerances)[0])
         missing = wanted - set(existing.columns)
         if missing:
             raise SystemExit(
-                f"{out} was written with different --tolerances: it has no {sorted(missing)}.\n"
-                f"Delete it to start over, or rerun with the tolerances it was built with.")
+                f"{out} lacks columns this run would produce: {sorted(missing)}.\n"
+                f"Either it was written with different --tolerances, or its schema predates a "
+                f"change to census_rows. Migrate it or delete it to start over.")
         rows = cast(list[dict[str, object]], existing.to_dict("records"))
         done_ids = {str(b) for b in existing["block_id"]}
         print(f"resuming from {out}: {len(rows):,} blocks already censused", flush=True)
@@ -254,7 +261,11 @@ def main() -> None:
 
     gate = f"n_interior_segments_{min(args.tolerances)}"
     covered = sum(1 for r in rows if int(r[gate]) > 0)
+    failed = sum(1 for r in rows if r.get("census_failed"))
     dropped = seen - kept_total
+    if failed:
+        print(f"\n{failed:,} blocks defeated GEOS even after make_valid and are recorded with "
+              f"census_failed=True -- exclude them, do not read them as uncovered")
     print(f"\nwrote {out}  ({len(rows):,} rows)")
     print(f"prefilter (k>={args.min_k}, buildings>={args.min_buildings}): "
           f"read {seen:,}, kept {kept_total:,}, dropped {dropped:,} "

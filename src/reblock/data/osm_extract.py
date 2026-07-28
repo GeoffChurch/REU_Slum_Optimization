@@ -14,7 +14,8 @@ from typing import cast
 import geopandas as gpd
 import pyogrio
 from pyproj import CRS
-from shapely import STRtree
+from shapely import STRtree, make_valid
+from shapely.errors import GEOSException
 from shapely.geometry.base import BaseGeometry
 
 from reblock.methods.osm_footpaths import interior_desire_lines
@@ -167,6 +168,18 @@ def assert_zone_fit(lon: float, epsg: int) -> None:
             f"batch blocks by zone via utm_zone_epsg before projecting")
 
 
+def _failed_row(block_id: str, tolerances: Sequence[float]) -> dict[str, object]:
+    """The row a block gets when its geometry defeats GEOS: same schema, zeros, and
+    `census_failed=True` so it is distinguishable from a block that genuinely has no footpaths."""
+    row: dict[str, object] = {"block_id": block_id, "boundary_length_m": 0.0,
+                              "census_failed": True}
+    for label in ("interior", "near_miss"):
+        for tol in tolerances:
+            row[f"n_{label}_segments_{tol}"] = 0
+            row[f"{label}_length_m_{tol}"] = 0.0
+    return row
+
+
 def census_rows(
     blocks: gpd.GeoDataFrame,
     footpaths: gpd.GeoDataFrame,
@@ -190,13 +203,26 @@ def census_rows(
     nm_tree = STRtree(list(nm_m.geometry)) if len(nm_m) else None
 
     rows: list[dict[str, object]] = []
-    for block_id, geom in zip(blocks_m["block_id"], blocks_m.geometry, strict=True):
-        near_fp = (fp_m.iloc[fp_tree.query(geom)] if fp_tree is not None
-                   else gpd.GeoDataFrame(geometry=[], crs=crs_m))
-        near_nm = (nm_m.iloc[nm_tree.query(geom)] if nm_tree is not None
-                   else gpd.GeoDataFrame(geometry=[], crs=crs_m))
-        row = interiority_row(str(block_id), geom, near_fp, near_nm, crs_m,
-                              tolerances=tolerances)
+    for block_id, raw in zip(blocks_m["block_id"], blocks_m.geometry, strict=True):
+        # `KblockSource._blocks_from` runs make_valid before building a Block; the census reaches
+        # the same geometry through a different door (straight off the country parquet) and must
+        # apply the same repair. Without it GEOS raises "TopologyException: side location
+        # conflict" from inside the clip -- observed on the Kenya corpus after 70,951 blocks.
+        geom = make_valid(raw)
+        row = _failed_row(str(block_id), tolerances)
+        try:
+            near_fp = (fp_m.iloc[fp_tree.query(geom)] if fp_tree is not None
+                       else gpd.GeoDataFrame(geometry=[], crs=crs_m))
+            near_nm = (nm_m.iloc[nm_tree.query(geom)] if nm_tree is not None
+                       else gpd.GeoDataFrame(geometry=[], crs=crs_m))
+            row = interiority_row(str(block_id), geom, near_fp, near_nm, crs_m,
+                                  tolerances=tolerances)
+            row["census_failed"] = False
+        except GEOSException:
+            # make_valid does not repair every pathological polygon, and one of 1.8M must not
+            # kill a 40-minute country run. Record the failure as data -- a row that reads as
+            # "uncovered" would be indistinguishable from a genuine absence of footpaths.
+            pass
         # The qualified filter is a building-count band, which does NOT bound block AREA: the
         # spike found 5 of 251 covered blocks carrying >5 km of "interior" footpath on 90-293
         # buildings (max 26.5 km on 258 buildings, vs a 356 m median) -- huge polygons where the

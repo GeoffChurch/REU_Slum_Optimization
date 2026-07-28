@@ -5,6 +5,7 @@ import pyogrio
 import pytest
 import yaml
 from pyproj import CRS
+from shapely.errors import GEOSException
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.data import osm_extract
@@ -285,3 +286,59 @@ def test_pbf_and_overpass_agree_on_a_pinned_bbox() -> None:
     a = PbfDesireLines(pbf).desire_lines(bbox, crs)
     b = OSMDesireLines(timeout_s=180.0).desire_lines(bbox, crs)
     assert a.geometry.length.sum() == pytest.approx(b.geometry.length.sum(), rel=0.25)
+
+
+def test_census_rows_repairs_an_invalid_polygon_instead_of_dying() -> None:
+    """A bowtie (self-intersecting) polygon makes GEOS raise "TopologyException: side location
+    conflict" from inside the clip. `KblockSource._blocks_from` runs make_valid before building a
+    Block; the census reaches the same geometry through a different door and must do the same --
+    this exact failure killed the Kenya run after 70,951 blocks."""
+    bowtie = Polygon([(18.50, -33.95), (18.51, -33.94), (18.50, -33.94), (18.51, -33.95)])
+    assert not bowtie.is_valid
+    blocks = gpd.GeoDataFrame({"block_id": ["bowtie"]}, geometry=[bowtie],
+                              crs=CRS.from_epsg(4326))
+    lines = gpd.GeoDataFrame(
+        geometry=[LineString([(18.5025, -33.9455), (18.5075, -33.9445)])],
+        crs=CRS.from_epsg(4326))
+    empty = gpd.GeoDataFrame(geometry=[], crs=CRS.from_epsg(4326))
+
+    rows = census_rows(blocks, lines, empty, 32734)
+
+    assert len(rows) == 1
+    assert rows[0]["census_failed"] is False
+    area: float = rows[0]["area_m2"]  # type: ignore[assignment]
+    assert area > 0
+
+
+def test_census_rows_records_an_unrepairable_block_as_failed_not_as_uncovered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One pathological polygon in 1.8M must not kill a 40-minute country run -- but it must not
+    quietly become a zero row either, which would be indistinguishable from a block that genuinely
+    has no footpaths. It is recorded as data, with the same schema and `census_failed=True`."""
+    blocks = gpd.GeoDataFrame(
+        {"block_id": ["ok", "doomed"]},
+        geometry=[
+            Polygon([(18.50, -33.95), (18.51, -33.95), (18.51, -33.94), (18.50, -33.94)]),
+            Polygon([(18.52, -33.95), (18.53, -33.95), (18.53, -33.94), (18.52, -33.94)]),
+        ],
+        crs=CRS.from_epsg(4326))
+    empty = gpd.GeoDataFrame(geometry=[], crs=CRS.from_epsg(4326))
+
+    real = osm_extract.interiority_row
+
+    def explode_on_the_second(block_id: str, *a: object, **k: object) -> dict[str, object]:
+        if block_id == "doomed":
+            raise GEOSException("side location conflict")
+        return real(block_id, *a, **k)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(osm_extract, "interiority_row", explode_on_the_second)
+    rows = census_rows(blocks, empty, empty, 32734, tolerances=(0.5,))
+
+    assert [r["block_id"] for r in rows] == ["ok", "doomed"]
+    assert [r["census_failed"] for r in rows] == [False, True]
+    # Same schema either way, so the parquet stays rectangular.
+    assert set(rows[0]) == set(rows[1])
+    assert rows[1]["n_interior_segments_0.5"] == 0
+    doomed_area: float = rows[1]["area_m2"]  # type: ignore[assignment]
+    assert doomed_area > 0
