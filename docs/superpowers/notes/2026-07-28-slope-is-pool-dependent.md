@@ -59,7 +59,50 @@ Routing through the repo's `Screen` is what exposed this. The private pool had b
 dependence on the pool definition for the whole arc, and no shipped method's numbers were
 comparable to it either.
 
-## The hypothesis worth testing next
+## The outline hypothesis — proposed here, then MEASURED AND REFUTED (same day)
+
+The section below proposed that GW distance in the legacy pool was substantially encoding
+**outline** difference, and that outline similarity was what predicted transplant success. It was
+tested immediately (`scratchpad/ot/outline_vs_fabric.py`) on the same 100 legacy pairs, with two
+descriptors that are both rotation/translation/scale invariant but see different things: an
+outline EDM spectrum over 64 uniformly-sampled boundary points, and a fabric descriptor (the k-NN
+distance profile of parcel centroids, k=1..6, normalized by the mean 1-NN distance).
+
+**It is wrong.**
+
+```
+within-recipient correlation with real_gw_dist:  outline +0.444   fabric +0.237
+
+within-recipient slope on perm_gap, each alone:
+  real_gw_dist   beta=  -9.592  se= 3.811  t=-2.52  p=0.0139
+  outline_dist   beta=  -0.012  se= 0.011  t=-1.13  p=0.2630
+  fabric_dist    beta=  +0.074  se= 0.170  t=+0.43  p=0.6658
+
+real_gw_dist controlling for outline_dist:
+  real_gw_dist   beta=  -9.498  se= 4.281  t=-2.22
+  outline_dist   beta=  -0.001  se= 0.012  t=-0.05
+```
+
+GW distance **keeps essentially its whole slope** when outline is controlled for (−9.592 →
+−9.498), and outline collapses to nothing (t = −0.05). Outline is genuinely *inside* GW distance —
+it correlates at r = +0.444 — but it is not the part that predicts fidelity. Neither is local
+packing.
+
+So GW's predictive content is in the full joint correspondence structure, and does not decompose
+into "global outline shape" plus "local packing" — at least not as measured by these two
+descriptors. That is a real, if inconvenient, argument for keeping the expensive GW fit rather
+than replacing it with cheap shape features.
+
+**Limit of this test.** Controlling for a *noisily measured* covariate only partially controls for
+it, so a better outline descriptor could still claim some of the slope. The 64-point boundary
+spectrum is crude. What the result rules out is outline being the *dominant* carrier, which is
+what the hypothesis claimed.
+
+**The mechanism behind the pool dependence is therefore still unknown.** Depth is ruled out (mean
+recipient depth 4.40 vs 4.24), donor source is ruled out, range restriction is ruled out, and now
+outline is ruled out. That the effect is pool-dependent stands; why, does not.
+
+## The hypothesis worth testing next (SUPERSEDED — see above)
 
 Depth does not explain the difference: mean recipient depth is 4.40 (legacy) vs 4.24 (screen).
 The pools are equally deep.
