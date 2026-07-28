@@ -5,13 +5,22 @@ recipient's substrate, and score it against a length-matched direct clearance so
 parquet is a retrieval benchmark -- any future featurization or donor material can be scored
 against it without re-solving anything.
 
-`load_pools()` reads real Cape Town blocks directly from
-``~/.cache/reblock/{blocks,buildings}_capetown_full.parquet`` -- the plan's census -> shortlist ->
-provisioned-building-points chain never ran (Task 5 needs a 417 MB Geofabrik PBF not on this
-machine; Task 7's provisioning was implemented but never executed), so there is no shortlist to
-read instead. See docs/superpowers/notes/2026-07-27-gw-pair-matrix-findings.md for the full
-writeup, and docs/superpowers/notes/2026-07-23-ot-road-transplant.md for the GW+UOT mechanism this
-script drives.
+`load_pools()` selects through the repo's own `Screen` (`density_compactness` = n/P^2 at the
+calibrated ABSOLUTE floor) and `RegionBuilder`, rather than the private
+`building_count in [60,300] AND k_complexity >= 4` band it used to carry. That band was a separate
+population from the one every shipped method is scored on, which made none of this script's
+numbers comparable to theirs. See `default_screen` for why depth is reported rather than gated.
+
+It still reads Cape Town from ``~/.cache/reblock/{blocks,buildings}_capetown_full.parquet``. The
+census -> shortlist -> provisioned-points chain HAS now run (2026-07-28: 238,484 blocks censused,
+9.81M Open Buildings points over 65,364 qualified blocks, see
+notes/2026-07-28-osm-census-results.md), but pointing this pilot at it is a separate step -- the
+screen over that corpus flags ~19.6k blocks and building them all is ~44 min of Voronoi, so it
+needs a sampling decision this script does not yet make.
+
+See docs/superpowers/notes/2026-07-27-gw-pair-matrix-findings.md for the full writeup, and
+docs/superpowers/notes/2026-07-23-ot-road-transplant.md for the GW+UOT mechanism this script
+drives.
 
 Usage (module form -- puts the repo root on sys.path so `reblock.data.provision`'s
 `from scripts.fetch_kblock_fixtures import ...` resolves; see
@@ -34,8 +43,10 @@ import json
 import sys
 import time
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from urllib.error import URLError
 
 import geopandas as gpd
@@ -46,12 +57,27 @@ from shapely.ops import unary_union
 
 from reblock.budget import building_radii, displacement
 from reblock.contracts import Block
+from reblock.data.kblock import KblockSource
+from reblock.data.osm_extract import (
+    PbfDesireLines,
+    utm_zone_epsg,
+)
 from reblock.data.provision import cached_kblock_source
 from reblock.data.settlements import exclusion_holdout
+from reblock.derivations import access_before
 from reblock.methods.clearance import ClearanceReblocker
-from reblock.methods.desire_lines import OSMDesireLines
+from reblock.methods.desire_lines import DesireLineSource, OSMDesireLines
 from reblock.methods.osm_footpaths import interior_desire_lines
+from reblock.metric import (
+    DENSITY_COMPACTNESS_FLOOR,
+    Compactness,
+    Density,
+    Gate,
+    Product,
+)
 from reblock.permeability import permeability
+from reblock.region import IdentityRegionBuilder, RegionBuilder
+from reblock.screen.dense_compact import DenseCompactScreen
 
 _OT_DIR = Path("scratchpad/ot")
 _ot_ns: SimpleNamespace | None = None
@@ -95,13 +121,79 @@ def _ot() -> SimpleNamespace:
 
 CORRIDOR_M = 3.0
 DEFAULT_CACHE = Path.home() / ".cache" / "reblock"
+# COMPUTE bounds, not a quality judgement -- what a GW fit can afford, kept deliberately separate
+# from what is worth reblocking (that is the screen's job, see `default_screen`). GW is quadratic
+# in parcel count, and `select_donor.signature`'s fixed subsample (N_SUB=50) cannot sign a block
+# with fewer real parcels than that at all.
 MIN_BUILDING_COUNT = 60
 MAX_BUILDING_COUNT = 300
-MIN_K_COMPLEXITY = 4
-# select_donor.signature's fixed subsample size (N_SUB=50); a block with fewer real parcels than
-# this can't be signed at all (ValueError), so it is dropped from the pool rather than the
-# eligibility/selection logic having to special-case it downstream.
 MIN_PARCELS = 50
+CACHE_SHORTLIST_BLOCKS = DEFAULT_CACHE / "blocks_shortlist.parquet"
+CACHE_SHORTLIST_BUILDINGS = DEFAULT_CACHE / "buildings_shortlist.parquet"
+
+
+def default_screen(min_buildings: int = 30) -> DenseCompactScreen:
+    """The repo's own screen, `density_compactness` = n/P^2 at its calibrated absolute floor.
+
+    This replaces a hand-rolled `building_count in [60,300] AND k_complexity >= 4` band that this
+    script used to define its own pool with. That band was a private population: every number the
+    OT arc produced on it -- including the within-recipient slope -- was measured on a different
+    set of blocks from the one `clearance`, `arterial` and every other shipped method is scored
+    on, so none of the results could be compared across. Selecting through `Screen` is what makes
+    them commensurable.
+
+    The gate is the ABSOLUTE calibrated floor (`DENSITY_COMPACTNESS_FLOOR`), not a percentile:
+    a percentile re-defines the population every time the corpus changes, and this pilot is meant
+    to scale from Cape Town to the ZAF+KEN corpus, where the same percentile is a four-times
+    different cut.
+
+    `density_compactness` is also peel-free (`needs_peel=False`), so selection reads the free
+    kblock columns and never builds a Block: no Voronoi, no peel, no building points required to
+    decide the pool. Depth is deliberately NOT gated on here -- it is the direct measure of the
+    access problem and belongs in the OUTPUT as a stratifier, because gating on it would destroy
+    the ability to ask whether transplant fidelity depends on it.
+    """
+    return DenseCompactScreen(
+        Product(name="density_compactness", terms=(Density(), Compactness())),
+        Gate(kind="absolute", value=DENSITY_COMPACTNESS_FLOOR),
+        min_buildings=min_buildings,
+    )
+
+
+def zone_source(epsg: int, *, min_buildings: int = 30) -> KblockSource:
+    """A `KblockSource` over the provisioned ZAF+KEN shortlist, restricted to ONE UTM zone.
+
+    The restriction is not optional. `KblockSource.region()` calls `estimate_utm_crs()` on the
+    WHOLE blocks frame -- deliberately, so the CRS stays stable under `block_ids` filtering -- so
+    pointing it at a two-country shortlist would hand every block a single UTM zone and distort
+    area, perimeter and every distance for anything far from that meridian. Filtering by
+    `block_ids` does NOT fix it, precisely because of that stability guarantee; the zone subset
+    has to be its own parquet, which is what this materializes (once, then cached).
+
+    Splitting by zone costs the cross-zone donor pairs. That is a real loss -- geographic distance
+    was measured to be uninformative about GW distance, so a Gauteng donor for a Cape Town
+    recipient is not a priori worse -- but it is the honest option until scoring is made
+    CRS-aware, and each zone is a genuinely different metro, which makes zone-wise runs a
+    REPLICATION rather than merely a smaller sample.
+    """
+    blocks = CACHE_SHORTLIST_BLOCKS
+    buildings = CACHE_SHORTLIST_BUILDINGS
+    for path in (blocks, buildings):
+        if not path.exists():
+            raise SystemExit(
+                f"missing {path} -- run `python -m scripts.provision_shortlist` first")
+    zone_path = blocks.with_name(f"blocks_shortlist_z{epsg}.parquet")
+    if not zone_path.exists():
+        frame = gpd.read_parquet(blocks)
+        rep = frame.geometry.representative_point()
+        keep = np.array([utm_zone_epsg(pt.x, pt.y) == epsg for pt in rep])
+        subset = cast(gpd.GeoDataFrame, frame[keep].reset_index(drop=True))
+        if subset.empty:
+            raise SystemExit(f"no shortlist blocks in UTM zone {epsg}")
+        subset.to_parquet(zone_path)
+        print(f"  materialized {zone_path.name}: {len(subset):,} blocks", flush=True)
+    return KblockSource(zone_path, buildings, region_id=f"shortlist-z{epsg}",
+                        min_buildings=min_buildings)
 
 
 def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
@@ -119,19 +211,80 @@ def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
     return float(displacement(pts, radii, roads, CORRIDOR_M) / n)
 
 
-def load_pools(
-    city: str = "capetown", *, min_buildings: int = 30
-) -> tuple[list[Block], gpd.GeoDataFrame, dict[str, np.ndarray]]:
-    """Real Cape Town blocks WITH building points, so `KblockSource` can build real `Block`s with
-    Voronoi parcels (required by `gap_snap` and `permeability`) -- read directly from the cached
-    full-city parquets rather than from a shortlist (see module docstring: the plan's shortlist
-    chain never ran).
+@dataclass(frozen=True)
+class Pools:
+    """The materialized pool, with the two ROLES kept apart.
 
-    The qualified pool is `building_count` in [60, 300] AND `k_complexity` >= 4, matching the
-    RESCOPE note (1,136 Cape Town blocks against the parquet on this machine), further restricted
-    to blocks whose real building-point join yields >= `MIN_PARCELS` parcels (a small fraction of
-    the 1,136 -- the stored `building_count` column is a proxy for the real join, and
-    `select_donor.signature`'s fixed subsample size needs a floor under it).
+    Recipients and donors have different requirements and were wrongly held to the same one. A
+    recipient needs building points and parcels -- it is a reblocking target, so it should be
+    whatever the screen says is worth reblocking. A donor needs interior footpaths -- it is
+    material to transplant, and nothing about being dense-and-compact itself is required.
+
+    Screening BOTH roles by n/P^2 is what starved every run so far of the only variable that
+    matters. Donor pools selected that way are morphologically near-identical to their recipients,
+    so `real_gw_dist` barely varies: the GW range ratio ran 8.96x / 4.54x / 1.71x across three
+    500-pair runs, and beta tracked it monotonically -- most negative and most precise where the
+    range was widest, and uninformative ([-19, +32]) where it was narrowest. Decoupling the roles
+    widens the corpus-wide donor pool 57x (247 -> 14,189).
+    """
+
+    blocks: list[Block]
+    blocks_gdf: gpd.GeoDataFrame
+    signatures: dict[str, np.ndarray]
+    recipients: list[int]
+    donors: list[int]
+
+
+def donatable_ids(iso: str, min_interior_m: float = 100.0) -> set[str]:
+    """Blocks the census says carry at least `min_interior_m` of interior footpath.
+
+    Read from the census rather than discovered by fetching: attempting a fetch per candidate is
+    what made donor slots so scarce (509 `empty_interior` skips for 68 usable pairs in Gauteng),
+    and the census already measured this for the whole corpus. Blocks absent from the census
+    failed its own prefilter (k_complexity >= 3, building_count >= 40) and are excluded -- they
+    are shallow or tiny, which is not donor material.
+    """
+    path = DEFAULT_CACHE / f"osm_coverage_{iso}.parquet"
+    if not path.exists():
+        raise SystemExit(
+            f"missing {path} -- run `python -m scripts.osm_census --iso {iso}` first; donor "
+            f"eligibility is read from the census, not discovered by fetching")
+    cen = pd.read_parquet(path, columns=["block_id", "census_failed", "interior_length_m_0.5"])
+    ok = (~cen["census_failed"]) & (cen["interior_length_m_0.5"] >= min_interior_m)
+    return set(cen.loc[ok, "block_id"].astype(str))
+
+
+def evenly_spaced(idx: list[int], key: list[float], n: int) -> list[int]:
+    """`n` of `idx` spanning `key`'s range: sort, then take evenly-spaced ranks (min, ..., max) --
+    not a random sample, so the matrix deliberately includes the extremes."""
+    order = sorted(idx, key=lambda i: key[i])
+    if n >= len(order):
+        return order
+    return [order[int(round(k))] for k in np.linspace(0, len(order) - 1, n)]
+
+
+def load_pools(
+    city: str = "capetown", *, min_buildings: int = 30,
+    screen: DenseCompactScreen | None = None,
+    region_builder: RegionBuilder | None = None,
+    source: KblockSource | None = None,
+    min_interior_m: float = 100.0,
+) -> Pools:
+    """Real Cape Town blocks WITH building points, so `KblockSource` can build real `Block`s with
+    Voronoi parcels (required by `gap_snap` and `permeability`).
+
+    The pool is chosen by `screen` (default `default_screen()`, the repo's `density_compactness`)
+    intersected with the MIN/MAX_BUILDING_COUNT compute bounds, then restricted to blocks whose
+    real building-point join yields >= `MIN_PARCELS` parcels -- the stored `building_count` column
+    is only a proxy for that join, and `select_donor.signature`'s fixed subsample needs a floor.
+
+    `region_builder` (default `IdentityRegionBuilder`) runs over the screen's output as singleton
+    seed groups. At singleton granularity identity is a no-op, which is exactly the point: it puts
+    this experiment on the same Source -> Screen -> RegionBuilder path every shipped method uses,
+    so swapping in an accreting builder later -- which Phase 3's street-form donor material
+    REQUIRES, since a single block has no internal streets -- is a substitution here rather than a
+    rewrite. A builder that returns non-singleton groups needs `region.region_block` to fuse each
+    group before scoring; that path is deliberately not built until something needs it.
 
     Returns `(blocks, blocks_gdf, signatures)`:
       - `blocks`: the materialized pool as real `Block`s (Voronoi parcels via `KblockSource`).
@@ -143,22 +296,39 @@ def load_pools(
         before paying for a real GW fit -- never written to the output parquet in place of
         `real_gw_dist`.
     """
-    raw = pd.read_parquet(
-        DEFAULT_CACHE / f"blocks_{city}_full.parquet",
-        columns=["block_id", "k_complexity", "building_count"],
-    )
-    qualified = raw[
-        (raw.building_count >= MIN_BUILDING_COUNT)
-        & (raw.building_count <= MAX_BUILDING_COUNT)
-        & (raw.k_complexity >= MIN_K_COMPLEXITY)
-    ]
-    ids = sorted(qualified["block_id"].astype(str).tolist())
+    screen = screen or default_screen(min_buildings)
+    region_builder = region_builder or IdentityRegionBuilder()
+    src_all = source or cached_kblock_source(city, min_buildings=min_buildings)
 
-    src = cached_kblock_source(city, block_ids=ids, min_buildings=min_buildings)
+    flagged = screen.select(src_all)
+    raw = pd.read_parquet(
+        src_all.blocks_path, columns=["block_id", "building_count", "geometry"])
+    raw["block_id"] = raw["block_id"].astype(str)
+    counts = dict(zip(raw["block_id"], raw["building_count"], strict=True))
+    in_band = {b for b, c in counts.items()
+               if MIN_BUILDING_COUNT <= float(c) <= MAX_BUILDING_COUNT}
+    recipient_ids = sorted(set(flagged) & in_band)
+    iso = str(next(iter(recipient_ids), "ZAF.")).split(".", 1)[0]
+    donor_ids = sorted(donatable_ids(iso, min_interior_m) & in_band)
+    print(f"  screen flagged {len(flagged):,} -> {len(recipient_ids):,} recipients; "
+          f"{len(donor_ids):,} donors with >={min_interior_m:.0f} m interior footpath",
+          flush=True)
+
+    groups = region_builder.build(
+        cast(gpd.GeoDataFrame,
+             raw[raw["block_id"].isin(recipient_ids)].reset_index(drop=True)),
+        [[b] for b in recipient_ids],
+    )
+    ids = sorted({b for group in groups for b in group} | set(donor_ids))
+
+    src = (KblockSource(src_all.blocks_path, src_all.buildings_path,
+                        region_id=src_all.region_id, min_buildings=min_buildings, block_ids=ids)
+           if source is not None
+           else cached_kblock_source(city, block_ids=ids, min_buildings=min_buildings))
     blocks = [b for b in src.region().blocks if len(b.parcels) >= MIN_PARCELS]
     blocks.sort(key=lambda b: b.block_id)
     if not blocks:
-        raise SystemExit(f"load_pools: no qualified {city} blocks survived construction")
+        raise SystemExit(f"load_pools: no screened {city} blocks survived construction")
 
     blocks_gdf = gpd.GeoDataFrame(
         {"block_id": [b.block_id for b in blocks]},
@@ -172,7 +342,16 @@ def load_pools(
             b.parcels.geometry.centroid.x.to_numpy(), b.parcels.geometry.centroid.y.to_numpy()
         ]
         signatures[b.block_id] = _ot().signature(xy)
-    return blocks, blocks_gdf, signatures
+
+    r_set, d_set = set(recipient_ids), set(donor_ids)
+    pools = Pools(
+        blocks=blocks, blocks_gdf=blocks_gdf, signatures=signatures,
+        recipients=[i for i, b in enumerate(blocks) if b.block_id in r_set],
+        donors=[i for i, b in enumerate(blocks) if b.block_id in d_set],
+    )
+    print(f"  materialized {len(blocks):,} blocks: {len(pools.recipients):,} usable recipients, "
+          f"{len(pools.donors):,} usable donors", flush=True)
+    return pools
 
 
 def _select_recipient_indices(blocks: list[Block], n: int) -> list[int]:
@@ -372,6 +551,43 @@ def range_restriction_summary(df: pd.DataFrame) -> dict[str, float]:
     }
 
 
+def donor_bootstrap(
+    df: pd.DataFrame, *, n_boot: int = 4000, seed: int = 0
+) -> dict[str, float]:
+    """Cluster bootstrap over the DONOR dimension: resample each recipient's donors with
+    replacement, refit the within-recipient slope, and report the distribution.
+
+    This exists because a single-draw p-value from this design was shown to be meaningless. Two
+    runs over the same pool with the SAME 20 recipients, differing only in which donors were
+    selected, gave beta=-9.59 (p=0.014) and beta=-3.97 (p=0.31) -- and the 10 pairs they shared
+    scored identically, so it was purely the draw. Re-scoring at 25 donors per recipient put the
+    5-donor design's beta interval at [-11.2, +5.4] with the published -9.58 at its 5th
+    percentile. See notes/2026-07-28-beta-was-a-lucky-draw.md.
+
+    So: report an interval, never a point. `beta_negative_frac` is the honest headline -- the
+    share of donor resamples in which the effect points the claimed way at all.
+    """
+    rng = np.random.default_rng(seed)
+    groups = [g.reset_index(drop=True) for _, g in df.groupby("recipient")]
+    betas: list[float] = []
+    for _ in range(n_boot):
+        draw = pd.concat(
+            [g.iloc[rng.integers(0, len(g), len(g))] for g in groups], ignore_index=True)
+        sub = draw[["recipient", "real_gw_dist", "perm_gap"]]
+        if sub["recipient"].nunique() < 2:
+            continue
+        betas.append(within_recipient_regression(sub)["beta"])
+    b = np.asarray(betas, dtype=np.float64)
+    return {
+        "beta_median": float(np.median(b)),
+        "beta_lo95": float(np.percentile(b, 2.5)),
+        "beta_hi95": float(np.percentile(b, 97.5)),
+        "beta_sd": float(b.std()),
+        "beta_negative_frac": float((b < 0).mean()),
+        "n_boot": float(len(b)),
+    }
+
+
 def analyze_fidelity_vs_distance(
     df: pd.DataFrame, *, n_perm: int = 5000, seed: int = 0
 ) -> dict[str, object]:
@@ -384,6 +600,7 @@ def analyze_fidelity_vs_distance(
     purely a function of an already-scored matrix's columns."""
     within = within_recipient_regression(df)
     _observed, perm_p = within_recipient_permutation_test(df, n_perm=n_perm, seed=seed)
+    bootstrap = donor_bootstrap(df, seed=seed)
     recipient_r, n_recipients = recipient_level_correlation(df)
     nonzero = df[df["road_len_m"] > 0]
     jackknife = [
@@ -402,6 +619,7 @@ def analyze_fidelity_vs_distance(
         ),
         "within_recipient": within,
         "within_recipient_permutation_p": perm_p,
+        "donor_bootstrap": bootstrap,
         "recipient_level_r": recipient_r,
         "within_recipient_excl_zero_length": within_recipient_regression(nonzero),
         "jackknife_beta_min": float(min(jackknife)),
@@ -432,6 +650,13 @@ def _print_analysis(result: dict[str, object]) -> None:
     )
     print(f"  p (t-distribution)      = {within['p']:.4f}")
     print(f"  p (cluster permutation) = {result['within_recipient_permutation_p']:.4f}")
+    bs = cast(dict[str, float], result["donor_bootstrap"])
+    print(
+        f"  DONOR BOOTSTRAP ({bs['n_boot']:.0f} resamples) -- read this, not the point estimate:\n"
+        f"    beta 95% interval [{bs['beta_lo95']:+.3f}, {bs['beta_hi95']:+.3f}]  "
+        f"median {bs['beta_median']:+.3f}  sd {bs['beta_sd']:.3f}\n"
+        f"    negative in {bs['beta_negative_frac']:.1%} of donor resamples"
+    )
     print(
         f"recipient-level aggregate r (n={result['n_recipients']}) = "
         f"{result['recipient_level_r']:.4f}  <-- the cancelling counterpart"
@@ -464,17 +689,67 @@ def _donor_bbox_wgs84(donor: Block) -> tuple[float, float, float, float]:
     return (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
 
 
+PBF_BY_ISO = {"ZAF": "south-africa-latest.osm.pbf", "KEN": "kenya-latest.osm.pbf"}
+
+
+def iso_of(blocks: list[Block]) -> str:
+    """The country a pool belongs to, from its kblock ids (`ZAF.9.3.1_1_44882`, `KEN.1.1_1_100`).
+
+    Load-bearing, and learned the hard way: a PBF covers EXACTLY its own extract, so pointing a
+    Kenyan pool at the South Africa extract does not error -- every donor simply comes back with
+    no interior footpaths. The first Nairobi run reported `empty_interior: 90` and zero pairs,
+    which reads as "these blocks have no footpaths" and is flatly contradicted by the census (56
+    of them carry >=100 m each). Deriving the extract from the data removes the chance to pick
+    the wrong one by hand.
+    """
+    isos = {str(b.block_id).split(".", 1)[0] for b in blocks}
+    if len(isos) != 1:
+        raise SystemExit(f"pool spans multiple countries {sorted(isos)}; one PBF cannot cover it")
+    iso = isos.pop()
+    if iso not in PBF_BY_ISO:
+        raise SystemExit(
+            f"no Geofabrik extract configured for {iso!r}; "
+            f"known: {sorted(PBF_BY_ISO)}")
+    return iso
+
+
+def desire_source(kind: str, iso: str = "ZAF") -> DesireLineSource:
+    """`pbf` (default) reads the local Geofabrik extract FOR `iso`; `overpass` hits the live API.
+
+    Not a fallback pair -- two live options with disjoint operating ranges. A PBF covers exactly
+    its own extract and nothing outside it; Overpass covers any bbox on earth but is a shared
+    third-party service that, measured here, failed 214 of 241 donor fetches in one run.
+    """
+    if kind == "overpass":
+        return OSMDesireLines()
+    pbf = DEFAULT_CACHE / "osm_pbf" / PBF_BY_ISO[iso]
+    if not pbf.exists():
+        raise SystemExit(
+            f"missing {pbf}\ndownload it from https://download.geofabrik.de/, or pass "
+            f"--desire-source overpass to use the live API instead.")
+    return PbfDesireLines(pbf_path=pbf)
+
+
 def fetch_donor_lines(
-    source: OSMDesireLines, donor: Block, *, max_tries: int = 4, base_backoff_s: float = 2.0
+    source: DesireLineSource, donor: Block, *, max_tries: int = 4, base_backoff_s: float = 2.0
 ) -> tuple[str, gpd.GeoDataFrame | None]:
     """Donor material: the donor block's real interior OSM footpaths (`donor_type =
-    "osm_footpaths"`), mirroring `OsmFootpathsReblocker.propose`. Overpass is flaky right now
-    (repeated 504 Gateway Timeouts observed during the coverage spike); a live fetch (cache miss)
-    is retried with exponential backoff, and a donor whose OSM can't be fetched after `max_tries`
-    is reported as `"fetch_failed"` -- the caller must skip it and count the skip, never silently
-    drop it from the totals. `"empty_interior"` means the fetch succeeded but the donor has no
-    interior footpath material once perimeter-retracing streets are subtracted -- also a skip, not
-    a zero-length row."""
+    "osm_footpaths"`), mirroring `OsmFootpathsReblocker.propose`.
+
+    `source` is any `DesireLineSource`. The default is now `PbfDesireLines` over a local Geofabrik
+    extract, because Overpass could not carry this: a 100-pair run against it returned 27 usable
+    pairs and 214 `fetch_failed`, spending 4,440 s -- 100% of wall clock -- against 15 s of actual
+    GW, transplant, clearance and permeability work. The PBF reads once into memory and every
+    donor after that is a bbox window, so the same run is one ~40 s read plus no network at all.
+
+    The retry/backoff below is dead weight against a PBF and deliberately kept: `OSMDesireLines`
+    remains a legitimate choice (Overpass covers any bbox on earth; a PBF covers its own extract),
+    so this stays useful whenever the source IS a network one. A donor whose lines can't be
+    fetched after `max_tries` is reported as `"fetch_failed"` -- the caller must skip it and count
+    the skip, never silently drop it from the totals. `"empty_interior"` means the fetch succeeded
+    but the donor has no interior footpath material once perimeter-retracing streets are
+    subtracted -- also a skip, not a zero-length row.
+    """
     bbox = _donor_bbox_wgs84(donor)
     lines = None
     for attempt in range(max_tries):
@@ -530,6 +805,14 @@ def score_pair(
         "recipient": recipient.block_id,
         "donor": donor.block_id,
         "donor_type": "osm_footpaths",
+        # Depth is REPORTED, never gated on. It is the direct measure of the access problem
+        # reblocking exists to fix, and the screen (`density_compactness` = n/P^2) does not
+        # capture it -- measured on Cape Town, only 29% of the screened pool reaches k>=4, where
+        # the old hand-rolled band required it of everything. Carrying it as a column is what
+        # lets the analysis ask whether transplant fidelity depends on depth; a gate would have
+        # made that question unanswerable from the matrix.
+        "recipient_depth": float(access_before(recipient).max()),
+        "donor_depth": float(access_before(donor).max()),
         "real_gw_dist": float(dist),
         "feature_dist": float(np.linalg.norm(ot.signature(d_xy) - ot.signature(r_xy))),
         "perm_gap": float(perm_prop - perm_direct),
@@ -543,10 +826,15 @@ def score_pair(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--pairs", type=int, default=100)
+    # 500 pairs / 25 donors per recipient, not the original 100 / 5. At 5 donors the design's
+    # standard error (3.81) exceeded the effect it was measuring, so which donors got drawn
+    # decided the result -- two runs over the same pool with the same recipients gave -9.59
+    # (p=0.014) and -3.97 (p=0.31). 25 donors halves the SE to 1.60. The old numbers were sized
+    # for when every donor meant an Overpass round trip; off the local PBF this is ~8 minutes.
+    ap.add_argument("--pairs", type=int, default=500)
     ap.add_argument("--timing-only", action="store_true")
     ap.add_argument("--exclusion-radius-m", type=float, default=2000.0)
-    ap.add_argument("--donors-per-recipient", type=int, default=5)
+    ap.add_argument("--donors-per-recipient", type=int, default=25)
     ap.add_argument(
         "--candidate-multiplier",
         type=int,
@@ -555,6 +843,15 @@ def main() -> None:
         "around OSM fetch/empty-interior skips",
     )
     ap.add_argument("--out", type=Path, default=Path("data/benchmarks/gw_pair_matrix.parquet"))
+    ap.add_argument(
+        "--utm-zone", type=int, default=None,
+        help="run over the provisioned ZAF+KEN shortlist restricted to this UTM EPSG (e.g. 32735 "
+             "= Gauteng, 32734 = Cape Town) instead of the cached Cape Town city parquets. One "
+             "zone at a time because KblockSource assigns a single estimate_utm_crs per parquet")
+    ap.add_argument(
+        "--desire-source", choices=("pbf", "overpass"), default="pbf",
+        help="where donor footpaths come from. pbf (default) reads the local Geofabrik extract "
+             "once into memory and windows it per donor -- no network; overpass hits the live API")
     ap.add_argument(
         "--rank1-scaling",
         type=str,
@@ -581,8 +878,10 @@ def main() -> None:
 
     print("loading pools...")
     t_load = time.time()
-    blocks, blocks_gdf, signatures = load_pools()
-    print(f"  {len(blocks)} qualified Cape Town blocks in {time.time() - t_load:.1f}s")
+    pools = load_pools(source=zone_source(args.utm_zone) if args.utm_zone else None)
+    blocks, blocks_gdf, signatures = pools.blocks, pools.blocks_gdf, pools.signatures
+    where = f"UTM {args.utm_zone}" if args.utm_zone else "Cape Town"
+    print(f"  {len(blocks)} screened {where} blocks in {time.time() - t_load:.1f}s")
 
     if args.rank1_scaling is not None:
         sizes = [int(s) for s in args.rank1_scaling.split(",")]
@@ -595,9 +894,13 @@ def main() -> None:
         return
 
     n_recipients = max(1, -(-args.pairs // args.donors_per_recipient))  # ceil
-    recipient_idx = _select_recipient_indices(blocks, n_recipients)
+    # Recipients come from the SCREENED set, donors from the donatable set -- different roles,
+    # different requirements. See Pools.
+    parcel_counts = [float(len(b.parcels)) for b in blocks]
+    recipient_idx = evenly_spaced(pools.recipients, parcel_counts, n_recipients)
+    donor_set = set(pools.donors)
 
-    source = OSMDesireLines()
+    source = desire_source(args.desire_source, iso_of(blocks))
     donor_cache: dict[str, tuple[str, gpd.GeoDataFrame | None]] = {}
 
     # Resume support: this process has no reliable long-lived background execution in this
@@ -641,7 +944,10 @@ def main() -> None:
         if len(rows) >= args.pairs:
             break
         recipient = blocks[i]
-        eligible = exclusion_holdout(blocks_gdf, i, radius_m=args.exclusion_radius_m)
+        eligible = [j for j in exclusion_holdout(blocks_gdf, i, radius_m=args.exclusion_radius_m)
+                    if j in donor_set]
+        if not eligible:
+            continue
         n_want = min(args.donors_per_recipient, args.pairs - len(rows))
         candidates = _select_donor_candidates(
             recipient, eligible, blocks, signatures, n_want * args.candidate_multiplier

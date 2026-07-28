@@ -18,6 +18,26 @@ from pyproj import CRS
 
 _Identity = tuple[object, ...]
 
+# Absolute floor for the density_compactness metric (n/P², units m^-2). Mirrored by
+# conf/metric/density_compactness.yaml; tests/test_metric.py fails if they drift.
+#
+# CALIBRATED, not chosen. The gate used to be `percentile 30`, which was only ever meant as the
+# instrument for finding an absolute threshold -- and a percentile cannot BE the threshold,
+# because it re-defines the population every time the corpus changes. Measured: Cape Town's
+# percentile-30 cut (n/P² = 1.98e-4) selects 7.6% of the ZAF+KEN censused corpus, so "top 30%"
+# means two different things on the two corpora, off by a factor of four.
+#
+# 3.55e-4 is Cape Town's percentile-10 cut, chosen because that is where the pool's TRUE peel
+# depth steps up -- median depth 3 at the 30% and 20% cuts, 4 from 10% on, with the share at
+# depth>=4 going 37% -> 43% -> 50% -> 55% (5%) -> 60% (2%). Tightening past 10% keeps buying
+# depth, but slowly, while the pool shrinks fast (1,646 -> 823 -> 330 Cape Town blocks).
+#
+# Sanity check on the magnitude: for a compact block P² is 16A (square) to 4πA (circle), so this
+# floor is roughly a density of 4,500-5,700 buildings/km² -- an informal-settlement density, and
+# well above the 95th percentile of the rural district polygons the census found (see
+# notes/2026-07-28-osm-census-results.md).
+DENSITY_COMPACTNESS_FLOOR = 3.55e-4
+
 
 def _cols(blocks: GeoDataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
     """(count, area, perim) Series from the free kblock columns -- perimeter in a metric CRS so it's

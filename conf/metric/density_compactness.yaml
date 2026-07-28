@@ -1,8 +1,17 @@
 # @package _global_
 # Dense, compact fabric from geometry alone (no peel): density × compactness = n/P². This is a
 # peel-free metric (needs_peel=False), so the proxy pre-filter is SKIPPED and the gate is the ONLY
-# selector -- it must be a real cut, not a pass-through. Percentile 30 keeps the tightest-densest
-# ~third of eligible blocks by n/P².
+# selector -- it must be a real cut, not a pass-through.
+#
+# The gate is ABSOLUTE, not a percentile. A percentile re-defines the population every time the
+# corpus changes: Cape Town's old percentile-30 cut selects 7.6% of the ZAF+KEN censused corpus,
+# so "the tightest-densest third" meant two different things off by a factor of four. The
+# percentile was only ever the instrument for calibrating this number, never the criterion itself.
+#
+# 3.55e-4 == Cape Town's percentile-10 cut, picked where the pool's true peel depth steps up.
+# reblock.metric.DENSITY_COMPACTNESS_FLOOR is the Python mirror and
+# tests/test_metric.py::test_config_floor_matches_python_definition fails if they drift; the full
+# calibration table lives in that constant's comment.
 metric:
   _target_: reblock.metric.Product
   name: density_compactness
@@ -10,4 +19,4 @@ metric:
     - {_target_: reblock.metric.Density}
     - {_target_: reblock.metric.Compactness}
   _convert_: all
-metric_gate: {_target_: reblock.metric.Gate, kind: percentile, value: 30.0}
+metric_gate: {_target_: reblock.metric.Gate, kind: absolute, value: 3.55e-4}
