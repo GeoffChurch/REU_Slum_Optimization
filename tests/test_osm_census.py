@@ -121,8 +121,10 @@ def _prepare_fake_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, n_block
     blocks = gpd.GeoDataFrame(
         {
             "block_id": [f"b{i}" for i in range(n_blocks)],
-            "building_count": [10] * n_blocks,
-            "k_complexity": [1] * n_blocks,
+            # Above the default --min-k / --min-buildings floors, so the tests that are about
+            # --limit and resume exercise the real default path instead of an all-dropped corpus.
+            "building_count": [50] * n_blocks,
+            "k_complexity": [3] * n_blocks,
         },
         geometry=[
             Polygon(
@@ -181,3 +183,106 @@ def test_resumed_run_skips_already_censused_blocks_and_appends_new_ones(
     assert set(second["block_id"]) == {f"b{i}" for i in range(10)}
     # No duplicate rows for blocks the first run already censused.
     assert second["block_id"].is_unique
+
+
+def test_prefilter_drops_below_either_floor_and_keeps_the_rest() -> None:
+    """Both floors must bind independently, and a missing value must FAIL the filter -- a block
+    with no recorded building_count cannot be shown to clear it."""
+    blocks = gpd.GeoDataFrame(
+        {
+            "block_id": ["keep", "low_k", "few_buildings", "nan_count", "nan_k"],
+            "building_count": [50, 50, 39, None, 50],
+            "k_complexity": [3, 2, 3, 3, None],
+        },
+        geometry=[Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])] * 5,
+        crs=4326,
+    )
+    kept = osm_census._prefilter(blocks, min_k=3, min_buildings=40)
+    assert list(kept["block_id"]) == ["keep"]
+
+    # 0 disables each floor independently -- including its NaN rejection, which is why `nan_k`
+    # survives a disabled k floor and `nan_count` survives a disabled building floor.
+    assert set(osm_census._prefilter(blocks, 0, 40)["block_id"]) == {"keep", "low_k", "nan_k"}
+    assert set(osm_census._prefilter(blocks, 3, 0)["block_id"]) == {
+        "keep", "few_buildings", "nan_count"}
+    assert len(osm_census._prefilter(blocks, 0, 0)) == 5
+
+
+def test_prefilter_actually_runs_in_the_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The filter must be wired into the batch loop, not merely defined: raising --min-buildings
+    above the fixture's 50 must census nothing. The drop is reported, never silent -- a census
+    that quietly skipped 96% of its input would look identical to one that found nothing there."""
+    _prepare_fake_cache(tmp_path, monkeypatch, n_blocks=10)
+    monkeypatch.setattr(sys, "argv", ["osm_census", "--iso", "ZAF", "--min-buildings", "51"])
+    osm_census.main()
+    assert not (tmp_path / "osm_coverage_ZAF.parquet").exists()
+    assert "read 10, kept 0, dropped 10 (100.0%)" in capsys.readouterr().out
+
+    # Lowering the floor to 50 admits the same blocks -- so the emptiness above was the filter,
+    # not a broken fixture.
+    monkeypatch.setattr(sys, "argv", ["osm_census", "--iso", "ZAF", "--min-buildings", "50"])
+    osm_census.main()
+    assert len(pd.read_parquet(tmp_path / "osm_coverage_ZAF.parquet")) == 10
+
+
+def test_tolerances_flag_selects_which_columns_are_computed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The corpus run pays for one tolerance, not three. The requested one must be present and
+    the others absent -- an unused column here is 3x the census's whole per-block budget."""
+    _prepare_fake_cache(tmp_path, monkeypatch, n_blocks=3)
+    monkeypatch.setattr(sys, "argv", ["osm_census", "--iso", "ZAF", "--tolerances", "0.5"])
+    osm_census.main()
+    cols = set(pd.read_parquet(tmp_path / "osm_coverage_ZAF.parquet").columns)
+    assert "n_interior_segments_0.5" in cols
+    assert "n_interior_segments_2.0" not in cols
+    assert "n_interior_segments_5.0" not in cols
+
+
+def test_resume_refuses_a_checkpoint_written_with_different_tolerances(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resuming with tolerances the checkpoint lacks would silently concatenate rows carrying NaN
+    for whichever columns each half is missing. It must refuse instead."""
+    _prepare_fake_cache(tmp_path, monkeypatch, n_blocks=6)
+    monkeypatch.setattr(
+        sys, "argv", ["osm_census", "--iso", "ZAF", "--limit", "3", "--tolerances", "0.5"]
+    )
+    osm_census.main()
+
+    monkeypatch.setattr(
+        sys, "argv", ["osm_census", "--iso", "ZAF", "--tolerances", "0.5,2.0"]
+    )
+    with pytest.raises(SystemExit, match="different --tolerances"):
+        osm_census.main()
+
+    # The refusal must not have damaged the existing checkpoint.
+    assert len(pd.read_parquet(tmp_path / "osm_coverage_ZAF.parquet")) == 3
+
+
+def test_checkpoint_write_is_atomic_under_a_mid_write_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A kill during a checkpoint must not corrupt the output: the resume path reads it
+    unconditionally, so a truncated file would poison every subsequent resume, not just lose one
+    batch. The temp file is written first and `os.replace`d in, so the crash leaves the previous
+    good parquet intact."""
+    out = tmp_path / "osm_coverage_ZAF.parquet"
+    good = [{"block_id": "a", "n_interior_segments_0.5": 1}]
+    osm_census._checkpoint(good, out)
+    assert list(pd.read_parquet(out)["block_id"]) == ["a"]
+
+    def die_mid_write(self: pd.DataFrame, path: Path, *a: object, **k: object) -> None:
+        # Write real bytes, then die before os.replace -- the shape of a kill during the write.
+        Path(path).write_bytes(b"PAR1-truncated-garbage")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", die_mid_write)
+    with pytest.raises(KeyboardInterrupt):
+        osm_census._checkpoint(good + [{"block_id": "b", "n_interior_segments_0.5": 0}], out)
+
+    monkeypatch.undo()
+    # The old checkpoint is still readable and still complete.
+    assert list(pd.read_parquet(out)["block_id"]) == ["a"]
