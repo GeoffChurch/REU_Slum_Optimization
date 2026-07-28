@@ -39,16 +39,23 @@ def interiority_row(
     footpaths: gpd.GeoDataFrame,
     near_miss: gpd.GeoDataFrame,
     crs: CRS,
+    *,
+    tolerances: Sequence[float] = TOLERANCES,
 ) -> dict[str, object]:
-    """One census row: interior segment count and length at every tolerance, for the primary
-    footpath tags and (separately) the near-miss tags.
+    """One census row: interior segment count and length at each requested tolerance, for the
+    primary footpath tags and (separately) the near-miss tags.
+
+    `tolerances` defaults to the full diagnostic sweep. A corpus-wide run passes a single value:
+    the 400-block spike found 0.5 -> 5 m moves the coverage gate by only 2.6 points while total
+    interior length drops 17.8%, so the sweep informs donor-quality ranking, not the census, and
+    paying for it 1.8M times over buys nothing.
 
     For a kblock block `streets` IS the outline, so the street corridor is `boundary.boundary`.
     """
     streets = boundary.boundary
     row: dict[str, object] = {"block_id": block_id, "boundary_length_m": float(streets.length)}
     for label, lines in (("interior", footpaths), ("near_miss", near_miss)):
-        for tol in TOLERANCES:
+        for tol in tolerances:
             kept = interior_desire_lines(lines, boundary, streets, crs, tol=tol)
             row[f"n_{label}_segments_{tol}"] = int(len(kept))
             row[f"{label}_length_m_{tol}"] = (
@@ -165,9 +172,14 @@ def census_rows(
     footpaths: gpd.GeoDataFrame,
     near_miss: gpd.GeoDataFrame,
     epsg: int,
+    *,
+    tolerances: Sequence[float] = TOLERANCES,
 ) -> list[dict[str, object]]:
     """Census rows for one UTM batch. `blocks` is in EPSG:4326; everything is reprojected to
-    `epsg` once, then each block queries an STRtree rather than re-reading the layer."""
+    `epsg` once, then each block queries an STRtree rather than re-reading the layer.
+
+    `tolerances` is forwarded to `interiority_row` -- see there for why a corpus run passes one.
+    """
     crs_m = CRS.from_epsg(epsg)
     blocks_m = blocks.to_crs(crs_m)
     fp_m = (footpaths.to_crs(crs_m) if len(footpaths)
@@ -183,7 +195,8 @@ def census_rows(
                    else gpd.GeoDataFrame(geometry=[], crs=crs_m))
         near_nm = (nm_m.iloc[nm_tree.query(geom)] if nm_tree is not None
                    else gpd.GeoDataFrame(geometry=[], crs=crs_m))
-        row = interiority_row(str(block_id), geom, near_fp, near_nm, crs_m)
+        row = interiority_row(str(block_id), geom, near_fp, near_nm, crs_m,
+                              tolerances=tolerances)
         # The qualified filter is a building-count band, which does NOT bound block AREA: the
         # spike found 5 of 251 covered blocks carrying >5 km of "interior" footpath on 90-293
         # buildings (max 26.5 km on 258 buildings, vs a 356 m median) -- huge polygons where the
