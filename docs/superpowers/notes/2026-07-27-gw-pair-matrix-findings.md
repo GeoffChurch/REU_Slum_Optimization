@@ -21,11 +21,24 @@ modest, not dramatic, and this dataset is *consistent with*, not contradictory t
 study's direction. The pooled correlation is still reported below — but labeled as the artifact it
 is, not the headline. No parquet rows changed; only the analysis of them did.
 
+**CORRECTION 2 (same day, after the POT cross-validation):** `ot_gw._gw_gradient_cost` was missing
+the factor of 2 that Peyré–Cuturi–Solomon Prop. 2 carries (and that the paper's own statement
+omits — POT ships the same correction with a comment saying so). Because Sinkhorn at `(cost, ε, τ)`
+and `(2·cost, 2ε, 2τ)` share an argmin, the solver silently ran at **twice** the requested entropic
+regularization: nominal ε=0.01 bought an effective 0.02, outside the ε ≤ 0.01 this note calls
+non-negotiable. The parquet has been **regenerated end-to-end** at the corrected calibration and
+every number below is from that run. The correction *strengthened* the result — β=-9.58 at p=0.014
+(cluster-permutation 0.011), against β=-9.23 at p=0.026 before — and improved the transplants
+themselves, with `perm_gap` better on 63 of the 95 rows common to both matrices (Wilcoxon p=0.005).
+Full write-up, including the ε ladder showing the estimate converges by the corrected ε=0.01 and
+only vanishes at 4× that: `docs/superpowers/notes/2026-07-27-gw-pot-crossvalidation.md`.
+
 ## What this is
 
 For 100 (recipient, donor) pairs of real Cape Town blocks: fit a real entropic Gromov-Wasserstein
-correspondence (ε=0.01, τ=1.0 — the note's own ablation found ε=0.05 already collapses the
-transported network to ~3% of its proper length, so ε≤0.01 was non-negotiable), transplant the
+correspondence (ε=0.01, τ=1.0 in the corrected, POT-standard convention — see CORRECTION 2; the
+2026-07-23 note's ablation found ε=0.05 already collapses the transported network to ~3% of its
+proper length, so ε≤0.01 was non-negotiable), transplant the
 donor's real interior OSM footpaths through it, gap-snap the result onto the recipient's own
 `ChordSubstrate`, and score it against a length-matched direct `ClearanceReblocker` solve using the
 repo's real `permeability` and `displacement` metrics. `real_gw_dist` (the exact, non-linearized GW
@@ -165,14 +178,14 @@ data/benchmarks/gw_pair_matrix.parquet` (`analyze_fidelity_vs_distance` in `scri
 — nothing here required a new GW fit or touched the parquet's rows.
 
 **Step 1 — how clustered is it?** `ICC(1)` of `perm_gap` grouped by recipient (Fisher's
-unbalanced-design formula) = **0.2517**; the raw ANOVA R² / η² (SSB/SST, uncorrected for
+unbalanced-design formula) = **0.3288**; the raw ANOVA R² / η² (SSB/SST, uncorrected for
 within-group noise — a related but distinct "how much variance is between-group" statistic, easy
-to conflate with ICC(1) under the same informal label) = **0.3890**. Either way: a substantial
+to conflate with ICC(1) under the same informal label) = **0.4503**. Either way: a substantial
 fraction of `perm_gap`'s variance sits between recipients rather than being donor-driven noise —
 enough to make pooling across recipients unsafe.
 
 **Step 2 — the pooled (wrong) headline.** `corr(real_gw_dist, perm_gap)` over all 100 rows =
-**0.0065** — indistinguishable from zero. *This is the number the first version of this note
+**-0.0496** — indistinguishable from zero. *This is the number the first version of this note
 reported as "no measurable relationship." It is an artifact of the clustering above, not evidence
 of no effect.*
 
@@ -180,38 +193,40 @@ of no effect.*
 recipient (the fixed-effects / "correct for cluster" transform) and regress:
 
 ```
-within-recipient beta (perm_gap ~ real_gw_dist) = -9.2286
-SE = 4.0713, t = -2.2667, dof = 79 (= 100 rows - 20 recipients - 1)
-p (t-distribution)      = 0.0261
-p (cluster permutation, 5000 within-recipient shuffles) = 0.0356
+within-recipient beta (perm_gap ~ real_gw_dist) = -9.5817
+SE = 3.8151, t = -2.5115, dof = 79 (= 100 rows - 20 recipients - 1)
+p (t-distribution)      = 0.0141
+p (cluster permutation, 5000 within-recipient shuffles) = 0.0110
 ```
+
+The estimator itself was later cross-checked against `statsmodels` OLS with recipient dummies,
+which reproduces β, SE, t, dof and p exactly. Cluster-robust standard errors — the more defensible
+choice for 20 clusters — widen the SE somewhat without changing the verdict.
 
 **β is negative and significant: within a given recipient, a smaller `real_gw_dist` (closer donor)
 is associated with a larger `perm_gap` (better transplant fidelity relative to direct clearance).**
 The permutation test (shuffle `real_gw_dist` *within* each recipient's own rows only, preserving
 every recipient's own value set and every recipient's own `perm_gap` values, 5000 draws) confirms
-this isn't a t-distribution artifact of a small cluster count: p=0.036, consistent with the
-parametric p=0.026.
+this isn't a t-distribution artifact of a small cluster count: p=0.011, consistent with the
+parametric p=0.014.
 
 **Step 4 — the cancelling counterpart.** The recipient-level aggregate correlation (one point per
-recipient — mean `real_gw_dist` vs. mean `perm_gap`, n=20) = **+0.2972**. This is the *positive*
+recipient — mean `real_gw_dist` vs. mean `perm_gap`, n=20) = **+0.1900**. This is the *positive*
 between-recipient trend that, pooled together with the negative within-recipient rows, washes the
 pooled correlation down to ~0 (Step 2). Both trends are real; they answer different questions
 ("does a recipient with, on average, farther-away sampled donors also tend to have higher
 `perm_gap` for other reasons" vs. "for one recipient, does its closer donor beat its farther
 donor") and pooling them is the mistake, not either number individually.
 
-**Robustness.** Excluding the 4 zero-road-length rows: β=-9.5501 (p=0.0273 by the same t-based
-estimator here; both this run's and the original review's p differ slightly in exact value for
-this secondary check depending on variance-estimator details, but both are comfortably < 0.05 and
-the same sign/magnitude as the full-sample β). Leave-one-recipient-out jackknife: β stays in
-**[-10.87, -7.21]** across all 20 holdouts — always negative, never close to flipping sign.
+**Robustness.** Excluding the zero-road-length rows: β=-9.5933 (p=0.0147). Leave-one-recipient-out
+jackknife: β stays in **[-13.02, -7.73]** across all 20 holdouts — always negative, never close to
+flipping sign.
 
 **Range restriction (why the effect looks modest, not why it might not exist).**
-`real_gw_dist` spans only **0.0108 to 0.0512** (mean 0.0256, sd 0.0074) — a 4.75x max/min ratio.
-The `feature_dist` proxy used to *stratify* donor selection spans a much wider 29.70x ratio
-(0.182 to 5.405) on the identical 100 pairs, and the two are only moderately correlated
-(r=0.5959). This means stratifying evenly across `feature_dist` rank did **not** transfer
+`real_gw_dist` spans only **0.0064 to 0.0443** (mean 0.0184, sd 0.0067) — a 6.96x max/min ratio.
+The `feature_dist` proxy used to *stratify* donor selection spans a much wider 28.50x ratio
+(0.182 to 5.186) on the identical 100 pairs, and the two are only moderately correlated
+(r=0.6301). This means stratifying evenly across `feature_dist` rank did **not** transfer
 proportionally into a correspondingly wide `real_gw_dist` spread — the achieved range likely
 undersamples the true achievable range in the qualified pool. Range restriction of this kind
 attenuates a detectable correlation/slope's *magnitude* (a wider range would very plausibly
@@ -315,13 +330,13 @@ added no `src/`/`tests/` changes, only `scripts/pair_matrix.py` and this note + 
 - **No conclusion is asserted beyond what n=100 (20 clusters) supports.** The within-recipient
   effect (§1) is real and significant by two independent tests, but it is still one pool (Cape
   Town), one donor-material type (`osm_footpaths`), one exclusion radius (2000m), one metric
-  pairing (`permeability` + `displacement`), and a restricted `real_gw_dist` range (4.75x max/min).
+  pairing (`permeability` + `displacement`), and a restricted `real_gw_dist` range (6.96x max/min).
   `donor_type` is a column specifically so Phase 3 can extend this same matrix with other donor
   material rather than re-deriving these caveats from scratch.
-- **Two statistics both get called "ICC" and disagree (0.2517 vs 0.3890) — this is a labeling
+- **Two statistics both get called "ICC" and disagree (0.3288 vs 0.4503) — this is a labeling
   ambiguity, not a bug.** `icc_one_way` computes the standard unbalanced-design-corrected Fisher
-  ICC(1) (0.2517); `variance_explained_by_recipient` computes the raw one-way-ANOVA R²/η² (SSB/SST,
-  0.3890) that some sources call "ICC" more loosely. The corrected estimator is smaller because it
+  ICC(1) (0.3288); `variance_explained_by_recipient` computes the raw one-way-ANOVA R²/η² (SSB/SST,
+  0.4503) that some sources call "ICC" more loosely. The corrected estimator is smaller because it
   accounts for the fact that even pure within-group noise produces *some* apparent between-group
   dispersion in a finite sample of small (mostly n=5) groups; the raw ratio does not. Both point the
   same direction (substantial clustering) and both are reported (`scripts/pair_matrix.py`'s

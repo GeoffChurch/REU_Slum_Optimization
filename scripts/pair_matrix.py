@@ -77,7 +77,10 @@ def _ot() -> SimpleNamespace:
             "fresh checkout. Rebuild it from "
             "docs/superpowers/notes/2026-07-23-ot-road-transplant.md §1 (entropic GW: "
             "projected-gradient outer loop + log-domain Sinkhorn inner, eps=0.01, tau=1.0) "
-            "before running this script."
+            "AND docs/superpowers/notes/2026-07-27-gw-pot-crossvalidation.md, which corrects "
+            "that recipe: the outer loop's cost is the GW GRADIENT, 2 * (constC - 2 c1 pi c2^T), "
+            "not the undoubled tensor. Omitting the 2 silently doubles both eps and tau (same "
+            "argmin under Sinkhorn) and does not reproduce the committed matrix."
         )
     if str(_OT_DIR) not in sys.path:
         sys.path.insert(0, str(_OT_DIR))

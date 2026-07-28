@@ -319,7 +319,10 @@ one `/tmp` reclaim from gone. Copy it into the working scratchpad first.
 
 **Timing pilot before the matrix.** 20 pairs, measured end to end. Each pair needs a real entropic
 GW fit at ε ≤ 0.01 (the note's ablation makes that mandatory; log-domain Sinkhorn converges slowly
-there), plus transplant, snap, a length-matched clearance solve, and permeability on both. v4's
+there), plus transplant, snap, a length-matched clearance solve, and permeability on both. This
+constraint turned out to be well chosen and was, at the time it was written, being violated: the
+solver was silently running at 2ε until the Prop.-2 gradient factor was fixed on 2026-07-27, and
+the fidelity effect is not detectable at 4ε. See `notes/2026-07-27-gw-pot-crossvalidation.md`. v4's
 per-recipient cost also included real-GW fits against a 20-candidate shortlist. Nothing downstream
 should be sized before this number exists.
 
