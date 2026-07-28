@@ -7,6 +7,20 @@ the last unit, and the one that turns the 2026-07-23 scratchpad spike
 (`docs/superpowers/notes/2026-07-23-ot-road-transplant.md`) into a reusable, re-scoreable benchmark
 instead of a one-off finding.
 
+**CORRECTION (same day, fix round 1):** the first version of this note's §1 reported a bare pooled
+Pearson correlation (`corr(real_gw_dist, perm_gap)` ≈ 0.006) as "no measurable relationship" and
+claimed this "closes" / "contradicts" the prior 2026-07-23 study. **That conclusion was wrong.** The
+100 rows are 20 recipients × ~5 donors each — a clustered sample, not 100 independent draws — and
+pooling them lets a positive *between-recipient* trend cancel a negative *within-recipient* one
+(a textbook Simpson's-paradox mask). A clustering-aware re-analysis (§1 below, code in
+`scripts/pair_matrix.py`'s `analyze_fidelity_vs_distance`) finds the opposite of what was first
+published: **within a given recipient, a closer donor produces a measurably better transplant**
+(fixed-effects slope β=-9.23 on `perm_gap` per unit `real_gw_dist`, p≈0.026 parametric / 0.036
+cluster-permutation, robust to jackknife and to dropping the zero-length rows). The effect is
+modest, not dramatic, and this dataset is *consistent with*, not contradictory to, the prior
+study's direction. The pooled correlation is still reported below — but labeled as the artifact it
+is, not the headline. No parquet rows changed; only the analysis of them did.
+
 ## What this is
 
 For 100 (recipient, donor) pairs of real Cape Town blocks: fit a real entropic Gromov-Wasserstein
@@ -140,36 +154,86 @@ see "Concerns" below.)
 
 ### 1. Fidelity vs. GW distance
 
-`corr(real_gw_dist, perm_gap)` = **0.006** (Spearman 0.022) across the 100 pairs — indistinguishable
-from zero. Binning by `real_gw_dist` quartile:
+**The 100 rows are clustered (20 recipients × ~5 donors each), not 100 independent draws, and the
+naive pooled correlation is unsafe to read at face value.** Recipients differ systematically in
+both their achievable GW-distance range and their baseline `perm_gap` level; pooling conflates
+"does a closer donor transplant better for a given recipient" with "do recipients whose donors
+happen to sit at larger GW distances also happen to have larger `perm_gap` for other reasons." This
+is a textbook Simpson's-paradox setup, and it is exactly what happened here. All of the numbers
+below are reproducible via `pixi run python -m scripts.pair_matrix --analyze --out
+data/benchmarks/gw_pair_matrix.parquet` (`analyze_fidelity_vs_distance` in `scripts/pair_matrix.py`)
+— nothing here required a new GW fit or touched the parquet's rows.
 
-| GW-distance quartile | n | mean perm_gap | median perm_gap |
-|---|---|---|---|
-| Q1 (closest) | 25 | -0.189 | -0.164 |
-| Q2 | 25 | -0.147 | -0.106 |
-| Q3 | 25 | -0.140 | 0.000 |
-| Q4 (farthest) | 25 | -0.154 | -0.130 |
+**Step 1 — how clustered is it?** `ICC(1)` of `perm_gap` grouped by recipient (Fisher's
+unbalanced-design formula) = **0.2517**; the raw ANOVA R² / η² (SSB/SST, uncorrected for
+within-group noise — a related but distinct "how much variance is between-group" statistic, easy
+to conflate with ICC(1) under the same informal label) = **0.3890**. Either way: a substantial
+fraction of `perm_gap`'s variance sits between recipients rather than being donor-driven noise —
+enough to make pooling across recipients unsafe.
 
-**No monotone trend, and no clean zero-crossing as a function of real GW distance** — `perm_gap` is
-negative (transplant underperforms length-matched direct clearance) across every quartile, hovering
-in a narrow band regardless of how similar the donor is. This directly answers the open question the
-prior 2026-07-23 study left hanging (transplant quality on a pool of only 111 blocks, sampled at 3
-points): with 100 real pairs spanning the pool's actual GW-distance range, **transplant quality does
-not measurably improve as the donor gets more similar.** The weak (r=0.11, still not significant at
-n=100) positive trend against the cheap `feature_dist` proxy instead of real GW distance — closer-in-
-feature-space donors trending *slightly worse*, not better — is the opposite sign from the naive
-expectation and is best read as noise, not a real inverted effect; it does at least confirm the two
-distances aren't interchangeable (`corr(real_gw_dist, feature_dist)` = 0.596 — correlated but far from
-identical, which is exactly why this matrix records both instead of only the cheap proxy).
+**Step 2 — the pooled (wrong) headline.** `corr(real_gw_dist, perm_gap)` over all 100 rows =
+**0.0065** — indistinguishable from zero. *This is the number the first version of this note
+reported as "no measurable relationship." It is an artifact of the clustering above, not evidence
+of no effect.*
 
-Overall `perm_gap` is negative on average (mean -0.157, median -0.124; only 32/100 pairs have
-`perm_gap > 0`), consistent with the 2026-07-23 note's single-donor conclusion: direct clearance
-usually wins. `perm_direct` averages 0.527 vs. `perm_proposal`'s 0.369; displacement is roughly a
-wash (0.085 direct vs. 0.093 transplant). **n=100 is a real sample, not a toy one, and it says
-plainly: real-GW-distance-based donor similarity is not, on this evidence, a usable predictor of
-transplant fidelity.** This closes the "does it improve with more similar donors" question the prior
-study left open — the answer is no, at least for this donor material (real OSM footpaths) and this
-recipient/donor pool.
+**Step 3 — the within-recipient (correct) estimate.** Demean both `real_gw_dist` and `perm_gap` by
+recipient (the fixed-effects / "correct for cluster" transform) and regress:
+
+```
+within-recipient beta (perm_gap ~ real_gw_dist) = -9.2286
+SE = 4.0713, t = -2.2667, dof = 79 (= 100 rows - 20 recipients - 1)
+p (t-distribution)      = 0.0261
+p (cluster permutation, 5000 within-recipient shuffles) = 0.0356
+```
+
+**β is negative and significant: within a given recipient, a smaller `real_gw_dist` (closer donor)
+is associated with a larger `perm_gap` (better transplant fidelity relative to direct clearance).**
+The permutation test (shuffle `real_gw_dist` *within* each recipient's own rows only, preserving
+every recipient's own value set and every recipient's own `perm_gap` values, 5000 draws) confirms
+this isn't a t-distribution artifact of a small cluster count: p=0.036, consistent with the
+parametric p=0.026.
+
+**Step 4 — the cancelling counterpart.** The recipient-level aggregate correlation (one point per
+recipient — mean `real_gw_dist` vs. mean `perm_gap`, n=20) = **+0.2972**. This is the *positive*
+between-recipient trend that, pooled together with the negative within-recipient rows, washes the
+pooled correlation down to ~0 (Step 2). Both trends are real; they answer different questions
+("does a recipient with, on average, farther-away sampled donors also tend to have higher
+`perm_gap` for other reasons" vs. "for one recipient, does its closer donor beat its farther
+donor") and pooling them is the mistake, not either number individually.
+
+**Robustness.** Excluding the 4 zero-road-length rows: β=-9.5501 (p=0.0273 by the same t-based
+estimator here; both this run's and the original review's p differ slightly in exact value for
+this secondary check depending on variance-estimator details, but both are comfortably < 0.05 and
+the same sign/magnitude as the full-sample β). Leave-one-recipient-out jackknife: β stays in
+**[-10.87, -7.21]** across all 20 holdouts — always negative, never close to flipping sign.
+
+**Range restriction (why the effect looks modest, not why it might not exist).**
+`real_gw_dist` spans only **0.0108 to 0.0512** (mean 0.0256, sd 0.0074) — a 4.75x max/min ratio.
+The `feature_dist` proxy used to *stratify* donor selection spans a much wider 29.70x ratio
+(0.182 to 5.405) on the identical 100 pairs, and the two are only moderately correlated
+(r=0.5959). This means stratifying evenly across `feature_dist` rank did **not** transfer
+proportionally into a correspondingly wide `real_gw_dist` spread — the achieved range likely
+undersamples the true achievable range in the qualified pool. Range restriction of this kind
+attenuates a detectable correlation/slope's *magnitude* (a wider range would very plausibly
+sharpen this signal further), but it is not a reason to doubt that the signal *exists* — the
+within-recipient effect is already detectable, at conventional significance, inside this
+restricted range.
+
+**Bottom line:** the corrected finding is the *opposite* of what the first version of this note
+claimed. Within a recipient, a closer (lower real-GW-distance) donor does transplant measurably
+better — modestly, not dramatically, and consistent with (not contradicting) the 2026-07-23 prior
+study's direction. This does **not** "close" the open question from that study in the sense of
+settling it decisively (n=20 recipients is a real but not enormous cluster count, and the achieved
+`real_gw_dist` range is restricted, per above) — but it is the first evidence, at n=100 pairs
+across 20 recipients rather than the prior study's handful of manual comparisons, that donor
+similarity is a genuine (if modest) predictor of transplant fidelity, not merely noise.
+
+Overall `perm_gap` is still negative on average (mean -0.157, median -0.124; only 32/100 pairs have
+`perm_gap > 0`) — direct clearance usually wins outright, consistent with the 2026-07-23 note's
+single-donor conclusion. `perm_direct` averages 0.527 vs. `perm_proposal`'s 0.369; displacement is
+roughly a wash (0.085 direct vs. 0.093 transplant). The within-recipient finding is about the
+*slope* of fidelity vs. distance, not about transplant beating clearance outright — those are
+different questions, and this dataset speaks only to the first.
 
 ### 2. Pool-size → rank-1-distance exponent
 
@@ -213,7 +277,9 @@ added no `src/`/`tests/` changes, only `scripts/pair_matrix.py` and this note + 
 - `scripts/pair_matrix.py` (new) — the benchmark driver; module-invoked
   (`pixi run python -m scripts.pair_matrix ...`), fails clearly naming this note's §"Two operational
   surprises" / `docs/superpowers/notes/2026-07-23-ot-road-transplant.md` §1 if `scratchpad/ot/` is
-  missing.
+  missing. Also holds the clustering-aware analysis (`--analyze`) and the pool-size scaling
+  measurement (`--rank1-scaling`) used to produce every number in this note, and (going forward)
+  checkpoints skip counts to a `<out-stem>.skips.json` sidecar the same way rows are checkpointed.
 - `data/benchmarks/gw_pair_matrix.parquet` (new, committed) — 100 rows, columns `recipient, donor,
   donor_type, real_gw_dist, feature_dist, perm_gap, perm_proposal, perm_direct,
   displacement_proposal, displacement_direct, road_len_m, wall_clock_s` (the last three are extras
@@ -246,9 +312,28 @@ added no `src/`/`tests/` changes, only `scripts/pair_matrix.py` and this note + 
   it again — it gets re-fetched (cache-hit, since the on-disk OSM cache persists) and re-skipped.
   This does not affect correctness (each skip is a genuine, freshly-evaluated candidate-slot
   decision for that recipient) but means the raw skip counts are not deduplicated by donor identity.
-- **No conclusion is asserted beyond what n=100 supports.** The near-zero fidelity/GW-distance
-  correlation is a real, moderately-powered result (n=100, not n=3), but it is still one pool
-  (Cape Town), one donor-material type (`osm_footpaths`), one exclusion radius (2000m), and one
-  metric pairing (`permeability` + `displacement`). `donor_type` is a column specifically so Phase 3
-  can extend this same matrix with other donor material rather than re-deriving these caveats from
-  scratch.
+- **No conclusion is asserted beyond what n=100 (20 clusters) supports.** The within-recipient
+  effect (§1) is real and significant by two independent tests, but it is still one pool (Cape
+  Town), one donor-material type (`osm_footpaths`), one exclusion radius (2000m), one metric
+  pairing (`permeability` + `displacement`), and a restricted `real_gw_dist` range (4.75x max/min).
+  `donor_type` is a column specifically so Phase 3 can extend this same matrix with other donor
+  material rather than re-deriving these caveats from scratch.
+- **Two statistics both get called "ICC" and disagree (0.2517 vs 0.3890) — this is a labeling
+  ambiguity, not a bug.** `icc_one_way` computes the standard unbalanced-design-corrected Fisher
+  ICC(1) (0.2517); `variance_explained_by_recipient` computes the raw one-way-ANOVA R²/η² (SSB/SST,
+  0.3890) that some sources call "ICC" more loosely. The corrected estimator is smaller because it
+  accounts for the fact that even pure within-group noise produces *some* apparent between-group
+  dispersion in a finite sample of small (mostly n=5) groups; the raw ratio does not. Both point the
+  same direction (substantial clustering) and both are reported (`scripts/pair_matrix.py`'s
+  `_print_analysis`) so a future reader isn't stuck reconciling two numbers with no explanation.
+- **Skip counts now persist across resumed invocations.** The original run lost chunk 1's skip
+  tally because `skip_counts` was process-local and only ever printed, never checkpointed --
+  exactly the failure mode the row-level checkpoint/resume was built to avoid, just applied to the
+  wrong variable. `scripts/pair_matrix.py` now mirrors the parquet's checkpoint-every-write pattern
+  for skips too: a `<out-stem>.skips.json` sidecar is loaded at start (if present) and rewritten
+  after every single skip, so a kill mid-run loses at most the skip in flight, and a later resumed
+  invocation's tally is added to the prior total rather than starting over. Verified end-to-end
+  against a scratch output path (not the committed parquet): a first invocation recorded 3 skips
+  into a fresh sidecar; a second, resumed invocation against the same `--out` re-attempted (and,
+  since `donor_cache` is still per-process, re-skipped) the same 3 donors, and the sidecar
+  correctly accumulated to 6 rather than resetting to 3.
