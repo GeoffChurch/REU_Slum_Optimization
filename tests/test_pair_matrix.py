@@ -7,10 +7,12 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pandas as pd
 import pytest
 
+from reblock.contracts import Block
 from scripts import pair_matrix
 
 
@@ -70,18 +72,22 @@ def test_ot_loader_still_raises_systemexit_when_scratchpad_missing(
         pair_matrix._ot()
 
 
+def _ids(*block_ids: str) -> list[Block]:
+    """Block stand-ins carrying only what `iso_of` reads."""
+    return cast("list[Block]", [SimpleNamespace(block_id=b) for b in block_ids])
+
+
 def test_iso_of_picks_the_extract_from_the_block_ids() -> None:
     """A PBF covers exactly its own extract, so a Kenyan pool pointed at the South Africa file
     does not error -- every donor comes back with no interior footpaths. The first Nairobi run
     reported `empty_interior: 90` and zero pairs, which reads as a fact about Nairobi and is
-    contradicted by the census. Derive the extract from the data, never by hand."""
-    zaf = [SimpleNamespace(block_id="ZAF.9.3.1_1_44882"), SimpleNamespace(block_id="ZAF.9.1_1_1")]
-    ken = [SimpleNamespace(block_id="KEN.1.1_1_100")]
-    assert pair_matrix.iso_of(zaf) == "ZAF"  # type: ignore[arg-type]
-    assert pair_matrix.iso_of(ken) == "KEN"  # type: ignore[arg-type]
+    contradicted by the census (56 of those blocks carry >=100 m each). Re-run against the Kenya
+    extract it produced 500 pairs and 7 skips. Derive the extract from the data, never by hand."""
+    assert pair_matrix.iso_of(_ids("ZAF.9.3.1_1_44882", "ZAF.9.1_1_1")) == "ZAF"
+    assert pair_matrix.iso_of(_ids("KEN.1.1_1_100")) == "KEN"
     assert pair_matrix.PBF_BY_ISO["KEN"] != pair_matrix.PBF_BY_ISO["ZAF"]
 
     with pytest.raises(SystemExit, match="spans multiple countries"):
-        pair_matrix.iso_of(zaf + ken)  # type: ignore[arg-type]
+        pair_matrix.iso_of(_ids("ZAF.9.3.1_1_44882", "KEN.1.1_1_100"))
     with pytest.raises(SystemExit, match="no Geofabrik extract"):
-        pair_matrix.iso_of([SimpleNamespace(block_id="BRA.1_1_1")])  # type: ignore[arg-type]
+        pair_matrix.iso_of(_ids("BRA.1_1_1"))

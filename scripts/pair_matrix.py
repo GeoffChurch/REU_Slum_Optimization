@@ -43,6 +43,7 @@ import json
 import sys
 import time
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -210,12 +211,65 @@ def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
     return float(displacement(pts, radii, roads, CORRIDOR_M) / n)
 
 
+@dataclass(frozen=True)
+class Pools:
+    """The materialized pool, with the two ROLES kept apart.
+
+    Recipients and donors have different requirements and were wrongly held to the same one. A
+    recipient needs building points and parcels -- it is a reblocking target, so it should be
+    whatever the screen says is worth reblocking. A donor needs interior footpaths -- it is
+    material to transplant, and nothing about being dense-and-compact itself is required.
+
+    Screening BOTH roles by n/P^2 is what starved every run so far of the only variable that
+    matters. Donor pools selected that way are morphologically near-identical to their recipients,
+    so `real_gw_dist` barely varies: the GW range ratio ran 8.96x / 4.54x / 1.71x across three
+    500-pair runs, and beta tracked it monotonically -- most negative and most precise where the
+    range was widest, and uninformative ([-19, +32]) where it was narrowest. Decoupling the roles
+    widens the corpus-wide donor pool 57x (247 -> 14,189).
+    """
+
+    blocks: list[Block]
+    blocks_gdf: gpd.GeoDataFrame
+    signatures: dict[str, np.ndarray]
+    recipients: list[int]
+    donors: list[int]
+
+
+def donatable_ids(iso: str, min_interior_m: float = 100.0) -> set[str]:
+    """Blocks the census says carry at least `min_interior_m` of interior footpath.
+
+    Read from the census rather than discovered by fetching: attempting a fetch per candidate is
+    what made donor slots so scarce (509 `empty_interior` skips for 68 usable pairs in Gauteng),
+    and the census already measured this for the whole corpus. Blocks absent from the census
+    failed its own prefilter (k_complexity >= 3, building_count >= 40) and are excluded -- they
+    are shallow or tiny, which is not donor material.
+    """
+    path = DEFAULT_CACHE / f"osm_coverage_{iso}.parquet"
+    if not path.exists():
+        raise SystemExit(
+            f"missing {path} -- run `python -m scripts.osm_census --iso {iso}` first; donor "
+            f"eligibility is read from the census, not discovered by fetching")
+    cen = pd.read_parquet(path, columns=["block_id", "census_failed", "interior_length_m_0.5"])
+    ok = (~cen["census_failed"]) & (cen["interior_length_m_0.5"] >= min_interior_m)
+    return set(cen.loc[ok, "block_id"].astype(str))
+
+
+def evenly_spaced(idx: list[int], key: list[float], n: int) -> list[int]:
+    """`n` of `idx` spanning `key`'s range: sort, then take evenly-spaced ranks (min, ..., max) --
+    not a random sample, so the matrix deliberately includes the extremes."""
+    order = sorted(idx, key=lambda i: key[i])
+    if n >= len(order):
+        return order
+    return [order[int(round(k))] for k in np.linspace(0, len(order) - 1, n)]
+
+
 def load_pools(
     city: str = "capetown", *, min_buildings: int = 30,
     screen: DenseCompactScreen | None = None,
     region_builder: RegionBuilder | None = None,
     source: KblockSource | None = None,
-) -> tuple[list[Block], gpd.GeoDataFrame, dict[str, np.ndarray]]:
+    min_interior_m: float = 100.0,
+) -> Pools:
     """Real Cape Town blocks WITH building points, so `KblockSource` can build real `Block`s with
     Voronoi parcels (required by `gap_snap` and `permeability`).
 
@@ -251,18 +305,21 @@ def load_pools(
         src_all.blocks_path, columns=["block_id", "building_count", "geometry"])
     raw["block_id"] = raw["block_id"].astype(str)
     counts = dict(zip(raw["block_id"], raw["building_count"], strict=True))
-    affordable = sorted(
-        b for b in flagged
-        if MIN_BUILDING_COUNT <= float(counts.get(b, 0)) <= MAX_BUILDING_COUNT
-    )
-    print(f"  screen flagged {len(flagged):,}; {len(affordable):,} within the "
-          f"[{MIN_BUILDING_COUNT}, {MAX_BUILDING_COUNT}] compute band", flush=True)
+    in_band = {b for b, c in counts.items()
+               if MIN_BUILDING_COUNT <= float(c) <= MAX_BUILDING_COUNT}
+    recipient_ids = sorted(set(flagged) & in_band)
+    iso = str(next(iter(recipient_ids), "ZAF.")).split(".", 1)[0]
+    donor_ids = sorted(donatable_ids(iso, min_interior_m) & in_band)
+    print(f"  screen flagged {len(flagged):,} -> {len(recipient_ids):,} recipients; "
+          f"{len(donor_ids):,} donors with >={min_interior_m:.0f} m interior footpath",
+          flush=True)
 
     groups = region_builder.build(
-        cast(gpd.GeoDataFrame, raw[raw["block_id"].isin(affordable)].reset_index(drop=True)),
-        [[b] for b in affordable],
+        cast(gpd.GeoDataFrame,
+             raw[raw["block_id"].isin(recipient_ids)].reset_index(drop=True)),
+        [[b] for b in recipient_ids],
     )
-    ids = sorted({b for group in groups for b in group})
+    ids = sorted({b for group in groups for b in group} | set(donor_ids))
 
     src = (KblockSource(src_all.blocks_path, src_all.buildings_path,
                         region_id=src_all.region_id, min_buildings=min_buildings, block_ids=ids)
@@ -285,7 +342,16 @@ def load_pools(
             b.parcels.geometry.centroid.x.to_numpy(), b.parcels.geometry.centroid.y.to_numpy()
         ]
         signatures[b.block_id] = _ot().signature(xy)
-    return blocks, blocks_gdf, signatures
+
+    r_set, d_set = set(recipient_ids), set(donor_ids)
+    pools = Pools(
+        blocks=blocks, blocks_gdf=blocks_gdf, signatures=signatures,
+        recipients=[i for i, b in enumerate(blocks) if b.block_id in r_set],
+        donors=[i for i, b in enumerate(blocks) if b.block_id in d_set],
+    )
+    print(f"  materialized {len(blocks):,} blocks: {len(pools.recipients):,} usable recipients, "
+          f"{len(pools.donors):,} usable donors", flush=True)
+    return pools
 
 
 def _select_recipient_indices(blocks: list[Block], n: int) -> list[int]:
@@ -812,8 +878,8 @@ def main() -> None:
 
     print("loading pools...")
     t_load = time.time()
-    blocks, blocks_gdf, signatures = load_pools(
-        source=zone_source(args.utm_zone) if args.utm_zone else None)
+    pools = load_pools(source=zone_source(args.utm_zone) if args.utm_zone else None)
+    blocks, blocks_gdf, signatures = pools.blocks, pools.blocks_gdf, pools.signatures
     where = f"UTM {args.utm_zone}" if args.utm_zone else "Cape Town"
     print(f"  {len(blocks)} screened {where} blocks in {time.time() - t_load:.1f}s")
 
@@ -828,7 +894,11 @@ def main() -> None:
         return
 
     n_recipients = max(1, -(-args.pairs // args.donors_per_recipient))  # ceil
-    recipient_idx = _select_recipient_indices(blocks, n_recipients)
+    # Recipients come from the SCREENED set, donors from the donatable set -- different roles,
+    # different requirements. See Pools.
+    parcel_counts = [float(len(b.parcels)) for b in blocks]
+    recipient_idx = evenly_spaced(pools.recipients, parcel_counts, n_recipients)
+    donor_set = set(pools.donors)
 
     source = desire_source(args.desire_source, iso_of(blocks))
     donor_cache: dict[str, tuple[str, gpd.GeoDataFrame | None]] = {}
@@ -874,7 +944,10 @@ def main() -> None:
         if len(rows) >= args.pairs:
             break
         recipient = blocks[i]
-        eligible = exclusion_holdout(blocks_gdf, i, radius_m=args.exclusion_radius_m)
+        eligible = [j for j in exclusion_holdout(blocks_gdf, i, radius_m=args.exclusion_radius_m)
+                    if j in donor_set]
+        if not eligible:
+            continue
         n_want = min(args.donors_per_recipient, args.pairs - len(rows))
         candidates = _select_donor_candidates(
             recipient, eligible, blocks, signatures, n_want * args.candidate_multiplier
