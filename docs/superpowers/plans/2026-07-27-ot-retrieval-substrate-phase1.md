@@ -752,8 +752,8 @@ hours per tolerance over 1.81M blocks -- about 5 h for the 0.5/2/5 m sweep and ~
 near-miss tag set is included. Use --limit for a smoke run first.
 
 Usage:
-    pixi run python scripts/osm_census.py --iso ZAF --limit 5000
-    pixi run python scripts/osm_census.py --iso ZAF
+    pixi run python -m scripts.osm_census --iso ZAF --limit 5000
+    pixi run python -m scripts.osm_census --iso ZAF
 """
 from __future__ import annotations
 
@@ -872,7 +872,7 @@ an unbounded block wastes tiles.
 
 - [ ] **Step 7: Smoke-run the driver**
 
-Run: `pixi run python scripts/osm_census.py --iso ZAF --limit 5000`
+Run: `pixi run python -m scripts.osm_census --iso ZAF --limit 5000`
 Expected: prints a per-batch rate and a final coverage percentage. If the PBF is absent it exits with the Geofabrik URL — download it and retry. Sanity-check the coverage percentage against the spike's 65.5% on qualified Cape Town blocks; a whole-country figure will be **lower** because it includes rural and formal blocks.
 
 - [ ] **Step 8: Typecheck, lint, commit**
