@@ -1,8 +1,12 @@
 # The fidelity-vs-distance slope is a property of the pool, not a general result
 
 **Date:** 2026-07-28
-**Status:** measured, three cells of a 2×2. Supersedes the headline reading of
-`2026-07-27-gw-pair-matrix-findings.md` without contradicting its arithmetic.
+**Status: SUPERSEDED by `2026-07-28-beta-was-a-lucky-draw.md`.** The premise below — that there
+is a stable pool difference to explain — does not hold. Scoring 500 pairs instead of 100 puts the
+donor-draw 95% interval at [−11.2, +5.4], which contains BOTH −9.59 (legacy) and +5.37 (screen).
+The pool difference is within sampling noise, and attributing it to the pool was reading structure
+into variance. What this note RULES OUT — donor source, range restriction, outline, depth — was
+ruled out correctly and still stands; only the thing it was explaining turned out not to exist.
 
 ## What happened
 
