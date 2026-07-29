@@ -1,0 +1,21 @@
+# The whole road set chosen at once by a linear program, against the budget the LENSES actually
+# score -- displacement -- rather than metres.
+#
+# Decision variables are PATHS, never edges: x_p <= z_s means choosing a candidate road builds
+# every segment of it, so any solution has bought the whole path back to the street and
+# connectivity is structural rather than a rounding repair. That is what dissolves the obstacle
+# specs/2026-07-21-unified-resistance-objective-notes.md shelved route (A) on ("the ROUNDING is
+# the hard part, because a road is a combinatorial frontage PATH, not a free edge").
+#
+# Budgeting displacement is the part a greedy structurally cannot do: budget.displacement scores
+# each building against the UNION corridor, so its cost is max_s c_b(s), not a sum -- two roads
+# flanking one building pay for it once. Marginal displacement is not CELF-safe, which is why
+# greedy_arterial had to abandon it for repulsion; as a linear constraint it is free.
+#
+# chunks is a Frank-Wolfe step count, not a fitted knob: the objective is a linearization around
+# the current road set, the true objective is concave, so K instalments re-linearize K times.
+# See reblock.methods.resistance_lp.ResistanceLPReblocker.
+_target_: reblock.methods.resistance_lp.ResistanceLPReblocker
+substrate: ${substrate}
+max_displacement: 0.10
+chunks: 8

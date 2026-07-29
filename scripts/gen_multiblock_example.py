@@ -183,7 +183,7 @@ def main() -> None:
 
         methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
                    for n in ("greedy_arterial_repulsion", "clearance_looped", "euclidean_grid",
-                             "flow_paths")}
+                             "flow_paths", "resistance_lp")}
         # osm_footpaths: the real as-built informal network, from a committed per-region OSM
         # snapshot (fetched once by scripts.fetch_desire_lines_snapshot) so the example
         # reproduces offline.
