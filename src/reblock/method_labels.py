@@ -11,6 +11,10 @@ FRIENDLY_METHOD_NAMES = {
     "clearance_looped": "Looped Tree",
     "euclidean_grid": "Grid",
     "greedy_arterial_repulsion": "Throughways",
+    "resistance_greedy": "Direct Objective",
+    "resistance_lp": "Direct Objective (LP)",
+    "flow_paths": "Worn Paths",
+    "flow_paths_noreinforce": "Worn Paths (no feedback)",
 }
 
 
