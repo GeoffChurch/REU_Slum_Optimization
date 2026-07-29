@@ -3,4 +3,5 @@ greedy_arterial_repulsion,3808.8,0.1179,0.604773,True
 clearance_looped,1473.7,0.0564,0.603204,True
 euclidean_grid,3678.5,0.0929,0.604129,True
 flow_paths,2402.6,0.0786,0.600603,True
+resistance_lp,2235.9,0.0403,0.600489,True
 osm_footpaths,2459.9,0.0783,0.605901,True
