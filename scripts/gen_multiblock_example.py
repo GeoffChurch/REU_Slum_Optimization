@@ -140,13 +140,6 @@ def main() -> None:
         "all_methods.clearance_looped.base.max_roads=3000",
         "all_methods.clearance_looped.budget_frac=0.30",
         "all_methods.clearance_looped.search_radius_m=60",
-        "all_methods.demand_looped.base.max_roads=3000",
-        "all_methods.demand_looped.budget_frac=0.30",
-        "all_methods.demand_looped.search_radius_m=60",
-        "all_methods.clearance_looped_cheap.base.depth_target=3",
-        "all_methods.clearance_looped_cheap.base.max_roads=3000",
-        "all_methods.clearance_looped_cheap.budget_frac=0.30",
-        "all_methods.clearance_looped_cheap.search_radius_m=60",
         "+all_methods.flow_paths.max_sources=1500",
         "all_methods.euclidean_grid.spacing=250"]   # coarser grid -> budget in the pack
     if metric_name in _ARTERIAL_MAX_ROADS:
@@ -190,8 +183,7 @@ def main() -> None:
 
         methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
                    for n in ("greedy_arterial_repulsion", "clearance_looped", "euclidean_grid",
-                             "demand_greedy_uniform", "demand_looped",
-                             "clearance_looped_cheap", "flow_paths")}
+                             "flow_paths")}
         # osm_footpaths: the real as-built informal network, from a committed per-region OSM
         # snapshot (fetched once by scripts.fetch_desire_lines_snapshot) so the example
         # reproduces offline.
@@ -200,9 +192,6 @@ def main() -> None:
             with open_dict(cfg):
                 cfg.desire_source.snapshot = str(snapshot)
             methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
-            # Same snapshot: demand_greedy consumes desire lines as a routing PRIOR rather than
-            # as its output, so it is only reproducible offline where osm_footpaths is.
-            methods["demand_greedy"] = cast(Method, instantiate(cfg.all_methods.demand_greedy))
         params, matched_displacement, matched_permeability = load_permeability_config()
         run_permeability_lenses(region, methods, out, matched_displacement=matched_displacement,
                                 matched_permeability=matched_permeability, params=params,
