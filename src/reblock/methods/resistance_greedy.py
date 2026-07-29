@@ -48,13 +48,21 @@ import shapely
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
+from shapely import STRtree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
-from reblock.permeability import PermeabilityParams, _adaptive_r0, permeability
+from reblock.permeability import (
+    PermeabilityParams,
+    _adaptive_r0,
+    _footpath_conductance,
+    _road_corridor,
+    egress_power,
+    permeability,
+)
 
 
 def _path_road(
@@ -77,6 +85,61 @@ def _path_road(
     return LineString(coords)
 
 
+def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]], r0: float
+          ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """(i, j, upgrade_gain, segment) for every adjacency edge: the conductance a road would ADD to
+    it, and the centroid-to-centroid segment a road must intersect to do so.
+
+    Mirrors `permeability.egress_power`'s mesh assembly exactly -- same adjacency, same
+    `_footpath_conductance`, same `min(footpath, road)` monotonicity cap -- because the scorer
+    below is only valid if it differentiates the SAME Laplacian the metric solves.
+    """
+    geoms = list(block.parcels.geometry)
+    cent = [g.centroid for g in geoms]
+    cx = np.array([c.x for c in cent]), np.array([c.y for c in cent])
+    rows, cols, dists = [], [], []
+    for i in range(len(geoms)):
+        for j in adj[i]:
+            if j <= i:
+                continue
+            d = float(np.hypot(cx[0][i] - cx[0][j], cx[1][i] - cx[1][j]))
+            if d > 0.0:
+                rows.append(i)
+                cols.append(j)
+                dists.append(d)
+    ri = np.asarray(rows, dtype=np.int64)
+    ci = np.asarray(cols, dtype=np.int64)
+    di = np.asarray(dists, dtype=np.float64)
+    if di.size == 0:
+        return ri, ci, np.zeros(0), np.empty(0, dtype=object)
+    road_g = params.g_road / di
+    foot_g = np.minimum(_footpath_conductance(di, r0, params.g_walk), road_g)
+    segs = np.array([LineString([(cx[0][a], cx[1][a]), (cx[0][b], cx[1][b])])
+                     for a, b in zip(ri.tolist(), ci.tolist(), strict=True)], dtype=object)
+    return ri, ci, road_g - foot_g, segs
+
+
+def linearized_gain(
+    v: np.ndarray, ri: np.ndarray, ci: np.ndarray, dg: np.ndarray,
+    upgraded: np.ndarray,
+) -> np.ndarray:
+    """Per-edge first-order drop in dissipated power if that edge were upgraded to a road.
+
+    P = b^T L^-1 b, and upgrading edge (i,j) by dg changes L by dg*(e_i - e_j)(e_i - e_j)^T. With
+    v = L^-1 b already in hand, the first-order sensitivity is
+
+        dP/d(dg) = -(v_i - v_j)^2      so      deltaP ~= -dg * (v_i - v_j)^2
+
+    which costs ONE solve for v and then O(1) per edge -- no solve per candidate. The exact
+    rank-1 value divides by (1 + dg * (e_i-e_j)^T L^-1 (e_i-e_j)) >= 1, so this OVERSTATES the
+    gain and is a ranking heuristic, not a score. `ResistanceGreedyReblocker` uses it to shortlist
+    and then re-scores the shortlist exactly, which is what keeps the selection honest.
+    """
+    gain = dg * (v[ri] - v[ci]) ** 2
+    gain[upgraded] = 0.0                # already a road: upgrading again buys nothing
+    return gain
+
+
 @dataclass(frozen=True)
 class ResistanceGreedyIdentity:
     substrate: Hashable
@@ -92,7 +155,7 @@ class ResistanceGreedyReblocker:
 
     substrate: Substrate = field(default_factory=ChordSubstrate)
     max_roads: int = 400
-    sample_size: int = 24
+    shortlist: int = 6
     min_gain_per_m: float = 1e-6
     seed: int = 0
     params: PermeabilityParams = field(default_factory=PermeabilityParams)
@@ -103,7 +166,7 @@ class ResistanceGreedyReblocker:
             return None
         return ResistanceGreedyIdentity(
             substrate=self.substrate.identity, max_roads=int(self.max_roads),
-            sample_size=int(self.sample_size), min_gain_per_m=float(self.min_gain_per_m),
+            sample_size=int(self.shortlist), min_gain_per_m=float(self.min_gain_per_m),
             seed=int(self.seed))
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
@@ -131,12 +194,14 @@ class ResistanceGreedyReblocker:
         reps = np.array([[g.representative_point().x, g.representative_point().y]
                          for g in geoms])
         starts = pt_tree.query(reps)[1]
-        rng = np.random.default_rng(self.seed)
         w = np.concatenate([graph.edist, graph.edist])
         csr = csr_matrix(
             (w, (np.concatenate([graph.rows, graph.cols]),
                  np.concatenate([graph.cols, graph.rows]))),
             shape=(len(graph.pts), len(graph.pts)))
+
+        ri, ci, dg, segs = _mesh(block, self.params, adj, r0)
+        seg_tree = STRtree(list(segs)) if len(segs) else None
 
         roads: list[LineString] = []
         current = permeability(block, empty, self.params, adj=adj, r0=r0)
@@ -147,14 +212,40 @@ class ResistanceGreedyReblocker:
             if not pool:
                 stopped = "no reachable parcel"
                 break
-            # Stochastic greedy: a random sample per step is what buys (1-1/e-eps) at
-            # O(N log 1/eps) evaluations instead of O(Nk) -- see the module docstring.
-            k = min(self.sample_size, len(pool))
-            best_gain, best_road, best_per_m = 0.0, None, 0.0
-            for i in rng.choice(pool, size=k, replace=False):
+
+            # ONE solve per round gives v = L^-1 b; every candidate is then scored in O(edges it
+            # covers) by the first-order sensitivity, so ALL candidates are considered instead of
+            # a random sample. See `linearized_gain`.
+            built = gpd.GeoDataFrame(geometry=roads, crs=crs) if roads else empty
+            _p, v = egress_power(block, built, self.params, adj=adj, r0=r0)
+            corridor = _road_corridor(built, self.params.corridor_m)
+            upgraded = (np.array([corridor.intersects(sg) for sg in segs], dtype=bool)
+                        if corridor is not None and len(segs)
+                        else np.zeros(len(segs), dtype=bool))
+            edge_gain = linearized_gain(v, ri, ci, dg, upgraded)
+
+            ranked: list[tuple[float, LineString]] = []
+            for i in pool:
                 road = _path_road(graph, pred, int(starts[i]), reps[i], street)
                 if road is None or road.length <= 0:
                     continue
+                if seg_tree is None:
+                    est = 0.0
+                else:
+                    hit = seg_tree.query(road.buffer(self.params.corridor_m),
+                                         predicate="intersects")
+                    est = float(edge_gain[hit].sum()) / road.length
+                ranked.append((est, road))
+            if not ranked:
+                stopped = "no candidate"
+                break
+            ranked.sort(key=lambda t: -t[0])
+
+            # The linearization overstates gain (see `linearized_gain`), so it SHORTLISTS and the
+            # exact metric decides -- `shortlist` exact solves per road instead of one per
+            # candidate.
+            best_gain, best_road, best_per_m = 0.0, None, 0.0
+            for _est, road in ranked[:max(self.shortlist, 1)]:
                 trial = gpd.GeoDataFrame(geometry=[*roads, road], crs=crs)
                 gain = permeability(block, trial, self.params, adj=adj, r0=r0) - current
                 per_m = gain / road.length
@@ -177,10 +268,10 @@ class ResistanceGreedyReblocker:
     def _proposal(self, block: Block, roads: gpd.GeoDataFrame,
                   params: dict[str, object]) -> Proposal:
         pid = (f"resistance_greedy:{self.substrate.tag}:mr{self.max_roads}"
-               f":s{self.sample_size}:g{self.min_gain_per_m:g}:seed{self.seed}")
+               f":s{self.shortlist}:g{self.min_gain_per_m:g}:seed{self.seed}")
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=pid, method="resistance_greedy",
             params={**params, "substrate": self.substrate.tag,
-                    "sample_size": self.sample_size},
+                    "shortlist": self.shortlist},
             block_identity=block.identity if self.identity is not None else None)

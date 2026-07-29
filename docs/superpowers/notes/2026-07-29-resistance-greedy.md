@@ -65,6 +65,46 @@ So the honest verdict is *not* "the single objective is worse". It is **"on smal
 flagship's loops are truncated away anyway, it wins narrowly on the median; the test that matters
 needs the incremental scorer the note sketches."**
 
+## The incremental scorer: built, and it changes the picture
+
+The note's cost concern was real — one sparse solve per candidate meant sampling candidates rather
+than considering them. The fix is the first-order sensitivity. With `P = bᵀL⁻¹b` and `v = L⁻¹b`
+already solved, upgrading edge (i,j) by `dg` changes `L` by `dg·(eᵢ−eⱼ)(eᵢ−eⱼ)ᵀ`, so
+
+    ΔP ≈ −dg · (vᵢ − vⱼ)²
+
+which costs **one solve per round** and then O(1) per edge. The exact rank-1 value divides by
+`1 + dg·(eᵢ−eⱼ)ᵀL⁻¹(eᵢ−eⱼ) ≥ 1`, so the linearization **overstates** the gain — it is a ranking
+heuristic, not a score. So it shortlists (all candidates, free) and the exact metric decides the
+shortlist. `linearized_gain` in the module.
+
+Effect: **every** candidate is now considered instead of a random 12, and the method went from
+~20× clearance's wall clock to ~8×.
+
+## Against `topology`, on the small blocks where it can run
+
+n=8 blocks ≤120 parcels, Lens A at matched displacement 10%:
+
+| method | permeability at D | road m | displacement | seconds |
+|---|---|---|---|---|
+| clearance / clearance_looped | 0.5829 | 67.2 | 0.0695 | 0.03 / 0.39 |
+| **resistance_greedy** | 0.5583 | **39.4** | 0.0792 | 3.23 |
+| topology | 0.3399 | 76.8 | 0.0966 | 3.12 |
+
+- beats **topology on 8/8** blocks, median paired delta **+0.273**
+- beats **clearance on 5/8**, median paired delta **+0.105** (up from +0.0125 with the sampled
+  scorer) — and does it with **41% less road**
+
+The topology result deserves a caveat rather than a victory lap: `topology` optimizes universal
+street access / k-complexity, not permeability, so losing on permeability is close to what its own
+objective predicts. It is a meaningful reference, not a like-for-like competitor.
+
+The per-block spread against clearance is wide — −0.136, −0.103, −0.058, +0.069, +0.140, +0.283,
++0.324, +0.473 — so this is a method that wins big and loses moderately, not one that edges ahead
+uniformly. **Still 5/8, so still not domination, and the note's stopping rule still applies.** But
+the margin grew eightfold when the scorer stopped sampling, which suggests the remaining gap is at
+least partly search quality rather than the objective being wrong.
+
 ## Testing note
 
 Two versions of the selection-rule test were written and both were **vacuous**, caught by fault

@@ -77,7 +77,7 @@ def test_the_first_road_is_the_ARGMAX_over_candidates_by_gain_per_metre() -> Non
         rate = (permeability(block, gpd.GeoDataFrame(geometry=[road], crs=block.crs)) - base)
         best_rate = max(best_rate, rate / road.length)
 
-    chosen = ResistanceGreedyReblocker(max_roads=1, sample_size=999).propose(block).roads
+    chosen = ResistanceGreedyReblocker(max_roads=1, shortlist=999).propose(block).roads
     assert chosen is not None and len(chosen) == 1
     got = (permeability(block, chosen) - base) / float(chosen.geometry.length.sum())
     assert got >= best_rate - 1e-12, f"not the argmax: chose {got}, best available {best_rate}"
@@ -87,7 +87,7 @@ def test_it_stops_when_the_gain_stops_paying() -> None:
     """Unlike a drainage tree, which runs until every parcel is served, this has a floor: a high
     min_gain_per_m must stop it early and say so."""
     block = _slab(6, 6)
-    greedy = ResistanceGreedyReblocker(max_roads=400, sample_size=8, min_gain_per_m=1e9)
+    greedy = ResistanceGreedyReblocker(max_roads=400, shortlist=8, min_gain_per_m=1e9)
     proposal = greedy.propose(block)
 
     assert proposal.params["stopped"] == "gain below floor"
@@ -99,7 +99,7 @@ def test_it_selects_differently_from_clearance() -> None:
     differ. If they matched, the objective would be doing nothing."""
     block = _slab(6, 6)
     theirs = ClearanceReblocker(depth_target=1).propose(block).roads
-    ours = ResistanceGreedyReblocker(max_roads=30, sample_size=10).propose(block).roads
+    ours = ResistanceGreedyReblocker(max_roads=30, shortlist=10).propose(block).roads
     assert theirs is not None and ours is not None
 
     assert list(ours.geometry.astype(str)) != list(theirs.geometry.astype(str))
@@ -114,5 +114,5 @@ def test_a_block_with_no_street_frontage_is_reported_not_crashed() -> None:
                      streets=gpd.GeoDataFrame(geometry=[LineString([(99, 99), (100, 100)])],
                                               crs=block.crs),
                      building_points=block.building_points)
-    proposal = ResistanceGreedyReblocker(max_roads=4, sample_size=4).propose(floating)
+    proposal = ResistanceGreedyReblocker(max_roads=4, shortlist=4).propose(floating)
     assert proposal.params["stopped"] == "no street frontage"
