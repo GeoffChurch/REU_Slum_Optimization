@@ -1,7 +1,7 @@
 """Machine-generated MkDocs site page. PURE dir-reader in the spirit of
 scripts/gen_example_readme.py: every number, table, and image on the generated page is read from
-run artifacts already on disk (examples/*/meta.json, lens_*.csv, displacement_table.csv, frontier
-CSVs, curve PNGs, before/after renders, and outputs/*/run.log kcomplexity lines). A section is
+run artifacts already on disk (examples/*/meta.json, lens_*.csv, frontier_permeability.csv, curve
+PNGs, before/after renders, and outputs/*/run.log kcomplexity lines). A section is
 emitted only when its artifacts exist, so a partial checkout yields a partial (never-erroring,
 never-stale) site. Prose is the only handwritten content: the per-method blurbs below, and the
 docs/_intro.md partial that opens the page.
@@ -72,37 +72,31 @@ def _img_row(items: list[tuple[str, str]]) -> str:
 # ---------------------------------------------------------------- data readers
 
 def _frontier_terminal(rows: list[dict[str, str]], method: str) -> tuple[float, float] | None:
-    """(terminal road_length_m, terminal benefit) for one method in a frontier CSV."""
-    pts = [(float(r["road_length_m"]), float(r["benefit"])) for r in rows if r["method"] == method]
+    """(terminal displacement, terminal permeability) for one method in a permeability frontier
+    CSV -- the full-build-out point, i.e. the sampled prefix with the most road (== most
+    displacement, since both axes are fractions in [0, 1) that only grow as road is added)."""
+    pts = [(float(r["displacement"]), float(r["permeability"])) for r in rows
+           if r["method"] == method]
     return max(pts) if pts else None
 
 
 def _mc_summary(method: str) -> dict[str, str] | None:
-    """Terminal-point row for the single-block head-to-head, from the frontier + displacement
-    CSVs."""
-    ext = _frontier_terminal(_read_csv(MC / "frontier_external_connectivity.csv"), method)
-    intr = _frontier_terminal(_read_csv(MC / "frontier_internal_connectivity.csv"), method)
-    disp = next((r for r in _read_csv(MC / "displacement_table.csv") if r["method"] == method),
-                None)
-    if ext is None and disp is None:
+    """Terminal-point (full build-out) summary for the single-block head-to-head, from the
+    permeability frontier CSV: the displacement spent and the permeability reached at full build."""
+    term = _frontier_terminal(_read_csv(MC / "frontier_permeability.csv"), method)
+    if term is None:
         return None
-    row: dict[str, str] = {}
-    if ext is not None:
-        row["road built"] = f"{_num(ext[0])} m"
-        row["external connectivity"] = f"{ext[1]:.2f}"
-    if intr is not None:
-        row["internal connectivity"] = f"{intr[1]:.2f}"
-    if disp is not None:
-        row["homes displaced"] = _num(float(disp["terminal_displacement"]))
-        row["% of homes"] = _pct(float(disp["pct_displaced"]))
-    return row
+    disp, perm = term
+    return {"homes displaced": _pct(disp), "permeability": _pct(perm)}
 
 
 def _mb_lens_rows(method: str) -> tuple[dict[str, str] | None, dict[str, str] | None]:
-    """This method's row from lens A (fixed connectivity target) and lens B (matched budget)."""
-    a = next((r for r in _read_csv(MB / "lens_a_external.csv") if r["method"] == method), None)
-    b = next((r for r in _read_csv(MB / "lens_b_matched.csv") if r["method"] == method), None)
-    return a, b
+    """This method's row from the two permeability lenses: matched-displacement (equal home-cost,
+    compare the permeability each buys) and matched-permeability (equal outcome, compare the homes
+    each spends)."""
+    disp = next((r for r in _read_csv(MB / "lens_displacement.csv") if r["method"] == method), None)
+    perm = next((r for r in _read_csv(MB / "lens_permeability.csv") if r["method"] == method), None)
+    return disp, perm
 
 
 def _dict_table(row: dict[str, str]) -> str:
@@ -296,14 +290,15 @@ def _mc_section(m: M) -> list[str]:
     parts.append("From the [method-comparison example](https://github.com/jmendoza167/"
                  "REU_Slum_Optimization/tree/main/examples/method-comparison): six reblockers on "
                  "`ZAF.9.3.1_1_40972`, the deepest topology-tractable block in the Cape Town "
-                 "metro (263 parcels, up to 7 rings deep). Blue = added roads; building sites "
-                 "shade grey to red by displacement risk; the depth heatmap goes pale as roads "
-                 "reach every parcel.\n")
+                 "metro (263 parcels, up to 7 rings deep), graded on permeability (a flow measure "
+                 "of how easily every parcel can reach a street) against displacement.\n")
     if before and after:
+        parts.append("Blue = added roads; building sites shade grey to red by displacement risk; "
+                     "the depth heatmap goes pale as roads reach every parcel.\n")
         parts.append(_img_row([("before", before), (f"after `{m.mc_key}`", after)]))
     if summary:
         parts.append("\nAt this method's full build-out on that block (terminal point of its "
-                     "benefit-vs-road frontier):\n")
+                     "permeability-vs-displacement frontier):\n")
         parts.append(_dict_table(summary))
     return parts
 
@@ -313,8 +308,8 @@ def _mb_section(m: M) -> list[str]:
     matched = _copy_asset(MB / f"after_{m.mb_key}_matched.png", "multiblock_depth")
     ext70 = _copy_asset(MB / f"after_{m.mb_key}_ext70.png", "multiblock_depth")
     gif = _copy_asset(MB / f"reblock_{m.mb_key}.gif", "multiblock_depth")
-    lens_a, lens_b = _mb_lens_rows(m.mb_key or "")
-    if not (matched or ext70 or gif or lens_a or lens_b):
+    disp_row, perm_row = _mb_lens_rows(m.mb_key or "")
+    if not (matched or ext70 or gif or disp_row or perm_row):
         return parts
     parts.append("### On the settlement-scale benchmark\n")
     parts.append("From the [Cape Town benchmark](#benchmarks) — the 12-block, 11,006-parcel "
@@ -328,23 +323,22 @@ def _mb_section(m: M) -> list[str]:
         parts.append("Truncated to the same road budget as every other method (left) and to the "
                      "road needed to reach external connectivity 0.70 (right):\n")
         parts.append(_img_row(imgs))
-    if lens_a:
-        reached = lens_a["reached"] == "True"
-        verdict = (f"reaches external connectivity {float(lens_a['reached_ext']):.2f} with "
-                   f"**{_num(float(lens_a['road_length_m']))} m** of road, displacing "
-                   f"{_num(float(lens_a['displacement']))} homes "
-                   f"({_pct(float(lens_a['pct_displaced']))})"
+    if disp_row:
+        note = ("" if disp_row["at_budget"] == "True"
+                else " (it converges below the shared budget)")
+        parts.append(f"\n**Matched displacement:** at **{_num(float(disp_row['road_m']))} m** of "
+                     f"road it reaches permeability {_pct(float(disp_row['permeability']))}, "
+                     f"displacing {_pct(float(disp_row['displacement']))} of homes{note}.\n")
+    if perm_row:
+        reached = perm_row["reached"] == "True"
+        verdict = (f"reaches the permeability target with "
+                   f"**{_num(float(perm_row['road_m']))} m** of road, displacing "
+                   f"{_pct(float(perm_row['displacement']))} of homes"
                    if reached else
-                   f"never reaches the 0.70 external-connectivity target — it plateaus at "
-                   f"{float(lens_a['reached_ext']):.2f} after "
-                   f"{_num(float(lens_a['road_length_m']))} m of road")
-        parts.append(f"\n**Lens A (fixed outcome, target 0.70):** {verdict}.\n")
-    if lens_b:
-        parts.append(f"**Lens B (matched budget, {_num(float(lens_b['budget_m']))} m):** external "
-                     f"connectivity {float(lens_b['external_connectivity']):.2f}, internal "
-                     f"connectivity {float(lens_b['internal_connectivity']):.2f}, "
-                     f"{_num(float(lens_b['displacement']))} homes displaced "
-                     f"({_pct(float(lens_b['pct_displaced']))}).\n")
+                   f"never reaches the permeability target — it plateaus at "
+                   f"{_pct(float(perm_row['permeability']))} after "
+                   f"{_num(float(perm_row['road_m']))} m of road")
+        parts.append(f"**Matched permeability:** {verdict}.\n")
     return parts
 
 
@@ -392,11 +386,11 @@ def gen_benchmark_section() -> str:
     parts.append("Two committed, fully reproducible benchmarks: a single deep block where all six "
                  "methods (including the single-block-only `topology` optimizer) run head-to-head, "
                  "and a settlement-scale region where the scalable methods are graded on the "
-                 "benefit-vs-added-road frontier.\n")
+                 "permeability-vs-displacement frontier.\n")
 
     # ---- part 1: single-block head-to-head -------------------------------------------------
-    disp = _read_csv(MC / "displacement_table.csv")
-    if disp:
+    mc_frontier = _read_csv(MC / "frontier_permeability.csv")
+    if mc_frontier:
         parts.append("### One deep block, six methods\n")
         parts.append("Block `ZAF.9.3.1_1_40972` — the deepest block (by the depth proxy "
                      "`sqrt(n*A)/P`) small enough for `topology` to run: 263 parcels, up to 7 "
@@ -411,23 +405,17 @@ def gen_benchmark_section() -> str:
             parts.append("After, per method:\n")
             for i in range(0, len(afters), 3):
                 parts.append(_img_row(afters[i:i + 3]))
-        ext_rows = _read_csv(MC / "frontier_external_connectivity.csv")
-        int_rows = _read_csv(MC / "frontier_internal_connectivity.csv")
-        methods = list(dict.fromkeys(r["method"] for r in disp))
+        methods = list(dict.fromkeys(r["method"] for r in mc_frontier))
         table_rows = []
         for meth in methods:
-            ext = _frontier_terminal(ext_rows, meth)
-            intr = _frontier_terminal(int_rows, meth)
-            d = next(r for r in disp if r["method"] == meth)
-            table_rows.append([f"`{meth}`",
-                               f"{ext[1]:.2f}" if ext else "-",
-                               f"{intr[1]:.2f}" if intr else "-",
-                               _num(ext[0]) if ext else "-",
-                               _num(float(d["terminal_displacement"])),
-                               _pct(float(d["pct_displaced"]))])
-        parts.append("\nTerminal (full build-out) point of each method's frontier:\n")
-        parts.append(_table(["method", "external connectivity", "internal connectivity",
-                             "road built (m)", "homes displaced", "% of homes"], table_rows))
+            term = _frontier_terminal(mc_frontier, meth)
+            if term is None:
+                continue
+            d_disp, d_perm = term
+            table_rows.append([f"`{meth}`", _pct(d_disp), _pct(d_perm)])
+        parts.append("\nAt each method's full build-out (terminal point of its "
+                     "permeability-vs-displacement frontier):\n")
+        parts.append(_table(["method", "homes displaced", "permeability"], table_rows))
         for curve in sorted(MC.glob("curve_*.png")) + sorted(MC.glob("displacement_*.png")):
             url = _copy_asset(curve, "method-comparison")
             if url:
@@ -451,36 +439,39 @@ def gen_benchmark_section() -> str:
             url = _copy_asset(MB / name, "multiblock_depth")
             if url:
                 parts.append(f"![{name}]({url})\n")
-        parts.append("#### The benefit-vs-road frontier\n")
-        parts.append("Each method's benefit as cumulative added road grows — external "
-                     "connectivity (access burden removed), internal connectivity (backup-route "
-                     "redundancy), and displacement (a rising cost):\n")
+        frontier_imgs: list[str] = []
         for pat in ("depth_vs_road_*.png", "curve_external_connectivity_*.png",
                     "curve_internal_connectivity_*.png", "displacement_*.png"):
             for p in sorted(MB.glob(pat)):
                 url = _copy_asset(p, "multiblock_depth")
                 if url:
-                    parts.append(f"![{p.stem}]({url})\n")
-        lens_a = _read_csv(MB / "lens_a_external.csv")
-        if lens_a:
-            parts.append("#### Lens A — road needed to reach external connectivity 0.70\n")
+                    frontier_imgs.append(f"![{p.stem}]({url})\n")
+        if frontier_imgs:
+            parts.append("#### The permeability-vs-displacement frontier\n")
+            parts.append("Each method's permeability (a flow measure of how easily every parcel "
+                         "reaches a street) as cumulative road grows, against the displacement it "
+                         "costs:\n")
+            parts.extend(frontier_imgs)
+        disp_lens = _read_csv(MB / "lens_displacement.csv")
+        if disp_lens:
+            parts.append("#### Lens A — matched displacement: permeability bought at an equal "
+                         "home-cost\n")
             parts.append(_table(
-                ["method", "reached", "external connectivity", "road (m)", "homes displaced",
-                 "% of homes"],
-                [[f"`{r['method']}`", "yes" if r["reached"] == "True" else "**no**",
-                  f"{float(r['reached_ext']):.2f}", _num(float(r["road_length_m"])),
-                  _num(float(r["displacement"])), _pct(float(r["pct_displaced"]))]
-                 for r in lens_a]))
-        lens_b = _read_csv(MB / "lens_b_matched.csv")
-        if lens_b:
-            budget = _num(float(lens_b[0]["budget_m"]))
-            parts.append(f"#### Lens B — every method at the same {budget} m road budget\n")
+                ["method", "road (m)", "homes displaced", "permeability", "note"],
+                [[f"`{r['method']}`", _num(float(r["road_m"])), _pct(float(r["displacement"])),
+                  _pct(float(r["permeability"])),
+                  "" if r["at_budget"] == "True" else "converged below budget"]
+                 for r in disp_lens]))
+        perm_lens = _read_csv(MB / "lens_permeability.csv")
+        if perm_lens:
+            parts.append("#### Lens B — matched permeability: homes displaced to reach the "
+                         "standard\n")
             parts.append(_table(
-                ["method", "external connectivity", "internal connectivity", "homes displaced",
-                 "% of homes"],
-                [[f"`{r['method']}`", f"{float(r['external_connectivity']):.2f}",
-                  f"{float(r['internal_connectivity']):.2f}", _num(float(r["displacement"])),
-                  _pct(float(r["pct_displaced"]))] for r in lens_b]))
+                ["method", "road (m)", "homes displaced", "permeability", "note"],
+                [[f"`{r['method']}`", _num(float(r["road_m"])), _pct(float(r["displacement"])),
+                  _pct(float(r["permeability"])),
+                  "" if r["reached"] == "True" else "**target unreached**"]
+                 for r in perm_lens]))
         matched = sorted(MB.glob("after_*_matched.png"))
         ext70 = sorted(MB.glob("after_*_ext*.png"))
         if matched or ext70:
