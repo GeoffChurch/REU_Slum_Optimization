@@ -46,6 +46,8 @@ from shapely.ops import unary_union
 
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
+from reblock.derive.geometric_access import geometric_access_distances
+from reblock.derive.network_metrics import meshedness, node_network
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
@@ -60,6 +62,17 @@ from scripts.pair_matrix import (
 )
 
 SNAP_TOL = 0.5      # metres; endpoints closer than this are the same node
+
+
+def _gini(x: np.ndarray) -> float:
+    """Gini coefficient of the walk-leg distribution: 0 = every parcel walks the same distance,
+    1 = the whole burden falls on one parcel. The distributional statement a mean cannot make."""
+    v = np.sort(np.asarray(x, dtype=float))
+    n = len(v)
+    total = v.sum()
+    if n == 0 or total <= 0:
+        return 0.0
+    return float((2.0 * np.arange(1, n + 1) - n - 1).dot(v) / (n * total))
 
 
 def _noded(roads: gpd.GeoDataFrame) -> list[LineString]:
@@ -112,15 +125,17 @@ def _nodes_edges(roads: gpd.GeoDataFrame) -> tuple[int, int, int]:
 def metrics_for(block: Block, roads: gpd.GeoDataFrame) -> dict[str, float]:
     if roads.empty:
         return {k: float("nan") for k in
-                ("cycle_ratio", "mean_leg_m", "road_per_parcel_m", "frontage_frac",
+                ("cycle_ratio", "meshedness", "walk_mean_m", "walk_p95_m", "walk_max_m",
+                 "walk_gini", "mean_leg_m", "road_per_parcel_m", "frontage_frac",
                  "deadend_frac", "straightness", "road_len_m", "displacement")}
     n_nodes, n_edges, comps = _nodes_edges(roads)
     cycles = max(n_edges - n_nodes + comps, 0)
 
-    net = unary_union(list(roads.geometry))
-    reps = [Point(g.representative_point().x, g.representative_point().y)
-            for g in block.parcels.geometry]
-    legs = np.array([net.distance(p) for p in reps], dtype=float)
+    # The repo's own primitive, not a crow-flies distance: geometric_access_distances walks the
+    # parcel-adjacency graph to the nearest road or street, so a parcel behind three others pays
+    # for crossing them. StructureEval already exposes its p95 as "B equity" -- this measurement
+    # exists to ask whether that retired metric is the one that separates real from synthetic.
+    legs = geometric_access_distances(block, roads).to_numpy().astype(float)
 
     degree: dict[tuple[int, int], int] = {}
     for geom in _noded(roads):
@@ -133,8 +148,16 @@ def metrics_for(block: Block, roads: gpd.GeoDataFrame) -> dict[str, float]:
     straight = [g.length and Point(g.coords[0]).distance(Point(g.coords[-1])) / g.length
                 for g in roads.geometry]
     total_len = float(roads.geometry.length.sum())
+    graph = node_network(roads, block.streets)
     return {
         "cycle_ratio": cycles / n_edges if n_edges else 0.0,
+        "meshedness": float(meshedness(graph)),
+        "walk_mean_m": float(legs.mean()),
+        "walk_p95_m": float(np.quantile(legs, 0.95)),
+        "walk_max_m": float(legs.max()),
+        # Gini over per-parcel walk legs: 0 = everyone walks the same, 1 = all burden on a few.
+        # The distributional reading the means cannot give.
+        "walk_gini": _gini(legs),
         "mean_leg_m": float(legs.mean()),
         "road_per_parcel_m": total_len / max(len(block.parcels), 1),
         "frontage_frac": float((legs <= STREET_TOL).mean()),
@@ -191,8 +214,8 @@ def main() -> None:
     print(f"\nwrote {args.out} ({len(df)} rows)\n")
     if df.empty:
         return
-    stat_cols = ["cycle_ratio", "mean_leg_m", "road_per_parcel_m", "frontage_frac",
-                 "deadend_frac", "straightness", "displacement"]
+    stat_cols = ["walk_mean_m", "walk_p95_m", "walk_max_m", "walk_gini", "cycle_ratio",
+                 "meshedness", "road_per_parcel_m", "frontage_frac", "displacement"]
     real = df[df.network == "real"].set_index("block")
     print(f"{'statistic':>18} {'real':>8} | " +
           " | ".join(f"{n:>22}" for n in ("clearance", "looped_tree", "demand_greedy")))

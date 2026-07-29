@@ -14,6 +14,7 @@ FRIENDLY_METHOD_NAMES = {
     "demand_greedy": "Desire-Line Tree",
     "demand_greedy_uniform": "Plain Tree",
     "demand_looped": "Looped Plain Tree",
+    "clearance_looped_cheap": "Looped Tree (cheap loops)",
 }
 
 

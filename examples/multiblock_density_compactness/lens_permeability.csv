@@ -4,5 +4,6 @@ clearance_looped,1473.7,0.0564,0.603204,True
 euclidean_grid,3678.5,0.0929,0.604129,True
 demand_greedy_uniform,1400.7,0.0564,0.607835,True
 demand_looped,1548.9,0.0627,0.602512,True
+clearance_looped_cheap,1434.3,0.0549,0.6017,True
 osm_footpaths,2459.9,0.0783,0.605901,True
 demand_greedy,1787.8,0.0615,0.608585,True

@@ -1,0 +1,1 @@
+[2026-07-08 16:33:46,206][__main__][INFO] - ZAF.9.3.1_1_5810 {'kcomplexity': {'k_before': 24.0, 'k_after': 1.0, 'delta_k': 23.0, 'added_road_length_m': 71725.59174259845, 'n_road_components': 335.0, 'connected_road_frac': 1.0, 'geometric_access_max_m': 0.0}}

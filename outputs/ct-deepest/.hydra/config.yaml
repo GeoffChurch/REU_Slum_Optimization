@@ -1,0 +1,17 @@
+data:
+  _target_: reblock.data.provision.cached_kblock_source
+  city: capetown
+  block_ids: ${block_ids}
+method:
+- _target_: reblock.methods.peel.PeelReblocker
+eval:
+- _target_: reblock.eval.kcomplexity.KComplexityEval
+shapefile: ???
+region_id: phule
+alpha: 2.0
+seed: 0
+assumed_crs: null
+max_blocks: 1
+render_dir: renders
+block_ids:
+- ZAF.9.3.1_1_5810

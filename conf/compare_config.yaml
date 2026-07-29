@@ -34,6 +34,20 @@ all_methods:
   # Looped Tree over a PLAIN-length base instead of the clearance base. The plain tree reaches
   # matched permeability with less road than clearance does, so the same loop budget is spent
   # from a cheaper starting point -- the obvious way to improve the flagship.
+  # "Cheap loops" variant of the flagship. Real footpath networks close loops within a tight
+  # budget where clearance_looped's connectors are the first thing a budget prefix cuts (measured:
+  # 5 of 6 blocks have 2-17 cycles in the full network, 0 after displacement-matching, which keeps
+  # only 1-33 of 24-166 segments). min_loop_len_m=40 excludes exactly the short connectors that
+  # would score highest on bridges-removed-per-metre and survive truncation.
+  clearance_looped_cheap:
+    _target_: reblock.methods.loop_closure.LoopClosureRefiner
+    base: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 1, max_roads: 400}
+    budget_frac: 0.12
+    min_bridges_per_m: 0.0
+    max_loops: 400
+    min_loop_len_m: 5.0
+    search_radius_m: 45.0
+    max_candidates: 1500
   demand_looped:
     _target_: reblock.methods.loop_closure.LoopClosureRefiner
     base: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: null, substrate: "${substrate}", depth_target: 1, max_roads: 400}
