@@ -42,6 +42,7 @@ all_methods:
   # entire effect and min_bridges_per_m 0.01 -> 0.0 is bit-for-bit inert, so it is NOT changed here.
   # The gain is also settings-dependent -- at the conf defaults (depth_target 1, budget_frac 0.12)
   # the same change is slightly NEGATIVE (0.7370 vs 0.7383); it helps at the example's deeper base.
+  resistance_greedy: {_target_: reblock.methods.resistance_greedy.ResistanceGreedyReblocker, substrate: "${substrate}", max_roads: 400, shortlist: 6, loop_radius_m: 0.0, min_loop_len_m: 40.0}
   # Flow accumulation rather than drainage: route every trip, count edge traffic, keep the busiest.
   # Sparse, can contain loops, does not reach every parcel -- the properties real footpaths have and
   # a drainage tree cannot. flow_quantile is the hierarchy knob (low = footpath web, high = skeleton).

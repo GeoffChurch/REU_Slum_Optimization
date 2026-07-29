@@ -54,6 +54,7 @@ from shapely.ops import nearest_points, unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.methods.loop_closure import loop_candidates
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
     PermeabilityParams,
@@ -147,6 +148,8 @@ class ResistanceGreedyIdentity:
     sample_size: int
     min_gain_per_m: float
     seed: int
+    loop_radius_m: float
+    min_loop_len_m: float
 
 
 @dataclass
@@ -156,6 +159,18 @@ class ResistanceGreedyReblocker:
     substrate: Substrate = field(default_factory=ChordSubstrate)
     max_roads: int = 400
     shortlist: int = 6
+    # OFF by default, and the reason is measured rather than assumed. Loop connectors ARE
+    # generated in quantity when this is on (90-275 per round on 50-160 parcel blocks) and are
+    # NEVER selected: an access road moves a parcel from footpath-only to road-adjacent, a large
+    # first-order gain, while a connector only adds redundancy among already-served parcels, a
+    # second-order one. Per metre, access dominates at every step until the gain floor stops the
+    # greedy -- so enabling this doubled wall clock (9.6s vs 4.5s) and changed the output
+    # bit-for-bit not at all. Kept because it is the honest test of "one objective over both move
+    # types", and the answer it gives -- access first, redundancy never inside this budget -- is a
+    # finding about the objective.
+    loop_radius_m: float = 0.0
+    min_loop_len_m: float = 40.0
+    max_loop_candidates: int = 400
     min_gain_per_m: float = 1e-6
     seed: int = 0
     params: PermeabilityParams = field(default_factory=PermeabilityParams)
@@ -167,7 +182,8 @@ class ResistanceGreedyReblocker:
         return ResistanceGreedyIdentity(
             substrate=self.substrate.identity, max_roads=int(self.max_roads),
             sample_size=int(self.shortlist), min_gain_per_m=float(self.min_gain_per_m),
-            seed=int(self.seed))
+            seed=int(self.seed), loop_radius_m=float(self.loop_radius_m),
+            min_loop_len_m=float(self.min_loop_len_m))
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
@@ -224,10 +240,26 @@ class ResistanceGreedyReblocker:
                         else np.zeros(len(segs), dtype=bool))
             edge_gain = linearized_gain(v, ri, ci, dg, upgraded)
 
-            ranked: list[tuple[float, LineString]] = []
+            # Candidates are BOTH kinds of move, which is what makes this one objective rather
+            # than two stages. Until loop connectors were added here the method was structurally a
+            # tree builder -- every candidate attached an unserved parcel to the network, so it
+            # could never choose redundancy however much the objective wanted it, and the note's
+            # "one quantity captures access AND redundancy" was only half implemented.
+            cands: list[LineString] = []
             for i in pool:
                 road = _path_road(graph, pred, int(starts[i]), reps[i], street)
-                if road is None or road.length <= 0:
+                if road is not None and road.length > 0:
+                    cands.append(road)
+            if roads and self.loop_radius_m > 0:
+                built_gdf = gpd.GeoDataFrame(geometry=roads, crs=crs)
+                cands += [c for c, _u, _v in loop_candidates(
+                    built_gdf, block, search_radius_m=self.loop_radius_m,
+                    min_loop_len_m=self.min_loop_len_m, snap_lam=2.0,
+                    max_candidates=self.max_loop_candidates)]
+
+            ranked: list[tuple[float, LineString]] = []
+            for road in cands:
+                if road.length <= 0:
                     continue
                 if seg_tree is None:
                     est = 0.0

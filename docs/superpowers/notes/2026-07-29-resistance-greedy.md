@@ -118,3 +118,49 @@ injection:
 The surviving test enumerates the candidate set the method chose from and requires its pick to be
 the **argmax by gain-per-metre**. It fails under both injected faults (select-by-length, and
 select-by-raw-gain-instead-of-per-metre).
+
+
+## Pushing further: both levers failed, informatively
+
+The +0.0125 → +0.105 jump came from the scorer, so the hypothesis was that the remaining gap is
+search quality. Two levers, same 10 blocks, Lens A at D=10%:
+
+| variant | permeability | road m | secs |
+|---|---|---|---|
+| clearance / clearance_looped | 0.6321 | 82.9 | 0.03 / 0.39 |
+| rg, shortlist 6, no loops | **0.6752** | 66.3 | 4.5 |
+| rg, shortlist 6, **with loop candidates** | **0.6752** | 66.3 | 9.6 |
+| rg, shortlist 20, with loops | 0.6622 | 62.2 | 18.2 |
+
+All three beat clearance on **6/10** blocks. Neither lever helped.
+
+**Loop candidates are generated and never chosen.** Not dead code — 90–275 connectors per round on
+50–160-parcel blocks — and the output is bit-for-bit identical with them enabled. The reason is
+structural: an access road moves a parcel from footpath-only to road-adjacent, a large first-order
+gain, while a connector only adds redundancy among already-served parcels, a second-order one. Per
+metre, **access dominates at every step** until the gain floor stops the greedy.
+
+That is the honest answer to "does one objective subsume access and redundancy?" — it does, and its
+verdict inside this budget is *access first, redundancy never*. It also explains why
+`clearance_looped` scores identically to `clearance` at a 10% displacement budget: the two-stage
+method's first stage terminates on **depth**, not on gain, leaving budget the loop stage then
+spends — and the objective says that budget is better spent on more access.
+
+Loop candidacy is now default-off (it doubled wall clock for a bit-identical result), with the
+capability kept because the measurement is the point.
+
+**More exact search makes it WORSE.** Shortlist 20 scores 0.6622 against shortlist 6's 0.6752, at
+4× the wall clock. That falsifies the search-quality hypothesis: this is **greedy myopia**, not
+search deficiency. A purer per-metre argmax picks a locally better road that leads to a worse
+trajectory; the linearization's bias at shortlist 6 is acting as an accidental regularizer.
+
+## Where that leaves it
+
+The gap to clearance is not the candidate set and not the search budget — it is the greedy itself.
+Which is precisely what route (A), the convex relaxation, would fix: it optimizes the whole road set
+at once instead of one road at a time. The obstacle is still the one the design note named, and
+nothing here has moved it: **a road is a combinatorial frontage path, not a free edge**, so the
+rounding remains unsolved.
+
+So the direction is coherent and the near-term verdict is unchanged: 6/10 is not domination,
+clearance+loops stands, and the next real move is rounding — not more greedy.
