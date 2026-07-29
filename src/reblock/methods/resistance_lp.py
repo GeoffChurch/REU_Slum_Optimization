@@ -145,7 +145,6 @@ def solve_coverage_lp(
     path_segs: list[list[int]], seg_len: np.ndarray, seg_edges: list[np.ndarray],
     seg_disp: list[tuple[np.ndarray, np.ndarray]], edge_gain: np.ndarray,
     n_buildings: int, base_c: np.ndarray, disp_budget: float, len_budget: float,
-    length_price: float = 0.0,
 ) -> np.ndarray:
     """The LP above. Returns `z`, the fractional build level of every segment.
 
@@ -194,14 +193,6 @@ def solve_coverage_lp(
     a_ub = coo_matrix((vals, (rows, cols)), shape=(len(ub), n_var)).tocsr()
     obj = np.zeros(n_var)
     obj[yoff:uoff] = -edge_gain
-    if length_price > 0.0 and edge_gain.size and seg_len.size:
-        # Price metres in the OBJECTIVE rather than capping them. A hard metre cap has to be tuned
-        # per block, and tuning it to match a baseline would beg the question the comparison asks.
-        # A price is scale-free: `length_price` is normalized by the instance's own best available
-        # gain-per-metre, so price 0 is the unpriced LP, price ~1 charges a segment roughly what an
-        # average productive segment earns, and large prices buy only the very best metres.
-        scale = float(edge_gain.sum()) / float(seg_len.sum())
-        obj[zoff:yoff] += length_price * scale * seg_len
     lo = np.zeros(n_var)
     lo[uoff:] = base_c
     res = linprog(obj, A_ub=a_ub, b_ub=np.asarray(ub, dtype=float),
@@ -217,7 +208,6 @@ class ResistanceLPIdentity:
     max_displacement: float
     max_road_m: float
     chunks: int
-    length_price: float
 
 
 @dataclass
@@ -226,14 +216,14 @@ class ResistanceLPReblocker:
 
     substrate: Substrate = field(default_factory=ChordSubstrate)
     max_displacement: float = 0.10
+    # A HARD metre cap, off by default. An in-objective length PRICE was built here and deleted:
+    # normalized per instance it was a pure loss at block scale (displacement 0.0271 -> 0.0354 with
+    # no metre saving) and far too weak where it was meant to help -- on the sparse `depth` region,
+    # price 16 still drew 33,623 m against clearance_looped's 18,061 m while displacing 2.2x more.
+    # The web there is not the method over-building (its block-scale network is the SHORTEST of any
+    # method); it is that a 10%-displacement budget on sparse fabric permits enormous length. That
+    # is a gap in lens A, not something a method-side knob patches.
     max_road_m: float = 1e6
-    # Charge for road length in the objective. Lens A caps displacement and says nothing about
-    # metres, so an unpriced optimizer keeps buying cheap parcel-boundary roads until the whole
-    # fabric is meshed -- measured on the depth example: 42,937 m against clearance_looped's 9,878 m
-    # for permeability 0.955. That is a correct solution to an under-specified problem. The price
-    # makes the LP trade gain against metres instead. Normalized per instance (see
-    # `solve_coverage_lp`), so one value is meaningful across blocks and regions.
-    length_price: float = 0.0
     chunks: int = 8
     params: PermeabilityParams = field(default_factory=PermeabilityParams)
 
@@ -243,8 +233,7 @@ class ResistanceLPReblocker:
             return None
         return ResistanceLPIdentity(
             substrate=self.substrate.identity, max_displacement=float(self.max_displacement),
-            max_road_m=float(self.max_road_m), chunks=int(self.chunks),
-            length_price=float(self.length_price))
+            max_road_m=float(self.max_road_m), chunks=int(self.chunks))
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
@@ -329,7 +318,7 @@ class ResistanceLPReblocker:
             spent_m = float(sum(r.length for r in best))
             z = solve_coverage_lp(path_segs, seg_len, seg_edges, seg_disp, edge_gain,
                                   n_b, base_c, allow, max(self.max_road_m - spent_m, 0.0),
-                                  length_price=self.length_price)
+)
             roads, base_c2 = self._round(path_segs, seg_len, seg_geom, seg_disp, z, base_c,
                                          allow, max(self.max_road_m - spent_m, 0.0))
             if not roads:
@@ -387,7 +376,7 @@ class ResistanceLPReblocker:
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
             proposal_id=(f"resistance_lp:{self.substrate.tag}:d{self.max_displacement:g}"
-                         f":k{self.chunks}:lp{self.length_price:g}"),
+                         f":k{self.chunks}"),
             method="resistance_lp",
             params={**params, "substrate": self.substrate.tag,
                     "max_displacement": self.max_displacement, "chunks": self.chunks},
