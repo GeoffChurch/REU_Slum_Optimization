@@ -12,10 +12,13 @@ repo_url: https://github.com/jmendoza167/REU_Slum_Optimization
 repo_name: jmendoza167/REU_Slum_Optimization
 
 # Internal working notes stay out of the published site (the files themselves are untouched);
-# _intro.md is the handwritten partial the generator folds into index.md, not a page of its own.
+# _intro.md is the handwritten partial the generator folds into index.md, not a page of its own;
+# metrics-north-star.md is internal design-direction writing that links into superpowers/, so it
+# ships with those notes rather than as a public page.
 exclude_docs: |
   superpowers/
   _intro.md
+  metrics-north-star.md
 
 theme:
   name: material
@@ -26,8 +29,8 @@ theme:
   features:
     - navigation.top
     - navigation.footer
-    - toc.integrate      # single-page site: the sidebar IS the anchor table of contents
-    - toc.follow
+    - navigation.indexes  # a section's index.md is the section's own landing page (Methods)
+    - toc.follow          # multi-page site: real page nav on the left, each page's TOC on the right
     - content.code.copy
   icon:
     repo: fontawesome/brands/github
@@ -44,4 +47,16 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Metrics — North Star: metrics-north-star.md
+  - Background: background.md
+  - Methodology: methodology.md
+  - Methods:
+      - methods/index.md
+      - Peel: methods/peel.md
+      - Clearance: methods/clearance.md
+      - Looped Tree: methods/clearance_looped.md
+      - Throughways: methods/greedy_arterial_buildable.md
+      - OSM Footpaths: methods/osm_footpaths.md
+      - Grid: methods/euclidean_grid.md
+      - Dream Come True: methods/dream_come_true.md
+  - Results: benchmark.md
+  - Team & References: team.md

@@ -1,56 +1,27 @@
-<!-- Handwritten intro for the single-page site. scripts/gen_site_pages.py prepends this file
-     to the generated method + benchmark sections and writes docs/index.md — edit HERE, never
-     index.md (it is generated and gitignored). Links to generated content are #anchors. -->
+<!-- Handwritten Home page for the multi-page site. scripts/gen_site_pages.py prepends the
+     do-not-edit note, injects a generated hero figure at the HTML hero marker below, and writes
+     docs/index.md — edit HERE, never index.md (it is generated and gitignored). This file is
+     committed but excluded from the built site (see exclude_docs in mkdocs.yml). Links are to the
+     other pages; every number lives on a generated page, never here. -->
 # Rebuilding access, one block at a time
 
 **Stony Brook University REU · REU_Slum_Optimization**
 
-We generate and evaluate road-network proposals for informal urban settlements — comparing
-methods that trade off accessibility, cost, displacement, and buildability across real
-slum-block data from Cape Town, Djibouti, and Nairobi.
+Roughly **1.1 billion people** live in informal settlements where missing roads cut homes off from
+emergency services, water, and power. `reblock` screens a whole city for its most access-starved
+blocks and proposes the least-disruptive new roads to reconnect them — then grades every proposal
+on the same footing: **permeability** (how easily every parcel can reach a street) bought against
+**displacement** (the homes a road set grazes).
 
-## The problem
+<!-- HERO -->
 
-Over a billion people live in informal settlements without direct access to roads — which means
-no direct access to water, sanitation, or emergency services either. *Reblocking* proposes the
-least-disruptive new roads needed to connect every parcel to the existing street network.
+## Start here
 
-## What the pipeline does
+- **[Background](background.md)** — the problem, why roads matter, and the prior work we build on.
+- **[Methodology](methodology.md)** — the `data → screen → reblock` pipeline and the metric definitions.
+- **[Methods](methods/index.md)** — seven road-generation methods, each shown on the ground.
+- **[Results](benchmark.md)** — the settlement-scale benchmark and the permeability–displacement tradeoff.
+- **[Team & References](team.md)** — who built this, and the work it stands on.
 
-`reblock` screens a whole city for its most access-starved blocks, grows each into a right-sized
-region, routes complementary roads with a pluggable method, and grades the result on external
-connectivity (access burden removed), internal connectivity (backup-route redundancy), and
-displacement — all as composable [Hydra](https://hydra.cc) stages. Every example, table, and
-figure on this site is machine-generated from run artifacts committed in the repository: the
-numbers can never drift from the data.
-
-## The methods
-
-Every method proposes a different road network for the same blocks; all are graded on the same
-metric basis. Each section below shows the method's roads on the ground and its numbers from the
-actual runs.
-
-| Method | Idea | Status |
-|---|---|---|
-| [Peel](#peel) | steepest descent down the access-depth peel — the access-optimal baseline | <span class="pill pill-done">baseline</span> |
-| [Clearance](#clearance) | least-cost paths that repel from homes | <span class="pill pill-done">evaluated</span> |
-| [Clearance (looped)](#clearance-looped) | clearance + loop-closing connectors for redundancy | <span class="pill pill-done">evaluated</span> |
-| [Greedy Arterial (buildable)](#greedy-arterial-buildable) | best straight arterial per metre, snapped to buildable frontage | <span class="pill pill-done">evaluated</span> |
-| [OSM Footpaths](#osm-footpaths) | the real as-built footpath network, as the baseline to beat | <span class="pill pill-done">evaluated</span> |
-| [Euclidean Grid](#euclidean-grid) | a density-adaptive Manhattan-style grid | <span class="pill pill-done">evaluated</span> |
-| [Dream Come True](#dream-come-true) | desire lines detected from imagery | <span class="pill pill-progress">in progress</span> |
-
-The [Benchmarks](#benchmarks) section puts the methods side by side twice: six methods
-head-to-head on one deep Cape Town block, and the scalable methods on a 12-block,
-11,000+-parcel settlement region graded along the full benefit-vs-added-road frontier. The
-[Metrics — North Star](metrics-north-star.md) note records where the metric design is heading.
-
-## Team
-
-- **Mentor: Geoffrey Churchill**
-- **Daisy Sanchez** — Farmingdale State College
-- **Elvin Mendoza** — Suffolk County Community College
-
-Built on research from the Santa Fe Institute's
-[Open Reblock](https://github.com/mansueto-institute/prclz) line of work, with informal footpath
-data digitized by the Humanitarian OpenStreetMap community.
+Every figure, table, and number on this site is machine-generated from run artifacts committed in
+the repository — the numbers can never drift from the data.
