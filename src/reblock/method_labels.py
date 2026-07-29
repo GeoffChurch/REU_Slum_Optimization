@@ -15,6 +15,8 @@ FRIENDLY_METHOD_NAMES = {
     "demand_greedy_uniform": "Plain Tree",
     "demand_looped": "Looped Plain Tree",
     "clearance_looped_cheap": "Looped Tree (cheap loops)",
+    "flow_paths": "Worn Paths",
+    "flow_paths_noreinforce": "Worn Paths (no feedback)",
 }
 
 

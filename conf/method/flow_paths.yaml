@@ -1,0 +1,11 @@
+# Trail-formation reblocker: paths where trips concentrate, not paths that serve everyone.
+# Route every parcel's trips on the substrate, accumulate edge traffic, reinforce trodden edges and
+# re-route, then keep the busiest edges. Because the cut is on flow VOLUME the same field gives a
+# hierarchy: a low quantile is the footpath web, a high one the arterial skeleton it feeds.
+# See reblock.methods.flow_paths.FlowPathsReblocker.
+_target_: reblock.methods.flow_paths.FlowPathsReblocker
+substrate: ${substrate}
+destination: all_pairs
+iterations: 3
+reinforcement: 0.5
+flow_quantile: 0.90
