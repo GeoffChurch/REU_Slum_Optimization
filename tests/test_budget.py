@@ -1,15 +1,19 @@
 from typing import cast
 
 import geopandas as gpd
+import networkx as nx
 import pandas as pd
 from pyproj import CRS
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, MultiLineString, Point, Polygon
+from shapely.ops import unary_union
 
 from reblock.budget import (
+    _street_first_ordered,
     access_burden,
     road_drainage,
 )
 from reblock.contracts import Block
+from reblock.derive.access import STREET_TOL
 from reblock.methods.clearance import ClearanceReblocker
 
 UTM = CRS.from_epsg(32643)
@@ -440,3 +444,65 @@ def test_permeability_and_displacement_curves_share_cost_samples():
     perm = permeability_curve(block, roads, PermeabilityParams())
     disp = displacement_curve(block, roads, radii, corridor_m=3.0)
     assert list(perm.cost) == list(disp.cost)
+
+
+def test_every_scored_prefix_reaches_the_street() -> None:
+    """`_street_first_ordered` must make every prefix a connected network reaching the street.
+
+    The lenses score a PREFIX of a method's roads, so a prefix that does not reach the street is a
+    road set nobody could build -- and permeability still credits it, because an isolated corridor
+    upgrades local adjacency conductance. Under the previous drainage-descending order this failed
+    for every loop-bearing method (measured fraction of prefix length connected:
+    greedy_arterial_repulsion 0.782, resistance_greedy 0.900, clearance_looped 0.831 at region
+    scale).
+
+    The fixture inverts drainage against street distance, which is the only way that order can
+    fail. A LOOP -- two branches up from the street joined by a far bar -- with every parcel on the
+    BAR and none beside the branches. Each branch carries only the parcels that route down its own
+    side, so the bar's drainage exceeds either branch's, and drainage-descending puts the bar
+    (which touches nothing) first.
+
+    FAULT INJECTION: dropping the street-distance term from the sort key -- i.e. restoring
+    `(-drain[i], i)` -- orders the bar first and this fails with a disconnected prefix.
+    """
+    street = LineString([(0.0, 0.0), (100.0, 0.0)])
+    xs = [20.0, 35.0, 50.0, 65.0, 80.0]
+    roads = gpd.GeoDataFrame(geometry=[
+        # Far bar, vertexed at each parcel: `road_drainage` attaches parcels to NODES, and a
+        # two-point LineString has nodes only at its ends.
+        LineString([(10.0, 20.0), *[(x, 20.0) for x in xs], (90.0, 20.0)]),
+        LineString([(10.0, 0.0), (10.0, 20.0)]),      # left branch
+        LineString([(90.0, 0.0), (90.0, 20.0)]),      # right branch
+    ], crs=UTM)
+    # Parcels sit ON the bar and nowhere near the branches, so each branch drains only its share.
+    parcels = gpd.GeoDataFrame(
+        {"parcel_id": [str(k) for k in range(len(xs))]},
+        geometry=[Polygon([(x - 5, 20), (x + 5, 20), (x + 5, 30), (x - 5, 30)]) for x in xs],
+        crs=UTM)
+    block = Block(
+        block_id="loop", crs=UTM,
+        boundary=Polygon([(0, 0), (100, 0), (100, 40), (0, 40)]),
+        parcels=parcels,
+        streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
+        building_points=gpd.GeoDataFrame(
+            geometry=[Point(x, 25) for x in xs], crs=UTM))
+
+    drain = road_drainage(block, roads)
+    assert drain[0] > max(drain[1], drain[2]), (
+        f"fixture is vacuous: the far bar must out-drain both branches, got {drain}")
+
+    ordered = _street_first_ordered(block, roads, STREET_TOL)
+    for k in range(1, len(ordered) + 1):
+        prefix = ordered.iloc[:k]
+        # prefix + street must be ONE connected component. Checking each noded piece's own distance
+        # to the street would be wrong -- the bar is legitimately reached THROUGH a branch.
+        merged = unary_union([*prefix.geometry, street])
+        pieces = list(merged.geoms) if isinstance(merged, MultiLineString) else [merged]
+        g: nx.Graph = nx.Graph()
+        g.add_nodes_from(range(len(pieces)))
+        for i, a in enumerate(pieces):
+            for j, b in enumerate(pieces[:i]):
+                if a.distance(b) <= STREET_TOL:
+                    g.add_edge(i, j)
+        assert nx.number_connected_components(g) == 1, (
+            f"prefix of {k} road(s) is disconnected from the street: {list(prefix.geometry)}")
