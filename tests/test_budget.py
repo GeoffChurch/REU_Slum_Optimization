@@ -506,3 +506,53 @@ def test_every_scored_prefix_reaches_the_street() -> None:
                     g.add_edge(i, j)
         assert nx.number_connected_components(g) == 1, (
             f"prefix of {k} road(s) is disconnected from the street: {list(prefix.geometry)}")
+
+
+def test_ordering_reduces_to_plain_drainage_when_that_is_already_buildable() -> None:
+    """On a drainage TREE the constrained order must equal plain drainage-descending, exactly.
+
+    This is what makes the constraint a fix rather than a new bias. A tree's drainage order is
+    already buildable, so constraining it must change nothing -- otherwise every existing
+    tree-method number would shift for no reason.
+
+    It also pins the CHOICE of constraint. Ordering by network distance to the street also
+    guarantees connectivity, but it is breadth-first: it completes a whole ring before going
+    deeper, penalizing fine-grained networks for granularity rather than geometry. The fixture
+    separates the two -- two branches off the street, the BUSIER one ordered first by drainage but
+    tied with the other by distance -- so a distance key gives a different answer.
+
+    FAULT INJECTION: replacing the heap key `-drain[i]` with a street-distance key orders
+    `[A, B, A2, B2]` instead of drainage's `[B, B2, A, A2]` and fails here.
+    """
+    street = LineString([(0.0, 0.0), (100.0, 0.0)])
+    roads = gpd.GeoDataFrame(geometry=[
+        LineString([(20.0, 0.0), (20.0, 10.0)]),                     # A  -- quiet branch stem
+        LineString([(20.0, 10.0), (20.0, 20.0)]),                    # A2 -- 1 parcel
+        LineString([(80.0, 0.0), (80.0, 10.0)]),                     # B  -- busy branch stem
+        # Single segment on purpose: `road_drainage` counts segment TRAVERSALS, so a
+        # multi-vertex road accumulates inflated drainage and would muddle this fixture.
+        LineString([(80.0, 10.0), (80.0, 20.0)]),                    # B2 -- 2 parcels
+    ], crs=UTM)
+    parcels = gpd.GeoDataFrame(
+        {"parcel_id": ["a", "b", "c"]},
+        geometry=[Polygon([(20, 20), (30, 20), (30, 30), (20, 30)]),
+                  Polygon([(80, 20), (90, 20), (90, 30), (80, 30)]),
+                  Polygon([(70, 20), (80, 20), (80, 30), (70, 30)])],
+        crs=UTM)
+    block = Block(
+        block_id="tree", crs=UTM,
+        boundary=Polygon([(0, 0), (100, 0), (100, 45), (0, 45)]),
+        parcels=parcels,
+        streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
+        building_points=gpd.GeoDataFrame(
+            geometry=[Point(25, 25), Point(85, 25), Point(75, 25)], crs=UTM))
+
+    drain = road_drainage(block, roads)
+    plain = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
+    # Only meaningful if the busy branch outranks the quiet one -- i.e. if drainage and street
+    # distance disagree. Distance puts A (index 0) first; drainage puts B (index 2).
+    assert plain[0] == 2, f"busy stem must lead plain drainage order, got {plain} for {drain}"
+
+    ordered = _street_first_ordered(block, roads, STREET_TOL)
+    got = [list(roads.geometry).index(g) for g in ordered.geometry]
+    assert got == plain, f"constrained order {got} differs from plain drainage {plain}"

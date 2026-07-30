@@ -600,31 +600,73 @@ def _street_first_ordered(block: Block, roads: GeoDataFrame, tol: float) -> GeoD
     walks, so every budget/prefix walk grows the road set in the same sequence. Callers guard
     `len(roads) == 0` before calling.
 
-    Roads are sorted by their own network distance to the street, ascending, with ties broken by
-    drainage descending (busiest first) and then original index. A road's path back to the street
-    runs through strictly nearer nodes, so those roads are already in the prefix: connectivity holds
-    by construction. Roads in no street-connected component sort last -- unbuildable, and they
-    belong at the end rather than scattered through the middle.
+    Drainage-descending order, with each road's CONNECTORS BOUGHT ON DEMAND: walk roads by drainage
+    descending, and before emitting one, emit any not-yet-emitted roads along its own shortest path
+    back to the street (street end first). Roads in no street-connected component have an empty
+    chain and simply take their drainage position; they are unbuildable either way.
 
-    This REPLACES a pure drainage-descending order. That order is a valid topological order only
-    for a drainage TREE, where a road nearer the street carries at least the traffic of everything
-    beyond it. Every method used to be such a tree, so it held. It fails once a network has loops or
-    redundant segments -- drainage stops being monotone along a path -- and once a later path can
-    branch off the MIDDLE of an earlier one, which even clearance does. Measured fraction of scored
-    prefix length that reached the street under the old order: greedy_arterial_repulsion 0.782,
-    resistance_greedy 0.900, clearance_looped 0.831 at region scale. The lens was scoring road sets
-    that could not be built.
+    Two properties make this the right order, and both matter:
+
+    1. **Every prefix is connected**, because a road is only ever chosen when it already touches the
+       built network. A pure drainage-descending order does NOT guarantee this. It is a valid
+       topological order only for a drainage TREE, where a road nearer the street carries at least
+       the traffic of everything beyond it; every method used to be such a tree, so it held and the
+       gap went unnoticed. It fails once a network has loops (drainage stops being monotone along a
+       path) or a later path branches off the MIDDLE of an earlier one, which even clearance does.
+       Measured fraction of scored prefix length reaching the street under the unconstrained order:
+       greedy_arterial_repulsion 0.782, resistance_greedy 0.900, clearance_looped 0.831 at region
+       scale. The lens was scoring road sets that could not be built.
+    2. **It preserves drainage's trunk-first preference**, and reduces EXACTLY to the old order
+       whenever that order was already buildable -- so a drainage tree's numbers are unchanged, and
+       the correction only touches prefixes that were actually broken.
+
+    Two alternatives were built and measured, and both distort in the same direction -- they make a
+    method look more expensive than a road set it demonstrably achieves:
+
+    - Sorting by network DISTANCE to the street guarantees connectivity but is breadth-first: it
+      completes a whole ring before reaching any deeper, penalizing fine-grained networks for their
+      granularity rather than their geometry. It moved `resistance_lp` on one region from 2,236 m at
+      0.0403 displacement to 5,104 m at 0.0630.
+    - Taking the highest-drainage road that merely TOUCHES the built network is nearly free at
+      block scale but loose at region scale: on the depth region it needed 23,490 m to reach
+      P* = 0.60 where a fully connected 1,951 m prefix was measured to exist -- 12x too much.
+
+    Buying the chain on demand avoids both: a deep high-drainage road is reachable as soon as its
+    own connectors are paid for, so the walk goes deep immediately instead of sweeping outward.
+
+    The lens's real question -- the CHEAPEST connected subnetwork reaching a target -- is an
+    optimization problem that no fixed order answers exactly. This is a heuristic for it, chosen to
+    be conservative in the one direction that matters (never scoring a set nobody could build)
+    without inflating cost.
     """
     net = _road_net(block, roads, tol)
-    dist, _paths = net.street_distance()
     drain = road_drainage(block, roads, tol=tol)
-    far = float("inf")
+    dist, paths = net.street_distance()
 
-    def key(i: int) -> tuple[float, int, int]:
-        ds = [dist[n] for n in net.road_nodes[i] if n in dist]
-        return (min(ds) if ds else far, -drain[i], i)
+    def connector_chain(i: int) -> list[int]:
+        """The roads on road `i`'s own shortest path back to the street, street end first."""
+        ns = [n for n in net.road_nodes[i] if n in dist]
+        if not ns:
+            return []
+        path = paths[min(ns, key=lambda n: (dist[n], n))]
+        chain: list[int] = []
+        for a, b in zip(path, path[1:], strict=False):
+            r = net.edge_row.get(frozenset((a, b)))
+            if r is not None and r != i and r not in chain:
+                chain.append(r)
+        return chain
 
-    order = sorted(range(len(roads)), key=key)
+    order: list[int] = []
+    taken = [False] * len(roads)
+    for i in sorted(range(len(roads)), key=lambda k: (-drain[k], k)):
+        if taken[i]:
+            continue
+        for r in connector_chain(i):        # street end first, so the prefix stays connected
+            if not taken[r]:
+                taken[r] = True
+                order.append(r)
+        taken[i] = True
+        order.append(i)
     return cast(GeoDataFrame, roads.iloc[order].reset_index(drop=True))
 
 
