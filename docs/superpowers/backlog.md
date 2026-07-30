@@ -125,6 +125,51 @@ on both axes to a Pareto trade. Nothing about the roads changed.
   vertex-dense roads got inflated drainage — a subdivided road scored 4 against an identical plain
   road's 1). Any future ordering work inherits the corrected key.
 
+### Headroom measured 2026-07-30: real on the curve, mixed at a threshold
+
+`scratchpad/ot/prefix_headroom.py` compares today's drainage chain against a greedy chain on
+marginal permeability per marginal displacement -- same road set, same connector-on-demand rule, so
+it is budget-matched by construction. 6 blocks, 24 method-rows:
+
+| method | disp to P* today | greedy | change | curve-area change |
+|---|---|---|---|---|
+| greedy_arterial_repulsion | 0.1100 | 0.0395 | **+55.9%** | +9.8% |
+| resistance_lp | 0.0376 | 0.0339 | +16.4% | +16.6% |
+| clearance | 0.1049 | 0.1139 | **-7.7%** | +2.8% |
+| clearance_looped | 0.1108 | 0.1215 | **-8.0%** | +4.5% |
+
+**Whole-curve area improves on 23/24 rows** (median +7.3%), which is the measure the frontier plot
+and the GIFs actually display. **The P* crossing is mixed** -- big gains for arterial and the LP,
+~8% WORSE for the two clearance variants. That split is structural, not noise: the greedy optimizes
+value-per-cost at every step, so it shapes the whole curve, but nothing makes it optimal at one
+chosen threshold. A chain taking cheap high-value roads early can plateau just under P* and then
+need more displacement to cross.
+
+**So "better order" is under-specified until we say better AT WHAT.** Optimizing the curve and
+optimizing a threshold crossing are different objectives with different winners, and lens B reports
+the threshold while the plots show the curve.
+
+### Exactness is the wrong target
+
+Two independent reasons, both worth recording so it is not attempted:
+
+- "Cheapest connected subnetwork reaching P*" contains Steiner tree, so it is NP-hard even with the
+  road set fixed.
+- More decisively, **the exact answer is not nested.** The optimal subset at budget b1 need not be a
+  subset of the optimal at b2, so the true Pareto frontier over subsets is not a CHAIN -- and the
+  curves and GIFs require a chain (roads appear and never disappear). The right target is therefore
+  the best chain, and the frontier-minus-chain gap is a price deliberately paid for interpretability,
+  not a defect to remove.
+
+### Cost, which decides feasibility
+
+The greedy chain is O(R) `egress_power` solves (one per round, all candidates then scored O(1) by
+the first-order sensitivity, as `resistance_greedy` does). Fine at block scale -- R is 27-105 here --
+but `resistance_lp` emits 4,451 roads on a region, so O(R) solves is out of reach. A chunked variant
+(commit the top-k per round, re-linearize) brings it to O(R/k) and is the only version that can ship.
+Today's order costs one sort plus an O(log R) binary search, so this is a real cost increase that has
+to be justified by the curve gain.
+
 ### The actual open problem
 
 Minimize cost (displaced homes, or metres, or both) over **connected** subnetworks of a proposal
