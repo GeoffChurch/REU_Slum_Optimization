@@ -1,50 +1,622 @@
-/* Stony Brook University palette: SBU red (#990000) as the accent on a white, academic page.
-   Material's `primary: custom` / `accent: custom` hand color control to these variables. */
-:root {
-  --sbu-red: #990000;
-  --sbu-red-dark: #7a0000;
-  --sbu-red-light: #b03030;
-}
+/* Stony Brook University visual system for the reblock project site.
+   Loaded after fonts.css (see extra_css in mkdocs.yml).
+
+   PALETTE POLICY. The SBU brand guide makes red and black primary and caps non-red secondary
+   colour at roughly 20%. So: red is the ONLY chromatic colour in light mode -- everything else
+   is white, near-black ink, or a neutral grey -- and Midnight Blue appears in exactly two
+   places (the tail of the hero gradient and the footer band). Stony Brook Grey #828282 is
+   deliberately NOT used for body text: it computes to 3.84:1 on white and fails WCAG AA. It
+   survives only on non-text rules, where no ratio is required.
+
+   DARK MODE. #990000 as *text* on a dark background is 2.15:1 -- unusable. Dark mode therefore
+   splits the brand red into two tokens: --sbu-red-fill stays exactly #990000 wherever white
+   text sits on top of it (8.92:1, unchanged in both schemes), and --sbu-red-ink is a lightness
+   tint of the same hue used only for text and links on dark (6.37:1 on the page, 5.15:1 on the
+   Midnight Blue surface). Every ratio in this file was computed, not estimated. */
+
+/* ------------------------------------------------------------------ tokens: light (default) */
 
 [data-md-color-scheme="default"] {
+  /* brand */
+  --sbu-red: #990000;             /* 8.92:1 on white  - AAA body */
+  --sbu-red-fill: #990000;        /* white on it      - 8.92:1, AAA */
+  --sbu-red-ink: #990000;         /* text/links       - 8.92:1, AAA */
+  --sbu-red-deep: #7a0000;        /* hover            - 11.49:1, AAA */
+  --sbu-midnight: #16243e;        /* secondary, supporting only */
+  --sbu-grey: #828282;            /* 3.84:1 - NON-TEXT USE ONLY */
+
+  /* surfaces + ink */
+  --sbu-bg: #ffffff;
+  --sbu-surface: #fbf9f8;
+  --sbu-ink: #111111;             /* 18.88:1 - AAA */
+  --sbu-ink-muted: #5c5c5c;       /* 6.69:1  - AA   */
+  --sbu-rule: #e4ded8;            /* decorative hairline; not a UI boundary */
+  --sbu-rule-strong: #948a81;     /* 3.22:1 on the card fill, 3.38:1 on the page - clears 1.4.11 */
+
+  /* Material overrides */
   --md-primary-fg-color: var(--sbu-red);
-  --md-primary-fg-color--light: var(--sbu-red-light);
-  --md-primary-fg-color--dark: var(--sbu-red-dark);
-  --md-accent-fg-color: var(--sbu-red-dark);
-  --md-typeset-a-color: var(--sbu-red);
+  --md-primary-fg-color--light: #b03030;
+  --md-primary-fg-color--dark: var(--sbu-red-deep);
+  --md-primary-bg-color: #ffffff;
+  --md-accent-fg-color: var(--sbu-red-deep);
+  --md-typeset-a-color: var(--sbu-red-ink);
+  --md-default-fg-color: var(--sbu-ink);
+  --md-default-bg-color: var(--sbu-bg);
+  --md-code-bg-color: #f6f2ef;
+  --md-footer-bg-color: var(--sbu-midnight);
+  --md-footer-bg-color--dark: #0f1a2c;
 }
 
-/* Keep the body calm: white paper, near-black ink, red reserved for links, header, and rules. */
+/* --------------------------------------------------------------------- tokens: dark (slate) */
+
+[data-md-color-scheme="slate"] {
+  --sbu-red: #e87070;
+  --sbu-red-fill: #990000;        /* unchanged: white on it is still 8.92:1 */
+  --sbu-red-ink: #e87070;         /* 6.37:1 on --sbu-bg, 5.15:1 on --sbu-surface - AA */
+  --sbu-red-deep: #f29a9a;        /* hover: lighter, not darker, on a dark ground */
+  --sbu-midnight: #16243e;
+  --sbu-grey: #828282;
+
+  --sbu-bg: #0f0f10;
+  --sbu-surface: #16243e;         /* official Midnight Blue as the elevated surface */
+  --sbu-ink: #e8e6e3;             /* 15.38:1 - AAA */
+  --sbu-ink-muted: #a8a4a0;       /* 7.74:1  - AAA */
+  --sbu-rule: #2c2b2a;
+  --sbu-rule-strong: #78736c;     /* 3.29:1 on the card fill, 4.08:1 on the page - clears 1.4.11 */
+
+  --md-primary-fg-color: var(--sbu-red-fill);
+  --md-primary-fg-color--light: #b03030;
+  --md-primary-fg-color--dark: #7a0000;
+  --md-primary-bg-color: #ffffff;
+  --md-accent-fg-color: var(--sbu-red-deep);
+  --md-typeset-a-color: var(--sbu-red-ink);
+  --md-default-fg-color: var(--sbu-ink);
+  --md-default-bg-color: var(--sbu-bg);
+  --md-code-bg-color: #1b1b1d;
+  --md-footer-bg-color: #0b1421;
+  --md-footer-bg-color--dark: #080f19;
+}
+
+/* Material derives several fg variants from --md-default-fg-color at fixed alphas; on a dark
+   ground those land too faint for AA, so they are pinned to the computed tokens instead. */
+[data-md-color-scheme="slate"] {
+  --md-default-fg-color--light: var(--sbu-ink-muted);
+  --md-default-fg-color--lighter: #6f6c69;
+  --md-typeset-color: var(--sbu-ink);
+}
+
+/* --------------------------------------------------------------------------- type + measure */
+
+:root {
+  --sbu-display: 'Crimson Pro', Georgia, 'Times New Roman', serif;
+
+  /* NOTE ON GREEK / MATH GLYPHS. Neither face covers Greek -- Atkinson Hyperlegible ships no
+     Greek subset on Google Fonts at all (latin and latin-ext only), and Crimson Pro offers only
+     latin, latin-ext and vietnamese. So a character like U+0394 (delta) falls through to the
+     system sans below, verified by canvas metrics: Latin renders in Atkinson while Delta matches
+     the fallback width exactly. The fallbacks here are therefore load-bearing, not decoration --
+     they are what actually draws any Greek the pages ever carry. The generator currently spells
+     it out in words ("delta k"), so nothing on the site depends on this today. */
+  --sbu-body: 'Atkinson Hyperlegible', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
+    sans-serif;
+
+  /* Material sets 1rem = 20px, so 0.8rem = 16px. Scale is ~1.25 (major third). */
+  --sbu-step--1: 0.7rem;   /* 14px - captions, table cells */
+  --sbu-step-0: 0.8rem;    /* 16px - body */
+  --sbu-step-1: 1rem;      /* 20px - h4 / lead */
+  --sbu-step-2: 1.25rem;   /* 25px - h3 */
+  --sbu-step-3: 1.5rem;    /* 30px - h2 */
+  --sbu-step-4: 1.9rem;    /* 38px - h1 */
+
+  --sbu-measure: 70ch;     /* inside the 65-75ch readable band */
+}
+
+body,
+.md-typeset {
+  font-family: var(--sbu-body);
+}
+
+/* Material caps its layout grid at 61rem, which after the left nav and right TOC leaves the
+   content column around 690px. That is too narrow for this site's actual content: wide lens
+   tables, side-by-side before/after renders, and a two-column hero. Widened to 76rem; prose is
+   still held to --sbu-measure, so lines never get longer, only figures and tables get room. */
+.md-grid {
+  max-width: 76rem;
+}
+
+.md-typeset {
+  font-size: var(--sbu-step-0);
+  line-height: 1.65;       /* inside the 1.5-1.75 band */
+}
+
 .md-typeset h1,
-.md-typeset h2 {
-  font-family: Georgia, "Times New Roman", serif;
-  color: #1b1f23;
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4 {
+  font-family: var(--sbu-display);
+  color: var(--sbu-ink);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 
-.md-typeset h2 {
-  border-bottom: 1px solid #e3ddd4;
-  padding-bottom: 0.3rem;
+.md-typeset h1 {
+  font-size: var(--sbu-step-4);
+  line-height: 1.15;
+  margin-bottom: 0.6em;
 }
 
-/* Data tables: quiet header band instead of a solid color flood. */
-.md-typeset table:not([class]) th {
-  background-color: #faf7f5;
-  color: #1b1f23;
-  border-bottom: 2px solid var(--sbu-red);
+/* More space above a heading than below it: headings bind to what follows, not what precedes. */
+.md-typeset h2 {
+  font-size: var(--sbu-step-3);
+  line-height: 1.2;
+  margin-top: 2.2em;
+  margin-bottom: 0.7em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--sbu-rule);
 }
+
+.md-typeset h3 {
+  font-size: var(--sbu-step-2);
+  line-height: 1.3;
+  margin-top: 1.8em;
+  margin-bottom: 0.5em;
+}
+
+.md-typeset h4 {
+  font-size: var(--sbu-step-1);
+  margin-top: 1.5em;
+}
+
+/* A red rule under h2 would put red on every section break and swamp the 80:20 proportion; it
+   is carried instead by a short leading mark, so red still signals hierarchy but sparingly. */
+.md-typeset h2::before {
+  content: "";
+  display: block;
+  width: 2.2rem;
+  height: 3px;
+  margin-bottom: 0.5rem;
+  background: var(--sbu-red-fill);
+}
+
+[data-md-color-scheme="slate"] .md-typeset h2::before {
+  background: var(--sbu-red-ink);
+}
+
+/* Measure applies to prose only. Tables, figures, and code carry data and stay full-width. */
+.md-typeset p,
+.md-typeset ul:not(.grid):not([class*="md-"]),
+.md-typeset ol,
+.md-typeset blockquote {
+  max-width: var(--sbu-measure);
+}
+
+.md-typeset a {
+  text-underline-offset: 0.15em;
+  text-decoration-thickness: 1px;
+}
+
+.md-typeset a:hover {
+  color: var(--sbu-red-deep);
+}
+
+/* Keyboard focus is a real UI boundary, so it uses the brand red at full strength: 8.92:1 in
+   light, 6.37:1 in dark. Never removed, never replaced with a shadow-only cue. */
+.md-typeset a:focus-visible,
+.md-nav__link:focus-visible,
+.md-header__button:focus-visible,
+.md-footer a:focus-visible,
+.sbu-card:focus-within {
+  outline: 3px solid var(--sbu-red-ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+[data-md-color-scheme="slate"] .md-header__button:focus-visible {
+  outline-color: #ffffff;
+}
+
+/* Inside the hero and the header the ground is brand red, where a red focus ring computes to
+   1.29:1 against the gradient's dark stop -- an invisible focus indicator, and a real WCAG
+   failure for anyone navigating by keyboard. On red, the ring is white: 11.49:1 on the dark
+   stop, 8.92:1 on the light one. */
+.sbu-hero a:focus-visible,
+.md-header a:focus-visible,
+.md-header__button:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ---------------------------------------------------------------------------------- header */
+
+.md-header {
+  border-bottom: 3px solid var(--sbu-red-deep);
+}
+
+[data-md-color-scheme="slate"] .md-header {
+  background-color: var(--sbu-red-fill);
+}
+
+.md-header__title {
+  font-family: var(--sbu-display);
+  font-size: var(--sbu-step-1);
+  font-weight: 600;
+}
+
+/* The official logo must never be stretched, skewed, recoloured, or crowded. Width is capped,
+   height follows, and the clear space is enforced with padding rather than a bare margin. */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  width: auto;
+  height: 1.6rem;
+  max-width: 9rem;
+  object-fit: contain;
+}
+
+.md-header__button.md-logo {
+  padding: 0.2rem 0.6rem 0.2rem 0.2rem;
+}
+
+/* ------------------------------------------------------------------------------------ hero */
+
+.sbu-hero {
+  margin: 0 0 3rem;
+  padding: 2.6rem 1.8rem 2.2rem;
+  border-radius: 3px;
+  /* Red-to-red, per the brand guide's gradient rule. An earlier version ramped Stony Brook Red
+     into Midnight Blue, whose midpoint interpolated through violet -- a hue in neither the
+     primary nor the secondary palette. Navy is gone from the gradient entirely; Midnight Blue
+     now appears only as the dark-scheme surface and the footer band.
+
+     Linear only, never radial. 55deg in CSS is an axis 35 degrees above horizontal pointing up
+     and to the right, inside the brand guide's 20-70 degree window. Both stops are values
+     already established in this sheet (#7a0000 predates this redesign as --sbu-red-dark), so
+     no new brand colour is invented here. */
+  background: linear-gradient(55deg, #7a0000 0%, #990000 100%);
+  color: #ffffff;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: 2.4rem;
+  /* Centred: the figure block is a little shorter than the text column, so centring splits the
+     slack above and below it instead of pooling all of it under the caption. */
+  align-items: center;
+}
+
+/* Every grid child needs an explicit min-width: 0. A grid track's default min-width is `auto`,
+   so a replaced element's intrinsic width (the region render is ~1000px wide) overflows the
+   track and scrolls the whole page sideways -- which is exactly what it did on a 414px viewport
+   before this line existed. */
+.sbu-hero > * {
+  min-width: 0;
+}
+
+/* White on the gradient: 8.92:1 over the red stops, 15.49:1 over the Midnight Blue tail. */
+.md-typeset .sbu-hero h1 {
+  color: #ffffff;
+  font-size: clamp(1.8rem, 3.6vw, 2.4rem);
+  line-height: 1.12;
+  margin: 0 0 0.6rem;
+  max-width: 22ch;
+  text-wrap: balance;
+}
+
+.md-typeset .sbu-hero p {
+  color: #ffffff;
+  max-width: 46ch;
+}
+
+/* Material's default code chip is a dark-grey fill meant for a white page; dropped on the red
+   hero it reads as a rendering fault. Scoped to the hero only: a faint white wash that belongs
+   to the gradient, with white text on it. */
+.md-typeset .sbu-hero code {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  border: 0;
+  box-shadow: none;
+  padding: 0.05em 0.35em;
+}
+
+.md-typeset .sbu-hero__thesis {
+  font-size: var(--sbu-step-0);
+  line-height: 1.6;
+  margin: 0 0 1.1rem;
+  max-width: 52ch;
+}
+
+/* The key result, stated up front. Emphasis comes from weight and a rule, not from a giant
+   number floating over a label. */
+.md-typeset .sbu-hero__result {
+  font-size: var(--sbu-step-0);
+  margin: 0 0 1.3rem;
+  padding-left: 0.9rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.55);
+}
+
+.md-typeset .sbu-hero__result strong {
+  font-weight: 700;
+}
+
+.sbu-hero__affil {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  margin: 0;
+  padding-top: 1.1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+/* The supplied lockup is a 2-colour mark: black wordmark plus a #990000 shield and "University".
+   It cannot sit on the red hero directly -- the red half would disappear -- and there is no
+   reversed variant to swap in, so it gets its own white card. The padding is the mark's clear
+   space, held at ~25% of the mark's height on every side. */
+.sbu-hero__lockup {
+  display: inline-flex;
+  flex: 0 0 auto;
+  background: #ffffff;
+  border-radius: 3px;
+  padding: 0.8rem 1rem;
+}
+
+/* Selector is .md-typeset-qualified on purpose. Material ships
+   `.md-typeset img,.md-typeset svg,.md-typeset video{height:auto;max-width:100%}` at specificity
+   (0,1,1); a bare `.sbu-hero__logo` is (0,1,0) and loses, which rendered the mark at its full
+   518x428 intrinsic size with Material's 1px image border still on it. Qualifying gets (0,2,0),
+   which wins.
+
+   Height only, width auto: the mark scales proportionally and is never stretched or skewed, and
+   nothing here recolours it. */
+.md-typeset .sbu-hero__logo {
+  display: block;
+  height: 3.2rem;
+  width: auto;
+  max-width: none;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.md-typeset .sbu-hero__affil-text {
+  margin: 0;
+  font-size: var(--sbu-step--1);
+  line-height: 1.45;
+  color: #ffffff;
+  max-width: 34ch;
+}
+
+.sbu-hero__figure {
+  margin: 0;
+  min-width: 0;
+}
+
+.md-typeset .sbu-hero__figure img {
+  width: 100%;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: none;
+  display: block;
+}
+
+.md-typeset .sbu-hero__figure figcaption {
+  color: #ffffff;
+  font-size: var(--sbu-step--1);
+  line-height: 1.45;
+  margin-top: 0.6rem;
+  text-align: left;
+}
+
+.md-typeset .sbu-hero__figure figcaption a {
+  color: #ffffff;
+  text-decoration-color: rgba(255, 255, 255, 0.6);
+}
+
+@media screen and (max-width: 76.1875em) {
+  .sbu-hero {
+    grid-template-columns: minmax(0, 1fr);   /* never a bare 1fr -- see the min-width note above */
+    gap: 1.6rem;
+    padding: 2rem 1.4rem 1.8rem;
+  }
+
+  .md-typeset .sbu-hero h1 {
+    max-width: none;
+  }
+
+  .md-typeset .sbu-hero p {
+    max-width: none;
+  }
+}
+
+/* Belt-and-braces against sideways scroll: a wide data table scrolls inside its own box rather
+   than dragging the page with it. `width: fit-content` matters -- display:block alone stretches
+   the table's border to the full column while its cells stay narrow, leaving the frame floating
+   far to the right of the data. */
+.md-typeset table:not([class]) {
+  display: block;
+  overflow-x: auto;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.md-typeset figure img,
+.md-typeset .sbu-hero__figure img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ------------------------------------------------------------------------------ key figures */
+
+/* Real measurements with their units and their basis -- read as a research figure's data row,
+   not as marketing stat cards. Every value here is written by scripts/gen_site_pages.py from
+   run artifacts. */
+.sbu-keyfigures {
+  display: grid;
+  /* Material's root is 20px, so 1rem here is 20px -- 9rem is a 180px minimum track, which fits
+     all four figures on one row in the widened content column. */
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0 2rem;
+  margin: 0 0 2.5rem;
+  padding: 1.1rem 0 0;
+  border-top: 2px solid var(--sbu-red-fill);
+  max-width: none;
+}
+
+[data-md-color-scheme="slate"] .sbu-keyfigures {
+  border-top-color: var(--sbu-red-ink);
+}
+
+.md-typeset .sbu-keyfigures dt {
+  font-size: var(--sbu-step--1);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--sbu-ink-muted);
+  margin: 0;
+  order: 2;
+}
+
+.md-typeset .sbu-keyfigures dd {
+  font-family: var(--sbu-display);
+  font-size: var(--sbu-step-2);
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--sbu-ink);
+  margin: 0 0 0.15rem;
+  order: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.sbu-keyfigures > div {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 1rem;
+}
+
+/* --------------------------------------------------------------------------- Material cards */
+
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .sbu-card {
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 3px;
+  padding: 1.1rem 1.2rem;
+  background: var(--sbu-surface);
+  box-shadow: none;
+  transition: border-color 200ms ease, transform 200ms ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--sbu-red-ink);
+  transform: translateY(-2px);
+}
+
+.md-typeset .grid.cards > ul > li > :first-child {
+  margin-top: 0;
+}
+
+.md-typeset .grid.cards > ul > li > :last-child {
+  margin-bottom: 0;
+}
+
+.md-typeset .grid.cards > ul > li p {
+  max-width: none;
+  font-size: var(--sbu-step--1);
+  line-height: 1.55;
+  color: var(--sbu-ink-muted);
+}
+
+.md-typeset .grid.cards > ul > li p:first-child strong,
+.md-typeset .grid.cards > ul > li h3 {
+  font-family: var(--sbu-display);
+  font-size: var(--sbu-step-1);
+  font-weight: 600;
+  color: var(--sbu-ink);
+}
+
+.md-typeset .grid.cards > ul > li p:first-child a {
+  font-family: var(--sbu-display);
+  font-size: var(--sbu-step-1);
+  font-weight: 600;
+}
+
+/* --------------------------------------------------------------------------------- tables */
 
 .md-typeset table:not([class]) {
-  font-size: 0.72rem;
+  font-size: var(--sbu-step--1);
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 2px;
 }
 
-/* Images in comparison grids sit on white cards. */
+.md-typeset table:not([class]) th {
+  background-color: var(--sbu-surface);
+  color: var(--sbu-ink);
+  font-family: var(--sbu-body);
+  font-weight: 700;
+  border-bottom: 2px solid var(--sbu-red-fill);
+  white-space: nowrap;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  border-bottom-color: var(--sbu-red-ink);
+}
+
+.md-typeset table:not([class]) td {
+  font-variant-numeric: tabular-nums;
+  border-top: 1px solid var(--sbu-rule);
+}
+
+.md-typeset table:not([class]) tr:hover td {
+  background-color: var(--sbu-surface);
+}
+
+/* Figure-comparison tables (the generator's before/after image rows) are frames, not data. */
+.md-typeset table:not([class]) td:has(> img:only-child) {
+  padding: 0.4rem;
+  vertical-align: top;
+}
+
+/* ------------------------------------------------------------------------ figures + images */
+
 .md-typeset img {
-  background: #fff;
-  border: 1px solid #e3ddd4;
-  border-radius: 4px;
+  background: var(--sbu-bg);
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 3px;
 }
 
-/* Small status pills used on the home page. */
+.md-typeset figure {
+  margin: 2rem 0;
+  max-width: none;
+}
+
+.md-typeset figure img {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+}
+
+.md-typeset figcaption {
+  font-size: var(--sbu-step--1);
+  line-height: 1.5;
+  color: var(--sbu-ink-muted);
+  margin-top: 0.65rem;
+  padding-left: 0.85rem;
+  border-left: 1px solid var(--sbu-red-fill);
+  max-width: var(--sbu-measure);
+  text-align: left;
+}
+
+[data-md-color-scheme="slate"] .md-typeset figcaption {
+  border-left-color: var(--sbu-red-ink);
+}
+
+/* Dark mode: renders are light-background scientific figures. They are not inverted (that would
+   falsify the colour scales the captions describe), only softened at the frame. */
+[data-md-color-scheme="slate"] .md-typeset img {
+  background: #f3f1ee;
+}
+
+/* --------------------------------------------------------------------------- status pills */
+
+/* Colour never carries the meaning alone: each pill states its status in words, and the two
+   states differ in border weight and fill as well as hue. */
 .pill {
   display: inline-block;
   padding: 0.05rem 0.5rem;
@@ -54,14 +626,79 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   vertical-align: middle;
+  white-space: nowrap;
 }
 
 .pill-done {
-  color: #3a7d44;
-  border: 1px solid #3a7d44;
+  color: var(--sbu-ink);
+  border: 1px solid var(--sbu-rule-strong);
+  background: var(--sbu-surface);
 }
 
 .pill-progress {
-  color: var(--sbu-red);
-  border: 1px solid var(--sbu-red);
+  color: #ffffff;
+  border: 1px solid var(--sbu-red-fill);
+  background: var(--sbu-red-fill);
+}
+
+/* --------------------------------------------------------------------------------- footer */
+
+.md-footer-meta {
+  background-color: var(--md-footer-bg-color--dark);
+}
+
+.sbu-affiliation {
+  font-size: var(--sbu-step--1);
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0.3rem 0 0;
+  max-width: 74ch;
+}
+
+/* ---------------------------------------------------------------------------------- motion */
+
+/* One authored moment on the page: the hero settles in on load. Nothing else moves on scroll.
+   Timing follows the Scroll Reveal (Subtle) preset -- 350ms, 12px, exponential ease-out -- and
+   the element's default state is already visible, so a failed animation degrades to "shown". */
+@keyframes sbu-settle {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+.sbu-hero {
+  animation: sbu-settle 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sbu-hero {
+    animation: none;
+  }
+
+  .md-typeset .grid.cards > ul > li:hover {
+    transform: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ------------------------------------------------------------------------------- lightbox */
+
+/* glightbox is configured (mkdocs.yml) to opt out of any image carrying .skip-lightbox: the
+   header logo, the hero logo, and the hero figure, none of which are data worth zooming. */
+.md-header__button.md-logo img,
+.sbu-hero__logo {
+  cursor: default;
+}
+
+.glightbox-clean .gslide-description {
+  font-family: var(--sbu-body);
 }

@@ -1,56 +1,77 @@
-<!-- Handwritten intro for the single-page site. scripts/gen_site_pages.py prepends this file
-     to the generated method + benchmark sections and writes docs/index.md — edit HERE, never
-     index.md (it is generated and gitignored). Links to generated content are #anchors. -->
+<!-- Handwritten Home page for the multi-page site. scripts/gen_site_pages.py prepends the
+     do-not-edit note, substitutes the four HTML markers below, and writes docs/index.md — edit
+     HERE, never index.md (it is generated and gitignored). This file is committed but excluded
+     from the built site (see exclude_docs in mkdocs.yml).
+
+     The markers below are HTML comments named HEROLOGO, KEYRESULT, HERO and KEYFIGURES. They
+     are deliberately NOT spelled out in full here -- the generator substitutes by plain string
+     replacement, so writing a marker inside this note would fill the note itself. Each is
+     filled from run artifacts, or dropped entirely when those artifacts are absent, so a
+     partial checkout never shows a placeholder:
+       HEROLOGO    the official SBU mark, only if docs/brand/ actually holds it
+       KEYRESULT   the headline finding, one sentence, from lens_displacement.csv
+       HERO        the grown-region figure, captioned
+       KEYFIGURES  four measurements from meta.json + the two lens CSVs
+
+     Prose lives here; every NUMBER lives in the generator. Never type a metric into this file. -->
+
+<section class="sbu-hero" markdown>
+<div class="sbu-hero__body" markdown>
+
 # Rebuilding access, one block at a time
 
-**Stony Brook University REU · REU_Slum_Optimization**
+<p class="sbu-hero__thesis">Roughly 1.1 billion people live in informal settlements where missing
+roads cut homes off from emergency services, water, and power. <code>reblock</code> screens a whole
+city for its most access-starved blocks, proposes the least-disruptive new roads to reconnect them,
+and grades every proposal on the same footing.</p>
 
-We generate and evaluate road-network proposals for informal urban settlements — comparing
-methods that trade off accessibility, cost, displacement, and buildability across real
-slum-block data from Cape Town, Djibouti, and Nairobi.
+<p class="sbu-hero__result"><!-- KEYRESULT --></p>
 
-## The problem
+<div class="sbu-hero__affil">
+<!-- HEROLOGO -->
+<p class="sbu-hero__affil-text">Stony Brook University · AI Innovation &amp; Diffusion REU</p>
+</div>
 
-Over a billion people live in informal settlements without direct access to roads — which means
-no direct access to water, sanitation, or emergency services either. *Reblocking* proposes the
-least-disruptive new roads needed to connect every parcel to the existing street network.
+</div>
 
-## What the pipeline does
+<!-- HERO -->
 
-`reblock` screens a whole city for its most access-starved blocks, grows each into a right-sized
-region, routes complementary roads with a pluggable method, and grades the result on external
-connectivity (access burden removed), internal connectivity (backup-route redundancy), and
-displacement — all as composable [Hydra](https://hydra.cc) stages. Every example, table, and
-figure on this site is machine-generated from run artifacts committed in the repository: the
-numbers can never drift from the data.
+</section>
 
-## The methods
+<!-- KEYFIGURES -->
 
-Every method proposes a different road network for the same blocks; all are graded on the same
-metric basis. Each section below shows the method's roads on the ground and its numbers from the
-actual runs.
+## What this measures
 
-| Method | Idea | Status |
-|---|---|---|
-| [Peel](#peel) | steepest descent down the access-depth peel — the access-optimal baseline | <span class="pill pill-done">baseline</span> |
-| [Clearance](#clearance) | least-cost paths that repel from homes | <span class="pill pill-done">evaluated</span> |
-| [Clearance (looped)](#clearance-looped) | clearance + loop-closing connectors for redundancy | <span class="pill pill-done">evaluated</span> |
-| [Greedy Arterial (buildable)](#greedy-arterial-buildable) | best straight arterial per metre, snapped to buildable frontage | <span class="pill pill-done">evaluated</span> |
-| [OSM Footpaths](#osm-footpaths) | the real as-built footpath network, as the baseline to beat | <span class="pill pill-done">evaluated</span> |
-| [Euclidean Grid](#euclidean-grid) | a density-adaptive Manhattan-style grid | <span class="pill pill-done">evaluated</span> |
-| [Dream Come True](#dream-come-true) | desire lines detected from imagery | <span class="pill pill-progress">in progress</span> |
+Every proposal is graded on one tradeoff: **permeability** — how easily every parcel can reach a
+street — bought against **displacement**, the homes a road set grazes. Both are computed the same
+way for every method, including the footpath network residents built themselves, so the comparison
+is like-for-like rather than a scoreboard of incompatible scores.
 
-The [Benchmarks](#benchmarks) section puts the methods side by side twice: six methods
-head-to-head on one deep Cape Town block, and the scalable methods on a 12-block,
-11,000+-parcel settlement region graded along the full benefit-vs-added-road frontier. The
-[Metrics — North Star](metrics-north-star.md) note records where the metric design is heading.
+## Start here
 
-## Team
+<div class="grid cards" markdown>
 
-- **Mentor: Geoffrey Churchill**
-- **Daisy Sanchez** — Farmingdale State College
-- **Elvin Mendoza** — Suffolk County Community College
+-   **[Background](background.md)**
 
-Built on research from the Santa Fe Institute's
-[Open Reblock](https://github.com/mansueto-institute/prclz) line of work, with informal footpath
-data digitized by the Humanitarian OpenStreetMap community.
+    The problem, why roads matter, and the prior work this builds on.
+
+-   **[Methodology](methodology.md)**
+
+    The `data → screen → reblock` pipeline, and what the two metrics actually mean.
+
+-   **[Methods](methods/index.md)**
+
+    Seven road-generation methods, each shown on the ground with its own numbers.
+
+-   **[Results](benchmark.md)**
+
+    The settlement-scale benchmark and the permeability–displacement frontier.
+
+-   **[Team & References](team.md)**
+
+    Who built this, and the research it stands on.
+
+</div>
+
+Every figure, table, and number on this site is machine-generated from run artifacts committed in
+the repository — the numbers can never drift from the data.
