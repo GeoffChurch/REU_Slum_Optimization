@@ -8,7 +8,7 @@
 
 `depth_density` flagged **13,822 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_38528` (peel depth 13).
 
-![screen](screen.jpg)
+![screen](screen.png)
 
 **Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-34.00410,18.61263,17z).
 
@@ -19,7 +19,7 @@
 
 The metric grows a **3-block** region (**2,690 parcels**), mean depth 8.7 rings, mean density 117 bldg/ha.
 
-![region](region.jpg)
+![region](region.png)
 
 ## 3. The permeability frontier (benefit vs added road)
 
@@ -31,61 +31,65 @@ The frontier is the whole trade-off: **permeability** (benefit — the only bene
 
 | access-depth | permeability potential |
 |---|---|
-| ![access-depth](before_depth.jpg) | ![permeability potential](before_perm.jpg) |
+| ![access-depth](before_depth.png) | ![permeability potential](before_perm.png) |
 
 ## 4. Each method on the ground
 
 **Watch each method reblock** — its full road set added in drainage order, the deep interior draining as the network reaches in:
 
-| clearance_looped | euclidean_grid | greedy_arterial_repulsion | osm_footpaths |
-|---|---|---|---|
-| ![clearance_looped](reblock_clearance_looped.gif) | ![euclidean_grid](reblock_euclidean_grid.gif) | ![greedy_arterial_repulsion](reblock_greedy_arterial_repulsion.gif) | ![osm_footpaths](reblock_osm_footpaths.gif) |
+| Looped Tree | Grid | Worn Paths | Throughways | OSM Footpaths | Direct Objective (LP) |
+|---|---|---|---|---|---|
+| ![Looped Tree](reblock_clearance_looped.gif) | ![Grid](reblock_euclidean_grid.gif) | ![Worn Paths](reblock_flow_paths.gif) | ![Throughways](reblock_greedy_arterial_repulsion.gif) | ![OSM Footpaths](reblock_osm_footpaths.gif) | ![Direct Objective (LP)](reblock_resistance_lp.gif) |
 
-### Matched displacement
+### Matched permeability (primary)
 
-Every method truncated to the same displacement %, so this compares the **permeability each buys for the same home-cost**:
-
-| Method | Road | Displacement | Permeability | Note |
-|---|---|---|---|---|
-| clearance_looped | 2,334 m | 10.0% | 78.2% |  |
-| euclidean_grid | 2,696 m | 10.5% | 70.6% |  |
-| greedy_arterial_repulsion | 3,431 m | 10.1% | 71.0% |  |
-| osm_footpaths | 4,607 m | 10.1% | 58.5% |  |
-
-Access-depth coloring:
-
-| clearance_looped | euclidean_grid | greedy_arterial_repulsion | osm_footpaths |
-|---|---|---|---|
-| ![clearance_looped](after_clearance_looped_disp_depth.jpg) | ![euclidean_grid](after_euclidean_grid_disp_depth.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_disp_depth.jpg) | ![osm_footpaths](after_osm_footpaths_disp_depth.jpg) |
-
-Permeability-potential coloring:
-
-| clearance_looped | euclidean_grid | greedy_arterial_repulsion | osm_footpaths |
-|---|---|---|---|
-| ![clearance_looped](after_clearance_looped_disp_perm.jpg) | ![euclidean_grid](after_euclidean_grid_disp_perm.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_disp_perm.jpg) | ![osm_footpaths](after_osm_footpaths_disp_perm.jpg) |
-
-### Matched permeability
-
-Every method truncated where permeability first reaches the standard target, so this compares the **displacement each spends** for the same permeability outcome:
+Every method truncated where permeability first reaches the standard target, so this compares **what each spends to get there** — in homes displaced and in metres of road. Pinning the benefit and comparing costs is the sounder direction: both costs appear in their own units, so no exchange rate between homes and metres is needed.
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| clearance_looped | 924 m | 4.5% | 62.1% |  |
-| euclidean_grid | 2,068 m | 7.8% | 66.1% |  |
-| greedy_arterial_repulsion | 1,860 m | 6.1% | 61.9% |  |
-| osm_footpaths | 4,760 m | 11.1% | 61.8% |  |
+| Looped Tree | 965 m | 4.7% | 60.1% |  |
+| Grid | 2,068 m | 7.8% | 66.1% |  |
+| Worn Paths | 1,137 m | 4.9% | 61.0% |  |
+| Throughways | 1,478 m | 5.1% | 60.9% |  |
+| OSM Footpaths | 4,760 m | 11.1% | 61.8% |  |
+| Direct Objective (LP) | 1,338 m | 1.6% | 60.3% |  |
 
 Access-depth coloring:
 
-| clearance_looped | euclidean_grid | greedy_arterial_repulsion | osm_footpaths |
-|---|---|---|---|
-| ![clearance_looped](after_clearance_looped_perm_depth.jpg) | ![euclidean_grid](after_euclidean_grid_perm_depth.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_perm_depth.jpg) | ![osm_footpaths](after_osm_footpaths_perm_depth.jpg) |
+| Looped Tree | Grid | Worn Paths | Throughways | OSM Footpaths | Direct Objective (LP) |
+|---|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_perm_depth.png) | ![Grid](after_euclidean_grid_perm_depth.png) | ![Worn Paths](after_flow_paths_perm_depth.png) | ![Throughways](after_greedy_arterial_repulsion_perm_depth.png) | ![OSM Footpaths](after_osm_footpaths_perm_depth.png) | ![Direct Objective (LP)](after_resistance_lp_perm_depth.png) |
 
 Permeability-potential coloring:
 
-| clearance_looped | euclidean_grid | greedy_arterial_repulsion | osm_footpaths |
-|---|---|---|---|
-| ![clearance_looped](after_clearance_looped_perm_perm.jpg) | ![euclidean_grid](after_euclidean_grid_perm_perm.jpg) | ![greedy_arterial_repulsion](after_greedy_arterial_repulsion_perm_perm.jpg) | ![osm_footpaths](after_osm_footpaths_perm_perm.jpg) |
+| Looped Tree | Grid | Worn Paths | Throughways | OSM Footpaths | Direct Objective (LP) |
+|---|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_perm_perm.png) | ![Grid](after_euclidean_grid_perm_perm.png) | ![Worn Paths](after_flow_paths_perm_perm.png) | ![Throughways](after_greedy_arterial_repulsion_perm_perm.png) | ![OSM Footpaths](after_osm_footpaths_perm_perm.png) | ![Direct Objective (LP)](after_resistance_lp_perm_perm.png) |
+
+### Matched displacement (secondary)
+
+Every method truncated to the same displacement %, so this compares the **permeability each buys for the same home-cost**. This lens budgets homes but **not road length**, and the two are not proportional — a metre through a gap displaces far less than a metre through the dense interior. So read `road_m` beside `permeability`: a method showing a higher number at several times the road length has not been shown to be better, only more expensive. Prefer the matched-permeability lens above, which prices both costs.
+
+| Method | Road | Displacement | Permeability | Note |
+|---|---|---|---|---|
+| Looped Tree | 2,271 m | 10.1% | 78.4% |  |
+| Grid | 2,696 m | 10.5% | 70.6% |  |
+| Worn Paths | 2,085 m | 10.0% | 75.6% |  |
+| Throughways | 3,625 m | 10.2% | 73.0% |  |
+| OSM Footpaths | 4,607 m | 10.1% | 58.5% |  |
+| Direct Objective (LP) | 6,957 m | 10.0% | 88.3% |  |
+
+Access-depth coloring:
+
+| Looped Tree | Grid | Worn Paths | Throughways | OSM Footpaths | Direct Objective (LP) |
+|---|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_disp_depth.png) | ![Grid](after_euclidean_grid_disp_depth.png) | ![Worn Paths](after_flow_paths_disp_depth.png) | ![Throughways](after_greedy_arterial_repulsion_disp_depth.png) | ![OSM Footpaths](after_osm_footpaths_disp_depth.png) | ![Direct Objective (LP)](after_resistance_lp_disp_depth.png) |
+
+Permeability-potential coloring:
+
+| Looped Tree | Grid | Worn Paths | Throughways | OSM Footpaths | Direct Objective (LP) |
+|---|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_disp_perm.png) | ![Grid](after_euclidean_grid_disp_perm.png) | ![Worn Paths](after_flow_paths_disp_perm.png) | ![Throughways](after_greedy_arterial_repulsion_disp_perm.png) | ![OSM Footpaths](after_osm_footpaths_disp_perm.png) | ![Direct Objective (LP)](after_resistance_lp_disp_perm.png) |
 
 
 ## How this was generated
