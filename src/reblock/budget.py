@@ -104,7 +104,7 @@ def access_burden(depths: pd.Series) -> float:
 class _RoadNet:
     """The snap-planarized road graph, with each road's own nodes and its distance to the street.
 
-    Shared by `road_drainage` and `_street_first_ordered` so the two can never disagree about what
+    Shared by `road_drainage` and `street_first_ordered` so the two can never disagree about what
     the road network is. Nodes are `_rnd`-snapped segment endpoints -- deliberately NOT
     `unary_union`-noded, because that re-nodes geometry into vertices no `_rnd` key matches.
     """
@@ -144,8 +144,15 @@ def _road_net(block: Block, roads: GeoDataFrame, tol: float) -> _RoadNet:
 
 
 def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL) -> list[int]:
-    """Per-road parcel count: build a graph from the road segments, route each parcel to the
-    street through it, and count how many parcels use each segment. Uniform across methods."""
+    """Per-road PARCEL count: build a graph from the road segments, route each parcel to the street
+    through it, and count how many parcels' routes use each road. Uniform across methods.
+
+    Each parcel contributes AT MOST 1 to any one road, however many of that road's segments its
+    route happens to traverse. Summing per-segment instead inflates vertex-dense roads -- a route
+    crossing two segments of one road scored it 2 -- which is a count of geometry, not of traffic,
+    and it biases every drainage-based decision toward finely-vertexed roads. Two parcels served by
+    one road must read 2, whether that road is drawn with two vertices or twenty.
+    """
     n = len(roads)
     if n == 0:
         return []
@@ -163,10 +170,10 @@ def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL)
         if not reach:
             continue
         entry = min(reach, key=lambda node: (dist[node], node))
-        for a, b in zip(paths[entry], paths[entry][1:], strict=False):
-            row = edge_row.get(frozenset((a, b)))
-            if row is not None:
-                counts[row] += 1
+        used = {row for a, b in zip(paths[entry], paths[entry][1:], strict=False)
+                if (row := edge_row.get(frozenset((a, b)))) is not None}
+        for row in used:
+            counts[row] += 1
     return [counts.get(i, 0) for i in range(n)]
 
 
@@ -594,11 +601,20 @@ class Curve:
 V = TypeVar("V")
 
 
-def _street_first_ordered(block: Block, roads: GeoDataFrame, tol: float) -> GeoDataFrame:
+def street_first_ordered(block: Block, roads: GeoDataFrame, tol: float) -> GeoDataFrame:
     """`roads` reindexed so EVERY PREFIX IS A CONNECTED NETWORK REACHING THE STREET, reset to a
-    fresh RangeIndex -- the single canonical prefix order shared by `_sweep` and the `prefix_to_*`
-    walks, so every budget/prefix walk grows the road set in the same sequence. Callers guard
-    `len(roads) == 0` before calling.
+    fresh RangeIndex.
+
+    THE canonical prefix order: `_sweep`, every `prefix_to_*` walk and `animate` all grow the road
+    set in this one sequence, so a method's curve, its lens truncations and its GIF agree by
+    construction. Public (not `_`-prefixed) because `animate` imports it across a module
+    boundary -- it is a real seam, and naming it private only obscured that. It is deliberately NOT
+    a Hydra Strategy: the two alternatives tried are measurably WRONG rather than different (see
+    below), so a plug-in point would ship one implementation and a menu nobody selects. See
+    docs/superpowers/backlog.md, "Lens prefix selection", for the optimization problem that would
+    earn one.
+
+    Callers guard `len(roads) == 0` before calling.
 
     Drainage-descending order, with each road's CONNECTORS BOUGHT ON DEMAND: walk roads by drainage
     descending, and before emitting one, emit any not-yet-emitted roads along its own shortest path
@@ -683,7 +699,7 @@ def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | No
     vals: list[V] = [value(cast(GeoDataFrame, roads.iloc[:0]))]
     if len(roads) == 0 or block.boundary.area == 0.0:
         return costs, vals
-    ordered = _street_first_ordered(block, roads, tol)
+    ordered = street_first_ordered(block, roads, tol)
     cum = ordered.geometry.length.to_numpy().cumsum()
     total = float(cum[-1])
     seen = 0
@@ -719,7 +735,7 @@ def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
     if len(roads) == 0:
         empty = cast(GeoDataFrame, roads.iloc[:0])
         return empty, max_access_depth(block, empty, tol=tol, adj=adj)
-    ordered = _street_first_ordered(block, roads, tol)
+    ordered = street_first_ordered(block, roads, tol)
 
     def depth_at(m: int) -> int:
         return max_access_depth(block, cast(GeoDataFrame, ordered.iloc[:m]), tol=tol, adj=adj)
@@ -754,7 +770,7 @@ def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.
     n = len(block.building_points)
     if len(roads) == 0:
         return cast(GeoDataFrame, roads.iloc[:0])
-    ordered = _street_first_ordered(block, roads, tol)
+    ordered = street_first_ordered(block, roads, tol)
 
     def frac_at(m: int) -> float:
         if n == 0:
@@ -801,7 +817,7 @@ def prefix_to_permeability(
         return cast(GeoDataFrame, roads.iloc[:0]), False
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     p0, _ = egress_power(block, None, params, adj=adj)
-    ordered = _street_first_ordered(block, roads, tol)
+    ordered = street_first_ordered(block, roads, tol)
 
     def perm_at(m: int) -> float:
         return permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0, adj=adj)

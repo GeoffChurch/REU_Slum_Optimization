@@ -8,9 +8,9 @@ from shapely.geometry import LineString, MultiLineString, Point, Polygon
 from shapely.ops import unary_union
 
 from reblock.budget import (
-    _street_first_ordered,
     access_burden,
     road_drainage,
+    street_first_ordered,
 )
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
@@ -447,7 +447,7 @@ def test_permeability_and_displacement_curves_share_cost_samples():
 
 
 def test_every_scored_prefix_reaches_the_street() -> None:
-    """`_street_first_ordered` must make every prefix a connected network reaching the street.
+    """`street_first_ordered` must make every prefix a connected network reaching the street.
 
     The lenses score a PREFIX of a method's roads, so a prefix that does not reach the street is a
     road set nobody could build -- and permeability still credits it, because an isolated corridor
@@ -491,7 +491,7 @@ def test_every_scored_prefix_reaches_the_street() -> None:
     assert drain[0] > max(drain[1], drain[2]), (
         f"fixture is vacuous: the far bar must out-drain both branches, got {drain}")
 
-    ordered = _street_first_ordered(block, roads, STREET_TOL)
+    ordered = street_first_ordered(block, roads, STREET_TOL)
     for k in range(1, len(ordered) + 1):
         prefix = ordered.iloc[:k]
         # prefix + street must be ONE connected component. Checking each noded piece's own distance
@@ -553,6 +553,44 @@ def test_ordering_reduces_to_plain_drainage_when_that_is_already_buildable() -> 
     # distance disagree. Distance puts A (index 0) first; drainage puts B (index 2).
     assert plain[0] == 2, f"busy stem must lead plain drainage order, got {plain} for {drain}"
 
-    ordered = _street_first_ordered(block, roads, STREET_TOL)
+    ordered = street_first_ordered(block, roads, STREET_TOL)
     got = [list(roads.geometry).index(g) for g in ordered.geometry]
     assert got == plain, f"constrained order {got} differs from plain drainage {plain}"
+
+
+def test_drainage_counts_parcels_not_segment_traversals() -> None:
+    """A road's drainage must not depend on how many vertices it is drawn with.
+
+    Drainage is documented as a per-road PARCEL count and is the ranking key for the lens prefix
+    order, so inflating vertex-dense roads biases every prefix walk toward them -- a count of
+    geometry rather than of traffic.
+
+    Two identical geometries, one drawn with a single segment and one subdivided into four, each
+    serving the same single parcel from the same street. Their drainage must be equal.
+
+    FAULT INJECTION: summing per traversed segment (`counts[row] += 1` inside the path loop, instead
+    of collecting the road set first) scores the subdivided road 4 against the plain road's 1.
+    """
+    street = LineString([(0.0, 0.0), (100.0, 0.0)])
+
+    def block_with(spur: LineString, parcel_at: tuple[float, float]) -> Block:
+        x, y = parcel_at
+        return Block(
+            block_id="d", crs=UTM,
+            boundary=Polygon([(0, 0), (100, 0), (100, 60), (0, 60)]),
+            parcels=gpd.GeoDataFrame(
+                {"parcel_id": ["a"]},
+                geometry=[Polygon([(x, y), (x + 10, y), (x + 10, y + 10), (x, y + 10)])],
+                crs=UTM),
+            streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
+            building_points=gpd.GeoDataFrame(geometry=[Point(x + 5, y + 5)], crs=UTM))
+
+    plain = LineString([(20.0, 0.0), (20.0, 40.0)])
+    subdivided = LineString([(20.0, 0.0), (20.0, 10.0), (20.0, 20.0), (20.0, 30.0), (20.0, 40.0)])
+    d_plain = road_drainage(block_with(plain, (20.0, 40.0)),
+                            gpd.GeoDataFrame(geometry=[plain], crs=UTM))
+    d_sub = road_drainage(block_with(subdivided, (20.0, 40.0)),
+                          gpd.GeoDataFrame(geometry=[subdivided], crs=UTM))
+    assert d_plain == [1], f"one parcel on one road must read 1, got {d_plain}"
+    assert d_sub == d_plain, (
+        f"subdividing a road changed drainage {d_plain} -> {d_sub}: counting segments, not parcels")
