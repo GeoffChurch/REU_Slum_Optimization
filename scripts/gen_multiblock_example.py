@@ -5,10 +5,18 @@ colouring -- into `examples/multiblock_<metric>/`. Then the pure dir-reader gene
 (`scripts.gen_example_readme`) turns the run's artifacts + a small `meta.json` into `README.md`, so
 the prose can never drift from the numbers.
 
-`osm_footpaths` is left out of the two-lens method comparison here: its desire-line snapshot is
-region-specific and each metric picks a DIFFERENT region, so a fair osm run would need a fresh OSM
-fetch per variant. `clearance` + `greedy_arterial` already demonstrate the two lenses on whatever
-region the metric chose -- which is the point of the variant.
+The method set is curated, not the whole registry: four synthetic methods spanning distinct
+mechanisms -- `clearance_looped` (drainage tree + loop closure, the flagship),
+`greedy_arterial_repulsion` (CELF greedy), `euclidean_grid` (fixed spacing), `resistance_lp` (the
+objective optimized directly over paths) -- plus `osm_footpaths`, the real as-built network, as a
+reference rather than a competitor. It is a fixed input, so it is the one entry that can fail to
+reach P*.
+
+`flow_paths` was dropped from the comparison: it exists as the real-footpath MIMICRY probe (it
+reproduces footpath position but not geometry), which is a question about realism, not about
+reblocking quality. It stays registered in `all_methods` and is still worth re-adding if the
+question becomes "what do the synthetic methods miss" -- on the depth region it reached P* with
+FEWER metres than any other method, so it is not dominated.
 
 Run:  pixi run python -m scripts.gen_multiblock_example <depth|depth_density>
 """
@@ -140,7 +148,6 @@ def main() -> None:
         "all_methods.clearance_looped.base.max_roads=3000",
         "all_methods.clearance_looped.budget_frac=0.30",
         "all_methods.clearance_looped.search_radius_m=60",
-        "+all_methods.flow_paths.max_sources=1500",
         # `resistance_lp` is the only method with an INTERNAL displacement budget, so it must be
         # given headroom above the lens's own D or it is treated differently from everything else:
         # every other method proposes a full network and lets the lens truncate, while an LP capped
@@ -191,7 +198,7 @@ def main() -> None:
 
         methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
                    for n in ("greedy_arterial_repulsion", "clearance_looped", "euclidean_grid",
-                             "flow_paths", "resistance_lp")}
+                             "resistance_lp")}
         # osm_footpaths: the real as-built informal network, from a committed per-region OSM
         # snapshot (fetched once by scripts.fetch_desire_lines_snapshot) so the example
         # reproduces offline.
