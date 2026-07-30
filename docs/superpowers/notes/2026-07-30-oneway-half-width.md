@@ -152,6 +152,44 @@ optimum would have been.
   the problem is an ordinary Laplacian solve whose conductance depends on the sign of its own
   solution; iterate with damping to the fixed point.
 
+## Attempt on real road sets: the shipped mesh CANNOT express one-way streets
+
+Re-testing the reversal on real proposals failed, and the failure is the most useful result in this
+note.
+
+**The permeability mesh has no road network in it.** `egress_power` builds edges between adjacent
+PARCEL CENTROIDS; a road is only a per-edge conductance modifier -- an adjacency edge whose
+centroid-to-centroid segment intersects `roads.buffer(corridor_m)` gets `g_road` instead of
+`g_walk`. There are no road nodes and no road edges. So:
+
+- A road corridor covers many adjacency edges, including ones running PERPENDICULAR to the road
+  (parcels facing each other across it). Orienting those has nothing to do with orienting traffic.
+- There is no object in the mesh corresponding to "this street, in this direction".
+
+`scratchpad/ot/directed_real.py` tried anyway -- dropping the reverse conductance of every
+road-covered adjacency edge -- and produced a result that is diagnostic precisely because it is
+backwards: `greedy_arterial_repulsion`, the most loop-rich method at 96% cycle edges, showed the
+WORST one-way penalty (5.65x), while a pure tree showed the BEST (3.49x). Loops are supposed to be
+what survives one-way. The numbers are not reported as findings.
+
+**Consequence for the design: one-way cannot be layered onto the current metric.** It needs a mesh
+in which road segments are first-class edges and parcels attach to them -- closer to a conventional
+transport network model than to today's parcel-adjacency conductance field. That is a bigger change
+than the width rule (which needs no solver at all) and should be scoped as such.
+
+### Also: the budget trap, for the third time
+
+The probe compared FULL road sets, so `egress_power` correctly reported the LP as worse (112 vs
+clearance's 45 on one block) purely because the LP stops at its 10% displacement cap and builds less
+road. The LP wins at MATCHED budget. This is the same error that invalidated the first Kirchhoff
+probe and the first one-way width probe. **Any probe comparing methods must match a budget or report
+only within-method ratios** -- there is no third option, and the failure mode is silent.
+
+The solver itself was validated against the shipped metric before any of this was read: run
+undirected it reproduces `egress_power` to a ratio of 1.0000 on every case tested. That is the same
+known-answer-oracle discipline that caught the broken connectivity instrument, and it is what
+localized the fault to the framing rather than the arithmetic.
+
 ## Before building
 
 The circulation history applies here as it did to the all-pairs probe
