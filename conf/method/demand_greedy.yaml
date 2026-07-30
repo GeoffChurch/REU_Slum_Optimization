@@ -1,0 +1,16 @@
+# Greedy drainage tree routed TOWARD a desire-line demand field, rather than away from buildings.
+# Same construction as clearance (worst-served parcel -> Dijkstra -> repeat, on the substrate, so
+# a road can never cut a building); only the edge cost differs:
+#   clearance      length * ((1-t) + t/clearance)     repel from buildings
+#   demand_greedy  length / (eps + demand)^gamma      attract to worn paths
+# Unlike osm_footpaths, the desire lines are only a PRIOR -- the tree still guarantees every parcel
+# reaches a road, so it does not inherit OSM's coverage gaps. See
+# reblock.methods.demand_greedy.DemandGreedyReblocker.
+_target_: reblock.methods.demand_greedy.DemandGreedyReblocker
+desire_source: ${desire_source}
+substrate: ${substrate}
+buffer_m: 3.0
+eps: 0.1
+gamma: 1.0
+depth_target: 2
+max_roads: 400

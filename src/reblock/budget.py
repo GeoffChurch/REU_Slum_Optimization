@@ -100,16 +100,35 @@ def access_burden(depths: pd.Series) -> float:
     return float((depths.astype("float64") ** 2).sum())
 
 
-def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL) -> list[int]:
-    """Per-road parcel count: build a graph from the road segments, route each parcel to the
-    street through it, and count how many parcels use each segment. Uniform across methods."""
-    n = len(roads)
-    if n == 0:
-        return []
+@dataclass(frozen=True)
+class _RoadNet:
+    """The snap-planarized road graph, with each road's own nodes and its distance to the street.
+
+    Shared by `road_drainage` and `street_first_ordered` so the two can never disagree about what
+    the road network is. Nodes are `_rnd`-snapped segment endpoints -- deliberately NOT
+    `unary_union`-noded, because that re-nodes geometry into vertices no `_rnd` key matches.
+    """
+
+    graph: nx.Graph
+    edge_row: dict[frozenset[_Node], int]
+    road_nodes: list[list[_Node]]
+    street_nodes: list[_Node]
+
+    def street_distance(self) -> tuple[dict[_Node, float], dict[_Node, list[_Node]]]:
+        """Per-node network distance from the street, and the path back to it."""
+        if not self.street_nodes:
+            return {}, {}
+        d, p = nx.multi_source_dijkstra(self.graph, sorted(self.street_nodes))
+        return cast(dict[_Node, float], d), cast(dict[_Node, list[_Node]], p)
+
+
+def _road_net(block: Block, roads: GeoDataFrame, tol: float) -> _RoadNet:
     g: nx.Graph = nx.Graph()
-    edge_row: dict[frozenset[tuple[float, float]], int] = {}
+    edge_row: dict[frozenset[_Node], int] = {}
+    road_nodes: list[list[_Node]] = []
     for i, geom in enumerate(roads.geometry):
         parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]   # explode Multi*
+        mine: list[_Node] = []
         for part in parts:
             cs = list(part.coords)
             for a, b in zip(cs, cs[1:], strict=False):
@@ -117,11 +136,31 @@ def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL)
                 if na != nb:
                     g.add_edge(na, nb, weight=Point(na).distance(Point(nb)))
                     edge_row[frozenset((na, nb))] = i
+                    mine += [na, nb]
+        road_nodes.append(mine)
     street = unary_union(list(block.streets.geometry))
-    snodes = {node for node in g.nodes if Point(node).distance(street) <= tol}
-    if not snodes:
+    snodes = [node for node in g.nodes if Point(node).distance(street) <= tol]
+    return _RoadNet(graph=g, edge_row=edge_row, road_nodes=road_nodes, street_nodes=snodes)
+
+
+def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL) -> list[int]:
+    """Per-road PARCEL count: build a graph from the road segments, route each parcel to the street
+    through it, and count how many parcels' routes use each road. Uniform across methods.
+
+    Each parcel contributes AT MOST 1 to any one road, however many of that road's segments its
+    route happens to traverse. Summing per-segment instead inflates vertex-dense roads -- a route
+    crossing two segments of one road scored it 2 -- which is a count of geometry, not of traffic,
+    and it biases every drainage-based decision toward finely-vertexed roads. Two parcels served by
+    one road must read 2, whether that road is drawn with two vertices or twenty.
+    """
+    n = len(roads)
+    if n == 0:
+        return []
+    net = _road_net(block, roads, tol)
+    g, edge_row = net.graph, net.edge_row
+    if not net.street_nodes:
         return [0] * n
-    dist, paths = nx.multi_source_dijkstra(g, sorted(snodes))
+    dist, paths = net.street_distance()
     nodes = list(g.nodes)
     tree = STRtree([Point(node) for node in nodes])
     counts: dict[int, int] = defaultdict(int)
@@ -131,10 +170,10 @@ def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL)
         if not reach:
             continue
         entry = min(reach, key=lambda node: (dist[node], node))
-        for a, b in zip(paths[entry], paths[entry][1:], strict=False):
-            row = edge_row.get(frozenset((a, b)))
-            if row is not None:
-                counts[row] += 1
+        used = {row for a, b in zip(paths[entry], paths[entry][1:], strict=False)
+                if (row := edge_row.get(frozenset((a, b)))) is not None}
+        for row in used:
+            counts[row] += 1
     return [counts.get(i, 0) for i in range(n)]
 
 
@@ -562,13 +601,88 @@ class Curve:
 V = TypeVar("V")
 
 
-def _drainage_ordered(block: Block, roads: GeoDataFrame, tol: float) -> GeoDataFrame:
-    """`roads` reindexed in drainage-descending order (ties by original index), reset to a fresh
-    RangeIndex -- the single canonical prefix order shared by `_sweep` and `prefix_to_depth`, so
-    every budget/prefix walk grows the road set in the same sequence. Callers guard
-    `len(roads) == 0` before calling (an empty road set has no drainage to order)."""
+def street_first_ordered(block: Block, roads: GeoDataFrame, tol: float) -> GeoDataFrame:
+    """`roads` reindexed so EVERY PREFIX IS A CONNECTED NETWORK REACHING THE STREET, reset to a
+    fresh RangeIndex.
+
+    THE canonical prefix order: `_sweep`, every `prefix_to_*` walk and `animate` all grow the road
+    set in this one sequence, so a method's curve, its lens truncations and its GIF agree by
+    construction. Public (not `_`-prefixed) because `animate` imports it across a module
+    boundary -- it is a real seam, and naming it private only obscured that. It is deliberately NOT
+    a Hydra Strategy: the two alternatives tried are measurably WRONG rather than different (see
+    below), so a plug-in point would ship one implementation and a menu nobody selects. See
+    docs/superpowers/backlog.md, "Lens prefix selection", for the optimization problem that would
+    earn one.
+
+    Callers guard `len(roads) == 0` before calling.
+
+    Drainage-descending order, with each road's CONNECTORS BOUGHT ON DEMAND: walk roads by drainage
+    descending, and before emitting one, emit any not-yet-emitted roads along its own shortest path
+    back to the street (street end first). Roads in no street-connected component have an empty
+    chain and simply take their drainage position; they are unbuildable either way.
+
+    Two properties make this the right order, and both matter:
+
+    1. **Every prefix is connected**, because a road is only ever chosen when it already touches the
+       built network. A pure drainage-descending order does NOT guarantee this. It is a valid
+       topological order only for a drainage TREE, where a road nearer the street carries at least
+       the traffic of everything beyond it; every method used to be such a tree, so it held and the
+       gap went unnoticed. It fails once a network has loops (drainage stops being monotone along a
+       path) or a later path branches off the MIDDLE of an earlier one, which even clearance does.
+       Measured fraction of scored prefix length reaching the street under the unconstrained order:
+       greedy_arterial_repulsion 0.782, resistance_greedy 0.900, clearance_looped 0.831 at region
+       scale. The lens was scoring road sets that could not be built.
+    2. **It preserves drainage's trunk-first preference**, and reduces EXACTLY to the old order
+       whenever that order was already buildable -- so a drainage tree's numbers are unchanged, and
+       the correction only touches prefixes that were actually broken.
+
+    Two alternatives were built and measured, and both distort in the same direction -- they make a
+    method look more expensive than a road set it demonstrably achieves:
+
+    - Sorting by network DISTANCE to the street guarantees connectivity but is breadth-first: it
+      completes a whole ring before reaching any deeper, penalizing fine-grained networks for their
+      granularity rather than their geometry. It moved `resistance_lp` on one region from 2,236 m at
+      0.0403 displacement to 5,104 m at 0.0630.
+    - Taking the highest-drainage road that merely TOUCHES the built network is nearly free at
+      block scale but loose at region scale: on the depth region it needed 23,490 m to reach
+      P* = 0.60 where a fully connected 1,951 m prefix was measured to exist -- 12x too much.
+
+    Buying the chain on demand avoids both: a deep high-drainage road is reachable as soon as its
+    own connectors are paid for, so the walk goes deep immediately instead of sweeping outward.
+
+    The lens's real question -- the CHEAPEST connected subnetwork reaching a target -- is an
+    optimization problem that no fixed order answers exactly. This is a heuristic for it, chosen to
+    be conservative in the one direction that matters (never scoring a set nobody could build)
+    without inflating cost.
+    """
+    net = _road_net(block, roads, tol)
     drain = road_drainage(block, roads, tol=tol)
-    order = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
+    dist, paths = net.street_distance()
+
+    def connector_chain(i: int) -> list[int]:
+        """The roads on road `i`'s own shortest path back to the street, street end first."""
+        ns = [n for n in net.road_nodes[i] if n in dist]
+        if not ns:
+            return []
+        path = paths[min(ns, key=lambda n: (dist[n], n))]
+        chain: list[int] = []
+        for a, b in zip(path, path[1:], strict=False):
+            r = net.edge_row.get(frozenset((a, b)))
+            if r is not None and r != i and r not in chain:
+                chain.append(r)
+        return chain
+
+    order: list[int] = []
+    taken = [False] * len(roads)
+    for i in sorted(range(len(roads)), key=lambda k: (-drain[k], k)):
+        if taken[i]:
+            continue
+        for r in connector_chain(i):        # street end first, so the prefix stays connected
+            if not taken[r]:
+                taken[r] = True
+                order.append(r)
+        taken[i] = True
+        order.append(i)
     return cast(GeoDataFrame, roads.iloc[order].reset_index(drop=True))
 
 
@@ -585,7 +699,7 @@ def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | No
     vals: list[V] = [value(cast(GeoDataFrame, roads.iloc[:0]))]
     if len(roads) == 0 or block.boundary.area == 0.0:
         return costs, vals
-    ordered = _drainage_ordered(block, roads, tol)
+    ordered = street_first_ordered(block, roads, tol)
     cum = ordered.geometry.length.to_numpy().cumsum()
     total = float(cum[-1])
     seen = 0
@@ -621,7 +735,7 @@ def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
     if len(roads) == 0:
         empty = cast(GeoDataFrame, roads.iloc[:0])
         return empty, max_access_depth(block, empty, tol=tol, adj=adj)
-    ordered = _drainage_ordered(block, roads, tol)
+    ordered = street_first_ordered(block, roads, tol)
 
     def depth_at(m: int) -> int:
         return max_access_depth(block, cast(GeoDataFrame, ordered.iloc[:m]), tol=tol, adj=adj)
@@ -656,7 +770,7 @@ def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.
     n = len(block.building_points)
     if len(roads) == 0:
         return cast(GeoDataFrame, roads.iloc[:0])
-    ordered = _drainage_ordered(block, roads, tol)
+    ordered = street_first_ordered(block, roads, tol)
 
     def frac_at(m: int) -> float:
         if n == 0:
@@ -703,7 +817,7 @@ def prefix_to_permeability(
         return cast(GeoDataFrame, roads.iloc[:0]), False
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     p0, _ = egress_power(block, None, params, adj=adj)
-    ordered = _drainage_ordered(block, roads, tol)
+    ordered = street_first_ordered(block, roads, tol)
 
     def perm_at(m: int) -> float:
         return permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0, adj=adj)

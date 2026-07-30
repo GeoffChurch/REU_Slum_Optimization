@@ -1,0 +1,18 @@
+# One objective, optimized directly: at every step add the road with the best PERMEABILITY GAIN
+# PER METRE, and stop when that stops paying. Candidates are both kinds of move -- connect an
+# unserved parcel, or close a loop -- so access and redundancy come out of one greedy rather than
+# a tree stage followed by a loop stage.
+#
+# The objective is the reported metric: permeability solves P = b'L^-1 b with the street eliminated
+# as ground, which IS the grounded effective resistance that specs/2026-07-21-unified-resistance-
+# objective-notes.md asked for (that note predates permeability and calls for building it).
+#
+# Candidates are ranked by a first-order sensitivity -- deltaP ~= -dg*(vi-vj)^2, one solve per round
+# then O(1) per edge -- which overstates gain, so it SHORTLISTS and the exact metric decides.
+# See reblock.methods.resistance_greedy.ResistanceGreedyReblocker.
+_target_: reblock.methods.resistance_greedy.ResistanceGreedyReblocker
+substrate: ${substrate}
+max_roads: 400
+shortlist: 6
+loop_radius_m: 0.0   # measured never-selected; see the class docstring
+min_loop_len_m: 40.0

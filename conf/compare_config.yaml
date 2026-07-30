@@ -27,6 +27,31 @@ all_methods:
   greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
+  demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", depth_target: 2, max_roads: 400}
+
+  # drainage tree. The gap to demand_greedy is exactly what the desire-line prior is worth.
+
+  # matched permeability with less road than clearance does, so the same loop budget is spent
+  # from a cheaper starting point -- the obvious way to improve the flagship.
+
+  # networks close loops within a tight budget where clearance_looped's connectors are the first
+  # thing a prefix cuts (5 of 6 blocks have 2-17 cycles in the full network and 0 after
+  # displacement-matching, which keeps only 1-33 of 24-166 segments); a 40 m floor excludes exactly
+  # the short connectors that score highest on bridges-removed-per-metre and survive truncation.
+  # ABLATED (scratchpad/ot/loop_ablation.py, at the example's overrides): min_loop_len_m carries the
+  # entire effect and min_bridges_per_m 0.01 -> 0.0 is bit-for-bit inert, so it is NOT changed here.
+  # The gain is also settings-dependent -- at the conf defaults (depth_target 1, budget_frac 0.12)
+  # the same change is slightly NEGATIVE (0.7370 vs 0.7383); it helps at the example's deeper base.
+  resistance_greedy: {_target_: reblock.methods.resistance_greedy.ResistanceGreedyReblocker, substrate: "${substrate}", max_roads: 400, shortlist: 6, loop_radius_m: 0.0, min_loop_len_m: 40.0}
+  # Whole road set chosen at once by LP, budgeting DISPLACEMENT (what the lenses score) rather than
+  # metres. Decides over paths, so connectivity is structural and the route-(A) rounding obstacle
+  # dissolves. chunks is a Frank-Wolfe step count. See conf/method/resistance_lp.yaml.
+  resistance_lp: {_target_: reblock.methods.resistance_lp.ResistanceLPReblocker, substrate: "${substrate}", max_displacement: 0.10, chunks: 8}
+  # Flow accumulation rather than drainage: route every trip, count edge traffic, keep the busiest.
+  # Sparse, can contain loops, does not reach every parcel -- the properties real footpaths have and
+  # a drainage tree cannot. flow_quantile is the hierarchy knob (low = footpath web, high = skeleton).
+  flow_paths: {_target_: reblock.methods.flow_paths.FlowPathsReblocker, substrate: "${substrate}", destination: all_pairs, iterations: 3, reinforcement: 0.5, flow_quantile: 0.90}
+  flow_paths_noreinforce: {_target_: reblock.methods.flow_paths.FlowPathsReblocker, substrate: "${substrate}", destination: all_pairs, iterations: 1, reinforcement: 0.0, flow_quantile: 0.90}
   clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
   clearance_looped:
     _target_: reblock.methods.loop_closure.LoopClosureRefiner
