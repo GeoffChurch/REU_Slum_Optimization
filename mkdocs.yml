@@ -8,40 +8,100 @@ site_description: >-
   Generating and evaluating road-network proposals for informal urban settlements —
   a Stony Brook University REU project.
 site_url: https://jmendoza167.github.io/REU_Slum_Optimization/
+copyright: Stony Brook University REU · AI Innovation &amp; Diffusion
 repo_url: https://github.com/jmendoza167/REU_Slum_Optimization
 repo_name: jmendoza167/REU_Slum_Optimization
 
 # Internal working notes stay out of the published site (the files themselves are untouched);
-# _intro.md is the handwritten partial the generator folds into index.md, not a page of its own.
+# _intro.md is the handwritten partial the generator folds into index.md, not a page of its own;
+# metrics-north-star.md is internal design-direction writing that links into superpowers/, so it
+# ships with those notes rather than as a public page.
 exclude_docs: |
   superpowers/
   _intro.md
+  metrics-north-star.md
+  stylesheets/fonts/README.md
 
 theme:
   name: material
+  custom_dir: overrides   # only partials/copyright.html, which adds the REU affiliation line
+  favicon: brand/favicon.png
+  # theme.logo is deliberately NOT set. Material renders it inside the header bar, which is solid
+  # Stony Brook Red -- and the supplied lockup is a 2-colour mark whose shield and the word
+  # "University" are both #990000, so they would vanish against it. There is no reversed/white
+  # variant in the pack and the mark must not be recoloured. The header therefore keeps its text
+  # title, and the lockup appears on a white card inside the hero, where it has the light ground
+  # and clear space the brand guide requires (see .sbu-hero__lockup in stylesheets/sbu.css).
+  # logo: brand/sbu-logo.png
   palette:
-    scheme: default
-    primary: custom
-    accent: custom
+    # Light is the default because the use scene is a daytime read of dense figures on a laptop;
+    # dark is offered, not assumed. Both schemes are hand-coloured in stylesheets/sbu.css.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
   features:
     - navigation.top
     - navigation.footer
-    - toc.integrate      # single-page site: the sidebar IS the anchor table of contents
-    - toc.follow
+    - navigation.indexes  # a section's index.md is the section's own landing page (Methods)
+    - toc.follow          # multi-page site: real page nav on the left, each page's TOC on the right
     - content.code.copy
   icon:
     repo: fontawesome/brands/github
 
 extra_css:
+  - stylesheets/fonts.css   # self-hosted faces; must load before the sheet that uses them
   - stylesheets/sbu.css
+
+plugins:
+  - search
+  # Click-to-zoom for the run renders and frontier curves, which carry detail that does not
+  # survive being scaled into the page. `skip_class` opts out the marks and the hero figure --
+  # brand assets and decoration are not data, so they are not zoom targets.
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      effect: fade
+      slide_effect: none
+      width: auto
+      height: auto
+      zoomable: true
+      draggable: false
+      skip_classes:
+        - skip-lightbox
+      auto_caption: false
+      caption_position: bottom
 
 markdown_extensions:
   - admonition
   - attr_list
   - md_in_html
+  - def_list      # the Home page key-figures row is a definition list
   - toc:
       permalink: true
 
 nav:
   - Home: index.md
-  - Metrics — North Star: metrics-north-star.md
+  - Background: background.md
+  - Methodology: methodology.md
+  - Methods:
+      - methods/index.md
+      - Peel: methods/peel.md
+      - Clearance: methods/clearance.md
+      - Looped Tree: methods/clearance_looped.md
+      - Throughways: methods/greedy_arterial_buildable.md
+      - OSM Footpaths: methods/osm_footpaths.md
+      - Grid: methods/euclidean_grid.md
+      - Dream Come True: methods/dream_come_true.md
+  - Results: benchmark.md
+  - Team & References: team.md

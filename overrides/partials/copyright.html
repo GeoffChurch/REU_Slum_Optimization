@@ -1,0 +1,27 @@
+{#-
+  Overrides mkdocs-material's partials/copyright.html so every page footer carries the REU
+  affiliation statement. Wording is a plain statement of where the work was done: it claims
+  affiliation, and explicitly disclaims being an official University publication, so nothing
+  here can read as institutional endorsement.
+
+  This is the only reason theme.custom_dir exists -- there is no main.html, because no other
+  block needed overriding.
+-#}
+<div class="md-copyright">
+  {% if config.copyright %}
+    <div class="md-copyright__highlight">
+      {{ config.copyright }}
+    </div>
+  {% endif %}
+  <p class="sbu-affiliation">
+    Undergraduate research conducted in the AI Innovation &amp; Diffusion REU at Stony Brook
+    University. This is student work, not an official publication of the University, and carries
+    no institutional endorsement.
+  </p>
+  {% if not config.extra.generator == false %}
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  {% endif %}
+</div>
