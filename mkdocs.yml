@@ -25,12 +25,14 @@ exclude_docs: |
 theme:
   name: material
   custom_dir: overrides   # only partials/copyright.html, which adds the REU affiliation line
-  # Official Stony Brook University marks. Both lines stay commented until the asset files are
-  # actually committed to docs/brand/ -- pointing theme.logo at a missing file renders a broken
-  # image in the header on every page. Uncomment both once the files land; nothing else needs
-  # changing (docs/stylesheets/sbu.css already sizes and pads the header mark).
-  # logo: brand/sbu-logo.svg
-  # favicon: brand/favicon.png
+  favicon: brand/favicon.png
+  # theme.logo is deliberately NOT set. Material renders it inside the header bar, which is solid
+  # Stony Brook Red -- and the supplied lockup is a 2-colour mark whose shield and the word
+  # "University" are both #990000, so they would vanish against it. There is no reversed/white
+  # variant in the pack and the mark must not be recoloured. The header therefore keeps its text
+  # title, and the lockup appears on a white card inside the hero, where it has the light ground
+  # and clear space the brand guide requires (see .sbu-hero__lockup in stylesheets/sbu.css).
+  # logo: brand/sbu-logo.png
   palette:
     # Light is the default because the use scene is a daytime read of dense figures on a laptop;
     # dark is offered, not assumed. Both schemes are hand-coloured in stylesheets/sbu.css.

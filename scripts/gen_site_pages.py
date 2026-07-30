@@ -645,8 +645,12 @@ def _hero_logo() -> str:
     stretched or skewed."""
     for name in ("sbu-logo.svg", "sbu-logo.png"):
         if (BRAND / name).exists():
-            return (f'<img class="sbu-hero__logo skip-lightbox" src="brand/{name}"'
-                    f' alt="Stony Brook University">')
+            # Wrapped in its own white card: the mark is 2-colour (black wordmark, #990000
+            # shield and "University") with no reversed variant, so it cannot sit on the red
+            # hero directly. The card supplies the light ground and the clear space.
+            return (f'<span class="sbu-hero__lockup">'
+                    f'<img class="sbu-hero__logo skip-lightbox" src="brand/{name}"'
+                    f' alt="Stony Brook University"></span>')
     return ""
 
 
@@ -704,13 +708,26 @@ def _key_figures() -> str:
     return f'<dl class="sbu-keyfigures">\n{cells}\n</dl>'
 
 
-def _write_page(path: Path, body: str, *, depth: int) -> None:
-    """Write one generated page: prepend the do-not-edit note and, for pages nested `depth` levels
-    below docs/, rewrite doc-root-relative asset links (assets/...) to reach back up (../assets/...)
-    so they are correct relative to the source file (MkDocs then fixes the output URLs)."""
+def _write_page(path: Path, body: str, *, depth: int, url_depth: int) -> None:
+    """Write one generated page, fixing asset paths for BOTH link forms, which MkDocs treats
+    differently:
+
+    `depth` -- Markdown links `](assets/...)`. MkDocs resolves these against the SOURCE file, so a
+    page nested `depth` levels below docs/ needs ../ per level; MkDocs then rewrites the output
+    URL itself.
+
+    `url_depth` -- raw HTML `src="assets/..."` inside the <figure> blocks. MkDocs does NOT touch
+    raw HTML, so these must already be correct against the page's SERVED url. With
+    use_directory_urls, benchmark.md is served at <base>/benchmark/ and methods/peel.md at
+    <base>/methods/peel/, so the served depth is not the same as the source depth -- benchmark.md
+    is depth 0 but url_depth 1. Getting this wrong 404s every figure on that page."""
     text = GENERATED_NOTE + body.rstrip() + "\n"
     if depth:
         text = text.replace("](assets/", "](" + "../" * depth + "assets/")
+    if url_depth:
+        up = "../" * url_depth
+        text = text.replace('src="assets/', f'src="{up}assets/')
+        text = text.replace('href="assets/', f'href="{up}assets/')
     path.write_text(text, encoding="utf-8")
 
 
@@ -732,11 +749,14 @@ def main() -> None:
         home = home.replace(marker, block)
     (DOCS / "index.md").write_text(GENERATED_NOTE + home + "\n", encoding="utf-8")
 
-    _write_page(methods_dir / "index.md", gen_methods_overview(), depth=1)
+    # url_depth is the page's SERVED depth under use_directory_urls, which differs from the
+    # source depth: methods/index.md serves at <base>/methods/ (1), methods/peel.md at
+    # <base>/methods/peel/ (2), benchmark.md at <base>/benchmark/ (1).
+    _write_page(methods_dir / "index.md", gen_methods_overview(), depth=1, url_depth=1)
     for m in METHODS:
-        _write_page(methods_dir / f"{m.slug}.md", gen_method_section(m), depth=1)
+        _write_page(methods_dir / f"{m.slug}.md", gen_method_section(m), depth=1, url_depth=2)
 
-    _write_page(DOCS / "benchmark.md", gen_benchmark_section(), depth=0)
+    _write_page(DOCS / "benchmark.md", gen_benchmark_section(), depth=0, url_depth=1)
     print("wrote docs/index.md, docs/methods/*.md, docs/benchmark.md")
 
 

@@ -31,7 +31,7 @@
   --sbu-ink: #111111;             /* 18.88:1 - AAA */
   --sbu-ink-muted: #5c5c5c;       /* 6.69:1  - AA   */
   --sbu-rule: #e4ded8;            /* decorative hairline; not a UI boundary */
-  --sbu-rule-strong: #c9c1b9;
+  --sbu-rule-strong: #948a81;     /* 3.22:1 on the card fill, 3.38:1 on the page - clears 1.4.11 */
 
   /* Material overrides */
   --md-primary-fg-color: var(--sbu-red);
@@ -62,7 +62,7 @@
   --sbu-ink: #e8e6e3;             /* 15.38:1 - AAA */
   --sbu-ink-muted: #a8a4a0;       /* 7.74:1  - AAA */
   --sbu-rule: #2c2b2a;
-  --sbu-rule-strong: #46433f;
+  --sbu-rule-strong: #78736c;     /* 3.29:1 on the card fill, 4.08:1 on the page - clears 1.4.11 */
 
   --md-primary-fg-color: var(--sbu-red-fill);
   --md-primary-fg-color--light: #b03030;
@@ -89,6 +89,14 @@
 
 :root {
   --sbu-display: 'Crimson Pro', Georgia, 'Times New Roman', serif;
+
+  /* NOTE ON GREEK / MATH GLYPHS. Neither face covers Greek -- Atkinson Hyperlegible ships no
+     Greek subset on Google Fonts at all (latin and latin-ext only), and Crimson Pro offers only
+     latin, latin-ext and vietnamese. So a character like U+0394 (delta) falls through to the
+     system sans below, verified by canvas metrics: Latin renders in Atkinson while Delta matches
+     the fallback width exactly. The fallbacks here are therefore load-bearing, not decoration --
+     they are what actually draws any Greek the pages ever carry. The generator currently spells
+     it out in words ("delta k"), so nothing on the site depends on this today. */
   --sbu-body: 'Atkinson Hyperlegible', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui,
     sans-serif;
 
@@ -208,6 +216,18 @@ body,
   outline-color: #ffffff;
 }
 
+/* Inside the hero and the header the ground is brand red, where a red focus ring computes to
+   1.29:1 against the gradient's dark stop -- an invisible focus indicator, and a real WCAG
+   failure for anyone navigating by keyboard. On red, the ring is white: 11.49:1 on the dark
+   stop, 8.92:1 on the light one. */
+.sbu-hero a:focus-visible,
+.md-header a:focus-visible,
+.md-header__button:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 /* ---------------------------------------------------------------------------------- header */
 
 .md-header {
@@ -244,10 +264,16 @@ body,
   margin: 0 0 3rem;
   padding: 2.6rem 1.8rem 2.2rem;
   border-radius: 3px;
-  /* Linear only, never radial. 55deg in CSS is an axis 35 degrees above horizontal pointing up
-     and to the right -- inside the brand guide's 20-70 degree window. Red holds the first 58%
-     so the red-to-secondary proportion stays near 80:20. */
-  background: linear-gradient(55deg, #990000 0%, #7a0000 58%, #16243e 100%);
+  /* Red-to-red, per the brand guide's gradient rule. An earlier version ramped Stony Brook Red
+     into Midnight Blue, whose midpoint interpolated through violet -- a hue in neither the
+     primary nor the secondary palette. Navy is gone from the gradient entirely; Midnight Blue
+     now appears only as the dark-scheme surface and the footer band.
+
+     Linear only, never radial. 55deg in CSS is an axis 35 degrees above horizontal pointing up
+     and to the right, inside the brand guide's 20-70 degree window. Both stops are values
+     already established in this sheet (#7a0000 predates this redesign as --sbu-red-dark), so
+     no new brand colour is invented here. */
+  background: linear-gradient(55deg, #7a0000 0%, #990000 100%);
   color: #ffffff;
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
@@ -280,6 +306,17 @@ body,
   max-width: 46ch;
 }
 
+/* Material's default code chip is a dark-grey fill meant for a white page; dropped on the red
+   hero it reads as a rendering fault. Scoped to the hero only: a faint white wash that belongs
+   to the gradient, with white text on it. */
+.md-typeset .sbu-hero code {
+  background-color: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  border: 0;
+  box-shadow: none;
+  padding: 0.05em 0.35em;
+}
+
 .md-typeset .sbu-hero__thesis {
   font-size: var(--sbu-step-0);
   line-height: 1.6;
@@ -310,15 +347,31 @@ body,
   border-top: 1px solid rgba(255, 255, 255, 0.28);
 }
 
-/* Clear space around the logo is padding-enforced; the mark is never scaled non-uniformly and
-   sits on the red end of the gradient, which is a high-contrast ground for a white-or-dark
-   mark. */
-.sbu-hero__logo {
-  height: 2.5rem;
+/* The supplied lockup is a 2-colour mark: black wordmark plus a #990000 shield and "University".
+   It cannot sit on the red hero directly -- the red half would disappear -- and there is no
+   reversed variant to swap in, so it gets its own white card. The padding is the mark's clear
+   space, held at ~25% of the mark's height on every side. */
+.sbu-hero__lockup {
+  display: inline-flex;
+  flex: 0 0 auto;
+  background: #ffffff;
+  border-radius: 3px;
+  padding: 0.8rem 1rem;
+}
+
+/* Selector is .md-typeset-qualified on purpose. Material ships
+   `.md-typeset img,.md-typeset svg,.md-typeset video{height:auto;max-width:100%}` at specificity
+   (0,1,1); a bare `.sbu-hero__logo` is (0,1,0) and loses, which rendered the mark at its full
+   518x428 intrinsic size with Material's 1px image border still on it. Qualifying gets (0,2,0),
+   which wins.
+
+   Height only, width auto: the mark scales proportionally and is never stretched or skewed, and
+   nothing here recolours it. */
+.md-typeset .sbu-hero__logo {
+  display: block;
+  height: 3.2rem;
   width: auto;
-  max-width: 11rem;
-  object-fit: contain;
-  padding: 0.35rem;
+  max-width: none;
   background: none;
   border: 0;
   border-radius: 0;
@@ -374,11 +427,14 @@ body,
   }
 }
 
-/* Belt-and-braces against sideways scroll: any wide element (a data table, a full-width render)
-   scrolls inside its own box rather than dragging the page with it. */
+/* Belt-and-braces against sideways scroll: a wide data table scrolls inside its own box rather
+   than dragging the page with it. `width: fit-content` matters -- display:block alone stretches
+   the table's border to the full column while its cells stay narrow, leaving the frame floating
+   far to the right of the data. */
 .md-typeset table:not([class]) {
   display: block;
   overflow-x: auto;
+  width: fit-content;
   max-width: 100%;
 }
 
