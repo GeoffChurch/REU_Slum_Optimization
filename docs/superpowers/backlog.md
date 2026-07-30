@@ -157,6 +157,40 @@ subject to permeability ≥ P\*. Notes toward it:
 - **The committed examples are stale** and need regenerating — `clearance_looped`, `arterial` and
   `resistance_greedy` prefixes all shift under the corrected order and drainage key.
 
+## Permeability credits disconnected roads; access depth does not (2026-07-30)
+
+The two reported quantities disagree about what a road that never reaches a street is worth:
+
+- `derive.access.street_connectivity` seeds ONLY road components that touch a street -- "floating
+  interior roads grant no access" -- so `parcel_access_layers` correctly leaves a parcel beside a
+  dead fragment deep.
+- `permeability` has no such rule. An isolated corridor still upgrades the local parcel-adjacency
+  conductance from footpath to road, so it RAISES the score while granting no access at all.
+
+**Found via the examples.** On `multiblock_density_compactness`, `osm_footpaths`'s lens-B prefix has
+**14 road components, only 70.8% of its length street-connected**, and **all 136** of its
+adjacent-but-still-deep parcels touch nothing but floating fragments. So its "reaches P* = 0.60"
+rests partly on road that provides zero access. The after-image is honest -- the depth colouring is
+right and the confusion is that a reader assumes any drawn road grants access.
+
+Chiefly hits `osm_footpaths`, a fixed real-world input (OSM footpath coverage is patchy, and
+clipping to the block interior severs connections at boundaries). Synthetic methods mostly build
+connected networks, so it flatters the real-world baseline rather than any of our methods -- but it
+is the same leniency that made disconnected lens prefixes score well before the prefix-order fix.
+
+### Options, none taken yet
+
+1. **Make permeability match access**: eliminate road conductance on components that do not reach
+   ground. Principled -- the metric is `b^T L^-1 b` on a grounded Laplacian, so an ungrounded
+   component is arguably already meaningless -- but it changes every published permeability number
+   and needs its own measurement pass.
+2. **Report connected fraction alongside** each method's lens rows, so a number resting on floating
+   road is visible rather than hidden. Cheap, honest, no metric change.
+3. **Render floating segments differently** (dashed or paler) in the after-images, so the picture
+   explains itself. Cheapest, purely presentational, fixes the confusion that surfaced this.
+
+(2) and (3) are independent of (1) and worth doing regardless.
+
 ## Deferred design (from the flow-refactor + peel-reblocker threads)
 
 - **Structured configs (dataclasses + ConfigStore)** — deferred out of the flow refactor; do once
