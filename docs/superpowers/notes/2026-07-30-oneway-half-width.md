@@ -190,6 +190,50 @@ undirected it reproduces `egress_power` to a ratio of 1.0000 on every case teste
 known-answer-oracle discipline that caught the broken connectivity instrument, and it is what
 localized the fault to the framing rather than the arithmetic.
 
+## The width rule ALONE IS GAMEABLE -- retracting "the cheap half is validated"
+
+Owner's objection, and it is correct: the half-width discount is granted because Robbins' theorem
+says a bridgeless network COULD be oriented one-way -- but **the scoring never orients anything.**
+Permeability stays undirected, so every discounted edge is still traversed both ways at full road
+conductance. You pay a one-way price for two-way function.
+
+And the exploit scales with loop size, which is the part that makes it fatal rather than merely
+generous: a huge loop that would be tedious to traverse in one direction costs nothing in an
+undirected score, because the forced detour -- the entire reason one-way is a real constraint -- is
+never charged. Bigger loops mean more edges on a cycle, hence more discount, with no offsetting term
+anywhere in the metric.
+
+**This is already visible in this note's own probe.** `greedy_arterial_repulsion` scoring 96% cycle
+edges and a 57.6% displacement saving is not evidence that it is one-way-functional; it is the
+largest UNEARNED discount in the set. It is bridgeless because it builds street-to-street
+through-routes, so nearly every edge qualifies for half width -- while the metric continues to let
+all of them carry traffic in both directions. The earlier framing in this note, "arterial becomes the
+structural favourite", is withdrawn: the correct reading is "arterial harvests the biggest free
+lunch".
+
+A loop-size sweep (`scratchpad/ot/width_gaming.py`, `LoopClosureRefiner.search_radius_m` from 30 m
+to 480 m) was inconclusive rather than confirmatory: `loop_frac` stayed flat at ~0.49 and
+permeability-per-displacement moved -1%, because the refiner saturates on `budget_frac` and
+`min_bridges_per_m` long before the search radius binds. The dial does not move, so the sweep tests
+nothing. The argument stands on its own construction regardless.
+
+### What this means for the design
+
+**The two halves are not separable.** The earlier claim in this note -- that the cost half is
+"validated decisively" and ready to spec while only the benefit half needs the new mesh -- was
+wrong. The width discount is a claim that the road can function one-way, and that claim is only
+cashable if the scoring enforces one-wayness. Without directed scoring it is free money, and the
+cheapest way to collect it is to build one enormous loop.
+
+So the honest position on the whole idea:
+
+| half | needs | status |
+|---|---|---|
+| half-width on cycle edges | displacement accounting only | **unsound alone** -- gameable by loop size |
+| directed ingress + egress | a mesh with explicit road edges | not expressible on the current metric |
+
+The cheap half is only meaningful as part of the expensive half. There is no incremental version.
+
 ## Before building
 
 The circulation history applies here as it did to the all-pairs probe
