@@ -85,6 +85,78 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
   cadastral/footprint parcels retain morphology kblock's k captures. Revisit whether a
   morphology-preserving parcelization is worth it, if the geometric metric doesn't suffice.
 
+## Lens prefix selection — the cheapest connected subnetwork (2026-07-29)
+
+Both lenses truncate a method's roads to a PREFIX of one canonical order (`budget.street_first_ordered`)
+and score that. The question the lens is really asking is **"what is the cheapest buildable
+subnetwork of this proposal that reaches the target?"** — an optimization problem. A fixed ordering is
+only a heuristic for it, and the heuristic's choice measurably changes conclusions, so it deserves to
+be attacked properly.
+
+**Why it matters:** on the depth region a wrong ordering moved `resistance_lp` from 1,951 m to
+23,490 m to reach P\* = 0.60 (12×) and flipped `resistance_lp` vs `clearance_looped` from domination
+on both axes to a Pareto trade. Nothing about the roads changed.
+
+### Settled so far (don't re-derive)
+
+- **The old order was broken, not merely suboptimal.** Plain drainage-descending IS a valid
+  topological order for a drainage *tree*, so it held while every method was one. It fails on loops
+  and where a later path branches off the middle of an earlier one (which clearance does). Measured
+  fraction of lens-B prefix length reaching the street under it: `greedy_arterial_repulsion` 0.782,
+  `resistance_greedy` 0.900, `clearance_looped` 0.831 (region scale). **Permeability credits
+  disconnected fragments** — an isolated corridor still upgrades local adjacency conductance — so the
+  lens was scoring road sets nobody could build.
+- **Two replacement orderings were tried and are WRONG**, both erring the same way (making a method
+  look costlier than a set it demonstrably achieves):
+  - *distance from the street, ascending* — guarantees connectivity but is breadth-first: completes a
+    ring before going deeper, penalizing granularity rather than geometry. Moved `resistance_lp` on
+    one region from 2,236 m / 0.0403 to 5,104 m / 0.0630.
+  - *highest drainage that merely TOUCHES the built set* — free at block scale, 12× too loose at
+    region scale (the 23,490 m figure above).
+- **What shipped:** drainage order with each road's **connectors bought on demand**. Reduces exactly
+  to the old order whenever the old order was already buildable, so only broken prefixes changed.
+  Every method now measures 1.000 prefix connectivity on 12/12 blocks. The method that had been
+  cheating pays an honest premium (`clearance_looped` +7% metres / +8% homes on depth); methods
+  already valid are bit-identical.
+- **It is deliberately not a Hydra Strategy.** Two of three candidates are wrong rather than
+  different, so a plug-in point would ship one implementation and a menu nobody selects (the
+  no-dead-options rule). A real optimizer WOULD earn one — see below.
+- **`road_drainage` semantics were fixed alongside** (it counted segment traversals, not parcels, so
+  vertex-dense roads got inflated drainage — a subdivided road scored 4 against an identical plain
+  road's 1). Any future ordering work inherits the corrected key.
+
+### The actual open problem
+
+Minimize cost (displaced homes, or metres, or both) over **connected** subnetworks of a proposal
+subject to permeability ≥ P\*. Notes toward it:
+
+- This is a Steiner-tree-flavoured problem — connectivity constraint plus a submodular-ish benefit —
+  so exact solution is out, but the LP-over-paths formulation in
+  `notes/2026-07-29-lp-route-a.md` is directly reusable: decide over paths, not edges, and
+  connectivity becomes structural (`x_p <= z_s`) rather than a repair.
+- **Only then does a Strategy seam make sense**, with genuinely live alternatives: the shipped greedy
+  as the cheap default, an LP/beam-search for accuracy, selected per run.
+- Beware granularity: methods emitting thousands of short segments and methods emitting a few long
+  paths must be treated even-handedly. An earlier equalize-to-3m control showed granularity alone is
+  worth a third of one measured advantage.
+- Sanity oracle worth reusing: `clearance` builds a drainage tree, so any road-set property a tree
+  satisfies by construction must return the trivial answer for it. That oracle caught a broken
+  connectivity instrument in this thread after it had produced three wrong conclusions.
+
+### Also still open, from the same thread
+
+- **Lens A (matched displacement) has no road-length budget.** It caps homes and says nothing about
+  metres, and the two are not proportional, so an optimizer buys permeability with metres: 42,937 m
+  against `clearance_looped`'s 9,878 m at the same displacement, for a capillary web nobody would
+  build. Mitigated for now by demoting it to *secondary* in the generated READMEs with the caveat
+  stated in its own table copy; matched permeability is primary because it prices both costs in their
+  own units. A composite `homes + lambda*metres` budget was deliberately NOT built — lambda is a
+  values question, not a measurement one. An in-objective length *price* on the method side was built
+  and deleted: too weak where it was needed (still 33,623 m at price 16) and a pure loss at block
+  scale.
+- **The committed examples are stale** and need regenerating — `clearance_looped`, `arterial` and
+  `resistance_greedy` prefixes all shift under the corrected order and drainage key.
+
 ## Deferred design (from the flow-refactor + peel-reblocker threads)
 
 - **Structured configs (dataclasses + ConfigStore)** — deferred out of the flow refactor; do once

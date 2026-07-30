@@ -1,15 +1,19 @@
 from typing import cast
 
 import geopandas as gpd
+import networkx as nx
 import pandas as pd
 from pyproj import CRS
-from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry import LineString, MultiLineString, Point, Polygon
+from shapely.ops import unary_union
 
 from reblock.budget import (
     access_burden,
     road_drainage,
+    street_first_ordered,
 )
 from reblock.contracts import Block
+from reblock.derive.access import STREET_TOL
 from reblock.methods.clearance import ClearanceReblocker
 
 UTM = CRS.from_epsg(32643)
@@ -440,3 +444,153 @@ def test_permeability_and_displacement_curves_share_cost_samples():
     perm = permeability_curve(block, roads, PermeabilityParams())
     disp = displacement_curve(block, roads, radii, corridor_m=3.0)
     assert list(perm.cost) == list(disp.cost)
+
+
+def test_every_scored_prefix_reaches_the_street() -> None:
+    """`street_first_ordered` must make every prefix a connected network reaching the street.
+
+    The lenses score a PREFIX of a method's roads, so a prefix that does not reach the street is a
+    road set nobody could build -- and permeability still credits it, because an isolated corridor
+    upgrades local adjacency conductance. Under the previous drainage-descending order this failed
+    for every loop-bearing method (measured fraction of prefix length connected:
+    greedy_arterial_repulsion 0.782, resistance_greedy 0.900, clearance_looped 0.831 at region
+    scale).
+
+    The fixture inverts drainage against street distance, which is the only way that order can
+    fail. A LOOP -- two branches up from the street joined by a far bar -- with every parcel on the
+    BAR and none beside the branches. Each branch carries only the parcels that route down its own
+    side, so the bar's drainage exceeds either branch's, and drainage-descending puts the bar
+    (which touches nothing) first.
+
+    FAULT INJECTION: dropping the street-distance term from the sort key -- i.e. restoring
+    `(-drain[i], i)` -- orders the bar first and this fails with a disconnected prefix.
+    """
+    street = LineString([(0.0, 0.0), (100.0, 0.0)])
+    xs = [20.0, 35.0, 50.0, 65.0, 80.0]
+    roads = gpd.GeoDataFrame(geometry=[
+        # Far bar, vertexed at each parcel: `road_drainage` attaches parcels to NODES, and a
+        # two-point LineString has nodes only at its ends.
+        LineString([(10.0, 20.0), *[(x, 20.0) for x in xs], (90.0, 20.0)]),
+        LineString([(10.0, 0.0), (10.0, 20.0)]),      # left branch
+        LineString([(90.0, 0.0), (90.0, 20.0)]),      # right branch
+    ], crs=UTM)
+    # Parcels sit ON the bar and nowhere near the branches, so each branch drains only its share.
+    parcels = gpd.GeoDataFrame(
+        {"parcel_id": [str(k) for k in range(len(xs))]},
+        geometry=[Polygon([(x - 5, 20), (x + 5, 20), (x + 5, 30), (x - 5, 30)]) for x in xs],
+        crs=UTM)
+    block = Block(
+        block_id="loop", crs=UTM,
+        boundary=Polygon([(0, 0), (100, 0), (100, 40), (0, 40)]),
+        parcels=parcels,
+        streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
+        building_points=gpd.GeoDataFrame(
+            geometry=[Point(x, 25) for x in xs], crs=UTM))
+
+    drain = road_drainage(block, roads)
+    assert drain[0] > max(drain[1], drain[2]), (
+        f"fixture is vacuous: the far bar must out-drain both branches, got {drain}")
+
+    ordered = street_first_ordered(block, roads, STREET_TOL)
+    for k in range(1, len(ordered) + 1):
+        prefix = ordered.iloc[:k]
+        # prefix + street must be ONE connected component. Checking each noded piece's own distance
+        # to the street would be wrong -- the bar is legitimately reached THROUGH a branch.
+        merged = unary_union([*prefix.geometry, street])
+        pieces = list(merged.geoms) if isinstance(merged, MultiLineString) else [merged]
+        g: nx.Graph = nx.Graph()
+        g.add_nodes_from(range(len(pieces)))
+        for i, a in enumerate(pieces):
+            for j, b in enumerate(pieces[:i]):
+                if a.distance(b) <= STREET_TOL:
+                    g.add_edge(i, j)
+        assert nx.number_connected_components(g) == 1, (
+            f"prefix of {k} road(s) is disconnected from the street: {list(prefix.geometry)}")
+
+
+def test_ordering_reduces_to_plain_drainage_when_that_is_already_buildable() -> None:
+    """On a drainage TREE the constrained order must equal plain drainage-descending, exactly.
+
+    This is what makes the constraint a fix rather than a new bias. A tree's drainage order is
+    already buildable, so constraining it must change nothing -- otherwise every existing
+    tree-method number would shift for no reason.
+
+    It also pins the CHOICE of constraint. Ordering by network distance to the street also
+    guarantees connectivity, but it is breadth-first: it completes a whole ring before going
+    deeper, penalizing fine-grained networks for granularity rather than geometry. The fixture
+    separates the two -- two branches off the street, the BUSIER one ordered first by drainage but
+    tied with the other by distance -- so a distance key gives a different answer.
+
+    FAULT INJECTION: replacing the heap key `-drain[i]` with a street-distance key orders
+    `[A, B, A2, B2]` instead of drainage's `[B, B2, A, A2]` and fails here.
+    """
+    street = LineString([(0.0, 0.0), (100.0, 0.0)])
+    roads = gpd.GeoDataFrame(geometry=[
+        LineString([(20.0, 0.0), (20.0, 10.0)]),                     # A  -- quiet branch stem
+        LineString([(20.0, 10.0), (20.0, 20.0)]),                    # A2 -- 1 parcel
+        LineString([(80.0, 0.0), (80.0, 10.0)]),                     # B  -- busy branch stem
+        # Single segment on purpose: `road_drainage` counts segment TRAVERSALS, so a
+        # multi-vertex road accumulates inflated drainage and would muddle this fixture.
+        LineString([(80.0, 10.0), (80.0, 20.0)]),                    # B2 -- 2 parcels
+    ], crs=UTM)
+    parcels = gpd.GeoDataFrame(
+        {"parcel_id": ["a", "b", "c"]},
+        geometry=[Polygon([(20, 20), (30, 20), (30, 30), (20, 30)]),
+                  Polygon([(80, 20), (90, 20), (90, 30), (80, 30)]),
+                  Polygon([(70, 20), (80, 20), (80, 30), (70, 30)])],
+        crs=UTM)
+    block = Block(
+        block_id="tree", crs=UTM,
+        boundary=Polygon([(0, 0), (100, 0), (100, 45), (0, 45)]),
+        parcels=parcels,
+        streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
+        building_points=gpd.GeoDataFrame(
+            geometry=[Point(25, 25), Point(85, 25), Point(75, 25)], crs=UTM))
+
+    drain = road_drainage(block, roads)
+    plain = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
+    # Only meaningful if the busy branch outranks the quiet one -- i.e. if drainage and street
+    # distance disagree. Distance puts A (index 0) first; drainage puts B (index 2).
+    assert plain[0] == 2, f"busy stem must lead plain drainage order, got {plain} for {drain}"
+
+    ordered = street_first_ordered(block, roads, STREET_TOL)
+    got = [list(roads.geometry).index(g) for g in ordered.geometry]
+    assert got == plain, f"constrained order {got} differs from plain drainage {plain}"
+
+
+def test_drainage_counts_parcels_not_segment_traversals() -> None:
+    """A road's drainage must not depend on how many vertices it is drawn with.
+
+    Drainage is documented as a per-road PARCEL count and is the ranking key for the lens prefix
+    order, so inflating vertex-dense roads biases every prefix walk toward them -- a count of
+    geometry rather than of traffic.
+
+    Two identical geometries, one drawn with a single segment and one subdivided into four, each
+    serving the same single parcel from the same street. Their drainage must be equal.
+
+    FAULT INJECTION: summing per traversed segment (`counts[row] += 1` inside the path loop, instead
+    of collecting the road set first) scores the subdivided road 4 against the plain road's 1.
+    """
+    street = LineString([(0.0, 0.0), (100.0, 0.0)])
+
+    def block_with(spur: LineString, parcel_at: tuple[float, float]) -> Block:
+        x, y = parcel_at
+        return Block(
+            block_id="d", crs=UTM,
+            boundary=Polygon([(0, 0), (100, 0), (100, 60), (0, 60)]),
+            parcels=gpd.GeoDataFrame(
+                {"parcel_id": ["a"]},
+                geometry=[Polygon([(x, y), (x + 10, y), (x + 10, y + 10), (x, y + 10)])],
+                crs=UTM),
+            streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
+            building_points=gpd.GeoDataFrame(geometry=[Point(x + 5, y + 5)], crs=UTM))
+
+    plain = LineString([(20.0, 0.0), (20.0, 40.0)])
+    subdivided = LineString([(20.0, 0.0), (20.0, 10.0), (20.0, 20.0), (20.0, 30.0), (20.0, 40.0)])
+    d_plain = road_drainage(block_with(plain, (20.0, 40.0)),
+                            gpd.GeoDataFrame(geometry=[plain], crs=UTM))
+    d_sub = road_drainage(block_with(subdivided, (20.0, 40.0)),
+                          gpd.GeoDataFrame(geometry=[subdivided], crs=UTM))
+    assert d_plain == [1], f"one parcel on one road must read 1, got {d_plain}"
+    assert d_sub == d_plain, (
+        f"subdividing a road changed drainage {d_plain} -> {d_sub}: counting segments, not parcels")

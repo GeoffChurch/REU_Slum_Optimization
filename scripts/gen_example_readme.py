@@ -39,6 +39,37 @@ def _img_table(items: list[tuple[str, str]]) -> str:
     return f"{head}\n{sep}\n| {cells} |\n"
 
 
+# (heading, blurb, flag column, note for rows that did not meet the standard) per lens.
+#
+# MATCHED PERMEABILITY IS PRIMARY. It pins the benefit and reports both costs -- homes displaced and
+# metres of road -- in their own units, so nothing has to be traded off behind the scenes.
+#
+# Matched displacement is secondary because it budgets homes but NOT road length, and the two
+# are not proportional: a metre through a gap displaces far less than one through dense interior.
+# A method free to spend metres can therefore buy a higher permeability without being better --
+# measured on the depth example, 42,937 m against the flagship's 9,878 m at the same displacement,
+# for a road web nobody would build. That went unnoticed while every method was a greedy drainage
+# tree with an implicit length bound.
+_LENS_COPY = {
+    "perm": (
+        "Matched permeability (primary)",
+        "Every method truncated where permeability first reaches the standard target, so this "
+        "compares **what each spends to get there** — in homes displaced and in metres of road. "
+        "Pinning the benefit and comparing costs is the sounder direction: both costs appear in "
+        "their own units, so no exchange rate between homes and metres is needed.\n",
+        "reached", "unreached"),
+    "disp": (
+        "Matched displacement (secondary)",
+        "Every method truncated to the same displacement %, so this compares the **permeability "
+        "each buys for the same home-cost**. This lens budgets homes but **not road length**, and "
+        "the two are not proportional — a metre through a gap displaces far less than a metre "
+        "through the dense interior. So read `road_m` beside `permeability`: a method showing a "
+        "higher number at several times the road length has not been shown to be better, only more "
+        "expensive. Prefer the matched-permeability lens above, which prices both costs.\n",
+        "at_budget", "converged below budget"),
+}
+
+
 def _lens_rows(csv_path: Path) -> dict[str, dict[str, str]]:
     with csv_path.open(newline="") as f:
         return {row["method"]: row for row in csv.DictReader(f)}
@@ -142,12 +173,9 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                      "potential (dark = hard to escape, light = easy):\n")
         parts.append(_img_table(before))
 
-    # §4: each method on the ground -- the GIF row, then the two lenses. Lens A (matched
-    # displacement) truncates every method to the same home-cost and compares the permeability
-    # each buys; Lens B (matched permeability) truncates every method to the same permeability
-    # outcome and compares the displacement each spends. Each lens's table comes straight from its
-    # CSV; its two after-image tables (access-depth coloring, permeability-potential coloring)
-    # share one method order with that table.
+    # §4: each method on the ground -- the GIF row, then the two lenses, MATCHED PERMEABILITY
+    # FIRST. Each lens's table comes straight from its CSV; its two after-image tables (access-depth
+    # coloring, permeability-potential coloring) share one method order with that table.
     gifs = sorted(run_dir.glob("reblock_*.gif"))
     disp_csv, perm_csv = run_dir / "lens_displacement.csv", run_dir / "lens_permeability.csv"
     disp_rows = _lens_rows(disp_csv) if disp_csv.exists() else {}
@@ -159,34 +187,21 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
                          "order, the deep interior draining as the network reaches in:\n")
             parts.append(_img_table([(friendly_method_name(_gif_method(p.name)), p.name)
                                      for p in gifs]))
-        if disp_rows:
-            methods = _lens_methods(run_dir, "disp", disp_rows)
-            parts.append("### Matched displacement\n")
-            parts.append("Every method truncated to the same displacement %, so this compares the "
-                         "**permeability each buys for the same home-cost**:\n")
-            parts.append(_lens_table(disp_rows, methods, flag_col="at_budget",
-                                     unmet_note="converged below budget"))
-            depth_imgs = _lens_images(run_dir, "disp", "depth", methods)
+        # Matched permeability FIRST and labelled primary -- see `_LENS_COPY`.
+        for kind in ("perm", "disp"):
+            rows = perm_rows if kind == "perm" else disp_rows
+            if not rows:
+                continue
+            methods = _lens_methods(run_dir, kind, rows)
+            heading, blurb, flag_col, unmet = _LENS_COPY[kind]
+            parts.append(f"### {heading}\n")
+            parts.append(blurb)
+            parts.append(_lens_table(rows, methods, flag_col=flag_col, unmet_note=unmet))
+            depth_imgs = _lens_images(run_dir, kind, "depth", methods)
             if depth_imgs:
                 parts.append("Access-depth coloring:\n")
                 parts.append(_img_table(depth_imgs))
-            perm_imgs = _lens_images(run_dir, "disp", "perm", methods)
-            if perm_imgs:
-                parts.append("Permeability-potential coloring:\n")
-                parts.append(_img_table(perm_imgs))
-        if perm_rows:
-            methods = _lens_methods(run_dir, "perm", perm_rows)
-            parts.append("### Matched permeability\n")
-            parts.append("Every method truncated where permeability first reaches the standard "
-                         "target, so this compares the **displacement each spends** for the same "
-                         "permeability outcome:\n")
-            parts.append(_lens_table(perm_rows, methods, flag_col="reached",
-                                     unmet_note="unreached"))
-            depth_imgs = _lens_images(run_dir, "perm", "depth", methods)
-            if depth_imgs:
-                parts.append("Access-depth coloring:\n")
-                parts.append(_img_table(depth_imgs))
-            perm_imgs = _lens_images(run_dir, "perm", "perm", methods)
+            perm_imgs = _lens_images(run_dir, kind, "perm", methods)
             if perm_imgs:
                 parts.append("Permeability-potential coloring:\n")
                 parts.append(_img_table(perm_imgs))

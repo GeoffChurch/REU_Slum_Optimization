@@ -19,7 +19,7 @@ from geopandas import GeoDataFrame
 from numpy.typing import NDArray
 from PIL import Image
 
-from reblock.budget import _drainage_ordered
+from reblock.budget import street_first_ordered
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.emit import _displaced_points
@@ -31,7 +31,7 @@ _CTX: dict[str, Any] = {}   # fork-inherited per-sweep state (block is NOT pickl
 
 def _prefixes(block: Block, roads: GeoDataFrame, n: int,
               tol: float) -> tuple[GeoDataFrame, NDArray[np.float64], NDArray[np.float64]]:
-    ordered = _drainage_ordered(block, roads, tol)
+    ordered = street_first_ordered(block, roads, tol)
     cumlen = ordered.geometry.length.cumsum().to_numpy()
     cutoffs = np.linspace(0.0, float(cumlen[-1]), n)
     return ordered, cumlen, cutoffs
