@@ -157,39 +157,92 @@ subject to permeability ≥ P\*. Notes toward it:
 - **The committed examples are stale** and need regenerating — `clearance_looped`, `arterial` and
   `resistance_greedy` prefixes all shift under the corrected order and drainage key.
 
-## Permeability credits disconnected roads; access depth does not (2026-07-30)
+## Permeability vs access depth on disconnected roads -- and the all-pairs alternative (2026-07-30)
 
-The two reported quantities disagree about what a road that never reaches a street is worth:
+### What ground actually is (settle this before reasoning about the rest)
 
-- `derive.access.street_connectivity` seeds ONLY road components that touch a street -- "floating
-  interior roads grant no access" -- so `parcel_access_layers` correctly leaves a parcel beside a
-  dead fragment deep.
-- `permeability` has no such rule. An isolated corridor still upgrades the local parcel-adjacency
-  conductance from footpath to road, so it RAISES the score while granting no access at all.
+`egress_power` grounds parcels within `STREET_TOL` of **`block.streets` -- the PRE-EXISTING street
+network, never the method's own added roads.** Added roads only upgrade edge conductance
+(footpath -> road) along their corridor; they never create a new exit.
 
-**Found via the examples.** On `multiblock_density_compactness`, `osm_footpaths`'s lens-B prefix has
-**14 road components, only 70.8% of its length street-connected**, and **all 136** of its
-adjacent-but-still-deep parcels touch nothing but floating fragments. So its "reaches P* = 0.60"
-rests partly on road that provides zero access. The after-image is honest -- the depth colouring is
-right and the confusion is that a reader assumes any drawn road grants access.
+For a single block `streets` is essentially the boundary, so "ground = the boundary" holds. **For a
+multiblock region it does not**: `region_block` unions every member block's streets ("perimeter +
+inter-block = the full existing road network"). Measured on `multiblock_density_compactness`
+(18 blocks / 4,615 parcels): 1,059 grounded parcels, of which **only 389 sit on the outer boundary
+and 670 are grounded by interior inter-block street**. Most ground in a region is interior.
 
-Chiefly hits `osm_footpaths`, a fixed real-world input (OSM footpath coverage is patchy, and
-clipping to the block interior severs connections at boundaries). Synthetic methods mostly build
-connected networks, so it flatters the real-world baseline rather than any of our methods -- but it
-is the same leniency that made disconnected lens prefixes score well before the prefix-order fix.
+### The inconsistency, and why the obvious fix is backwards
 
-### Options, none taken yet
+- `derive.access.street_connectivity` seeds only road components that touch a street -- "floating
+  interior roads grant no access" -- so `parcel_access_layers` leaves a parcel beside a dead
+  fragment deep.
+- `permeability` has no such rule: an isolated corridor still upgrades local adjacency conductance
+  and so lowers dissipated power.
 
-1. **Make permeability match access**: eliminate road conductance on components that do not reach
-   ground. Principled -- the metric is `b^T L^-1 b` on a grounded Laplacian, so an ungrounded
-   component is arguably already meaningless -- but it changes every published permeability number
-   and needs its own measurement pass.
-2. **Report connected fraction alongside** each method's lens rows, so a number resting on floating
-   road is visible rather than hidden. Cheap, honest, no metric change.
-3. **Render floating segments differently** (dashed or paler) in the after-images, so the picture
-   explains itself. Cheapest, purely presentational, fixes the confusion that surfaced this.
+Found via the examples: `osm_footpaths`'s lens-B prefix on `density_compactness` has **14 road
+components, only 70.8% of its length street-connected**, and **all 136** of its
+adjacent-but-still-deep parcels touch nothing but floating fragments. Its "reaches P* = 0.60"
+therefore rests partly on road that grants no access. The after-image is honest; the confusion is
+that a reader assumes any drawn road grants access.
 
-(2) and (3) are independent of (1) and worth doing regardless.
+**An earlier revision of this entry proposed "make permeability match access". That is backwards.**
+A footpath linking three interior parcels genuinely does help you move -- you can use it to reach a
+parcel that IS near a street, and you still pay the footpath resistance for the last leg.
+Permeability's continuous-resistance model captures that faithfully; access depth's binary
+touches-a-street-or-not is the cruder abstraction. The disagreement is real, but permeability is the
+better model of the two, so the fix is not to make it stricter.
+
+Worth doing regardless of anything below, both cheap and independent:
+
+- **Report connected fraction alongside each method's lens rows**, so a number resting on floating
+  road is visible rather than hidden.
+- **Render floating segments differently** (dashed or paler) in the after-images, so the picture
+  explains itself. This is what would have prevented the confusion that surfaced all of it.
+
+### The real alternative: all-pairs (Kirchhoff index)
+
+Today's metric is all-to-ground: `b = 1`, every parcel injects one unit of escape current, all of it
+flowing to the street. The alternative is **total effective resistance**, where every parcel wants to
+reach every OTHER parcel:
+
+    R_tot = sum_{i<j} R_ij = n * trace(L^+)
+
+on the UNGROUNDED Laplacian's pseudoinverse.
+
+| | current (`egress_power`) | all-pairs (Kirchhoff) |
+|---|---|---|
+| model | all current -> street | every pair exchanges current |
+| needs a ground | yes | **no** |
+| rewards | getting OUT | getting AROUND |
+| floating road linking A-B-C | helps a little (better routing toward ground) | helps properly: R_AB, R_BC, R_AC drop, and correctly NO help reaching the street |
+| convex in edge conductances | yes | yes -- Ghosh-Boyd-Saberi state it for exactly this |
+| monotone under an added road | yes (Rayleigh) | yes (Rayleigh) |
+
+Three things recommend it beyond the question that prompted it:
+
+1. **It is exactly what Ghosh-Boyd-Saberi optimize**, so the convexity result the route-(A) LP leans
+   on applies natively rather than by analogy.
+2. **It needs no ground**, which dissolves the entire "what counts as street" question above --
+   including the region-vs-block asymmetry.
+3. **It would capture internal circulation**, which no shipped metric sees -- the "Bermuda triangle"
+   livability concern already in this backlog.
+
+**Costs and open questions, not yet resolved:**
+
+- `trace(L^+)` needs all eigenvalues or n solves against today's single sparse solve. Tractable
+  exactly at n ~ 4,600; at n ~ 11,000 it wants the standard Spielman-Srivastava / Hutchinson
+  estimator, which introduces sampling error into a reported metric.
+- **Pure all-pairs is probably wrong on its own**: a settlement where everyone reaches everyone but
+  nobody reaches the arterial scores perfectly. The honest version is likely a COMBINATION of egress
+  and circulation, which reintroduces a weighting question of the same kind deliberately avoided for
+  `homes + lambda*metres`.
+- It would change every published permeability number, so it needs the brainstorm-then-spec
+  treatment, not a patch. Start from `specs/2026-07-22-permeability-metric-design.md`.
+
+Full reasoning, measurements and the suggested route:
+`notes/2026-07-30-egress-vs-circulation.md`. It also names the cheap first probe -- compute `R_tot`
+alongside `P` on the existing benchmark blocks and check whether it RANKS methods differently. If the
+ordering is unchanged, the question closes without building anything.
 
 ## Deferred design (from the flow-refactor + peel-reblocker threads)
 
