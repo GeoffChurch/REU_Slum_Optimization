@@ -1,4 +1,5 @@
-"""Prefix sweeps over a method's roads added in drainage order, rendered into a per-method GIF
+"""Prefix sweeps over a method's roads in `budget.street_first_ordered` -- busiest first, each road
+preceded by whatever it needs to reach the street -- rendered into a per-method GIF
 (`reblock_gif`).
 
 Every prefix is an independent access peel, so the sweep runs across a fork `ProcessPoolExecutor`
@@ -53,7 +54,7 @@ def _run_parallel(worker: Callable[[tuple[int, float]], _T],
 
 
 def _frame_png(task: tuple[int, float]) -> tuple[int, bytes]:
-    """Render one GIF frame: the drainage-ordered prefix up to `cutoff` metres, parcels coloured by
+    """Render one GIF frame: the street-first-ordered prefix up to `cutoff` metres, parcels by
     access depth under it. Returns (index, PNG bytes)."""
     import matplotlib.pyplot as plt
     idx, cutoff = task
@@ -72,9 +73,9 @@ def _frame_png(task: tuple[int, float]) -> tuple[int, bytes]:
 def reblock_gif(block: Block, roads: GeoDataFrame, out_path: Path, *, vmax: int,
                 frame: tuple[float, float, float, float], frames: int = 16,
                 tol: float = STREET_TOL, dpi: int = 68, hold_last: int = 4) -> None:
-    """Write a GIF of `roads` added to `block` in drainage order over `frames` cumulative-length
-    budgets, on the shared access-depth scale `vmax` and fixed `frame` extent. No-op for empty
-    roads. Frames render across a fork pool."""
+    """Write a GIF of `roads` added to `block` in `street_first_ordered` order over `frames`
+    cumulative-length budgets, on the shared access-depth scale `vmax` and fixed `frame` extent.
+    No-op for empty roads. Frames render across a fork pool."""
     if roads is None or len(roads) == 0:
         return
     ordered, cumlen, cutoffs = _prefixes(block, roads, frames, tol)

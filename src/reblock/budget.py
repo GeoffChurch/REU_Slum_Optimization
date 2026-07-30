@@ -1,5 +1,6 @@
 """Budget-sweep and scoring primitives for reblocking. `_sweep` adds a method's roads
-incrementally in drainage order and samples a value at each budget, yielding a `Curve` of value
+incrementally in `street_first_ordered` order -- drainage-descending, with each road's connectors
+to the street bought first -- and samples a value at each budget, yielding a `Curve` of value
 vs cost (cumulative added road length, m); `displacement_curve` and (in `permeability.py`)
 `permeability_curve` ride it, and the matched-displacement / matched-permeability lens
 truncations read the resulting index-aligned curves. Also holds the retained road/parcel scoring
@@ -727,7 +728,7 @@ def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
     <= `target_depth`, paired with that prefix's actual max depth. Access-depth is monotone
     non-increasing as drainage-ordered roads are added (a larger street seed only shrinks depths),
     so a binary search over the prefix length finds the smallest sufficient prefix in O(log R)
-    peels. If even all `roads` cannot reach `target_depth`, returns (all roads in drainage order,
+    peels. If even all `roads` cannot reach `target_depth`, returns (all roads in canonical order,
     floor depth) with floor depth > `target_depth` -- the caller reports that as unreached (an
     `osm_footpaths`-style fixed input that never reaches the deep interior). Empty `roads` returns
     (empty, the no-road peel's max depth)."""
@@ -765,7 +766,7 @@ def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.
     finds the smallest sufficient prefix in O(log R) peels -- mirroring `prefix_to_permeability`'s
     binary search. n_buildings == 0 makes the fraction always 0.0 (matching
     `displacement_curve`'s `_disp`), so a positive `d_frac` is then unreachable. If even all
-    `roads` cannot reach `d_frac`, returns all roads in drainage order. Empty `roads` returns
+    `roads` cannot reach `d_frac`, returns all roads in canonical order. Empty `roads` returns
     empty."""
     n = len(block.building_points)
     if len(roads) == 0:
@@ -811,7 +812,7 @@ def prefix_to_permeability(
     is a function of `block.parcels` geometry alone, invariant across road prefixes, exactly the
     precomputed-adj pattern `prefix_to_depth` already uses. If even all `roads`
     cannot reach `p_star` (including an ungrounded block, where permeability is nan and every
-    comparison is False), returns (all roads in drainage order, False). Empty `roads` returns
+    comparison is False), returns (all roads in canonical order, False). Empty `roads` returns
     (empty, False)."""
     if len(roads) == 0:
         return cast(GeoDataFrame, roads.iloc[:0]), False

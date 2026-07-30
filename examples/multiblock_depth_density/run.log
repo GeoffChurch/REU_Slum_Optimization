@@ -1,1 +1,9 @@
+[__main__][INFO] screen: flagged 13822/83192 blocks (0.9s)
+[__main__][INFO] region built: 3 blocks / 2690 parcels (60.3s)
+[scripts.compare_budgets][INFO] reblocked greedy_arterial_repulsion: 162 segments, 6179 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked clearance_looped: 126 segments, 5114 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked euclidean_grid: 14 segments, 3334 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 2483 segments, 13070 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked osm_footpaths: 87 segments, 6505 m (0.0s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 5 methods (50.2s)
 wrote examples/multiblock_depth_density: 3 blocks / 2690 parcels; flagged 13822/83192; README + maps + lens CSVs

@@ -395,8 +395,10 @@ def _mb_section(m: M) -> list[str]:
     parts.append("From the [Cape Town benchmark](../benchmark.md) — the 12-block, 11,006-parcel "
                  "`multiblock_depth` region.\n")
     if gif:
-        parts.append(f"Full road set added in drainage order, the deep interior draining as the "
-                     f"network reaches in:\n\n![reblock animation]({gif})\n")
+        parts.append(f"Full road set added busiest-first, each road preceded by whatever it needs "
+                     f"to reach the street, so every frame is a network you could actually build. "
+                     f"The deep interior drains as the network reaches in:"
+                     f"\n\n![reblock animation]({gif})\n")
     imgs = [(lbl, u) for lbl, u in (("matched road budget", matched),
                                     ("external connectivity 0.70", ext70)) if u]
     if imgs:
