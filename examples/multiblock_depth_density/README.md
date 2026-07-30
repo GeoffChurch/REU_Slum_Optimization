@@ -35,7 +35,7 @@ The frontier is the whole trade-off: **permeability** (benefit — the only bene
 
 ## 4. Each method on the ground
 
-**Watch each method reblock** — its full road set added in drainage order, the deep interior draining as the network reaches in:
+**Watch each method reblock** — its full road set added busiest-first, each road preceded by whatever it needs to reach the street, so every frame is a network you could actually build. The deep interior drains as the network reaches in:
 
 | Looped Tree | Grid | Throughways | OSM Footpaths | Direct Objective (LP) |
 |---|---|---|---|---|

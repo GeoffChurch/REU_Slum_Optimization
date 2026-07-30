@@ -183,8 +183,10 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
     if gifs or disp_rows or perm_rows:
         parts.append("## 4. Each method on the ground\n")
         if gifs:
-            parts.append("**Watch each method reblock** — its full road set added in drainage "
-                         "order, the deep interior draining as the network reaches in:\n")
+            parts.append("**Watch each method reblock** — its full road set added busiest-first, "
+                         "each road preceded by whatever it needs to reach the street, so every "
+                         "frame is a network you could actually build. The deep interior drains as "
+                         "the network reaches in:\n")
             parts.append(_img_table([(friendly_method_name(_gif_method(p.name)), p.name)
                                      for p in gifs]))
         # Matched permeability FIRST and labelled primary -- see `_LENS_COPY`.
