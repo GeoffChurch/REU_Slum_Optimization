@@ -8,6 +8,7 @@ site_description: >-
   Generating and evaluating road-network proposals for informal urban settlements —
   a Stony Brook University REU project.
 site_url: https://jmendoza167.github.io/REU_Slum_Optimization/
+copyright: Stony Brook University REU · AI Innovation &amp; Diffusion
 repo_url: https://github.com/jmendoza167/REU_Slum_Optimization
 repo_name: jmendoza167/REU_Slum_Optimization
 
@@ -19,13 +20,34 @@ exclude_docs: |
   superpowers/
   _intro.md
   metrics-north-star.md
+  stylesheets/fonts/README.md
 
 theme:
   name: material
+  custom_dir: overrides   # only partials/copyright.html, which adds the REU affiliation line
+  # Official Stony Brook University marks. Both lines stay commented until the asset files are
+  # actually committed to docs/brand/ -- pointing theme.logo at a missing file renders a broken
+  # image in the header on every page. Uncomment both once the files land; nothing else needs
+  # changing (docs/stylesheets/sbu.css already sizes and pads the header mark).
+  # logo: brand/sbu-logo.svg
+  # favicon: brand/favicon.png
   palette:
-    scheme: default
-    primary: custom
-    accent: custom
+    # Light is the default because the use scene is a daytime read of dense figures on a laptop;
+    # dark is offered, not assumed. Both schemes are hand-coloured in stylesheets/sbu.css.
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
   features:
     - navigation.top
     - navigation.footer
@@ -36,12 +58,33 @@ theme:
     repo: fontawesome/brands/github
 
 extra_css:
+  - stylesheets/fonts.css   # self-hosted faces; must load before the sheet that uses them
   - stylesheets/sbu.css
+
+plugins:
+  - search
+  # Click-to-zoom for the run renders and frontier curves, which carry detail that does not
+  # survive being scaled into the page. `skip_class` opts out the marks and the hero figure --
+  # brand assets and decoration are not data, so they are not zoom targets.
+  - glightbox:
+      touchNavigation: true
+      loop: false
+      effect: fade
+      slide_effect: none
+      width: auto
+      height: auto
+      zoomable: true
+      draggable: false
+      skip_classes:
+        - skip-lightbox
+      auto_caption: false
+      caption_position: bottom
 
 markdown_extensions:
   - admonition
   - attr_list
   - md_in_html
+  - def_list      # the Home page key-figures row is a definition list
   - toc:
       permalink: true
 

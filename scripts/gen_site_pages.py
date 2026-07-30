@@ -22,6 +22,7 @@ from __future__ import annotations
 import ast
 import csv
 import importlib.util
+import json
 import re
 import shutil
 from collections.abc import Callable
@@ -30,6 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 ASSETS = DOCS / "assets"
+BRAND = DOCS / "brand"      # committed institutional marks, unlike the gitignored assets/
 MC = ROOT / "examples" / "method-comparison"
 MB = ROOT / "examples" / "multiblock_depth"
 OUTPUTS = ROOT / "outputs"
@@ -70,7 +72,7 @@ def _pct(x: float) -> str:
 def _read_csv(path: Path) -> list[dict[str, str]]:
     if not path.exists():
         return []
-    with path.open() as f:
+    with path.open(encoding="utf-8") as f:
         return list(csv.DictReader(f))
 
 
@@ -90,6 +92,45 @@ def _img_row(items: list[tuple[str, str]]) -> str:
     sep = "|" + "|".join(["---"] * len(items)) + "|"
     cells = " | ".join(f"![{lbl}]({url})" for lbl, url in items)
     return f"{head}\n{sep}\n| {cells} |\n"
+
+
+def _figure(url: str, alt: str, caption: str, *, fig_class: str = "",
+            skip_lightbox: bool = False) -> str:
+    """One captioned figure, emitted as a raw HTML block (no `markdown` attribute) so
+    python-markdown passes it through untouched -- <figcaption> has no Markdown spelling, and
+    mixing md_in_html parsing modes inside a <figure> is fragile. Any links in `caption` must
+    therefore be written as HTML, and directory-relative (use_directory_urls is on).
+
+    `skip_lightbox` marks an image as decoration rather than data; glightbox is configured with
+    skip_classes: [skip-lightbox] so those images are not zoom targets."""
+    img_cls = ' class="skip-lightbox"' if skip_lightbox else ""
+    fig_attr = f' class="{fig_class}"' if fig_class else ""
+    return (f"<figure{fig_attr}>\n"
+            f'  <img src="{url}" alt="{alt}"{img_cls}>\n'
+            f"  <figcaption>{caption}</figcaption>\n"
+            f"</figure>\n")
+
+
+# Wording is lifted from the prose already committed alongside these plots (see
+# gen_benchmark_section), so a caption never asserts anything the page does not already say.
+CURVE_CAPTIONS = {
+    "curve_external_connectivity": "External connectivity as cumulative road grows, per method.",
+    "curve_internal_connectivity": "Internal connectivity — the backup-route redundancy a pure "
+                                   "tree lacks — as cumulative road grows, per method.",
+    "depth_vs_road": "Access depth as cumulative road grows, per method.",
+    "displacement": "Displacement — the share of homes a road set grazes — as cumulative road "
+                    "grows, per method.",
+}
+
+
+def _curve_caption(stem: str) -> str:
+    """Caption for a generated plot, keyed on its filename prefix. The block or region id is the
+    remainder of the stem, so an unmapped plot still gets an honest, if plain, caption."""
+    for prefix, text in CURVE_CAPTIONS.items():
+        if stem.startswith(prefix):
+            ident = stem[len(prefix):].strip("_")
+            return f"{text} Region <code>{ident}</code>." if ident else text
+    return f"<code>{stem}</code>"
 
 
 # ---------------------------------------------------------------- data readers
@@ -140,7 +181,7 @@ def _run_method_target(run_dir: Path) -> str | None:
     cfg = run_dir / ".hydra" / "config.yaml"
     if not cfg.exists():
         return None
-    m = re.search(r"_target_:\s*(reblock\.methods\.[\w.]+)", cfg.read_text())
+    m = re.search(r"_target_:\s*(reblock\.methods\.[\w.]+)", cfg.read_text(encoding="utf-8"))
     return m.group(1) if m else None
 
 
@@ -148,7 +189,7 @@ def _run_flag(run_dir: Path, key: str) -> str | None:
     cfg = run_dir / ".hydra" / "config.yaml"
     if not cfg.exists():
         return None
-    m = re.search(rf"^\s+{key}:\s*(\S+)\s*$", cfg.read_text(), re.M)
+    m = re.search(rf"^\s+{key}:\s*(\S+)\s*$", cfg.read_text(encoding="utf-8"), re.M)
     return m.group(1) if m else None
 
 
@@ -157,7 +198,7 @@ def _kcomplexity_lines(run_dir: Path) -> list[tuple[str, dict[str, float]]]:
     if not log.exists():
         return []
     out = []
-    for line in log.read_text().splitlines():
+    for line in log.read_text(encoding="utf-8").splitlines():
         if "'kcomplexity'" not in line:
             continue
         m = re.search(r"INFO\] - (\S+) (\{.*\})\s*$", line)
@@ -420,7 +461,6 @@ def gen_method_section(m: M) -> str:
 
 
 def gen_benchmark_section() -> str:
-    import json
     parts = ["# Results\n"]
     parts.append("Two committed, fully reproducible benchmarks: a single deep block where all six "
                  "methods (including the single-block-only `topology` optimizer) run head-to-head, "
@@ -436,7 +476,8 @@ def gen_benchmark_section() -> str:
                      "rings deep, auto-picked with no hand tuning.\n")
         before = _copy_asset(MC / "before.png", "method-comparison")
         if before:
-            parts.append(f"![before]({before})\n")
+            parts.append(_figure(before, "Block ZAF.9.3.1_1_40972 before any roads are added",
+                                 "The block before reblocking: 263 parcels, up to 7 rings deep."))
         afters = [(p.name[len("after_"):-len(".png")], _copy_asset(p, "method-comparison"))
                   for p in sorted(MC.glob("after_*.png"))]
         afters = [(lbl, url) for lbl, url in afters if url]
@@ -458,11 +499,11 @@ def gen_benchmark_section() -> str:
         for curve in sorted(MC.glob("curve_*.png")) + sorted(MC.glob("displacement_*.png")):
             url = _copy_asset(curve, "method-comparison")
             if url:
-                parts.append(f"![{curve.stem}]({url})\n")
+                parts.append(_figure(url, curve.stem, _curve_caption(curve.stem)))
 
     # ---- part 2: settlement scale -----------------------------------------------------------
     meta_path = MB / "meta.json"
-    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
     if meta:
         parts.append("## Settlement scale: the `multiblock_depth` region\n")
         parts.append(f"The `depth` metric screened **{_num(meta['flagged'])} of "
@@ -474,17 +515,25 @@ def gen_benchmark_section() -> str:
                      f"{meta['region_mean_density_per_ha']:.0f} buildings/ha.\n")
         if meta.get("maps_url"):
             parts.append(f"[See the region on Google Maps]({meta['maps_url']})\n")
+        scene_captions = {
+            "screen.png": (f"The `depth` screen across the Cape Town metro: "
+                           f"{_num(meta['flagged'])} of {_num(meta['total_blocks'])} blocks "
+                           f"flagged."),
+            "region.png": (f"The region grown from the top-scoring block: "
+                           f"{meta['region_members']} blocks, "
+                           f"{_num(meta['region_parcels'])} parcels."),
+        }
         for name in ("screen.png", "region.png"):
             url = _copy_asset(MB / name, "multiblock_depth")
             if url:
-                parts.append(f"![{name}]({url})\n")
+                parts.append(_figure(url, name.removesuffix(".png"), scene_captions[name]))
         frontier_imgs: list[str] = []
         for pat in ("depth_vs_road_*.png", "curve_external_connectivity_*.png",
                     "curve_internal_connectivity_*.png", "displacement_*.png"):
             for p in sorted(MB.glob(pat)):
                 url = _copy_asset(p, "multiblock_depth")
                 if url:
-                    frontier_imgs.append(f"![{p.stem}]({url})\n")
+                    frontier_imgs.append(_figure(url, p.stem, _curve_caption(p.stem)))
         if frontier_imgs:
             parts.append("### The permeability-vs-displacement frontier\n")
             parts.append("Each method's permeability (a flow measure of how easily every parcel "
@@ -538,13 +587,29 @@ def gen_benchmark_section() -> str:
 
 
 def gen_methods_overview() -> str:
-    """The Methods section landing (docs/methods/index.md): a one-row-per-method table linking to
-    each method's page. Prose (title, one-line idea, badge) is registry-driven; no run data."""
+    """The Methods section landing (docs/methods/index.md): the seven methods as scannable cards,
+    then the same seven as a table. Both are emitted deliberately -- the cards are for choosing
+    which method to read, the table is for comparing status and one-line ideas at a glance without
+    scanning a grid. Prose (title, one-line idea, badge) is registry-driven; no run data."""
     parts = ["# The methods\n"]
     parts.append("Every method proposes a different road network for the same blocks; all are "
                  "graded on the same basis — permeability (the benefit) against displacement (the "
                  "cost). Each page shows the method's roads on the ground and its numbers from the "
                  "actual runs.\n")
+
+    cards = []
+    for m in METHODS:
+        label = m.status or m.badge
+        cls = "pill-progress" if m.status else "pill-done"
+        # Uppercase only the first letter -- str.capitalize() would lowercase the rest and turn
+        # "Manhattan-style" into "manhattan-style", "OSM" into "osm".
+        idea = m.idea[:1].upper() + m.idea[1:]
+        cards.append(f"-   **[{m.display_title}]({m.slug}.md)**\n\n"
+                     f"    {idea}.\n\n"
+                     f'    <span class="pill {cls}">{label}</span>')
+    parts.append('<div class="grid cards" markdown>\n\n' + "\n\n".join(cards) + "\n\n</div>\n")
+
+    parts.append("## At a glance\n")
     rows = []
     for m in METHODS:
         label = m.status or m.badge
@@ -556,16 +621,87 @@ def gen_methods_overview() -> str:
 
 
 def _hero_block() -> str:
-    """Home hero: the grown settlement render, copied into assets/. Extension-agnostic (the example
-    image pipeline is migrating JPG->PNG) and gated on existence, so a partial checkout yields no
-    hero rather than a broken image."""
+    """Home hero figure: the grown settlement render, copied into assets/. Extension-agnostic (the
+    example image pipeline is migrating JPG->PNG) and gated on existence, so a partial checkout
+    yields no hero figure rather than a broken image. Marked skip-lightbox: it is the page's
+    opening image, and the same render is zoomable on Results where it carries the argument."""
     for name in ("region.png", "region.jpg", "region.jpeg"):
         url = _copy_asset(MB / name, "home")
         if url:
-            return (f"![The grown Cape Town settlement region, reblocked]({url})\n\n"
-                    "*A screened settlement grown into a multi-block region, with proposed roads "
-                    "threaded through it — see the full run on [Results](benchmark.md).*")
+            return _figure(
+                url,
+                "The grown Cape Town settlement region with proposed roads threaded through it",
+                'A screened settlement grown into a multi-block region, with proposed roads '
+                'threaded through it — see the full run on <a href="benchmark/">Results</a>.',
+                fig_class="sbu-hero__figure", skip_lightbox=True)
     return ""
+
+
+def _hero_logo() -> str:
+    """The official Stony Brook mark in the hero, emitted only when the asset is genuinely
+    committed under docs/brand/. Same existence gate every artifact on this site gets: no asset,
+    no markup. It is never substituted with a traced, redrawn, or approximated mark, and the
+    surrounding CSS pads rather than scales it so clear space survives and the mark is never
+    stretched or skewed."""
+    for name in ("sbu-logo.svg", "sbu-logo.png"):
+        if (BRAND / name).exists():
+            return (f'<img class="sbu-hero__logo skip-lightbox" src="brand/{name}"'
+                    f' alt="Stony Brook University">')
+    return ""
+
+
+def _key_result() -> str:
+    """The headline finding, stated on the Home page in one sentence, entirely from Lens A of the
+    settlement benchmark: the permeability the best method buys at the shared road budget, set
+    against the as-built footpath network measured on the same basis. Emits nothing when the
+    artifacts are absent, so a partial checkout drops the claim rather than inventing one."""
+    rows = _read_csv(MB / "lens_displacement.csv")
+    if not rows:
+        return ""
+    best = max(rows, key=lambda r: float(r["permeability"]))
+    osm = next((r for r in rows if r["method"] == "osm_footpaths"), None)
+    lead = (f"At a matched road budget, <strong>{friendly_method_name(best['method'])}</strong> "
+            f"reaches <strong>{_pct(float(best['permeability']))} permeability</strong>")
+    if osm is None:
+        return f"{lead} across the 12-block benchmark region."
+    return (f"{lead} — against <strong>{_pct(float(osm['permeability']))}</strong> for the "
+            f"footpath network residents have already worn into the same settlement.")
+
+
+def _key_figures() -> str:
+    """The Home page's figures row: four measurements read straight from the benchmark artifacts.
+    Each entry is dropped individually when its artifact is missing, and the whole row disappears
+    if none survive -- no placeholder ever stands in for a number."""
+    items: list[tuple[str, str]] = []
+
+    meta_path = MB / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    if meta.get("region_parcels") and meta.get("region_members"):
+        items.append((_num(meta["region_parcels"]),
+                      f"parcels across the {meta['region_members']}-block benchmark region"))
+    if meta.get("flagged") and meta.get("total_blocks"):
+        items.append((_num(meta["flagged"]),
+                      f"of {_num(meta['total_blocks'])} Cape Town blocks flagged by the depth "
+                      f"screen"))
+
+    disp = _read_csv(MB / "lens_displacement.csv")
+    if disp:
+        best = max(disp, key=lambda r: float(r["permeability"]))
+        items.append((_pct(float(best["permeability"])),
+                      f"permeability at a matched road budget "
+                      f"({friendly_method_name(best['method'])})"))
+
+    reached = [r for r in _read_csv(MB / "lens_permeability.csv") if r["reached"] == "True"]
+    if reached:
+        cheapest = min(reached, key=lambda r: float(r["displacement"]))
+        items.append((_pct(float(cheapest["displacement"])),
+                      f"of homes displaced to reach the shared permeability target "
+                      f"({friendly_method_name(cheapest['method'])})"))
+
+    if not items:
+        return ""
+    cells = "\n".join(f"  <div><dd>{value}</dd><dt>{label}</dt></div>" for value, label in items)
+    return f'<dl class="sbu-keyfigures">\n{cells}\n</dl>'
 
 
 def _write_page(path: Path, body: str, *, depth: int) -> None:
@@ -575,7 +711,7 @@ def _write_page(path: Path, body: str, *, depth: int) -> None:
     text = GENERATED_NOTE + body.rstrip() + "\n"
     if depth:
         text = text.replace("](assets/", "](" + "../" * depth + "assets/")
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
 def main() -> None:
@@ -587,9 +723,14 @@ def main() -> None:
     methods_dir.mkdir(parents=True, exist_ok=True)
 
     intro_path = DOCS / "_intro.md"
-    intro = intro_path.read_text() if intro_path.exists() else "# reblock\n"
-    home = intro.rstrip().replace("<!-- HERO -->", _hero_block())
-    (DOCS / "index.md").write_text(GENERATED_NOTE + home + "\n")
+    intro = intro_path.read_text(encoding="utf-8") if intro_path.exists() else "# reblock\n"
+    home = intro.rstrip()
+    for marker, block in (("<!-- HEROLOGO -->", _hero_logo()),
+                          ("<!-- HERO -->", _hero_block()),
+                          ("<!-- KEYRESULT -->", _key_result()),
+                          ("<!-- KEYFIGURES -->", _key_figures())):
+        home = home.replace(marker, block)
+    (DOCS / "index.md").write_text(GENERATED_NOTE + home + "\n", encoding="utf-8")
 
     _write_page(methods_dir / "index.md", gen_methods_overview(), depth=1)
     for m in METHODS:
