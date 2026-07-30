@@ -108,3 +108,46 @@ term is a circulation measure and inherits that history.
 A cheap first probe before committing to anything: compute `R_tot` alongside `P` on the existing
 benchmark blocks and see whether it RANKS methods differently. If the ordering is the same, the
 extra machinery buys nothing and the question closes cheaply.
+
+## 4. The probe was run. Verdict: not worth building as a replacement
+
+`scratchpad/ot/kirchhoff_probe.py`, 12 blocks <= 160 parcels, both quantities scored on the
+**displacement-matched prefix** (D = 0.10) so every method pays the same home-cost:
+
+| method | permeability | all-pairs drop | perm rank | all-pairs rank |
+|---|---|---|---|---|
+| **resistance_lp** | **0.8496** | **0.6385** | **1.00** | **1.00** |
+| resistance_greedy | 0.7077 | 0.3853 | 3.00 | 2.50 |
+| clearance (repulsion) | 0.6689 | 0.3787 | 4.00 | 3.00 |
+| greedy_arterial_repulsion | 0.6607 | 0.3874 | 3.50 | 3.00 |
+| clearance | 0.6549 | 0.3472 | 4.25 | 4.50 |
+
+Within-block rank agreement: **Kendall tau median +0.800** (min +0.400), Spearman rho median +0.900,
+**same winning method on 10/12 blocks**. The top is unambiguous on both; only the middle three
+shuffle, and they are near-tied on either metric.
+
+**So the ordering is substantially unchanged and the stopping rule applies: all-pairs is not worth
+building as a REPLACEMENT.** It would change every published number to reproduce nearly the same
+ranking.
+
+### Watch the probe's own trap
+
+A first version scored each method's FULL road set and found tau +0.800 with the same winner 12/12 --
+apparently a cleaner closure. It was wrong. Full road sets differ enormously in size (the LP stops at
+its 10% displacement cap; `clearance` runs to `depth_target=1`), and BOTH metrics are monotone in
+added conductance, so it was mostly ranking "who built more road" and the agreement followed from
+that shared monotonicity rather than from the metrics valuing structure alike. The tell was that the
+LP ranked LAST there, contradicting every budget-matched result in the project -- a metric column
+that inverts a well-established finding is usually measuring the wrong thing.
+
+### Two things the probe found that are worth keeping
+
+1. **Roads buy far more egress than circulation.** At D = 10% permeability improves 0.65-0.85 while
+   all-pairs resistance falls only 0.35-0.64. The two are different quantities so the magnitudes are
+   suggestive rather than a proof, but the gap is large and consistent across methods. That is the
+   "Bermuda triangle" intuition showing up as a number for the first time: a reblocking that opens
+   egress well can leave internal circulation comparatively untouched. **All-pairs is therefore
+   redundant as a RANKER but not as a DIAGNOSTIC** -- a cheap third column, not a replacement.
+2. **The LP is first on BOTH metrics.** It is not winning by exploiting egress-specific structure;
+   it also produces the best circulation. That independently strengthens the route-(A) result rather
+   than qualifying it.

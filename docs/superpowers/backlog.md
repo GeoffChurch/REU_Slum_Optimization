@@ -239,10 +239,16 @@ Three things recommend it beyond the question that prompted it:
 - It would change every published permeability number, so it needs the brainstorm-then-spec
   treatment, not a patch. Start from `specs/2026-07-22-permeability-metric-design.md`.
 
-Full reasoning, measurements and the suggested route:
-`notes/2026-07-30-egress-vs-circulation.md`. It also names the cheap first probe -- compute `R_tot`
-alongside `P` on the existing benchmark blocks and check whether it RANKS methods differently. If the
-ordering is unchanged, the question closes without building anything.
+**PROBE RUN 2026-07-30 -- closed as a replacement.** At matched displacement over 12 blocks,
+all-pairs ranks methods essentially as permeability does: Kendall tau median +0.800, same winning
+method 10/12, `resistance_lp` first on both. Changing every published number to reproduce nearly the
+same ranking is not worth it.
+
+Two findings kept: roads buy far more egress than circulation (permeability improves 0.65-0.85 at
+D = 10% while all-pairs resistance falls only 0.35-0.64), which is the "Bermuda triangle" intuition
+as a number and makes all-pairs worth a cheap DIAGNOSTIC column even though it is redundant as a
+ranker; and the LP leads on both metrics, so it is not exploiting egress-specific structure. Full
+reasoning and the probe's own methodological trap: `notes/2026-07-30-egress-vs-circulation.md`.
 
 ## Deferred design (from the flow-refactor + peel-reblocker threads)
 
