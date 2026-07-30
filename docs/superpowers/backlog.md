@@ -149,6 +149,42 @@ need more displacement to cross.
 optimizing a threshold crossing are different objectives with different winners, and lens B reports
 the threshold while the plots show the curve.
 
+### Bake-off 2026-07-30: a ONE-SOLVE static order captures most of the gain
+
+`scratchpad/ot/order_bakeoff.py`, five chains on the same road sets, 6 blocks. Gain vs today's
+drainage order, with the solve count each needs:
+
+| order | arterial | clearance | looped | lp | solves |
+|---|---|---|---|---|---|
+| greedy (re-solve every commit) | **+7.4%** | **+2.7%** | **+4.5%** | +18.3% | 19-103 |
+| **static** (one solve on the full net, sort once) | +5.6% | +1.3% | +2.4% | **+18.1%** | **1** |
+| neartie (batch near-ties in the upper bound) | +4.3% | +1.4% | +2.3% | +15.5% | 8-11 |
+| runs (continue to a fork/terminus) | +6.7% | +1.3% | +2.7% | +14.9% | 15-97 |
+
+(AUC = area under the permeability-vs-displacement curve, the thing the plots and GIFs show.)
+
+**`static` is the value pick: 50-99% of the full greedy's gain for ONE solve.** On `resistance_lp` --
+4,451 roads at region scale, where solve count is the whole problem -- it captures 99% of the benefit
+(18.09 vs 18.27) at 1 solve against 103. Its weakness is the threshold measure, where it can regress
+badly (clearance -23% on displacement-to-P*), while the full greedy was positive on every method
+there (+0.8% to +22.7%).
+
+Two negatives worth keeping:
+
+- **Run-following does not work here.** It cut solves barely (31 vs 32.7 for arterial, 97 vs 103 for
+  the LP) and scored slightly worse. The fork/terminus condition fires almost immediately on real
+  road sets, so runs are short. It is not the granularity equalizer it looked like.
+- **`neartie` is dominated by `static`** on both quality and cost, despite being the more principled
+  construction (the linearized gain is a certified upper bound and submodularity keeps it valid, so
+  a near-tie batch needs no re-solve). Principled did not beat cheap.
+
+**The cost denominator must be DISPLACEMENT, not length.** A first run of this bake-off used road
+length -- chasing CELF-safety, per `budget.repulsion`'s docstring -- and EVERY ordering then lost to
+plain drainage (full greedy -3.4% AUC, having been +7.3% with displacement cost). Displacement is
+the curve's x-axis, so per-metre optimizes a ratio unrelated to what is plotted. The CELF motivation
+was void regardless: CELF removes per-candidate evaluations, which the linearization already makes
+free, while the bottleneck is the number of ROUNDS.
+
 ### Exactness is the wrong target
 
 Two independent reasons, both worth recording so it is not attempted:
