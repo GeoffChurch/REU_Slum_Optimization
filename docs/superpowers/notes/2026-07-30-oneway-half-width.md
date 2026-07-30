@@ -107,6 +107,51 @@ lives in the QP, not in the width accounting.
 
 So the full idea needs both halves. The probe validates the cost half decisively.
 
+## Directed probe: the interior optimum did NOT appear, but the geometry preference REVERSES
+
+`scratchpad/ot/directed_probe.py`. 200 parcels uniform on a disc, a one-way ring road at radius `r`,
+a spoke from the ring to ground on the boundary; parcels walk radially to the ring. Both sides of
+the predicted trade are present -- a small ring is cheap to ride but far from most parcels; a large
+ring passes close to the many outer parcels but is long to go round when you cannot reverse.
+
+| r | egress | ingress | **total (one-way)** | undirected |
+|---|---|---|---|---|
+| 0.15 | 41198 | 42068 | **83266 (best)** | 75782 |
+| 0.35 | 41011 | 43040 | 84050 | 66586 |
+| 0.55 | **40939 (best)** | 44127 | 85066 | 57623 |
+| 0.75 | 41016 | 45364 | 86379 | 48957 |
+| 0.95 | 41344 | 46851 | 88195 | **40793 (best)** |
+
+**The interior optimum did not materialize in the scored total.** It is monotone: the smallest ring
+wins. Egress ALONE does show a genuine interior minimum at r = 0.55, rising on both sides -- so the
+mechanism the owner described is real and measurable -- but ingress is monotone increasing and
+dominates the sum.
+
+**The larger result is a REVERSAL of geometric preference.** Undirected prefers the LARGEST ring
+(75782 -> 40793 as r grows); one-way prefers the SMALLEST (83266 -> 88195). Opposite directions.
+Undirected rewards a big ring for passing close to the many outer parcels; one-way penalizes it
+because a rider may traverse the whole circumference without reversing, and that cost outgrows the
+proximity benefit. **So the directed model does not merely re-weight the existing metric -- it wants
+a different shape of network.** That is a stronger argument for building it than the interior
+optimum would have been.
+
+### Caveats that bound this
+
+- **One idealized fixture**: a single ring with one spoke. Real proposals have several loops and
+  many connections to the street, where the forced-detour cost is shared out differently. The
+  reversal should be re-tested on real road sets before it is relied on.
+- Parcels attach only at their nearest bearing node, and the radial walk conductance `g_walk / gap`
+  blows up when a parcel sits almost exactly on the ring. That flatters mid-radius rings and is
+  probably why egress alone peaks near the middle.
+- **Three solver attempts, two of which failed in ways that looked like findings**, recorded so they
+  are not repeated: penalising only the conservation residual minimises constraint violation rather
+  than energy; a stacked-identity penalty least-squares was ill-conditioned enough to return `inf`
+  at scattered radii, which read as infeasible geometry rather than non-convergence -- and its few
+  converged points suggested an "interior optimum at 0.35" that was pure solver noise. What works is
+  an IRLS Laplacian solve: the per-edge cost is a convex asymmetric quadratic in the NET flow, so
+  the problem is an ordinary Laplacian solve whose conductance depends on the sign of its own
+  solution; iterate with damping to the fixed point.
+
 ## Before building
 
 The circulation history applies here as it did to the all-pairs probe
