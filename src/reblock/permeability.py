@@ -163,8 +163,8 @@ def directional_conductance(
 
     with `t` the angle between the mesh edge and the covering road's direction (a one-way road's
     direction IS its LineString coordinate order -- the geometry already carries it, so nothing
-    extra is stored). The angle GATES direction; it does not scale the boost. A road is a 1D curve, so you
-    either travel along it or you do not:
+    extra is stored). The angle GATES direction; it does not scale the boost. A road is a 1D
+    curve, so you either travel along it or you do not:
 
         cos t = +1   aligned    forward keeps the road, backward falls back to the footpath
         cos t =  0   crossing   BOTH keep the road -- two parcels facing each other across a one-way
