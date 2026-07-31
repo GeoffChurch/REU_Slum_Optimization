@@ -95,6 +95,24 @@ class PermeabilityParams:
     # this rewards fewer, wider roads over many narrow ones -- which is what real street hierarchies
     # look like, but it is a behavioural change, not just realism.
     road_margin_m: float = 1.0
+    # Narrowest BUILDABLE road, by direction. Conductance is affine in width, which is right ABOVE
+    # these floors -- extra width really does buy throughput, because in a dense settlement one
+    # parked vehicle or vendor otherwise blocks the way outright -- and fiction BELOW them: a road
+    # with less than one lane per direction of travel cannot carry that traffic at all. A two-way
+    # road needs room for two directions at once, so its floor is the higher one.
+    #
+    # This is the guard that was missing when a `two_way_3.5` arm -- 2.5 m usable, one car, scored
+    # as two 1.25 m lanes running simultaneously -- decided the one-way comparison. See
+    # `notes/2026-07-31-one-way-is-dominated.md`.
+    #
+    # Stated as two widths rather than `margin + k * lane`, because a clear-width minimum is what
+    # access standards actually specify, and it keeps an invented lane constant out of the model.
+    # The defaults are TODAY'S values, so nothing moves -- but they are provisional: service access
+    # (fire, ambulance, refuse) is usually the binding constraint and is commonly cited at 3.0-4.0 m
+    # clear per lane, which would put the two-way floor at 7-9 m and make the shipped 6 m default
+    # illegal. Pinning them against a real standard is a re-baseline, not a tweak.
+    min_one_way_width_m: float = 3.5
+    min_two_way_width_m: float = 6.0
     r0_frac: float = 0.55   # r0 = r0_frac * median(building nearest-neighbour distance); see
                              # `_adaptive_r0`. Calibrated so r0 lands ~3m on
                              # multiblock_density_compactness (median NN ~5.2m) -- the flat
@@ -186,6 +204,42 @@ def road_conductance(params: PermeabilityParams, width_for_direction: NDArray[np
     return params.g_road_per_m * usable / np.maximum(dist, 1e-12)
 
 
+def buildable_widths(roads: GeoDataFrame, params: PermeabilityParams,
+                     ) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """`(width_m, oneway)` for every road, after checking each one could actually be built.
+
+    Two refusals, both about scoring something that cannot exist:
+
+    * no `width_m` column at all -- width is mandatory, there is no global corridor to inherit;
+    * a width below its direction's floor -- `min_two_way_width_m` for a two-way road (it must fit
+      two directions at once), `min_one_way_width_m` for a one-way one.
+
+    The floors matter because conductance is affine in width with no lower knee: without them the
+    model happily reports a 3.5 m two-way road as two 1.25 m lanes running side by side, which is
+    how an unbuildable road came to decide the one-way comparison. Above the floors the continuum is
+    real and stays -- a wider road genuinely carries more, because a single parked vehicle no longer
+    blocks it -- so this is a floor, not a quantization.
+    """
+    if WIDTH_COL not in roads.columns:
+        raise ValueError(
+            f"Proposal.roads must carry a '{WIDTH_COL}' column: road width is mandatory since the "
+            f"global corridor width was removed. Methods set it on the roads they emit.")
+    widths = roads[WIDTH_COL].to_numpy(dtype=float)
+    oneway = (roads[ONEWAY_COL].to_numpy(dtype=bool) if ONEWAY_COL in roads.columns
+              else np.zeros(len(roads), dtype=bool))
+    floors = np.where(oneway, params.min_one_way_width_m, params.min_two_way_width_m)
+    bad = widths < floors
+    if bad.any():
+        k = int(np.argmax(bad))
+        kind = "one-way" if oneway[k] else "two-way"
+        raise ValueError(
+            f"road {k} is {widths[k]:g} m, below the {floors[k]:g} m floor for a {kind} road "
+            f"({int(bad.sum())} of {len(roads)} roads are too narrow). A {kind} road narrower than "
+            f"that cannot carry the traffic the conductance model would credit it with"
+            + (" -- a two-way road has to fit both directions at once." if not oneway[k] else "."))
+    return widths, oneway
+
+
 def lane_width(params: PermeabilityParams, width_m: float, *, oneway: bool = False) -> float:
     """Corridor width available to ONE direction of travel on a road of total width `width_m`.
 
@@ -243,15 +297,11 @@ def edge_conductances(
     * Symmetric exactly when no road is one-way, so the directed solve is only used when needed.
     """
     gf, gb = footpath_g.copy(), footpath_g.copy()
-    if roads is None or len(roads) == 0 or rows.size == 0:
+    if roads is None or len(roads) == 0:
         return gf, gb
-    if WIDTH_COL not in roads.columns:
-        raise ValueError(
-            f"Proposal.roads must carry a '{WIDTH_COL}' column: road width is mandatory since the "
-            f"global corridor width was removed. Methods set it on the roads they emit.")
-    widths = roads[WIDTH_COL].to_numpy(dtype=float)
-    oneway = (roads[ONEWAY_COL].to_numpy(dtype=bool) if ONEWAY_COL in roads.columns
-              else np.zeros(len(roads), dtype=bool))
+    widths, oneway = buildable_widths(roads, params)
+    if rows.size == 0:
+        return gf, gb
 
     edge_lines = shapely.linestrings(
         np.column_stack([np.stack([cx[rows], cx[cols]], axis=1).ravel(),

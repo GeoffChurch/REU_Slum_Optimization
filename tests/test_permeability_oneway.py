@@ -6,15 +6,18 @@ from __future__ import annotations
 
 import geopandas as gpd
 import numpy as np
+import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import Block
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
+    PermeabilityParams,
     has_oneway,
     lane_width,
     permeability,
+    road_conductance,
     with_width,
 )
 
@@ -200,3 +203,57 @@ def test_widening_is_superlinear_because_the_margin_is_paid_once() -> None:
     w = DEFAULT_ROAD_WIDTH_M
     ratio = road_conductance(pr, 2 * w, 1.0) / road_conductance(pr, w, 1.0)
     assert ratio > 2.0, f"widening should be superlinear, got {ratio:.4f}"
+
+
+def test_a_two_way_road_below_its_floor_is_refused():
+    # The guard that was missing: a 3.5 m road has one lane of usable width, and the affine model
+    # would otherwise credit it as two 1.25 m lanes running side by side. That unbuildable road
+    # decided the one-way comparison once already.
+    pr = PermeabilityParams()
+    block, roads = _block(), _roads()
+    narrow = with_width(roads, 3.5)
+    with pytest.raises(ValueError, match="below the 6 m floor for a two-way road"):
+        permeability(block, narrow, pr)
+
+
+def test_the_same_width_is_legal_ONE_way_and_illegal_TWO_way():
+    # The floor is directional -- that is the whole content of it. One lane carries one direction.
+    pr = PermeabilityParams()
+    block, roads = _block(), _roads()
+    at_floor = with_width(roads, pr.min_one_way_width_m, oneway=True)
+    assert 0.0 < float(permeability(block, at_floor, pr))     # legal: exactly one lane, one way
+
+    same_width_two_way = with_width(roads, pr.min_one_way_width_m)
+    with pytest.raises(ValueError, match="two-way"):
+        permeability(block, same_width_two_way, pr)
+
+
+def test_a_one_way_road_below_its_own_floor_is_refused():
+    pr = PermeabilityParams()
+    block, roads = _block(), _roads()
+    sliver = with_width(roads, 3.0, oneway=True)              # the retracted "naive half"
+    with pytest.raises(ValueError, match="below the 3.5 m floor for a one-way road"):
+        permeability(block, sliver, pr)
+
+
+def test_the_derived_one_way_width_of_a_legal_road_is_itself_legal():
+    # `one_way_width` must never hand back something the floor then rejects, or orienting a legal
+    # network would produce an illegal one: (W + margin)/2 >= min_one_way for every
+    # W >= min_two_way.
+    from reblock.orient import one_way_width
+
+    pr = PermeabilityParams()
+    for w in (pr.min_two_way_width_m, 6.0, 7.2, 9.0, 12.0):
+        assert one_way_width(pr, w) >= pr.min_one_way_width_m
+
+
+def test_above_the_floor_width_still_buys_capacity_continuously():
+    # This pins the DESIGN DECISION: a floor, not a quantization. Extra width above the floor is
+    # real -- in a dense settlement one parked vehicle otherwise blocks the way outright -- so
+    # conductance must keep rising between whole-lane multiples, not sit flat until the next one.
+    # Quantizing `lane_width` to whole lanes would break exactly this assertion.
+    pr = PermeabilityParams()
+    widths = np.array([6.0, 6.4, 7.2, 8.5])
+    g = road_conductance(pr, np.array([lane_width(pr, float(w)) for w in widths]),
+                         np.ones(len(widths)))
+    assert (np.diff(g) > 0).all(), f"width must buy capacity continuously above the floor, got {g}"

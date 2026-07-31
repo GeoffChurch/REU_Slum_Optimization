@@ -126,13 +126,43 @@ comparison is p=0.081 with the opposite sign. Both are "no significant differenc
 instability at n=14 is a caution about every small-n paired result in this line of work. Lens A was
 stable across n=16 and n=36; Lens B was not.
 
+### Resolution: a directional FLOOR, not quantization
+
+Two params on `PermeabilityParams`, checked by `buildable_widths` at the metric boundary alongside
+the existing "must carry `width_m`" refusal:
+
+    min_one_way_width_m = 3.5      # one lane, one direction
+    min_two_way_width_m = 6.0      # a two-way road must fit both directions at once
+
+Full quantization (`lane_width` rounded to whole lanes) was considered and **rejected: the fiction
+was never the continuum, only the region below the floor.** A 7.2 m two-way road is not 2.48 fake
+lanes — in a dense settlement one parked vehicle, vendor, or breakdown otherwise blocks the way
+outright, so width above the floor buys real throughput. Quantizing would delete that effect to fix
+an unrelated one, and it would flatten conductance into steps with no gradient, which any future
+width search would sit inside. The floors are stated as two clear widths rather than
+`margin + k*LANE` so no invented lane constant enters the model — a clear-width minimum is also what
+access standards actually specify.
+
+Defaults are today's values, so no published number moves, and all 548 tests pass unchanged: nothing
+in the repo was emitting a sub-floor road. Five tests guard it, fault-injected three ways — removing
+the check, making the floor non-directional, and quantizing `lane_width` (which breaks
+`test_above_the_floor_width_still_buys_capacity_continuously`, the test that pins this decision so a
+later change cannot make it silently).
+
+Noted in passing: `osm_footpaths` stamps 6.0 m, so imported footpaths are modelled as full two-way
+streets. That is unchanged behaviour (the old `corridor_m: 3.0` meant the same 6 m), but the floors
+turn it from an accident into an explicit claim, and a real footpath is 1.5-3 m. If footpaths should
+carry pedestrian rather than vehicle conductance, that is a separate modelling gap.
+
 ### Open: LANE_M is a domain parameter nobody has pinned down
 
+The floors above encode it implicitly (3.5/6.0 == margin + 1 and 2 lanes of 2.5 m).
 2.5 m is the value that makes the shipped defaults consistent, and it is narrow — service access
 (fire, ambulance, refuse) is usually the binding constraint in these settlements and is commonly
-cited at 3.0–4.0 m clear. **At LANE_M = 3.0 the shipped 6.0 m default would itself be an illegal
-two-way road** (floor 7.0 m). That is worth settling with a domain source before any width work,
-because it moves the floor everything else is measured against.
+cited at 3.0–4.0 m clear. **At LANE_M = 3.0 the two-way floor becomes 7.0 m and the shipped 6.0 m
+default is itself illegal** -- the metric would start refusing every method's roads. That is worth
+settling with a domain source before any width work: it moves the floor everything else is measured
+against, and changing `min_two_way_width_m` is a re-baseline of every published number, not a tweak.
 
 ## What was kept and what was deleted
 
