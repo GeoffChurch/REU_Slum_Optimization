@@ -25,6 +25,7 @@ from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
 from reblock.methods.arterial import _snap, _snap_graph
 from reblock.methods.boundary_graph import _boundary_graph
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 Node = tuple[float, float]
 
@@ -259,6 +260,9 @@ class LoopClosureRefiner:
     # via `_subsample_pairs` regardless of density -- a belt-and-suspenders guard, not the primary
     # lever (search_radius_m's cut is what keeps the common case fast).
     max_candidates: int | None = 1500
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
     # Uniform-subsample cap on `loop_candidates`' pair volume (see `_subsample_pairs`): bounds the
     # per-pair `_snap` cost regardless of mesh density. 1500 is the commute_ratio PLATEAU -- caps
     # 1500/2500/4000 all reach ~the same ρ on an 11k-parcel region (budget-bound past ~1300 valid
@@ -302,7 +306,8 @@ class LoopClosureRefiner:
         roads = gpd.GeoDataFrame(geometry=all_roads, crs=block.crs)
         pid = f"loop_closure:{base_prop.proposal_id}:bf{self.budget_frac}:ml{self.max_loops}"
         return Proposal(
-            block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+            block_id=block.block_id, crs=block.crs, edges=None,
+            roads=with_width(roads, self.road_width_m),
             proposal_id=pid, method="loop_closure",
             params={"budget_frac": self.budget_frac, "min_bridges_per_m": self.min_bridges_per_m,
                     "max_loops": self.max_loops,

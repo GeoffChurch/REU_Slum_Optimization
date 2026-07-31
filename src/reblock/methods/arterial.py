@@ -39,6 +39,7 @@ from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.boundary_graph import _boundary_graph, _rnd
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 
 def _xy(c: tuple[float, ...]) -> tuple[float, float]:
@@ -183,19 +184,21 @@ def _merge(lines: list[LineString]) -> BaseGeometry | None:
     return unary_union(lines) if lines else None
 
 
-def _explode(merged: BaseGeometry | None, crs: CRS) -> GeoDataFrame:
+def _explode(merged: BaseGeometry | None, crs: CRS, width_m: float) -> GeoDataFrame:
     """Explode a (possibly `None`) merged/noded geometry into a one-row-per-LineString
-    GeoDataFrame."""
-    if merged is None:
-        return gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=crs)
-    parts: list[BaseGeometry] = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
+    GeoDataFrame, every row stamped with `width_m` -- road width is mandatory, and these
+    frames are scored by `displacement` exactly like an emitted proposal's."""
+    parts: list[BaseGeometry] = (
+        [] if merged is None
+        else (list(merged.geoms) if hasattr(merged, "geoms") else [merged]))
     rows = [ln for ln in parts if "LineString" in ln.geom_type and ln.length > 0]
-    return gpd.GeoDataFrame({"geometry": rows}, geometry="geometry", crs=crs)
+    return with_width(gpd.GeoDataFrame({"geometry": rows}, geometry="geometry", crs=crs),
+                      width_m)
 
 
-def _planarize(lines: list[LineString], crs: CRS) -> GeoDataFrame:
+def _planarize(lines: list[LineString], crs: CRS, width_m: float) -> GeoDataFrame:
     """unary_union the lines (nodes crossings), explode to LineStrings, one row each."""
-    return _explode(_merge(lines), crs)
+    return _explode(_merge(lines), crs, width_m)
 
 
 def _union_with(base_merged: BaseGeometry | None, real: LineString) -> BaseGeometry:
@@ -253,7 +256,7 @@ class _StepState:
     objective: str
     cost: str
     lam: float
-    corridor_m: float
+    half_width_m: float
     committed_disp: float
     block: Block
     radii: NDArray[np.float64]
@@ -290,15 +293,17 @@ def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
         e, direct = st.step.score_candidate(real)
         raw = (e if st.objective == "efficiency" else direct) - st.base_val
     elif st.mode == "buildable":
-        trial = _explode(_union_with(st.base_merged, real), st.crs)
+        trial = _explode(_union_with(st.base_merged, real), st.crs, 2.0 * st.half_width_m)
         raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
     else:
-        trial = _planarize(st.committed + [real], st.crs)
+        trial = _planarize(st.committed + [real], st.crs, 2.0 * st.half_width_m)
         raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
     if st.cost == "displacement":
         if trial is None:
-            trial = _explode(_union_with(st.base_merged, real), st.crs)  # step -> buildable
-        denom = float(displacement(st.block.building_points, st.radii, trial, st.corridor_m)
+            # step -> buildable
+            trial = _explode(_union_with(st.base_merged, real), st.crs,
+                             2.0 * st.half_width_m)
+        denom = float(displacement(st.block.building_points, st.radii, trial)
                      - st.committed_disp)
     elif st.cost == "repulsion":
         denom = repulsion(st.block.building_points, st.radii, real)
@@ -327,12 +332,12 @@ def _best_candidate(results: Iterable[tuple[float, BaseGeometry | None]]
 
 def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
                       top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
-                      cost: str = "length", corridor_m: float = 3.0,
+                      cost: str = "length", half_width_m: float,
                       workers: int = 16, max_anchors: int = 0) -> GeoDataFrame:
     """Greedily commit the straight arterial with the best objective gain per unit cost until
     `max_roads` are placed or no candidate improves. `mode` in {"buildable", "aspirational"}.
     `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/expected buildings
-    newly displaced within `corridor_m` of any committed road, via the extent-aware disk
+    newly displaced within `half_width_m` of any committed road, via the extent-aware disk
     `budget.displacement` over `block.building_points` -- see `budget.building_radii`), "repulsion"
     (Delta-benefit per the road's OWN quadratic-tail proximity to the building field via
     `budget.repulsion` -- a constant-per-candidate, never-zero soft cost, so CELF-safe and never
@@ -364,7 +369,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
     # Constant across every step (depends only on block.building_points), so computed ONCE here
     # rather than per-step.
-    radii = building_radii(block.building_points, corridor_m)
+    radii = building_radii(block.building_points)
 
     committed: list[LineString] = []                        # realized geometry, in commit order
     global _STEP_STATE
@@ -372,11 +377,11 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         network: list[BaseGeometry] = [*streets, *committed]
         anchors = _anchor_points(network, n_anchors, max_anchors)
         base_merged = _merge(committed)              # unary_union(committed), once per step
-        base = _explode(base_merged, block.crs)
+        base = _explode(base_merged, block.crs, 2.0 * half_width_m)
         base_val = _score(objective, block, base, adj, base_burden, ctx)
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
-        committed_disp = (displacement(block.building_points, radii, base, corridor_m)
+        committed_disp = (displacement(block.building_points, radii, base)
                           if cost == "displacement" else 0.0)
         # Route per-candidate scoring by mode. BUILDABLE trials are boundary-snapped (they join the
         # committed/street network at shared graph vertices), so the incremental
@@ -404,7 +409,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         assert _STEP_STATE is None, "eval_candidate's per-step state holder is not reentrant"
         _STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
-            mode=mode, objective=objective, cost=cost, lam=lam, corridor_m=corridor_m,
+            mode=mode, objective=objective, cost=cost, lam=lam, half_width_m=half_width_m,
             committed_disp=committed_disp, block=block, radii=radii,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
@@ -429,7 +434,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         assert isinstance(best_real, LineString)
         committed.append(best_real)
 
-    roads = _planarize(committed, block.crs)
+    roads = _planarize(committed, block.crs, 2.0 * half_width_m)
     roads["drain"] = road_drainage(block, roads) if len(roads) else []
     return roads
 
@@ -443,7 +448,7 @@ class ArterialIdentity:
     mode: str
     objective: str
     cost: str
-    # corridor_m when cost in {displacement, repulsion} else 0.0 -- DERIVED (see the property).
+    # road_width_m when cost in {displacement, repulsion} else 0.0 -- DERIVED (see the property).
     corridor_key: float
     max_roads: int
     n_anchors: int
@@ -466,7 +471,9 @@ class GreedyArterialReblocker:
     # "length" (Delta-benefit/metre) | "displacement" (Delta-benefit/building, see budget.py)
     # | "repulsion" (Delta-benefit / soft quadratic-tail proximity cost, never-zero & CELF-safe)
     cost: str = "length"
-    corridor_m: float = 3.0   # road half-width + setback; the displacement corridor
+    # Total width of the roads this method emits; also the displacement corridor it
+    # scores against (half-width each side). Stamped on every road it returns.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
     workers: int = 16         # fork-pool size for per-step candidate scoring; 1 == serial no-op
     lazy: bool = False               # False -> exact _greedy_arterials (byte-identical)
     candidate_policy: str = "grow"   # "grow" | "fixed" | "faithful" (only used when lazy)
@@ -478,13 +485,13 @@ class GreedyArterialReblocker:
 
     @property
     def identity(self) -> ArterialIdentity:
-        # Every field that changes the proposed roads must be in the derive-cache key. corridor_m
+        # Every field that changes the proposed roads must be in the derive-cache key. road_width_m
         # changes which roads win only under cost="displacement"/"repulsion"; hold it fixed so
-        # length-cost methods stay corridor-independent (two methods differing only in corridor_m
+        # length-cost methods stay corridor-independent (two methods differing only in road_width_m
         # must NOT share a cached proposal when it matters). max_roads / n_anchors / top_k / lam all
         # change the greedy search, so they belong in the key too -- otherwise a budget/candidate
         # sweep silently returns another setting's cached proposal.
-        corridor_key = self.corridor_m if self.cost in ("displacement", "repulsion") else 0.0
+        corridor_key = self.road_width_m if self.cost in ("displacement", "repulsion") else 0.0
         return ArterialIdentity(
             mode=self.mode, objective=self.objective, cost=self.cost, corridor_key=corridor_key,
             max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k, lam=self.lam,
@@ -498,18 +505,19 @@ class GreedyArterialReblocker:
             roads = _greedy_arterials_lazy(
                 block, mode=self.mode, objective=self.objective, n_anchors=self.n_anchors,
                 top_k=self.top_k, lam=self.lam, max_roads=self.max_roads, cost=self.cost,
-                corridor_m=self.corridor_m, workers=self.workers,
+                half_width_m=self.road_width_m / 2.0, workers=self.workers,
                 candidate_policy=self.candidate_policy, rescore_every=self.rescore_every,
                 max_anchors=self.max_anchors)
         else:
             roads = _greedy_arterials(
                 block, mode=self.mode, objective=self.objective, n_anchors=self.n_anchors,
                 top_k=self.top_k, lam=self.lam, max_roads=self.max_roads, cost=self.cost,
-                corridor_m=self.corridor_m, workers=self.workers,
+                half_width_m=self.road_width_m / 2.0, workers=self.workers,
                 max_anchors=self.max_anchors)
         return Proposal(
-            block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+            block_id=block.block_id, crs=block.crs, edges=None,
+            roads=with_width(roads, self.road_width_m),
             proposal_id=f"greedy_arterial_{self.mode}_{self.objective}", method="greedy_arterial",
             params={"segments": len(roads), "mode": self.mode, "objective": self.objective,
-                    "cost": self.cost, "corridor_m": self.corridor_m, "lazy": self.lazy},
+                    "cost": self.cost, "road_width_m": self.road_width_m, "lazy": self.lazy},
             block_identity=block.identity)

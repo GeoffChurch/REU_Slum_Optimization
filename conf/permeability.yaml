@@ -10,9 +10,16 @@
 # (D=10% method-spread ~0.9pts -> ~11.8pts) -- see reblock.permeability's module docstring for
 # the formula.
 g_walk: 0.1
-g_road: 20.0
+# Conductance per METRE of usable road width, per unit distance. Replaced g_road (20.0) + the
+# global corridor_m (3.0) 2026-07-31: width is carried per road now, so there is no standard road
+# for a single g_road to describe. 8.0 reproduces the old numbers exactly -- a default 6 m two-way
+# road gives each direction (6 - road_margin_m)/2 = 2.5 m of usable width, and 8.0 * 2.5 = 20.0.
+g_road_per_m: 8.0
 g_street: 20.0
-corridor_m: 3.0
+# Irreducible corridor margin (verge, drainage, wall clearance), paid once per road however many
+# lanes it carries. Makes conductance AFFINE in width, and makes a one-way street wider than half a
+# two-way one: they match per-direction at W_one = (W_two + margin)/2 = 3.5 m, not 3.0 m.
+road_margin_m: 1.0
 r0_frac: 0.55   # r0 = r0_frac * median(building nearest-neighbour distance) -- adaptive corridor
                 # half-width; 0.55 lands r0~3m on multiblock_density_compactness (median NN~5.2m).
 # Lens A -- matched displacement %: truncate every method to its first prefix at/after this

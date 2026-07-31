@@ -124,10 +124,10 @@ def test_incremental_scorer_matches_full_rederivation() -> None:
     ]
     for name, block, committed, trials in cases:
         ctx = _BlockScoringContext(block)
-        step = ctx.step(_planarize(committed, block.crs))
+        step = ctx.step(_planarize(committed, block.crs, 6.0))
         for real in trials:
             got = step.score_candidate(real)
-            want = network_efficiency(block, _planarize(committed + [real], block.crs))
+            want = network_efficiency(block, _planarize(committed + [real], block.crs, 6.0))
             assert _close(got[0], want[0]), (name, real.wkt, "E", got, want)
             assert _close(got[1], want[1]), (name, real.wkt, "directness", got, want)
 
@@ -154,17 +154,20 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     region = _region_deep()
 
     calls["n"] = 0
-    roads_a1 = arterial._greedy_arterials(region, mode="aspirational", objective="directness",
+    roads_a1 = arterial._greedy_arterials(
+        region, half_width_m=3.0, mode="aspirational", objective="directness",
                                           max_roads=2, workers=1)
     assert calls["n"] == 0, "aspirational must NOT use the incremental scorer (Bug 2)"
 
     calls["n"] = 0
-    arterial._greedy_arterials(region, mode="buildable", objective="directness", max_roads=2,
+    arterial._greedy_arterials(
+        region, half_width_m=3.0, mode="buildable", objective="directness", max_roads=2,
                                workers=1)
     assert calls["n"] > 0, "buildable must score candidates through the incremental scorer"
 
     # Aspirational proposed geometry is deterministic/unchanged across runs (it scores through the
     # full path, which equals network_efficiency -- verified elsewhere -- so the argmax is stable).
-    roads_a2 = arterial._greedy_arterials(region, mode="aspirational", objective="directness",
+    roads_a2 = arterial._greedy_arterials(
+        region, half_width_m=3.0, mode="aspirational", objective="directness",
                                           max_roads=2, workers=1)
     assert [g.wkt for g in roads_a1.geometry] == [g.wkt for g in roads_a2.geometry]

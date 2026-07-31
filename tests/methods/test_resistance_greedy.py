@@ -15,7 +15,7 @@ from shapely.ops import unary_union
 from reblock.contracts import Block
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.resistance_greedy import ResistanceGreedyReblocker
-from reblock.permeability import permeability
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability, with_width
 
 UTM = CRS.from_epsg(32734)
 
@@ -74,7 +74,8 @@ def test_the_first_road_is_the_ARGMAX_over_candidates_by_gain_per_metre() -> Non
         road = _path_road(graph, pred, int(starts[i]), reps[i], street)
         if road is None or road.length <= 0:
             continue
-        rate = (permeability(block, gpd.GeoDataFrame(geometry=[road], crs=block.crs)) - base)
+        rate = (permeability(block, with_width(
+            gpd.GeoDataFrame(geometry=[road], crs=block.crs), DEFAULT_ROAD_WIDTH_M)) - base)
         best_rate = max(best_rate, rate / road.length)
 
     chosen = ResistanceGreedyReblocker(max_roads=1, shortlist=999).propose(block).roads

@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import math
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
 import matplotlib
 
@@ -214,9 +214,10 @@ def render_after(
     )
     ax = fig.axes[0]
     if proposal.roads is not None and not proposal.roads.empty:
-        corridor_m = float(cast(float, proposal.params.get("corridor_m", 3.0)))
+        # per-road width; there is no global corridor to fall back on
         roads_buffered = gpd.GeoDataFrame(
-            geometry=proposal.roads.geometry.buffer(corridor_m), crs=block.crs)
+            geometry=proposal.roads.geometry.buffer(
+                proposal.roads["width_m"].to_numpy(dtype=float) / 2.0), crs=block.crs)
         roads_buffered.plot(ax=ax, color=_ROAD_COLOR, zorder=4)
 
     return fig

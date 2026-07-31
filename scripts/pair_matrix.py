@@ -207,8 +207,8 @@ def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
     n = len(pts)
     if n == 0:
         return 0.0
-    radii = building_radii(pts, CORRIDOR_M)
-    return float(displacement(pts, radii, roads, CORRIDOR_M) / n)
+    radii = building_radii(pts)
+    return float(displacement(pts, radii, roads) / n)
 
 
 @dataclass(frozen=True)

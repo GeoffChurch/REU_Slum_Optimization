@@ -10,7 +10,13 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import Block
-from reblock.permeability import has_oneway, permeability
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    has_oneway,
+    lane_width,
+    permeability,
+    with_width,
+)
 
 UTM = CRS.from_epsg(32734)
 
@@ -44,14 +50,14 @@ def _equivalent_one_way_width() -> float:
     from reblock.permeability import PermeabilityParams
 
     pr = PermeabilityParams()
-    return (2.0 * pr.corridor_m + pr.road_margin_m) / 2.0
+    return float(lane_width(pr, DEFAULT_ROAD_WIDTH_M))
 
 
 def _roads() -> gpd.GeoDataFrame:
-    return gpd.GeoDataFrame(geometry=[
+    return with_width(gpd.GeoDataFrame(geometry=[
         LineString([(20.0, 0.0), (20.0, 50.0)]),
         LineString([(20.0, 30.0), (50.0, 30.0)]),
-    ], crs=UTM)
+    ], crs=UTM), DEFAULT_ROAD_WIDTH_M)
 
 
 def test_two_way_reduces_exactly_to_todays_metric() -> None:
@@ -62,7 +68,7 @@ def test_two_way_reduces_exactly_to_todays_metric() -> None:
 
     NOT fault-injectable by the boost formula: a two-way road takes the `dvec is None` branch and
     never evaluates it. This guards the ship-safety property (existing numbers are preserved unless
-    a method opts in), and `test_crossing_edge_keeps_full_road_conductance` guards the formula.
+    a method opts in), and `test_crossing_edge_keeps_fullroad_conductance` guards the formula.
     """
     block, roads = _block(), _roads()
     plain = float(permeability(block, roads))
@@ -97,7 +103,7 @@ def test_one_way_never_scores_better_than_two_way() -> None:
     assert p_one <= p_two + 1e-12, f"one-way {p_one:.8f} beat two-way {p_two:.8f}"
 
 
-def test_crossing_edge_keeps_full_road_conductance() -> None:
+def test_crossing_edge_keeps_fullroad_conductance() -> None:
     """A parcel pair facing each other ACROSS a one-way road must score as if it were two-way.
 
     This is the property that distinguishes gating (`min(1, 1 + cos t)`) from scaling
@@ -124,8 +130,8 @@ def test_crossing_edge_keeps_full_road_conductance() -> None:
         boundary=Polygon([(0, 0), (20, 0), (20, 40), (0, 40)]), parcels=parcels,
         streets=gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (20.0, 0.0)])], crs=UTM),
         building_points=gpd.GeoDataFrame(geometry=[Point(10, 10), Point(10, 30)], crs=UTM))
-    two = gpd.GeoDataFrame(geometry=[road], crs=UTM)
-    one = gpd.GeoDataFrame(geometry=[road], crs=UTM)
+    two = with_width(gpd.GeoDataFrame(geometry=[road], crs=UTM), DEFAULT_ROAD_WIDTH_M)
+    one = with_width(gpd.GeoDataFrame(geometry=[road], crs=UTM), DEFAULT_ROAD_WIDTH_M)
     two["oneway"], one["oneway"] = False, True
     one["width_m"] = _equivalent_one_way_width()       # equal per-direction capacity
     p_two, p_one = float(permeability(block, two)), float(permeability(block, one))
@@ -164,18 +170,18 @@ def test_width_model_calibration_and_the_one_way_equivalent_width() -> None:
     wider than half a two-way one. The same parameter makes conductance affine -- usable capacity is
     (W - margin) -- so one number does both jobs instead of two independent fudge factors.
 
-    FAULT INJECTION: dropping the margin from `_road_conductance` (pure `k*W/d`) makes the one-way
+    FAULT INJECTION: dropping the margin from `road_conductance` (pure `k*W/d`) makes the one-way
     equivalent width fall to exactly W/2, failing the second assertion.
     """
-    from reblock.permeability import PermeabilityParams, _road_conductance
+    from reblock.permeability import PermeabilityParams, road_conductance
 
     pr = PermeabilityParams()
-    full, margin = 2.0 * pr.corridor_m, pr.road_margin_m
+    full, margin = DEFAULT_ROAD_WIDTH_M, pr.road_margin_m
     per_direction_two_way = margin + (full - margin) / 2.0
-    assert abs(_road_conductance(pr, per_direction_two_way, 1.0) - pr.g_road) < 1e-9
+    assert abs(road_conductance(pr, per_direction_two_way, 1.0) - (pr.g_road_per_m * 2.5)) < 1e-9
 
     equivalent = (full + margin) / 2.0
-    assert abs(_road_conductance(pr, equivalent, 1.0) - pr.g_road) < 1e-9
+    assert abs(road_conductance(pr, equivalent, 1.0) - (pr.g_road_per_m * 2.5)) < 1e-9
     assert equivalent > full / 2.0, "a one-way street must be WIDER than half a two-way one"
 
 
@@ -188,9 +194,9 @@ def test_widening_is_superlinear_because_the_margin_is_paid_once() -> None:
 
     FAULT INJECTION: dropping the margin makes this exactly 2.0 and the strict inequality fails.
     """
-    from reblock.permeability import PermeabilityParams, _road_conductance
+    from reblock.permeability import PermeabilityParams, road_conductance
 
     pr = PermeabilityParams()
-    w = 2.0 * pr.corridor_m
-    ratio = _road_conductance(pr, 2 * w, 1.0) / _road_conductance(pr, w, 1.0)
+    w = DEFAULT_ROAD_WIDTH_M
+    ratio = road_conductance(pr, 2 * w, 1.0) / road_conductance(pr, w, 1.0)
     assert ratio > 2.0, f"widening should be superlinear, got {ratio:.4f}"

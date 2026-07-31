@@ -57,9 +57,13 @@ from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
-from reblock.permeability import PermeabilityParams, _adaptive_r0, permeability
-
-CORRIDOR_M = 3.0
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    PermeabilityParams,
+    _adaptive_r0,
+    permeability,
+    with_width,
+)
 
 
 def _trace(graph: RoutingGraph, pred: np.ndarray, start: int) -> list[int]:
@@ -88,6 +92,9 @@ class CycleNativeReblocker:
     max_displacement: float = 0.10
     shortlist: int = 8
     params: PermeabilityParams = field(default_factory=PermeabilityParams)
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
     identity = None
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
@@ -101,7 +108,7 @@ class CycleNativeReblocker:
 
         adj = parcel_adjacency(geoms, STREET_TOL)
         r0 = _adaptive_r0(block, self.params)
-        radii = building_radii(block.building_points, CORRIDOR_M)
+        radii = building_radii(block.building_points)
         n_b = max(len(block.building_points), 1)
         street = unary_union(list(block.streets.geometry))
         seeds = np.flatnonzero(
@@ -121,7 +128,8 @@ class CycleNativeReblocker:
         cur_p = float(permeability(block, empty, self.params, adj=adj, r0=r0))
         for _ in range(60):
             spent = displacement(block.building_points, radii,
-                                 gpd.GeoDataFrame(geometry=roads, crs=crs), CORRIDOR_M) / n_b \
+                                 with_width(gpd.GeoDataFrame(geometry=roads, crs=crs),
+                                            self.road_width_m)) / n_b \
                 if roads else 0.0
             if spent >= self.max_displacement:
                 break
@@ -158,8 +166,9 @@ class CycleNativeReblocker:
                 if pred2[int(starts[i])] >= 0:
                     back = _geom(graph, _trace(graph, pred2, int(starts[i])), street)
                 cand = [out_geom] + ([back] if back is not None else [])
-                trial = gpd.GeoDataFrame(geometry=[*roads, *cand], crs=crs)
-                d = displacement(block.building_points, radii, trial, CORRIDOR_M) / n_b
+                trial = with_width(gpd.GeoDataFrame(geometry=[*roads, *cand], crs=crs),
+                                   self.road_width_m)
+                d = displacement(block.building_points, radii, trial) / n_b
                 if d > self.max_displacement:
                     continue
                 gain = float(permeability(block, trial, self.params, adj=adj, r0=r0)) - cur_p
@@ -173,6 +182,7 @@ class CycleNativeReblocker:
         return self._out(block, gpd.GeoDataFrame(geometry=roads, crs=crs))
 
     def _out(self, block: Block, roads: gpd.GeoDataFrame) -> Proposal:
-        return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+        return Proposal(block_id=block.block_id, crs=block.crs,
+                        roads=with_width(roads, self.road_width_m), edges=None,
                         proposal_id=f"cycle_native:d{self.max_displacement:g}",
                         method="cycle_native", params={"roads": len(roads)}, block_identity=None)

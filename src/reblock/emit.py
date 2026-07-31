@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, cast
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
+import shapely
 from matplotlib.ticker import PercentFormatter
 from numpy.typing import NDArray
 
@@ -60,9 +61,8 @@ def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
     pts = block.building_points
     if pts.empty or proposal.roads is None or proposal.roads.empty:
         return cast(gpd.GeoDataFrame, pts.iloc[:0])
-    corridor_m = cast(float, proposal.params.get("corridor_m", 3.0))
-    radii = building_radii(pts, corridor_m)
-    corridor = proposal.roads.geometry.buffer(corridor_m).union_all()
+    radii = building_radii(pts)
+    corridor = _corridor(proposal.roads)
     d = pts.geometry.distance(corridor).to_numpy()
     with np.errstate(divide="ignore", invalid="ignore"):
         c = np.where(radii > 0.0, 1.0 - d / radii, np.where(d <= 0.0, 1.0, 0.0))
@@ -72,24 +72,27 @@ def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
     return cast(gpd.GeoDataFrame, out[out["c"] > 0.0])
 
 
-def pct_paved(roads: gpd.GeoDataFrame | None, corridor_m: float, block_area: float) -> float:
-    """Fraction of the block's area under the roads' corridor footprint
-    (union(roads).buffer(corridor_m)) -- the same buffer the displacement metric uses. 0 for an
-    empty road set or a non-positive block area."""
+def _corridor(roads: gpd.GeoDataFrame) -> shapely.geometry.base.BaseGeometry:
+    """Paved footprint: every road buffered by its OWN half-width."""
+    return roads.geometry.buffer(roads["width_m"].to_numpy(dtype=float) / 2.0).union_all()
+
+
+def pct_paved(roads: gpd.GeoDataFrame | None, block_area: float) -> float:
+    """Fraction of the block's area under the roads' paved footprint -- the same buffer the
+    displacement metric uses. 0 for an empty road set or a non-positive block area."""
     if roads is None or len(roads) == 0 or block_area <= 0:
         return 0.0
-    return float(roads.geometry.buffer(corridor_m).union_all().area / block_area)
+    return float(_corridor(roads).area / block_area)
 
 
-def pct_displaced(roads: gpd.GeoDataFrame | None, corridor_m: float,
-                  building_points: gpd.GeoDataFrame,
+def pct_displaced(roads: gpd.GeoDataFrame | None, building_points: gpd.GeoDataFrame,
                   radii: NDArray[np.float64]) -> float:
     """Fraction of buildings-equivalent displaced: Σcᵢ / n_buildings (see budget.displacement)."""
     from reblock.budget import displacement
     n = len(building_points)
     if roads is None or len(roads) == 0 or n == 0:
         return 0.0
-    return displacement(building_points, radii, roads, corridor_m) / n
+    return displacement(building_points, radii, roads) / n
 
 
 def _member_ids(block_id: str) -> list[str]:

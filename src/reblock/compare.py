@@ -35,15 +35,15 @@ log = logging.getLogger(__name__)
 
 def _load_permeability_params(config_dir: Path = Path("conf")
                               ) -> tuple[PermeabilityParams, float, float]:
-    """`conf/permeability.yaml`'s metric params (`g_walk`/`g_road`/`g_street`/`corridor_m`/
+    """`conf/permeability.yaml`'s metric params (`g_walk`/`g_road_per_m`/`g_street`/
     `r0_frac`) plus the two calibrated lens thresholds (`matched_displacement`/
     `matched_permeability`) -- mirrors `scripts.compare_budgets.load_permeability_config` exactly.
     `compare()` uses only the params half (for `permeability_curve`); `main()` uses the thresholds
     half too, to draw `compare_report`'s guide lines at the same cutoffs the two-lens driver grades
     methods against."""
     raw = cast(DictConfig, OmegaConf.load(config_dir / "permeability.yaml"))
-    params = PermeabilityParams(g_walk=float(raw.g_walk), g_road=float(raw.g_road),
-                                g_street=float(raw.g_street), corridor_m=float(raw.corridor_m),
+    params = PermeabilityParams(g_walk=float(raw.g_walk), g_road_per_m=float(raw.g_road_per_m),
+                                g_street=float(raw.g_street),
                                 r0_frac=float(raw.r0_frac))
     return params, float(raw.matched_displacement), float(raw.matched_permeability)
 
@@ -102,7 +102,6 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
     methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in names]
     _expand_method_sweep(cfg, names, methods)   # optional: sweep one base method over a param
     regions = build_regions(source, screen, region_builder, block_groups, cfg.max_blocks)
-    corridor_m = float(cfg.get("corridor_m", 3.0))
     params, _, _ = _load_permeability_params()
 
     # one curve per (region, method, metric); the stored Curve.cost is always cumulative added
@@ -132,11 +131,11 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
                 block = result.block
                 roads = cast(GeoDataFrame, result.proposal.roads)
             block_area = float(block.parcels.geometry.union_all().area)
-            radii = building_radii(block.building_points, corridor_m)
-            pp = pct_paved(roads, corridor_m, block_area)
-            pd_ = pct_displaced(roads, corridor_m, block.building_points, radii)
+            radii = building_radii(block.building_points)
+            pp = pct_paved(roads, block_area)
+            pd_ = pct_displaced(roads, block.building_points, radii)
             perm = permeability_curve(block, roads, params)
-            disp = displacement_curve(block, roads, radii, corridor_m=corridor_m)
+            disp = displacement_curve(block, roads, radii)
             raw.append((name, label, "permeability", perm, pp, pd_))
             raw.append((name, label, "displacement", disp, pp, pd_))
     # No cross-method normalization: the frontier is reported as raw (road length, benefit)

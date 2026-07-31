@@ -151,8 +151,10 @@ def region_names() -> list[str]:
 
 def _load_permeability_params() -> PermeabilityParams:
     raw = cast(DictConfig, OmegaConf.load(CONFIG_DIR / "permeability.yaml"))
-    return PermeabilityParams(g_walk=float(raw.g_walk), g_road=float(raw.g_road),
-                              g_street=float(raw.g_street), corridor_m=float(raw.corridor_m),
+    return PermeabilityParams(g_walk=float(raw.g_walk),
+                              g_road_per_m=float(raw.g_road_per_m),
+                              g_street=float(raw.g_street),
+                              road_margin_m=float(raw.road_margin_m),
                               r0_frac=float(raw.r0_frac))
 
 
@@ -267,13 +269,13 @@ def _method_frontier(block: Block, method: Method, params: PermeabilityParams, *
     roads = prop.roads
     if roads is None or roads.empty:
         return None
-    radii = building_radii(block.building_points, params.corridor_m)
+    radii = building_radii(block.building_points)
 
     def _report(i: int, total: int) -> None:
         _log(f"    {label}: solve {i}/{total}")
 
     perm_curve = permeability_curve(block, roads, params, n_points=20, progress=_report)
-    disp_curve = displacement_curve(block, roads, radii, corridor_m=params.corridor_m, n_points=20)
+    disp_curve = displacement_curve(block, roads, radii, n_points=20)
     return MethodFrontier(
         n_roads=int(len(roads)),
         terminal_permeability=perm_curve.benefit[-1],

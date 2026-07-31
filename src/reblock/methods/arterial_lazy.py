@@ -156,7 +156,7 @@ def _iter_live(heap: list[tuple[float, str, str, LineString, int]], live: set[st
 
 def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
                            top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
-                           cost: str = "length", corridor_m: float = 3.0,
+                           cost: str = "length", half_width_m: float,
                            workers: int = 16, candidate_policy: str = "grow",
                            rescore_every: int = 0, max_anchors: int = 0) -> GeoDataFrame:
     """CELF lazy-greedy driver: commit the best gain-per-cost arterial one at a time, but instead of
@@ -173,7 +173,7 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
     policy = _make_policy(candidate_policy, block, streets, n_anchors, top_k, adj, max_anchors)
     # Constant across every step (depends only on block.building_points), so computed ONCE here
     # rather than per-step.
-    radii = building_radii(block.building_points, corridor_m)
+    radii = building_radii(block.building_points)
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
@@ -193,16 +193,16 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
     while len(committed) < max_roads:
         step = len(committed)
         base_merged = _merge(committed)
-        base = _explode(base_merged, block.crs)
+        base = _explode(base_merged, block.crs, 2.0 * half_width_m)
         base_val = _art._score(objective, block, base, adj, base_burden, ctx)
         committed_disp = 0.0
         if cost == "displacement":
-            committed_disp = displacement(block.building_points, radii, base, corridor_m)
+            committed_disp = displacement(block.building_points, radii, base)
         stepctx = ctx.step(base) if (ctx is not None and mode == "buildable") else None
         assert _art._STEP_STATE is None, "eval_candidate's per-step state holder is not reentrant"
         _art._STEP_STATE = _StepState(
             step=stepctx, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
-            mode=mode, objective=objective, cost=cost, lam=lam, corridor_m=corridor_m,
+            mode=mode, objective=objective, cost=cost, lam=lam, half_width_m=half_width_m,
             committed_disp=committed_disp, block=block, radii=radii,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
@@ -252,6 +252,6 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
             live.discard(k)
         pending = added
 
-    roads = _planarize(committed, block.crs)
+    roads = _planarize(committed, block.crs, 2.0 * half_width_m)
     roads["drain"] = road_drainage(block, roads) if len(roads) else []
     return roads

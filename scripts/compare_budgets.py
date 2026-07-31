@@ -107,8 +107,10 @@ def load_permeability_config(config_dir: Path = Path("conf")
     """`conf/permeability.yaml`'s metric params + the two calibrated lens thresholds
     (`matched_displacement` D for Lens A, `matched_permeability` P* for Lens B)."""
     raw = cast(DictConfig, OmegaConf.load(config_dir / "permeability.yaml"))
-    params = PermeabilityParams(g_walk=float(raw.g_walk), g_road=float(raw.g_road),
-                                g_street=float(raw.g_street), corridor_m=float(raw.corridor_m),
+    params = PermeabilityParams(g_walk=float(raw.g_walk),
+                                g_road_per_m=float(raw.g_road_per_m),
+                                g_street=float(raw.g_street),
+                                road_margin_m=float(raw.road_margin_m),
                                 r0_frac=float(raw.r0_frac))
     return params, float(raw.matched_displacement), float(raw.matched_permeability)
 
@@ -136,7 +138,7 @@ def _write_csv(path: Path, header: list[str], rows: list[list[object]]) -> None:
 
 def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out_dir: Path, *,
                             matched_displacement: float, matched_permeability: float,
-                            params: PermeabilityParams, corridor_m: float = 3.0,
+                            params: PermeabilityParams,
                             label: str | None = None) -> list[OutcomeRow]:
     """Reblock each method once over `region` (natural config), compute the permeability +
     displacement frontier, both lenses' outcome tables, and every render (before, both colorings;
@@ -158,13 +160,13 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                  float(roads.geometry.length.sum()), time.perf_counter() - t0)
     assert block is not None
 
-    radii = building_radii(block.building_points, corridor_m)
+    radii = building_radii(block.building_points)
     n_buildings = len(block.building_points)
 
     def _disp_frac(prefix: GeoDataFrame) -> float:
         if n_buildings == 0:
             return 0.0
-        return displacement(block.building_points, radii, prefix, corridor_m) / n_buildings
+        return displacement(block.building_points, radii, prefix) / n_buildings
 
     # Frontier: permeability + displacement curves per method, from the SAME reblock above -- no
     # second propose. `compare_report` writes frontier_permeability.csv + frontier_<label>.png.
@@ -175,7 +177,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         curves.append(MethodCurve(name, curve_label, "permeability",
                                   permeability_curve(block, roads, params)))
         curves.append(MethodCurve(name, curve_label, "displacement",
-                                  displacement_curve(block, roads, radii, corridor_m=corridor_m)))
+                                  displacement_curve(block, roads, radii)))
     compare_report(curves, out_dir, method_order=list(methods),
                    matched_displacement=matched_displacement,
                    matched_permeability=matched_permeability)
@@ -189,8 +191,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     prefix_b: dict[str, GeoDataFrame] = {}
     reached_b: dict[str, bool] = {}
     for name, roads in roads_by_method.items():
-        prefix_a[name] = prefix_to_displacement(block, roads, radii, matched_displacement,
-                                                corridor_m=corridor_m)
+        prefix_a[name] = prefix_to_displacement(block, roads, radii, matched_displacement)
         pb, reached = prefix_to_permeability(block, roads, matched_permeability, params)
         prefix_b[name] = pb
         reached_b[name] = reached
