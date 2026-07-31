@@ -3,7 +3,9 @@
 Every other method adds spurs -- a path from an unserved parcel back to the network -- which is why
 they all score at the tree end of the directed penalty (5.47, against a pure cycle's 2.27). A
 method whose atomic move is a LOOP is bridgeless by construction, needs no repair pass, and is
-strongly orientable, so every road it emits can be made one-way.
+strongly orientable, so every road it emits can be made one-way. That last property was the point
+of the exercise and it did NOT pay -- see `notes/2026-07-31-one-way-is-dominated.md`; the value that
+survives is the bridgelessness itself.
 
 ## The move
 
@@ -37,9 +39,7 @@ onto a finished tree. Choosing cycles from the start finds loops that also serve
 """
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -49,8 +49,6 @@ from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from reblock.budget import building_radii, displacement
 from reblock.contracts import Block, Proposal
@@ -182,7 +180,8 @@ class CycleNativeReblocker:
         return self._out(block, gpd.GeoDataFrame(geometry=roads, crs=crs))
 
     def _out(self, block: Block, roads: gpd.GeoDataFrame) -> Proposal:
-        return Proposal(block_id=block.block_id, crs=block.crs,
-                        roads=with_width(roads, self.road_width_m), edges=None,
-                        proposal_id=f"cycle_native:d{self.max_displacement:g}",
-                        method="cycle_native", params={"roads": len(roads)}, block_identity=None)
+        out = with_width(roads, self.road_width_m)
+        return Proposal(
+            block_id=block.block_id, crs=block.crs, roads=out, edges=None,
+            proposal_id=f"cycle_native:d{self.max_displacement:g}", method="cycle_native",
+            params={"roads": len(out), "road_width_m": self.road_width_m}, block_identity=None)
