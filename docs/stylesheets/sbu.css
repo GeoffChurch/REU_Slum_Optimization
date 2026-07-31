@@ -244,18 +244,54 @@ body,
   font-weight: 600;
 }
 
-/* The official logo must never be stretched, skewed, recoloured, or crowded. Width is capped,
-   height follows, and the clear space is enforced with padding rather than a bare margin. */
-.md-header__button.md-logo img,
-.md-header__button.md-logo svg {
+/* HEADER MARK. The horizontal lockup sits left of the title on a white plate. The plate is not
+   decoration: the file is 78% transparent and its shield and the word "University" are #990000,
+   so straight on the red header bar that half of the mark would disappear. There is no reversed
+   variant in the pack and the mark must not be recoloured, so it gets a light ground instead.
+   Padding is the clear space, ~29% of the mark's height on every side.
+
+   Material hides this element below 76.234375em, so the plate is a wide-viewport affordance
+   only -- which is why the hero keeps its own lockup for narrow screens. */
+.md-header .md-header__button.md-logo {
+  display: inline-flex;   /* shrink-wrap the plate to the mark; `flex` would let it stretch */
+  align-items: center;
+  flex: 0 0 auto;
   width: auto;
-  height: 1.6rem;
-  max-width: 9rem;
-  object-fit: contain;
+  background: #ffffff;
+  border-radius: 3px;
+  padding: 0.3rem 0.45rem;
+  margin: 0.2rem 0.45rem 0.2rem 0.2rem;
+  opacity: 1;
 }
 
-.md-header__button.md-logo {
-  padding: 0.2rem 0.6rem 0.2rem 0.2rem;
+/* Specificity (0,3,1) to clear Material's own
+   `.md-header__button.md-logo img{height:1.2rem;width:auto}` at (0,2,1). Height only, width
+   auto: proportional, never stretched or skewed, never recoloured. */
+.md-header .md-header__button.md-logo img,
+.md-header .md-header__button.md-logo svg {
+  display: block;
+  height: 1.05rem;
+  width: auto;
+  max-width: none;
+  object-fit: contain;
+  fill: none;
+}
+
+/* The generic white focus ring would land on a white plate. A wider offset puts the ring out on
+   the red bar where it is legible (white on #990000 is 8.92:1). */
+.md-header .md-header__button.md-logo:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 4px;
+}
+
+/* Restates Material's own breakpoint. Material hides the header logo below 76.234375em, but the
+   rule above is (0,3,0) against their (0,2,0) and silently un-hid it -- which put a 142px plate
+   next to the hamburger and truncated the site title to "reblock - REU Slu...". Below this
+   width the institutional mark is carried by the hero lockup instead. */
+@media screen and (max-width: 76.234375em) {
+  .md-header .md-header__button.md-logo {
+    display: none;
+  }
 }
 
 /* ------------------------------------------------------------------------------------ hero */
