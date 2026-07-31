@@ -271,12 +271,19 @@ class M:
     def __init__(self, slug: str, title: str, blurb: str, *, idea: str = "",
                  badge: str = "evaluated", mc_key: str | None = None, mb_key: str | None = None,
                  outputs_frag: str | None = None, outputs_flags: list[str] | None = None,
-                 conf: str | None = None, status: str | None = None) -> None:
+                 conf: str | None = None, status: str | None = None,
+                 published: bool = True) -> None:
         self.slug, self.title, self.blurb = slug, title, blurb
         self.idea, self.badge = idea, badge
         self.mc_key, self.mb_key = mc_key, mb_key
         self.outputs_frag, self.outputs_flags = outputs_frag, outputs_flags or []
         self.conf, self.status = conf, status
+        # published=False keeps the method OUT of the Methods overview, so that page never links
+        # to something the site does not build. It does NOT stop the page file being written --
+        # exclude_docs in mkdocs.yml is the actual publish switch, and the file staying on disk
+        # keeps its prose recoverable. THE TWO MUST BE KEPT IN SYNC: unpublishing a method means
+        # published=False here AND its path in exclude_docs there.
+        self.published = published
 
     @property
     def display_title(self) -> str:
@@ -324,6 +331,20 @@ METHODS = [
       idea="best straight arterial per metre, snapped to buildable frontage",
       mc_key="greedy_arterial_repulsion", mb_key="greedy_arterial_repulsion",
       conf="greedy_arterial_repulsion"),
+    M("resistance_lp", "Direct Objective (LP)",
+      "Chooses the **whole road set at once** with a linear program, rather than adding one road "
+      "at a time, and budgets the currency the lenses actually score — **displacement** — instead "
+      "of metres. The same metres cost wildly different numbers of homes depending on whether "
+      "they run down a gap or through the dense interior, so budgeting metres optimises the wrong "
+      "thing.\n\n"
+      "Its decision variables are whole candidate *paths*, never free edges: choosing a path "
+      "builds every segment of it, so any solution has already bought the route back to the "
+      "street and connectivity is structural rather than repaired after rounding. Displacement is "
+      "modelled as a maximum over segments rather than a sum, so two roads flanking the same "
+      "building pay for it once — an exact discount a greedy cannot express, because marginal "
+      "displacement is not CELF-safe.",
+      idea="the whole road set solved at once by a linear program, budgeted in displacement",
+      mb_key="resistance_lp", conf="resistance_lp"),
     M("osm_footpaths", "OSM Footpaths",
       "The reblocker whose \"proposed roads\" are the **real** informal circulation network — the "
       "worn footpaths people already walk, as mapped in OpenStreetMap (largely by Humanitarian "
@@ -342,9 +363,19 @@ METHODS = [
       idea="a density-adaptive Manhattan-style grid",
       mc_key="euclidean_grid", mb_key="euclidean_grid", outputs_frag="methods.euclidean_grid",
       outputs_flags=["seek_density", "adaptive", "spacing"], conf="euclidean_grid"),
+    # Unpublished (see published= above and exclude_docs in mkdocs.yml): the method is still in
+    # the pipeline and its page is still generated, it just is not built into the site while it
+    # has no run artifacts. NOTE the Phase 1/Phase 2 write-up in DREAM_BODY below is the only
+    # copy of that narrative anywhere in docs/ -- do not delete it when tidying.
     M("dream_come_true", "Dream Come True", "",
-      idea="desire lines detected from imagery", status="in progress"),
+      idea="desire lines detected from imagery", status="in progress", published=False),
 ]
+
+# The methods the Methods overview lists and links to. Anything unpublished is filtered out here
+# so that page can never link to a file mkdocs.yml's exclude_docs drops from the build -- which
+# MkDocs reports as "contains a link to ... which is excluded from the built site".
+PUBLISHED_METHODS = [m for m in METHODS if m.published]
+
 
 DREAM_BODY = """
 !!! warning "In progress"
@@ -612,7 +643,7 @@ def gen_methods_overview() -> str:
                  "actual runs.\n")
 
     cards = []
-    for m in METHODS:
+    for m in PUBLISHED_METHODS:
         label = m.status or m.badge
         cls = "pill-progress" if m.status else "pill-done"
         # Uppercase only the first letter -- str.capitalize() would lowercase the rest and turn
@@ -625,7 +656,7 @@ def gen_methods_overview() -> str:
 
     parts.append("## At a glance\n")
     rows = []
-    for m in METHODS:
+    for m in PUBLISHED_METHODS:
         label = m.status or m.badge
         cls = "pill-progress" if m.status else "pill-done"
         rows.append([f"[{m.display_title}]({m.slug}.md)", m.idea,
@@ -726,7 +757,8 @@ def _key_figures() -> str:
     return f'<dl class="sbu-keyfigures">\n{cells}\n</dl>'
 
 
-def _write_page(path: Path, body: str, *, depth: int, url_depth: int) -> None:
+def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
+                title: str | None = None) -> None:
     """Write one generated page, fixing asset paths for BOTH link forms, which MkDocs treats
     differently:
 
@@ -739,7 +771,13 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int) -> None:
     use_directory_urls, benchmark.md is served at <base>/benchmark/ and methods/peel.md at
     <base>/methods/peel/, so the served depth is not the same as the source depth -- benchmark.md
     is depth 0 but url_depth 1. Getting this wrong 404s every figure on that page."""
-    text = GENERATED_NOTE + body.rstrip() + "\n"
+    # YAML front matter, when given, sets the page's nav label. Without it MkDocs derives the
+    # label from the FILENAME -- "clearance_looped" became "Clearance looped" in the sidebar, not
+    # "Looped Tree" -- because it does not read the H1 for nav purposes. Emitting the title here
+    # keeps method_labels.py the single source of the display name for the heading AND the nav,
+    # instead of a hand-written copy in mkdocs.yml that silently goes stale.
+    front = f'---\ntitle: "{title}"\n---\n' if title else ""
+    text = front + GENERATED_NOTE + body.rstrip() + "\n"
     if depth:
         text = text.replace("](assets/", "](" + "../" * depth + "assets/")
     if url_depth:
@@ -770,9 +808,11 @@ def main() -> None:
     # url_depth is the page's SERVED depth under use_directory_urls, which differs from the
     # source depth: methods/index.md serves at <base>/methods/ (1), methods/peel.md at
     # <base>/methods/peel/ (2), benchmark.md at <base>/benchmark/ (1).
-    _write_page(methods_dir / "index.md", gen_methods_overview(), depth=1, url_depth=1)
+    _write_page(methods_dir / "index.md", gen_methods_overview(), depth=1, url_depth=1,
+                title="The methods")
     for m in METHODS:
-        _write_page(methods_dir / f"{m.slug}.md", gen_method_section(m), depth=1, url_depth=2)
+        _write_page(methods_dir / f"{m.slug}.md", gen_method_section(m), depth=1, url_depth=2,
+                    title=m.display_title)
 
     _write_page(DOCS / "benchmark.md", gen_benchmark_section(), depth=0, url_depth=1)
     print("wrote docs/index.md, docs/methods/*.md, docs/benchmark.md")
