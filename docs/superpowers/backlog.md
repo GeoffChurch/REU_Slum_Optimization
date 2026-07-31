@@ -185,6 +185,53 @@ the curve's x-axis, so per-metre optimizes a ratio unrelated to what is plotted.
 was void regardless: CELF removes per-candidate evaluations, which the linearization already makes
 free, while the bottleneck is the number of ROUNDS.
 
+### CLOSED 2026-07-30: do not roll out a new order. Four hypotheses, none explains the failure
+
+Widened to 20 blocks and the full example method set (n=303 rows), the n=6 conclusion reversed in
+BOTH directions -- the `euclidean_grid` regression vanished (-1.6% -> +1.3% AUC) and a new one
+appeared on the FLAGSHIP:
+
+| method | static AUC | greedy AUC | static lens-B | greedy lens-B |
+|---|---|---|---|---|
+| resistance_lp | +14.9% | +17.9% | +21.3% | +27.8% |
+| greedy_arterial_repulsion | +4.4% | +6.9% | +28.0% | +28.5% |
+| euclidean_grid | +1.3% | +1.3% | -2.4% | -0.2% |
+| osm_footpaths | 0.0% | 0.0% | -- | -- |
+| clearance | **-1.4%** | +2.7% | **-13.8%** | -3.3% |
+| clearance_looped | **-1.9%** | +1.4% | **-8.6%** | -1.7% |
+
+`static` regresses the flagship on both measures, so it must not ship. `greedy` is non-negative on
+AUC everywhere but costs 18-112 solves per curve to give the flagship +1.4%. **The gains are
+concentrated in `arterial` and `resistance_lp`** -- the two methods whose drainage order is worst
+matched to their structure -- and `osm_footpaths` is exactly 0.0% under every ordering. That is a
+poor trade for a change that touches the evaluation core and rewrites every published number.
+
+**Four hypotheses for the flagship regression, all refuted by measurement:**
+
+1. *Wrong operating point* -- gains scored at the full network while the chain starts empty. Refuted:
+   the key correlates with true single-road gain at rho 0.42-0.68 either way, and `static_empty` /
+   `static_avg` measured no better than `static_full`.
+2. *Front-loading* -- a gain key picks a deep leaf and drags its whole trunk chain in at once.
+   Refuted: static's first commit displaces LESS (0.015 vs 0.035) with SHORTER chains (0.44 vs 1.10).
+3. *Drainage captures enabling value* the first-order gain cannot see. Refuted: drainage correlates
+   with essentially nothing -- rho -0.08..0.18 against solo gain, -0.62..0.15 against the gain of the
+   road plus its whole connector chain.
+4. *Infinite-key ties* -- roads with zero marginal displacement tie at `inf` and argsort breaks the
+   tie by index, i.e. arbitrary emission order. A real defect, but it hits 19.3% of `resistance_lp`'s
+   roads (which wins anyway) and only 1.1% of `clearance_looped`'s (which regresses), so it does not
+   explain this.
+
+**The meta-finding, which is the useful part.** Hypothesis 3 exposes an assumption every ordering
+idea here rested on: that a per-road key correlating with per-road value yields a better CHAIN. The
+data denies it -- drainage correlates with nothing yet beats a key correlating 0.39-0.74 with solo
+value. Chain quality is a property of the whole sequence, and per-road correlation does not predict
+it. **Any future attempt should first characterize empirically what distinguishes a good chain from a
+bad one** -- take a block where two orders diverge sharply and examine what actually differs -- before
+proposing another key. Four keys were proposed and tested here without that step.
+
+Also note the n=6 -> n=20 reversal in both directions: several probes in this thread ran at n~6-12,
+which is not enough for a method-level ordering claim.
+
 ### Exactness is the wrong target
 
 Two independent reasons, both worth recording so it is not attempted:
