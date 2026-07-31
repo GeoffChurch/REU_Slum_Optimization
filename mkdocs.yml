@@ -26,13 +26,12 @@ theme:
   name: material
   custom_dir: overrides   # only partials/copyright.html, which adds the REU affiliation line
   favicon: brand/favicon.png
-  # theme.logo is deliberately NOT set. Material renders it inside the header bar, which is solid
-  # Stony Brook Red -- and the supplied lockup is a 2-colour mark whose shield and the word
-  # "University" are both #990000, so they would vanish against it. There is no reversed/white
-  # variant in the pack and the mark must not be recoloured. The header therefore keeps its text
-  # title, and the lockup appears on a white card inside the hero, where it has the light ground
-  # and clear space the brand guide requires (see .sbu-hero__lockup in stylesheets/sbu.css).
-  # logo: brand/sbu-logo.png
+  # The HORIZONTAL lockup (1184x200) -- the vertical one is near-square and turns to mush at the
+  # ~21px the header allows. The mark is 2-colour with no reversed variant and must not be
+  # recoloured, and this file is 78% transparent, so its #990000 shield and "University" would
+  # sit straight on the red header bar and vanish. stylesheets/sbu.css therefore gives
+  # .md-header__button.md-logo a white plate with clear space, and sizes the mark by height.
+  logo: brand/sbu-logo-horz.png
   palette:
     # Light is the default because the use scene is a daytime read of dense figures on a laptop;
     # dark is offered, not assumed. Both schemes are hand-coloured in stylesheets/sbu.css.
