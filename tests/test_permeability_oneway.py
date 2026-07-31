@@ -33,6 +33,20 @@ def _block(n: int = 6, step: float = 10.0) -> Block:
         building_points=gpd.GeoDataFrame(geometry=pts, crs=UTM))
 
 
+def _equivalent_one_way_width() -> float:
+    """The one-way width matching a default two-way road's PER-DIRECTION conductance, (W+margin)/2.
+
+    Comparing one-way and two-way at the SAME TOTAL width is not apples to apples: a one-way street
+    points every lane the same way, so it carries strictly MORE forward than a two-way road of equal
+    width. The meaningful comparison holds per-direction capacity fixed and asks what losing the
+    return direction costs.
+    """
+    from reblock.permeability import PermeabilityParams
+
+    pr = PermeabilityParams()
+    return (2.0 * pr.corridor_m + pr.road_margin_m) / 2.0
+
+
 def _roads() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(geometry=[
         LineString([(20.0, 0.0), (20.0, 50.0)]),
@@ -63,15 +77,19 @@ def test_one_way_never_scores_better_than_two_way() -> None:
 
     A physical impossibility, so it is the sharpest available check on the directed solve.
 
-    Weak on a small synthetic fixture -- the observed ground-shunt leak (0.9964 vs 0.9894 on a real
-    block) did NOT flip this inequality here. `test_directed_solver_matches_a_hand_computed_case`
-    is the sharp guard on the shunt; this one is the cheap sanity bound.
+    Compared at EQUAL PER-DIRECTION capacity (see `_equivalent_one_way_width`), not equal total
+    width -- at equal width a one-way street is legitimately BETTER forward, since every lane points
+    the same way. Weak on a small synthetic fixture: the observed ground-shunt leak (0.9964 vs
+    0.9894 on a real block) did NOT flip this inequality here.
+    `test_directed_solver_matches_a_hand_computed_case` is the sharp guard on the shunt; this one
+    is the cheap sanity bound.
     """
     block, roads = _block(), _roads()
     two_way = roads.copy()
     two_way["oneway"] = False
     one_way = roads.copy()
     one_way["oneway"] = True
+    one_way["width_m"] = _equivalent_one_way_width()   # equal forward capacity; see the helper
     assert has_oneway(one_way)
     p_two = float(permeability(block, two_way))
     p_one = float(permeability(block, one_way))
@@ -109,6 +127,7 @@ def test_crossing_edge_keeps_full_road_conductance() -> None:
     two = gpd.GeoDataFrame(geometry=[road], crs=UTM)
     one = gpd.GeoDataFrame(geometry=[road], crs=UTM)
     two["oneway"], one["oneway"] = False, True
+    one["width_m"] = _equivalent_one_way_width()       # equal per-direction capacity
     p_two, p_one = float(permeability(block, two)), float(permeability(block, one))
     assert p_one == p_two, f"crossing a one-way road cost something: {p_one} vs {p_two}"
 
@@ -135,3 +154,43 @@ def test_directed_solver_matches_a_hand_computed_case() -> None:
     expected = 1.0 / gb[0] + 4.0 / s
     assert np.isfinite(p)
     assert abs(p - expected) < 1e-9 * expected, f"got {p:.9f}, closed form {expected:.9f}"
+
+
+def test_width_model_calibration_and_the_one_way_equivalent_width() -> None:
+    """The affine width law must reproduce `g_road` for a default two-way road, and derive the
+    one-way equivalent width as (W + margin)/2 rather than W/2.
+
+    The margin is paid ONCE per corridor regardless of lane count, which is why a one-way street is
+    wider than half a two-way one. The same parameter makes conductance affine -- usable capacity is
+    (W - margin) -- so one number does both jobs instead of two independent fudge factors.
+
+    FAULT INJECTION: dropping the margin from `_road_conductance` (pure `k*W/d`) makes the one-way
+    equivalent width fall to exactly W/2, failing the second assertion.
+    """
+    from reblock.permeability import PermeabilityParams, _road_conductance
+
+    pr = PermeabilityParams()
+    full, margin = 2.0 * pr.corridor_m, pr.road_margin_m
+    per_direction_two_way = margin + (full - margin) / 2.0
+    assert abs(_road_conductance(pr, per_direction_two_way, 1.0) - pr.g_road) < 1e-9
+
+    equivalent = (full + margin) / 2.0
+    assert abs(_road_conductance(pr, equivalent, 1.0) - pr.g_road) < 1e-9
+    assert equivalent > full / 2.0, "a one-way street must be WIDER than half a two-way one"
+
+
+def test_widening_is_superlinear_because_the_margin_is_paid_once() -> None:
+    """Doubling a corridor's width must MORE than double its conductance.
+
+    A behavioural consequence, not just realism: it rewards fewer wide roads over many narrow ones,
+    which is what real street hierarchies look like. Worth pinning so the incentive cannot be
+    removed by accident.
+
+    FAULT INJECTION: dropping the margin makes this exactly 2.0 and the strict inequality fails.
+    """
+    from reblock.permeability import PermeabilityParams, _road_conductance
+
+    pr = PermeabilityParams()
+    w = 2.0 * pr.corridor_m
+    ratio = _road_conductance(pr, 2 * w, 1.0) / _road_conductance(pr, w, 1.0)
+    assert ratio > 2.0, f"widening should be superlinear, got {ratio:.4f}"

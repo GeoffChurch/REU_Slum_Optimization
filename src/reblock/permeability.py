@@ -73,6 +73,19 @@ class PermeabilityParams:
     g_road: float = 20.0
     g_street: float = 20.0
     corridor_m: float = 3.0
+    # Irreducible margin of a road corridor -- verge, drainage, wall clearance -- paid ONCE
+    # regardless of how many lanes it carries. It does two jobs with one number:
+    #   * a one-way street is NOT half a two-way one, because both pay the same margin:
+    #     W_two = 2*lane + margin, W_one = lane + margin, so W_one/W_two > 1/2;
+    #   * usable capacity is (W - margin), so conductance is AFFINE in width, and zero for a road
+    #     too narrow to use at all.
+    # The two meet: a one-way road matches a two-way's PER-DIRECTION conductance at
+    # W_one = (W_two + margin)/2 -- 3.5 m at the defaults, not 3.0. That ">somewhat wider than half"
+    # is derived, not asserted.
+    # Consequence worth knowing: widening is SUPERLINEAR in capacity (the margin is paid once), so
+    # this rewards fewer, wider roads over many narrow ones -- which is what real street hierarchies
+    # look like, but it is a behavioural change, not just realism.
+    road_margin_m: float = 1.0
     r0_frac: float = 0.55   # r0 = r0_frac * median(building nearest-neighbour distance); see
                              # `_adaptive_r0`. Calibrated so r0 lands ~3m on
                              # multiblock_density_compactness (median NN ~5.2m) -- the flat
@@ -149,44 +162,69 @@ def _covered_edges(cx: NDArray[np.float64], cy: NDArray[np.float64], rows: NDArr
 ONEWAY_COL = "oneway"
 
 
+WIDTH_COL = "width_m"
+
+
+def _road_conductance(params: PermeabilityParams, width_for_direction: float,
+                      dist: float) -> float:
+    """Conductance a corridor of usable width `width_for_direction` gives over `dist`.
+
+    Affine in width, floored at zero: capacity is `(W - road_margin_m)`, because the margin (verge,
+    drainage, wall clearance) is consumed before any lane. Calibrated so a TWO-WAY road at the
+    default width reproduces `g_road` exactly, which is what keeps every existing number unchanged.
+    """
+    full = 2.0 * params.corridor_m
+    usable_default = max(full - params.road_margin_m, 1e-9) / 2.0     # per direction, two-way
+    k = params.g_road / usable_default
+    return k * max(0.0, width_for_direction - params.road_margin_m) / max(dist, 1e-12)
+
+
 def directional_conductance(
     cx: NDArray[np.float64], cy: NDArray[np.float64], rows: NDArray[np.int64],
-    cols: NDArray[np.int64], road_g: NDArray[np.float64], footpath_g: NDArray[np.float64],
-    roads: GeoDataFrame | None, corridor_m: float,
+    cols: NDArray[np.int64], dist: NDArray[np.float64], footpath_g: NDArray[np.float64],
+    roads: GeoDataFrame | None, params: PermeabilityParams,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
-    """Per-edge (forward, backward) conductance when some roads are ONE-WAY.
+    """Per-edge (forward, backward) conductance, roads as DIRECTED options over the footpath.
 
-    A road is an OPTIONAL BOOSTER over the footpath, never a replacement:
+    A road offers a directed passage; if it does not serve your direction you fall back to the
+    footpath. Which passage a road offers is decided by width, not by a boost factor:
 
-        g(i->j) = max(footpath, road_g * min(1, 1 + cos t))
-        g(j->i) = max(footpath, road_g * min(1, 1 - cos t))
+        two-way,  total width W   ->  each direction gets (W - margin)/2 of usable width
+        one-way,  total width W   ->  the permitted direction gets (W - margin), the other nothing
 
-    with `t` the angle between the mesh edge and the covering road's direction (a one-way road's
-    direction IS its LineString coordinate order -- the geometry already carries it, so nothing
-    extra is stored). The angle GATES direction; it does not scale the boost. A road is a 1D
-    curve, so you either travel along it or you do not:
+    Direction availability is a HARD test, not a smoothed one: a road is a 1D curve, so it either
+    carries you toward `j` or it does not. `cos t >= 0` (anything not pointing against you) counts,
+    which makes a CROSSING edge symmetric -- two parcels facing each other across a one-way street
+    do not care which way its traffic runs.
 
-        cos t = +1   aligned    forward keeps the road, backward falls back to the footpath
-        cos t =  0   crossing   BOTH keep the road -- two parcels facing each other across a one-way
-                                street do not care which way its traffic runs. Identical to today.
-        cos t = -1   reversed   the mirror image
+    ## Switch, not sum
 
-    Two properties this must have, and does:
+    A covered edge takes `max(footpath, road)`, NOT `footpath + road`. The corridor IS the road once
+    built, so this models replacement rather than two parallel channels. The alternative -- treating
+    pavement and carriageway as genuinely parallel -- arguably truer, since you really can walk
+    against a one-way street -- would ADD the conductances, raising every covered edge by roughly
+    `g_walk` and shifting every published number by ~10%. That is the only reason it is not the
+    default; if the ~10% re-baseline is ever acceptable, `sum` is the more physical choice.
 
-    * **It reduces EXACTLY to today's metric when no road is one-way** -- every two-way road takes
-      the `min(1, ...)` branch at full strength in both directions, giving `road_g` symmetrically.
-    * **It stays monotone.** The road enters only through a `max` with the footpath value, so adding
-      a road can never LOWER any conductance in either direction, and for the convex flow program
-      raising an arc conductance can only lower the optimum. Monotonicity is load-bearing (see the
-      module docstring) and an earlier road-first design was rejected for breaking it.
+    ## Properties
+
+    * Reduces EXACTLY to the pre-directional metric when no road is one-way: a two-way road at
+      the default width yields `g_road` both ways, by construction of `_road_conductance`.
+    * Monotone: roads enter only through a `max` with the footpath, and conductance rises with
+      width, so nothing can ever decrease. Monotonicity is load-bearing (module docstring) and is
+      what an earlier road-first design broke.
     """
     gf, gb = footpath_g.copy(), footpath_g.copy()
     if roads is None or len(roads) == 0 or rows.size == 0:
         return gf, gb
+    n_r = len(roads)
     oneway = (roads[ONEWAY_COL].to_numpy(dtype=bool) if ONEWAY_COL in roads.columns
-              else np.zeros(len(roads), dtype=bool))
+              else np.zeros(n_r, dtype=bool))
+    widths = (roads[WIDTH_COL].to_numpy(dtype=float) if WIDTH_COL in roads.columns
+              else np.full(n_r, 2.0 * params.corridor_m))
     segs: list[LineString] = []
-    dirs: list[NDArray[np.float64] | None] = []
+    seg_dir: list[NDArray[np.float64] | None] = []
+    seg_w: list[float] = []
     for k, geom in enumerate(roads.geometry):
         parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
         for part in parts:
@@ -195,14 +233,15 @@ def directional_conductance(
                 if a == b:
                     continue
                 segs.append(LineString([a, b]))
+                seg_w.append(float(widths[k]))
                 if not oneway[k]:
-                    dirs.append(None)
+                    seg_dir.append(None)
                 else:
                     d = np.array([b[0] - a[0], b[1] - a[1]], dtype=np.float64)
-                    dirs.append(d / max(float(np.hypot(d[0], d[1])), 1e-12))
+                    seg_dir.append(d / max(float(np.hypot(d[0], d[1])), 1e-12))
     if not segs:
         return gf, gb
-    tree = STRtree([sg.buffer(corridor_m) for sg in segs])
+    tree = STRtree([sg.buffer(w / 2.0) for sg, w in zip(segs, seg_w, strict=True)])
     for e in range(rows.size):
         i, j = int(rows[e]), int(cols[e])
         hit = tree.query(LineString([(cx[i], cy[i]), (cx[j], cy[j])]), predicate="intersects")
@@ -211,14 +250,19 @@ def directional_conductance(
         ev = np.array([cx[j] - cx[i], cy[j] - cy[i]], dtype=np.float64)
         ev = ev / max(float(np.hypot(ev[0], ev[1])), 1e-12)
         for h in hit.tolist():
-            dvec = dirs[h]
+            dvec, w = seg_dir[h], seg_w[h]
             if dvec is None:
-                gf[e] = max(gf[e], road_g[e])
-                gb[e] = max(gb[e], road_g[e])
+                half = params.road_margin_m + (w - params.road_margin_m) / 2.0
+                g = _road_conductance(params, half, float(dist[e]))
+                gf[e] = max(gf[e], g)
+                gb[e] = max(gb[e], g)
             else:
                 c = float(np.dot(ev, dvec))
-                gf[e] = max(gf[e], road_g[e] * min(1.0, 1.0 + c))
-                gb[e] = max(gb[e], road_g[e] * min(1.0, 1.0 - c))
+                g = _road_conductance(params, w, float(dist[e]))
+                if c >= 0.0:
+                    gf[e] = max(gf[e], g)
+                if c <= 0.0:
+                    gb[e] = max(gb[e], g)
     return gf, gb
 
 
@@ -300,7 +344,7 @@ def egress_power(
             # the solve below is the asymmetric one. Reduces to the symmetric branch exactly when
             # nothing is flagged (see `directional_conductance`).
             gf_arr, gb_arr = directional_conductance(
-                cx, cy, rows_arr, cols_arr, road_g, footpath_g, roads, params.corridor_m)
+                cx, cy, rows_arr, cols_arr, dist_arr, footpath_g, roads, params)
             conds_arr = np.maximum(gf_arr, gb_arr)      # symmetric proxy for the diagonal
         else:
             covered = (_covered_edges(cx, cy, rows_arr, cols_arr, corridor)
