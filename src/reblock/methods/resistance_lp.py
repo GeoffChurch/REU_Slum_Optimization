@@ -59,6 +59,7 @@ from shapely.ops import nearest_points, unary_union
 
 from reblock.budget import building_radii
 from reblock.contracts import Block, Proposal
+from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.resistance_greedy import _mesh, linearized_gain
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
@@ -244,7 +245,11 @@ class ResistanceLPReblocker:
         if len(geoms) == 0 or len(graph.pts) == 0:
             return self._proposal(block, empty, {"roads": 0, "stopped": "empty"})
 
-        adj = parcel_adjacency(geoms, self.params.corridor_m)
+        # STREET_TOL, matching `egress_power`'s own default -- NOT corridor_m. Building the
+        # mesh at corridor_m (3.0 vs 0.5) gave a 6x looser adjacency than the evaluator
+        # scores, so this method optimized a different Laplacian than the one it is graded
+        # on -- exactly what `_mesh`'s docstring says must not happen.
+        adj = parcel_adjacency(geoms, STREET_TOL)
         r0 = _adaptive_r0(block, self.params)
         street = unary_union(list(block.streets.geometry))
         net0 = np.flatnonzero(

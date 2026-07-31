@@ -53,6 +53,7 @@ from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
 from reblock.contracts import Block, Proposal
+from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.loop_closure import loop_candidates
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
@@ -197,7 +198,11 @@ class ResistanceGreedyReblocker:
         # Frozen once and reused for every candidate evaluation: the adjacency, the adaptive
         # corridor half-width and the no-roads baseline are properties of the BLOCK, not of the
         # road set, and recomputing them per candidate would dominate the cost.
-        adj = parcel_adjacency(geoms, self.params.corridor_m)
+        # STREET_TOL, matching `egress_power`'s own default -- NOT corridor_m. Building the
+        # mesh at corridor_m (3.0 vs 0.5) gave a 6x looser adjacency than the evaluator
+        # scores, so this method optimized a different Laplacian than the one it is graded
+        # on -- exactly what `_mesh`'s docstring says must not happen.
+        adj = parcel_adjacency(geoms, STREET_TOL)
         r0 = _adaptive_r0(block, self.params)
 
         street = unary_union(list(block.streets.geometry))

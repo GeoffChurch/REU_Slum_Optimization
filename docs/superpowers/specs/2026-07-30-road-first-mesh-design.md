@@ -1,8 +1,13 @@
 # Road-first mesh: making the metric represent roads as objects
 
-**Status:** spec, nothing built. Written after the one-way thread
-(`notes/2026-07-30-oneway-half-width.md`) hit a wall that turned out to be about the mesh rather
-than about one-way.
+**Status: DO NOT BUILD AS WRITTEN.** Red-teamed 2026-07-30 by four independent reviewers. The four
+DEFECT claims in section 2 were all verified true and quantified -- but the PROPOSAL in section 3 is
+a third attempt at a model this repo already built and retired twice, it breaks the monotonicity
+permeability depends on, and two of its three acceptance criteria are unachievable. See section 7
+before reading anything below it as a plan.
+
+Written after the one-way thread (`notes/2026-07-30-oneway-half-width.md`) hit a wall that turned
+out to be about the mesh rather than about one-way.
 
 **Motivating claim in one line:** `permeability` does not model roads. It models *which parcel pairs
 are near one*.
@@ -112,3 +117,78 @@ One-way streets, width, capacity, and directed ingress+egress. The prerequisite 
 this mesh; bundling them would make the correctness work (defects 1-3) hostage to an idea whose own
 payoff is still unvalidated -- the width half is gameable alone and the directed half showed no
 interior optimum on the disc fixture.
+
+
+## 7. Red-team verdict (2026-07-30) -- what survives and what does not
+
+Four independent reviewers with repo access, each required to cite file:line or a measured number.
+
+### The defect claims (section 2) all hold, and are now quantified
+
+Measured over 24 real blocks:
+
+- **D1 length/shape invisible -- TRUE.** A straight road and a zigzag covering an identical
+  covered-edge set score **bit-identically**, at detour ratios up to 3.07x. Nit: the published curve's
+  x-axis IS cumulative road length (`budget.py:692`), so length is not invisible in *reporting*.
+- **D2 crow-flies distance -- TRUE.** Travel/crow-flies on covered edges: **median 1.395**, per-edge
+  max 2.63. Conductance is overstated ~40%.
+- **D3 floating fragments conduct -- TRUE, and the strongest.** Trimming a road's street end gives
+  `street_connectivity` 0.000 and improves access depth for **0 parcels** (vs 1,426 connected), yet
+  retains a median **99.3%** of permeability.
+- **D4 no capacity/hierarchy -- TRUE.** One scalar `g_road`, one `corridor_m`, no width or direction
+  on `Proposal`.
+
+### Why the PROPOSAL is nonetheless rejected
+
+1. **It is the third attempt at a retired model.** `budget._road_street_graph` -- road segments as
+   edges, parcels attached by line-proximity, i.e. section 3's model -- shipped and carried
+   `network_efficiency` / `directness` / `resistance_benefit`. Deleted in `180bbf6`. It returned as
+   `commute_ratio` on the planarized road-street graph and was retired again by permeability
+   (`specs/2026-07-22-permeability-metric-design.md`). This spec cited none of it.
+2. **It breaks monotonicity, which section 3 claims it preserves.** Rayleigh needs a NESTED edge set;
+   a nearest-road access edge MOVES when roads are added. That is the documented bug fixed by
+   `3a8dd25 fix: network_efficiency monotone via fixed entry mapping` (values could FALL, ~9% drops).
+   Freezing entries fixed the efficiency form; for the RESISTANCE form it did not
+   (memory `commute-ratio-monotonicity-fundamental`: every fully monotone variant became gameable,
+   multi-frontage worst). Permeability's monotonicity is load-bearing, stated in its module docstring.
+3. **C2 is false** -- three reviewers independently. Footpath edges survive, so parcels fronting a
+   floating fragment give it access edges and it becomes a parcel->road->parcel bypass. Measured:
+   `osm_footpaths` scores 0.1040 keeping floating components vs 0.0074 dropping them -- **93% of its
+   score comes from road that reaches no street.** Enforcing C2 needs exactly the explicit strict rule
+   `notes/2026-07-30-egress-vs-circulation.md` argues is backwards.
+4. **C3 is unachievable.** P0 is highly sensitive to the parameters section 4 mandates re-deriving
+   (g_walk 0.1->0.2 halves P0; r0_frac 0.55->0.80 cuts it 3.4x), and making the street part of the
+   road graph replaces the `g_street` shunt with a near-short access edge, moving P0 again.
+5. **S1 is circular.** `scripts/calibrate_permeability.py:383` selects by "widest mean cross-method
+   permeability spread". Calibrating for method spread and then accepting on ranking change is
+   nearly the same operation twice. Spread is also not a correctness proxy, and the calibration used
+   the same example regions the comparison publishes.
+
+### What was RIGHT that the spec got wrong in the other direction
+
+**Cost is a reason to build, not a risk.** Section 5 warned about scale; measured on the real
+`multiblock_depth` region (11,006 parcels), the proposed mesh is 1.1-1.8x the nodes and 1.07-1.53x
+the edges, and a solve is **0.15-0.5 s against 3-13 s today** -- 5-40x FASTER, because today's cost is
+a Python loop calling `corridor.intersects` 31,395 times per solve. That is a genuine finding about
+the CURRENT metric independent of any redesign.
+
+### Concrete traps for any future attempt
+
+- **Ungrounded components make L singular.** Measured planarized components: `euclidean_grid` 62,
+  `osm_footpaths` 65, LP 35; `spsolve` returned NaN for grid and osm. Pruning is mandatory.
+- **"Fronts" is a free parameter that moves a third of the region.** Parcels fronting a road:
+  30.1% at 0.5 m, 55.1% at 10 m, 74.1% at 25 m. Parcels touching >=2 roads at 3 m: LP **58.8%**.
+  Multi-frontage is the common case -- and it is the documented gameable branch.
+- **Two incompatible graph conventions already coexist**: `_road_net` (raw `_rnd` keys) vs
+  `_noded_graph` (`unary_union`). Measured disagreement on the LP: **521 raw components vs 35
+  planarized**. `street_first_ordered` and `road_drainage` -- which generate every scored prefix --
+  use the raw one.
+- **Slivers.** Planarized minimum segment is 0.0100 m (the `_rnd` floor), giving `g_road/L = 2000`
+  against a median 3.2 -- six orders of conditioning. The 2026-07-17 redundancy spec already hit this.
+
+### Bonus: a real bug in shipped code, found and fixed
+
+`resistance_greedy.py:200` and `resistance_lp.py:247` built their mesh with
+`parcel_adjacency(geoms, corridor_m)` (3.0) while `egress_power` scores at `STREET_TOL` (0.5) -- a 6x
+looser adjacency, so both methods optimized a **different Laplacian than the evaluator grades**,
+contradicting `_mesh`'s own docstring. Fixed 2026-07-30.
