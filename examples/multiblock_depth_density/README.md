@@ -51,7 +51,7 @@ Every method truncated where permeability first reaches the standard target, so 
 | Grid | 2,068 m | 7.8% | 66.1% |  |
 | Throughways | 1,478 m | 5.1% | 60.9% |  |
 | OSM Footpaths | 4,760 m | 11.1% | 61.8% |  |
-| Direct Objective (LP) | 1,338 m | 1.6% | 60.3% |  |
+| Direct Objective (LP) | 1,392 m | 1.5% | 60.1% |  |
 
 Access-depth coloring:
 
@@ -75,7 +75,7 @@ Every method truncated to the same displacement %, so this compares the **permea
 | Grid | 2,696 m | 10.5% | 70.6% |  |
 | Throughways | 3,625 m | 10.2% | 73.0% |  |
 | OSM Footpaths | 4,607 m | 10.1% | 58.5% |  |
-| Direct Objective (LP) | 6,957 m | 10.0% | 88.3% |  |
+| Direct Objective (LP) | 6,546 m | 10.1% | 88.9% |  |
 
 Access-depth coloring:
 
