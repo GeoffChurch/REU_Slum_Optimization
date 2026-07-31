@@ -51,6 +51,7 @@ from numpy.typing import NDArray
 from scipy.sparse import coo_matrix, csr_matrix
 from scipy.sparse.linalg import spsolve
 from shapely import STRtree
+from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -145,6 +146,88 @@ def _covered_edges(cx: NDArray[np.float64], cy: NDArray[np.float64], rows: NDArr
     return covered
 
 
+ONEWAY_COL = "oneway"
+
+
+def directional_conductance(
+    cx: NDArray[np.float64], cy: NDArray[np.float64], rows: NDArray[np.int64],
+    cols: NDArray[np.int64], road_g: NDArray[np.float64], footpath_g: NDArray[np.float64],
+    roads: GeoDataFrame | None, corridor_m: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Per-edge (forward, backward) conductance when some roads are ONE-WAY.
+
+    A road is an OPTIONAL BOOSTER over the footpath, never a replacement:
+
+        g(i->j) = max(footpath, road_g * min(1, 1 + cos t))
+        g(j->i) = max(footpath, road_g * min(1, 1 - cos t))
+
+    with `t` the angle between the mesh edge and the covering road's direction (a one-way road's
+    direction IS its LineString coordinate order -- the geometry already carries it, so nothing
+    extra is stored). The angle GATES direction; it does not scale the boost. A road is a 1D curve, so you
+    either travel along it or you do not:
+
+        cos t = +1   aligned    forward keeps the road, backward falls back to the footpath
+        cos t =  0   crossing   BOTH keep the road -- two parcels facing each other across a one-way
+                                street do not care which way its traffic runs. Identical to today.
+        cos t = -1   reversed   the mirror image
+
+    Two properties this must have, and does:
+
+    * **It reduces EXACTLY to today's metric when no road is one-way** -- every two-way road takes
+      the `min(1, ...)` branch at full strength in both directions, giving `road_g` symmetrically.
+    * **It stays monotone.** The road enters only through a `max` with the footpath value, so adding
+      a road can never LOWER any conductance in either direction, and for the convex flow program
+      raising an arc conductance can only lower the optimum. Monotonicity is load-bearing (see the
+      module docstring) and an earlier road-first design was rejected for breaking it.
+    """
+    gf, gb = footpath_g.copy(), footpath_g.copy()
+    if roads is None or len(roads) == 0 or rows.size == 0:
+        return gf, gb
+    oneway = (roads[ONEWAY_COL].to_numpy(dtype=bool) if ONEWAY_COL in roads.columns
+              else np.zeros(len(roads), dtype=bool))
+    segs: list[LineString] = []
+    dirs: list[NDArray[np.float64] | None] = []
+    for k, geom in enumerate(roads.geometry):
+        parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
+        for part in parts:
+            cs = list(part.coords)
+            for a, b in zip(cs, cs[1:], strict=False):
+                if a == b:
+                    continue
+                segs.append(LineString([a, b]))
+                if not oneway[k]:
+                    dirs.append(None)
+                else:
+                    d = np.array([b[0] - a[0], b[1] - a[1]], dtype=np.float64)
+                    dirs.append(d / max(float(np.hypot(d[0], d[1])), 1e-12))
+    if not segs:
+        return gf, gb
+    tree = STRtree([sg.buffer(corridor_m) for sg in segs])
+    for e in range(rows.size):
+        i, j = int(rows[e]), int(cols[e])
+        hit = tree.query(LineString([(cx[i], cy[i]), (cx[j], cy[j])]), predicate="intersects")
+        if not len(hit):
+            continue
+        ev = np.array([cx[j] - cx[i], cy[j] - cy[i]], dtype=np.float64)
+        ev = ev / max(float(np.hypot(ev[0], ev[1])), 1e-12)
+        for h in hit.tolist():
+            dvec = dirs[h]
+            if dvec is None:
+                gf[e] = max(gf[e], road_g[e])
+                gb[e] = max(gb[e], road_g[e])
+            else:
+                c = float(np.dot(ev, dvec))
+                gf[e] = max(gf[e], road_g[e] * min(1.0, 1.0 + c))
+                gb[e] = max(gb[e], road_g[e] * min(1.0, 1.0 - c))
+    return gf, gb
+
+
+def has_oneway(roads: GeoDataFrame | None) -> bool:
+    """True iff any road is flagged one-way -- switches the symmetric solve to the directed one."""
+    return (roads is not None and len(roads) > 0 and ONEWAY_COL in roads.columns
+            and bool(roads[ONEWAY_COL].to_numpy(dtype=bool).any()))
+
+
 def egress_power(
     block: Block,
     roads: GeoDataFrame | None,
@@ -205,15 +288,25 @@ def egress_power(
     dist_arr = np.asarray(dists, dtype=np.float64)
 
     diag = np.zeros(n, dtype=np.float64)
+    gf_arr = gb_arr = np.zeros(0, dtype=np.float64)
     if dist_arr.size:
         road_g = params.g_road / dist_arr
         # monotonicity guard: a footpath edge can never out-conduct the road it would upgrade to,
         # for every edge regardless of region (see module docstring) -- so upgrading uncovered ->
         # covered never LOWERS that edge's conductance.
         footpath_g = np.minimum(_footpath_conductance(dist_arr, r0, params.g_walk), road_g)
-        covered = (_covered_edges(cx, cy, rows_arr, cols_arr, corridor)
-                   if corridor is not None else np.zeros(dist_arr.size, dtype=bool))
-        conds_arr = np.where(covered, road_g, footpath_g)
+        if has_oneway(roads):
+            # DIRECTED: some road is one-way, so each edge gets its own forward/backward pair and
+            # the solve below is the asymmetric one. Reduces to the symmetric branch exactly when
+            # nothing is flagged (see `directional_conductance`).
+            gf_arr, gb_arr = directional_conductance(
+                cx, cy, rows_arr, cols_arr, road_g, footpath_g, roads, params.corridor_m)
+            conds_arr = np.maximum(gf_arr, gb_arr)      # symmetric proxy for the diagonal
+        else:
+            covered = (_covered_edges(cx, cy, rows_arr, cols_arr, corridor)
+                       if corridor is not None else np.zeros(dist_arr.size, dtype=bool))
+            conds_arr = np.where(covered, road_g, footpath_g)
+            gf_arr = gb_arr = conds_arr
         np.add.at(diag, rows_arr, conds_arr)
         np.add.at(diag, cols_arr, conds_arr)
     diag[ground] += params.g_street
@@ -234,11 +327,62 @@ def egress_power(
 
     lap = coo_matrix((all_data, (all_rows, all_cols)), shape=(n, n)).tocsr()
     b = np.ones(n, dtype=np.float64)
+    if not np.array_equal(gf_arr, gb_arr) if dist_arr.size else False:
+        # DIRECTED. Per-edge cost is a convex asymmetric quadratic in the NET flow, so this is an
+        # ordinary Laplacian solve whose conductance follows the sign of its own solution, iterated
+        # to a fixed point (convex => the fixed point is the optimum). Scored as EGRESS + INGRESS
+        # halved: undirected those are identical by reciprocity, so this reduces to the symmetric
+        # branch's value exactly, and directed they diverge -- which is the entire point, since an
+        # out-tree serves egress perfectly and fails ingress.
+        shunt = ground.astype(np.float64) * params.g_street
+        pe, v = _directed_power(n, rows_arr, cols_arr, gf_arr, gb_arr, shunt, b)
+        pi, _v2 = _directed_power(n, rows_arr, cols_arr, gb_arr, gf_arr, shunt, b)
+        if not np.isfinite(pe) or not np.isfinite(pi):
+            return float("inf"), np.zeros(n, dtype=np.float64)
+        return 0.5 * (pe + pi), v
     v = spsolve(cast(csr_matrix, lap), b)
     if not np.all(np.isfinite(v)):
         return float("inf"), np.zeros(n, dtype=np.float64)
     p = float(b @ v)
     return p, cast(NDArray[np.float64], v)
+
+
+def _directed_power(
+    n: int, rows: NDArray[np.int64], cols: NDArray[np.int64], gf: NDArray[np.float64],
+    gb: NDArray[np.float64], ground_term: NDArray[np.float64], b: NDArray[np.float64],
+    iters: int = 40,
+) -> tuple[float, NDArray[np.float64]]:
+    """min-energy flow where each edge's conductance depends on the DIRECTION of flow through it.
+
+    Damped IRLS: solve, read the flow signs, re-weight, repeat. `ground_term` is the per-node ground
+    shunt (`g_street` on grounded parcels, 0 elsewhere), passed EXPLICITLY. A first version tried to
+    back it out of the assembled diagonal, which was built with `max(gf, gb)` while the iteration
+    re-derives degrees from the current `g` -- so the difference between the two aggregations leaked
+    into the shunt, inflated conductance to ground, and made one-way roads score BETTER than
+    two-way. Restricting a road cannot improve flow; that impossibility is what exposed the bug.
+    """
+    g = np.sqrt(gf * gb)
+    prev: float | None = None
+    v = np.zeros(n, dtype=np.float64)
+    for _ in range(iters):
+        deg = np.zeros(n, dtype=np.float64)
+        np.add.at(deg, rows, g)
+        np.add.at(deg, cols, g)
+        rr = np.concatenate([rows, cols, np.arange(n, dtype=np.int64)])
+        cc = np.concatenate([cols, rows, np.arange(n, dtype=np.int64)])
+        dd = np.concatenate([-g, -g, deg + ground_term])
+        lap = coo_matrix((dd, (rr, cc)), shape=(n, n)).tocsr()
+        v = spsolve(cast(csr_matrix, lap), b)
+        if not np.all(np.isfinite(v)):
+            return float("inf"), np.zeros(n, dtype=np.float64)
+        x = g * (v[rows] - v[cols])
+        g_new = np.where(x >= 0, gf, gb)
+        power = float(np.sum(x * x / g_new) + np.sum(ground_term * v * v))
+        if prev is not None and abs(power - prev) <= 1e-12 * max(1.0, abs(prev)):
+            return power, cast(NDArray[np.float64], v)
+        prev = power
+        g = 0.5 * g + 0.5 * g_new
+    return (float(prev) if prev is not None else float("inf")), cast(NDArray[np.float64], v)
 
 
 def permeability(
