@@ -378,6 +378,44 @@ as a number and makes all-pairs worth a cheap DIAGNOSTIC column even though it i
 ranker; and the LP leads on both metrics, so it is not exploiting egress-specific structure. Full
 reasoning and the probe's own methodological trap: `notes/2026-07-30-egress-vs-circulation.md`.
 
+## Road-first mesh -- SPEC'D 2026-07-30, not built
+
+`specs/2026-07-30-road-first-mesh-design.md`. Came out of the one-way thread but does NOT depend on
+it. The motivating finding: **`permeability` does not model roads, it models which parcel pairs are
+near one.** Nodes are parcel centroids, edges are parcel adjacencies, edge length is the crow-flies
+centroid distance, and a road enters through a single boolean (does its corridor intersect that
+centroid segment).
+
+Four defects follow; the first three have nothing to do with one-way and are the reason to build it:
+
+1. Road length and shape never enter the metric -- two roads covering the same parcel pairs score
+   identically, so only `displacement` distinguishes a long winding road from a short straight one.
+2. Travel distance is crow-flies parcel-to-parcel, not distance along the road.
+3. Road-network connectivity is invisible, which is why a floating fragment still raises
+   permeability (the `osm_footpaths` inconsistency: 14 components, 70.8% street-connected, all 136
+   adjacent-but-deep parcels touching only floating road).
+4. No capacity or hierarchy -- every covered edge gets the same `g_road / d`. This is the one-way
+   prerequisite, and it is deliberately OUT OF SCOPE in the spec.
+
+Acceptance criteria are written before implementation, because the all-pairs probe closed a metric
+change for reproducing the same ranking at real cost: the ranking must actually move (Kendall tau vs
+today over >= 20 blocks; tau near +1.0 is a stop signal), the conductance parameters must be
+RECALIBRATED for road-edge length scales rather than inherited, and the resilience/one-way ideas stay
+out.
+
+### N-1 resilience: tried as the cheap alternative, INCONCLUSIVE
+
+Tested whether `min over roads r of permeability(S - r)` could reward redundancy inside today's
+metric, avoiding the mesh entirely. Un-equalized it looked strongly discriminating (`keep` 0.245 to
+0.944) but that was pure GRANULARITY -- at D = 10% `resistance_lp` emits 111 roads and
+`euclidean_grid` 2.5, so one removal is a scratch for one and an amputation for the other -- and it
+failed its own decisive check (`clearance_looped` no better than its own tree base, 2/8 blocks,
+median +0.0000). Re-run with all roads subdivided to 5 m the spread collapsed to 0.86-0.98, but the
+run was killed after 3 blocks and 2 of those had the two methods produce coincident networks, so
+there was effectively one informative block. **Not refuted, not supported -- inconclusive.** Redo at
+n >= 20 with a budget where the loop refiner's loops actually exist, or with a synthetic same-length
+tree-vs-loop pair, if the redundancy question is worth reopening.
+
 ## Deferred design (from the flow-refactor + peel-reblocker threads)
 
 - **Structured configs (dataclasses + ConfigStore)** — deferred out of the flow refactor; do once
