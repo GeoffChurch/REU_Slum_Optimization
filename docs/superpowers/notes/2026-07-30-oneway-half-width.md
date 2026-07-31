@@ -245,3 +245,55 @@ well-placed loops over many tiny ones -- exactly the interior optimum above.
 
 Cost note: the directed QP is per-block and convex, but it is a QP per evaluation rather than one
 sparse solve, so the region-scale cost needs checking before this can sit inside a lens.
+
+
+## REOPENED 2026-07-31: directed scoring works, and every method is at the tree end
+
+The gating question -- does directed scoring separate our methods? -- was tested on the ROAD GRAPH
+ONLY (`scratchpad/ot/directed_roadgraph.py`), so `permeability` is untouched, no monotonicity risk,
+no recalibration, and the rejected road-first mesh is not needed. Budget-matched at D = 10%,
+planarized, orientation chosen by the solver rather than by hand.
+
+    penalty = (egress + ingress) / (2 * undirected)     1.0 = one-way is free (richly looped)
+
+**Raw result looked null**: every method 5.4439-5.4846, a 0.7% spread, and `clearance_looped` beat
+its own tree base on 12/20 blocks with median -0.0011. But `bridge_frac` varied 0.15-0.37, so the
+topologies clearly differ while the penalty did not move -- suspicious enough to validate the
+instrument before believing it.
+
+**Known-answer test** (same node count, same edge lengths, ground at one end):
+
+| topology | penalty |
+|---|---|
+| pure PATH -- every edge a bridge | **5.46** |
+| pure CYCLE -- no bridges | **2.27** |
+
+The measure separates them by 2.4x, so it sees topology fine. **Every method sits at the PATH value.**
+
+### What that means
+
+The flat result is not "directed scoring cannot discriminate". It is **every method we have builds a
+network that behaves as a TREE under directed flow** -- `clearance_looped` and
+`greedy_arterial_repulsion` included, despite bridge fractions of only 0.15-0.37. Their cycles are
+decorative for circulation: local loops that do not provide an alternate route where flow needs one.
+
+So there is a **2.4x headroom that nothing in the method set captures**, and one-way is not moot --
+it is a target none of our methods hit. That is a stronger argument for the direction than the
+original loop-reward framing, and it is the first evidence in this thread that came from a validated
+instrument rather than an idealized fixture.
+
+The model's known weakness cuts the safe way: each solve picks its own orientation independently, so
+it is OPTIMISTIC about directionality. A single shared orientation -- the real physics -- would
+penalize these networks more, not less.
+
+### What this does and does not license
+
+- It does NOT revive the road-first mesh. That was rejected on monotonicity, and this result needs
+  none of it: the measure lives on the road graph, beside permeability rather than inside it.
+- It does NOT revive the half-width discount alone, which is still gameable (an undirected score pays
+  a one-way price for two-way function).
+- It DOES make `penalty` a candidate DIAGNOSTIC column -- cheap, validated, and it separates
+  something no shipped number does.
+- The obvious next question is whether any method can be made to score near the cycle end at
+  comparable displacement, or whether 5.47 is a property of dense informal fabric rather than of our
+  methods. **That is untested, and is the thing to test before building anything.**
