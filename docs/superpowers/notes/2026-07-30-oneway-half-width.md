@@ -342,3 +342,64 @@ size is measured, and its price is known.
 What remains defensible: `penalty` as a cheap DIAGNOSTIC column (validated, and it separates
 something no shipped number does). What is not supported: rebuilding the metric, the road-first mesh,
 or the half-width discount, for a 21% move on an axis that costs 16% of the primary one.
+
+
+## A cycle-native method reaches the frontier at ~0.4% access cost (2026-07-31)
+
+Every shipped method adds SPURS -- a path from an unserved parcel back to the network -- which is why
+they all sit at the tree end. A method whose atomic move is a LOOP is bridgeless by construction and
+strongly orientable, so every road it emits can be made one-way with no repair pass.
+
+`cycle_native` (prototype, untracked scratchpad): each move is a Dijkstra path from the street out to
+a parcel PLUS a second path back that avoids the outbound edges -- so the return is a genuine
+alternate route, not a retrace. Candidates scored by permeability gain per displacement.
+
+| method | penalty | bridge_frac | permeability | disp | road m |
+|---|---|---|---|---|---|
+| clearance_looped | 5.4754 | 0.1723 | 0.6939 | 0.1103 | 75 |
+| greedy_arterial_repulsion | 5.4758 | 0.2669 | 0.6483 | 0.1153 | 161 |
+| resistance_lp | 5.4777 | 0.4740 | **0.8411** | 0.1010 | 326 |
+| **cycle_native** | **4.8467** | **0.0000** | 0.6911 | 0.0907 | 193 |
+
+**It reaches 4.8467 -- the frontier forced bridge-removal found -- with ZERO bridges, at LOWER
+displacement.**
+
+**And it costs 0.4% of permeability, not the ~16% predicted.** The reachability probe's 16% was an
+artifact of its two-phase construction (half the budget on a tree, then connectors bolted on).
+Optimizing gain-per-displacement over CYCLES from the start finds loops that also serve parcels.
+**Native beats retrofit, and the access/circulation conflict inferred earlier is not a structural
+law.** The real cost is metres: 193 against clearance_looped's 75.
+
+It also sharpens the bridge finding: `resistance_lp` has the HIGHEST bridge fraction (0.474) yet sits
+at the tree end, while `cycle_native` at exactly 0.0 breaks out. **Zero bridges gets the frontier;
+partial reduction buys nearly nothing.**
+
+### The demand-weighting fix was nearly a no-op, for a structural reason
+
+`penalty` injected one unit at every road node, so a road serving 50 parcels counted the same as one
+serving none. Reweighting `b` to parcels-served moved the cross-method spread only 0.0406 -> 0.0317.
+**`penalty` is a RATIO** -- demand appears in numerator and denominator and largely cancels -- so it
+is inherently a topology measure and cannot be made demand-sensitive by reweighting alone.
+
+### Where permeability stands, and the multiscale question, answered
+
+Two literature reviews (see `2026-07-31-related-work.md` if written; findings summarized here):
+
+- **Permeability is already a spectral functional.** `P = sum_k (1.u_k)^2 / mu_k` over the Dirichlet
+  spectrum -- verified numerically to 1e-15. Fiedler keeps ONE term and drops all weights; a
+  heat-kernel trace drops the weights entirely. **Spectral scalars are lossy projections of what we
+  already compute**, which is a principled reason the repo's Fiedler metric failed, independent of
+  the empirics.
+- **Bettencourt does not use spectra.** Zero hits for Laplacian/diffusion/eigenvalue across
+  Sci Adv 2018, EPB 2019, Nature 2025, PNAS 2007 and the 2025 restatement. He uses block complexity
+  `k_max` -- iterated weak duals, an L-infinity max-depth on **the same graph permeability grounds**.
+  Integer, topological, contention-blind: n parallel routes score as one. **kblock lineage confirmed**
+  (our data carries his `k_complexity` column).
+- **The multiscale-diffusion recollection does not check out.** Expander/Cheeger applied to cities:
+  empty. The small-world analogue is largely NULL where tested at scale (Fleming et al., 337 MSAs:
+  Q = 0.0024, se 0.0030; Uzzi & Spiro: path-length null in all six models). Nearest evidence-backed
+  quantity at our scale is plain intersection density (OR 0.83 on incident depression, n=24,141),
+  which our construction dominates.
+- **Nearest named prior art**: grounded-Laplacian / network-coherence family (`tr(L_g^-1)` is the
+  leader-follower H2 norm); the exact operational precedent is Circuitscape's all-to-one mode, in
+  landscape ecology. No urban paper found using the grounded construction to score street networks.
