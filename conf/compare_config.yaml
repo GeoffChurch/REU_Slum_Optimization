@@ -47,6 +47,9 @@ all_methods:
   # metres. Decides over paths, so connectivity is structural and the route-(A) rounding obstacle
   # dissolves. chunks is a Frank-Wolfe step count. See conf/method/resistance_lp.yaml.
   resistance_lp: {_target_: reblock.methods.resistance_lp.ResistanceLPReblocker, substrate: "${substrate}", max_displacement: 0.10, chunks: 8}
+  # Cycle-native: each move is a loop from the street back to the street, so the output is
+  # bridgeless by construction and every road can be oriented one-way. See conf/method/cycle_native.yaml.
+  cycle_native: {_target_: reblock.methods.cycle_native.CycleNativeReblocker, substrate: "${substrate}", max_displacement: 0.10, shortlist: 8}
   # Flow accumulation rather than drainage: route every trip, count edge traffic, keep the busiest.
   # Sparse, can contain loops, does not reach every parcel -- the properties real footpaths have and
   # a drainage tree cannot. flow_quantile is the hierarchy knob (low = footpath web, high = skeleton).
