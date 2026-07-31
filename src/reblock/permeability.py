@@ -45,11 +45,12 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pandas as pd
+import shapely
 from geopandas import GeoDataFrame
 from numpy.typing import NDArray
 from scipy.sparse import coo_matrix, csr_matrix
 from scipy.sparse.linalg import spsolve
-from shapely.geometry import LineString
+from shapely import STRtree
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
@@ -122,6 +123,28 @@ def _footpath_conductance(dist: NDArray[np.float64], r0: float, g_walk: float,
     return (target_median / shape_median) * shape
 
 
+def _covered_edges(cx: NDArray[np.float64], cy: NDArray[np.float64], rows: NDArray[np.int64],
+                   cols: NDArray[np.int64], corridor: BaseGeometry) -> NDArray[np.bool_]:
+    """Which mesh edges the road corridor covers -- `corridor.intersects(edge)` for every edge.
+
+    Semantically identical to the elementwise predicate, but built with shapely's vectorized
+    constructor and answered by one `STRtree.query(..., predicate="intersects")`, which returns
+    exactly the indices whose geometry intersects `corridor`. The straightforward Python loop this
+    replaces was the metric's hot spot: one shapely call per mesh edge, 31,395 of them per solve on
+    an 11k-parcel region, which dominated a 3-13 s solve.
+    """
+    n = rows.size
+    if n == 0:
+        return np.zeros(0, dtype=bool)
+    pts = np.empty((2 * n, 2), dtype=np.float64)
+    pts[0::2, 0], pts[0::2, 1] = cx[rows], cy[rows]
+    pts[1::2, 0], pts[1::2, 1] = cx[cols], cy[cols]
+    segs = shapely.linestrings(pts, indices=np.repeat(np.arange(n, dtype=np.int64), 2))
+    covered = np.zeros(n, dtype=bool)
+    covered[STRtree(segs).query(corridor, predicate="intersects")] = True
+    return covered
+
+
 def egress_power(
     block: Block,
     roads: GeoDataFrame | None,
@@ -188,12 +211,8 @@ def egress_power(
         # for every edge regardless of region (see module docstring) -- so upgrading uncovered ->
         # covered never LOWERS that edge's conductance.
         footpath_g = np.minimum(_footpath_conductance(dist_arr, r0, params.g_walk), road_g)
-        covered = np.zeros(dist_arr.size, dtype=bool)
-        if corridor is not None:
-            covered = np.array(
-                [corridor.intersects(LineString([(cx[i], cy[i]), (cx[j], cy[j])]))
-                 for i, j in zip(rows_arr.tolist(), cols_arr.tolist(), strict=True)],
-                dtype=bool)
+        covered = (_covered_edges(cx, cy, rows_arr, cols_arr, corridor)
+                   if corridor is not None else np.zeros(dist_arr.size, dtype=bool))
         conds_arr = np.where(covered, road_g, footpath_g)
         np.add.at(diag, rows_arr, conds_arr)
         np.add.at(diag, cols_arr, conds_arr)

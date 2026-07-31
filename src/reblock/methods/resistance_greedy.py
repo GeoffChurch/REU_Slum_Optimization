@@ -240,9 +240,11 @@ class ResistanceGreedyReblocker:
             built = gpd.GeoDataFrame(geometry=roads, crs=crs) if roads else empty
             _p, v = egress_power(block, built, self.params, adj=adj, r0=r0)
             corridor = _road_corridor(built, self.params.corridor_m)
-            upgraded = (np.array([corridor.intersects(sg) for sg in segs], dtype=bool)
-                        if corridor is not None and len(segs)
-                        else np.zeros(len(segs), dtype=bool))
+            # One indexed query instead of a shapely call per mesh edge -- the same hot spot
+            # `permeability._covered_edges` fixes, and this runs once per greedy round.
+            upgraded = np.zeros(len(segs), dtype=bool)
+            if corridor is not None and seg_tree is not None:
+                upgraded[seg_tree.query(corridor, predicate="intersects")] = True
             edge_gain = linearized_gain(v, ri, ci, dg, upgraded)
 
             # Candidates are BOTH kinds of move, which is what makes this one objective rather
