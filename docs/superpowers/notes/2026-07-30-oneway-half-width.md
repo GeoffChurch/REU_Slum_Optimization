@@ -296,4 +296,49 @@ penalize these networks more, not less.
   something no shipped number does.
 - The obvious next question is whether any method can be made to score near the cycle end at
   comparable displacement, or whether 5.47 is a property of dense informal fabric rather than of our
-  methods. **That is untested, and is the thing to test before building anything.**
+  methods. **Tested -- see below.**
+
+## Is the headroom reachable? Partly, and it costs access (2026-07-31)
+
+`scratchpad/ot/cycle_reachable.py`. Rather than ask a method for circulation, build the best
+circulating network the block admits: seed with half the budget on the tree, then spend every
+remaining metre ONLY on connectors that remove bridge length, best bridges-removed-per-displacement
+first. 10 blocks, D = 10%.
+
+| | method | forced circulation |
+|---|---|---|
+| directed penalty | 5.4754 | **4.8177** |
+| bridge fraction | 0.1723 | **0.0189** |
+| permeability | 0.6939 | **0.5806** |
+| displacement used | 0.100 | 0.084 |
+
+Lower penalty on 9/10 blocks, median -0.6631.
+
+**Bridgelessness is achievable; the cycle end is not.** Bridge length drops from 17% to 1.9% -- the
+network becomes essentially bridgeless, so Robbins-orientability is reachable in this fabric. But the
+penalty moves only 5.48 -> 4.82, closing about **21% of the gap** to a pure cycle's 2.27.
+
+So **bridgelessness is necessary but nowhere near sufficient**: circulation being POSSIBLE is not
+circulation being CHEAP. A near-bridgeless real network still scores 4.82 because the way around is
+long. The pure cycle is an idealization a block cannot reach while also serving interior parcels,
+which requires branches -- and branches are what the penalty punishes.
+
+Two details as important as the headline:
+
+- **It costs 16% of permeability** (0.694 -> 0.581). Forcing circulation trades away access. One-way
+  is therefore a **Pareto axis, not a free win**, and adopting it means deciding that circulation is
+  worth access -- a values question, not a measurement one.
+- **It stopped at 0.084 displacement without spending the 0.10 budget**, having run out of
+  bridge-removing candidates worth taking. The ceiling is structural, not budgetary: more money does
+  not buy more circulation here.
+
+### Verdict
+
+The 5.47 figure is **mostly the fabric, partly the methods**. There is real but modest headroom
+(~21%), it is bought with access, and the idealized cycle end is unreachable in dense informal
+fabric. That is enough to stop treating one-way as an unexplored opportunity: it is explored, its
+size is measured, and its price is known.
+
+What remains defensible: `penalty` as a cheap DIAGNOSTIC column (validated, and it separates
+something no shipped number does). What is not supported: rebuilding the metric, the road-first mesh,
+or the half-width discount, for a 21% move on an axis that costs 16% of the primary one.
