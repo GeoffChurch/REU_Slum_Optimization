@@ -21,6 +21,16 @@ exclude_docs: |
   _intro.md
   metrics-north-star.md
   stylesheets/fonts/README.md
+  # dream_come_true is UNPUBLISHED, not removed. The method stays in the pipeline
+  # (conf/compare_config.yaml, conf/method/, src/) and the generator still writes this page from
+  # its METHODS registry entry -- it is simply not built into the site, because the method has no
+  # run artifacts yet and carries no numbers.
+  #
+  # STALE-KEY WARNING: this path is the method's slug. If the method is renamed upstream, this
+  # line silently stops matching and the renamed page REAPPEARS in the built site -- and, because
+  # the nav below is explicit, it would appear only as an un-navigable orphan page plus a build
+  # warning. Whoever renames the method must update this line and the nav together.
+  methods/dream_come_true.md
 
 theme:
   name: material
@@ -93,14 +103,26 @@ nav:
   - Home: index.md
   - Background: background.md
   - Methodology: methodology.md
+  # Method entries are PATHS ONLY, with no hand-written title. Each label comes from the YAML
+  # front-matter `title:` that scripts/gen_site_pages.py writes into every generated method page
+  # from method_labels.py -- so renaming a method's display label is a one-line change there and
+  # reaches the heading and the sidebar together, instead of needing a matching edit here that
+  # was easy to forget. (Note MkDocs does NOT read the H1 for this: drop the front matter and it
+  # falls back to the FILENAME, which renders "clearance_looped" as "Clearance looped".)
+  #
+  # The file LIST is still manual, and cannot be automated without a new dependency: MkDocs has no
+  # way to auto-populate one section of an otherwise explicit nav (mkdocs-awesome-nav does it, but
+  # that is another pinned package in the deploy workflow). Adding or retiring a method therefore
+  # still means a line here. Order matches the METHODS registry in scripts/gen_site_pages.py;
+  # dream_come_true is intentionally absent, see exclude_docs above.
   - Methods:
       - methods/index.md
-      - Peel: methods/peel.md
-      - Clearance: methods/clearance.md
-      - Looped Tree: methods/clearance_looped.md
-      - Throughways: methods/greedy_arterial_buildable.md
-      - OSM Footpaths: methods/osm_footpaths.md
-      - Grid: methods/euclidean_grid.md
-      - Dream Come True: methods/dream_come_true.md
+      - methods/peel.md
+      - methods/clearance.md
+      - methods/clearance_looped.md
+      - methods/greedy_arterial_buildable.md
+      - methods/resistance_lp.md
+      - methods/osm_footpaths.md
+      - methods/euclidean_grid.md
   - Results: benchmark.md
   - Team & References: team.md
