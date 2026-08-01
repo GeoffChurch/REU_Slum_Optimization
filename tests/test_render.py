@@ -14,6 +14,7 @@ from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import Block, Metrics, Proposal
 from reblock.derive.access import parcel_access_layers
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 from reblock.render import frame_bbox, render_after, render_before, save_render
 
 UTM = CRS.from_epsg(32643)
@@ -35,7 +36,8 @@ def _connector_proposal(block: Block) -> Proposal:
     # 3x3 grid: interior road from boundary node (1,0) to the centre's corner
     # (1,1) reaches the centre parcel -> k drops from 2 to 1 (mirrors
     # tests/eval/test_kcomplexity.py's fixture).
-    connector = gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM)
+    connector = with_width(gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM),
+                           DEFAULT_ROAD_WIDTH_M)
     return Proposal(block_id=block.block_id, crs=UTM, roads=connector, method="topology")
 
 
@@ -323,7 +325,9 @@ def test_displaced_points_carry_fraction_and_radius(tmp_path):
     pts = gpd.GeoDataFrame(geometry=[Point(10, 10), Point(10, 12)], crs=crs)
     block = Block(block_id="b", crs=crs, boundary=boundary, parcels=parcels,
                   streets=streets, building_points=pts)
-    roads = gpd.GeoDataFrame(geometry=[LineString([(0, 10), (20, 10)])], crs=crs)
+    roads = with_width(
+        gpd.GeoDataFrame(geometry=[LineString([(0, 10), (20, 10)])], crs=crs),
+        DEFAULT_ROAD_WIDTH_M)
     prop = Proposal(block_id="b", crs=crs, roads=roads, edges=None,
                     proposal_id="x", method="m", params={"corridor_m": 1.0}, block_identity=None)
     disp = _displaced_points(block, prop)

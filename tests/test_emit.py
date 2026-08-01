@@ -19,6 +19,7 @@ from reblock.emit import (
     region_map,
     render_results,
 )
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 from reblock.render import save_render as _real_save_render
 
 UTM = CRS.from_epsg(32643)
@@ -165,8 +166,9 @@ def test_displaced_points_only_keeps_sites_with_positive_displacement_fraction()
     block = replace(_grid_block(3),
                     building_points=gpd.GeoDataFrame(
                         geometry=[Point(1.0, 0.5), Point(2.9, 2.9)], crs=UTM))
-    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads, params={"corridor_m": 0.5})
+    roads = with_width(
+        gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM), 1.0)
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads)
 
     displaced = _displaced_points(block, proposal)
 
@@ -176,13 +178,15 @@ def test_displaced_points_only_keeps_sites_with_positive_displacement_fraction()
     assert (displaced["radius"] > 0).all()
 
 
-def test_displaced_points_defaults_corridor_m_when_absent_from_params() -> None:
-    # 1.5m from the road at x=1, well inside the default 3.0m corridor -- a single point, so its
-    # radius falls back to corridor_m itself (building_radii, n < 2).
+def test_displaced_points_takes_its_corridor_from_the_roads_own_width() -> None:
+    # 1.5m from the road at x=1, inside a default 6m road's 3m half-width -- a
+    # single point, so its radius falls back to DEFAULT_BUILDING_RADIUS_M (building_radii, n < 2).
     block = replace(_grid_block(3),
                     building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 2.5)], crs=UTM))
-    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads)   # corridor_m defaults to 3.0
+    roads = with_width(
+        gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM),
+        DEFAULT_ROAD_WIDTH_M)
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads)
 
     displaced = _displaced_points(block, proposal)
 
@@ -193,7 +197,9 @@ def test_displaced_points_defaults_corridor_m_when_absent_from_params() -> None:
 
 def test_displaced_points_empty_without_building_points_or_roads() -> None:
     block = _grid_block(3)   # building_points defaults to empty
-    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
+    roads = with_width(
+        gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM),
+        DEFAULT_ROAD_WIDTH_M)
     assert _displaced_points(block, Proposal(block_id="g", crs=UTM, roads=roads)).empty
 
     pts_block = replace(block, building_points=gpd.GeoDataFrame(
@@ -206,8 +212,9 @@ def test_render_results_marks_displaced_points(tmp_path: Path) -> None:
     # one of them must still render the after-heatmap without error.
     block = replace(_grid_block(3),
                     building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM))
-    roads = gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads, params={"corridor_m": 0.5})
+    roads = with_width(
+        gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM), 1.0)
+    proposal = Proposal(block_id="g", crs=UTM, roads=roads)
     result = Result(block=block, proposal=proposal, metrics=(_kc(block),))
 
     render_results([result], tmp_path, RenderConfig(enabled=True),

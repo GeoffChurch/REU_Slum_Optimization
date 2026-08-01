@@ -1,14 +1,14 @@
 {
   "metric": "density_compactness",
-  "flagged": 2013,
-  "total_blocks": 16200,
   "deepest_block": "KEN.30.9_1_3515",
   "deepest_depth": 2.0,
-  "region_members": 89,
-  "region_parcels": 2809,
-  "region_mean_depth": 2.460674157303371,
-  "region_mean_density_per_ha": 63.41685882528717,
-  "maps_url": "https://www.google.com/maps/@-1.24565,36.90874,16z",
-  "command": "pixi run python -m scripts.gen_multiblock_example density_compactness nairobi",
-  "maps_qr": "maps_qr.png"
+  "region_parcels": 3547,
+  "region_mean_depth": 2.395348837209302,
+  "region_mean_density_per_ha": 67.05549883079763,
+  "maps_url": "https://www.google.com/maps/@-1.24628,36.90350,15z",
+  "command": "pixi run python -m scripts.gen_example density_compactness nairobi",
+  "maps_qr": "maps_qr.png",
+  "flagged": 257,
+  "total_blocks": 16200,
+  "region_members": 43
 }

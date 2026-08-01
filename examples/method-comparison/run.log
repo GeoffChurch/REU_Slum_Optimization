@@ -1,14 +1,10 @@
-[gen_method_comparison][INFO] ZAF.9.3.1_1_40972 map: https://www.google.com/maps/@-33.97795,18.58064,18z
-[gen_method_comparison][INFO] topology [lens A D=0.10] permeability=0.646 at 186 m
-[gen_method_comparison][INFO] topology [lens B P*=0.60] reached P*=0.60, 7.4% displaced at 109 m
-[gen_method_comparison][INFO] clearance [lens A D=0.10] permeability=0.588 at 143 m
-[gen_method_comparison][INFO] clearance [lens B P*=0.60] reached P*=0.60, 12.2% displaced at 174 m
-[gen_method_comparison][INFO] greedy_arterial_repulsion [lens A D=0.10] permeability=0.709 at 183 m
-[gen_method_comparison][INFO] greedy_arterial_repulsion [lens B P*=0.60] reached P*=0.60, 11.5% displaced at 183 m
-[gen_method_comparison][INFO] clearance_looped [lens A D=0.10] permeability=0.661 at 139 m
-[gen_method_comparison][INFO] clearance_looped [lens B P*=0.60] reached P*=0.60, 9.2% displaced at 101 m
-[gen_method_comparison][INFO] euclidean_grid [lens A D=0.10] permeability=0.699 at 270 m
-[gen_method_comparison][INFO] euclidean_grid [lens B P*=0.60] reached P*=0.60, 13.1% displaced at 270 m
-[gen_method_comparison][INFO] osm_footpaths [lens A D=0.10] permeability=0.823 at 274 m
-[gen_method_comparison][INFO] osm_footpaths [lens B P*=0.60] reached P*=0.60, 4.3% displaced at 120 m
-wrote examples/method-comparison: 6 methods; frontier + both lenses + renders + run.log
+[__main__][INFO] region built: 1 blocks / 263 parcels (3.9s)
+[scripts.compare_budgets][INFO] reblocked topology: 228 segments, 934 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked clearance: 20 segments, 486 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked clearance_looped: 92 segments, 1300 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 18 segments, 541 m (1.7s)
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 252 segments, 701 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked euclidean_grid: 9 segments, 741 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked osm_footpaths: 13 segments, 639 m (0.0s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 7 methods (3.6s)
+wrote examples/method-comparison: 1 blocks / 263 parcels; pinned 1 block(s); 7 methods; README + maps + lens CSVs

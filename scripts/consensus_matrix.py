@@ -48,7 +48,6 @@ from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import permeability
 from scripts.pair_matrix import (
-    CORRIDOR_M,
     _ot,
     desire_source,
     displacement_fraction,
@@ -98,7 +97,7 @@ def _bc() -> SimpleNamespace:
 
 
 def _perm_disp(block: Block, roads: gpd.GeoDataFrame) -> tuple[float, float]:
-    radii = building_radii(block.building_points, CORRIDOR_M)
+    radii = building_radii(block.building_points)
     del radii
     return (float(permeability(block, roads)), displacement_fraction(block, roads))
 

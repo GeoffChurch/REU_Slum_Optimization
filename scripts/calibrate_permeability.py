@@ -23,11 +23,11 @@ built to avoid:
 Region loading mirrors two generators, replayed verbatim (down to the literal hydra override
 strings), NOT unified into one shared config -- replaying each generator's own choices IS the
 "natural config" this probe is required to use:
-  - `scripts/gen_multiblock_example.py`, for the 6 multiblock regions ({depth, depth_density,
+  - `scripts/gen_example.py`, for the 6 multiblock regions ({depth, depth_density,
     density_compactness} metric x {capetown, nairobi} city): dense_compact screen + dense_cluster
     region_builder up to 3000 buildings, arterial's `candidate_policy=fixed`/`max_anchors=64`
     tractability knobs, and clearance_looped/euclidean_grid retuned for regional scale.
-  - `scripts/gen_method_comparison.py`, for the pinned single-block flagship (`ZAF.9.3.1_1_40972`):
+  - `scripts/scripts/gen_example.py`, for the pinned single-block flagship (`ZAF.9.3.1_1_40972`):
     identity screen/region_builder (an explicit `block_ids` group), arterial capped to
     `max_roads=8`, clearance_looped/euclidean_grid left at `compare_config.yaml` defaults.
 `osm_footpaths` (the real as-built footpath network) is added wherever a committed OSM snapshot
@@ -93,7 +93,7 @@ CONFIG_DIR = ROOT / "conf"
 SYNTH_METHODS = ("greedy_arterial_repulsion", "clearance_looped", "euclidean_grid")
 METRICS = ("depth", "depth_density", "density_compactness")
 CITIES = ("capetown", "nairobi")
-# The deepest block in a topology-tractable size window, pinned in gen_method_comparison.py.
+# The deepest block in a topology-tractable size window, pinned in scripts/gen_example.py.
 PINNED_BLOCK_ID = "ZAF.9.3.1_1_40972"
 PINNED_SNAPSHOT = ROOT / "examples" / "method-comparison" / "desire_lines_40972.geojson"
 
@@ -151,13 +151,15 @@ def region_names() -> list[str]:
 
 def _load_permeability_params() -> PermeabilityParams:
     raw = cast(DictConfig, OmegaConf.load(CONFIG_DIR / "permeability.yaml"))
-    return PermeabilityParams(g_walk=float(raw.g_walk), g_road=float(raw.g_road),
-                              g_street=float(raw.g_street), corridor_m=float(raw.corridor_m),
+    return PermeabilityParams(g_walk=float(raw.g_walk),
+                              g_road_per_m=float(raw.g_road_per_m),
+                              g_street=float(raw.g_street),
+                              road_margin_m=float(raw.road_margin_m),
                               r0_frac=float(raw.r0_frac))
 
 
 def _load_pinned_block() -> tuple[Block, dict[str, Method]]:
-    """The pinned method-comparison flagship, loaded EXACTLY as `scripts/gen_method_comparison.py`
+    """The pinned method-comparison flagship, loaded EXACTLY as `scripts/scripts/gen_example.py`
     loads it: the same hydra overrides (data, the explicit `block_ids` seed group, arterial's
     `max_roads=8`, the committed OSM snapshot), the default (identity) screen/region_builder, then
     `region_block` on the singleton region (a no-op union on one member)."""
@@ -173,13 +175,13 @@ def _load_pinned_block() -> tuple[Block, dict[str, Method]]:
     block = region_block(region)
     methods = {n: cast(Method, instantiate(cfg.all_methods[n])) for n in SYNTH_METHODS}
     # The pinned flagship's OSM snapshot is committed (this is why it's pinned) -- unlike the
-    # multiblock regions below, no existence guard is needed; mirrors gen_method_comparison.py.
+    # multiblock regions below, no existence guard is needed; mirrors scripts/gen_example.py.
     methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
     return block, methods
 
 
 def _load_multiblock_region(metric: str, city: str) -> tuple[Block, dict[str, Method]]:
-    """One multiblock region, loaded EXACTLY as `scripts/gen_multiblock_example.py` loads it: the
+    """One multiblock region, loaded EXACTLY as `scripts/gen_example.py` loads it: the
     same hydra overrides (metric, city data, the dense_compact screen, the dense_cluster
     region_builder, the SAME method tractability/retuning overrides that generator applies -- these
     are not over-provisioning, they are what that generator calls "natural" at regional scale), the
@@ -267,13 +269,13 @@ def _method_frontier(block: Block, method: Method, params: PermeabilityParams, *
     roads = prop.roads
     if roads is None or roads.empty:
         return None
-    radii = building_radii(block.building_points, params.corridor_m)
+    radii = building_radii(block.building_points)
 
     def _report(i: int, total: int) -> None:
         _log(f"    {label}: solve {i}/{total}")
 
     perm_curve = permeability_curve(block, roads, params, n_points=20, progress=_report)
-    disp_curve = displacement_curve(block, roads, radii, corridor_m=params.corridor_m, n_points=20)
+    disp_curve = displacement_curve(block, roads, radii, n_points=20)
     return MethodFrontier(
         n_roads=int(len(roads)),
         terminal_permeability=perm_curve.benefit[-1],

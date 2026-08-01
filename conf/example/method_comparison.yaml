@@ -1,0 +1,26 @@
+# @package _global_
+# The single-block flagship. It is the SAME pipeline as every other example -- one entry point,
+# `scripts/gen_example.py` -- and differs only in the two things this file sets: it pins one block
+# instead of growing a region, and it runs more methods.
+#
+# The pinned block is the deepest one in a topology-tractable size window, auto-picked once and
+# fixed here so the example reproduces. `topology` is the prior art and is SINGLE-BLOCK ONLY -- a
+# multi-block region gives it a disconnected source node and it crashes -- which is the reason this
+# variant exists at all.
+defaults:
+  - override /metric: depth
+  - override /screen: identity
+  - override /region_builder: identity
+
+example:
+  slug: method-comparison
+  formula: "one deep block — every method, including the single-block-only prior art"
+  blurb: >-
+    Seven reblockers head-to-head on one deep informal block, small enough that even `topology`
+    runs. The set spans the families this project ships: whole-graph `topology`, least-cost
+    `clearance` and its loop-closing refinement, the cycle-native Loop Network, the objective
+    optimised directly over paths, a Manhattan grid, and the real as-built OSM footpaths.
+
+block_ids: [["ZAF.9.3.1_1_40972"]]
+methods: [topology, clearance, clearance_looped, cycle_native, resistance_lp, euclidean_grid]
+max_blocks: 1

@@ -10,9 +10,27 @@
 # (D=10% method-spread ~0.9pts -> ~11.8pts) -- see reblock.permeability's module docstring for
 # the formula.
 g_walk: 0.1
-g_road: 20.0
+# Conductance per METRE of usable road width, per unit distance. Replaced g_road (20.0) + the
+# global corridor_m (3.0) 2026-07-31: width is carried per road now, so there is no standard road
+# for a single g_road to describe.
+#
+# The calibrated quantity is one LANE at 20.0 -- that is what was tuned against g_walk. So this rate
+# fell with the lane re-base (2.5 m -> 3.0 m, see the width floors below): 20.0/3.0 keeps one lane at
+# exactly 20.0, leaving a default road's conductance unchanged and moving only its footprint.
+g_road_per_m: 6.666666666666667
 g_street: 20.0
-corridor_m: 3.0
+# Irreducible corridor margin (verge, drainage, wall clearance), paid once per road however many
+# lanes it carries. Makes conductance AFFINE in width, and makes a one-way street wider than half a
+# two-way one: they match per-direction at W_one = (W_two + margin)/2 = 3.5 m, not 3.0 m.
+road_margin_m: 1.0
+# Narrowest BUILDABLE road, by direction -- a two-way street has to fit both directions at once, so
+# its floor is the higher one. The metric REFUSES anything narrower rather than scoring a road that
+# could not be built (permeability.buildable_widths). Re-based 2026-07-31 from 3.5/6.0, which
+# implied a 2.5 m lane: barely a light vehicle, nothing for a service vehicle plus clearance. These
+# encode a 3.0 m lane, the low end of the 3.0-4.0 m clear width usually cited for fire/ambulance/
+# refuse access. Engineering judgement, not a specific jurisdiction's clause -- edit freely.
+min_one_way_width_m: 4.0
+min_two_way_width_m: 7.0
 r0_frac: 0.55   # r0 = r0_frac * median(building nearest-neighbour distance) -- adaptive corridor
                 # half-width; 0.55 lands r0~3m on multiblock_density_compactness (median NN~5.2m).
 # Lens A -- matched displacement %: truncate every method to its first prefix at/after this

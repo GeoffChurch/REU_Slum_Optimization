@@ -5,6 +5,7 @@ from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import GreedyArterialReblocker
 from reblock.methods.arterial_lazy import _make_policy
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.methods.test_arterial import _grid_block  # reuse the fast grid fixture
 
 
@@ -69,11 +70,13 @@ def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads):
     from reblock.methods.arterial_lazy import _greedy_arterials_lazy
     for mode in ("buildable", "aspirational"):
         block = _grid_block(grid_n)
-        exact = _greedy_arterials(block, mode=mode, objective="directness", n_anchors=n_anchors,
+        exact = _greedy_arterials(
+            block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+            mode=mode, objective="directness", n_anchors=n_anchors,
                                   max_roads=max_roads, workers=1)
         lazy = _greedy_arterials_lazy(block, mode=mode, objective="directness", n_anchors=n_anchors,
                                       top_k=8, lam=2.0, max_roads=max_roads, cost="length",
-                                      corridor_m=3.0, workers=1,
+                                      half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=1,
                                       candidate_policy="faithful", rescore_every=1)
         assert [g.wkt for g in exact.geometry] == [g.wkt for g in lazy.geometry], \
             (mode, grid_n, n_anchors, max_roads)

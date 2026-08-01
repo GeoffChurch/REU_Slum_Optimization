@@ -50,6 +50,7 @@ from shapely.ops import unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 Destination = Literal["gateway", "all_pairs"]
 
@@ -162,6 +163,9 @@ class FlowPathsReblocker:
     flow_quantile: float = 0.90
     max_sources: int = 400
     seed: int = 0
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
     def identity(self) -> FlowPathsIdentity | None:
@@ -195,7 +199,8 @@ class FlowPathsReblocker:
         pid = (f"flow_paths:{self.substrate.tag}:{self.destination}:i{self.iterations}"
                f":r{self.reinforcement:g}:q{self.flow_quantile:g}")
         return Proposal(
-            block_id=block.block_id, crs=block.crs, roads=gdf, edges=None,
+            block_id=block.block_id, crs=block.crs, edges=None,
+            roads=with_width(gdf, self.road_width_m),
             proposal_id=pid, method="flow_paths",
             params={"roads": len(roads), "substrate": self.substrate.tag,
                     "destination": self.destination, "iterations": self.iterations,

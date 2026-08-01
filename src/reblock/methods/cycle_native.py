@@ -3,7 +3,9 @@
 Every other method adds spurs -- a path from an unserved parcel back to the network -- which is why
 they all score at the tree end of the directed penalty (5.47, against a pure cycle's 2.27). A
 method whose atomic move is a LOOP is bridgeless by construction, needs no repair pass, and is
-strongly orientable, so every road it emits can be made one-way.
+strongly orientable, so every road it emits can be made one-way. That last property was the point
+of the exercise and it did NOT pay -- see `notes/2026-07-31-one-way-is-dominated.md`; the value that
+survives is the bridgelessness itself.
 
 ## The move
 
@@ -37,9 +39,7 @@ onto a finished tree. Choosing cycles from the start finds loops that also serve
 """
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -50,16 +50,18 @@ from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
 from reblock.budget import building_radii, displacement
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
-from reblock.permeability import PermeabilityParams, _adaptive_r0, permeability
-
-CORRIDOR_M = 3.0
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    PermeabilityParams,
+    _adaptive_r0,
+    permeability,
+    with_width,
+)
 
 
 def _trace(graph: RoutingGraph, pred: np.ndarray, start: int) -> list[int]:
@@ -88,6 +90,9 @@ class CycleNativeReblocker:
     max_displacement: float = 0.10
     shortlist: int = 8
     params: PermeabilityParams = field(default_factory=PermeabilityParams)
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
     identity = None
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
@@ -101,7 +106,7 @@ class CycleNativeReblocker:
 
         adj = parcel_adjacency(geoms, STREET_TOL)
         r0 = _adaptive_r0(block, self.params)
-        radii = building_radii(block.building_points, CORRIDOR_M)
+        radii = building_radii(block.building_points)
         n_b = max(len(block.building_points), 1)
         street = unary_union(list(block.streets.geometry))
         seeds = np.flatnonzero(
@@ -121,7 +126,8 @@ class CycleNativeReblocker:
         cur_p = float(permeability(block, empty, self.params, adj=adj, r0=r0))
         for _ in range(60):
             spent = displacement(block.building_points, radii,
-                                 gpd.GeoDataFrame(geometry=roads, crs=crs), CORRIDOR_M) / n_b \
+                                 with_width(gpd.GeoDataFrame(geometry=roads, crs=crs),
+                                            self.road_width_m)) / n_b \
                 if roads else 0.0
             if spent >= self.max_displacement:
                 break
@@ -158,8 +164,9 @@ class CycleNativeReblocker:
                 if pred2[int(starts[i])] >= 0:
                     back = _geom(graph, _trace(graph, pred2, int(starts[i])), street)
                 cand = [out_geom] + ([back] if back is not None else [])
-                trial = gpd.GeoDataFrame(geometry=[*roads, *cand], crs=crs)
-                d = displacement(block.building_points, radii, trial, CORRIDOR_M) / n_b
+                trial = with_width(gpd.GeoDataFrame(geometry=[*roads, *cand], crs=crs),
+                                   self.road_width_m)
+                d = displacement(block.building_points, radii, trial) / n_b
                 if d > self.max_displacement:
                     continue
                 gain = float(permeability(block, trial, self.params, adj=adj, r0=r0)) - cur_p
@@ -173,6 +180,8 @@ class CycleNativeReblocker:
         return self._out(block, gpd.GeoDataFrame(geometry=roads, crs=crs))
 
     def _out(self, block: Block, roads: gpd.GeoDataFrame) -> Proposal:
-        return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
-                        proposal_id=f"cycle_native:d{self.max_displacement:g}",
-                        method="cycle_native", params={"roads": len(roads)}, block_identity=None)
+        out = with_width(roads, self.road_width_m)
+        return Proposal(
+            block_id=block.block_id, crs=block.crs, roads=out, edges=None,
+            proposal_id=f"cycle_native:d{self.max_displacement:g}", method="cycle_native",
+            params={"roads": len(out), "road_width_m": self.road_width_m}, block_identity=None)

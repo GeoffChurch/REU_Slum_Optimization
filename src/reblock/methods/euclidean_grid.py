@@ -53,6 +53,7 @@ from shapely.ops import substring
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 # `follow_parcels` density raster cell size, as a multiple of the block's own parcel-spacing scale
 # (median parcel nearest-neighbour distance): a few parcel-spacings wide, so a cell in a dense
@@ -368,6 +369,9 @@ def _grid_lines(
 
 @dataclass
 class EuclideanGridReblocker:
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
     spacing: float = 60.0
     angle: float = 0.0
     min_seg_len: float = 1.0
@@ -548,7 +552,8 @@ class EuclideanGridReblocker:
                f":sb{self.street_buffer:g}:sd{int(self.seek_density)}:ad{int(self.adaptive)}"
                f":fs{fine_spacing:g}:dtp{self.density_threshold_percentile:g}"
                f":phb{parcel_hug_buffer:g}:pbg{parcel_bridge_gap:g}")
-        return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+        return Proposal(block_id=block.block_id, crs=block.crs, edges=None,
+                        roads=with_width(roads, self.road_width_m),
                         proposal_id=pid, method="euclidean_grid", params=params,
                         block_identity=block.identity)
 
@@ -630,7 +635,8 @@ class EuclideanGridReblocker:
         }
         pid = (f"euclidean_grid:follow:msl{self.min_seg_len:g}:sb{self.street_buffer:g}"
                f":cov{lo:g}-{hi:g}:g{gamma:g}:mc{min_component:g}")
-        return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+        return Proposal(block_id=block.block_id, crs=block.crs, edges=None,
+                        roads=with_width(roads, self.road_width_m),
                         proposal_id=pid, method="euclidean_grid", params=params,
                         block_identity=block.identity)
     

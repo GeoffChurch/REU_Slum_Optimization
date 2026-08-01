@@ -1,14 +1,14 @@
 {
   "metric": "depth",
-  "flagged": 3313,
-  "total_blocks": 16200,
   "deepest_block": "KEN.30.6_1_80",
   "deepest_depth": 15.0,
-  "region_members": 1,
   "region_parcels": 4365,
   "region_mean_depth": 15.0,
   "region_mean_density_per_ha": 38.02449807247383,
   "maps_url": "https://www.google.com/maps/@-1.31807,36.88120,15z",
-  "command": "pixi run python -m scripts.gen_multiblock_example depth nairobi",
-  "maps_qr": "maps_qr.png"
+  "command": "pixi run python -m scripts.gen_example depth nairobi",
+  "maps_qr": "maps_qr.png",
+  "flagged": 3313,
+  "total_blocks": 16200,
+  "region_members": 1
 }

@@ -24,7 +24,7 @@ def test_compare_displacement_metric_runs_and_writes_curves(tmp_path: Path) -> N
     # the axis arithmetic itself is unit-tested in test_budget/test_permeability.
     result = subprocess.run(
         [sys.executable, "-m", "reblock.compare", "data=dji", "eval=kcomplexity",
-         "max_blocks=1", "methods=[clearance]", "corridor_m=3.0",
+         "max_blocks=1", "methods=[clearance]",
          f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, result.stderr

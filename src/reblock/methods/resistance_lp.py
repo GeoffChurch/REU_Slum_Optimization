@@ -64,14 +64,15 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.resistance_greedy import _mesh, linearized_gain
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
     PermeabilityParams,
     _adaptive_r0,
     _road_corridor,
     egress_power,
     permeability,
+    with_width,
 )
 
-CORRIDOR_M = 3.0
 SegId = tuple[str, int, int]
 
 
@@ -110,7 +111,7 @@ def _path_segments(
 
 
 def segment_displacement(
-    seg_geom: list[LineString], pts: gpd.GeoDataFrame, radii: np.ndarray, corridor_m: float,
+    seg_geom: list[LineString], pts: gpd.GeoDataFrame, radii: np.ndarray, half_width_m: float,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Per segment, `(building indices, c_b)` for every building its corridor alone would graze.
 
@@ -125,14 +126,14 @@ def segment_displacement(
     rmax = float(radii.max()) if radii.size else 0.0
     out: list[tuple[np.ndarray, np.ndarray]] = []
     for g in seg_geom:
-        near = np.asarray(tree.query_ball_point(np.asarray(g.coords), corridor_m + rmax,
+        near = np.asarray(tree.query_ball_point(np.asarray(g.coords), half_width_m + rmax,
                                                 return_sorted=False), dtype=object)
         idx = np.unique(np.concatenate([np.asarray(a, dtype=np.int64) for a in near])
                         ) if near.size else np.zeros(0, dtype=np.int64)
         if idx.size == 0:
             out.append((idx, np.zeros(0)))
             continue
-        d = np.maximum(shapely.distance(shapely.points(xy[idx]), g) - corridor_m, 0.0)
+        d = np.maximum(shapely.distance(shapely.points(xy[idx]), g) - half_width_m, 0.0)
         r = radii[idx]
         with np.errstate(divide="ignore", invalid="ignore"):
             c = np.where(r > 0.0, 1.0 - d / r, np.where(d <= 0.0, 1.0, 0.0))
@@ -227,6 +228,9 @@ class ResistanceLPReblocker:
     max_road_m: float = 1e6
     chunks: int = 8
     params: PermeabilityParams = field(default_factory=PermeabilityParams)
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
     def identity(self) -> ResistanceLPIdentity | None:
@@ -240,13 +244,13 @@ class ResistanceLPReblocker:
         del prior
         graph = self.substrate.build(block)
         crs = block.crs
-        empty = gpd.GeoDataFrame(geometry=[], crs=crs)
+        empty = with_width(gpd.GeoDataFrame(geometry=[], crs=crs), self.road_width_m)
         geoms = list(block.parcels.geometry)
         if len(geoms) == 0 or len(graph.pts) == 0:
             return self._proposal(block, empty, {"roads": 0, "stopped": "empty"})
 
-        # STREET_TOL, matching `egress_power`'s own default -- NOT corridor_m. Building the
-        # mesh at corridor_m (3.0 vs 0.5) gave a 6x looser adjacency than the evaluator
+        # STREET_TOL, matching `egress_power`'s own default -- NOT the road half-width. Building the
+        # mesh at the road half-width (3.0 vs 0.5) gave a 6x looser adjacency than the evaluator
         # scores, so this method optimized a different Laplacian than the one it is graded
         # on -- exactly what `_mesh`'s docstring says must not happen.
         adj = parcel_adjacency(geoms, STREET_TOL)
@@ -259,7 +263,7 @@ class ResistanceLPReblocker:
 
         pts = block.building_points
         n_b = len(pts)
-        radii = building_radii(pts, CORRIDOR_M)
+        radii = building_radii(pts)
         disp_cap = self.max_displacement * n_b
 
         pt_tree = cKDTree(graph.pts)
@@ -271,7 +275,7 @@ class ResistanceLPReblocker:
             (w, (np.concatenate([graph.rows, graph.cols]),
                  np.concatenate([graph.cols, graph.rows]))),
             shape=(len(graph.pts), len(graph.pts)))
-        ri, ci, dg, segs = _mesh(block, self.params, adj, r0)
+        ri, ci, dg, segs = _mesh(block, self.params, adj, r0, self.road_width_m)
         seg_tree = STRtree(list(segs)) if len(segs) else None
 
         best: list[LineString] = []
@@ -279,9 +283,10 @@ class ResistanceLPReblocker:
         base_c = np.zeros(n_b)
         k = max(self.chunks, 1)
         for t in range(k):
-            built = gpd.GeoDataFrame(geometry=best, crs=crs) if best else empty
+            built = with_width(gpd.GeoDataFrame(geometry=best, crs=crs) if best else empty,
+                    self.road_width_m)
             _p, v = egress_power(block, built, self.params, adj=adj, r0=r0)
-            corridor = _road_corridor(built, self.params.corridor_m)
+            corridor = _road_corridor(built, self.road_width_m / 2.0)
             # One indexed query instead of a shapely call per mesh edge -- the same hot spot
             # `permeability._covered_edges` fixes, and this runs once per greedy round.
             upgraded = np.zeros(len(segs), dtype=bool)
@@ -316,11 +321,11 @@ class ResistanceLPReblocker:
 
             seg_len = np.array([g.length for g in seg_geom], dtype=float)
             seg_edges = [
-                (seg_tree.query(g.buffer(self.params.corridor_m), predicate="intersects")
+                (seg_tree.query(g.buffer(self.road_width_m / 2.0), predicate="intersects")
                  if seg_tree is not None else np.zeros(0, dtype=np.int64))
                 for g in seg_geom
             ]
-            seg_disp = segment_displacement(seg_geom, pts, radii, CORRIDOR_M)
+            seg_disp = segment_displacement(seg_geom, pts, radii, self.road_width_m / 2.0)
             allow = disp_cap * (t + 1) / k
             spent_m = float(sum(r.length for r in best))
             z = solve_coverage_lp(path_segs, seg_len, seg_edges, seg_disp, edge_gain,
@@ -330,13 +335,15 @@ class ResistanceLPReblocker:
                                          allow, max(self.max_road_m - spent_m, 0.0))
             if not roads:
                 continue
-            trial = gpd.GeoDataFrame(geometry=[*best, *roads], crs=crs)
+            trial = with_width(gpd.GeoDataFrame(geometry=[*best, *roads], crs=crs),
+                    self.road_width_m)
             perm = permeability(block, trial, self.params, adj=adj, r0=r0)
             if perm <= best_perm:
                 continue
             best, best_perm, base_c = [*best, *roads], perm, base_c2
 
-        gdf = gpd.GeoDataFrame(geometry=best, crs=crs)
+        gdf = with_width(gpd.GeoDataFrame(geometry=best, crs=crs),
+                  self.road_width_m)
         return self._proposal(block, gdf, {"roads": len(best),
                                            "permeability": float(best_perm)})
 
@@ -381,7 +388,8 @@ class ResistanceLPReblocker:
     def _proposal(self, block: Block, roads: gpd.GeoDataFrame,
                   params: dict[str, object]) -> Proposal:
         return Proposal(
-            block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+            block_id=block.block_id, crs=block.crs, edges=None,
+            roads=with_width(roads, self.road_width_m),
             proposal_id=(f"resistance_lp:{self.substrate.tag}:d{self.max_displacement:g}"
                          f":k{self.chunks}"),
             method="resistance_lp",

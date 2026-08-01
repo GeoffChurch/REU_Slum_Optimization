@@ -9,12 +9,17 @@ from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import Block
 from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
     PermeabilityParams,
     _adaptive_r0,
     _footpath_conductance,
+    edge_conductances,
     egress_power,
+    lane_width,
     permeability,
     permeability_curve,
+    road_conductance,
+    with_width,
 )
 
 UTM = CRS.from_epsg(32734)
@@ -36,7 +41,8 @@ def _grid_block(k=4, cell=1.0):
     boundary = Polygon([(0, 0), (k*cell, 0), (k*cell, k*cell), (0, k*cell)])
     return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
 
-def _roads(lines): return gpd.GeoDataFrame(geometry=lines, crs=UTM)
+def _roads(lines): return with_width(gpd.GeoDataFrame(geometry=lines, crs=UTM),
+                                     DEFAULT_ROAD_WIDTH_M)
 
 def test_no_roads_permeability_is_zero():
     b = _grid_block()
@@ -65,7 +71,7 @@ def test_monotone_under_added_roads():
 
 def test_loop_beats_spur_at_equal_length():
     # A 15x15 grid of 10m parcels (225 parcels; centroid spacing 10m) -- large enough, at the
-    # PermeabilityParams() default corridor_m=3.0, that a road's buffered corridor stays THIN
+    # PermeabilityParams() default that a road's buffered corridor stays THIN
     # (covers a local band, not the whole grid): measured coverage is 10.0% of footpath edges
     # for spur, 8.6% for loop -- both well under 100% (see task-1-report.md for the full
     # measurement). (A 6x6 grid of 1m unit parcels -- this repo's earlier attempt -- fails this:
@@ -89,7 +95,7 @@ def test_loop_beats_spur_at_equal_length():
     #
     # Uses an explicit g_walk=1.0 (this test's ORIGINAL calibration level, pre-2026-07-23 metric
     # change): this is a topological property (loop redundancy beats single-arm reach at equal
-    # road length) that empirically FLIPS at the new production default g_walk=0.1/g_road=20 (a
+    # road length) that empirically FLIPS at the new production default g_walk=0.1/g_road_per_m=8 (a
     # 200x ratio makes REACH dominate REDUNDANCY on this single-arm grid -- verified directly, not
     # assumed). That is not a regression in the r0-corridor formula itself: this fixture has no
     # `building_points`, so r0=0 and `_footpath_conductance` reduces exactly to the pre-change
@@ -149,9 +155,9 @@ def test_permeability_at_displacement_first_crossing_and_unreached():
     perm = Curve([0, 1, 2, 3], [0.0, 0.20, 0.35, 0.50])
     disp = Curve([0, 1, 2, 3], [0.0, 0.10, 0.25, 0.45])
     # first sample with disp >= 0.20 is i=2 (disp .25) -> perm .35
-    assert permeability_at_displacement(perm, disp, 0.20) == 0.35
+    assert permeability_at_displacement(perm, disp, 0.2) == 0.35
     assert permeability_at_displacement(perm, disp, 0.45) == 0.50
-    assert permeability_at_displacement(perm, disp, 0.50) == float("-inf")
+    assert permeability_at_displacement(perm, disp, 0.5) == float("-inf")
 
 # --- r0-corridor footpath conductance + adaptive r0 (2026-07-23 metric change) -----------------
 
@@ -201,23 +207,37 @@ def test_adaptive_r0_falls_back_to_zero_without_enough_building_points():
     b = _grid_block()   # building_points defaults to empty
     assert _adaptive_r0(b, params) == 0.0
 
-def test_footpath_conductance_can_exceed_road_conductance_without_a_clamp():
-    # Sanity check on WHY `egress_power` clamps footpath conductance at g_road/dist (see its
-    # docstring): the raw r0-corridor shape asymptotes to a nonzero constant (the fair-normalized
-    # `scale`) as dist -> infinity, while g_road/dist -> 0, so for a sufficiently long edge the
-    # UNCLAMPED footpath conductance would exceed the road conductance -- a real failure mode, not
-    # hypothetical. Hand-verified with r0=3 (2*r0=6), g_walk=0.1, g_road=20, dist=[1, 10, 1000]:
+def test_a_road_upgrade_never_lowers_an_edges_conductance():
+    # The monotonicity guarantee, checked where it is actually enforced: `edge_conductances` takes
+    # `max(footpath, road)`, so covering an edge can only raise it. This replaced an explicit clamp
+    # (every footpath edge capped at its own would-be upgrade) that the `max` makes unnecessary.
+    #
+    # The fixture is chosen so the OLD replace-outright rule would have FAILED it: the raw
+    # r0-corridor shape asymptotes to a nonzero constant as dist -> infinity while a road's g/dist
+    # decays, so on a long enough edge the footpath genuinely beats the road. Hand-verified with
+    # r0=3 (2*r0=6), g_walk=0.1, dist=[1, 10, 1000]:
     #   shape = [max(0.02, 1-6/1), max(0.02, 1-6/10), max(0.02, 1-6/1000)] = [0.02, 0.4, 0.994]
-    #   median(shape) = 0.4 (the dist=10 point); median(1/dist) = 0.1 (the dist=10 point)
-    #   scale = (0.1 * 0.1) / 0.4 = 0.025
+    #   median(shape) = 0.4; median(1/dist) = 0.1; scale = (0.1 * 0.1) / 0.4 = 0.025
     #   raw = scale * shape = [0.0005, 0.01, 0.02485]; road_g = 20/dist = [20, 2, 0.02]
-    #   at dist=1000: raw=0.02485 > road_g=0.02 -- EXCEEDS.
+    #   at dist=1000: raw = 0.02485 > road_g = 0.02 -- the footpath EXCEEDS the road.
     params = PermeabilityParams()
     dist = np.array([1.0, 10.0, 1000.0])
-    raw = _footpath_conductance(dist, r0=3.0, g_walk=params.g_walk)
-    road_g = params.g_road / dist
-    assert raw[2] > road_g[2]                # the long edge: unclamped footpath beats the road
-    assert (raw[:2] < road_g[:2]).all()       # the shorter edges never come close
-    clamped = np.minimum(raw, road_g)
-    assert (clamped <= road_g + 1e-12).all()  # the guard `egress_power` actually applies
+    foot = _footpath_conductance(dist, r0=3.0, g_walk=params.g_walk)
+    road = road_conductance(params, np.full(3, lane_width(params, DEFAULT_ROAD_WIDTH_M)), dist)
+    assert foot[2] > road[2]                 # the long edge: the footpath really does beat the road
+    assert (foot[:2] < road[:2]).all()       # the shorter edges never come close
 
+    # Four collinear parcels at x = 0, 1, 11, 1011 -- edge lengths exactly the [1, 10, 1000] above,
+    # so the per-block normalization is the one hand-verified there -- all spanned by one long road.
+    cent = np.array([0.0, 1.0, 11.0, 1011.0])
+    rows, cols = np.array([0, 1, 2]), np.array([1, 2, 3])
+    fp = _footpath_conductance(dist, r0=3.0, g_walk=params.g_walk)
+    roads = with_width(gpd.GeoDataFrame(
+        geometry=[LineString([(0.0, 0.0), (1011.0, 0.0)])], crs=UTM), DEFAULT_ROAD_WIDTH_M)
+    gf, gb = edge_conductances(cent, np.zeros(4), rows, cols, dist, fp, roads, params)
+
+    assert (gf >= fp - 1e-12).all() and (gb >= fp - 1e-12).all()   # the guarantee itself
+    # ...and it is not vacuous: on the two short edges the road wins, on the long one the FOOTPATH
+    # does, so a `max` that silently took the road would drop that edge from 0.02485 to 0.02.
+    assert gf[:2] == pytest.approx(road[:2]) and gf[2] == pytest.approx(fp[2])
+    assert fp[2] > road[2]

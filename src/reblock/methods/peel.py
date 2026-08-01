@@ -18,11 +18,15 @@ from shapely.ops import nearest_points
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 
 @dataclass
 class PeelReblocker:
     tol: float = STREET_TOL
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
     def identity(self) -> tuple[str, float]:
@@ -73,7 +77,8 @@ class PeelReblocker:
             segments.append(LineString([cent[pos[pid]], on_street]))
 
         roads = gpd.GeoDataFrame(geometry=segments, crs=block.crs)
-        return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+        return Proposal(block_id=block.block_id, crs=block.crs,
+                        roads=with_width(roads, self.road_width_m), edges=None,
                         proposal_id=f"peel_tol{self.tol}", method="peel",
                         params={"unreachable": unreachable},
                         block_identity=block.identity)

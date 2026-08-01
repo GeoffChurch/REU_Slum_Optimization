@@ -113,11 +113,18 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
     parts: list[str] = []
     meta_path = run_dir / "meta.json"
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-    parts.append(f"# Multiblock, screened by `{metric_name}`\n")
-    parts.append(f"*{blurb}*\n")
-    parts.append(f"**Metric:** `{formula}` — one metric drives the screen, region growth, and "
-                 f"colouring end to end.\n")
+    # `flagged` is present only for a metric-GROWN region. A pinned variant (one entry point, same
+    # pipeline -- see scripts/gen_example.py) has no screen selection, so it takes a title and lead
+    # that do not claim one: saying "one metric drives the screen and region growth" of a variant
+    # that pinned its block by id would simply be false.
     flagged, total_blocks = meta.get("flagged"), meta.get("total_blocks")
+    grown = flagged is not None
+    parts.append(f"# {'Multiblock, screened by' if grown else 'Pinned block:'} `{metric_name}`\n"
+                 if grown else f"# {metric_name.replace('_', '-')}\n")
+    parts.append(f"*{blurb}*\n")
+    parts.append(f"**Metric:** `{formula}`" + (" — one metric drives the screen, region growth, "
+                 "and colouring end to end.\n" if grown else " — the block is pinned by id; the "
+                 "metric drives the colouring only.\n"))
     top_block, top_depth = meta.get("deepest_block"), meta.get("deepest_depth")
     if (flagged is not None and total_blocks is not None
             and top_block is not None and top_depth is not None):

@@ -2,4 +2,4 @@
 # See reblock.methods.osm_footpaths.OsmFootpathsReblocker.
 _target_: reblock.methods.osm_footpaths.OsmFootpathsReblocker
 source: ${desire_source}
-corridor_m: 3.0
+road_width_m: 7.0

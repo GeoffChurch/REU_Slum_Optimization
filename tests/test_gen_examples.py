@@ -5,8 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.gen_example import _tee_to_file, example_command, write_maps_qr
 from scripts.gen_example_readme import gen_example_readme
-from scripts.gen_multiblock_example import _tee_to_file, example_command, write_maps_qr
 
 
 def test_write_maps_qr_makes_a_png(tmp_path: Path) -> None:
@@ -37,12 +37,12 @@ def _seed_run_dir(d, **meta):
 
 def test_readme_includes_command_and_qr(tmp_path):
     _seed_run_dir(tmp_path,
-        command="pixi run python -m scripts.gen_multiblock_example depth",
+        command="pixi run python -m scripts.gen_example depth",
         maps_qr="maps_qr.png", maps_url="https://maps.example/x",
         flagged=3, total_blocks=100, deepest_block="B1", deepest_depth=7.0)
     md = gen_example_readme(tmp_path, metric_name="depth", formula="f", blurb="b")
     assert "## How this was generated" in md
-    assert "pixi run python -m scripts.gen_multiblock_example depth" in md
+    assert "pixi run python -m scripts.gen_example depth" in md
     assert "run.log" in md
     assert "maps_qr.png" in md
 
@@ -55,12 +55,12 @@ def test_readme_omits_provenance_when_absent(tmp_path):
 
 def test_example_command_capetown_omits_city():
     assert example_command("depth", "capetown") == \
-        "pixi run python -m scripts.gen_multiblock_example depth"
+        "pixi run python -m scripts.gen_example depth"
 
 
 def test_example_command_other_city_appends_it():
     assert example_command("depth_density", "nairobi") == \
-        "pixi run python -m scripts.gen_multiblock_example depth_density nairobi"
+        "pixi run python -m scripts.gen_example depth_density nairobi"
 
 
 def test_regenerate_dry_run_lists_all(tmp_path):
@@ -69,7 +69,9 @@ def test_regenerate_dry_run_lists_all(tmp_path):
                        capture_output=True, text=True, env=env)
     assert r.returncode == 0, r.stderr
     out = r.stdout
-    for m in ("depth", "depth_density", "density_compactness"):
-        assert f"gen_multiblock_example {m}" in out            # capetown
-        assert f"gen_multiblock_example {m} nairobi" in out    # nairobi
-    assert "scripts.gen_method_comparison" in out            # the method-comparison flagship
+    # ONE entry point for every variant -- a variant differs only in its conf/example/<name>.yaml
+    for v in ("depth", "depth_density", "density_compactness"):
+        assert f"gen_example {v}" in out            # capetown
+        assert f"gen_example {v} nairobi" in out    # nairobi
+    assert "gen_example method_comparison" in out   # the pinned single-block flagship
+    assert "gen_method_comparison" not in out, "the second entry point must be gone"

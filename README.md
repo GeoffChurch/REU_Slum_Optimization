@@ -83,4 +83,4 @@ Flagships in [`examples/`](examples/), each reproducing from the full Cape Town 
 
 | [method-comparison](examples/method-comparison/) | [multiblock_depth_density](examples/multiblock_depth_density/) |
 |---|---|
-| ![](examples/method-comparison/curve_directness.png) | ![](examples/multiblock_depth_density/region.jpg) |
+| ![](examples/method-comparison/frontier_ZAF.9.3.1_1_40972.png) | ![](examples/multiblock_depth_density/region.png) |

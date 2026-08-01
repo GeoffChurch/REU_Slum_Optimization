@@ -80,14 +80,14 @@ def test_cacheable_source_encodes_config_into_proposal_identity() -> None:
     assert block.identity is not None
     src_a = _StubSource([], ident=("osm", ("path",), "abc"))
     src_b = _StubSource([], ident=("osm", ("path",), "abc"))
-    prop_a = OsmFootpathsReblocker(source=src_a, corridor_m=3.0).propose(block)
-    prop_b = OsmFootpathsReblocker(source=src_b, corridor_m=5.0).propose(block)
+    prop_a = OsmFootpathsReblocker(source=src_a, road_width_m=6).propose(block)
+    prop_b = OsmFootpathsReblocker(source=src_b, road_width_m=10).propose(block)
     assert prop_a.identity is not None
     assert prop_a.proposal_id != prop_b.proposal_id      # config encoded -> no eval-cache collision
     assert prop_a.identity != prop_b.identity
     # the Method-level identity (the propose() memo key) is likewise distinct per config
-    m_a = OsmFootpathsReblocker(source=src_a, corridor_m=3.0)
-    m_b = OsmFootpathsReblocker(source=src_a, corridor_m=5.0)
+    m_a = OsmFootpathsReblocker(source=src_a, road_width_m=6)
+    m_b = OsmFootpathsReblocker(source=src_a, road_width_m=10)
     assert m_a.identity is not None and m_a.identity != m_b.identity
 
 

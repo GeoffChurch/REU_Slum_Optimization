@@ -23,6 +23,7 @@ from reblock.methods.arterial import (
     _snap_graph,
 )
 from reblock.methods.boundary_graph import _boundary_graph
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 UTM = CRS.from_epsg(32643)
 
@@ -227,7 +228,7 @@ def test_arterial_parallel_soak(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_planarize_nodes_two_crossing_chords() -> None:
     a = LineString([(0.0, 1.0), (2.0, 1.0)])
     b = LineString([(1.0, 0.0), (1.0, 2.0)])             # crosses a at (1, 1)
-    gdf = _planarize([a, b], UTM)
+    gdf = _planarize([a, b], UTM, 6.0)
     coords = {c for geom in gdf.geometry for c in geom.coords}
     assert (1.0, 1.0) in coords                    # crossing became a shared vertex
     assert len(gdf) == 4                           # each chord split into two at the crossing
@@ -248,7 +249,9 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (0.0, 9.0)])], crs=UTM)
     block = Block(block_id="long", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
-    roads = _greedy_arterials(block, mode="buildable", objective="directness", max_roads=3,
+    roads = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness", max_roads=3,
                               n_anchors=12)
     assert len(roads) >= 1
     assert roads.geometry.length.max() >= 6.0                        # a real lengthwise arterial
@@ -258,9 +261,13 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
 
 def test_greedy_is_deterministic() -> None:
     block = _grid_block(5)
-    r1 = _greedy_arterials(block, mode="buildable", objective="directness", max_roads=4,
+    r1 = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness", max_roads=4,
                            n_anchors=12)
-    r2 = _greedy_arterials(block, mode="buildable", objective="directness", max_roads=4,
+    r2 = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness", max_roads=4,
                            n_anchors=12)
     assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
 
@@ -269,7 +276,9 @@ def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     from reblock.budget import road_drainage
     from reblock.permeability import PermeabilityParams, permeability_curve
     block = _grid_block(6)
-    roads = _greedy_arterials(block, mode="buildable", objective="directness",
+    roads = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness",
                               max_roads=5, n_anchors=12)
     assert len(roads) >= 1
     assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
@@ -293,7 +302,9 @@ def test_arterial_proposal_wkt_unchanged() -> None:
 
 def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
     block = _grid_block(6)
-    roads = _greedy_arterials(block, mode="aspirational", objective="directness", max_roads=6,
+    roads = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="aspirational", objective="directness", max_roads=6,
                               n_anchors=12)
     # Build the road+street graph as a CSR (the nx-free scoring path's own builders) and read
     # node degree off the CSR's per-row nnz -- a real crossroads noded by `_planarize` shows up
@@ -367,10 +378,10 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
         cfg = compose(config_name="compare_config",
                       overrides=["shapefile=x", "methods=[greedy_arterial_displacement]"])
     m = instantiate(cfg.all_methods["greedy_arterial_displacement"])
-    assert (m.mode, m.objective, m.cost, m.corridor_m) == (
-        "aspirational", "directness", "displacement", 3.0)
+    assert (m.mode, m.objective, m.cost, m.road_width_m) == (
+        "aspirational", "directness", "displacement", 7.0)
     assert m.identity == ArterialIdentity(
-        mode="aspirational", objective="directness", cost="displacement", corridor_key=3.0,
+        mode="aspirational", objective="directness", cost="displacement", corridor_key=7.0,
         max_roads=15, n_anchors=32, top_k=8, lam=2.0, lazy=False,
         candidate_policy="grow", rescore_every=0, max_anchors=0)
 
@@ -414,7 +425,9 @@ def test_greedy_handles_multilinestring_streets() -> None:
     # rather than filter it out, or the greedy sees no anchors and returns an empty proposal.
     block = _holed_block()
     assert "Multi" in block.streets.geometry.iloc[0].geom_type    # precondition: streets ARE Multi
-    roads = _greedy_arterials(block, mode="buildable", objective="directness",
+    roads = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness",
                               max_roads=3, n_anchors=12)
     assert len(roads) >= 1
 
@@ -422,7 +435,7 @@ def test_greedy_handles_multilinestring_streets() -> None:
 def test_cost_displacement_in_identity() -> None:
     m = GreedyArterialReblocker(mode="aspirational", objective="directness", cost="displacement")
     assert m.identity == ArterialIdentity(
-        mode="aspirational", objective="directness", cost="displacement", corridor_key=3.0,
+        mode="aspirational", objective="directness", cost="displacement", corridor_key=7.0,
         max_roads=15, n_anchors=32, top_k=8, lam=2.0, lazy=False,
         candidate_policy="grow", rescore_every=0, max_anchors=0)
 
@@ -467,17 +480,17 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
     block = _two_arm_block(pts)
 
     roads_length = _greedy_arterials(block, mode="aspirational", objective="access", max_roads=1,
-                                     n_anchors=8, top_k=2, corridor_m=1.0, cost="length")
+                                     n_anchors=8, top_k=2, half_width_m=1.0, cost="length")
     roads_disp = _greedy_arterials(block, mode="aspirational", objective="access", max_roads=1,
-                                   n_anchors=8, top_k=2, corridor_m=1.0, cost="displacement")
+                                   n_anchors=8, top_k=2, half_width_m=1.0, cost="displacement")
 
     assert len(roads_length) == 1 and len(roads_disp) == 1
     # the cost switch changed WHICH road is proposed:
     assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt
     # ... to one that displaces fewer buildings (disk measure) than the length-optimal pick:
-    radii = building_radii(pts, corridor_m=1.0)
-    d_length = displacement(pts, radii, roads_length, corridor_m=1.0)
-    d_disp = displacement(pts, radii, roads_disp, corridor_m=1.0)
+    radii = building_radii(pts)
+    d_length = displacement(pts, radii, roads_length)
+    d_disp = displacement(pts, radii, roads_disp)
     assert d_disp < d_length
     assert d_disp == 1.0    # right arm's single (large-radius) point, fully inside its corridor
 
@@ -496,7 +509,7 @@ def _grid_block_with_points(building_points: gpd.GeoDataFrame, w: int = 8, h: in
 
 def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None:
     # The FINITE-vs-FINITE case the greedy denominator exists for: every candidate here displaces
-    # >0 buildings (points tile the whole block at corridor_m=1.0, so no free/zero-displacement
+    # >0 buildings (points tile the whole block at half_width_m=1.0, so no free/zero-displacement
     # escape chord exists), so the pick is decided by the raw/denom comparison, NOT the inf branch.
     # A heavy cluster sits astride the access-optimal corridor (x~2): cost="length" drives straight
     # through it (many displaced); cost="displacement" must swerve to a sparser corridor that
@@ -508,12 +521,12 @@ def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None
     block = _grid_block_with_points(pts)
 
     roads_length = _greedy_arterials(block, mode="aspirational", objective="access", max_roads=1,
-                                     n_anchors=10, top_k=4, corridor_m=1.0, cost="length")
+                                     n_anchors=10, top_k=4, half_width_m=1.0, cost="length")
     roads_disp = _greedy_arterials(block, mode="aspirational", objective="access", max_roads=1,
-                                   n_anchors=10, top_k=4, corridor_m=1.0, cost="displacement")
-    radii = building_radii(pts, corridor_m=1.0)
-    d_length = displacement(pts, radii, roads_length, corridor_m=1.0)
-    d_disp = displacement(pts, radii, roads_disp, corridor_m=1.0)
+                                   n_anchors=10, top_k=4, half_width_m=1.0, cost="displacement")
+    radii = building_radii(pts)
+    d_length = displacement(pts, radii, roads_length)
+    d_disp = displacement(pts, radii, roads_disp)
 
     assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt   # cost changed it
     assert d_disp > 0.0              # the pick DISPLACES -> the finite raw/denom branch, not inf
@@ -526,9 +539,9 @@ def test_cost_displacement_is_deterministic() -> None:
     pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
     block = _two_arm_block(pts)
     r1 = _greedy_arterials(block, mode="aspirational", objective="access", cost="displacement",
-                           max_roads=1, n_anchors=8, top_k=2, corridor_m=1.0)
+                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0)
     r2 = _greedy_arterials(block, mode="aspirational", objective="access", cost="displacement",
-                           max_roads=1, n_anchors=8, top_k=2, corridor_m=1.0)
+                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0)
     assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
 
 
@@ -544,11 +557,11 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
     block = Block(block_id=plain.block_id, crs=plain.crs, boundary=plain.boundary,
                  parcels=plain.parcels, streets=plain.streets, building_points=far_points)
     roads = _greedy_arterials(block, mode="aspirational", objective="access", cost="displacement",
-                              max_roads=1, n_anchors=12, corridor_m=1.0)
+                              max_roads=1, n_anchors=12, half_width_m=1.0)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 1.0                 # a real, non-degenerate candidate
-    far_radii = building_radii(far_points, corridor_m=1.0)
-    assert displacement(far_points, far_radii, roads, corridor_m=1.0) == 0.0
+    far_radii = building_radii(far_points)
+    assert displacement(far_points, far_radii, roads) == 0.0
 
 
 def test_displacement_objective_is_extent_aware_unlike_the_old_centroid_rule() -> None:
@@ -559,16 +572,18 @@ def test_displacement_objective_is_extent_aware_unlike_the_old_centroid_rule() -
     # block 40972: disk 2.84 -> 0.24). The disk `displacement` still credits it partial
     # displacement because the footprint's disk (r=NN/2) reaches into the corridor even though
     # the centroid does not.
-    road = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (10.0, 0.0)])], crs=UTM)
-    # two buildings 2 m apart -> NN dist 2 -> r = 1.0 each. Point A sits just past the 1 m
+    road = with_width(
+        gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (10.0, 0.0)])], crs=UTM), 2.0)
+    # a 2 m road -> 1 m half-width. two buildings 2 m apart -> NN dist 2 -> r = 1.0
+    # each. Point A sits just past the 1 m
     # corridor edge (y=1.5 -> d=0.5 < r=1.0 -> its disk grazes the corridor); point B is out of
     # disk range entirely (y=3.5 -> d=2.5 > r=1.0 -> contributes 0 either way).
     pts = gpd.GeoDataFrame(geometry=[Point(5.0, 1.5), Point(5.0, 3.5)], crs=UTM)
-    radii = building_radii(pts, corridor_m=1.0)
+    radii = building_radii(pts)
 
     corridor = road.geometry.buffer(1.0).union_all()
     assert not pts.geometry.within(corridor).any()          # OLD centroid rule: nobody displaced
-    d = displacement(pts, radii, road, corridor_m=1.0)
+    d = displacement(pts, radii, road)
     assert d > 0.0                                          # disk rule: A is partially displaced
 
 
@@ -585,7 +600,9 @@ def test_cost_repulsion_identity_and_valid_proposal() -> None:
     pts = gpd.GeoDataFrame(geometry=[Point(i + 0.5, j + 0.5) for i in range(8) for j in range(3)],
                            crs=UTM)
     block = _grid_block_with_points(pts)
-    roads = _greedy_arterials(block, mode="aspirational", objective="access", cost="repulsion",
+    roads = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="aspirational", objective="access", cost="repulsion",
                               max_roads=1, n_anchors=8, top_k=4)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 0.0             # a real, non-degenerate committed road
@@ -614,7 +631,9 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     base_depth = parcel_access_layers(block, None, tol=STREET_TOL, adj=adj).max()
     assert base_depth >= 5                              # precondition: a genuinely deep pocket
 
-    roads = _greedy_arterials(block, mode="buildable", objective="directness", cost="repulsion",
+    roads = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness", cost="repulsion",
                               max_roads=4, n_anchors=12)
     # (i) non-degeneracy: repulsion commits real, access-improving road(s) -- it reaches the
     # interior rather than building zero-benefit gap roads (a zero-benefit road has raw=0 -> gain=0
@@ -624,6 +643,6 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     assert depth_with_roads < base_depth                      # access strictly improves
     # (ii) the committed roads' total displacement is finite and non-trivial (a real corridor
     # through the building field), not degenerate.
-    radii = building_radii(pts, corridor_m=3.0)
-    disp = displacement(pts, radii, roads, corridor_m=3.0)
+    radii = building_radii(pts)
+    disp = displacement(pts, radii, roads)
     assert 0.0 < disp < float("inf")

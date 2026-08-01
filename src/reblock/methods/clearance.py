@@ -32,6 +32,7 @@ from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 _CLEARANCE_EPS = 0.3       # keeps node cost finite on a grid node sitting on a building point
 _SIGMOID_EPS = 1e-15       # clamps sigmoid strictly inside (0, 1); float64 underflows to exact
@@ -255,6 +256,9 @@ class ClearanceReblocker:
     repulsion: float = 0.0
     depth_target: int = 2
     max_roads: int = 400
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
     def identity(self) -> ClearanceIdentity | None:
@@ -284,7 +288,8 @@ class ClearanceReblocker:
         # Method.identity, already None). Else two prebuilt graphs collide on the eval-cache key.
         cacheable = self.substrate.identity is not None
         return Proposal(
-            block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+            block_id=block.block_id, crs=block.crs, edges=None,
+            roads=with_width(roads, self.road_width_m),
             proposal_id=pid, method="clearance",
             params={**params, "substrate": self.substrate.tag, "repulsion": self.repulsion,
                     "depth_target": self.depth_target},

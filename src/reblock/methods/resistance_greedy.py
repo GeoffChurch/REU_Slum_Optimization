@@ -58,12 +58,16 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.loop_closure import loop_candidates
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
     PermeabilityParams,
     _adaptive_r0,
     _footpath_conductance,
     _road_corridor,
     egress_power,
+    lane_width,
     permeability,
+    road_conductance,
+    with_width,
 )
 
 
@@ -87,14 +91,15 @@ def _path_road(
     return LineString(coords)
 
 
-def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]], r0: float
-          ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """(i, j, upgrade_gain, segment) for every adjacency edge: the conductance a road would ADD to
-    it, and the centroid-to-centroid segment a road must intersect to do so.
+def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]], r0: float,
+          road_width_m: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """(i, j, upgrade_gain, segment) for every adjacency edge: the conductance a two-way road of
+    `road_width_m` would ADD to it, and the centroid-to-centroid segment a road must intersect.
 
     Mirrors `permeability.egress_power`'s mesh assembly exactly -- same adjacency, same
-    `_footpath_conductance`, same `min(footpath, road)` monotonicity cap -- because the scorer
-    below is only valid if it differentiates the SAME Laplacian the metric solves.
+    `_footpath_conductance`, same `max(footpath, road)` switch -- because the scorer below is only
+    valid if it differentiates the SAME Laplacian the metric solves. The gain is floored at zero
+    for the same reason the metric takes a `max`: a road never makes an edge worse.
     """
     geoms = list(block.parcels.geometry)
     cent = [g.centroid for g in geoms]
@@ -114,11 +119,12 @@ def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]], r0: flo
     di = np.asarray(dists, dtype=np.float64)
     if di.size == 0:
         return ri, ci, np.zeros(0), np.empty(0, dtype=object)
-    road_g = params.g_road / di
-    foot_g = np.minimum(_footpath_conductance(di, r0, params.g_walk), road_g)
+    road_g = road_conductance(params, np.full(di.size,
+                                             lane_width(params, road_width_m)), di)
+    foot_g = _footpath_conductance(di, r0, params.g_walk)
     segs = np.array([LineString([(cx[0][a], cx[1][a]), (cx[0][b], cx[1][b])])
                      for a, b in zip(ri.tolist(), ci.tolist(), strict=True)], dtype=object)
-    return ri, ci, road_g - foot_g, segs
+    return ri, ci, np.maximum(road_g - foot_g, 0.0), segs
 
 
 def linearized_gain(
@@ -175,6 +181,9 @@ class ResistanceGreedyReblocker:
     min_gain_per_m: float = 1e-6
     seed: int = 0
     params: PermeabilityParams = field(default_factory=PermeabilityParams)
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
     def identity(self) -> ResistanceGreedyIdentity | None:
@@ -190,7 +199,7 @@ class ResistanceGreedyReblocker:
         del prior
         graph = self.substrate.build(block)
         crs = block.crs
-        empty = gpd.GeoDataFrame(geometry=[], crs=crs)
+        empty = with_width(gpd.GeoDataFrame(geometry=[], crs=crs), self.road_width_m)
         geoms = list(block.parcels.geometry)
         if len(geoms) == 0 or len(graph.pts) == 0:
             return self._proposal(block, empty, {"roads": 0, "stopped": "empty"})
@@ -198,8 +207,8 @@ class ResistanceGreedyReblocker:
         # Frozen once and reused for every candidate evaluation: the adjacency, the adaptive
         # corridor half-width and the no-roads baseline are properties of the BLOCK, not of the
         # road set, and recomputing them per candidate would dominate the cost.
-        # STREET_TOL, matching `egress_power`'s own default -- NOT corridor_m. Building the
-        # mesh at corridor_m (3.0 vs 0.5) gave a 6x looser adjacency than the evaluator
+        # STREET_TOL, matching `egress_power`'s own default -- NOT the road half-width. Building the
+        # mesh at the road half-width (3.0 vs 0.5) gave a 6x looser adjacency than the evaluator
         # scores, so this method optimized a different Laplacian than the one it is graded
         # on -- exactly what `_mesh`'s docstring says must not happen.
         adj = parcel_adjacency(geoms, STREET_TOL)
@@ -221,7 +230,7 @@ class ResistanceGreedyReblocker:
                  np.concatenate([graph.cols, graph.rows]))),
             shape=(len(graph.pts), len(graph.pts)))
 
-        ri, ci, dg, segs = _mesh(block, self.params, adj, r0)
+        ri, ci, dg, segs = _mesh(block, self.params, adj, r0, self.road_width_m)
         seg_tree = STRtree(list(segs)) if len(segs) else None
 
         roads: list[LineString] = []
@@ -237,9 +246,10 @@ class ResistanceGreedyReblocker:
             # ONE solve per round gives v = L^-1 b; every candidate is then scored in O(edges it
             # covers) by the first-order sensitivity, so ALL candidates are considered instead of
             # a random sample. See `linearized_gain`.
-            built = gpd.GeoDataFrame(geometry=roads, crs=crs) if roads else empty
+            built = with_width(gpd.GeoDataFrame(geometry=roads, crs=crs) if roads else empty,
+                    self.road_width_m)
             _p, v = egress_power(block, built, self.params, adj=adj, r0=r0)
-            corridor = _road_corridor(built, self.params.corridor_m)
+            corridor = _road_corridor(built, self.road_width_m / 2.0)
             # One indexed query instead of a shapely call per mesh edge -- the same hot spot
             # `permeability._covered_edges` fixes, and this runs once per greedy round.
             upgraded = np.zeros(len(segs), dtype=bool)
@@ -258,7 +268,8 @@ class ResistanceGreedyReblocker:
                 if road is not None and road.length > 0:
                     cands.append(road)
             if roads and self.loop_radius_m > 0:
-                built_gdf = gpd.GeoDataFrame(geometry=roads, crs=crs)
+                built_gdf = with_width(gpd.GeoDataFrame(geometry=roads, crs=crs),
+                        self.road_width_m)
                 cands += [c for c, _u, _v in loop_candidates(
                     built_gdf, block, search_radius_m=self.loop_radius_m,
                     min_loop_len_m=self.min_loop_len_m, snap_lam=2.0,
@@ -271,7 +282,7 @@ class ResistanceGreedyReblocker:
                 if seg_tree is None:
                     est = 0.0
                 else:
-                    hit = seg_tree.query(road.buffer(self.params.corridor_m),
+                    hit = seg_tree.query(road.buffer(self.road_width_m / 2.0),
                                          predicate="intersects")
                     est = float(edge_gain[hit].sum()) / road.length
                 ranked.append((est, road))
@@ -285,7 +296,8 @@ class ResistanceGreedyReblocker:
             # candidate.
             best_gain, best_road, best_per_m = 0.0, None, 0.0
             for _est, road in ranked[:max(self.shortlist, 1)]:
-                trial = gpd.GeoDataFrame(geometry=[*roads, road], crs=crs)
+                trial = with_width(gpd.GeoDataFrame(geometry=[*roads, road], crs=crs),
+                    self.road_width_m)
                 gain = permeability(block, trial, self.params, adj=adj, r0=r0) - current
                 per_m = gain / road.length
                 if per_m > best_per_m:
@@ -300,7 +312,8 @@ class ResistanceGreedyReblocker:
                 net.extend(pt_tree.query_ball_point([x, y], graph.net_tol))
             net = list(dict.fromkeys(net))
 
-        gdf = gpd.GeoDataFrame(geometry=roads, crs=crs)
+        gdf = with_width(gpd.GeoDataFrame(geometry=roads, crs=crs),
+                  self.road_width_m)
         return self._proposal(block, gdf, {"roads": len(roads), "stopped": stopped,
                                            "permeability": float(current)})
 
@@ -309,7 +322,8 @@ class ResistanceGreedyReblocker:
         pid = (f"resistance_greedy:{self.substrate.tag}:mr{self.max_roads}"
                f":s{self.shortlist}:g{self.min_gain_per_m:g}:seed{self.seed}")
         return Proposal(
-            block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+            block_id=block.block_id, crs=block.crs, edges=None,
+            roads=with_width(roads, self.road_width_m),
             proposal_id=pid, method="resistance_greedy",
             params={**params, "substrate": self.substrate.tag,
                     "shortlist": self.shortlist},

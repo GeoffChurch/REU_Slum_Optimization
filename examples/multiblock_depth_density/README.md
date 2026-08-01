@@ -37,9 +37,9 @@ The frontier is the whole trade-off: **permeability** (benefit — the only bene
 
 **Watch each method reblock** — its full road set added busiest-first, each road preceded by whatever it needs to reach the street, so every frame is a network you could actually build. The deep interior drains as the network reaches in:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths | Direct Objective (LP) |
+| Looped Tree | Loop Network | Grid | OSM Footpaths | Direct Objective (LP) |
 |---|---|---|---|---|
-| ![Looped Tree](reblock_clearance_looped.gif) | ![Grid](reblock_euclidean_grid.gif) | ![Throughways](reblock_greedy_arterial_repulsion.gif) | ![OSM Footpaths](reblock_osm_footpaths.gif) | ![Direct Objective (LP)](reblock_resistance_lp.gif) |
+| ![Looped Tree](reblock_clearance_looped.gif) | ![Loop Network](reblock_cycle_native.gif) | ![Grid](reblock_euclidean_grid.gif) | ![OSM Footpaths](reblock_osm_footpaths.gif) | ![Direct Objective (LP)](reblock_resistance_lp.gif) |
 
 ### Matched permeability (primary)
 
@@ -47,23 +47,23 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 965 m | 4.7% | 60.1% |  |
-| Grid | 2,068 m | 7.8% | 66.1% |  |
-| Throughways | 1,478 m | 5.1% | 60.9% |  |
-| OSM Footpaths | 4,760 m | 11.1% | 61.8% |  |
-| Direct Objective (LP) | 1,392 m | 1.5% | 60.1% |  |
+| Looped Tree | 874 m | 5.1% | 62.0% |  |
+| Loop Network | 787 m | 3.6% | 60.1% |  |
+| Grid | 2,068 m | 8.8% | 67.6% |  |
+| OSM Footpaths | 4,607 m | 11.6% | 60.6% |  |
+| Direct Objective (LP) | 1,200 m | 2.1% | 60.3% |  |
 
 Access-depth coloring:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths | Direct Objective (LP) |
+| Looped Tree | Loop Network | Grid | OSM Footpaths | Direct Objective (LP) |
 |---|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_perm_depth.png) | ![Grid](after_euclidean_grid_perm_depth.png) | ![Throughways](after_greedy_arterial_repulsion_perm_depth.png) | ![OSM Footpaths](after_osm_footpaths_perm_depth.png) | ![Direct Objective (LP)](after_resistance_lp_perm_depth.png) |
+| ![Looped Tree](after_clearance_looped_perm_depth.png) | ![Loop Network](after_cycle_native_perm_depth.png) | ![Grid](after_euclidean_grid_perm_depth.png) | ![OSM Footpaths](after_osm_footpaths_perm_depth.png) | ![Direct Objective (LP)](after_resistance_lp_perm_depth.png) |
 
 Permeability-potential coloring:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths | Direct Objective (LP) |
+| Looped Tree | Loop Network | Grid | OSM Footpaths | Direct Objective (LP) |
 |---|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_perm_perm.png) | ![Grid](after_euclidean_grid_perm_perm.png) | ![Throughways](after_greedy_arterial_repulsion_perm_perm.png) | ![OSM Footpaths](after_osm_footpaths_perm_perm.png) | ![Direct Objective (LP)](after_resistance_lp_perm_perm.png) |
+| ![Looped Tree](after_clearance_looped_perm_perm.png) | ![Loop Network](after_cycle_native_perm_perm.png) | ![Grid](after_euclidean_grid_perm_perm.png) | ![OSM Footpaths](after_osm_footpaths_perm_perm.png) | ![Direct Objective (LP)](after_resistance_lp_perm_perm.png) |
 
 ### Matched displacement (secondary)
 
@@ -71,23 +71,23 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 2,271 m | 10.1% | 78.4% |  |
-| Grid | 2,696 m | 10.5% | 70.6% |  |
-| Throughways | 3,625 m | 10.2% | 73.0% |  |
-| OSM Footpaths | 4,607 m | 10.1% | 58.5% |  |
-| Direct Objective (LP) | 6,546 m | 10.1% | 88.9% |  |
+| Looped Tree | 1,994 m | 10.2% | 78.8% |  |
+| Loop Network | 2,713 m | 10.2% | 81.3% |  |
+| Grid | 2,371 m | 10.2% | 71.0% |  |
+| OSM Footpaths | 4,147 m | 10.1% | 58.0% |  |
+| Direct Objective (LP) | 5,493 m | 10.0% | 87.0% |  |
 
 Access-depth coloring:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths | Direct Objective (LP) |
+| Looped Tree | Loop Network | Grid | OSM Footpaths | Direct Objective (LP) |
 |---|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_disp_depth.png) | ![Grid](after_euclidean_grid_disp_depth.png) | ![Throughways](after_greedy_arterial_repulsion_disp_depth.png) | ![OSM Footpaths](after_osm_footpaths_disp_depth.png) | ![Direct Objective (LP)](after_resistance_lp_disp_depth.png) |
+| ![Looped Tree](after_clearance_looped_disp_depth.png) | ![Loop Network](after_cycle_native_disp_depth.png) | ![Grid](after_euclidean_grid_disp_depth.png) | ![OSM Footpaths](after_osm_footpaths_disp_depth.png) | ![Direct Objective (LP)](after_resistance_lp_disp_depth.png) |
 
 Permeability-potential coloring:
 
-| Looped Tree | Grid | Throughways | OSM Footpaths | Direct Objective (LP) |
+| Looped Tree | Loop Network | Grid | OSM Footpaths | Direct Objective (LP) |
 |---|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_disp_perm.png) | ![Grid](after_euclidean_grid_disp_perm.png) | ![Throughways](after_greedy_arterial_repulsion_disp_perm.png) | ![OSM Footpaths](after_osm_footpaths_disp_perm.png) | ![Direct Objective (LP)](after_resistance_lp_disp_perm.png) |
+| ![Looped Tree](after_clearance_looped_disp_perm.png) | ![Loop Network](after_cycle_native_disp_perm.png) | ![Grid](after_euclidean_grid_disp_perm.png) | ![OSM Footpaths](after_osm_footpaths_disp_perm.png) | ![Direct Objective (LP)](after_resistance_lp_disp_perm.png) |
 
 
 ## How this was generated
@@ -95,7 +95,7 @@ Permeability-potential coloring:
 This example is machine-generated — one self-logging command emits the data, maps, curves, and this README:
 
 ```bash
-pixi run python -m scripts.gen_multiblock_example depth_density
+pixi run python -m scripts.gen_example depth_density
 ```
 The full run log is in [`run.log`](run.log).
 

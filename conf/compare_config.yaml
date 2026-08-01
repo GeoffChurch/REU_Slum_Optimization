@@ -25,7 +25,7 @@ all_methods:
   # block buildable tends to match or beat aspirational. The through-road advantage shows on
   # deep/elongated regions, where a straight road shortcuts trips a frontage tree can't.
   greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
-  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, corridor_m: 3.0}
+  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, road_width_m: 7.0}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
   demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", depth_target: 2, max_roads: 400}
 
@@ -46,10 +46,15 @@ all_methods:
   # Whole road set chosen at once by LP, budgeting DISPLACEMENT (what the lenses score) rather than
   # metres. Decides over paths, so connectivity is structural and the route-(A) rounding obstacle
   # dissolves. chunks is a Frank-Wolfe step count. See conf/method/resistance_lp.yaml.
-  resistance_lp: {_target_: reblock.methods.resistance_lp.ResistanceLPReblocker, substrate: "${substrate}", max_displacement: 0.10, chunks: 8}
+  # max_displacement 0.20, NOT 0.10: a method's own cap must sit clear of the Lens A budget
+  # (matched_displacement, 0.10) or the cap binds before the lens does and the lens compares a
+  # terminal network against everyone else's truncated prefix. At 0.10 cycle_native stopped at
+  # 0.0998 and read `at_budget: False` on the flagship region -- its headline Lens A number was
+  # its own cap, not its performance.
+  resistance_lp: {_target_: reblock.methods.resistance_lp.ResistanceLPReblocker, substrate: "${substrate}", max_displacement: 0.20, chunks: 8}
   # Cycle-native: each move is a loop from the street back to the street, so the output is
   # bridgeless by construction and every road can be oriented one-way. See conf/method/cycle_native.yaml.
-  cycle_native: {_target_: reblock.methods.cycle_native.CycleNativeReblocker, substrate: "${substrate}", max_displacement: 0.10, shortlist: 8}
+  cycle_native: {_target_: reblock.methods.cycle_native.CycleNativeReblocker, substrate: "${substrate}", max_displacement: 0.20, shortlist: 8}
   # Flow accumulation rather than drainage: route every trip, count edge traffic, keep the busiest.
   # Sparse, can contain loops, does not reach every parcel -- the properties real footpaths have and
   # a drainage tree cannot. flow_quantile is the hierarchy knob (low = footpath web, high = skeleton).
@@ -68,11 +73,10 @@ all_methods:
     # which bounds the expensive per-pair snap volume regardless of mesh density (see _subsample_pairs).
     search_radius_m: 45.0
     max_candidates: 1500
-  osm_footpaths: {_target_: reblock.methods.osm_footpaths.OsmFootpathsReblocker, source: "${desire_source}", corridor_m: 3.0}
+  osm_footpaths: {_target_: reblock.methods.osm_footpaths.OsmFootpathsReblocker, source: "${desire_source}", road_width_m: 7.0}
   euclidean_grid: {_target_: reblock.methods.euclidean_grid.EuclideanGridReblocker, spacing: 60.0, angle: 0.0, min_seg_len: 1.0, street_buffer: 0.5, seek_density: true, adaptive: true}
 methods: [topology, clearance, greedy_arterial_buildable]
 
-corridor_m: 3.0
 
 # Optional: sweep ONE base method over a param's values without hand-writing an all_methods entry
 # per value. Expands to `{base}_{param}{value}` methods appended to the run list, e.g.

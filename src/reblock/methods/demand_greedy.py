@@ -47,6 +47,7 @@ from reblock.methods.clearance import greedy_drainage
 from reblock.methods.desire_lines import DesireLineSource
 from reblock.methods.osm_footpaths import interior_desire_lines
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 # Guards the divide when an edge sits entirely outside the demand field, and sets how much cheaper
 # a fully-in-demand edge is than a fully-outside one: at gamma=1 the ratio is (eps+1)/eps = 11x.
@@ -119,6 +120,9 @@ class DemandGreedyReblocker:
     gamma: float = DEMAND_GAMMA
     depth_target: int = 2
     max_roads: int = 400
+    # Total width of the roads this method emits; stamped on every one. The metric has no
+    # global corridor to fall back on.
+    road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
     def identity(self) -> DemandGreedyIdentity | None:
@@ -155,7 +159,8 @@ class DemandGreedyReblocker:
         pid = (f"demand_greedy:{self.substrate.tag}:b{self.buffer_m:g}:e{self.eps:g}"
                f":g{self.gamma:g}:d{self.depth_target}:mr{self.max_roads}")
         return Proposal(
-            block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
+            block_id=block.block_id, crs=block.crs, edges=None,
+            roads=with_width(roads, self.road_width_m),
             proposal_id=pid, method="demand_greedy",
             params={**params, "substrate": self.substrate.tag, "buffer_m": self.buffer_m,
                     "eps": self.eps, "gamma": self.gamma, "depth_target": self.depth_target,

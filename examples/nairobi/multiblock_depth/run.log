@@ -1,1 +1,9 @@
-wrote examples/nairobi/multiblock_depth: 1 blocks / 4365 parcels; flagged 3313/16200; README + maps + lens CSVs
+[__main__][INFO] screen: flagged 3313/16200 blocks (0.3s)
+[__main__][INFO] region built: 1 blocks / 4365 parcels (15.4s)
+[scripts.compare_budgets][INFO] reblocked clearance_looped: 180 segments, 9429 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked euclidean_grid: 74 segments, 12731 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 5563 segments, 39496 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 10466 m (196.1s)
+[scripts.compare_budgets][INFO] reblocked osm_footpaths: 29 segments, 2885 m (0.0s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 5 methods (52.5s)
+wrote examples/nairobi/multiblock_depth: 1 blocks / 4365 parcels; flagged 3313/16200; 5 methods; README + maps + lens CSVs

@@ -9,7 +9,13 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.contracts import Block, Proposal
-from reblock.permeability import PermeabilityParams
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    PermeabilityParams,
+    lane_width,
+    road_conductance,
+    with_width,
+)
 from reblock.render import save_render as _real_save_render
 
 UTM = CRS.from_epsg(32643)
@@ -27,8 +33,9 @@ def _street_block(x0: int, block_id: str) -> Block:
 
 
 def _sparse_stub_block() -> tuple[Block, gpd.GeoDataFrame]:
-    # A 6x6 grid of 10m parcels fronting a street at y=0 (10m spacing keeps the default
-    # corridor_m=3.0 a strictly LOCAL band -- unlike 1m-cell fixtures, which corridor-saturate; see
+    # A 6x6 grid of 10m parcels fronting a street at y=0 (10m spacing keeps a default 6 m
+    # road's 3 m half-width a strictly LOCAL band -- unlike 1m-cell fixtures, which
+    # corridor-saturate; see
     # test_budget.py's `_permeability_grid_block_and_roads` for the same trap/fix), one building
     # point per parcel centroid (36 total). A single short stub road near one corner reaches only
     # its own immediate neighbourhood: at most 1 of 36 points falls inside its 3m corridor, so its
@@ -48,7 +55,9 @@ def _sparse_stub_block() -> tuple[Block, gpd.GeoDataFrame]:
     points = gpd.GeoDataFrame(geometry=[p.centroid for p in polys], crs=UTM)
     block = Block(block_id="sparse_stub", crs=UTM, boundary=boundary, parcels=parcels,
                  streets=streets, building_points=points)
-    roads = gpd.GeoDataFrame(geometry=[LineString([(5.0, 0.0), (5.0, 5.0)])], crs=UTM)
+    roads = with_width(
+        gpd.GeoDataFrame(geometry=[LineString([(5.0, 0.0), (5.0, 5.0)])], crs=UTM),
+        DEFAULT_ROAD_WIDTH_M)
     return block, roads
 
 
@@ -74,8 +83,12 @@ def test_load_permeability_config_reads_the_committed_yaml() -> None:
 
     params, matched_displacement, matched_permeability = load_permeability_config()
 
-    assert params.g_walk == 0.1 and params.g_road == 20.0 and params.g_street == 20.0
-    assert params.corridor_m == 3.0
+    assert params.g_walk == 0.1 and params.g_street == 20.0
+    # one lane at the calibrated 20.0 -- the invariant the lane re-base preserved,
+    # asserted so it survives the next re-base too
+    assert road_conductance(
+        params, lane_width(params, params.min_two_way_width_m), 1.0) == pytest.approx(20.0)
+    assert params.road_margin_m == 1.0
     assert params.r0_frac == 0.55
     assert 0.0 < matched_displacement < 1.0
     assert 0.0 < matched_permeability < 1.0
@@ -169,7 +182,7 @@ def test_run_permeability_lenses_singleton_region_skips_region_reblock(
     # `reblock.compare.compare`'s own singleton branch), NOT `region_reblock`: `region_reblock`/
     # `region_block` unions a single block's `streets` rows into ONE (Multi)LineString row, which a
     # method that filters `streets.geometry` by `isinstance(..., LineString)` (e.g. TopologyMethod,
-    # used single-block-only by gen_method_comparison.py) would then see as empty street geometry.
+    # used single-block-only by scripts/gen_example.py) would then see as empty street geometry.
     import scripts.compare_budgets as cb
     from reblock.methods.clearance import ClearanceReblocker
 

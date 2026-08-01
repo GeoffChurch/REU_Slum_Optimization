@@ -41,15 +41,24 @@ def _rnd(c: tuple[float, ...]) -> tuple[float, float]:
     return (round(c[0], 2), round(c[1], 2))
 
 
-def building_radii(building_points: GeoDataFrame, corridor_m: float) -> NDArray[np.float64]:
+DEFAULT_BUILDING_RADIUS_M = 3.0
+
+
+def building_radii(building_points: GeoDataFrame) -> NDArray[np.float64]:
     """Per-building disk radius = HALF the nearest-neighbor distance among the building points (the
     fair, non-overlapping 'as big as possible' footprint bound). Fewer than 2 points -> no neighbor,
-    so fall back to `corridor_m`. Coincident points get radius 0 (handled by `displacement`)."""
+    so fall back to `DEFAULT_BUILDING_RADIUS_M`. Coincident points get radius 0 (handled by
+    `displacement`).
+
+    The fallback used to be the global road corridor half-width, which conflated two unrelated
+    quantities: how wide a ROAD is, and how big a BUILDING is when we cannot measure it. Removing
+    the global corridor exposed that; they are separate constants now.
+    """
     n = len(building_points)
     if n == 0:
         return np.zeros(0, dtype=np.float64)
     if n < 2:
-        return np.full(n, float(corridor_m), dtype=np.float64)
+        return np.full(n, DEFAULT_BUILDING_RADIUS_M, dtype=np.float64)
     xy = np.column_stack([building_points.geometry.x.to_numpy(),
                           building_points.geometry.y.to_numpy()])
     dist, _ = cKDTree(xy).query(xy, k=2)     # k=2: self (0) + nearest other
@@ -57,15 +66,26 @@ def building_radii(building_points: GeoDataFrame, corridor_m: float) -> NDArray[
 
 
 def displacement(building_points: GeoDataFrame, radii: NDArray[np.float64],
-                 roads: GeoDataFrame, corridor_m: float) -> float:
+                 roads: GeoDataFrame) -> float:
     """Extent-aware expected homes displaced: each building is a disk (radius `radii[i]`); its
     contribution is the probability the road corridor grazes it under a uniform size prior,
-    c_i = max(0, 1 - d_i/r_i), d_i = distance from the point to roads.buffer(corridor_m). r_i = 0
-    (coincident points) counts iff d_i = 0. Returns Sum c_i; 0 with no roads or no points."""
+    c_i = max(0, 1 - d_i/r_i), d_i = distance from the point to the road corridor. r_i = 0
+    (coincident points) counts iff d_i = 0. Returns Sum c_i; 0 with no roads or no points.
+
+    Each road is buffered by its OWN `width_m`/2 -- width is a per-road property, so a narrow
+    one-way lane costs less corridor than a wide two-way street. The buffers are UNIONED, which is
+    what makes overlap free: two coincident opposing one-way lanes occupy one corridor and are
+    charged once, while separating them widens the union and costs more. No separate gap rule is
+    needed, and none exists.
+    """
     n = len(building_points)
     if n == 0 or roads is None or len(roads) == 0:
         return 0.0
-    corridor = roads.geometry.buffer(corridor_m).union_all()
+    if "width_m" not in roads.columns:
+        raise ValueError(
+            "roads must carry a 'width_m' column: road width is mandatory since the global "
+            "corridor width was removed. Methods set it on the roads they emit.")
+    corridor = roads.geometry.buffer(roads["width_m"].to_numpy(dtype=float) / 2.0).union_all()
     d = building_points.geometry.distance(corridor).to_numpy()
     r = np.asarray(radii, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -756,10 +776,10 @@ def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
 
 
 def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64],
-                           d_frac: float, *, corridor_m: float = 3.0,
+                           d_frac: float, *,
                            tol: float = STREET_TOL) -> GeoDataFrame:
     """The minimal drainage-ordered prefix of `roads` whose displacement FRACTION
-    (`displacement(block.building_points, radii, prefix, corridor_m) / n_buildings`) is
+    (`displacement(block.building_points, radii, prefix) / n_buildings`) is
     >= `d_frac`. Displacement is monotone non-decreasing as drainage-ordered roads are added (a
     growing prefix's buffered corridor union only grows, so every building's distance to it is
     non-increasing, hence each cᵢ is non-decreasing), so a binary search over the prefix length
@@ -777,7 +797,7 @@ def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.
         if n == 0:
             return 0.0
         return displacement(block.building_points, radii,
-                            cast(GeoDataFrame, ordered.iloc[:m]), corridor_m) / n
+                            cast(GeoDataFrame, ordered.iloc[:m])) / n
 
     total = len(ordered)
     if frac_at(total) < d_frac:                   # unreachable: best effort is all roads
@@ -837,7 +857,7 @@ def prefix_to_permeability(
 
 
 def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.float64], *,
-                       corridor_m: float = 3.0, n_points: int = 20,
+                       n_points: int = 20,
                        tol: float = STREET_TOL) -> Curve:
     """A Curve whose x is cumulative added road length (m) and whose y is the FRACTION of homes
     displaced, Σcᵢ / n_buildings (a rising COST in [0, 1]). Reuses the drainage-ordered _sweep.
@@ -847,7 +867,7 @@ def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.floa
     def _disp(prefix: GeoDataFrame | None) -> float:
         if prefix is None or len(prefix) == 0 or n == 0:
             return 0.0
-        return displacement(block.building_points, radii, prefix, corridor_m) / n
+        return displacement(block.building_points, radii, prefix) / n
 
     costs, vals = _sweep(block, roads, _disp, n_points, tol)
     return Curve(costs, vals)

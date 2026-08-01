@@ -58,8 +58,8 @@ def test_displacement_budget_is_respected(cap: float) -> None:
     block = _grid_block()
     roads = ResistanceLPReblocker(max_displacement=cap).propose(block).roads
     assert roads is not None and len(roads) > 0, "no roads: the cap is vacuous"
-    radii = building_radii(block.building_points, CORRIDOR_M)
-    got = displacement(block.building_points, radii, roads, CORRIDOR_M) / len(
+    radii = building_radii(block.building_points)
+    got = displacement(block.building_points, radii, roads) / len(
         block.building_points)
     assert got <= cap + 1e-9, f"displacement {got:.4f} exceeds cap {cap}"
 

@@ -94,6 +94,6 @@ def test_respects_its_displacement_budget(cap: float) -> None:
     assert roads is not None
     if not len(roads):
         return
-    radii = building_radii(block.building_points, 3.0)
-    got = displacement(block.building_points, radii, roads, 3.0) / len(block.building_points)
+    radii = building_radii(block.building_points)
+    got = displacement(block.building_points, radii, roads) / len(block.building_points)
     assert got <= cap + 1e-9, f"displacement {got:.4f} exceeds its own cap {cap}"

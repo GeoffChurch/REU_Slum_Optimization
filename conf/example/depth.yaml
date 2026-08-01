@@ -1,0 +1,27 @@
+# @package _global_
+# One example variant, entirely in config. `scripts/gen_example.py` is the single entry point for
+# every example; a variant differs ONLY in this file -- which region it grades (a metric-grown one
+# or a pinned block list) and which methods it runs.
+defaults:
+  - override /metric: depth
+  - override /screen: dense_compact
+  - override /region_builder: dense_cluster
+
+example:
+  slug: multiblock_depth
+  formula: "depth = √(n·A)/P  →  true peel rings from a street"
+  blurb: >-
+    The deepest street-access fabric: how many parcels a home sits from a street, regardless of
+    crowding.
+
+# null -> grow a region with the screen + region_builder above. A list pins exact blocks instead.
+block_ids: null
+methods: [clearance_looped, euclidean_grid, resistance_lp, cycle_native]
+max_blocks: 1
+region_builder: {max_buildings: 3000}
+all_methods:
+  clearance_looped:
+    base: {depth_target: 3, max_roads: 3000}
+    budget_frac: 0.30
+    search_radius_m: 60
+  euclidean_grid: {spacing: 250}   # coarser grid -> budget in the pack

@@ -1,14 +1,14 @@
 {
   "metric": "density_compactness",
-  "flagged": 2865,
-  "total_blocks": 83192,
   "deepest_block": "ZAF.9.3.1_1_44531",
   "deepest_depth": 4.0,
-  "region_members": 18,
   "region_parcels": 4615,
   "region_mean_depth": 5.111111111111111,
   "region_mean_density_per_ha": 145.71265884436443,
   "maps_url": "https://www.google.com/maps/@-34.01690,18.58833,16z",
-  "command": "pixi run python -m scripts.gen_multiblock_example density_compactness",
-  "maps_qr": "maps_qr.png"
+  "command": "pixi run python -m scripts.gen_example density_compactness",
+  "maps_qr": "maps_qr.png",
+  "flagged": 2865,
+  "total_blocks": 83192,
+  "region_members": 18
 }
