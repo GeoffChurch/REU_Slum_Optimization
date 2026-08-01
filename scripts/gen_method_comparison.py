@@ -34,7 +34,7 @@ from scripts.gen_multiblock_example import _tee_to_file
 # by design); `osm_footpaths` loads the committed OSM snapshot beside this file.
 BLOCK_ID = "ZAF.9.3.1_1_40972"
 METHODS = ("topology", "clearance", "clearance_looped", "cycle_native",
-           "euclidean_grid", "osm_footpaths")
+           "resistance_lp", "euclidean_grid", "osm_footpaths")
 OUT = Path("examples/method-comparison")
 
 log = logging.getLogger("gen_method_comparison")
@@ -60,7 +60,6 @@ def main() -> None:
         with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
             cfg = compose(config_name="compare_config", overrides=[
                 "data=capetown_full", f"block_ids=[[{BLOCK_ID}]]", "max_blocks=1",
-                "all_methods.greedy_arterial_repulsion.max_roads=8",
                 f"desire_source.snapshot={OUT}/desire_lines_40972.geojson"])
         source = cast(Source, instantiate(cfg.data))
         screen = cast(Screen, instantiate(cfg.screen))

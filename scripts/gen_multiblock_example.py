@@ -148,14 +148,6 @@ def main() -> None:
         "all_methods.clearance_looped.base.max_roads=3000",
         "all_methods.clearance_looped.budget_frac=0.30",
         "all_methods.clearance_looped.search_radius_m=60",
-        # `resistance_lp` is the only method with an INTERNAL displacement budget, so it must be
-        # given headroom above the lens's own D or it is treated differently from everything else:
-        # every other method proposes a full network and lets the lens truncate, while an LP capped
-        # at exactly the lens's D stops AT the budget instead of crossing it. The matched-
-        # displacement lens then reports it as "converged below budget" -- language meaning "ran out
-        # of roads", which is not what happened. Headroom restores uniform treatment: propose more
-        # than the lens needs, let the lens do the cutting.
-        "all_methods.resistance_lp.max_displacement=0.15",
         "all_methods.euclidean_grid.spacing=250"]   # coarser grid -> budget in the pack
     if metric_name in _ARTERIAL_MAX_ROADS:
         overrides.append(

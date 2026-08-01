@@ -51,7 +51,7 @@ Every method truncated where permeability first reaches the standard target, so 
 | Loop Network | 787 m | 3.6% | 60.1% |  |
 | Grid | 2,068 m | 8.8% | 67.6% |  |
 | OSM Footpaths | 4,607 m | 11.6% | 60.6% |  |
-| Direct Objective (LP) | 1,157 m | 2.4% | 60.1% |  |
+| Direct Objective (LP) | 1,200 m | 2.1% | 60.3% |  |
 
 Access-depth coloring:
 
@@ -75,7 +75,7 @@ Every method truncated to the same displacement %, so this compares the **permea
 | Loop Network | 2,713 m | 10.2% | 81.3% |  |
 | Grid | 2,371 m | 10.2% | 71.0% |  |
 | OSM Footpaths | 4,147 m | 10.1% | 58.0% |  |
-| Direct Objective (LP) | 5,564 m | 10.0% | 85.7% |  |
+| Direct Objective (LP) | 5,493 m | 10.0% | 87.0% |  |
 
 Access-depth coloring:
 

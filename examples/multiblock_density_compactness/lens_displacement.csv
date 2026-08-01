@@ -1,6 +1,6 @@
 method,road_m,displacement,permeability,at_budget
 clearance_looped,2284.0,0.1007,0.734912,True
 euclidean_grid,3553.8,0.1005,0.606693,True
-resistance_lp,4479.9,0.1003,0.762861,True
+resistance_lp,3993.9,0.1003,0.764031,True
 cycle_native,3024.9,0.1009,0.736118,True
 osm_footpaths,2727.0,0.1001,0.634892,True

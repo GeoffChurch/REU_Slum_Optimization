@@ -3,5 +3,6 @@ topology,141.9,0.1057,0.669625,True
 clearance,143.0,0.1225,0.677973,True
 clearance_looped,109.7,0.1006,0.644252,True
 cycle_native,242.4,0.1143,0.762799,True
+resistance_lp,237.1,0.1061,0.843784,True
 euclidean_grid,270.0,0.1485,0.702334,True
 osm_footpaths,233.7,0.1198,0.71979,True
