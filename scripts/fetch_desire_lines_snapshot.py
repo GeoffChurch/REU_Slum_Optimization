@@ -10,7 +10,7 @@ import resolves): `pixi run python -m scripts.fetch_desire_lines_snapshot <out.g
       data=nairobi_full metric=depth screen=dense_compact \
       region_builder=dense_cluster region_builder.max_buildings=3000
   # method-comparison (single deep block 40972):
-  ... examples/method-comparison/desire_lines_40972.geojson data=capetown_full \
+  ... examples/method-comparison/desire_lines_ZAF.9.3.1_1_40972.geojson data=capetown_full \
       block_ids=[[ZAF.9.3.1_1_40972]]
 """
 import sys

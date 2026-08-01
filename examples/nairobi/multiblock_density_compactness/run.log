@@ -3,7 +3,7 @@
 [__main__][INFO] region built: 43 blocks / 3547 parcels (3.1s)
 [scripts.compare_budgets][INFO] reblocked clearance_looped: 112 segments, 4987 m (0.0s)
 [scripts.compare_budgets][INFO] reblocked euclidean_grid: 93 segments, 11927 m (0.0s)
-[scripts.compare_budgets][INFO] reblocked resistance_lp: 4597 segments, 25891 m (30.8s)
-[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 10095 m (199.5s)
-[scripts.compare_budgets][INFO] lens/frontier curves computed for 4 methods (42.0s)
-wrote examples/nairobi/multiblock_density_compactness: 43 blocks / 3547 parcels; flagged 257/16200; README + maps + lens CSVs
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 4597 segments, 25891 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 10095 m (195.0s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 4 methods (40.2s)
+wrote examples/nairobi/multiblock_density_compactness: 43 blocks / 3547 parcels; flagged 257/16200; 4 methods; README + maps + lens CSVs

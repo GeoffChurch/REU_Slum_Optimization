@@ -182,7 +182,7 @@ def test_run_permeability_lenses_singleton_region_skips_region_reblock(
     # `reblock.compare.compare`'s own singleton branch), NOT `region_reblock`: `region_reblock`/
     # `region_block` unions a single block's `streets` rows into ONE (Multi)LineString row, which a
     # method that filters `streets.geometry` by `isinstance(..., LineString)` (e.g. TopologyMethod,
-    # used single-block-only by gen_method_comparison.py) would then see as empty street geometry.
+    # used single-block-only by scripts/gen_example.py) would then see as empty street geometry.
     import scripts.compare_budgets as cb
     from reblock.methods.clearance import ClearanceReblocker
 

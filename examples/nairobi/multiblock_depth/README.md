@@ -95,7 +95,7 @@ Permeability-potential coloring:
 This example is machine-generated — one self-logging command emits the data, maps, curves, and this README:
 
 ```bash
-pixi run python -m scripts.gen_multiblock_example depth nairobi
+pixi run python -m scripts.gen_example depth nairobi
 ```
 The full run log is in [`run.log`](run.log).
 

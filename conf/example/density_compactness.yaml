@@ -1,0 +1,27 @@
+# @package _global_
+# One example variant, entirely in config. `scripts/gen_example.py` is the single entry point for
+# every example; a variant differs ONLY in this file -- which region it grades (a metric-grown one
+# or a pinned block list) and which methods it runs.
+defaults:
+  - override /metric: density_compactness
+  - override /screen: dense_compact
+  - override /region_builder: dense_cluster
+
+example:
+  slug: multiblock_density_compactness
+  formula: "density × compactness = n/P²  —  dense, compact fabric (no peel)"
+  blurb: >-
+    Dense and compact from geometry alone — the tightest, most built-up blocks by building count
+    per perimeter², found without ever peeling a single parcel ring.
+
+# null -> grow a region with the screen + region_builder above. A list pins exact blocks instead.
+block_ids: null
+methods: [clearance_looped, euclidean_grid, resistance_lp, cycle_native]
+max_blocks: 1
+region_builder: {max_buildings: 3000}
+all_methods:
+  clearance_looped:
+    base: {depth_target: 3, max_roads: 3000}
+    budget_frac: 0.30
+    search_radius_m: 60
+  euclidean_grid: {spacing: 250}   # coarser grid -> budget in the pack

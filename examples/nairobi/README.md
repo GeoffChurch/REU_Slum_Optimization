@@ -4,7 +4,7 @@ The same screen → grow region → **frontier** pipeline as the [Cape Town mult
 examples](../README.md), run on **central Nairobi** — the country-wide Kenya kblock data clipped to
 the Nairobi metro bbox + Open Buildings (`data=nairobi_full`, ~16,200 blocks, auto-downloaded to
 `~/.cache/reblock`). Each variant is driven end to end by one composable `BlockMetric`; regenerate
-with `pixi run python -m scripts.gen_multiblock_example <metric> nairobi`.
+with `pixi run python -m scripts.gen_example <variant> nairobi`.
 
 | variant | metric | region | osm baseline |
 |---|---|---|---|

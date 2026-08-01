@@ -1,9 +1,9 @@
 [__main__][INFO] screen: flagged 13822/83192 blocks (1.1s)
-[__main__][INFO] region built: 3 blocks / 2690 parcels (73.7s)
+[__main__][INFO] region built: 3 blocks / 2690 parcels (72.1s)
 [scripts.compare_budgets][INFO] reblocked clearance_looped: 126 segments, 5114 m (0.0s)
 [scripts.compare_budgets][INFO] reblocked euclidean_grid: 14 segments, 3334 m (0.0s)
-[scripts.compare_budgets][INFO] reblocked resistance_lp: 2546 segments, 13891 m (47.0s)
-[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 7103 m (123.0s)
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 2546 segments, 13891 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 7103 m (120.3s)
 [scripts.compare_budgets][INFO] reblocked osm_footpaths: 87 segments, 6505 m (0.0s)
-[scripts.compare_budgets][INFO] lens/frontier curves computed for 5 methods (28.6s)
-wrote examples/multiblock_depth_density: 3 blocks / 2690 parcels; flagged 13822/83192; README + maps + lens CSVs
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 5 methods (30.1s)
+wrote examples/multiblock_depth_density: 3 blocks / 2690 parcels; flagged 13822/83192; 5 methods; README + maps + lens CSVs

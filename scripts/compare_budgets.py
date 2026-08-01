@@ -120,8 +120,9 @@ def _reblock_once(region: list[Block], method: Method) -> tuple[Block, Proposal]
     single-block path (`propose` directly on `region[0]`) rather than `region_reblock`:
     `region_reblock`/`region_block` unions `region[0].streets` into ONE row (a single (Multi)
     LineString), which a method that filters `streets.geometry` by `isinstance(..., LineString)`
-    (e.g. `TopologyMethod`, needed single-block-only by `gen_method_comparison.py`) would then see
-    as empty -- mirrors `reblock.compare.compare`'s identical singleton branch."""
+    (e.g. `TopologyMethod`, needed single-block-only by the `method_comparison`
+    example variant) would then see as empty -- mirrors `reblock.compare.compare`'s
+    identical singleton branch."""
     if len(region) == 1:
         block = region[0]
         return block, propose(method, block)
