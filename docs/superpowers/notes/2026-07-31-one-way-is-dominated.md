@@ -173,3 +173,62 @@ to be the only bridgeless method is stated in its docstring and now has an instr
 Deleted: the `CycleNativeReblocker.oneway` flag. It was a measured loser that nothing selected, and
 an option nobody sets is exactly the wart the no-legacy rule bans. The probe calls
 `strong_orientation` directly, so the result stays reproducible without it.
+
+## RE-BASED 2026-07-31 (owner sign-off): the floors are 4.0 / 7.0
+
+The floors were provisional at 3.5/6.0, which implied a 2.5 m lane — barely a light vehicle
+(~1.8-2.0 m), nothing for a service vehicle (~2.5 m) plus clearance. Access for fire, ambulance and
+refuse is the binding constraint in these settlements and is commonly cited at 3.0-4.0 m clear per
+lane. The floors now encode the low end of that range, a 3.0 m lane:
+
+    min_one_way_width_m  3.5 -> 4.0        DEFAULT_ROAD_WIDTH_M  6.0 -> 7.0
+    min_two_way_width_m  6.0 -> 7.0        g_road_per_m          8.0 -> 20/3
+
+Engineering judgement, not a specific jurisdiction's clause — both floors are in
+`conf/permeability.yaml` and are one edit away.
+
+**`g_road_per_m` had to move with it, and that is what makes the re-base clean.** The calibrated
+quantity is one LANE at 20.0 — that is what was tuned against `g_walk` for method discrimination.
+Believing a lane takes more SPACE is not a claim that it carries more traffic, so the per-metre rate
+falls in exact step: `20.0 / 3.0 m` keeps one lane at exactly 20.0. The re-based parameter set is
+self-consistent in the same way the old one was — `one_way_width(7.0) = 4.0` lands exactly on the
+one-way floor, just as `one_way_width(6.0) = 3.5` did.
+
+### What moved (`scratchpad/width/rebase_impact.py`, 24 blocks, identical geometry either side)
+
+| | median delta | direction |
+|---|---|---|
+| road metres | 0.0000 | 0/24 changed — geometry is fixed, the control |
+| permeability | **+0.0006** (+0.1%) | 24/24, max abs 0.0028 |
+| displacement | **+0.0565** (+9.9%) | 24/24 |
+
+Exactly the predicted shape: **the same function, honestly priced.** Conductance per covered edge is
+unchanged by construction, so permeability barely moves — the +0.1% is the wider corridor (3.5 m
+each side, not 3.0 m) catching a few more mesh edges. What rose is the COST: a buildable two-way
+street displaces ~10% more homes than the 6 m road we were costing.
+
+**Outstanding:** `examples/` was generated before the re-base and its displacement figures are ~10%
+low. Regenerating is a separate job, not done here.
+
+## osm_footpaths: two-way streets, and one-way there is VACUOUS
+
+An imported footpath is an ALIGNMENT — evidence of where people already walk — not a width claim. A
+real footpath is 1.5-3 m; the method proposes to WIDEN it into a street along that proven desire
+line, so `road_width_m` is what gets built and the displacement is the cost of the buildings that
+must go. A full two-way street (now 7 m) is therefore right, and the floors turn what used to be an
+accident into an explicit claim.
+
+The alternative — orient the footpath loops and build 4 m one-way — was measured and has nothing to
+operate on. `scratchpad/width/footpath_loops.py`, 400 Nairobi blocks via the local `.pbf` plus 4
+Cape Town blocks via Overpass:
+
+* **11 of 11 blocks with interior footpaths are 100% bridges. 0.000 of all footpath metres are
+  orientable.** Robbins forbids orienting a bridge, so the one-way option is not dominated here —
+  it is empty.
+* The mechanism is obvious in hindsight: clipping OSM ways to a block and subtracting the street
+  corridor leaves stubs and spurs, not cycles.
+
+Sample caveat: only 7 of 400 Nairobi blocks had ANY interior footpath (1.75%). That is consistent
+with the known low OSM footpath coverage recorded in the census work, and it is a separate finding
+worth its own attention — on this region `osm_footpaths` is a method that does nothing on ~98% of
+blocks.

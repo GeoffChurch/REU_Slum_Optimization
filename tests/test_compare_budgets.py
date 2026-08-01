@@ -9,7 +9,13 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.contracts import Block, Proposal
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams, with_width
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    PermeabilityParams,
+    lane_width,
+    road_conductance,
+    with_width,
+)
 from reblock.render import save_render as _real_save_render
 
 UTM = CRS.from_epsg(32643)
@@ -77,7 +83,11 @@ def test_load_permeability_config_reads_the_committed_yaml() -> None:
 
     params, matched_displacement, matched_permeability = load_permeability_config()
 
-    assert params.g_walk == 0.1 and (params.g_road_per_m * 2.5) == 20.0 and params.g_street == 20.0
+    assert params.g_walk == 0.1 and params.g_street == 20.0
+    # one lane at the calibrated 20.0 -- the invariant the lane re-base preserved,
+    # asserted so it survives the next re-base too
+    assert road_conductance(
+        params, lane_width(params, params.min_two_way_width_m), 1.0) == pytest.approx(20.0)
     assert params.road_margin_m == 1.0
     assert params.r0_frac == 0.55
     assert 0.0 < matched_displacement < 1.0

@@ -2,4 +2,4 @@ _target_: reblock.methods.arterial.GreedyArterialReblocker
 mode: aspirational
 objective: directness
 cost: displacement
-road_width_m: 6.0
+road_width_m: 7.0

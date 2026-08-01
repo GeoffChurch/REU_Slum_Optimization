@@ -4,7 +4,22 @@ rather than a synthesized one. It fetches those footpaths through a pluggable De
 (`OSMDesireLines`), clips them to the block, drops the parts that merely retrace existing streets,
 and returns the interior remainder as the intervention. Deriving desire-lines instead from satellite
 imagery or from the building-point geometry was explored and dropped -- neither cheap signal matches
-OSM's human-mapped network (see docs/superpowers/notes/2026-07-15-desire-line-detection.md)."""
+OSM's human-mapped network (see docs/superpowers/notes/2026-07-15-desire-line-detection.md).
+
+## What the width means
+
+An imported footpath is an ALIGNMENT -- evidence of where people already walk -- not a width claim.
+A real footpath is 1.5-3 m; what this method proposes is to WIDEN it into a street along that proven
+desire line, so `road_width_m` is the width of the road built there, and the displacement it scores
+is the cost of the buildings that must go to make room. That is why the default is a full two-way
+street rather than anything footpath-sized.
+
+Making them one-way instead (cheaper: 4 m against 7 m) was measured and is VACUOUS, not merely
+dominated: interior footpath geometry has no loops to orient. Across 400 Nairobi blocks and 4 Cape
+Town blocks, every block with interior footpaths was 100% bridges -- 0.000 of all footpath metres
+orientable (`scratchpad/width/footpath_loops.py`). Clipping OSM ways to a block and subtracting the
+street corridor leaves stubs and spurs, and Robbins forbids orienting a bridge.
+"""
 from __future__ import annotations
 
 import hashlib

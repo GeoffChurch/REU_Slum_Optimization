@@ -23,7 +23,7 @@ from reblock.methods.arterial import (
     _snap_graph,
 )
 from reblock.methods.boundary_graph import _boundary_graph
-from reblock.permeability import with_width
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 UTM = CRS.from_epsg(32643)
 
@@ -250,7 +250,8 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
     streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (0.0, 9.0)])], crs=UTM)
     block = Block(block_id="long", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
     roads = _greedy_arterials(
-        block, half_width_m=3.0, mode="buildable", objective="directness", max_roads=3,
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness", max_roads=3,
                               n_anchors=12)
     assert len(roads) >= 1
     assert roads.geometry.length.max() >= 6.0                        # a real lengthwise arterial
@@ -261,10 +262,12 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
 def test_greedy_is_deterministic() -> None:
     block = _grid_block(5)
     r1 = _greedy_arterials(
-        block, half_width_m=3.0, mode="buildable", objective="directness", max_roads=4,
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness", max_roads=4,
                            n_anchors=12)
     r2 = _greedy_arterials(
-        block, half_width_m=3.0, mode="buildable", objective="directness", max_roads=4,
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness", max_roads=4,
                            n_anchors=12)
     assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
 
@@ -273,7 +276,9 @@ def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     from reblock.budget import road_drainage
     from reblock.permeability import PermeabilityParams, permeability_curve
     block = _grid_block(6)
-    roads = _greedy_arterials(block, half_width_m=3.0, mode="buildable", objective="directness",
+    roads = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness",
                               max_roads=5, n_anchors=12)
     assert len(roads) >= 1
     assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
@@ -298,7 +303,8 @@ def test_arterial_proposal_wkt_unchanged() -> None:
 def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
     block = _grid_block(6)
     roads = _greedy_arterials(
-        block, half_width_m=3.0, mode="aspirational", objective="directness", max_roads=6,
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="aspirational", objective="directness", max_roads=6,
                               n_anchors=12)
     # Build the road+street graph as a CSR (the nx-free scoring path's own builders) and read
     # node degree off the CSR's per-row nnz -- a real crossroads noded by `_planarize` shows up
@@ -373,9 +379,9 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
                       overrides=["shapefile=x", "methods=[greedy_arterial_displacement]"])
     m = instantiate(cfg.all_methods["greedy_arterial_displacement"])
     assert (m.mode, m.objective, m.cost, m.road_width_m) == (
-        "aspirational", "directness", "displacement", 6.0)
+        "aspirational", "directness", "displacement", 7.0)
     assert m.identity == ArterialIdentity(
-        mode="aspirational", objective="directness", cost="displacement", corridor_key=6.0,
+        mode="aspirational", objective="directness", cost="displacement", corridor_key=7.0,
         max_roads=15, n_anchors=32, top_k=8, lam=2.0, lazy=False,
         candidate_policy="grow", rescore_every=0, max_anchors=0)
 
@@ -419,7 +425,9 @@ def test_greedy_handles_multilinestring_streets() -> None:
     # rather than filter it out, or the greedy sees no anchors and returns an empty proposal.
     block = _holed_block()
     assert "Multi" in block.streets.geometry.iloc[0].geom_type    # precondition: streets ARE Multi
-    roads = _greedy_arterials(block, half_width_m=3.0, mode="buildable", objective="directness",
+    roads = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness",
                               max_roads=3, n_anchors=12)
     assert len(roads) >= 1
 
@@ -427,7 +435,7 @@ def test_greedy_handles_multilinestring_streets() -> None:
 def test_cost_displacement_in_identity() -> None:
     m = GreedyArterialReblocker(mode="aspirational", objective="directness", cost="displacement")
     assert m.identity == ArterialIdentity(
-        mode="aspirational", objective="directness", cost="displacement", corridor_key=6.0,
+        mode="aspirational", objective="directness", cost="displacement", corridor_key=7.0,
         max_roads=15, n_anchors=32, top_k=8, lam=2.0, lazy=False,
         candidate_policy="grow", rescore_every=0, max_anchors=0)
 
@@ -593,7 +601,8 @@ def test_cost_repulsion_identity_and_valid_proposal() -> None:
                            crs=UTM)
     block = _grid_block_with_points(pts)
     roads = _greedy_arterials(
-        block, half_width_m=3.0, mode="aspirational", objective="access", cost="repulsion",
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="aspirational", objective="access", cost="repulsion",
                               max_roads=1, n_anchors=8, top_k=4)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 0.0             # a real, non-degenerate committed road
@@ -623,7 +632,8 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     assert base_depth >= 5                              # precondition: a genuinely deep pocket
 
     roads = _greedy_arterials(
-        block, half_width_m=3.0, mode="buildable", objective="directness", cost="repulsion",
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        mode="buildable", objective="directness", cost="repulsion",
                               max_roads=4, n_anchors=12)
     # (i) non-degeneracy: repulsion commits real, access-improving road(s) -- it reaches the
     # interior rather than building zero-benefit gap roads (a zero-benefit road has raw=0 -> gain=0

@@ -46,7 +46,7 @@ def test_one_way_width_equalizes_per_direction_conductance():
     # The derived rule: a one-way road matches a two-way road's PER-DIRECTION capacity at
     # (W + margin)/2 -- 3.5 m, not the naive 3.0 m, because both pay the margin once.
     w_one = one_way_width(PARAMS, DEFAULT_ROAD_WIDTH_M)
-    assert w_one == pytest.approx(3.5)
+    assert w_one == pytest.approx(4.0)                # re-based with the floors
     assert w_one > DEFAULT_ROAD_WIDTH_M / 2.0        # wider than half; the margin is why
     assert lane_width(PARAMS, w_one, oneway=True) == pytest.approx(
         lane_width(PARAMS, DEFAULT_ROAD_WIDTH_M))
@@ -73,7 +73,7 @@ def test_a_street_to_street_loop_is_orientable():
 
     out = strong_orientation(block, roads, params=PARAMS)
     assert out[ONEWAY_COL].all()
-    assert list(out[WIDTH_COL]) == pytest.approx([3.5, 3.5, 3.5])
+    assert list(out[WIDTH_COL]) == pytest.approx([4.0, 4.0, 4.0])
 
     # ...and the orientation is strongly connected: every node reaches every other. Street-touching
     # nodes contract to one, the same way `strong_orientation` models them.

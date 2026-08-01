@@ -15,7 +15,9 @@ def _roads(*lines: list[tuple[float, float]]) -> gpd.GeoDataFrame:
 def test_pct_paved_is_buffer_area_over_block_area() -> None:
     roads = _roads([(0, 0), (100, 0)])
     block_area = 10_000.0
-    expected = roads.geometry.buffer(3.0).union_all().area / block_area
+    # half-width read off the roads, not hardcoded -- this survives a width re-base
+    half = float(roads["width_m"].iloc[0]) / 2.0
+    expected = roads.geometry.buffer(half).union_all().area / block_area
     assert abs(pct_paved(roads, block_area) - expected) < 1e-9
     assert 0.0 < pct_paved(roads, block_area) < 1.0
 

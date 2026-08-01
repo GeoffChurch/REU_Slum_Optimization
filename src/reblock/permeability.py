@@ -78,9 +78,14 @@ class PermeabilityParams:
     # conductance of a standard road"), which only meant something relative to a standard width --
     # and so needed a global `corridor_m` that every road silently inherited. With width carried per
     # road there is no standard, so the parameter is per-metre and no reference width exists.
-    # 8.0 reproduces the old g_road=20.0 exactly: a default 6 m two-way road gave each direction
-    # (6 - 1)/2 = 2.5 m of usable width, and 8.0 * 2.5 = 20.0.
-    g_road_per_m: float = 8.0
+    #
+    # The CALIBRATED quantity is the conductance of one lane, 20.0 -- that is what was tuned against
+    # g_walk for method discrimination. So when the lane width was re-based from 2.5 m to 3.0 m
+    # (2026-07-31, see min_two_way_width_m), this rate had to fall with it: a wider belief about how
+    # much SPACE a lane takes is not a claim that a lane carries more traffic.
+    # 20.0 / 3.0 m keeps one lane at exactly 20.0, so a default road's conductance is
+    # unchanged by the re-base and only its footprint moved.
+    g_road_per_m: float = 6.666666666666667
     g_street: float = 20.0
     # Irreducible margin of a road corridor -- verge, drainage, wall clearance -- paid ONCE
     # regardless of how many lanes it carries. It does two jobs with one number:
@@ -107,12 +112,20 @@ class PermeabilityParams:
     #
     # Stated as two widths rather than `margin + k * lane`, because a clear-width minimum is what
     # access standards actually specify, and it keeps an invented lane constant out of the model.
-    # The defaults are TODAY'S values, so nothing moves -- but they are provisional: service access
-    # (fire, ambulance, refuse) is usually the binding constraint and is commonly cited at 3.0-4.0 m
-    # clear per lane, which would put the two-way floor at 7-9 m and make the shipped 6 m default
-    # illegal. Pinning them against a real standard is a re-baseline, not a tweak.
-    min_one_way_width_m: float = 3.5
-    min_two_way_width_m: float = 6.0
+    #
+    # RE-BASED 2026-07-31 (owner sign-off) from 3.5/6.0 to 4.0/7.0. The old pair implied a 2.5 m
+    # lane, which is barely a light vehicle (~1.8-2.0 m) and leaves nothing for a service vehicle
+    # (~2.5 m) plus clearance. Access for fire, ambulance and refuse is the binding constraint in
+    # these settlements and is commonly cited at 3.0-4.0 m clear per lane; 3.0 m is the low end of
+    # that range and is what these encode. ENGINEERING JUDGEMENT, not a specific jurisdiction's
+    # clause -- if a real local standard says otherwise these are one edit away, and both are
+    # exposed in conf/permeability.yaml.
+    #
+    # This is a re-baseline: a buildable two-way street is 7 m, not 6 m, so every method's roads
+    # displace more than they used to. Permeability per covered edge is unchanged (see
+    # g_road_per_m), so what moved is the COST side only -- the same function, honestly priced.
+    min_one_way_width_m: float = 4.0
+    min_two_way_width_m: float = 7.0
     r0_frac: float = 0.55   # r0 = r0_frac * median(building nearest-neighbour distance); see
                              # `_adaptive_r0`. Calibrated so r0 lands ~3m on
                              # multiblock_density_compactness (median NN ~5.2m) -- the flat
@@ -174,8 +187,11 @@ ONEWAY_COL = "oneway"
 WIDTH_COL = "width_m"
 
 
-DEFAULT_ROAD_WIDTH_M = 6.0
+DEFAULT_ROAD_WIDTH_M = 7.0
 """Total width of a road a method emits when nothing else specifies one.
+
+Equals `PermeabilityParams.min_two_way_width_m`: the default road is the narrowest street that can
+actually carry two directions. Re-based from 6.0 with the floors on 2026-07-31.
 
 Every method carries this as a `road_width_m` field, so it is a default a caller can override --
 never a global the metric falls back to. The metric itself has no default at all: roads without a
