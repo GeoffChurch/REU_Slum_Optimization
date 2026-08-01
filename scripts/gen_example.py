@@ -112,8 +112,11 @@ def main() -> None:
     # surface a committed example dir predates (lens_a_external.csv, curve_{external,internal}_
     # connectivity_*.png, depth_vs_road_*.png, displacement_*.png/*.csv,
     # frontier_{external,internal}_connectivity.csv) -- leaves no orphans (all regenerated below).
+    # `*.jpg` is in the list because renders used to be JPG-flattened and are not any more (see
+    # region_map below): 122 unreferenced fossils survived every regeneration because the old
+    # cleanup globbed only .png/.gif, and one of them was still linked from the top-level README.
     for pattern in ("reblock_*.gif", "after_*.png", "curve_*.png", "depth_vs_road_*.png",
-                    "displacement_*.png"):
+                    "displacement_*.png", "*.jpg"):
         for stale in out.glob(pattern):
             stale.unlink()
     for name in ("displacement_table.csv", "displacement_vs_length.csv",

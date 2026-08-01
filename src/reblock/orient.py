@@ -34,8 +34,9 @@ walk in prefix order. A method emits whole Dijkstra paths, and one of those can 
 
 Refusing such a row outright is the obvious rule and it is far too lossy: MEASURED on 8 real blocks
 it oriented 39% of road length against a Robbins ceiling of 95%, leaving 56 points of the discount
-unclaimed and understating one-way's case badly (`scratchpad/width/orient_coverage.py`). So a row is
-instead split into maximal runs of consistently-oriented segments, each emitted as its own road.
+unclaimed and understating one-way's case badly
+(`notes/2026-07-31-one-way-is-dominated.md`). So a row is instead split into maximal runs of
+consistently-oriented segments, each emitted as its own road.
 
 That changes row granularity, and finer rows let a method stop closer to a lens target. `oneway=
 False` therefore performs the IDENTICAL split and leaves everything two-way at full width -- it is

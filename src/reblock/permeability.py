@@ -29,7 +29,7 @@ Graph model (nodes = parcel centroids; ground = eliminated node at potential 0):
     edge and every region, so no clamp is needed. An earlier model had the road REPLACE the
     footpath outright and therefore had to cap every footpath edge at its own would-be upgrade;
     that cap is gone. Measured on 19,023 mesh edges across 60 real blocks, it never once fired
-    (`scratchpad/width/clamp_probe.py`), so removing it left every published number unchanged.
+    (`notes/2026-07-31-width-is-per-road.md`), so removing it left every published number unchanged.
   - ground edges: a parcel within STREET_TOL of the (unioned) street geometry gets a ground
     edge of conductance g_street, folded straight into that parcel's Laplacian diagonal
     (ground is eliminated, never a graph node).
@@ -304,7 +304,7 @@ def edge_conductances(
     edges, on an edge 2.9984 m from the centreline of a 3 m half-width corridor -- 1.6 mm inside,
     which the union buffer cut out and this one (correctly) keeps. It moved that block's
     permeability by 9.4e-10 relative; the other 59 were bit-identical
-    (`scratchpad/width/reduction_probe.py`). Everything else about the reduction is exact.
+    (`notes/2026-07-31-width-is-per-road.md`). Everything else about the reduction is exact.
 
     ## Properties
 
