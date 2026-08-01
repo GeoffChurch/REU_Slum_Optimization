@@ -430,6 +430,66 @@ there was effectively one informative block. **Not refuted, not supported -- inc
 n >= 20 with a budget where the loop refiner's loops actually exist, or with a synthetic same-length
 tree-vs-loop pair, if the redundancy question is worth reopening.
 
+## Width/direction solver layer -- PROMISING, and its premise is refuted (2026-07-31)
+
+Owner's proposal: methods emit undirected topology only; a solver layer between method and eval
+assigns per-road width and direction; the eval scores the solved network. Methods stay simple and
+the solver figures out where thin one-way road pays.
+
+**The decision variable is a 4-element lattice** -- the powerset of {forward, backward} ordered by
+inclusion, i.e. don't-build at the bottom, the two one-way directions incomparable in the middle,
+two-way on top. That is the right algebra and not merely a convenient picture, because BOTH benefit
+and cost are monotone up it, and the middle->top step is pure addition: forward capacity is
+IDENTICAL at one-way and two-way (20.0 either way, verified), so climbing adds the reverse direction
+and 3 m of width without trading anything away. That falls out of `one_way_width` being defined as
+the equal-per-direction-capacity width.
+
+Consequences:
+
+* **Truncation and flipping are the SAME decision** -- width 0 is "don't build" -- so this subsumes
+  the open "cheapest connected subnetwork subject to P* >= target" problem below, retiring the
+  arbitrary prefix ordering at the same time.
+* **There is NO Robbins feasibility constraint.** An earlier note here said orientability is
+  endogenous and needs a fixed-point iteration; that is WRONG. The reverse direction of a one-way
+  road falls back to footpath conductance, never zero, so nothing disconnects and the metric prices
+  a bad orientation by itself.
+* **Connectivity is upward-closed** (climbing only adds roads), so the feasible set is a filter.
+* The general form is N^2 -- (forward lanes, backward lanes) componentwise, width =
+  margin + (f+b)*LANE -- and the 4-element lattice is {0,1}^2. Note this does NOT reopen the
+  quantization question: continuous width is right for SCORING a road someone hands you (extra width
+  buys robustness to a blocking vehicle), integer lanes are right for the solver's CHOICE SET
+  (you build whole lanes). Different questions.
+* Lives per SEGMENT, not per road; `orient.strong_orientation` already splits at those boundaries.
+* NOT on the lattice: couplets (a parallel one-way pair replacing a two-way road) -- new geometry,
+  so a method move rather than a solver move.
+
+**Measured go/no-go** (`scratchpad/width/flip_vs_truncate.py`, 24 blocks x 3 methods): there are two
+ways to spend less displacement -- build fewer roads, or build thinner one-way roads -- and the
+question is which trades better. FLIP beats TRUNCATE at equal displacement on **54/72, median
++0.0193, p=0.0020**. The layer has real work to do.
+
+**But the premise is refuted.** The expectation was that loopy networks benefit most. They do not:
+
+    clearance_looped           +0.0269   24/24   p=1.2e-07     (0.37 orientable)
+    greedy_arterial_repulsion  +0.0236   21/24   p=2.5e-05     (0.79 orientable)
+    cycle_native               -0.0208    9/24   p=0.065       (0.50 orientable)
+
+`cycle_native`, the only genuinely circulating method, is the one place flipping LOSES. Likely
+because the benefit comes from SLACK, not loops: `clearance_looped` carries 487 m of road where ~72 m
+reaches the lens target, so there is surplus to flip cheaply, while `cycle_native`'s 230 m is all
+load-bearing and halving any road's reverse capacity bites. (At n=8 `cycle_native` read 5/8 POSITIVE
+-- the small-n instability this thread keeps producing. Use n >= 24.)
+
+So the layer is worth speccing as a general improvement, but NOT on the grounds that it rewards
+circulation -- it does the opposite. Feasibility looks fine: `resistance_greedy.linearized_gain`
+already gives one solve per round plus O(1) per candidate, which is what a solver over hundreds of
+roads needs; the probe's ~8 exact solves per step would be hopeless at region scale.
+
+**Open modelling wrinkle:** the footpath fallback means "go the wrong way at walking pace" -- right
+for pedestrian egress, wrong for vehicle access, since you cannot drive the wrong way up a one-way
+street. That is why there is no hard constraint, and it means one-way is probably UNDER-penalised
+for vehicle-dependent trips.
+
 ## Can permeability price CIRCULATION on its own? NO -- tested 2026-07-31
 
 The appealing idea: a network you can force one-way and still use is a circulating one, so the
