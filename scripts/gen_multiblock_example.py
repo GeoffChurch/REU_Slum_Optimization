@@ -197,8 +197,8 @@ def main() -> None:
         # example naming -- no JPG flatten step needed.
 
         methods = {n: cast(Method, instantiate(cfg.all_methods[n]))
-                   for n in ("greedy_arterial_repulsion", "clearance_looped", "euclidean_grid",
-                             "resistance_lp")}
+                   for n in ("clearance_looped", "euclidean_grid", "resistance_lp",
+                             "cycle_native")}
         # osm_footpaths: the real as-built informal network, from a committed per-region OSM
         # snapshot (fetched once by scripts.fetch_desire_lines_snapshot) so the example
         # reproduces offline.

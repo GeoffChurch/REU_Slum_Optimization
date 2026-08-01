@@ -1,1 +1,11 @@
+[reblock.screen.dense_compact][INFO] fine pass: 3354 survivors across 16 fork workers
+[reblock.screen.dense_compact][INFO] screen: 3354/16200 blocks selected by metric=depth_density (needs_peel=True)
+[__main__][INFO] screen: flagged 3354/16200 blocks (4.1s)
+[__main__][INFO] region built: 7 blocks / 5095 parcels (17.2s)
+[scripts.compare_budgets][INFO] reblocked clearance_looped: 181 segments, 9013 m (19.4s)
+[scripts.compare_budgets][INFO] reblocked euclidean_grid: 90 segments, 11927 m (0.3s)
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 5742 segments, 31209 m (46.0s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 9505 m (244.9s)
+[scripts.compare_budgets][INFO] reblocked osm_footpaths: 28 segments, 2427 m (0.1s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 5 methods (59.2s)
 wrote examples/nairobi/multiblock_depth_density: 7 blocks / 5095 parcels; flagged 3354/16200; README + maps + lens CSVs

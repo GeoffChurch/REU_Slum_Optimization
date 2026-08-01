@@ -10,5 +10,7 @@
 # See reblock.methods.cycle_native.CycleNativeReblocker.
 _target_: reblock.methods.cycle_native.CycleNativeReblocker
 substrate: ${substrate}
-max_displacement: 0.10
+# Must sit clear of the Lens A budget (matched_displacement, 0.10) or this cap
+# binds before the lens does -- see conf/compare_config.yaml.
+max_displacement: 0.20
 shortlist: 8

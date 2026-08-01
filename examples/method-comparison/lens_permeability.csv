@@ -1,7 +1,7 @@
 method,road_m,displacement,permeability,reached
-topology,108.7,0.0737,0.60474,True
-clearance,174.4,0.1216,0.604595,True
-greedy_arterial_repulsion,183.5,0.1148,0.708773,True
-clearance_looped,100.5,0.0918,0.616198,True
-euclidean_grid,270.0,0.1310,0.698973,True
-osm_footpaths,120.1,0.0434,0.620949,True
+topology,93.0,0.0714,0.607417,True
+clearance,89.4,0.0792,0.607512,True
+clearance_looped,96.9,0.0834,0.632594,True
+cycle_native,117.4,0.0668,0.689201,True
+euclidean_grid,270.0,0.1485,0.702334,True
+osm_footpaths,161.1,0.0779,0.66249,True

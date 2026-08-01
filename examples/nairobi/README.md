@@ -19,8 +19,8 @@ with `pixi run python -m scripts.gen_multiblock_example <metric> nairobi`.
   exceeds the budget (a 1-block "multiblock"), while `density_compactness`'s tiny blocks take 89 to
   fill it (a few are skipped for invalid cadastral geometry). No single budget fixes both.
 - **OSM coverage.** The `depth`/`depth_density` regions have usable mapped footpaths, but the
-  `density_compactness` region has essentially none, so its frontier grades only `clearance` and
-  `greedy_arterial` (no as-built `osm_footpaths` line).
+  `density_compactness` region has essentially none, so its frontier grades only the
+  synthesized methods (no as-built `osm_footpaths` line).
 
 The screens and metric behaviour carry over cleanly; the region-growth tuning and OSM coverage are
 what differ. Building points and dimmed surrounding blocks are overlaid on every heatmap.

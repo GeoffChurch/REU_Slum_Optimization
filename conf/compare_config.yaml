@@ -46,10 +46,15 @@ all_methods:
   # Whole road set chosen at once by LP, budgeting DISPLACEMENT (what the lenses score) rather than
   # metres. Decides over paths, so connectivity is structural and the route-(A) rounding obstacle
   # dissolves. chunks is a Frank-Wolfe step count. See conf/method/resistance_lp.yaml.
-  resistance_lp: {_target_: reblock.methods.resistance_lp.ResistanceLPReblocker, substrate: "${substrate}", max_displacement: 0.10, chunks: 8}
+  # max_displacement 0.20, NOT 0.10: a method's own cap must sit clear of the Lens A budget
+  # (matched_displacement, 0.10) or the cap binds before the lens does and the lens compares a
+  # terminal network against everyone else's truncated prefix. At 0.10 cycle_native stopped at
+  # 0.0998 and read `at_budget: False` on the flagship region -- its headline Lens A number was
+  # its own cap, not its performance.
+  resistance_lp: {_target_: reblock.methods.resistance_lp.ResistanceLPReblocker, substrate: "${substrate}", max_displacement: 0.20, chunks: 8}
   # Cycle-native: each move is a loop from the street back to the street, so the output is
   # bridgeless by construction and every road can be oriented one-way. See conf/method/cycle_native.yaml.
-  cycle_native: {_target_: reblock.methods.cycle_native.CycleNativeReblocker, substrate: "${substrate}", max_displacement: 0.10, shortlist: 8}
+  cycle_native: {_target_: reblock.methods.cycle_native.CycleNativeReblocker, substrate: "${substrate}", max_displacement: 0.20, shortlist: 8}
   # Flow accumulation rather than drainage: route every trip, count edge traffic, keep the busiest.
   # Sparse, can contain loops, does not reach every parcel -- the properties real footpaths have and
   # a drainage tree cannot. flow_quantile is the hierarchy knob (low = footpath web, high = skeleton).

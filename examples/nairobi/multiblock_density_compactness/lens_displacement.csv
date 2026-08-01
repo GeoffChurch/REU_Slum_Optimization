@@ -1,4 +1,5 @@
 method,road_m,displacement,permeability,at_budget
-greedy_arterial_repulsion,1819.9,0.0202,0.205563,False
-clearance_looped,485.2,0.0089,0.289398,False
-euclidean_grid,4459.0,0.1008,0.455365,True
+clearance_looped,3729.1,0.1003,0.809449,True
+euclidean_grid,9842.4,0.1027,0.690792,True
+resistance_lp,14030.9,0.1001,0.922385,True
+cycle_native,10095.0,0.0694,0.748914,False

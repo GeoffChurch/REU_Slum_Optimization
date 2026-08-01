@@ -33,7 +33,7 @@ from scripts.gen_multiblock_example import _tee_to_file
 # here so the flagship reproduces exactly. `greedy_arterial_repulsion` is capped to 8 roads (sparse
 # by design); `osm_footpaths` loads the committed OSM snapshot beside this file.
 BLOCK_ID = "ZAF.9.3.1_1_40972"
-METHODS = ("topology", "clearance", "greedy_arterial_repulsion", "clearance_looped",
+METHODS = ("topology", "clearance", "clearance_looped", "cycle_native",
            "euclidean_grid", "osm_footpaths")
 OUT = Path("examples/method-comparison")
 

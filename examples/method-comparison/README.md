@@ -4,10 +4,9 @@ Six reblockers graded head-to-head by a single flow metric — **permeability** 
 — **displacement** — on one deep informal block small enough that even `topology` runs (it's
 **single-block-only**: a multi-block region gives it a disconnected source node and it crashes). The
 six span the families this project ships: whole-graph `topology`, least-cost `clearance` and its
-loop-closing refinement `clearance_looped`, the repulsion-cost arterial `greedy_arterial_repulsion`
-(it scores benefit **per home displaced** — a soft, never-zero proximity cost — so it routes *around*
-homes, and runs via **CELF/lazy** so it scales), a Manhattan `euclidean_grid`, and the real as-built
-`osm_footpaths`. The companion [`multiblock_depth`](../multiblock_depth/) flagship runs the scalable
+loop-closing refinement `clearance_looped`, the cycle-native `cycle_native` (its atomic move is a
+**loop** out from the street and back, so it is bridgeless by construction rather than a tree with
+connectors bolted on), a Manhattan `euclidean_grid`, and the real as-built `osm_footpaths`. The companion [`multiblock_depth`](../multiblock_depth/) flagship runs the scalable
 methods on a whole settlement.
 
 The block is **`ZAF.9.3.1_1_40972`** — the deepest block (by the depth proxy `√(n·A)/P`) in a
@@ -46,7 +45,7 @@ pixi run python -m scripts.gen_method_comparison
 ```
 It reblocks the pinned block with each method (from ONE propose each), renders a before-heatmap plus
 per-method after-heatmaps in both colourings, and builds the permeability-vs-displacement frontier.
-`topology` is the slow pole (~7 min); `greedy_arterial_repulsion` runs via CELF/lazy in seconds.
+`topology` is the slow pole (~7 min); every other method runs in seconds.
 `osm_footpaths` loads a committed OSM snapshot (`desire_lines_40972.geojson`, 22 mapped ways — see
 `scripts/fetch_desire_lines_snapshot.py`). The console output is captured in [`run.log`](run.log), the
 source of truth for the tables below.
@@ -68,14 +67,12 @@ dominance reads straight off it: up-and-to-the-left is better (more permeability
 
 ![permeability vs displacement](frontier_ZAF.9.3.1_1_40972.png)
 
-The shape tells the story. **`osm_footpaths` (magenta) owns the efficient low-displacement frontier** —
-the loopy real network buys the most permeability for the fewest homes across the whole cheap range,
-with **`greedy_arterial_repulsion` (green) just behind it** as the best optimiser. **`clearance`
-(yellow) is the laggard through the critical mid-range** — a least-cost drainage *tree* has no
-redundancy by construction, so it visibly *plateaus* around 10–20% displacement while every looped
-network keeps climbing. `euclidean_grid` (blue) starts slowest of all (a blind grid wastes its first
-roads far from the deep core), and `clearance_looped` (cyan) runs longest, reaching the highest
-*absolute* permeability but only by paving to heavy displacement.
+The shape tells the story, and it is a story about **loops**. The two networks that carry real
+circulation — the as-built `osm_footpaths` and the cycle-native `cycle_native` — buy the most
+permeability for the fewest homes, while **`clearance` is the laggard through the critical
+mid-range**: a least-cost drainage *tree* has no redundancy by construction, so it plateaus while
+every looped network keeps climbing. `euclidean_grid` starts slowest of all (a blind grid wastes
+its first roads far from the deep core) and only catches up by paving to heavy displacement.
 
 ## Lens A — matched displacement: permeability at an equal home-cost
 
@@ -85,12 +82,12 @@ at the budget):
 
 | method | road | displacement | **permeability** |
 |---|---|---|---|
-| **osm_footpaths** | 274 m | 12.8% | **0.823** |
-| greedy_arterial_repulsion | 183 m | 11.5% | 0.709 |
-| euclidean_grid | 270 m | 13.1% | 0.699 |
-| clearance_looped | 139 m | 11.3% | 0.661 |
-| topology | 186 m | 10.4% | 0.646 |
-| clearance | 143 m | 10.2% | **0.588** |
+| **cycle_native** | 242 m | 11.4% | **0.763** |
+| osm_footpaths | 234 m | 12.0% | 0.720 |
+| euclidean_grid | 270 m | 14.9% | 0.702 |
+| clearance | 143 m | 12.3% | 0.678 |
+| topology | 142 m | 10.6% | 0.670 |
+| clearance_looped | 110 m | 10.1% | **0.644** |
 
 At an equal ~10% home-cost, **the real footpaths are the most permeable network** (0.823) — the paths
 people already walk form a loopy mesh no optimiser here beats at this budget — with the repulsion
