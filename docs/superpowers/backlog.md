@@ -494,6 +494,11 @@ road at all (coverage, worst-case parcel access, N-1 style), because permeabilit
 delete a road and spend the savings elsewhere. Absent that, the middle of the lattice has no reason
 to be selected and the layer has nothing to add.
 
+**Code status: `src/reblock/width_solver.py` is IN THE TREE AND UNUSED** (owner's call 2026-08-02),
+kept so a variant can be tried without rewriting ~200 lines. Nothing imports it outside
+`tests/test_width_solver.py`. It is a wart under the repo's own no-legacy rule for as long as that
+stays true -- **delete it if the variant above is not attempted.**
+
 **But the premise is refuted.** The expectation was that loopy networks benefit most. They do not:
 
     clearance_looped           +0.0269   24/24   p=1.2e-07     (0.37 orientable)

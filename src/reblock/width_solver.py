@@ -1,5 +1,32 @@
 """Choose a per-road width and direction for a network someone else drew.
 
+## NOT WIRED IN. Measured at region scale and it did not pay.
+
+Nothing imports this outside its own tests. It is kept in the tree only so a variant can be tried
+without rewriting it -- if it is still unused when someone next reads this, delete it; an option
+nobody selects is exactly the wart the repo's no-legacy rule bans.
+
+Against the lens's own prefix truncation on the 4,615-parcel density_compactness region:
+
+    promote from `don't build`   better on  6/12   median -0.0134
+    demote  from two-way         better on  3/12   median -0.0266
+
+Cost was never the problem (1.6 s median, 30 s worst) -- the batched `linearized_gain` scoring
+works. The problem is that the lattice's MIDDLE elements are dominated in both search directions:
+promoting, one-way offers ~0.5x the gain for 0.57x the cost, so two-way always wins gain-per-metre;
+demoting, dropping a road forfeits everything but saves everything and wins the ratio. One-way was
+chosen 0-17 times out of 8-3,522 pieces. With the middle unused this is just road SELECTION, and it
+loses to `budget.street_first_ordered` at every budget.
+
+The block-scale result that motivated it (flip beats truncate, 54/72, p=0.0020) does not translate
+because that probe FORCED the topology to stay and only allowed narrowing. Given the freedom to drop
+a road instead, the optimizer drops.
+
+**What would have to change to make this worth wiring in:** a benefit term that values keeping a
+road at all -- coverage, worst-case parcel access, N-1 resilience -- because permeability alone is
+content to delete a road and spend the savings elsewhere. Without one the middle of the lattice has
+no reason to be selected. See the backlog entry for the full record.
+
 A method proposes TOPOLOGY -- where roads go. What each of those roads should BE is a separate
 question, and one the methods currently answer by fiat: every road comes out a full two-way street.
 This solves it instead.
