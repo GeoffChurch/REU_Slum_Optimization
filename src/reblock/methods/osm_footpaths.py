@@ -14,11 +14,12 @@ desire line, so `road_width_m` is the width of the road built there, and the dis
 is the cost of the buildings that must go to make room. That is why the default is a full two-way
 street rather than anything footpath-sized.
 
-Making them one-way instead (cheaper: 4 m against 7 m) was measured and is VACUOUS, not merely
-dominated: interior footpath geometry has no loops to orient. Across 400 Nairobi blocks and 4 Cape
-Town blocks, every block with interior footpaths was 100% bridges -- 0.000 of all footpath metres
-orientable (`scratchpad/width/footpath_loops.py`). Clipping OSM ways to a block and subtracting the
-street corridor leaves stubs and spurs, and Robbins forbids orienting a bridge.
+Making them one-way instead (cheaper: 4 m against 7 m) is MARGINAL rather than useful: interior
+footpath geometry is mostly bridges, and Robbins forbids orienting a bridge. On 30 Nairobi blocks
+the OSM census says carry >=250 m of interior footpath, 21/30 are bridges end to end and only
+**18.8% of all footpath metres are orientable at all**. Combined with the finding that one-way loses
+to two-way at equal buildable footprint anyway
+(`notes/2026-07-31-one-way-is-dominated.md`), there is no case for it here.
 """
 from __future__ import annotations
 
