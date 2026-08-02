@@ -118,6 +118,13 @@ def segment_displacement(
     Mirrors `budget.displacement` term for term -- `c = clip(1 - d/r)` with `d` measured to the
     corridor, `r == 0` counting iff `d <= 0` -- so that the max of these over the chosen segments
     is the exact union displacement, not an approximation of it.
+
+    ONLY VALID FOR SHORT SEGMENTS. The prefilter queries balls around the geometry's VERTICES, so a
+    building beside the middle of a long span -- further than `half_width_m + rmax` from either end
+    -- is never considered and silently contributes zero. That is sound here, where `seg_geom` is
+    per-graph-edge and a few metres long. Reusing this on whole roads under-counted by 22% on a
+    60 m fixture, which is why the width-solver experiment computed its own per-piece table instead
+    of calling this.
     """
     if len(pts) == 0:
         return [(np.zeros(0, dtype=np.int64), np.zeros(0)) for _ in seg_geom]
