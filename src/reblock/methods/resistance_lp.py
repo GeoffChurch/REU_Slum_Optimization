@@ -118,18 +118,29 @@ def segment_displacement(
     Mirrors `budget.displacement` term for term -- `c = clip(1 - d/r)` with `d` measured to the
     corridor, `r == 0` counting iff `d <= 0` -- so that the max of these over the chosen segments
     is the exact union displacement, not an approximation of it.
+
+    The prefilter measures to the SEGMENT, not to its vertices. An earlier version queried balls
+    around each vertex, which silently missed any building beside the middle of a span longer than
+    `2 * (half_width_m + rmax)` -- and 8.31% of this method's own substrate edges are that long
+    (measured over 23,746 edges on 10 blocks, longest 38 m against an ~18 m threshold), so the
+    "exact union displacement" claim above was false and the LP under-counted what it had spent.
+    One bulk `dwithin` query costs no more than the per-vertex ball queries it replaces.
     """
     if len(pts) == 0:
         return [(np.zeros(0, dtype=np.int64), np.zeros(0)) for _ in seg_geom]
     xy = np.column_stack([pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy()])
-    tree = cKDTree(xy)
     rmax = float(radii.max()) if radii.size else 0.0
+    # One query for every segment at once: (input index, point index) pairs within reach of the
+    # SEGMENT. Sorting by input index lets each segment's slice be taken without a Python loop.
+    tree = STRtree(shapely.points(xy))
+    pairs = tree.query(np.asarray(seg_geom, dtype=object), predicate="dwithin",
+                       distance=half_width_m + rmax)
+    order = np.argsort(pairs[0], kind="stable")
+    seg_of, pt_of = pairs[0][order], pairs[1][order]
+    starts = np.searchsorted(seg_of, np.arange(len(seg_geom) + 1))
     out: list[tuple[np.ndarray, np.ndarray]] = []
-    for g in seg_geom:
-        near = np.asarray(tree.query_ball_point(np.asarray(g.coords), half_width_m + rmax,
-                                                return_sorted=False), dtype=object)
-        idx = np.unique(np.concatenate([np.asarray(a, dtype=np.int64) for a in near])
-                        ) if near.size else np.zeros(0, dtype=np.int64)
+    for k, g in enumerate(seg_geom):
+        idx = np.unique(pt_of[starts[k]:starts[k + 1]].astype(np.int64))
         if idx.size == 0:
             out.append((idx, np.zeros(0)))
             continue

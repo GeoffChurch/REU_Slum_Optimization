@@ -9,4 +9,6 @@ def test_friendly_method_name_maps_known_keys() -> None:
 
 
 def test_friendly_method_name_falls_back_to_raw_key_for_unmapped_method() -> None:
-    assert friendly_method_name("topology") == "topology"
+    # A key that is deliberately not a method, so labelling a real one cannot break this the way
+    # mapping `topology` did.
+    assert friendly_method_name("not_a_registered_method") == "not_a_registered_method"

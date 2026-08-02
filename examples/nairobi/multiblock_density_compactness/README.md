@@ -73,7 +73,7 @@ Every method truncated to the same displacement %, so this compares the **permea
 | Looped Tree | 3,729 m | 10.0% | 80.9% |  |
 | Loop Network | 10,095 m | 6.9% | 74.9% | converged below budget |
 | Grid | 9,842 m | 10.3% | 69.1% |  |
-| Direct Objective (LP) | 11,737 m | 10.0% | 92.7% |  |
+| Direct Objective (LP) | 11,827 m | 10.0% | 92.8% |  |
 
 Access-depth coloring:
 

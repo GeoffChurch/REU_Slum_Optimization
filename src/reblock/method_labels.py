@@ -8,6 +8,8 @@ from __future__ import annotations
 
 FRIENDLY_METHOD_NAMES = {
     "osm_footpaths": "OSM Footpaths",
+    "topology": "Topology",
+    "clearance": "Least-Cost Tree",
     "clearance_looped": "Looped Tree",
     "euclidean_grid": "Grid",
     "greedy_arterial_repulsion": "Throughways",

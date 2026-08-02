@@ -104,3 +104,26 @@ def test_source_hash_covers_all_paths_order_independent(tmp_path: Path) -> None:
     b.write_bytes(b"bbb")
     assert dg.source_hash(a, b) == dg.source_hash(b, a)   # sorted internally
     assert dg.source_hash(a, b) != dg.source_hash(a)
+
+
+def test_every_method_module_is_hashed_into_the_cache_key() -> None:
+    """`derivations.propose` caches ANY method, so every method module must be in the key.
+
+    This used to be a hand-maintained list and it went stale silently: it named exactly the methods
+    that existed when it was written, so edits to every later one were invisible. A real
+    `segment_displacement` fix in resistance_lp changed its output on a direct call and changed
+    nothing through the cache -- a full examples regeneration wrote 0 new entries and republished
+    pre-fix results without a word.
+
+    FAULT INJECTION: drop the `methods/*.py` glob back to a hand-list and this fails, naming every
+    module the list forgot.
+    """
+    from pathlib import Path
+
+    from reblock.derive_graph import _DERIVATION_MODULES
+
+    methods_dir = Path(__file__).resolve().parents[1] / "src" / "reblock" / "methods"
+    on_disk = {p.name for p in methods_dir.glob("*.py")}
+    hashed = {p.name for p in _DERIVATION_MODULES}
+    missing = sorted(on_disk - hashed)
+    assert not missing, f"method modules absent from the cache key: {missing}"

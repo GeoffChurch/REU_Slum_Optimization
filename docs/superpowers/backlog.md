@@ -463,10 +463,41 @@ Consequences:
 * NOT on the lattice: couplets (a parallel one-way pair replacing a two-way road) -- new geometry,
   so a method move rather than a solver move.
 
-**Measured go/no-go** (`scratchpad/width/flip_vs_truncate.py`, 24 blocks x 3 methods): there are two
-ways to spend less displacement -- build fewer roads, or build thinner one-way roads -- and the
-question is which trades better. FLIP beats TRUNCATE at equal displacement on **54/72, median
-+0.0193, p=0.0020**. The layer has real work to do.
+**BUILT AND MEASURED 2026-08-02: it does NOT pay. Do not build it again without a new mechanism.**
+
+Block-scale go/no-go looked good (`scratchpad/width/flip_vs_truncate.py`, 24 blocks x 3 methods):
+FLIP beats TRUNCATE at equal displacement on **54/72, median +0.0193, p=0.0020**. A real solver was
+then written (four-element lattice per road, `linearized_gain` ranking, batched commits) and run
+against the lens's own prefix truncation on the 4,615-parcel density_compactness region:
+
+    promote from `don't build`   solver better on  6/12   median -0.0134
+    demote  from two-way         solver better on  3/12   median -0.0266
+
+**Cost is fine** -- 1.6 s median, 30 s worst, at 4,615 parcels; the one-solve-per-batch trick works.
+This is a value failure, not a feasibility one.
+
+**Why, and it is the same reason both ways.** The lattice's MIDDLE elements are dominated in both
+search directions. Promoting, one-way offers 0.5x the gain for 4/7 = 0.57x the cost, so two-way
+always wins gain-per-metre. Demoting, narrowing forfeits half the gain to save a little width while
+DROPPING forfeits all of it to save everything, and dropping wins the ratio. One-way was chosen 0-17
+times out of 8-3,522 pieces. With the middle unused the solver degenerates into road SELECTION --
+and as a selector it loses to `street_first_ordered` at every budget.
+
+**So the block-scale result does not translate, and it is worth understanding why.** That probe
+FORCED the topology to stay and only allowed narrowing. Given the freedom to drop a road instead,
+the optimizer drops. The honest reading of +0.0193 is therefore "IF you must keep every road,
+narrow rather than truncate" -- a constraint someone might impose for access reasons, not an
+optimization this metric rewards.
+
+**What would have to change** for this to be worth revisiting: a benefit term that values keeping a
+road at all (coverage, worst-case parcel access, N-1 style), because permeability alone is happy to
+delete a road and spend the savings elsewhere. Absent that, the middle of the lattice has no reason
+to be selected and the layer has nothing to add.
+
+**Code status: `src/reblock/width_solver.py` is IN THE TREE AND UNUSED** (owner's call 2026-08-02),
+kept so a variant can be tried without rewriting ~200 lines. Nothing imports it outside
+`tests/test_width_solver.py`. It is a wart under the repo's own no-legacy rule for as long as that
+stays true -- **delete it if the variant above is not attempted.**
 
 **But the premise is refuted.** The expectation was that loopy networks benefit most. They do not:
 
