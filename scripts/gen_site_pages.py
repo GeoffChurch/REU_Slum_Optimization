@@ -329,8 +329,31 @@ METHODS = [
       "per home displaced and roads thread the gaps *between* building clusters. It runs via "
       "CELF/lazy greedy, so it scales to settlement-size regions.",
       idea="best straight arterial per metre, snapped to buildable frontage",
+      status=("not in the current benchmark lineup — it costs ~80x the wall-clock of every other "
+              "method (37.6 s/block against 0.01-0.47 s) while trailing both lenses, so it was "
+              "dropped from the examples; it remains a registered, tested method"),
       mc_key="greedy_arterial_repulsion", mb_key="greedy_arterial_repulsion",
       conf="greedy_arterial_repulsion"),
+    M("cycle_native", "Loop Network",
+      "Makes the **cycle** the primitive instead of the spur. Every other reblocker grows a tree "
+      "and then, at best, bolts connectors onto it; this one's atomic move is a LOOP — a path out "
+      "from the street to a chosen parcel, plus a second path back that avoids the first one's "
+      "edges, so the union is a genuine circuit rather than a there-and-back. Candidates are "
+      "scored by permeability gain per home displaced, the same currency the lenses use.\n\n"
+      "The consequence is structural: it is **bridgeless by construction**, the only method here "
+      "with essentially no single points of failure (bridge fraction ~0.03 against 0.51 for the "
+      "looped tree and 1.00 for the grid and the LP). That property is real but currently "
+      "invisible in the reported numbers, which price permeability and displacement only — so it "
+      "reads as a strong second to the LP rather than as the different thing it is.",
+      idea="the cycle, not the spur — bridgeless by construction",
+      mc_key="cycle_native", mb_key="cycle_native", conf="cycle_native"),
+    M("topology", "Topology",
+      "The prior art: a whole-graph reblocker that solves the block in one shot rather than adding "
+      "roads greedily. It is **single-block only** — a multi-block region gives it a disconnected "
+      "source node and it fails — which is why it appears in the single-block flagship and nowhere "
+      "else, and why that flagship exists at all.",
+      idea="whole-graph, single-block — the prior art this project is measured against",
+      mc_key="topology", conf="topology"),
     M("resistance_lp", "Direct Objective (LP)",
       "Chooses the **whole road set at once** with a linear program, rather than adding one road "
       "at a time, and budgets the currency the lenses actually score — **displacement** — instead "

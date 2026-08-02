@@ -121,6 +121,8 @@ nav:
       - methods/clearance.md
       - methods/clearance_looped.md
       - methods/greedy_arterial_buildable.md
+      - methods/cycle_native.md
+      - methods/topology.md
       - methods/resistance_lp.md
       - methods/osm_footpaths.md
       - methods/euclidean_grid.md
