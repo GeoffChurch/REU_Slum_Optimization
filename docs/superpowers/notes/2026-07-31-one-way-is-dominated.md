@@ -218,17 +218,32 @@ line, so `road_width_m` is what gets built and the displacement is the cost of t
 must go. A full two-way street (now 7 m) is therefore right, and the floors turn what used to be an
 accident into an explicit claim.
 
-The alternative — orient the footpath loops and build 4 m one-way — was measured and has nothing to
-operate on. `scratchpad/width/footpath_loops.py`, 400 Nairobi blocks via the local `.pbf` plus 4
-Cape Town blocks via Overpass:
+The alternative — orient the footpath loops and build 4 m one-way — is marginal rather than useful.
+On 30 Nairobi blocks the census says carry >=250 m of interior footpath
+(`scratchpad/width/footpath_bridges.py`): **21/30 are bridges end to end, and only 18.8% of all
+footpath metres are orientable.** Clipping OSM ways to a block and subtracting the street corridor
+leaves mostly stubs and spurs. With one-way already losing to two-way at equal buildable footprint,
+a discount available on a fifth of the length changes nothing.
 
-* **11 of 11 blocks with interior footpaths are 100% bridges. 0.000 of all footpath metres are
-  orientable.** Robbins forbids orienting a bridge, so the one-way option is not dominated here —
-  it is empty.
-* The mechanism is obvious in hindsight: clipping OSM ways to a block and subtracting the street
-  corridor leaves stubs and spurs, not cycles.
+### CORRECTED 2026-08-01 — both numbers above replaced two badly-sampled ones
 
-Sample caveat: only 7 of 400 Nairobi blocks had ANY interior footpath (1.75%). That is consistent
-with the known low OSM footpath coverage recorded in the census work, and it is a separate finding
-worth its own attention — on this region `osm_footpaths` is a method that does nothing on ~98% of
-blocks.
+The first version of this section claimed **0.000** orientable metres and **1.75%** footpath
+coverage ("`osm_footpaths` does nothing on ~98% of blocks"). Both came from
+`islice(source.region().blocks, 400)` — the FIRST 400 blocks in source order, which is spatially
+sorted, so it sampled one corner of the metro rather than the metro. It was also unscreened, while
+the method only ever runs on screened fabric.
+
+The OSM census had already measured coverage properly for the whole corpus, and it is not close
+(`scratchpad/width/footpath_coverage.py`, 238k blocks; the census is already prefiltered to
+building_count >= 40 and k_complexity >= 3):
+
+| | any interior footpath | >=100 m | median when present |
+|---|---|---|---|
+| ZAF, all censused (151,607) | 21.1% | 17.0% | 478 m |
+| ZAF, deep+large (14,671) | **53.1%** | 48.6% | 1,450 m |
+| KEN, all censused (86,877) | 22.7% | 20.0% | 589 m |
+| KEN, deep+large (23,252) | **34.0%** | 31.6% | 1,079 m |
+
+So `osm_footpaths` abstains on roughly half to two-thirds of deep fabric — not 98% — and where it
+does fire it has a substantial network to work with, not a stub. **Lesson: `islice` over a Source is
+not a sample.** Every probe in this thread that used it should be read with that in mind.
