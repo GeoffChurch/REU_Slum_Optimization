@@ -28,9 +28,20 @@ memory = joblib.Memory(location=str(_CACHE_DIR), verbose=0)
 
 _L1: dict[tuple[Any, ...], Any] = {}
 
-# Derivation modules whose source defines cached logic; hashed into `version`
-# so an edit to any of them is a clean miss (D2: centralized + complete). Grows
-# as later layers add derivation modules.
+# Derivation modules whose source defines cached logic; hashed into `version` so an edit to any of
+# them is a clean miss.
+#
+# `methods/` is GLOBBED, not listed. It used to be a hand-maintained list and it silently went
+# stale: it named exactly the methods that existed when it was written (topology, peel,
+# boundary_graph, arterial, clearance, substrates, loop_closure) while `derivations.propose` caches
+# ANY method, so every later one -- resistance_lp, resistance_greedy, cycle_native, euclidean_grid,
+# flow_paths, demand_greedy, osm_footpaths -- was invisible to the key. A `segment_displacement` fix
+# in resistance_lp changed its output on a direct call and changed NOTHING through the cache, so a
+# full examples regeneration wrote 0 new entries and silently republished pre-fix results. A list
+# that must be maintained by hand to stay correct is one that will go stale again.
+#
+# `permeability.py` is here because methods call it DURING their search (cycle_native and
+# resistance_lp score candidates with it), so it shapes proposals, not just evaluation.
 _DERIVATION_MODULES: tuple[Path, ...] = (
     Path(__file__).with_name("derive_graph.py"),
     Path(__file__).parent / "derive" / "access.py",
@@ -39,13 +50,9 @@ _DERIVATION_MODULES: tuple[Path, ...] = (
     Path(__file__).parent / "derive" / "parcel_graph.py",
     # _noded_graph/access_burden/displacement -- used by arterial + loop_closure
     Path(__file__).with_name("budget.py"),
-    Path(__file__).parent / "methods" / "topology.py",
-    Path(__file__).parent / "methods" / "peel.py",
-    Path(__file__).parent / "methods" / "boundary_graph.py",
-    Path(__file__).parent / "methods" / "arterial.py",
-    Path(__file__).parent / "methods" / "clearance.py",
-    Path(__file__).parent / "methods" / "substrates.py",
-    Path(__file__).parent / "methods" / "loop_closure.py",
+    Path(__file__).with_name("permeability.py"),     # scored inside several methods' search
+    Path(__file__).with_name("orient.py"),           # width/direction assignment
+    *sorted((Path(__file__).parent / "methods").glob("*.py")),
     Path(__file__).with_name("derivations.py"),      # derive()-wrapper bodies
     Path(__file__).parent / "data" / "kblock.py",    # _voronoi_parcels (the voronoi derivation)
     Path(__file__).parent / "screen" / "dense_compact.py",  # _compute_selection (screen cache)
