@@ -119,3 +119,35 @@ def test_lp_respects_displacement_budget() -> None:
             used[bidx] = np.maximum(used[bidx], c * z[s])
     assert used.sum() <= 1.0 + 1e-6, f"LP displaced {used.sum():.3f} against a budget of 1.0"
     assert z[2] > 0.99, "the free segment carries gain at no displacement and must be built"
+
+
+def test_segment_displacement_sees_buildings_beside_a_LONG_span() -> None:
+    """The prefilter must measure to the segment, not to its vertices.
+
+    An earlier version queried balls around each vertex, so a building beside the MIDDLE of a long
+    span -- further than `half_width_m + rmax` from either end -- was never considered and silently
+    contributed zero. 8.31% of this method's own substrate edges are long enough for that, so it
+    made the LP under-count what it had spent.
+
+    FAULT INJECTION: restore the per-vertex `query_ball_point` prefilter and the midpoint building
+    drops out, failing the first assertion while the endpoint one still passes.
+    """
+    import geopandas as gpd
+    import numpy as np
+    from shapely.geometry import LineString, Point
+
+    from reblock.methods.resistance_lp import segment_displacement
+
+    crs = "EPSG:32734"
+    half, r = 3.5, 4.0
+    # 100 m span; its midpoint is 50 m from either end, far outside any (half + rmax) ball
+    seg = LineString([(0.0, 0.0), (100.0, 0.0)])
+    mid, end = Point(50.0, 2.0), Point(2.0, 2.0)     # both 2 m off the line, inside half + r
+    pts = gpd.GeoDataFrame(geometry=[mid, end], crs=crs)
+    radii = np.array([r, r])
+
+    (idx, c), = segment_displacement([seg], pts, radii, half)
+    assert 0 in idx, "a building beside the MIDDLE of a long span must be counted"
+    assert 1 in idx, "a building beside its END must still be counted"
+    # both sit 2 m off the line, so d = max(2 - 3.5, 0) = 0 -> fully displaced
+    assert c[list(idx).index(0)] == pytest.approx(1.0)
