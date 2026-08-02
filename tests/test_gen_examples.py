@@ -75,3 +75,27 @@ def test_regenerate_dry_run_lists_all(tmp_path):
         assert f"gen_example {v} nairobi" in out    # nairobi
     assert "gen_example method_comparison" in out   # the pinned single-block flagship
     assert "gen_method_comparison" not in out, "the second entry point must be gone"
+
+
+def test_every_example_method_has_a_friendly_name() -> None:
+    """A method shown in an example must render with a human label, not a raw key.
+
+    `method-comparison` published a frontier legend and README mixing "Looped Tree" and "Loop
+    Network" with bare `clearance` and `topology`, because FRIENDLY_METHOD_NAMES is hand-maintained
+    and the lineup had moved on. This reads the lineups out of `conf/example/*.yaml` so the guard
+    tracks the config rather than anyone's memory -- the same failure mode as the derivation cache's
+    module list.
+    """
+    import re
+
+    from reblock.method_labels import FRIENDLY_METHOD_NAMES
+
+    conf = Path(__file__).resolve().parents[1] / "conf" / "example"
+    named: set[str] = set()
+    for cfg in sorted(conf.glob("*.yaml")):
+        m = re.search(r"^methods:\s*\[([^\]]*)\]", cfg.read_text(), flags=re.M)
+        if m:
+            named |= {x.strip() for x in m.group(1).split(",") if x.strip()}
+    named.add("osm_footpaths")          # joined by any variant with a committed OSM snapshot
+    missing = sorted(named - set(FRIENDLY_METHOD_NAMES))
+    assert not missing, f"example methods with no friendly label: {missing}"

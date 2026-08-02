@@ -26,16 +26,19 @@ def test_generated_readme_reflects_meta_and_curves() -> None:
     assert "![permeability potential](before_perm.png)" in md  # before-image, permeability coloring
     assert "Each method on the ground" in md           # §4 apples-to-apples after-images
     assert "Watch each method reblock" in md            # the animated GIF row
-    assert "![clearance](reblock_clearance.gif)" in md  # a per-method GIF, method as column
+    # alt text is human-facing, so it takes the FRIENDLY label, not the config key
+    assert "![Least-Cost Tree](reblock_clearance.gif)" in md
     assert "Matched displacement" in md and "Matched permeability" in md  # both lens headings
-    assert "| clearance | greedy_arterial_buildable |" in md  # aligned method columns (image table
+    # aligned method columns (image table)
+    assert "| Least-Cost Tree | greedy_arterial_buildable |" in md  
                                                                # header) -- _lens_methods' one order
                                                                # shared by the CSV table + both
                                                                # coloring image tables
-    assert "| clearance |" in md                # a lens-table row (from lens_displacement.csv)
+    # a lens-table row (from lens_displacement.csv)
+    assert "| Least-Cost Tree |" in md  
     assert "converged below budget" in md       # greedy_arterial_buildable: at_budget=False
     assert "unreached" in md                    # greedy_arterial_buildable: reached=False
-    assert "![clearance](after_clearance_disp_depth.png)" in md    # a method after-image, new name
+    assert "![Least-Cost Tree](after_clearance_disp_depth.png)" in md   # after-image
 
 
 def test_top_scoring_wording_is_metric_neutral() -> None:
