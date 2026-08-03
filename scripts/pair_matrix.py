@@ -75,7 +75,7 @@ from reblock.metric import (
     Gate,
     Product,
 )
-from reblock.permeability import permeability
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability, with_width
 from reblock.region import IdentityRegionBuilder, RegionBuilder
 from reblock.screen.dense_compact import DenseCompactScreen
 
@@ -785,7 +785,11 @@ def score_pair(
 
     t = time.time()
     warped = ot.transport_lines(donor_lines, result, out_crs=recipient.crs)
-    moved = ot.gap_snap(warped, recipient)
+    # Transplanted linework is bare geometry, so stamp the road width the metric now requires. The
+    # baseline gets it from `ClearanceReblocker`; without this the transplant side raised inside
+    # `score_pair`'s broad `except Exception`, which counted it as `scoring_error` and skipped the
+    # pair -- 275 of 300 on a Gauteng smoke run, silently, since the width refactor.
+    moved = with_width(ot.gap_snap(warped, recipient), DEFAULT_ROAD_WIDTH_M)
     timings["transplant"] += time.time() - t
 
     t = time.time()

@@ -111,7 +111,7 @@ def load_permeability_config(config_dir: Path = Path("conf")
                                 g_road_per_m=float(raw.g_road_per_m),
                                 g_street=float(raw.g_street),
                                 road_margin_m=float(raw.road_margin_m),
-                                r0_frac=float(raw.r0_frac))
+                                radius_frac=float(raw.radius_frac))
     return params, float(raw.matched_displacement), float(raw.matched_permeability)
 
 

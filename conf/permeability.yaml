@@ -4,7 +4,7 @@
 # still building.
 #
 # g_walk lowered 1.0 -> 0.1 and the footpath edge switched from a plain g_walk/dist model to the
-# r0-corridor open-corridor-fraction model (r0_frac below) 2026-07-23: scratchpad experiments
+# clearance-fraction corridor model (radius_frac below) 2026-07-23: scratchpad experiments
 # (conductance_variants.py / combination_experiment.py / r0_sweep.py) on
 # multiblock_density_compactness found this combination massively improves method discrimination
 # (D=10% method-spread ~0.9pts -> ~11.8pts) -- see reblock.permeability's module docstring for
@@ -31,10 +31,13 @@ road_margin_m: 1.0
 # refuse access. Engineering judgement, not a specific jurisdiction's clause -- edit freely.
 min_one_way_width_m: 4.0
 min_two_way_width_m: 7.0
-r0_frac: 0.55   # r0 = r0_frac * median(building nearest-neighbour distance) -- adaptive corridor
-                # half-width; 0.55 lands r0~3m on multiblock_density_compactness (median NN~5.2m).
-# Lens A -- matched displacement %: truncate every method to its first prefix at/after this
-# displacement fraction, then compare permeability reached at that equal home-cost.
+# Scales the per-parcel footprint radii the footpath clearance is measured against; 1.0 uses
+# building_radii as-is (half the nearest-neighbour distance), a geometric fact rather than a tuned
+# constant. Replaced r0_frac=0.55, which sized a single block-median corridor half-width -- the same
+# clearance estimate with both radii averaged away, so one assumed gap served a block's packed core
+# and its sparse edge alike. Kept as a knob because a metric change of this kind must be
+# recalibratable, not because a value other than 1.0 is known to be better.
+radius_frac: 1.0
 matched_displacement: 0.10   # 10% of homes (Lens A)
 # Lens B -- matched permeability: truncate every method to its first prefix reaching this
 # permeability level, then compare displacement cost to get there (a method whose full network

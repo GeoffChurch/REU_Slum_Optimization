@@ -66,9 +66,9 @@ from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     PermeabilityParams,
-    _adaptive_r0,
     _road_corridor,
     egress_power,
+    parcel_radii,
     permeability,
     with_width,
 )
@@ -265,7 +265,7 @@ class ResistanceLPReblocker:
         # scores, so this method optimized a different Laplacian than the one it is graded
         # on -- exactly what `_mesh`'s docstring says must not happen.
         adj = parcel_adjacency(geoms, STREET_TOL)
-        r0 = _adaptive_r0(block, self.params)
+        pradii = parcel_radii(block, self.params)
         street = unary_union(list(block.streets.geometry))
         net0 = np.flatnonzero(
             shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol)).tolist()
@@ -286,17 +286,17 @@ class ResistanceLPReblocker:
             (w, (np.concatenate([graph.rows, graph.cols]),
                  np.concatenate([graph.cols, graph.rows]))),
             shape=(len(graph.pts), len(graph.pts)))
-        ri, ci, dg, segs = _mesh(block, self.params, adj, r0, self.road_width_m)
+        ri, ci, dg, segs = _mesh(block, self.params, adj, pradii, self.road_width_m)
         seg_tree = STRtree(list(segs)) if len(segs) else None
 
         best: list[LineString] = []
-        best_perm = permeability(block, empty, self.params, adj=adj, r0=r0)
+        best_perm = permeability(block, empty, self.params, adj=adj, radii=pradii)
         base_c = np.zeros(n_b)
         k = max(self.chunks, 1)
         for t in range(k):
             built = with_width(gpd.GeoDataFrame(geometry=best, crs=crs) if best else empty,
                     self.road_width_m)
-            _p, v = egress_power(block, built, self.params, adj=adj, r0=r0)
+            _p, v = egress_power(block, built, self.params, adj=adj, radii=pradii)
             corridor = _road_corridor(built, self.road_width_m / 2.0)
             # One indexed query instead of a shapely call per mesh edge -- the same hot spot
             # `permeability._covered_edges` fixes, and this runs once per greedy round.
@@ -348,7 +348,7 @@ class ResistanceLPReblocker:
                 continue
             trial = with_width(gpd.GeoDataFrame(geometry=[*best, *roads], crs=crs),
                     self.road_width_m)
-            perm = permeability(block, trial, self.params, adj=adj, r0=r0)
+            perm = permeability(block, trial, self.params, adj=adj, radii=pradii)
             if perm <= best_perm:
                 continue
             best, best_perm, base_c = [*best, *roads], perm, base_c2

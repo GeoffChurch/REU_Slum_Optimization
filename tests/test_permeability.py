@@ -11,11 +11,11 @@ from reblock.contracts import Block
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     PermeabilityParams,
-    _adaptive_r0,
     _footpath_conductance,
     edge_conductances,
     egress_power,
     lane_width,
+    parcel_radii,
     permeability,
     permeability_curve,
     road_conductance,
@@ -159,31 +159,33 @@ def test_permeability_at_displacement_first_crossing_and_unreached():
     assert permeability_at_displacement(perm, disp, 0.45) == 0.50
     assert permeability_at_displacement(perm, disp, 0.5) == float("-inf")
 
-# --- r0-corridor footpath conductance + adaptive r0 (2026-07-23 metric change) -----------------
+# --- clearance-fraction footpath conductance + per-parcel radii ---------------------------
 
 def test_footpath_conductance_cramped_edge_lower_than_open_edge():
-    # r0=3m -> 2*r0=6m: dist=4m is CRAMPED (inside the corridor -- most of the direct line between
-    # the two centroids sits within r0 of an obstruction on either end), hits the eps floor;
-    # dist=40m is OPEN (well beyond 2*r0), reads near the raw shape's ceiling of 1. Hand-computed:
-    #   shape = [max(0.02, 1-6/4), max(0.02, 1-6/40)] = [0.02, 0.85]
+    # Two edges whose footprints sum to 6 m of the centroid line. dist=4m is CRAMPED (the disks
+    # overlap, so the clearance is negative and it hits the eps floor); dist=40m is OPEN. Passing
+    # r_sum = 6 on both reproduces the block-median r0=3 case exactly, so the hand-computed values
+    # below are unchanged from the previous model -- the estimator generalises it rather than
+    # replacing it. Hand-computed:
+    #   shape = [max(0.02, (4-6)/4), max(0.02, (40-6)/40)] = [0.02, 0.85]
     #   median(shape) = 0.435; median(1/dist) = median([0.25, 0.025]) = 0.1375
     #   target_median = g_walk * median(1/dist) = 0.1 * 0.1375 = 0.01375
     #   scale = target_median / median(shape) = 0.01375 / 0.435 = 0.0316091...
     #   g = scale * shape = [0.000632184, 0.026868]
     dist = np.array([4.0, 40.0])
-    g = _footpath_conductance(dist, r0=3.0, g_walk=0.1)
+    g = _footpath_conductance(dist, np.array([6.0, 6.0]), g_walk=0.1)
     assert g[0] < g[1]                            # cramped strictly less permeable than open
     assert g[0] > 0.0                              # eps floor: never literally zero
     assert g[0] == pytest.approx(0.000632184, rel=1e-5)
     assert g[1] == pytest.approx(0.026868, rel=1e-5)
 
 def test_footpath_conductance_empty_dist_returns_empty():
-    assert _footpath_conductance(np.zeros(0), r0=3.0, g_walk=0.1).shape == (0,)
+    assert _footpath_conductance(np.zeros(0), np.zeros(0), g_walk=0.1).shape == (0,)
 
 def _points_block(n_points: int, spacing: float) -> Block:
     # A trivial valid Block whose PARCEL geometry is irrelevant -- only `building_points` (a row
     # of `n_points` points `spacing` apart, so every point's nearest-neighbour distance is exactly
-    # `spacing`, including the two endpoints) matters for `_adaptive_r0`.
+    # `spacing`, including the two endpoints) matters for the radii.
     boundary = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
     parcels = gpd.GeoDataFrame({"parcel_id": [0]}, geometry=[boundary], crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (10, 0)])], crs=UTM)
@@ -192,20 +194,40 @@ def _points_block(n_points: int, spacing: float) -> Block:
     block = Block(block_id="pts", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
     return replace(block, building_points=pts)
 
-def test_adaptive_r0_scales_with_median_nearest_neighbor_distance():
-    params = PermeabilityParams()   # r0_frac=0.55
-    dense = _points_block(6, spacing=4.0)
-    sparse = _points_block(6, spacing=12.0)
-    r0_dense = _adaptive_r0(dense, params)
-    r0_sparse = _adaptive_r0(sparse, params)
-    assert r0_dense == pytest.approx(params.r0_frac * 4.0)
-    assert r0_sparse == pytest.approx(params.r0_frac * 12.0)
-    assert r0_sparse == pytest.approx(3.0 * r0_dense)   # NN scales 1:1 with point spacing
+def test_parcel_radii_are_PER_PARCEL_and_scale_with_local_spacing():
+    """The point of the change: each parcel gets its OWN footprint radius, not a block median.
 
-def test_adaptive_r0_falls_back_to_zero_without_enough_building_points():
+    The single-parcel fixture puts every point in one parcel, so containment resolves to that
+    parcel and the radius is a real per-parcel quantity rather than an average. Radii scale 1:1 with
+    point spacing, as `building_radii` (NN/2) must.
+
+    FAULT INJECTION: return `np.full(n, radii.mean())` from `parcel_radii` and the dense/sparse
+    ratio survives but `test_footpath_clearance_is_LOCAL_not_a_block_median` below fails.
+    """
+    params = PermeabilityParams()
+    dense = parcel_radii(_points_block(6, spacing=4.0), params)
+    sparse = parcel_radii(_points_block(6, spacing=12.0), params)
+    assert dense.shape == (1,) and sparse.shape == (1,)
+    assert sparse[0] == pytest.approx(3.0 * dense[0])   # NN scales 1:1 with point spacing
+
+
+def test_footpath_clearance_is_LOCAL_not_a_block_median():
+    """Two edges with the SAME length but different footprints must now differ.
+
+    Under the old block-median r0 both edges got `1 - 2*r0/dist` with one r0, so they were
+    identical. This is the whole content of the change.
+    """
+    dist = np.array([20.0, 20.0])
+    g = _footpath_conductance(dist, np.array([2.0, 16.0]), g_walk=0.1)
+    assert g[0] > g[1], "an edge between small footprints must beat one between large ones"
+    # a block median would have assigned both the mean gap and returned them equal
+    same = _footpath_conductance(dist, np.array([9.0, 9.0]), g_walk=0.1)
+    assert same[0] == pytest.approx(same[1])
+
+def test_parcel_radii_fall_back_to_zero_without_enough_building_points():
     params = PermeabilityParams()
     b = _grid_block()   # building_points defaults to empty
-    assert _adaptive_r0(b, params) == 0.0
+    assert not parcel_radii(b, params).any()
 
 def test_a_road_upgrade_never_lowers_an_edges_conductance():
     # The monotonicity guarantee, checked where it is actually enforced: `edge_conductances` takes
@@ -222,7 +244,7 @@ def test_a_road_upgrade_never_lowers_an_edges_conductance():
     #   at dist=1000: raw = 0.02485 > road_g = 0.02 -- the footpath EXCEEDS the road.
     params = PermeabilityParams()
     dist = np.array([1.0, 10.0, 1000.0])
-    foot = _footpath_conductance(dist, r0=3.0, g_walk=params.g_walk)
+    foot = _footpath_conductance(dist, np.full(dist.size, 6.0), g_walk=params.g_walk)
     road = road_conductance(params, np.full(3, lane_width(params, DEFAULT_ROAD_WIDTH_M)), dist)
     assert foot[2] > road[2]                 # the long edge: the footpath really does beat the road
     assert (foot[:2] < road[:2]).all()       # the shorter edges never come close
@@ -231,7 +253,7 @@ def test_a_road_upgrade_never_lowers_an_edges_conductance():
     # so the per-block normalization is the one hand-verified there -- all spanned by one long road.
     cent = np.array([0.0, 1.0, 11.0, 1011.0])
     rows, cols = np.array([0, 1, 2]), np.array([1, 2, 3])
-    fp = _footpath_conductance(dist, r0=3.0, g_walk=params.g_walk)
+    fp = _footpath_conductance(dist, np.full(dist.size, 6.0), g_walk=params.g_walk)
     roads = with_width(gpd.GeoDataFrame(
         geometry=[LineString([(0.0, 0.0), (1011.0, 0.0)])], crs=UTM), DEFAULT_ROAD_WIDTH_M)
     gf, gb = edge_conductances(cent, np.zeros(4), rows, cols, dist, fp, roads, params)

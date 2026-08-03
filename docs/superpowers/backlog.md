@@ -57,6 +57,19 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
 
 ## Visualizations (brainstorm needed — own its own brainstorm)
 
+- **Draw the guessed building circle-footprints, and the graph the metric actually uses.** Every
+  render currently shows building POINTS, but the metric and `displacement` both reason about
+  *disks*: `building_radii` gives each building a radius of half its nearest-neighbour distance, and
+  displacement is `clip(1 - d/r)` against that disk, while the footpath conductance is a function of
+  the gap between two disks. None of that is visible, so the quantity being optimised is invisible
+  too — a reader sees points and roads and has to take the corridor arithmetic on faith. Two pieces:
+  (a) an overlay drawing each building's disk at its true radius, which makes displacement legible
+  and would have made the r0-vs-per-pair-gap question obvious much earlier; (b) an overlay of the
+  METRIC's graph itself — parcel-centroid nodes, adjacency edges, edge width or colour by
+  conductance, ground edges marked. That second one is the honest picture of what permeability
+  scores, and it makes visible that edges run straight through building interiors (the road-first
+  mesh spec's motivating defect).
+
 - **Region choropleth** — color every block in a region by a metric (peel-k, geometric access
   distance, population, building density, road-length-to-reblock). The first "zoom out from one
   block to the whole city" view. Needs a region-level render (many small polygons + a colorbar);
@@ -68,6 +81,60 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
   the region by cluster. Directly visualizes the OT-similarity idea.
 - **Before/after polish** — the existing `render_after` + the head-to-head webpage; a proper
   emitter with `format=webpage` and side-by-side layout (see flow-refactor spec §2).
+
+## Retrieval may be the wrong problem: donor QUALITY is predictable, MATCHING is not (2026-08-02)
+
+See [the note](notes/2026-08-02-donor-quality-is-predictable-matching-is-not.md). On the 500 pairs
+already in `data/benchmarks/gw_pair_matrix.parquet`, with no new GW fits: cheap invariant
+descriptors of the DONOR ALONE predict transplant fidelity at within-recipient rho +0.22 on held-out
+recipients, against GW distance's +0.04. **But against six TRIVIAL donor numbers (+0.190) the margin
+is +0.028, inside this design's noise -- the learned descriptor is not established as necessary, and
+"good donor" is mostly "small and compact" (n_parcels alone reaches |rho| 0.229). Donor permeability
+is among the WEAKEST predictors, -0.134.** Adding the recipient or the pairwise difference adds
+nothing, 85% of donors appear exactly once so it is not memorisation, and the real score beats
+30/30 permutation draws.
+
+**This removes the motivation for the Phase 2 retrieval index rather than deferring it.** An index
+answers "which donor is nearest this recipient"; the measurement says that question has little to do
+with transplant quality, while "is this a good donor at all" is answerable from a per-block score
+computed once, with no pairwise anything.
+
+Small (20 recipients, Cape Town, one fidelity measure) and the permutation margin is modest, so
+next steps are re-run at scale on the 65,364 provisioned blocks, then interpret the score before
+building on it.
+
+## Shape-standardizing RegionBuilder -- BUILT 2026-08-02, objective chosen empirically
+
+`ShapeStandardizingRegionBuilder` (`src/reblock/region.py`, `conf/region_builder/
+shape_standardizing.yaml`). Accretes by adjacency like `dense_cluster`, but ranks each frontier
+block by `objective.score(union u candidate)` -- the shape of what is being ASSEMBLED, not of the
+candidate in isolation. That one line is the whole point: dense_cluster's `sqrt(n*A)/P` is computed
+per block and never looks at the union, which is why its regions came out as 150-900 parcel tendrils
+whose outline is a growth artifact, the confound the Phase 3 donor-material test cannot tolerate.
+
+**The objective was chosen against evidence, not assumed.** The spec warned that isoperimetric
+compactness is "only the obvious first guess" and should not be adopted because it is familiar. It
+turns out to be disqualified on a NECESSARY condition, before the GW-variance criterion is even
+reached: polyomino perimeters tie constantly (a 1x3 strip and an L-tromino both have area 3 and
+perimeter 8, so identical quotient), so on grid-like fabric the greedy cannot discriminate, falls
+back to its `block_id` tie-break, and lands where the compact option is unreachable. Growing 4
+blocks from the centre of a uniform 5x5 grid:
+
+    isoperimetric   -> staircase,  quotient 0.503   (misses 0.785 on its OWN metric)
+    rectangularity  -> 1x4 strip,  quotient 0.503   (blind to elongation by construction)
+    squareness      -> the 2x2,    quotient 0.785
+
+An objective that ties everywhere standardizes nothing. `Squareness` (rectangularity x the rotated
+bounding box's aspect ratio) is the default on that basis; it also keeps the fabric's own
+orientation, since the rectangle is rotated rather than axis-aligned.
+
+**Still open, and it is the spec's actual criterion:** whether squareness beats the alternatives on
+REAL fabric, measured as the outline's share of inter-region GW distance variance using the pair
+matrix. The finding above only rules out the familiar quotient on a synthetic grid. `objective` is a
+live Strategy precisely so that comparison can be run without touching the builder.
+
+**Not yet done:** nothing calls this builder in a shipped path -- the Phase 3 donor-material test it
+gates has not been written.
 
 ## Method lineup
 

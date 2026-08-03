@@ -89,7 +89,7 @@ def test_load_permeability_config_reads_the_committed_yaml() -> None:
     assert road_conductance(
         params, lane_width(params, params.min_two_way_width_m), 1.0) == pytest.approx(20.0)
     assert params.road_margin_m == 1.0
-    assert params.r0_frac == 0.55
+    assert params.radius_frac == 1.0
     assert 0.0 < matched_displacement < 1.0
     assert 0.0 < matched_permeability < 1.0
 

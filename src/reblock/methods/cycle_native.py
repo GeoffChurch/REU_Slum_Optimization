@@ -58,7 +58,7 @@ from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     PermeabilityParams,
-    _adaptive_r0,
+    parcel_radii,
     permeability,
     with_width,
 )
@@ -105,7 +105,7 @@ class CycleNativeReblocker:
             return self._out(block, empty)
 
         adj = parcel_adjacency(geoms, STREET_TOL)
-        r0 = _adaptive_r0(block, self.params)
+        pradii = parcel_radii(block, self.params)
         radii = building_radii(block.building_points)
         n_b = max(len(block.building_points), 1)
         street = unary_union(list(block.streets.geometry))
@@ -123,7 +123,7 @@ class CycleNativeReblocker:
         cc = np.concatenate([graph.cols, graph.rows])
 
         roads: list[LineString] = []
-        cur_p = float(permeability(block, empty, self.params, adj=adj, r0=r0))
+        cur_p = float(permeability(block, empty, self.params, adj=adj, radii=pradii))
         for _ in range(60):
             spent = displacement(block.building_points, radii,
                                  with_width(gpd.GeoDataFrame(geometry=roads, crs=crs),
@@ -169,7 +169,7 @@ class CycleNativeReblocker:
                 d = displacement(block.building_points, radii, trial) / n_b
                 if d > self.max_displacement:
                     continue
-                gain = float(permeability(block, trial, self.params, adj=adj, r0=r0)) - cur_p
+                gain = float(permeability(block, trial, self.params, adj=adj, radii=pradii)) - cur_p
                 cost = max(d - spent, 1e-9)
                 if gain > 0 and gain / cost > best_val:
                     best, best_val = (cand, gain + cur_p), gain / cost

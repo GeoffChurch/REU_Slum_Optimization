@@ -47,10 +47,10 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 1,174 m | 3.2% | 60.2% |  |
-| Loop Network | 1,551 m | 2.4% | 60.9% |  |
-| Grid | 6,570 m | 6.6% | 61.2% |  |
-| Direct Objective (LP) | 2,283 m | 1.6% | 60.1% |  |
+| Looped Tree | 942 m | 2.5% | 60.1% |  |
+| Loop Network | 1,486 m | 2.3% | 62.4% |  |
+| Grid | 4,713 m | 5.0% | 60.7% |  |
+| Direct Objective (LP) | 1,615 m | 1.4% | 60.1% |  |
 
 Access-depth coloring:
 
@@ -70,10 +70,10 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 3,729 m | 10.0% | 80.9% |  |
-| Loop Network | 10,095 m | 6.9% | 74.9% | converged below budget |
-| Grid | 9,842 m | 10.3% | 69.1% |  |
-| Direct Objective (LP) | 11,827 m | 10.0% | 92.8% |  |
+| Looped Tree | 3,729 m | 10.0% | 81.6% |  |
+| Loop Network | 10,095 m | 6.9% | 77.8% | converged below budget |
+| Grid | 9,842 m | 10.3% | 73.3% |  |
+| Direct Objective (LP) | 12,813 m | 10.0% | 93.9% |  |
 
 Access-depth coloring:
 
