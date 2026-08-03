@@ -1,0 +1,18 @@
+# Grows each seed group into ONE contiguous region whose OUTLINE is standardized, scoring the shape
+# of the UNION at every step -- unlike dense_cluster, which ranks each candidate block in isolation
+# and never looks at the shape being assembled, so its outlines are a growth artifact.
+#
+# Prerequisite for the Phase 3 donor-material test: street-form donors force accretion (a kblock
+# block is a street-bounded face, so a single block has no internal streets to copy), so comparing
+# donor material requires outline held fixed.
+#
+# `objective` is deliberately pluggable and NOT defaulted to compactness. Isoperimetric is
+# disqualified on a necessary condition: polyomino perimeters tie constantly, so the greedy falls
+# back to its block_id tie-break and reproduces the very growth artifact this replaces. Growing 4
+# blocks from the centre of a uniform 5x5 grid: isoperimetric -> staircase (quotient 0.503),
+# rectangularity -> 1x4 strip (0.503), squareness -> the 2x2 (0.785). Swap with
+# `region_builder.objective._target_=reblock.region.Isoperimetric` to reproduce that.
+_target_: reblock.region.ShapeStandardizingRegionBuilder
+objective:
+  _target_: reblock.region.Squareness
+max_buildings: 150

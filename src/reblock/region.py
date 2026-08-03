@@ -16,7 +16,7 @@ import hashlib
 import logging
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, cast
 
 import geopandas as gpd
@@ -350,5 +350,170 @@ class DenseClusterRegionBuilder:
                 )
                 cluster.add(best)
                 size += counts[best]
+            result.append(sorted(ids[i] for i in cluster))
+        return result
+
+
+class ShapeObjective(Protocol):
+    """Scores the OUTLINE of a candidate region union. Higher is better; scale-free.
+
+    Scale-free matters: the accretion compares unions of different sizes at every step, so an
+    objective that grows with area would just pick the biggest block every time.
+    """
+
+    # read-only: the implementations are frozen dataclasses, and a plain `name: str` in a Protocol
+    # demands a SETTABLE attribute, which a frozen field is not
+    @property
+    def name(self) -> str: ...
+
+    def score(self, union: BaseGeometry) -> float: ...
+
+
+@dataclass(frozen=True)
+class Isoperimetric:
+    """4*pi*A / P^2 -- 1 for a circle, lower for anything else. The obvious first guess.
+
+    The spec that asked for this builder warns against assuming it is the right target: the
+    requirement is that outline variance be small enough not to dominate GW distance, NOT that
+    regions be maximally circular. It is here as a baseline to beat, not as the default answer.
+    """
+
+    name: str = "isoperimetric"
+
+    def score(self, union: BaseGeometry) -> float:
+        p = float(union.length)
+        return 0.0 if p <= 0 else float(4.0 * math.pi * union.area / (p * p))
+
+
+@dataclass(frozen=True)
+class Rectangularity:
+    """A / area(minimum rotated rectangle) -- 1 for any rectangle, at any orientation.
+
+    Unlike `Isoperimetric` this does not punish elongation, and it keeps whatever dominant
+    orientation the fabric has rather than discarding it toward a circle.
+    """
+
+    name: str = "rectangularity"
+
+    def score(self, union: BaseGeometry) -> float:
+        mrr = union.minimum_rotated_rectangle
+        a = float(mrr.area)
+        return 0.0 if a <= 0 else float(union.area / a)
+
+
+@dataclass(frozen=True)
+class Squareness:
+    """Rectangularity times the minimum-rotated-rectangle's aspect ratio -- 1 only for a square.
+
+    The spec's argument for preferring this over a circle: squares tile, they are FFT-native if
+    retrieval goes that way, and a square still admits the fabric's own orientation because the
+    rectangle is rotated, not axis-aligned.
+    """
+
+    name: str = "squareness"
+
+    def score(self, union: BaseGeometry) -> float:
+        mrr = union.minimum_rotated_rectangle
+        a = float(mrr.area)
+        if a <= 0:
+            return 0.0
+        xs, ys = zip(*list(cast(Polygon, mrr).exterior.coords)[:4], strict=True)
+        sides = [math.dist((xs[i], ys[i]), (xs[(i + 1) % 4], ys[(i + 1) % 4])) for i in range(4)]
+        short, long_ = min(sides), max(sides)
+        aspect = short / long_ if long_ > 0 else 0.0
+        return float(union.area / a) * aspect
+
+
+@dataclass
+class ShapeStandardizingRegionBuilder:
+    """Accretes blocks into a region whose OUTLINE is standardized, scoring the union as it grows.
+
+    The distinction from `DenseClusterRegionBuilder` is the whole point of this builder, and it is
+    one line of the loop: dense-cluster ranks each frontier block by `sqrt(n*A)/P` computed on that
+    block ALONE and never looks at the shape being assembled, so its regions came out as 150-900
+    parcel tendrils whose outline is a growth artifact. That uncontrolled outline is a confound the
+    Phase 3 donor-material test cannot tolerate -- street-form donors force accretion (a kblock
+    block is a street-bounded face, so a single block has no internal streets to copy), so material
+    can only be compared against outline held fixed.
+
+    Here the frontier block chosen is the one maximizing `objective.score(union u candidate)`.
+
+    ## The objective is deliberately pluggable, and deliberately not defaulted to compactness
+
+    The originally-specified builder was never built and a substitute shipped in its place. The spec
+    is explicit that the objective is open -- isoperimetric compactness is "only the obvious first
+    guess", squareness and rectangularity are live alternatives, and the choice should be made
+    empirically against the outline's share of inter-region GW distance variance rather than by
+    assuming the familiar quotient is right. So this takes a `ShapeObjective`.
+
+    `Squareness` is the default, and NOT by assumption -- `Isoperimetric` is disqualified on a
+    necessary condition before the GW criterion is even reached. Polyomino perimeters tie
+    constantly (a 1x3 strip and an L-tromino both have area 3 and perimeter 8, so identical
+    quotient), so on grid-like fabric the greedy cannot discriminate, falls back to the `block_id`
+    tie-break, and walks into shapes from which the compact option is unreachable. Growing a
+    4-block region from the centre of a uniform 5x5 grid:
+
+        isoperimetric  -> staircase, quotient 0.503   (its OWN metric, and it misses 0.785)
+        rectangularity -> 1x4 strip, quotient 0.503   (blind to elongation by construction)
+        squareness     -> the 2x2,   quotient 0.785
+
+    An objective that ties everywhere standardizes nothing -- it reproduces exactly the
+    growth-artifact outline this builder exists to remove. The GW-variance criterion the spec names
+    is still the one that should settle squareness vs alternatives on real fabric; this only rules
+    out the familiar quotient.
+
+    Growth stops on the same `max_buildings` budget as dense-cluster, and shares its conventions:
+    the seed group is always included (even alone over budget), ties break by higher
+    `building_count` then `block_id` ascending, and a non-adjacent seed group grows each fragment
+    locally with a warning rather than bridging.
+    """
+
+    objective: ShapeObjective = field(default_factory=lambda: Squareness())
+    max_buildings: int = 150
+
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
+        del depth_fn                      # shape is scored on geometry; access depth plays no part
+        _validate_group_ids(block_geoms, groups)
+        ids = cast(list[str], list(block_geoms["block_id"]))
+        geoms = list(block_geoms.geometry)
+        # Shape must be measured in METRES: in lon/lat, area and length are anisotropic, so every
+        # objective here would score a north-south region differently from an identical east-west
+        # one. Adjacency still runs on the original geometries.
+        metric = block_geoms
+        if metric.crs is not None and metric.crs.is_geographic:
+            metric = metric.to_crs(metric.estimate_utm_crs())
+        shape_geoms = list(metric.geometry)
+        counts = (
+            [0.0 if pd.isna(c) else float(c) for c in block_geoms["building_count"]]
+            if "building_count" in block_geoms.columns else [1.0] * len(ids)
+        )
+        idx_by_id = {b: i for i, b in enumerate(ids)}
+        adj = _block_adjacency(geoms)
+
+        result: list[list[str]] = []
+        for group in groups:
+            if len(group) > 1 and not _touch_adjacent([geoms[idx_by_id[b]] for b in group]):
+                logger.warning(
+                    "region group %s is not mutually touch-adjacent -- shape_standardizing grows "
+                    "each fragment locally and won't bridge the gap, so the region stays disjoint "
+                    "and its outline is not standardized; pass adjacent seeds, or "
+                    "region_builder=convex_hull to fill the gap into one contiguous region",
+                    sorted(group),
+                )
+            cluster = {idx_by_id[b] for b in group}
+            size = sum(counts[i] for i in cluster)
+            union = unary_union([shape_geoms[i] for i in cluster])
+            while size < self.max_buildings:
+                frontier = {j for i in cluster for j in adj[i]} - cluster
+                if not frontier:
+                    break
+                # One binary union per candidate against the running union -- NOT a fresh
+                # unary_union of the whole cluster each time, which would make growth quadratic.
+                scored = {j: self.objective.score(union.union(shape_geoms[j])) for j in frontier}
+                best = min(frontier, key=lambda j: (-scored[j], -counts[j], ids[j]))
+                cluster.add(best)
+                size += counts[best]
+                union = union.union(shape_geoms[best])
             result.append(sorted(ids[i] for i in cluster))
         return result

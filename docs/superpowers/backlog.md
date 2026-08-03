@@ -69,6 +69,39 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
 - **Before/after polish** — the existing `render_after` + the head-to-head webpage; a proper
   emitter with `format=webpage` and side-by-side layout (see flow-refactor spec §2).
 
+## Shape-standardizing RegionBuilder -- BUILT 2026-08-02, objective chosen empirically
+
+`ShapeStandardizingRegionBuilder` (`src/reblock/region.py`, `conf/region_builder/
+shape_standardizing.yaml`). Accretes by adjacency like `dense_cluster`, but ranks each frontier
+block by `objective.score(union u candidate)` -- the shape of what is being ASSEMBLED, not of the
+candidate in isolation. That one line is the whole point: dense_cluster's `sqrt(n*A)/P` is computed
+per block and never looks at the union, which is why its regions came out as 150-900 parcel tendrils
+whose outline is a growth artifact, the confound the Phase 3 donor-material test cannot tolerate.
+
+**The objective was chosen against evidence, not assumed.** The spec warned that isoperimetric
+compactness is "only the obvious first guess" and should not be adopted because it is familiar. It
+turns out to be disqualified on a NECESSARY condition, before the GW-variance criterion is even
+reached: polyomino perimeters tie constantly (a 1x3 strip and an L-tromino both have area 3 and
+perimeter 8, so identical quotient), so on grid-like fabric the greedy cannot discriminate, falls
+back to its `block_id` tie-break, and lands where the compact option is unreachable. Growing 4
+blocks from the centre of a uniform 5x5 grid:
+
+    isoperimetric   -> staircase,  quotient 0.503   (misses 0.785 on its OWN metric)
+    rectangularity  -> 1x4 strip,  quotient 0.503   (blind to elongation by construction)
+    squareness      -> the 2x2,    quotient 0.785
+
+An objective that ties everywhere standardizes nothing. `Squareness` (rectangularity x the rotated
+bounding box's aspect ratio) is the default on that basis; it also keeps the fabric's own
+orientation, since the rectangle is rotated rather than axis-aligned.
+
+**Still open, and it is the spec's actual criterion:** whether squareness beats the alternatives on
+REAL fabric, measured as the outline's share of inter-region GW distance variance using the pair
+matrix. The finding above only rules out the familiar quotient on a synthetic grid. `objective` is a
+live Strategy precisely so that comparison can be run without touching the builder.
+
+**Not yet done:** nothing calls this builder in a shipped path -- the Phase 3 donor-material test it
+gates has not been written.
+
 ## Method lineup
 
 - **Drop `greedy_arterial_repulsion` from the examples if it does not earn its place** in whatever
