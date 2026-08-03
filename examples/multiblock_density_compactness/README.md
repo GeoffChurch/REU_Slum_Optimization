@@ -47,11 +47,11 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 1,370 m | 5.9% | 60.8% |  |
-| Loop Network | 1,651 m | 5.9% | 60.3% |  |
-| Grid | 3,466 m | 9.7% | 60.1% |  |
-| OSM Footpaths | 2,424 m | 9.0% | 61.7% |  |
-| Direct Objective (LP) | 2,200 m | 5.4% | 60.0% |  |
+| Looped Tree | 1,301 m | 5.7% | 60.3% |  |
+| Loop Network | 1,621 m | 5.9% | 60.5% |  |
+| Grid | 3,466 m | 9.7% | 61.2% |  |
+| OSM Footpaths | 2,335 m | 8.7% | 60.1% |  |
+| Direct Objective (LP) | 2,026 m | 4.9% | 60.1% |  |
 
 Access-depth coloring:
 
@@ -71,11 +71,11 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 2,284 m | 10.1% | 73.5% |  |
-| Loop Network | 3,025 m | 10.1% | 73.6% |  |
-| Grid | 3,554 m | 10.1% | 60.7% |  |
-| OSM Footpaths | 2,727 m | 10.0% | 63.5% |  |
-| Direct Objective (LP) | 3,994 m | 10.0% | 76.4% |  |
+| Looped Tree | 2,284 m | 10.1% | 74.1% |  |
+| Loop Network | 3,063 m | 10.1% | 74.3% |  |
+| Grid | 3,554 m | 10.1% | 61.7% |  |
+| OSM Footpaths | 2,727 m | 10.0% | 64.3% |  |
+| Direct Objective (LP) | 4,454 m | 10.0% | 80.7% |  |
 
 Access-depth coloring:
 
