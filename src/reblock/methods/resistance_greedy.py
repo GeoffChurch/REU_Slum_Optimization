@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 import geopandas as gpd
 import numpy as np
 import shapely
+from numpy.typing import NDArray
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
@@ -60,11 +61,11 @@ from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     PermeabilityParams,
-    _adaptive_r0,
     _footpath_conductance,
     _road_corridor,
     egress_power,
     lane_width,
+    parcel_radii,
     permeability,
     road_conductance,
     with_width,
@@ -91,7 +92,8 @@ def _path_road(
     return LineString(coords)
 
 
-def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]], r0: float,
+def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]],
+          radii: NDArray[np.float64],
           road_width_m: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """(i, j, upgrade_gain, segment) for every adjacency edge: the conductance a two-way road of
     `road_width_m` would ADD to it, and the centroid-to-centroid segment a road must intersect.
@@ -121,7 +123,7 @@ def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]], r0: flo
         return ri, ci, np.zeros(0), np.empty(0, dtype=object)
     road_g = road_conductance(params, np.full(di.size,
                                              lane_width(params, road_width_m)), di)
-    foot_g = _footpath_conductance(di, r0, params.g_walk)
+    foot_g = _footpath_conductance(di, radii[ri] + radii[ci], params.g_walk)
     segs = np.array([LineString([(cx[0][a], cx[1][a]), (cx[0][b], cx[1][b])])
                      for a, b in zip(ri.tolist(), ci.tolist(), strict=True)], dtype=object)
     return ri, ci, np.maximum(road_g - foot_g, 0.0), segs
@@ -212,7 +214,7 @@ class ResistanceGreedyReblocker:
         # scores, so this method optimized a different Laplacian than the one it is graded
         # on -- exactly what `_mesh`'s docstring says must not happen.
         adj = parcel_adjacency(geoms, STREET_TOL)
-        r0 = _adaptive_r0(block, self.params)
+        pradii = parcel_radii(block, self.params)
 
         street = unary_union(list(block.streets.geometry))
         net = np.flatnonzero(
@@ -230,11 +232,11 @@ class ResistanceGreedyReblocker:
                  np.concatenate([graph.cols, graph.rows]))),
             shape=(len(graph.pts), len(graph.pts)))
 
-        ri, ci, dg, segs = _mesh(block, self.params, adj, r0, self.road_width_m)
+        ri, ci, dg, segs = _mesh(block, self.params, adj, pradii, self.road_width_m)
         seg_tree = STRtree(list(segs)) if len(segs) else None
 
         roads: list[LineString] = []
-        current = permeability(block, empty, self.params, adj=adj, r0=r0)
+        current = permeability(block, empty, self.params, adj=adj, radii=pradii)
         stopped = "max_roads"
         for _ in range(self.max_roads):
             _d, pred, _src = dijkstra(csr, indices=net, return_predecessors=True, min_only=True)
@@ -248,7 +250,7 @@ class ResistanceGreedyReblocker:
             # a random sample. See `linearized_gain`.
             built = with_width(gpd.GeoDataFrame(geometry=roads, crs=crs) if roads else empty,
                     self.road_width_m)
-            _p, v = egress_power(block, built, self.params, adj=adj, r0=r0)
+            _p, v = egress_power(block, built, self.params, adj=adj, radii=pradii)
             corridor = _road_corridor(built, self.road_width_m / 2.0)
             # One indexed query instead of a shapely call per mesh edge -- the same hot spot
             # `permeability._covered_edges` fixes, and this runs once per greedy round.
@@ -298,7 +300,7 @@ class ResistanceGreedyReblocker:
             for _est, road in ranked[:max(self.shortlist, 1)]:
                 trial = with_width(gpd.GeoDataFrame(geometry=[*roads, road], crs=crs),
                     self.road_width_m)
-                gain = permeability(block, trial, self.params, adj=adj, r0=r0) - current
+                gain = permeability(block, trial, self.params, adj=adj, radii=pradii) - current
                 per_m = gain / road.length
                 if per_m > best_per_m:
                     best_gain, best_road, best_per_m = gain, road, per_m

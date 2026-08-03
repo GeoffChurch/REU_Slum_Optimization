@@ -98,10 +98,10 @@ from reblock.permeability import (
     ONEWAY_COL,
     WIDTH_COL,
     PermeabilityParams,
-    _adaptive_r0,
     _footpath_conductance,
     egress_power,
     lane_width,
+    parcel_radii,
     road_conductance,
 )
 
@@ -121,7 +121,8 @@ class WidthAssignment:
     one_way: int
 
 
-def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]], r0: float,
+def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]],
+          radii: NDArray[np.float64],
           width_m: float) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.float64],
                                    NDArray[np.float64]]:
     """`(i, j, footpath_g, upgrade_delta)` per adjacency edge, and the centroid segment endpoints.
@@ -147,7 +148,7 @@ def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]], r0: flo
     dist = np.hypot(cx[ri] - cx[ci], cy[ri] - cy[ci])
     keep = dist > 0.0
     ri, ci, dist = ri[keep], ci[keep], dist[keep]
-    foot = _footpath_conductance(dist, r0, params.g_walk)
+    foot = _footpath_conductance(dist, radii[ri] + radii[ci], params.g_walk)
     road = road_conductance(params, np.full(dist.size, lane_width(params, width_m)), dist)
     return ri, ci, foot, np.maximum(road - foot, 0.0)
 
@@ -237,8 +238,8 @@ class WidthSolver:
         n = len(geoms)
 
         adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-        r0 = _adaptive_r0(block, self.params)
-        ri, ci, _foot, delta = _mesh(block, self.params, adj, r0, self.road_width_m)
+        pradii = parcel_radii(block, self.params)
+        ri, ci, _foot, delta = _mesh(block, self.params, adj, pradii, self.road_width_m)
         tree = _edge_lines(block, ri, ci) if ri.size else None
 
         half = self.road_width_m / 2.0
@@ -291,7 +292,7 @@ class WidthSolver:
         for _t in range(max(self.chunks, 1)):
             if c_now.sum() <= cap:
                 break
-            _p, v = egress_power(block, frame(state), self.params, adj=adj, r0=r0)
+            _p, v = egress_power(block, frame(state), self.params, adj=adj, radii=pradii)
             # Rank every legal DEMOTION by gain surrendered per home saved, cheapest sacrifice
             # first. A one-way road keeps the permitted direction at full conductance and drops the
             # other to footpath, so it forfeits about half the edge gain; dropping a road forfeits
@@ -320,8 +321,8 @@ class WidthSolver:
         built = frame(state)
         d = (displacement(block.building_points, radii, built) / n_b) if len(built) else 0.0
         p = float(egress_power(block, built if len(built) else None,
-                               self.params, adj=adj, r0=r0)[0])
-        p0 = float(egress_power(block, None, self.params, adj=adj, r0=r0)[0])
+                               self.params, adj=adj, radii=pradii)[0])
+        p0 = float(egress_power(block, None, self.params, adj=adj, radii=pradii)[0])
         perm = 0.0 if p0 <= 0 else 1.0 - p / p0
         return WidthAssignment(built, d, perm, int((state > BOTTOM).sum()),
                                int((state == ONE_WAY).sum()))

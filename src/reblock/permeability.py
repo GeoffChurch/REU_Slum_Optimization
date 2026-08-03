@@ -8,12 +8,19 @@ construction => permeability is monotone non-decreasing.
 
 Graph model (nodes = parcel centroids; ground = eliminated node at potential 0):
   - footpath mesh (always present): adjacent parcel pairs (parcel_adjacency), conductance
-    g_walk * max(eps, 1 - 2*r0/dist(centroid_i, centroid_j)) -- an "open-corridor fraction"
-    (`_footpath_conductance`) that reads ~1 (fully open) for centroids far apart relative to r0
-    and collapses toward the floor `eps` for centroids closer than 2*r0 (a cramped, obstructed
-    line between them). r0 (`_adaptive_r0`) is `r0_frac` * median nearest-neighbour distance
-    among the block's building points, so the corridor half-width scales with local building
-    density rather than a fixed absolute metre count. The raw shape is rescaled per block so its
+    g_walk * max(eps, (dist - r_i - r_j)/dist) -- the CLEARANCE fraction
+    (`_footpath_conductance`):
+    the share of the centroid-to-centroid line lying in neither building, i.e. the gap at the point
+    where the two footprints come closest. r_i is parcel i's own footprint radius (`parcel_radii`,
+    half the building's nearest-neighbour distance -- the same disk `displacement` charges for), so
+    the estimate is local. It reads ~1 for footprints far apart relative to their size and collapses
+    toward the floor `eps` when the two disks nearly touch.
+
+    This replaced a single block-median corridor half-width (`r0 = r0_frac * median NN distance`,
+    shape `1 - 2*r0/dist`), which is the same quantity with both radii averaged away -- so a
+    mixed-density block assumed one gap in its packed core and at its sparse edge alike.
+
+    The raw shape is rescaled per block so its
     MEDIAN over the mesh equals what the plain g_walk/dist model's median would be at the same
     g_walk -- this keeps g_walk playing its original role as the footpath/road BALANCE knob
     (permeability is invariant to scaling every conductance together, but a road of a given width
@@ -35,11 +42,11 @@ Graph model (nodes = parcel centroids; ground = eliminated node at potential 0):
     (ground is eliminated, never a graph node).
 
 Ported from the validated research prototype (contention_power / p_benefit) -- the graph
-assembly and sparse solve are transcribed verbatim; do not re-derive. The r0-corridor footpath
-model + its fair-normalization is ported from the scratchpad `conductance_variants.py` /
+assembly and sparse solve are transcribed verbatim; do not re-derive. The corridor footpath model
++ its fair-normalization is ported from the scratchpad `conductance_variants.py` /
 `combination_experiment.py` / `r0_sweep.py` experiments, which found it massively improves
 method discrimination on multiblock_density_compactness (D=10% method-spread ~0.9pts ->
-~11.8pts) at g_walk=0.1, r0~3m.
+~11.8pts) at g_walk=0.1; those swept the block-median r0 that the per-pair clearance replaced.
 """
 from __future__ import annotations
 
@@ -66,9 +73,9 @@ from reblock.derive.adjacency import parcel_adjacency
 if TYPE_CHECKING:
     from reblock.budget import Curve
 
-FOOTPATH_EPS = 0.02   # floor on the r0-corridor open-corridor fraction (an edge never hits 0
+FOOTPATH_EPS = 0.02   # floor on the clearance fraction (an edge never hits 0
                        # conductance, so the mesh graph's topological connectivity to ground
-                       # never breaks purely from the footpath model, independent of r0)
+                       # never breaks purely from the footpath model, however tight the gap)
 
 
 @dataclass(frozen=True)
@@ -126,11 +133,12 @@ class PermeabilityParams:
     # g_road_per_m), so what moved is the COST side only -- the same function, honestly priced.
     min_one_way_width_m: float = 4.0
     min_two_way_width_m: float = 7.0
-    r0_frac: float = 0.55   # r0 = r0_frac * median(building nearest-neighbour distance); see
-                             # `_adaptive_r0`. Calibrated so r0 lands ~3m on
-                             # multiblock_density_compactness (median NN ~5.2m) -- the flat
-                             # plateau (1.5-3.5m all give ~11-11.8pts D=10% spread) of the
-                             # r0-corridor discrimination sweep.
+    # Scales the per-parcel footprint radii the footpath clearance is measured against. 1.0 uses
+    # `budget.building_radii` as-is (half the nearest-neighbour distance), which is a geometric
+    # fact rather than a tuned constant -- unlike the r0_frac=0.55 this replaces, which existed to
+    # size a single block-median corridor. Kept as a knob because a metric change of this kind has
+    # to be recalibratable, not because a value other than 1.0 is known to be better.
+    radius_frac: float = 1.0
 
 
 def _road_corridor(roads: GeoDataFrame | None, half_width_m: float) -> BaseGeometry | None:
@@ -147,33 +155,57 @@ def _road_corridor(roads: GeoDataFrame | None, half_width_m: float) -> BaseGeome
     return union.buffer(half_width_m)
 
 
-def _adaptive_r0(block: Block, params: PermeabilityParams) -> float:
-    """r0 (corridor half-width, m) = `r0_frac` * median nearest-neighbour distance among the
-    block's building points -- adaptive so the corridor width scales with local building density
-    rather than a fixed absolute metre count (portable across regions of very different
-    densities; see the module docstring). Fewer than 2 building points (no defined neighbour)
-    -> r0 = 0.0, which degenerates the corridor shape to a constant 1 everywhere (no local-
-    geometry modulation -- `_footpath_conductance` then reduces to the plain g_walk/dist model),
-    a safe fallback for blocks without a building point cloud (e.g. synthetic test fixtures)."""
+def parcel_radii(block: Block, params: PermeabilityParams) -> NDArray[np.float64]:
+    """Per-PARCEL footprint radius, in parcel order -- the disk `displacement` already charges for.
+
+    Replaces a block-median corridor half-width (`r0 = r0_frac * median NN distance`). That was one
+    number for the whole block, so a mixed-density block got the same assumed gap in its packed core
+    and at its sparse edge; this uses each building's own radius, which `budget.building_radii`
+    already computes as half its nearest-neighbour distance.
+
+    Parcels are Voronoi cells of the building points, so the correspondence is exactly one point per
+    parcel -- but NOT in index order (verified: parcel i does not contain point i), so it is
+    resolved
+    by containment. A parcel with no contained point (degenerate geometry) gets radius 0, which
+    makes
+    its edges read as fully open rather than fully blocked -- the same direction the old code failed
+    in when a block had too few points to define a neighbour.
+    """
     from reblock.budget import building_radii  # deferred: avoids the budget<->permeability cycle
 
-    if len(block.building_points) < 2:
-        return 0.0
-    radii = building_radii(block.building_points)
-    return params.r0_frac * float(np.median(2.0 * radii))   # building_radii returns NN/2
+    n = len(block.parcels)
+    out = np.zeros(n, dtype=np.float64)
+    pts = block.building_points
+    if n == 0 or len(pts) < 2:
+        return out
+    radii = building_radii(pts)
+    xy = np.column_stack([pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy()])
+    hit = STRtree(shapely.points(xy)).query(
+        np.asarray(list(block.parcels.geometry), dtype=object), predicate="contains")
+    out[hit[0]] = radii[hit[1]]
+    return params.radius_frac * out
 
 
-def _footpath_conductance(dist: NDArray[np.float64], r0: float, g_walk: float,
+def _footpath_conductance(dist: NDArray[np.float64], r_sum: NDArray[np.float64], g_walk: float,
                           eps: float = FOOTPATH_EPS) -> NDArray[np.float64]:
-    """r0-corridor footpath conductance: g_walk * max(eps, 1 - 2*r0/dist), fair-normalized (see
-    module docstring) so its median over `dist` equals g_walk * median(1/dist) -- the median the
-    plain g_walk/dist baseline would give at the same g_walk. `dist` must cover the WHOLE
-    adjacency mesh (every footpath edge, not just currently road-uncovered ones): the mesh -- and
-    therefore this normalization -- is a property of the block's parcel geometry alone,
-    independent of any one road prefix."""
+    """Footpath conductance from the CLEARANCE between the two footprints an edge runs between:
+    `g_walk * max(eps, (dist - r_i - r_j) / dist)`, fair-normalized (see module docstring) so its
+    median over `dist` equals g_walk * median(1/dist) -- the median the plain g_walk/dist baseline
+    would give at the same g_walk.
+
+    `(dist - r_i - r_j)/dist` is the fraction of the centroid-to-centroid line that is not inside
+    either building: the gap at the point where the two disks come closest. The previous form used
+    `1 - 2*r0/dist` with a single block-median r0, which is the same quantity with both radii
+    replaced by the block median -- so it is this estimator with the local information averaged
+    away.
+
+    `dist` must cover the WHOLE adjacency mesh (every footpath edge, not just currently
+    road-uncovered ones): the mesh -- and therefore this normalization -- is a property of the
+    block's parcel geometry alone, independent of any one road prefix.
+    """
     if dist.size == 0:
         return np.zeros(0, dtype=np.float64)
-    shape = np.maximum(eps, 1.0 - 2.0 * r0 / dist)
+    shape = np.maximum(eps, (dist - r_sum) / dist)
     shape_median = float(np.median(shape))
     if shape_median <= 0.0:
         return np.zeros_like(dist)
@@ -368,14 +400,14 @@ def egress_power(
     params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
     *,
     adj: list[set[int]] | None = None,
-    r0: float | None = None,
+    radii: NDArray[np.float64] | None = None,
 ) -> tuple[float, NDArray[np.float64]]:
     """P = b^T L^-1 b for the grounded parcel-centroid Laplacian described in the module
     docstring; b = ones(n) (every parcel injects 1 unit of escape current). Also returns the
     per-parcel potentials v (for the heatmap). (+inf, zeros(n)) if no parcel is
     street-fronting (no path to ground at all -- an ungrounded network has no well-defined
-    dissipated power for a nonzero current injection). `r0` lets a caller freeze the adaptive
-    corridor half-width (`_adaptive_r0`) across repeated calls on the same block (mirrors `adj`);
+    dissipated power for a nonzero current injection). `radii` lets a caller freeze the per-parcel
+    footprint radii (`parcel_radii`) across repeated calls on the same block (mirrors `adj`);
     computed internally when omitted."""
     parcels = block.parcels
     n = len(parcels)
@@ -387,7 +419,7 @@ def egress_power(
     cy = np.array([c.y for c in centroids], dtype=np.float64)
 
     adj = adj if adj is not None else parcel_adjacency(geoms, STREET_TOL)
-    r0 = r0 if r0 is not None else _adaptive_r0(block, params)
+    radii = radii if radii is not None else parcel_radii(block, params)
 
 
     # --- ground membership: parcel polygon within STREET_TOL of the (unioned) street geometry
@@ -427,7 +459,8 @@ def egress_power(
         # one-way. The old split -- a vectorized boolean `covered` for the symmetric case and a
         # separate directional branch -- disappeared with the global corridor width, since every
         # edge's road conductance now depends on WHICH road covers it and how wide that road is.
-        footpath_g = _footpath_conductance(dist_arr, r0, params.g_walk)
+        r_sum = radii[rows_arr] + radii[cols_arr]
+        footpath_g = _footpath_conductance(dist_arr, r_sum, params.g_walk)
         gf_arr, gb_arr = edge_conductances(
             cx, cy, rows_arr, cols_arr, dist_arr, footpath_g, roads, params)
         conds_arr = np.maximum(gf_arr, gb_arr)
@@ -516,21 +549,21 @@ def permeability(
     *,
     p0: float | None = None,
     adj: list[set[int]] | None = None,
-    r0: float | None = None,
+    radii: NDArray[np.float64] | None = None,
 ) -> float:
     """1 - P(roads)/P(no_roads); p0 lets a caller freeze the no-roads baseline (avoids
-    recomputing it inside a sweep). `r0` likewise lets a caller freeze the adaptive corridor
+    recomputing it inside a sweep). `radii` likewise lets a caller freeze the per-parcel
     half-width (mirrors `adj`); computed internally when omitted. Guards: no-roads baseline that
     is non-finite or <= 0 (ungrounded block) -> nan; a roaded network that comes out
     ungrounded/non-finite is not reachable in practice (roads only add ground/conductance) but is
     guarded defensively via the same non-finite check on p1."""
-    if r0 is None:
-        r0 = _adaptive_r0(block, params)
+    if radii is None:
+        radii = parcel_radii(block, params)
     if p0 is None:
-        p0, _ = egress_power(block, None, params, adj=adj, r0=r0)
+        p0, _ = egress_power(block, None, params, adj=adj, radii=radii)
     if not np.isfinite(p0) or p0 <= 0.0:
         return float("nan")
-    p1, _ = egress_power(block, roads, params, adj=adj, r0=r0)
+    p1, _ = egress_power(block, roads, params, adj=adj, radii=radii)
     if not np.isfinite(p1):
         return float("-inf")
     return 1.0 - p1 / p0
@@ -570,14 +603,14 @@ def permeability_curve(
     from reblock.budget import Curve, _sweep  # deferred: breaks the budget<->permeability cycle
 
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    r0 = _adaptive_r0(block, params)
-    p0, _ = egress_power(block, None, params, adj=adj, r0=r0)
+    radii = parcel_radii(block, params)
+    p0, _ = egress_power(block, None, params, adj=adj, radii=radii)
     calls = 0
 
     def f(prefix: GeoDataFrame | None) -> float:
         nonlocal calls
         calls += 1
-        value = permeability(block, prefix, params, p0=p0, adj=adj, r0=r0)
+        value = permeability(block, prefix, params, p0=p0, adj=adj, radii=radii)
         if progress is not None:
             progress(calls, n_points + 1)
         return value

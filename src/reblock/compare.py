@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 def _load_permeability_params(config_dir: Path = Path("conf")
                               ) -> tuple[PermeabilityParams, float, float]:
     """`conf/permeability.yaml`'s metric params (`g_walk`/`g_road_per_m`/`g_street`/
-    `r0_frac`) plus the two calibrated lens thresholds (`matched_displacement`/
+    `radius_frac`) plus the two calibrated lens thresholds (`matched_displacement`/
     `matched_permeability`) -- mirrors `scripts.compare_budgets.load_permeability_config` exactly.
     `compare()` uses only the params half (for `permeability_curve`); `main()` uses the thresholds
     half too, to draw `compare_report`'s guide lines at the same cutoffs the two-lens driver grades
@@ -44,7 +44,7 @@ def _load_permeability_params(config_dir: Path = Path("conf")
     raw = cast(DictConfig, OmegaConf.load(config_dir / "permeability.yaml"))
     params = PermeabilityParams(g_walk=float(raw.g_walk), g_road_per_m=float(raw.g_road_per_m),
                                 g_street=float(raw.g_street),
-                                r0_frac=float(raw.r0_frac))
+                                radius_frac=float(raw.radius_frac))
     return params, float(raw.matched_displacement), float(raw.matched_permeability)
 
 

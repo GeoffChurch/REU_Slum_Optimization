@@ -155,7 +155,7 @@ def _load_permeability_params() -> PermeabilityParams:
                               g_road_per_m=float(raw.g_road_per_m),
                               g_street=float(raw.g_street),
                               road_margin_m=float(raw.road_margin_m),
-                              r0_frac=float(raw.r0_frac))
+                              radius_frac=float(raw.radius_frac))
 
 
 def _load_pinned_block() -> tuple[Block, dict[str, Method]]:

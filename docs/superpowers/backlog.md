@@ -57,6 +57,19 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
 
 ## Visualizations (brainstorm needed — own its own brainstorm)
 
+- **Draw the guessed building circle-footprints, and the graph the metric actually uses.** Every
+  render currently shows building POINTS, but the metric and `displacement` both reason about
+  *disks*: `building_radii` gives each building a radius of half its nearest-neighbour distance, and
+  displacement is `clip(1 - d/r)` against that disk, while the footpath conductance is a function of
+  the gap between two disks. None of that is visible, so the quantity being optimised is invisible
+  too — a reader sees points and roads and has to take the corridor arithmetic on faith. Two pieces:
+  (a) an overlay drawing each building's disk at its true radius, which makes displacement legible
+  and would have made the r0-vs-per-pair-gap question obvious much earlier; (b) an overlay of the
+  METRIC's graph itself — parcel-centroid nodes, adjacency edges, edge width or colour by
+  conductance, ground edges marked. That second one is the honest picture of what permeability
+  scores, and it makes visible that edges run straight through building interiors (the road-first
+  mesh spec's motivating defect).
+
 - **Region choropleth** — color every block in a region by a metric (peel-k, geometric access
   distance, population, building density, road-length-to-reblock). The first "zoom out from one
   block to the whole city" view. Needs a region-level render (many small polygons + a colorbar);
