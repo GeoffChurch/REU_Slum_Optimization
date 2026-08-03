@@ -69,6 +69,24 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
 - **Before/after polish** — the existing `render_after` + the head-to-head webpage; a proper
   emitter with `format=webpage` and side-by-side layout (see flow-refactor spec §2).
 
+## Retrieval may be the wrong problem: donor QUALITY is predictable, MATCHING is not (2026-08-02)
+
+See [the note](notes/2026-08-02-donor-quality-is-predictable-matching-is-not.md). On the 500 pairs
+already in `data/benchmarks/gw_pair_matrix.parquet`, with no new GW fits: cheap invariant
+descriptors of the DONOR ALONE predict transplant fidelity at within-recipient rho +0.22 on held-out
+recipients, against GW distance's +0.04. Adding the recipient or the pairwise difference adds
+nothing, 85% of donors appear exactly once so it is not memorisation, and the real score beats
+30/30 permutation draws.
+
+**This removes the motivation for the Phase 2 retrieval index rather than deferring it.** An index
+answers "which donor is nearest this recipient"; the measurement says that question has little to do
+with transplant quality, while "is this a good donor at all" is answerable from a per-block score
+computed once, with no pairwise anything.
+
+Small (20 recipients, Cape Town, one fidelity measure) and the permutation margin is modest, so
+next steps are re-run at scale on the 65,364 provisioned blocks, then interpret the score before
+building on it.
+
 ## Shape-standardizing RegionBuilder -- BUILT 2026-08-02, objective chosen empirically
 
 `ShapeStandardizingRegionBuilder` (`src/reblock/region.py`, `conf/region_builder/
