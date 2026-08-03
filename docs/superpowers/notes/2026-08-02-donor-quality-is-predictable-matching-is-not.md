@@ -119,3 +119,52 @@ established that the learned feature map is needed at all.**
    descriptor is unnecessary and the finding is simpler still.
 4. Only then, if a per-block donor-quality score holds up, wire it in as a donor FILTER — which is
    what the consensus reblocker would consume, and it needs no retrieval at all.
+
+
+## REPLICATED AT 5x SCALE (2026-08-03) — the effect is real, `n_parcels` was not
+
+2,500 Gauteng pairs over **100 recipients** (`gw_pair_matrix_zaf_scaled.parquet`, 33 min, zero
+skips), same protocol. Generating it first required fixing `pair_matrix`, which had been silently
+skipping 75% of pairs since the width refactor.
+
+    median within-recipient rho, held out          by RECIPIENT   by DONOR
+      n_parcels only                                  -0.018       -0.008
+      n_parcels + compactness                         +0.122       +0.099
+      five trivial numbers                            +0.171       +0.137
+      descriptor spectra                              +0.127       +0.104
+      trivial + descriptor                            +0.172       +0.178
+
+    permutation null (within-recipient shuffle):  median +0.003, 95th +0.032, max +0.038
+
+**The null is now tight** — max +0.038 against Cape Town's +0.174 — so at 100 recipients the design
+finally resolves what 20 could not. Three conclusions change or firm up:
+
+1. **The effect is real and decisive.** +0.17 against a null that never exceeds +0.04.
+2. **`n_parcels` alone is DEAD (-0.018).** The Cape Town reading that a single size number matched
+   the whole model does not replicate — that was a 20-recipient artifact, and this note's own
+   "good donor is mostly small and compact" headline was too strong.
+3. **The descriptor still does not beat the trivial features** (+0.127 vs +0.171 by recipient), and
+   still adds nothing on top of them when recipients are held out. It does add under donor-held-out
+   CV (+0.178 vs +0.137), which is the one place the spectra have ever earned anything.
+4. **It survives holding DONORS out** (+0.137 trivial), so it generalises to unseen donors — worth
+   checking here because donors repeat up to 7x in this pool, unlike Cape Town's 85%-singleton set.
+
+### And permeability, at scale
+
+    within-recipient spearman with perm_gap
+      perimeter_m                      -0.174
+      area_m2                          -0.172
+      own_permeability_P0_per_parcel   -0.161
+      compactness_A_over_P2            +0.123
+      real_gw_dist                     -0.115
+      n_parcels                        -0.055
+      donor_depth                      -0.055
+
+Donor permeability is **-0.161** — no longer near the bottom as it read on Cape Town, but part of an
+undifferentiated cluster with perimeter and area at -0.17. So the honest answer to "is donor quality
+highly correlated with permeability" is: **weakly and negatively, and not distinguishably more than
+with donor SIZE**, which permeability-per-parcel partly tracks. Nothing here isolates permeability
+as the mechanism.
+
+**What a donor filter would use:** the five trivial numbers, not the spectra and not GW. That is
++0.17 from geometry every block already has.
