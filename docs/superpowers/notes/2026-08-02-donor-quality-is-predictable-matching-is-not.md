@@ -1,8 +1,15 @@
-# Donor quality is predictable from cheap features; donor–recipient MATCHING is not (2026-08-02)
+# Donor quality is predictable — and it is mostly SIZE (2026-08-02)
 
-Cheap rotation/translation/scale-invariant descriptors of a **donor block alone** predict how well
-that donor transplants — for unseen donors and unseen recipients — roughly **6× better than GW
-distance does**. Adding the recipient, or the recipient–donor difference, adds nothing.
+> **CORRECTED same day.** The first version compared the learned descriptor against GW distance
+> (+0.218 vs +0.035) and called it a 6× win. That is the wrong baseline. Against six trivial donor
+> numbers the descriptor scores +0.218 vs **+0.190** — a margin this design cannot resolve. The
+> durable findings are that donor quality is predictable at all, that it is NOT matching, and that
+> it is NOT permeability; the learned feature map is not established as necessary. See
+> [What "good donor" actually is](#what-good-donor-actually-is).
+
+Descriptors of a **donor block alone** predict how well that donor transplants — for unseen donors
+and unseen recipients — where GW distance does not. Adding the recipient, or the recipient–donor
+difference, adds nothing.
 
 If that holds up, the retrieval programme has been solving the wrong problem. You do not need to
 find the nearest donor to a given recipient. You need to know which blocks are good donors at all,
@@ -58,6 +65,38 @@ property of the donor, and it is legible to two cheap descriptors.
 Concretely, this removes the motivation for the Phase 2 retrieval index (masked-NCC FFT over
 feature vectors) rather than merely deferring it. An index answers "which donor is nearest this
 recipient"; the measurement says that question has little to do with transplant quality.
+
+## What "good donor" actually is
+
+Asked whether donor quality is just permeability. It is not — and the honest answer deflates the
+result above.
+
+    within-recipient rho with perm_gap        vs the model's own prediction (spearman)
+      descriptor model      +0.218
+      n_parcels             -0.229               area_m2               -0.485
+      compactness A/P^2     +0.188               compactness A/P^2     +0.344
+      area_m2               -0.157               interior_footpath_m   -0.309
+      own permeability P0   -0.134               n_parcels             -0.192
+      donor_depth           -0.106               own permeability P0   -0.159
+      interior_footpath_m   +0.071               donor_depth           -0.073
+      GW distance           +0.035
+
+**Permeability is among the weakest predictors** (-0.134). What predicts transplant quality is
+donor SIZE, negatively: `n_parcels` alone reaches |rho| 0.229, matching the whole descriptor model,
+and the model's own prediction correlates -0.485 with donor area and +0.344 with compactness. Scale-
+invariant descriptors can still track size, because larger blocks in this corpus have systematically
+different outline shapes.
+
+So "good donor" is largely **small and compact** — a rule in two numbers.
+
+The ablation that decides whether the spectra are worth anything:
+
+    trivial only (n, area, perim, compactness, P0/parcel, footpath_m)   +0.190
+    descriptor only                                                    +0.218
+    both                                                               +0.241
+
+The descriptor's +0.028 over six trivial numbers is well inside this design's noise. **It is not
+established that the learned feature map is needed at all.**
 
 ## What it does not establish
 

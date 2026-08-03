@@ -74,7 +74,10 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
 See [the note](notes/2026-08-02-donor-quality-is-predictable-matching-is-not.md). On the 500 pairs
 already in `data/benchmarks/gw_pair_matrix.parquet`, with no new GW fits: cheap invariant
 descriptors of the DONOR ALONE predict transplant fidelity at within-recipient rho +0.22 on held-out
-recipients, against GW distance's +0.04. Adding the recipient or the pairwise difference adds
+recipients, against GW distance's +0.04. **But against six TRIVIAL donor numbers (+0.190) the margin
+is +0.028, inside this design's noise -- the learned descriptor is not established as necessary, and
+"good donor" is mostly "small and compact" (n_parcels alone reaches |rho| 0.229). Donor permeability
+is among the WEAKEST predictors, -0.134.** Adding the recipient or the pairwise difference adds
 nothing, 85% of donors appear exactly once so it is not memorisation, and the real score beats
 30/30 permutation draws.
 
