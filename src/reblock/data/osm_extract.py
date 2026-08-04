@@ -32,6 +32,10 @@ NEAR_MISS_TAGS: tuple[str, ...] = ("service", "residential", "unclassified")
 # path more than STREET_TOL off the outline reads as interior. Measured: the count gate moves only
 # 2.6 points across this range while total length drops ~18%, so tolerance matters for
 # donor-quality ranking, not for the coverage census -- but report both and let the data say so.
+# That ~18% is an UPPER BOUND as of 2026-08-04: it was measured before `_reach_street` stopped the
+# subtraction from eating `tol` metres off every path that reaches the block edge, which was pure
+# trimming artifact rather than genuine street/interior ambiguity. The conclusion is unaffected --
+# a smaller length swing only strengthens the case for not sweeping tolerance 1.8M times.
 TOLERANCES: tuple[float, ...] = (0.5, 2.0, 5.0)
 
 
