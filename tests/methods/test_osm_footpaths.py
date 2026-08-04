@@ -10,7 +10,9 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.contracts import Block, Proposal
+from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.methods.osm_footpaths import OsmFootpathsReblocker, interior_desire_lines
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 UTM = CRS.from_epsg(32734)
 Bbox = tuple[float, float, float, float]
@@ -145,3 +147,62 @@ def test_interior_desire_lines_tolerance_trims_length_not_count() -> None:
     lines = gpd.GeoDataFrame(geometry=[LineString([(10, 2), (90, 2)])], crs=crs)
     assert len(interior_desire_lines(lines, boundary, boundary.boundary, crs, tol=0.5)) == 1
     assert len(interior_desire_lines(lines, boundary, boundary.boundary, crs, tol=5.0)) == 0
+
+
+# --- the street-corridor subtraction must not sever the path from its own egress ----------------
+#
+# `difference(streets.buffer(tol))` leaves a cut end at distance exactly `tol`, and
+# `street_connectivity` tests `<= tol` -- so whether an imported footpath reads as reaching the
+# street came down to floating-point noise. These pin the reconnection that removes the collision.
+
+_STREET = LineString([(0, 0), (100, 0)])
+_BOUNDARY = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
+
+
+def _street_gdf(crs: CRS) -> gpd.GeoDataFrame:
+    return gpd.GeoDataFrame(geometry=[_STREET], crs=crs)
+
+
+def test_a_footpath_meeting_the_street_still_reaches_it_after_the_subtraction() -> None:
+    """The knife-edge guard, asserted where the answer is unambiguous: the kept remainder must
+    TOUCH the street, not merely land within a tolerance of it.
+
+    FAULT INJECTION: drop the `_reach_street` call from `interior_desire_lines` and the remainder
+    sits 0.5 m off the street -- `distance` becomes 0.5 and `connected_frac` at a tight seam
+    collapses to 0.0, failing both assertions below.
+    """
+    crs = CRS.from_epsg(32734)
+    lines = gpd.GeoDataFrame(geometry=[LineString([(50, 0), (50, 60)])], crs=crs)
+    out = interior_desire_lines(lines, _BOUNDARY, _STREET, crs)
+    assert len(out) == 1
+    assert out.geometry.iloc[0].distance(_STREET) == pytest.approx(0.0, abs=1e-9)
+    # and it reads as street-connected however tight the access seam is drawn
+    roads = with_width(out, DEFAULT_ROAD_WIDTH_M)
+    assert street_connectivity(_street_gdf(crs), roads, 0.01).connected_frac == pytest.approx(1.0)
+
+
+def test_a_footpath_running_along_the_street_still_loses_that_length() -> None:
+    """Reconnection must not undo what the subtraction is FOR. This path runs 40 m along the
+    street before turning into the block: the along-street 40 m goes, the interior 60 m stays, and
+    the survivor reaches the street through a connector no longer than `tol`.
+    """
+    crs = CRS.from_epsg(32734)
+    lines = gpd.GeoDataFrame(
+        geometry=[LineString([(10, 0), (50, 0), (50, 60)])], crs=crs)
+    out = interior_desire_lines(lines, _BOUNDARY, _STREET, crs)
+    assert len(out) == 1
+    kept = out.geometry.iloc[0]
+    assert kept.length == pytest.approx(60.0, abs=STREET_TOL)   # the 40 m along the street: gone
+    assert kept.distance(_STREET) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_a_purely_interior_footpath_is_not_snapped_to_anything() -> None:
+    """The other direction: reconnection may only repair a cut, never invent egress. This path is
+    nowhere near the street, so it must come back byte-for-byte unchanged.
+    """
+    crs = CRS.from_epsg(32734)
+    interior = LineString([(20, 40), (80, 40)])
+    lines = gpd.GeoDataFrame(geometry=[interior], crs=crs)
+    out = interior_desire_lines(lines, _BOUNDARY, _STREET, crs)
+    assert len(out) == 1
+    assert out.geometry.iloc[0].equals_exact(interior, 0.0)

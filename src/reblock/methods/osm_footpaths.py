@@ -30,14 +30,55 @@ from typing import cast
 
 import geopandas as gpd
 from pyproj import CRS
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import unary_union
+from shapely.ops import nearest_points, unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.methods.desire_lines import DesireLineSource
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+
+
+def _reach_street(line: LineString, streets: BaseGeometry, reach: float) -> LineString:
+    """Extend back to the street either end that the street-corridor subtraction cut off.
+
+    `difference(streets.buffer(tol))` leaves a cut end lying ON the corridor boundary -- at distance
+    `tol` from the street, to within floating point. `street_connectivity` then asks whether a road
+    comes WITHIN `tol` of a street, so for a footpath drawn meeting the street the answer is decided
+    by whether `0.5000000000000001 <= 0.5`. Both sides read the same `STREET_TOL`, so the collision
+    is structural rather than a bad calibration: MEASURED over 10 Cape Town blocks, moving the
+    connectivity test by ONE CENTIMETRE (0.50 -> 0.51 m) takes street-connected footpath length from
+    70.0% to 87.5% and fully-connected blocks from 4/10 to 8/10 -- and nothing moves again out to
+    5 m, the signature of a threshold artifact rather than a tolerance curve. That artifact is what
+    made `osm_footpaths` look like 93% floating road
+    (`specs/2026-07-30-road-first-mesh-design.md`, D3).
+
+    Reconnecting at the source fixes it for every consumer and makes the result independent of `tol`
+    -- which matters because `tol` cannot simply be shrunk below the access seam: it also sets how
+    far off the kblock outline an OSM way may run and still count as the same feature, and the
+    census sweeps it upward for exactly that reason.
+
+    A footpath drawn meeting the street therefore keeps meeting it. One drawn RUNNING ALONG the
+    street still loses its whole overlapping length, which is what the subtraction is for; the
+    connector that replaces a cut end is at most `tol` long and lies inside the street corridor,
+    where it displaces nothing.
+    """
+    if streets.is_empty:
+        return line
+    coords = list(line.coords)
+    ends = []
+    for pos in (0, -1):
+        end = Point(coords[pos])
+        d = end.distance(streets)
+        # `0 <` excludes an end already touching the street, whose connector would be zero-length.
+        ends.append(nearest_points(end, streets)[1] if 0.0 < d <= reach else None)
+    head, tail = ends
+    if head is not None:
+        coords.insert(0, (head.x, head.y))
+    if tail is not None:
+        coords.append((tail.x, tail.y))
+    return LineString(coords)
 
 
 def interior_desire_lines(
@@ -50,7 +91,9 @@ def interior_desire_lines(
 ) -> gpd.GeoDataFrame:
     """Clip `lines` to `boundary`, subtract the `streets` corridor (a `tol` buffer), and keep the
     interior LineString remainder longer than `tol` -- the added intervention, excluding the
-    perimeter/inter-block streets that are already egress.
+    perimeter/inter-block streets that are already egress. Ends that the subtraction cut are
+    reconnected to the street (`_reach_street`), so what comes back reaches its egress the way the
+    mapped path does.
 
     Pure geometry: takes boundary/streets/crs rather than a Block, so the country-wide OSM census
     can call it for blocks that have no building points (and therefore no Voronoi parcels, and
@@ -72,7 +115,12 @@ def interior_desire_lines(
     # scalar-return overload (-> BaseGeometry) instead of the array-return one; cast to
     # correct it, mirroring the same fixup in reblock.data.shapefile._prepared.
     kept = cast(gpd.GeoSeries, remainder[mask])
-    return gpd.GeoDataFrame(geometry=list(kept), crs=crs)
+    # A cut end sits at distance `tol` from the street by construction; the slack only absorbs the
+    # double round-off that decides `0.5000000000000001 <= 0.5`, and is far too small to invent a
+    # connection that the subtraction did not sever.
+    reach = tol * (1.0 + 1e-6)
+    return gpd.GeoDataFrame(
+        geometry=[_reach_street(g, streets, reach) for g in kept], crs=crs)
 
 
 @dataclass
