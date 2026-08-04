@@ -38,14 +38,40 @@ def test_interiority_row_reports_count_and_length_at_every_tolerance() -> None:
 
 
 def test_interiority_row_count_gate_is_robust_where_length_is_not() -> None:
-    """A path crossing the interior but touching the edge: length is trimmed by tolerance,
-    the count is not. This is the spike's central finding and the reason both are reported."""
+    """A path RUNNING ALONG the boundary before diving into the block: raising the tolerance
+    reclassifies the along-boundary run as street rather than interior, so length falls while the
+    count does not. This is the spike's central finding and the reason both are reported.
+
+    The fixture is a boundary-runner rather than a plain edge-to-interior crossing because that is
+    where the ambiguity actually lives -- OSM ways are digitized against different imagery than the
+    kblock outlines, so a path a couple of metres off the outline may be the street or may not.
+    A crossing that merely TOUCHES the edge is not ambiguous at all: see
+    `test_a_path_reaching_the_edge_keeps_its_full_length_at_every_tolerance`.
+    """
     row = interiority_row(
-        "b2", BOUNDARY, _lines(LineString([(0, 50), (90, 50)])), _lines(), CRS_M)
+        "b2", BOUNDARY, _lines(LineString([(10, 2), (60, 2), (60, 90)])), _lines(), CRS_M)
     assert row["n_interior_segments_0.5"] == row["n_interior_segments_5.0"] == 1
     len_low: float = row["interior_length_m_0.5"]  # type: ignore[assignment]
     len_high: float = row["interior_length_m_5.0"]  # type: ignore[assignment]
+    assert len_low == pytest.approx(138.0)    # 50 m along the boundary + 88 m in
+    assert len_high == pytest.approx(90.0)    # the along-boundary 50 m reads as street
     assert len_low > len_high
+
+
+def test_a_path_reaching_the_edge_keeps_its_full_length_at_every_tolerance() -> None:
+    """The census must not bill a path for touching its own egress. The street-corridor
+    subtraction used to eat `tol` metres off the end of any path that reached the block edge, so
+    `interior_length_m` moved with the tolerance for a reason that was purely our own trimming
+    (`specs/2026-07-30-road-first-mesh-design.md`, "D3 was our own artifact").
+
+    FAULT INJECTION: drop the `_reach_street` call from `interior_desire_lines` and this reads
+    89.5 / 88.0 / 85.0 across the three tolerances instead of a flat 90.0.
+    """
+    row = interiority_row(
+        "b5", BOUNDARY, _lines(LineString([(0, 50), (90, 50)])), _lines(), CRS_M)
+    for tol in TOLERANCES:
+        assert row[f"n_interior_segments_{tol}"] == 1
+        assert row[f"interior_length_m_{tol}"] == pytest.approx(90.0), f"trimmed at tol={tol}"
 
 
 def test_interiority_row_keeps_near_miss_separate() -> None:
