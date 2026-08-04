@@ -120,7 +120,8 @@ def interior_desire_lines(
     # connection that the subtraction did not sever.
     reach = tol * (1.0 + 1e-6)
     return gpd.GeoDataFrame(
-        geometry=[_reach_street(g, streets, reach) for g in kept], crs=crs)
+        # `mask` already dropped everything but LineStrings; a GeoSeries element type cannot say so.
+        geometry=[_reach_street(cast(LineString, g), streets, reach) for g in kept], crs=crs)
 
 
 @dataclass
