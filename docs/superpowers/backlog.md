@@ -205,8 +205,30 @@ block, and (b) a stranding detector to call when a proposal looks suspicious. Us
 (higher concordance, less noisy order statistic).
 
 Standing caveat if anyone revisits: a tail statistic is **not** monotone under road addition —
-demonstrated with a counterexample in the note. `tr(L^-p)` is the monotone family to reach for if an
-objective is ever wanted.
+demonstrated with a counterexample in the note.
+
+### 1b. `tr(L^-p)` as a tail-weighted OBJECTIVE — screen it before committing
+
+The only monotone route to optimizing for the worst-off parcels, and it is provably the only one:
+`tr(L^-p)` is monotone at every `p > 0` (Weyl, eigenvalues only), while the demand-weighted
+`1^T L^-p 1` breaks above `p = 1` — measured, 41/4000 violations at p=2, 47/4000 at p=4, exactly
+Löwner's boundary. It is also **convex in the edge weights** (`tr f(X)` convex for convex `f`,
+`L` affine in weights), so it drops into `resistance_lp`'s existing convex machinery with `p` as a
+dial from mean-like to worst-case.
+
+**Screen it cheaply first, and do NOT start by modifying the LP.** Evaluate `tr(L^-p)` for
+`p = 1, 2, 4` on EXISTING method outputs at matched displacement and compute Kendall tau against the
+permeability ranking. If every `p` ranks methods the way permeability already does, optimizing for it
+must produce the same networks and the idea is dead for the cost of one evaluation pass.
+
+**There is a specific reason to expect exactly that.** The `p = 1` case is essentially the all-pairs
+Kirchhoff probe, which was run 2026-07-30 and closed: Kendall tau **+0.800** against permeability,
+same winner 10/12, "not worth changing every published number to reproduce nearly the same ranking."
+So the entire bet is that `p > 1` behaves materially differently from `p = 1`. That is a narrow,
+untested, and quite specific hypothesis — screen it, do not assume it.
+
+Cost if it survives: `tr(L^-p)` needs a spectrum or a stochastic trace estimator against one sparse
+solve for `P`, on a method that is already the slow one.
 
 ### 2. Spectral dimension as a fabric descriptor — MEASURED 2026-08-05, largely NEGATIVE
 

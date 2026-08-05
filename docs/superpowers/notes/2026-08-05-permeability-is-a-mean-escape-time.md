@@ -143,10 +143,34 @@ than one eigenvalue, and is the useful result here:
 > weakly increases. Hence **every Schatten norm `tr(L^-p) = sum_k lambda_k^-p` is monotone, for
 > every `p > 0`** — with `p = 1` the trace and `p -> inf` giving `1/lambda_min`.
 
-So `p` is a dial from mean-like to worst-case and **every setting is monotone**. Contrast `||tau||_p`,
-where only `p = 1` is. The difference is precise and worth remembering: Schatten norms are functions
-of the OPERATOR, and eigenvalue monotonicity transfers to them; `||tau||_p` is a function of one
-VECTOR `L^-1 b`, and it does not transfer to that vector's components.
+So `p` is a dial from mean-like to worst-case and **every setting is monotone**.
+
+The natural competitor is the DEMAND-weighted version, `1^T L^-p 1 = sum_k c_k^2 lambda_k^-p`, which
+is what you would actually want — it equals `sum_i E_i[T^p] / p!`, the aggregate p-th moment of
+escape time. It does not survive. Searching 4,000 random grounded graphs, one added edge each
+(`scratchpad/spectral/schatten_monotone.py`):
+
+    functional        p    violations   worst relative INCREASE on added conductance
+    quadform        0.5        0
+    quadform        1.0        0
+    quadform        2.0       41            0.20%   <- BREAKS
+    quadform        4.0       47            1.09%   <- BREAKS
+    trace       0.5-4.0        0                    (every p tested)
+
+It breaks **exactly** above `p = 1` and not before, which is Löwner's boundary showing up
+empirically. The mechanism is worth stating precisely, because it is the whole reason the trace is
+usable:
+
+> `tr(L^-p)` needs only **eigenvalue** monotonicity — Weyl's `A >= B => lambda_k(A) >= lambda_k(B)`
+> for every k — which holds at every `p`. `b^T L^-p b` needs **operator** monotonicity of
+> `t -> t^-p`, which by Löwner holds only for `p <= 1`.
+>
+> **The trace discards the eigenvectors, and that discard is exactly what buys monotonicity at
+> every p.** The price is uniform mode weighting: modes no one's demand excites count the same as
+> modes everyone's does.
+
+Same distinction in one line: Schatten norms are functions of the OPERATOR; `||tau||_p` and
+`b^T L^-p b` are functions of one VECTOR, and eigenvalue monotonicity does not reach them.
 
 Caveat before anyone reaches for `tr(L^-1)`: it weights all modes equally, where `P` weights by
 `c_k^2`. Trace-style rankers have already come back redundant against permeability here — the
