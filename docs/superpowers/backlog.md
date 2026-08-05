@@ -166,6 +166,178 @@ gates has not been written.
   cadastral/footprint parcels retain morphology kblock's k captures. Revisit whether a
   morphology-preserving parcelization is worth it, if the geometric metric doesn't suffice.
 
+## Complexity-science cross-pollination — Batty, fractals, spectra (2026-08-05)
+
+Survey prompted by asking what Batty's fractal-cities programme offers us. **The headline finding is
+already written up** (`notes/2026-08-05-permeability-is-a-mean-escape-time.md`): our own metric is a
+total expected escape time, `P = sum_i tau_i`, and the per-parcel times are already computed and
+discarded. Everything below is worth less than that. Ranked by value/cost, honestly.
+
+**Note on the sources.** `complexcity.info` refuses connections; `jmichaelbatty.wordpress.com` has
+not been posted to since **July 2011**. Mining Batty means the books — *Fractal Cities* (Batty &
+Longley 1994), *Cities and Complexity* (2005), *The New Science of Cities* (2013) — not the sites.
+
+### 1. Escape-time DISTRIBUTION, not just its sum — DO THIS FIRST
+
+Zero extra solves; `egress_power` already returns `v`. `P` is a SUM, so it cannot say whether roads
+served everyone a little or rescued the worst-off parcel — an **equity-of-egress** gap.
+
+**Not the "Bermuda triangle."** That is a *circulation* failure (a pocket with fine egress and
+terrible internal connectivity) which egress by construction cannot see, and its diagnostic is the
+all-pairs column below. These are two cheap diagnostics for two different gaps, complementary rather
+than competing — and this one is the cheaper by far, since all-pairs needs `n` solves or a trace
+estimator while the `tau` tail needs nothing.
+
+**The decisive test before building anything:** one block, two methods truncated to matched
+permeability, compare `max(tau)` and `p95(tau)`. If the tail is pinned by the total, drop the idea.
+If it is not, report a tail statistic alongside permeability and displacement. Caveat that must
+survive into any implementation: a tail statistic is **not** monotone under road addition (Rayleigh
+gives the sum, not the components), so it is a diagnostic, not an objective, unless measured
+otherwise.
+
+### 2. Spectral dimension as a fabric descriptor — MEASURED 2026-08-05, largely NEGATIVE
+
+**Read this before spending anything here.** `scratchpad/spectral/spectrum_shape.py` computed full
+Laplacian spectra for 8 real Cape Town blocks against synthetic references with known `d_s`
+(path = 1, grid = 2), fitting the counting-function slope on the lower half AND lower quarter of the
+spectrum so slope *stability* is visible rather than assumed.
+
+    references validate the estimator:  path 0.98 / 0.95 (true 1),  grid 1.96 / 1.78 (true 2)
+
+                        GROUNDED L                     UNGROUNDED D - W
+    block          d_s      drift   decades       d_s      drift   decades
+    (8 blocks)   2.8-3.6   to 3.34  0.90-1.65   1.74-2.12  0.12-0.23  1.29-2.44
+
+Two findings, both worth keeping:
+
+1. **The grounded operator is the wrong one and gives garbage.** `g_street = 20` against
+   `g_walk = 0.1` floors the spectrum, so there is no `lambda -> 0` asymptotic to measure at all.
+   Slopes come out at `d_s ~ 3`, impossible for a planar graph, and the slope drifts by up to **3.34**
+   between sub-ranges. Any spectral-dimension work must use ungrounded `D - W`.
+2. **On the right operator, every block reads `d_s ~ 2`** — 1.74 to 2.12, a spread barely above the
+   0.12-0.23 systematic drift, and indistinguishable from a plain 2D lattice.
+
+**Why that is probably structural rather than a null result to push through.** Our mesh is
+parcel-adjacency: a planar, bounded-degree graph whatever the morphology. The morphology lives
+entirely in the edge CONDUCTANCES, and the low-`lambda` counting slope is dominated by topology and
+embedding dimension, not weights. So `d_s` is close to blind to exactly what we want to measure. This
+also **retracts the claim** that made the idea attractive — that the spectrum can tell a cul-de-sac
+maze from a grid at equal density. Not this statistic; both are 2D planar graphs.
+
+The scale caveat below still stands independently, and the two compound.
+
+### 2b. Eigenvalue SPACINGS — the untested idea worth more than 2 was
+
+The replacement, and the most promising thing left in this section. Nearest-neighbour spacing
+distribution after **unfolding**: Poisson spacings `P(s) ~ e^-s` mean localized, uncoupled modes;
+Wigner-Dyson repulsion `P(s) ~ s e^{-s^2}` means delocalized, well-mixed. **Localized eigenmodes are
+trapped pockets**, which is the structural statement we actually want.
+
+Two reasons it may succeed where `d_s` failed: unfolding removes the smooth part of the density by
+construction, so it dodges the conductance-scale normalization problem entirely; and spacings depend
+on the WEIGHTS, not just the topology, so it is not pinned to the embedding dimension the way the
+counting slope is.
+
+### On EDF tests over the spectrum, if that route is taken
+
+- The empirical spectral distribution `F_n(lambda) = N(lambda)/n` IS what item 2 fit, so an EDF
+  analysis of the spectrum is nonparametric spectral-dimension estimation.
+- **KS is the wrong member of the family.** Its statistic is dominated by the bulk near the median
+  and has poor tail power; the hierarchical signal lives in the small-`lambda` tail. CvM is better;
+  **Anderson-Darling** is the right one, since its `1/(F(1-F))` weight upweights the tails on purpose.
+- **Normalization is the whole test.** `lambda` has units of rate, so a raw two-sample comparison
+  between blocks mostly detects conductance SCALE, not structure. Normalizing (`lambda/lambda_max`,
+  or `lambda*n/tr L`) is a modelling decision that determines what is being tested.
+- **A slope plus a stability check beats a p-value here.** An EDF test says two spectra differ; the
+  counting-function slope says how, in an interpretable parameter. And it was the stability check —
+  not any test statistic — that caught the grounded operator above.
+- Cost: dense `eigh` is fine at block `n <= 400` and impossible at region `n ~ 11,000`. At region
+  scale use stochastic Lanczos quadrature for the spectral density — the same Hutchinson machinery
+  the all-pairs entry already names.
+
+### 2c. The original reasoning — SUPERSEDED by 2, kept so it is not re-derived
+
+`d_s` defined by `N(lambda) ~ lambda^(d_s/2)` (equivalently return probability `p(t) ~ t^(-d_s/2)`,
+or `lambda_k ~ k^(2/d_s)`), related to Hausdorff and walk dimension by `d_s = 2 d_f / d_w`. On a
+lattice `d_w = 2` and `d_s = d_f`; on a dead-end-riddled fractal `d_w > 2` (subdiffusion) and
+`d_s < d_f`. Alexander–Orbach conjectured `d_s ~ 4/3` for critical percolation clusters, and
+percolation-with-dead-ends looked like a fair caricature of informal fabric. **That analogy is what
+failed** — the caricature applies to the obstacles, which live in our edge weights, not to the
+parcel-adjacency topology the counting slope actually sees.
+
+Two specific claims from the original pitch, both now settled:
+
+- ~~"Informal fabric is subdiffusive (`d_s < 2`) and good reblocking pushes it toward 2."~~
+  **TESTED AND FALSE at block scale**: `d_s = 1.74-2.12` on ungrounded `D - W`, i.e. already ~2, with
+  no room to move and no discrimination between blocks.
+- ~~"A box count cannot distinguish a cul-de-sac maze from a grid at equal density; the spectrum
+  can."~~ **RETRACTED.** Not via this statistic — both are planar bounded-degree graphs and both
+  read `d_s ~ 2`. The claim may still hold for a weight-sensitive spectral statistic (see 2b), but it
+  was asserted for the counting slope, where it is wrong.
+
+**The scale blocker still stands, independently:** a 100-400 parcel block spans 1.3-2.4 decades on
+the ungrounded operator — the same scaling-range critique that undermines much of the fractal-cities
+literature (see below), and it applies to us. Anything in this area belongs at *region* scale
+(11k-parcel depth region) or corpus scale. The two problems compound: too few decades AND a statistic
+pinned to the embedding dimension.
+
+### 3. Lacunarity as a donor descriptor — one cheap shot
+
+Batty & Longley's lacunarity measures gappiness *at each scale* rather than collapsing to one
+dimension. The donor-quality work found learned outline/packing spectra could not beat five trivial
+numbers (`notes/2026-08-02-donor-quality-is-predictable-matching-is-not.md`). Lacunarity is a
+genuinely different, scale-resolved texture measure and is cheap to compute. Worth one attempt as a
+feature in that same protocol; drop it if it does not move the within-recipient rho.
+
+### 4. Wilson's entropy maximization IS entropic optimal transport — the sleeper
+
+Wilson (1967) derived the doubly-constrained gravity model by maximizing entropy subject to marginals
+and a cost budget. **That is the Sinkhorn / entropic-OT problem**, and Wilson's dispersion parameter
+`beta` is our `1/eps`. It is central to *The New Science of Cities*.
+
+We are running entropic Gromov-Wasserstein and recently corrected a factor of 2 in `eps`/`tau`
+(PR #40). There is a fifty-year urban-modelling literature on how to **choose and interpret** that
+parameter — including calibrating it against observed trip-length distributions so it carries
+physical meaning rather than being a regularization knob. Same mathematics, different vocabulary,
+and the urban side has the calibration experience. Highest-value item here *if* the OT thread is
+revived; currently that thread is closed for single-donor and open only for consensus.
+
+### 5. Space syntax — positioning, not technique
+
+Hillier's "integration" is normalized mean topological depth on the axial/segment graph, close to our
+access-depth, and it is the dominant existing method for informal settlements. Known weakness:
+insensitive to capacity and to metric distance — which is exactly what contention-aware permeability
+fixes. Useful for saying precisely what we improve on. A paper asset, not a code change.
+
+### On the fractal claim itself — what the evidence actually supports
+
+Worth recording so nobody re-derives it. Two claims get conflated and only one is Zipf: **rank-size**
+is about a *system of cities*; **fractal urban form** is about the geometry of *one city's* built-up
+area. The second has independent geometric evidence — box-counting `D ~ 1.7-1.8` on built-up
+footprints, perimeter-area scaling, power-law-over-exponential radial density (Batty & Kim 1992).
+None of it is downstream of Zipf.
+
+But it is weaker than presented. Avnir, Biham, Lidar & Malcai (*Science* 1998) found published
+physical "fractals" span a median of **~1.3 decades**; over two decades almost any inhomogeneous set
+gives a convincing log-log line. Clauset, Shalizi & Newman (2009) killed many power-law claims under
+proper MLE+KS testing, and Eeckhout (2004) showed lognormal fits city sizes with Zipf surviving only
+in a tail whose truncation is a free parameter. The literature's own retreat to multifractal `f(alpha)`
+spectra concedes a single `D` is insufficient.
+
+**Usable reading:** treat "fractal" as *hierarchically organised with no single characteristic scale
+over the range that matters*. Much weaker than scale invariance, defensible, and enough to be useful.
+Do not claim fractality of our blocks; we do not have the decades to support it.
+
+### Already falsified here — do not re-propose
+
+The intuition "fast local mixing, then branch out and mix fast there" is metastable/hierarchically
+clustered dynamics, whose textbook signature is `k` small eigenvalues separated by a gap from the
+bulk. **The naive spectral version has already been tested and failed on the gate**: Fiedler,
+resistance, log-tree and soft-Phi were all falsified (`memory: road-structure-metric-basis`). What is
+different about `d_s` above is that it is not one eigenvalue but the slope of the counting function
+over the whole low-frequency tail — a far more robust statistic than `lambda_2`. That distinction is
+the only reason item 2 is listed at all.
+
 ## Lens prefix selection — the cheapest connected subnetwork (2026-07-29)
 
 Both lenses truncate a method's roads to a PREFIX of one canonical order (`budget.street_first_ordered`)
@@ -458,6 +630,12 @@ D = 10% while all-pairs resistance falls only 0.35-0.64), which is the "Bermuda 
 as a number and makes all-pairs worth a cheap DIAGNOSTIC column even though it is redundant as a
 ranker; and the LP leads on both metrics, so it is not exploiting egress-specific structure. Full
 reasoning and the probe's own methodological trap: `notes/2026-07-30-egress-vs-circulation.md`.
+
+**Its cheaper sibling (2026-08-05).** If a diagnostic column is wanted, note that permeability is a
+total expected escape TIME, `P = sum_i tau_i`, and `egress_power` already returns the per-parcel
+`tau` (`notes/2026-08-05-permeability-is-a-mean-escape-time.md`). A tail statistic over `tau` costs
+**zero solves** where all-pairs costs `n`. It measures a different gap — equity of egress, not
+circulation — so it does not replace this entry, but it is the one to try first on cost alone.
 
 ## Road-first mesh -- SPEC'D 2026-07-30, not built
 
