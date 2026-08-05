@@ -177,7 +177,7 @@ discarded. Everything below is worth less than that. Ranked by value/cost, hones
 not been posted to since **July 2011**. Mining Batty means the books — *Fractal Cities* (Batty &
 Longley 1994), *Cities and Complexity* (2005), *The New Science of Cities* (2013) — not the sites.
 
-### 1. Escape-time DISTRIBUTION, not just its sum — DO THIS FIRST
+### 1. Escape-time DISTRIBUTION — RUN 2026-08-05, qualified pass, do NOT ship a column
 
 Zero extra solves; `egress_power` already returns `v`. `P` is a SUM, so it cannot say whether roads
 served everyone a little or rescued the worst-off parcel — an **equity-of-egress** gap.
@@ -188,12 +188,25 @@ all-pairs column below. These are two cheap diagnostics for two different gaps, 
 than competing — and this one is the cheaper by far, since all-pairs needs `n` solves or a trace
 estimator while the `tau` tail needs nothing.
 
-**The decisive test before building anything:** one block, two methods truncated to matched
-permeability, compare `max(tau)` and `p95(tau)`. If the tail is pinned by the total, drop the idea.
-If it is not, report a tail statistic alongside permeability and displacement. Caveat that must
-survive into any implementation: a tail statistic is **not** monotone under road addition (Rayleigh
-gives the sum, not the components), so it is a diagnostic, not an objective, unless measured
-otherwise.
+**TESTED** (14 blocks, 6 methods, each truncated to exactly `P* = 0.60` by interpolating its whole
+prefix curve — matching permeability matches `mean(tau)` by construction, so only shape survives).
+Full result in `notes/2026-08-05-permeability-is-a-mean-escape-time.md`:
+
+- **The tail is NOT pinned by the total** — between-method spread of `max/mean` within a block is
+  median **26.8%**, max 47.4%. The go/no-go passes.
+- **But it does not separate serious methods.** Kendall `W = 0.337` (p = 0.0005) collapses to
+  `W = 0.138` (p = 0.13) when `euclidean_grid` is dropped, while every other leave-one-out stays at
+  p <= 0.0014. The whole ranking signal is one rigid-grid outlier that strands parcels.
+- **The block dominates**: 60.2% between-block spread against 26.8% between-method, ~2.2x.
+
+**So: do NOT add a third reported column** — it fails the job a reported axis has to do. Keep it as
+(a) a per-block chooser, since the 26.8% spread is real when comparing concrete proposals for ONE
+block, and (b) a stranding detector to call when a proposal looks suspicious. Use `p95`, not `max`
+(higher concordance, less noisy order statistic).
+
+Standing caveat if anyone revisits: a tail statistic is **not** monotone under road addition —
+demonstrated with a counterexample in the note. `tr(L^-p)` is the monotone family to reach for if an
+objective is ever wanted.
 
 ### 2. Spectral dimension as a fabric descriptor — MEASURED 2026-08-05, largely NEGATIVE
 

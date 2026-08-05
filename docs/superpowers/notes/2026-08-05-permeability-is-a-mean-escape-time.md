@@ -153,12 +153,72 @@ Caveat before anyone reaches for `tr(L^-1)`: it weights all modes equally, where
 all-pairs Kirchhoff probe scored Kendall tau +0.800 against it
 (`notes/2026-07-30-egress-vs-circulation.md`). Monotone does not mean informative.
 
+## RUN 2026-08-05: the tail is real, but it is not a method discriminator
+
+The decisive experiment, run rather than left queued. `scratchpad/spectral/tail_at_matched_perm.py`
++ `tail_analysis.py`: 14 Cape Town blocks (<= 400 parcels), 6 methods, each truncated to
+**exactly** `P* = 0.60`.
+
+**Why matched permeability is the right control.** `P = sum_i tau_i`, so matching permeability on a
+block matches `mean(tau)` BY CONSTRUCTION. Any surviving difference in `p95(tau)/mean` or
+`max(tau)/mean` is pure distribution shape, with the level divided out.
+
+**First cut was confounded and had to be redone.** `prefix_to_permeability` returns the first prefix
+reaching `>= P*`, and methods overshot by different amounts (measured 0.603 to 0.683), so comparing
+them at their own stopping points conflates method with overshoot. Fixed by sweeping each method's
+whole prefix curve and interpolating at exactly `P*`.
+
+### 1. The tail is NOT pinned by the total — the go/no-go passes
+
+At exactly matched permeability, the between-method spread of `max/mean` within a block is
+**median 26.8%, max 47.4%**. Permeability does not determine its own distribution.
+
+### 2. But the method ranking is one outlier
+
+    p95/mean, 13 complete blocks x 6 methods
+      Kendall W = 0.337   Friedman chi2 = 21.91 (df=5)   p = 0.0005
+      clearance_grid 2.54 | topology 2.69 | clearance 2.88 | flow_paths 3.38
+      clearance_looped 4.12 | euclidean_grid 5.38          (mean rank, 1 = thinnest tail)
+
+    LEAVE-ONE-METHOD-OUT
+      all six                    W = 0.337   p = 0.0005
+      without euclidean_grid     W = 0.138   p = 0.1264   <- NOT SIGNIFICANT
+      without any other method   W = 0.339 - 0.428, p <= 0.0014
+
+**The entire ranking signal is `euclidean_grid`.** A rigid grid laid without regard to fabric leaves
+parcels stranded and the tail statistic catches it. Among the five fabric-following methods there is
+**no reproducible tail ordering at all**.
+
+And the effect is small next to the fabric itself: the between-BLOCK spread of block means is 60.2%
+against a 26.8% between-method spread, so **the block explains ~2.2x more tail variation than the
+method choice does**.
+
+### What that means, stated plainly
+
+- **Do NOT add a tail column beside permeability and displacement.** It does not separate serious
+  methods, which is what a reported third axis has to do.
+- **It IS a valid per-block chooser.** The 26.8% spread is real, so given several concrete proposals
+  for ONE block, the tail meaningfully distinguishes them — you just cannot predict from the method
+  name which will win. Useful to a planner picking among proposals; useless as "method X beats Y".
+- **It is a stranding detector.** It reliably flags a method that abandons parcels. Worth calling
+  when a proposal looks suspicious, not worth publishing.
+- **Use `p95`, not `max`.** Higher concordance (W 0.337 vs 0.297) and lower p on the same data, as a
+  less noisy order statistic.
+
+### The trap this probe set for itself
+
+The first concordance used `wide.dropna(axis=1)`, which silently DROPPED two methods in order to
+keep one block that only had four — reporting `W = 0.210` over 4 methods instead of `0.297` over 6.
+Dropping the incomplete BLOCK is what the question asks for. Any repeat of this analysis should
+check which axis a `dropna` is eating.
+
+**Scope:** 13-14 Cape Town blocks under 400 parcels, 6 methods, one target `P* = 0.60`, one region.
+
 ## What this does NOT establish
 
-- **The decisive experiment has not been run.** The spread above is ACROSS blocks with no roads. What
-  matters for a diagnostic is whether two proposals *on the same block at matched permeability*
-  differ in their tail. If the tail turns out to be pinned by the total, this is worthless. That test
-  is cheap and is the first thing to do — see the backlog's escape-time-distribution entry.
+- ~~The decisive experiment has not been run.~~ **RUN — see the section above.** The tail is not
+  pinned by the total (26.8% spread at matched permeability), but it does not discriminate among
+  serious methods, so it is a per-block chooser and a stranding detector rather than a reported axis.
 - **A tail statistic of `tau` is not monotone** — now demonstrated above, not merely suspected. So
   `max(tau)` is a **diagnostic, not an objective**; do not put it in a greedy's gain function. If an
   objective is wanted, `tr(L^-p)` is the monotone family to reach for instead.
