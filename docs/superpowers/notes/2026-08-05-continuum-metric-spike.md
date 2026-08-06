@@ -10,8 +10,10 @@ space collapses to one component. But swept across 6 blocks rather than 2, `eps`
 four of them and a KNOB on one, where permeability climbs 0.608 -> 0.696 with no plateau. Worst-case
 `eps` + `h` sensitivity then approaches the whole ~0.118 cross-method signal.
 
-**Current state: not shippable, but the blocker is now DIAGNOSED — under-resolution of
-narrow corridors, pointing at a body-fitted triangulation (round 5).** Region-scale cost
+**Current state (round 6): the blocker largely dissolves.** `eps` moves absolute
+permeability but does NOT reorder methods -- 0 of 50 rank flips, Kendall tau +1.000 on every block
+-- and permeability is used comparatively. `h` converges on the common population; the rare
+under-resolved block is per-block detectable. Region-scale cost
 and memory are both cleared (60.4 s and 6.35 GB at region size); displacement coupling is decided
 (couple them). See [Round 3](#round-3-breadth-the-rescue-holds-on-most-blocks-but-not-all).
 
@@ -268,6 +270,59 @@ staircase error that is generating both sensitivities.
 Not yet established: this is ONE tail block against ONE control. The mechanism is coherent and the
 prediction held, but whether every tail block is under-resolution — and whether a triangulation
 actually fixes it — are both untested.
+
+## ROUND 6 (the gate): round 5's mechanism does NOT generalize — and the right question was different
+
+Round 5 predicted, from one tail block, that `eps` and `h` sensitivity are one error. Tested as a
+population claim on 40 blocks, taking the 4 most and 4 least `eps`-sensitive
+(`scratchpad/continuum/mechanism_gate.py`):
+
+    control  median eps_sens 0.00084   median h_sens 0.00060
+    tail     median eps_sens 0.01634   median h_sens 0.00056     <- SAME h_sens as controls
+
+    Spearman(eps_sens, h_sens) = +0.214, p = 0.61
+    Mann-Whitney h_sens (tail > control): p = 0.44    ratio of medians 0.9x
+
+**FALSIFIED.** The two do not covary. Every block in this sample — tail or control — converges
+cleanly in `h` (all `h_sens <= 0.0018`, progressions flat). The sample's worst `eps_sens` was 0.0238
+against 41829's 0.066, so it contained no true outlier. Two distinct phenomena, which round 5
+conflated:
+
+- **common**: `h` converges; `eps` still moves permeability ~0.007 median / 0.024 max. That is `eps`
+  doing genuine MODELLING work, not compensating for under-resolution.
+- **rare (41829)**: both knobs move it. Genuinely under-resolved, and rare enough that 40 blocks did
+  not contain one.
+
+So a body-fitted triangulation would fix the rare case, **not** the common one. Round 5's "the
+triangulation is the answer" is retracted: `eps` is a modelling parameter and no meshing removes it.
+
+### The question that should have been asked first
+
+Every `eps` measurement to this point was ABSOLUTE sensitivity on ONE method. Permeability is used
+COMPARATIVELY — both lenses compare methods on the same block. So what matters is whether `eps`
+reorders methods, not whether it moves the level. Measured over 10 blocks x 5 methods
+(`scratchpad/continuum/eps_ranking.py`):
+
+    within-block spread of the eps shift ACROSS methods: median 0.0156, max 0.0309
+      (NOT a uniform level shift -- clearance falls while flow_paths rises on the same block)
+
+    method RANK changes:             0 of 50 cells (0.0%)
+    blocks where the WINNER changes: 0 of 10
+    per-block Kendall tau:           median +1.000, MIN +1.000
+
+**`eps` moves levels differentially and never reorders a single pair.** It is a NUISANCE parameter
+for comparisons, provided it is held fixed across a comparison — trivially satisfiable.
+
+Scope: 10 blocks, 5 methods, `eps` in {0.5, 1.0}, blocks <= 150 parcels, no known outlier included.
+A wider `eps` range and a tail block would strengthen it. But `tau = +1.000` with `min = +1.000` is
+as clean as this measurement can come out.
+
+### Status after the gate
+
+Healthier than rounds 3-5 implied. `eps` affects the absolute value but not the ordering; `h`
+converges on the common population; the rare under-resolved block is detectable per-block (its `h`
+sweep does not converge) and fixable with finer `h` there. What remains is method breadth beyond
+these five, a wider `eps` range, and behaviour on a known outlier.
 
 ## Displacement coupling: decoupling IS a confound, measured
 
