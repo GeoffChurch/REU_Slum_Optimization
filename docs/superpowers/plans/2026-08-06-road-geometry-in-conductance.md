@@ -393,10 +393,29 @@ Expected: FAIL, `route_resistance` undefined
 combines with the access legs:
 
 ```
-R(i) = min over a in {endpoints of the segment nearest pts_a[i]},
-                b in {endpoints of the segment nearest pts_b[i]} of
-       leg(pts_a[i], a) + D[a, b] + leg(b, pts_b[i])
+R(i) = min over p, q in N(roads) of
+       leg(pts_a[i], p) + R_network(p, q) + leg(q, pts_b[i])
 ```
+
+**This is a JOINT MINIMIZATION over the whole network, not an assignment to the nearest segment.**
+An earlier draft of this plan said "endpoints of the segment NEAREST the point", which is the exact
+substitution the spec's monotonicity proof forbids — and it was measured breaking monotonicity on
+real nested prefixes (~7% of prefix steps rising, worst 5.8-8.8x; a road landing 0.19 m nearer
+captured the entry onto a DISCONNECTED component, turning a finite route into `inf`). That is
+`3a8dd25` reproducing, the failure the spec says killed three earlier attempts.
+
+Exactness without enumerating the network: for a fixed source, the objective along one segment is
+`|c - p|/kappa` (convex in `p`) plus the network distance from `p` (piecewise linear), so their sum
+is convex and its minimum on that segment lies at either the PROJECTION of `c` onto it or one of its
+two endpoints. The exact candidate set is therefore the projection onto every segment plus every
+node — `S + K` candidates, vectorizable. Seed the search with all of them rather than from one node.
+
+Price each segment at `lane_width(params, seg_width, oneway=seg_oneway)`, NOT at full `seg_width`.
+This change is about geometry, not capacity: the old term used `road_conductance(lane_width(w), d)`,
+and keeping the capacity convention fixed while changing only the length is what makes A2's
+prediction ("road conductance strictly falls, because `L >= d`") mean anything. Using full width
+inflates conductance ~1.75x for a 7 m two-way road and inverts A2 — measured rising on 66-86% of
+covered edges.
 
 where `leg(p, node) = |p - node| / (g_road_per_m * width_of_that_segment)`, plus the same-segment
 case `|t_a - t_b| * seg_len / (g_road_per_m * w)` when both projections land on one segment.
