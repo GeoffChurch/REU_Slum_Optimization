@@ -193,6 +193,39 @@ Stacked, worst-case uncertainty on the tail blocks approaches the entire signal 
 measure. **That is not shippable, and it is the current blocker.** What is special about `41829` is
 not yet understood and is the first thing to investigate if this is picked up again.
 
+## ROUND 4 (diagnosis): the tail is real but rare, and its cause is NOT identified
+
+Round 3 left one question: what distinguishes a block where `eps` never plateaus? Two hypotheses
+tested, both falsified, and the exercise reframed the size of the problem.
+
+**Pinched fraction explains nothing.** The share of adjacent pairs with `gap <= 0` — the mechanism
+behind round 1's failure — sits at **0.091-0.101 on all six blocks** and correlates `r = +0.104`
+with `eps` sensitivity. It does not vary, so it cannot discriminate.
+
+**Street frontage looked like the answer at n=6 and is not.** The three least-sensitive blocks all
+had frontage >= 0.341 and the three most-sensitive <= 0.305, `r = -0.640`, with a coherent mechanism
+(`eps` sets interior corridor width, so it should matter most where demand cannot escape directly
+onto a street) and an alarming implication (frontage is inverse depth, so the metric would be least
+trustworthy on exactly the deep blocks the project targets). **Tested on 20 blocks: Spearman
+`+0.027`, p = 0.91; low-vs-high frontage Mann-Whitney p = 0.60.** No relationship. Neither does
+block size (`+0.039`, p = 0.87).
+
+**But the 20-block sample resizes the problem, in the good direction:**
+
+    |perm(eps=1.0) - perm(eps=0.5)| at h = 0.5, over 20 blocks
+      median 0.0057     max 0.0285
+      (41782 reads 0.00144 here against 0.00145 in the 6-block run -- reproducible)
+
+Median sensitivity is **~5% of the 0.118 cross-method signal**. Round 3's "max 0.066" came from one
+block this sample did not draw. Over ~26 block-measurements the honest picture is: median ~0.006,
+nearly all <= 0.029, **one outlier at 0.066**. A tail of roughly 1 in 25 — not the norm round 3
+implied, but real, and **unexplained after two falsified hypotheses**.
+
+That is the state to resume from. The typical case is fine; an uncharacterized 1-in-25 tail is still
+disqualifying for a metric that grades published comparisons, because the risk cannot be bounded
+without knowing what drives it. Next attempts should sample enough blocks to collect SEVERAL tail
+cases and compare them against matched controls, rather than reasoning from one.
+
 ## Displacement coupling: decoupling IS a confound, measured
 
 If circulation shrinks disks by `eps` but `displacement` does not, the two axes disagree about the
