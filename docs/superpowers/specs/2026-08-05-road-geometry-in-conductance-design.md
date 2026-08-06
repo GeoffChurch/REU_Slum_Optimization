@@ -1,11 +1,15 @@
 # Road geometry in the conductance: replacing crow-flies with a route (2026-08-05)
 
-**Status: SPEC'D, PARKED 2026-08-06 — not built, not cancelled.** Complete and ready: acceptance
-criteria are written and none of it depends on unresolved research. It is parked because the
-CONTINUUM direction was chosen instead (`notes/2026-08-05-continuum-metric-spike.md`), and this
-spec's machinery — planarized road graph, projections, bounded Dijkstra, series resistance — is
-entirely DISPOSABLE if the continuum lands. Revive this verbatim if the continuum's unexplained
-~1-in-25 `eps` tail cannot be characterized.
+**Status: REVIVED 2026-08-06, building.** Parked earlier the same day in favour of the continuum
+metric; revived unchanged when that direction hit its own kill gate. The continuum's `eps` was
+measured to REORDER methods (119 rank flips, min Kendall tau +0.600 over 21 blocks x 6 methods x 4
+eps values), so it is a free modelling constant rather than a nuisance parameter and cannot ship
+without real building footprints to remove it — see
+`specs/2026-08-06-continuum-permeability-design.md` (BLOCKED) and
+`notes/2026-08-05-continuum-metric-spike.md`, "A5 GATE 2026-08-06".
+
+Nothing in THIS spec depends on any of that. It operates on the road network rather than on free
+space, needs no `eps`, and its acceptance criteria were written before the continuum work began.
 
 Scope is the EVALUATOR only; optimizing methods keep today's constant-gain model as a documented
 first-order proxy (see [Scope](#scope-what-this-does-not-touch)).
