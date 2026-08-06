@@ -4,11 +4,15 @@ Spiked before committing to `specs/2026-08-05-road-geometry-in-conductance-desig
 spec's machinery — planarized road graph, projections, bounded Dijkstra, series resistance — is
 entirely DISPOSABLE if the continuum works.
 
-**Two rounds, opposite verdicts.** On raw `NN/2` disks it does not converge and the free-space
-topology fragments without limit. Shrinking every disk by a minimum separation `eps ~ 0.5-1.0 m`
-fixes both completely — one connected component, permeability stable to +/- 0.001-0.003 — and,
-critically, DOUBLING `eps` moves the answer no more than the residual resolution noise. The
-direction is live; see [Rescue](#the-rescue-a-minimum-separation).
+**Three rounds.** On raw `NN/2` disks it does not converge and the free-space topology fragments
+without limit. Shrinking every disk by a minimum separation `eps ~ 0.5-1.0 m` fixes that — free
+space collapses to one component. But swept across 6 blocks rather than 2, `eps` is a regularizer on
+four of them and a KNOB on one, where permeability climbs 0.608 -> 0.696 with no plateau. Worst-case
+`eps` + `h` sensitivity then approaches the whole ~0.118 cross-method signal.
+
+**Current state: not shippable, blocked on the tail blocks rather than on cost.** Region-scale cost
+and memory are both cleared (60.4 s and 6.35 GB at region size); displacement coupling is decided
+(couple them). See [Round 3](#round-3-breadth-the-rescue-holds-on-most-blocks-but-not-all).
 
 ## What was tested
 
@@ -153,22 +157,80 @@ It is also a better parameter than the one it replaces. `FOOTPATH_EPS = 0.02` is
 DIMENSIONLESS floor on a conductance ratio; "buildings are separated by at least 1 m" is a physical
 length that can be defended, measured, or falsified against real footprints.
 
+## ROUND 3 (breadth): the rescue holds on most blocks, but not all
+
+Round 2 rested on two blocks and two `eps` values. Swept properly — 6 blocks, `eps` in
+{0.25, 0.5, 0.75, 1.0, 1.5}, `h` in {1.0, 0.5} (`scratchpad/continuum/eps_sweep.py`):
+
+    h-CONVERGENCE  |perm(h=1.0) - perm(h=0.5)|        max free-space components
+      eps=0.25   median 0.0127   max 0.1106                    10
+      eps=0.50   median 0.0080   max 0.0680                     2
+      eps=0.75   median 0.0054   max 0.0271                     3
+      eps=1.00   median 0.0068   max 0.0430                     3
+      eps=1.50   median 0.0037   max 0.0147                     2
+
+    eps-SENSITIVITY at h = 0.5, permeability per block
+      eps:            0.25     0.50     0.75     1.00     1.50
+      ...19362     0.57964  0.58098  0.57487  0.57674  0.56870
+      ...19366     0.65867  0.65893  0.65931  0.65778  0.66128
+      ...20053     0.57722  0.57191  0.57212  0.57045  0.56186
+      ...39257     0.61897  0.72857  0.74170  0.74199  0.74851
+      ...41782     0.73238  0.76823  0.76837  0.76968  0.76949
+      ...41829     0.60771  0.62050  0.64567  0.68627  0.69575   <- NO PLATEAU
+
+      per-block range over eps 0.25-1.5 : median 0.02632, max 0.12954
+      restricted to eps 0.5-1.0         : median 0.00389, max 0.06577
+
+**Round 2's headline was an n=2 artifact and is corrected.** "Doubling `eps` barely moves the answer"
+holds for four of six blocks and fails badly on one: `41829` climbs monotonically 0.608 -> 0.696
+across the whole `eps` range with no sign of settling, so there `eps` is a knob rather than a
+regularizer. In the sane 0.5-1.0 band the MEDIAN sensitivity is a fine 0.0039, but the MAX is 0.066 —
+over half the ~0.118 cross-method spread — and h-convergence still tops out at 0.043.
+
+Stacked, worst-case uncertainty on the tail blocks approaches the entire signal the metric exists to
+measure. **That is not shippable, and it is the current blocker.** What is special about `41829` is
+not yet understood and is the first thing to investigate if this is picked up again.
+
+## Displacement coupling: decoupling IS a confound, measured
+
+If circulation shrinks disks by `eps` but `displacement` does not, the two axes disagree about the
+same geometry. Measured over 10 blocks x 6 methods
+(`scratchpad/continuum/displacement_coupling.py`), the disagreement is **not** a uniform level shift:
+
+    method                    disp@eps=0   ratio@0.5   ratio@1.0
+    flow_paths_noreinforce        0.2070      0.918       0.823   <- shrinks most
+    topology                      0.4184      0.920       0.826
+    clearance                     0.2446      0.947       0.881
+    clearance_grid                0.2351      0.947       0.886
+    euclidean_grid                0.4445      0.955       0.907
+    clearance_looped              0.6419      0.964       0.922   <- shrinks least
+
+    eps=1.0: ratio spans 0.823-0.922 (spread 11.3% of mean); 10% of per-block method ranks flip
+
+The direction matches the predicted mechanism: `topology` and `flow_paths` thread tight gaps, so
+their displacement is most sensitive to assumed building size. **So couple them** — one radius for
+both axes. The cost is that published displacement moves 8-18%, which is arguably toward reality
+since `NN/2` is a packing UPPER BOUND rather than an estimate.
+
 ## What still has to clear before building
 
-Convergence is no longer the blocker, and neither is solver TIME. Remaining, in rough order of risk:
+Cost is settled and displacement coupling is decided. What remains:
 
-- **Region-scale MEMORY.** The one thing the cost benchmark did not test. SuperLU fill-in is
-  O(N log N) on a 2D grid and the measurements stop at 729k against a 3.5M target. If memory binds,
-  the fallback is a domain-decomposition solve per block with the region assembled from block
-  Laplacians — which the geometry already supports, since blocks are disjoint.
-- **Breadth.** Two blocks and one method. Needs enough blocks and methods to show it does not do
-  something perverse, and that it ranks methods sanely.
-- **`eps` sensitivity as a proper sweep**, not two points.
-- **Displacement coupling.** If circulation treats buildings as `NN/2 - eps`, `displacement`
-  charging `NN/2` is inconsistent — the same building cannot be two sizes. Decide whether the shrink
-  applies to both, which would move every displacement number too.
+- **THE BLOCKER: `eps` and `h` sensitivity on the tail blocks** (round 3). Median behaviour is fine;
+  the worst block moves 0.066 over `eps` 0.5-1.0 and 0.043 over `h`, against a 0.118 signal.
+  Diagnosing `41829` is the entry point — what distinguishes a block where `eps` never plateaus from
+  the four where it does?
+- **Region-scale MEMORY — CLEARED.** Measured directly rather than extrapolated
+  (`scratchpad/continuum/memory_test.py`): at 3.42M cells, matching the region at `h = 0.5`,
+  `spsolve` takes **60.4 s and peaks at 6.35 GB** against 227 GB available. Scaling of peak RSS is
+  1.65 / 3.60 / 6.35 GB at 1M / 2M / 3.4M, so even `h = 0.25` (14.1M) projects to ~30 GB. Time, not
+  memory, is the cost. The earlier 42 s/solve extrapolation was ~30% optimistic; ~40 min per
+  40-solve lens curve is the honest figure.
+- **Method breadth.** All spike work so far uses `clearance` only. Nothing yet shows the metric
+  ranks methods sanely.
 - **Grid anisotropy.** 4-neighbour grids make diagonal travel cost `sqrt(2)` in distance but 2 in
-  steps. A real implementation wants 8-neighbour weights or a triangulation.
+  steps. A real implementation wants 8-neighbour weights or a triangulation. Untested, and a
+  candidate contributor to the `h` sensitivity above.
 
 ## Real footprints remain the deeper fix
 
