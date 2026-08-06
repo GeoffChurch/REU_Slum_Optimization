@@ -362,9 +362,9 @@ def free_space_mesh(block: Block, params: ContinuumParams, h: float | None = Non
                 unplaced += 1
                 continue
             demand[sel] += 1.0 / len(sel)
-    return FreeSpace(xy=np.column_stack([fpts_x := shapely.get_x(fpts), shapely.get_y(fpts)])
-                     if len(fpts) else np.zeros((0, 2)),
-                     rows=lo, cols=hi, ground=ground, demand=demand, n_unplaced=unplaced)
+    xy = (np.column_stack([shapely.get_x(fpts), shapely.get_y(fpts)]) if n
+          else np.zeros((0, 2), dtype=np.float64))
+    return FreeSpace(xy=xy, rows=lo, cols=hi, ground=ground, demand=demand, n_unplaced=unplaced)
 ```
 
 Create `src/reblock/continuum/__init__.py`:
@@ -381,7 +381,7 @@ __all__ = ["ContinuumParams", "FreeSpace", "continuum_power", "converged_power",
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pixi run pytest tests/continuum/test_mesh.py -q --no-cov`
-Expected: PASS (6 tests). Remove the stray walrus `fpts_x :=` if ruff flags it.
+Expected: PASS (6 tests)
 
 - [ ] **Step 5: Lint and typecheck**
 
@@ -466,10 +466,9 @@ def test_adding_a_road_never_raises_power():
 def test_monotone_under_a_SUPERSET_of_roads():
     """FAULT INJECTION: in `_sigma_field`, replace the road assignment with `sigma_walk` for cells
     already at road level (i.e. let sigma DECREASE somewhere) and this fails."""
+    import pandas as pd
     blk = _block()
     one = _road(25.0)
-    two = gpd.GeoDataFrame(pd_concat := [one, _road(15.0)][0].iloc[:0], crs=UTM)  # placeholder
-    import pandas as pd
     two = gpd.GeoDataFrame(pd.concat([one, _road(15.0)], ignore_index=True), crs=UTM)
     p_one, _ = continuum_power(blk, one, P)
     p_two, _ = continuum_power(blk, two, P)
@@ -603,9 +602,7 @@ def continuum_power(block: Block, roads: GeoDataFrame | None, params: ContinuumP
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pixi run pytest tests/continuum/test_solve.py -q --no-cov`
-Expected: PASS (6 tests). Delete the placeholder walrus line in
-`test_monotone_under_a_SUPERSET_of_roads` — it exists only to show the intended construction and
-ruff will reject it.
+Expected: PASS (6 tests)
 
 - [ ] **Step 5: Fault-inject the monotonicity guard**
 
@@ -755,7 +752,9 @@ surrogate, not the metric.
 **Files:**
 - Create: `src/reblock/methods/parcel_gain.py`
 - Modify: `src/reblock/methods/resistance_greedy.py:58-70`, `src/reblock/methods/resistance_lp.py:63-70`,
-  `src/reblock/width_solver.py:94-105`, `scripts/compare_budgets.py:79`
+  `src/reblock/width_solver.py:94-105`, `scripts/compare_budgets.py:79`,
+  `tests/test_permeability.py:16-17`, `tests/test_permeability_oneway.py:18,157`,
+  `tests/test_orient.py:22`, `tests/test_width_solver.py`
 - Test: `tests/test_parcel_gain.py`
 
 **Interfaces:**
@@ -933,8 +932,11 @@ Update `permeability_curve` identically (drop `adj`/`radii`, call `converged_pow
 
 Remove from `src/reblock/permeability.py`: `FOOTPATH_EPS`, `_road_corridor`, `parcel_radii`,
 `_footpath_conductance`, `edge_conductances`, `has_oneway`, `egress_power`, `_directed_power`,
-`road_conductance`, `lane_width` (all now live in `methods/parcel_gain.py`). Keep
-`PermeabilityParams` ONLY if something still needs it after Task 7; otherwise delete it too.
+`road_conductance`, `lane_width` (all now live in `methods/parcel_gain.py`). DELETE
+`PermeabilityParams` as well: Task 7 moves its three surviving fields (`road_margin_m`,
+`min_one_way_width_m`, `min_two_way_width_m`) onto `ContinuumParams`, so `buildable_widths` takes a
+`ContinuumParams`. Verified: `buildable_widths` reads only those three fields and the width/oneway
+columns — it does NOT call `lane_width`, so the split is clean.
 
 - [ ] **Step 5: Update every caller**
 
