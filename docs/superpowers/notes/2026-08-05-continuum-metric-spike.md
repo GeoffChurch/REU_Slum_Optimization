@@ -10,7 +10,8 @@ space collapses to one component. But swept across 6 blocks rather than 2, `eps`
 four of them and a KNOB on one, where permeability climbs 0.608 -> 0.696 with no plateau. Worst-case
 `eps` + `h` sensitivity then approaches the whole ~0.118 cross-method signal.
 
-**Current state: not shippable, blocked on the tail blocks rather than on cost.** Region-scale cost
+**Current state: not shippable, but the blocker is now DIAGNOSED — under-resolution of
+narrow corridors, pointing at a body-fitted triangulation (round 5).** Region-scale cost
 and memory are both cleared (60.4 s and 6.35 GB at region size); displacement coupling is decided
 (couple them). See [Round 3](#round-3-breadth-the-rescue-holds-on-most-blocks-but-not-all).
 
@@ -226,6 +227,48 @@ disqualifying for a metric that grades published comparisons, because the risk c
 without knowing what drives it. Next attempts should sample enough blocks to collect SEVERAL tail
 cases and compare them against matched controls, rather than reasoning from one.
 
+## ROUND 5 (mechanism): the tail is UNDER-RESOLUTION of narrow corridors
+
+First, a correction to round 3's risk list. It named "4-neighbour grid anisotropy" as a candidate
+cause. **That is the wrong worry for a conduction problem** — the 5-point stencil is a consistent
+ISOTROPIC discretization of the Laplacian; anisotropy bites shortest-PATH problems, not conduction.
+The real geometric error is the **staircase representation of curved disk boundaries**, which is
+worst in narrow corridors, which is exactly where `eps` operates.
+
+That reframing predicts the two knobs are two faces of one error: on a tail block, permeability
+should fail to converge in `h` at fixed `eps` as well. Tested on the known outlier against a
+well-behaved control (`scratchpad/continuum/tail_mechanism.py`):
+
+    TAIL ...41829 (105 parcels)              CONTROL ...19366 (88 parcels)
+      eps  h=1.0   0.5    0.35   0.25          eps  h=1.0   0.5    0.35   0.25
+      0.5  0.604  0.621  0.626  0.670          0.5  0.658  0.659  0.661  0.660
+           finest two differ by 0.04474             finest two differ by 0.00067
+      1.0  0.643  0.686  0.690  0.696          1.0  0.658  0.658  0.658  0.659
+           finest two differ by 0.00666             finest two differ by 0.00050
+
+**Confirmed.** The tail block does not converge in `h` either — still moving 0.045 between the two
+finest grids at `eps = 0.5`. Raising `eps` to 1.0 improves its `h`-convergence **6.7x**
+(0.0447 -> 0.0067). The control is flat throughout, at both `eps`.
+
+So `eps` sensitivity and `h` sensitivity are **the same phenomenon**: corridors too narrow for the
+grid to resolve. Widening them with `eps` makes them resolvable, and then `h` converges. The tail is
+not a defect of the continuum FORMULATION — it is under-resolution of the DISCRETIZATION.
+
+### What that changes
+
+The requirement stops being "choose a good `eps`" and becomes the standard meshing criterion: **cell
+size must be small relative to the narrowest corridor carrying significant flow.** That is a
+resolution rule, not a free parameter, and it can be checked per block rather than assumed.
+
+It also names the fix. A **body-fitted triangulation** resolves curved disk boundaries directly
+instead of by staircase, and can grade element size to local corridor width — ordinary FEM practice.
+That would demote `eps` from a structural knob to, at most, a degeneracy guard, and would remove the
+staircase error that is generating both sensitivities.
+
+Not yet established: this is ONE tail block against ONE control. The mechanism is coherent and the
+prediction held, but whether every tail block is under-resolution — and whether a triangulation
+actually fixes it — are both untested.
+
 ## Displacement coupling: decoupling IS a confound, measured
 
 If circulation shrinks disks by `eps` but `displacement` does not, the two axes disagree about the
@@ -263,9 +306,8 @@ Cost is settled and displacement coupling is decided. What remains:
   40-solve lens curve is the honest figure.
 - **Method breadth.** All spike work so far uses `clearance` only. Nothing yet shows the metric
   ranks methods sanely.
-- **Grid anisotropy.** 4-neighbour grids make diagonal travel cost `sqrt(2)` in distance but 2 in
-  steps. A real implementation wants 8-neighbour weights or a triangulation. Untested, and a
-  candidate contributor to the `h` sensitivity above.
+- ~~**Grid anisotropy.**~~ Retracted in round 5: the 5-point stencil is isotropic for conduction.
+  The real geometric error is staircase boundary representation, now identified as the tail's cause.
 
 ## Real footprints remain the deeper fix
 

@@ -1,7 +1,14 @@
 # Road geometry in the conductance: replacing crow-flies with a route (2026-08-05)
 
-**Status: SPEC'D, not built.** Scope is the EVALUATOR only; optimizing methods keep today's
-constant-gain model as a documented first-order proxy (see [Scope](#scope-what-this-does-not-touch)).
+**Status: SPEC'D, PARKED 2026-08-06 — not built, not cancelled.** Complete and ready: acceptance
+criteria are written and none of it depends on unresolved research. It is parked because the
+CONTINUUM direction was chosen instead (`notes/2026-08-05-continuum-metric-spike.md`), and this
+spec's machinery — planarized road graph, projections, bounded Dijkstra, series resistance — is
+entirely DISPOSABLE if the continuum lands. Revive this verbatim if the continuum's unexplained
+~1-in-25 `eps` tail cannot be characterized.
+
+Scope is the EVALUATOR only; optimizing methods keep today's constant-gain model as a documented
+first-order proxy (see [Scope](#scope-what-this-does-not-touch)).
 
 **Goal in one line:** an edge covered by a road should be priced by the route a walker actually
 takes, not by the straight line between two parcel centroids.
