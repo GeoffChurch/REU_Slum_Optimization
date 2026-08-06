@@ -85,15 +85,20 @@ mutual-nearest-neighbour pair have `r_i + r_j = d` EXACTLY, so free space is pin
 climbing 7 -> 21 and 8 -> 24 under refinement), and permeability oscillates +/- 0.013-0.024 with no
 plateau. With `eps ~ 0.5-1.0 m` free space collapses to ONE component and stays there.
 
-**`eps` is a NUISANCE parameter, and this is the load-bearing measurement.** It moves absolute
-permeability — median 0.0057, max 0.0285 over 20 blocks — and it moves methods DIFFERENTIALLY
-(within-block spread of the shift up to 0.0309; `clearance` falls while `flow_paths` rises on the
-same block). But over 10 blocks x 5 methods it **never reorders a single pair**: 0 of 50 rank
-changes, winner unchanged on 10 of 10, per-block Kendall tau median AND minimum `+1.000`.
+> **~~`eps` is a NUISANCE parameter, and this is the load-bearing measurement.`~~ FALSIFIED
+> 2026-08-06 by A5.** The claim below rested on 10 blocks x 5 methods x ONE eps pair — 50
+> comparisons against the 756 A5 asks for. At 21 blocks x 6 methods x 4 eps values: **119 rank
+> flips, 3 winner changes, min Kendall tau +0.600**, with flips inside the 0.5-1.0 band too. `eps`
+> DOES reorder methods, so it is a free modelling constant, not a nuisance. The original text is
+> kept below only to show what was believed and on what evidence.
 
-Permeability is used comparatively — both lenses compare methods on one block — so the requirement
-is only that `eps` be held FIXED across a comparison. That is trivially satisfiable and must be
-stated in the config, not left implicit.
+~~It moves absolute permeability — median 0.0057, max 0.0285 over 20 blocks — and it moves methods
+DIFFERENTIALLY (within-block spread of the shift up to 0.0309; `clearance` falls while `flow_paths`
+rises on the same block). But over 10 blocks x 5 methods it never reorders a single pair: 0 of 50
+rank changes, winner unchanged on 10 of 10, per-block Kendall tau median AND minimum `+1.000`.~~
+
+~~Permeability is used comparatively — both lenses compare methods on one block — so the requirement
+is only that `eps` be held FIXED across a comparison.~~
 
 `eps` is a regularization standing in for a measurement. Real building footprints would let it be
 measured; `data/provision.py:57` records that Open Buildings polygons exist and were declined on
