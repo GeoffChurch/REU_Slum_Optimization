@@ -176,6 +176,29 @@ def _project(
     return seg, frac, offset
 
 
+def _usable_widths(net: RoadNet, params: PermeabilityParams) -> NDArray[np.float64]:
+    """Corridor width each segment offers ONE direction of travel, once the margin is set aside.
+
+    This is `road_conductance`'s own `usable` evaluated at `lane_width` for the segment's own
+    direction, vectorized per SEGMENT rather than per road -- a two-way road's directions split
+    what is left after the once-paid margin, a one-way road gives its permitted direction all of it.
+
+    Pricing a segment at its FULL `seg_width` instead would inflate a 7 m two-way road from 3.0 m
+    of usable corridor to 7.0 m, and that is a capacity re-base wearing a geometry fix's clothes.
+    What this module changes is the LENGTH -- a route instead of a crow-flies line -- and holding
+    the capacity convention fixed is exactly what makes `L >= d` mean "road conductance strictly
+    falls". The repo keeps those two apart deliberately; the 2026-07-31 width re-base moved
+    footprint without moving conductance for the same reason.
+
+    Never zero in practice: `buildable_widths` floors a road at 4.0 m one-way / 7.0 m two-way, both
+    of which leave usable = 3.0 m against a 1.0 m margin. `tests/test_road_route.py` pins this
+    against `lane_width` and `road_conductance` themselves so the two cannot drift.
+    """
+    lane = np.where(net.seg_oneway, net.seg_width,
+                    params.road_margin_m + (net.seg_width - params.road_margin_m) / 2.0)
+    return np.maximum(0.0, lane - params.road_margin_m)
+
+
 def _travel_graph(net: RoadNet, seg_res: NDArray[np.float64], *, directed: bool) -> csr_matrix:
     """The CSR the route search runs over: one arc per segment, weighted by its RESISTANCE.
 
@@ -210,10 +233,13 @@ def route_resistance(
 
     ## Resistance, not length
 
-    A segment costs `seg_len / (g_road_per_m * seg_width)` and a route costs the SUM over its
+    A segment costs `seg_len / (g_road_per_m * usable_width)` and a route costs the SUM over its
     segments, so the search minimizes RESISTANCE rather than distance. That is what makes a
     mixed-width route well defined: a short narrow alley and a long wide street trade off
     correctly, and no arbitrary "which width does this route have" rule is needed.
+
+    The usable width is `road_conductance`'s, per `_usable_widths` -- the SAME capacity convention
+    as the crow-flies term this replaces, so that what changes here is the length and nothing else.
 
     ## Projections attach where they land
 
@@ -253,11 +279,30 @@ def route_resistance(
     finite route to `inf`. This is the same shape as `3a8dd25` ("network_efficiency monotone via
     fixed entry mapping"), which the spec cites as having killed three earlier attempts.
 
-    Restricting to the nearest segment is what the implementation plan specifies and it is what
-    keeps this to one bounded multi-source solve; the honest minimization needs a per-point search
-    from a virtual source wired to every node, which is the all-pairs cost the early exit exists to
-    avoid. It is recorded here rather than papered over: the metric's monotonicity is tested on
-    real blocks (the spec's A4), and that test is where this has to be settled.
+    **The joint minimization was implemented and measured, and it is not a drop-in fix.** It is
+    monotone, as advertised -- and it also destroys the two defects this whole module exists to
+    correct, because `r_leg` is charged at ROAD rate. A straight-line leg is then the cheapest
+    travel per metre anywhere in the model, so a minimizer handed every point of `N(R)` will
+    happily walk 40 m across a block to reach a far node and call it a route:
+
+    * D1 (a zigzag must not score like a straight road) fails OUTRIGHT. On the A1 fixture the
+      direct leg from `(0,0)` to the far node `(40,0)` is 40 m, exactly the straight road's own
+      length, so `R_zigzag == R_straight` bit-for-bit -- the defect restored in full.
+    * D2 (travel/crow, measured at 1.395) collapses. On the pinned block the median detour falls
+      from 1.775 to 1.110 (`clearance_looped`) and 1.826 to 1.145 (`greedy_arterial_repulsion`) --
+      82-86% of the detour destroyed, with 13-17% of covered edges landing within 1% of crow-flies.
+
+    The spec licenses the road-rate leg with "the legs are sub-metre and the choice is immaterial".
+    MEASURED on covered edges of the pinned block, they are not: median 2.48-2.83 m, p90 5.0-7.7 m,
+    max ~15 m, only 20-25% under a metre. Under an ASSIGNMENT that is harmless, since the leg is
+    short by construction; under a MINIMIZATION the optimizer seeks long legs out precisely because
+    they are underpriced. So the spec's monotonicity mechanism and its acceptance criteria are in
+    direct conflict, and the conflict is `r_leg`'s rate, not the search.
+
+    Restricting to the nearest segment is therefore what ships, with this non-monotonicity known
+    and recorded rather than papered over. Resolving it needs a decision about what an admissible
+    entry IS -- a bounded leg, a leg priced off-road, or accepting the assignment -- which is a
+    spec-level question, not one this function can answer.
 
     ## The early exit is EXACT
 
@@ -293,11 +338,12 @@ def route_resistance(
         return np.full(n, np.inf, dtype=np.float64)
 
     g = params.g_road_per_m
-    seg_res = net.seg_len / (g * net.seg_width)
+    usable = _usable_widths(net, params)
+    seg_res = net.seg_len / (g * usable)
 
     sidx_a, t_a, off_a = _project(net, pts_a)
     sidx_b, t_b, off_b = _project(net, pts_b)
-    legs = off_a / (g * net.seg_width[sidx_a]) + off_b / (g * net.seg_width[sidx_b])
+    legs = off_a / (g * usable[sidx_a]) + off_b / (g * usable[sidx_b])
 
     # Row 0 is the `seg_a` end of each point's segment, row 1 the `seg_b` end.
     ends_a = np.stack([net.seg_a[sidx_a], net.seg_b[sidx_a]])

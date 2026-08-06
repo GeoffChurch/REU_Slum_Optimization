@@ -15,6 +15,10 @@ from reblock.road_route import build_roadnet, route_resistance
 UTM = CRS.from_epsg(32734)
 P = PermeabilityParams()
 G = P.g_road_per_m
+# Usable corridor a DEFAULT 7 m two-way road gives one direction: lane_width(7) - margin = 3.0.
+# Every expected value below is in these units, because that is the capacity convention
+# `road_conductance` already uses -- see `_usable_widths`.
+U7 = 3.0
 
 
 def _roads(*pairs):
@@ -135,12 +139,13 @@ def test_a_zigzag_costs_more_than_a_straight_road_of_the_same_endpoints():
 
 
 def test_resistance_is_series_over_mixed_widths():
-    # 20 m at width 7 then 20 m at width 12: resistance is the SUM of len/(g*w), not len/(g*mean).
+    # 20 m then 20 m, at USABLE widths 3.0 and 5.5 (two-way 7 m and 12 m roads, margin 1 m):
+    # resistance is the SUM of len/(g*u), not len/(g*mean).
     net = build_roadnet(_roads(([(0, 0), (20, 0)], 7.0), ([(20, 0), (40, 0)], 12.0)), P)
     got = route_resistance(net, np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]]), P,
                            np.array([np.inf]))[0]
     g = P.g_road_per_m
-    assert got == pytest.approx(20.0 / (g * 7.0) + 20.0 / (g * 12.0), rel=1e-6)
+    assert got == pytest.approx(20.0 / (g * 3.0) + 20.0 / (g * 5.5), rel=1e-6)
 
 
 def test_disconnected_components_give_infinite_resistance():
@@ -180,7 +185,7 @@ def test_the_early_exit_is_EXACT_on_a_route_whose_MIDDLE_carries_it():
     net = build_roadnet(_roads((coords, 7.0)), P)
     a, b = np.array([[2.5, 0.0]]), np.array([[197.5, 0.0]])
     exact = route_resistance(net, a, b, P, np.array([np.inf]))
-    assert exact[0] == pytest.approx(195.0 / (G * 7.0), rel=1e-9)
+    assert exact[0] == pytest.approx(195.0 / (G * U7), rel=1e-9)
     generous = route_resistance(net, a, b, P, exact * 2.0)
     assert np.array_equal(exact, generous), "a cutoff above the true value must not change it"
 
@@ -190,7 +195,7 @@ def test_a_cutoff_below_the_true_resistance_returns_inf():
     discard may come back as `inf` -- that is what makes the bounded search legitimate."""
     net = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0)), P)
     a, b = np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]])
-    true = 40.0 / (G * 7.0)
+    true = 40.0 / (G * U7)
     assert route_resistance(net, a, b, P, np.array([true * 1.5]))[0] == pytest.approx(true)
     assert not np.isfinite(route_resistance(net, a, b, P, np.array([true * 0.5]))[0])
 
@@ -203,8 +208,8 @@ def test_projections_attach_where_they_land_not_at_the_nearest_node():
     net = build_roadnet(_roads(([(0, 0), (50, 0)], 7.0), ([(50, 0), (100, 0)], 7.0)), P)
     got = route_resistance(net, np.array([[10.0, 0.0]]), np.array([[90.0, 0.0]]), P,
                            np.array([np.inf]))[0]
-    assert got == pytest.approx(80.0 / (G * 7.0), rel=1e-9)
-    assert got < 100.0 / (G * 7.0), "snapping to the nearest node would charge the whole 100 m"
+    assert got == pytest.approx(80.0 / (G * U7), rel=1e-9)
+    assert got < 100.0 / (G * U7), "snapping to the nearest node would charge the whole 100 m"
 
 
 def test_the_access_legs_are_added_in_series_at_the_road_rate():
@@ -219,10 +224,10 @@ def test_the_access_legs_are_added_in_series_at_the_road_rate():
     a = np.array([[10.0, 3.0], [5.0, 3.0]])
     b = np.array([[40.0, 0.0], [15.0, 0.0]])
     got = route_resistance(net, a, b, P, np.array([np.inf, np.inf]))
-    # pair 0: 3 m leg + 10 m to the node at (20,0) at width 7, then 20 m at width 12
-    assert got[0] == pytest.approx(13.0 / (G * 7.0) + 20.0 / (G * 12.0), rel=1e-9)
-    # pair 1: 3 m leg + |0.25 - 0.75| * 20 m along the SAME segment, all at width 7
-    assert got[1] == pytest.approx(13.0 / (G * 7.0), rel=1e-9)
+    # pair 0: 3 m leg + 10 m to the node at (20,0) at usable 3.0, then 20 m at usable 5.5
+    assert got[0] == pytest.approx(13.0 / (G * U7) + 20.0 / (G * 5.5), rel=1e-9)
+    # pair 1: 3 m leg + |0.25 - 0.75| * 20 m along the SAME segment, all at usable 3.0
+    assert got[1] == pytest.approx(13.0 / (G * U7), rel=1e-9)
 
 
 def test_a_one_way_segment_carries_travel_in_one_direction_only():
@@ -234,7 +239,7 @@ def test_a_one_way_segment_carries_travel_in_one_direction_only():
     a, b = np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]])
     cut = np.array([np.inf])
     both = sorted([route_resistance(net, a, b, P, cut)[0], route_resistance(net, b, a, P, cut)[0]])
-    assert both[0] == pytest.approx(40.0 / (G * 7.0), rel=1e-9)
+    assert both[0] == pytest.approx(40.0 / (G * 6.0), rel=1e-9)   # one-way: usable = 7 - margin
     assert not np.isfinite(both[1]), "the forbidden direction has no route, not a dearer one"
 
 
@@ -255,7 +260,7 @@ def test_a_two_way_net_is_symmetric():
     cut = np.array([np.inf])
     fwd = route_resistance(net, a, b, P, cut)[0]
     bwd = route_resistance(net, b, a, P, cut)[0]
-    assert fwd == pytest.approx(30.0 / (G * 7.0), rel=1e-9)
+    assert fwd == pytest.approx(30.0 / (G * U7), rel=1e-9)
     assert bwd == fwd
 
 
@@ -266,3 +271,32 @@ def test_an_empty_net_gives_infinite_resistance():
     got = route_resistance(net, np.array([[0.0, 0.0]]), np.array([[1.0, 1.0]]), P,
                            np.array([np.inf]))
     assert got.shape == (1,) and not np.isfinite(got[0])
+
+
+def test_segment_resistance_uses_road_conductance_s_OWN_capacity_convention():
+    """`_usable_widths` re-derives `lane_width` + `road_conductance`'s `usable` per SEGMENT, so it
+    can drift from them. Pin it against the real functions.
+
+    This is what keeps the change honest: the crow-flies term being replaced is
+    `road_conductance(params, lane_width(w), d)`, so a route of length `d` must price IDENTICALLY
+    to it. Only then does `L >= d` mean road conductance strictly falls (A2) rather than a capacity
+    re-base hiding inside a geometry fix.
+    """
+    from reblock.permeability import lane_width, road_conductance
+    from reblock.road_route import _usable_widths
+
+    net = build_roadnet(
+        _roads_ow(([(0, 0), (40, 0)], 7.0, False), ([(0, 30), (40, 30)], 12.0, True)), P)
+    got = _usable_widths(net, P)
+    for w, oneway in ((7.0, False), (12.0, True)):
+        pick = np.isclose(net.seg_width, w)
+        assert pick.any()
+        want = lane_width(P, w, oneway=oneway) - P.road_margin_m
+        assert np.allclose(got[pick], want), f"width {w} oneway={oneway}"
+
+    # ...and end to end: a straight road of length d must give exactly today's crow-flies term.
+    straight = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0)), P)
+    r = route_resistance(straight, np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]]), P,
+                         np.array([np.inf]))[0]
+    today = road_conductance(P, np.array([lane_width(P, 7.0)]), np.array([40.0]))[0]
+    assert 1.0 / r == pytest.approx(today, rel=1e-12), "a route of length d must price like crow"
