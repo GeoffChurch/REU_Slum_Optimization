@@ -1,4 +1,4 @@
-# Continuum conduction: fails on raw disks, RESCUED by a minimum separation (2026-08-05)
+# Continuum conduction: the right object, still not a metric (2026-08-05)
 
 Spiked before committing to `specs/2026-08-05-road-geometry-in-conductance-design.md`, because that
 spec's machinery — planarized road graph, projections, bounded Dijkstra, series resistance — is
@@ -118,9 +118,11 @@ appears sufficient once `eps >= 0.5 m`: the h = 0.5 -> 0.25 movement there was o
 CG+Jacobi is far worse (855 s extrapolated at h = 0.5) and its iteration count grows as sqrt(N), so
 "add an iterative solver" is the wrong instinct here; AMG would help but is not required.
 
-**The untested risk is MEMORY, not time.** SuperLU fill-in on a 2D grid grows as O(N log N), and the
-benchmark only reaches 729k against a 3.5M target — a 5x extrapolation. Memory may bind before time
-does, and that has not been checked.
+Memory was the residual worry and is now **measured, not extrapolated** — see the round-3 list:
+6.35 GB at 3.42M cells. Time is the cost; memory is not a constraint.
+
+The `h = 0.5 -> 0.25` figures quoted just above ("only 0.0003-0.002") come from the two-block round-2
+sample and do NOT generalize; round 3 measures `h` sensitivity up to 0.043 across six blocks.
 
 ## The rescue: a minimum separation
 
