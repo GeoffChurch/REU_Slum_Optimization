@@ -40,9 +40,15 @@ os.environ["REBLOCK_CACHE_DIR"] = tempfile.mkdtemp(prefix="reblock-test-cache-")
 
 from collections.abc import Iterator  # noqa: E402
 
+import geopandas as gpd  # noqa: E402
 import pytest  # noqa: E402
+from pyproj import CRS  # noqa: E402
+from shapely.geometry import LineString, Polygon  # noqa: E402
 
 import reblock.derive_graph as _dg  # noqa: E402
+from reblock.contracts import Block  # noqa: E402
+
+UTM = CRS.from_epsg(32734)
 
 
 @pytest.fixture(autouse=True)
@@ -50,3 +56,21 @@ def _clear_l1() -> Iterator[None]:
     _dg.clear_l1()
     yield
     _dg.clear_l1()
+
+
+@pytest.fixture
+def real_block() -> Block:
+    """A 10x10 grid of unit parcels tiling a 10x10 square, south edge (y=0) is the street --
+    same `_grid_block` pattern tests/test_permeability.py uses (k=10, cell=1.0), pulled into a
+    shared fixture so tests/test_mesh.py doesn't have to import across test modules."""
+    k, cell = 10, 1.0
+    polys, ids = [], []
+    for r in range(k):
+        for c in range(k):
+            x0, x1, y0, y1 = c * cell, (c + 1) * cell, r * cell, (r + 1) * cell
+            polys.append(Polygon([(x0, y0), (x1, y0), (x1, y1), (x0, y1)]))
+            ids.append(r * k + c)
+    parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k * cell, 0)])], crs=UTM)
+    boundary = Polygon([(0, 0), (k * cell, 0), (k * cell, k * cell), (0, k * cell)])
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
