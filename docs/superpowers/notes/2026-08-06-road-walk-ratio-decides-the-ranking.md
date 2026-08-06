@@ -1,5 +1,21 @@
 # The road/walk ratio decides which method wins (2026-08-06)
 
+> **CORRECTED 2026-08-06.** The ratio is **204x, not 513x**, and every sweep label below is inflated
+> **2.52x**. The error: this note computed the footpath level using the RAW median clearance fraction
+> (0.39), but `footpath_conductance`'s fair-normalization rescales that shape so its median is ~1.
+> Measured directly, walking costs 10.19 resistance per metre against a default road's 0.05 — 204x.
+> Read every label as `label x 0.39`:
+>
+>     label   5x -> TRUE   2.0x        label  100x -> TRUE  39.0x
+>     label  10x -> TRUE   3.9x        label  250x -> TRUE  97.5x
+>     label  25x -> TRUE   9.8x        label  513x -> TRUE 200.1x
+>
+> **This materially softens the finding.** Rankings are stable at today's 204x (tau +1.000) and at
+> 97.5x (+0.933), degrade at 39x (+0.714), and only scramble below ~20x. The shipped metric is NOT
+> operating near the unstable band. What the sweep does establish is where the cliff is — and that
+> matters enormously for the fix, because the walking-leg formulation lands at an effective 1.04-1.41x,
+> deep inside it. See the closing section.
+
 A road is currently **~513x more conductive per metre** than a gap between buildings:
 
     road      g_road_per_m * usable = 6.667 * 3.0 = 20.0     (per unit distance)
@@ -76,7 +92,15 @@ term. The direction is unambiguous and large; the exact numbers are not load-bea
 therefore how the ratio enters. Doing it on the old term would measure something being replaced.
 That re-run is the open item.
 
-## Why this outranks D1 and D2
+## What it actually decides — the fix, not the shipped metric
+
+With the labels corrected, the shipped metric at 204x is comfortably clear of the scrambling band, so
+this is not an indictment of published rankings as they stand. Its force is prospective: it locates
+the cliff at roughly 20x, and the walking-rate-leg fix measured an effective road benefit of
+**1.04-1.41x** — far below it. That is what rules the fix out, and it is the reason to keep this
+measurement rather than treat the correction as a retraction.
+
+## Why the ratio question still outranks D1 and D2
 
 D1 and D2 are defects in how a road's SHAPE is priced — worth a few points of permeability. This is
 about whether the published ordering of methods means anything. Until it is resolved, any claim that
