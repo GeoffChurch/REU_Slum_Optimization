@@ -1,6 +1,17 @@
 # Continuum permeability: conduction on the free space (2026-08-06)
 
-**Status: BLOCKED 2026-08-06 by its own acceptance criterion A5.** `eps` reorders methods at the
+**Status: SUPERSEDED 2026-08-06 by `specs/2026-08-06-continuum-on-footprints-design.md`.** The
+blocker below is REMOVED rather than worked around: `eps` existed only because `NN/2` disks pinch
+free space shut, and measured on real building footprints there is no `eps` to choose. Real polygons
+leave connected free space (largest component 98.2-100%, every building fronting it) even though 50%
+of buildings touch their nearest neighbour — a disk blocks its whole circular envelope, a rectangle
+touches on one side and leaves three open. So `eps` was not regularizing a numerical problem, it was
+MANUFACTURING PASSAGES THROUGH WALLS, which is exactly why its value decided the rankings.
+
+Kept for its falsified-hypothesis catalogue and its verified measurements (perimeter injection,
+solver choice, cost and memory), which the successor inherits.
+
+**Original status: BLOCKED by its own acceptance criterion A5.** `eps` reorders methods at the
 sample A5 specifies (21 blocks x 6 methods x 4 eps): 119 rank flips, 3 winner changes, min Kendall
 tau +0.600, with flips even inside the 0.5-1.0 band. The "eps is a nuisance parameter" measurement
 this spec rests on was an n=10 x 5-method x 1-eps-pair artifact. Real building footprints are now a
