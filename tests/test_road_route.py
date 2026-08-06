@@ -122,10 +122,21 @@ def test_a_midpoint_no_corridor_covers_falls_back_to_the_narrowest_road_for_BOTH
     assert np.allclose(net.seg_width, 7.0), "every segment falls back to the narrowest road's width"
     assert not net.seg_oneway.any(), "...and that SAME road's direction, not an independent default"
 
-
 # ---------------------------------------------------------------------------
 # route_resistance
 # ---------------------------------------------------------------------------
+# Resistance of ONE METRE of walking. Travel along a default road costs 1/(G*U7) = 0.05 per metre,
+# so walking here is 20x dearer; on the pinned block the real ratio is ~500x. The gap is what makes
+# the joint minimization safe -- an entry point far from the centroid is not worth walking to --
+# and every expected value below turns on it.
+WALK = 1.0
+ROAD_M = 1.0 / (G * U7)      # 0.05, resistance per metre of a default two-way road
+
+
+def _w(k: int) -> np.ndarray:
+    return np.full(k, WALK, dtype=np.float64)
+
+
 def test_a_zigzag_costs_more_than_a_straight_road_of_the_same_endpoints():
     """D1: today these score BIT-IDENTICALLY at detour ratios to 3.07x."""
     straight = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0)), P)
@@ -133,9 +144,23 @@ def test_a_zigzag_costs_more_than_a_straight_road_of_the_same_endpoints():
     a = np.array([[0.0, 0.0]])
     b = np.array([[40.0, 0.0]])
     cut = np.array([np.inf])
-    r_straight = route_resistance(straight, a, b, P, cut)[0]
-    r_zig = route_resistance(zig, a, b, P, cut)[0]
+    r_straight = route_resistance(straight, a, b, P, cut, _w(1))[0]
+    r_zig = route_resistance(zig, a, b, P, cut, _w(1))[0]
     assert r_zig > r_straight * 1.5
+
+
+def test_a_zigzag_is_not_short_circuited_by_WALKING_to_its_far_end():
+    """The reason D1 survives a joint minimization, pinned. Every node of the network is an entry
+    candidate, so the far end of the zigzag is one -- reachable by a 40 m straight line, exactly
+    the straight road's own length. Priced at ROAD rate that leg makes the two nets score
+    bit-identically (measured: it does). Priced at WALKING rate it costs 40.0 against the zigzag's
+    own 3.12, and never binds."""
+    zig = build_roadnet(_roads(([(0, 0), (10, 12), (20, 0), (30, 12), (40, 0)], 7.0)), P)
+    got = route_resistance(zig, np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]]), P,
+                           np.array([np.inf]), _w(1))[0]
+    zig_len = 4.0 * np.hypot(10.0, 12.0)
+    assert got == pytest.approx(zig_len * ROAD_M, rel=1e-9), "the route follows the road"
+    assert got < 40.0 * WALK, "...and beats the straight walk, which is what makes it worth taking"
 
 
 def test_resistance_is_series_over_mixed_widths():
@@ -143,16 +168,40 @@ def test_resistance_is_series_over_mixed_widths():
     # resistance is the SUM of len/(g*u), not len/(g*mean).
     net = build_roadnet(_roads(([(0, 0), (20, 0)], 7.0), ([(20, 0), (40, 0)], 12.0)), P)
     got = route_resistance(net, np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]]), P,
-                           np.array([np.inf]))[0]
+                           np.array([np.inf]), _w(1))[0]
     g = P.g_road_per_m
     assert got == pytest.approx(20.0 / (g * 3.0) + 20.0 / (g * 5.5), rel=1e-6)
 
 
-def test_disconnected_components_give_infinite_resistance():
-    net = build_roadnet(_roads(([(0, 0), (10, 0)], 7.0), ([(30, 0), (40, 0)], 7.0)), P)
-    got = route_resistance(net, np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]]), P,
-                           np.array([np.inf]))[0]
-    assert not np.isfinite(got)
+def test_a_road_too_far_to_reach_gives_no_benefit_and_is_discarded():
+    """A3, under walking legs. The old form of this test asserted `inf` for a disconnected
+    component; that came from the entry being ASSIGNED to the nearest segment at road rate. With a
+    walking leg every component is reachable, so the fallback is no longer a special value -- a
+    road you would have to walk 100 m to reach simply loses to walking straight there, and the
+    caller's own cutoff discards it. Still no gate and no rule."""
+    net = build_roadnet(_roads(([(0, 100), (40, 100)], 7.0)), P)
+    a, b = np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]])
+    footpath = np.array([40.0 * WALK])           # what walking the edge direct costs
+    assert not np.isfinite(route_resistance(net, a, b, P, footpath, _w(1))[0])
+    assert route_resistance(net, a, b, P, np.array([np.inf]), _w(1))[0] > footpath[0]
+
+
+def test_disconnected_components_are_not_traversed_as_though_joined():
+    """The disconnection property that still bites. Two collinear stubs with a 20 m gap: the route
+    may ride ONE of them and walk the rest, but must not cross the gap along the network.
+
+    Riding the first stub 10 m and walking the remaining 30 m is genuinely better than walking all
+    40 m, so the answer is finite -- that is correct, not a regression. What it must never be is
+    the 40 m of riding a joined road would give."""
+    split = build_roadnet(_roads(([(0, 0), (10, 0)], 7.0), ([(30, 0), (40, 0)], 7.0)), P)
+    joined = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0)), P)
+    a, b = np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]])
+    cut = np.array([np.inf])
+    r_split = route_resistance(split, a, b, P, cut, _w(1))[0]
+    r_joined = route_resistance(joined, a, b, P, cut, _w(1))[0]
+    assert r_joined == pytest.approx(40.0 * ROAD_M, rel=1e-9)
+    assert r_split == pytest.approx(10.0 * ROAD_M + 30.0 * WALK, rel=1e-9), "ride 10 m, walk 30"
+    assert r_split > r_joined
 
 
 def test_the_early_exit_is_EXACT_not_approximate():
@@ -161,8 +210,8 @@ def test_the_early_exit_is_EXACT_not_approximate():
     net = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0), ([(40, 0), (40, 40)], 7.0)), P)
     a = np.array([[0.0, 0.0], [0.0, 0.0]])
     b = np.array([[40.0, 40.0], [40.0, 0.0]])
-    exact = route_resistance(net, a, b, P, np.array([np.inf, np.inf]))
-    generous = route_resistance(net, a, b, P, exact * 2.0)
+    exact = route_resistance(net, a, b, P, np.array([np.inf, np.inf]), _w(2))
+    generous = route_resistance(net, a, b, P, exact * 2.0, _w(2))
     assert np.allclose(exact, generous), "a cutoff above the true value must not change it"
     # A7 asks for BIT-identity, not closeness -- `allclose` above would pass an early exit that
     # rounded differently, and the Loewner argument needs the two to be the same function.
@@ -173,20 +222,19 @@ def test_the_early_exit_is_EXACT_on_a_route_whose_MIDDLE_carries_it():
     """The real guard on the bounded search; the two-segment case above cannot be one.
 
     There, every route runs end to end of a single segment at each side, so a truncated
-    node-to-node `D` is simply absorbed: the search cuts the same route at the OTHER endpoint and
-    pays the difference as a partial-segment offset, reaching the identical answer through a
-    shorter `D`. Fault injection proved it -- shrinking `limit` to 0.4x left that test green.
+    node-to-node distance is simply absorbed: the search cuts the same route at the OTHER endpoint
+    and pays the difference as a partial-segment offset, reaching the identical answer through a
+    shorter one. Fault injection proved it -- shrinking `limit` to 0.4x left that test green.
 
     A real route is tens of metres over ~5 m segments (`topology`'s median is 4.83 m), so the
-    middle is nearly all of the resistance and there is no shorter cut to fall back on. Here the
-    winning route is 195 m of which 190 m is `D`, and any `limit` under that changes the answer.
+    middle is nearly all of the resistance and there is no shorter cut to fall back on.
     """
     coords = [(float(x), 0.0) for x in range(0, 201, 5)]
     net = build_roadnet(_roads((coords, 7.0)), P)
     a, b = np.array([[2.5, 0.0]]), np.array([[197.5, 0.0]])
-    exact = route_resistance(net, a, b, P, np.array([np.inf]))
-    assert exact[0] == pytest.approx(195.0 / (G * U7), rel=1e-9)
-    generous = route_resistance(net, a, b, P, exact * 2.0)
+    exact = route_resistance(net, a, b, P, np.array([np.inf]), _w(1))
+    assert exact[0] == pytest.approx(195.0 * ROAD_M, rel=1e-9)
+    generous = route_resistance(net, a, b, P, exact * 2.0, _w(1))
     assert np.array_equal(exact, generous), "a cutoff above the true value must not change it"
 
 
@@ -195,9 +243,9 @@ def test_a_cutoff_below_the_true_resistance_returns_inf():
     discard may come back as `inf` -- that is what makes the bounded search legitimate."""
     net = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0)), P)
     a, b = np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]])
-    true = 40.0 / (G * U7)
-    assert route_resistance(net, a, b, P, np.array([true * 1.5]))[0] == pytest.approx(true)
-    assert not np.isfinite(route_resistance(net, a, b, P, np.array([true * 0.5]))[0])
+    true = 40.0 * ROAD_M
+    assert route_resistance(net, a, b, P, np.array([true * 1.5]), _w(1))[0] == pytest.approx(true)
+    assert not np.isfinite(route_resistance(net, a, b, P, np.array([true * 0.5]), _w(1))[0])
 
 
 def test_projections_attach_where_they_land_not_at_the_nearest_node():
@@ -207,14 +255,14 @@ def test_projections_attach_where_they_land_not_at_the_nearest_node():
     not a rounding error -- it is the dominant term."""
     net = build_roadnet(_roads(([(0, 0), (50, 0)], 7.0), ([(50, 0), (100, 0)], 7.0)), P)
     got = route_resistance(net, np.array([[10.0, 0.0]]), np.array([[90.0, 0.0]]), P,
-                           np.array([np.inf]))[0]
-    assert got == pytest.approx(80.0 / (G * U7), rel=1e-9)
-    assert got < 100.0 / (G * U7), "snapping to the nearest node would charge the whole 100 m"
+                           np.array([np.inf]), _w(1))[0]
+    assert got == pytest.approx(80.0 * ROAD_M, rel=1e-9)
+    assert got < 100.0 * ROAD_M, "snapping to the nearest node would charge the whole 100 m"
 
 
-def test_the_access_legs_are_added_in_series_at_the_road_rate():
-    """A point OFF the network pays `|c - projection| / (g * w)` on top of the on-network route --
-    the spec's `r_leg`, in series, at that segment's own rate.
+def test_the_access_legs_are_charged_at_the_WALKING_rate_in_series():
+    """A point OFF the network pays `|c - projection| * walk_res_per_m` on top of the on-network
+    route -- the spec's `r_leg`, in series, but at the FOOTPATH rate, because the leg is walking.
 
     Pair 0 crosses a width boundary, pair 1 stays on ONE segment: the leg is charged in BOTH
     branches, which is what keeps `R` continuous as a point slides across a node (drop it from the
@@ -223,44 +271,64 @@ def test_the_access_legs_are_added_in_series_at_the_road_rate():
     net = build_roadnet(_roads(([(0, 0), (20, 0)], 7.0), ([(20, 0), (40, 0)], 12.0)), P)
     a = np.array([[10.0, 3.0], [5.0, 3.0]])
     b = np.array([[40.0, 0.0], [15.0, 0.0]])
-    got = route_resistance(net, a, b, P, np.array([np.inf, np.inf]))
-    # pair 0: 3 m leg + 10 m to the node at (20,0) at usable 3.0, then 20 m at usable 5.5
-    assert got[0] == pytest.approx(13.0 / (G * U7) + 20.0 / (G * 5.5), rel=1e-9)
-    # pair 1: 3 m leg + |0.25 - 0.75| * 20 m along the SAME segment, all at usable 3.0
-    assert got[1] == pytest.approx(13.0 / (G * U7), rel=1e-9)
+    got = route_resistance(net, a, b, P, np.array([np.inf, np.inf]), _w(2))
+    g = P.g_road_per_m
+    # pair 0: walk 3 m to the projection at (10,0), ride 10 m at usable 3.0, then 20 m at usable 5.5
+    assert got[0] == pytest.approx(3.0 * WALK + 10.0 / (g * 3.0) + 20.0 / (g * 5.5), rel=1e-9)
+    # pair 1: walk 3 m, then |0.25 - 0.75| * 20 m along the SAME segment, never reaching a node
+    assert got[1] == pytest.approx(3.0 * WALK + 10.0 / (g * 3.0), rel=1e-9)
+
+
+def test_a_leg_at_ROAD_rate_would_let_a_long_straight_leg_beat_a_short_one():
+    """The fault this rate choice exists to prevent, pinned as a property rather than a value.
+
+    Entry is minimized over the WHOLE network, so a long straight leg to a distant node is always
+    a candidate. Walking must make it lose. Here the near entry is 3 m off a road that then runs
+    the wrong way; the far node is 50 m away in a straight line. At walking rate the near entry
+    wins outright; at road rate (1/20th the price per metre) the 50 m leg would win and the route
+    would cut across the block.
+    """
+    net = build_roadnet(_roads(([(0, 0), (0, 40)], 7.0), ([(50, 0), (50, 40)], 7.0)), P)
+    a, b = np.array([[3.0, 0.0]]), np.array([[3.0, 40.0]])
+    got = route_resistance(net, a, b, P, np.array([np.inf]), _w(1))[0]
+    near = 3.0 * WALK + 40.0 * ROAD_M + 3.0 * WALK          # walk on, ride the near road, walk off
+    far = np.hypot(47.0, 0.0) * WALK * 2 + 40.0 * ROAD_M    # walk to the far road and back
+    assert near < far, "the fixture must actually discriminate the two rates"
+    assert got == pytest.approx(near, rel=1e-9), "the NEAR entry wins when the leg is walking"
 
 
 def test_a_one_way_segment_carries_travel_in_one_direction_only():
-    """`seg_oneway` is a hard gate, exactly as `edge_conductances` already treats it: the permitted
-    direction costs what the road costs and the other has no route at all. Which of the two the
-    planarizer calls forward is its own business, so assert the PAIR."""
+    """`seg_oneway` is a hard gate on ROAD travel, exactly as `edge_conductances` treats it. The
+    permitted direction costs what the road costs; the forbidden one gets no road benefit at all
+    and is left walking the whole way. Which of the two the planarizer calls forward is its own
+    business, so assert the PAIR."""
     net = build_roadnet(_roads_ow(([(0, 0), (40, 0)], 7.0, True)), P)
     assert net.seg_oneway.all()
     a, b = np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]])
     cut = np.array([np.inf])
-    both = sorted([route_resistance(net, a, b, P, cut)[0], route_resistance(net, b, a, P, cut)[0]])
-    assert both[0] == pytest.approx(40.0 / (G * 6.0), rel=1e-9)   # one-way: usable = 7 - margin
-    assert not np.isfinite(both[1]), "the forbidden direction has no route, not a dearer one"
+    both = sorted([route_resistance(net, a, b, P, cut, _w(1))[0],
+                   route_resistance(net, b, a, P, cut, _w(1))[0]])
+    g = P.g_road_per_m
+    assert both[0] == pytest.approx(40.0 / (g * 6.0), rel=1e-9)   # one-way: usable = 7 - margin
+    assert both[1] == pytest.approx(40.0 * WALK, rel=1e-9), "the forbidden direction just walks"
 
 
 def test_a_two_way_net_is_symmetric():
-    """The control for the one-way test, and the guard on the undirected fast path: with nothing
-    one-way the graph stores ONE arc per segment and `dijkstra(directed=False)` supplies the
-    reverse.
+    """The control for the one-way test: with nothing one-way, both directions must price alike.
 
     The route needs a MIDDLE for this to guard anything -- with the two points on the two end
     segments of a two-segment net, both directions are paid entirely in partial-segment offsets
-    (which are two-way by construction) and never touch `D` at all, so even a graph searched as
-    directed comes back symmetric. Four segments with the points mid-way along the outer two puts
-    20 of the 30 m into `D`.
+    (which are two-way by construction) and never traverse the graph at all, so even a graph
+    searched as directed comes back symmetric. Four segments with the points mid-way along the
+    outer two puts 20 of the 30 m into the graph.
     """
     net = build_roadnet(_roads(([(0, 0), (10, 0), (20, 0), (30, 0), (40, 0)], 7.0)), P)
     assert not net.seg_oneway.any()
     a, b = np.array([[5.0, 0.0]]), np.array([[35.0, 0.0]])
     cut = np.array([np.inf])
-    fwd = route_resistance(net, a, b, P, cut)[0]
-    bwd = route_resistance(net, b, a, P, cut)[0]
-    assert fwd == pytest.approx(30.0 / (G * U7), rel=1e-9)
+    fwd = route_resistance(net, a, b, P, cut, _w(1))[0]
+    bwd = route_resistance(net, b, a, P, cut, _w(1))[0]
+    assert fwd == pytest.approx(30.0 * ROAD_M, rel=1e-9)
     assert bwd == fwd
 
 
@@ -269,7 +337,7 @@ def test_an_empty_net_gives_infinite_resistance():
     anyway -- there is nothing to route over, so the road term is zero via `1/inf`."""
     net = build_roadnet(with_width(gpd.GeoDataFrame(geometry=[], crs=UTM), 7.0), P)
     got = route_resistance(net, np.array([[0.0, 0.0]]), np.array([[1.0, 1.0]]), P,
-                           np.array([np.inf]))
+                           np.array([np.inf]), _w(1))
     assert got.shape == (1,) and not np.isfinite(got[0])
 
 
@@ -297,6 +365,6 @@ def test_segment_resistance_uses_road_conductance_s_OWN_capacity_convention():
     # ...and end to end: a straight road of length d must give exactly today's crow-flies term.
     straight = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0)), P)
     r = route_resistance(straight, np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]]), P,
-                         np.array([np.inf]))[0]
+                         np.array([np.inf]), _w(1))[0]
     today = road_conductance(P, np.array([lane_width(P, 7.0)]), np.array([40.0]))[0]
     assert 1.0 / r == pytest.approx(today, rel=1e-12), "a route of length d must price like crow"

@@ -125,55 +125,11 @@ def build_roadnet(roads: GeoDataFrame, params: PermeabilityParams) -> RoadNet:
     return RoadNet(nodes, sa, sb, seg_len, seg_w, seg_o)
 
 
-# Cap on the (points x segments) temporaries `_project` allocates in one pass. The nearest-segment
-# search is a brute-force sweep -- an STRtree would win asymptotically but loses on the sizes that
-# actually occur (a block's road net is hundreds of segments) and would still need this arithmetic
-# to recover `t`. Chunking keeps peak memory flat instead of quadratic in block size: at 1e6
-# elements the pass holds ~50 MB of float64 whatever the block.
-_PROJECT_ELEMS = 1_000_000
-
-
-def _project(
-    net: RoadNet, pts: NDArray[np.float64],
-) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64]]:
-    """`(segment, t, offset)` per point: the index of the NEAREST segment, the fraction along it at
-    which the point's perpendicular projection lands (clamped into `[0, 1]`, so a point past an end
-    projects onto that end), and the distance from the point to that projection.
-
-    Ties -- a point exactly equidistant from two segments -- go to the LOWEST segment index, which
-    is `np.argmin`'s documented behaviour over a segment order `build_roadnet` fixes
-    deterministically. Determinism is the property that matters (the same block must score the same
-    number twice); WHICH segment wins is almost always immaterial, because the equidistant case is
-    reached in practice at a shared NODE, where both segments offer the same entry point at the
-    same zero offset.
-    """
-    ax = net.nodes[net.seg_a, 0]
-    ay = net.nodes[net.seg_a, 1]
-    abx = net.nodes[net.seg_b, 0] - ax
-    aby = net.nodes[net.seg_b, 1] - ay
-    # `_explode_segments` drops zero-length segments, so this is strictly positive and needs no
-    # guard -- a degenerate segment would otherwise divide by zero here.
-    len2 = net.seg_len**2
-
-    n = pts.shape[0]
-    seg = np.zeros(n, dtype=np.int64)
-    frac = np.zeros(n, dtype=np.float64)
-    offset = np.zeros(n, dtype=np.float64)
-    step = max(1, _PROJECT_ELEMS // net.seg_a.size)
-    for lo in range(0, n, step):
-        hi = min(lo + step, n)
-        apx = pts[lo:hi, 0, None] - ax[None, :]
-        apy = pts[lo:hi, 1, None] - ay[None, :]
-        t = np.clip((apx * abx + apy * aby) / len2, 0.0, 1.0)
-        dx = apx - t * abx
-        dy = apy - t * aby
-        d2 = dx * dx + dy * dy
-        near = np.argmin(d2, axis=1)
-        rows = np.arange(hi - lo)
-        seg[lo:hi] = near
-        frac[lo:hi] = t[rows, near]
-        offset[lo:hi] = np.sqrt(d2[rows, near])
-    return seg, frac, offset
+# Cap on the (points x segments) temporaries one chunk of the projection sweep allocates. Every
+# point is projected onto EVERY segment -- that is what makes the entry a joint minimization rather
+# than an assignment -- so the sweep is quadratic in block size unless it is chunked. At 1e6
+# elements a chunk holds ~50 MB of float64 whatever the block.
+_CHUNK_ELEMS = 1_000_000
 
 
 def _usable_widths(net: RoadNet, params: PermeabilityParams) -> NDArray[np.float64]:
@@ -199,26 +155,98 @@ def _usable_widths(net: RoadNet, params: PermeabilityParams) -> NDArray[np.float
     return np.maximum(0.0, lane - params.road_margin_m)
 
 
-def _travel_graph(net: RoadNet, seg_res: NDArray[np.float64], *, directed: bool) -> csr_matrix:
-    """The CSR the route search runs over: one arc per segment, weighted by its RESISTANCE.
+def _projections(net: RoadNet, pts: NDArray[np.float64],
+                 ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """`(t, offset)` of every point against EVERY segment: where the perpendicular projection lands
+    along the segment (clamped into `[0, 1]`) and how far the point is from that landing.
 
-    With nothing one-way the graph carries HALF the arcs and `dijkstra(directed=False)` supplies
-    the reverse of each internally -- there is no reason to materialize both.
-
-    The COO -> CSR conversion SUMS duplicate `(row, col)` entries, which would silently make a
-    doubled segment twice as resistive rather than leaving it alone. It cannot happen here:
-    `_explode_segments` deduplicates by `frozenset` of the endpoint pair, so no two segments share
-    an unordered endpoint pair.
+    Both are `(P, S)`. The joint minimization needs every segment, not the nearest one -- the whole
+    defect being fixed is that picking one segment is an ASSIGNMENT, and an assignment can move.
     """
-    k = net.nodes.shape[0]
+    ax = net.nodes[net.seg_a, 0]
+    ay = net.nodes[net.seg_a, 1]
+    abx = net.nodes[net.seg_b, 0] - ax
+    aby = net.nodes[net.seg_b, 1] - ay
+    # `_explode_segments` drops zero-length segments, so this is strictly positive and needs no
+    # guard -- a degenerate segment would otherwise divide by zero here.
+    len2 = net.seg_len**2
+    apx = pts[:, 0, None] - ax[None, :]
+    apy = pts[:, 1, None] - ay[None, :]
+    t = np.clip((apx * abx + apy * aby) / len2, 0.0, 1.0)
+    dx = apx - t * abx
+    dy = apy - t * aby
+    return t, np.sqrt(dx * dx + dy * dy)
+
+
+def _incidence(net: RoadNet) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.int64]]:
+    """`(order, starts, nodes)` for a segmented minimum over the segments incident to each node.
+
+    `np.concatenate([seg_a, seg_b])[order]` is grouped by node, `starts` are the group boundaries
+    and `nodes` names the group. `np.minimum.reduceat` over those groups is the vectorized "best
+    segment incident to this node" -- `np.minimum.at` would express it directly but is a `ufunc.at`
+    scatter, orders of magnitude slower, and this runs once per point chunk.
+    """
+    inc = np.concatenate([net.seg_a, net.seg_b])
+    order = np.argsort(inc, kind="stable")
+    nodes, starts = np.unique(inc[order], return_index=True)
+    return order, starts.astype(np.int64), nodes.astype(np.int64)
+
+
+def _reach_costs(net: RoadNet, pts: NDArray[np.float64], walk: NDArray[np.float64],
+                 seg_res: NDArray[np.float64], t: NDArray[np.float64], off: NDArray[np.float64],
+                 inc: tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.int64]],
+                 *, exit_side: bool, directed: bool) -> NDArray[np.float64]:
+    """`(P, K)` cheapest cost linking each point to each NODE, over every entry point on the net.
+
+    Two ways to link a point to node `k`, and the answer is the min of them:
+
+    * walk straight to `k` -- `|c - k| * walk`, the candidate for `k` itself as the entry point;
+    * walk to the projection on some segment incident to `k`, then travel the partial segment --
+      `off * walk + (t or 1-t) * seg_res`.
+
+    That pair IS the exact candidate set. Along one segment the cost is `|c - p|/kappa_walk` (convex
+    in `p`) plus a network distance that is piecewise linear in `p`, so the minimum sits at the
+    projection or at an endpoint, and nowhere else. The projection is the one that usually binds now
+    that walking is the dearer rate -- when both rates were equal the endpoint always won, which is
+    exactly why the old road-rate leg let a route walk clean across a block.
+
+    `exit_side` mirrors it for the far end of the route (node -> point instead of point -> node),
+    which matters only under one-way segments: leaving a projection BACKWARDS is not a route, and
+    neither is arriving at the far end and running back to it. A zero-length partial is exempt --
+    a projection sitting on a node travels nowhere to reach it.
+    """
+    order, starts, nodes = inc
+    base = off * walk[:, None]
+    to_a = base + t * seg_res[None, :]
+    to_b = base + (1.0 - t) * seg_res[None, :]
     if directed:
-        two_way = ~net.seg_oneway
-        rows = np.concatenate([net.seg_a, net.seg_b[two_way]])
-        cols = np.concatenate([net.seg_b, net.seg_a[two_way]])
-        data = np.concatenate([seg_res, seg_res[two_way]])
-    else:
-        rows, cols, data = net.seg_a, net.seg_b, seg_res
-    return csr_matrix((data, (rows, cols)), shape=(k, k))
+        ow = net.seg_oneway[None, :]
+        if exit_side:
+            to_b = np.where(ow & (to_b > base), np.inf, to_b)
+        else:
+            to_a = np.where(ow & (to_a > base), np.inf, to_a)
+    via = np.minimum.reduceat(np.concatenate([to_a, to_b], axis=1)[:, order], starts, axis=1)
+
+    direct = np.hypot(pts[:, 0, None] - net.nodes[None, :, 0],
+                      pts[:, 1, None] - net.nodes[None, :, 1]) * walk[:, None]
+    direct[:, nodes] = np.minimum(direct[:, nodes], via)
+    return direct
+
+
+def _network_arcs(net: RoadNet, seg_res: NDArray[np.float64], *, directed: bool,
+                  ) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]:
+    """The road network's own arcs, both directions explicitly.
+
+    Explicitly, rather than leaning on `dijkstra(directed=False)`, because the search runs over a
+    graph AUGMENTED with one virtual source per point: those arcs must stay one-way, so the whole
+    solve is directed and the network has to carry its own reverse arcs. One-way segments carry
+    only `seg_a -> seg_b`.
+    """
+    two_way = ~net.seg_oneway if directed else np.ones(net.seg_a.size, dtype=bool)
+    rows = np.concatenate([net.seg_a, net.seg_b[two_way]])
+    cols = np.concatenate([net.seg_b, net.seg_a[two_way]])
+    data = np.concatenate([seg_res, seg_res[two_way]])
+    return rows, cols, data
 
 
 def route_resistance(
@@ -227,109 +255,68 @@ def route_resistance(
     pts_b: NDArray[np.float64],
     params: PermeabilityParams,
     cutoff: NDArray[np.float64],
+    walk_res_per_m: NDArray[np.float64],
 ) -> NDArray[np.float64]:
-    """Minimum series resistance from `pts_a[i]` to `pts_b[i]` along `net`, access legs INCLUDED,
-    or `inf` where the best route does not come in at or under `cutoff[i]`.
+    """Minimum series resistance from `pts_a[i]` to `pts_b[i]` via `net`, access legs INCLUDED, or
+    `inf` where the best route does not come in at or under `cutoff[i]`.
 
-    ## Resistance, not length
+    ## Two rates, and why that is the whole design
 
-    A segment costs `seg_len / (g_road_per_m * usable_width)` and a route costs the SUM over its
-    segments, so the search minimizes RESISTANCE rather than distance. That is what makes a
-    mixed-width route well defined: a short narrow alley and a long wide street trade off
-    correctly, and no arbitrary "which width does this route have" rule is needed.
+    Travel ALONG a road segment costs `seg_len / (g_road_per_m * usable_width)` and a route costs
+    the SUM over its segments, so the search minimizes RESISTANCE rather than distance -- which is
+    what makes a mixed-width route well defined, since a short narrow alley and a long wide street
+    then trade off correctly.
 
-    The usable width is `road_conductance`'s, per `_usable_widths` -- the SAME capacity convention
-    as the crow-flies term this replaces, so that what changes here is the length and nothing else.
+    The ACCESS LEG -- centroid to wherever the route joins the network -- is walking, and is priced
+    at `walk_res_per_m[i]` per metre, the caller's own footpath rate for that edge
+    (`1 / (footpath_g * dist)`). It is not road travel and must not be priced as though it were.
 
-    ## Projections attach where they land
+    That single distinction is load-bearing. With the leg at ROAD rate a straight line is the
+    cheapest travel per metre anywhere in the model, so minimizing the entry point over the whole
+    network buys shortcuts: on the spec's own zigzag fixture the direct 40 m leg to the far node
+    equals the straight road's length and the two score bit-identically -- defect D1 restored in
+    full -- and on real blocks the median detour collapses from 1.78 to 1.11, giving back 82-86% of
+    D2. Measured legs are 2.48-2.83 m median, p90 5.0-7.7 m, so the spec's premise that they are
+    "sub-metre and immaterial" does not hold and the rate is not a free choice.
 
-    A point's projection lands at fraction `t` along its nearest segment, and the route pays
+    With walking as the dearer rate the model says something simple and geometric:
 
-        r_leg  = |point - projection| / (g * w)          the approach to the network
-        offset = t * seg_len / (g * w)                   the partial segment to one end of it
+        take the road iff  L_i + L_j + (road resistance in walk-metres)  <  d
+        benefit over the footpath ~ d / (L_i + L_j)
 
-    with the node-to-node minimum `D` in between, minimized over both ends at each side. Snapping
-    to the nearest NODE instead would charge up to half a segment -- `topology`'s median segment is
-    4.83 m, against access legs that are themselves sub-metre, so that is the dominant term rather
-    than a rounding error.
+    -- worth a lot to a parcel fronting a road, nothing to one far from any.
 
-    The two pieces are SUMMED (approach, then travel along the segment) rather than combined by
-    Pythagoras into a single `|point - node|`. They agree whenever the point lies on the network,
-    which is the case the spec's `r_leg` justification cares about, but only the sum survives
-    planarization: splitting a segment between a projection and the node it was reaching leaves the
-    summed cost identical (`|p-m| + |m-a| = |p-a|` measured ALONG the segment) while the
-    hypotenuse form strictly increases it. The monotonicity proof needs road resistance never to
-    RISE when a road is added, and a new road splits existing segments at every crossing it makes.
+    ## The entry point is MINIMIZED, not assigned
 
-    When both projections land on ONE segment the answer is `|t_a - t_b| * seg_len / (g * w)` plus
-    the two `r_leg`s, and no graph search is involved -- going out to an end and back could only
-    cost more (undirected), and where a one-way segment forbids the direct traversal the route
-    round the network is still considered.
+    Every point is projected onto EVERY segment, and the candidate set per point is the projection
+    onto each segment plus every node (`_reach_costs` proves that is exhaustive). This is the
+    spec's joint minimization over `N(R)`, and it is what makes the metric monotone: as roads are
+    added `N(R)` only grows and every network distance only falls, so the minimum is
+    non-increasing. Picking the NEAREST segment instead is an ASSIGNMENT, and an assignment moves
+    -- measured, it made 7% of prefix steps RISE, worst 5.8-8.8x, once a road landing 0.19 m nearer
+    captured an entry onto a disconnected component. That is the failure `3a8dd25` records as
+    having killed three earlier attempts.
 
-    ## The entry point is ASSIGNED here, and the spec wants it MINIMIZED
-
-    Each point enters the network at its NEAREST segment. The design spec instead makes the entry
-    a joint minimization over every projection point in `N(R)`, and says so for a reason: as roads
-    are added `N(R)` grows and every route resistance falls, so the joint minimum is non-increasing
-    and the road term is monotone -- which is the whole Loewner argument. An assignment has no such
-    property, and MEASURED on the pinned block it does fail: over prefixes of three methods' road
-    sets, ~7% of (edge, prefix-step) pairs see this resistance RISE, worst case 5.8-8.8x, because a
-    newly added road lands fractionally nearer a centroid and captures its entry. In the sharpest
-    observed case a road 0.19 m nearer took an entry onto a DISCONNECTED component and sent a
-    finite route to `inf`. This is the same shape as `3a8dd25` ("network_efficiency monotone via
-    fixed entry mapping"), which the spec cites as having killed three earlier attempts.
-
-    **The joint minimization was implemented and measured, and it is not a drop-in fix.** It is
-    monotone, as advertised -- and it also destroys the two defects this whole module exists to
-    correct, because `r_leg` is charged at ROAD rate. A straight-line leg is then the cheapest
-    travel per metre anywhere in the model, so a minimizer handed every point of `N(R)` will
-    happily walk 40 m across a block to reach a far node and call it a route:
-
-    * D1 (a zigzag must not score like a straight road) fails OUTRIGHT. On the A1 fixture the
-      direct leg from `(0,0)` to the far node `(40,0)` is 40 m, exactly the straight road's own
-      length, so `R_zigzag == R_straight` bit-for-bit -- the defect restored in full.
-    * D2 (travel/crow, measured at 1.395) collapses. On the pinned block the median detour falls
-      from 1.775 to 1.110 (`clearance_looped`) and 1.826 to 1.145 (`greedy_arterial_repulsion`) --
-      82-86% of the detour destroyed, with 13-17% of covered edges landing within 1% of crow-flies.
-
-    The spec licenses the road-rate leg with "the legs are sub-metre and the choice is immaterial".
-    MEASURED on covered edges of the pinned block, they are not: median 2.48-2.83 m, p90 5.0-7.7 m,
-    max ~15 m, only 20-25% under a metre. Under an ASSIGNMENT that is harmless, since the leg is
-    short by construction; under a MINIMIZATION the optimizer seeks long legs out precisely because
-    they are underpriced. So the spec's monotonicity mechanism and its acceptance criteria are in
-    direct conflict, and the conflict is `r_leg`'s rate, not the search.
-
-    Restricting to the nearest segment is therefore what ships, with this non-monotonicity known
-    and recorded rather than papered over. Resolving it needs a decision about what an admissible
-    entry IS -- a bounded leg, a leg priced off-road, or accepting the assignment -- which is a
-    spec-level question, not one this function can answer.
+    Planarization refines rather than reroutes, so refinement preserves it exactly: splitting a
+    segment between a projection and the node it was reaching leaves `off * walk + partial` and the
+    two halves summing to the identical cost, and nodes are only ever added.
 
     ## The early exit is EXACT
 
-    `dijkstra` runs with `limit=cutoff.max()`, which is legitimate rather than approximate:
-    `D <= offset + D + offset + legs = R`, so any route with `R <= cutoff[i]` has `D` under the
-    limit and is found exactly. Routes that lose to `cutoff[i]` come back `inf` -- the caller takes
-    `max(footpath, 1/R)` with `cutoff = 1/footpath_g`, so it discards those whatever their value.
-    A generous cutoff therefore returns a BIT-IDENTICAL answer to an infinite one, which the
-    Loewner monotonicity argument depends on: an early exit that changed the computed function by
-    even a rounding step would void it.
+    One `dijkstra` over the network augmented with a virtual source per point, seeded at
+    `_reach_costs`, with `limit=cutoff.max()`. Any route with `R <= cutoff[i]` has every prefix of
+    itself under the limit, so it is found exactly; only routes the caller would discard can be
+    truncated, since it takes `max(footpath, 1/R)` with `cutoff = 1/footpath_g`. Seed arcs above
+    `cutoff[i]` are dropped for the same reason -- a route through that node already costs more
+    than the cutoff. A generous cutoff therefore returns a BIT-IDENTICAL answer to an infinite one,
+    which the Loewner monotonicity argument depends on.
 
     ## `inf`, not a sentinel
 
-    No route means `inf`, so the caller's `1.0 / R` is `0.0` exactly, with no branch, no epsilon
-    and no warning, and `max(footpath, 0.0)` leaves the edge at footpath. A disconnected road
-    component needing no special-case rule is a stated design property, and a sentinel would put
-    the rule back at every call site. `R` is never `0` for a mesh edge (its two parcel centroids
-    are distinct), so the reciprocal is finite.
-
-    ## One multi-source solve
-
-    One `dijkstra` call over the DISTINCT `pts_a`-side entry nodes, not one call per pair: covered
-    edges join ADJACENT parcels, so neighbouring pairs enter the network at the same handful of
-    nodes and a per-pair loop would recompute the same search many times over, at Python call
-    overhead per pair. The cost is `O(U * (S + K log K))` for `U` distinct entry nodes over `K`
-    nodes and `S` segments, with `limit` confining each search to a ball rather than the whole
-    component, and `O(U * K)` for the dense result.
+    No route means `inf`, so the caller's `1.0 / R` is `0.0` exactly -- no branch, no epsilon, no
+    warning -- and `max(footpath, 0.0)` leaves the edge at footpath. A disconnected road component
+    needing no special-case rule is a stated design property, and a sentinel would put the rule
+    back at every call site.
     """
     n = int(pts_a.shape[0])
     if n == 0:
@@ -340,45 +327,44 @@ def route_resistance(
     g = params.g_road_per_m
     usable = _usable_widths(net, params)
     seg_res = net.seg_len / (g * usable)
-
-    sidx_a, t_a, off_a = _project(net, pts_a)
-    sidx_b, t_b, off_b = _project(net, pts_b)
-    legs = off_a / (g * usable[sidx_a]) + off_b / (g * usable[sidx_b])
-
-    # Row 0 is the `seg_a` end of each point's segment, row 1 the `seg_b` end.
-    ends_a = np.stack([net.seg_a[sidx_a], net.seg_b[sidx_a]])
-    ends_b = np.stack([net.seg_a[sidx_b], net.seg_b[sidx_b]])
-    part_a = np.stack([t_a * seg_res[sidx_a], (1.0 - t_a) * seg_res[sidx_a]])
-    part_b = np.stack([t_b * seg_res[sidx_b], (1.0 - t_b) * seg_res[sidx_b]])
-
     directed = bool(net.seg_oneway.any())
-    if directed:
-        # A one-way segment permits travel from `seg_a` to `seg_b` only, and that governs the
-        # partial segments at both ends as much as it governs the graph: leaving a projection
-        # BACKWARDS towards the `seg_a` end is not a route, nor is arriving at the `seg_b` end and
-        # running back to the projection. A zero-length partial is exempt -- a projection sitting
-        # exactly on a node travels nowhere to reach it.
-        part_a[0] = np.where(net.seg_oneway[sidx_a] & (part_a[0] > 0.0), np.inf, part_a[0])
-        part_b[1] = np.where(net.seg_oneway[sidx_b] & (part_b[1] > 0.0), np.inf, part_b[1])
+    inc = _incidence(net)
+    k = int(net.nodes.shape[0])
+    arc_rows, arc_cols, arc_data = _network_arcs(net, seg_res, directed=directed)
+    limit = float(np.max(cutoff))
 
-    sources = np.unique(ends_a)
-    node_dist = dijkstra(_travel_graph(net, seg_res, directed=directed), directed=directed,
-                         indices=sources, limit=float(np.max(cutoff)))
-    row_of = np.zeros(net.nodes.shape[0], dtype=np.int64)
-    row_of[sources] = np.arange(sources.size, dtype=np.int64)
+    out = np.empty(n, dtype=np.float64)
+    step = max(1, _CHUNK_ELEMS // max(net.seg_a.size, k))
+    for lo in range(0, n, step):
+        hi = min(lo + step, n)
+        m = hi - lo
+        walk = walk_res_per_m[lo:hi]
+        cut = cutoff[lo:hi]
+        t_a, off_a = _projections(net, pts_a[lo:hi])
+        t_b, off_b = _projections(net, pts_b[lo:hi])
 
-    path = np.full(n, np.inf, dtype=np.float64)
-    for u in (0, 1):
-        rows = row_of[ends_a[u]]
-        for v in (0, 1):
-            path = np.minimum(path, part_a[u] + node_dist[rows, ends_b[v]] + part_b[v])
+        d0 = _reach_costs(net, pts_a[lo:hi], walk, seg_res, t_a, off_a, inc,
+                          exit_side=False, directed=directed)
+        d1 = _reach_costs(net, pts_b[lo:hi], walk, seg_res, t_b, off_b, inc,
+                          exit_side=True, directed=directed)
 
-    shared = sidx_a == sidx_b
-    if shared.any():
-        direct = np.abs(t_a - t_b) * seg_res[sidx_a]
+        # A route that never reaches a node: both points enter the SAME segment and travel within
+        # it. The node-to-node form above cannot express it, and it is the right answer whenever
+        # both projections sit mid-segment -- going out to an end and back would cost more.
+        along = np.abs(t_a - t_b) * seg_res[None, :]
         if directed:
-            direct = np.where(net.seg_oneway[sidx_a] & (t_b < t_a), np.inf, direct)
-        path = np.where(shared, np.minimum(path, direct), path)
+            along = np.where(net.seg_oneway[None, :] & (t_b < t_a), np.inf, along)
+        in_seg = ((off_a + off_b) * walk[:, None] + along).min(axis=1)
 
-    total = legs + path
-    return np.where(total > cutoff, np.inf, total)
+        # Virtual source per point, wired to every node it can afford to reach. Dropping seeds
+        # above the pair's own cutoff is exact: a route through that node already loses.
+        src, dst = np.nonzero(d0 <= cut[:, None])
+        rows = np.concatenate([arc_rows, (k + src).astype(np.int64)])
+        cols = np.concatenate([arc_cols, dst.astype(np.int64)])
+        data = np.concatenate([arc_data, d0[src, dst]])
+        aug = csr_matrix((data, (rows, cols)), shape=(k + m, k + m))
+        dist = dijkstra(aug, directed=True, indices=np.arange(k, k + m), limit=limit)
+
+        out[lo:hi] = np.minimum(in_seg, (dist[:, :k] + d1).min(axis=1))
+
+    return np.where(out > cutoff, np.inf, out)
