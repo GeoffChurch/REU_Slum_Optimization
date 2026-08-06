@@ -10,7 +10,11 @@ space collapses to one component. But swept across 6 blocks rather than 2, `eps`
 four of them and a KNOB on one, where permeability climbs 0.608 -> 0.696 with no plateau. Worst-case
 `eps` + `h` sensitivity then approaches the whole ~0.118 cross-method signal.
 
-**Current state (round 6): the blocker largely dissolves.** `eps` moves absolute
+**Current state (A5 gate, 2026-08-06): BLOCKED.** `eps` reorders methods at the
+criterion's own sample -- 119 rank flips, min Kendall tau +0.600. Round 6's contrary result was an
+n=10 x 5-method x 1-eps-pair artifact. Superseded text follows.
+
+~~Round 6:~~ `eps` moves absolute
 permeability but does NOT reorder methods -- 0 of 50 rank flips, Kendall tau +1.000 on every block
 -- and permeability is used comparatively. `h` converges on the common population; the rare
 under-resolved block is per-block detectable. Region-scale cost
@@ -323,6 +327,50 @@ Healthier than rounds 3-5 implied. `eps` affects the absolute value but not the 
 converges on the common population; the rare under-resolved block is detectable per-block (its `h`
 sweep does not converge) and fixable with finer `h` there. What remains is method breadth beyond
 these five, a wider `eps` range, and behaviour on a known outlier.
+
+## A5 GATE 2026-08-06: FAILED. `eps` DOES reorder methods.
+
+Round 6 concluded `eps` is a nuisance parameter from 10 blocks x 5 methods at ONE eps pair
+({0.5, 1.0}): 0 of 50 rank flips, Kendall tau median and min +1.000. The whole continuum spec was
+built on that. Widened to the acceptance criterion's sample -- **21 blocks x 6 methods x 4 eps
+values, all 21 blocks complete** -- it collapses:
+
+    eps pair      flips  winners   min tau   blocks with any flip
+    0.25 vs 0.5      19       1     +0.600         9 / 21
+    0.25 vs 1.0      27       1     +0.600        11 / 21
+    0.25 vs 1.5      29       1     +0.600        12 / 21
+    0.5  vs 1.0      17       0     +0.733         8 / 21     <- the "safe" band
+    0.5  vs 1.5      19       0     +0.600         7 / 21
+    1.0  vs 1.5       8       0     +0.733         3 / 21
+
+    TOTAL: 119 rank flips, 3 winner changes, min Kendall tau +0.600
+
+**Every pair reorders**, including 0.5 vs 1.0 where round 6 measured none. Example
+(`ZAF.9.3.1_1_38525`): `flow_paths` 0.5513 -> 0.6040 while `clearance` 0.5958 -> 0.5919, moving
+`flow_paths` from last place to third. A genuine reorder, not a tie-break.
+
+### Why round 6 missed it
+
+Three ways at once, each of which shrank the chance of seeing a flip: 10 blocks not 21; 5 methods
+not 6 (`clearance_looped`, which round 6 omitted, is involved in flips); and ONE eps pair not six.
+The reported "0 of 50 cells" was 10 blocks x 5 methods x 1 pair = 50 comparisons against the 756 the
+criterion actually asks for.
+
+### What it means
+
+`eps` is **not** a nuisance parameter. It is a free modelling constant that changes which method
+wins, and it cannot be measured from point + `NN/2`-disk geometry — that is exactly what it exists
+to paper over. So the continuum metric as specified cannot be shipped: two people choosing
+defensible values of `eps` would publish different method rankings.
+
+`specs/2026-08-06-continuum-permeability-design.md` is BLOCKED. Its A5 was written to be the
+criterion that could kill it, placed first in the plan for that reason, and it did its job at the
+cost of one task instead of ten.
+
+**Real building footprints are now a PREREQUISITE, not an improvement.** With measured footprints
+there is no `eps` to choose: free space is what the polygons leave. `data/provision.py:57` records
+that Open Buildings polygons exist and were declined on size (*"points; the polygon variants are
+14.09 GB"*).
 
 ## Displacement coupling: decoupling IS a confound, measured
 

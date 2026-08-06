@@ -1,6 +1,13 @@
 # Continuum permeability: conduction on the free space (2026-08-06)
 
-**Status: SPEC'D, not built.** Replaces the parcel-centroid graph metric outright — migrate and
+**Status: BLOCKED 2026-08-06 by its own acceptance criterion A5.** `eps` reorders methods at the
+sample A5 specifies (21 blocks x 6 methods x 4 eps): 119 rank flips, 3 winner changes, min Kendall
+tau +0.600, with flips even inside the 0.5-1.0 band. The "eps is a nuisance parameter" measurement
+this spec rests on was an n=10 x 5-method x 1-eps-pair artifact. Real building footprints are now a
+PREREQUISITE rather than an improvement: with measured polygons there is no `eps` to choose. See
+`notes/2026-08-05-continuum-metric-spike.md`, "A5 GATE 2026-08-06".
+
+**Original status: SPEC'D, not built.** Replaces the parcel-centroid graph metric outright — migrate and
 delete, no toggle. Evidence base is six rounds of measurement in
 `notes/2026-08-05-continuum-metric-spike.md`; every number quoted here was measured, not assumed.
 

@@ -1,5 +1,10 @@
 # Continuum Permeability Implementation Plan
 
+> **HALTED 2026-08-06 at Task 1.** The A5 kill gate FAILED (119 rank flips, min Kendall tau +0.600
+> over 21 blocks x 6 methods x 4 eps values). Tasks 2-10 were never dispatched, which is what
+> placing the gate first was for. Do not execute this plan unless the spec's `eps` problem is
+> resolved — most plausibly by real building footprints, which remove `eps` entirely.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the parcel-centroid graph permeability metric with conduction on the free space,
