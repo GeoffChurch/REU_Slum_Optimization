@@ -10,10 +10,11 @@ from pyproj import CRS
 from shapely.geometry import LineString
 
 from reblock.permeability import PermeabilityParams, with_width
-from reblock.road_route import build_roadnet
+from reblock.road_route import build_roadnet, route_resistance
 
 UTM = CRS.from_epsg(32734)
 P = PermeabilityParams()
+G = P.g_road_per_m
 
 
 def _roads(*pairs):
@@ -116,3 +117,152 @@ def test_a_midpoint_no_corridor_covers_falls_back_to_the_narrowest_road_for_BOTH
         _roads_ow(([(0, 10), (40, 10)], 12.0, True), ([(0, 30), (40, 30)], 7.0, False)), P)
     assert np.allclose(net.seg_width, 7.0), "every segment falls back to the narrowest road's width"
     assert not net.seg_oneway.any(), "...and that SAME road's direction, not an independent default"
+
+
+# ---------------------------------------------------------------------------
+# route_resistance
+# ---------------------------------------------------------------------------
+def test_a_zigzag_costs_more_than_a_straight_road_of_the_same_endpoints():
+    """D1: today these score BIT-IDENTICALLY at detour ratios to 3.07x."""
+    straight = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0)), P)
+    zig = build_roadnet(_roads(([(0, 0), (10, 12), (20, 0), (30, 12), (40, 0)], 7.0)), P)
+    a = np.array([[0.0, 0.0]])
+    b = np.array([[40.0, 0.0]])
+    cut = np.array([np.inf])
+    r_straight = route_resistance(straight, a, b, P, cut)[0]
+    r_zig = route_resistance(zig, a, b, P, cut)[0]
+    assert r_zig > r_straight * 1.5
+
+
+def test_resistance_is_series_over_mixed_widths():
+    # 20 m at width 7 then 20 m at width 12: resistance is the SUM of len/(g*w), not len/(g*mean).
+    net = build_roadnet(_roads(([(0, 0), (20, 0)], 7.0), ([(20, 0), (40, 0)], 12.0)), P)
+    got = route_resistance(net, np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]]), P,
+                           np.array([np.inf]))[0]
+    g = P.g_road_per_m
+    assert got == pytest.approx(20.0 / (g * 7.0) + 20.0 / (g * 12.0), rel=1e-6)
+
+
+def test_disconnected_components_give_infinite_resistance():
+    net = build_roadnet(_roads(([(0, 0), (10, 0)], 7.0), ([(30, 0), (40, 0)], 7.0)), P)
+    got = route_resistance(net, np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]]), P,
+                           np.array([np.inf]))[0]
+    assert not np.isfinite(got)
+
+
+def test_the_early_exit_is_EXACT_not_approximate():
+    """The monotonicity proof depends on the cutoff returning the SAME answer, not a close one --
+    it only ever discards values that `max(footpath, road)` would drop anyway."""
+    net = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0), ([(40, 0), (40, 40)], 7.0)), P)
+    a = np.array([[0.0, 0.0], [0.0, 0.0]])
+    b = np.array([[40.0, 40.0], [40.0, 0.0]])
+    exact = route_resistance(net, a, b, P, np.array([np.inf, np.inf]))
+    generous = route_resistance(net, a, b, P, exact * 2.0)
+    assert np.allclose(exact, generous), "a cutoff above the true value must not change it"
+    # A7 asks for BIT-identity, not closeness -- `allclose` above would pass an early exit that
+    # rounded differently, and the Loewner argument needs the two to be the same function.
+    assert np.array_equal(exact, generous)
+
+
+def test_the_early_exit_is_EXACT_on_a_route_whose_MIDDLE_carries_it():
+    """The real guard on the bounded search; the two-segment case above cannot be one.
+
+    There, every route runs end to end of a single segment at each side, so a truncated
+    node-to-node `D` is simply absorbed: the search cuts the same route at the OTHER endpoint and
+    pays the difference as a partial-segment offset, reaching the identical answer through a
+    shorter `D`. Fault injection proved it -- shrinking `limit` to 0.4x left that test green.
+
+    A real route is tens of metres over ~5 m segments (`topology`'s median is 4.83 m), so the
+    middle is nearly all of the resistance and there is no shorter cut to fall back on. Here the
+    winning route is 195 m of which 190 m is `D`, and any `limit` under that changes the answer.
+    """
+    coords = [(float(x), 0.0) for x in range(0, 201, 5)]
+    net = build_roadnet(_roads((coords, 7.0)), P)
+    a, b = np.array([[2.5, 0.0]]), np.array([[197.5, 0.0]])
+    exact = route_resistance(net, a, b, P, np.array([np.inf]))
+    assert exact[0] == pytest.approx(195.0 / (G * 7.0), rel=1e-9)
+    generous = route_resistance(net, a, b, P, exact * 2.0)
+    assert np.array_equal(exact, generous), "a cutoff above the true value must not change it"
+
+
+def test_a_cutoff_below_the_true_resistance_returns_inf():
+    """The other half of the contract: the caller takes `max(footpath, 1/R)`, so a route it would
+    discard may come back as `inf` -- that is what makes the bounded search legitimate."""
+    net = build_roadnet(_roads(([(0, 0), (40, 0)], 7.0)), P)
+    a, b = np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]])
+    true = 40.0 / (G * 7.0)
+    assert route_resistance(net, a, b, P, np.array([true * 1.5]))[0] == pytest.approx(true)
+    assert not np.isfinite(route_resistance(net, a, b, P, np.array([true * 0.5]))[0])
+
+
+def test_projections_attach_where_they_land_not_at_the_nearest_node():
+    """Two 50 m segments meeting at (50, 0); the points sit 10 m in from each far end. The route
+    is 40 + 40 = 80 m of road, NOT the 100 m that snapping each point to its nearest NODE would
+    charge. `topology`'s median segment is 4.83 m against sub-metre access legs, so snapping is
+    not a rounding error -- it is the dominant term."""
+    net = build_roadnet(_roads(([(0, 0), (50, 0)], 7.0), ([(50, 0), (100, 0)], 7.0)), P)
+    got = route_resistance(net, np.array([[10.0, 0.0]]), np.array([[90.0, 0.0]]), P,
+                           np.array([np.inf]))[0]
+    assert got == pytest.approx(80.0 / (G * 7.0), rel=1e-9)
+    assert got < 100.0 / (G * 7.0), "snapping to the nearest node would charge the whole 100 m"
+
+
+def test_the_access_legs_are_added_in_series_at_the_road_rate():
+    """A point OFF the network pays `|c - projection| / (g * w)` on top of the on-network route --
+    the spec's `r_leg`, in series, at that segment's own rate.
+
+    Pair 0 crosses a width boundary, pair 1 stays on ONE segment: the leg is charged in BOTH
+    branches, which is what keeps `R` continuous as a point slides across a node (drop it from the
+    same-segment branch and `R` jumps by `r_leg` the instant the two projections part company).
+    """
+    net = build_roadnet(_roads(([(0, 0), (20, 0)], 7.0), ([(20, 0), (40, 0)], 12.0)), P)
+    a = np.array([[10.0, 3.0], [5.0, 3.0]])
+    b = np.array([[40.0, 0.0], [15.0, 0.0]])
+    got = route_resistance(net, a, b, P, np.array([np.inf, np.inf]))
+    # pair 0: 3 m leg + 10 m to the node at (20,0) at width 7, then 20 m at width 12
+    assert got[0] == pytest.approx(13.0 / (G * 7.0) + 20.0 / (G * 12.0), rel=1e-9)
+    # pair 1: 3 m leg + |0.25 - 0.75| * 20 m along the SAME segment, all at width 7
+    assert got[1] == pytest.approx(13.0 / (G * 7.0), rel=1e-9)
+
+
+def test_a_one_way_segment_carries_travel_in_one_direction_only():
+    """`seg_oneway` is a hard gate, exactly as `edge_conductances` already treats it: the permitted
+    direction costs what the road costs and the other has no route at all. Which of the two the
+    planarizer calls forward is its own business, so assert the PAIR."""
+    net = build_roadnet(_roads_ow(([(0, 0), (40, 0)], 7.0, True)), P)
+    assert net.seg_oneway.all()
+    a, b = np.array([[0.0, 0.0]]), np.array([[40.0, 0.0]])
+    cut = np.array([np.inf])
+    both = sorted([route_resistance(net, a, b, P, cut)[0], route_resistance(net, b, a, P, cut)[0]])
+    assert both[0] == pytest.approx(40.0 / (G * 7.0), rel=1e-9)
+    assert not np.isfinite(both[1]), "the forbidden direction has no route, not a dearer one"
+
+
+def test_a_two_way_net_is_symmetric():
+    """The control for the one-way test, and the guard on the undirected fast path: with nothing
+    one-way the graph stores ONE arc per segment and `dijkstra(directed=False)` supplies the
+    reverse.
+
+    The route needs a MIDDLE for this to guard anything -- with the two points on the two end
+    segments of a two-segment net, both directions are paid entirely in partial-segment offsets
+    (which are two-way by construction) and never touch `D` at all, so even a graph searched as
+    directed comes back symmetric. Four segments with the points mid-way along the outer two puts
+    20 of the 30 m into `D`.
+    """
+    net = build_roadnet(_roads(([(0, 0), (10, 0), (20, 0), (30, 0), (40, 0)], 7.0)), P)
+    assert not net.seg_oneway.any()
+    a, b = np.array([[5.0, 0.0]]), np.array([[35.0, 0.0]])
+    cut = np.array([np.inf])
+    fwd = route_resistance(net, a, b, P, cut)[0]
+    bwd = route_resistance(net, b, a, P, cut)[0]
+    assert fwd == pytest.approx(30.0 / (G * 7.0), rel=1e-9)
+    assert bwd == fwd
+
+
+def test_an_empty_net_gives_infinite_resistance():
+    """`build_roadnet` returns an empty net for empty roads, and the caller asks for a route
+    anyway -- there is nothing to route over, so the road term is zero via `1/inf`."""
+    net = build_roadnet(with_width(gpd.GeoDataFrame(geometry=[], crs=UTM), 7.0), P)
+    got = route_resistance(net, np.array([[0.0, 0.0]]), np.array([[1.0, 1.0]]), P,
+                           np.array([np.inf]))
+    assert got.shape == (1,) and not np.isfinite(got[0])
