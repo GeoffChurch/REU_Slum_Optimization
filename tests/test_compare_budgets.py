@@ -12,7 +12,6 @@ from reblock.contracts import Block, Proposal
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     PermeabilityParams,
-    lane_width,
     road_conductance,
     with_width,
 )
@@ -86,8 +85,7 @@ def test_load_permeability_config_reads_the_committed_yaml() -> None:
     assert params.g_walk == 0.1 and params.g_street == 20.0
     # one lane at the calibrated 20.0 -- the invariant the lane re-base preserved,
     # asserted so it survives the next re-base too
-    assert road_conductance(
-        params, lane_width(params, params.min_two_way_width_m), 1.0) == pytest.approx(20.0)
+    assert road_conductance(params, params.min_road_width_m, 1.0) == pytest.approx(20.0)
     assert params.road_margin_m == 1.0
     assert params.radius_frac == 1.0
     assert 0.0 < matched_displacement < 1.0

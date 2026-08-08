@@ -51,7 +51,6 @@ _DERIVATION_MODULES: tuple[Path, ...] = (
     # _noded_graph/access_burden/displacement -- used by arterial + loop_closure
     Path(__file__).with_name("budget.py"),
     Path(__file__).with_name("permeability.py"),     # scored inside several methods' search
-    Path(__file__).with_name("orient.py"),           # width/direction assignment
     *sorted((Path(__file__).parent / "methods").glob("*.py")),
     Path(__file__).with_name("derivations.py"),      # derive()-wrapper bodies
     Path(__file__).parent / "data" / "kblock.py",    # _voronoi_parcels (the voronoi derivation)

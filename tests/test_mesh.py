@@ -41,7 +41,7 @@ def test_extraction_changed_nothing(real_block):
     distinguish "extraction preserved the computation" from "extraction changed it and this pins
     the new number." That property -- the actual purity claim for this task -- was established
     separately, by running the full pre-existing test suite (592 tests, including several
-    hand-computed values in tests/test_permeability.py and tests/test_permeability_oneway.py)
+    hand-computed values in tests/test_permeability.py and tests/test_permeability_width.py)
     against the extracted code and confirming every one passed with zero expectations edited (see
     task-1-report.md).
     """

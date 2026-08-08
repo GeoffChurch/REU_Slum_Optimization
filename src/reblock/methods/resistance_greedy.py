@@ -64,7 +64,6 @@ from reblock.permeability import (
     _footpath_conductance,
     _road_corridor,
     egress_power,
-    lane_width,
     parcel_radii,
     permeability,
     road_conductance,
@@ -95,7 +94,7 @@ def _path_road(
 def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]],
           radii: NDArray[np.float64],
           road_width_m: float) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """(i, j, upgrade_gain, segment) for every adjacency edge: the conductance a two-way road of
+    """(i, j, upgrade_gain, segment) for every adjacency edge: the conductance a road of
     `road_width_m` would ADD to it, and the centroid-to-centroid segment a road must intersect.
 
     Mirrors `permeability.egress_power`'s mesh assembly exactly -- same adjacency, same
@@ -121,8 +120,7 @@ def _mesh(block: Block, params: PermeabilityParams, adj: list[set[int]],
     di = np.asarray(dists, dtype=np.float64)
     if di.size == 0:
         return ri, ci, np.zeros(0), np.empty(0, dtype=object)
-    road_g = road_conductance(params, np.full(di.size,
-                                             lane_width(params, road_width_m)), di)
+    road_g = road_conductance(params, np.full(di.size, road_width_m), di)
     foot_g = _footpath_conductance(di, radii[ri] + radii[ci], params.g_walk)
     segs = np.array([LineString([(cx[0][a], cx[1][a]), (cx[0][b], cx[1][b])])
                      for a, b in zip(ri.tolist(), ci.tolist(), strict=True)], dtype=object)

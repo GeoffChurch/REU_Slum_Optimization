@@ -14,7 +14,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
 import pytest
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
@@ -24,7 +23,7 @@ from shapely.geometry import LineString, Polygon
 
 from reblock.budget import building_radii, displacement
 from reblock.contracts import Block
-from reblock.permeability import ONEWAY_COL, WIDTH_COL, PermeabilityParams, permeability
+from reblock.permeability import WIDTH_COL, PermeabilityParams, permeability
 
 UTM = CRS.from_epsg(32734)
 PARAMS = PermeabilityParams()
@@ -70,10 +69,7 @@ def test_method_emits_scorable_roads(name: str) -> None:
 
     assert WIDTH_COL in roads.columns, f"{name} emits roads without a '{WIDTH_COL}' column"
     widths = roads[WIDTH_COL].to_numpy(dtype=float)
-    oneway = (roads[ONEWAY_COL].to_numpy(dtype=bool) if ONEWAY_COL in roads.columns
-              else np.zeros(len(roads), dtype=bool))
-    floors = np.where(oneway, PARAMS.min_one_way_width_m, PARAMS.min_two_way_width_m)
-    assert (widths >= floors).all(), f"{name} emits a road too narrow for its own direction"
+    assert (widths >= PARAMS.min_road_width_m).all(), f"{name} emits an unbuildably narrow road"
 
     # ...and both scorers actually accept it -- the assertion that fails on a missing stamp, and
     # why a column check alone would not be enough (the stamp has to survive the ORDERING the lenses

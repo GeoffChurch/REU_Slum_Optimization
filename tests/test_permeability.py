@@ -14,7 +14,6 @@ from reblock.permeability import (
     _footpath_conductance,
     edge_conductances,
     egress_power,
-    lane_width,
     parcel_radii,
     permeability,
     permeability_curve,
@@ -245,7 +244,7 @@ def test_a_road_upgrade_never_lowers_an_edges_conductance():
     params = PermeabilityParams()
     dist = np.array([1.0, 10.0, 1000.0])
     foot = _footpath_conductance(dist, np.full(dist.size, 6.0), g_walk=params.g_walk)
-    road = road_conductance(params, np.full(3, lane_width(params, DEFAULT_ROAD_WIDTH_M)), dist)
+    road = road_conductance(params, np.full(3, DEFAULT_ROAD_WIDTH_M), dist)
     assert foot[2] > road[2]                 # the long edge: the footpath really does beat the road
     assert (foot[:2] < road[:2]).all()       # the shorter edges never come close
 
@@ -253,13 +252,15 @@ def test_a_road_upgrade_never_lowers_an_edges_conductance():
     # so the per-block normalization is the one hand-verified there -- all spanned by one long road.
     cent = np.array([0.0, 1.0, 11.0, 1011.0])
     rows, cols = np.array([0, 1, 2]), np.array([1, 2, 3])
+    segs = np.array([LineString([(cent[a], 0.0), (cent[b], 0.0)])
+                     for a, b in zip(rows.tolist(), cols.tolist(), strict=True)], dtype=object)
     fp = _footpath_conductance(dist, np.full(dist.size, 6.0), g_walk=params.g_walk)
     roads = with_width(gpd.GeoDataFrame(
         geometry=[LineString([(0.0, 0.0), (1011.0, 0.0)])], crs=UTM), DEFAULT_ROAD_WIDTH_M)
-    gf, gb = edge_conductances(cent, np.zeros(4), rows, cols, dist, fp, roads, params)
+    g = edge_conductances(segs, dist, fp, roads, params)
 
-    assert (gf >= fp - 1e-12).all() and (gb >= fp - 1e-12).all()   # the guarantee itself
+    assert (g >= fp - 1e-12).all()           # the guarantee itself
     # ...and it is not vacuous: on the two short edges the road wins, on the long one the FOOTPATH
     # does, so a `max` that silently took the road would drop that edge from 0.02485 to 0.02.
-    assert gf[:2] == pytest.approx(road[:2]) and gf[2] == pytest.approx(fp[2])
+    assert g[:2] == pytest.approx(road[:2]) and g[2] == pytest.approx(fp[2])
     assert fp[2] > road[2]

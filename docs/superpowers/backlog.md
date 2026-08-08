@@ -774,10 +774,23 @@ road at all (coverage, worst-case parcel access, N-1 style), because permeabilit
 delete a road and spend the savings elsewhere. Absent that, the middle of the lattice has no reason
 to be selected and the layer has nothing to add.
 
-**Code status: `src/reblock/width_solver.py` is IN THE TREE AND UNUSED** (owner's call 2026-08-02),
-kept so a variant can be tried without rewriting ~200 lines. Nothing imports it outside
-`tests/test_width_solver.py`. It is a wart under the repo's own no-legacy rule for as long as that
-stays true -- **delete it if the variant above is not attempted.**
+**Code status: DELETED 2026-08-07** (owner's call), on the condition this entry itself set: the
+variant above was never attempted, so the layer had decayed into exactly the wart the no-legacy rule
+bans. Gone with it: `width_solver.py`, `orient.py` (its only producer of one-way roads), and the
+whole directed half of the metric -- `has_oneway`, `_directed_power`'s IRLS solve, the `(gf, gb)`
+edge split, the `cos t >= 0` direction test, `ONEWAY_COL`, `lane_width`, and the
+`min_one_way_width_m` floor. `min_two_way_width_m` became `min_road_width_m` and `road_conductance`
+now takes a road's TOTAL width and halves the usable part itself, since every road is two-way.
+
+**Verified a no-op before deleting**, not assumed: 120 permeability values (12 real blocks x 5
+methods, full road set and Lens A prefix) were frozen first and came back BIT-identical -- `max(gf,
+gb)` with `gf == gb` is `gf`, and no production method ever emitted a one-way road. The check was
+fault-injected (a 1e-12 relative nudge to `road_conductance` makes it fail), so the pass is not
+vacuous. `scratchpad/oneway_removal/`.
+
+Everything measured above stands as the research record; only the code is gone. Recovering it is
+`git show` on the commit that removed it, so re-attempting the variant costs a checkout, not a
+rewrite -- which is why keeping it in the tree bought nothing.
 
 **But the premise is refuted.** The expectation was that loopy networks benefit most. They do not:
 
@@ -802,6 +815,10 @@ street. That is why there is no hard constraint, and it means one-way is probabl
 for vehicle-dependent trips.
 
 ## Can permeability price CIRCULATION on its own? NO -- tested 2026-07-31
+
+> Reads as history from 2026-08-07: `orient.strong_orientation` and the directed solve this probe
+> ran against were deleted with the width/direction layer above. The finding is what survives --
+> reopening it means rebuilding the orientation machinery first.
 
 The appealing idea: a network you can force one-way and still use is a circulating one, so the
 ORIENTATION PENALTY `permeability(two-way) - permeability(oriented)` might price circulation from
