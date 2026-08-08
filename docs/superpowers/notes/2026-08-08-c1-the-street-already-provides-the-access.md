@@ -53,17 +53,42 @@ test of whether a post-hoc change is honest:
   and Kendall tau is undefined. Undefined is not a pass. It now reports as undefined, with the
   count of blocks where it is defined.
 
-## Limitation -- stated, not acted on
+## The sample is the TARGET fabric -- and that makes the result structural
 
-These are B2's blocks, <= 150 parcels, inherited for comparability. **A reach metric saturates on
-small blocks by construction**, and the deep blocks are where methods are already known to separate
-(`voronoi-adjacency-partition-method`, the moderate/deep flagship split). So the sample is close to
-the worst possible one for this particular question, and I should have seen that before running
-rather than after.
+An earlier version of this note called the sample "close to the worst possible one" and suggested
+retesting on deep blocks. **That was wrong on the facts.** Measured:
 
-But re-running on a different sample AFTER a FAIL is post-hoc, and this project has already been
-burned twice by criteria that moved once the result was visible. Whether to retest on deep blocks is
-the owner's call, not a correction to make unilaterally.
+    block                parcels   area_m2  perim_m      n/P^2     /km2   depth
+    ZAF.9.3.1_1_19362         50     8,121    357.7   3.91e-4    6,157       3
+    ZAF.9.3.1_1_20571         64     7,994    381.7   4.39e-4    8,006       4
+    ZAF.9.3.1_1_38870         71     7,039    382.3   4.86e-4   10,090       3
+    ZAF.9.3.1_1_44534         79     5,223    300.1   8.77e-4   15,120       4
+    ZAF.9.3.1_1_5517          87     6,543    375.4   6.17e-4   13,300       3
+    ZAF.9.3.1_1_41942         94    12,860    490.9   3.90e-4    7,307       4
+    ZAF.9.3.1_1_20343        104     9,406    381.9   7.13e-4   11,060       5
+    ZAF.9.3.1_1_21024        115    12,790    487.3   4.84e-4    8,992       4
+    ZAF.9.3.1_1_21159        129    14,510    556.3   4.17e-4    8,891       4
+    ZAF.9.3.1_1_5530         150     9,580    508.1   5.81e-4   15,660       4
+
+Every block clears `DENSITY_COMPACTNESS_FLOOR` (3.55e-4); median density is 9,539/km², well above
+the ~4,500-5,700/km² the floor was sized for; and median peel depth is **4**, exactly the depth
+`metric.py` records the floor as calibrated to buy. These are not shallow blocks that happen to be
+small. They are the repo's own `density_compactness` selection.
+
+**So the saturation is geometry, not sampling.** A block of ~10,000 m² with a ~500 m perimeter is
+roughly 100 m across, so no interior point is more than ~50 m from its own boundary street. D = 50
+covers everything BY CONSTRUCTION.
+
+That makes the finding much stronger than a failed gate:
+
+> **The screen selects for compactness; compactness is precisely what makes euclidean reach
+> trivial; so any reach-based benefit term is structurally excluded by the screen itself.**
+
+A coverage term cannot discriminate on this corpus no matter how D and W are chosen, because the
+target fabric has no reach deficit to measure. If emergency access is a real concern, it is a
+concern for the blocks this screen REJECTS -- the large, sprawling, low-n/P² ones where an interior
+dwelling really can be 200 m from the nearest street. Testing there would be measuring a different
+population, not rescuing this gate.
 
 ## What it means either way
 

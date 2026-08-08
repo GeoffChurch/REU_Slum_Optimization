@@ -91,6 +91,14 @@ benefit term with a width threshold in it, not a better value of `sigma`.
 
 ## Caveats
 
+* **The width sample is looser than the project's own screen.** `gap_widths.py` used a density floor
+  of 1,000/km², where `DENSITY_COMPACTNESS_FLOOR` corresponds to ~4,500-5,700/km² and the blocks
+  actually scored are at a median of **9,539/km²** (measured 2026-08-08). So the target fabric sits
+  in the 8k+ band, whose median channel is **2.50 m**, not the 3.00 m used above. Redone at 2.50 m
+  the implied ratio is 85x-170x rather than 102x-272x. Every conclusion is unchanged -- the
+  physical readings (0.2-0.3x, 3-6x) remain one to two orders of magnitude below B2's floor -- and
+  the correction moves the implied number DOWN, i.e. slightly toward the physical readings rather
+  than away.
 * The 10.19 resistance-per-metre walking figure is inherited from
   `notes/2026-08-06-road-walk-ratio-decides-the-ranking.md`, measured on the parcel graph.
 * Ridge samples are weighted by cell count, not by traffic, so wide interior courtyards count more
