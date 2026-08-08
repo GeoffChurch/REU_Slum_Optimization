@@ -1,5 +1,12 @@
 # C2: only `topology` reaches universal street access, and the 7 m floor is why it costs 45% (2026-08-08)
 
+> **SUPERSEDED 2026-08-08 by [C4](2026-08-08-c4-the-bakeoff-was-missing-two-thirds-of-the-field.md).**
+> This ran 5 methods. The bakeoff configures 16, and `peel` -- the method built for this very
+> objective -- was not registered in `all_methods` at all. With the full 17-method field the
+> headline below does not hold. The measurements are correct; the FIELD was wrong.
+
+> Specifically: 7 of 17 methods reach universal access, not 1. The 7 m width finding survives.
+
 Kill gate on the block-complexity idea (`scratchpad/complexity/c2_gate.py`): measure the COST to
 reach k = 1, universal street access, which is the objective the Brelsford/Bettencourt line of work
 treats as the definition of reblocking. Chosen after two parameter-driven failures because **it has

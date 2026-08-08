@@ -1,5 +1,14 @@
 # C3: the access curve crosses, and Σ(d−1)² is the statistic that sees it (2026-08-08)
 
+> **SUPERSEDED 2026-08-08 by [C4](2026-08-08-c4-the-bakeoff-was-missing-two-thirds-of-the-field.md).**
+> This ran 5 methods. The bakeoff configures 16, and `peel` -- the method built for this very
+> objective -- was not registered in `all_methods` at all. With the full 17-method field the
+> headline below does not hold. The measurements are correct; the FIELD was wrong.
+
+> Specifically: neither `flow_paths_noreinforce` nor `topology` wins anywhere in the full field --
+> `resistance_lp` dominates at 7 m and `greedy_arterial_repulsion` at 2 m. The width-dependence and
+> the case for the zero-indexed burden statistic both survive.
+
 C2 asked only what universal access COSTS, and concluded `topology` is the only method that ever
 reaches it. That is a question about the end of the curve. The owner's objection was that the
 interesting part may be the start — another method could be far more efficient at low displacement
