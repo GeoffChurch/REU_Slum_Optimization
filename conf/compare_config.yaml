@@ -24,6 +24,29 @@ all_methods:
   # metric a frontage-hugging buildable road gives every parcel a short walk leg, so on a compact
   # block buildable tends to match or beat aspirational. The through-road advantage shows on
   # deep/elongated regions, where a straight road shortcuts trips a frontage tree can't.
+  # ACCESS objective: greedily maximize 1 - access_burden/base_burden, i.e. optimize sum of squared
+  # access depths directly. `GreedyArterialReblocker` has supported `objective: access` since it was
+  # written, but every configured variant used `directness`, so it had never been run
+  # (notes/2026-08-08-c5-the-access-objective-was-never-wired-up-and-it-wins.md).
+  #
+  # BOTH costs are configured because which one wins depends on the road width being priced, and
+  # neither dominates (notes/2026-08-08-c6-c7-tuning-the-access-objective-and-what-it-draws.md):
+  #   repulsion    best at LANE width (2 m): AUC 0.013 vs resistance_lp's 0.080
+  #   displacement best at STREET width (7 m): AUC 0.115 vs resistance_lp's 0.137
+  # `cost: displacement` optimizes benefit-per-displacement, and displacement is the x-axis these
+  # methods are compared on -- legitimate, since it is the real cost and any method may target it,
+  # but it is optimizing the axis being reported and that must be stated alongside any result.
+  # (The earlier finding that cost=displacement degenerates on sparse fabric was measured against
+  # the DIRECTNESS objective and does not transfer: an access gain requires actually fronting
+  # parcels, so a gap-hugging road earns nothing.)
+  #
+  # NOT `lazy` -- unlike the directness variants above. CELF's guarantee needs the objective to be
+  # submodular, which holds for directness but NOT for access-burden reduction: measured on 3 blocks
+  # x 2 costs, lazy diverged from the exact greedy on 6 of 6 (final burden 0.0733 vs 0.0867 and
+  # 0.2600 vs 0.2933 among others), in both directions, and was SLOWER in 4 of 6. So it buys an
+  # approximation for no speed.
+  greedy_arterial_access_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: access, cost: repulsion, max_roads: 15}
+  greedy_arterial_access_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: access, cost: displacement, max_roads: 15}
   greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
   greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, road_width_m: 7.0}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
