@@ -16,7 +16,13 @@ example:
 
 # null -> grow a region with the screen + region_builder above. A list pins exact blocks instead.
 block_ids: null
-methods: [clearance_looped, euclidean_grid, resistance_lp, cycle_native]
+
+  # Added 2026-08-09. Optimizes sum of squared access depths directly, and earns its place on BOTH
+  # reported axes: measured at Lens A over 10 blocks it is 1st on access burden reduction (0.764 vs
+  # resistance_lp's 0.746) and 3rd of 8 on permeability (0.708 vs 0.778). Its `repulsion`-cost twin
+  # is NOT included -- 5th and 4th on the two axes, so it does not earn a slot.
+  # Note it is ~65x slower than resistance_lp (37.7s vs 0.6s median per block).
+methods: [clearance_looped, euclidean_grid, resistance_lp, cycle_native, greedy_arterial_access_displacement]
 max_blocks: 1
 region_builder: {max_buildings: 3000}
 all_methods:

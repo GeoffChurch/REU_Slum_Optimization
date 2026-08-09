@@ -70,9 +70,10 @@ from reblock.budget import (
 from reblock.compare import MethodCurve
 from reblock.contracts import Block, Method, Proposal, Screen, Source
 from reblock.derivations import propose
-from reblock.derive.access import STREET_TOL
+from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.emit import _displaced_points, compare_report
+from reblock.eval.access_burden import burden
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.permeability import (
     PermeabilityParams,
@@ -100,6 +101,14 @@ class OutcomeRow:
     perm_road_m: float        # Lens B: road length at the matched-permeability prefix
     perm_displacement: float  # Lens B: displacement fraction spent to reach it
     reached: bool             # Lens B: whether matched_permeability was actually reached
+    # ACCESS, the second reported axis, at each lens's prefix: 1 - burden(roads)/burden(no roads),
+    # burden being sum (depth-1)^2 / n (reblock.eval.access_burden). Deliberately the same shape as
+    # permeability so the two read alike, and reported at the SAME prefixes so a method's two
+    # numbers are directly comparable. The axes agree at rho +0.810 over 10 blocks x 8 methods, but
+    # not everywhere -- euclidean_grid is mid-pack on permeability and last on access -- which is
+    # the reason both ship rather than one.
+    disp_burden_reduction: float   # Lens A
+    perm_burden_reduction: float   # Lens B
 
 
 def load_permeability_config(config_dir: Path = Path("conf")
@@ -220,6 +229,17 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     rows: list[OutcomeRow] = []
     disp_csv_rows: list[list[object]] = []
     perm_csv_rows: list[list[object]] = []
+    # access baseline, road-independent, computed once for the region like p0 is
+    burden0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj,
+                                          unreached_depth=len(block.parcels) + 1))
+
+    def _burden_red(prefix: GeoDataFrame) -> float:
+        if burden0 <= 0.0:
+            return 0.0
+        after = burden(parcel_access_layers(block, prefix, tol=STREET_TOL, adj=adj,
+                                            unreached_depth=len(block.parcels) + 1))
+        return 1.0 - after / burden0
+
     for name in methods:
         pa, pb, reached = prefix_a[name], prefix_b[name], reached_b[name]
         disp_frac_a = _disp_frac(pa)
@@ -257,14 +277,16 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
             save_render(fig, out_dir / f"after_{name}_{tag}_perm.png")
             plt.close(fig)
 
+        burden_red_a, burden_red_b = _burden_red(pa), _burden_red(pb)
         rows.append(OutcomeRow(
             method=name, disp_road_m=float(pa.geometry.length.sum()), disp_permeability=perm_at_a,
             at_budget=at_budget, perm_road_m=float(pb.geometry.length.sum()),
-            perm_displacement=disp_frac_b, reached=reached))
+            perm_displacement=disp_frac_b, reached=reached,
+            disp_burden_reduction=burden_red_a, perm_burden_reduction=burden_red_b))
         disp_csv_rows.append([name, f"{rows[-1].disp_road_m:.1f}", f"{disp_frac_a:.4f}",
-                              f"{perm_at_a:.6g}", at_budget])
+                              f"{perm_at_a:.6g}", f"{burden_red_a:.6g}", at_budget])
         perm_csv_rows.append([name, f"{rows[-1].perm_road_m:.1f}", f"{disp_frac_b:.4f}",
-                              f"{perm_at_b:.6g}", reached])
+                              f"{perm_at_b:.6g}", f"{burden_red_b:.6g}", reached])
 
     # Per-method reblock GIF over the FULL road set (unchanged) -- depth coloring only (the only
     # mode `reblock_gif`/`animate._frame_png` render).
@@ -272,9 +294,11 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         reblock_gif(block, roads, out_dir / f"reblock_{name}.gif", vmax=depth_vmax, frame=frame)
 
     _write_csv(out_dir / "lens_displacement.csv",
-              ["method", "road_m", "displacement", "permeability", "at_budget"], disp_csv_rows)
+              ["method", "road_m", "displacement", "permeability", "access_burden_reduction",
+               "at_budget"], disp_csv_rows)
     _write_csv(out_dir / "lens_permeability.csv",
-              ["method", "road_m", "displacement", "permeability", "reached"], perm_csv_rows)
+              ["method", "road_m", "displacement", "permeability", "access_burden_reduction",
+               "reached"], perm_csv_rows)
     return rows
 
 
@@ -296,10 +320,12 @@ def main() -> None:
                                    matched_permeability=matched_permeability, params=params)
     for r in rows:
         print(f"[lens A D={matched_displacement:.2f}] {r.method}: "
-              f"permeability={r.disp_permeability:.3f} at {r.disp_road_m:.0f} m")
+              f"permeability={r.disp_permeability:.3f} "
+              f"access={r.disp_burden_reduction:+.3f} at {r.disp_road_m:.0f} m")
         mark = f"reached P*={matched_permeability:.2f}" if r.reached else "UNREACHED"
         print(f"[lens B P*={matched_permeability:.2f}] {r.method}: {mark}, "
-              f"{r.perm_displacement * 100:.1f}% displaced at {r.perm_road_m:.0f} m")
+              f"{r.perm_displacement * 100:.1f}% displaced, "
+              f"access={r.perm_burden_reduction:+.3f} at {r.perm_road_m:.0f} m")
 
 
 if __name__ == "__main__":
