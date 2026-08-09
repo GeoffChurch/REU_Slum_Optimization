@@ -50,17 +50,49 @@ per-block noise reaches 15%, that is a lot of blocks.
 that way, so those results stand. What does NOT stand is any per-block or per-region figure for an
 arterial variant — which includes the `method_comparison` example, a single pinned block.
 
+## The mechanism, after two wrong guesses
+
+Not near-identical chords producing near-identical gains, which was the first hypothesis and would
+have made candidate deduplication the fix. The ties are **EXACT**, and they are between genuinely
+DIFFERENT roads. On the worst block, 6 of 8 greedy steps have an exact top-gain tie, and at step 1
+**nine candidates share a bit-identical gain while realizing six distinct roads up to 38.8 m apart**.
+
+They are structural, not accidental: the access objective is a sum of squared INTEGER depths, so the
+set of achievable improvements is discrete and small, and quite different networks routinely hit the
+same value. Deduplication would do nothing — the tied candidates are not duplicates.
+
+`_best_candidate` already breaks these ties, on `real.wkt < best_real.wkt` — lexicographic order
+over the coordinate STRING. That is why shuffling candidate order changes nothing (the rule is a
+total order, hence order-independent) and why a 1e-10 perturbation changes everything (it breaks the
+exact tie before the rule is consulted). Both selections are equally arbitrary.
+
+## Tested: no tie-break rule is better, so none was adopted
+
+Three rules over 12 blocks, `objective=access`, `cost=displacement` (`scratchpad/perf/tiebreak.py`):
+
+    rule          burden_red      perm    road_m    beats wkt (of those differing)
+    wkt               0.7896    0.7711     272.1    baseline
+    shortest          0.7637    0.7294     190.8    2/6
+    longest           0.7637    0.7333     271.9    5/9
+
+    all three rules agree on 3 of 12 blocks
+
+The arbitrary baseline has the best median on both objectives. `longest` wins more often than it
+loses but medians lower. Every gap here is well inside the ±15% per-block spread measured above, on
+6-9 differing blocks, so this cannot distinguish the rules and there is no sign of one to find.
+
+**So the sensitivity is real variance but genuinely UNBIASED, and choosing more cleverly does not
+help** -- which is what a tie means: the candidates really are equally good by the objective. The
+WKT rule costs nothing measurable and stays.
+
 ## What to do about it
 
-Options, none taken yet:
-
 * **Report it.** An arterial row in a single-block comparison carries a ±15% error bar that no other
-  method has. Saying so is cheap and honest.
-* **Average it away.** Run k perturbed seeds and report the median. Exact, trivially parallel, k×
-  the cost — and it turns an arbitrary draw into an estimate.
-* **Remove the near-ties.** They presumably come from candidates that are geometrically near-identical
-  (chords between adjacent anchors). Deduplicating candidates within a tolerance before scoring would
-  collapse the near-ties rather than resolving them arbitrarily. Speculative; unmeasured.
+  method has. Cheap and honest, and it is the one thing worth doing.
+* **Average it away** if a per-block number is ever needed: run k perturbed seeds and take the
+  median. Exact, trivially parallel, k× the cost.
+* **NOT worth doing:** changing the tie-break (measured, no better) or deduplicating candidates
+  (wrong mechanism).
 
 ## Caveats
 
