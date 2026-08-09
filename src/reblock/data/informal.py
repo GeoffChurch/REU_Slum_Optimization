@@ -130,8 +130,9 @@ def _dbscan(xy: NDArray[np.float64]) -> NDArray[np.int64]:
     100% partition agreement with scikit-learn on points both call non-noise -- so the fringe was
     the entire difference.
 
-    Nearest-core assignment is deterministic; scikit-learn attaches a border point to whichever core
-    its scan reaches first, which is arbitrary but equally valid DBSCAN. Both satisfy the definition.
+    Nearest-core assignment is deterministic; scikit-learn attaches a border point to whichever
+    core its scan reaches first, which is arbitrary but equally valid DBSCAN. Both satisfy the
+    definition.
     """
     tree = cKDTree(xy)
     pairs = np.asarray(list(tree.query_pairs(EPS_M)), dtype=np.int64)
