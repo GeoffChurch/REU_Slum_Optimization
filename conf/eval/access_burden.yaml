@@ -1,0 +1,9 @@
+# A list (see conf/method/topology.yaml for why): `cfg.eval` instantiates to a ListConfig of Eval
+# instances, so a Result can carry more than one Metrics per proposal.
+#
+# Reported alongside kcomplexity rather than replacing it: kcomplexity carries max peel depth, which
+# is the literature's STANDARD (k = 1 is universal street access), while the burden is what actually
+# RANKS -- at a 10% displacement budget four of five methods tie at k0 = 2.0 with burdens spanning
+# 0.89-1.46 (notes/2026-08-08-c3-...).
+- _target_: reblock.eval.kcomplexity.KComplexityEval
+- _target_: reblock.eval.access_burden.AccessBurdenEval
