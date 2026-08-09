@@ -368,6 +368,23 @@ METHODS = [
       "displacement is not CELF-safe.",
       idea="the whole road set solved at once by a linear program, budgeted in displacement",
       mb_key="resistance_lp", conf="resistance_lp"),
+    M("greedy_arterial_access_displacement", "Frontage (street-priced)",
+      "Drives straight arterials, like the other Greedy Arterial variants, but optimises a "
+      "different thing: **the sum of squared access depths**. Depth is how many of other people's "
+      "plots you cross to reach a public street — the quantity the block-complexity literature "
+      "treats as the definition of the slum deficit — and squaring it means the deepest dwellings "
+      "dominate, so the method drives roads at whoever is worst served.\n\n"
+      "Two details earn their keep. It costs each candidate by **displacement** rather than by "
+      "metres, which matters because displacement is the axis it is graded on: the same metres "
+      "cost wildly different numbers of homes depending on where they run. And it is deliberately "
+      "**not** run lazily — CELF's speedup needs a submodular objective, which holds for "
+      "directness but not for access-burden reduction, where the lazy variant diverged from the "
+      "exact greedy on every block tested and was slower on most of them.\n\n"
+      "What it draws looks like a plan rather than an accretion: a handful of long chords "
+      "threading between buildings and spanning the block, where a least-cost tree grows many "
+      "short stubs.",
+      idea="straight arterials chosen to cut the deepest access, priced in homes displaced",
+      mb_key="greedy_arterial_access_displacement", conf="greedy_arterial"),
     M("osm_footpaths", "OSM Footpaths",
       "The reblocker whose \"proposed roads\" are the **real** informal circulation network — the "
       "worn footpaths people already walk, as mapped in OpenStreetMap (largely by Humanitarian "

@@ -124,6 +124,7 @@ nav:
       - methods/cycle_native.md
       - methods/topology.md
       - methods/resistance_lp.md
+      - methods/greedy_arterial_access_displacement.md
       - methods/osm_footpaths.md
       - methods/euclidean_grid.md
   - Results: benchmark.md
