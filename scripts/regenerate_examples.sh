@@ -5,6 +5,28 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DRY=0; [[ "${1:-}" == "--dry-run" ]] && { DRY=1; shift; }
+
+# CRASH SAFETY. `gen_example` unlinks stale artifacts from the LIVE examples/<slug>/ directory
+# before regenerating it, so an interruption between the unlink and the writes leaves that example
+# gutted -- which is exactly what happened on 2026-08-09 (25 files deleted, recovered from git).
+# Any variant that does not finish therefore has its directory restored from git, and an interrupted
+# run leaves the published examples byte-identical to how it found them.
+#
+# Requires a clean examples/ to start, so "restore from git" cannot silently discard real work.
+if [[ $DRY -eq 0 ]] && ! git diff --quiet -- examples/; then
+  echo "examples/ has uncommitted changes; commit or stash them first (this script restores from" >&2
+  echo "git on interruption and would discard them)." >&2
+  exit 1
+fi
+_CURRENT_DIR=""
+_restore() {
+  [[ -n "$_CURRENT_DIR" ]] && {
+    echo "!! interrupted during $_CURRENT_DIR -- restoring it from git" >&2
+    git checkout -- "$_CURRENT_DIR" 2>/dev/null || true
+  }
+}
+trap _restore EXIT INT TERM
+
 run() { echo "+ $*"; [[ $DRY -eq 1 ]] || "$@"; }
 
 # One entry point for every example. A variant IS a config file (conf/example/<name>.yaml); the
@@ -14,7 +36,14 @@ CITIES=(capetown nairobi)
 
 gen() {  # <variant> <city>
   local variant="$1" city="$2"
+  local slug
+  slug=$(pixi run python -c "
+from omegaconf import OmegaConf
+c = OmegaConf.load('conf/example/${variant}.yaml')
+print(c.example.slug)" 2>/dev/null | tail -1)
+  if [[ "$city" == capetown ]]; then _CURRENT_DIR="examples/$slug"; else _CURRENT_DIR="examples/$city/$slug"; fi
   run pixi run python -m scripts.gen_example "$variant" $([[ "$city" == capetown ]] || echo "$city")
+  _CURRENT_DIR=""          # completed cleanly; nothing to restore
 }
 
 if [[ $# -gt 0 ]]; then
