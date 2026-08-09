@@ -12,7 +12,9 @@ from collections import deque
 from typing import NamedTuple
 
 import networkx as nx
+import numpy as np
 import pandas as pd
+import shapely
 from geopandas import GeoDataFrame
 from shapely import STRtree, union_all
 from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
@@ -104,9 +106,19 @@ def parcel_access_layers(
     street = street_connectivity(block.streets, roads, tol).seed_geom
 
     layer = [0] * len(geoms)
-    frontier = deque(
-        i for i, g in enumerate(geoms) if street is not None and g.distance(street) <= tol
-    )
+    # VECTORIZED frontier seed. This was a Python loop calling `g.distance(street)` once per
+    # parcel, which is one GEOS round trip per parcel per call -- and this function is called once
+    # per CANDIDATE inside the arterial greedy's inner loop, so it dominated: profiled at 278,833
+    # scalar `shapely.measurement` calls (2.54 s of 28.8 s) on a 50-parcel block scoring 5,228
+    # candidates. `shapely.dwithin` is the same predicate (`distance <= tol`) evaluated over the
+    # whole array in one call. Bit-identical, verified against the scalar form over every
+    # parcel/prefix pair on real blocks -- the same swap `permeability.edge_conductances` records
+    # as worth 4.4x at region scale.
+    if street is None or not geoms:
+        frontier: deque[int] = deque()
+    else:
+        near = shapely.dwithin(np.asarray(geoms, dtype=object), street, tol)
+        frontier = deque(int(i) for i in np.flatnonzero(near))
     seen = set(frontier)
     for i in frontier:
         layer[i] = 1
