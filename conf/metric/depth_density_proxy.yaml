@@ -1,0 +1,26 @@
+# @package _global_
+# THE DEFAULT. Deep AND crowded, scored entirely from the free kblock columns -- no Voronoi, no peel,
+# no fine pass. `DepthProxy` is sqrt(nA)/P, the same estimator `Depth` uses as its pre-filter, but
+# with needs_peel=False so the screen stops after the cheap stage.
+#
+# Why the cheap stage is enough (notes/2026-08-08-c14-...): against the City of Cape Town's own
+# informal-settlement structure survey, this metric's top 1% is 81.7% really-informal, where the full
+# two-stage pipeline -- peel every survivor, rank by true depth x density -- reaches 84.1%. The whole
+# expensive stage buys 2.4 points.
+#
+# Why it replaced density_compactness as the default: at an equal pool size it dominates on BOTH
+# axes -- 27.6% precision / 66.6% recall against 24.5% / 58.9%. n/P^2's own selling point, that it
+# needs no Voronoi, is not a differentiator: this needs none either.
+#
+# For the peeled two-stage version, use `metric=depth_density` (Product(Depth, Density), needs_peel).
+# That is the configuration to reach for when 2.4 points of precision are worth minutes per run.
+metric:
+  _target_: reblock.metric.Product
+  name: depth_density_proxy
+  terms:
+    - {_target_: reblock.metric.DepthProxy}
+    - {_target_: reblock.metric.Density}
+  _convert_: all
+# Absolute, not percentile: a percentile re-defines the population every time the corpus changes.
+# Value mirrors reblock.metric.DEPTH_DENSITY_PROXY_FLOOR; tests/test_metric.py fails if they drift.
+metric_gate: {_target_: reblock.metric.Gate, kind: absolute, value: 0.0128}

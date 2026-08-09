@@ -247,9 +247,15 @@ def test_cli_screen_stage_end_to_end(tmp_path: Path) -> None:
     # Guards the README headline recipe: one command doing NON-TRIVIAL screening
     # (dense_compact prunes the 301-block sample to a strict subset) -> MULTI-block
     # reblock (peel) -> both visuals (per-block before/after heatmaps + city map).
+    #
+    # Deliberately NO `metric_gate.value` override: this runs the SHIPPED default metric and its
+    # calibrated floor end to end, so a change to either is caught here. It used to pass 1.3, which
+    # was a ring count meaningful only for the old `metric: depth` default; against
+    # `depth_density_proxy` (max ~0.068) that silently selected zero blocks. At the real floor the
+    # sample prunes 301 -> 127, which is the non-trivial subset this test is about.
     result = subprocess.run(
         [sys.executable, "-m", "reblock.run",
-         "data=capetown", "screen=dense_compact", "metric_gate.value=1.3",
+         "data=capetown", "screen=dense_compact",
          "method=peel", "eval=kcomplexity", "max_blocks=3",
          "render.enabled=true", "flagged_map.enabled=true",
          f"hydra.run.dir={tmp_path}"],

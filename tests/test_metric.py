@@ -2,16 +2,19 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pytest
 import yaml
 from pyproj import CRS
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, box
 
 from reblock.metric import (
     DENSITY_COMPACTNESS_FLOOR,
+    DEPTH_DENSITY_PROXY_FLOOR,
     Compactness,
     Count,
     Density,
     Depth,
+    DepthProxy,
     Gate,
     Power,
     Product,
@@ -96,3 +99,44 @@ def test_config_floor_matches_python_definition() -> None:
     gate = conf["metric_gate"]
     assert gate["kind"] == "absolute"
     assert float(gate["value"]) == DENSITY_COMPACTNESS_FLOOR
+
+
+def test_depth_density_proxy_floor_matches_python_definition() -> None:
+    """Same mirror-plus-drift-guard as the density_compactness floor, for the metric that replaced
+    it as the default. Also pins the two properties the default rests on:
+
+    * the gate is ABSOLUTE, so the population does not move with the corpus;
+    * the metric does NOT need a peel -- that is the entire point of `DepthProxy` over `Depth`, and
+      a config that silently reintroduced `Depth` would turn every screen run into a fine pass.
+
+    FAULT INJECTION: changing the yaml value to 0.02 fails the value assertion; swapping
+    `DepthProxy` for `Depth` in the yaml fails the needs_peel assertion.
+    """
+    conf = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / "conf/metric/depth_density_proxy.yaml").read_text())
+    gate = conf["metric_gate"]
+    assert gate["kind"] == "absolute"
+    assert float(gate["value"]) == DEPTH_DENSITY_PROXY_FLOOR
+
+    targets = [t["_target_"] for t in conf["metric"]["terms"]]
+    assert targets == ["reblock.metric.DepthProxy", "reblock.metric.Density"]
+    metric = Product(name="depth_density_proxy", terms=(DepthProxy(), Density()))
+    assert not metric.needs_peel, "the default screen metric must never trigger a fine pass"
+
+
+def test_depth_proxy_fine_equals_its_own_proxy() -> None:
+    """`DepthProxy` exists so the cheap estimator can be used with no peel, which only works if its
+    scalar `fine` agrees with its vectorized `proxy`. `Depth`'s two differ BY DESIGN (proxy
+    estimates, fine peels); this one's must not.
+
+    FAULT INJECTION: returning `count / perim` from `fine` breaks the equality.
+    """
+    blocks = gpd.GeoDataFrame(
+        {"building_count": [40.0, 120.0], "block_area_m2": [4000.0, 9000.0]},
+        geometry=[box(0, 0, 40, 100), box(0, 0, 90, 100)], crs="EPSG:32734")
+    m = DepthProxy()
+    vec = m.proxy(blocks).to_numpy()
+    for i, (count, area, perim) in enumerate(
+            ((40.0, 4000.0, blocks.geometry.iloc[0].length),
+             (120.0, 9000.0, blocks.geometry.iloc[1].length))):
+        assert m.fine(0.0, count, area, perim) == pytest.approx(vec[i])

@@ -108,6 +108,64 @@ class Density:
         return ("density",)
 
 
+DEPTH_DENSITY_PROXY_FLOOR = 0.0128
+"""Absolute floor for `depth_density_proxy` = sqrt(nA)/P * n/A. Mirrored by
+conf/metric/depth_density_proxy.yaml; tests/test_metric.py fails if they drift.
+
+CALIBRATED against real ground truth, 2026-08-08 -- the City of Cape Town's own informal-settlement
+structure survey (117,336 dwellings digitised from Feb 2018 aerial photography at 1:200, Edinburgh
+DataShare doi:10.7488/ds/2758), clustered into 189 settlement extents. 683 of 16,451 Cape Town
+blocks are informal by that measure.
+
+Chosen to match the SHIPPED pool size, because at equal size this metric strictly dominates the
+`density_compactness` floor it replaces -- better precision AND better recall, so adopting it costs
+nothing and adjudicates no trade-off:
+
+    floor      blocks   precision   recall
+    0.0128      1,646       27.6%    66.6%     <- this
+    n/P^2       1,644       24.5%    58.9%     <- DENSITY_COMPACTNESS_FLOOR, for comparison
+    0.0181        593       52.1%    45.2%     max-F1
+    0.0284        165       81.2%    19.6%     Cape Town p99
+
+Tightening is a deliberate project decision, not a default: it buys a lot of precision and costs a
+lot of recall, and it changes which blocks every downstream comparison runs on. The two tighter
+values above are measured and one edit away.
+"""
+
+
+@dataclass(frozen=True)
+class DepthProxy:
+    """`Depth`'s cheap estimator, sqrt(nA)/P, promoted to a metric in its own right.
+
+    The point is `needs_peel = False`. `Depth` needs a Voronoi tessellation and a BFS peel per
+    block; this is the same quantity read straight off the free kblock columns, so a screen built
+    from it never runs the fine pass at all.
+
+    MEASURED WORTH (notes/2026-08-08-c14-the-two-stage-screen-and-whether-you-need-stage-two.md):
+    against real ground truth, `Product(DepthProxy, Density)` selects informal blocks at 81.7%
+    precision in the top 1% with NO peel, where the full two-stage pipeline -- peel every survivor,
+    rank by true `Product(Depth, Density)` -- reaches 84.1%. The entire expensive stage buys 2.4
+    points. Hence this exists, and hence it is the default.
+
+    `fine` and `proxy` are the same closed form here, unlike `Depth` where they differ by
+    definition.
+    """
+
+    name: str = "depth_proxy"
+    needs_peel: bool = False
+
+    def proxy(self, blocks: GeoDataFrame) -> pd.Series:
+        count, area, perim = _cols(blocks)
+        return cast(pd.Series, np.sqrt(count * area) / perim.where(perim > 0))
+
+    def fine(self, depth: float, count: float, area: float, perim: float) -> float:
+        return math.sqrt(count * area) / perim if perim > 0 else 0.0
+
+    @property
+    def identity(self) -> _Identity:
+        return ("depth_proxy",)
+
+
 @dataclass(frozen=True)
 class Compactness:
     name: str = "compactness"

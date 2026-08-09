@@ -6,7 +6,7 @@ defaults:
   - eval: kcomplexity
   - substrate: chord_diag
   - desire_source: osm
-  - metric: depth
+  - metric: depth_density_proxy
   - _self_
 
 # Top-level scalars are the interpolation sources the data/method config
