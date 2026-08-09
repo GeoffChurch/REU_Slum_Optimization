@@ -136,6 +136,50 @@ live Strategy precisely so that comparison can be run without touching the build
 **Not yet done:** nothing calls this builder in a shipped path -- the Phase 3 donor-material test it
 gates has not been written.
 
+## Open Buildings footprint SIZE is the best informality signal measured — unused (2026-08-08)
+
+**The screen could be better than what shipped, at the cost of a download.** Measured on Cape Town
+against the City's own informal-structure survey (C13's ground truth, 683 informal blocks of 16,451):
+
+    feature                        AUC     informal vs formal median
+    p90 footprint area           0.943      63.7 vs 178.7 m²   (inverted)
+    density n/A                  0.922
+    depth_density proxy          0.921      <- what ships today
+    median footprint area        0.919      28.9 vs  61.1 m²   (inverted)
+    share of footprints <= 40 m² 0.911      0.69 vs 0.34
+    density_compactness          0.841      <- what it replaced
+
+**A single Open Buildings feature — the 90th-percentile footprint area in a block — beats every
+block-geometry metric available**, including the one just made default. And the informal median of
+28.9 m² independently reproduces the City survey's 29.5 m²: two unrelated datasets agreeing to
+within 2%.
+
+**Why it is not already the screen.** It needs Open Buildings POLYGONS, where the shipped metric
+needs only the free kblock columns (`building_count`, area, perimeter). `data/provision.py` records
+the polygon variants at 14.09 GB for all 20 ZAF+KEN tiles — but Cape Town's single tile is 0.32 GB
+and Nairobi's is comparable, so per-city this is routine, not a blocker
+(`notes/2026-08-06-...` / the B1 pull). The real cost is a provisioning step the current screen does
+not have.
+
+**What it CANNOT do, and this is the trap.** It is not usable as independent ground truth for
+evaluating density-based screens, because it is not independent of them:
+
+    feature                     vs density    vs ddp   vs n/P^2
+    p90 footprint area              -0.774    -0.743    -0.640
+    built area fraction             +0.757    +0.703    +0.735
+    median footprint area           -0.613    -0.614    -0.505
+    OB footprint count              +0.011    +0.148    -0.204
+
+The strong predictors correlate |rho| 0.5-0.77 with the metrics they would be judging; the one
+genuinely independent feature (count, rho +0.011) is weak at 0.703. So it can be a FEATURE or a
+sanity check, never an arbiter. That is why the Nairobi ground-truth gap
+(`notes/2026-08-08-c17-...`) is not solved by reaching for Open Buildings.
+
+**Worth trying when picked up:** a screen combining morphology with block geometry, which should beat
+either alone — nothing here tested the combination. And check whether p90 area survives to Nairobi,
+where OB polygons are already cached (`~/.cache/reblock/buildings_nairobi_polygons.parquet`).
+Measured in `scratchpad/complexity/c18_open_buildings_proxy.py`.
+
 ## Method lineup
 
 - **Drop `greedy_arterial_repulsion` from the examples if it does not earn its place** in whatever
