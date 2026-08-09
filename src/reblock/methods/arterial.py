@@ -31,7 +31,9 @@ from reblock.budget import (
     _StepContext,
     access_burden,
     building_radii,
+    corridor_distance,
     displacement,
+    displacement_from_distance,
     repulsion,
     road_drainage,
 )
@@ -258,6 +260,10 @@ class _StepState:
     lam: float
     half_width_m: float
     committed_disp: float
+    # For cost="displacement_fast": per-building distance to the COMMITTED corridor, fixed for the
+    # step, plus the building geometries to measure a candidate against. None for other costs.
+    committed_dist: NDArray[np.float64] | None
+    building_xy: NDArray[np.object_] | None
     block: Block
     radii: NDArray[np.float64]
     crs: CRS
@@ -298,7 +304,19 @@ def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
     else:
         trial = _planarize(st.committed + [real], st.crs, 2.0 * st.half_width_m)
         raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
-    if st.cost == "displacement":
+    if st.cost == "displacement_fast":
+        # dist(p, committed u cand) == min(dist(p, committed), dist(p, cand)), so only the
+        # candidate's own corridor distance is new work -- no union over the committed set. Agrees
+        # with `displacement` to ~1e-10, NOT bit-exactly (GEOS measures distance to a unioned
+        # polygon over a different vertex set than to the parts), and this greedy's argmax turns
+        # that into a different trajectory on ~29% of runs. See
+        # notes/2026-08-09-greedy-arterial-is-tie-sensitive.md -- the divergence is large when it
+        # lands (up to 11 points of burden reduction) but shows no systematic direction.
+        assert st.building_xy is not None
+        cand_d = shapely.distance(st.building_xy, real.buffer(st.half_width_m))
+        d = cand_d if st.committed_dist is None else np.minimum(st.committed_dist, cand_d)
+        denom = float(displacement_from_distance(st.radii, d) - st.committed_disp)
+    elif st.cost == "displacement":
         if trial is None:
             # step -> buildable
             trial = _explode(_union_with(st.base_merged, real), st.crs,
@@ -381,6 +399,10 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         base_val = _score(objective, block, base, adj, base_burden, ctx)
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
+        committed_dist = building_xy = None
+        if cost == "displacement_fast":
+            building_xy = np.asarray(list(block.building_points.geometry), dtype=object)
+            committed_dist = corridor_distance(block.building_points, base) if len(base) else None
         committed_disp = (displacement(block.building_points, radii, base)
                           if cost == "displacement" else 0.0)
         # Route per-candidate scoring by mode. BUILDABLE trials are boundary-snapped (they join the
@@ -410,7 +432,8 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         _STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             mode=mode, objective=objective, cost=cost, lam=lam, half_width_m=half_width_m,
-            committed_disp=committed_disp, block=block, radii=radii,
+            committed_disp=committed_disp, committed_dist=committed_dist,
+            building_xy=building_xy, block=block, radii=radii,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             if use_pool:
@@ -470,6 +493,9 @@ class GreedyArterialReblocker:
     max_roads: int = 15
     # "length" (Delta-benefit/metre) | "displacement" (Delta-benefit/building, see budget.py)
     # | "repulsion" (Delta-benefit / soft quadratic-tail proximity cost, never-zero & CELF-safe)
+    # "displacement_fast" is "displacement" computed incrementally -- 1.43x, agrees to ~1e-10 but
+    # not bit-exactly, so it takes a different trajectory on ~29% of runs. Kept as a VARIANT until
+    # measured to win or lose; if it always wins it replaces `displacement` and this note goes away.
     cost: str = "length"
     # Total width of the roads this method emits; also the displacement corridor it
     # scores against (half-width each side). Stamped on every road it returns.

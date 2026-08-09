@@ -8,6 +8,7 @@ from collections.abc import Iterator, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 
+import numpy as np
 from geopandas import GeoDataFrame
 from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
@@ -17,6 +18,7 @@ from reblock.budget import (
     _BlockScoringContext,
     access_burden,
     building_radii,
+    corridor_distance,
     displacement,
     road_drainage,
 )
@@ -196,14 +198,19 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
         base = _explode(base_merged, block.crs, 2.0 * half_width_m)
         base_val = _art._score(objective, block, base, adj, base_burden, ctx)
         committed_disp = 0.0
-        if cost == "displacement":
+        committed_dist = building_xy = None
+        if cost in ("displacement", "displacement_fast"):
             committed_disp = displacement(block.building_points, radii, base)
+        if cost == "displacement_fast":
+            building_xy = np.asarray(list(block.building_points.geometry), dtype=object)
+            committed_dist = corridor_distance(block.building_points, base) if len(base) else None
         stepctx = ctx.step(base) if (ctx is not None and mode == "buildable") else None
         assert _art._STEP_STATE is None, "eval_candidate's per-step state holder is not reentrant"
         _art._STEP_STATE = _StepState(
             step=stepctx, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             mode=mode, objective=objective, cost=cost, lam=lam, half_width_m=half_width_m,
-            committed_disp=committed_disp, block=block, radii=radii,
+            committed_disp=committed_disp, committed_dist=committed_dist,
+            building_xy=building_xy, block=block, radii=radii,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             # eager-score candidates entering this step
