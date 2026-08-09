@@ -81,12 +81,30 @@ def displacement(building_points: GeoDataFrame, radii: NDArray[np.float64],
     n = len(building_points)
     if n == 0 or roads is None or len(roads) == 0:
         return 0.0
+    return displacement_from_distance(radii, corridor_distance(building_points, roads))
+
+
+def corridor_distance(building_points: GeoDataFrame, roads: GeoDataFrame) -> NDArray[np.float64]:
+    """Per-building distance to the unioned, per-road-width-buffered corridor.
+
+    Split out of `displacement` so a caller scoring many candidates against a FIXED committed set
+    can exploit `dist(p, A u B) == min(dist(p, A), dist(p, B))`: compute the committed distances
+    once, then take an elementwise minimum with each candidate's own. That turns a union-plus-
+    distance over the whole road set into one distance per candidate -- see
+    `arterial._StepState.committed_dist`, where it removed 20,904 `unary_union` calls (the single
+    largest `tottime` in the profile) from one 5,228-candidate block.
+    """
     if "width_m" not in roads.columns:
         raise ValueError(
             "roads must carry a 'width_m' column: road width is mandatory since the global "
             "corridor width was removed. Methods set it on the roads they emit.")
     corridor = roads.geometry.buffer(roads["width_m"].to_numpy(dtype=float) / 2.0).union_all()
-    d = building_points.geometry.distance(corridor).to_numpy()
+    return cast(NDArray[np.float64], building_points.geometry.distance(corridor).to_numpy())
+
+
+def displacement_from_distance(radii: NDArray[np.float64],
+                               d: NDArray[np.float64]) -> float:
+    """`Sum clip(1 - d_i/r_i, 0, 1)` given precomputed per-building corridor distances."""
     r = np.asarray(radii, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
         c = np.where(r > 0.0, 1.0 - d / r, np.where(d <= 0.0, 1.0, 0.0))

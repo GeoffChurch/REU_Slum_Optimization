@@ -180,6 +180,41 @@ either alone — nothing here tested the combination. And check whether p90 area
 where OB polygons are already cached (`~/.cache/reblock/buildings_nairobi_polygons.parquet`).
 Measured in `scratchpad/complexity/c18_open_buildings_proxy.py`.
 
+## Incremental displacement -- 1.43x, but it changes greedy trajectories (2026-08-09)
+
+`budget.corridor_distance` + `budget.displacement_from_distance` exist and are used by
+`displacement` itself. What is NOT wired up is the incremental path they were split out for, and
+the reason is worth keeping.
+
+**The optimisation.** Inside `GreedyArterialReblocker`, `cost="displacement"` re-unions the entire
+committed road set with each candidate and re-measures every building's distance to that union --
+per candidate. But distance to a union is the elementwise MIN of distances to its parts, so the
+committed distances can be computed once per step and combined with `np.minimum` against each
+candidate's own. Profiled: it removes 20,904 `unary_union` calls (the single largest `tottime`) and
+takes a 50-parcel block from 16.4 s to **11.5 s, 1.43x**, on top of the vectorized peel seed.
+
+**Why it is not shipped.** The two formulations agree to **1.14e-10** (max over 110
+committed/candidate pairs on real blocks) -- but not bit-exactly, because GEOS measures distance to
+a unioned polygon over a different vertex set than to the parts. A greedy takes an ARGMAX over
+gains, so last-bit noise flips tie-breaks and cascades. Measured end to end against the pre-change
+code: **1 of 10 (block, cost) runs diverged**, and not cosmetically --
+
+    ZAF.9.3.1_1_41363, cost=displacement
+      before  13 roads, 175.60004040089768 m
+      after   11 roads, 175.51059768181852 m
+
+Neither trajectory is more correct; ties in a greedy are arbitrary. But the examples are published
+artifacts, and this would silently move ~10% of them.
+
+**If picked up:** it needs to be an ANNOUNCED behaviour change with its own before/after on the
+published examples, not smuggled in as a perf commit -- or a formulation that is exactly identical
+(shortlist on the incremental value, then re-score the shortlist exactly, the pattern
+`resistance_greedy.linearized_gain` already uses, which bounds the divergence to candidates within
+1e-10 of the winner).
+
+The safe half of that work IS shipped: `2170190` vectorized the peel's frontier seed for a
+bit-identical **1.76x** that benefits every caller of `parcel_access_layers`.
+
 ## Method lineup
 
 - **Drop `greedy_arterial_repulsion` from the examples if it does not earn its place** in whatever
