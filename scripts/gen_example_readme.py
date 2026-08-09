@@ -109,6 +109,31 @@ def _lens_images(run_dir: Path, lens: str, coloring: str,
     return items
 
 
+def _tie_caveat(methods: list[str], grown: bool) -> str:
+    """A note under the outcome table when an ACCESS-objective arterial ran on a SINGLE block.
+
+    `greedy_arterial` with `objective=access` sits on exact ties: the objective is a sum of squared
+    INTEGER depths, so genuinely different networks routinely score identically, and
+    `_best_candidate` then picks between them on lexicographic WKT order. Measured, perturbing the
+    gains by 1e-10 moves burden reduction by up to 15% on a third of blocks
+    (`notes/2026-08-09-greedy-arterial-is-near-tie-sensitive.md`).
+
+    Aggregates over many blocks are unaffected -- the variance is unbiased, and no tie-break rule
+    beat the arbitrary one when three were tested. A SINGLE block's number is one draw, and saying
+    so is the honest fix, so this fires only for a pinned (non-grown) example.
+    """
+    if grown or not any("access" in m for m in methods):
+        return ""
+    return (
+        "> **On the access-objective arterial row.** This example scores ONE pinned block, and "
+        "`objective=access` maximises a sum of squared *integer* depths — so different networks "
+        "routinely tie exactly, and the greedy picks between them arbitrarily. Perturbing "
+        "the gains "
+        "by 1e-10 moves this method's burden reduction by up to 15% on a third of blocks. Its "
+        "number here is one draw, not a stable estimate; the medians over many blocks reported in "
+        "the notes are the trustworthy form. No other method in this table has that sensitivity.\n")
+
+
 def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: str) -> str:
     parts: list[str] = []
     meta_path = run_dir / "meta.json"
@@ -206,6 +231,7 @@ def gen_example_readme(run_dir: Path, *, metric_name: str, formula: str, blurb: 
             parts.append(f"### {heading}\n")
             parts.append(blurb)
             parts.append(_lens_table(rows, methods, flag_col=flag_col, unmet_note=unmet))
+            parts.append(_tie_caveat(methods, grown))
             depth_imgs = _lens_images(run_dir, kind, "depth", methods)
             if depth_imgs:
                 parts.append("Access-depth coloring:\n")
