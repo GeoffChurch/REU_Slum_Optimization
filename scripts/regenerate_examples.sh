@@ -22,4 +22,8 @@ if [[ $# -gt 0 ]]; then
 else
   for v in "${VARIANTS[@]}"; do for c in "${CITIES[@]}"; do gen "$v" "$c"; done; done
   gen method_comparison capetown
+  # The screen bake-off is not a gen_example variant: it grades SCREENS against ground truth rather
+  # than methods against a region, so it has its own entry point. Cape Town only -- the ground truth
+  # is the City's own structure survey and no equivalent exists for Nairobi.
+  run pixi run python -m scripts.gen_screen_bakeoff
 fi
