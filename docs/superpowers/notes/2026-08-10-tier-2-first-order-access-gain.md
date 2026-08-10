@@ -141,19 +141,40 @@ tail of 512 × 242.5 ms ≈ 124 s serial (≈ 8 s across the 16-worker fork pool
 `depth`'s 1,115 s without this method and 11.6 h of not finishing with it, that is the difference
 between impossible and roughly a half-hour surcharge.
 
-Two caveats on that arithmetic. It holds step 0's candidate count fixed, and the count **grows**:
-uncapped `_anchor_points` takes every network vertex, and each committed road is a boundary-graph
-path contributing tens of new ones. And the ranking is serial inside `greedy_shortlist` as measured
-— threading it is the change the table above justifies, not something already in place.
+### Measured: 79.6 minutes, and the projection above was wrong in an instructive way
 
-**The 15-step total is still a projection, not a measurement.** A full run at `shortlist=512` was
-killed at 73 minutes — the fourth long background run in this repo to be stopped mid-flight (C9 at
-2/10, C20 at 2/12 and 5/12 are the others; `scratchpad/complexity/instrumented.py` exists to
-identify the sender and was not used here). It printed nothing before dying, because the script only
-reported totals, so 73 minutes yielded no partial evidence at all. Both faults are fixed —
-`greedy_shortlist` now takes an `on_step` callback and the region script logs each step as it lands,
-and the rerun goes through the instrumentation wrapper. Everything above this paragraph is measured
-and stands; only the end-to-end total is outstanding.
+A full 15-step run at `shortlist=512` with the ranking threaded at 8: **79.6 min, all 15 roads
+placed, 29 road rows, 3,635 m.** Against "not finished after 11.6 h", that is the difference between
+impossible and an overnight-free afternoon. But it is more than double the ~35 min the table above
+implies, and the gap is the whole point.
+
+**The projection held step 0's candidate count fixed. It is not fixed — it grows 2.52×.**
+
+| step | 1 | 4 | 8 | 12 | 15 |
+|---|---|---|---|---|---|
+| candidates | 468,968 | 644,652 | 879,773 | 1,027,433 | **1,180,388** |
+| secs | 139.5 | 200.5 | 390.5 | 394.9 | 466.9 |
+
+Uncapped `_anchor_points` takes every network vertex, and each committed road is a boundary-graph
+path contributing tens of new ones, so the candidate set compounds with every commit and step cost
+tracks it (139.5 s → 466.9 s, 3.3×). The threading itself behaved exactly as measured — step 1's
+139.5 s is 104 s of ranking at 8 threads plus ~35 s of enumeration, peel and the exact tail — so the
+miss is entirely the growth term.
+
+Scored against what actually happened rather than the fixed-count assumption: **12,675,441
+candidates** were ranked across the run. Exhaustively scoring that many at 242.5 ms each is 854 h
+serial, or **53.4 h on 16 workers**. Tier 2 did it in 1.33 h — a **40× end-to-end speedup at region
+scale**, at 377 µs per candidate all-in.
+
+The standing cost is now unambiguous: **candidate enumeration, not candidate scoring.** Tier 2
+removed the term the backlog was written about and promoted the one it only flagged in passing.
+
+*(The first attempt at this run was killed at 73 minutes having printed nothing — the fourth long
+background run in this repo stopped mid-flight, after C9 at 2/10 and C20 at 2/12 and 5/12. Two
+faults were mine: the script reported only totals, so a kill destroyed every minute of it, and it
+did not go through `scratchpad/complexity/instrumented.py`, which exists to name the signal's
+sender. Both fixed; the rerun logged each step as it landed and finished normally under the
+wrapper.)*
 
 ## 7. What to do with it
 
@@ -183,9 +204,11 @@ so.
   ranking floors the denominator at one building and so cannot prioritize them the way the exact
   scorer does. Mirroring the `denom <= 0 and raw > 0 → inf` rule is cheap; whether it matters is not
   measured, and at region scale a free class of that size would swamp any shortlist.
-- **Candidate enumeration is now the floor.** `_candidate_chords` builds and WKT-sorts 469k chords
-  per step, and the anchor set grows as committed roads add network vertices, so it is quadratic
-  across steps. Tier 2 does not touch it. Pairing tier 2 with `max_anchors` is the obvious next
-  move, and `max_anchors` deserves re-measuring now that the earlier inference from it is known to
-  be wrong.
+- **Candidate enumeration is now the floor — measured, not suspected.** The set grows 2.52× across
+  15 steps (469k → 1.18M) and step cost tracks it 3.3×; two thirds of the run's 79.6 min is growth
+  the projection did not anticipate. `max_anchors` caps exactly this, and is the obvious next lever
+  — with the caveat that it drops per-vertex anchors and so biases toward long chords over short
+  local connectors, which for an ACCESS objective is precisely the wrong bias and needs measuring
+  rather than assuming. Its earlier dismissal rested on an inference now known to be wrong (§1), so
+  it is unevaluated rather than rejected.
 - **Why the `max_anchors=24` run took 66 minutes** is still unexplained (§1).

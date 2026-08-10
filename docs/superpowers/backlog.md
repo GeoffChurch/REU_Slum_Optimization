@@ -316,15 +316,23 @@ Was: tier 1 (raster) -> tier 2 (local parcels) -> exact peel on the survivors, s
 level; build tier 2 first and add the others only if it proved insufficient.
 
 **Tier 2 alone was sufficient, and the ladder above it was the wrong shape.** Tier 2 ships: ~5x at
-block scale, ~320x per step at region scale (ranking all 468,968 step-0 candidates costs 355 s
-against ~31.6 h to score them exactly), no outcome penalty, and validated against a uniform-random
-null that it beats on 8/8 blocks. Tier 3 is dropped above. Tier 1 survives but is re-motivated: it
+block scale, and at region scale a MEASURED 15-step run in **79.6 min** (29 road rows, 3,635 m)
+against "not finished after 11.6 h" -- 12,675,441 candidates ranked, which exhaustive scoring would
+have taken 53.4 h on 16 workers to do, so **40x end to end**. No outcome penalty, and validated
+against a uniform-random null that it beats on 8/8 blocks. Tier 3 is dropped above. Tier 1 survives but is re-motivated: it
 was specified as a cheaper *ranking*, and since extra ranking fidelity does not pay, its only
 remaining value is throughput -- where it competes with capping candidate ENUMERATION, the cost tier
 2 does not touch and which grows quadratically across steps as committed roads add network vertices.
 
 The unlooked-for result is that effort spent on per-step fidelity is wasted and effort spent on
 covering the space of runs is not -- see stochastic restarts above.
+
+**Candidate ENUMERATION is now the binding cost, measured.** Across that 15-step run the candidate
+set grew 2.52x (468,968 -> 1,180,388) because uncapped `_anchor_points` takes every network vertex
+and each committed road adds tens; per-step cost tracked it 3.3x (139.5 s -> 466.9 s). Two thirds of
+the 79.6 min is that growth. `max_anchors` caps it and is the next lever -- but it drops per-vertex
+anchors and so biases toward long chords over short local connectors, which for an ACCESS objective
+is the wrong bias, so it needs measuring rather than assuming.
 
 **Interim:** the access method belongs in `method_comparison` (one pinned block, affordable, and the
 only place C19 evidenced it) and NOT in the three multiblock variants until tier 2 is productionized
