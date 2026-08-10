@@ -146,8 +146,14 @@ uncapped `_anchor_points` takes every network vertex, and each committed road is
 path contributing tens of new ones. And the ranking is serial inside `greedy_shortlist` as measured
 — threading it is the change the table above justifies, not something already in place.
 
-A full 15-step region run at `shortlist=512` is in flight to replace this projection with a
-measurement; nothing above depends on it except the total.
+**The 15-step total is still a projection, not a measurement.** A full run at `shortlist=512` was
+killed at 73 minutes — the fourth long background run in this repo to be stopped mid-flight (C9 at
+2/10, C20 at 2/12 and 5/12 are the others; `scratchpad/complexity/instrumented.py` exists to
+identify the sender and was not used here). It printed nothing before dying, because the script only
+reported totals, so 73 minutes yielded no partial evidence at all. Both faults are fixed —
+`greedy_shortlist` now takes an `on_step` callback and the region script logs each step as it lands,
+and the rerun goes through the instrumentation wrapper. Everything above this paragraph is measured
+and stands; only the end-to-end total is outstanding.
 
 ## 7. What to do with it
 
