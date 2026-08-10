@@ -1,5 +1,5 @@
-method,road_m,displacement,permeability,at_budget
-clearance_looped,3729.1,0.1003,0.81599,True
-euclidean_grid,9842.4,0.1027,0.733433,True
-resistance_lp,12813.4,0.1000,0.939354,True
-cycle_native,10095.0,0.0694,0.777843,False
+method,road_m,displacement,permeability,access_burden_reduction,at_budget
+clearance_looped,3729.1,0.1003,0.81599,0.849245,True
+euclidean_grid,9842.4,0.1027,0.733433,0.657978,True
+resistance_lp,12813.4,0.1000,0.939354,0.952266,True
+cycle_native,10095.0,0.0694,0.777843,0.766769,False
