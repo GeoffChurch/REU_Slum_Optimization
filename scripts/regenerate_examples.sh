@@ -19,7 +19,12 @@ if [[ $DRY -eq 0 ]] && ! git diff --quiet -- examples/; then
   exit 1
 fi
 _CURRENT_DIR=""
+_CHILD=""
 _restore() {
+  # Stop the in-flight generator FIRST. A bash trap does not interrupt the foreground command --
+  # it runs only once that command returns -- so a TERM to this script alone leaves the python
+  # child running and the trap never fires (observed 2026-08-10). Kill the child's process group.
+  [[ -n "$_CHILD" ]] && kill -TERM -"$_CHILD" 2>/dev/null
   [[ -n "$_CURRENT_DIR" ]] && {
     echo "!! interrupted during $_CURRENT_DIR -- restoring it from git" >&2
     git checkout -- "$_CURRENT_DIR" 2>/dev/null || true
@@ -42,7 +47,15 @@ from omegaconf import OmegaConf
 c = OmegaConf.load('conf/example/${variant}.yaml')
 print(c.example.slug)" 2>/dev/null | tail -1)
   if [[ "$city" == capetown ]]; then _CURRENT_DIR="examples/$slug"; else _CURRENT_DIR="examples/$city/$slug"; fi
-  run pixi run python -m scripts.gen_example "$variant" $([[ "$city" == capetown ]] || echo "$city")
+  if [[ $DRY -eq 1 ]]; then
+    echo "+ pixi run python -m scripts.gen_example $variant $([[ "$city" == capetown ]] || echo "$city")"
+  else
+    setsid pixi run python -m scripts.gen_example "$variant" \
+        $([[ "$city" == capetown ]] || echo "$city") &
+    _CHILD=$!
+    wait "$_CHILD"
+    _CHILD=""
+  fi
   _CURRENT_DIR=""          # completed cleanly; nothing to restore
 }
 
