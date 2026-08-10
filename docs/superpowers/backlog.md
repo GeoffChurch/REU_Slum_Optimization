@@ -215,6 +215,83 @@ published examples, not smuggled in as a perf commit -- or a formulation that is
 The safe half of that work IS shipped: `2170190` vectorized the peel's frontier seed for a
 bit-identical **1.76x** that benefits every caller of `parcel_access_layers`.
 
+## Making the access objective affordable at REGION scale (2026-08-10)
+
+**The problem, measured.** The `depth` example variant takes **1,115 s without**
+`greedy_arterial_access_displacement` and had **not finished after 41,700 s (11.6 h) with it** on an
+11,006-parcel / 12-block region -- a >=37x penalty. It is fine at block scale (~38 s on 50-150
+parcels, where C19 justified including it) and unusable at region scale.
+
+**Why.** The objective is GLOBAL, the perturbation is LOCAL. Every candidate triggers a full BFS
+peel over all 11,006 parcels to score adding ONE road, which changes depths only in that road's
+neighbourhood. Multiply by thousands of candidates per step (`_anchor_points` includes every network
+vertex, so candidates grow ~C(anchors,2) as the network densifies) times ~15 steps.
+
+**`max_anchors` does not rescue it, and is not the kind of approximation it looks like.** Capping
+anchors bounds candidates to ~C(max_anchors,2) -- but a run at `max_anchors=24` (~276 candidates per
+step, ~4,100 total, which at 85 ms/peel should be ~6 minutes) had not finished after **66 minutes**.
+So per-candidate cost dominates, not candidate count, and the likely culprit is `_snap`: a
+`nx.shortest_path` over the parcel-boundary graph of an 11k-parcel region, once per candidate.
+
+Worth being precise about what `max_anchors` IS, since it invites a wrong analogy. It subsamples the
+SEARCH SPACE and scores every survivor exactly. Nystrom approximates an OPERATOR (low-rank from
+sampled landmarks). Different axis: `max_anchors` reduces the NUMBER of exact evaluations, Nystrom
+would reduce the COST of each. It is also not random sampling but arc-length stratified -- closer to
+a quadrature rule -- and it drops per-vertex anchors, biasing toward long chords over short local
+connectors.
+
+### Tier 2 (BUILD THIS FIRST): first-order local gain -- the `linearized_gain` analogue
+
+`resistance_greedy.linearized_gain` already does exactly this for permeability: one solve per step
+gives `v = L^-1 b`, then each candidate's first-order gain is O(1) from `v`, used to SHORTLIST before
+re-scoring the shortlist exactly. Its docstring is explicit that it overstates and is "a ranking
+heuristic, not a score", and that the exact re-score "is what keeps the selection honest".
+
+The access objective admits the direct analogue. One peel per step gives every parcel's depth. A
+candidate's first-order gain is then
+
+    delta_burden ~= sum over parcels the road DIRECTLY FRONTS of (d_i - 1)^2
+
+found by an STRtree query over local geometry, not a global peel. It ignores the ripple to
+neighbours whose depth also drops, so it UNDERSTATES the gain (opposite sign to `linearized_gain`,
+which overstates) -- fine for ranking either way. Cost per candidate falls from O(11,006) to
+O(parcels near one road).
+
+Note this does NOT fix `_snap`, which the timing above implicates as the larger term at region
+scale. Measure that first: if snapping dominates, the first-order gain alone will not be enough and
+the shortlist has to be formed BEFORE snapping (rank on the unsnapped chord, snap only the
+shortlist).
+
+### Tier 3: ALT / landmark distance -- the genuinely Nystrom-flavoured option
+
+Landmark-based distance approximation IS a low-rank approximation of the graph distance matrix.
+Precompute distances from every parcel to k landmarks once; then for a candidate's seed set,
+
+    depth(parcel) ~= min over seeds s, landmarks l of  ( d(parcel, l) + d(l, s) )
+
+by the triangle inequality -- an upper bound, hence a conservative (understating) ranking heuristic,
+at O(k) per parcel instead of a BFS. More faithful to the "fast linear projection" idea and more
+machinery; it buys the same thing as tier 2, so hold it in reserve.
+
+### Tier 1: uniform-density geometric proxy
+
+With a precomputed per-parcel depth field rasterized, a candidate's benefit is approximately
+
+    swept corridor area  x  local parcel density  x  mean (d-1)^2 along it
+
+which is O(1) per candidate off a raster. Throws away adjacency structure entirely -- it assumes
+parcels are uniformly distributed and that fronting is proportional to swept area -- so trust it
+only as a first-pass filter.
+
+### The cascade
+
+Tier 1 (O(1), raster) -> tier 2 (O(local parcels)) -> exact peel on the survivors, shortlisting at
+each level. **Build tier 2 alone first**: it has a working precedent in this repo and may close the
+gap by itself. Only add tiers 1 and 3 if measurement says tier 2 is insufficient.
+
+**Interim:** the access method belongs in `method_comparison` (one pinned block, affordable, and the
+only place C19 evidenced it) and NOT in the three multiblock variants until one of these lands.
+
 ## Method lineup
 
 - **Drop `greedy_arterial_repulsion` from the examples if it does not earn its place** in whatever
