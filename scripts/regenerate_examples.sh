@@ -29,6 +29,9 @@ _restore() {
     echo "!! interrupted during $_CURRENT_DIR -- restoring it from git" >&2
     git checkout -- "$_CURRENT_DIR" 2>/dev/null || true
   }
+  # An EXIT trap's status becomes the script's, and the tests above are FALSE on a clean run
+  # (nothing in flight, nothing to restore) -- which made a fully successful regeneration exit 1.
+  return 0
 }
 trap _restore EXIT INT TERM
 
@@ -50,6 +53,8 @@ print(c.example.slug)" 2>/dev/null | tail -1)
   if [[ $DRY -eq 1 ]]; then
     echo "+ pixi run python -m scripts.gen_example $variant $([[ "$city" == capetown ]] || echo "$city")"
   else
+    echo "+ pixi run python -m scripts.gen_example $variant" \
+         "$([[ "$city" == capetown ]] || echo "$city")"
     setsid pixi run python -m scripts.gen_example "$variant" \
         $([[ "$city" == capetown ]] || echo "$city") &
     _CHILD=$!
