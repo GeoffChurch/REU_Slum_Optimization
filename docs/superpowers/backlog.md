@@ -262,16 +262,43 @@ scale. Measure that first: if snapping dominates, the first-order gain alone wil
 the shortlist has to be formed BEFORE snapping (rank on the unsnapped chord, snap only the
 shortlist).
 
-### Tier 3: ALT / landmark distance -- the genuinely Nystrom-flavoured option
+### Tier 3: ALT / landmark distance -- DROPPED 2026-08-10, measured
 
-Landmark-based distance approximation IS a low-rank approximation of the graph distance matrix.
-Precompute distances from every parcel to k landmarks once; then for a candidate's seed set,
+Was: precompute distances from every parcel to k landmarks; a candidate's depths then come from the
+triangle inequality at O(k) per parcel instead of a BFS -- a genuine low-rank approximation of the
+graph distance matrix, and the most principled rung of the cascade.
 
-    depth(parcel) ~= min over seeds s, landmarks l of  ( d(parcel, l) + d(l, s) )
+**Dropped because it improves a quantity that has been measured not to pay.** Tier 3 improves only
+the NUMERATOR, so its ceiling is a perfect numerator over the best cheap denominator, and that is
+directly measurable: +0.919 against tier 2's +0.829, so a perfect numerator is worth +0.090 of rho
+(a perfect denominator only +0.017). That reads as a green light. It is not, because the exact
+greedy already IS the perfect ranking -- rho = 1 by construction -- and it scores 0.7414 burden
+reduction against tier 2's 0.7451, losing on 6 of 8 blocks. There is no outcome headroom above tier
+2 for the extra fidelity to reach.
 
-by the triangle inequality -- an upper bound, hence a conservative (understating) ranking heuristic,
-at O(k) per parcel instead of a BFS. More faithful to the "fast linear projection" idea and more
-machinery; it buys the same thing as tier 2, so hold it in reserve.
+A null result about VALUE rather than about failure, which is why it is recorded here in full: the
+idea is seductive (it IS the more principled approximation) and would otherwise be re-proposed, and
+a better landmark scheme would not rescue it. See
+`notes/2026-08-10-the-ranking-earns-its-place-tier-3-does-not.md`.
+
+### Stochastic restarts -- NEW 2026-08-10, best measured return of anything here
+
+Not part of the original cascade, and it inverts the cascade's premise. Every tier was a fidelity
+ladder -- compute the per-step argmax more accurately. But this greedy's argmax flips under a 1e-10
+perturbation, so fidelity to a single step cannot pay. Coverage of the space of RUNS can:
+`StochasticFirstOrder(k, pool, seed)` draws k from the top `pool` by first-order score, keeping the
+ranking's signal while making runs independent, and best-of-R takes the best network.
+
+Measured (8 blocks, k=128, D=0.10): one exact run costs the wall clock of **4.6 restarts**, and
+best-of-4 at pool=1024 takes 12.5 s against exact's 13.2 while beating it by **+0.045 burden
+reduction and +0.041 permeability**. Cost-matched, it dominates. Believable because permeability is
+not selected on and rises +0.060 alongside the selected burden's +0.087, and because the `pool`
+sweep reverses with R exactly as the mechanism requires (tight pool wins at R=1, wide at R=4).
+
+**Before it could ship:** a wider block sample, a real `pool`/R sweep rather than two points,
+confirmation across displacement budgets (only D=0.10 tested), and a decision about what a restart
+selects on when the method reports two metrics -- burden is the greedy's objective, permeability is
+co-reported, and nothing currently arbitrates between them.
 
 ### Tier 1: uniform-density geometric proxy
 
@@ -283,14 +310,25 @@ which is O(1) per candidate off a raster. Throws away adjacency structure entire
 parcels are uniformly distributed and that fronting is proportional to swept area -- so trust it
 only as a first-pass filter.
 
-### The cascade
+### The cascade -- RESOLVED 2026-08-10
 
-Tier 1 (O(1), raster) -> tier 2 (O(local parcels)) -> exact peel on the survivors, shortlisting at
-each level. **Build tier 2 alone first**: it has a working precedent in this repo and may close the
-gap by itself. Only add tiers 1 and 3 if measurement says tier 2 is insufficient.
+Was: tier 1 (raster) -> tier 2 (local parcels) -> exact peel on the survivors, shortlisting at each
+level; build tier 2 first and add the others only if it proved insufficient.
+
+**Tier 2 alone was sufficient, and the ladder above it was the wrong shape.** Tier 2 ships: ~5x at
+block scale, ~320x per step at region scale (ranking all 468,968 step-0 candidates costs 355 s
+against ~31.6 h to score them exactly), no outcome penalty, and validated against a uniform-random
+null that it beats on 8/8 blocks. Tier 3 is dropped above. Tier 1 survives but is re-motivated: it
+was specified as a cheaper *ranking*, and since extra ranking fidelity does not pay, its only
+remaining value is throughput -- where it competes with capping candidate ENUMERATION, the cost tier
+2 does not touch and which grows quadratically across steps as committed roads add network vertices.
+
+The unlooked-for result is that effort spent on per-step fidelity is wasted and effort spent on
+covering the space of runs is not -- see stochastic restarts above.
 
 **Interim:** the access method belongs in `method_comparison` (one pinned block, affordable, and the
-only place C19 evidenced it) and NOT in the three multiblock variants until one of these lands.
+only place C19 evidenced it) and NOT in the three multiblock variants until tier 2 is productionized
+out of `scratchpad/perf` into a selectable engine.
 
 ## Method lineup
 
