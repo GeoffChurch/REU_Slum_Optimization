@@ -1,10 +1,10 @@
 """Tier 2 as an actual greedy: reduce each step's candidates with an injected selector.
 
 Mirrors `_greedy_arterials` step for step and changes exactly one thing -- which candidates reach
-`eval_candidate` -- in the same spirit as `arterial_lazy` ("reuses arterial's exact scoring
-machinery unchanged; only changes which candidates get scored each step"). The per-step state, the
-scorer, the fork pool and the `_best_candidate` reduce are all the shipped ones, so any difference
-in the output comes from the shortlist and nothing else.
+`eval_candidate` -- in the same spirit as the lazy engine, `_greedy_arterials_lazy` ("reuses
+arterial's exact scoring machinery unchanged; only changes which candidates get scored each step").
+The per-step state, the scorer, the fork pool and the `_best_candidate` reduce are all the shipped
+ones, so any difference in the output comes from the shortlist and nothing else.
 
 ## Why the ranking is judged end-to-end and not per-step
 
@@ -48,7 +48,7 @@ from geopandas import GeoDataFrame
 from shapely import STRtree
 from shapely.geometry import LineString
 
-import reblock.methods.arterial as art
+import reblock.methods.arterial.scoring as art
 from reblock.budget import (
     _BlockScoringContext,
     access_burden,
@@ -60,16 +60,18 @@ from reblock.budget import (
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import (
-    _PARALLEL_THRESHOLD,
+from reblock.methods.arterial.primitives import (
     _anchor_points,
     _candidate_chords,
     _deep_targets,
     _explode,
     _merge,
     _planarize,
-    _score,
     _snap_graph,
+)
+from reblock.methods.arterial.scoring import (
+    _PARALLEL_THRESHOLD,
+    _score,
     _StepState,
     eval_candidate,
 )

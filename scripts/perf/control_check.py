@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import sys
 
-from reblock.methods.arterial import _greedy_arterials
+from reblock.methods.arterial.engines import _greedy_arterials
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from scripts.pair_matrix import evenly_spaced, load_pools
 from scripts.perf.selectors import ScoreAll

@@ -25,7 +25,7 @@ from shapely import STRtree
 
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import _anchor_points, _candidate_chords, _deep_targets
+from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords, _deep_targets
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from scripts.perf.selectors import CHUNK, RANK_RADIUS, FirstOrder
 from scripts.perf.shortlist_greedy import greedy_shortlist

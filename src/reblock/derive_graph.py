@@ -42,6 +42,12 @@ _L1: dict[tuple[Any, ...], Any] = {}
 #
 # `permeability.py` is here because methods call it DURING their search (cycle_native and
 # resistance_lp score candidates with it), so it shapes proposals, not just evaluation.
+#
+# The `methods/` glob is RECURSIVE (`**/*.py`, not `*.py`): `arterial` is a package (one module per
+# concern under `methods/arterial/`), not a flat file, and a non-recursive glob would silently stop
+# hashing its source entirely -- exactly the staleness this glob (over a hand-maintained list) was
+# built to prevent, just one level deeper. Any FUTURE method that becomes a package is covered the
+# same way, with no list to remember to update.
 _DERIVATION_MODULES: tuple[Path, ...] = (
     Path(__file__).with_name("derive_graph.py"),
     Path(__file__).parent / "derive" / "access.py",
@@ -51,7 +57,7 @@ _DERIVATION_MODULES: tuple[Path, ...] = (
     # _noded_graph/access_burden/displacement -- used by arterial + loop_closure
     Path(__file__).with_name("budget.py"),
     Path(__file__).with_name("permeability.py"),     # scored inside several methods' search
-    *sorted((Path(__file__).parent / "methods").glob("*.py")),
+    *sorted((Path(__file__).parent / "methods").glob("**/*.py")),
     Path(__file__).with_name("derivations.py"),      # derive()-wrapper bodies
     Path(__file__).parent / "data" / "kblock.py",    # _voronoi_parcels (the voronoi derivation)
     Path(__file__).parent / "screen" / "dense_compact.py",  # _compute_selection (screen cache)

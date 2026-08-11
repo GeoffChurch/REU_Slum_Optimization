@@ -34,11 +34,13 @@ from shapely import STRtree
 from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
-import reblock.methods.arterial as art
+import reblock.methods.arterial.engines as engines
+import reblock.methods.arterial.scoring as scoring
 from reblock.budget import displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import GreedyArterialReblocker
+from reblock.methods.arterial.primitives import _explode, _planarize, _union_with
 from scripts.pair_matrix import evenly_spaced, load_pools
 from scripts.perf.first_order_rank import first_order_gain
 
@@ -50,9 +52,9 @@ OUT = Path("scripts/perf/rank_decompose.json")
 _EXACT: list[tuple[float, float, float]] = []       # (raw benefit, exact denom, snapped length)
 _CHORDS: list[LineString] = []
 _ROWS: list[dict[str, float]] = []
-_ORIG_CHORDS = art._candidate_chords
-_ORIG_BEST = art._best_candidate
-_ORIG_EVAL = art.eval_candidate
+_ORIG_CHORDS = engines._candidate_chords
+_ORIG_BEST = engines._best_candidate
+_ORIG_EVAL = engines.eval_candidate
 
 _BLOCK: object = None
 _ADJ: list[set[int]] = []
@@ -66,14 +68,15 @@ def _eval_hook(chord: LineString) -> tuple[float, BaseGeometry | None]:
     """`eval_candidate`, plus the (benefit, cost) split it discards. Recomputed here rather than
     plumbed out of `eval_candidate`, so the shipped scorer is untouched and the gain it returns is
     the real one -- these two numbers only have to be consistent with each other."""
-    st = art._STEP_STATE
+    st = scoring._STEP_STATE
     gain, real = _ORIG_EVAL(chord)
     assert st is not None
     if real is None or real.length == 0:
         _EXACT.append((0.0, 0.0, 0.0))
         return gain, real
-    trial = art._explode(art._union_with(st.base_merged, real), st.crs, 2.0 * st.half_width_m)
-    raw = art._score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
+    trial = _explode(_union_with(st.base_merged, real), st.crs, 2.0 * st.half_width_m)
+    raw = scoring._score(
+        st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
     denom = float(displacement(st.block.building_points, st.radii, trial) - st.committed_disp)
     _EXACT.append((raw, denom, float(real.length)))
     return gain, real
@@ -101,7 +104,7 @@ def _best_hook(results: object) -> tuple[float, BaseGeometry | None]:
     if real is None or blk is None or _TREE is None or len(_EXACT) != len(_CHORDS):
         return gain, real
 
-    base = art._planarize(list(_COMMITTED), blk.crs, 2.0 * _HALF_W)      # type: ignore[attr-defined]
+    base = _planarize(list(_COMMITTED), blk.crs, 2.0 * _HALF_W)          # type: ignore[attr-defined]
     depths = parcel_access_layers(blk, base if len(base) else None,      # type: ignore[arg-type]
                                   tol=STREET_TOL, adj=_ADJ,
                                   unreached_depth=len(blk.parcels) + 1)   # type: ignore[attr-defined]
@@ -161,9 +164,9 @@ def _best_hook(results: object) -> tuple[float, BaseGeometry | None]:
 
 
 def main() -> None:
-    art._candidate_chords = _chords_hook           # type: ignore[assignment]
-    art._best_candidate = _best_hook               # type: ignore[assignment]
-    art.eval_candidate = _eval_hook                # type: ignore[assignment]
+    engines._candidate_chords = _chords_hook           # type: ignore[assignment]
+    engines._best_candidate = _best_hook               # type: ignore[assignment]
+    engines.eval_candidate = _eval_hook                # type: ignore[assignment]
     pools = load_pools()
     blocks = pools.blocks
     counts = [float(len(b.parcels)) for b in blocks]

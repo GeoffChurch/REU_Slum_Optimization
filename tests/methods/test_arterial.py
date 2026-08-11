@@ -9,19 +9,17 @@ from reblock.budget import building_radii, displacement
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods import arterial
-from reblock.methods.arterial import (
-    ArterialIdentity,
-    GreedyArterialReblocker,
+from reblock.methods.arterial import ArterialIdentity, GreedyArterialReblocker, engines
+from reblock.methods.arterial.engines import _greedy_arterials
+from reblock.methods.arterial.primitives import (
     _anchor_points,
-    _best_candidate,
     _candidate_chords,
     _deep_targets,
-    _greedy_arterials,
     _planarize,
-    _snap,
     _snap_graph,
 )
+from reblock.methods.arterial.realize import _snap
+from reblock.methods.arterial.scoring import _best_candidate
 from reblock.methods.boundary_graph import _boundary_graph
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
@@ -154,7 +152,7 @@ def test_arterial_parallel_identical_to_serial(monkeypatch: pytest.MonkeyPatch) 
     # the final all-non-positive-gain step also runs through the pool. Without the forced-low
     # threshold, candidates < 128 and the "parallel" run would silently fall back to serial, proving
     # nothing. Repeat a few times because fork races are low-probability per run.
-    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
     for _ in range(3):
         for mode in ("buildable", "aspirational"):
             block = _grid_block(3)
@@ -173,7 +171,7 @@ def test_arterial_parallel_geometry_bit_identical(monkeypatch: pytest.MonkeyPatc
     # The winner geometry returned across the process boundary must be COORDINATE-exact to serial's,
     # not merely wkt-equal (.wkt rounds at precision 6). This fails fast if a future change reverts
     # eval_candidate's return from the shapely geometry (pickled lossless via WKB) to a lossy wkt.
-    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
     block = _grid_block(3)
     serial = GreedyArterialReblocker(mode="buildable", n_anchors=6, workers=1).propose(block).roads
     par = GreedyArterialReblocker(mode="buildable", n_anchors=6, workers=16).propose(block).roads
@@ -190,7 +188,7 @@ def test_arterial_parallel_matches_reference_1808(monkeypatch: pytest.MonkeyPatc
     # pool actually runs on the real 1808 block, and its buildable roads must WKT-set-equal the
     # pinned reference (same guarantee the serial test_arterial_proposal_wkt_unchanged asserts).
     from scoring_fixtures import _REF, _block_1808
-    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
     roads = GreedyArterialReblocker(mode="buildable", workers=16).propose(_block_1808()).roads
     assert roads is not None
     assert sorted(g.wkt for g in roads.geometry) == sorted(_REF["arterial_buildable"]["wkt"])
@@ -199,7 +197,7 @@ def test_arterial_parallel_matches_reference_1808(monkeypatch: pytest.MonkeyPatc
 def test_arterial_parallel_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
     # Two identical workers=16 proposes must produce identical sorted WKT. Forced-low threshold so
     # the pool path (not serial) is what's being checked for determinism.
-    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
     block = _grid_block(3)
     a = GreedyArterialReblocker(mode="buildable", n_anchors=6, workers=16).propose(block).roads
     b = GreedyArterialReblocker(mode="buildable", n_anchors=6, workers=16).propose(block).roads
@@ -216,7 +214,7 @@ def test_arterial_parallel_soak(monkeypatch: pytest.MonkeyPatch) -> None:
     # (n_anchors=6, the same known-fast config as the other parallel tests) stay under 128 and the
     # soak would take the serial path every time, spawning zero pools and proving nothing. 30
     # proposes x a handful of greedy steps/propose = a few hundred pool create/teardown cycles.
-    monkeypatch.setattr(arterial, "_PARALLEL_THRESHOLD", 1)
+    monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
     block = _grid_block(3)
     for _ in range(30):
         roads = GreedyArterialReblocker(mode="buildable", objective="directness", n_anchors=6,
@@ -351,7 +349,10 @@ def test_config_and_derivation_wiring() -> None:
     from hydra.utils import instantiate
 
     from reblock.derive_graph import _DERIVATION_MODULES
-    assert any(p.name == "arterial.py" for p in _DERIVATION_MODULES)
+    # arterial.py became a package (task 1 of the arterial-engine-productionization refactor); the
+    # public method now lives in reblocker.py, so that's the file this wiring check looks for. The
+    # glob itself is recursive (see derive_graph.py), so every module under arterial/ is hashed.
+    assert any(p.name == "reblocker.py" for p in _DERIVATION_MODULES)
     conf_dir = str(Path("conf").resolve())
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config",

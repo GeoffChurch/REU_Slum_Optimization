@@ -37,7 +37,7 @@ from pathlib import Path
 
 import numpy as np
 
-import reblock.methods.arterial as art
+import reblock.methods.arterial.engines as art
 from reblock.budget import building_radii, prefix_to_displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency

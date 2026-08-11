@@ -30,16 +30,16 @@ from reblock.budget import access_burden
 from reblock.contracts import Block, Screen, Source
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import (
+from reblock.methods.arterial.primitives import (
     _anchor_points,
-    _boundary_graph,
     _candidate_chords,
     _deep_targets,
     _explode,
-    _score,
-    _snap,
     _snap_graph,
 )
+from reblock.methods.arterial.realize import _snap
+from reblock.methods.arterial.scoring import _score
+from reblock.methods.boundary_graph import _boundary_graph
 
 CACHE = Path("scratchpad/perf/region_block.pkl")
 N_SAMPLE = 60          # candidates to time; each is one Dijkstra + one 11k-parcel BFS
@@ -123,7 +123,7 @@ def main() -> None:
     for real in reals:
         if real is None or real.length == 0:
             continue
-        from reblock.methods.arterial import _union_with
+        from reblock.methods.arterial.primitives import _union_with
         trial = _explode(_union_with(None, real), block.crs, 2.0 * HALF_W)
         t0 = time.perf_counter()
         _score("access", block, trial, adj, base_burden, None)

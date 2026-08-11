@@ -28,7 +28,7 @@ from shapely import STRtree
 
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import _anchor_points, _candidate_chords, _deep_targets
+from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords, _deep_targets
 from scripts.perf.snap_vs_peel import region_block_cached
 
 CHUNK = 20_000          # chords per bulk query -- bounds the pair array, not the total work

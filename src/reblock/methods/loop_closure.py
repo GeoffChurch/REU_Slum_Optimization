@@ -23,7 +23,8 @@ from reblock.budget import _explode_segments, _noded_graph
 from reblock.contracts import Block, Method, Proposal
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
-from reblock.methods.arterial import _snap, _snap_graph
+from reblock.methods.arterial.primitives import _snap_graph
+from reblock.methods.arterial.realize import _snap
 from reblock.methods.boundary_graph import _boundary_graph
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 

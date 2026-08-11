@@ -13,8 +13,8 @@ from reblock.budget import (
     _StepContext,
     network_efficiency,
 )
-from reblock.methods import arterial
-from reblock.methods.arterial import _planarize
+from reblock.methods.arterial.engines import _greedy_arterials
+from reblock.methods.arterial.primitives import _planarize
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 
 
@@ -155,14 +155,14 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     region = _region_deep()
 
     calls["n"] = 0
-    roads_a1 = arterial._greedy_arterials(
+    roads_a1 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         mode="aspirational", objective="directness",
                                           max_roads=2, workers=1)
     assert calls["n"] == 0, "aspirational must NOT use the incremental scorer (Bug 2)"
 
     calls["n"] = 0
-    arterial._greedy_arterials(
+    _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         mode="buildable", objective="directness", max_roads=2,
                                workers=1)
@@ -170,7 +170,7 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
 
     # Aspirational proposed geometry is deterministic/unchanged across runs (it scores through the
     # full path, which equals network_efficiency -- verified elsewhere -- so the argmax is stable).
-    roads_a2 = arterial._greedy_arterials(
+    roads_a2 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         mode="aspirational", objective="directness",
                                           max_roads=2, workers=1)

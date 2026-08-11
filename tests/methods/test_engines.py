@@ -4,7 +4,7 @@ from shapely.geometry import LineString
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import GreedyArterialReblocker
-from reblock.methods.arterial_lazy import _make_policy
+from reblock.methods.arterial.policies import _make_policy
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.methods.test_arterial import _grid_block  # reuse the fast grid fixture
 
@@ -66,8 +66,7 @@ def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads):
     # Parametrized over several buildable/aspirational configs (not just one) because the heap's
     # tie-break only diverges from exact on candidate sets that actually contain an equal-gain tie
     # -- a single lucky config can pass while the tie-break logic is still wrong.
-    from reblock.methods.arterial import _greedy_arterials
-    from reblock.methods.arterial_lazy import _greedy_arterials_lazy
+    from reblock.methods.arterial.engines import _greedy_arterials, _greedy_arterials_lazy
     for mode in ("buildable", "aspirational"):
         block = _grid_block(grid_n)
         exact = _greedy_arterials(
@@ -84,7 +83,7 @@ def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads):
 
 def test_faithful_policy_matches_arterial_candidate_set():
     # faithful's set after committing a road must equal arterial's own regeneration for that network
-    from reblock.methods.arterial import _anchor_points, _candidate_chords
+    from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords
     block = _grid_block(5)
     pol = _policy("faithful", block)
     base = pol.initial()
@@ -125,21 +124,21 @@ def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
     # instrument eval_candidate call count on a real block where arterial runs
     from scoring_fixtures import _block_1808
 
-    import reblock.methods.arterial as art
+    from reblock.methods.arterial import engines
     block = _block_1808()
     calls = {"n": 0}
-    real_eval = art.eval_candidate
+    real_eval = engines.eval_candidate
     def counting(chord):
         calls["n"] += 1
         return real_eval(chord)
+    # `_greedy_arterials` (exact) and `_greedy_arterials_lazy` now live in the same module and
+    # share this one imported `eval_candidate` binding, so a single patch covers both engines.
+    monkeypatch.setattr(engines, "eval_candidate", counting)
     # exact
-    monkeypatch.setattr(art, "eval_candidate", counting)
     calls["n"] = 0
     GreedyArterialReblocker(mode="buildable", n_anchors=8, max_roads=4, workers=1).propose(block)
     exact_calls = calls["n"]
-    # lazy grow (patch the name the lazy engine imported, too)
-    import reblock.methods.arterial_lazy as lz
-    monkeypatch.setattr(lz, "eval_candidate", counting)
+    # lazy grow
     calls["n"] = 0
     GreedyArterialReblocker(mode="buildable", n_anchors=8, max_roads=4, workers=1,
                             lazy=True, candidate_policy="grow", rescore_every=0).propose(block)
