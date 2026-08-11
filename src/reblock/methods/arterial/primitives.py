@@ -31,37 +31,58 @@ def _xy(c: tuple[float, ...]) -> tuple[float, float]:
     return (c[0], c[1])
 
 
-def _anchor_points(network: Sequence[BaseGeometry], n: int,
-                    max_anchors: int = 0) -> list[tuple[float, float]]:
-    """`n` points sampled evenly by arc-length along the merged network, plus every network vertex
-    (so committed-segment endpoints are always anchors -> continuations come for free). If
-    `max_anchors > 0`, return ONLY ~`max_anchors` arc-length samples (NOT every vertex), bounding
-    the candidate count to ~C(max_anchors, 2) for tractability on large blocks. `unary_union`
-    explodes any Multi* input, so streets given as a MultiLineString (a block with a hole/courtyard)
-    are handled. `_rnd`-snapped, de-duplicated, sorted for determinism."""
+def _merged_lines(network: Sequence[BaseGeometry]) -> tuple[list[BaseGeometry], float]:
+    """The network as a flat line list plus its total length. `unary_union` explodes any Multi*
+    input, so streets given as a MultiLineString (a block with a hole/courtyard) are handled."""
     merged = unary_union(network)
     lines = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
-    total = sum(ln.length for ln in lines)
+    return lines, sum(ln.length for ln in lines)
+
+
+def _arclength_samples(lines: Sequence[BaseGeometry], total: float,
+                       count: int) -> list[tuple[float, float]]:
+    """`count` points spaced evenly by arc-length along the network. `_rnd`-snapped, de-duplicated,
+    sorted for determinism. Yields ~`count` + one per line, not exactly `count`."""
     pts: set[tuple[float, float]] = set()
-    if max_anchors > 0:
-        if total > 0:
-            step = total / max_anchors
-            for ln in lines:
-                d = 0.0
-                while d <= ln.length:
-                    pts.add(_rnd(_xy(ln.interpolate(d).coords[0])))
-                    d += step
-        return sorted(pts)
-    for ln in lines:
-        pts.update(_rnd(_xy(c)) for c in ln.coords)                  # vertices
-    if total > 0 and n > 0:
-        step = total / n
+    if total > 0 and count > 0:
+        step = total / count
         for ln in lines:
             d = 0.0
             while d <= ln.length:
                 pts.add(_rnd(_xy(ln.interpolate(d).coords[0])))
                 d += step
     return sorted(pts)
+
+
+def _vertices_and_samples(lines: Sequence[BaseGeometry], total: float,
+                          n: int) -> list[tuple[float, float]]:
+    """Every network vertex plus `n` arc-length samples -- the uncapped anchor family. Vertices are
+    what make committed-segment endpoints anchors, so continuations come for free."""
+    pts: set[tuple[float, float]] = {_rnd(_xy(c)) for ln in lines for c in ln.coords}
+    pts.update(_arclength_samples(lines, total, n))
+    return sorted(pts)
+
+
+def _anchor_points(network: Sequence[BaseGeometry], n: int,
+                    max_anchors: int = 0) -> list[tuple[float, float]]:
+    """Anchors for candidate generation: every network vertex plus `n` arc-length samples.
+
+    `max_anchors > 0` is a CAP, not a mode switch. If the uncapped family already fits, it is
+    returned untouched; only when it does not does this fall back to ~`max_anchors` arc-length
+    samples, and even then it returns whichever set is smaller. So the cap can never inflate the
+    anchor count -- which the previous implementation did, replacing the vertex family outright and
+    yielding 129 anchors where uncapped gave 39 (measured 1.69x wall clock at block scale).
+
+    When the cap DOES bind the result is the sampled family, exactly as measured in
+    notes/2026-08-11-max-anchors-is-a-region-scale-win.md -- subsampling the vertex set instead
+    would preserve continuations and might well be better, but it is unmeasured.
+    """
+    lines, total = _merged_lines(network)
+    full = _vertices_and_samples(lines, total, n)
+    if max_anchors <= 0 or len(full) <= max_anchors:
+        return full
+    sampled = _arclength_samples(lines, total, max_anchors)
+    return sampled if len(sampled) < len(full) else full
 
 
 def _deep_targets(block: Block, roads: GeoDataFrame | None, k: int,

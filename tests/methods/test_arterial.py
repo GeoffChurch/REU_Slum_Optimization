@@ -59,6 +59,27 @@ def test_anchor_points_max_anchors_caps_and_default_matches_uncapped() -> None:
     assert len(capped) < len(uncapped)
 
 
+def test_max_anchors_never_pessimises() -> None:
+    """A cap must never produce MORE anchors than uncapped. Today `max_anchors > 0` REPLACES the
+    per-vertex family with arc-length samples, so a cap above the vertex count inflates the set --
+    measured 1.69x wall clock at block scale. The name promises a maximum; this makes it one."""
+    coords = [(float(i), 0.0 if i % 2 == 0 else 1.0) for i in range(40)]
+    net = [LineString(coords)]
+    uncapped = _anchor_points(net, n=8, max_anchors=0)
+    for cap in (4, 8, 16, 32, 64, 128, 256):
+        got = _anchor_points(net, n=8, max_anchors=cap)
+        assert len(got) <= len(uncapped), (
+            f"max_anchors={cap} produced {len(got)} anchors, more than uncapped's {len(uncapped)}")
+
+
+def test_max_anchors_above_the_anchor_count_is_a_no_op() -> None:
+    """A cap the network never reaches must be exactly uncapped -- not a different anchor family."""
+    coords = [(float(i), 0.0 if i % 2 == 0 else 1.0) for i in range(40)]
+    net = [LineString(coords)]
+    uncapped = _anchor_points(net, n=8, max_anchors=0)
+    assert _anchor_points(net, n=8, max_anchors=10_000) == uncapped
+
+
 def test_deep_targets_are_the_deepest_parcels() -> None:
     block = _grid_block(5)                       # center parcel is deepest, full-boundary streets
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
