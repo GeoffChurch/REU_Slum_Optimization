@@ -1,96 +1,92 @@
-# `max_anchors` is a region-scale COST win, and a block-scale mistake
+# `max_anchors`: a 7.6× region-scale cost win, a block-scale mistake, and three wrong turns
 
-**Date:** 2026-08-11
+**Date:** 2026-08-11 (rewritten same day; supersedes three earlier versions of this note)
 **Branch:** `continuum-permeability`
-**Harnesses:** `scripts/perf/anchor_cap.py` (block), `scripts/perf/region_anchor_cap.py` (region)
-**Data:** `scripts/perf/anchor_cap.json`, `scripts/perf/region_anchor_cap.json`
+**Harnesses:** `scripts/perf/{anchor_cap,region_cap_replicate,region_cap_matched,region_shortlist_confound}.py`
+**Analysis:** `pixi run python -m scripts.perf.region_cap_report`
 
 The handoff left `max_anchors` "unevaluated, not rejected", expecting it to *cost* access quality:
 it drops per-vertex anchors and biases toward long chords, "which for an access objective is
-precisely the wrong bias." Measured, that bias does not appear. The cap is **8.2× faster at
-roughly comparable quality**, which is what makes region-scale access affordable.
-
-> ## CORRECTION (same day, before this note was acted on)
->
-> **The quality half of this note's first version was wrong, and the error is instructive.** It
-> claimed the cap was "better on both metrics" on the strength of **+0.0884 permeability**. That
-> comparison was not displacement-matched, despite saying it was.
->
-> At region scale the 15-road networks displace only **0.0115–0.0193** of buildings, so
-> `prefix_to_displacement(..., 0.10)` never truncated anything — its documented behaviour when a
-> budget is unreachable is to return *all* roads. Every "matched budget 0.10" region figure below
-> is therefore **road-count-matched, not displacement-matched**, and the arms displace very
-> different amounts: `cap=128` displaces **68% more** than uncapped (0.0193 vs 0.0115) for 4% more
-> road length.
->
-> Re-evaluated at budgets all three arms can actually reach:
->
-> | budget | arm | roads | road_m | burden_red | perm |
-> |---|---|---|---|---|---|
-> | 0.005 | 128 | 8 | 1,303 | 0.6294 | 0.3656 |
-> | 0.005 | 256 | 26 | 1,217 | 0.6346 | 0.3885 |
-> | 0.005 | **uncapped** | 10 | 1,788 | **0.7137** | **0.4250** |
-> | 0.010 | 128 | 13 | 2,166 | 0.7098 | 0.4970 |
-> | 0.010 | 256 | 34 | 2,353 | 0.7936 | **0.5766** |
-> | 0.010 | **uncapped** | 19 | 2,948 | **0.8260** | 0.5012 |
->
-> At equal displacement uncapped wins outright at 0.005 and wins on burden at 0.010; only
-> `cap=256`'s permeability at 0.010 beats it. **The permeability win was displacement the capped
-> arm spent and was not charged for.**
->
-> What survives untouched: the **8.2× / 6.1× speedup**, the mode-switch finding, the block-scale
-> dominance result, the candidate-growth diagnosis, and the retirement of the 66-minute
-> observation. What does not: "better on both metrics".
->
-> A coherent mechanism sits in the road lengths — uncapped needs **more metres for the same
-> displacement** (1,788 m vs 1,303 m at 0.005), i.e. its roads run through emptier corridors.
-> Vertex anchors sit on parcel-boundary-graph vertices, which are the gaps *between* buildings;
-> arc-length samples land anywhere, including mid-cluster.
->
-> **Lesson worth keeping:** a budget-matching helper that silently degrades to "no truncation" when
-> the budget is unreachable will not error, and the resulting comparison looks matched. Check that
-> the budget actually binds before claiming it did.
+precisely the wrong bias." That bias does not appear. What the cap actually buys is **speed**, and
+the quality question is **unresolvable at the n this work can afford** — which is itself the useful
+finding, because it says the decision should be made on cost.
 
 ---
 
-## The headline (road-count-matched — see the correction above)
+## The claim
 
-Region block, 11,006 parcels, tier-2 shortlist 512, 15 roads, matched displacement budget 0.10:
+Six independent region blocks (3.4k–12k parcels), tier-2 shortlist 512, 8 roads:
 
-| `max_anchors` | burden_red | perm | road_m | minutes | candidate growth |
-|---|---|---|---|---|---|
-| 128 | 0.8705 | **0.6369** | 3,779 | **9.7** | 1.62× |
-| 256 | 0.8632 | **0.6476** | 3,643 | **13.1** | 1.37× |
-| uncapped (shipped) | 0.8610 | 0.5485 | 3,635 | 79.7 | 2.52× |
+| | cap=128 | cap=256 |
+|---|---|---|
+| speedup vs uncapped | **7.6× median** (2.5–12.2×), 6/6 regions | **5.5× median** (1.4–8.7×), 6/6 |
+| quality at matched displacement | no detectable difference | no detectable difference |
 
-`128` vs uncapped: burden **+0.0095**, perm **+0.0884**, **8.2×** faster.
-`256` vs uncapped: burden **+0.0021**, perm **+0.0991**, **6.1×** faster.
+Every quality interval against uncapped spans zero; win-counts are 2/6–3/6 with sign-test p ≥ 0.69.
+Region-scale access goes from "not finished after 11.6 h" to **~10 minutes** — roughly **330×**
+combined with tier 2, and that is the number carrying this work.
 
-The uncapped arm reproduced the previously recorded run exactly — identical candidate counts at
-every one of the 15 steps (468,968 → 1,180,388), 29 road rows, 3,635 m, 79.7 min against the
-recorded 79.6 — so this is the same measurement, not a differently-configured one.
+**"No detectable difference" means exactly that, not "no difference."** The between-region sd of
+the burden delta is **0.0984**, and this same greedy moves by up to **0.1356** under a 1e-10
+perturbation of its own gains (2026-08-09 tie-sensitivity note). The scatter between regions is the
+same order as the method's own arbitrariness. n=6 cannot resolve a quality effect against that, and
+no affordable n would: each uncapped region costs 30–53 minutes.
 
-**Why the permeability number looked like it mattered — and why that reasoning failed.** Burden is
-what the greedy optimizes; permeability is co-reported and nothing selects on it, so a metric that
-moves without being selected on normally indicates a real structural difference rather than
-tie-break scatter. That signature was pre-registered in the harness docstring before the run, and
-it fired: permeability moved +0.09 under two independent caps.
+---
 
-The inference was still wrong, because it assumed the arms were otherwise comparable. They were
-not — the capped arms spent 68% more displacement, which lifts *both* metrics at once. A
-pre-registered signature protects against choosing your evidence after the fact; it does not
-protect against an uncontrolled variable. See the correction above.
+## Three wrong turns, and why each happened
+
+Recorded because the *pattern* is the transferable part, and because two of them were published
+before being caught.
+
+### 1. "Better on both metrics" — the budget never bound
+
+The first version headlined **+0.0884 permeability** at a "matched displacement budget of 0.10."
+Region networks displace **0.0115–0.0193**. `prefix_to_displacement` returns *all* roads when a
+budget is unreachable — documented, silent, no error — so nothing was ever truncated. The
+comparison was road-count-matched, and the capped arm had quietly spent **68% more displacement**,
+which buys burden and permeability alike.
+
+*Transferable:* a budget-matching helper that degrades to "no truncation" rather than raising will
+produce a comparison that looks matched and is not. **Assert the budget binds.** Absolute budgets
+carried from block scale (0.05–0.20) are all unreachable at region scale, where the band is
+0.005–0.02 and differs per region — which is why matching is now computed *from the arms* in
+`region_cap_matched.py` rather than configured.
+
+### 2. "Costs quality" — a biased interim sample
+
+The correction over-shot. At n=3 matched, capping looked *worse* (perm negative at all four budget
+fractions), and that was reported. It does not survive n=6.
+
+The cause is mechanical and worth remembering: the replication runs regions **ascending by size**,
+because uncapped cost grows steeply and cheapest-first makes an interrupted run maximally useful.
+That same ordering makes any interim read the **three smallest regions** — and it happened to
+include region 3, the one large negative outlier (−0.16 burden). One outlier in a biased
+sub-sample.
+
+*Transferable:* an ordering chosen for kill-resilience is not a random sample. **Interim results
+from a deliberately-ordered run should not be given a direction.**
+
+### 3. "The stratification mechanism" — an n=1 story
+
+Also claimed: capped roads displace more because arc-length samples land mid-cluster while
+boundary-graph vertices thread the gaps between buildings. Coherent, and true on region 0. Across
+six regions the direction **flips** — uncapped displaces most in regions 5, 4 and 1 and least in 3
+and 0. Retracted; the per-region displacement column is now reported so it cannot be assumed again.
+
+**A pre-registered signature did not save turn 1.** The harness declared in advance that
+"permeability moving without being selected on indicates real structure", and it fired. Declaring
+your evidence in advance guards against choosing it after the fact; it does nothing about an
+uncontrolled variable lifting both metrics together.
 
 ---
 
 ## `max_anchors` is a mode switch, not a tuning knob
 
-This is the fact that reframes the parameter, and it is verifiable in three lines:
+The most durable structural finding, verifiable in three lines:
 
 ```
 max_anchors=16   anchors=17    committed endpoint present: False
-max_anchors=32   anchors=33    committed endpoint present: False
-max_anchors=64   anchors=65    committed endpoint present: False
 max_anchors=128  anchors=129   committed endpoint present: False
 uncapped         anchors=35    committed endpoint present: True
 ```
@@ -102,15 +98,13 @@ for free."
 
 So the cap does not thin the anchor set — it **replaces one family with another**. At `cap=128` you
 get 129 anchors where uncapped gives 35, nearly four times as many, and the committed endpoint is
-*still* gone. There is **no setting that preserves continuations**, and "set it larger to be safe"
-buys only cost. Any future discussion of tuning this parameter should start here.
+*still* gone. **No setting preserves continuations**, and "set it larger to be safe" buys only cost.
 
 ---
 
-## Block scale: the cap is dominated — do not use it there
+## Block scale: dominated — do not use it there
 
-12 blocks, paired bootstrap against uncapped, same tier-2 selector in every arm, matched
-displacement:
+12 blocks, paired bootstrap, same tier-2 selector in every arm:
 
 | cap | Δburden | 95% CI | Δperm | 95% CI | speed |
 |---|---|---|---|---|---|
@@ -119,114 +113,101 @@ displacement:
 | 128 | −0.0063 | [−0.0259, +0.0113] | +0.0023 | [−0.0207, +0.0238] | **0.59×** |
 | 256 | −0.0281 | [−0.0866, +0.0108] | −0.0220 | [−0.0700, +0.0150] | **0.24×** |
 
-Seven of eight CIs span zero. `cap=64`'s burden CI clears zero by 0.0009 — across eight comparisons
-that is what chance produces, and its own permeability CI spans zero, so the independent check does
-not corroborate it. **No quality effect.**
+Seven of eight CIs span zero (cap=64's burden clears it by 0.0009 — across eight comparisons that is
+chance, and its own permeability CI spans zero). No quality effect, and every useful setting is
+*slower*: uncapped needs 1,272 candidates on these blocks while `cap=256` enumerates 34,688.
 
-But every useful setting is *slower*: uncapped needs only 1,272 candidates on these blocks while
-`cap=256` enumerates 34,688 — 27× more work for nothing. Neutral on quality, worse on speed, so the
-cap is **Pareto-dominated at block scale** and should never be offered there.
-
-This is the unusual shape worth remembering: the same parameter is dominated at one scale and
-strongly Pareto-optimal at another. It is not a setting with a good default — it is a setting whose
-correct value is a function of the input size.
+**Pareto-dominated at block scale.** The same parameter is dominated at one scale and strongly
+favourable at another, so its correct value is a function of input size — it resolves upstream in
+config, never as a global default.
 
 ---
 
-## How the networks actually differ
+## What the speedup scales with
 
-The structural difference is real and survives the correction — it is only its *interpretation* as
-a quality win that does not:
+Not parcels. Regions 5 and 2 have near-identical parcel counts (3,404 / 3,427) and differ **7×** in
+uncapped runtime (2.5 vs 18.6 min), because anchors follow street and boundary-graph vertices.
 
-| arm | segs | total_m | mean_m | median_m | junctions | deg ≥ 3 |
-|---|---|---|---|---|---|---|
-| 128 | 57 | 3,779 | 66.3 | 11.7 | 64 | 6 |
-| 256 | 63 | 3,643 | 57.8 | 12.4 | 70 | 5 |
-| uncapped | 29 | 3,635 | 125.3 | 113.8 | 34 | 9 |
+| | Spearman vs speedup | exact permutation p |
+|---|---|---|
+| candidate count | **+0.829** | 0.058 |
+| parcel count | +0.371 | 0.497 |
 
-Uncapped builds **fewer, longer, more-branching** roads — it has *more* true intersections (9
-against 5–6), which is what having continuations available should produce. The caps build many
-shorter segments across more junctions, at the same total length.
-
-Arc-length anchors are evenly spaced along the network by construction; vertex anchors pile up
-wherever the parcel-boundary graph is geometrically dense. That is a genuine difference in what the
-two families propose, and it shows up twice:
-
-* **Spatially** — the capped networks spread more evenly, the uncapped ones concentrate.
-* **In displacement per metre** — uncapped needs **1,788 m** to displace 0.005 where `cap=128`
-  needs **1,303 m**. Boundary-graph vertices *are* the gaps between buildings, so vertex-anchored
-  roads thread through empty space; arc-length samples land wherever the arc length falls,
-  including through building clusters.
-
-The second point is the whole correction. Spreading evenly means displacing more, and displacement
-buys burden and permeability. Once displacement is charged for, the apparent quality gain is mostly
-gone. **This is a cost win with a structural side-effect, not a quality win.**
-
-Two things remain genuinely open. The **shortlist confound**: at a fixed 512, the capped arm scores
-1.7% of its candidates and uncapped 0.04%, so the arms differ in sampled fraction as well as anchor
-family (`region_shortlist_confound.py` climbs the uncapped ladder to separate them). And whether
-the even-spread family is *preferable* at matched displacement is now an open question rather than a
-settled one — at 0.010 `cap=256` did post the best permeability of the three.
+Candidates is what the cap acts on, so this is the mechanically coherent reading — but at n=6 it is
+suggestive, not established. Candidate growth flattens as designed: uncapped 1.58–2.51× across 8
+steps, capped 1.05–1.53×.
 
 ---
 
-## Cost: the handoff's diagnosis of the growth was right
+## Frontier: neither cap dominates the other
 
-Uncapped candidates grow 2.52× across 15 region steps and 3.27× across 8 block steps, and every cap
-flattens it (block scale: 1.34× / 1.19× / 1.05× / 1.02×). The residual growth is **linear, not
-quadratic** — the capped branch yields `max_anchors + n_lines` anchors, so it gains about one per
-committed road. Committed-road vertices really are what drives the growth, as diagnosed.
+The comparison that *does* resolve, because both caps share the arc-length anchor family and so shed
+the between-family scatter that swamps the cap-vs-uncapped tests:
+
+| cap=128 minus cap=256 | mean | 95% CI |
+|---|---|---|
+| burden | −0.0341 | [−0.0634, −0.0011] |
+| permeability | −0.0459 | [−0.0678, −0.0200] |
+
+`cap=128` is faster in **6/6** regions; `cap=256` is better on both metrics with intervals excluding
+zero. **Neither is dominated** — 128 buys speed, 256 buys quality — so under the frontier directive
+both stay, selectable, alongside uncapped.
 
 ---
 
 ## Retired: the "unexplained" 66-minute observation
 
-The handoff carries this as an open puzzle: "the 66-minute `max_anchors=24` observation is still
-unexplained — 276 candidates at 242 ms is ~67 s per step. Something else was slow in that run and
-nobody knows what."
-
-There is nothing to explain. `scratchpad/perf/anchors.log` is 77 bytes: the region line and the
-column header, and **zero data rows**. The harness prints one row *after* each `propose` returns, so
-no row means the first `propose` never returned. 66 minutes is wall-clock-until-killed with
-`ma=24` still running — not a completed timing. It also drove the **exact** greedy, which is the
-cost tier 2 exists to remove.
-
----
-
-## Caveats, stated plainly
-
-- **The region result is n=1 block**, and the matched-displacement re-analysis is n=1 as well.
-  Replication across six regions of 3.4k–12k parcels is running (`region_cap_replicate.py`), which
-  also gives a **size gradient** — the mechanism predicts any anchor-family effect grows with
-  region size and vanishes toward block scale, where it measured ~0.
-- **`cap=128` and `cap=256` are not separated.** At matched displacement they do not even agree:
-  256 posted the best permeability at 0.010 and 128 the worst of the three.
-- **The shortlist confound is untested.** At a fixed 512 the arms differ in sampled *fraction*
-  (1.7% vs 0.04%) as well as anchor family. `region_shortlist_confound.py` holds the family at
-  uncapped and climbs the shortlist to separate them; if the gap closes, the honest lever is the
-  shortlist rather than the cap.
-- **Matched-displacement budgets must be checked for reachability.** 0.05–0.20 are all unreachable
-  at region scale with 8–15 roads; the reachable band is roughly 0.005–0.019. Absolute budgets
-  carried over from block scale silently do nothing here.
-- The block-scale null was measured with the *same* tier-2 selector in every arm, so it says nothing
-  about capping under the exact greedy — which is moot, since the exact greedy is what tier 2
-  replaced at this scale.
+The handoff carried this as an open puzzle. There is nothing to explain:
+`scratchpad/perf/anchors.log` is 77 bytes — the region line and a column header, **zero data rows**.
+The harness prints one row *after* each `propose` returns, so the first `propose` never returned. 66
+minutes is wall-clock-until-killed, not a timing. It also drove the **exact** greedy, the cost tier 2
+exists to remove.
 
 ---
 
 ## What this changes
 
-1. `max_anchors` moves from "unevaluated" to **the region-scale affordability lever** — a measured
-   **8.2× cost win at roughly comparable quality**. It is *not* a quality win; the first version of
-   this note said so and was wrong.
-2. It must be selected by input scale, not set globally. A single default is wrong at one of the two
-   scales, and at block scale the wrong default costs up to 4× wall clock for nothing.
-3. The productionization decision (handoff §4) now has a second dimension: an `ArterialEngine`
-   choice, and an anchor policy that is scale-dependent. Both resolve upstream, in config.
-4. Region-scale access is now **9.7 minutes**, against 79.6 for tier 2 alone and "not finished after
-   11.6 h" before it. Combined with tier 2's 40×, that is roughly **330×** on the original problem.
-   This is the claim that carries the work, and it is untouched by the correction.
-5. **Method note for this repo:** `prefix_to_displacement` returns all roads when the budget is
-   unreachable. Any comparison claiming to be displacement-matched should assert the budget binds —
-   otherwise it silently becomes road-count-matched and the arms are free to spend different
-   amounts of the thing that buys the metrics.
+1. `max_anchors` is **the region-scale affordability lever**: 7.6× at no detectable quality cost,
+   with the honest caveat that n=6 cannot resolve a cost of the size that would matter.
+2. It must be selected **by input scale**. Dominated at block scale, favourable at region scale.
+3. Productionization (handoff §4) gains a second dimension: an `ArterialEngine` choice *and* a
+   scale-dependent anchor policy, both resolved upstream in config.
+4. **Method rules for this repo**, each paid for above: assert a displacement budget actually binds
+   before calling a comparison matched; do not read a direction off a deliberately-ordered interim;
+   persist full road lists so budget questions are re-analysis, not re-runs.
+
+---
+
+## Addendum: the shortlist confound is closed — uncapped is saturated at 512
+
+At a fixed shortlist of 512 the arms differ in two ways, not one: anchor **family**, and the
+**fraction** of their own candidates they score exactly — 2.40% for `cap=128` against **0.06%** for
+uncapped, a 40× difference. If the fraction were doing the work, the honest lever would be the
+shortlist and not the cap, and every comparison above would be unfair to uncapped.
+
+It is not. Holding the anchor family at uncapped on region 0 and climbing the shortlist:
+
+| arm | scored | permeability |
+|---|---|---|
+| uncapped, shortlist 512 | 0.06% | 0.4536 |
+| uncapped, shortlist 1024 | 0.12% | 0.4536 |
+| uncapped, shortlist 2048 | 0.23% | 0.4536 |
+| `cap=128`, shortlist 512 | 2.40% | 0.5275 |
+
+Quadrupling the shortlist produces a **bit-identical network**. The first-order ranking already
+puts the step's winner inside the top 512, so candidates below that rank never change an argmax.
+**Uncapped is saturated at 512, the comparison was fair, and the shortlist is not a lever here.**
+(The 4096 rung was still running at the time of writing; three identical rungs settle the shape.)
+
+This also retires the "sampling density" half of the stratification story in wrong turn 3: whatever
+separates the two anchor families, it is not how much of each family gets scored.
+
+---
+
+## Still open
+
+- **The quality question is not closed, and cannot be closed cheaply.** Resolving a ~0.03 effect
+  against sd 0.0984 needs roughly n≈40 regions, i.e. 20–35 hours of uncapped baselines. Whether that
+  is worth buying is a judgement call, not a measurement.
+- Only one road budget (8, plus 15 on region 0) was swept, and — given saturation — one shortlist is
+  now known to be sufficient rather than merely untested.

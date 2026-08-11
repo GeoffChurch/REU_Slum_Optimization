@@ -227,19 +227,38 @@ peel over all 11,006 parcels to score adding ONE road, which changes depths only
 neighbourhood. Multiply by thousands of candidates per step (`_anchor_points` includes every network
 vertex, so candidates grow ~C(anchors,2) as the network densifies) times ~15 steps.
 
-**`max_anchors` DOES rescue it -- measured 2026-08-11. It is a COST win at comparable quality.** See
-`notes/2026-08-11-max-anchors-is-a-region-scale-win.md`. Region block, tier-2 shortlist: `cap=128`
-runs in **9.7 min against uncapped's 79.7** (8.2x); `cap=256` gives 6.1x. Region-scale access is now
-~10 minutes, roughly 330x on the original problem when combined with tier 2.
+**`max_anchors` DOES rescue it -- measured 2026-08-11 across 6 regions. It is a SPEED win.** See
+`notes/2026-08-11-max-anchors-is-a-region-scale-win.md`; run
+`pixi run python -m scripts.perf.region_cap_report` for the numbers. `cap=128` gives a **7.6x median
+speedup** (2.5-12.2x, 6/6 regions), `cap=256` 5.5x. Region-scale access is ~10 minutes, roughly 330x
+on the original problem combined with tier 2.
 
-**Not a quality win -- an earlier version of this entry said it was.** That claim rested on
-permeability +0.0884 at a "matched displacement budget 0.10" which was never reachable: region
-networks displace only 0.0115-0.0193, and `prefix_to_displacement` returns ALL roads when the budget
-cannot be met. So the comparison was road-count-matched, and the capped arm quietly spent **68% more
-displacement** (0.0193 vs 0.0115) -- which buys burden and permeability alike. Re-run at reachable
-budgets, uncapped wins outright at 0.005 and wins on burden at 0.010; only `cap=256`'s permeability
-at 0.010 beats it. Any future displacement-matched claim here should assert the budget actually
-binds.
+**Quality at matched displacement: no detectable difference, and not resolvable at affordable n.**
+Every interval against uncapped spans zero (win-counts 2/6-3/6, sign p >= 0.69). That is a statement
+about resolution, not about equality: the between-region sd of the burden delta is 0.0984 and this
+same greedy moves up to 0.1356 under a 1e-10 self-perturbation, so the scatter is the same order as
+the method's own arbitrariness. Closing it would need n~40 regions -- 20-35 h of uncapped baselines.
+
+**Three published claims here were wrong and are retracted**, recorded in the note because the
+pattern transfers: (1) "+0.0884 permeability, better on both metrics" -- the displacement budget was
+unreachable, so `prefix_to_displacement` silently returned all roads and the capped arm spent 68%
+more displacement uncharged; assert a budget BINDS before calling a comparison matched. (2) "capping
+costs quality" -- read off an interim sample of the three smallest regions, because the run is
+ordered ascending by size for kill-resilience; a deliberately-ordered interim is not a random
+sample. (3) the even-spread displacement mechanism -- true on region 0, direction flips across six.
+
+**The shortlist is not a lever: uncapped is saturated at 512.** Climbing it to 1024 and 2048 on
+region 0 produces a bit-identical network (perm 0.4536 at all three), so the first-order ranking
+already contains each step's winner in its top 512 and the fixed-shortlist comparison was fair to
+uncapped despite it scoring 0.06% of candidates against the cap's 2.40%.
+
+**Frontier: neither cap dominates.** `cap=128` is faster in 6/6 regions; `cap=256` is better on both
+metrics with intervals excluding zero (burden -0.0341 [-0.0634, -0.0011], perm -0.0459 [-0.0678,
+-0.0200]). This paired test resolves what cap-vs-uncapped cannot, because both caps share the
+arc-length family. Both stay, selectable, alongside uncapped.
+
+Speedup scales with CANDIDATE COUNT (Spearman +0.829, exact p=0.058), not parcels (+0.371, p=0.50) --
+regions 5 and 2 have near-identical parcel counts and differ 7x in runtime.
 
 The "66 minutes at `max_anchors=24`" that this paragraph used to rest on **was never a measurement**:
 `scratchpad/perf/anchors.log` holds a header and zero rows, so the first `propose` never returned and
@@ -247,12 +266,7 @@ The "66 minutes at `max_anchors=24`" that this paragraph used to rest on **was n
 number that does not exist -- and it is wrong. Candidate *count* dominates, exactly as the tier-2
 work later measured directly (peel 88%, `_snap` 12%).
 
-The stratification reading in this paragraph was right and its sign was backwards. `max_anchors` is
-arc-length stratified -- closer to a quadrature rule than to random sampling -- and that even spread
-is **why it wins**: vertex anchors pile up where the parcel-boundary graph is geometrically dense,
-so at a fixed shortlist budget the capped arm samples 1.7% of a well-spread candidate set while
-uncapped samples 0.04% of a clustered one. The predicted long-chord bias does not appear at either
-scale.
+The predicted long-chord bias does not appear at either scale.
 
 Two things to carry forward:
 
@@ -358,10 +372,10 @@ covering the space of runs is not -- see stochastic restarts above.
 **Candidate ENUMERATION is now the binding cost, measured.** Across that 15-step run the candidate
 set grew 2.52x (468,968 -> 1,180,388) because uncapped `_anchor_points` takes every network vertex
 and each committed road adds tens; per-step cost tracked it 3.3x (139.5 s -> 466.9 s). Two thirds of
-the 79.6 min is that growth. **`max_anchors` caps it and this was measured 2026-08-11: 8.2x faster
-(79.7 -> 9.7 min) at comparable quality.** The predicted long-chord bias does not appear. The
-permeability gain first reported alongside it was a displacement-matching artifact and does not
-stand -- details above and in `notes/2026-08-11-max-anchors-is-a-region-scale-win.md`.
+the 79.6 min is that growth. **`max_anchors` caps it -- measured across 6 regions 2026-08-11: 7.6x
+median speedup, no detectable quality difference at matched displacement.** The permeability gain
+first reported alongside it was a displacement-matching artifact and does not stand. Details above
+and in `notes/2026-08-11-max-anchors-is-a-region-scale-win.md`.
 
 **Interim:** the access method belongs in `method_comparison` (one pinned block, affordable, and the
 only place C19 evidenced it) and NOT in the three multiblock variants until tier 2 is productionized
