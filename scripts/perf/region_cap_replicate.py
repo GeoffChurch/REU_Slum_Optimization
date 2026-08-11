@@ -1,4 +1,4 @@
-"""Does the `max_anchors` region win replicate across independent regions and displacement budgets?
+"""Does the `max_anchors` region result replicate across independent regions and sizes?
 
 `region_anchor_cap.py` measured it once: on one region block, at one displacement budget (0.10),
 `cap=128` beat uncapped by +0.0884 permeability while running 8.2x faster. Two independent caps
@@ -9,14 +9,22 @@ truncation point".
 Three caveats closed here, one left open:
 
   * **n=1** -> independent regions from `region_pool`, same arms in each.
-  * **one displacement budget** -> the FULL road list is persisted and evaluated at four budgets.
-    The previous harness saved only the 0.10 prefix, which is why this needs a re-run rather than a
-    re-analysis; saving the full list means no future budget question costs compute again.
+  * **one displacement budget** -> the FULL road list is persisted, so any budget becomes a
+    re-analysis rather than a re-run. The predecessor saved only the 0.10 prefix, which is why this
+    needed a re-run at all.
   * **cap=128 vs cap=256 unseparated** -> both run in every region, so a consistent winner would
     show as a sign that does not flip.
   * NOT closed here: whether the win is an artifact of the fixed shortlist budget interacting with
     candidate-set size. That is `region_shortlist_confound.py`, and it is the mechanism question
     rather than the robustness question.
+
+**This harness deliberately does NOT evaluate at absolute displacement budgets.** Region networks
+displace only ~0.005-0.02, so block-scale budgets like 0.10 are unreachable, and
+`prefix_to_displacement` silently returns *all* roads when a budget cannot be met -- which is how
+the original headline came to compare arms that had spent 68% different displacement while claiming
+to be matched. Reachability is a property of the arms, so matching is computed per region *after*
+every arm exists: see `region_cap_matched.py`. What is recorded here is each arm's full road list
+and the displacement it actually achieves.
 
 `MAX_ROADS` is 8 rather than the headline's 15 because uncapped costs ~31 min at 8 and ~80 at 15,
 and replication needs several regions. Region 0 is re-run at 8 here despite already having 15-road
@@ -33,7 +41,7 @@ import json
 import time
 from pathlib import Path
 
-from reblock.budget import building_radii, prefix_to_displacement
+from reblock.budget import building_radii, displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
@@ -48,7 +56,6 @@ MAX_ROADS = 8
 THREADS = 8
 WORKERS = 16
 CAPS = (128, 256, 0)                  # cheapest first; 0 == uncapped == shipped default
-BUDGETS = (0.05, 0.10, 0.15, 0.20)
 OUT = Path("scripts/perf/region_cap_replicate.json")
 
 
@@ -99,24 +106,26 @@ def main() -> None:
                 print(f"    [r{ri} {label}] no roads -- skipped", flush=True)
                 continue
 
-            at: dict[str, dict[str, float]] = {}
-            for d in BUDGETS:
-                pre = prefix_to_displacement(block, roads, radii, d)
-                if len(pre) == 0:
-                    continue
-                b1 = burden(parcel_access_layers(block, pre, tol=STREET_TOL, adj=adj,
-                                                 unreached_depth=n + 1))
-                at[f"{d:.2f}"] = {"burden_red": (1.0 - b1 / b0) if b0 > 0 else 0.0,
-                                  "perm": float(permeability(block, pre)),
-                                  "road_m": float(pre.geometry.length.sum()),
-                                  "n_roads": float(len(pre))}
+            # Whole-network figures only. Matching happens in region_cap_matched.py, which can see
+            # every arm's reachable displacement and pick a budget that actually binds; an absolute
+            # budget chosen here would silently degrade to "all roads" and fake a matched result.
+            nb = len(block.building_points)
+            reach = displacement(block.building_points, radii, roads) / nb if nb else 0.0
+            b1 = burden(parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj,
+                                             unreached_depth=n + 1))
+            at = {"all": {"burden_red": (1.0 - b1 / b0) if b0 > 0 else 0.0,
+                          "perm": float(permeability(block, roads)),
+                          "road_m": float(roads.geometry.length.sum()),
+                          "n_roads": float(len(roads)), "displaced_frac": float(reach)}}
             # roads_wkt is the FULL list, not a prefix, so any future budget question is a
             # re-analysis rather than a re-run -- the flaw that forced this harness to exist.
             arms[label] = {"secs": dt, "cand": per_step, "at": at,
                            "roads_wkt": [g.wkt for g in roads.geometry]}
-            shown = "  ".join(f"d={k} b={v['burden_red']:.4f} p={v['perm']:.4f}"
-                              for k, v in at.items())
-            print(f"    [r{ri} {label}] {dt / 60:.1f} min  {shown}", flush=True)
+            a = at["all"]
+            print(f"    [r{ri} {label}] {dt / 60:.1f} min  whole network: "
+                  f"b={a['burden_red']:.4f} p={a['perm']:.4f} "
+                  f"{a['n_roads']:.0f} roads {a['road_m']:,.0f} m "
+                  f"displaced {a['displaced_frac']:.4f}", flush=True)
             out[str(ri)] = {"parcels": n, "arms": arms}
             OUT.write_text(json.dumps(out, indent=1))
 
@@ -126,71 +135,38 @@ def main() -> None:
     _report(out)
 
 
-def _delta(out: dict[str, dict[str, object]], ri: str, lb: str, key: str
-           ) -> tuple[float, float] | None:
-    """(burden, perm) of arm `lb` minus uncapped, in region `ri` at budget `key`."""
-    arms = out[ri]["arms"]
-    assert isinstance(arms, dict)
-    if not all(x in arms and key in arms[x]["at"] for x in ("uncapped", lb)):
-        return None
-    ref, got = arms["uncapped"]["at"][key], arms[lb]["at"][key]
-    return got["burden_red"] - ref["burden_red"], got["perm"] - ref["perm"]
-
-
 def _report(out: dict[str, dict[str, object]]) -> None:
+    """Speed, enumeration growth and displacement reach -- everything that needs no matching.
+
+    Quality is deliberately absent. Comparing burden/perm across arms requires equal displacement,
+    the arms reach different amounts, and a budget picked here cannot know what is reachable until
+    every arm has run. That comparison lives in `region_cap_matched.py`.
+    """
     ids = sorted(out, key=lambda r: int(out[r]["parcels"]))  # type: ignore[arg-type]
     print(f"\n{'=' * 100}\nREGION CAP REPLICATION -- {len(out)} regions, max_roads={MAX_ROADS}, "
           f"shortlist={SHORTLIST}\n")
 
-    for d in BUDGETS:
-        key = f"{d:.2f}"
-        rows = [(ri, {lb: _delta(out, ri, lb, key) for lb in ("128", "256")}) for ri in ids]
-        rows = [(ri, dd) for ri, dd in rows if all(v is not None for v in dd.values())]
-        if not rows:
-            continue
-        print(f"  displacement {key} -- delta vs uncapped, per region (ascending size)")
-        print(f"    {'region':<8}{'parcels':>9}{'128 burden':>13}{'128 perm':>11}"
-              f"{'256 burden':>13}{'256 perm':>11}")
-        for ri, dd in rows:
-            print(f"    {ri:<8}{int(out[ri]['parcels']):>9,}"  # type: ignore[arg-type]
-                  f"{dd['128'][0]:>+13.4f}{dd['128'][1]:>+11.4f}"  # type: ignore[index]
-                  f"{dd['256'][0]:>+13.4f}{dd['256'][1]:>+11.4f}")  # type: ignore[index]
-        for lb in ("128", "256"):
-            pw = sum(1 for _, dd in rows if dd[lb][1] > 0)   # type: ignore[index]
-            bw = sum(1 for _, dd in rows if dd[lb][0] > 0)   # type: ignore[index]
-            print(f"    cap={lb}: perm improves in {pw}/{len(rows)} regions, "
-                  f"burden in {bw}/{len(rows)}")
-        print()
-
-    print("  SIZE GRADIENT -- perm delta of cap=128 vs uncapped, against region size.\n"
-          "  The mechanism (vertex anchors dominate and cluster as the network grows) predicts\n"
-          "  the gain RISES with parcels; block scale (~50-110 parcels) measured ~0. A flat or\n"
-          "  falling trend would falsify that story even if every sign is positive.\n")
-    print(f"    {'parcels':>9}" + "".join(f"{f'd={d:.2f}':>10}" for d in BUDGETS))
-    for ri in ids:
-        cells = []
-        for d in BUDGETS:
-            got = _delta(out, ri, "128", f"{d:.2f}")
-            cells.append(f"{got[1]:>+10.4f}" if got else f"{'--':>10}")
-        print(f"    {int(out[ri]['parcels']):>9,}" + "".join(cells))  # type: ignore[arg-type]
-
-    print("\n  speed, per region (uncapped minutes / capped minutes)")
-    print(f"    {'region':<8}{'parcels':>9}{'uncapped min':>14}{'128':>9}{'256':>9}"
-          f"{'128x':>9}{'256x':>9}")
+    print("  SPEED and ENUMERATION (ascending region size)")
+    print(f"    {'region':<8}{'parcels':>9}{'arm':>10}{'min':>8}{'speedup':>9}"
+          f"{'cand step1':>12}{'cand last':>11}{'growth':>8}{'displaced':>11}")
     for ri in ids:
         arms = out[ri]["arms"]
         assert isinstance(arms, dict)
-        if not all(lb in arms for lb in ("uncapped", "128", "256")):
+        if "uncapped" not in arms:
             continue
-        u, a, b = (float(arms[x]["secs"]) for x in ("uncapped", "128", "256"))
-        print(f"    {ri:<8}{int(out[ri]['parcels']):>9,}{u / 60:>14.1f}"  # type: ignore[arg-type]
-              f"{a / 60:>9.1f}{b / 60:>9.1f}{u / a:>8.1f}x{u / b:>8.1f}x")
+        base = float(arms["uncapped"]["secs"])
+        for lb in ("uncapped", "128", "256"):
+            if lb not in arms:
+                continue
+            v = arms[lb]
+            cand = v["cand"]
+            assert isinstance(cand, list)
+            f, ln = (cand[0], cand[-1]) if cand else (0, 0)
+            a = v["at"]["all"]
+            print(f"    {ri:<8}{int(out[ri]['parcels']):>9,}{lb:>10}"  # type: ignore[arg-type]
+                  f"{float(v['secs']) / 60:>8.1f}{base / float(v['secs']):>8.1f}x"
+                  f"{f:>12,}{ln:>11,}{ln / max(f, 1):>7.2f}x{a['displaced_frac']:>11.4f}")
 
-    print("\n  A sign that does not flip across independent regions is the claim; one region's\n"
-          "  magnitude is not. If perm improves everywhere at every budget the n=1 caveat closes;\n"
-          "  if it flips, the original +0.0884 was one draw from a wide distribution -- which is\n"
-          "  exactly what this method's known tie-break scatter would produce.")
-
-
-if __name__ == "__main__":
-    main()
+    print("\n  The displacement column is why quality is not compared here: the arms spend\n"
+          "  different amounts of it, and displacement buys both burden and permeability.\n"
+          "  Run `python -m scripts.perf.region_cap_matched` for the matched comparison.")
