@@ -115,13 +115,18 @@ measured, not suspected — across the 15-step region run:
 The set grows **2.52×** because uncapped `_anchor_points` takes every network vertex and each
 committed road is a boundary-graph path adding tens more. Two thirds of the 79.6 min is that growth.
 
-**`max_anchors` caps exactly this and is the obvious next lever** — with a caveat that must be
-measured, not assumed: it drops per-vertex anchors and biases toward long chords over short local
-connectors, which for an *access* objective is precisely the wrong bias. Its earlier dismissal
-("does not rescue it") rested on an inference now known to be wrong, so it is **unevaluated, not
-rejected**. Note also that the 66-minute `max_anchors=24` observation behind that dismissal is
-**still unexplained** — 276 candidates at 242 ms is ~67 s per step. Something else was slow in that
-run and nobody knows what.
+**`max_anchors` caps exactly this — MEASURED 2026-08-11, and it wins.** See
+`notes/2026-08-11-max-anchors-is-a-region-scale-win.md`. `cap=128` runs the region in **9.7 min
+against 79.7** (8.2×) with burden **+0.0095** and permeability **+0.0884**. The long-chord bias
+feared below does not appear at either scale; the arc-length stratification turns out to be *why*
+it wins. Two corrections to what this section assumed: `max_anchors` is a **mode switch, not a
+knob** (no setting preserves continuations — the capped branch returns before the vertex loop), and
+it is **dominated at block scale** (quality-neutral, up to 4× slower), so it resolves by input
+scale in config rather than as a global default.
+
+The 66-minute `max_anchors=24` observation called "still unexplained" here **was never a
+measurement**: `scratchpad/perf/anchors.log` holds a header and zero rows, so the first `propose`
+never returned and 66 min is wall-clock-until-killed. Nothing to explain.
 
 ---
 
@@ -208,15 +213,20 @@ Cheap to avoid, expensive to rediscover.
 
 ## §6. Suggested order of work
 
-1. **§0 decision** — the code is unprotected until this is made.
-2. **`max_anchors`, measured properly** (§2). Highest value: it attacks the now-binding cost, it is
-   cheap, and it is currently unevaluated on a bad inference. Measure the long-chord bias explicitly
-   against the access objective rather than assuming it away.
+1. ~~**§0 decision**~~ — **DONE 2026-08-10**, option (b); see the banner in §0.
+2. ~~**`max_anchors`, measured properly**~~ — **DONE 2026-08-11**, and it wins at region scale
+   (8.2×, permeability +0.0884). See §2 and the 2026-08-11 note. What remains from it: the region
+   result is **n=1 block** and wants replication; `cap=128` vs `256` is unseparated; only one
+   displacement budget and one shortlist were tested, and the stratification mechanism predicts the
+   shortlist budget interacts with the gap.
 3. **Widen the restart evidence** (§3) — more blocks, a real `pool`/R sweep, more than one
-   displacement budget. Then raise the two-metric selection question with the owner.
-4. **Productionize tier 2** (§4) once the owner has weighed the cache-invalidation cost.
-5. Leave alone: tier 3 (dead, §1), tier 1 (open but now only a throughput play, and it competes with
-   item 2).
+   displacement budget. Then raise the two-metric selection question with the owner. **Now the
+   highest-value open item.**
+4. **Productionize tier 2** (§4) once the owner has weighed the cache-invalidation cost. Note this
+   now carries a second dimension: the anchor policy is scale-dependent, so an engine choice *and*
+   an anchor policy both resolve upstream in config.
+5. Leave alone: tier 3 (dead, §1), tier 1 (open but now only a throughput play — and much weaker
+   than it was, since capping already removed most of the enumeration cost it targeted).
 
 ## §7. Also still open, from before today
 

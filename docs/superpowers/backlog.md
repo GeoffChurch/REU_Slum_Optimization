@@ -227,18 +227,39 @@ peel over all 11,006 parcels to score adding ONE road, which changes depths only
 neighbourhood. Multiply by thousands of candidates per step (`_anchor_points` includes every network
 vertex, so candidates grow ~C(anchors,2) as the network densifies) times ~15 steps.
 
-**`max_anchors` does not rescue it, and is not the kind of approximation it looks like.** Capping
-anchors bounds candidates to ~C(max_anchors,2) -- but a run at `max_anchors=24` (~276 candidates per
-step, ~4,100 total, which at 85 ms/peel should be ~6 minutes) had not finished after **66 minutes**.
-So per-candidate cost dominates, not candidate count, and the likely culprit is `_snap`: a
-`nx.shortest_path` over the parcel-boundary graph of an 11k-parcel region, once per candidate.
+**`max_anchors` DOES rescue it -- measured 2026-08-11, and it is a quality gain, not a cost.** See
+`notes/2026-08-11-max-anchors-is-a-region-scale-win.md`. Region block, tier-2 shortlist, matched
+displacement: `cap=128` runs in **9.7 min against uncapped's 79.7** (8.2x) with burden **+0.0095**
+and permeability **+0.0884**; `cap=256` gives 6.1x, +0.0021, +0.0991. Permeability is not selected
+on and both independent caps move it the same way by ~the full block-scale noise band, which is the
+signature of a real structural difference. Region-scale access is now ~10 minutes.
 
-Worth being precise about what `max_anchors` IS, since it invites a wrong analogy. It subsamples the
-SEARCH SPACE and scores every survivor exactly. Nystrom approximates an OPERATOR (low-rank from
-sampled landmarks). Different axis: `max_anchors` reduces the NUMBER of exact evaluations, Nystrom
-would reduce the COST of each. It is also not random sampling but arc-length stratified -- closer to
-a quadrature rule -- and it drops per-vertex anchors, biasing toward long chords over short local
-connectors.
+The "66 minutes at `max_anchors=24`" that this paragraph used to rest on **was never a measurement**:
+`scratchpad/perf/anchors.log` holds a header and zero rows, so the first `propose` never returned and
+66 min is wall-clock-until-killed. The inference that per-candidate cost dominates was drawn from a
+number that does not exist -- and it is wrong. Candidate *count* dominates, exactly as the tier-2
+work later measured directly (peel 88%, `_snap` 12%).
+
+The stratification reading in this paragraph was right and its sign was backwards. `max_anchors` is
+arc-length stratified -- closer to a quadrature rule than to random sampling -- and that even spread
+is **why it wins**: vertex anchors pile up where the parcel-boundary graph is geometrically dense,
+so at a fixed shortlist budget the capped arm samples 1.7% of a well-spread candidate set while
+uncapped samples 0.04% of a clustered one. The predicted long-chord bias does not appear at either
+scale.
+
+Two things to carry forward:
+
+* **It is a MODE SWITCH, not a knob.** The capped branch of `_anchor_points` returns before the
+  vertex loop, so committed-segment endpoints are never anchors at *any* setting -- verified at
+  caps 16/32/64/128, where `cap=128` yields 129 anchors against uncapped's 35 and still drops the
+  endpoint. No value preserves continuations; "set it larger to be safe" buys only cost.
+* **It is DOMINATED at block scale** and must not be used there: quality-neutral (7 of 8 paired
+  bootstrap CIs span zero, n=12) but slower at every useful setting (0.59x at 128, 0.24x at 256),
+  because uncapped needs 1,272 candidates there while `cap=256` enumerates 34,688. Its correct
+  value is a function of input size, so it resolves upstream in config alongside the engine choice.
+
+Still open: the region result is **n=1 block**, only one displacement budget (0.10) and one shortlist
+(512) were tested, and the mechanism predicts the shortlist budget interacts with the gap.
 
 ### Tier 2 (BUILD THIS FIRST): first-order local gain -- the `linearized_gain` analogue
 
@@ -330,9 +351,10 @@ covering the space of runs is not -- see stochastic restarts above.
 **Candidate ENUMERATION is now the binding cost, measured.** Across that 15-step run the candidate
 set grew 2.52x (468,968 -> 1,180,388) because uncapped `_anchor_points` takes every network vertex
 and each committed road adds tens; per-step cost tracked it 3.3x (139.5 s -> 466.9 s). Two thirds of
-the 79.6 min is that growth. `max_anchors` caps it and is the next lever -- but it drops per-vertex
-anchors and so biases toward long chords over short local connectors, which for an ACCESS objective
-is the wrong bias, so it needs measuring rather than assuming.
+the 79.6 min is that growth. **`max_anchors` caps it and this was measured 2026-08-11: 8.2x faster
+(79.7 -> 9.7 min) with permeability UP +0.0884 and burden flat.** The predicted long-chord bias does
+not appear. Details and caveats above and in
+`notes/2026-08-11-max-anchors-is-a-region-scale-win.md`.
 
 **Interim:** the access method belongs in `method_comparison` (one pinned block, affordable, and the
 only place C19 evidenced it) and NOT in the three multiblock variants until tier 2 is productionized
