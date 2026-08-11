@@ -8,9 +8,12 @@ uncapped scores 512 of 1,180,388 (**0.04%**). So the capped arm differs in two w
      up wherever the parcel-boundary graph is geometrically dense;
   2. **fraction** -- it searches 40x more of its own candidate set.
 
-If (2) is doing the work, `max_anchors` is not really the lever; the shortlist is, and the honest
-recommendation would be "score more candidates", not "cap anchors". If (1) is doing the work, the
-anchor family itself is better and the cap is the right knob.
+The question this was written for has since changed. At matched displacement the cap has no
+quality advantage to explain -- it COSTS quality -- so what is at stake now is the mirror image:
+is the UNCAPPED arm handicapped by a shortlist that lets it score 0.04% of its candidates? If
+uncapped improves as the shortlist grows, the measured quality gap widens and the cap looks worse
+still; if uncapped is already saturated at 512, the gap stands as measured. Either way this is
+confirmatory rather than decisive, which is why it runs last.
 
 The separation: hold the anchor family at uncapped and climb the shortlist. Matching the capped
 arm's 1.7% would need a shortlist near 20,000, which is not affordable -- but the SHAPE of the
