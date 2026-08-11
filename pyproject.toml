@@ -82,7 +82,7 @@ default = { features = ["dev", "research"], solve-group = "default" }
 
 [tool.pixi.tasks]
 test = "pytest"
-typecheck = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py"
+typecheck = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py"
 lint = "ruff check ."
 fmt = "ruff format ."
 check = { depends-on = ["lint", "typecheck", "test"] }
@@ -96,10 +96,13 @@ regen-examples = "bash scripts/regenerate_examples.sh"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-# scripts/crossblock_probe.py + scripts/calibrate_permeability.py only, NOT the whole scripts/
-# dir: the pre-existing scripts/fetch_kblock_fixtures.py (Task 0, out of scope here) has its own
-# pre-existing --strict findings and was never covered by this config before.
-files = ["src", "tests", "scripts/crossblock_probe.py", "scripts/calibrate_permeability.py"]
+# Named scripts only, NOT the whole scripts/ dir: the pre-existing scripts/fetch_kblock_fixtures.py
+# (Task 0) has its own pre-existing --strict findings and was never covered by this config. Files
+# are added here as they are made strict-clean -- scripts/perf/{records,region_cap_report}.py are
+# the typed boundary and analysis for the region-cap experiments, and are listed so the dataclasses
+# that replaced their string-keyed dict access cannot silently rot back.
+files = ["src", "tests", "scripts/crossblock_probe.py", "scripts/calibrate_permeability.py",
+         "scripts/perf/records.py", "scripts/perf/region_cap_report.py"]
 # topology is installed via a PEP 660 "strict" editable install, whose .pth
 # registers a sys.meta_path finder at runtime rather than a plain sys.path
 # entry — mypy's static .pth scan can't see through that, so point it at the

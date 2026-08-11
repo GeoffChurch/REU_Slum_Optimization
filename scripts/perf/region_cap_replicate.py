@@ -146,41 +146,9 @@ def main() -> None:
     if not out:
         print("no arms completed")
         return
-    _report(out)
+    print("\n  Recorded. Analysis lives in one place:")
+    print("    pixi run python -m scripts.perf.region_cap_report")
 
 
-def _report(out: dict[str, dict[str, object]]) -> None:
-    """Speed, enumeration growth and displacement reach -- everything that needs no matching.
-
-    Quality is deliberately absent. Comparing burden/perm across arms requires equal displacement,
-    the arms reach different amounts, and a budget picked here cannot know what is reachable until
-    every arm has run. That comparison lives in `region_cap_matched.py`.
-    """
-    ids = sorted(out, key=lambda r: int(out[r]["parcels"]))  # type: ignore[arg-type]
-    print(f"\n{'=' * 100}\nREGION CAP REPLICATION -- {len(out)} regions, max_roads={MAX_ROADS}, "
-          f"shortlist={SHORTLIST}\n")
-
-    print("  SPEED and ENUMERATION (ascending region size)")
-    print(f"    {'region':<8}{'parcels':>9}{'arm':>10}{'min':>8}{'speedup':>9}"
-          f"{'cand step1':>12}{'cand last':>11}{'growth':>8}{'displaced':>11}")
-    for ri in ids:
-        arms = out[ri]["arms"]
-        assert isinstance(arms, dict)
-        if "uncapped" not in arms:
-            continue
-        base = float(arms["uncapped"]["secs"])
-        for lb in ("uncapped", "128", "256"):
-            if lb not in arms:
-                continue
-            v = arms[lb]
-            cand = v["cand"]
-            assert isinstance(cand, list)
-            f, ln = (cand[0], cand[-1]) if cand else (0, 0)
-            a = v["at"]["all"]
-            print(f"    {ri:<8}{int(out[ri]['parcels']):>9,}{lb:>10}"  # type: ignore[arg-type]
-                  f"{float(v['secs']) / 60:>8.1f}{base / float(v['secs']):>8.1f}x"
-                  f"{f:>12,}{ln:>11,}{ln / max(f, 1):>7.2f}x{a['displaced_frac']:>11.4f}")
-
-    print("\n  The displacement column is why quality is not compared here: the arms spend\n"
-          "  different amounts of it, and displacement buys both burden and permeability.\n"
-          "  Run `python -m scripts.perf.region_cap_matched` for the matched comparison.")
+if __name__ == "__main__":
+    main()

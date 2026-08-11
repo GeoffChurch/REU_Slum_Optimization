@@ -23,7 +23,6 @@ import sys
 from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
 from shapely import wkt
 
 from reblock.budget import building_radii, displacement, prefix_to_displacement
@@ -100,42 +99,9 @@ def main() -> int:
     if not out:
         print("nothing to analyse")
         return 1
-    _report(out)
+    print("\n  Recorded. Analysis lives in one place:")
+    print("    pixi run python -m scripts.perf.region_cap_report")
     return 0
-
-
-def _report(out: dict[str, dict[str, object]]) -> None:
-    ids = sorted(out, key=lambda r: int(out[r]["parcels"]))  # type: ignore[arg-type]
-    print(f"\n{'=' * 96}\nMATCHED DISPLACEMENT -- {len(out)} regions, per-region budgets\n")
-    print("  Delta vs uncapped at equal displacement. Positive = the cap is better.\n")
-    for f in FRACTIONS:
-        key = f"{f:.2f}"
-        rows = [(ri, out[ri]["at"][key]) for ri in ids                       # type: ignore[index]
-                if key in out[ri]["at"] and len(out[ri]["at"][key]) == len(ARMS)]  # type: ignore[index,arg-type]
-        if not rows:
-            continue
-        print(f"  at {f:.0%} of each region's reachable displacement")
-        print(f"    {'region':<8}{'parcels':>9}{'128 burden':>13}{'128 perm':>11}"
-              f"{'256 burden':>13}{'256 perm':>11}")
-        for ri, row in rows:
-            u = row["uncapped"]                                              # type: ignore[index]
-            print(f"    {ri:<8}{int(out[ri]['parcels']):>9,}"                # type: ignore[arg-type]
-                  f"{row['128']['burden_red'] - u['burden_red']:>+13.4f}"    # type: ignore[index]
-                  f"{row['128']['perm'] - u['perm']:>+11.4f}"                # type: ignore[index]
-                  f"{row['256']['burden_red'] - u['burden_red']:>+13.4f}"    # type: ignore[index]
-                  f"{row['256']['perm'] - u['perm']:>+11.4f}")               # type: ignore[index]
-        for a in ("128", "256"):
-            db = np.array([r[a]["burden_red"] - r["uncapped"]["burden_red"] for _, r in rows])
-            dp = np.array([r[a]["perm"] - r["uncapped"]["perm"] for _, r in rows])
-            print(f"    cap={a}: burden better in {(db > 0).sum()}/{len(rows)} "
-                  f"(mean {db.mean():+.4f}), perm better in {(dp > 0).sum()}/{len(rows)} "
-                  f"(mean {dp.mean():+.4f})")
-        print()
-
-    print("  READ THIS AS: does capping cost QUALITY once displacement is charged for? The speed\n"
-          "  win (8.2x) is not in question and is not measured here. A sign that flips region to\n"
-          "  region means no reliable quality difference either way -- which, given the speedup,\n"
-          "  is the outcome that makes the cap usable at region scale.")
 
 
 if __name__ == "__main__":
