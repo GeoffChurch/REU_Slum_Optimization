@@ -345,6 +345,37 @@ confirmation across displacement budgets (only D=0.10 tested), and a decision ab
 selects on when the method reports two metrics -- burden is the greedy's objective, permeability is
 co-reported, and nothing currently arbitrates between them.
 
+### Shortlist `k` at multiblock scale -- OPEN, and it gets MORE interesting once the cap ships
+
+`k` is currently 512 because that is the value every region result was measured at, and because the
+saturation check bounds it only from ABOVE: uncapped at 512 / 1024 / 2048 / 4096 produced a
+bit-identical network (perm 0.4536 at all four rungs), so overshooting costs nothing in quality. The
+unmeasured direction is DOWNWARD, and nothing establishes that 512 is needed rather than merely
+sufficient.
+
+**Why capping raises the stakes rather than settling them.** The cap removes ~40x of the enumeration
+term, so whatever remains is a much larger share of a step. From the region run: uncapped step 1 was
+152 s for 468,968 candidates, while `cap=128` step 1 was 31 s for 18,693. Pure candidate
+proportionality would put the capped step at ~6 s; it costs 31. So roughly **80% of a capped step is
+not enumeration**, and exact-scoring `k` candidates is a large part of that. `k` is the natural next
+lever precisely once `max_anchors` is on -- which is the opposite of how it looked before the cap
+was measured.
+
+**What to measure**, at multiblock scale where the cost compounds across regions:
+
+* `k` in {64, 128, 256, 512} with the cap on, burden + permeability at MATCHED displacement
+  (`region_cap_matched.py`; do not use absolute budgets -- they do not bind at region scale);
+* the step-cost decomposition that the 80% figure above is inferred from. It is arithmetic on two
+  step timings, not a measurement, and this work has already been burned once by a number that was
+  never measured (the "66 minutes at `max_anchors=24`").
+
+Cheap, because the capped arms run in ~10 min per region rather than 30-53.
+
+**Interaction to watch:** `k` and `max_anchors` are not independent. Both reduce how much of the
+candidate space is examined, from opposite ends -- the cap shrinks what is enumerated, `k` shrinks
+what is scored exactly. A combined sweep is the honest experiment; a `k` sweep at one cap value can
+only describe that slice.
+
 ### Tier 1: uniform-density geometric proxy
 
 With a precomputed per-parcel depth field rasterized, a candidate's benefit is approximately
