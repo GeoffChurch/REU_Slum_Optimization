@@ -247,10 +247,13 @@ costs quality" -- read off an interim sample of the three smallest regions, beca
 ordered ascending by size for kill-resilience; a deliberately-ordered interim is not a random
 sample. (3) the even-spread displacement mechanism -- true on region 0, direction flips across six.
 
-**The shortlist is not a lever: uncapped is saturated at 512.** Climbing it to 1024 and 2048 on
-region 0 produces a bit-identical network (perm 0.4536 at all three), so the first-order ranking
-already contains each step's winner in its top 512 and the fixed-shortlist comparison was fair to
-uncapped despite it scoring 0.06% of candidates against the cap's 2.40%.
+**The shortlist is not a lever: uncapped is saturated at 512.** Climbing it 512 -> 1024 -> 2048 ->
+4096 on region 0 produces a bit-identical network (perm 0.4536 at all four rungs; the gap to
+`cap=128` is exactly -0.0739 at every one), so the first-order ranking already contains each step's
+winner in its top 512 and the fixed-shortlist comparison was fair to uncapped despite it scoring
+0.06% of candidates against the cap's 2.40%. The 8x rise cost **57% more wall clock (31.1 -> 48.8
+min) for zero change in output** -- compute spent on scoring more candidates per step is wasted, and
+belongs in restarts instead. Same conclusion tier 2 reached from the other direction.
 
 **Frontier: neither cap dominates.** `cap=128` is faster in 6/6 regions; `cap=256` is better on both
 metrics with intervals excluding zero (burden -0.0341 [-0.0634, -0.0011], perm -0.0459 [-0.0678,

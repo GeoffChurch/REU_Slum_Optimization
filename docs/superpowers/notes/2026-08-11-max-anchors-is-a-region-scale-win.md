@@ -187,17 +187,23 @@ shortlist and not the cap, and every comparison above would be unfair to uncappe
 
 It is not. Holding the anchor family at uncapped on region 0 and climbing the shortlist:
 
-| arm | scored | permeability |
-|---|---|---|
-| uncapped, shortlist 512 | 0.06% | 0.4536 |
-| uncapped, shortlist 1024 | 0.12% | 0.4536 |
-| uncapped, shortlist 2048 | 0.23% | 0.4536 |
-| `cap=128`, shortlist 512 | 2.40% | 0.5275 |
+| arm | scored | permeability | minutes |
+|---|---|---|---|
+| uncapped, shortlist 512 | 0.06% | 0.4536 | 31.1 |
+| uncapped, shortlist 1024 | 0.12% | 0.4536 | 34.1 |
+| uncapped, shortlist 2048 | 0.23% | 0.4536 | 38.2 |
+| uncapped, shortlist 4096 | 0.47% | 0.4536 | **48.8** |
+| `cap=128`, shortlist 512 | 2.40% | 0.5275 | 4.7 |
 
-Quadrupling the shortlist produces a **bit-identical network**. The first-order ranking already
-puts the step's winner inside the top 512, so candidates below that rank never change an argmax.
+An **8× increase in shortlist produces a bit-identical network** — and the gap to `cap=128` is
+exactly **−0.0739 at every rung**, flat rather than slow-moving. The first-order ranking already
+puts each step's winner inside the top 512, so candidates below that rank never change an argmax.
 **Uncapped is saturated at 512, the comparison was fair, and the shortlist is not a lever here.**
-(The 4096 rung was still running at the time of writing; three identical rungs settle the shape.)
+
+There is a practical corollary: raising the shortlist cost **57% more wall clock (31.1 → 48.8 min)
+for zero change in output**. Anyone tempted to spend compute on scoring more candidates per step
+should spend it on restarts instead — which is the same conclusion the tier-2 work reached from the
+other direction ("fidelity is the wrong axis; covering the space of *runs* is not").
 
 This also retires the "sampling density" half of the stratification story in wrong turn 3: whatever
 separates the two anchor families, it is not how much of each family gets scored.
