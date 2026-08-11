@@ -172,7 +172,7 @@ removed the term the backlog was written about and promoted the one it only flag
 *(The first attempt at this run was killed at 73 minutes having printed nothing — the fourth long
 background run in this repo stopped mid-flight, after C9 at 2/10 and C20 at 2/12 and 5/12. Two
 faults were mine: the script reported only totals, so a kill destroyed every minute of it, and it
-did not go through `scratchpad/complexity/instrumented.py`, which exists to name the signal's
+did not go through `scripts/perf/instrumented.py`, which exists to name the signal's
 sender. Both fixed; the rerun logged each step as it landed and finished normally under the
 wrapper.)*
 

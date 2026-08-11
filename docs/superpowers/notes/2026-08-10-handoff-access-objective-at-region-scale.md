@@ -195,11 +195,28 @@ Cheap to avoid, expensive to rediscover.
 - **`pixi run lint` does not check `scratchpad/`.** Ruff respects `.gitignore`. Use
   `pixi run ruff check --no-cache <path>` explicitly. I briefly mistook this for a cache bug; it is
   not, it is the ignore file.
-- **Long background runs get killed.** Four so far (C9 at 2/10, C20 at 2/12 and 5/12, and the first
-  region run at 73 min). Cause still unknown; not OOM (cgroup reports `oom_kill 0`, pressure-stall
-  flat). Run anything long via
-  `pixi run python -m scratchpad.complexity.instrumented <module> <logfile>` — it catches signals
-  with `sigwaitinfo` so the `siginfo` names the **sending pid**, which an ordinary handler cannot.
+- **Long background runs get killed — SOLVED 2026-08-11. The agent harness is the killer.** The
+  instrumented runner caught the fifth one and the `siginfo` named the sender outright:
+
+  ```
+  !! SIGNAL SIGTERM (15) si_code=0 si_uid=1641171234
+     FROM pid=1638454 comm='claude' ppid=2872 cmdline='claude'
+  ```
+
+  `si_code=0` is `SI_USER`, i.e. a deliberate `kill()`, and `comm='claude'` is the Claude Code
+  process itself. Not OOM, not a supervisor, **not external** — `instrumented.py`'s own docstring
+  concluding "the kill is external" is wrong, and the tool it describes is what disproved it.
+  Killed at 57 min after an earlier 103-min run survived, so it is not a simple wall-clock timeout;
+  the exact trigger is still unidentified, but the *source* is no longer in question.
+
+  **What to do about it:** launch long runs into their own session so harness signals cannot reach
+  them —
+  `setsid nohup pixi run python -u -m scripts.perf.<name> > log 2>&1 < /dev/null &` — and make the
+  harness resumable anyway (`region_cap_replicate.py` skips regions already complete in its JSON).
+  Detaching costs the completion notification, so poll the log or the output file. Keep using
+  `pixi run python -m scripts.perf.instrumented <module> <logfile>` for anything
+  long-running: it catches signals with `sigwaitinfo`, so the `siginfo` names the **sending pid**,
+  which an ordinary handler cannot.
 - **Print progress incrementally, with `flush=True`.** The first region run burned 73 minutes and
   produced *zero* rows because it only reported totals. `greedy_shortlist` now takes an `on_step`
   callback for this reason.

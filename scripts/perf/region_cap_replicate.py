@@ -70,8 +70,22 @@ def main() -> None:
     # because vertex anchors dominate and cluster at scale, so the effect should GROW with region
     # size and vanish toward block scale, where it already measured neutral-to-negative. A
     # monotone trend across 3.4k -> 12k is dose-response evidence replication alone cannot give.
+    # Resume: regions already complete in a previous run are skipped. Runs here get SIGTERMed by
+    # the agent harness itself -- confirmed 2026-08-11, `comm='claude'` naming itself as the sender
+    # in instrumented.py's siginfo -- so a multi-hour matrix WILL be interrupted, and restarting
+    # from zero would mean it never finishes. Launch detached (setsid) to avoid the signal, and
+    # resume to make an interruption cost one region rather than all of them.
+    if OUT.exists():
+        done = json.load(OUT.open())
+        out.update({k: v for k, v in done.items()
+                    if all(a in v["arms"] for a in ("uncapped", "128", "256"))})
+        if out:
+            print(f"  resuming: regions {sorted(out, key=int)} already complete", flush=True)
+
     order = sorted(range(len(pool)), key=lambda i: len(pool[i].parcels))
     for ri in order:
+        if str(ri) in out:
+            continue
         block = pool[ri]
         n = len(block.parcels)
         print(f"\n=== region {ri}: {n:,} parcels, {len(block.building_points):,} buildings ===",
