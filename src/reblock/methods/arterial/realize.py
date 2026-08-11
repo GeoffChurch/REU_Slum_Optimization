@@ -3,6 +3,9 @@ graph, hugging the ideal line as closely as the graph allows.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Protocol, TypeAlias, runtime_checkable
+
 import networkx as nx
 import shapely
 from shapely.geometry import LineString, Point
@@ -47,3 +50,72 @@ def _snap(chord: LineString, sg: _SnapGraph, lam: float) -> LineString | None:
     except (nx.NetworkXNoPath, nx.NodeNotFound):
         return None
     return LineString([tuple(node) for node in path])
+
+
+@runtime_checkable
+class ChordRealizer(Protocol):
+    """How an ideal straight chord becomes the road that is actually scored and committed.
+
+    Injected rather than selected by a `mode` string, so nothing downstream asks which realization
+    it has. `snaps` exists for the same reason: the two places outside `realize` that used to test
+    `mode == "buildable"` ask the realizer what it does instead of re-deriving it from a name.
+    """
+
+    @property
+    def snaps(self) -> bool:
+        """True when realization follows the parcel-boundary graph, so committed roads planarize
+        into the existing network and the incremental scoring branch applies."""
+
+    @property
+    def identity(self) -> RealizerIdentity:
+        """The proposal-affecting part of this realizer, for the derive-cache key."""
+
+    def realize(self, chord: LineString, sg: _SnapGraph | None) -> LineString | None: ...
+
+
+@dataclass(frozen=True)
+class SnapToBoundary:
+    """Buildable realization: the boundary-graph path hugging the ideal line.
+
+    `lam` weights how hard the path hugs the chord (edge cost = length + lam * dist(midpoint,
+    chord)). It lives here, on the only strategy that uses it, rather than on the reblocker where
+    it was silently dead for aspirational runs -- and dead in the cache key too.
+    """
+
+    lam: float = 2.0
+
+    @property
+    def snaps(self) -> bool:
+        return True
+
+    @property
+    def identity(self) -> RealizerIdentity:
+        return self          # every field affects the proposal
+
+    def realize(self, chord: LineString, sg: _SnapGraph | None) -> LineString | None:
+        assert sg is not None, "SnapToBoundary needs a snap graph"
+        return _snap(chord, sg, self.lam)
+
+
+@dataclass(frozen=True)
+class IdealChord:
+    """Aspirational realization: the straight chord itself, unsnapped.
+
+    A DIAGNOSTIC that isolates the effect of frontage-snapping, not a universal directness ceiling
+    -- see the design doc's correction note.
+    """
+
+    @property
+    def snaps(self) -> bool:
+        return False
+
+    @property
+    def identity(self) -> RealizerIdentity:
+        return self
+
+    def realize(self, chord: LineString, sg: _SnapGraph | None) -> LineString | None:
+        del sg
+        return chord
+
+
+RealizerIdentity: TypeAlias = SnapToBoundary | IdealChord
