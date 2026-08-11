@@ -336,7 +336,7 @@ is the wrong bias, so it needs measuring rather than assuming.
 
 **Interim:** the access method belongs in `method_comparison` (one pinned block, affordable, and the
 only place C19 evidenced it) and NOT in the three multiblock variants until tier 2 is productionized
-out of `scratchpad/perf` into a selectable engine.
+out of `scripts/perf` into a selectable engine.
 
 ## Method lineup
 

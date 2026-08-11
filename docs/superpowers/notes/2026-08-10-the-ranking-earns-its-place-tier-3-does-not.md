@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-10
 **Follows:** `2026-08-10-tier-2-first-order-access-gain.md`
-**Scripts:** `scratchpad/perf/{selectors,null_model,null_analyze,rank_decompose,stochastic_restarts}.py`
+**Scripts:** `scripts/perf/{selectors,null_model,null_analyze,rank_decompose,stochastic_restarts}.py`
 
 Three follow-ups to the tier-2 result, chosen because tier 2 changed which questions were worth
 asking. Two of them are gates the original cascade did not specify, and one of them kills tier 3.

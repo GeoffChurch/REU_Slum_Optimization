@@ -9,7 +9,21 @@ before the work can be picked up at all.
 
 ---
 
-## §0. READ THIS FIRST: the implementation is untracked and can be destroyed
+## §0. RESOLVED 2026-08-10 — option (b), tracked under `scripts/perf/`
+
+> The owner chose **(b)**: the live code moved to `scripts/perf/` unchanged and is now tracked.
+> `scripts/` was already the home for exactly this kind of harness (`consensus_sweep.py`,
+> `crossblock_probe.py`, `pair_matrix.py`), so this is the existing convention, not a new one.
+> **§4's productionization decision is untouched and still open.**
+>
+> Moved: the 16 live modules + their JSON results. Deliberately **not** moved, and still
+> destroyable: `arterial_incremental.py` / `arterial_lazy_incremental.py` (patched forks of
+> `src/reblock/methods/arterial{,_lazy}.py`) with `run_patched.sh` and `bias.py`. Tracking a stale
+> 531-line fork that a script `cp`s over `src/` is a drift hazard and a footgun; the incremental
+> reformulation is a closed experiment whose finding is recorded in the 2026-08-09 tie-sensitivity
+> note. Logs and `region_block.pkl` also stay behind — the pkl self-regenerates in ~67 s.
+>
+> The original problem statement is kept below as the record of why.
 
 Everything built today — the tier-2 shortlist greedy, the selector Protocol, and eight measurement
 harnesses, about **1,670 lines** — lives in `scratchpad/perf/`, which is **git-ignored**

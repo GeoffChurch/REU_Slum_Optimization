@@ -8,7 +8,7 @@ the method, and it had never been looked at.
 ## The measurement
 
 Perturb each candidate's gain by `(1 ± 1e-10)`, the size of that discrepancy, under six seeds.
-Nothing else changes: same candidates, same objective, same code path (`scratchpad/perf/tie_sensitivity.py`,
+Nothing else changes: same candidates, same objective, same code path (`scripts/perf/tie_sensitivity.py`,
 monkeypatching the shipped `eval_candidate`). Any spread is attributable to near-ties in the argmax.
 
     metric        spread across seeds        relative
@@ -68,7 +68,7 @@ exact tie before the rule is consulted). Both selections are equally arbitrary.
 
 ## Tested: no tie-break rule is better, so none was adopted
 
-Three rules over 12 blocks, `objective=access`, `cost=displacement` (`scratchpad/perf/tiebreak.py`):
+Three rules over 12 blocks, `objective=access`, `cost=displacement` (`scripts/perf/tiebreak.py`):
 
     rule          burden_red      perm    road_m    beats wkt (of those differing)
     wkt               0.7896    0.7711     272.1    baseline

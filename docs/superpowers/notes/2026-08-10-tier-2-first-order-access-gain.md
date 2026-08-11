@@ -1,7 +1,7 @@
 # Tier 2: the first-order access gain works, and it exposes something worse
 
 **Date:** 2026-08-10
-**Scripts:** `scratchpad/perf/{snap_vs_peel,rank_throughput,first_order_rank,rank_decompose,shortlist_greedy,shortlist_ab,control_check,region_shortlist}.py`
+**Scripts:** `scripts/perf/{snap_vs_peel,rank_throughput,first_order_rank,rank_decompose,shortlist_greedy,shortlist_ab,control_check,region_shortlist}.py`
 
 Tier 2 is the backlog's "build this first" fix for the access objective's region-scale cost:
 replace a full BFS peel per candidate with a local estimate, shortlist on it, and score only the
