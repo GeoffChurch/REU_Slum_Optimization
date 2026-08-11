@@ -115,14 +115,18 @@ measured, not suspected — across the 15-step region run:
 The set grows **2.52×** because uncapped `_anchor_points` takes every network vertex and each
 committed road is a boundary-graph path adding tens more. Two thirds of the 79.6 min is that growth.
 
-**`max_anchors` caps exactly this — MEASURED 2026-08-11, and it wins.** See
-`notes/2026-08-11-max-anchors-is-a-region-scale-win.md`. `cap=128` runs the region in **9.7 min
-against 79.7** (8.2×) with burden **+0.0095** and permeability **+0.0884**. The long-chord bias
-feared below does not appear at either scale; the arc-length stratification turns out to be *why*
-it wins. Two corrections to what this section assumed: `max_anchors` is a **mode switch, not a
-knob** (no setting preserves continuations — the capped branch returns before the vertex loop), and
-it is **dominated at block scale** (quality-neutral, up to 4× slower), so it resolves by input
-scale in config rather than as a global default.
+**`max_anchors` caps exactly this — MEASURED 2026-08-11: an 8.2× COST win at comparable quality.**
+See `notes/2026-08-11-max-anchors-is-a-region-scale-win.md`. `cap=128` runs the region in **9.7 min
+against 79.7**. The long-chord bias feared below does not appear at either scale. Two corrections
+to what this section assumed: `max_anchors` is a **mode switch, not a knob** (no setting preserves
+continuations — the capped branch returns before the vertex loop), and it is **dominated at block
+scale** (quality-neutral, up to 4× slower), so it resolves by input scale in config rather than as
+a global default.
+
+A permeability gain of +0.0884 was also reported on the day and **does not stand**: the region
+displacement budget was unreachable, so the comparison was road-count-matched and the capped arm
+spent 68% more displacement. At reachable budgets the quality advantage largely disappears. The
+speedup is unaffected.
 
 The 66-minute `max_anchors=24` observation called "still unexplained" here **was never a
 measurement**: `scratchpad/perf/anchors.log` holds a header and zero rows, so the first `propose`
@@ -214,11 +218,11 @@ Cheap to avoid, expensive to rediscover.
 ## §6. Suggested order of work
 
 1. ~~**§0 decision**~~ — **DONE 2026-08-10**, option (b); see the banner in §0.
-2. ~~**`max_anchors`, measured properly**~~ — **DONE 2026-08-11**, and it wins at region scale
-   (8.2×, permeability +0.0884). See §2 and the 2026-08-11 note. What remains from it: the region
-   result is **n=1 block** and wants replication; `cap=128` vs `256` is unseparated; only one
-   displacement budget and one shortlist were tested, and the stratification mechanism predicts the
-   shortlist budget interacts with the gap.
+2. ~~**`max_anchors`, measured properly**~~ — **DONE 2026-08-11**: an 8.2× cost win at region scale,
+   at comparable quality. See §2 and the 2026-08-11 note. In progress from it: replication across
+   six regions (3.4k–12k parcels, also a size gradient), and the shortlist confound — at a fixed
+   512 the arms differ in sampled fraction (1.7% vs 0.04%) as well as anchor family, so if climbing
+   the uncapped shortlist closes the gap, the honest lever is the shortlist and not the cap.
 3. **Widen the restart evidence** (§3) — more blocks, a real `pool`/R sweep, more than one
    displacement budget. Then raise the two-metric selection question with the owner. **Now the
    highest-value open item.**

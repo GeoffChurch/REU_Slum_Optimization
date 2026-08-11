@@ -227,12 +227,19 @@ peel over all 11,006 parcels to score adding ONE road, which changes depths only
 neighbourhood. Multiply by thousands of candidates per step (`_anchor_points` includes every network
 vertex, so candidates grow ~C(anchors,2) as the network densifies) times ~15 steps.
 
-**`max_anchors` DOES rescue it -- measured 2026-08-11, and it is a quality gain, not a cost.** See
-`notes/2026-08-11-max-anchors-is-a-region-scale-win.md`. Region block, tier-2 shortlist, matched
-displacement: `cap=128` runs in **9.7 min against uncapped's 79.7** (8.2x) with burden **+0.0095**
-and permeability **+0.0884**; `cap=256` gives 6.1x, +0.0021, +0.0991. Permeability is not selected
-on and both independent caps move it the same way by ~the full block-scale noise band, which is the
-signature of a real structural difference. Region-scale access is now ~10 minutes.
+**`max_anchors` DOES rescue it -- measured 2026-08-11. It is a COST win at comparable quality.** See
+`notes/2026-08-11-max-anchors-is-a-region-scale-win.md`. Region block, tier-2 shortlist: `cap=128`
+runs in **9.7 min against uncapped's 79.7** (8.2x); `cap=256` gives 6.1x. Region-scale access is now
+~10 minutes, roughly 330x on the original problem when combined with tier 2.
+
+**Not a quality win -- an earlier version of this entry said it was.** That claim rested on
+permeability +0.0884 at a "matched displacement budget 0.10" which was never reachable: region
+networks displace only 0.0115-0.0193, and `prefix_to_displacement` returns ALL roads when the budget
+cannot be met. So the comparison was road-count-matched, and the capped arm quietly spent **68% more
+displacement** (0.0193 vs 0.0115) -- which buys burden and permeability alike. Re-run at reachable
+budgets, uncapped wins outright at 0.005 and wins on burden at 0.010; only `cap=256`'s permeability
+at 0.010 beats it. Any future displacement-matched claim here should assert the budget actually
+binds.
 
 The "66 minutes at `max_anchors=24`" that this paragraph used to rest on **was never a measurement**:
 `scratchpad/perf/anchors.log` holds a header and zero rows, so the first `propose` never returned and
@@ -352,9 +359,9 @@ covering the space of runs is not -- see stochastic restarts above.
 set grew 2.52x (468,968 -> 1,180,388) because uncapped `_anchor_points` takes every network vertex
 and each committed road adds tens; per-step cost tracked it 3.3x (139.5 s -> 466.9 s). Two thirds of
 the 79.6 min is that growth. **`max_anchors` caps it and this was measured 2026-08-11: 8.2x faster
-(79.7 -> 9.7 min) with permeability UP +0.0884 and burden flat.** The predicted long-chord bias does
-not appear. Details and caveats above and in
-`notes/2026-08-11-max-anchors-is-a-region-scale-win.md`.
+(79.7 -> 9.7 min) at comparable quality.** The predicted long-chord bias does not appear. The
+permeability gain first reported alongside it was a displacement-matching artifact and does not
+stand -- details above and in `notes/2026-08-11-max-anchors-is-a-region-scale-win.md`.
 
 **Interim:** the access method belongs in `method_comparison` (one pinned block, affordable, and the
 only place C19 evidenced it) and NOT in the three multiblock variants until tier 2 is productionized
