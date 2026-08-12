@@ -472,9 +472,13 @@ def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
         assert isinstance(m.engine, ShortlistEngine), name
         assert isinstance(m.realizer, SnapToBoundary), name
         assert m.max_anchors == 128, name
+        # max_roads 60, not 15: raised 2026-08-12 after a sweep on capetown/depth_density showed 15
+        # BOUND in every settlement region (terminal 0.5-2.6% displacement, short of P* in 3 of 6),
+        # so Lens A was grading the cap rather than the method. Pinned here, like every other field
+        # on this identity, so the next change to it is deliberate rather than drift.
         assert m.identity == ArterialIdentity(
             realizer=SnapToBoundary(), objective="access", cost=cost,
-            corridor_key=DEFAULT_ROAD_WIDTH_M, max_roads=15, n_anchors=32, top_k=8,
+            corridor_key=DEFAULT_ROAD_WIDTH_M, max_roads=60, n_anchors=32, top_k=8,
             engine=ShortlistIdentity(k=512), max_anchors=128), name
 
     # Negative direction: the cap and ShortlistEngine are access-only. "Tidying" either onto a
