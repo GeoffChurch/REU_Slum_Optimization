@@ -913,8 +913,13 @@ subject to permeability ≥ P\*. Notes toward it:
   values question, not a measurement one. An in-objective length *price* on the method side was built
   and deleted: too weak where it was needed (still 33,623 m at price 16) and a pure loss at block
   scale.
-- **The committed examples are stale** and need regenerating — `clearance_looped`, `arterial` and
-  `resistance_greedy` prefixes all shift under the corrected order and drainage key.
+- ~~**The committed examples are stale** and need regenerating — `clearance_looped`, `arterial` and
+  `resistance_greedy` prefixes all shift under the corrected order and drainage key.~~
+  **RESOLVED 2026-08-12.** All seven example targets were regenerated from current code during the
+  arterial-engine rollout (commit `87eea5d`). The evidence that no shift remains is the shape of
+  that commit: it touched 35 `greedy_arterial` artifacts and **zero** for `clearance_looped` or
+  `resistance_greedy` — those methods re-ran and came back byte-identical to what was already
+  committed, so whatever shift was anticipated either landed earlier or never materialised.
 
 ## Permeability vs access depth on disconnected roads -- and the all-pairs alternative (2026-07-30)
 
@@ -1053,7 +1058,23 @@ there was effectively one informative block. **Not refuted, not supported -- inc
 n >= 20 with a budget where the loop refiner's loops actually exist, or with a synthetic same-length
 tree-vs-loop pair, if the redundancy question is worth reopening.
 
-## Width/direction solver layer -- PROMISING, and its premise is refuted (2026-07-31)
+## Width/direction solver layer -- CLOSED 2026-07-31 (value failure), code DELETED 2026-08-07
+
+> **Status at a glance, because this entry is long and its detail reads as promising.** The layer
+> was measured, found to add nothing, and its code was removed. Cost was never the problem (1.6 s
+> median at 4,615 parcels). The lattice's middle elements are dominated in BOTH search directions,
+> so one-way was chosen 0-17 times out of 8-3,522 pieces and the solver degenerated into road
+> selection -- where it loses to `street_first_ordered` at every budget.
+>
+> **Its own stated revival condition:** *"a benefit term that values keeping a road at all
+> (coverage, worst-case parcel access, N-1 style), because permeability alone is happy to delete a
+> road and spend the savings elsewhere."*
+>
+> **That condition may now be met.** The ACCESS objective -- which values reaching parcels and is
+> therefore hurt by deleting a road -- became affordable at region scale on 2026-08-12 and now
+> ships (`ShortlistEngine` + `max_anchors`). Whether scoring the lattice against access burden
+> instead of permeability un-dominates the middle is UNTESTED. That is the one experiment that
+> would reopen this. Recovering the deleted code is a `git show`, not a rebuild.
 
 Owner's proposal: methods emit undirected topology only; a solver layer between method and eval
 assigns per-road width and direction; the eval scores the solved network. Methods stay simple and
