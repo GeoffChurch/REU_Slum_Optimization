@@ -1,5 +1,7 @@
 _target_: reblock.methods.arterial.GreedyArterialReblocker
-mode: buildable
+realizer:
+  _target_: reblock.methods.arterial.SnapToBoundary
+  lam: 2.0
 objective: directness
 # Greedy budget + candidate-generation knobs (first-class so they're plain `method.<k>=` overrides).
 # Cost is ~fixed per road (~1 step scores n_anchors^2 + n_anchors*top_k candidates), so max_roads is
@@ -7,7 +9,6 @@ objective: directness
 max_roads: 15
 n_anchors: 32
 top_k: 8
-lam: 2.0
 workers: 16
 # Lazy (CELF) greedy: re-score only the heap-top candidate per commit (huge speedup at large
 # max_roads; scales with budget). lazy=False keeps the exact path byte-identical.

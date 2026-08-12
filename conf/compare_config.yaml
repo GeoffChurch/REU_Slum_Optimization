@@ -16,8 +16,8 @@ defaults:
 # just not benchmarked. The registry order below also keys the plot colour palette.
 all_methods:
   topology: {_target_: reblock.methods.topology.TopologyMethod}
-  greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: directness, max_roads: 15, lazy: true, candidate_policy: grow}
-  greedy_arterial_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: directness, cost: repulsion, max_roads: 15, lazy: true, candidate_policy: grow}
+  greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: directness, max_roads: 15, lazy: true, candidate_policy: grow}
+  greedy_arterial_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: directness, cost: repulsion, max_roads: 15, lazy: true, candidate_policy: grow}
   # aspirational (ideal straight chords, not snapped to frontages) is a DIAGNOSTIC -- it isolates
   # the effect of frontage-snapping, NOT a universal directness ceiling. directness/E measure
   # internal circulation (all-pairs, door-to-door incl. the walk-to-road legs); under that honest
@@ -45,10 +45,10 @@ all_methods:
   # x 2 costs, lazy diverged from the exact greedy on 6 of 6 (final burden 0.0733 vs 0.0867 and
   # 0.2600 vs 0.2933 among others), in both directions, and was SLOWER in 4 of 6. So it buys an
   # approximation for no speed.
-  greedy_arterial_access_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: access, cost: repulsion, max_roads: 15}
-  greedy_arterial_access_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: buildable, objective: access, cost: displacement, max_roads: 15}
-  greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness}
-  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, mode: aspirational, objective: directness, cost: displacement, road_width_m: 7.0}
+  greedy_arterial_access_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: access, cost: repulsion, max_roads: 15}
+  greedy_arterial_access_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: access, cost: displacement, max_roads: 15}
+  greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: directness}
+  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: directness, cost: displacement, road_width_m: 7.0}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
   demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", depth_target: 2, max_roads: 400}
 
