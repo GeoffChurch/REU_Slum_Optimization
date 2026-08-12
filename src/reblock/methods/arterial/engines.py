@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import heapq
 import multiprocessing
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol, TypeAlias, runtime_checkable
 
 import numpy as np
 from geopandas import GeoDataFrame
+from shapely import STRtree
 from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
@@ -54,6 +55,7 @@ from reblock.methods.arterial.scoring import (
 # instrumentable seam, same spirit as `_PARALLEL_THRESHOLD`'s test-monkeypatch design), which
 # --strict would otherwise flag as accessing a name this module merely imports, not exports.
 from reblock.methods.arterial.scoring import eval_candidate as eval_candidate
+from reblock.methods.arterial.shortlist import CandidateSelector, FirstOrder, RankContext
 from reblock.methods.boundary_graph import _boundary_graph
 
 
@@ -312,6 +314,106 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: 
     return roads
 
 
+def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: str,
+                      selector: CandidateSelector, n_anchors: int = 32,
+                      top_k: int = 8, max_roads: int = 15,
+                      cost: str = "length", half_width_m: float,
+                      workers: int = 16, max_anchors: int = 0,
+                      on_step: Callable[[int, int, int], None] | None = None) -> GeoDataFrame:
+    """`_greedy_arterials` with the step's candidate list reduced by an injected `selector` --
+    tier 2. Mirrors `_greedy_arterials` step for step and changes exactly one thing: which
+    candidates reach `eval_candidate`. The per-step state, the scorer, the fork pool and the
+    `_best_candidate` reduce are all the SAME ones `_greedy_arterials` uses, so any difference in
+    the output comes from the shortlist and nothing else -- verified by
+    `test_shortlist_with_non_binding_k_is_the_exact_engine`, which sets `selector` to a `FirstOrder`
+    wide enough to never bind and checks the two engines produce byte-identical roads.
+
+    `on_step(step, n_candidates, n_committed)` fires after each commit. A region run can take over
+    an hour and reports nothing until it returns, so without this a kill destroys the whole run's
+    evidence -- see docs/superpowers/notes/2026-08-11-max-anchors-is-a-region-scale-win.md.
+    """
+    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    base_burden = access_burden(parcel_access_layers(
+        block, None, tol=STREET_TOL, adj=adj, unreached_depth=len(block.parcels) + 1))
+    g = _boundary_graph(block.parcels)
+    sg = _snap_graph(g)
+    # Raw street geometries (may be a MultiLineString for a holed/courtyard block) -- do NOT
+    # filter to LineString, or Multi* streets get dropped and the proposal comes back empty;
+    # _anchor_points explodes Multi* internally.
+    streets: list[BaseGeometry] = list(block.streets.geometry)
+    ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
+    radii = building_radii(block.building_points)
+    # The two trees the ranking queries against -- built once per block, like `_snap_graph` above.
+    parcel_tree = STRtree(list(block.parcels.geometry))
+    building_tree = STRtree(list(block.building_points.geometry))
+    ids = block.parcels["parcel_id"]
+
+    committed: list[LineString] = []
+    while len(committed) < max_roads:
+        network: list[BaseGeometry] = [*streets, *committed]
+        anchors = _anchor_points(network, n_anchors, max_anchors)
+        base_merged = _merge(committed)
+        base = _explode(base_merged, block.crs, 2.0 * half_width_m)
+        base_val = _score(objective, block, base, adj, base_burden, ctx)
+        curr_roads = base if len(committed) else None
+        targets = _deep_targets(block, curr_roads, top_k, adj)
+        committed_dist = building_xy = None
+        if cost == "displacement_fast":
+            building_xy = np.asarray(list(block.building_points.geometry), dtype=object)
+            committed_dist = corridor_distance(block.building_points, base) if len(base) else None
+        committed_disp = (displacement(block.building_points, radii, base)
+                          if cost == "displacement" else 0.0)
+        step = ctx.step(base) if (ctx is not None and realizer.snaps) else None
+
+        # --- the one difference from `_greedy_arterials`: reduce the candidate list ---
+        candidates = _candidate_chords(anchors, targets)
+        n_cand = len(candidates)                    # pre-shortlist -- what `on_step` reports
+        # ONE peel per step (not per candidate) gives every parcel's depth under what is already
+        # committed. `.loc[ids]` puts it in the positional order `parcel_tree` indexes. Computed
+        # for every selector, including one that ignores it, so a timing comparison between
+        # selectors is never flattered by one of them skipping work the others pay for.
+        depths = parcel_access_layers(block, curr_roads, tol=STREET_TOL, adj=adj,
+                                      unreached_depth=len(block.parcels) + 1)
+        candidates = selector.select(candidates, RankContext(
+            depths=depths.loc[ids].to_numpy(dtype=float), parcel_tree=parcel_tree,
+            building_tree=building_tree, half_width_m=half_width_m, step=len(committed)))
+        # --- everything below is the shipped path, unmodified ---
+
+        use_pool = (workers > 1 and len(candidates) >= _PARALLEL_THRESHOLD
+                    and "fork" in multiprocessing.get_all_start_methods())
+        # See `_greedy_arterials`' matching comment: `_STEP_STATE` lives in `scoring` and must be
+        # written/read through the qualified module object, never a rebound local import.
+        assert scoring._STEP_STATE is None, (
+            "eval_candidate's per-step state holder is not reentrant")
+        scoring._STEP_STATE = _StepState(
+            step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
+            realizer=realizer, objective=objective, cost=cost, half_width_m=half_width_m,
+            committed_disp=committed_disp, committed_dist=committed_dist,
+            building_xy=building_xy, block=block, radii=radii,
+            crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
+        try:
+            if use_pool:
+                with ProcessPoolExecutor(max_workers=workers,
+                                         mp_context=multiprocessing.get_context("fork")) as ex:
+                    results = list(ex.map(eval_candidate, candidates,
+                                          chunksize=max(1, len(candidates) // (workers * 4))))
+            else:
+                results = [eval_candidate(chord) for chord in candidates]
+        finally:
+            scoring._STEP_STATE = None
+        _, best_real = _best_candidate(results)
+        if best_real is None:                               # no candidate improves -> stop
+            break
+        assert isinstance(best_real, LineString)
+        committed.append(best_real)
+        if on_step is not None:
+            on_step(len(committed), n_cand, len(committed))
+
+    roads = _planarize(committed, block.crs, 2.0 * half_width_m)
+    roads["drain"] = road_drainage(block, roads) if len(roads) else []
+    return roads
+
+
 @runtime_checkable
 class ArterialEngine(Protocol):
     """How the greedy searches: which candidates get scored exactly, each step.
@@ -371,5 +473,43 @@ class LazyEngine:
             policy_spec=self.policy, rescore_every=self.rescore_every, max_anchors=max_anchors)
 
 
-# ShortlistIdentity joins this union in Task 7 -- extending it is a one-line change.
-EngineIdentity: TypeAlias = ExactEngine | LazyEngine
+@dataclass(frozen=True)
+class ShortlistEngine:
+    """Tier 2: rank every candidate by a cheap first-order estimate, score only the top `k` exactly.
+
+    Needed because CELF is invalid for the access objective (not submodular). Ranks by
+    (sum of d^2-1 over parcels the chord fronts) / (buildings in its corridor) -- chosen by
+    measurement: against exact displacement it correlates +0.92 where chord length manages +0.65,
+    for the same single bulk `dwithin`.
+
+    `k=512` is the value every region result was measured at. Saturation bounds it only from ABOVE:
+    512/1024/2048/4096 produce a bit-identical network, so overshooting is free and the unmeasured
+    direction is downward. `threads=8` is the measured optimum (354.9 s at 1, 104.3 s at 8, and
+    134.0 s at 16 -- the STRtree query is memory-bandwidth bound). At block scale threads is a
+    no-op by construction: a few thousand candidates is one chunk.
+    """
+
+    k: int = 512
+    threads: int = 8
+
+    @property
+    def identity(self) -> EngineIdentity:
+        return ShortlistIdentity(k=self.k)      # threads cannot change the roads
+
+    def run(self, block: Block, *, objective: str, cost: str, realizer: ChordRealizer,
+            n_anchors: int, top_k: int, max_roads: int, half_width_m: float,
+            workers: int, max_anchors: int) -> GeoDataFrame:
+        return _greedy_shortlist(
+            block, objective=objective, cost=cost, realizer=realizer, n_anchors=n_anchors,
+            top_k=top_k, max_roads=max_roads, half_width_m=half_width_m, workers=workers,
+            max_anchors=max_anchors, selector=FirstOrder(self.k, threads=self.threads))
+
+
+@dataclass(frozen=True)
+class ShortlistIdentity:
+    """ShortlistEngine's proposal-affecting part. `threads` is excluded deliberately."""
+
+    k: int
+
+
+EngineIdentity: TypeAlias = ExactEngine | LazyEngine | ShortlistIdentity

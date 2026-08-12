@@ -44,10 +44,11 @@ from reblock.budget import building_radii, prefix_to_displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
+from reblock.methods.arterial import SnapToBoundary
+from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
 from scripts.pair_matrix import evenly_spaced, load_pools
 from scripts.perf.selectors import FirstOrder
-from scripts.perf.shortlist_greedy import greedy_shortlist
 
 K = 128                       # tier-2 shortlist, held fixed across arms
 CAPS = (0, 32, 64, 128, 256)  # 0 == uncapped == the shipped default
@@ -74,10 +75,11 @@ def main() -> None:
         for cap in CAPS:
             per_step: list[int] = []
             t0 = time.perf_counter()
-            r = greedy_shortlist(b, mode="buildable", objective="access", cost="displacement",
-                                 half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                 max_roads=MAX_ROADS, max_anchors=cap, selector=FirstOrder(K),
-                                 on_step=lambda s, c, nr, acc=per_step: acc.append(c))
+            r = _greedy_shortlist(b, realizer=SnapToBoundary(), objective="access",
+                                  cost="displacement",
+                                  half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
+                                  max_roads=MAX_ROADS, max_anchors=cap, selector=FirstOrder(K),
+                                  on_step=lambda s, c, nr, acc=per_step: acc.append(c))
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue

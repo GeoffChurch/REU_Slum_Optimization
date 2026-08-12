@@ -1,15 +1,21 @@
 import dataclasses
 
+import geopandas as gpd
 import pytest
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import GreedyArterialReblocker, IdealChord, SnapToBoundary
-from reblock.methods.arterial.engines import ArterialEngine, ExactEngine, LazyEngine
+from reblock.methods.arterial.engines import (
+    ArterialEngine,
+    ExactEngine,
+    LazyEngine,
+    ShortlistEngine,
+)
 from reblock.methods.arterial.policies import Faithful, Fixed, Grow
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
-from tests.methods.test_arterial import _grid_block  # reuse the fast grid fixture
+from tests.methods.test_arterial import UTM, _grid_block, _two_arm_block  # reuse fast fixtures
 
 
 def _policy(spec, block):
@@ -45,6 +51,33 @@ def test_reblocker_has_no_engine_flags_left() -> None:
     fields = {f.name for f in dataclasses.fields(GreedyArterialReblocker)}
     assert {"lazy", "candidate_policy", "rescore_every", "mode", "lam"} & fields == set()
     assert {"engine", "realizer"} <= fields
+
+
+def test_shortlist_with_non_binding_k_is_the_exact_engine() -> None:
+    """The shortlist re-states the exact step loop so an injected ranking can cut the candidate
+    list mid-loop. With k above every step's candidate count it must reduce to the exact greedy
+    EXACTLY -- the two have separate copies of a dozen per-step setup lines, and dropping one
+    (committed_disp, base_val, the step context) changes scores silently rather than crashing.
+
+    Uses the access objective with cost=displacement because that is the combination the shortlist
+    exists for, and _two_arm_block supplies the building points displacement needs."""
+    pts = gpd.GeoDataFrame(geometry=[Point(0.5, y) for y in range(1, 8)] + [Point(10.5, 4)],
+                           crs=UTM)
+    block = _two_arm_block(pts)
+    kw: dict[str, object] = dict(objective="access", cost="displacement",
+                                 realizer=SnapToBoundary(), max_roads=3,
+                                 road_width_m=DEFAULT_ROAD_WIDTH_M, workers=2)
+    want = GreedyArterialReblocker(engine=ExactEngine(), **kw).propose(block)          # type: ignore[arg-type]
+    got = GreedyArterialReblocker(engine=ShortlistEngine(k=10_000_000), **kw).propose(block)  # type: ignore[arg-type]
+    assert want.roads is not None and got.roads is not None
+    assert [g.wkt for g in got.roads.geometry] == [g.wkt for g in want.roads.geometry]
+
+
+def test_shortlist_threads_do_not_enter_identity() -> None:
+    """threads is a parallelism knob, same category as workers -- it cannot change the roads, so
+    it must not split the cache key."""
+    assert ShortlistEngine(k=512, threads=1).identity == ShortlistEngine(k=512, threads=8).identity
+    assert ShortlistEngine(k=512).identity != ShortlistEngine(k=256).identity
 
 
 def test_lazy_fixed_and_faithful_run_and_differ_from_exact_is_ok():

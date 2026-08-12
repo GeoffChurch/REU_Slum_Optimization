@@ -31,10 +31,11 @@ from reblock.budget import building_radii, prefix_to_displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
+from reblock.methods.arterial import SnapToBoundary
+from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
 from scripts.pair_matrix import evenly_spaced, load_pools
 from scripts.perf.selectors import CandidateSelector, FirstOrder, RandomSample, ScoreAll
-from scripts.perf.shortlist_greedy import greedy_shortlist
 
 KS = (128, 32)
 SEEDS = (1, 2, 3, 4, 5)
@@ -68,9 +69,10 @@ def main() -> None:
         rec: dict[str, dict[str, float]] = {}
         for name, selector in the_arms:
             t0 = time.perf_counter()
-            r = greedy_shortlist(b, mode="buildable", objective="access", cost="displacement",
-                                 half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                 max_roads=MAX_ROADS, selector=selector)
+            r = _greedy_shortlist(b, realizer=SnapToBoundary(), objective="access",
+                                  cost="displacement",
+                                  half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
+                                  max_roads=MAX_ROADS, selector=selector)
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue
@@ -103,21 +105,29 @@ def main() -> None:
           f"{'vs exact':>11}{'beats exact':>13}")
     ex = col("exact")
 
-    def line(label: str, br: np.ndarray, pm: np.ndarray, rm: np.ndarray, sc: np.ndarray) -> None:
+    # `ref` is explicit, not closed over: the random arm's br/pm/rm/sc pool len(SEEDS) draws per
+    # block (a DISTRIBUTION, not a point), so its "vs exact"/"beats exact" columns need `ex` tiled
+    # to match -- comparing a (blocks * seeds)-length array against a blocks-length `ex` directly
+    # is a shape mismatch (numpy refuses to broadcast (40,) against (8,) at n=8 blocks, 5 seeds).
+    def line(label: str, br: np.ndarray, pm: np.ndarray, rm: np.ndarray, sc: np.ndarray,
+             ref: np.ndarray) -> None:
         print(f"  {label:<14}{np.median(br):>12.4f}{np.median(pm):>9.4f}{np.median(rm):>9.1f}"
-              f"{np.median(sc):>8.1f}{np.median(br) - np.median(ex):>+11.4f}"
-              f"{(br > ex).sum():>9}/{len(br):<3}")
+              f"{np.median(sc):>8.1f}{np.median(br) - np.median(ref):>+11.4f}"
+              f"{(br > ref).sum():>9}/{len(br):<3}")
 
-    line("exact", ex, col("exact", "perm"), col("exact", "road_m"), col("exact", "secs"))
+    line("exact", ex, col("exact", "perm"), col("exact", "road_m"), col("exact", "secs"), ex)
     for k in KS:
         line(f"fo-{k}", col(f"fo-{k}"), col(f"fo-{k}", "perm"), col(f"fo-{k}", "road_m"),
-             col(f"fo-{k}", "secs"))
+             col(f"fo-{k}", "secs"), ex)
         # pool every (block, seed) draw: the random arm is a DISTRIBUTION, not a point
         br = np.concatenate([col(f"rand-{k}-s{s}") for s in SEEDS])
         pm = np.concatenate([col(f"rand-{k}-s{s}", "perm") for s in SEEDS])
         rm = np.concatenate([col(f"rand-{k}-s{s}", "road_m") for s in SEEDS])
         sc = np.concatenate([col(f"rand-{k}-s{s}", "secs") for s in SEEDS])
-        line(f"rand-{k} (x{len(SEEDS)})", br, pm, rm, sc)
+        # `ex` tiled len(SEEDS) times matches the seed-major concatenation above exactly (each
+        # block's `col(...)` preserves `rows`' iteration order, so every seed-block contributes
+        # in the same block order): tile, don't repeat-per-element.
+        line(f"rand-{k} (x{len(SEEDS)})", br, pm, rm, sc, np.tile(ex, len(SEEDS)))
 
     print("\n  PER BLOCK: where does the ranking sit inside the random arm's own spread?\n")
     for k in KS:

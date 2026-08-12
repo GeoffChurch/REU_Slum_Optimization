@@ -2,7 +2,7 @@
 
 The per-step test ("is the exact winner in the top k?") was measured and is the wrong question: the
 exact greedy's argmax flips under a 1e-10 perturbation, so the winner is one arbitrary draw from a
-set of near-ties and no approximation can reproduce it. See `shortlist_greedy.py`'s docstring.
+set of near-ties and no approximation can reproduce it. See `tie_sensitivity.py`.
 
 The right question is whether the OUTCOME matches, and there is already a calibrated band to judge
 it against. `tie_sensitivity.py` perturbed candidate gains by 1e-10 -- a change with no meaning
@@ -31,9 +31,11 @@ from reblock.budget import building_radii, prefix_to_displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
+from reblock.methods.arterial import SnapToBoundary
+from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
 from scripts.pair_matrix import evenly_spaced, load_pools
-from scripts.perf.shortlist_greedy import greedy_shortlist
+from scripts.perf.selectors import FirstOrder
 
 ARMS = [("exact", 0), ("k=512", 512), ("k=128", 128), ("k=32", 32)]
 N_BLOCKS = 8
@@ -60,9 +62,10 @@ def main() -> None:
         rec: dict[str, dict[str, float]] = {}
         for name, k in ARMS:
             t0 = time.perf_counter()
-            r = greedy_shortlist(b, mode="buildable", objective="access", cost="displacement",
-                                 half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                 max_roads=MAX_ROADS, shortlist=k)
+            r = _greedy_shortlist(b, realizer=SnapToBoundary(), objective="access",
+                                  cost="displacement",
+                                  half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
+                                  max_roads=MAX_ROADS, selector=FirstOrder(k))
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue
