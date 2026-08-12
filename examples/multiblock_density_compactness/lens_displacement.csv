@@ -3,4 +3,5 @@ clearance_looped,2284.0,0.1007,0.740517,0.693764,True
 euclidean_grid,3553.8,0.1005,0.617463,0.529445,True
 resistance_lp,4454.3,0.1000,0.807481,0.789107,True
 cycle_native,3063.0,0.1006,0.743257,0.702329,True
+greedy_arterial_access_displacement,1870.0,0.0259,0.472182,0.525057,False
 osm_footpaths,2874.4,0.1022,0.630436,0.400375,True
