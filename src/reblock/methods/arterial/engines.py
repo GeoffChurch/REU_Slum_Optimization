@@ -11,6 +11,8 @@ import heapq
 import multiprocessing
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
+from typing import Protocol, TypeAlias, runtime_checkable
 
 import numpy as np
 from geopandas import GeoDataFrame
@@ -29,7 +31,7 @@ from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import scoring
-from reblock.methods.arterial.policies import CandidatePolicySpec
+from reblock.methods.arterial.policies import CandidatePolicySpec, Grow
 from reblock.methods.arterial.primitives import (
     _anchor_points,
     _candidate_chords,
@@ -308,3 +310,66 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: 
     roads = _planarize(committed, block.crs, 2.0 * half_width_m)
     roads["drain"] = road_drainage(block, roads) if len(roads) else []
     return roads
+
+
+@runtime_checkable
+class ArterialEngine(Protocol):
+    """How the greedy searches: which candidates get scored exactly, each step.
+
+    Injected rather than picked by three co-dependent flags. Every engine reuses the same scoring
+    machinery (`eval_candidate`, `_STEP_STATE`, the fork pool) -- only candidate selection differs.
+    """
+
+    @property
+    def identity(self) -> EngineIdentity: ...
+
+    def run(self, block: Block, *, objective: str, cost: str, realizer: ChordRealizer,
+            n_anchors: int, top_k: int, max_roads: int, half_width_m: float,
+            workers: int, max_anchors: int) -> GeoDataFrame: ...
+
+
+@dataclass(frozen=True)
+class ExactEngine:
+    """Score every candidate, every step. The reference path every other engine is checked
+    against."""
+
+    @property
+    def identity(self) -> EngineIdentity:
+        return self
+
+    def run(self, block: Block, *, objective: str, cost: str, realizer: ChordRealizer,
+            n_anchors: int, top_k: int, max_roads: int, half_width_m: float,
+            workers: int, max_anchors: int) -> GeoDataFrame:
+        return _greedy_arterials(
+            block, objective=objective, cost=cost, realizer=realizer, n_anchors=n_anchors,
+            top_k=top_k, max_roads=max_roads, half_width_m=half_width_m, workers=workers,
+            max_anchors=max_anchors)
+
+
+@dataclass(frozen=True)
+class LazyEngine:
+    """CELF lazy-greedy: drive selection with a max-heap of stale upper bounds.
+
+    VALID ONLY FOR SUBMODULAR OBJECTIVES. That holds for directness; it does NOT hold for
+    access-burden reduction, where it was measured diverging from the exact greedy on 6 of 6 blocks
+    and SLOWER in 4 of 6 -- an approximation for no speed. Use ShortlistEngine for access.
+    """
+
+    policy: CandidatePolicySpec = Grow()
+    rescore_every: int = 0          # 0 = pure lazy; N = full re-score every N commits
+
+    @property
+    def identity(self) -> EngineIdentity:
+        return self
+
+    def run(self, block: Block, *, objective: str, cost: str, realizer: ChordRealizer,
+            n_anchors: int, top_k: int, max_roads: int, half_width_m: float,
+            workers: int, max_anchors: int) -> GeoDataFrame:
+        return _greedy_arterials_lazy(
+            block, objective=objective, cost=cost, realizer=realizer, n_anchors=n_anchors,
+            top_k=top_k, max_roads=max_roads, half_width_m=half_width_m, workers=workers,
+            policy_spec=self.policy, rescore_every=self.rescore_every, max_anchors=max_anchors)
+
+
+# ShortlistIdentity joins this union in Task 7 -- extending it is a one-line change.
+EngineIdentity: TypeAlias = ExactEngine | LazyEngine

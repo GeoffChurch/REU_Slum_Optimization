@@ -10,8 +10,8 @@ from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import ArterialIdentity, GreedyArterialReblocker, engines
-from reblock.methods.arterial.engines import _greedy_arterials
-from reblock.methods.arterial.policies import Fixed, Grow
+from reblock.methods.arterial.engines import ExactEngine, LazyEngine, _greedy_arterials
+from reblock.methods.arterial.policies import Fixed
 from reblock.methods.arterial.primitives import (
     _anchor_points,
     _candidate_chords,
@@ -347,15 +347,18 @@ def test_identity_and_proposal_metadata() -> None:
     m = GreedyArterialReblocker(objective="directness")
     assert m.identity == ArterialIdentity(
         realizer=SnapToBoundary(), objective="directness", cost="length", corridor_key=0.0,
-        max_roads=15, n_anchors=32, top_k=8, lazy=False,
-        policy_spec=Grow(), rescore_every=0, max_anchors=0)
+        max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
     # max_roads / n_anchors / top_k change the proposed roads -> must change the cache key,
     # else a budget/candidate sweep silently returns another setting's cached proposal.
     assert GreedyArterialReblocker(max_roads=3).identity != m.identity
     assert GreedyArterialReblocker(n_anchors=16).identity != m.identity
-    assert GreedyArterialReblocker(lazy=True).identity != m.identity
-    assert GreedyArterialReblocker(policy_spec=Fixed()).identity != m.identity
-    assert GreedyArterialReblocker(rescore_every=2).identity != m.identity
+    # engine was lazy + candidate_policy + rescore_every -- one injected instance now, so
+    # discriminate both the engine choice itself and the knobs that only exist inside LazyEngine.
+    assert GreedyArterialReblocker(engine=LazyEngine()).identity != m.identity
+    assert (GreedyArterialReblocker(engine=LazyEngine(policy=Fixed())).identity
+            != GreedyArterialReblocker(engine=LazyEngine()).identity)
+    assert (GreedyArterialReblocker(engine=LazyEngine(rescore_every=2)).identity
+            != GreedyArterialReblocker(engine=LazyEngine()).identity)
     assert GreedyArterialReblocker(max_anchors=48).identity != m.identity
     proposal = GreedyArterialReblocker(objective="directness").propose(_grid_block(5))
     assert proposal.block_identity == _grid_block(5).identity
@@ -401,14 +404,14 @@ def test_config_and_derivation_wiring() -> None:
         cfg = compose(config_name="compare_config",
                       overrides=["shapefile=x", "methods=[greedy_arterial_buildable]"])
     m = instantiate(cfg.all_methods["greedy_arterial_buildable"])
-    # NOTE: lazy=True here (unlike other goldens in this file) matches compare_config.yaml's
-    # inline greedy_arterial_buildable entry, which sets lazy: true -- a pre-existing golden/config
-    # mismatch (this assertion previously asserted False) found and fixed incidentally while
-    # updating these tuples for max_anchors; unrelated to the anchor-cap feature itself.
+    # NOTE: engine=LazyEngine() here (unlike other goldens in this file) matches
+    # compare_config.yaml's inline greedy_arterial_buildable entry, which sets
+    # engine: {_target_: ...LazyEngine} -- a pre-existing golden/config mismatch (this assertion
+    # previously asserted ExactEngine) found and fixed incidentally while updating these tuples for
+    # max_anchors; unrelated to the anchor-cap feature itself.
     assert m.identity == ArterialIdentity(
         realizer=SnapToBoundary(), objective="directness", cost="length", corridor_key=0.0,
-        max_roads=15, n_anchors=32, top_k=8, lazy=True,
-        policy_spec=Grow(), rescore_every=0, max_anchors=0)
+        max_roads=15, n_anchors=32, top_k=8, engine=LazyEngine(), max_anchors=0)
 
 
 def test_displacement_config_instantiates_with_right_params_and_identity() -> None:
@@ -426,8 +429,7 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
     assert (m.objective, m.cost, m.road_width_m) == ("directness", "displacement", 7.0)
     assert m.identity == ArterialIdentity(
         realizer=IdealChord(), objective="directness", cost="displacement", corridor_key=7.0,
-        max_roads=15, n_anchors=32, top_k=8, lazy=False,
-        policy_spec=Grow(), rescore_every=0, max_anchors=0)
+        max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
 
     # The standalone conf/method/greedy_arterial_displacement.yaml config group (config.yaml's
     # `method=` default group), separate from compare_config's inline `all_methods` entry above.
@@ -480,8 +482,7 @@ def test_cost_displacement_in_identity() -> None:
     m = GreedyArterialReblocker(realizer=IdealChord(), objective="directness", cost="displacement")
     assert m.identity == ArterialIdentity(
         realizer=IdealChord(), objective="directness", cost="displacement", corridor_key=7.0,
-        max_roads=15, n_anchors=32, top_k=8, lazy=False,
-        policy_spec=Grow(), rescore_every=0, max_anchors=0)
+        max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
 
 
 def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 10) -> Block:

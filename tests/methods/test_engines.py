@@ -1,9 +1,12 @@
+import dataclasses
+
 import pytest
 from shapely.geometry import LineString
 
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import GreedyArterialReblocker, IdealChord, SnapToBoundary
+from reblock.methods.arterial.engines import ArterialEngine, ExactEngine, LazyEngine
 from reblock.methods.arterial.policies import Faithful, Fixed, Grow
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.methods.test_arterial import _grid_block  # reuse the fast grid fixture
@@ -14,21 +17,53 @@ def _policy(spec, block):
     return spec.build(block, list(block.streets.geometry), 6, 4, adj, 0)
 
 
+def test_engines_are_their_own_identity_and_discriminate() -> None:
+    # Reflexive equality (identity must be usable as a cache key: two separate constructions with
+    # the same field values share it) plus discrimination on every field LazyEngine has --
+    # rescore_every and policy -- not just the engine-type switch. Mirrors test_policies.py's
+    # test_specs_are_their_own_identity_and_distinct, which caught a real gap (a missed comparison
+    # let a copy-paste `return self` bug through undetected).
+    assert ExactEngine().identity == ExactEngine().identity
+    assert LazyEngine().identity == LazyEngine().identity
+    assert (LazyEngine(policy=Fixed(), rescore_every=3).identity
+            == LazyEngine(policy=Fixed(), rescore_every=3).identity)
+    assert ExactEngine().identity != LazyEngine().identity
+    assert LazyEngine(rescore_every=0).identity != LazyEngine(rescore_every=1).identity
+    assert LazyEngine(policy=Grow()).identity != LazyEngine(policy=Faithful()).identity
+
+
+def test_engines_satisfy_the_protocol() -> None:
+    """Both engines conform to ArterialEngine; a non-conformer doesn't."""
+    assert isinstance(ExactEngine(), ArterialEngine)
+    assert isinstance(LazyEngine(), ArterialEngine)
+    assert not isinstance(object(), ArterialEngine)
+
+
+def test_reblocker_has_no_engine_flags_left() -> None:
+    """lazy + candidate_policy + rescore_every jointly picked an engine; a fourth would have made
+    it worse. They are one injected instance now."""
+    fields = {f.name for f in dataclasses.fields(GreedyArterialReblocker)}
+    assert {"lazy", "candidate_policy", "rescore_every", "mode", "lam"} & fields == set()
+    assert {"engine", "realizer"} <= fields
+
+
 def test_lazy_fixed_and_faithful_run_and_differ_from_exact_is_ok():
     block = _grid_block(5)
     for spec in (Fixed(), Grow(), Faithful()):
         roads = GreedyArterialReblocker(
             objective="directness", n_anchors=6,
-            max_roads=4, lazy=True, policy_spec=spec,
+            max_roads=4, engine=LazyEngine(policy=spec),
         ).propose(block).roads
         assert roads is not None
         assert len(roads) >= 0            # all policies produce a valid proposal
     # rescore_every=1 with fixed equals a full-rescore greedy over that policy's
     # set: determinism
-    a = GreedyArterialReblocker(n_anchors=6, max_roads=3, lazy=True,
-                                policy_spec=Fixed(), rescore_every=1).propose(block).roads
-    b = GreedyArterialReblocker(n_anchors=6, max_roads=3, lazy=True,
-                                policy_spec=Fixed(), rescore_every=1).propose(block).roads
+    a = GreedyArterialReblocker(
+        n_anchors=6, max_roads=3,
+        engine=LazyEngine(policy=Fixed(), rescore_every=1)).propose(block).roads
+    b = GreedyArterialReblocker(
+        n_anchors=6, max_roads=3,
+        engine=LazyEngine(policy=Fixed(), rescore_every=1)).propose(block).roads
     assert a is not None and b is not None
     assert [g.wkt for g in a.geometry] == [g.wkt for g in b.geometry]
 
@@ -101,7 +136,7 @@ def test_faithful_policy_matches_arterial_candidate_set():
 def test_lazy_dispatch_and_determinism():
     block = _grid_block(5)
     m = GreedyArterialReblocker(objective="directness", n_anchors=6,
-                               max_roads=4, lazy=True, policy_spec=Grow())
+                               max_roads=4, engine=LazyEngine(policy=Grow()))
     a = m.propose(block).roads
     b = m.propose(block).roads
     assert a is not None and b is not None
@@ -114,7 +149,7 @@ def test_lazy_grow_with_max_anchors_runs_end_to_end():
     # the end-to-end check that the cap threads through the lazy/grow path without breaking the
     # proposal shape.
     block = _grid_block(5)
-    roads = GreedyArterialReblocker(lazy=True, policy_spec=Grow(),
+    roads = GreedyArterialReblocker(engine=LazyEngine(policy=Grow()),
                                     max_anchors=8, max_roads=3).propose(block).roads
     assert roads is not None
     assert len(roads) >= 0
@@ -141,8 +176,9 @@ def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
     exact_calls = calls["n"]
     # lazy grow
     calls["n"] = 0
-    GreedyArterialReblocker(n_anchors=8, max_roads=4, workers=1,
-                            lazy=True, policy_spec=Grow(), rescore_every=0).propose(block)
+    GreedyArterialReblocker(
+        n_anchors=8, max_roads=4, workers=1,
+        engine=LazyEngine(policy=Grow(), rescore_every=0)).propose(block)
     lazy_calls = calls["n"]
     assert lazy_calls < exact_calls / 2, (lazy_calls, exact_calls)
 
@@ -154,8 +190,8 @@ def test_lazy_roads_carry_drain_column_like_exact():
     # divergence where the lazy engine ended on `_explode(_merge(committed))` with no `drain`.
     block = _grid_block(5)
     roads = GreedyArterialReblocker(objective="directness", n_anchors=6,
-                                    max_roads=4, lazy=True,
-                                    policy_spec=Grow()).propose(block).roads
+                                    max_roads=4,
+                                    engine=LazyEngine(policy=Grow())).propose(block).roads
     assert roads is not None
     assert "drain" in roads.columns
     if len(roads):
@@ -171,7 +207,7 @@ def test_lazy_quality_within_tolerance():
     exact = GreedyArterialReblocker(
         n_anchors=8, max_roads=4, workers=1).propose(block).roads
     lazy = GreedyArterialReblocker(n_anchors=8, max_roads=4, workers=1,
-                                   lazy=True, policy_spec=Grow()).propose(block).roads
+                                   engine=LazyEngine(policy=Grow())).propose(block).roads
     _e0, d_exact = network_efficiency(block, exact)
     _e1, d_lazy = network_efficiency(block, lazy)
     assert d_lazy >= d_exact - 0.02, (d_lazy, d_exact)  # comparable-or-better (beats exact)

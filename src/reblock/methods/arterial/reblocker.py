@@ -1,19 +1,21 @@
 """GreedyArterialReblocker: greedily insert the single straight arterial with the best
-objective gain per meter, one at a time, until a road budget runs out. Two modes -- buildable
-(snapped to the parcel-boundary graph; the shippable navigability method) and aspirational (ideal
-chords; a diagnostic isolating the effect of frontage-snapping, NOT a universal directness ceiling
--- see the design doc's correction note). Candidates are through-roads (network<->network) + spurs
-(network->deep pocket); continuations are through-roads from committed-segment endpoints (always
-anchors), so a spur completes into a through-road for free and crossings planarize into true
-intersections. See docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-design.md.
+objective gain per meter, one at a time, until a road budget runs out. How a candidate chord
+becomes a road is an injected `ChordRealizer` -- SnapToBoundary (snapped to the parcel-boundary
+graph; the shippable navigability method) or IdealChord (ideal chords; a diagnostic isolating the
+effect of frontage-snapping, NOT a universal directness ceiling -- see the design doc's correction
+note). Which candidates get scored exactly, each step, is an injected `ArterialEngine` --
+ExactEngine (every candidate, every step) or LazyEngine (CELF lazy-greedy, valid only for
+submodular objectives). Candidates are through-roads (network<->network) + spurs (network->deep
+pocket); continuations are through-roads from committed-segment endpoints (always anchors), so a
+spur completes into a through-road for free and crossings planarize into true intersections. See
+docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-design.md.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from reblock.contracts import Block, Proposal
-from reblock.methods.arterial.engines import _greedy_arterials, _greedy_arterials_lazy
-from reblock.methods.arterial.policies import CandidatePolicySpec, Grow, PolicyIdentity
+from reblock.methods.arterial.engines import ArterialEngine, EngineIdentity, ExactEngine
 from reblock.methods.arterial.realize import ChordRealizer, RealizerIdentity, SnapToBoundary
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
@@ -32,9 +34,7 @@ class ArterialIdentity:
     max_roads: int
     n_anchors: int
     top_k: int
-    lazy: bool
-    policy_spec: PolicyIdentity
-    rescore_every: int
+    engine: EngineIdentity
     max_anchors: int
 
 
@@ -59,12 +59,10 @@ class GreedyArterialReblocker:
     # scores against (half-width each side). Stamped on every road it returns.
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
     workers: int = 16         # fork-pool size for per-step candidate scoring; 1 == serial no-op
-    lazy: bool = False               # False -> exact _greedy_arterials (byte-identical)
-    # Which candidates the lazy engine keeps alive as roads commit -- Grow (default) | Fixed |
-    # Faithful (only consulted when lazy). Injected rather than selected by a string, matching
-    # `realizer` above.
-    policy_spec: CandidatePolicySpec = Grow()
-    rescore_every: int = 0           # 0 = pure lazy; N = full re-score every N commits (safety)
+    # Which candidates get scored exactly, each step -- ExactEngine (default, byte-identical) or
+    # LazyEngine (CELF lazy-greedy, valid only for submodular objectives). Injected rather than
+    # selected by lazy/candidate_policy/rescore_every flags, matching `realizer` above.
+    engine: ArterialEngine = ExactEngine()
     # A CAP, not a mode switch: 0 = uncapped (every network vertex + arc-length samples,
     # byte-identical); >0 only ever REDUCES that uncapped anchor count, falling back to
     # ~max_anchors arc-length samples when the uncapped set does not already fit -- see
@@ -81,31 +79,22 @@ class GreedyArterialReblocker:
         # sweep silently returns another setting's cached proposal. `realizer.identity` (not
         # `realizer` itself) so a non-snapping realizer's irrelevant fields -- none exist today, but
         # the seam is the same one `SnapToBoundary.identity`/`IdealChord.identity` already use --
-        # can never leak into the key. `policy_spec.identity` for the identical reason (today all
-        # three specs are field-free, but the seam stays the same one Fixed/Grow/Faithful use).
+        # can never leak into the key. `engine.identity` for the identical reason -- ExactEngine
+        # has no fields, and LazyEngine's policy/rescore_every only matter when the engine IS lazy.
         corridor_key = self.road_width_m if self.cost in ("displacement", "repulsion") else 0.0
         return ArterialIdentity(
             realizer=self.realizer.identity, objective=self.objective, cost=self.cost,
             corridor_key=corridor_key,
             max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k,
-            lazy=self.lazy, policy_spec=self.policy_spec.identity,
-            rescore_every=self.rescore_every, max_anchors=self.max_anchors)
+            engine=self.engine.identity, max_anchors=self.max_anchors)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
-        if self.lazy:
-            roads = _greedy_arterials_lazy(
-                block, realizer=self.realizer, objective=self.objective, n_anchors=self.n_anchors,
-                top_k=self.top_k, max_roads=self.max_roads, cost=self.cost,
-                half_width_m=self.road_width_m / 2.0, workers=self.workers,
-                policy_spec=self.policy_spec, rescore_every=self.rescore_every,
-                max_anchors=self.max_anchors)
-        else:
-            roads = _greedy_arterials(
-                block, realizer=self.realizer, objective=self.objective, n_anchors=self.n_anchors,
-                top_k=self.top_k, max_roads=self.max_roads, cost=self.cost,
-                half_width_m=self.road_width_m / 2.0, workers=self.workers,
-                max_anchors=self.max_anchors)
+        roads = self.engine.run(
+            block, objective=self.objective, cost=self.cost, realizer=self.realizer,
+            n_anchors=self.n_anchors, top_k=self.top_k, max_roads=self.max_roads,
+            half_width_m=self.road_width_m / 2.0, workers=self.workers,
+            max_anchors=self.max_anchors)
         realizer_name = type(self.realizer).__name__
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
@@ -114,5 +103,6 @@ class GreedyArterialReblocker:
             method="greedy_arterial",
             params={"segments": len(roads), "realizer": realizer_name,
                     "objective": self.objective,
-                    "cost": self.cost, "road_width_m": self.road_width_m, "lazy": self.lazy},
+                    "cost": self.cost, "road_width_m": self.road_width_m,
+                    "engine": type(self.engine).__name__},
             block_identity=block.identity)
