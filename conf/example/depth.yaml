@@ -17,13 +17,15 @@ example:
 # null -> grow a region with the screen + region_builder above. A list pins exact blocks instead.
 block_ids: null
 
-  # greedy_arterial_access_displacement is DELIBERATELY ABSENT from the multiblock variants and
-  # present only in method_comparison. Measured 2026-08-10: this variant takes 1,115 s without it
-  # and had not finished after 11.6 h WITH it, on an 11,006-parcel region -- the objective is global
-  # (a full BFS peel over every parcel) while each candidate is local, and capping max_anchors does
-  # not rescue it. It is affordable and evidenced at BLOCK scale, which is what method_comparison
-  # scores. See backlog, "Making the access objective affordable at region scale".
-methods: [clearance_looped, euclidean_grid, resistance_lp, cycle_native]
+  # greedy_arterial_access_displacement joined this lineup 2026-08-12. It used to be DELIBERATELY
+  # ABSENT here (present only in method_comparison): measured 2026-08-10, this variant took 1,115 s
+  # without it and had not finished after 11.6 h WITH it, on an 11,006-parcel region -- the
+  # objective is global (a full BFS peel over every parcel) while ExactEngine scores every
+  # candidate exactly. ShortlistEngine (tier 2) is what makes region-scale access finish at all
+  # (~80 min uncapped); max_anchors: 128 stacks a further 7.6x median (2.5-12.2x, 6/6 regions, no
+  # detectable quality difference at matched displacement) -- ~330x combined, ~10 min now. See
+  # notes/2026-08-11-max-anchors-is-a-region-scale-win.md and compare_config.yaml's own comment.
+methods: [clearance_looped, euclidean_grid, resistance_lp, cycle_native, greedy_arterial_access_displacement]
 max_blocks: 1
 region_builder: {max_buildings: 3000}
 all_methods:
