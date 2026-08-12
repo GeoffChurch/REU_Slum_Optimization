@@ -39,7 +39,7 @@ import reblock.methods.arterial.scoring as scoring
 from reblock.budget import displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import GreedyArterialReblocker
+from reblock.methods.arterial import GreedyArterialReblocker, SnapToBoundary
 from reblock.methods.arterial.primitives import _explode, _planarize, _union_with
 from scripts.pair_matrix import evenly_spaced, load_pools
 from scripts.perf.first_order_rank import first_order_gain
@@ -185,7 +185,7 @@ def main() -> None:
         print(f"  {b.block_id}  ({len(b.parcels)} parcels)", flush=True)
         # workers=1 -> the serial path, so `_eval_hook`'s stash survives (a fork pool would
         # compute it in children and discard it)
-        GreedyArterialReblocker(mode="buildable", objective="access", cost="displacement",
+        GreedyArterialReblocker(realizer=SnapToBoundary(), objective="access", cost="displacement",
                                 workers=1, max_roads=MAX_ROADS).propose(b)
         by_block[b.block_id] = list(_ROWS)
     OUT.write_text(json.dumps(by_block, indent=1))

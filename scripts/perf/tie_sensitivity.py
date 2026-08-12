@@ -42,7 +42,7 @@ from reblock.budget import building_radii, prefix_to_displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
-from reblock.methods.arterial import GreedyArterialReblocker
+from reblock.methods.arterial import GreedyArterialReblocker, SnapToBoundary
 from reblock.permeability import permeability
 from scripts.pair_matrix import evenly_spaced, load_pools
 
@@ -94,7 +94,7 @@ def main() -> None:
         rec: dict[str, list[float]] = {"burden_red": [], "perm": [], "road_m": [], "n_roads": []}
         for seed in SEEDS:
             _patch(seed)
-            m = GreedyArterialReblocker(mode="buildable", objective="access",
+            m = GreedyArterialReblocker(realizer=SnapToBoundary(), objective="access",
                                         cost="displacement", workers=8, max_roads=8)
             r = m.propose(b).roads
             if r is None or len(r) == 0:
