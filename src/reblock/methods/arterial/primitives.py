@@ -175,6 +175,6 @@ def _union_with(base_merged: BaseGeometry | None, real: LineString) -> BaseGeome
     vertices, so this incremental two-stage union nodes identically to a one-shot union of the
     full list. It is NOT bit-exact for aspirational free chords crossing a committed edge at a
     float interior point ("Bug 2" -- see `_StepContext`'s docstring), so callers must gate this
-    on `mode == "buildable"` and use the full `_planarize(committed + [real], ...)` for
-    aspirational."""
+    on `realizer.snaps` and use the full `_planarize(committed + [real], ...)` for a
+    non-snapping realizer."""
     return unary_union([base_merged, real]) if base_merged is not None else unary_union([real])

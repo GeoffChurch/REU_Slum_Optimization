@@ -39,6 +39,7 @@ from reblock.methods.arterial.primitives import (
     _planarize,
     _snap_graph,
 )
+from reblock.methods.arterial.realize import ChordRealizer
 from reblock.methods.arterial.scoring import (
     _PARALLEL_THRESHOLD,
     _best_candidate,
@@ -54,12 +55,13 @@ from reblock.methods.arterial.scoring import eval_candidate as eval_candidate
 from reblock.methods.boundary_graph import _boundary_graph
 
 
-def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
-                      top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
+def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, n_anchors: int = 32,
+                      top_k: int = 8, max_roads: int = 15,
                       cost: str = "length", half_width_m: float,
                       workers: int = 16, max_anchors: int = 0) -> GeoDataFrame:
     """Greedily commit the straight arterial with the best objective gain per unit cost until
-    `max_roads` are placed or no candidate improves. `mode` in {"buildable", "aspirational"}.
+    `max_roads` are placed or no candidate improves. `realizer` turns each candidate chord into the
+    road that is actually scored and committed (see `ChordRealizer`).
     `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/expected buildings
     newly displaced within `half_width_m` of any committed road, via the extent-aware disk
     `budget.displacement` over `block.building_points` -- see `budget.building_radii`), "repulsion"
@@ -76,9 +78,10 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
     without `fork` all take the literal serial path (a true no-op vs the pool, not a 1-worker
     pool).
 
-    `max_anchors` (0 = today's uncapped behavior, byte-identical) bounds anchor generation to
-    ~`max_anchors` arc-length samples instead of every network vertex, so candidate count stays
-    ~C(max_anchors, 2) regardless of block boundary complexity -- see `_anchor_points`."""
+    `max_anchors` is a CAP, not a mode switch: 0 means uncapped (byte-identical to every network
+    vertex + arc-length samples); a positive value only ever REDUCES the anchor count below that
+    uncapped set, never inflates it, falling back to ~`max_anchors` arc-length samples when the
+    uncapped family does not already fit -- see `_anchor_points`."""
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     base_burden = access_burden(parcel_access_layers(
         block, None, tol=STREET_TOL, adj=adj, unreached_depth=len(block.parcels) + 1))
@@ -110,8 +113,8 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
             committed_dist = corridor_distance(block.building_points, base) if len(base) else None
         committed_disp = (displacement(block.building_points, radii, base)
                           if cost == "displacement" else 0.0)
-        # Route per-candidate scoring by mode. BUILDABLE trials are boundary-snapped (they join the
-        # committed/street network at shared graph vertices), so the incremental
+        # Route per-candidate scoring by realizer. BUILDABLE trials are boundary-snapped (they join
+        # the committed/street network at shared graph vertices), so the incremental
         # `step.score_candidate` is bit-exact to `_score(objective, _planarize(committed+[real]))`
         # while skipping the per-candidate full entry re-derivation -- the perf win. Likewise, a
         # buildable trial's noding is bit-exact under `_union_with`'s incremental `unary_union`
@@ -121,7 +124,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
         # planarize noding is NOT bit-exact (design "Bug 2"), so those always use the full
         # `_planarize(committed + [real])` re-union below (still frozen-constants fast via `ctx`
         # when scored, for efficiency/directness).
-        step = ctx.step(base) if (ctx is not None and mode == "buildable") else None
+        step = ctx.step(base) if (ctx is not None and realizer.snaps) else None
 
         # Evaluate every candidate against the frozen per-step state, via the module-level holder
         # (COW-inheritable by the fork pool). Both the serial and pool paths funnel through the SAME
@@ -141,7 +144,7 @@ def _greedy_arterials(block: Block, *, mode: str, objective: str, n_anchors: int
             "eval_candidate's per-step state holder is not reentrant")
         scoring._STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
-            mode=mode, objective=objective, cost=cost, lam=lam, half_width_m=half_width_m,
+            realizer=realizer, objective=objective, cost=cost, half_width_m=half_width_m,
             committed_disp=committed_disp, committed_dist=committed_dist,
             building_xy=building_xy, block=block, radii=radii,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
@@ -196,8 +199,9 @@ def _iter_live(heap: list[tuple[float, str, str, LineString, int]], live: set[st
             yield chord
 
 
-def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors: int = 32,
-                           top_k: int = 8, lam: float = 2.0, max_roads: int = 15,
+def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: str,
+                           n_anchors: int = 32,
+                           top_k: int = 8, max_roads: int = 15,
                            cost: str = "length", half_width_m: float,
                            workers: int = 16, candidate_policy: str = "grow",
                            rescore_every: int = 0, max_anchors: int = 0) -> GeoDataFrame:
@@ -221,8 +225,8 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
     # (-gain, real.wkt, chord.wkt, chord, scored_at_step). Ordered by (-gain, real_wkt, key) to
-    # match `_best_candidate`'s tie-break on the REALIZED geometry's wkt exactly (in buildable mode
-    # `real = _snap(chord, sg, lam)` is the boundary-graph path, whose wkt differs from the chord's
+    # match `_best_candidate`'s tie-break on the REALIZED geometry's wkt exactly (a snapping
+    # realizer's `real` is the boundary-graph path, whose wkt differs from the chord's
     # -- ordering by chord.wkt instead would resolve equal-gain ties differently than exact and
     # break the `rescore_every=1` + `faithful` byte-identity oracle). `key` (== chord.wkt) is kept
     # as the THIRD element -- after real_wkt so ties order correctly, before the raw `chord` so
@@ -245,12 +249,12 @@ def _greedy_arterials_lazy(block: Block, *, mode: str, objective: str, n_anchors
         if cost == "displacement_fast":
             building_xy = np.asarray(list(block.building_points.geometry), dtype=object)
             committed_dist = corridor_distance(block.building_points, base) if len(base) else None
-        stepctx = ctx.step(base) if (ctx is not None and mode == "buildable") else None
+        stepctx = ctx.step(base) if (ctx is not None and realizer.snaps) else None
         assert scoring._STEP_STATE is None, (
             "eval_candidate's per-step state holder is not reentrant")
         scoring._STEP_STATE = _StepState(
             step=stepctx, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
-            mode=mode, objective=objective, cost=cost, lam=lam, half_width_m=half_width_m,
+            realizer=realizer, objective=objective, cost=cost, half_width_m=half_width_m,
             committed_disp=committed_disp, committed_dist=committed_dist,
             building_xy=building_xy, block=block, radii=radii,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)

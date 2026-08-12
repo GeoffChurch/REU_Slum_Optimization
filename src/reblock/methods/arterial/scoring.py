@@ -36,7 +36,7 @@ from reblock.budget import (
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.methods.arterial.primitives import _explode, _planarize, _SnapGraph, _union_with
-from reblock.methods.arterial.realize import _snap
+from reblock.methods.arterial.realize import ChordRealizer
 
 
 def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]],
@@ -77,10 +77,9 @@ class _StepState:
     base_val: float
     base_merged: BaseGeometry | None
     committed: list[LineString]
-    mode: str
+    realizer: ChordRealizer
     objective: str
     cost: str
-    lam: float
     half_width_m: float
     committed_disp: float
     # For cost="displacement_fast": per-building distance to the COMMITTED corridor, fixed for the
@@ -105,23 +104,23 @@ _PARALLEL_THRESHOLD = 128
 
 def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
     """Pure per-candidate evaluation, module-level so it doubles as the parallel-map unit of work
-    in a later task. Mirrors `_greedy_arterials`' former inline loop body EXACTLY (mode/objective/
-    cost routing, the `cost="displacement"` denominator, the infinite-gain zero-denominator
-    escape) reading the frozen per-step state stashed in `_STEP_STATE` by `_greedy_arterials` (see
+    in a later task. Mirrors `_greedy_arterials`' former inline loop body EXACTLY (realizer/
+    objective/cost routing, the `cost="displacement"` denominator, the infinite-gain
+    zero-denominator escape) reading the frozen per-step state stashed in `_STEP_STATE` (see
     `_StepState`). Returns `(0.0, None)` for a None/zero-length realization. Returns the shapely
     GEOMETRY (not wkt) -- `_best_candidate` compares `.wkt` only for its tie-break, and returning
     the geometry keeps a future process-pool's pickled round-trip (WKB, lossless) bit-identical to
     this serial path's `real`, unlike a lossy default-precision `to_wkt()`."""
     st = _STEP_STATE
     assert st is not None, "eval_candidate called with no _STEP_STATE set"
-    real = chord if st.mode == "aspirational" else _snap(chord, st.sg, st.lam)
+    real = st.realizer.realize(chord, st.sg)
     if real is None or real.length == 0:
         return 0.0, None
     trial: GeoDataFrame | None = None
     if st.step is not None:
         e, direct = st.step.score_candidate(real)
         raw = (e if st.objective == "efficiency" else direct) - st.base_val
-    elif st.mode == "buildable":
+    elif st.realizer.snaps:
         trial = _explode(_union_with(st.base_merged, real), st.crs, 2.0 * st.half_width_m)
         raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
     else:

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from reblock.contracts import Block, Proposal
 from reblock.methods.arterial.engines import _greedy_arterials, _greedy_arterials_lazy
+from reblock.methods.arterial.realize import ChordRealizer, RealizerIdentity, SnapToBoundary
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 
@@ -22,7 +23,7 @@ class ArterialIdentity:
     knob. The dataclass type itself discriminates the method (no string tag needed -- a frozen
     dataclass compares type before fields, so this never equals another identity type). Frozen ->
     hashable, so it works as an L1 dict key and pickles into the joblib L2 key."""
-    mode: str
+    realizer: RealizerIdentity
     objective: str
     cost: str
     # road_width_m when cost in {displacement, repulsion} else 0.0 -- DERIVED (see the property).
@@ -30,7 +31,6 @@ class ArterialIdentity:
     max_roads: int
     n_anchors: int
     top_k: int
-    lam: float
     lazy: bool
     candidate_policy: str
     rescore_every: int
@@ -39,11 +39,14 @@ class ArterialIdentity:
 
 @dataclass
 class GreedyArterialReblocker:
-    mode: str = "buildable"          # "buildable" | "aspirational"
+    # How a candidate chord becomes the road that is scored and committed -- SnapToBoundary (the
+    # shippable navigability method) or IdealChord (a diagnostic isolating the effect of
+    # frontage-snapping, NOT a universal directness ceiling -- see the design doc's correction
+    # note).
+    realizer: ChordRealizer = SnapToBoundary()
     objective: str = "directness"    # "access" | "efficiency" | "directness"
     n_anchors: int = 32
     top_k: int = 8
-    lam: float = 2.0
     max_roads: int = 15
     # "length" (Delta-benefit/metre) | "displacement" (Delta-benefit/building, see budget.py)
     # | "repulsion" (Delta-benefit / soft quadratic-tail proximity cost, never-zero & CELF-safe)
@@ -58,9 +61,10 @@ class GreedyArterialReblocker:
     lazy: bool = False               # False -> exact _greedy_arterials (byte-identical)
     candidate_policy: str = "grow"   # "grow" | "fixed" | "faithful" (only used when lazy)
     rescore_every: int = 0           # 0 = pure lazy; N = full re-score every N commits (safety)
-    # 0 = today's uncapped anchor generation (byte-identical); >0 bounds anchors to ~max_anchors
-    # arc-length samples (no per-vertex anchors), so candidate count stays ~C(max_anchors, 2)
-    # regardless of boundary complexity -- see _anchor_points.
+    # A CAP, not a mode switch: 0 = uncapped (every network vertex + arc-length samples,
+    # byte-identical); >0 only ever REDUCES that uncapped anchor count, falling back to
+    # ~max_anchors arc-length samples when the uncapped set does not already fit -- see
+    # _anchor_points.
     max_anchors: int = 0
 
     @property
@@ -68,13 +72,17 @@ class GreedyArterialReblocker:
         # Every field that changes the proposed roads must be in the derive-cache key. road_width_m
         # changes which roads win only under cost="displacement"/"repulsion"; hold it fixed so
         # length-cost methods stay corridor-independent (two methods differing only in road_width_m
-        # must NOT share a cached proposal when it matters). max_roads / n_anchors / top_k / lam all
+        # must NOT share a cached proposal when it matters). max_roads / n_anchors / top_k all
         # change the greedy search, so they belong in the key too -- otherwise a budget/candidate
-        # sweep silently returns another setting's cached proposal.
+        # sweep silently returns another setting's cached proposal. `realizer.identity` (not
+        # `realizer` itself) so a non-snapping realizer's irrelevant fields -- none exist today, but
+        # the seam is the same one `SnapToBoundary.identity`/`IdealChord.identity` already use --
+        # can never leak into the key.
         corridor_key = self.road_width_m if self.cost in ("displacement", "repulsion") else 0.0
         return ArterialIdentity(
-            mode=self.mode, objective=self.objective, cost=self.cost, corridor_key=corridor_key,
-            max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k, lam=self.lam,
+            realizer=self.realizer.identity, objective=self.objective, cost=self.cost,
+            corridor_key=corridor_key,
+            max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k,
             lazy=self.lazy, candidate_policy=self.candidate_policy,
             rescore_every=self.rescore_every, max_anchors=self.max_anchors)
 
@@ -82,21 +90,24 @@ class GreedyArterialReblocker:
         del prior
         if self.lazy:
             roads = _greedy_arterials_lazy(
-                block, mode=self.mode, objective=self.objective, n_anchors=self.n_anchors,
-                top_k=self.top_k, lam=self.lam, max_roads=self.max_roads, cost=self.cost,
+                block, realizer=self.realizer, objective=self.objective, n_anchors=self.n_anchors,
+                top_k=self.top_k, max_roads=self.max_roads, cost=self.cost,
                 half_width_m=self.road_width_m / 2.0, workers=self.workers,
                 candidate_policy=self.candidate_policy, rescore_every=self.rescore_every,
                 max_anchors=self.max_anchors)
         else:
             roads = _greedy_arterials(
-                block, mode=self.mode, objective=self.objective, n_anchors=self.n_anchors,
-                top_k=self.top_k, lam=self.lam, max_roads=self.max_roads, cost=self.cost,
+                block, realizer=self.realizer, objective=self.objective, n_anchors=self.n_anchors,
+                top_k=self.top_k, max_roads=self.max_roads, cost=self.cost,
                 half_width_m=self.road_width_m / 2.0, workers=self.workers,
                 max_anchors=self.max_anchors)
+        realizer_name = type(self.realizer).__name__
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
             roads=with_width(roads, self.road_width_m),
-            proposal_id=f"greedy_arterial_{self.mode}_{self.objective}", method="greedy_arterial",
-            params={"segments": len(roads), "mode": self.mode, "objective": self.objective,
+            proposal_id=f"greedy_arterial_{realizer_name}_{self.objective}",
+            method="greedy_arterial",
+            params={"segments": len(roads), "realizer": realizer_name,
+                    "objective": self.objective,
                     "cost": self.cost, "road_width_m": self.road_width_m, "lazy": self.lazy},
             block_identity=block.identity)
