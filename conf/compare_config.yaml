@@ -16,8 +16,8 @@ defaults:
 # just not benchmarked. The registry order below also keys the plot colour palette.
 all_methods:
   topology: {_target_: reblock.methods.topology.TopologyMethod}
-  greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: directness, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine}}
-  greedy_arterial_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: directness, cost: repulsion, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine}}
+  greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: directness, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}}}
+  greedy_arterial_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: directness, cost: repulsion, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}}}
   # aspirational (ideal straight chords, not snapped to frontages) is a DIAGNOSTIC -- it isolates
   # the effect of frontage-snapping, NOT a universal directness ceiling. directness/E measure
   # internal circulation (all-pairs, door-to-door incl. the walk-to-road legs); under that honest
@@ -40,15 +40,22 @@ all_methods:
   # the DIRECTNESS objective and does not transfer: an access gain requires actually fronting
   # parcels, so a gap-hugging road earns nothing.)
   #
-  # NOT `lazy` -- unlike the directness variants above. CELF's guarantee needs the objective to be
-  # submodular, which holds for directness but NOT for access-burden reduction: measured on 3 blocks
-  # x 2 costs, lazy diverged from the exact greedy on 6 of 6 (final burden 0.0733 vs 0.0867 and
-  # 0.2600 vs 0.2933 among others), in both directions, and was SLOWER in 4 of 6. So it buys an
-  # approximation for no speed.
-  greedy_arterial_access_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: access, cost: repulsion, max_roads: 15}
-  greedy_arterial_access_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: access, cost: displacement, max_roads: 15}
-  greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: directness}
-  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: directness, cost: displacement, road_width_m: 7.0}
+  # `ShortlistEngine`, not `LazyEngine` -- unlike the directness variants above. CELF's guarantee
+  # needs the objective to be submodular, which holds for directness but NOT for access-burden
+  # reduction: measured on 3 blocks x 2 costs, lazy diverged from the exact greedy on 6 of 6 (final
+  # burden 0.0733 vs 0.0867 and 0.2600 vs 0.2933 among others), in both directions, and was SLOWER
+  # in 4 of 6 -- an approximation for no speed. ShortlistEngine (tier 2: rank every candidate by a
+  # cheap first-order estimate, score only the top k=512 exactly) is what makes access affordable
+  # at region scale at all -- 11.6h unfinished -> ~80 min uncapped. `max_anchors: 128` (this pair
+  # ONLY; directness/CELF above keep the uncapped default) stacks a further 7.6x median
+  # (2.5-12.2x, 6/6 regions, no detectable quality difference at matched displacement) -- ~330x
+  # combined, 11.6h unfinished to ~10 min (notes/2026-08-11-max-anchors-is-a-region-scale-win.md).
+  # The cap changes which candidates exist, so it changes directness outcomes too, and every
+  # measurement behind it is objective=access.
+  greedy_arterial_access_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: access, cost: repulsion, max_roads: 15, max_anchors: 128, engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512}}
+  greedy_arterial_access_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: access, cost: displacement, max_roads: 15, max_anchors: 128, engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512}}
+  greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: directness, engine: {_target_: reblock.methods.arterial.ExactEngine}}
+  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: directness, cost: displacement, road_width_m: 7.0, engine: {_target_: reblock.methods.arterial.ExactEngine}}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
   demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", depth_target: 2, max_roads: 400}
 
