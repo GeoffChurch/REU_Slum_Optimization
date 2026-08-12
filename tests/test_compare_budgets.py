@@ -1,4 +1,5 @@
 import csv
+import tempfile
 from pathlib import Path
 from typing import cast
 
@@ -8,6 +9,7 @@ from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
+from reblock.compare import PermeabilityConfig
 from reblock.contracts import Block, Proposal
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
@@ -18,6 +20,15 @@ from reblock.permeability import (
 from reblock.render import save_render as _real_save_render
 
 UTM = CRS.from_epsg(32643)
+
+
+def _pcfg(matched_displacement: float, matched_permeability: float) -> PermeabilityConfig:
+    """Test lens thresholds, default metric params. `frontier_xmax` is display-only, so tests that
+    exercise the lenses pin it to the shipped value rather than varying it."""
+    return PermeabilityConfig(params=PermeabilityParams(),
+                              matched_displacement=matched_displacement,
+                              matched_permeability=matched_permeability,
+                              frontier_xmax=0.40)
 
 
 def _street_block(x0: int, block_id: str) -> Block:
@@ -78,18 +89,58 @@ class _FixedRoadMethod:
 
 
 def test_load_permeability_config_reads_the_committed_yaml() -> None:
-    from scripts.compare_budgets import load_permeability_config
+    from reblock.compare import load_permeability_config
 
-    params, matched_displacement, matched_permeability = load_permeability_config()
+    cfg = load_permeability_config()
 
-    assert params.g_walk == 0.1 and params.g_street == 20.0
+    assert cfg.params.g_walk == 0.1 and cfg.params.g_street == 20.0
     # one lane at the calibrated 20.0 -- the invariant the lane re-base preserved,
     # asserted so it survives the next re-base too
-    assert road_conductance(params, params.min_road_width_m, 1.0) == pytest.approx(20.0)
-    assert params.road_margin_m == 1.0
-    assert params.radius_frac == 1.0
-    assert 0.0 < matched_displacement < 1.0
-    assert 0.0 < matched_permeability < 1.0
+    assert road_conductance(cfg.params, cfg.params.min_road_width_m, 1.0) == pytest.approx(20.0)
+    assert cfg.params.road_margin_m == 1.0
+    assert cfg.params.radius_frac == 1.0
+    assert 0.0 < cfg.matched_displacement < 1.0
+    assert 0.0 < cfg.matched_permeability < 1.0
+    assert 0.0 < cfg.frontier_xmax <= 1.0
+
+
+def test_load_permeability_config_reads_every_field_from_the_yaml_not_a_default() -> None:
+    """The defect this loader was consolidated to kill: a field silently omitted from the reader
+    falls back to the dataclass default and nothing raises. Rewrite the yaml with values that
+    differ from every default, and check each one lands."""
+    import textwrap
+
+    from reblock.compare import load_permeability_config as load
+
+    src = (Path("conf") / "permeability.yaml").read_text()
+    with tempfile.TemporaryDirectory() as td:
+        conf = Path(td)
+        # Perturb every field this reader is responsible for, away from both the committed value
+        # and the PermeabilityParams default, so a dropped field cannot coincidentally pass.
+        body = textwrap.dedent("""
+            g_walk: 0.17
+            g_road_per_m: 5.5
+            g_street: 21.5
+            road_margin_m: 1.75
+            radius_frac: 0.85
+            min_road_width_m: 7.0
+            matched_displacement: 0.11
+            matched_permeability: 0.61
+            frontier_xmax: 0.37
+        """)
+        (conf / "permeability.yaml").write_text(body)
+        cfg = load(conf)
+
+    defaults = PermeabilityParams()
+    assert cfg.params.g_walk == 0.17 != defaults.g_walk
+    assert cfg.params.g_road_per_m == 5.5 != defaults.g_road_per_m
+    assert cfg.params.g_street == 21.5 != defaults.g_street
+    assert cfg.params.road_margin_m == 1.75 != defaults.road_margin_m
+    assert cfg.params.radius_frac == 0.85 != defaults.radius_frac
+    assert cfg.matched_displacement == 0.11
+    assert cfg.matched_permeability == 0.61
+    assert cfg.frontier_xmax == 0.37
+    assert src == (Path("conf") / "permeability.yaml").read_text()   # committed yaml untouched
 
 
 def test_run_permeability_lenses_writes_tables_and_renders(tmp_path: Path) -> None:
@@ -104,7 +155,7 @@ def test_run_permeability_lenses_writes_tables_and_renders(tmp_path: Path) -> No
     region = [_street_block(0, "a"), _street_block(4, "b")]
     rows = run_permeability_lenses(
         region, {"clearance": ClearanceReblocker()}, tmp_path,
-        matched_displacement=0.3, matched_permeability=0.1, params=PermeabilityParams())
+        pcfg=_pcfg(0.3, 0.1))
 
     assert len(rows) == 1
     (row,) = rows
@@ -168,8 +219,7 @@ def test_run_permeability_lenses_reblocks_once_per_method_not_twice(
     monkeypatch.setattr(cb, "region_reblock", counting)
     region = [_street_block(0, "a"), _street_block(4, "b")]
     cb.run_permeability_lenses(region, {"clearance": ClearanceReblocker()}, tmp_path,
-                               matched_displacement=0.3, matched_permeability=0.1,
-                               params=PermeabilityParams())
+                               pcfg=_pcfg(0.3, 0.1))
     assert calls["n"] == 1        # one method -> one reblock; frontier + both lenses reuse it
 
 
@@ -190,8 +240,7 @@ def test_run_permeability_lenses_singleton_region_skips_region_reblock(
     monkeypatch.setattr(cb, "region_reblock", _boom)
     region = [_street_block(0, "a")]
     cb.run_permeability_lenses(region, {"clearance": ClearanceReblocker()}, tmp_path,
-                               matched_displacement=0.3, matched_permeability=0.1,
-                               params=PermeabilityParams())
+                               pcfg=_pcfg(0.3, 0.1))
 
 
 def test_run_permeability_lenses_reports_below_budget_and_unreached_honestly(
@@ -217,7 +266,7 @@ def test_run_permeability_lenses_reports_below_budget_and_unreached_honestly(
     block, roads = _sparse_stub_block()
     rows = cb.run_permeability_lenses(
         [block], {"sparse": _FixedRoadMethod(roads)}, tmp_path,
-        matched_displacement=0.5, matched_permeability=0.999, params=PermeabilityParams())
+        pcfg=_pcfg(0.5, 0.999))
 
     (row,) = rows
     assert row.method == "sparse"

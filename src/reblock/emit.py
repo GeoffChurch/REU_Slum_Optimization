@@ -294,7 +294,8 @@ def _method_colors(method_order: Sequence[str]) -> dict[str, tuple[float, float,
 
 def compare_report(results: list[MethodCurve], out_dir: Path,
                    *, method_order: Sequence[str],
-                   matched_displacement: float, matched_permeability: float) -> None:
+                   matched_displacement: float, matched_permeability: float,
+                   frontier_xmax: float) -> None:
     """ONE frontier curve per block/region: permeability (y) vs displacement (x), every method
     overlaid, no title. `results` is the flat (method x block x metric) list from reblock.compare,
     where `metric` is either "permeability" (`curve.cost` = cumulative added road length (m),
@@ -353,6 +354,11 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
                    label=f"matched permeability = {matched_permeability:.0%}")
         ax.set_xlabel("displacement", fontsize=16)
         ax.set_ylabel("permeability", fontsize=16)
+        # DISPLAY ONLY -- `frontier_permeability.csv` above already holds every sample, including
+        # the ones past the limit, so nothing measured is lost by clipping the view. Methods have
+        # no common terminal, so without this the axis autoscales to whichever ran longest and
+        # squashes the range where the lens guides sit. See conf/permeability.yaml's frontier_xmax.
+        ax.set_xlim(0.0, frontier_xmax)
         ax.xaxis.set_major_formatter(PercentFormatter(xmax=1))
         ax.yaxis.set_major_formatter(PercentFormatter(xmax=1))
         ax.tick_params(labelsize=13)
