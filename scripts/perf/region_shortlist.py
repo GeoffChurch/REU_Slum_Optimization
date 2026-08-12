@@ -28,13 +28,13 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords, _deep_targets
+from reblock.methods.arterial.shortlist import CHUNK, RANK_RADIUS, FirstOrder
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
-from scripts.perf.selectors import CHUNK, RANK_RADIUS, FirstOrder
 from scripts.perf.snap_vs_peel import region_block_cached
 
 SHORTLIST = 512
 MAX_ROADS = 15
-THREADS = 8            # measured optimum -- see selectors.first_order_score
+THREADS = 8            # measured optimum -- see shortlist.first_order_score
 SCALING = False        # the thread-scaling table is already measured and recorded; skip the re-run
 
 

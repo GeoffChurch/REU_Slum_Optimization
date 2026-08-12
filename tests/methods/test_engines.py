@@ -26,9 +26,9 @@ def _policy(spec, block):
 def test_engines_are_their_own_identity_and_discriminate() -> None:
     # Reflexive equality (identity must be usable as a cache key: two separate constructions with
     # the same field values share it) plus discrimination on every field LazyEngine has --
-    # rescore_every and policy -- not just the engine-type switch. Mirrors test_policies.py's
-    # test_specs_are_their_own_identity_and_distinct, which caught a real gap (a missed comparison
-    # let a copy-paste `return self` bug through undetected).
+    # rescore_every and policy -- not just the engine-type switch. A narrower check (e.g. only the
+    # engine-type switch) would let a copy-paste `return self` bug -- LazyEngine.identity silently
+    # ignoring `policy` or `rescore_every` -- through undetected.
     assert ExactEngine().identity == ExactEngine().identity
     assert LazyEngine().identity == LazyEngine().identity
     assert (LazyEngine(policy=Fixed(), rescore_every=3).identity
@@ -39,9 +39,10 @@ def test_engines_are_their_own_identity_and_discriminate() -> None:
 
 
 def test_engines_satisfy_the_protocol() -> None:
-    """Both engines conform to ArterialEngine; a non-conformer doesn't."""
+    """All three engines conform to ArterialEngine; a non-conformer doesn't."""
     assert isinstance(ExactEngine(), ArterialEngine)
     assert isinstance(LazyEngine(), ArterialEngine)
+    assert isinstance(ShortlistEngine(), ArterialEngine)
     assert not isinstance(object(), ArterialEngine)
 
 
@@ -213,6 +214,10 @@ def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
         n_anchors=8, max_roads=4, workers=1,
         engine=LazyEngine(policy=Grow(), rescore_every=0)).propose(block)
     lazy_calls = calls["n"]
+    # A lower bound, not just an upper one: without it, a future change that moves the lazy engine
+    # off `engines.eval_candidate` would silently drive lazy_calls to 0 and this assertion would
+    # keep passing vacuously -- 0 < exact_calls / 2 is true for any positive exact_calls.
+    assert lazy_calls > 0
     assert lazy_calls < exact_calls / 2, (lazy_calls, exact_calls)
 
 

@@ -46,9 +46,9 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
+from reblock.methods.arterial.shortlist import FirstOrder
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
 from scripts.pair_matrix import evenly_spaced, load_pools
-from scripts.perf.selectors import FirstOrder
 
 K = 128                       # tier-2 shortlist, held fixed across arms
 CAPS = (0, 32, 64, 128, 256)  # 0 == uncapped == the shipped default

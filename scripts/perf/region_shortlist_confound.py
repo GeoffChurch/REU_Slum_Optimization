@@ -42,9 +42,9 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
+from reblock.methods.arterial.shortlist import FirstOrder
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
 from scripts.perf import region_pool
-from scripts.perf.selectors import FirstOrder
 
 REGION = 0
 MAX_ROADS = 8

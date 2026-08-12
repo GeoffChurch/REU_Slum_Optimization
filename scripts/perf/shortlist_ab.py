@@ -33,9 +33,9 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
+from reblock.methods.arterial.shortlist import FirstOrder
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
 from scripts.pair_matrix import evenly_spaced, load_pools
-from scripts.perf.selectors import FirstOrder
 
 ARMS = [("exact", 0), ("k=512", 512), ("k=128", 128), ("k=32", 32)]
 N_BLOCKS = 8

@@ -11,7 +11,7 @@ per-proposal and lives on the `CandidatePolicy` instance `build()` returns, not 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, TypeAlias, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from geopandas import GeoDataFrame
 from shapely.geometry import LineString
@@ -117,9 +117,6 @@ class CandidatePolicySpec(Protocol):
     adjacency, seed candidates), which is per-proposal and cannot be built where config is read --
     so config injects a spec and the engine calls `build` once per block."""
 
-    @property
-    def identity(self) -> PolicyIdentity: ...
-
     def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
               adj: list[set[int]], max_anchors: int) -> CandidatePolicy: ...
 
@@ -136,10 +133,6 @@ def _seed(block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
 class Fixed:
     """Score only the step-0 candidate set forever. Cheapest, and blind to continuations."""
 
-    @property
-    def identity(self) -> PolicyIdentity:
-        return self
-
     def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
               adj: list[set[int]], max_anchors: int) -> CandidatePolicy:
         _, initial = _seed(block, streets, n_anchors, top_k, adj, max_anchors)
@@ -149,10 +142,6 @@ class Fixed:
 @dataclass(frozen=True)
 class Grow:
     """Add continuations from each committed road's vertices as they appear. The shipped default."""
-
-    @property
-    def identity(self) -> PolicyIdentity:
-        return self
 
     def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
               adj: list[set[int]], max_anchors: int) -> CandidatePolicy:
@@ -166,15 +155,8 @@ class Faithful:
     """Regenerate the exact greedy's candidate set every step. With rescore_every=1 this makes the
     lazy engine byte-identical to the exact one -- the oracle the lazy path is checked against."""
 
-    @property
-    def identity(self) -> PolicyIdentity:
-        return self
-
     def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
               adj: list[set[int]], max_anchors: int) -> CandidatePolicy:
         _, initial = _seed(block, streets, n_anchors, top_k, adj, max_anchors)
         return _FaithfulPolicy(block, list(streets), n_anchors, adj, top_k,
                                {ls.wkt for ls in initial}, initial, max_anchors)
-
-
-PolicyIdentity: TypeAlias = Fixed | Grow | Faithful

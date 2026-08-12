@@ -462,6 +462,10 @@ class LazyEngine:
 
     @property
     def identity(self) -> EngineIdentity:
+        # `policy` and `rescore_every` both affect the proposal -- no field to strip, so `self`
+        # (embedding the raw `policy` spec) is the identity outright, same as ExactEngine. `Grow`/
+        # `Fixed`/`Faithful` are frozen, zero-field dataclasses, so a policy IS its own identity
+        # too; there is deliberately no `CandidatePolicySpec.identity` seam to route through here.
         return self
 
     def run(self, block: Block, *, objective: str, cost: str, realizer: ChordRealizer,

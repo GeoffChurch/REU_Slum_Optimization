@@ -39,8 +39,8 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
+from reblock.methods.arterial.shortlist import FirstOrder
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
-from scripts.perf.selectors import FirstOrder
 from scripts.perf.snap_vs_peel import region_block_cached
 
 SHORTLIST = 512        # matches region_shortlist.py, so the uncapped arm IS the 79.6-min baseline

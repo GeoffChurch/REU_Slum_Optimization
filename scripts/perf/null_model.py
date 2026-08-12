@@ -33,9 +33,10 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
+from reblock.methods.arterial.shortlist import CandidateSelector, FirstOrder
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
 from scripts.pair_matrix import evenly_spaced, load_pools
-from scripts.perf.selectors import CandidateSelector, FirstOrder, RandomSample, ScoreAll
+from scripts.perf.selectors import RandomSample, ScoreAll
 
 KS = (128, 32)
 SEEDS = (1, 2, 3, 4, 5)

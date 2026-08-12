@@ -215,7 +215,7 @@ published examples, not smuggled in as a perf commit -- or a formulation that is
 The safe half of that work IS shipped: `2170190` vectorized the peel's frontier seed for a
 bit-identical **1.76x** that benefits every caller of `parcel_access_layers`.
 
-## Making the access objective affordable at REGION scale (2026-08-10)
+## Making the access objective affordable at REGION scale (2026-08-10) -- RESOLVED 2026-08-12
 
 **The problem, measured.** The `depth` example variant takes **1,115 s without**
 `greedy_arterial_access_displacement` and had **not finished after 41,700 s (11.6 h) with it** on an
@@ -285,6 +285,15 @@ Two things to carry forward:
 Still open: the region result is **n=1 block**, only one displacement budget (0.10) and one shortlist
 (512) were tested, and the mechanism predicts the shortlist budget interacts with the gap.
 
+**RESOLVED 2026-08-12** by the `continuum-permeability` arterial-engine-productionization branch
+(`docs/superpowers/specs/2026-08-11-arterial-engine-productionization-design.md`). `ShortlistEngine`
+(tier 2 above) ships as a production `ArterialEngine`, and `max_anchors` ships as a real cap rather
+than the mode switch it used to be -- both selectable from config instead of living only in
+`scripts/perf`. `conf/compare_config.yaml` wires the access methods to
+`engine: {ShortlistEngine, k: 512}` + `max_anchors: 128`, and `greedy_arterial_access_displacement`
+now runs in all three multiblock example variants (`depth`, `depth_density`,
+`density_compactness`), which previously ran no arterial method at all.
+
 ### Tier 2 (BUILD THIS FIRST): first-order local gain -- the `linearized_gain` analogue
 
 `resistance_greedy.linearized_gain` already does exactly this for permeability: one solve per step
@@ -345,7 +354,12 @@ confirmation across displacement budgets (only D=0.10 tested), and a decision ab
 selects on when the method reports two metrics -- burden is the greedy's objective, permeability is
 co-reported, and nothing currently arbitrates between them.
 
-### Shortlist `k` at multiblock scale -- OPEN, and it gets MORE interesting once the cap ships
+### Shortlist `k` at multiblock scale -- OPEN, and MORE interesting now that the cap has shipped
+
+**Update 2026-08-12:** `max_anchors` has shipped as a real, config-selectable cap (see the RESOLVED
+region-scale item above), and `k=512` is the shipped `ShortlistEngine` default alongside it in
+`conf/compare_config.yaml`. The sweep below is now a live follow-up against production config, not a
+hypothetical.
 
 `k` is currently 512 because that is the value every region result was measured at, and because the
 saturation check bounds it only from ABOVE: uncapped at 512 / 1024 / 2048 / 4096 produced a
@@ -358,7 +372,7 @@ term, so whatever remains is a much larger share of a step. From the region run:
 152 s for 468,968 candidates, while `cap=128` step 1 was 31 s for 18,693. Pure candidate
 proportionality would put the capped step at ~6 s; it costs 31. So roughly **80% of a capped step is
 not enumeration**, and exact-scoring `k` candidates is a large part of that. `k` is the natural next
-lever precisely once `max_anchors` is on -- which is the opposite of how it looked before the cap
+lever now that `max_anchors` is on in production -- the opposite of how it looked before the cap
 was measured.
 
 **What to measure**, at multiblock scale where the cost compounds across regions:

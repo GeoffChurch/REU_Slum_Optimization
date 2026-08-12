@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from shapely.geometry import LineString
 
-from reblock.methods.arterial.primitives import _snap_graph
+from reblock.methods.arterial.primitives import _snap_graph, _SnapGraph
 from reblock.methods.arterial.realize import ChordRealizer, IdealChord, SnapToBoundary
 from reblock.methods.boundary_graph import _boundary_graph
 from tests.methods.test_arterial import _grid_block
@@ -40,7 +40,7 @@ def test_both_satisfy_the_protocol() -> None:
     assert not isinstance(object(), ChordRealizer)
 
 
-def test_snap_to_boundary_realize_forwards_self_lam(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_snap_to_boundary_realize_forwards_self_lam(monkeypatch: pytest.MonkeyPatch) -> None:
     """SnapToBoundary.realize forwards self.lam to _snap, not a hardcoded value.
 
     Uses a spy on _snap to verify the exact lam argument received. This test FAILS
@@ -58,7 +58,7 @@ def test_snap_to_boundary_realize_forwards_self_lam(monkeypatch) -> None:  # typ
 
     original_snap = realize_module._snap
 
-    def spy_snap(chord_arg: LineString, sg_arg, lam_arg: float) -> LineString | None:  # type: ignore[no-untyped-def]
+    def spy_snap(chord_arg: LineString, sg_arg: _SnapGraph, lam_arg: float) -> LineString | None:
         """Spy that records lam before delegating to original _snap."""
         received_lams.append(lam_arg)
         return original_snap(chord_arg, sg_arg, lam_arg)

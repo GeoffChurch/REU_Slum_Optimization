@@ -1,11 +1,11 @@
 """How a greedy step reduces thousands of candidates to the few it scores exactly.
 
-`CandidateSelector`, `FirstOrder`, `RankContext`, `CHUNK`, `RANK_RADIUS` and `first_order_score` now
+`CandidateSelector`, `FirstOrder`, `RankContext`, `CHUNK`, `RANK_RADIUS` and `first_order_score`
 live in `reblock.methods.arterial.shortlist` -- production owns the seam, since
 `engines.ShortlistEngine` always injects `FirstOrder` through the SAME step loop
-(`engines._greedy_shortlist`) these harnesses call. Re-exported here so callers that were already
-importing them from this module keep working. What stays here are the arms that exist ONLY to
-answer "does tier 2's RANKING earn its place" and have no production use:
+(`engines._greedy_shortlist`) the harnesses under scripts/perf call. Import them from there
+directly. What stays here are the arms that exist ONLY to answer "does tier 2's RANKING earn its
+place" and have no production use:
 
   ScoreAll              score every candidate exactly -- the shipped greedy, the control
   RandomSample          take k uniformly at random -- the NULL MODEL
@@ -23,24 +23,7 @@ from dataclasses import dataclass
 import numpy as np
 from shapely.geometry import LineString
 
-# Plain (not `X as X`) re-export: unlike src/, this module is outside mypy's --strict scan (see
-# pyproject.toml's [tool.mypy] `files` list), so the --no-implicit-reexport workaround doesn't
-# apply here -- and it would fragment into one import statement per name (ruff/isort keeps every
-# `as`-aliased name in its own statement when combine-as-imports is off, the repo default). `CHUNK`,
-# `RANK_RADIUS`, `CandidateSelector` and `FirstOrder` have no local use, only this re-export, so
-# ruff's unused-import check needs `__all__` below -- the same convention the now-deleted
-# shortlist_greedy.py used for its own single export.
-from reblock.methods.arterial.shortlist import (
-    CHUNK,
-    RANK_RADIUS,
-    CandidateSelector,
-    FirstOrder,
-    RankContext,
-    first_order_score,
-)
-
-__all__ = ["CHUNK", "RANK_RADIUS", "CandidateSelector", "FirstOrder", "RandomSample",
-          "RankContext", "ScoreAll", "StochasticFirstOrder", "first_order_score"]
+from reblock.methods.arterial.shortlist import RankContext, first_order_score
 
 
 @dataclass(frozen=True)

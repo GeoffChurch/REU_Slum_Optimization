@@ -23,7 +23,6 @@ from reblock.methods.arterial.policies import (
     Faithful,
     Fixed,
     Grow,
-    PolicyIdentity,
 )
 from reblock.methods.arterial.realize import (
     ChordRealizer,
@@ -35,5 +34,5 @@ from reblock.methods.arterial.reblocker import ArterialIdentity, GreedyArterialR
 
 __all__ = ["ArterialEngine", "ArterialIdentity", "CandidatePolicySpec", "ChordRealizer",
           "EngineIdentity", "ExactEngine", "Faithful", "Fixed", "GreedyArterialReblocker", "Grow",
-          "IdealChord", "LazyEngine", "PolicyIdentity", "RealizerIdentity", "ShortlistEngine",
+          "IdealChord", "LazyEngine", "RealizerIdentity", "ShortlistEngine",
           "ShortlistIdentity", "SnapToBoundary"]
