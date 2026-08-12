@@ -10,7 +10,13 @@ from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import ArterialIdentity, GreedyArterialReblocker, engines
-from reblock.methods.arterial.engines import ExactEngine, LazyEngine, _greedy_arterials
+from reblock.methods.arterial.engines import (
+    ExactEngine,
+    LazyEngine,
+    ShortlistEngine,
+    ShortlistIdentity,
+    _greedy_arterials,
+)
 from reblock.methods.arterial.policies import Fixed
 from reblock.methods.arterial.primitives import (
     _anchor_points,
@@ -437,6 +443,47 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
         method_cfg = compose(config_name="config",
                              overrides=["shapefile=x", "method=greedy_arterial_displacement"])
     assert instantiate(method_cfg.method).identity == m.identity
+
+
+def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
+    """greedy_arterial_access_{repulsion,displacement} in compare_config.yaml are Task 8's entire
+    payload: engine: ShortlistEngine + max_anchors: 128 -- CELF is invalid for access-burden
+    reduction, and the cap is what makes access affordable at region scale (~330x combined with
+    tier 2; docs/superpowers/notes/2026-08-11-max-anchors-is-a-region-scale-win.md). BOTH keys
+    compose fine if dropped or mistyped -- Hydra silently falls back to the structurally-valid
+    class defaults ExactEngine()/max_anchors=0, so a reversion would pass lint, typecheck, and
+    "does it instantiate" alike. This pins the concrete engine type, max_anchors, and realizer for
+    both entries, via the same compose+instantiate+identity pattern as
+    test_config_and_derivation_wiring above -- plus the negative direction: a directness method
+    must NOT pick up either, since the cap changes which candidates exist (so it changes
+    directness outcomes too) and every measurement behind it used objective=access."""
+    from pathlib import Path
+
+    from hydra import compose, initialize_config_dir
+    from hydra.utils import instantiate
+
+    conf_dir = str(Path("conf").resolve())
+    with initialize_config_dir(version_base=None, config_dir=conf_dir):
+        cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
+
+    for name, cost in (("greedy_arterial_access_repulsion", "repulsion"),
+                       ("greedy_arterial_access_displacement", "displacement")):
+        m = instantiate(cfg.all_methods[name])
+        assert isinstance(m.engine, ShortlistEngine), name
+        assert isinstance(m.realizer, SnapToBoundary), name
+        assert m.max_anchors == 128, name
+        assert m.identity == ArterialIdentity(
+            realizer=SnapToBoundary(), objective="access", cost=cost,
+            corridor_key=DEFAULT_ROAD_WIDTH_M, max_roads=15, n_anchors=32, top_k=8,
+            engine=ShortlistIdentity(k=512), max_anchors=128), name
+
+    # Negative direction: the cap and ShortlistEngine are access-only. "Tidying" either onto a
+    # directness method later (greedy_arterial_buildable is already pinned to engine=LazyEngine(),
+    # max_anchors=0 by test_config_and_derivation_wiring above) is a realistic, equally silent
+    # mistake -- guard it here too, next to the property it must never acquire.
+    buildable = instantiate(cfg.all_methods["greedy_arterial_buildable"])
+    assert not isinstance(buildable.engine, ShortlistEngine)
+    assert buildable.max_anchors == 0
 
 
 def _deep_block() -> Block:
