@@ -82,7 +82,7 @@ def test_output_is_bridgeless() -> None:
 
 @pytest.mark.parametrize("cap", [0.05, 0.15])
 def test_respects_its_displacement_budget(cap: float) -> None:
-    """The method's own budget must bind; it is the only stopping rule it has.
+    """The method's INTENDED stopping rule must bind (`max_cycles` is a safety valve above it).
 
     FAULT INJECTION: removing the `if d > self.max_displacement: continue` candidate rejection lets
     it run to 0.30+ displacement against a 0.05 cap, failing here.
@@ -97,3 +97,32 @@ def test_respects_its_displacement_budget(cap: float) -> None:
     radii = building_radii(block.building_points)
     got = displacement(block.building_points, radii, roads) / len(block.building_points)
     assert got <= cap + 1e-9, f"displacement {got:.4f} exceeds its own cap {cap}"
+
+
+@pytest.mark.parametrize("cap", [1, 3])
+def test_max_cycles_caps_the_greedy(cap: int) -> None:
+    """`max_cycles` must bind when it is the binding rule.
+
+    It was a bare `range(60)` in the greedy loop: unconfigurable and untested, and it silently ended
+    the reported curve short of `max_displacement` in every settlement region measured (all of them
+    emitting exactly 120 segments = 60 cycles x 2 legs).
+
+    FAULT INJECTION: restoring the literal `range(60)` makes cap=1 emit 20+ roads against the 2
+    asserted here, failing this test.
+    """
+    roads = CycleNativeReblocker(max_displacement=0.9, max_cycles=cap).propose(_block()).roads
+    assert roads is not None
+    # Each accepted move appends its outbound leg plus, when a bridgeless return exists, the return
+    # leg -- so at most two roads per cycle.
+    assert len(roads) <= 2 * cap, f"max_cycles={cap} emitted {len(roads)} roads"
+
+
+def test_max_cycles_is_what_binds_not_an_earlier_stop() -> None:
+    """The cap test above passes vacuously if the greedy stops early for some OTHER reason, which
+    would defend the bug rather than catch it. Raising the cap on the same block must buy more road
+    -- proving the cap is the live constraint and the assertion above is load-bearing."""
+    block = _block()
+    small = CycleNativeReblocker(max_displacement=0.9, max_cycles=2).propose(block).roads
+    large = CycleNativeReblocker(max_displacement=0.9, max_cycles=8).propose(block).roads
+    assert small is not None and large is not None
+    assert len(large) > len(small), f"cap 8 gave {len(large)} roads, cap 2 gave {len(small)}"

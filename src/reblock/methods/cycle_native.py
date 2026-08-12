@@ -88,6 +88,15 @@ class CycleNativeReblocker:
 
     substrate: Substrate = field(default_factory=ChordSubstrate)
     max_displacement: float = 0.10
+    # Safety valve on the greedy, NOT the intended stopping rule -- `max_displacement` is. This was
+    # a bare `range(60)` in the loop below: unconfigurable, undocumented, untested, and it BOUND in
+    # every settlement region measured (each emitted exactly 120 segments = 60 cycles x 2 legs) at
+    # 6.9-16.0% displacement, well under the configured `max_displacement: 0.20`. So the reported
+    # curve ended on a magic number rather than on the budget, in a way nothing surfaced -- the
+    # generated docs read it as "converges below the shared budget", which is not what happened.
+    # Every other method in the lineup already has its budget as a field (`max_roads`,
+    # `depth_target`, `max_displacement`, `spacing`); this one did not.
+    max_cycles: int = 400
     shortlist: int = 8
     params: PermeabilityParams = field(default_factory=PermeabilityParams)
     # Total width of the roads this method emits; stamped on every one. The metric has no
@@ -124,7 +133,7 @@ class CycleNativeReblocker:
 
         roads: list[LineString] = []
         cur_p = float(permeability(block, empty, self.params, adj=adj, radii=pradii))
-        for _ in range(60):
+        for _ in range(self.max_cycles):
             spent = displacement(block.building_points, radii,
                                  with_width(gpd.GeoDataFrame(geometry=roads, crs=crs),
                                             self.road_width_m)) / n_b \
@@ -183,5 +192,8 @@ class CycleNativeReblocker:
         out = with_width(roads, self.road_width_m)
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=out, edges=None,
-            proposal_id=f"cycle_native:d{self.max_displacement:g}", method="cycle_native",
+            # max_cycles is in the id because it CHANGES the road set whenever it binds -- two runs
+            # differing only in the cap must not be mistaken for the same proposal.
+            proposal_id=f"cycle_native:d{self.max_displacement:g}:mc{self.max_cycles}",
+            method="cycle_native",
             params={"roads": len(out), "road_width_m": self.road_width_m}, block_identity=None)

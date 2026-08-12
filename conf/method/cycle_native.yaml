@@ -13,4 +13,8 @@ substrate: ${substrate}
 # Must sit clear of the Lens A budget (matched_displacement, 0.10) or this cap
 # binds before the lens does -- see conf/compare_config.yaml.
 max_displacement: 0.20
+# max_cycles is left at the dataclass default (400) DELIBERATELY: it is a safety valve, and
+# `max_displacement` above is meant to be what stops this method. Setting it here would invite
+# tuning it, which is how the old hardcoded `range(60)` came to end the reported curve at
+# 6.9-16.0% displacement in every settlement region while the config said 0.20.
 shortlist: 8
