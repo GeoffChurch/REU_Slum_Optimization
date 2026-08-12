@@ -1,7 +1,10 @@
 # Tier 2: the first-order access gain works, and it exposes something worse
 
 **Date:** 2026-08-10
-**Scripts:** `scripts/perf/{snap_vs_peel,rank_throughput,first_order_rank,rank_decompose,shortlist_greedy,shortlist_ab,control_check,region_shortlist}.py`
+**Scripts:** `scripts/perf/{snap_vs_peel,rank_throughput,first_order_rank,rank_decompose,shortlist_ab,region_shortlist}.py`.
+`shortlist_greedy.py` and `control_check.py` no longer exist: on 2026-08-12 the shortlist greedy was
+productionized as `reblock.methods.arterial.engines.ShortlistEngine` (deleting the duplicate step loop),
+and `control_check.py`'s oracle became the test `test_shortlist_with_non_binding_k_is_the_exact_engine`.
 
 Tier 2 is the backlog's "build this first" fix for the access objective's region-scale cost:
 replace a full BFS peel per candidate with a local estimate, shortlist on it, and score only the
@@ -96,7 +99,8 @@ answerable question is whether the *outcome* matches.
 `shortlist_ab.py`, 8 blocks, `max_roads=8`, D=0.10 prefix — the same blocks, arms and metrics as the
 tie-sensitivity run, so the two tables read side by side. The `shortlist=0` control arm re-states
 `_greedy_arterials`' step loop, so it was checked against the shipped function rather than assumed
-equal to it: identical road geometry WKT-for-WKT on 3 blocks at `max_roads=5` (`control_check.py`).
+equal to it: identical road geometry WKT-for-WKT on 3 blocks at `max_roads=5` (then `control_check.py`,
+now the test `test_shortlist_with_non_binding_k_is_the_exact_engine`).
 Every deviation below is therefore the shortlist's.
 
 | arm | burden_red | perm | road_m | secs | speedup | median \|Δburden\| | max \|Δ\| | beat exact |

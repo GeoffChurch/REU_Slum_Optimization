@@ -390,6 +390,27 @@ candidate space is examined, from opposite ends -- the cap shrinks what is enume
 what is scored exactly. A combined sweep is the honest experiment; a `k` sweep at one cap value can
 only describe that slice.
 
+### Rescued from the deleted 2026-08-10 handoff (2026-08-12)
+
+That handoff was written to bootstrap a cold session; the session happened, the work shipped, and
+the document was deleted. Two of its open items existed NOWHERE else in the repo, so they are
+carried here rather than lost with it. (Its other items were already tracked: stochastic restarts
+and ShapeStandardizingRegionBuilder both appear above.)
+
+**The "gravity grid" / coherence-term build -- the oldest outstanding ask, never built.** The owner
+asked for it directly. The rectilinearity measurement came back discouraging (Spearman -0.036
+across methods) but is CONFOUNDED BY BLOCK, so it does not settle the question. The owner's own
+words on why the discouraging number should not close it: *"I'm not sure we should skip the build
+even if coherence is emergent... I was curious if the converse would hold."* That converse -- does
+imposing a coherence term produce the fabric, rather than merely correlating with it -- is the part
+no measurement here has addressed. Still never built.
+
+**The "free class" of candidates.** 12.1% of arterial candidates have zero exact displacement and
+therefore infinite gain-per-cost. The cheap first-order denominator floors at one building and
+cannot express that, so the ranking cannot distinguish a genuinely free road from a very cheap one.
+Untouched. Relevant to any further work on the shortlist ranking, since it is a known blind spot in
+the estimator that `ShortlistEngine` now ships.
+
 ### Carried out of the arterial-engine productionization (2026-08-12) -- two open items
 
 Both surfaced by the final whole-plan review of the injected-engine refactor. Neither blocks
