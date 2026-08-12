@@ -288,10 +288,19 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         perm_csv_rows.append([name, f"{rows[-1].perm_road_m:.1f}", f"{disp_frac_b:.4f}",
                               f"{perm_at_b:.6g}", f"{burden_red_b:.6g}", reached])
 
-    # Per-method reblock GIF over the FULL road set (unchanged) -- depth coloring only (the only
-    # mode `reblock_gif`/`animate._frame_png` render).
-    for name, roads in roads_by_method.items():
-        reblock_gif(block, roads, out_dir / f"reblock_{name}.gif", vmax=depth_vmax, frame=frame)
+    # Per-method reblock GIF over the LENS B prefix, not the full road set -- depth coloring only
+    # (the only mode `reblock_gif`/`animate._frame_png` render). Full build-outs terminate at wildly
+    # different displacements (0.9%-24.8% across the settlement regions, 14%-83% on the pinned
+    # block), so full-length GIFs animate to incomparable endpoints and cannot be read side by side.
+    # Lens B is the primary lens for the same reason it is primary in the tables: pinning the
+    # BENEFIT and letting the costs differ needs no exchange rate between homes and metres, so every
+    # animation now stops the moment its network reaches P* and the viewer watches which method got
+    # there with less disruption. A method that never reaches P* has `reached_b[name] == False` and
+    # `prefix_to_permeability` hands back its whole network, so it still animates to its own
+    # terminal -- the same convention, and the same flag, the Lens B table already reports.
+    for name in roads_by_method:
+        reblock_gif(block, prefix_b[name], out_dir / f"reblock_{name}.gif", vmax=depth_vmax,
+                    frame=frame)
 
     _write_csv(out_dir / "lens_displacement.csv",
               ["method", "road_m", "displacement", "permeability", "access_burden_reduction",
