@@ -29,7 +29,7 @@ from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import scoring
-from reblock.methods.arterial.policies import _make_policy
+from reblock.methods.arterial.policies import CandidatePolicySpec
 from reblock.methods.arterial.primitives import (
     _anchor_points,
     _candidate_chords,
@@ -203,21 +203,21 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: 
                            n_anchors: int = 32,
                            top_k: int = 8, max_roads: int = 15,
                            cost: str = "length", half_width_m: float,
-                           workers: int = 16, candidate_policy: str = "grow",
+                           workers: int = 16, policy_spec: CandidatePolicySpec,
                            rescore_every: int = 0, max_anchors: int = 0) -> GeoDataFrame:
     """CELF lazy-greedy driver: commit the best gain-per-cost arterial one at a time, but instead of
     re-scoring every candidate every step (the exact `_greedy_arterials`), drive selection with a
     max-heap and pop-re-score only the heap top until it is fresh under the current committed set.
     Reuses arterial's EXACT scoring machinery unchanged (via `eval_candidate` +
-    `scoring._STEP_STATE`), so with `rescore_every=1` + the `faithful` policy it is byte-identical
-    to the exact greedy."""
+    `scoring._STEP_STATE`), so with `rescore_every=1` + the `Faithful` policy spec it is
+    byte-identical to the exact greedy."""
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     base_burden = access_burden(parcel_access_layers(
         block, None, tol=STREET_TOL, adj=adj, unreached_depth=len(block.parcels) + 1))
     sg = _snap_graph(_boundary_graph(block.parcels))
     streets = list(block.streets.geometry)
     ctx = _BlockScoringContext(block) if objective in ("efficiency", "directness") else None
-    policy = _make_policy(candidate_policy, block, streets, n_anchors, top_k, adj, max_anchors)
+    policy = policy_spec.build(block, streets, n_anchors, top_k, adj, max_anchors)
     # Constant across every step (depends only on block.building_points), so computed ONCE here
     # rather than per-step.
     radii = building_radii(block.building_points)

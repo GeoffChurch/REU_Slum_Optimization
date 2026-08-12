@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from reblock.contracts import Block, Proposal
 from reblock.methods.arterial.engines import _greedy_arterials, _greedy_arterials_lazy
+from reblock.methods.arterial.policies import CandidatePolicySpec, Grow, PolicyIdentity
 from reblock.methods.arterial.realize import ChordRealizer, RealizerIdentity, SnapToBoundary
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
@@ -32,7 +33,7 @@ class ArterialIdentity:
     n_anchors: int
     top_k: int
     lazy: bool
-    candidate_policy: str
+    policy_spec: PolicyIdentity
     rescore_every: int
     max_anchors: int
 
@@ -59,7 +60,10 @@ class GreedyArterialReblocker:
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
     workers: int = 16         # fork-pool size for per-step candidate scoring; 1 == serial no-op
     lazy: bool = False               # False -> exact _greedy_arterials (byte-identical)
-    candidate_policy: str = "grow"   # "grow" | "fixed" | "faithful" (only used when lazy)
+    # Which candidates the lazy engine keeps alive as roads commit -- Grow (default) | Fixed |
+    # Faithful (only consulted when lazy). Injected rather than selected by a string, matching
+    # `realizer` above.
+    policy_spec: CandidatePolicySpec = Grow()
     rescore_every: int = 0           # 0 = pure lazy; N = full re-score every N commits (safety)
     # A CAP, not a mode switch: 0 = uncapped (every network vertex + arc-length samples,
     # byte-identical); >0 only ever REDUCES that uncapped anchor count, falling back to
@@ -77,13 +81,14 @@ class GreedyArterialReblocker:
         # sweep silently returns another setting's cached proposal. `realizer.identity` (not
         # `realizer` itself) so a non-snapping realizer's irrelevant fields -- none exist today, but
         # the seam is the same one `SnapToBoundary.identity`/`IdealChord.identity` already use --
-        # can never leak into the key.
+        # can never leak into the key. `policy_spec.identity` for the identical reason (today all
+        # three specs are field-free, but the seam stays the same one Fixed/Grow/Faithful use).
         corridor_key = self.road_width_m if self.cost in ("displacement", "repulsion") else 0.0
         return ArterialIdentity(
             realizer=self.realizer.identity, objective=self.objective, cost=self.cost,
             corridor_key=corridor_key,
             max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k,
-            lazy=self.lazy, candidate_policy=self.candidate_policy,
+            lazy=self.lazy, policy_spec=self.policy_spec.identity,
             rescore_every=self.rescore_every, max_anchors=self.max_anchors)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
@@ -93,7 +98,7 @@ class GreedyArterialReblocker:
                 block, realizer=self.realizer, objective=self.objective, n_anchors=self.n_anchors,
                 top_k=self.top_k, max_roads=self.max_roads, cost=self.cost,
                 half_width_m=self.road_width_m / 2.0, workers=self.workers,
-                candidate_policy=self.candidate_policy, rescore_every=self.rescore_every,
+                policy_spec=self.policy_spec, rescore_every=self.rescore_every,
                 max_anchors=self.max_anchors)
         else:
             roads = _greedy_arterials(

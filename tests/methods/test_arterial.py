@@ -11,6 +11,7 @@ from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import ArterialIdentity, GreedyArterialReblocker, engines
 from reblock.methods.arterial.engines import _greedy_arterials
+from reblock.methods.arterial.policies import Fixed, Grow
 from reblock.methods.arterial.primitives import (
     _anchor_points,
     _candidate_chords,
@@ -347,13 +348,13 @@ def test_identity_and_proposal_metadata() -> None:
     assert m.identity == ArterialIdentity(
         realizer=SnapToBoundary(), objective="directness", cost="length", corridor_key=0.0,
         max_roads=15, n_anchors=32, top_k=8, lazy=False,
-        candidate_policy="grow", rescore_every=0, max_anchors=0)
+        policy_spec=Grow(), rescore_every=0, max_anchors=0)
     # max_roads / n_anchors / top_k change the proposed roads -> must change the cache key,
     # else a budget/candidate sweep silently returns another setting's cached proposal.
     assert GreedyArterialReblocker(max_roads=3).identity != m.identity
     assert GreedyArterialReblocker(n_anchors=16).identity != m.identity
     assert GreedyArterialReblocker(lazy=True).identity != m.identity
-    assert GreedyArterialReblocker(candidate_policy="fixed").identity != m.identity
+    assert GreedyArterialReblocker(policy_spec=Fixed()).identity != m.identity
     assert GreedyArterialReblocker(rescore_every=2).identity != m.identity
     assert GreedyArterialReblocker(max_anchors=48).identity != m.identity
     proposal = GreedyArterialReblocker(objective="directness").propose(_grid_block(5))
@@ -407,7 +408,7 @@ def test_config_and_derivation_wiring() -> None:
     assert m.identity == ArterialIdentity(
         realizer=SnapToBoundary(), objective="directness", cost="length", corridor_key=0.0,
         max_roads=15, n_anchors=32, top_k=8, lazy=True,
-        candidate_policy="grow", rescore_every=0, max_anchors=0)
+        policy_spec=Grow(), rescore_every=0, max_anchors=0)
 
 
 def test_displacement_config_instantiates_with_right_params_and_identity() -> None:
@@ -426,7 +427,7 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
     assert m.identity == ArterialIdentity(
         realizer=IdealChord(), objective="directness", cost="displacement", corridor_key=7.0,
         max_roads=15, n_anchors=32, top_k=8, lazy=False,
-        candidate_policy="grow", rescore_every=0, max_anchors=0)
+        policy_spec=Grow(), rescore_every=0, max_anchors=0)
 
     # The standalone conf/method/greedy_arterial_displacement.yaml config group (config.yaml's
     # `method=` default group), separate from compare_config's inline `all_methods` entry above.
@@ -480,7 +481,7 @@ def test_cost_displacement_in_identity() -> None:
     assert m.identity == ArterialIdentity(
         realizer=IdealChord(), objective="directness", cost="displacement", corridor_key=7.0,
         max_roads=15, n_anchors=32, top_k=8, lazy=False,
-        candidate_policy="grow", rescore_every=0, max_anchors=0)
+        policy_spec=Grow(), rescore_every=0, max_anchors=0)
 
 
 def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 10) -> Block:

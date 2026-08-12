@@ -2,11 +2,16 @@
 `_FixedPolicy` never adds candidates after the initial set, `_GrowPolicy` only adds (monotonic,
 matches CELF's lazy re-scoring), and `_FaithfulPolicy` regenerates arterial's own candidate set
 exactly (add/remove) -- byte-identical to the exact greedy when paired with `rescore_every=1`.
+
+`Fixed`/`Grow`/`Faithful` are the CONFIGURABLE specs -- injected rather than selected by a
+`candidate_policy` string, so nothing downstream asks which policy it has. Each closes over
+nothing (frozen, no fields); the block-specific state (block, adjacency, seed candidates) is
+per-proposal and lives on the `CandidatePolicy` instance `build()` returns, not on the spec.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Protocol, TypeAlias, runtime_checkable
 
 from geopandas import GeoDataFrame
 from shapely.geometry import LineString
@@ -97,17 +102,79 @@ class _FaithfulPolicy:
         return added, removed
 
 
-def _make_policy(name: str, block: Block, streets: Sequence[BaseGeometry],
-                 n_anchors: int, top_k: int, adj: list[set[int]], max_anchors: int = 0
-                 ) -> _FixedPolicy | _GrowPolicy | _FaithfulPolicy:
-    anchors0 = _anchor_points(list(streets), n_anchors, max_anchors)
+@runtime_checkable
+class CandidatePolicy(Protocol):
+    """Which candidates the lazy engine keeps alive as roads commit. Stateful, per block."""
+
+    def initial(self) -> list[LineString]: ...
+    def after_commit(self, committed: list[LineString],
+                     step: int) -> tuple[list[LineString], list[str]]: ...
+
+
+@runtime_checkable
+class CandidatePolicySpec(Protocol):
+    """The CONFIGURABLE half of a policy. The policies themselves close over block state (block,
+    adjacency, seed candidates), which is per-proposal and cannot be built where config is read --
+    so config injects a spec and the engine calls `build` once per block."""
+
+    @property
+    def identity(self) -> PolicyIdentity: ...
+
+    def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
+              adj: list[set[int]], max_anchors: int) -> CandidatePolicy: ...
+
+
+def _seed(block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
+          adj: list[set[int]], max_anchors: int
+          ) -> tuple[list[tuple[float, float]], list[LineString]]:
+    anchors0 = _anchor_points(streets, n_anchors, max_anchors)
     targets0 = _deep_targets(block, None, top_k, adj)
-    initial = _candidate_chords(anchors0, targets0)
-    if name == "fixed":
+    return anchors0, _candidate_chords(anchors0, targets0)
+
+
+@dataclass(frozen=True)
+class Fixed:
+    """Score only the step-0 candidate set forever. Cheapest, and blind to continuations."""
+
+    @property
+    def identity(self) -> PolicyIdentity:
+        return self
+
+    def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
+              adj: list[set[int]], max_anchors: int) -> CandidatePolicy:
+        _, initial = _seed(block, streets, n_anchors, top_k, adj, max_anchors)
         return _FixedPolicy(initial)
-    if name == "grow":
-        return _GrowPolicy(block, adj, list(anchors0), top_k, {ls.wkt for ls in initial}, initial)
-    if name == "faithful":
+
+
+@dataclass(frozen=True)
+class Grow:
+    """Add continuations from each committed road's vertices as they appear. The shipped default."""
+
+    @property
+    def identity(self) -> PolicyIdentity:
+        return self
+
+    def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
+              adj: list[set[int]], max_anchors: int) -> CandidatePolicy:
+        anchors0, initial = _seed(block, streets, n_anchors, top_k, adj, max_anchors)
+        return _GrowPolicy(block, adj, list(anchors0), top_k,
+                           {ls.wkt for ls in initial}, initial)
+
+
+@dataclass(frozen=True)
+class Faithful:
+    """Regenerate the exact greedy's candidate set every step. With rescore_every=1 this makes the
+    lazy engine byte-identical to the exact one -- the oracle the lazy path is checked against."""
+
+    @property
+    def identity(self) -> PolicyIdentity:
+        return self
+
+    def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
+              adj: list[set[int]], max_anchors: int) -> CandidatePolicy:
+        _, initial = _seed(block, streets, n_anchors, top_k, adj, max_anchors)
         return _FaithfulPolicy(block, list(streets), n_anchors, adj, top_k,
                                {ls.wkt for ls in initial}, initial, max_anchors)
-    raise ValueError(f"unknown candidate_policy {name!r}")
+
+
+PolicyIdentity: TypeAlias = Fixed | Grow | Faithful
