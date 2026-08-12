@@ -1,10 +1,18 @@
-[__main__][INFO] screen: flagged 13793/83192 blocks (1.2s)
-[__main__][INFO] region built: 12 blocks / 11006 parcels (67.3s)
-[scripts.compare_budgets][INFO] reblocked clearance_looped: 406 segments, 18061 m (0.0s)
-[scripts.compare_budgets][INFO] reblocked euclidean_grid: 92 segments, 12874 m (0.0s)
-[scripts.compare_budgets][INFO] reblocked resistance_lp: 13341 segments, 55322 m (359.3s)
-[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 10863 m (666.3s)
-[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 57 segments, 3779 m (618.5s)
-[scripts.compare_budgets][INFO] reblocked osm_footpaths: 119 segments, 7694 m (0.0s)
-[scripts.compare_budgets][INFO] lens/frontier curves computed for 6 methods (192.1s)
+[reblock.screen.dense_compact][INFO] fine pass: 13822 survivors across 16 fork workers
+/home/gchurchill/src/reblock/src/reblock/screen/dense_compact.py:50: UserWarning: screen:ZAF.9.5.2_1_2690: dissolve is MultiPolygon, not Polygon; skipping
+  for blk in src.region().blocks:
+/home/gchurchill/src/reblock/src/reblock/screen/dense_compact.py:50: UserWarning: screen:ZAF.9.5.2_1_3714: dissolve is GeometryCollection, not Polygon; skipping
+  for blk in src.region().blocks:
+/home/gchurchill/src/reblock/src/reblock/screen/dense_compact.py:50: UserWarning: screen:ZAF.9.6.5_1_5801: dissolve is GeometryCollection, not Polygon; skipping
+  for blk in src.region().blocks:
+[reblock.screen.dense_compact][INFO] screen: 13793/83192 blocks selected by metric=depth (needs_peel=True)
+[__main__][INFO] screen: flagged 13793/83192 blocks (23.9s)
+[__main__][INFO] region built: 12 blocks / 11006 parcels (67.9s)
+[scripts.compare_budgets][INFO] reblocked clearance_looped: 406 segments, 18061 m (44.7s)
+[scripts.compare_budgets][INFO] reblocked euclidean_grid: 92 segments, 12874 m (0.5s)
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 13341 segments, 55322 m (381.6s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 10863 m (684.8s)
+[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 57 segments, 3779 m (618.2s)
+[scripts.compare_budgets][INFO] reblocked osm_footpaths: 119 segments, 7694 m (0.1s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 6 methods (191.2s)
 wrote examples/multiblock_depth: 12 blocks / 11006 parcels; flagged 13793/83192; 6 methods; README + maps + lens CSVs
