@@ -40,28 +40,46 @@ def test_both_satisfy_the_protocol() -> None:
     assert not isinstance(object(), ChordRealizer)
 
 
-def test_snap_to_boundary_realize_executes_with_snap_graph() -> None:
-    """SnapToBoundary.realize successfully delegates to _snap with self.lam.
+def test_snap_to_boundary_realize_forwards_self_lam(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """SnapToBoundary.realize forwards self.lam to _snap, not a hardcoded value.
 
-    Mutation testing (documented in report): when realize() was changed to hardcode
-    `return _snap(chord, sg, 2.0)` instead of `self.lam`, a geometry-sensitive test
-    detected the defect by showing both SnapToBoundary(lam=2.0) and (lam=10.0)
-    produced identical paths (both using lam=2.0). This test verifies that realize()
-    successfully calls _snap without raising exceptions.
+    Uses a spy on _snap to verify the exact lam argument received. This test FAILS
+    if realize() hardcodes lam instead of using self.lam, catching the mutation immediately.
     """
+    from reblock.methods.arterial import realize as realize_module
+
     block = _grid_block(5)
     g = _boundary_graph(block.parcels)
     sg = _snap_graph(g)
     chord = LineString([(0.0, 2.5), (5.0, 2.5)])
 
-    # Both should successfully call _snap and return valid paths
-    path_lam_2 = SnapToBoundary(lam=2.0).realize(chord, sg)
-    path_lam_10 = SnapToBoundary(lam=10.0).realize(chord, sg)
+    # Spy on _snap to capture the lam argument it receives
+    received_lams: list[float] = []
 
-    assert path_lam_2 is not None
-    assert path_lam_10 is not None
-    assert len(path_lam_2.coords) >= 2
-    assert len(path_lam_10.coords) >= 2
+    original_snap = realize_module._snap
+
+    def spy_snap(chord_arg: LineString, sg_arg, lam_arg: float) -> LineString | None:  # type: ignore[no-untyped-def]
+        """Spy that records lam before delegating to original _snap."""
+        received_lams.append(lam_arg)
+        return original_snap(chord_arg, sg_arg, lam_arg)
+
+    monkeypatch.setattr(realize_module, "_snap", spy_snap)
+
+    # Call realize with a specific lam value
+    target_lam = 7.5
+    realizer = SnapToBoundary(lam=target_lam)
+    result = realizer.realize(chord, sg)
+
+    # Verify _snap was called
+    assert result is not None
+    assert len(received_lams) == 1, f"Expected 1 call to _snap, got {len(received_lams)}"
+
+    # This assertion FAILS if realize hardcodes lam instead of using self.lam
+    assert received_lams[0] == target_lam, (
+        f"realize() passed lam={received_lams[0]} to _snap, "
+        f"but self.lam was {target_lam}. "
+        f"If this fails, realize() may be hardcoding lam."
+    )
 
 
 def test_snap_to_boundary_realize_requires_snap_graph() -> None:
