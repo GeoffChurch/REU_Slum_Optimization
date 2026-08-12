@@ -390,6 +390,35 @@ candidate space is examined, from opposite ends -- the cap shrinks what is enume
 what is scored exactly. A combined sweep is the honest experiment; a `k` sweep at one cap value can
 only describe that slice.
 
+### Carried out of the arterial-engine productionization (2026-08-12) -- two open items
+
+Both surfaced by the final whole-plan review of the injected-engine refactor. Neither blocks
+anything today; both are recorded because the SDD scratch ledger that held them is git-ignored and
+was deleted when the plan finished.
+
+**1. `ChordRealizer.snaps` is a predicate, which the design spec forbade.** The spec
+(`specs/2026-08-11-arterial-engine-productionization-design.md` §1) says the two `mode ==` reads
+outside realization "must become realizer METHODS -- the realizer supplies the step context -- not
+a `realizer.is_snapping` query. A predicate would move the string dispatch rather than remove it."
+The implementation plan mandated the predicate, so spec and plan contradicted each other and the
+conflict was never adjudicated. Nothing is wrong with the two realizers that exist: `snaps` is read
+at `engines.py` (x3) and `scoring.py` to pick between the incremental `_union_with` scoring branch
+and the full `_planarize` one. The risk is a THIRD realizer -- e.g. one snapping to a coarser graph
+-- for which those two questions come apart: `snaps` conflates "does it follow the boundary graph"
+with "does the incremental scoring branch apply", so such a realizer would silently take the wrong
+branch and return wrong gains rather than crash. Fix if a third realizer is ever added: replace the
+bool with `step_context(ctx, base)` + `trial(...)` methods, keeping the two questions separate.
+
+**2. No test compares `Fixed` vs `Faithful` candidate-policy identity.** The final fix wave deleted
+`CandidatePolicySpec.identity`/`PolicyIdentity` as dead code (nothing read them; `LazyEngine` is its
+own identity because both its fields affect the proposal). That removed the one test checking all
+three pairwise policy-identity comparisons. Two survive, split across files -- `test_engines.py`
+checks Grow != Faithful, `test_arterial.py` checks Fixed != Grow via the default -- but Fixed vs
+Faithful is now unchecked. The reviewer PROVED this is a real hole rather than a theoretical one by
+patching `Fixed.__eq__`/`Faithful.__eq__` to collide and replaying every surviving assertion: all
+passed. Identity discrimination is intact on today's code (verified by direct construction), so
+there is no cache-key collision now. Cost to close: one assertion.
+
 ### Tier 1: uniform-density geometric proxy
 
 With a precomputed per-parcel depth field rasterized, a candidate's benefit is approximately
