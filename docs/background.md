@@ -34,10 +34,12 @@ block boundaries** rather than stopping at the edge of each separately-solved bl
 
 **Detecting where to reblock.** Soman et al. (2020) detect informal settlements worldwide by a
 topological analysis of crowdsourced maps — but their per-block Voronoi tessellation is
-prohibitively expensive to run at metropolitan scale. This project instead screens with a cheap
-**density × compactness** heuristic (`n/P²`) that scores every block in an entire metro in a single
-fast sweep, and which peaks in the **Khayelitsha** informal settlement of Cape Town — the region
-the [Results](benchmark.md) benchmark grows and reblocks.
+prohibitively expensive to run at metropolitan scale. This project instead screens with
+`depth_density_proxy` (`√(nA)/P · n/A`), a cheap heuristic that rewards blocks which are both deep
+and crowded — built from nothing but each block's building count, area, and perimeter, with no
+Voronoi and no peel — scoring every block in an entire metro in a single fast sweep. It peaks in the
+**Klipfontein** informal settlement of Cape Town — the region the [Results](benchmark.md) benchmark
+grows and reblocks.
 
 ### References
 
