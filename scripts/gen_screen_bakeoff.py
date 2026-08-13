@@ -236,10 +236,7 @@ def print_top_settlements(b: gpd.GeoDataFrame, ext: gpd.GeoDataFrame, *, retenti
     metric concentrate (robust to any one block's placement)."""
     sid = _block_settlement_id(b, ext)
     ext_ll = gpd.GeoSeries(ext.geometry.centroid, crs=ext.crs).to_crs(4326)
-    # `.x`/`.y` taken on the whole GeoSeries, not a `.iloc[k]` scalar: a single indexed-out
-    # geometry types as the generic `BaseGeometry`, which has no `.x`/`.y` -- matches the
-    # `pts.geometry.x.to_numpy()` idiom used elsewhere in this codebase (e.g. reblock/mesh.py).
-    ext_lat, ext_lon = ext_ll.y, ext_ll.x
+    ext_lat, ext_lon = ext_ll.y, ext_ll.x  # Series-level: a `.iloc[k]` scalar has no `.x`/`.y` type
 
     def where(k: int) -> str:
         return (f"settlement #{k} ({int(ext['n_structures'].iloc[k]):,} structures) centred at "
