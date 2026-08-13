@@ -103,3 +103,20 @@ def test_published_method_count_is_generated_not_typed() -> None:
     for word in ("Seven", "seven", "Eight", "Nine", "Ten", "Eleven"):
         assert f"{word} road-generation" not in intro, (
             f"'{word}' typed into prose; the count must come from METHODCOUNT")
+
+
+def test_unpublished_methods_are_excluded_from_the_build() -> None:
+    """published=False keeps a method out of the overview, but exclude_docs is the actual publish
+    switch. If they drift, the page is BUILT and reachable by URL while linked from nowhere.
+
+    mkdocs.yml's own comment concedes this pair is manual and warns: the method's slug must match
+    in both the M() entry in gen_site_pages.py and the exclude_docs path in mkdocs.yml, or the
+    unpublished page silently reappears in the built site as an orphan.
+    """
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
+    unpublished = set(re.findall(r'M\("([a-z_]+)"[^)]*?published=False', src, flags=re.S))
+    assert unpublished, "no unpublished methods found; this guard would be vacuous"
+    nav_text = (ROOT / "mkdocs.yml").read_text()
+    excluded = set(re.findall(r"^\s*\S*methods/([a-z_]+)\.md\s*$", nav_text, flags=re.M))
+    leaked = sorted(unpublished - excluded)
+    assert not leaked, f"published=False but not in exclude_docs, so still built: {leaked}"
