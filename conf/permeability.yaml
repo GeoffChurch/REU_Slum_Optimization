@@ -50,3 +50,13 @@ matched_displacement: 0.10   # 10% of homes (Lens A)
 # still honestly missed by the sparse/weak ones (greedy_arterial_repulsion; both weak methods on
 # density_compactness/nairobi).
 matched_permeability: 0.60   # permeability >= 0.60 (Lens B)
+# Frontier plot x-limit -- DISPLAY ONLY. Nothing is truncated and no number changes; the curves
+# simply leave the frame past this point. Methods have no common terminal (each stops on its own
+# rule: `depth_target` for the trees, `max_displacement` for the LP and the cycle method, a fixed
+# lattice for the grid), so the axis autoscaled to whichever method ran longest -- on the pinned
+# flagship block that is clearance_looped at 83% displacement, driving an axis on which every
+# method is saturated and flat past 40% and the whole interesting range is squashed into the left
+# fifth. Both lens guides sit at 10% displacement / 60% permeability, so 40% keeps them and the
+# separation between methods legible. The terminal points the tail carried are not lost -- they are
+# tabled per method on the docs pages and are in frontier_permeability.csv.
+frontier_xmax: 0.40

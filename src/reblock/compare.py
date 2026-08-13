@@ -33,19 +33,39 @@ log = logging.getLogger(__name__)
 # inverted -- see `displacement_curve`). One frontier: permeability (y) vs displacement (x).
 
 
-def _load_permeability_params(config_dir: Path = Path("conf")
-                              ) -> tuple[PermeabilityParams, float, float]:
-    """`conf/permeability.yaml`'s metric params (`g_walk`/`g_road_per_m`/`g_street`/
-    `radius_frac`) plus the two calibrated lens thresholds (`matched_displacement`/
-    `matched_permeability`) -- mirrors `scripts.compare_budgets.load_permeability_config` exactly.
-    `compare()` uses only the params half (for `permeability_curve`); `main()` uses the thresholds
-    half too, to draw `compare_report`'s guide lines at the same cutoffs the two-lens driver grades
-    methods against."""
+@dataclass(frozen=True)
+class PermeabilityConfig:
+    """Everything `conf/permeability.yaml` configures, as named fields.
+
+    A tuple would do the same job until someone inserts a field, at which point every positional
+    unpack silently shifts by one and keeps type-checking. `frontier_xmax` was exactly that
+    insertion, which is why this is a dataclass now.
+    """
+    params: PermeabilityParams
+    matched_displacement: float   # Lens A -- the D every method's prefix is truncated to
+    matched_permeability: float   # Lens B -- the P* every method's prefix is truncated to
+    frontier_xmax: float          # frontier plot x-limit; see `compare_report`
+
+
+def load_permeability_config(config_dir: Path = Path("conf")) -> PermeabilityConfig:
+    """`conf/permeability.yaml` -> `PermeabilityConfig`. The ONE reader of that file.
+
+    There were three copies of this before -- here, `scripts.compare_budgets` and
+    `scripts.calibrate_permeability` -- and this one had silently dropped `road_margin_m`, so the
+    frontier path built `PermeabilityParams` with the dataclass default while the other two read
+    the configured value. Inert only because the configured value happened to equal the default;
+    editing the yaml would have moved two of the three call sites. Hence one implementation.
+    """
     raw = cast(DictConfig, OmegaConf.load(config_dir / "permeability.yaml"))
-    params = PermeabilityParams(g_walk=float(raw.g_walk), g_road_per_m=float(raw.g_road_per_m),
-                                g_street=float(raw.g_street),
-                                radius_frac=float(raw.radius_frac))
-    return params, float(raw.matched_displacement), float(raw.matched_permeability)
+    return PermeabilityConfig(
+        params=PermeabilityParams(g_walk=float(raw.g_walk),
+                                  g_road_per_m=float(raw.g_road_per_m),
+                                  g_street=float(raw.g_street),
+                                  road_margin_m=float(raw.road_margin_m),
+                                  radius_frac=float(raw.radius_frac)),
+        matched_displacement=float(raw.matched_displacement),
+        matched_permeability=float(raw.matched_permeability),
+        frontier_xmax=float(raw.frontier_xmax))
 
 
 @dataclass(frozen=True)
@@ -102,7 +122,7 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
     methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in names]
     _expand_method_sweep(cfg, names, methods)   # optional: sweep one base method over a param
     regions = build_regions(source, screen, region_builder, block_groups, cfg.max_blocks)
-    params, _, _ = _load_permeability_params()
+    params = load_permeability_config().params
 
     # one curve per (region, method, metric); the stored Curve.cost is always cumulative added
     # road length (m) -- metric-independent, so no shared cap needs computing. (emit.compare_report
@@ -148,14 +168,15 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
 def main(cfg: DictConfig) -> None:
     results = compare(cfg)
     out_dir = Path(HydraConfig.get().runtime.output_dir)
-    _, matched_displacement, matched_permeability = _load_permeability_params()
+    pcfg = load_permeability_config()
     # The canonical registry drives per-method curve colours: `all_methods` is the global method
     # list, and `compare()` has already merged any `method_sweep` variants into it, so this covers
     # every method that could appear in `results`. A method's colour is its index here -- the full
     # registry, not the run's selected subset -- so it stays put when a pass drops another method.
     compare_report(results, out_dir, method_order=[str(k) for k in cfg.all_methods],
-                   matched_displacement=matched_displacement,
-                   matched_permeability=matched_permeability)
+                   matched_displacement=pcfg.matched_displacement,
+                   matched_permeability=pcfg.matched_permeability,
+                   frontier_xmax=pcfg.frontier_xmax)
     # Log each method's terminal: permeability (benefit, road length, %paved) -- no scalar rank --
     # and displacement (rising cost, never inverted) separately.
     for r in sorted(results, key=lambda r: (r.metric, -r.curve.benefit[-1])):

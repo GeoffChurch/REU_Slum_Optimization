@@ -76,9 +76,10 @@ from typing import Any, cast
 
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf, open_dict
+from omegaconf import open_dict
 
 from reblock.budget import Curve, building_radii, displacement_curve
+from reblock.compare import load_permeability_config
 from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
 from reblock.permeability import PermeabilityParams, permeability_curve
@@ -147,15 +148,6 @@ def region_names() -> list[str]:
     """Every region this probe covers, in the `--region` display-name form: `<metric>/<city>` for
     the 6 multiblock regions, plus `method_comparison` for the pinned flagship block."""
     return [f"{metric}/{city}" for metric in METRICS for city in CITIES] + ["method_comparison"]
-
-
-def _load_permeability_params() -> PermeabilityParams:
-    raw = cast(DictConfig, OmegaConf.load(CONFIG_DIR / "permeability.yaml"))
-    return PermeabilityParams(g_walk=float(raw.g_walk),
-                              g_road_per_m=float(raw.g_road_per_m),
-                              g_street=float(raw.g_street),
-                              road_margin_m=float(raw.road_margin_m),
-                              radius_frac=float(raw.radius_frac))
 
 
 def _load_pinned_block() -> tuple[Block, dict[str, Method]]:
@@ -314,7 +306,7 @@ def run_region(name: str) -> RegionResult:
     available; a plain serial loop otherwise (e.g. a single method, or no `fork` start method) --
     same code path `_method_frontier` runs either way, so results are identical."""
     block, methods = _load_region(name)
-    params = _load_permeability_params()
+    params = load_permeability_config(CONFIG_DIR).params
     workers = min(METHOD_WORKERS, len(methods), os.cpu_count() or 1)
     if workers > 1 and "fork" in multiprocessing.get_all_start_methods():
         ctx = multiprocessing.get_context("fork")

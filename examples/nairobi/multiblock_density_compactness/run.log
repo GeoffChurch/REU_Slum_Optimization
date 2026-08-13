@@ -2,10 +2,10 @@
 [__main__][INFO] screen: flagged 257/16200 blocks (0.5s)
 [reblock.pipeline][WARNING] region KEN.30.5_1_158+KEN.30.5_1_174+KEN.30.5_1_182+KEN.30.5_1_183+KEN.30.5_1_185+KEN.30.5_1_187+KEN.30.5_1_188+KEN.30.5_1_190+KEN.30.5_1_192+KEN.30.5_1_195+KEN.30.5_1_196+KEN.30.5_1_200+KEN.30.5_1_225+KEN.30.5_1_228+KEN.30.5_1_230+KEN.30.5_1_231+KEN.30.5_1_236+KEN.30.5_1_243+KEN.30.5_1_265+KEN.30.5_1_266+KEN.30.5_1_267+KEN.30.5_1_268+KEN.30.5_1_269+KEN.30.5_1_271+KEN.30.5_1_301+KEN.30.5_1_306+KEN.30.5_1_320+KEN.30.5_1_323+KEN.30.9_1_3501+KEN.30.9_1_3502+KEN.30.9_1_3509+KEN.30.9_1_3511+KEN.30.9_1_3512+KEN.30.9_1_3514+KEN.30.9_1_3515+KEN.30.9_1_3517+KEN.30.9_1_3518+KEN.30.9_1_3524+KEN.30.9_1_3525+KEN.30.9_1_3526+KEN.30.9_1_3527+KEN.30.9_1_3529+KEN.30.9_1_3534+KEN.30.9_1_3535+KEN.30.9_1_3537 lost member(s) ['KEN.30.9_1_3517', 'KEN.30.9_1_3529'] to a build failure -- reblocking only ['KEN.30.5_1_158', 'KEN.30.5_1_174', 'KEN.30.5_1_182', 'KEN.30.5_1_183', 'KEN.30.5_1_185', 'KEN.30.5_1_187', 'KEN.30.5_1_188', 'KEN.30.5_1_190', 'KEN.30.5_1_192', 'KEN.30.5_1_195', 'KEN.30.5_1_196', 'KEN.30.5_1_200', 'KEN.30.5_1_225', 'KEN.30.5_1_228', 'KEN.30.5_1_230', 'KEN.30.5_1_231', 'KEN.30.5_1_236', 'KEN.30.5_1_243', 'KEN.30.5_1_265', 'KEN.30.5_1_266', 'KEN.30.5_1_267', 'KEN.30.5_1_268', 'KEN.30.5_1_269', 'KEN.30.5_1_271', 'KEN.30.5_1_301', 'KEN.30.5_1_306', 'KEN.30.5_1_320', 'KEN.30.5_1_323', 'KEN.30.9_1_3501', 'KEN.30.9_1_3502', 'KEN.30.9_1_3509', 'KEN.30.9_1_3511', 'KEN.30.9_1_3512', 'KEN.30.9_1_3514', 'KEN.30.9_1_3515', 'KEN.30.9_1_3518', 'KEN.30.9_1_3524', 'KEN.30.9_1_3525', 'KEN.30.9_1_3526', 'KEN.30.9_1_3527', 'KEN.30.9_1_3534', 'KEN.30.9_1_3535', 'KEN.30.9_1_3537']
 [__main__][INFO] region built: 43 blocks / 3547 parcels (2.6s)
-[scripts.compare_budgets][INFO] reblocked clearance_looped: 112 segments, 4987 m (9.5s)
+[scripts.compare_budgets][INFO] reblocked clearance_looped: 112 segments, 4987 m (9.6s)
 [scripts.compare_budgets][INFO] reblocked euclidean_grid: 93 segments, 11927 m (0.2s)
-[scripts.compare_budgets][INFO] reblocked resistance_lp: 4649 segments, 27469 m (26.3s)
-[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 10095 m (193.1s)
-[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 69 segments, 5226 m (216.9s)
-[scripts.compare_budgets][INFO] lens/frontier curves computed for 5 methods (42.4s)
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 4649 segments, 27469 m (26.6s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 428 segments, 20886 m (920.8s)
+[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 227 segments, 12885 m (1364.7s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 5 methods (50.6s)
 wrote examples/nairobi/multiblock_density_compactness: 43 blocks / 3547 parcels; flagged 257/16200; 5 methods; README + maps + lens CSVs

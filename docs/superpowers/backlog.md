@@ -486,12 +486,63 @@ out of `scripts/perf` into a selectable engine.
   which at region scale likely dominates the whole examples regeneration, and it currently trails on
   both reported lenses (permA 0.6650 / dispB 0.1262, last and second-to-last of five). Decide from
   the final eval, not from this one bakeoff.
-- **`cycle_native` is NOT in the examples and should stay out for now.** It beats `clearance_looped`
-  on Lens B (12/12, -0.0326) and ties it on Lens A, but loses to `resistance_lp` on both (Lens A
-  1/14, -0.0696). Its distinguishing property -- near-zero bridge fraction, the only method that
-  builds real circulation -- is invisible in a report that shows permeability and displacement only,
-  so it would read purely as a dominated sixth method. Revisit if circulation ever becomes a
-  reported axis (see the orientation-penalty section below, which says it cannot come free).
+- **`cycle_native` IS in the examples** (all seven, as `Loop Network`) and is not dominated. The
+  entry that used to sit here said it was out and should stay out; it was admitted later and the
+  line was never retired. What replaced its reasoning, measured 2026-08-12 across all 7 example
+  regions off the committed `frontier_permeability.csv`:
+  - It does NOT dominate `clearance_looped`, and is not dominated by it. Loop Network covers the
+    Looped Tree's whole curve in **1 of 7** regions (nairobi/depth, +0.038) and loses by up to
+    0.127 elsewhere; the reverse holds in 0 of 7. At the Lens B operating point Loop Network is
+    cheaper in BOTH homes and metres in the two `depth` regions, `clearance_looped` is cheaper in
+    both in `capetown/density_compactness`, and the other four are genuine trades (Loop Network
+    cheaper in homes, Looped Tree cheaper in metres).
+  - It is 16x slower: cold-cache, 8.3 s vs 140.6 s on 2,690 parcels and 40.8 s vs 666 s on 11,006.
+    `clearance`/`loop_closure` register cached derivations with `reblock.derive_graph` and
+    `cycle_native` does not, so the committed `run.log` timings flatter it -- the 0.0 s
+    `clearance_looped` line on the 11k region is a warm hit, not work.
+  - Its distinguishing property is still bridge fraction 0.000 vs `clearance_looped`'s 0.577, still
+    invisible in a report that prices permeability and displacement only. That remains the reason
+    it is on the frontier rather than a ranking win.
+  - **The `range(60)` caveat this entry carried is DISCHARGED** (next item): re-measured
+    2026-08-13 with the cap lifted and every method running to its own budget, Loop Network covers
+    the Looped Tree's whole curve in **2 of 7** rather than 1 (capetown/depth +0.037, nairobi/depth
+    +0.000 -- an exact tie), and the Looped Tree still wins the other five by up to 0.223. The
+    verdict survived the un-truncation.
+
+- **DONE 2026-08-13: the two binding budgets were raised and everything re-measured.**
+  `cycle_native`'s hardcoded `range(60)` is now a `max_cycles` field defaulting to 400, and the
+  access arterials went 15 -> 60 roads. Both changed proposals, so all seven examples regenerated.
+  Outcomes, and what they cost:
+  - **`max_cycles` never binds now** -- regions used 80/118/214/248/251/300 cycles against the 400
+    cap, and every one terminates at 0.195-0.200 displacement, i.e. on its configured
+    `max_displacement: 0.20`. The valve is a valve.
+  - **Frontage now reaches P\*=0.60 in 7 of 7** (it missed 3 of 6 before), but is STILL short of the
+    10% Lens A budget in 4 of 6 regions (terminals 4.3-10.8%). So 60 only partly achieved what it
+    was raised for. Do not raise it again without measuring first: see the cost note below.
+  - **Cost, and a sampling error worth not repeating.** The `max_roads` sweep was run on
+    capetown/depth_density and predicted ~5.7x; actual was 5.5-6.7x across regions, fine. The
+    `max_cycles` estimate from the SAME region predicted 1.4x and was badly wrong: actual 1.3x
+    there but 4.8-6.8x everywhere else (depth: 666 s -> 4,549 s), because depth_density needed only
+    80 cycles where the others needed 214-300. The region swept was the one with the least headroom
+    to spend. Same lesson as notes/2026-07-29-tree-grid-six-regions.md, in a new place.
+  - `cycle_native` at 4,549 s and Frontage at 3,863 s on the 11k-parcel flagship make runtime a
+    first-class axis for these two, not a footnote.
+
+- **`euclidean_grid` is dominated on the reported axes and survives on runtime alone.** Measured
+  2026-08-12, same 7 regions: `resistance_lp` covers the grid's ENTIRE curve in 6 of 7, worst-case
+  margin +0.039 to +0.130 permeability at every displacement the grid reaches (the 7th failure is
+  the LP's configured `max_displacement: 0.20` against the grid's 47% build-out on the pinned block,
+  outside the range anything is graded at). Re-measured 2026-08-13 after the budget lift, a SECOND
+  and independent method does the same: `cycle_native` also covers the grid's entire curve in 6 of 7
+  (+0.006 to +0.087), which it could not do before, because its own truncation had stopped it short
+  of the grid's tail. Two independent dominators, the same 6 of 7, the same lone exception. At the
+  Lens B operating point both `resistance_lp` and
+  `cycle_native` beat it on BOTH costs in 7 of 7 -- the grid pays 2.0-7.0x the homes and 1.3-4.0x
+  the metres for the same permeability. What is left is speed: 0.0-0.9 s against 26-359 s for the
+  LP, which at census scale (the 1.8M-block ZAF+KEN pool) is a real axis, plus its role as the
+  conventional-planning yardstick, which is a baseline's job rather than a candidate's. Before
+  acting: `spacing` has never been swept at region scale -- the examples override it to 250 m -- so
+  the dominance is measured at one setting.
 
 ## Metric / research
 

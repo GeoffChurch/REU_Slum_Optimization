@@ -41,12 +41,13 @@ from hydra.utils import instantiate
 from omegaconf import open_dict
 from shapely.ops import unary_union
 
+from reblock.compare import load_permeability_config
 from reblock.contracts import Method, Screen, Source
 from reblock.emit import region_map
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, block_depths
 from reblock.render import google_maps_url
-from scripts.compare_budgets import load_permeability_config, run_permeability_lenses
+from scripts.compare_budgets import run_permeability_lenses
 from scripts.gen_example_readme import write_readme
 
 log = logging.getLogger(__name__)
@@ -179,9 +180,7 @@ def main() -> None:
             with open_dict(cfg):
                 cfg.desire_source.snapshot = str(snapshot)
             methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
-        params, matched_displacement, matched_permeability = load_permeability_config()
-        run_permeability_lenses(region, methods, out, matched_displacement=matched_displacement,
-                                matched_permeability=matched_permeability, params=params,
+        run_permeability_lenses(region, methods, out, pcfg=load_permeability_config(),
                                 label=seed)
 
         depths = block_depths(source, members)

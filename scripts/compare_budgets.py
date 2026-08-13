@@ -25,11 +25,13 @@ Both lenses render one after-heatmap per method, in BOTH colorings (access-depth
 `KComplexityEval`'s `access_after`, and the permeability potential via
 `reblock.permeability.parcel_potentials`) -- re-scoring against the truncated road set via a
 `Proposal` with `block_identity=None` so the derive memo never hands back the untruncated depth.
-One before-heatmap per region, also in both colorings. One reblock-drainage GIF per method
-(unchanged, full network).
+One before-heatmap per region, also in both colorings. One reblock-drainage GIF per method, over
+that method's LENS B prefix -- so every animation ends at the same benefit and the row can be read
+side by side (full build-outs terminate wherever each method's own stopping rule lands, which is
+nowhere near each other).
 
-`load_permeability_config` reads `conf/permeability.yaml` (metric params + the two calibrated
-thresholds `matched_displacement`/`matched_permeability`) -- the single source both example
+`reblock.compare.load_permeability_config` reads `conf/permeability.yaml` into a
+`PermeabilityConfig`, which is threaded through as one object -- the single source both example
 generators and this module's own CLI load from, so a re-calibration only ever touches the yaml.
 
 Run (module form -- mirrors scripts/fetch_desire_lines_snapshot.py's Hydra bootstrapping):
@@ -57,7 +59,6 @@ import matplotlib.pyplot as plt
 from geopandas import GeoDataFrame
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
-from omegaconf import DictConfig, OmegaConf
 
 from reblock.animate import reblock_gif
 from reblock.budget import (
@@ -67,7 +68,7 @@ from reblock.budget import (
     prefix_to_displacement,
     prefix_to_permeability,
 )
-from reblock.compare import MethodCurve
+from reblock.compare import MethodCurve, PermeabilityConfig, load_permeability_config
 from reblock.contracts import Block, Method, Proposal, Screen, Source
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL, parcel_access_layers
@@ -76,7 +77,6 @@ from reblock.emit import _displaced_points, compare_report
 from reblock.eval.access_burden import burden
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.permeability import (
-    PermeabilityParams,
     egress_power,
     parcel_potentials,
     permeability,
@@ -111,19 +111,6 @@ class OutcomeRow:
     perm_burden_reduction: float   # Lens B
 
 
-def load_permeability_config(config_dir: Path = Path("conf")
-                             ) -> tuple[PermeabilityParams, float, float]:
-    """`conf/permeability.yaml`'s metric params + the two calibrated lens thresholds
-    (`matched_displacement` D for Lens A, `matched_permeability` P* for Lens B)."""
-    raw = cast(DictConfig, OmegaConf.load(config_dir / "permeability.yaml"))
-    params = PermeabilityParams(g_walk=float(raw.g_walk),
-                                g_road_per_m=float(raw.g_road_per_m),
-                                g_street=float(raw.g_street),
-                                road_margin_m=float(raw.road_margin_m),
-                                radius_frac=float(raw.radius_frac))
-    return params, float(raw.matched_displacement), float(raw.matched_permeability)
-
-
 def _reblock_once(region: list[Block], method: Method) -> tuple[Block, Proposal]:
     """One propose for `method` over `region`. A singleton region takes the exact pre-region
     single-block path (`propose` directly on `region[0]`) rather than `region_reblock`:
@@ -147,14 +134,19 @@ def _write_csv(path: Path, header: list[str], rows: list[list[object]]) -> None:
 
 
 def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out_dir: Path, *,
-                            matched_displacement: float, matched_permeability: float,
-                            params: PermeabilityParams,
+                            pcfg: PermeabilityConfig,
                             label: str | None = None) -> list[OutcomeRow]:
     """Reblock each method once over `region` (natural config), compute the permeability +
     displacement frontier, both lenses' outcome tables, and every render (before, both colorings;
     per-method-per-lens after, both colorings; per-method GIF) -- all from that single reblock. The
     region block is method-independent (same parcels/streets every reblock), so any method's block
     scores every method and fixes the shared render frame/vmax."""
+    # Unpacked once, here, so the body below reads the same as it did when these arrived as three
+    # separate arguments -- what changed is that the CALLER now passes one named object, so adding
+    # a field to it cannot silently shift anything at a call site.
+    params = pcfg.params
+    matched_displacement = pcfg.matched_displacement
+    matched_permeability = pcfg.matched_permeability
     out_dir.mkdir(parents=True, exist_ok=True)
     roads_by_method: dict[str, GeoDataFrame] = {}
     proposals: dict[str, Proposal] = {}
@@ -190,7 +182,8 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                                   displacement_curve(block, roads, radii)))
     compare_report(curves, out_dir, method_order=list(methods),
                    matched_displacement=matched_displacement,
-                   matched_permeability=matched_permeability)
+                   matched_permeability=matched_permeability,
+                   frontier_xmax=pcfg.frontier_xmax)
 
     # Lens prefixes -- either lens can fall short of its target with a fixed/sparse method's own
     # network (Lens A: `at_budget=False` below, prefix_a is that method's full network shown at its
@@ -323,10 +316,10 @@ def main() -> None:
     groups = [[str(b) for b in g] for g in cfg.block_ids]
     region = build_regions(source, screen, region_builder, groups, 1)[0]
     methods = {n: cast(Method, instantiate(cfg.all_methods[n])) for n in method_names}
-    params, matched_displacement, matched_permeability = load_permeability_config()
-    rows = run_permeability_lenses(region, methods, out_dir,
-                                   matched_displacement=matched_displacement,
-                                   matched_permeability=matched_permeability, params=params)
+    pcfg = load_permeability_config()
+    matched_displacement = pcfg.matched_displacement
+    matched_permeability = pcfg.matched_permeability
+    rows = run_permeability_lenses(region, methods, out_dir, pcfg=pcfg)
     for r in rows:
         print(f"[lens A D={matched_displacement:.2f}] {r.method}: "
               f"permeability={r.disp_permeability:.3f} "
