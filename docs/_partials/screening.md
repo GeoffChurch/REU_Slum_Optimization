@@ -5,10 +5,11 @@
      docs/methodology/screening.md (it is generated and gitignored). This file is committed but
      excluded from the built site (see exclude_docs in mkdocs.yml).
 
-     The "why n/P^2 was retired" section below links to the screen-bakeoff example on GitHub
-     (mirroring how gen_site_pages.py's _mc_section links out to method-comparison), NOT to a
-     docs/results/bakeoff.md page -- that page does not exist yet, and a link to it would fail
-     `mkdocs build --strict` today. Repoint it once that page ships.
+     The "why n/P^2 was retired" section below links to the published results/bakeoff.md page.
+     It originally linked to the screen-bakeoff example on GitHub instead (mirroring how
+     gen_site_pages.py's _mc_section links out to method-comparison), because results/bakeoff.md
+     did not exist yet and a link to it would have failed `mkdocs build --strict`. Repointed now
+     that page ships.
 
      No typed numbers anywhere in this file: the floor and the precision/AUC figures come from
      SCREENTABLE, not from prose. -->
@@ -33,7 +34,7 @@ in one pass.
 
 Every candidate screen below is scored against the City of Cape Town's own informal-structure
 survey — AUC across the whole ranking, precision at the top of it — plus each one's shipped
-absolute floor where it has one; the two that were never shipped as a gate carry none:
+absolute floor where it has one; a screen never shipped as a gate carries none:
 
 <!-- SCREENTABLE -->
 
@@ -41,8 +42,7 @@ absolute floor where it has one; the two that were never shipped as a gate carry
 
 `density_compactness` (`n/P²` — density times compactness) was the previous default. At an equal
 pool size, `depth_density_proxy` beats it on both precision and recall, so the change costs
-nothing and settles no trade-off — see the full
-[screen bake-off](https://github.com/jmendoza167/REU_Slum_Optimization/tree/main/examples/screen-bakeoff)
+nothing and settles no trade-off — see the full [screen bake-off](../results/bakeoff.md)
 for the comparison. Its historical selling point — that it needs no Voronoi tessellation and no
 peel — was never a real differentiator: the metric that replaced it needs no Voronoi tessellation
 and no peel either.

@@ -71,6 +71,10 @@ is like-for-like rather than a scoreboard of incompatible scores.
 
     The settlement-scale benchmark and the permeability–displacement frontier.
 
+-   **[Reproduce](reproduce.md)**
+
+    How to set up the project, and the exact command behind every figure on this site.
+
 -   **[Team & References](team.md)**
 
     Who built this, and the research it stands on.

@@ -39,7 +39,7 @@ prohibitively expensive to run at metropolitan scale. This project instead scree
 and crowded — built from nothing but each block's building count, area, and perimeter, with no
 Voronoi and no peel — scoring every block in an entire metro in a single fast sweep. What it finds is
 checked against the City of Cape Town's own informal-structure survey, and reported on the
-[Results](results/frontier.md) page.
+[screen bake-off](results/bakeoff.md) page.
 
 ### References
 

@@ -105,6 +105,35 @@ def test_published_method_count_is_generated_not_typed() -> None:
             f"'{word}' typed into prose; the count must come from METHODCOUNT")
 
 
+def test_no_partial_links_to_a_retired_path() -> None:
+    """methodology.md and benchmark.md are gone; a link to either 404s. mkdocs --strict catches
+    this at build time, but only in CI -- this fails in the unit suite.
+
+    "](methods/index.md)" is retired ONLY as seen from a partial that ends up at the docs/ ROOT
+    (intro.md -> docs/index.md, reproduce.md -> docs/reproduce.md): docs/methods/ was renested
+    under docs/methodology/methods/ in an earlier task, so a root-level page must now spell the
+    full "methodology/methods/index.md" -- which is exactly what both currently do. The identical
+    string is a CORRECT relative link from a partial that itself already lives under
+    docs/methodology/ (methodology.md, screening.md, permeability.md, displacement.md): e.g.
+    methodology.md's own live "[reblocker](methods/index.md)" resolves to
+    methodology/methods/index.md and is not a retired link at all -- checking it unconditionally
+    would fail on a page that mkdocs --strict itself builds clean. So that one path is checked
+    only against the root partials; the other two retired paths 404 from anywhere and are checked
+    against every partial.
+    """
+    retired_everywhere = ("](methodology.md)", "](benchmark.md)")
+    retired_at_docs_root = "](methods/index.md)"
+    root_partials = ("intro.md", "reproduce.md")
+
+    offenders: list[str] = []
+    for name, text in _partials().items():
+        paths = retired_everywhere + ((retired_at_docs_root,) if name in root_partials else ())
+        for path in paths:
+            if path in text:
+                offenders.append(f"{name}: {path}")
+    assert not offenders, f"links to retired paths: {offenders}"
+
+
 def test_unpublished_methods_are_excluded_from_the_build() -> None:
     """published=False keeps a method out of the overview, but exclude_docs is the actual publish
     switch. If they drift, the page is BUILT and reachable by URL while linked from nowhere.
