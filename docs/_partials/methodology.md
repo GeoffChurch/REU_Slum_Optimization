@@ -21,7 +21,7 @@ component, and every run writes its output to disk, so a result reproduces from 
 3. **Region builder.** Grow each flagged block into a right-sized, multi-block **region** before
    any road is proposed, so the roads that follow can stay continuous across block boundaries
    instead of stopping at the edge of one separately-solved block. See [Screening](screening.md).
-4. **Method.** Run a pluggable [reblocker](../methods/index.md) that proposes new roads for the
+4. **Method.** Run a pluggable [reblocker](methods/index.md) that proposes new roads for the
    region — the roads themselves, and how many, are entirely the method's choice.
 5. **Eval.** Grade the result the same way for every method: **permeability** — how easily every
    parcel can reach a street — bought against **displacement**, the homes it costs.

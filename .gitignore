@@ -59,7 +59,6 @@ outputs/*/.hydra/*
 # (see .github/workflows/deploy-site.yml); run scripts/gen_site_pages.py for a local preview.
 # The handwritten prose lives in docs/_partials/ (tracked); index.md is assembled from it.
 docs/index.md
-docs/methods/
 docs/methodology/
 docs/benchmark.md
 docs/assets/

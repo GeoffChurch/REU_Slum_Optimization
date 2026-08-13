@@ -63,7 +63,7 @@ is like-for-like rather than a scoreboard of incompatible scores.
 
     The `data → screen → reblock` pipeline, and what the two metrics actually mean.
 
--   **[Methods](methods/index.md)**
+-   **[Methods](methodology/methods/index.md)**
 
     <!-- METHODCOUNT --> road-generation methods, each shown on the ground with its own numbers.
 

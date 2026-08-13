@@ -1,5 +1,5 @@
 # Project site (GitHub Pages; deployed by .github/workflows/deploy-site.yml, which regenerates
-# the data-driven pages in CI -- docs/methods/, docs/benchmark.md, and docs/assets/ are NOT
+# the data-driven pages in CI -- docs/methodology/, docs/benchmark.md, and docs/assets/ are NOT
 # committed). CI's actual check is `mkdocs build --strict`, which fails the build on a broken
 # link or orphan page instead of just warning. For a local preview:
 #   python3 scripts/gen_site_pages.py   # regenerate data-driven pages from run artifacts
@@ -32,7 +32,12 @@ exclude_docs: |
   # line silently stops matching and the renamed page REAPPEARS in the built site -- and, because
   # the nav below is explicit, it would appear only as an un-navigable orphan page plus a build
   # warning. Whoever renames the method must update this line and the nav together.
-  methods/dream_come_true.md
+  #
+  # tests/test_gen_site_pages.py::test_unpublished_methods_are_excluded_from_the_build guards the
+  # published=False/exclude_docs pairing itself -- a method marked unpublished with no matching
+  # line here fails CI. It does NOT catch a slug rename (its regex only checks that unpublished
+  # slugs are a subset of excluded slugs), so the warning above still applies.
+  methodology/methods/dream_come_true.md
 
 theme:
   name: material
@@ -109,29 +114,31 @@ nav:
       - methodology/screening.md
       - methodology/permeability.md
       - methodology/displacement.md
-  # Method entries are PATHS ONLY, with no hand-written title. Each label comes from the YAML
-  # front-matter `title:` that scripts/gen_site_pages.py writes into every generated method page
-  # from method_labels.py -- so renaming a method's display label is a one-line change there and
-  # reaches the heading and the sidebar together, instead of needing a matching edit here that
-  # was easy to forget. (Note MkDocs does NOT read the H1 for this: drop the front matter and it
-  # falls back to the FILENAME, which renders "clearance_looped" as "Clearance looped".)
-  #
-  # The file LIST is still manual, and cannot be automated without a new dependency: MkDocs has no
-  # way to auto-populate one section of an otherwise explicit nav (mkdocs-awesome-nav does it, but
-  # that is another pinned package in the deploy workflow). Adding or retiring a method therefore
-  # still means a line here. Order matches the METHODS registry in scripts/gen_site_pages.py;
-  # dream_come_true is intentionally absent, see exclude_docs above.
-  - Methods:
-      - methods/index.md
-      - methods/peel.md
-      - methods/clearance.md
-      - methods/clearance_looped.md
-      - methods/greedy_arterial_buildable.md
-      - methods/cycle_native.md
-      - methods/topology.md
-      - methods/resistance_lp.md
-      - methods/greedy_arterial_access_displacement.md
-      - methods/osm_footpaths.md
-      - methods/euclidean_grid.md
+      # Method entries are PATHS ONLY, with no hand-written title. Each label comes from the YAML
+      # front-matter `title:` that scripts/gen_site_pages.py writes into every generated method
+      # page from method_labels.py -- so renaming a method's display label is a one-line change
+      # there and reaches the heading and the sidebar together, instead of needing a matching
+      # edit here that was easy to forget. (Note MkDocs does NOT read the H1 for this: drop the
+      # front matter and it falls back to the FILENAME, which renders "clearance_looped" as
+      # "Clearance looped".)
+      #
+      # The file LIST is still manual, and cannot be automated without a new dependency: MkDocs
+      # has no way to auto-populate one section of an otherwise explicit nav (mkdocs-awesome-nav
+      # does it, but that is another pinned package in the deploy workflow). Adding or retiring a
+      # method therefore still means a line here. Order matches the METHODS registry in
+      # scripts/gen_site_pages.py; dream_come_true is intentionally absent, see exclude_docs
+      # above.
+      - Methods:
+          - methodology/methods/index.md
+          - methodology/methods/peel.md
+          - methodology/methods/clearance.md
+          - methodology/methods/clearance_looped.md
+          - methodology/methods/greedy_arterial_buildable.md
+          - methodology/methods/cycle_native.md
+          - methodology/methods/topology.md
+          - methodology/methods/resistance_lp.md
+          - methodology/methods/greedy_arterial_access_displacement.md
+          - methodology/methods/osm_footpaths.md
+          - methodology/methods/euclidean_grid.md
   - Results: benchmark.md
   - Team & References: team.md

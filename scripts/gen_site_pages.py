@@ -7,17 +7,18 @@ never-stale) site. Prose is the only handwritten content: the per-method blurbs 
 docs/_partials/intro.md partial that opens the page.
 
 The site is multi-page. This script writes only the GENERATED (gitignored) pages: docs/index.md
-(Home -- docs/_partials/intro.md folded in, plus a hero figure), docs/methods/index.md (methods
-overview) and docs/methods/<slug>.md (one page per method), docs/benchmark.md (Results), and
-docs/methodology/index.md, docs/methodology/screening.md, docs/methodology/permeability.md, and
-docs/methodology/displacement.md (each from its own docs/_partials/*.md partial). The handwritten
-prose pages -- docs/background.md, docs/team.md -- are committed and this script never creates,
-reads, or overwrites them; docs/_partials/*.md are the committed partials it reads (excluded from
-the built site) and folds into the generated pages.
+(Home -- docs/_partials/intro.md folded in, plus a hero figure), docs/methodology/index.md,
+docs/methodology/screening.md, docs/methodology/permeability.md, and
+docs/methodology/displacement.md (each from its own docs/_partials/*.md partial),
+docs/methodology/methods/index.md (methods overview) and docs/methodology/methods/<slug>.md (one
+page per method), and docs/benchmark.md (Results). The handwritten prose pages --
+docs/background.md, docs/team.md -- are committed and this script never creates, reads, or
+overwrites them; docs/_partials/*.md are the committed partials it reads (excluded from the built
+site) and folds into the generated pages.
 
 Usage:  python3 scripts/gen_site_pages.py
-Emits:  docs/index.md, docs/methods/*.md, docs/benchmark.md, docs/methodology/*.md, and copies
-        referenced images into docs/assets/ (MkDocs can only serve files under docs/).
+Emits:  docs/index.md, docs/methodology/*.md, docs/methodology/methods/*.md, docs/benchmark.md, and
+        copies referenced images into docs/assets/ (MkDocs can only serve files under docs/).
 """
 from __future__ import annotations
 
@@ -497,8 +498,8 @@ def _mb_section(m: M) -> list[str]:
     if not (matched or ext70 or gif or disp_row or perm_row):
         return parts
     parts.append("## On the settlement-scale benchmark\n")
-    parts.append("From the [Cape Town benchmark](../benchmark.md) — the 12-block, 11,006-parcel "
-                 "`multiblock_depth` region.\n")
+    parts.append("From the [Cape Town benchmark](../../results/frontier.md) — the 12-block, "
+                 "11,006-parcel `multiblock_depth` region.\n")
     if gif:
         parts.append(f"Roads added busiest-first, each preceded by whatever it needs to reach the "
                      f"street, so every frame is a network you could actually build. The animation "
@@ -696,10 +697,11 @@ def gen_benchmark_section() -> str:
 
 
 def gen_methods_overview() -> str:
-    """The Methods section landing (docs/methods/index.md): the seven methods as scannable cards,
-    then the same seven as a table. Both are emitted deliberately -- the cards are for choosing
-    which method to read, the table is for comparing status and one-line ideas at a glance without
-    scanning a grid. Prose (title, one-line idea, badge) is registry-driven; no run data."""
+    """The Methods section landing (docs/methodology/methods/index.md): the seven methods as
+    scannable cards, then the same seven as a table. Both are emitted deliberately -- the cards
+    are for choosing which method to read, the table is for comparing status and one-line ideas
+    at a glance without scanning a grid. Prose (title, one-line idea, badge) is registry-driven;
+    no run data."""
     parts = ["# The methods\n"]
     parts.append("Every method proposes a different road network for the same blocks; all are "
                  "graded on the same basis — permeability (the benefit) against displacement (the "
@@ -866,9 +868,10 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
 
     `url_depth` -- raw HTML `src="assets/..."` inside the <figure> blocks. MkDocs does NOT touch
     raw HTML, so these must already be correct against the page's SERVED url. With
-    use_directory_urls, benchmark.md is served at <base>/benchmark/ and methods/peel.md at
-    <base>/methods/peel/, so the served depth is not the same as the source depth -- benchmark.md
-    is depth 0 but url_depth 1. Getting this wrong 404s every figure on that page."""
+    use_directory_urls, benchmark.md is served at <base>/benchmark/ and
+    methodology/methods/peel.md at <base>/methodology/methods/peel/, so the served depth is not the
+    same as the source depth -- benchmark.md is depth 0 but url_depth 1. Getting this wrong 404s
+    every figure on that page."""
     # YAML front matter, when given, sets the page's nav label. Without it MkDocs derives the
     # label from the FILENAME -- "clearance_looped" became "Clearance looped" in the sidebar, not
     # "Looped Tree" -- because it does not read the H1 for nav purposes. Emitting the title here
@@ -886,31 +889,16 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
 
 
 def main() -> None:
-    # Generated (gitignored) pages only. Rebuild docs/methods/ from scratch each run; the
-    # handwritten committed pages (background.md, team.md) are never touched.
-    methods_dir = DOCS / "methods"
-    if methods_dir.exists():
-        shutil.rmtree(methods_dir)
-    methods_dir.mkdir(parents=True, exist_ok=True)
-
+    # Generated (gitignored) pages only. The handwritten committed pages (background.md,
+    # team.md) are never touched.
     (DOCS / "index.md").write_text(GENERATED_NOTE + _render_partial("intro") + "\n",
                                    encoding="utf-8")
 
-    # url_depth is the page's SERVED depth under use_directory_urls, which differs from the
-    # source depth: methods/index.md serves at <base>/methods/ (1), methods/peel.md at
-    # <base>/methods/peel/ (2), benchmark.md at <base>/benchmark/ (1).
-    _write_page(methods_dir / "index.md", gen_methods_overview(), depth=1, url_depth=1,
-                title="The methods")
-    for m in METHODS:
-        _write_page(methods_dir / f"{m.slug}.md", gen_method_section(m), depth=1, url_depth=2,
-                    title=m.display_title)
-
     _write_page(DOCS / "benchmark.md", gen_benchmark_section(), depth=0, url_depth=1)
 
-    # docs/methodology/ -- rebuilt from scratch each run, same as docs/methods/ above. Task 7 (the
-    # methods/ renest) adds more _write_page calls into this directory; every one of them MUST come
-    # after this rmtree/mkdir, or it deletes the page just written -- same reason permeability.md
-    # and displacement.md below have to.
+    # docs/methodology/ -- rebuilt from scratch each run. Every _write_page into this directory,
+    # including the methodology/methods/ pages below, MUST come after this rmtree/mkdir, or it
+    # deletes the page just written -- same reason permeability.md and displacement.md have to.
     methodology_dir = DOCS / "methodology"
     if methodology_dir.exists():
         shutil.rmtree(methodology_dir)
@@ -924,7 +912,19 @@ def main() -> None:
     _write_page(methodology_dir / "displacement.md", _render_partial("displacement"),
                 depth=1, url_depth=2, title="Displacement")
 
-    print("wrote docs/index.md, docs/methods/*.md, docs/benchmark.md, docs/methodology/*.md")
+    methods_dir = methodology_dir / "methods"
+    methods_dir.mkdir(parents=True, exist_ok=True)
+    # methodology/methods/index.md serves at <base>/methodology/methods/ (2 segments);
+    # methodology/methods/peel.md at <base>/methodology/methods/peel/ (3). Source depth is 2 for
+    # both. Getting url_depth wrong 404s every figure on the page.
+    _write_page(methods_dir / "index.md", gen_methods_overview(), depth=2, url_depth=2,
+                title="The methods")
+    for m in METHODS:
+        _write_page(methods_dir / f"{m.slug}.md", gen_method_section(m), depth=2, url_depth=3,
+                    title=m.display_title)
+
+    print("wrote docs/index.md, docs/benchmark.md, docs/methodology/*.md, "
+          "docs/methodology/methods/*.md")
 
 
 if __name__ == "__main__":
