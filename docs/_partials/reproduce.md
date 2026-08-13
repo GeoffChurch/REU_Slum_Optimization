@@ -87,9 +87,9 @@ pixi exec --spec mkdocs-material==9.7.7 --spec mkdocs-glightbox==0.5.2 -- mkdocs
 
 `gen_site_pages.py` is stdlib-only, so the first command needs nothing but a plain Python
 interpreter — no `reblock` import, no third-party packages. The second needs the MkDocs packages
-pinned above — `pixi exec --spec ...` fetches
-them ephemerally for a local run; CI installs the same pinned versions with `pip` before building.
-`--strict` turns a broken link or an orphan page into a build failure rather than a warning.
+pinned above — `pixi exec --spec ...` fetches them ephemerally for a local run; CI installs the
+same pinned versions with `pip` before building. `--strict` turns a broken link or an orphan page
+into a build failure rather than a warning.
 
 That is exactly what CI runs on every push to `main` that touches the site
 (`.github/workflows/deploy-site.yml`). Generated pages — this one included — are gitignored and
