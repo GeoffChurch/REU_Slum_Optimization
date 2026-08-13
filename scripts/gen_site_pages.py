@@ -8,14 +8,16 @@ docs/_partials/intro.md partial that opens the page.
 
 The site is multi-page. This script writes only the GENERATED (gitignored) pages: docs/index.md
 (Home -- docs/_partials/intro.md folded in, plus a hero figure), docs/methods/index.md (methods
-overview) and docs/methods/<slug>.md (one page per method), and docs/benchmark.md (Results). The
-handwritten prose pages -- docs/background.md, docs/methodology.md, docs/team.md -- are committed
-and this script never creates, reads, or overwrites them; docs/_partials/intro.md is the one
-committed partial it reads (excluded from the built site) and folds into the generated Home page.
+overview) and docs/methods/<slug>.md (one page per method), docs/benchmark.md (Results), and
+docs/methodology/index.md + docs/methodology/screening.md (from the docs/_partials/methodology.md
+and docs/_partials/screening.md partials). The handwritten prose pages -- docs/background.md,
+docs/team.md -- are committed and this script never creates, reads, or overwrites them;
+docs/_partials/*.md are the committed partials it reads (excluded from the built site) and folds
+into the generated pages.
 
 Usage:  python3 scripts/gen_site_pages.py
-Emits:  docs/index.md, docs/methods/*.md, docs/benchmark.md, and copies referenced images into
-        docs/assets/ (MkDocs can only serve files under docs/).
+Emits:  docs/index.md, docs/methods/*.md, docs/benchmark.md, docs/methodology/*.md, and copies
+        referenced images into docs/assets/ (MkDocs can only serve files under docs/).
 """
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ BRAND = DOCS / "brand"      # committed institutional marks, unlike the gitignor
 MC = ROOT / "examples" / "method-comparison"
 MB = ROOT / "examples" / "multiblock_depth"
 OUTPUTS = ROOT / "outputs"
+BAKEOFF = ROOT / "examples" / "screen-bakeoff"
 
 
 def _load_friendly_method_name() -> Callable[[str], str]:
@@ -185,6 +188,25 @@ def _table(headers: list[str], rows: list[list[str]]) -> str:
     out = ["| " + " | ".join(headers) + " |", "|" + "|".join(["---"] * len(headers)) + "|"]
     out += ["| " + " | ".join(r) + " |" for r in rows]
     return "\n".join(out) + "\n"
+
+
+def _screen_table() -> str:
+    """The screen bake-off ranking, read straight from screen_comparison.csv's own columns --
+    including `floor`, which already carries each metric's shipped absolute gate (empty for the
+    two metrics never shipped as a gate). Deliberately NOT re-derived from conf/metric/*.yaml: a
+    metric's CSV label (e.g. "depth_density proxy   √(nA)/P · n/A") does not round-trip to its
+    config stem by splitting on whitespace -- `.split()[0]` lands on `depth_density`, which names
+    a DIFFERENT, percentile-gated metric than `depth_density_proxy`. The CSV's own floor column
+    has no such ambiguity. Empty string when the artifact is absent, per the dir-reader contract:
+    a section is emitted only when its data exists."""
+    rows = _read_csv(BAKEOFF / "screen_comparison.csv")
+    if not rows:
+        return ""
+    body = [["metric", "AUC", "precision in top 1%", "shipped floor"]]
+    for r in rows:
+        body.append([r["metric"], _num(float(r["auc"]), 3), _pct(float(r["prec@1%"])),
+                     r["floor"] or "—"])
+    return _table(body[0], body[1:])
 
 
 # ---------------------------------------------------------------- outputs/ scanning (k-complexity)
@@ -818,6 +840,7 @@ MARKERS: dict[str, Callable[[], str]] = {
     "KEYRESULT": _key_result,
     "KEYFIGURES": _key_figures,
     "METHODCOUNT": _method_count,
+    "SCREENTABLE": _screen_table,
 }
 
 PARTIALS = DOCS / "_partials"
@@ -864,7 +887,7 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
 
 def main() -> None:
     # Generated (gitignored) pages only. Rebuild docs/methods/ from scratch each run; the
-    # handwritten committed pages (background.md, methodology.md, team.md) are never touched.
+    # handwritten committed pages (background.md, team.md) are never touched.
     methods_dir = DOCS / "methods"
     if methods_dir.exists():
         shutil.rmtree(methods_dir)
@@ -883,7 +906,21 @@ def main() -> None:
                     title=m.display_title)
 
     _write_page(DOCS / "benchmark.md", gen_benchmark_section(), depth=0, url_depth=1)
-    print("wrote docs/index.md, docs/methods/*.md, docs/benchmark.md")
+
+    # docs/methodology/ -- rebuilt from scratch each run, same as docs/methods/ above. Tasks 6 and
+    # 7 (permeability.md, displacement.md, and the methods/ renest) add more _write_page calls into
+    # this directory; every one of them MUST come after this rmtree/mkdir, or it deletes the page
+    # just written.
+    methodology_dir = DOCS / "methodology"
+    if methodology_dir.exists():
+        shutil.rmtree(methodology_dir)
+    methodology_dir.mkdir(parents=True, exist_ok=True)
+    _write_page(methodology_dir / "index.md", _render_partial("methodology"),
+                depth=1, url_depth=1, title="Methodology")
+    _write_page(methodology_dir / "screening.md", _render_partial("screening"),
+                depth=1, url_depth=2, title="Screening")
+
+    print("wrote docs/index.md, docs/methods/*.md, docs/benchmark.md, docs/methodology/*.md")
 
 
 if __name__ == "__main__":

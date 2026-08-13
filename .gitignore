@@ -60,6 +60,7 @@ outputs/*/.hydra/*
 # The handwritten prose lives in docs/_partials/ (tracked); index.md is assembled from it.
 docs/index.md
 docs/methods/
+docs/methodology/
 docs/benchmark.md
 docs/assets/
 

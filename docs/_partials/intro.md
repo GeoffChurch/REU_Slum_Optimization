@@ -59,7 +59,7 @@ is like-for-like rather than a scoreboard of incompatible scores.
 
     The problem, why roads matter, and the prior work this builds on.
 
--   **[Methodology](methodology.md)**
+-   **[Methodology](methodology/index.md)**
 
     The `data → screen → reblock` pipeline, and what the two metrics actually mean.
 
