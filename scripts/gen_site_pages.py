@@ -278,11 +278,11 @@ class M:
         self.mc_key, self.mb_key = mc_key, mb_key
         self.outputs_frag, self.outputs_flags = outputs_frag, outputs_flags or []
         self.conf, self.status = conf, status
-        # published set False keeps the method OUT of the Methods overview, so that page never
-        # links to something the site does not build. It does NOT stop the page file being
-        # written -- exclude_docs in mkdocs.yml is the actual publish switch, and the file staying
-        # on disk keeps its prose recoverable. THE TWO MUST BE KEPT IN SYNC: unpublishing a method
-        # means setting published False here AND excluding its path in exclude_docs there.
+        # published=False keeps the method OUT of the Methods overview, so that page never links
+        # to something the site does not build. It does NOT stop the page file being written --
+        # exclude_docs in mkdocs.yml is the actual publish switch, and the file staying on disk
+        # keeps its prose recoverable. THE TWO MUST BE KEPT IN SYNC: unpublishing a method means
+        # published=False here AND its path in exclude_docs there.
         self.published = published
 
     @property

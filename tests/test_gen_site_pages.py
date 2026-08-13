@@ -92,8 +92,11 @@ def test_every_producer_is_used_by_a_partial() -> None:
 def test_published_method_count_is_generated_not_typed() -> None:
     """Defect 4: '_intro.md' said "Seven" while ten methods were published."""
     src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
+    # Scoped to the M(...) call itself (same pattern as the sibling test above), not a bare
+    # substring search: an unscoped 'published=False' search also matches the phrase anywhere it
+    # is used in prose -- e.g. a comment explaining what the kwarg does -- and silently miscounts.
     published = len(re.findall(r'^    M\("[a-z_]+"', src, flags=re.M)) - len(
-        re.findall(r'published=False', src))
+        re.findall(r'M\("[a-z_]+"[^)]*?published=False', src, flags=re.S))
     assert published == 10, f"expected 10 published methods, registry says {published}"
     intro = (ROOT / "docs" / "_partials" / "intro.md").read_text(encoding="utf-8")
     assert "<!-- METHODCOUNT -->" in intro

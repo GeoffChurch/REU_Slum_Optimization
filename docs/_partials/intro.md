@@ -6,8 +6,10 @@
      The markers below are HTML comments named HEROLOGO, KEYRESULT, HERO, KEYFIGURES and
      METHODCOUNT. They are deliberately NOT spelled out in full here -- the generator substitutes
      by plain string replacement, so writing a marker inside this note would fill the note itself.
-     Each is filled from run artifacts, or dropped entirely when those artifacts are absent, so a
-     partial checkout never shows a placeholder:
+     HEROLOGO, KEYRESULT, HERO and KEYFIGURES are filled from run artifacts, or dropped entirely
+     when those artifacts are absent, so a partial checkout never shows a placeholder. METHODCOUNT
+     is not artifact-gated the same way -- it comes from the METHODS list literal in the script,
+     not from disk, so it is always present:
        HEROLOGO     the official SBU mark, only if docs/brand/ actually holds it
        KEYRESULT    the headline finding, one sentence, from lens_displacement.csv
        HERO         the grown-region figure, captioned
