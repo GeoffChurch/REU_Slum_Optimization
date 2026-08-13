@@ -142,4 +142,5 @@ nav:
           - methodology/methods/euclidean_grid.md
   - Results:
       - results/frontier.md
+      - results/bakeoff.md
   - Team & References: team.md

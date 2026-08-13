@@ -211,6 +211,49 @@ def _screen_table() -> str:
     return _table(body[0], body[1:])
 
 
+def _bakeoff_floors_table() -> str:
+    """Both shipped screens at their absolute floors: pool size, precision, recall. Empty when
+    the artifact is absent, per the dir-reader contract."""
+    rows = [r for r in _read_csv(BAKEOFF / "screen_comparison.csv") if r.get("floor")]
+    if not rows:
+        return ""
+    body = [[r["metric"], _num(float(r["floor_n"])), _pct(float(r["floor_prec"])),
+             _pct(float(r["floor_recall"]))] for r in rows]
+    return _table(["screen at its floor", "blocks", "precision", "recall"], body)
+
+
+def _bakeoff_figures() -> str:
+    """The three committed bake-off figures, in narrative order. Each is emitted only if present,
+    per the dir-reader contract."""
+    wanted = [("precision_recall.png", "Precision and recall across the candidate screens."),
+              ("city_map.png", "Where the shipped screen and its predecessor disagree, city-wide."),
+              ("settlements.png",
+               "The four settlements of sharpest disagreement. Green sits inside the gold "
+               "settlement outlines; red sits outside them.")]
+    out: list[str] = []
+    for name, caption in wanted:
+        url = _copy_asset(BAKEOFF / name, "bakeoff")
+        if url:
+            out.append(_figure(url, caption, caption))
+    return "\n\n".join(out)
+
+
+def _bakeoff_scale() -> str:
+    """Survey scale, read from the ground-truth artifact rather than typed into prose -- and a
+    COMPLETE SENTENCE, never a noun phrase (ruling F5). The generator's dir-reader contract lets
+    ground_truth.json be absent on a partial checkout, in which case this returns "" -- a noun
+    phrase spliced mid-sentence would then leave a dangling fragment ("The survey covers ."); a
+    whole sentence simply disappears instead, and docs/_partials/bakeoff.md places it as its own
+    paragraph so the section around it reads correctly either way."""
+    path = BAKEOFF / "ground_truth.json"
+    if not path.exists():
+        return ""
+    g = json.loads(path.read_text(encoding="utf-8"))
+    return (f"That survey contains {_num(g['structures'])} dwelling polygons, which cluster into "
+            f"{_num(g['settlements'])} settlements and mark {_num(g['informal_blocks'])} of "
+            f"{_num(g['total_blocks'])} Cape Town blocks informal.")
+
+
 # ---------------------------------------------------------------- outputs/ scanning (k-complexity)
 
 def _run_method_target(run_dir: Path) -> str | None:
@@ -845,6 +888,9 @@ MARKERS: dict[str, Callable[[], str]] = {
     "KEYFIGURES": _key_figures,
     "METHODCOUNT": _method_count,
     "SCREENTABLE": _screen_table,
+    "BAKEOFFSCALE": _bakeoff_scale,
+    "BAKEOFFFLOORS": _bakeoff_floors_table,
+    "BAKEOFFFIGS": _bakeoff_figures,
 }
 
 PARTIALS = DOCS / "_partials"
@@ -903,6 +949,11 @@ def main() -> None:
     # results/frontier.md serves at <base>/results/frontier/ -- source depth 1, url_depth 2.
     _write_page(results_dir / "frontier.md", gen_benchmark_section(), depth=1, url_depth=2,
                 title="Frontier benchmark")
+    # results/bakeoff.md serves at <base>/results/bakeoff/ -- same depth/url_depth as frontier.md
+    # above, and MUST follow the results_dir rmtree/mkdir block above it (ruling F4): an insertion
+    # above that block would delete this page as soon as it was written.
+    _write_page(results_dir / "bakeoff.md", _render_partial("bakeoff"), depth=1, url_depth=2,
+                title="Screen bake-off")
 
     # docs/methodology/ -- rebuilt from scratch each run. Every _write_page into this directory,
     # including the methodology/methods/ pages below, MUST come after this rmtree/mkdir, or it

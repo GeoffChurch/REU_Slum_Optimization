@@ -12,6 +12,7 @@ doi:10.7488/ds/2758), clustered into 189 settlement extents.
 Outputs, into `examples/screen-bakeoff/`:
 
     screen_comparison.csv   AUC + precision/recall at each retention, per metric
+    ground_truth.json       survey scale: structure/settlement/block counts (site BAKEOFFSCALE)
     precision_recall.png    the statistical view
     city_map.png            the whole metro: settlements, and where the two leading screens disagree
     settlements.png         zoomed panels on the settlements where they disagree most
@@ -23,18 +24,20 @@ equivalent Nairobi layer.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyogrio
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from pyproj import CRS
 from scipy.stats import rankdata
 
-from reblock.data.informal import label_blocks, settlement_extents
+from reblock.data.informal import ensure_informal_structures, label_blocks, settlement_extents
 from reblock.data.provision import cached_kblock_source
 from reblock.metric import DENSITY_COMPACTNESS_FLOOR, DEPTH_DENSITY_PROXY_FLOOR
 
@@ -264,6 +267,26 @@ def print_top_settlements(b: gpd.GeoDataFrame, ext: gpd.GeoDataFrame, *, retenti
             print(f"    top {k} blocks: none inside any settlement extent")
 
 
+def ground_truth_summary(b: gpd.GeoDataFrame, ext: gpd.GeoDataFrame) -> dict[str, int]:
+    """The four counts the site's BAKEOFFSCALE marker reads (scripts/gen_site_pages.py): total
+    surveyed structures, how many settlement extents they cluster into, and how many of the
+    scored blocks are informal versus scored in total.
+
+    `structures` is read from the shapefile's own feature count via pyogrio -- fast (no geometry
+    parsing) and, unlike `ext["n_structures"].sum()`, not undercounted by the DBSCAN clustering in
+    `settlement_extents`, which drops border noise and sub-MIN_STRUCTURES clusters and retains
+    only 97.9% of structures (see reblock.data.informal).
+    """
+    n_structures = int(pyogrio.read_info(str(ensure_informal_structures("capetown")))["features"])
+    lab = b["informal"].to_numpy()
+    return {
+        "structures": n_structures,
+        "settlements": len(ext),
+        "informal_blocks": int(lab.sum()),
+        "total_blocks": len(b),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--top-settlement", action="store_true",
@@ -281,6 +304,10 @@ def main() -> None:
     t = table(b)
     t.to_csv(OUT / "screen_comparison.csv", index=False)
     print("\n" + t.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+
+    gt = ground_truth_summary(b, ext)
+    (OUT / "ground_truth.json").write_text(json.dumps(gt, indent=2) + "\n", encoding="utf-8")
+    print(f"  wrote ground_truth.json: {gt}", flush=True)
 
     if args.top_settlement:
         print_top_settlements(b, ext)
