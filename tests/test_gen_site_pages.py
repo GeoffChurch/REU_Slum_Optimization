@@ -50,3 +50,53 @@ def test_every_published_site_method_is_in_the_mkdocs_nav() -> None:
     listed = set(re.findall(r"methods/([a-z_]+)\.md", nav))
     missing = sorted(_site_methods() - unpublished - listed)
     assert not missing, f"site pages generated but absent from mkdocs.yml nav: {missing}"
+
+
+def _partials() -> dict[str, str]:
+    """Every committed partial. NOT tolerant of a missing directory: Path.glob() on one that does
+    not exist yields nothing rather than raising, which would make every test below pass while
+    checking nothing."""
+    d = ROOT / "docs" / "_partials"
+    assert d.is_dir(), f"{d} does not exist; the partials tests would be vacuous"
+    out = {p.name: p.read_text(encoding="utf-8") for p in sorted(d.glob("*.md"))}
+    assert out, f"{d} holds no partials; the partials tests would be vacuous"
+    return out
+
+
+def _producers() -> set[str]:
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
+    found = set(re.findall(r'^    "([A-Z]+)": ', src, flags=re.M))
+    assert found, "no MARKERS entries found; the marker tests would be vacuous"
+    return found
+
+
+def _markers_used() -> set[str]:
+    used: set[str] = set()
+    for text in _partials().values():
+        used |= set(re.findall(r"<!-- ([A-Z]+) -->", text))
+    return used
+
+
+def test_every_marker_in_a_partial_has_a_producer() -> None:
+    """A marker with no producer survives substitution and ships as a literal HTML comment."""
+    orphans = sorted(_markers_used() - _producers())
+    assert not orphans, f"markers used in partials with no producer: {orphans}"
+
+
+def test_every_producer_is_used_by_a_partial() -> None:
+    """A producer nothing references is dead code that silently stops being rendered."""
+    unused = sorted(_producers() - _markers_used())
+    assert not unused, f"producers defined but referenced by no partial: {unused}"
+
+
+def test_published_method_count_is_generated_not_typed() -> None:
+    """Defect 4: '_intro.md' said "Seven" while ten methods were published."""
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
+    published = len(re.findall(r'^    M\("[a-z_]+"', src, flags=re.M)) - len(
+        re.findall(r'published=False', src))
+    assert published == 10, f"expected 10 published methods, registry says {published}"
+    intro = (ROOT / "docs" / "_partials" / "intro.md").read_text(encoding="utf-8")
+    assert "<!-- METHODCOUNT -->" in intro
+    for word in ("Seven", "seven", "Eight", "Nine", "Ten", "Eleven"):
+        assert f"{word} road-generation" not in intro, (
+            f"'{word}' typed into prose; the count must come from METHODCOUNT")

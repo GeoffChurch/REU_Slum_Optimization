@@ -1,17 +1,19 @@
-<!-- Handwritten Home page for the multi-page site. scripts/gen_site_pages.py prepends the
-     do-not-edit note, substitutes the four HTML markers below, and writes docs/index.md — edit
-     HERE, never index.md (it is generated and gitignored). This file is committed but excluded
-     from the built site (see exclude_docs in mkdocs.yml).
+<!-- Handwritten Home-page partial for the multi-page site. scripts/gen_site_pages.py prepends the
+     do-not-edit note, substitutes the five HTML markers below, and writes docs/index.md from
+     docs/_partials/intro.md — edit HERE, never index.md (it is generated and gitignored). This
+     file is committed but excluded from the built site (see exclude_docs in mkdocs.yml).
 
-     The markers below are HTML comments named HEROLOGO, KEYRESULT, HERO and KEYFIGURES. They
-     are deliberately NOT spelled out in full here -- the generator substitutes by plain string
-     replacement, so writing a marker inside this note would fill the note itself. Each is
-     filled from run artifacts, or dropped entirely when those artifacts are absent, so a
+     The markers below are HTML comments named HEROLOGO, KEYRESULT, HERO, KEYFIGURES and
+     METHODCOUNT. They are deliberately NOT spelled out in full here -- the generator substitutes
+     by plain string replacement, so writing a marker inside this note would fill the note itself.
+     Each is filled from run artifacts, or dropped entirely when those artifacts are absent, so a
      partial checkout never shows a placeholder:
-       HEROLOGO    the official SBU mark, only if docs/brand/ actually holds it
-       KEYRESULT   the headline finding, one sentence, from lens_displacement.csv
-       HERO        the grown-region figure, captioned
-       KEYFIGURES  four measurements from meta.json + the two lens CSVs
+       HEROLOGO     the official SBU mark, only if docs/brand/ actually holds it
+       KEYRESULT    the headline finding, one sentence, from lens_displacement.csv
+       HERO         the grown-region figure, captioned
+       KEYFIGURES   four measurements from meta.json + the two lens CSVs
+       METHODCOUNT  the number of published methods, as an English word (see METHODS in
+                    scripts/gen_site_pages.py)
 
      Prose lives here; every NUMBER lives in the generator. Never type a metric into this file. -->
 
@@ -61,7 +63,7 @@ is like-for-like rather than a scoreboard of incompatible scores.
 
 -   **[Methods](methods/index.md)**
 
-    Seven road-generation methods, each shown on the ground with its own numbers.
+    <!-- METHODCOUNT --> road-generation methods, each shown on the ground with its own numbers.
 
 -   **[Results](benchmark.md)**
 

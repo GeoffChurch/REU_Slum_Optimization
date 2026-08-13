@@ -13,12 +13,13 @@ repo_url: https://github.com/jmendoza167/REU_Slum_Optimization
 repo_name: jmendoza167/REU_Slum_Optimization
 
 # Internal working notes stay out of the published site (the files themselves are untouched);
-# _intro.md is the handwritten partial the generator folds into index.md, not a page of its own;
+# _partials/ holds the handwritten prose the generator folds artifacts into -- one directory
+# exclusion here, rather than a per-file list, so it does not go stale as more partials are added;
 # metrics-north-star.md is internal design-direction writing that links into superpowers/, so it
 # ships with those notes rather than as a public page.
 exclude_docs: |
   superpowers/
-  _intro.md
+  _partials/
   metrics-north-star.md
   stylesheets/fonts/README.md
   # dream_come_true is UNPUBLISHED, not removed. The method stays in the pipeline
