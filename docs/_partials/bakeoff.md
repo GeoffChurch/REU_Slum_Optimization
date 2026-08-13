@@ -35,8 +35,8 @@ of those extents — a threshold choice, not a measured fact (see Caveats below)
 
 ## The ranking
 
-Four candidate screens, every one cheap enough to score an entire metro in a single pass — no
-Voronoi tessellation, no peel — ranked against the survey above: AUC across the whole ranking,
+The candidate screens below, each cheap enough to score an entire metro in a single pass — no
+Voronoi tessellation, no peel — are ranked against the survey above: AUC across the whole ranking,
 precision at the very top of it, and each screen's shipped absolute floor where it has one.
 
 <!-- SCREENTABLE -->
@@ -50,15 +50,15 @@ pool sizes close enough to compare directly:
 
 ## The honest headline
 
-Even the better of the two screens is right about roughly one block in four it selects — most of
-what it flags is not, in fact, informal settlement. The screen it replaced did worse: about three
+Even the better screen is right about roughly one block in four it selects — most of what it flags
+is not, in fact, informal settlement. The screen it replaced did worse: about three
 non-settlement blocks selected for every settlement block it correctly caught. Screening a whole
 metro this cheaply is hard, and that is the headline this page leads with, not the one it buries.
 
 ## In pictures
 
-Three views of the same comparison: the statistical picture above, where the shipped screen and
-its predecessor disagree across the whole city, and a close look at the settlements where that
+Views of the same comparison: the statistical picture above, where the shipped screen and its
+predecessor disagree across the whole city, and a close look at the settlements where that
 disagreement is sharpest. Green is gained by the shipped default; red is dropped.
 
 <!-- BAKEOFFFIGS -->
