@@ -9,11 +9,11 @@ docs/_partials/intro.md partial that opens the page.
 The site is multi-page. This script writes only the GENERATED (gitignored) pages: docs/index.md
 (Home -- docs/_partials/intro.md folded in, plus a hero figure), docs/methods/index.md (methods
 overview) and docs/methods/<slug>.md (one page per method), docs/benchmark.md (Results), and
-docs/methodology/index.md + docs/methodology/screening.md (from the docs/_partials/methodology.md
-and docs/_partials/screening.md partials). The handwritten prose pages -- docs/background.md,
-docs/team.md -- are committed and this script never creates, reads, or overwrites them;
-docs/_partials/*.md are the committed partials it reads (excluded from the built site) and folds
-into the generated pages.
+docs/methodology/index.md, docs/methodology/screening.md, docs/methodology/permeability.md, and
+docs/methodology/displacement.md (each from its own docs/_partials/*.md partial). The handwritten
+prose pages -- docs/background.md, docs/team.md -- are committed and this script never creates,
+reads, or overwrites them; docs/_partials/*.md are the committed partials it reads (excluded from
+the built site) and folds into the generated pages.
 
 Usage:  python3 scripts/gen_site_pages.py
 Emits:  docs/index.md, docs/methods/*.md, docs/benchmark.md, docs/methodology/*.md, and copies
@@ -907,10 +907,10 @@ def main() -> None:
 
     _write_page(DOCS / "benchmark.md", gen_benchmark_section(), depth=0, url_depth=1)
 
-    # docs/methodology/ -- rebuilt from scratch each run, same as docs/methods/ above. Tasks 6 and
-    # 7 (permeability.md, displacement.md, and the methods/ renest) add more _write_page calls into
-    # this directory; every one of them MUST come after this rmtree/mkdir, or it deletes the page
-    # just written.
+    # docs/methodology/ -- rebuilt from scratch each run, same as docs/methods/ above. Task 7 (the
+    # methods/ renest) adds more _write_page calls into this directory; every one of them MUST come
+    # after this rmtree/mkdir, or it deletes the page just written -- same reason permeability.md
+    # and displacement.md below have to.
     methodology_dir = DOCS / "methodology"
     if methodology_dir.exists():
         shutil.rmtree(methodology_dir)
@@ -919,6 +919,10 @@ def main() -> None:
                 depth=1, url_depth=1, title="Methodology")
     _write_page(methodology_dir / "screening.md", _render_partial("screening"),
                 depth=1, url_depth=2, title="Screening")
+    _write_page(methodology_dir / "permeability.md", _render_partial("permeability"),
+                depth=1, url_depth=2, title="Permeability")
+    _write_page(methodology_dir / "displacement.md", _render_partial("displacement"),
+                depth=1, url_depth=2, title="Displacement")
 
     print("wrote docs/index.md, docs/methods/*.md, docs/benchmark.md, docs/methodology/*.md")
 

@@ -2,12 +2,7 @@
      do-not-edit note and writes this straight through -- there are no markers to fill on this
      page, only prose that links out to the pages that give each term its full treatment. Edit
      HERE, never docs/methodology/index.md (it is generated and gitignored). This file is
-     committed but excluded from the built site (see exclude_docs in mkdocs.yml).
-
-     Permeability and displacement are named in the Glossary below but NOT yet linked: their pages
-     (methodology/permeability.md, methodology/displacement.md) do not exist yet, and a link to a
-     page that does not exist fails `mkdocs build --strict`. Once those pages land, link the two
-     remaining Glossary rows the same way the first three already are. -->
+     committed but excluded from the built site (see exclude_docs in mkdocs.yml). -->
 
 # Methodology
 
@@ -40,5 +35,6 @@ component, and every run writes its output to disk, so a result reproduces from 
   sliver.
 - **[The depth proxy](screening.md)** (`√(nA)/P`) — a closed-form estimate of access depth, cheap
   enough to compute for every block in a metro.
-- **Permeability** — how easily every parcel in a region can reach a street once roads are added.
-- **Displacement** — the homes a road set costs.
+- **[Permeability](permeability.md)** — how easily every parcel in a region can reach a street once
+  roads are added.
+- **[Displacement](displacement.md)** — the homes a road set costs.

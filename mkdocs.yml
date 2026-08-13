@@ -107,6 +107,8 @@ nav:
   - Methodology:
       - methodology/index.md
       - methodology/screening.md
+      - methodology/permeability.md
+      - methodology/displacement.md
   # Method entries are PATHS ONLY, with no hand-written title. Each label comes from the YAML
   # front-matter `title:` that scripts/gen_site_pages.py writes into every generated method page
   # from method_labels.py -- so renaming a method's display label is a one-line change there and
