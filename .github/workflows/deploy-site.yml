@@ -38,7 +38,10 @@ jobs:
       # point at. Bump these deliberately.
       - run: pip install mkdocs-material==9.7.7 mkdocs-glightbox==0.5.2
       - run: python3 scripts/gen_site_pages.py
-      - run: mkdocs build
+      # --strict promotes MkDocs' broken-link and orphan-page warnings to build failures. The site's
+      # nav is explicit and its cross-page links are hand-written, so a moved page otherwise ships
+      # a dead link silently.
+      - run: mkdocs build --strict
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
