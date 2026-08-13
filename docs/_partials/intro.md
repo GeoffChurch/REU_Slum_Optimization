@@ -67,7 +67,7 @@ is like-for-like rather than a scoreboard of incompatible scores.
 
     <!-- METHODCOUNT --> road-generation methods, each shown on the ground with its own numbers.
 
--   **[Results](benchmark.md)**
+-   **[Results](results/frontier.md)**
 
     The settlement-scale benchmark and the permeability–displacement frontier.
 

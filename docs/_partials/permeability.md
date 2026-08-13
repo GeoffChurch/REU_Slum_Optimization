@@ -37,7 +37,7 @@ conductance. That makes `P` monotone non-increasing as roads are added, and `per
 monotone non-decreasing — with no clamp needed anywhere to force it.
 
 That property is load-bearing, not incidental. It is what makes the permeability curves on
-[Results](../benchmark.md) valid to read as a monotone climb rather than something that might dip
+[Results](../results/frontier.md) valid to read as a monotone climb rather than something that might dip
 and need explaining away, and it is what makes a target search well-defined: the least road that
 reaches a permeability target `P*`, trusting that once one prefix clears `P*`, every longer prefix
 stays clear too.

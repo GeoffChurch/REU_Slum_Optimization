@@ -26,7 +26,7 @@ component, and every run writes its output to disk, so a result reproduces from 
 5. **Eval.** Grade the result the same way for every method: **permeability** — how easily every
    parcel can reach a street — bought against **displacement**, the homes it costs.
 6. **Render.** Draw the proposed roads and the before/after maps used throughout
-   [Results](../benchmark.md).
+   [Results](../results/frontier.md).
 
 ## Glossary
 

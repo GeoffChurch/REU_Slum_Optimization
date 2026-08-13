@@ -1,5 +1,5 @@
 # Project site (GitHub Pages; deployed by .github/workflows/deploy-site.yml, which regenerates
-# the data-driven pages in CI -- docs/methodology/, docs/benchmark.md, and docs/assets/ are NOT
+# the data-driven pages in CI -- docs/methodology/, docs/results/, and docs/assets/ are NOT
 # committed). CI's actual check is `mkdocs build --strict`, which fails the build on a broken
 # link or orphan page instead of just warning. For a local preview:
 #   python3 scripts/gen_site_pages.py   # regenerate data-driven pages from run artifacts
@@ -140,5 +140,6 @@ nav:
           - methodology/methods/greedy_arterial_access_displacement.md
           - methodology/methods/osm_footpaths.md
           - methodology/methods/euclidean_grid.md
-  - Results: benchmark.md
+  - Results:
+      - results/frontier.md
   - Team & References: team.md

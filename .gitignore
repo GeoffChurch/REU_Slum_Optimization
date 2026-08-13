@@ -60,7 +60,7 @@ outputs/*/.hydra/*
 # The handwritten prose lives in docs/_partials/ (tracked); index.md is assembled from it.
 docs/index.md
 docs/methodology/
-docs/benchmark.md
+docs/results/
 docs/assets/
 
 # Hydra scratch dir left behind by in-place regeneration of examples/method-comparison

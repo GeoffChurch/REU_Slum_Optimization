@@ -11,14 +11,15 @@ The site is multi-page. This script writes only the GENERATED (gitignored) pages
 docs/methodology/screening.md, docs/methodology/permeability.md, and
 docs/methodology/displacement.md (each from its own docs/_partials/*.md partial),
 docs/methodology/methods/index.md (methods overview) and docs/methodology/methods/<slug>.md (one
-page per method), and docs/benchmark.md (Results). The handwritten prose pages --
+page per method), and docs/results/frontier.md (Results). The handwritten prose pages --
 docs/background.md, docs/team.md -- are committed and this script never creates, reads, or
 overwrites them; docs/_partials/*.md are the committed partials it reads (excluded from the built
 site) and folds into the generated pages.
 
 Usage:  python3 scripts/gen_site_pages.py
-Emits:  docs/index.md, docs/methodology/*.md, docs/methodology/methods/*.md, docs/benchmark.md, and
-        copies referenced images into docs/assets/ (MkDocs can only serve files under docs/).
+Emits:  docs/index.md, docs/methodology/*.md, docs/methodology/methods/*.md,
+        docs/results/frontier.md, and copies referenced images into docs/assets/ (MkDocs can only
+        serve files under docs/).
 """
 from __future__ import annotations
 
@@ -743,7 +744,8 @@ def _hero_block() -> str:
                 url,
                 "The grown Cape Town settlement region with proposed roads threaded through it",
                 'A screened settlement grown into a multi-block region, with proposed roads '
-                'threaded through it — see the full run on <a href="benchmark/">Results</a>.',
+                'threaded through it — see the full run on '
+                '<a href="results/frontier/">Results</a>.',
                 fig_class="sbu-hero__figure", skip_lightbox=True)
     return ""
 
@@ -868,10 +870,10 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
 
     `url_depth` -- raw HTML `src="assets/..."` inside the <figure> blocks. MkDocs does NOT touch
     raw HTML, so these must already be correct against the page's SERVED url. With
-    use_directory_urls, benchmark.md is served at <base>/benchmark/ and
-    methodology/methods/peel.md at <base>/methodology/methods/peel/, so the served depth is not the
-    same as the source depth -- benchmark.md is depth 0 but url_depth 1. Getting this wrong 404s
-    every figure on that page."""
+    use_directory_urls, results/frontier.md is served at <base>/results/frontier/ and
+    methodology/methods/peel.md at <base>/methodology/methods/peel/, so the served depth is not
+    the same as the source depth -- results/frontier.md is depth 1 but url_depth 2. Getting this
+    wrong 404s every figure on that page."""
     # YAML front matter, when given, sets the page's nav label. Without it MkDocs derives the
     # label from the FILENAME -- "clearance_looped" became "Clearance looped" in the sidebar, not
     # "Looped Tree" -- because it does not read the H1 for nav purposes. Emitting the title here
@@ -894,7 +896,13 @@ def main() -> None:
     (DOCS / "index.md").write_text(GENERATED_NOTE + _render_partial("intro") + "\n",
                                    encoding="utf-8")
 
-    _write_page(DOCS / "benchmark.md", gen_benchmark_section(), depth=0, url_depth=1)
+    results_dir = DOCS / "results"
+    if results_dir.exists():
+        shutil.rmtree(results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    # results/frontier.md serves at <base>/results/frontier/ -- source depth 1, url_depth 2.
+    _write_page(results_dir / "frontier.md", gen_benchmark_section(), depth=1, url_depth=2,
+                title="Frontier benchmark")
 
     # docs/methodology/ -- rebuilt from scratch each run. Every _write_page into this directory,
     # including the methodology/methods/ pages below, MUST come after this rmtree/mkdir, or it
@@ -923,7 +931,7 @@ def main() -> None:
         _write_page(methods_dir / f"{m.slug}.md", gen_method_section(m), depth=2, url_depth=3,
                     title=m.display_title)
 
-    print("wrote docs/index.md, docs/benchmark.md, docs/methodology/*.md, "
+    print("wrote docs/index.md, docs/results/frontier.md, docs/methodology/*.md, "
           "docs/methodology/methods/*.md")
 
 
