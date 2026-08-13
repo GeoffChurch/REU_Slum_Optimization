@@ -11,15 +11,14 @@ The site is multi-page. This script writes only the GENERATED (gitignored) pages
 docs/methodology/screening.md, docs/methodology/permeability.md, and
 docs/methodology/displacement.md (each from its own docs/_partials/*.md partial),
 docs/methodology/methods/index.md (methods overview) and docs/methodology/methods/<slug>.md (one
-page per method), and docs/results/frontier.md (Results). The handwritten prose pages --
-docs/background.md, docs/team.md -- are committed and this script never creates, reads, or
-overwrites them; docs/_partials/*.md are the committed partials it reads (excluded from the built
-site) and folds into the generated pages.
+page per method), and docs/results/frontier.md, docs/results/bakeoff.md and docs/results/nairobi.md
+(Results). The handwritten prose pages -- docs/background.md, docs/team.md -- are committed and
+this script never creates, reads, or overwrites them; docs/_partials/*.md are the committed
+partials it reads (excluded from the built site) and folds into the generated pages.
 
 Usage:  python3 scripts/gen_site_pages.py
-Emits:  docs/index.md, docs/methodology/*.md, docs/methodology/methods/*.md,
-        docs/results/frontier.md, and copies referenced images into docs/assets/ (MkDocs can only
-        serve files under docs/).
+Emits:  docs/index.md, docs/methodology/*.md, docs/methodology/methods/*.md, docs/results/*.md,
+        and copies referenced images into docs/assets/ (MkDocs can only serve files under docs/).
 """
 from __future__ import annotations
 
@@ -40,6 +39,7 @@ MC = ROOT / "examples" / "method-comparison"
 MB = ROOT / "examples" / "multiblock_depth"
 OUTPUTS = ROOT / "outputs"
 BAKEOFF = ROOT / "examples" / "screen-bakeoff"
+NAIROBI = ROOT / "examples" / "nairobi"
 
 
 def _load_friendly_method_name() -> Callable[[str], str]:
@@ -252,6 +252,35 @@ def _bakeoff_scale() -> str:
     return (f"That survey contains {_num(g['structures'])} dwelling polygons, which cluster into "
             f"{_num(g['settlements'])} settlements and mark {_num(g['informal_blocks'])} of "
             f"{_num(g['total_blocks'])} Cape Town blocks informal.")
+
+
+def _nairobi_table() -> str:
+    """One row per Nairobi variant, read from its own artifacts. Absent variants simply do not
+    appear -- a partial checkout yields a shorter table, never a placeholder row (same dir-reader
+    contract as _k_runs, guarded on NAIROBI.exists() for the same reason that one guards on
+    OUTPUTS.exists() before iterating).
+
+    Ruling F6: a field missing from one variant's meta.json renders as an em dash for THAT row,
+    never a fabricated number. This mirrors the guarded `meta.get(...)` pattern _key_figures()
+    already uses -- not the brief's original `_num(meta.get("region_members", 0))`, which would
+    publish a confident 0 for a field that was simply never written."""
+    rows: list[list[str]] = []
+    if not NAIROBI.exists():
+        return ""
+    for d in sorted(p for p in NAIROBI.iterdir() if p.is_dir()):
+        meta_path = d / "meta.json"
+        if not meta_path.exists():
+            continue
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        methods = {r["method"] for r in _read_csv(d / "lens_permeability.csv")}
+        rows.append([f"[{d.name}](https://github.com/jmendoza167/REU_Slum_Optimization/"
+                     f"tree/main/examples/nairobi/{d.name})",
+                     f"`{meta['metric']}`" if meta.get("metric") else "—",
+                     _num(meta["region_members"]) if meta.get("region_members") else "—",
+                     "yes" if "osm_footpaths" in methods else "—"])
+    if not rows:
+        return ""
+    return _table(["variant", "metric", "blocks in region", "OSM baseline"], rows)
 
 
 # ---------------------------------------------------------------- outputs/ scanning (k-complexity)
@@ -891,6 +920,7 @@ MARKERS: dict[str, Callable[[], str]] = {
     "BAKEOFFSCALE": _bakeoff_scale,
     "BAKEOFFFLOORS": _bakeoff_floors_table,
     "BAKEOFFFIGS": _bakeoff_figures,
+    "NAIROBITABLE": _nairobi_table,
 }
 
 PARTIALS = DOCS / "_partials"
@@ -954,6 +984,10 @@ def main() -> None:
     # above that block would delete this page as soon as it was written.
     _write_page(results_dir / "bakeoff.md", _render_partial("bakeoff"), depth=1, url_depth=2,
                 title="Screen bake-off")
+    # results/nairobi.md serves at <base>/results/nairobi/ -- same depth/url_depth as its two
+    # siblings above, and (ruling F4) MUST likewise follow the results_dir rmtree/mkdir block.
+    _write_page(results_dir / "nairobi.md", _render_partial("nairobi"), depth=1, url_depth=2,
+                title="Second city: Nairobi")
 
     # docs/methodology/ -- rebuilt from scratch each run. Every _write_page into this directory,
     # including the methodology/methods/ pages below, MUST come after this rmtree/mkdir, or it
