@@ -48,9 +48,9 @@ Every method truncated where permeability first reaches the standard target, so 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
 | Looped Tree | 2,215 m | 3.3% | 60.1% |  |
-| Loop Network | 1,247 m | 1.1% | 60.3% |  |
+| Loop Network | 1,512 m | 1.7% | 66.2% |  |
 | Grid | 6,040 m | 6.3% | 69.2% |  |
-| Frontage (street-priced) | 2,498 m | 0.5% | 60.6% |  |
+| Frontage (street-priced) | 3,367 m | 1.3% | 61.7% |  |
 | OSM Footpaths | 2,890 m | 1.9% | 46.6% | unreached |
 | Direct Objective (LP) | 1,645 m | 0.9% | 60.1% |  |
 
@@ -74,9 +74,9 @@ Every method truncated to the same displacement %, so this compares the **permea
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
 | Looped Tree | 6,897 m | 10.1% | 77.4% |  |
-| Loop Network | 10,669 m | 7.5% | 86.3% | converged below budget |
+| Loop Network | 9,314 m | 10.1% | 89.9% |  |
 | Grid | 10,399 m | 10.3% | 82.4% |  |
-| Frontage (street-priced) | 5,026 m | 0.9% | 67.6% | converged below budget |
+| Frontage (street-priced) | 14,644 m | 4.3% | 86.1% | converged below budget |
 | OSM Footpaths | 2,890 m | 1.9% | 46.6% | converged below budget |
 | Direct Objective (LP) | 19,523 m | 10.0% | 95.9% |  |
 

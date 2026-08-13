@@ -1,12 +1,12 @@
 [reblock.screen.dense_compact][INFO] fine pass: 3354 survivors across 16 fork workers
 [reblock.screen.dense_compact][INFO] screen: 3313/16200 blocks selected by metric=depth (needs_peel=True)
 [__main__][INFO] screen: flagged 3313/16200 blocks (6.5s)
-[__main__][INFO] region built: 1 blocks / 4365 parcels (13.8s)
-[scripts.compare_budgets][INFO] reblocked clearance_looped: 180 segments, 9429 m (12.8s)
+[__main__][INFO] region built: 1 blocks / 4365 parcels (13.7s)
+[scripts.compare_budgets][INFO] reblocked clearance_looped: 180 segments, 9429 m (12.7s)
 [scripts.compare_budgets][INFO] reblocked euclidean_grid: 74 segments, 12731 m (0.2s)
-[scripts.compare_budgets][INFO] reblocked resistance_lp: 5628 segments, 41514 m (40.4s)
-[scripts.compare_budgets][INFO] reblocked cycle_native: 120 segments, 10669 m (206.7s)
-[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 69 segments, 5026 m (247.0s)
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 5628 segments, 41514 m (40.2s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 502 segments, 25946 m (1144.7s)
+[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 301 segments, 14645 m (1665.5s)
 [scripts.compare_budgets][INFO] reblocked osm_footpaths: 29 segments, 2890 m (0.0s)
-[scripts.compare_budgets][INFO] lens/frontier curves computed for 6 methods (56.7s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 6 methods (65.8s)
 wrote examples/nairobi/multiblock_depth: 1 blocks / 4365 parcels; flagged 3313/16200; 6 methods; README + maps + lens CSVs

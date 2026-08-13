@@ -2,6 +2,6 @@ method,road_m,displacement,permeability,access_burden_reduction,reached
 clearance_looped,873.6,0.0505,0.626304,0.609266,True
 euclidean_grid,2067.5,0.0879,0.683458,0.662523,True
 resistance_lp,1089.2,0.0223,0.606646,0.656398,True
-cycle_native,955.4,0.0363,0.600168,0.630126,True
-greedy_arterial_access_displacement,2116.6,0.0229,0.60529,0.76304,True
+cycle_native,899.2,0.0384,0.61377,0.639834,True
+greedy_arterial_access_displacement,1454.0,0.0218,0.617834,0.724976,True
 osm_footpaths,2608.6,0.0935,0.629574,0.613617,True

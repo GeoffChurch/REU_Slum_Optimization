@@ -503,38 +503,40 @@ out of `scripts/perf` into a selectable engine.
   - Its distinguishing property is still bridge fraction 0.000 vs `clearance_looped`'s 0.577, still
     invisible in a report that prices permeability and displacement only. That remains the reason
     it is on the frontier rather than a ranking win.
-  - **Caveat on all of the above:** its curve is truncated by the hardcoded `range(60)` (next item),
-    so the tail of every comparison here is not a measured property of the method. The verdict
-    survives restricting to the range where both methods operate (still 1 of 6), but it should be
-    re-run once that cap is configurable.
+  - **The `range(60)` caveat this entry carried is DISCHARGED** (next item): re-measured
+    2026-08-13 with the cap lifted and every method running to its own budget, Loop Network covers
+    the Looped Tree's whole curve in **2 of 7** rather than 1 (capetown/depth +0.037, nairobi/depth
+    +0.000 -- an exact tie), and the Looped Tree still wins the other five by up to 0.223. The
+    verdict survived the un-truncation.
 
-- **Two hardcoded budgets bind well below every other method's terminal, and neither has been
-  swept.** Same defect, two methods; both gate a live conclusion, so do them as ONE experiment (they
-  need the same six-region re-measurement and both change proposals, so the examples regenerate
-  once, not twice).
-  - `cycle_native.py:127` is `for _ in range(60)` -- unconfigurable, undocumented, untested. It
-    binds in 6 of 6 settlement regions (every one emits exactly 120 segments = 60 cycles x 2 legs)
-    and stops the method at 6.9-16.0% displacement, well under its own `max_displacement: 0.20`.
-    It is the ONLY stopping rule in the lineup that is not configurable -- `resistance_lp` has
-    `max_displacement`, clearance has `depth_target`/`max_roads`, the grid has `spacing`. The fix is
-    to make it a field and let the documented displacement cap govern, not to pick a bigger magic
-    number. Note `scripts/gen_site_pages.py:493` currently renders this as "it converges below the
-    shared budget", which is published in `benchmark.md` and on the method page and is not what
-    happens.
-  - `greedy_arterial_access_displacement`'s `max_roads: 15` likewise binds, not converges --
-    measured on the pinned block, 15 -> 45 segments / 624 m and 40 -> 107 / 1,148 m. At settlement
-    scale it terminates at 0.5-2.6% displacement and misses P*=0.60 in 3 of 6 regions. Its apparent
-    dominance of the low-displacement corner is therefore measured over a very short curve. Raising
-    it is EXPENSIVE -- this is already the slowest method in the lineup (127-618 s/region at 15
-    roads, after the ~330x ShortlistEngine + max_anchors work), and cost is roughly linear in
-    `max_roads` with a candidate set that grows as the network does. Measure the runtime before
-    picking a value, or the examples regeneration becomes a many-hour run.
+- **DONE 2026-08-13: the two binding budgets were raised and everything re-measured.**
+  `cycle_native`'s hardcoded `range(60)` is now a `max_cycles` field defaulting to 400, and the
+  access arterials went 15 -> 60 roads. Both changed proposals, so all seven examples regenerated.
+  Outcomes, and what they cost:
+  - **`max_cycles` never binds now** -- regions used 80/118/214/248/251/300 cycles against the 400
+    cap, and every one terminates at 0.195-0.200 displacement, i.e. on its configured
+    `max_displacement: 0.20`. The valve is a valve.
+  - **Frontage now reaches P\*=0.60 in 7 of 7** (it missed 3 of 6 before), but is STILL short of the
+    10% Lens A budget in 4 of 6 regions (terminals 4.3-10.8%). So 60 only partly achieved what it
+    was raised for. Do not raise it again without measuring first: see the cost note below.
+  - **Cost, and a sampling error worth not repeating.** The `max_roads` sweep was run on
+    capetown/depth_density and predicted ~5.7x; actual was 5.5-6.7x across regions, fine. The
+    `max_cycles` estimate from the SAME region predicted 1.4x and was badly wrong: actual 1.3x
+    there but 4.8-6.8x everywhere else (depth: 666 s -> 4,549 s), because depth_density needed only
+    80 cycles where the others needed 214-300. The region swept was the one with the least headroom
+    to spend. Same lesson as notes/2026-07-29-tree-grid-six-regions.md, in a new place.
+  - `cycle_native` at 4,549 s and Frontage at 3,863 s on the 11k-parcel flagship make runtime a
+    first-class axis for these two, not a footnote.
 
 - **`euclidean_grid` is dominated on the reported axes and survives on runtime alone.** Measured
   2026-08-12, same 7 regions: `resistance_lp` covers the grid's ENTIRE curve in 6 of 7, worst-case
   margin +0.039 to +0.130 permeability at every displacement the grid reaches (the 7th failure is
   the LP's configured `max_displacement: 0.20` against the grid's 47% build-out on the pinned block,
-  outside the range anything is graded at). At the Lens B operating point both `resistance_lp` and
+  outside the range anything is graded at). Re-measured 2026-08-13 after the budget lift, a SECOND
+  and independent method does the same: `cycle_native` also covers the grid's entire curve in 6 of 7
+  (+0.006 to +0.087), which it could not do before, because its own truncation had stopped it short
+  of the grid's tail. Two independent dominators, the same 6 of 7, the same lone exception. At the
+  Lens B operating point both `resistance_lp` and
   `cycle_native` beat it on BOTH costs in 7 of 7 -- the grid pays 2.0-7.0x the homes and 1.3-4.0x
   the metres for the same permeability. What is left is speed: 0.0-0.9 s against 26-359 s for the
   LP, which at census scale (the 1.8M-block ZAF+KEN pool) is a real axis, plus its role as the
