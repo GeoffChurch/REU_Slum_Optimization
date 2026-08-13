@@ -11,14 +11,16 @@ The site is multi-page. This script writes only the GENERATED (gitignored) pages
 docs/methodology/screening.md, docs/methodology/permeability.md, and
 docs/methodology/displacement.md (each from its own docs/_partials/*.md partial),
 docs/methodology/methods/index.md (methods overview) and docs/methodology/methods/<slug>.md (one
-page per method), and docs/results/frontier.md, docs/results/bakeoff.md and docs/results/nairobi.md
-(Results). The handwritten prose pages -- docs/background.md, docs/team.md -- are committed and
-this script never creates, reads, or overwrites them; docs/_partials/*.md are the committed
-partials it reads (excluded from the built site) and folds into the generated pages.
+page per method), docs/results/frontier.md, docs/results/bakeoff.md and docs/results/nairobi.md
+(Results), and docs/reproduce.md (the exact command behind every flagship, read from each
+examples/*/meta.json). The handwritten prose pages -- docs/background.md, docs/team.md -- are
+committed and this script never creates, reads, or overwrites them; docs/_partials/*.md are the
+committed partials it reads (excluded from the built site) and folds into the generated pages.
 
 Usage:  python3 scripts/gen_site_pages.py
 Emits:  docs/index.md, docs/methodology/*.md, docs/methodology/methods/*.md, docs/results/*.md,
-        and copies referenced images into docs/assets/ (MkDocs can only serve files under docs/).
+        docs/reproduce.md, and copies referenced images into docs/assets/ (MkDocs can only serve
+        files under docs/).
 """
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 ASSETS = DOCS / "assets"
 BRAND = DOCS / "brand"      # committed institutional marks, unlike the gitignored assets/
+EXAMPLES = ROOT / "examples"
 MC = ROOT / "examples" / "method-comparison"
 MB = ROOT / "examples" / "multiblock_depth"
 OUTPUTS = ROOT / "outputs"
@@ -281,6 +284,23 @@ def _nairobi_table() -> str:
     if not rows:
         return ""
     return _table(["variant", "metric", "blocks in region", "OSM baseline"], rows)
+
+
+def _repro_commands() -> str:
+    """Every flagship's regeneration command, read from its own meta.json. Never typed here: a
+    command that drifts from the artifact it claims to produce is the same defect as a stale
+    number."""
+    rows: list[list[str]] = []
+    for meta_path in sorted(EXAMPLES.glob("*/meta.json")) + sorted(
+            EXAMPLES.glob("*/*/meta.json")):
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        cmd = meta.get("command")
+        if not cmd:
+            continue
+        rows.append([meta_path.parent.relative_to(EXAMPLES).as_posix(), f"`{cmd}`"])
+    if not rows:
+        return ""
+    return _table(["flagship", "command"], rows)
 
 
 # ---------------------------------------------------------------- outputs/ scanning (k-complexity)
@@ -921,6 +941,7 @@ MARKERS: dict[str, Callable[[], str]] = {
     "BAKEOFFFLOORS": _bakeoff_floors_table,
     "BAKEOFFFIGS": _bakeoff_figures,
     "NAIROBITABLE": _nairobi_table,
+    "REPROCOMMANDS": _repro_commands,
 }
 
 PARTIALS = DOCS / "_partials"
@@ -972,6 +993,12 @@ def main() -> None:
     (DOCS / "index.md").write_text(GENERATED_NOTE + _render_partial("intro") + "\n",
                                    encoding="utf-8")
 
+    # reproduce.md serves at <base>/reproduce/ -- source depth 0, url_depth 1. Written directly
+    # into docs/, not into a cleared subdirectory, so (unlike results/ and methodology/ below) it
+    # is not subject to the rmtree/mkdir hazard those blocks document (ruling F4).
+    _write_page(DOCS / "reproduce.md", _render_partial("reproduce"), depth=0, url_depth=1,
+                title="Reproduce")
+
     results_dir = DOCS / "results"
     if results_dir.exists():
         shutil.rmtree(results_dir)
@@ -1016,8 +1043,8 @@ def main() -> None:
         _write_page(methods_dir / f"{m.slug}.md", gen_method_section(m), depth=2, url_depth=3,
                     title=m.display_title)
 
-    print("wrote docs/index.md, docs/results/frontier.md, docs/methodology/*.md, "
-          "docs/methodology/methods/*.md")
+    print("wrote docs/index.md, docs/reproduce.md, docs/results/frontier.md, "
+          "docs/methodology/*.md, docs/methodology/methods/*.md")
 
 
 if __name__ == "__main__":
