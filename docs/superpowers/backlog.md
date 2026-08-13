@@ -486,7 +486,7 @@ out of `scripts/perf` into a selectable engine.
   which at region scale likely dominates the whole examples regeneration, and it currently trails on
   both reported lenses (permA 0.6650 / dispB 0.1262, last and second-to-last of five). Decide from
   the final eval, not from this one bakeoff.
-- **`cycle_native` IS in the examples** (all seven, as `Loop Network`) and is not dominated. The
+- **`cycle_native` IS in the examples** (full derivation: [notes/2026-08-13-pareto-dominance-across-the-lineup.md](notes/2026-08-13-pareto-dominance-across-the-lineup.md)) (all seven, as `Loop Network`) and is not dominated. The
   entry that used to sit here said it was out and should stay out; it was admitted later and the
   line was never retired. What replaced its reasoning, measured 2026-08-12 across all 7 example
   regions off the committed `frontier_permeability.csv`:
@@ -528,7 +528,8 @@ out of `scripts/perf` into a selectable engine.
   - `cycle_native` at 4,549 s and Frontage at 3,863 s on the 11k-parcel flagship make runtime a
     first-class axis for these two, not a footnote.
 
-- **`euclidean_grid` is dominated on the reported axes and survives on runtime alone.** Measured
+- **`euclidean_grid` is dominated on the reported axes and survives on runtime alone.**
+  (full derivation, and the three reasons NOT to act on it yet: [notes/2026-08-13-pareto-dominance-across-the-lineup.md](notes/2026-08-13-pareto-dominance-across-the-lineup.md)) Measured
   2026-08-12, same 7 regions: `resistance_lp` covers the grid's ENTIRE curve in 6 of 7, worst-case
   margin +0.039 to +0.130 permeability at every displacement the grid reaches (the 7th failure is
   the LP's configured `max_displacement: 0.20` against the grid's 47% build-out on the pinned block,
