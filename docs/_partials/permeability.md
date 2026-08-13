@@ -20,8 +20,8 @@ the existing street is grounded at potential 0. A parcel with only a long, narro
 the street needs a high potential to push its current through — the same way a narrow pipe needs
 more pressure to pass the same flow — so it dissipates more power getting that one unit out. Summed
 over every parcel, that gives one number for the whole region, the total dissipated power
-`P = bᵀL⁻¹b`, where `L` is the graph Laplacian built from the mesh's edge conductances and `b` is the
-all-ones vector of per-parcel current injections.
+`P = bᵀL⁻¹b`, where `L` is the grounded graph Laplacian built from the mesh's edge conductances and
+`b` is the all-ones vector of per-parcel current injections.
 
 That total, `P`, is reported as an improvement over doing nothing at all:
 `permeability = 1 − P(roads)/P(no roads)`. Lower dissipated power means easier collective egress, so
