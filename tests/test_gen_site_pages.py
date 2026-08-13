@@ -109,25 +109,32 @@ def test_no_partial_links_to_a_retired_path() -> None:
     """methodology.md and benchmark.md are gone; a link to either 404s. mkdocs --strict catches
     this at build time, but only in CI -- this fails in the unit suite.
 
-    "](methods/index.md)" is retired ONLY as seen from a partial that ends up at the docs/ ROOT
-    (intro.md -> docs/index.md, reproduce.md -> docs/reproduce.md): docs/methods/ was renested
-    under docs/methodology/methods/ in an earlier task, so a root-level page must now spell the
-    full "methodology/methods/index.md" -- which is exactly what both currently do. The identical
-    string is a CORRECT relative link from a partial that itself already lives under
-    docs/methodology/ (methodology.md, screening.md, permeability.md, displacement.md): e.g.
-    methodology.md's own live "[reblocker](methods/index.md)" resolves to
-    methodology/methods/index.md and is not a retired link at all -- checking it unconditionally
-    would fail on a page that mkdocs --strict itself builds clean. So that one path is checked
-    only against the root partials; the other two retired paths 404 from anywhere and are checked
-    against every partial.
+    "](methods/index.md)" is retired everywhere EXCEPT the four partials that already live under
+    docs/methodology/ (methodology.md, screening.md, permeability.md, displacement.md): from any
+    of those, it is a CORRECT relative link to the current methodology/methods/ directory -- e.g.
+    methodology.md's own live "[reblocker](methods/index.md)", which resolves to
+    methodology/methods/index.md and is not retired at all. From every OTHER partial -- both the
+    two at the docs/ ROOT (intro.md -> docs/index.md, reproduce.md -> docs/reproduce.md) AND the
+    two nested under docs/results/ (bakeoff.md, nairobi.md) -- the identical string IS genuinely
+    retired: it would resolve to docs/methods/index.md or docs/results/methods/index.md, neither
+    of which has ever existed. (An earlier version of this test scoped the exemption the other way
+    -- "only check the two root partials" -- which silently stopped checking the two results/
+    partials entirely: a "not root" partial was treated as safe whether it was nested under
+    docs/methodology/, where the string really is safe, or under docs/results/, where it is not.
+    RULING F18 caught this: injecting "](methods/index.md)" into bakeoff.md against that version
+    of the guard returned zero offenders.) Allowlisting the four partials where the string is
+    actually correct, and checking it everywhere else, leaves no partial silently exempt by
+    omission.
     """
     retired_everywhere = ("](methodology.md)", "](benchmark.md)")
     retired_at_docs_root = "](methods/index.md)"
-    root_partials = ("intro.md", "reproduce.md")
+    methods_index_correct_from = ("methodology.md", "screening.md", "permeability.md",
+                                   "displacement.md")
 
     offenders: list[str] = []
     for name, text in _partials().items():
-        paths = retired_everywhere + ((retired_at_docs_root,) if name in root_partials else ())
+        paths = retired_everywhere + (() if name in methods_index_correct_from
+                                       else (retired_at_docs_root,))
         for path in paths:
             if path in text:
                 offenders.append(f"{name}: {path}")
