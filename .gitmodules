@@ -3,4 +3,4 @@
 	url = https://github.com/mansueto-institute/kblock.git
 [submodule "ext/topology"]
 	path = ext/topology
-	url = git@github.com:jmendoza167/topology.git
+	url = https://github.com/jmendoza167/topology.git
