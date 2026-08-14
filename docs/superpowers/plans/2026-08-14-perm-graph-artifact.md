@@ -730,7 +730,7 @@ def render_graph(
     return fig
 ```
 
-`_GRAPH_LAYER_FIELD` maps the literal to a field name once, so a renamed `GraphFigure` field is a single edit and an unknown `layer` raises `KeyError` rather than silently drawing nothing.
+`GRAPH_LAYERS` (Task 2) spells each layer's quantity as a field access, so a renamed `GraphFigure` field is a type error rather than a silently blank drawing, and an unknown `layer` raises `KeyError` rather than drawing nothing.
 
 - [ ] **Step 4: Run test to verify it passes**
 
