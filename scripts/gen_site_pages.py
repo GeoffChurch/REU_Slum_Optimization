@@ -244,36 +244,58 @@ def _bakeoff_figures() -> str:
 
 
 def _perm_graph_figures() -> str:
-    """The Permeability section's 2x2: the egress graph, conductance and current, before and after.
+    """The Permeability section's figure grid: the egress graph, conductance and current, before
+    and after, laid out in `.sbu-figure-grid` (docs/stylesheets/sbu.css) -- two columns, not four
+    stacked <figure>s. The whole reason a before/after pair shares one width norm and one node
+    `vmax` is so the two can be *compared*; stacked four deep with a ~1.7 MB image between each,
+    that comparison cannot be made. Figures are emitted row-major (conductance-before,
+    conductance-after, current-before, current-after) so grid auto-flow lands layer-as-row x
+    before/after-as-column (fix round 1, Finding F4 -- an earlier version of this docstring called
+    the stacked output "the ... 2x2", a comment asserting something the code did not do).
 
-    Every number in these captions is read from `examples/perm-graph/perm_graph.json`, written by
-    `scripts/gen_perm_graph.py` beside the images. Typing one here would reintroduce the drift class
-    the truth pass closed -- and `_intro.md`'s "seven methods" is the proof that a figure does not
-    have to look like a metric to rot.
+    Every number is read from `examples/perm-graph/perm_graph.json`, written by
+    `scripts/gen_perm_graph.py` beside the images. Typing one here would reintroduce the drift
+    class the truth pass closed -- and `_intro.md`'s "seven methods" is the proof that a figure
+    does not have to look like a metric to rot.
+
+    The legend (blue = a road raised this edge, halo = grounded parcel) and the block-level facts
+    (id, parcel/edge counts) are stated once, in a lead sentence above the grid -- repeating them
+    per caption would just be Finding F5 again under cover of fixing F3. Each caption is trimmed
+    to what is unique to its own panel: the layer, the state, and, for the "after" panels only,
+    the road length and permeability reached. The width claim is scoped to the footpath mesh,
+    because upgraded (road) edges draw at a fixed width by design, not a width derived from their
+    conductance or current (`render_graph`'s docstring, src/reblock/render.py) -- an unscoped
+    width claim would be false of exactly those edges (fix round 1, Finding F2). Node colour is
+    stated once, as one scale shared across the panels -- not "the same scale as the heatmaps
+    above": there are no heatmaps on this page, only these four images (fix round 1, Finding F1).
     """
     meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
     block, method = meta["block_id"], friendly_method_name(meta["method"])
     p_after, road_m = meta["permeability_after"] * 100.0, meta["road_m"]
     n_parcels, n_edges = meta["n_parcels"], meta["n_edges"]
-    out: list[str] = []
-    for layer, what in (("conductance", "conductance"), ("current", "current")):
-        for state, roads_phrase in (
-            ("before", "with no new roads"),
-            ("after", f"under {method}'s roads at the matched-permeability standard"),
+
+    figs: list[str] = []
+    for layer in ("conductance", "current"):
+        for state, roads_clause in (
+            ("before", "No new roads."),
+            ("after", f"Under {method}'s roads at the matched-permeability standard: "
+                      f"{road_m:,.0f} m of road, reaching {p_after:.1f}% permeability."),
         ):
             url = _copy_asset(PERMGRAPH / f"graph_{layer}_{state}.png", "perm-graph")
             if url is None:
                 continue
-            caption = (
-                f"Block {block}: {n_parcels} parcels, {n_edges} footpath-mesh edges, "
-                f"{roads_phrase}. Edge width is {what}; node colour is egress potential φ on "
-                f"the same scale as the heatmaps above, dark meaning a harder escape."
-            )
-            if state == "after":
-                caption += (f" That prefix is {road_m:,.0f} m of road and reaches "
-                            f"{p_after:.1f}% permeability.")
-            out.append(_figure(url, f"egress graph, {what}, {state} roads", caption))
-    return "\n".join(out)
+            caption = f"Edge width is footpath-mesh {layer}. {roads_clause}"
+            figs.append(_figure(url, f"egress graph, {layer}, {state} roads", caption))
+    if not figs:
+        return ""
+
+    intro = (
+        f"Block {block}: {n_parcels} parcels, {n_edges} footpath-mesh edges. Node colour is "
+        f"egress potential φ, on one scale shared across these panels, dark meaning a harder "
+        f"escape. Blue edges are the ones a road raised; haloed nodes front the existing street "
+        f"and drain straight to ground."
+    )
+    return f'{intro}\n\n<div class="sbu-figure-grid">\n' + "".join(figs) + "</div>\n"
 
 
 def _bakeoff_scale() -> str:

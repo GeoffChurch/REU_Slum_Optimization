@@ -213,3 +213,41 @@ def test_perm_graph_figures_quote_the_artifact_not_a_typed_number() -> None:
     assert "graph_current_after.png" in html
     assert f"{meta['permeability_after'] * 100:.1f}" in html
     assert meta["block_id"] in html
+
+
+def test_perm_graph_figures_carry_no_fix_round_1_regression() -> None:
+    """Fix round 1 found two false claims live on the page (F1, F2), a load-bearing legend stated
+    nowhere (F3), a stacked layout that defeats the shared scale it advertises (F4), and four-way
+    caption repetition (F5). Each assertion below is the guard for one finding, named, so a
+    regression fails as that finding rather than as a vague content diff."""
+    import json
+
+    from scripts.gen_site_pages import PERMGRAPH, _perm_graph_figures
+
+    meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
+    html = _perm_graph_figures()
+
+    # F1: this page has no heatmaps above the graph figures -- these four images are the only
+    # ones on the page. The true, shared thing across them is one vmax.
+    assert "the heatmaps above" not in html
+    assert "one scale shared" in html
+
+    # F2: upgraded (road) edges draw at a fixed width by design (render_graph's docstring) -- no
+    # "Edge width is ..." sentence may claim width for anything wider than the footpath mesh.
+    for claim in re.findall(r"Edge width is [^.]*\.", html):
+        assert "footpath-mesh" in claim, claim
+
+    # F3: the blue-edge / haloed-node legend is load-bearing and must appear -- exactly once, not
+    # once per caption (which would just be F5 wearing a different hat).
+    assert html.count("Blue edges are the ones a road raised") == 1
+
+    # F4: the four figures sit inside the CSS grid that makes the shared scale comparable, not as
+    # four stacked <figure> blocks with no relation to each other in the markup.
+    assert html.count("<figure>") == 4
+    assert '<div class="sbu-figure-grid">' in html
+    assert html.index('<div class="sbu-figure-grid">') < html.index("<figure>")
+
+    # F5: the block id and parcel/edge counts are stated once, in the intro, not per caption.
+    assert html.count(meta["block_id"]) == 1
+    assert html.count(str(meta["n_parcels"])) == 1
+    assert html.count(str(meta["n_edges"])) == 1
