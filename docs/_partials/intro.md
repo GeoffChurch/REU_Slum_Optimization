@@ -81,5 +81,6 @@ is like-for-like rather than a scoreboard of incompatible scores.
 
 </div>
 
-Every figure, table, and number on this site is machine-generated from run artifacts committed in
-the repository — the numbers can never drift from the data.
+Nearly every figure, table, and number on this site is machine-generated from run artifacts
+committed in the repository, so it cannot drift from the data — the rare exception is a
+qualitative approximation stated in prose and flagged as such where it appears.

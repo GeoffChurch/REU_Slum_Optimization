@@ -40,8 +40,8 @@ than a claim made about it in this paragraph.
 ## No ground truth here
 
 The [screen bake-off](bakeoff.md) validates the screening stage against the City of Cape Town's
-own informal-structure survey — and that survey has no Nairobi counterpart. The bake-off's own
-caveats record the search behind that absence (the City's ArcGIS portal, openAFRICA, HDX, and OSM
+own informal-structure survey — and that survey has no Nairobi counterpart. `reblock.data.informal`
+records the search behind that absence (the City's ArcGIS portal, openAFRICA, HDX, and OSM
 Overpass) coming up empty. Its precision/recall evidence is Cape Town only and does not extend to
 anything on this page: what appears above is what each method's frontier measures on its own
 terms, not a validated claim about which Nairobi blocks actually need reblocking.

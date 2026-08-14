@@ -41,6 +41,12 @@ precision at the very top of it, and each screen's shipped absolute floor where 
 
 <!-- SCREENTABLE -->
 
+AUC scores a ranking end to end, weighting agreement across the whole sweep from top to bottom
+equally. A deployed screen never reads that whole sweep, though — only the slice above its gate
+ever decides which blocks get reblocked, and everything below the cutoff is discarded unread. That
+is why the shipped default is the screen it is even where a competitor's AUC looks stronger: what
+matters is which screen separates cleanly at the top of the ranking, not across all of it.
+
 ## Head to head, at the shipped floor
 
 The shipped default and the screen it replaced, each cut at its own shipped absolute floor, on

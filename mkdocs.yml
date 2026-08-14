@@ -1,7 +1,8 @@
 # Project site (GitHub Pages; deployed by .github/workflows/deploy-site.yml, which regenerates
 # the data-driven pages in CI -- docs/methodology/, docs/results/, and docs/assets/ are NOT
 # committed). CI's actual check is `mkdocs build --strict`, which fails the build on a broken
-# link or orphan page instead of just warning. For a local preview:
+# link instead of just warning (an orphan page -- one outside nav -- only logs at INFO and does
+# NOT fail the build, verified). For a local preview:
 #   python3 scripts/gen_site_pages.py   # regenerate data-driven pages from run artifacts
 #   mkdocs serve                        # needs mkdocs-material (e.g. `pixi exec --spec mkdocs-material mkdocs serve`)
 site_name: reblock · REU Slum Optimization
@@ -29,14 +30,17 @@ exclude_docs: |
   # run artifacts yet and carries no numbers.
   #
   # STALE-KEY WARNING: this path is the method's slug. If the method is renamed upstream, this
-  # line silently stops matching and the renamed page REAPPEARS in the built site -- and, because
-  # the nav below is explicit, it would appear only as an un-navigable orphan page plus a build
-  # warning. Whoever renames the method must update this line and the nav together.
+  # line silently stops matching and the renamed page REAPPEARS in the built site -- reachable by
+  # direct URL and, because the nav below is explicit, linked from nowhere. There is no build
+  # warning to catch it: an orphan page (one outside nav) logs at INFO under `mkdocs build
+  # --strict`, not WARNING, and the build exits 0 regardless (verified empirically). Whoever
+  # renames the method must update this line and the nav together.
   #
   # tests/test_gen_site_pages.py::test_unpublished_methods_are_excluded_from_the_build guards the
-  # published=False/exclude_docs pairing itself -- a method marked unpublished with no matching
-  # line here fails CI. It does NOT catch a slug rename (its regex only checks that unpublished
-  # slugs are a subset of excluded slugs), so the warning above still applies.
+  # published=False/exclude_docs pairing: it asserts this excluded path equals the generator's
+  # actual output path for the slug, derived from gen_site_pages.py's own methodology_dir/
+  # methods_dir assignments -- so a slug rename AND a wrong-but-plausible path (e.g. a pre-renest
+  # `methods/<slug>.md`) both fail CI, not only a missing slug.
   methodology/methods/dream_come_true.md
 
 theme:

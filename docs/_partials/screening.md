@@ -25,12 +25,11 @@ it: one score per block, cheap enough to compute for a whole metro in a single s
 
 ## The shipped screen
 
-Every screen considered here is a formula over three quantities free on every block: parcel count
-**n**, area **A**, and perimeter **P**. The default is `depth_density_proxy`: `√(nA)/P · n/A`, the
-depth proxy times density. A block scores high only if it is both **deep** — its interior sits
-many parcels back from a street — and **crowded**. Every input comes straight from the block's
-building count, area, and perimeter: no Voronoi tessellation, no peel, so the whole metro scores
-in one pass.
+Every screen considered here is a formula over three quantities free on every block: building
+count **n**, area **A**, and perimeter **P**. The default is `depth_density_proxy`: `√(nA)/P ·
+n/A`, the depth proxy times density. A block scores high only if it is both **deep** — its
+interior sits many parcels back from a street — and **crowded**. No Voronoi tessellation, no
+peel: the whole metro scores in one pass.
 
 Every candidate screen below is scored against the City of Cape Town's own informal-structure
 survey — AUC across the whole ranking, precision at the top of it — plus each one's shipped

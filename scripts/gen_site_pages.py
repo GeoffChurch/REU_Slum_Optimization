@@ -231,8 +231,9 @@ def _bakeoff_figures() -> str:
     wanted = [("precision_recall.png", "Precision and recall across the candidate screens."),
               ("city_map.png", "Where the shipped screen and its predecessor disagree, city-wide."),
               ("settlements.png",
-               "The four settlements of sharpest disagreement. Green sits inside the gold "
-               "settlement outlines; red sits outside them.")]
+               "The settlements of sharpest disagreement, zoomed — gold traces each settlement's "
+               "real extent; green marks blocks the new default gains, red marks blocks it "
+               "drops.")]
     out: list[str] = []
     for name, caption in wanted:
         url = _copy_asset(BAKEOFF / name, "bakeoff")
@@ -790,8 +791,8 @@ def gen_benchmark_section() -> str:
 
 
 def gen_methods_overview() -> str:
-    """The Methods section landing (docs/methodology/methods/index.md): the seven methods as
-    scannable cards, then the same seven as a table. Both are emitted deliberately -- the cards
+    """The Methods section landing (docs/methodology/methods/index.md): PUBLISHED_METHODS as
+    scannable cards, then the same set as a table. Both are emitted deliberately -- the cards
     are for choosing which method to read, the table is for comparing status and one-line ideas
     at a glance without scanning a grid. Prose (title, one-line idea, badge) is registry-driven;
     no run data."""
@@ -947,10 +948,19 @@ MARKERS: dict[str, Callable[[], str]] = {
 PARTIALS = DOCS / "_partials"
 
 
+_LEADING_COMMENT = re.compile(r"\A\s*<!--.*?-->\s*", flags=re.S)
+
+
 def _render_partial(name: str) -> str:
-    """Read docs/_partials/<name>.md and fill every known marker. Unknown markers are left alone so
-    the closed-set test can catch them; a missing partial is an error, not an empty page."""
-    text = (PARTIALS / f"{name}.md").read_text(encoding="utf-8").rstrip()
+    """Read docs/_partials/<name>.md, strip its LEADING maintainer comment, and fill every known
+    marker. Every partial opens with an internal note (do-not-edit pointer, marker inventory,
+    sometimes ruling numbers or plan paths) that has no business in a public site's page source --
+    HTML comments pass through python-markdown untouched into the built HTML. Only the leading
+    comment is stripped: a partial may legitimately carry one later in its body (e.g.
+    permeability.md's figure placeholder), and those must survive. Unknown markers are left alone
+    so the closed-set test can catch them; a missing partial is an error, not an empty page."""
+    text = (PARTIALS / f"{name}.md").read_text(encoding="utf-8")
+    text = _LEADING_COMMENT.sub("", text, count=1).rstrip()
     for marker, produce in MARKERS.items():
         text = text.replace(f"<!-- {marker} -->", produce())
     return text
