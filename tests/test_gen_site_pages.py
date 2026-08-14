@@ -232,10 +232,13 @@ def test_perm_graph_figures_carry_no_fix_round_1_regression() -> None:
     assert "the heatmaps above" not in html
     assert "one scale shared" in html
 
-    # F2: upgraded (road) edges draw at a fixed width by design (render_graph's docstring) -- no
-    # "Edge width is ..." sentence may claim width for anything wider than the footpath mesh.
-    for claim in re.findall(r"Edge width is [^.]*\.", html):
-        assert "footpath-mesh" in claim, claim
+    # F2 (amended in the 2026-08-14 fix wave): "footpath-mesh" alone does not scope the claim away
+    # from the upgraded (blue) edges -- they are footpath-mesh edges too. So no "... edge width is
+    # ..." sentence may claim width for anything but the GREY edges specifically, and it must say
+    # what the blue ones do instead (draw at a fixed width, not a computed one).
+    for claim in re.findall(r"[A-Z][a-z]* edge width is [^.]*\.", html):
+        assert claim.startswith("Grey edge width is"), claim
+        assert "fixed width instead" in claim, claim
 
     # F3: the blue-edge / haloed-node legend is load-bearing and must appear -- exactly once, not
     # once per caption (which would just be F5 wearing a different hat).

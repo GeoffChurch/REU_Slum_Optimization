@@ -239,7 +239,6 @@ def render_after(
     return fig
 
 
-_GRAPH_PARCEL_EDGE = "#cccccc"     # the wireframe parcels recede to; graph is the subject
 _EDGE_GREY = "#8c8c8c"
 _EDGE_LW_MIN = 0.15                # a hairline, so the mesh stays present rather than vanishing
 # Tuned for a MESH-ONLY width_norm (gen_perm_graph.py's `norms`, fix round 1 Finding A/C) -- the
@@ -253,7 +252,6 @@ _EDGE_LW_MAX = 3.0
 # both fully obscured); 1.0 is thin enough that the mesh, nodes and pale corridor tint show through
 # the whole corridor's length while the road is still an unmistakably bold, distinct blue feature.
 _UPGRADED_LW = 1.0
-_GROUND_HALO = "#1a1a1a"
 _NODE_RADIUS_FRAC = 0.18           # of the median edge length, so this holds at region scale
 
 
@@ -291,12 +289,13 @@ def render_graph(
 
     Parcels are drawn as a pale wireframe, NOT filled by potential. Filling them would state the
     same quantity twice in two shapes and drown the graph -- this is not the `perm` choropleth with
-    dots on top. Node colour uses `_PERM_CMAP` with `vmin=0`, the same scale that choropleth uses,
-    so colour means the same thing on both images a reader meets on one page.
+    dots on top. Node colour uses `_PERM_CMAP` with `vmin=0`, matching the `perm` choropleth's own
+    convention (`render_before`/`render_after`) -- only `vmin` is actually shared, though; `vmax` is
+    per-caller, and there is no choropleth on this page for a reader to compare against anyway.
     """
     fig, ax = plt.subplots(figsize=(16, 16))
 
-    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_GRAPH_PARCEL_EDGE, linewidth=0.4)
+    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.4)
 
     view = frame if frame is not None else frame_bbox(block.parcels)
     ax.set_xlim(view[0], view[2])
@@ -312,10 +311,10 @@ def render_graph(
     # each group's union at its own half-width; this collapses to a single polygon in the normal
     # case where every road in the set shares one width.
     if roads is not None and not roads.empty:
-        widths = roads["width_m"].to_numpy(dtype=float)
+        road_w = roads["width_m"].to_numpy(dtype=float)
         corridor = gpd.GeoDataFrame(
-            geometry=[unary_union(list(roads.geometry[widths == w])).buffer(float(w) / 2.0)
-                      for w in np.unique(widths)],
+            geometry=[unary_union(list(roads.geometry[road_w == w])).buffer(float(w) / 2.0)
+                      for w in np.unique(road_w)],
             crs=block.crs)
         corridor.plot(ax=ax, color=_ROAD_COLOR, alpha=0.25, zorder=2, linewidth=0)
 
@@ -355,7 +354,7 @@ def render_graph(
     grounded = figure.ground_g > 0.0
     if grounded.any():
         nodes[grounded].geometry.buffer(node_r * 0.6).plot(
-            ax=ax, facecolor="none", edgecolor=_GROUND_HALO, linewidth=1.6, zorder=5)
+            ax=ax, facecolor="none", edgecolor=_BOUNDARY_COLOR, linewidth=1.6, zorder=5)
     nodes.plot(ax=ax, column="phi", cmap=_PERM_CMAP, vmin=0.0, vmax=vmax, linewidth=0, zorder=6)
 
     ax.set_aspect("equal")

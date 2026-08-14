@@ -9,10 +9,12 @@ the metric is actually computed on, drawn four ways.
 | width ∝ current | ![](graph_current_before.png) | ![](graph_current_after.png) |
 
 Nodes are parcel centroids, coloured by egress potential φ on the same `YlOrRd` scale the `_perm`
-heatmaps use — dark means a harder escape. Edge width encodes either the mesh conductance (the
+heatmaps use — dark means a harder escape. Grey edge width encodes either the mesh conductance (the
 clearance fraction between two footprints) or the current `i = g(φᵢ − φⱼ)` flowing along that edge.
-Blue edges are the ones a road raised; haloed nodes front the existing street and drain straight to
-ground.
+Blue edges are the ones a road raised — every road-raised edge is itself a mesh edge, so it draws at
+a fixed width instead of one derived from its (near-saturated) conductance or current. The pale-blue
+band under them is the road corridor itself, drawn at its own width. Haloed nodes front the existing
+street and drain straight to ground.
 
 **Provenance.** Block `ZAF.9.3.1_1_40972` — the block `conf/example/method_comparison.yaml` pins,
 so this is the same block every method page's before/after uses. The roads are `clearance` at its

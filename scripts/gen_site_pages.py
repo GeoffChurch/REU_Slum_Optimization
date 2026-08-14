@@ -258,21 +258,27 @@ def _perm_graph_figures() -> str:
     class the truth pass closed -- and `_intro.md`'s "seven methods" is the proof that a figure
     does not have to look like a metric to rot.
 
-    The legend (blue = a road raised this edge, halo = grounded parcel) and the block-level facts
-    (id, parcel/edge counts) are stated once, in a lead sentence above the grid -- repeating them
-    per caption would just be Finding F5 again under cover of fixing F3. Each caption is trimmed
-    to what is unique to its own panel: the layer, the state, and, for the "after" panels only,
-    the road length and permeability reached. The width claim is scoped to the footpath mesh,
-    because upgraded (road) edges draw at a fixed width by design, not a width derived from their
-    conductance or current (`render_graph`'s docstring, src/reblock/render.py) -- an unscoped
-    width claim would be false of exactly those edges (fix round 1, Finding F2). Node colour is
-    stated once, as one scale shared across the panels -- not "the same scale as the heatmaps
-    above": there are no heatmaps on this page, only these four images (fix round 1, Finding F1).
+    The legend (blue = a road raised this edge, the pale-blue band = the road corridor itself,
+    halo = grounded parcel) and the block-level facts (id, parcel/edge counts) are stated once, in
+    a lead sentence above the grid -- repeating them per caption would just be Finding F5 again
+    under cover of fixing F3. Each caption is trimmed to what is unique to its own panel: the
+    layer, the state, and, for the "after" panels only, the road length and permeability reached.
+
+    The width claim names GREY edges specifically, not "footpath-mesh": upgraded (road) edges are
+    footpath-mesh edges too (the mesh has no other kind for a road to raise -- see this file's
+    intro sentence, which counts them among the same `n_edges`), so scoping the claim to
+    "footpath-mesh" does not exclude them, and an earlier fix that tried exactly that word left the
+    claim still false of the 65 blue edges, which draw at a fixed width by design rather than one
+    derived from their conductance or current (`render_graph`'s docstring, src/reblock/render.py).
+    The caption now says so explicitly, with the upgraded-edge count read from `n_upgraded` in the
+    artifact rather than typed as `65`. Node colour is stated once, as one scale shared across the
+    panels -- not "the same scale as the heatmaps above": there are no heatmaps on this page, only
+    these four images (fix round 1, Finding F1).
     """
     meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
     block, method = meta["block_id"], friendly_method_name(meta["method"])
     p_after, road_m = meta["permeability_after"] * 100.0, meta["road_m"]
-    n_parcels, n_edges = meta["n_parcels"], meta["n_edges"]
+    n_parcels, n_edges, n_upgraded = meta["n_parcels"], meta["n_edges"], meta["n_upgraded"]
 
     figs: list[str] = []
     for layer in ("conductance", "current"):
@@ -284,7 +290,8 @@ def _perm_graph_figures() -> str:
             url = _copy_asset(PERMGRAPH / f"graph_{layer}_{state}.png", "perm-graph")
             if url is None:
                 continue
-            caption = f"Edge width is footpath-mesh {layer}. {roads_clause}"
+            caption = (f"Grey edge width is {layer} on the footpath mesh; the {n_upgraded} "
+                      f"road-raised edges (blue) draw at a fixed width instead. {roads_clause}")
             figs.append(_figure(url, f"egress graph, {layer}, {state} roads", caption))
     if not figs:
         return ""
@@ -292,8 +299,9 @@ def _perm_graph_figures() -> str:
     intro = (
         f"Block {block}: {n_parcels} parcels, {n_edges} footpath-mesh edges. Node colour is "
         f"egress potential φ, on one scale shared across these panels, dark meaning a harder "
-        f"escape. Blue edges are the ones a road raised; haloed nodes front the existing street "
-        f"and drain straight to ground."
+        f"escape. Blue edges are the ones a road raised, and the pale-blue band is the road "
+        f"corridor itself, drawn at its own width; haloed nodes front the existing street and "
+        f"drain straight to ground."
     )
     return f'{intro}\n\n<div class="sbu-figure-grid">\n' + "".join(figs) + "</div>\n"
 

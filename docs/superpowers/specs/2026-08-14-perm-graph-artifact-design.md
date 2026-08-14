@@ -203,9 +203,15 @@ explicit `vmax`: a before/after pair must share its scales or the comparison is 
    caller's `vmax`. Same colormap and same scale as the existing perm renders, so colour means the
    same thing on both images a reader sees on that page.
 
-Palette constants, `frame_bbox` and `save_render` are reused as-is. No new colours are introduced;
-piece C emits these same constants into the bundle, so a second palette here would surface as the
-most visible possible drift.
+Palette constants, `frame_bbox` and `save_render` are reused as-is wherever an existing constant
+already says the right thing: the parcel wireframe uses `_CONTEXT_OUTLINE` (`#dddddd`), the ground
+halo uses `_BOUNDARY_COLOR` (`#222222`). `render_graph` adds exactly ONE new constant, `_EDGE_GREY`
+(`#8c8c8c`): a real need, since `_CONTEXT_OUTLINE`'s `#dddddd` is far too pale to read at the
+hairline widths mesh edges draw at. (A first pass at this file introduced two more, one for the
+wireframe and one for the ground halo, each indistinguishable from an existing constant already in
+the file; a 2026-08-14 fix wave deleted both and recorded the decision here so it does not
+re-surface as drift.) piece C emits these same constants into the bundle, so a second palette here
+would surface as the most visible possible drift.
 
 ## §3 The figure set and its generator
 

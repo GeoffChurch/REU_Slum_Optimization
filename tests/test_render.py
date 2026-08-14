@@ -360,7 +360,7 @@ def test_render_graph_draws_upgraded_edges_in_the_road_colour() -> None:
     from matplotlib.colors import to_rgba, to_rgba_array
 
     from reblock.perm_graph import permeability_graph
-    from reblock.render import _ROAD_COLOR, render_graph
+    from reblock.render import _ROAD_COLOR, _UPGRADED_LW, render_graph
 
     block = _grid_block(6)
     roads = with_width(
@@ -381,9 +381,29 @@ def test_render_graph_draws_upgraded_edges_in_the_road_colour() -> None:
                 for coll in f.axes[0].collections if isinstance(coll, LineCollection)
                 for colour in to_rgba_array(coll.get_colors())}
 
+    def _blue_collections(f: Figure, blue: tuple[float, ...]) -> list[LineCollection]:
+        return [coll for coll in f.axes[0].collections if isinstance(coll, LineCollection)
+                for colour in to_rgba_array(coll.get_colors())
+                if tuple(round(float(v), 4) for v in colour) == blue]
+
     blue = tuple(round(float(v), 4) for v in to_rgba(_ROAD_COLOR))
     a = render_graph(plain, block, layer="current", vmax=1.0, width_norm=1.0)
     b = render_graph(roaded, block, layer="current", vmax=1.0, width_norm=1.0, roads=roads)
     assert blue not in _edge_colours(a)
     assert blue in _edge_colours(b)
+
+    def _linewidths(coll: LineCollection) -> list[float]:
+        # `LineCollection.get_linewidth()` is typed `float | Sequence[float]` for the same reason
+        # `get_colors()` is above -- at runtime it hands back a sequence here, but the isinstance
+        # check keeps this correct (and mypy --strict happy) even if a single bare float ever came
+        # back.
+        lw = coll.get_linewidth()
+        return [float(lw)] if isinstance(lw, (int, float)) else [float(v) for v in lw]
+
+    # The road-raised (blue) collection draws at the fixed `_UPGRADED_LW`, never a width derived
+    # from conductance/current -- this is exactly what the site caption's exception (Important 1,
+    # 2026-08-14 fix wave) rests on, so a regression back to a variable width must fail here.
+    for coll in _blue_collections(b, blue):
+        widths = _linewidths(coll)
+        assert widths == [_UPGRADED_LW] * len(widths)
 

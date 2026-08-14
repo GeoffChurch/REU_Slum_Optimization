@@ -304,9 +304,14 @@ def solve_egress(
     Degenerate cases keep `egress_power`'s contract exactly: an ungrounded block (no parcel within
     STREET_TOL of a street) or a non-finite solve yields `p = inf` and zero potentials, still
     paired with the mesh and conductances that were built -- a caller that wants to REFUSE those
-    (the figure generator does) checks `p` rather than being handed a silently-zero field."""
-    parcels = block.parcels
-    n = len(parcels)
+    (the figure generator does) checks `p` rather than being handed a silently-zero field. One
+    corner no longer keeps that contract: an ungrounded block paired with an INVALID road set
+    (missing `width_m`, or a width below the floor) now raises out of `buildable_widths` instead of
+    returning `(inf, zeros)`, because `edge_conductances` (which validates the roads) runs before
+    the ground check. Unreachable in production -- callers only ever pair a block with a road set
+    they built themselves -- and arguably the better behaviour anyway, so this is noted rather than
+    restructured."""
+    n = len(block.parcels)
 
     mesh = footpath_mesh(block, params, adj=adj, radii=radii)
     rows_arr, cols_arr, dist_arr = mesh.rows, mesh.cols, mesh.dist

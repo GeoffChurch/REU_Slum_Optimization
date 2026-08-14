@@ -85,6 +85,12 @@ def test_energy_identity(roads):
         sum_edges g (dphi)^2 + sum_nodes ground_g phi^2  ==  p  ==  sum(phi)
 
     because v = L^-1 b makes v^T L v = v^T b. Exact up to solver residual.
+
+    The first assertion is the actual guard on the drawn quantities' derivation. The second,
+    `potential.sum() == p`, cannot fail for any change to perm_graph.py: `fig.p` *is*
+    `float(b @ v)` and `fig.potential` *is* `v` (see `EgressSolution`/`GraphFigure`), so it is an
+    identity of the two field assignments, not a computation. It still guards one real cross-module
+    contract -- that `b` stays all-ones in `solve_egress` -- which is why it is kept.
     """
     fig = permeability_graph(_grid_block(), roads)
     dphi = fig.potential[fig.rows] - fig.potential[fig.cols]
