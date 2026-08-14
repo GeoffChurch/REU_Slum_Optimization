@@ -241,7 +241,7 @@ def render_after(
 _GRAPH_PARCEL_EDGE = "#cccccc"     # the wireframe parcels recede to; graph is the subject
 _EDGE_GREY = "#8c8c8c"
 _EDGE_LW_MIN = 0.15                # a hairline, so the mesh stays present rather than vanishing
-_EDGE_LW_MAX = 6.0
+_EDGE_LW_MAX = 12.0
 _GROUND_HALO = "#1a1a1a"
 _NODE_RADIUS_FRAC = 0.18           # of the median edge length, so this holds at region scale
 

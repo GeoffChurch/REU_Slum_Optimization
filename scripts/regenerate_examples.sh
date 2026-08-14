@@ -73,4 +73,8 @@ else
   # than methods against a region, so it has its own entry point. Cape Town only -- the ground truth
   # is the City's own structure survey and no equivalent exists for Nairobi.
   run pixi run python -m scripts.gen_screen_bakeoff
+  # The graph figure set is likewise its own entry point, and for the same kind of reason: it is a
+  # figure set for one site page rather than a graded example, and it deliberately does NOT re-run
+  # the ten-method comparison whose block and roads it borrows.
+  run pixi run python -m scripts.gen_perm_graph
 fi

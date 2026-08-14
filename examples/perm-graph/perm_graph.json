@@ -1,0 +1,11 @@
+{
+  "block_id": "ZAF.9.3.1_1_40972",
+  "method": "clearance",
+  "p_star": 0.6,
+  "permeability_before": 0.0,
+  "permeability_after": 0.6253906117970942,
+  "road_m": 89.43251802592889,
+  "n_parcels": 263,
+  "n_edges": 745,
+  "n_upgraded": 65
+}

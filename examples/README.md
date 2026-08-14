@@ -21,6 +21,11 @@ per-region OSM snapshot) on the benefit-vs-road frontier — the as-built footpa
 to reach far less permeability than the optimised methods. Building points and dimmed surrounding blocks are
 overlaid on every heatmap automatically.
 
+Alongside the flagships, [`perm-graph/`](perm-graph/) holds the egress graph itself drawn four ways
+— conductance and current, before and after roads — on the same pinned block `method-comparison`
+grades. It is a figure set for the site's Permeability section rather than a graded example, which
+is why it is not in the table above.
+
 A second city, **[Nairobi](nairobi/)**, runs the same three variants on central Nairobi data. It's
 shipped as-is: the screens and metric behaviour carry over, but Nairobi's block-size distribution and
 OSM footpath coverage differ from Cape Town's, so its regions come out unevenly sized and one variant
