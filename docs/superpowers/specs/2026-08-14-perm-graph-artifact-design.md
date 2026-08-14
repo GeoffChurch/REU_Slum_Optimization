@@ -138,11 +138,17 @@ so `egress_power`'s contract is unchanged; `permeability_graph` is the one that 
 `Mesh`; the second is the *drawable* form — flat arrays, current, `upgraded`, `ground_g`, and nothing
 that will not serialise to JSON in piece C.
 
-**Ungrounded and empty blocks raise `ValueError`.** `egress_power` returns `(inf, zeros)` when no
-parcel fronts a street, because an ungrounded network has no well-defined dissipated power. A figure
-built from those zeros would be a picture of no flow anywhere — silently wrong rather than absent, so
-the failure is loud instead. Same for `n == 0`. This is a figure generator, not a batch metric; there
-is no aggregate for it to keep marching through.
+**An ungrounded block raises `ValueError`.** `egress_power` returns `(inf, zeros)` when no parcel
+fronts a street, because an ungrounded network has no well-defined dissipated power. A figure built
+from those zeros would be a picture of no flow anywhere — silently wrong rather than absent, so the
+failure is loud instead. This is a figure generator, not a batch metric; there is no aggregate for it
+to keep marching through.
+
+**No `n == 0` guard**, deliberately. `Block.__post_init__` already raises on empty parcels
+(`contracts.py:56`), so that branch cannot be reached — it would be a silencer for a failure that
+cannot happen, and a test for it would need an input the production code cannot construct.
+`egress_power`'s own `n == 0` early return is dead for the same reason; it is pre-existing and out of
+scope here, noted so it is not copied.
 
 **Reusing the solve.** `permeability_graph` performs the same single solve `egress_power` does, so it
 is not an added cost where a permeability render already happens — the caller can feed
@@ -297,7 +303,7 @@ tests count as guards — three tests in this repo's recent history passed while
 | transpose `rows`/`cols` | Kirchhoff |
 
 **Also tested:** `upgraded` is all-false for `roads=None` and has at least one true edge for a road
-set known to cover the mesh; ungrounded and empty blocks raise `ValueError`. The renderer gets a
+set known to cover the mesh; an ungrounded block raises `ValueError`. The renderer gets a
 smoke test in `tests/test_render.py`'s existing style — assertions on the figure's artists, not on
 pixels.
 
