@@ -70,6 +70,13 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
   scores, and it makes visible that edges run straight through building interiors (the road-first
   mesh spec's motivating defect).
 
+  **Both halves are now designed** — `specs/2026-08-13-site-redesign-design.md` §3 specifies (b) as
+  **piece B**, a Python renderer joining `render_before`/`render_after` so the PNG exists before any
+  web widget does, and (a) as the displacement overlay in piece D. The spec adds one thing this
+  bullet did not ask for and is worth keeping: draw **edge current** `i = g(φᵢ − φⱼ)`, one
+  subtraction from `parcel_potentials`, so the drainage tree appears and a new road is visibly a
+  corridor that current concentrates into. See the Site section below.
+
 - **Region choropleth** — color every block in a region by a metric (peel-k, geometric access
   distance, population, building density, road-length-to-reblock). The first "zoom out from one
   block to the whole city" view. Needs a region-level render (many small polygons + a colorbar);
@@ -81,6 +88,48 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
   the region by cluster. Directly visualizes the OT-similarity idea.
 - **Before/after polish** — the existing `render_after` + the head-to-head webpage; a proper
   emitter with `format=webpage` and side-by-side layout (see flow-refactor spec §2).
+
+## Site: pieces B–F of the redesign, and one artifact drift (2026-08-14)
+
+**Piece A shipped** (PRs #55/#56, merged 2026-08-14): the truth pass and the methodology IA. The
+site is live at `https://geoffchurch.github.io/REU_Slum_Optimization/` — note the host, the repo
+was renamed and GitHub Pages does not follow repo renames. Design for everything below:
+`specs/2026-08-13-site-redesign-design.md` §7. Each piece ships to the public site on its own and
+none blocks on a later one.
+
+- **B — the graph artifact type.** Python only; the Visualizations bullet above is its origin. Derive
+  the drawable graph once, `render.py` draws it to PNG. Do this before any web work: it gives the
+  Permeability page a figure (it has none today) *and* it becomes every future widget's static
+  fallback, so the site degrades to a picture with JS off.
+- **C — data bundle + widget substrate.** The risky piece: a `web/` TypeScript tree built by esbuild,
+  a mount contract, an injected `StateSource` so a widget never asks whether it is inline or in the
+  explorer, and a generated `.d.ts` for the bundle so a renamed Python field is a type error rather
+  than a blank panel. Prove it with exactly one widget (`PermGraph`), which B has just built a Python
+  twin of, so the two can be diffed.
+- **D — the remaining widgets.** `DisplacementField`, `Frontier`, `RegionGrow`, then `ScreenMap`
+  last: 16k blocks is the only real rendering-performance problem in the design (Canvas, not SVG —
+  recolouring must not touch geometry).
+- **E — the Explore chain.** Shared store + URL-as-state, so a reviewer can cite a specific view.
+  Thin once D lands.
+- **F — draw-your-own-road.** Pinned Pyodide (`indexURL` with an explicit version — `geopandas`,
+  `pyproj` and `shapely` have twice fallen out of the distribution), lazy-booted on click. Add the CI
+  guard the spec specifies: assert `reblock.permeability`'s import closure stays inside the
+  Pyodide-available set, or the explorer dies silently while every test still passes.
+
+**Long pole, independent of A:** the bundle needs a *full* prefix table (every `m`, not
+`displacement_curve`'s 20-point sweep) per block per method — R permeability solves each. Wall-clock,
+not effort; start it before C needs it.
+
+- **`examples/nairobi/README.md` has drifted from its artifacts.** It claims **89 blocks** for
+  `multiblock_density_compactness` (lines 13 and 19); every live `meta.json` says
+  `region_members: 43` (the other two variants are 1 and 7). Almost certainly the regeneration at
+  raised budgets (df83408) against a hand-written table nobody updated — the same
+  typed-number-drifts-from-artifact defect the site truth pass just fixed, one directory over. The
+  surrounding narrative ("tiny blocks take 89 to fill it") needs rewording, not a numeral swap, and
+  the file has not been audited for other stale figures. **Better fix than a correction:** generate
+  it, the way `scripts/gen_example_readme.py` already generates the `multiblock_*` variant READMEs —
+  that closes the drift class instead of one instance. `examples/screen-bakeoff/README.md` is
+  hand-written for the same reason and has the same exposure.
 
 ## Retrieval may be the wrong problem: donor QUALITY is predictable, MATCHING is not (2026-08-02)
 
