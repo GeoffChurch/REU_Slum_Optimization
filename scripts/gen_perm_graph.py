@@ -77,7 +77,15 @@ def main() -> None:
     # before/after pair is two pictures at two zoom levels of ink, and teaches nothing.
     frame = frame_bbox(block.parcels)
     vmax = max(float(before.potential.max()), float(after.potential.max()))
-    norms = {layer: max(_p99(read(before)), _p99(read(after)))
+    # Mesh-only norm (fix round 1, Finding A): a road-raised edge's conductance/current sits ~2-3
+    # orders of magnitude above the surrounding mesh (a real, physically-correct trunk, not an
+    # outlier to rob p99 of its robustness). Pooling p99 over ALL edges lets those ~65 upgraded
+    # edges set the norm, which crushes every mesh edge's width into a band under 1% of
+    # [_EDGE_LW_MIN, _EDGE_LW_MAX] -- invisible. Excluding upgraded edges from the norm (both
+    # states; `before.upgraded` is all-False so this is a no-op there) puts the mesh's own spread
+    # back on a legible scale; upgraded edges then clip at the maximum, which loses no information
+    # because colour (`_ROAD_COLOR`) already marks them -- see render_graph's docstring.
+    norms = {layer: max(_p99(read(before)[~before.upgraded]), _p99(read(after)[~after.upgraded]))
              for layer, read in GRAPH_LAYERS.items()}
 
     for state, fig_data, prefix_roads in (("before", before, None), ("after", after, prefix)):

@@ -241,7 +241,13 @@ def render_after(
 _GRAPH_PARCEL_EDGE = "#cccccc"     # the wireframe parcels recede to; graph is the subject
 _EDGE_GREY = "#8c8c8c"
 _EDGE_LW_MIN = 0.15                # a hairline, so the mesh stays present rather than vanishing
-_EDGE_LW_MAX = 12.0
+# Tuned for a MESH-ONLY width_norm (gen_perm_graph.py's `norms`, fix round 1 Finding A/C) -- the
+# norm no longer includes upgraded edges, so plain mesh edges now use the map's full range instead
+# of its bottom sliver. Re-tune this if the norm's definition changes again.
+_EDGE_LW_MAX = 3.0
+# Upgraded edges do not use the frac-of-width_norm map at all (fix round 1 Finding B): see
+# render_graph's docstring for why a fixed width is the honest choice here.
+_UPGRADED_LW = 2.5
 _GROUND_HALO = "#1a1a1a"
 _NODE_RADIUS_FRAC = 0.18           # of the median edge length, so this holds at region scale
 
@@ -266,7 +272,17 @@ def render_graph(
 
     `vmax` (node potential) and `width_norm` (the edge quantity) are explicit for the same reason
     `render_before`/`render_after` take an explicit `vmax`: a before/after pair has to share its
-    scales or the comparison means nothing.
+    scales or the comparison means nothing. The caller derives `width_norm` from the MESH-ONLY
+    (non-upgraded) edges, pooled across before and after, so the mesh's own spread stays legible;
+    against that norm, upgraded edges land at or near its top already -- all of them, for
+    conductance; most, for current (fix round 1, Finding A).
+
+    Upgraded edges do NOT draw at that computed width regardless. Because most of them already
+    saturate the map, a variable width there would look like a measurement while mostly carrying
+    none -- worse than not encoding at all. So upgraded edges draw at a fixed `_UPGRADED_LW`
+    instead, and rely on `_ROAD_COLOR` alone to say "a road raised this edge" (fix round 1, Finding
+    B). This is a deliberate, honest downgrade: colour still distinguishes them; width no longer
+    pretends to.
 
     Parcels are drawn as a pale wireframe, NOT filled by potential. Filling them would state the
     same quantity twice in two shapes and drown the graph -- this is not the `perm` choropleth with
@@ -305,9 +321,11 @@ def render_graph(
         ax.add_collection(LineCollection(
             segs[plain], linewidths=widths[plain], colors=_EDGE_GREY, zorder=3))
     if figure.upgraded.any():
+        # Fixed width, not `widths[figure.upgraded]` -- see the docstring above. Every upgraded
+        # edge clips near `frac=1.0` regardless, so a variable width here would be decorative, not
+        # informative; `_UPGRADED_LW` plus `_ROAD_COLOR` is the honest encoding.
         ax.add_collection(LineCollection(
-            segs[figure.upgraded], linewidths=widths[figure.upgraded], colors=_ROAD_COLOR,
-            zorder=4))
+            segs[figure.upgraded], linewidths=_UPGRADED_LW, colors=_ROAD_COLOR, zorder=4))
 
     # Nodes as geographic-radius disks (the `_point_disks` treatment), so this does not collapse
     # into a screen-size thicket at region scale.
