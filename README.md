@@ -60,7 +60,7 @@ Each stage is a swappable Hydra config group; a run composes them left to right:
   perimeter alone, so it sweeps a whole metro in one pass. `metric=depth` and `metric=depth_density`
   instead peel a proxy-pre-filtered top slice (`proxy_keep_pct`); `metric_gate` sets the absolute
   floor. Validated against ground truth in the
-  [screen bake-off](https://jmendoza167.github.io/REU_Slum_Optimization/results/bakeoff/).
+  [screen bake-off](https://geoffchurch.github.io/REU_Slum_Optimization/results/bakeoff/).
 - **`region_builder`** — `identity`, `convex_hull` (bridge disjoint seed blocks), `dense_cluster`
   (grow a seed into a `max_buildings`-sized contiguous region by that same metric, so growth follows
   the deep fabric), or `shape_standardizing`.
@@ -68,7 +68,7 @@ Each stage is a swappable Hydra config group; a run composes them left to right:
   **the default**), `peel`, `topology`, `greedy_arterial`, `resistance_lp`, `euclidean_grid`, or
   `osm_footpaths` (the network residents already walk, used as an as-built baseline). See
   `conf/method/` for the full set, and
-  [Methods](https://jmendoza167.github.io/REU_Slum_Optimization/methodology/methods/) for each one
+  [Methods](https://geoffchurch.github.io/REU_Slum_Optimization/methodology/methods/) for each one
   on the ground with its own numbers.
 - **`eval`** — the per-run scorer: `kcomplexity` by default, with `access_burden`, `structure` and
   `weakdual_k` as alternatives. The published head-to-head grading is separate: `reblock.compare`

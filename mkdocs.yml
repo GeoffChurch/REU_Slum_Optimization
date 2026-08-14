@@ -9,10 +9,10 @@ site_name: reblock · REU Slum Optimization
 site_description: >-
   Generating and evaluating road-network proposals for informal urban settlements —
   a Stony Brook University REU project.
-site_url: https://jmendoza167.github.io/REU_Slum_Optimization/
+site_url: https://geoffchurch.github.io/REU_Slum_Optimization/
 copyright: Stony Brook University REU · AI Innovation &amp; Diffusion
-repo_url: https://github.com/jmendoza167/REU_Slum_Optimization
-repo_name: jmendoza167/REU_Slum_Optimization
+repo_url: https://github.com/GeoffChurch/REU_Slum_Optimization
+repo_name: GeoffChurch/REU_Slum_Optimization
 
 # Internal working notes stay out of the published site (the files themselves are untouched);
 # _partials/ holds the handwritten prose the generator folds artifacts into -- one directory
