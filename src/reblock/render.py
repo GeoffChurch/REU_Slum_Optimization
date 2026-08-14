@@ -32,6 +32,7 @@ from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 
 from reblock.contracts import BBox, Block, Metrics, Proposal
 from reblock.perm_graph import GRAPH_LAYERS, GraphFigure, GraphLayer
@@ -297,11 +298,22 @@ def render_graph(
     ax.set_xlim(view[0], view[2])
     ax.set_ylim(view[1], view[3])
 
-    # The corridor under the graph, so corridor and upgraded edges read as one fact.
+    # The corridor under the graph, so corridor and upgraded edges read as one fact. Dissolved PER
+    # WIDTH GROUP before buffering, mirroring permeability._road_corridor's unary_union-then-buffer
+    # -- GeoDataFrame.plot() draws one patch per row, and overlapping translucent patches compound
+    # toward opacity wherever segments join (a drainage-ordered prefix is many short segments along
+    # one corridor, overlapping heavily at every joint), so a per-row buffer would never actually
+    # deliver alpha=0.25 along most of the corridor. Road width is per-road here (no global corridor
+    # width -- see permeability.py's module docstring), so union within each width group and buffer
+    # each group's union at its own half-width; this collapses to a single polygon in the normal
+    # case where every road in the set shares one width.
     if roads is not None and not roads.empty:
-        gpd.GeoDataFrame(
-            geometry=roads.geometry.buffer(roads["width_m"].to_numpy(dtype=float) / 2.0),
-            crs=block.crs).plot(ax=ax, color=_ROAD_COLOR, alpha=0.25, zorder=2, linewidth=0)
+        widths = roads["width_m"].to_numpy(dtype=float)
+        corridor = gpd.GeoDataFrame(
+            geometry=[unary_union(list(roads.geometry[widths == w])).buffer(float(w) / 2.0)
+                      for w in np.unique(widths)],
+            crs=block.crs)
+        corridor.plot(ax=ax, color=_ROAD_COLOR, alpha=0.25, zorder=2, linewidth=0)
 
     _draw_boundary_and_streets(ax, block)
 
