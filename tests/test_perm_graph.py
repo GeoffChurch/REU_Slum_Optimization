@@ -66,3 +66,55 @@ def test_ungrounded_block_raises():
     silently zero is not."""
     with pytest.raises(ValueError, match="ungrounded"):
         permeability_graph(_grid_block(street=False), None)
+
+
+def _node_net_current(fig: GraphFigure) -> np.ndarray:
+    """Signed current leaving each node, plus what it sheds to ground. Equals (L v)_i, which is
+    b_i = 1 for every node: one unit of escape current injected per parcel."""
+    out = np.zeros(fig.n, dtype=np.float64)
+    np.add.at(out, fig.rows, fig.current)     # leaves rows[k]
+    np.add.at(out, fig.cols, -fig.current)    # arrives at cols[k]
+    return out + fig.ground_g * fig.potential
+
+
+@pytest.mark.parametrize("roads", [None, _roads(SPINE)], ids=["no_roads", "spine"])
+def test_energy_identity(roads):
+    """Dissipated power recomputed from the DRAWN quantities equals the solver's own P, which for
+    b = ones also equals the sum of potentials:
+
+        sum_edges g (dphi)^2 + sum_nodes ground_g phi^2  ==  p  ==  sum(phi)
+
+    because v = L^-1 b makes v^T L v = v^T b. Exact up to solver residual.
+    """
+    fig = permeability_graph(_grid_block(), roads)
+    dphi = fig.potential[fig.rows] - fig.potential[fig.cols]
+    drawn = float((fig.conductance * dphi**2).sum() + (fig.ground_g * fig.potential**2).sum())
+    assert drawn == pytest.approx(fig.p, rel=1e-9)
+    assert float(fig.potential.sum()) == pytest.approx(fig.p, rel=1e-9)
+
+
+@pytest.mark.parametrize("roads", [None, _roads(SPINE)], ids=["no_roads", "spine"])
+def test_per_node_kirchhoff(roads):
+    """Every node injects exactly one unit. Catches indexing and sign errors the aggregate energy
+    identity can absorb -- a globally-flipped current still squares to the same power."""
+    fig = permeability_graph(_grid_block(), roads)
+    assert np.allclose(_node_net_current(fig), 1.0, rtol=1e-9, atol=1e-9)
+
+
+def test_current_is_zero_when_every_parcel_fronts_the_street():
+    """A sanity anchor for the sign convention: with every parcel grounded and the fabric
+    symmetric, no unit has any reason to cross the mesh -- each leaves through its own ground edge,
+    so the potentials are equal and every dphi is 0.
+
+    Built with the full boundary ring as street, not the shared south-edge fixture, and asserted to
+    have edges: on a 1x1 block `current` is empty and `allclose` would pass vacuously.
+    """
+    base = _grid_block(2, 10.0)
+    ring = gpd.GeoDataFrame(geometry=[base.boundary.boundary], crs=UTM)
+    block = Block(block_id="ring", crs=UTM, boundary=base.boundary,
+                  parcels=base.parcels, streets=ring)
+
+    fig = permeability_graph(block, None)
+    assert len(fig.rows) > 0                       # not vacuous
+    assert np.all(fig.ground_g > 0.0)              # every parcel fronts the ring
+    assert np.allclose(fig.current, 0.0)
