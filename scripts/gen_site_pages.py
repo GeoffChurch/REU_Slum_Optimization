@@ -43,6 +43,7 @@ MB = ROOT / "examples" / "multiblock_depth"
 OUTPUTS = ROOT / "outputs"
 BAKEOFF = ROOT / "examples" / "screen-bakeoff"
 NAIROBI = ROOT / "examples" / "nairobi"
+PERMGRAPH = ROOT / "examples" / "perm-graph"
 
 
 def _load_friendly_method_name() -> Callable[[str], str]:
@@ -240,6 +241,39 @@ def _bakeoff_figures() -> str:
         if url:
             out.append(_figure(url, caption, caption))
     return "\n\n".join(out)
+
+
+def _perm_graph_figures() -> str:
+    """The Permeability section's 2x2: the egress graph, conductance and current, before and after.
+
+    Every number in these captions is read from `examples/perm-graph/perm_graph.json`, written by
+    `scripts/gen_perm_graph.py` beside the images. Typing one here would reintroduce the drift class
+    the truth pass closed -- and `_intro.md`'s "seven methods" is the proof that a figure does not
+    have to look like a metric to rot.
+    """
+    meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
+    block, method = meta["block_id"], friendly_method_name(meta["method"])
+    p_after, road_m = meta["permeability_after"] * 100.0, meta["road_m"]
+    n_parcels, n_edges = meta["n_parcels"], meta["n_edges"]
+    out: list[str] = []
+    for layer, what in (("conductance", "conductance"), ("current", "current")):
+        for state, roads_phrase in (
+            ("before", "with no new roads"),
+            ("after", f"under {method}'s roads at the matched-permeability standard"),
+        ):
+            url = _copy_asset(PERMGRAPH / f"graph_{layer}_{state}.png", "perm-graph")
+            if url is None:
+                continue
+            caption = (
+                f"Block {block}: {n_parcels} parcels, {n_edges} footpath-mesh edges, "
+                f"{roads_phrase}. Edge width is {what}; node colour is egress potential φ on "
+                f"the same scale as the heatmaps above, dark meaning a harder escape."
+            )
+            if state == "after":
+                caption += (f" That prefix is {road_m:,.0f} m of road and reaches "
+                            f"{p_after:.1f}% permeability.")
+            out.append(_figure(url, f"egress graph, {what}, {state} roads", caption))
+    return "\n".join(out)
 
 
 def _bakeoff_scale() -> str:
@@ -682,9 +716,9 @@ def gen_benchmark_section() -> str:
         if before:
             parts.append(_figure(before, "Block ZAF.9.3.1_1_40972 before any roads are added",
                                  "The block before reblocking: 263 parcels, up to 7 rings deep."))
-        afters = [(p.name[len("after_"):-len(".png")], _copy_asset(p, "method-comparison"))
-                  for p in sorted(MC.glob("after_*.png"))]
-        afters = [(lbl, url) for lbl, url in afters if url]
+        afters_all = [(p.name[len("after_"):-len(".png")], _copy_asset(p, "method-comparison"))
+                      for p in sorted(MC.glob("after_*.png"))]
+        afters: list[tuple[str, str]] = [(lbl, url) for lbl, url in afters_all if url is not None]
         if afters:
             parts.append("After, per method:\n")
             for i in range(0, len(afters), 3):
@@ -941,6 +975,7 @@ MARKERS: dict[str, Callable[[], str]] = {
     "BAKEOFFSCALE": _bakeoff_scale,
     "BAKEOFFFLOORS": _bakeoff_floors_table,
     "BAKEOFFFIGS": _bakeoff_figures,
+    "PERMGRAPHFIGS": _perm_graph_figures,
     "NAIROBITABLE": _nairobi_table,
     "REPROCOMMANDS": _repro_commands,
 }

@@ -197,3 +197,19 @@ def test_unpublished_methods_are_excluded_from_the_build() -> None:
     assert not leaked, (
         f"published=False but exclude_docs has no line matching the generator's real output "
         f"path for: {leaked}")
+
+
+def test_perm_graph_figures_quote_the_artifact_not_a_typed_number() -> None:
+    """The captions' numbers must come from perm_graph.json. A hand-typed figure in the partial is
+    exactly the drift the site's truth pass closed -- and 'seven methods' drifted because a count
+    did not look like a metric."""
+    import json
+
+    from scripts.gen_site_pages import PERMGRAPH, _perm_graph_figures
+
+    meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
+    html = _perm_graph_figures()
+
+    assert "graph_current_after.png" in html
+    assert f"{meta['permeability_after'] * 100:.1f}" in html
+    assert meta["block_id"] in html

@@ -1,11 +1,13 @@
 <!-- Handwritten partial for docs/methodology/permeability.md. scripts/gen_site_pages.py prepends
-     the do-not-edit note and writes this straight through -- there are no markers to fill on this
-     page (this page adds no markers and no producers). Edit HERE, never
-     docs/methodology/permeability.md (it is generated and gitignored). This file is committed but
-     excluded from the built site (see exclude_docs in mkdocs.yml).
+     the do-not-edit note and fills one marker, PERMGRAPHFIGS, which reads
+     examples/perm-graph/perm_graph.json and copies the four committed PNGs beside it -- written by
+     scripts/gen_perm_graph.py. Edit HERE, never docs/methodology/permeability.md (it is generated
+     and gitignored). This file is committed but excluded from the built site (see exclude_docs in
+     mkdocs.yml).
 
-     This page describes a MODEL, so its only quantities are symbolic parameters (g_walk, P*, r_i),
-     never measured values -- no typed number belongs in this file. -->
+     This page otherwise describes a MODEL, so its prose quantities are symbolic parameters
+     (g_walk, P*, r_i), never measured values -- no number is typed directly into this file; every
+     figure caption's numbers arrive via the marker. -->
 
 # Permeability
 
@@ -55,6 +57,6 @@ Nodes are parcel centroids. Two layers of edges connect them:
   folded directly into that parcel's own row of the Laplacian diagonal. Ground is eliminated
   algebraically — it is never a graph node you could route through.
 
-<!-- Figure: the parcel graph on a real block -- footpath mesh, ground edges, and road-upgraded
-     edges together -- is not rendered on this page yet. Piece B of this site redesign (the graph
-     artifact type) supplies it as a static image. -->
+## The graph, drawn
+
+<!-- PERMGRAPHFIGS -->
