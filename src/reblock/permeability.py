@@ -68,8 +68,8 @@ from shapely.ops import unary_union
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.mesh import Mesh, footpath_mesh
 from reblock.mesh import _footpath_conductance as _footpath_conductance
-from reblock.mesh import footpath_mesh
 from reblock.mesh import parcel_radii as parcel_radii
 
 if TYPE_CHECKING:
@@ -272,6 +272,72 @@ def edge_conductances(
     return g
 
 
+@dataclass(frozen=True)
+class EgressSolution:
+    """One grounded egress solve, with the assembly it was built from.
+
+    `egress_power` returns only (P, v) because that is all the metric needs. The graph FIGURE
+    (`reblock.perm_graph`) also needs the per-edge conductances the Laplacian was assembled from --
+    so the assembly is exposed here once, rather than re-derived (which this module's docstring
+    forbids) or recomputed alongside a second mesh build that would be free to disagree with the
+    first.
+
+    `conductance` is one value per `mesh` edge, after road upgrades: `edge_conductances`' output.
+    """
+    p: float
+    potential: NDArray[np.float64]
+    mesh: Mesh
+    conductance: NDArray[np.float64]
+
+
+def solve_egress(
+    block: Block,
+    roads: GeoDataFrame | None,
+    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
+    *,
+    adj: list[set[int]] | None = None,
+    radii: NDArray[np.float64] | None = None,
+) -> EgressSolution:
+    """The one grounded-Laplacian assembly and sparse solve. See `egress_power` for the model, and
+    `EgressSolution` for why the intermediate quantities are returned rather than discarded.
+
+    Degenerate cases keep `egress_power`'s contract exactly: an ungrounded block (no parcel within
+    STREET_TOL of a street) or a non-finite solve yields `p = inf` and zero potentials, still
+    paired with the mesh and conductances that were built -- a caller that wants to REFUSE those
+    (the figure generator does) checks `p` rather than being handed a silently-zero field."""
+    parcels = block.parcels
+    n = len(parcels)
+
+    mesh = footpath_mesh(block, params, adj=adj, radii=radii)
+    rows_arr, cols_arr, dist_arr = mesh.rows, mesh.cols, mesh.dist
+    conds_arr = edge_conductances(mesh.segments, dist_arr, mesh.footpath_g, roads, params)
+    zeros = np.zeros(n, dtype=np.float64)
+
+    if not mesh.ground.any():
+        return EgressSolution(float("inf"), zeros, mesh, conds_arr)
+
+    diag = np.zeros(n, dtype=np.float64)
+    np.add.at(diag, rows_arr, conds_arr)
+    np.add.at(diag, cols_arr, conds_arr)
+    diag[mesh.ground] += params.g_street
+
+    # off-diagonal entries: -g_ij at (i,j) and (j,i)
+    off_rows = np.concatenate([rows_arr, cols_arr])
+    off_cols = np.concatenate([cols_arr, rows_arr])
+    off_data = np.concatenate([-conds_arr, -conds_arr])
+
+    all_rows = np.concatenate([off_rows, np.arange(n, dtype=np.int64)])
+    all_cols = np.concatenate([off_cols, np.arange(n, dtype=np.int64)])
+    all_data = np.concatenate([off_data, diag])
+
+    lap = coo_matrix((all_data, (all_rows, all_cols)), shape=(n, n)).tocsr()
+    b = np.ones(n, dtype=np.float64)
+    v = spsolve(cast(csr_matrix, lap), b)
+    if not np.all(np.isfinite(v)):
+        return EgressSolution(float("inf"), zeros, mesh, conds_arr)
+    return EgressSolution(float(b @ v), cast(NDArray[np.float64], v), mesh, conds_arr)
+
+
 def egress_power(
     block: Block,
     roads: GeoDataFrame | None,
@@ -287,46 +353,8 @@ def egress_power(
     dissipated power for a nonzero current injection). `radii` lets a caller freeze the per-parcel
     footprint radii (`parcel_radii`) across repeated calls on the same block (mirrors `adj`);
     computed internally when omitted."""
-    parcels = block.parcels
-    n = len(parcels)
-    if n == 0:
-        return float("inf"), np.zeros(0, dtype=np.float64)
-
-    mesh = footpath_mesh(block, params, adj=adj, radii=radii)
-    if not mesh.ground.any():
-        return float("inf"), np.zeros(n, dtype=np.float64)
-    rows_arr, cols_arr, dist_arr = mesh.rows, mesh.cols, mesh.dist
-    ground = mesh.ground
-
-    diag = np.zeros(n, dtype=np.float64)
-    if dist_arr.size:
-        conds_arr = edge_conductances(
-            mesh.segments, dist_arr, mesh.footpath_g, roads, params)
-        np.add.at(diag, rows_arr, conds_arr)
-        np.add.at(diag, cols_arr, conds_arr)
-    diag[ground] += params.g_street
-
-    # off-diagonal entries: -g_ij at (i,j) and (j,i)
-    if dist_arr.size:
-        off_rows = np.concatenate([rows_arr, cols_arr])
-        off_cols = np.concatenate([cols_arr, rows_arr])
-        off_data = np.concatenate([-conds_arr, -conds_arr])
-    else:
-        off_rows = np.zeros(0, dtype=np.int64)
-        off_cols = np.zeros(0, dtype=np.int64)
-        off_data = np.zeros(0, dtype=np.float64)
-
-    all_rows = np.concatenate([off_rows, np.arange(n, dtype=np.int64)])
-    all_cols = np.concatenate([off_cols, np.arange(n, dtype=np.int64)])
-    all_data = np.concatenate([off_data, diag])
-
-    lap = coo_matrix((all_data, (all_rows, all_cols)), shape=(n, n)).tocsr()
-    b = np.ones(n, dtype=np.float64)
-    v = spsolve(cast(csr_matrix, lap), b)
-    if not np.all(np.isfinite(v)):
-        return float("inf"), np.zeros(n, dtype=np.float64)
-    p = float(b @ v)
-    return p, cast(NDArray[np.float64], v)
+    sol = solve_egress(block, roads, params, adj=adj, radii=radii)
+    return sol.p, sol.potential
 
 
 def permeability(
