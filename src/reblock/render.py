@@ -247,8 +247,12 @@ _EDGE_LW_MIN = 0.15                # a hairline, so the mesh stays present rathe
 # of its bottom sliver. Re-tune this if the norm's definition changes again.
 _EDGE_LW_MAX = 3.0
 # Upgraded edges do not use the frac-of-width_norm map at all (fix round 1 Finding B): see
-# render_graph's docstring for why a fixed width is the honest choice here.
-_UPGRADED_LW = 2.5
+# render_graph's docstring for why a fixed width is the honest choice here. 1.0pt (fix round 3,
+# down from 2.5) -- at 2.5, ~65 criss-crossing centroid-to-centroid edges along a narrow corridor
+# painted it as one opaque slab (the corridor buffer beneath, and the mesh/nodes inside it, were
+# both fully obscured); 1.0 is thin enough that the mesh, nodes and pale corridor tint show through
+# the whole corridor's length while the road is still an unmistakably bold, distinct blue feature.
+_UPGRADED_LW = 1.0
 _GROUND_HALO = "#1a1a1a"
 _NODE_RADIUS_FRAC = 0.18           # of the median edge length, so this holds at region scale
 
