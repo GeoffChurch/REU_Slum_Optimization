@@ -236,7 +236,7 @@ def test_perm_graph_figures_carry_no_fix_round_1_regression() -> None:
     # from the upgraded (blue) edges -- they are footpath-mesh edges too. So no "... edge width is
     # ..." sentence may claim width for anything but the GREY edges specifically, and it must say
     # what the blue ones do instead (draw at a fixed width, not a computed one).
-    for claim in re.findall(r"[A-Z][a-z]* edge width is [^.]*\.", html):
+    for claim in re.findall(r"\b(?:[A-Z][a-z]* )?[Ee]dge width is\b[^.]*\.", html):
         assert claim.startswith("Grey edge width is"), claim
         assert "fixed width instead" in claim, claim
 

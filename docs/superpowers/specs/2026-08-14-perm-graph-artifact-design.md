@@ -210,7 +210,7 @@ halo uses `_BOUNDARY_COLOR` (`#222222`). `render_graph` adds exactly ONE new con
 hairline widths mesh edges draw at. (A first pass at this file introduced two more, one for the
 wireframe and one for the ground halo, each indistinguishable from an existing constant already in
 the file; a 2026-08-14 fix wave deleted both and recorded the decision here so it does not
-re-surface as drift.) piece C emits these same constants into the bundle, so a second palette here
+re-surface as drift.) Piece C emits these same constants into the bundle, so a second palette here
 would surface as the most visible possible drift.
 
 ## §3 The figure set and its generator
