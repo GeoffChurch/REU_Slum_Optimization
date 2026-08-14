@@ -24,13 +24,17 @@ import matplotlib
 matplotlib.use("Agg")
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from matplotlib.axes import Axes
+from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import BBox, Block, Metrics, Proposal
+from reblock.perm_graph import GRAPH_LAYERS, GraphFigure, GraphLayer
 
 _CMAP = "YlOrRd"          # depth coloring: pale -> dark red as access depth grows
 _PERM_CMAP = _CMAP        # perm now shares the depth red (YlOrRd) scale (was "PuBu" blue)
@@ -110,6 +114,29 @@ _FIELD_CMAP: dict[str, str] = {"depth": _CMAP, "perm": _PERM_CMAP}
 _FIELD_VMIN: dict[str, float] = {"depth": 1, "perm": 0}
 
 
+def _draw_boundary_and_streets(ax: Axes, block: Block) -> None:
+    """The block outline and the EXISTING street network, in `_BOUNDARY_COLOR`.
+
+    Shared by the heatmap and the graph renderers: both need it, and the MultiPolygon reasoning
+    below is not worth stating twice.
+
+    A single block (or a gap-free region) is a Polygon -- draw its ring. A gappy multi-block
+    region's boundary is a MultiPolygon whose `.boundary` is one ring PER member: redundant with
+    the inter-block streets drawn below, so skip it there (drawing it added a misleading
+    convex-hull-like outline across the empty gaps between members).
+
+    The street network is never skipped. For a single block it is the outer ring; for a region it
+    also carries the inter-block streets between members -- existing egress the 'before' access
+    depth is measured against, so they must be visible (a parcel next to one is shallow, not deep),
+    and for a gappy region this IS the region outline.
+    """
+    if isinstance(block.boundary, Polygon):
+        gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
+            ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
+    if block.streets is not None and not block.streets.empty:
+        block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
+
+
 def _draw_heatmap(
     block: Block, layers: pd.Series, vmax: float, *,
     field: Literal["depth", "perm"] = "depth",
@@ -143,19 +170,7 @@ def _draw_heatmap(
         _point_disks(context_points, _POINT_RADIUS_M).plot(
             ax=ax, color=_CONTEXT_PT, alpha=0.6, linewidth=0)
 
-    # Outline. A single block (or a gap-free region) is a Polygon -- draw its ring. A gappy
-    # multi-block region's boundary is a MultiPolygon whose `.boundary` is one ring PER member:
-    # redundant with the inter-block streets drawn below, so skip it there (drawing it added a
-    # misleading convex-hull-like outline across the empty gaps between members).
-    if isinstance(block.boundary, Polygon):
-        gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
-            ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
-    # The existing street network. For a single block this is the outer ring; for a region it also
-    # carries the inter-block streets between members -- existing egress the 'before' access depth
-    # is measured against, so they must be visible (a parcel next to one is shallow, not deep). For
-    # a gappy region this IS the region outline (the boundary above is skipped).
-    if block.streets is not None and not block.streets.empty:
-        block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
+    _draw_boundary_and_streets(ax, block)
 
     if own_points is not None and not own_points.empty:
         _point_disks(own_points, _POINT_RADIUS_M).plot(ax=ax, color=_OWN_PT, linewidth=0)
@@ -220,6 +235,97 @@ def render_after(
                 proposal.roads["width_m"].to_numpy(dtype=float) / 2.0), crs=block.crs)
         roads_buffered.plot(ax=ax, color=_ROAD_COLOR, zorder=4)
 
+    return fig
+
+
+_GRAPH_PARCEL_EDGE = "#cccccc"     # the wireframe parcels recede to; graph is the subject
+_EDGE_GREY = "#8c8c8c"
+_EDGE_LW_MIN = 0.15                # a hairline, so the mesh stays present rather than vanishing
+_EDGE_LW_MAX = 6.0
+_GROUND_HALO = "#1a1a1a"
+_NODE_RADIUS_FRAC = 0.18           # of the median edge length, so this holds at region scale
+
+
+def render_graph(
+    figure: GraphFigure,
+    block: Block,
+    *,
+    layer: GraphLayer,
+    vmax: float,
+    width_norm: float,
+    frame: BBox | None = None,
+    roads: gpd.GeoDataFrame | None = None,
+) -> Figure:
+    """The egress graph itself: nodes coloured by potential, edges widthed by `layer`.
+
+    `layer` picks what edge width encodes -- `"conductance"` shows the clearance-fraction mesh (and,
+    with roads, which edges they raised); `"current"` shows the drainage, `i = g(phi_i - phi_j)`,
+    where the tree appears and a road visibly concentrates flow into itself. Both quantities live on
+    the same `GraphFigure`; the choice is the caller's, made once where a figure SET is defined
+    rather than re-derived per draw.
+
+    `vmax` (node potential) and `width_norm` (the edge quantity) are explicit for the same reason
+    `render_before`/`render_after` take an explicit `vmax`: a before/after pair has to share its
+    scales or the comparison means nothing.
+
+    Parcels are drawn as a pale wireframe, NOT filled by potential. Filling them would state the
+    same quantity twice in two shapes and drown the graph -- this is not the `perm` choropleth with
+    dots on top. Node colour uses `_PERM_CMAP` with `vmin=0`, the same scale that choropleth uses,
+    so colour means the same thing on both images a reader meets on one page.
+    """
+    fig, ax = plt.subplots(figsize=(16, 16))
+
+    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_GRAPH_PARCEL_EDGE, linewidth=0.4)
+
+    view = frame if frame is not None else frame_bbox(block.parcels)
+    ax.set_xlim(view[0], view[2])
+    ax.set_ylim(view[1], view[3])
+
+    # The corridor under the graph, so corridor and upgraded edges read as one fact.
+    if roads is not None and not roads.empty:
+        gpd.GeoDataFrame(
+            geometry=roads.geometry.buffer(roads["width_m"].to_numpy(dtype=float) / 2.0),
+            crs=block.crs).plot(ax=ax, color=_ROAD_COLOR, alpha=0.25, zorder=2, linewidth=0)
+
+    _draw_boundary_and_streets(ax, block)
+
+    # Edges: ONE LineCollection per colour, never a per-row plot -- a region's ~60k edges are
+    # cheap as two collections and hopeless as 60k artists.
+    quantity = GRAPH_LAYERS[layer](figure)
+    segs = np.stack([
+        np.column_stack([figure.cx[figure.rows], figure.cy[figure.rows]]),
+        np.column_stack([figure.cx[figure.cols], figure.cy[figure.cols]]),
+    ], axis=1)
+    frac = np.clip(np.abs(quantity) / width_norm, 0.0, 1.0) if width_norm > 0 else np.zeros(
+        len(quantity))
+    widths = _EDGE_LW_MIN + frac * (_EDGE_LW_MAX - _EDGE_LW_MIN)
+
+    plain = ~figure.upgraded
+    if plain.any():
+        ax.add_collection(LineCollection(
+            segs[plain], linewidths=widths[plain], colors=_EDGE_GREY, zorder=3))
+    if figure.upgraded.any():
+        ax.add_collection(LineCollection(
+            segs[figure.upgraded], linewidths=widths[figure.upgraded], colors=_ROAD_COLOR,
+            zorder=4))
+
+    # Nodes as geographic-radius disks (the `_point_disks` treatment), so this does not collapse
+    # into a screen-size thicket at region scale.
+    node_r = _NODE_RADIUS_FRAC * (float(np.median(np.hypot(
+        figure.cx[figure.rows] - figure.cx[figure.cols],
+        figure.cy[figure.rows] - figure.cy[figure.cols]))) if len(figure.rows) else 1.0)
+    nodes = gpd.GeoDataFrame(
+        {"phi": figure.potential},
+        geometry=gpd.points_from_xy(figure.cx, figure.cy).buffer(node_r), crs=block.crs)
+
+    grounded = figure.ground_g > 0.0
+    if grounded.any():
+        nodes[grounded].geometry.buffer(node_r * 0.6).plot(
+            ax=ax, facecolor="none", edgecolor=_GROUND_HALO, linewidth=1.6, zorder=5)
+    nodes.plot(ax=ax, column="phi", cmap=_PERM_CMAP, vmin=0.0, vmax=vmax, linewidth=0, zorder=6)
+
+    ax.set_aspect("equal")
+    ax.axis("off")
     return fig
 
 
