@@ -57,10 +57,11 @@ outputs/*/.hydra/*
 
 # Generated site page + assets: CI regenerates them from examples/ + the outputs snapshot
 # (see .github/workflows/deploy-site.yml); run scripts/gen_site_pages.py for a local preview.
-# The handwritten intro lives in docs/_intro.md (tracked); index.md is assembled from it.
+# The handwritten prose lives in docs/_partials/ (tracked); index.md is assembled from it.
 docs/index.md
-docs/methods/
-docs/benchmark.md
+docs/reproduce.md
+docs/methodology/
+docs/results/
 docs/assets/
 
 # Hydra scratch dir left behind by in-place regeneration of examples/method-comparison

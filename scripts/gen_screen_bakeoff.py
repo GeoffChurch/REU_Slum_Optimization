@@ -12,6 +12,7 @@ doi:10.7488/ds/2758), clustered into 189 settlement extents.
 Outputs, into `examples/screen-bakeoff/`:
 
     screen_comparison.csv   AUC + precision/recall at each retention, per metric
+    ground_truth.json       survey scale: structure/settlement/block counts (site BAKEOFFSCALE)
     precision_recall.png    the statistical view
     city_map.png            the whole metro: settlements, and where the two leading screens disagree
     settlements.png         zoomed panels on the settlements where they disagree most
@@ -22,18 +23,21 @@ equivalent Nairobi layer.
 """
 from __future__ import annotations
 
+import argparse
+import json
 import sys
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyogrio
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from pyproj import CRS
 from scipy.stats import rankdata
 
-from reblock.data.informal import label_blocks, settlement_extents
+from reblock.data.informal import ensure_informal_structures, label_blocks, settlement_extents
 from reblock.data.provision import cached_kblock_source
 from reblock.metric import DENSITY_COMPACTNESS_FLOOR, DEPTH_DENSITY_PROXY_FLOOR
 
@@ -173,14 +177,19 @@ def plot_city(b: gpd.GeoDataFrame, ext: gpd.GeoDataFrame, path: Path) -> None:
     plt.close(fig)
 
 
+def _block_settlement_id(b: gpd.GeoDataFrame, ext: gpd.GeoDataFrame) -> np.ndarray:
+    """Index into `ext` of the settlement containing each block's centroid, NaN if none."""
+    cent = b.geometry.centroid
+    pts = gpd.GeoDataFrame(geometry=list(cent), crs=b.crs)
+    joined = gpd.sjoin(pts, ext.reset_index(names="sid"), how="left", predicate="within")
+    return joined.groupby(joined.index)["sid"].first().reindex(range(len(b))).to_numpy()
+
+
 def plot_settlements(b: gpd.GeoDataFrame, ext: gpd.GeoDataFrame, path: Path, n: int = 4) -> None:
     """Zoom on the settlements where the two screens disagree most."""
     new, old = _selections(b)
     disagree = new ^ old
-    cent = b.geometry.centroid
-    pts = gpd.GeoDataFrame(geometry=list(cent), crs=b.crs)
-    joined = gpd.sjoin(pts, ext.reset_index(names="sid"), how="left", predicate="within")
-    sid = joined.groupby(joined.index)["sid"].first().reindex(range(len(b))).to_numpy()
+    sid = _block_settlement_id(b, ext)
     counts = pd.Series(sid[disagree]).value_counts()
     top = [int(s) for s in counts.index[:n] if not np.isnan(s)]
     if not top:
@@ -219,7 +228,72 @@ def plot_settlements(b: gpd.GeoDataFrame, ext: gpd.GeoDataFrame, path: Path, n: 
     plt.close(fig)
 
 
+def print_top_settlements(b: gpd.GeoDataFrame, ext: gpd.GeoDataFrame, *, retention: float = 0.01
+                          ) -> None:
+    """Which settlement holds the highest-scoring block(s), per metric.
+
+    Settlement extents (`reblock.data.informal`) carry no name field -- they are DBSCAN clusters of
+    survey structures, not a gazetteer -- so this reports each settlement by its cluster id,
+    structure count, and WGS84 centroid, which is enough to look the place up by hand. Two views:
+    the single #1 block (can be a fluke), and where the top `retention` share of blocks by that
+    metric concentrate (robust to any one block's placement)."""
+    sid = _block_settlement_id(b, ext)
+    ext_ll = gpd.GeoSeries(ext.geometry.centroid, crs=ext.crs).to_crs(4326)
+    ext_lat, ext_lon = ext_ll.y, ext_ll.x  # Series-level: a `.iloc[k]` scalar has no `.x`/`.y` type
+
+    def where(k: int) -> str:
+        return (f"settlement #{k} ({int(ext['n_structures'].iloc[k]):,} structures) centred at "
+                f"{ext_lat.iloc[k]:.4f}, {ext_lon.iloc[k]:.4f} (lat, lon)")
+
+    print(f"\ntop-scoring block(s) by settlement, per metric (retention={retention:.0%}):")
+    for col, name, _ in METRICS:
+        s = b[col].to_numpy()
+        order = np.argsort(-s)
+        top1 = int(order[0])
+        s1 = sid[top1]
+        loc1 = "NOT inside any settlement extent" if np.isnan(s1) else where(int(s1))
+        print(f"  {name}\n    #1 block (score {s[top1]:.4g}): {loc1}")
+
+        k = max(1, int(len(s) * retention))
+        pool = sid[order[:k]]
+        valid = pool[~np.isnan(pool)]
+        vc = pd.Series(valid).value_counts()
+        outside = int(np.isnan(pool).sum())
+        if len(vc):
+            top_sid = int(vc.index.to_numpy()[0])
+            print(f"    top {k} blocks: {int(vc.iloc[0])}/{k} concentrate in {where(top_sid)}; "
+                  f"{len(vc)} distinct settlements touched, {outside}/{k} outside any extent")
+        else:
+            print(f"    top {k} blocks: none inside any settlement extent")
+
+
+def ground_truth_summary(b: gpd.GeoDataFrame, ext: gpd.GeoDataFrame) -> dict[str, int]:
+    """The four counts the site's BAKEOFFSCALE marker reads (scripts/gen_site_pages.py): total
+    surveyed structures, how many settlement extents they cluster into, and how many of the
+    scored blocks are informal versus scored in total.
+
+    `structures` is read from the shapefile's own feature count via pyogrio -- fast (no geometry
+    parsing) and, unlike `ext["n_structures"].sum()`, not undercounted by the DBSCAN clustering in
+    `settlement_extents`, which drops border noise and sub-MIN_STRUCTURES clusters and retains
+    only 97.9% of structures (see reblock.data.informal).
+    """
+    n_structures = int(pyogrio.read_info(str(ensure_informal_structures("capetown")))["features"])
+    lab = b["informal"].to_numpy()
+    return {
+        "structures": n_structures,
+        "settlements": len(ext),
+        "informal_blocks": int(lab.sum()),
+        "total_blocks": len(b),
+    }
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--top-settlement", action="store_true",
+                        help="also print which settlement holds the highest-scoring block(s), "
+                             "per metric -- the measurement behind background.md's peak claim")
+    args = parser.parse_args()
+
     OUT.mkdir(parents=True, exist_ok=True)
     print("loading blocks + settlement extents (downloads ~18 MB once)", flush=True)
     b, ext = load()
@@ -230,6 +304,13 @@ def main() -> None:
     t = table(b)
     t.to_csv(OUT / "screen_comparison.csv", index=False)
     print("\n" + t.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+
+    gt = ground_truth_summary(b, ext)
+    (OUT / "ground_truth.json").write_text(json.dumps(gt, indent=2) + "\n", encoding="utf-8")
+    print(f"  wrote ground_truth.json: {gt}", flush=True)
+
+    if args.top_settlement:
+        print_top_settlements(b, ext)
 
     for name, fn in (("precision_recall.png", plot_pr),
                      ("city_map.png", lambda x, p: plot_city(x, ext, p)),
