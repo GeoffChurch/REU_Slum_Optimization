@@ -277,7 +277,7 @@ def _nairobi_table() -> str:
             continue
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         methods = {r["method"] for r in _read_csv(d / "lens_permeability.csv")}
-        rows.append([f"[{d.name}](https://github.com/jmendoza167/REU_Slum_Optimization/"
+        rows.append([f"[{d.name}](https://github.com/GeoffChurch/REU_Slum_Optimization/"
                      f"tree/main/examples/nairobi/{d.name})",
                      f"`{meta['metric']}`" if meta.get("metric") else "—",
                      _num(meta["region_members"]) if meta.get("region_members") else "—",
@@ -567,7 +567,7 @@ def _mc_section(m: M) -> list[str]:
     if not (before or after or summary):
         return parts
     parts.append("## Head-to-head on one deep block\n")
-    parts.append("From the [method-comparison example](https://github.com/jmendoza167/"
+    parts.append("From the [method-comparison example](https://github.com/GeoffChurch/"
                  "REU_Slum_Optimization/tree/main/examples/method-comparison): six reblockers on "
                  "`ZAF.9.3.1_1_40972`, the deepest topology-tractable block in the Cape Town "
                  "metro (263 parcels, up to 7 rings deep), graded on permeability (a flow measure "
@@ -653,7 +653,7 @@ def gen_method_section(m: M) -> str:
         parts.append(m.blurb + "\n")
     if m.conf and (ROOT / "conf" / "method" / f"{m.conf}.yaml").exists():
         parts.append(f"Configuration: [`conf/method/{m.conf}.yaml`](https://github.com/"
-                     f"jmendoza167/REU_Slum_Optimization/blob/main/conf/method/{m.conf}.yaml)\n")
+                     f"GeoffChurch/REU_Slum_Optimization/blob/main/conf/method/{m.conf}.yaml)\n")
     if m.slug == "dream_come_true":
         parts.append(DREAM_BODY)
     body = (_mc_section(m) if m.mc_key else []) + \
