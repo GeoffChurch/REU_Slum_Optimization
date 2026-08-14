@@ -69,5 +69,12 @@ multi-block **region** first:
 The reason is architectural. A road proposed for a single block stops dead at that block's
 boundary, whether or not the settlement's fabric continues past it; growing a region first lets
 the roads that follow run continuous across block boundaries instead. This is also the hinge in
-the pipeline: everything up to and including the screen is cheap enough to sweep a whole city at
-once, and everything from `region_builder` on is per-block and expensive.
+the pipeline: under the shipped default, everything up to and including the screen is cheap enough
+to sweep a whole city at once, and everything from `region_builder` on is per-block and expensive.
+
+The peel-based metrics — `depth` and `depth_density`, selectable in place of the default — blur
+that line deliberately. Neither can score a block without its true access depth, so the screen runs
+in two stages: rank the whole metro by the cheap proxy, keep the top slice, then tessellate and
+peel only those survivors. The expensive work still happens, but on a pre-filtered fraction of the
+metro instead of all of it — which is why those metrics cost minutes where the default costs one
+pass.
