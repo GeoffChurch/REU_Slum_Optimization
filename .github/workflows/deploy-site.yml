@@ -37,6 +37,16 @@ jobs:
       # in either package can change theme markup or image handling under us with no commit to
       # point at. Bump these deliberately.
       - run: pip install mkdocs-material==9.7.7 mkdocs-glightbox==0.5.2
+      # The widget bundle. Node is pinned to the same major as pyproject.toml's pixi `nodejs`
+      # dependency, so the tsc that gates pull requests and the esbuild that ships are the same
+      # runtime. `npm ci` (not install) so package-lock.json is authoritative.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
       - run: python3 scripts/gen_site_pages.py
       # --strict promotes MkDocs' broken-link warnings to build failures (an orphan page -- one
       # outside nav -- only logs at INFO and does NOT fail the build even under --strict, verified

@@ -1,0 +1,13 @@
+{
+  "name": "reblock-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/mount.ts --bundle --format=iife --minify --outfile=../docs/js/widgets.js",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

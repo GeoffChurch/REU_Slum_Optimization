@@ -83,6 +83,9 @@ extra_css:
   - stylesheets/fonts.css   # self-hosted faces; must load before the sheet that uses them
   - stylesheets/sbu.css
 
+extra_javascript:
+  - js/widgets.js
+
 plugins:
   - search
   # Click-to-zoom for the run renders and frontier curves, which carry detail that does not

@@ -4,6 +4,7 @@
 venv/
 env/
 .pixi/
+web/node_modules/
 
 # Python
 __pycache__/
@@ -63,6 +64,9 @@ docs/reproduce.md
 docs/methodology/
 docs/results/
 docs/assets/
+
+# Built by `pixi run web` (esbuild) and by deploy-site.yml in CI -- generated, like docs/assets/.
+docs/js/
 
 # Hydra scratch dir left behind by in-place regeneration of examples/method-comparison
 examples/method-comparison/.hydra/

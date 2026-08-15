@@ -60,6 +60,10 @@ types-shapely = "*"
 # PyYAML ships no py.typed marker either; same upstream-stub pattern as above so
 # tests/data/test_osm_extract.py's `import yaml` stays fully checked.
 types-pyyaml = "*"
+# Builds and type-checks the web/ widget bundle. Pinned to the same major as
+# .github/workflows/deploy-site.yml's actions/setup-node, so a type error cannot pass locally and
+# fail in the site build (or the reverse).
+nodejs = "22.*"
 
 # Research/analysis stack for scripts/ and the OT retrieval work. Deliberately NOT in
 # [tool.pixi.dependencies]: no `src/reblock` module imports these, so they are not runtime
@@ -82,7 +86,10 @@ default = { features = ["dev", "research"], solve-group = "default" }
 
 [tool.pixi.tasks]
 test = "pytest"
-typecheck = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py"
+typecheck-py = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py"
+web = { cmd = "npm ci && npm run build", cwd = "web" }
+web-check = { cmd = "npm ci && npm run check", cwd = "web" }
+typecheck = { depends-on = ["typecheck-py", "web-check"] }
 lint = "ruff check ."
 fmt = "ruff format ."
 check = { depends-on = ["lint", "typecheck", "test"] }
