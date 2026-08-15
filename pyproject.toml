@@ -267,6 +267,7 @@ filterwarnings = [
 ]
 markers = [
     "network: hits the network (Geofabrik/Overpass/Open Buildings); deselect with -m 'not network'",
+    "slow: needs a warm derivation cache and re-solves a block; deselect with -m 'not slow'",
 ]
 
 [tool.ruff]
