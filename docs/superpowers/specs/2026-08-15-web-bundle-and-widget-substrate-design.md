@@ -77,9 +77,14 @@ follow from CI's shape:
 
 Road-independent, baked once:
 
-* `parcels` — polygon rings in projected UTM metres. **No reprojection anywhere:** the canvas fits
-  the bbox and draws. Coordinates rounded to 0.01 m, which is far below one screen pixel at any
-  plausible zoom.
+* `origin` — the UTM easting/northing subtracted from every coordinate below, so all geometry is
+  **local metres**. Two reasons, and the first is a correctness trap: a Cape Town UTM northing is
+  ~6,240,000, so rounding coordinates by *significant digits* would quantize them to 10 m and
+  dissolve the parcels while the file still parsed and the widget still drew. Coordinates are
+  therefore rounded to an absolute 0.01 m, and translating them to a local origin makes that cheap —
+  3–4 digits instead of 7. `width_m` is a length, so translation leaves it alone.
+* `parcels` — polygon rings, local metres. **No reprojection anywhere:** the canvas fits the bbox
+  and draws, and never learns the CRS. 0.01 m is far below one screen pixel at any plausible zoom.
 * `nodes` — `cx`, `cy` per parcel (from `GraphFigure`).
 * `edges` — `rows`, `cols`, and the road-independent `footpath_g`.
 * `roads` — `clearance`'s segments in `street_first_ordered` order (`src/reblock/budget.py:643`),
