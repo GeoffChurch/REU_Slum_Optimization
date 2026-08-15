@@ -38,22 +38,55 @@ export function draw(ctx: CanvasRenderingContext2D, b: Bundle, f: Frame,
     ctx.stroke();
   }
 
-  // The road corridor, drawn once as a translucent stroke of the prefix's segments at their own
-  // width. Stroked rather than buffered+filled because overlapping translucent fills compound
-  // toward opaque -- exactly the bug that made piece B's corridor unreadable.
+  // The road corridor, drawn once per width group as a translucent stroke of that group's
+  // segments, all joined into ONE path before ONE stroke(). A drainage-ordered prefix is many
+  // short segments meeting at junctions; each `stroke()` call is an independent compositing
+  // operation, so a stroke PER ROAD compounds translucency toward opaque at every junction just
+  // as surely as a fill would (this is the bug src/reblock/render.py:304-319 documents and avoids
+  // by unioning roads per width group before a single draw -- mirrored here: one beginPath() per
+  // width group covering every road in it, then one stroke()). Grouping by width_m also keeps a
+  // group's lineWidth well-defined, since lineWidth is a single value per stroke() call.
   ctx.globalAlpha = 0.25;
   ctx.strokeStyle = e.road_color;
   ctx.lineCap = "round";
+  const byWidth = new Map<number, typeof b.roads>();
   for (const r of b.roads.slice(0, f.prefix)) {
-    ctx.lineWidth = r.width_m * f.view.scale;
+    const group = byWidth.get(r.width_m);
+    if (group) group.push(r); else byWidth.set(r.width_m, [r]);
+  }
+  for (const [width_m, group] of byWidth) {
+    ctx.lineWidth = width_m * f.view.scale;
     ctx.beginPath();
-    r.coords.forEach(([x, y], i) => {
+    for (const r of group) {
+      r.coords.forEach(([x, y], i) => {
+        const [sx, sy] = toScreen(f.view, x, y);
+        if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+      });
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  // The block outline and the existing street network, beneath the graph -- fallback parity with
+  // src/reblock/render.py's _draw_boundary_and_streets, which every PNG (including
+  // graph_current_after.png, the image this widget replaces) draws in the same layer position:
+  // after the parcel wireframe and road corridor, before the mesh edges and nodes.
+  ctx.strokeStyle = e.boundary_color;
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  b.boundary.forEach(([x, y], i) => {
+    const [sx, sy] = toScreen(f.view, x, y);
+    if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+  });
+  ctx.stroke();
+  for (const line of b.streets) {
+    ctx.beginPath();
+    line.forEach(([x, y], i) => {
       const [sx, sy] = toScreen(f.view, x, y);
       if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
     });
     ctx.stroke();
   }
-  ctx.globalAlpha = 1;
 
   // Edges. Width encodes the chosen quantity for MESH edges only; road-raised edges draw at the
   // fixed upgraded_lw, because their computed width would be a saturated non-measurement.
@@ -62,7 +95,7 @@ export function draw(ctx: CanvasRenderingContext2D, b: Bundle, f: Frame,
   const { rows, cols, first_upgraded_at } = b.edges;
   for (let k = 0; k < rows.length; k++) {
     const up = first_upgraded_at[k]! >= 0 && first_upgraded_at[k]! <= f.prefix;
-    const frac = Math.min(1, Math.abs(quantity[k]!) / norm);
+    const frac = norm > 0 ? Math.min(1, Math.abs(quantity[k]!) / norm) : 0;
     ctx.strokeStyle = up ? e.road_color : e.edge_color;
     ctx.lineWidth = up ? e.upgraded_lw : e.edge_lw_min + frac * (e.edge_lw_max - e.edge_lw_min);
     const [x0, y0] = toScreen(f.view, b.nodes.cx[rows[k]!]!, b.nodes.cy[rows[k]!]!);
@@ -94,10 +127,15 @@ export function draw(ctx: CanvasRenderingContext2D, b: Bundle, f: Frame,
   }
 }
 
+/** Matches `np.median` (src/reblock/render.py:347-349): the average of the two middle values on
+ * an even-length array, not just the upper-middle one -- otherwise the widget's node radius
+ * quietly diverges from the PNG's whenever the edge count happens to be even. */
 function medianEdgeLength(b: Bundle): number {
   const ds = b.edges.rows.map((ri, k) => {
     const ci = b.edges.cols[k]!;
     return Math.hypot(b.nodes.cx[ri]! - b.nodes.cx[ci]!, b.nodes.cy[ri]! - b.nodes.cy[ci]!);
   }).sort((a, z) => a - z);
-  return ds[Math.floor(ds.length / 2)] ?? 1;
+  if (ds.length === 0) return 1;
+  const mid = ds.length / 2;
+  return ds.length % 2 === 0 ? (ds[mid - 1]! + ds[mid]!) / 2 : ds[Math.floor(mid)]!;
 }

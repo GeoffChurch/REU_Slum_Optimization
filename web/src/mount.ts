@@ -1,8 +1,5 @@
 /** The mount contract: a page carries a placeholder and nothing else. */
 import { localState, type StateSource, type WidgetState } from "./state.js";
-// Registers itself with `register()` below on import -- this is the one line that puts
-// PermGraph into the esbuild bundle. A widget file nothing imports never ships.
-import "./widgets/perm-graph.js";
 
 export type Widget = (host: HTMLElement, state: StateSource) => void;
 
@@ -44,6 +41,21 @@ export function mountAll(root: ParentNode = document): void {
     widget(el, localState(initialState(el)));
   }
 }
+
+// Registration lives HERE, not inside the widget module, and that is deliberate: importing the
+// widget was previously done for its `register("perm-graph", permGraph)` side effect at the
+// widget's own top level, and that widget module imported `register` back from this file to do
+// it. ES module evaluation fully resolves a module's imports -- running the imported module's own
+// top-level body -- before executing the importing module's body, so with that shape the widget's
+// top-level `register(...)` call ran BEFORE this file reached its own `const REGISTRY = new
+// Map()` above, throwing `TypeError: Cannot read properties of undefined (reading 'set')` on
+// every page load, before the DOMContentLoaded listener below was ever wired up (silent, because
+// the PNG fallback stayed visible and the page looked fine). Importing only the plain `permGraph`
+// function here -- and registering it explicitly, after REGISTRY exists -- breaks the cycle:
+// perm-graph.ts now has no runtime import of this file at all (see its `import type` comment), so
+// there is nothing left to reorder. Do not move this back into the widget module.
+import { permGraph } from "./widgets/perm-graph.js";
+register("perm-graph", permGraph);
 
 // DOMContentLoaded fires once per full page load. That is sufficient only because this project's
 // mkdocs.yml does not enable Material's navigation.instant feature (confirmed absent as of this

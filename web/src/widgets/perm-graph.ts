@@ -1,10 +1,13 @@
 import type { Bundle } from "../bundle.js";
 import { draw, sizeCanvas } from "../render/canvas.js";
-import { register, type Widget } from "../mount.js";
+// Type-only: erased at compile time, so this produces no runtime import of mount.js. A runtime
+// import here would recreate the mount<->widget cycle that made the bundle throw on load (see
+// mount.ts's registration comment) -- this module must never import `register` from mount.js.
+import type { Widget } from "../mount.js";
 import { fitBbox, nearest, panned, toWorld, zoomed, type View } from "../view/transform.js";
 import type { StateSource } from "../state.js";
 
-const permGraph: Widget = (host, state) => {
+export const permGraph: Widget = (host, state) => {
   const src = host.dataset.bundle!;
   void fetch(src).then((r) => r.json()).then((b: Bundle) => boot(host, state, b));
 };
@@ -76,5 +79,3 @@ function boot(host: HTMLElement, state: StateSource, b: Bundle): void {
 
   render();
 }
-
-register("perm-graph", permGraph);

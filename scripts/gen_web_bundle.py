@@ -23,7 +23,8 @@ from geopandas import GeoDataFrame
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from matplotlib import colormaps
-from shapely.geometry import Polygon
+from shapely.geometry import LineString, MultiLineString, Polygon
+from shapely.geometry.base import BaseGeometry
 
 from reblock.budget import prefix_to_permeability, street_first_ordered
 from reblock.compare import load_permeability_config
@@ -94,6 +95,24 @@ def _c(x: float) -> float:
     return round(x, 2)
 
 
+def _line_coords(geom: BaseGeometry, ox: float, oy: float) -> list[list[list[float]]]:
+    """Explode a LineString/MultiLineString into one coordinate list per component, at the same
+    centimetre precision `_c` gives every other coordinate in this bundle (see its docstring): a
+    street's northing is exactly as far from the origin as a parcel's, and significant-digit
+    rounding would dissolve it the same way. `Block.streets` is documented as line geometry
+    (`_draw_boundary_and_streets` in render.py draws it with no other case); anything else is a
+    contract violation worth raising on, not silently dropping."""
+    if isinstance(geom, LineString):
+        lines: list[LineString] = [geom]
+    elif isinstance(geom, MultiLineString):
+        lines = list(geom.geoms)
+    else:
+        raise ValueError(
+            f"unexpected street geometry type {geom.geom_type!r} -- report this instead of "
+            f"silently dropping it")
+    return [[[_c(x - ox), _c(y - oy)] for x, y in line.coords] for line in lines]
+
+
 def _ramp(name: str, n: int = 256) -> list[str]:
     """The colormap sampled to hex stops. `_PERM_CMAP` is the STRING "YlOrRd" -- a matplotlib
     colormap name -- and the browser has no matplotlib, so a hand-rolled JS approximation would put
@@ -129,6 +148,12 @@ export interface Bundle {
   /** UTM easting/northing subtracted from every coordinate below; all geometry is local metres. */
   origin: [number, number];
   parcels: [number, number][][];
+  /** Block exterior ring, relative to `origin` -- fallback-parity background layer; see
+   * `_draw_boundary_and_streets` in render.py, which draws this under the graph on every PNG. */
+  boundary: [number, number][];
+  /** Existing street network, relative to `origin`; one entry per disjoint line (a block's
+   * streets are not always a single connected LineString). Fallback-parity, same as `boundary`. */
+  streets: [number, number][][];
   nodes: { cx: number[]; cy: number[]; ground_g: number[] };
   edges: { rows: number[]; cols: number[]; footpath_g: number[]; first_upgraded_at: number[] };
   roads: { coords: [number, number][]; width_m: number }[];
@@ -213,6 +238,23 @@ def main() -> None:
                 f"of silently dropping geometry")
         parcel_coords.append([[_c(x - ox), _c(y - oy)] for x, y in g.exterior.coords])
 
+    # Fallback parity: _draw_boundary_and_streets (render.py) draws the block outline and the
+    # EXISTING street network under every graph PNG, including graph_current_after.png -- the
+    # exact image this widget replaces. The widget draws neither unless the bundle carries the
+    # geometry, so bake it here rather than let the interactive version silently omit context the
+    # static fallback always shows.
+    if not isinstance(block.boundary, Polygon):
+        raise ValueError(
+            f"block {block.block_id!r} has a non-Polygon boundary ({block.boundary.geom_type}) "
+            f"-- load_block_and_roads asserts this figure set is single-block, so the gappy-"
+            f"region MultiPolygon case _draw_boundary_and_streets skips should not arise here; "
+            f"report this instead of silently dropping the boundary")
+    boundary_coords = [[_c(x - ox), _c(y - oy)] for x, y in block.boundary.exterior.coords]
+
+    street_coords: list[list[list[float]]] = []
+    for g in block.streets.geometry:
+        street_coords.extend(_line_coords(g, ox, oy))
+
     bundle = {
         "block_id": block.block_id,
         "method": METHOD,
@@ -220,6 +262,8 @@ def main() -> None:
         "n_prefixes": len(figs),
         "origin": [ox, oy],
         "parcels": parcel_coords,
+        "boundary": boundary_coords,
+        "streets": street_coords,
         "nodes": {"cx": [_c(v - ox) for v in base.cx], "cy": [_c(v - oy) for v in base.cy],
                   "ground_g": [_r(v) for v in base.ground_g]},
         "edges": {"rows": base.rows.tolist(), "cols": base.cols.tolist(),

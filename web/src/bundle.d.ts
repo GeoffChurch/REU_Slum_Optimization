@@ -21,6 +21,12 @@ export interface Bundle {
   /** UTM easting/northing subtracted from every coordinate below; all geometry is local metres. */
   origin: [number, number];
   parcels: [number, number][][];
+  /** Block exterior ring, relative to `origin` -- fallback-parity background layer; see
+   * `_draw_boundary_and_streets` in render.py, which draws this under the graph on every PNG. */
+  boundary: [number, number][];
+  /** Existing street network, relative to `origin`; one entry per disjoint line (a block's
+   * streets are not always a single connected LineString). Fallback-parity, same as `boundary`. */
+  streets: [number, number][][];
   nodes: { cx: number[]; cy: number[]; ground_g: number[] };
   edges: { rows: number[]; cols: number[]; footpath_g: number[]; first_upgraded_at: number[] };
   roads: { coords: [number, number][]; width_m: number }[];

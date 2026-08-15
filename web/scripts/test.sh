@@ -35,6 +35,15 @@
 # A flat glob ("$OUTDIR"/test/*.test.js) does not match a nested test/widgets/foo.test.js, so
 # a future subdirectory under web/test/ would silently never run. `find` walks recursively and
 # hands `node --test` an explicit file list, sidestepping the bare-directory bug above too.
+#
+# Why build the esbuild bundle here? test/widgets-bundle.test.ts evaluates ../docs/js/widgets.js
+# directly (the artifact that ships, not just the src/ modules) -- but `pixi run test`'s web-test
+# task and the `web` task (which is what actually runs esbuild) are independent leaves of
+# pixi.toml's dependency graph, neither depending on the other. Without building here, `pixi run
+# test` alone would either read a stale bundle from a previous `pixi run web` or fail outright on
+# a machine that never ran it. Building it as this script's first step makes the test suite
+# self-sufficient: no ordering requirement on `web` having run first, here or in CI.
+npm run build
 
 OUTDIR=$(mktemp -d)
 tsc -p tsconfig.test.json --outDir "$OUTDIR" --noEmit false
