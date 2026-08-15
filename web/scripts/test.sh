@@ -29,25 +29,47 @@
 # noEmitOnError isn't set, deliberately -- so `&&` would let a tsc-only failure silently skip
 # running the tests altogether. Running both unconditionally, then capturing node --test's own
 # exit code as STATUS right after it runs, means this script's exit code is exactly the test
-# outcome, never tsc's.
+# outcome, never tsc's. (This is also why the script has no blanket `set -e`: that would abort
+# on tsc's own non-zero exit, exactly the behavior this paragraph rules out. The two checks
+# below are therefore explicit, not a global flag.)
 #
 # Why `find "$OUTDIR/test" -name '*.test.js'` rather than a flat glob or a bare directory arg?
 # A flat glob ("$OUTDIR"/test/*.test.js) does not match a nested test/widgets/foo.test.js, so
 # a future subdirectory under web/test/ would silently never run. `find` walks recursively and
 # hands `node --test` an explicit file list, sidestepping the bare-directory bug above too.
 #
-# Why build the esbuild bundle here? test/widgets-bundle.test.ts evaluates ../docs/js/widgets.js
-# directly (the artifact that ships, not just the src/ modules) -- but `pixi run test`'s web-test
-# task and the `web` task (which is what actually runs esbuild) are independent leaves of
-# pixi.toml's dependency graph, neither depending on the other. Without building here, `pixi run
-# test` alone would either read a stale bundle from a previous `pixi run web` or fail outright on
-# a machine that never ran it. Building it as this script's first step makes the test suite
-# self-sufficient: no ordering requirement on `web` having run first, here or in CI.
-npm run build
+# Why `mapfile -d '' -t files < <(find ... -print0)` instead of `node --test $(find ...)`? Two
+# defects in the old unquoted-substitution form, found in the fix-wave review (I5): `node --test`
+# with ZERO file arguments exits 0 -- so a broken tsconfig.test.json "include", a renamed
+# web/test/, or a `.spec.ts` (instead of `.test.ts`) naming drift would all silently run and
+# "pass" zero tests. And an unquoted `$(find ...)` word-splits on whitespace in a filename. NUL-
+# delimited `find -print0` into a real bash array survives both: `${#files[@]}` can distinguish
+# "zero results" from "one file", which is asserted explicitly below, and no word-splitting
+# happens on the array elements when they are expanded quoted (`"${files[@]}"`).
+#
+# Why build the esbuild bundle here, and check its exit code? test/widgets-bundle.test.ts
+# evaluates ../docs/js/widgets.js directly (the artifact that ships, not just the src/ modules)
+# -- but `pixi run test`'s web-test task and the `web` task (which is what actually runs esbuild)
+# are independent leaves of pixi.toml's dependency graph, neither depending on the other. Without
+# building here, `pixi run test` alone would either read a stale bundle from a previous `pixi run
+# web` or fail outright on a machine that never ran it. Building it as this script's first step
+# makes the test suite self-sufficient: no ordering requirement on `web` having run first, here or
+# in CI. `|| exit 1` matters because esbuild does NOT overwrite ../docs/js/widgets.js on a failed
+# build -- without checking the exit code, a build failure would leave a STALE bundle in place and
+# widgets-bundle.test.ts would happily evaluate yesterday's successful build instead.
+npm run build || exit 1
 
 OUTDIR=$(mktemp -d)
 tsc -p tsconfig.test.json --outDir "$OUTDIR" --noEmit false
-node --test $(find "$OUTDIR/test" -name '*.test.js')
+mapfile -d '' -t files < <(find "$OUTDIR/test" -name '*.test.js' -print0)
+if (( ${#files[@]} == 0 )); then
+  echo "no compiled test files found under $OUTDIR/test -- a broken tsconfig.test.json," \
+       "a renamed web/test/, or a *.test.ts naming drift would all produce this silently" \
+       "otherwise (see this script's own comment)" >&2
+  rm -rf "$OUTDIR"
+  exit 1
+fi
+node --test "${files[@]}"
 STATUS=$?
 rm -rf "$OUTDIR"
 exit $STATUS

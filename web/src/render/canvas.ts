@@ -93,17 +93,31 @@ export function draw(ctx: CanvasRenderingContext2D, b: Bundle, f: Frame,
   const quantity = f.layer === "current" ? b.prefix.current[f.prefix]! : b.edges.footpath_g;
   const norm = e.width_norm[f.layer];
   const { rows, cols, first_upgraded_at } = b.edges;
-  for (let k = 0; k < rows.length; k++) {
-    const up = first_upgraded_at[k]! >= 0 && first_upgraded_at[k]! <= f.prefix;
-    const frac = norm > 0 ? Math.min(1, Math.abs(quantity[k]!) / norm) : 0;
-    ctx.strokeStyle = up ? e.road_color : e.edge_color;
-    ctx.lineWidth = up ? e.upgraded_lw : e.edge_lw_min + frac * (e.edge_lw_max - e.edge_lw_min);
+  const isUpgraded = (k: number): boolean =>
+    first_upgraded_at[k]! >= 0 && first_upgraded_at[k]! <= f.prefix;
+  const strokeEdge = (k: number, strokeStyle: string, lineWidth: number): void => {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
     const [x0, y0] = toScreen(f.view, b.nodes.cx[rows[k]!]!, b.nodes.cy[rows[k]!]!);
     const [x1, y1] = toScreen(f.view, b.nodes.cx[cols[k]!]!, b.nodes.cy[cols[k]!]!);
     ctx.beginPath();
     ctx.moveTo(x0, y0);
     ctx.lineTo(x1, y1);
     ctx.stroke();
+  };
+  // Two passes -- every mesh (grey) edge, THEN every upgraded (blue) edge -- mirroring
+  // render_graph's zorder=3/zorder=4 split (src/reblock/render.py): a single index-order pass
+  // interleaves grey and blue, and a mesh edge can reach 3 px against an upgraded edge's fixed
+  // 1.0 px, so blue could be partially hidden by grey drawn after it -- weakening the exact
+  // corridor signal this widget exists to show (fix wave, minor). Splitting into two passes makes
+  // blue undraws-over-able the same way the PNG's LineCollection z-order already guarantees.
+  for (let k = 0; k < rows.length; k++) {
+    if (isUpgraded(k)) continue;
+    const frac = norm > 0 ? Math.min(1, Math.abs(quantity[k]!) / norm) : 0;
+    strokeEdge(k, e.edge_color, e.edge_lw_min + frac * (e.edge_lw_max - e.edge_lw_min));
+  }
+  for (let k = 0; k < rows.length; k++) {
+    if (isUpgraded(k)) strokeEdge(k, e.road_color, e.upgraded_lw);
   }
 
   // Nodes, coloured by potential on the ramp Python sampled. vmax is prefix 0's maximum: roads

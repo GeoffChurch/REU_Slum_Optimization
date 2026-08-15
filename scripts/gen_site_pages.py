@@ -116,17 +116,24 @@ def _img_row(items: list[tuple[str, str]]) -> str:
 
 
 def _figure(url: str, alt: str, caption: str, *, fig_class: str = "",
-            skip_lightbox: bool = False) -> str:
+            skip_lightbox: bool = False, attrs: str = "") -> str:
     """One captioned figure, emitted as a raw HTML block (no `markdown` attribute) so
     python-markdown passes it through untouched -- <figcaption> has no Markdown spelling, and
     mixing md_in_html parsing modes inside a <figure> is fragile. Any links in `caption` must
     therefore be written as HTML, and directory-relative (use_directory_urls is on).
 
     `skip_lightbox` marks an image as decoration rather than data; glightbox is configured with
-    skip_classes: [skip-lightbox] so those images are not zoom targets."""
+    skip_classes: [skip-lightbox] so those images are not zoom targets.
+
+    `attrs` is raw HTML attributes appended to the <figure> tag itself -- e.g. a widget's
+    `data-widget`/`data-block`/`data-bundle`/... mount-point attributes (fix wave, I4). Those MUST
+    land on the figure element and not on a wrapping <div>: `.sbu-figure-grid > figure` in
+    docs/stylesheets/sbu.css resets `margin` and the mandatory `min-width: 0` on DIRECT children
+    only, and a wrapping div would put the figure one level too deep to be reset."""
     img_cls = ' class="skip-lightbox"' if skip_lightbox else ""
     fig_attr = f' class="{fig_class}"' if fig_class else ""
-    return (f"<figure{fig_attr}>\n"
+    extra_attr = f" {attrs}" if attrs else ""
+    return (f"<figure{fig_attr}{extra_attr}>\n"
             f'  <img src="{url}" alt="{alt}"{img_cls}>\n'
             f"  <figcaption>{caption}</figcaption>\n"
             f"</figure>\n")
@@ -275,12 +282,15 @@ def _perm_graph_figures() -> str:
     panels -- not "the same scale as the heatmaps above": there are no heatmaps on this page, only
     these four images (fix round 1, Finding F1).
 
-    The current/after figure -- and ONLY that one -- is wrapped in a `data-widget="perm-graph"`
-    mount point (Task 6): a reader drags a slider along the road build-out order and watches
-    current concentrate into each new road while permeability climbs, using the same bundle.json
-    baked in Task 1. The other three panels stay plain <figure>s; the widget adds one interactive
-    view, not four, and it boots at `bundle.lens_b_index` so it shows exactly what the fallback
-    PNG and caption already claim before the reader touches the slider.
+    The current/after figure -- and ONLY that one -- carries `data-widget="perm-graph"` mount-point
+    attributes on its own `<figure>` (Task 6; moved onto the figure itself rather than a wrapping
+    `<div>` in the fix wave, I4 -- see `_figure`'s docstring for why): a reader drags a slider along
+    the road build-out order and watches current concentrate into each new road while permeability
+    climbs, using the same bundle.json baked in Task 1. The other three panels stay plain
+    `<figure>`s; the widget adds one interactive view, not four. `data-prefix` is read straight from
+    `bundle.json`'s `lens_b_index` (fix wave, I8) so the mount point -- not the widget's boot code
+    -- declares the state it must show before the reader touches the slider, right next to the
+    caption that already claims it.
     """
     meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
     block, method = meta["block_id"], friendly_method_name(meta["method"])
@@ -299,19 +309,25 @@ def _perm_graph_figures() -> str:
                 continue
             caption = (f"Grey edge width is {layer} on the footpath mesh; the {n_upgraded} "
                       f"road-raised edges (blue) draw at a fixed width instead. {roads_clause}")
-            fig_html = _figure(url, f"egress graph, {layer}, {state} roads", caption)
             # Only THIS figure -- current, after -- gets the interactive mount point. It is the
             # one the fallback PNG (graph_current_after.png) and its caption above already
             # describe, so booting the widget here is fallback parity, not a fourth copy of the
             # same widget: wrapping all four figures would replace three distinct images with
-            # three copies of the same slider.
+            # three copies of the same slider. The mount attributes land on the <figure> ITSELF
+            # (via `_figure`'s `attrs`), not a wrapping <div> -- see `_figure`'s docstring.
+            attrs = ""
             if layer == "current" and state == "after":
                 bundle_url = _copy_asset(PERMGRAPH / "bundle.json", "perm-graph")
                 if bundle_url:
-                    fig_html = (f'<div data-widget="perm-graph" data-block="{block}"'
-                               f' data-bundle="{bundle_url}" data-layer="current">\n'
-                               f'{fig_html}</div>\n')
-            figs.append(fig_html)
+                    # lens_b_index read straight from the artifact, not retyped: the mount point
+                    # declares the boot prefix here, beside the caption it has to match, rather
+                    # than the widget hardcoding it on every boot (fix wave, I8).
+                    bundle_meta = json.loads(
+                        (PERMGRAPH / "bundle.json").read_text(encoding="utf-8"))
+                    attrs = (f'data-widget="perm-graph" data-block="{block}" '
+                            f'data-bundle="{bundle_url}" data-layer="current" '
+                            f'data-prefix="{bundle_meta["lens_b_index"]}"')
+            figs.append(_figure(url, f"egress graph, {layer}, {state} roads", caption, attrs=attrs))
     if not figs:
         return ""
 

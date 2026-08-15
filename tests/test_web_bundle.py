@@ -69,20 +69,127 @@ def test_permeability_is_zero_at_prefix_zero_and_monotone(bundle: dict[str, Any]
                for a, b in zip(perm, perm[1:], strict=False)), "permeability must not fall"
 
 
+_LINE_COMMENT = re.compile(r"//.*")
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+
+
+def _ts_field_names(dts: str) -> set[str]:
+    """Every field name the .d.ts declares, at ANY nesting depth -- not just 2-space-indented
+    top-level lines. `bundle.d.ts` mixes two nesting styles (`prefix`'s fields sit on their own
+    4-space-indented lines; `nodes`/`edges`/`width_norm`'s sit inline on one line, e.g. `nodes: {
+    cx: number[]; cy: number[]; ground_g: number[] }`), so a line-anchored, fixed-indent regex only
+    ever sees the outer style. Comments are stripped first: a bare `key:` regex would otherwise
+    treat "// Regenerate: pixi run ..." as declaring a field named `Regenerate`."""
+    stripped = _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", dts))
+    return set(re.findall(r"(\w+)\s*\??:\s", stripped))
+
+
+def _json_keys(obj: Any) -> set[str]:
+    """Every dict key appearing anywhere inside `obj`, through both dicts and lists, as bare names
+    (not paths) -- e.g. `edges.footpath_g` and `roads[].width_m` both surface as `footpath_g` and
+    `width_m`. Bare names are what a `.d.ts` interface declares too, so this is the comparable shape
+    on both sides."""
+    keys: set[str] = set()
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            keys.add(k)
+            keys |= _json_keys(v)
+    elif isinstance(obj, list):
+        for item in obj:
+            keys |= _json_keys(item)
+    return keys
+
+
 def test_dts_declares_exactly_the_bundle_keys(bundle: dict[str, Any]) -> None:
-    """Catches 'regenerated one file, not the other'. Structural and fast -- no solving."""
-    dts = DTS.read_text(encoding="utf-8")
-    declared = set(re.findall(r"^\s{2}(\w+)[?]?:", dts, flags=re.M))
-    for key in bundle:
-        assert key in declared, f"bundle key {key!r} missing from bundle.d.ts"
-    for key in bundle["encoding"]:
-        assert key in declared, f"encoding key {key!r} missing from bundle.d.ts"
+    """Catches 'regenerated one file, not the other'. Structural and fast -- no solving.
+
+    Fix wave, I3: the original regex (`^\\s{2}(\\w+)[?]?:`) matched only 2-space-indented lines, so
+    it checked the top-level `Bundle`/`Encoding` keys but NOT `nodes.{cx,cy,ground_g}`,
+    `edges.{rows,cols,footpath_g,first_upgraded_at}`, `prefix.{potential,current,permeability,
+    road_m}`, `width_norm.*`, `roads[].*` -- every field the canvas actually reads each frame was in
+    the unguarded half. Walking the parsed JSON recursively (`_json_keys`) closes that. Also made
+    BIDIRECTIONAL: `.d.ts` declaring a key the bundle no longer has is a regression too (a renamed
+    Python field otherwise leaves a dead, misleading declaration behind), and this direction was
+    free -- `declared - bundle_keys` was already empty before this fix."""
+    declared = _ts_field_names(DTS.read_text(encoding="utf-8"))
+    present = _json_keys(bundle)
+    missing = present - declared
+    assert not missing, f"bundle keys missing from bundle.d.ts: {sorted(missing)}"
+    extra = declared - present
+    assert not extra, f"bundle.d.ts declares keys the bundle does not have: {sorted(extra)}"
+
+
+def test_encoding_matches_reblock_render_live_constants(bundle: dict[str, Any]) -> None:
+    """I7: nothing previously guarded `encoding` against `reblock.render`'s live constants -- change
+    `_EDGE_LW_MAX` there (or any of the other width/colour constants, or the ramp's source colormap)
+    and every PNG moves while the committed bundle silently keeps whatever number was baked in,
+    forever. Fast: no block loading, no solving, no `slow` marker -- imports `reblock.render`
+    directly and reuses the baker's own `_ramp` sampling (not a re-implementation of it, which
+    would just be a second place for the two to drift) to reproduce the ramp from the live
+    colormap name."""
+    from reblock.render import (
+        _BOUNDARY_COLOR,
+        _CONTEXT_OUTLINE,
+        _EDGE_GREY,
+        _EDGE_LW_MAX,
+        _EDGE_LW_MIN,
+        _NODE_RADIUS_FRAC,
+        _PERM_CMAP,
+        _ROAD_COLOR,
+        _UPGRADED_LW,
+    )
+    from scripts.gen_web_bundle import _ramp
+
+    e = bundle["encoding"]
+    assert e["edge_lw_min"] == _EDGE_LW_MIN
+    assert e["edge_lw_max"] == _EDGE_LW_MAX
+    assert e["upgraded_lw"] == _UPGRADED_LW
+    assert e["node_radius_frac"] == _NODE_RADIUS_FRAC
+    assert e["road_color"] == _ROAD_COLOR
+    assert e["boundary_color"] == _BOUNDARY_COLOR
+    assert e["parcel_color"] == _CONTEXT_OUTLINE
+    assert e["edge_color"] == _EDGE_GREY
+    assert e["ramp"] == _ramp(_PERM_CMAP)
+
+
+def test_bundle_matches_perm_graph_json_at_the_caption_precision(bundle: dict[str, Any]) -> None:
+    """I7: `gen_web_bundle.py` and `gen_perm_graph.py` each define their own VARIANT/METHOD pin and
+    each load the block independently -- nothing compared the two artifacts, so re-pinning one but
+    not the other would make the widget describe a different block than the caption underneath it,
+    silently. (The slow parity test above cannot catch this: it shares `load_block_and_roads` with
+    the baker, so a bad pin there would just make both sides of that comparison agree.) Compared at
+    the caption's own precision (`gen_site_pages.py`'s `_perm_graph_figures`: whole metres, one
+    decimal of percent), not exact float equality, which is stricter than what a reader can see."""
+    meta = json.loads(
+        Path("examples/perm-graph/perm_graph.json").read_text(encoding="utf-8"))
+    i = bundle["lens_b_index"]
+    assert bundle["block_id"] == meta["block_id"]
+    assert round(bundle["prefix"]["road_m"][i]) == round(meta["road_m"])
+    assert round(bundle["prefix"]["permeability"][i] * 100, 1) == round(
+        meta["permeability_after"] * 100, 1)
 
 
 @pytest.mark.slow
 def test_bundle_matches_permeability_graph_at_every_prefix(bundle: dict[str, Any]) -> None:
     """THE parity test: the committed bundle must equal what the Python twin produces, at the 6
-    significant digits the baker emits. This is what B being built first bought us."""
+    significant digits the baker emits. This is what B being built first bought us.
+
+    DEVELOPER-LOCAL BY DESIGN. This is `slow` (needs a warm derivation cache -- `ensure_city_data`
+    reaches Dataverse for the Cape Town blocks parquet and Open Buildings for the matching tile on
+    a cold cache, at a 900 s timeout) and `pixi run test` -- which `.github/workflows/ci.yml` runs
+    on every PR -- does not deselect `slow` (see the marker's own registration comment in
+    pyproject.toml: deselecting it by default would stop anyone running the guard without
+    remembering an override, so it stays opt-in via a cache check instead of opt-out via addopts).
+    So instead of running on a cold checkout and downloading ~1 GB, this test SKIPS when the local
+    artifact it needs is absent, mirroring the established convention at
+    tests/data/test_osm_extract.py:303-307. A contributor with a warm `~/.cache/reblock` (anyone
+    who has run the baker or an example generator) gets the real guard for free; CI and a fresh
+    clone get neither the guard nor the download."""
+    blocks = Path.home() / ".cache" / "reblock" / "blocks_capetown_full.parquet"
+    if not blocks.exists():
+        pytest.skip("needs the capetown_full cache; run "
+                    "`pixi run python -m scripts.gen_web_bundle`")
+
     from typing import cast
 
     from geopandas import GeoDataFrame

@@ -77,4 +77,8 @@ else
   # figure set for one site page rather than a graded example, and it deliberately does NOT re-run
   # the ten-method comparison whose block and roads it borrows.
   run pixi run python -m scripts.gen_perm_graph
+  # The web bundle shares gen_perm_graph's block, method and pinned config, and is the directory's
+  # largest committed file -- it belongs in the same regeneration path as the PNGs it must stay in
+  # sync with (fix wave, I7), not off it where a re-bake is easy to forget.
+  run pixi run python -m scripts.gen_web_bundle
 fi

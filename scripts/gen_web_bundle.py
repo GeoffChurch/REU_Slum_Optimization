@@ -31,7 +31,7 @@ from reblock.compare import load_permeability_config
 from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
-from reblock.perm_graph import permeability_graph
+from reblock.perm_graph import GRAPH_LAYERS, permeability_graph
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder
 from reblock.render import (
@@ -197,23 +197,24 @@ def main() -> None:
         newly = f.upgraded & (first_upgraded_at < 0)
         first_upgraded_at[newly] = m
 
-    # Mesh-only width norms, matching render_graph's rule exactly (see gen_perm_graph.py): the
-    # road-dominated max would collapse the mesh into a sub-pixel band.
+    # Mesh-only width norms (fix wave, C2): for each layer, the TRUE MAXIMUM over every prefix m of
+    # that layer's p99, restricted to prefix m's OWN mesh (edges not yet upgraded at m -- the same
+    # mesh mask `render_graph` excludes upgraded edges from before taking its own p99). Prefix m's
+    # mesh shrinks monotonically as roads raise more edges, so this is a slider-independent scalar:
+    # one fixed number per layer, computed once here, never recomputed per prefix in the browser.
     #
-    # This deliberately differs from gen_perm_graph.py's pooling: piece B pools p99 over only two
-    # prefixes (0 and the Lens-B index), because it only ever renders those two. This widget spans
-    # every prefix 0..len(ordered), including ones piece B never rendered; a Lens-B-derived constant
-    # would let mesh currents at prefixes past Lens B clip to maximum width -- the uniform-thick-
-    # mesh legibility failure piece B spent three fix rounds removing. So the norm here pools over
-    # ALL prefixes' mesh-only edges, using the full-network mesh mask (edges never raised by any
-    # prefix, i.e. `~figs[-1].upgraded`) rather than each prefix's own (monotonically shrinking)
-    # mask -- one fixed set of denominator edges, so the norm does not itself depend on the slider
-    # position.
-    mesh = ~figs[-1].upgraded
+    # This reproduces gen_perm_graph.py's PNG norm exactly, because that norm is the SAME rule
+    # pooled over only two prefixes (0 and the Lens-B index) rather than all of them -- a subset of
+    # what is computed here, so this can only match or exceed it, never fall short. Measured on this
+    # block: per-prefix mesh p99 for `current` falls monotonically across every prefix, 3.9367 at
+    # m=0 down to 0.58 at the full network, so the maximum lands at m=0 and pooling every prefix
+    # reproduces the PNG's 3.9367 precisely. It clips nothing, by construction: every prefix's own
+    # mesh p99 is <= this maximum, so no mesh edge at any prefix can exceed `edge_lw_max`.
     width_norm = {
-        "conductance": _r(float(np.percentile(np.abs(base.footpath_g[mesh]), 99))),
-        "current": _r(float(np.percentile(
-            np.abs(np.concatenate([f.current[mesh] for f in figs])), 99))),
+        layer: _r(max(float(np.percentile(np.abs(read(f)[~f.upgraded]), 99)) if (~f.upgraded).any()
+                      else 0.0
+                      for f in figs))
+        for layer, read in GRAPH_LAYERS.items()
     }
 
     # Everything geometric is emitted RELATIVE to this, in metres. The canvas works in local metres
