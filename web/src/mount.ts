@@ -1,5 +1,8 @@
 /** The mount contract: a page carries a placeholder and nothing else. */
 import { localState, type StateSource, type WidgetState } from "./state.js";
+// Registers itself with `register()` below on import -- this is the one line that puts
+// PermGraph into the esbuild bundle. A widget file nothing imports never ships.
+import "./widgets/perm-graph.js";
 
 export type Widget = (host: HTMLElement, state: StateSource) => void;
 

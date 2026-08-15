@@ -250,7 +250,15 @@ def test_perm_graph_figures_carry_no_fix_round_1_regression() -> None:
     assert '<div class="sbu-figure-grid">' in html
     assert html.index('<div class="sbu-figure-grid">') < html.index("<figure>")
 
-    # F5: the block id and parcel/edge counts are stated once, in the intro, not per caption.
-    assert html.count(meta["block_id"]) == 1
+    # F5: the block id and parcel/edge counts are stated once, in the intro, not per caption. Task
+    # 6 gave the block id a second, distinct occurrence -- the `data-block` attribute on the
+    # current/after figure's widget mount point, which exists for the browser widget to read, not
+    # for a reader to see repeated -- so it is not the caption-repetition F5 guarded against.
+    # Assert both halves separately: exactly one PROSE occurrence (the intro sentence) and exactly
+    # one machine-readable occurrence (the mount point), so a regression in either still fails as
+    # itself rather than being absorbed into a single loosened count.
+    assert html.count(f'data-block="{meta["block_id"]}"') == 1
+    prose_id_count = html.count(meta["block_id"]) - html.count(f'data-block="{meta["block_id"]}"')
+    assert prose_id_count == 1
     assert html.count(str(meta["n_parcels"])) == 1
     assert html.count(str(meta["n_edges"])) == 1

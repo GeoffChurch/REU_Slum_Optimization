@@ -274,6 +274,13 @@ def _perm_graph_figures() -> str:
     artifact rather than typed as `65`. Node colour is stated once, as one scale shared across the
     panels -- not "the same scale as the heatmaps above": there are no heatmaps on this page, only
     these four images (fix round 1, Finding F1).
+
+    The current/after figure -- and ONLY that one -- is wrapped in a `data-widget="perm-graph"`
+    mount point (Task 6): a reader drags a slider along the road build-out order and watches
+    current concentrate into each new road while permeability climbs, using the same bundle.json
+    baked in Task 1. The other three panels stay plain <figure>s; the widget adds one interactive
+    view, not four, and it boots at `bundle.lens_b_index` so it shows exactly what the fallback
+    PNG and caption already claim before the reader touches the slider.
     """
     meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
     block, method = meta["block_id"], friendly_method_name(meta["method"])
@@ -292,7 +299,19 @@ def _perm_graph_figures() -> str:
                 continue
             caption = (f"Grey edge width is {layer} on the footpath mesh; the {n_upgraded} "
                       f"road-raised edges (blue) draw at a fixed width instead. {roads_clause}")
-            figs.append(_figure(url, f"egress graph, {layer}, {state} roads", caption))
+            fig_html = _figure(url, f"egress graph, {layer}, {state} roads", caption)
+            # Only THIS figure -- current, after -- gets the interactive mount point. It is the
+            # one the fallback PNG (graph_current_after.png) and its caption above already
+            # describe, so booting the widget here is fallback parity, not a fourth copy of the
+            # same widget: wrapping all four figures would replace three distinct images with
+            # three copies of the same slider.
+            if layer == "current" and state == "after":
+                bundle_url = _copy_asset(PERMGRAPH / "bundle.json", "perm-graph")
+                if bundle_url:
+                    fig_html = (f'<div data-widget="perm-graph" data-block="{block}"'
+                               f' data-bundle="{bundle_url}" data-layer="current">\n'
+                               f'{fig_html}</div>\n')
+            figs.append(fig_html)
     if not figs:
         return ""
 
@@ -1040,12 +1059,14 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
     page nested `depth` levels below docs/ needs ../ per level; MkDocs then rewrites the output
     URL itself.
 
-    `url_depth` -- raw HTML `src="assets/..."` inside the <figure> blocks. MkDocs does NOT touch
-    raw HTML, so these must already be correct against the page's SERVED url. With
-    use_directory_urls, results/frontier.md is served at <base>/results/frontier/ and
-    methodology/methods/peel.md at <base>/methodology/methods/peel/, so the served depth is not
-    the same as the source depth -- results/frontier.md is depth 1 but url_depth 2. Getting this
-    wrong 404s every figure on that page."""
+    `url_depth` -- raw HTML `src="assets/..."`, `href="assets/..."` and `data-bundle="assets/..."`
+    (the widget mount point's fetch URL -- same rule, it is raw HTML too) inside the <figure>
+    blocks. MkDocs does NOT touch raw HTML, so these must already be correct against the page's
+    SERVED url. With use_directory_urls, results/frontier.md is served at
+    <base>/results/frontier/ and methodology/methods/peel.md at
+    <base>/methodology/methods/peel/, so the served depth is not the same as the source depth --
+    results/frontier.md is depth 1 but url_depth 2. Getting this wrong 404s every figure -- or,
+    for data-bundle, silently fails the widget's fetch -- on that page."""
     # YAML front matter, when given, sets the page's nav label. Without it MkDocs derives the
     # label from the FILENAME -- "clearance_looped" became "Clearance looped" in the sidebar, not
     # "Looped Tree" -- because it does not read the H1 for nav purposes. Emitting the title here
@@ -1059,7 +1080,19 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
         up = "../" * url_depth
         text = text.replace('src="assets/', f'src="{up}assets/')
         text = text.replace('href="assets/', f'href="{up}assets/')
+        text = text.replace('data-bundle="assets/', f'data-bundle="{up}assets/')
     path.write_text(text, encoding="utf-8")
+
+
+def _assert_widget_bundle_present(pages_with_widgets: bool) -> None:
+    """A site built without `pixi run web` emits a <script> tag for a file that is not there: every
+    widget silently fails to boot, the PNG fallbacks still render, and the page looks FINE. Turn
+    that into a build failure. File existence needs no imports, so this respects the stdlib-only
+    contract."""
+    if pages_with_widgets and not (DOCS / "js" / "widgets.js").exists():
+        raise SystemExit(
+            "docs/js/widgets.js is missing but a page carries a widget mount point -- run "
+            "`pixi run web` (CI does this in deploy-site.yml before mkdocs build)")
 
 
 def main() -> None:
@@ -1117,6 +1150,19 @@ def main() -> None:
     for m in METHODS:
         _write_page(methods_dir / f"{m.slug}.md", gen_method_section(m), depth=2, url_depth=3,
                     title=m.display_title)
+
+    # Scoped to exactly the GENERATED (gitignored) page set -- docs/index.md, docs/reproduce.md,
+    # docs/methodology/**, docs/results/** -- never docs/superpowers/ or docs/_partials/. Both of
+    # those are committed prose that can legitimately quote 'data-widget="perm-graph"' (this
+    # file's own design spec does, as an example snippet) without a single generated page
+    # actually carrying a mount point; scanning them would make the guard fire on a site that
+    # built perfectly fine.
+    generated_pages = ([DOCS / "index.md", DOCS / "reproduce.md"]
+                       + sorted(methodology_dir.rglob("*.md"))
+                       + sorted(results_dir.rglob("*.md")))
+    pages_with_widgets = any('data-widget="' in p.read_text(encoding="utf-8")
+                             for p in generated_pages if p.exists())
+    _assert_widget_bundle_present(pages_with_widgets)
 
     print("wrote docs/index.md, docs/reproduce.md, docs/results/frontier.md, "
           "docs/methodology/*.md, docs/methodology/methods/*.md")
