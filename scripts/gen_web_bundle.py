@@ -23,6 +23,7 @@ from geopandas import GeoDataFrame
 from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from matplotlib import colormaps
+from shapely.geometry import Polygon
 
 from reblock.budget import prefix_to_permeability, street_first_ordered
 from reblock.compare import load_permeability_config
@@ -160,7 +161,8 @@ def main() -> None:
     # boot here or the caption below it describes a different picture.
     lens_b_index = len(prefix)
 
-    figs = [permeability_graph(block, ordered.iloc[:m], params) for m in range(len(ordered) + 1)]
+    figs = [permeability_graph(block, cast(GeoDataFrame, ordered.iloc[:m]), params)
+            for m in range(len(ordered) + 1)]
     base = figs[0]
 
     # `upgraded` is monotone in the road set (conductance enters only through max(footpath, road)),
@@ -195,9 +197,17 @@ def main() -> None:
 
     parcel_coords = []
     for g in block.parcels.geometry:
-        if g.geom_type != "Polygon" or len(g.interiors) != 0:
+        # isinstance, not geom_type, so this line IS the runtime guard mypy can also verify: it
+        # narrows `g` to Polygon, which is what makes `.interiors`/`.exterior` below type-check
+        # instead of resolving through BaseGeometry, the union GeoSeries iteration yields.
+        if not isinstance(g, Polygon):
             raise ValueError(
-                f"block {block.block_id!r} has a non-simple parcel ({g.geom_type}, "
+                f"block {block.block_id!r} has a non-Polygon parcel ({g.geom_type}) -- the "
+                f"bundle format assumes every parcel is a simple Polygon with an exterior ring "
+                f"and no holes; report this instead of silently dropping geometry")
+        if len(g.interiors) != 0:
+            raise ValueError(
+                f"block {block.block_id!r} has a non-simple parcel (Polygon, "
                 f"{len(g.interiors)} interior rings) -- the bundle format assumes every parcel "
                 f"is a simple Polygon with an exterior ring and no holes; report this instead "
                 f"of silently dropping geometry")
@@ -222,7 +232,12 @@ def main() -> None:
             "potential": [[_r(v) for v in f.potential] for f in figs],
             "current": [[_r(v) for v in f.current] for f in figs],
             "permeability": [_r(1.0 - f.p / base.p) for f in figs],
-            "road_m": [_r(float(ordered.geometry.iloc[:m].length.sum()))
+            # `ordered.geometry.iloc[:m]` types (wrongly) as a scalar BaseGeometry -- the same
+            # geopandas-stub slice-collapse the `cast`s elsewhere on this page work around --
+            # which then makes `.length` resolve to a single float instead of a Series. Slicing
+            # the frame (not the geometry column) before reading `.length` sidesteps it and is
+            # the same value: selecting first-m-then-geometry equals geometry-then-first-m.
+            "road_m": [_r(float(cast(GeoDataFrame, ordered.iloc[:m]).length.sum()))
                        for m in range(len(figs))],
         },
         "encoding": {

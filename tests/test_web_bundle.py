@@ -3,6 +3,7 @@ tests are the only thing standing between a bad bake and a wrong picture."""
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -12,11 +13,12 @@ DTS = Path("web/src/bundle.d.ts")
 
 
 @pytest.fixture(scope="module")
-def bundle() -> dict:
-    return json.loads(BUNDLE.read_text(encoding="utf-8"))
+def bundle() -> dict[str, Any]:
+    result: dict[str, Any] = json.loads(BUNDLE.read_text(encoding="utf-8"))
+    return result
 
 
-def test_shapes_are_internally_consistent(bundle) -> None:
+def test_shapes_are_internally_consistent(bundle: dict[str, Any]) -> None:
     n_nodes, n_edges = len(bundle["nodes"]["cx"]), len(bundle["edges"]["rows"])
     assert len(bundle["nodes"]["cy"]) == len(bundle["nodes"]["ground_g"]) == n_nodes
     assert len(bundle["edges"]["cols"]) == len(bundle["edges"]["footpath_g"]) == n_edges
@@ -29,7 +31,7 @@ def test_shapes_are_internally_consistent(bundle) -> None:
     assert 0 < bundle["lens_b_index"] < bundle["n_prefixes"]
 
 
-def test_first_upgraded_at_is_monotone_and_in_range(bundle) -> None:
+def test_first_upgraded_at_is_monotone_and_in_range(bundle: dict[str, Any]) -> None:
     """-1 means never raised. Any other value must be a real prefix index -- an off-by-one here
     would silently paint the wrong edges blue at every slider position."""
     n = bundle["n_prefixes"]
@@ -38,7 +40,7 @@ def test_first_upgraded_at_is_monotone_and_in_range(bundle) -> None:
     assert (fu != 0).all(), "no edge can be road-raised at prefix 0: there are no roads"
 
 
-def test_coordinates_are_local_metres_at_centimetre_precision(bundle) -> None:
+def test_coordinates_are_local_metres_at_centimetre_precision(bundle: dict[str, Any]) -> None:
     """Guards a bug that would ship as *slightly wrong geometry* rather than as a crash.
 
     Coordinates are emitted relative to `origin`. If someone rounds them with significant digits
@@ -60,14 +62,14 @@ def test_coordinates_are_local_metres_at_centimetre_precision(bundle) -> None:
     assert bundle["origin"][1] > 1_000_000, "origin should carry the real UTM northing"
 
 
-def test_permeability_is_zero_at_prefix_zero_and_monotone(bundle) -> None:
+def test_permeability_is_zero_at_prefix_zero_and_monotone(bundle: dict[str, Any]) -> None:
     perm = bundle["prefix"]["permeability"]
     assert perm[0] == 0.0
     assert all(b >= a - 1e-9
                for a, b in zip(perm, perm[1:], strict=False)), "permeability must not fall"
 
 
-def test_dts_declares_exactly_the_bundle_keys(bundle) -> None:
+def test_dts_declares_exactly_the_bundle_keys(bundle: dict[str, Any]) -> None:
     """Catches 'regenerated one file, not the other'. Structural and fast -- no solving."""
     dts = DTS.read_text(encoding="utf-8")
     declared = set(re.findall(r"^\s{2}(\w+)[?]?:", dts, flags=re.M))
@@ -78,9 +80,13 @@ def test_dts_declares_exactly_the_bundle_keys(bundle) -> None:
 
 
 @pytest.mark.slow
-def test_bundle_matches_permeability_graph_at_every_prefix(bundle) -> None:
+def test_bundle_matches_permeability_graph_at_every_prefix(bundle: dict[str, Any]) -> None:
     """THE parity test: the committed bundle must equal what the Python twin produces, at the 6
     significant digits the baker emits. This is what B being built first bought us."""
+    from typing import cast
+
+    from geopandas import GeoDataFrame
+
     from reblock.budget import street_first_ordered
     from reblock.compare import load_permeability_config
     from reblock.derive.access import STREET_TOL
@@ -92,7 +98,7 @@ def test_bundle_matches_permeability_graph_at_every_prefix(bundle) -> None:
     ordered = street_first_ordered(block, roads, STREET_TOL)
 
     for m in range(bundle["n_prefixes"]):
-        fig = permeability_graph(block, ordered.iloc[:m], params)
+        fig = permeability_graph(block, cast(GeoDataFrame, ordered.iloc[:m]), params)
         np.testing.assert_allclose(bundle["prefix"]["potential"][m], fig.potential, rtol=1e-5)
         np.testing.assert_allclose(bundle["prefix"]["current"][m], fig.current, rtol=1e-5,
                                    atol=1e-9)

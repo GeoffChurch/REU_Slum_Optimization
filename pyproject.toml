@@ -65,6 +65,13 @@ types-pyyaml = "*"
 # fail in the site build (or the reverse).
 nodejs = "22.*"
 
+# web/package.json pins "typescript" to the latest 5.x (not 7.x, which `npm install
+# typescript@latest` resolves to as of 2026-08): TypeScript 7 is a ground-up Go-ported
+# reimplementation, not an incremental major on the 5.x lineage. This project only uses
+# TypeScript for `tsc --noEmit` checking -- esbuild does all transpiling -- so 5.x costs
+# nothing we need, while 7.x's less-settled diagnostics and inference would be what later
+# tasks end up debugging widget code against. Declined deliberately; not staleness.
+
 # Research/analysis stack for scripts/ and the OT retrieval work. Deliberately NOT in
 # [tool.pixi.dependencies]: no `src/reblock` module imports these, so they are not runtime
 # dependencies of the package -- same grouping-by-purpose intent as the dev feature above

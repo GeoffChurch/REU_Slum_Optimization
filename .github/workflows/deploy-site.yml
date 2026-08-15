@@ -11,6 +11,7 @@ on:
       - "docs/**"
       - "examples/**"
       - "outputs/**"
+      - "web/**"
       - "scripts/gen_site_pages.py"
       - "mkdocs.yml"
       - ".github/workflows/deploy-site.yml"
