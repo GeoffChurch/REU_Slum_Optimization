@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "esbuild src/mount.ts --bundle --format=iife --minify --outfile=../docs/js/widgets.js",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "OUTDIR=$(mktemp -d) && tsc --outDir \"$OUTDIR\" --noEmit false; node --test \"$OUTDIR\"/test/*.test.js; STATUS=$?; rm -rf \"$OUTDIR\"; exit $STATUS"
   },
   "devDependencies": {
     "esbuild": "0.28.2",
