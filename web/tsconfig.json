@@ -7,7 +7,12 @@
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "lib": ["ES2022", "DOM"],
+    // Empty on purpose: this config type-checks browser widget code only (see "include"
+    // below). Leaving "types" empty keeps Node's ambient globals (process, fs, Buffer, ...)
+    // out of the checked surface, so widget code that reaches for a Node API fails tsc
+    // instead of type-checking cleanly and only failing at runtime in a browser. The test
+    // suite needs Node's globals and gets them from tsconfig.test.json instead.
     "types": []
   },
-  "include": ["src", "test"]
+  "include": ["src"]
 }

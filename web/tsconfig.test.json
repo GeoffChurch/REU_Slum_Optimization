@@ -1,0 +1,11 @@
+{
+  // Type-checks the test suite, which runs under Node and needs its ambient globals
+  // (node:assert, node:test, ...) -- unlike tsconfig.json's browser-only "src" program.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  // "src" is not re-listed: tsc pulls in whatever the test files import via the module
+  // graph (e.g. ../src/view/transform.js), so this only needs to name its own root files.
+  "include": ["test"]
+}
