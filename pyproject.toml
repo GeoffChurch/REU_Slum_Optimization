@@ -92,7 +92,13 @@ scikit-image = "*"
 default = { features = ["dev", "research"], solve-group = "default" }
 
 [tool.pixi.tasks]
-test = "pytest"
+# Split the same way typecheck is split below (typecheck-py + web-check, composed by typecheck):
+# web/'s transform.ts unit tests otherwise run only when a human types `npm test` by hand. CI
+# (.github/workflows/ci.yml) invokes `pixi run test`, so folding web-test in here is what puts
+# those tests on the gate -- with no new CI step for a future workflow edit to forget.
+test-py = "pytest"
+web-test = { cmd = "npm ci && npm test", cwd = "web" }
+test = { depends-on = ["test-py", "web-test"] }
 typecheck-py = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py"
 web = { cmd = "npm ci && npm run build", cwd = "web" }
 web-check = { cmd = "npm ci && npm run check", cwd = "web" }

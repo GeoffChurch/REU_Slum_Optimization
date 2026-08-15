@@ -5,7 +5,7 @@
   "scripts": {
     "build": "esbuild src/mount.ts --bundle --format=iife --minify --outfile=../docs/js/widgets.js",
     "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
-    "test": "OUTDIR=$(mktemp -d) && tsc -p tsconfig.test.json --outDir \"$OUTDIR\" --noEmit false; node --test \"$OUTDIR\"/test/*.test.js; STATUS=$?; rm -rf \"$OUTDIR\"; exit $STATUS"
+    "test": "bash scripts/test.sh"
   },
   "devDependencies": {
     "@types/node": "22.20.1",
