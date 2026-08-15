@@ -334,3 +334,76 @@ def test_displaced_points_carry_fraction_and_radius(tmp_path):
     assert "c" in disp.columns and "radius" in disp.columns
     assert (disp["c"] > 0).any() and (disp["c"] <= 1).all()
 
+
+def test_render_graph_returns_figure_with_axes() -> None:
+    from reblock.perm_graph import permeability_graph
+    from reblock.render import render_graph
+
+    block = _grid_block(6)
+    fig_data = permeability_graph(block, None)
+    fig = render_graph(fig_data, block, layer="conductance",
+                       vmax=float(fig_data.potential.max()),
+                       width_norm=float(fig_data.conductance.max()))
+
+    assert isinstance(fig, Figure)
+    assert len(fig.axes) == 1
+
+
+def test_render_graph_draws_upgraded_edges_in_the_road_colour() -> None:
+    """Road-raised edges are drawn in the road blue, and only when a road actually raised one.
+
+    Asserted on COLOUR, not on a count of collections: on this unit-cell fixture a 7 m road
+    blankets the whole mesh, so the grey collection can legitimately be absent and a count would
+    read the wrong way round.
+    """
+    from matplotlib.collections import LineCollection
+    from matplotlib.colors import to_rgba, to_rgba_array
+
+    from reblock.perm_graph import permeability_graph
+    from reblock.render import _ROAD_COLOR, _UPGRADED_LW, render_graph
+
+    block = _grid_block(6)
+    roads = with_width(
+        gpd.GeoDataFrame(geometry=[LineString([(3.0, 0.0), (3.0, 5.0)])], crs=UTM),
+        DEFAULT_ROAD_WIDTH_M)
+
+    plain = permeability_graph(block, None)
+    roaded = permeability_graph(block, roads)
+    assert roaded.upgraded.any(), "fixture road must upgrade an edge or the test is vacuous"
+
+    def _edge_colours(f: Figure) -> set[tuple[float, ...]]:
+        # `LineCollection.get_colors()` is typed `ColorType | Sequence[ColorType]` (it can, in
+        # principle, return one bare color rather than a sequence); at runtime it always hands
+        # back an (N, 4) RGBA array here, and to_rgba_array is the identity on that shape -- so
+        # routing through it gives mypy a concrete `np.ndarray` to iterate without changing what
+        # gets compared.
+        return {tuple(round(float(v), 4) for v in colour)
+                for coll in f.axes[0].collections if isinstance(coll, LineCollection)
+                for colour in to_rgba_array(coll.get_colors())}
+
+    def _blue_collections(f: Figure, blue: tuple[float, ...]) -> list[LineCollection]:
+        return [coll for coll in f.axes[0].collections if isinstance(coll, LineCollection)
+                for colour in to_rgba_array(coll.get_colors())
+                if tuple(round(float(v), 4) for v in colour) == blue]
+
+    blue = tuple(round(float(v), 4) for v in to_rgba(_ROAD_COLOR))
+    a = render_graph(plain, block, layer="current", vmax=1.0, width_norm=1.0)
+    b = render_graph(roaded, block, layer="current", vmax=1.0, width_norm=1.0, roads=roads)
+    assert blue not in _edge_colours(a)
+    assert blue in _edge_colours(b)
+
+    def _linewidths(coll: LineCollection) -> list[float]:
+        # `LineCollection.get_linewidth()` is typed `float | Sequence[float]` for the same reason
+        # `get_colors()` is above -- at runtime it hands back a sequence here, but the isinstance
+        # check keeps this correct (and mypy --strict happy) even if a single bare float ever came
+        # back.
+        lw = coll.get_linewidth()
+        return [float(lw)] if isinstance(lw, (int, float)) else [float(v) for v in lw]
+
+    # The road-raised (blue) collection draws at the fixed `_UPGRADED_LW`, never a width derived
+    # from conductance/current -- this is exactly what the site caption's exception (Important 1,
+    # 2026-08-14 fix wave) rests on, so a regression back to a variable width must fail here.
+    for coll in _blue_collections(b, blue):
+        widths = _linewidths(coll)
+        assert widths == [_UPGRADED_LW] * len(widths)
+

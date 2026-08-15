@@ -197,3 +197,60 @@ def test_unpublished_methods_are_excluded_from_the_build() -> None:
     assert not leaked, (
         f"published=False but exclude_docs has no line matching the generator's real output "
         f"path for: {leaked}")
+
+
+def test_perm_graph_figures_quote_the_artifact_not_a_typed_number() -> None:
+    """The captions' numbers must come from perm_graph.json. A hand-typed figure in the partial is
+    exactly the drift the site's truth pass closed -- and 'seven methods' drifted because a count
+    did not look like a metric."""
+    import json
+
+    from scripts.gen_site_pages import PERMGRAPH, _perm_graph_figures
+
+    meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
+    html = _perm_graph_figures()
+
+    assert "graph_current_after.png" in html
+    assert f"{meta['permeability_after'] * 100:.1f}" in html
+    assert meta["block_id"] in html
+
+
+def test_perm_graph_figures_carry_no_fix_round_1_regression() -> None:
+    """Fix round 1 found two false claims live on the page (F1, F2), a load-bearing legend stated
+    nowhere (F3), a stacked layout that defeats the shared scale it advertises (F4), and four-way
+    caption repetition (F5). Each assertion below is the guard for one finding, named, so a
+    regression fails as that finding rather than as a vague content diff."""
+    import json
+
+    from scripts.gen_site_pages import PERMGRAPH, _perm_graph_figures
+
+    meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
+    html = _perm_graph_figures()
+
+    # F1: this page has no heatmaps above the graph figures -- these four images are the only
+    # ones on the page. The true, shared thing across them is one vmax.
+    assert "the heatmaps above" not in html
+    assert "one scale shared" in html
+
+    # F2 (amended in the 2026-08-14 fix wave): "footpath-mesh" alone does not scope the claim away
+    # from the upgraded (blue) edges -- they are footpath-mesh edges too. So no "... edge width is
+    # ..." sentence may claim width for anything but the GREY edges specifically, and it must say
+    # what the blue ones do instead (draw at a fixed width, not a computed one).
+    for claim in re.findall(r"\b(?:[A-Z][a-z]* )?[Ee]dge width is\b[^.]*\.", html):
+        assert claim.startswith("Grey edge width is"), claim
+        assert "fixed width instead" in claim, claim
+
+    # F3: the blue-edge / haloed-node legend is load-bearing and must appear -- exactly once, not
+    # once per caption (which would just be F5 wearing a different hat).
+    assert html.count("Blue edges are the ones a road raised") == 1
+
+    # F4: the four figures sit inside the CSS grid that makes the shared scale comparable, not as
+    # four stacked <figure> blocks with no relation to each other in the markup.
+    assert html.count("<figure>") == 4
+    assert '<div class="sbu-figure-grid">' in html
+    assert html.index('<div class="sbu-figure-grid">') < html.index("<figure>")
+
+    # F5: the block id and parcel/edge counts are stated once, in the intro, not per caption.
+    assert html.count(meta["block_id"]) == 1
+    assert html.count(str(meta["n_parcels"])) == 1
+    assert html.count(str(meta["n_edges"])) == 1

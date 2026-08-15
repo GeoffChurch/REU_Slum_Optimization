@@ -649,6 +649,34 @@ body,
   background: #f3f1ee;
 }
 
+/* Before/after figure pairs that share one width norm or one node `vmax` (e.g. Permeability's
+   egress-graph panels) need to sit side by side for the comparison that shared scale exists to
+   make -- stacked with a multi-megabyte image between each pair, the comparison cannot be made.
+   Two columns; the caller emits its figures row-major, so grid auto-flow lands layer-as-row x
+   before/after-as-column.
+
+   Every grid child needs an explicit min-width: 0, same reason as .sbu-hero above -- a grid
+   track's default min-width is `auto`, so a wide image's intrinsic width overflows the track and
+   scrolls the whole page sideways. That bug has already happened once in this sheet, at a 414px
+   viewport (see the .sbu-hero > * rule). */
+.sbu-figure-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem 2rem;
+  margin: 2rem 0;
+}
+
+.md-typeset .sbu-figure-grid > figure {
+  min-width: 0;
+  margin: 0;
+}
+
+@media screen and (max-width: 76.1875em) {
+  .sbu-figure-grid {
+    grid-template-columns: minmax(0, 1fr);   /* never a bare 1fr -- see the min-width note above */
+  }
+}
+
 /* --------------------------------------------------------------------------- status pills */
 
 /* Colour never carries the meaning alone: each pill states its status in words, and the two

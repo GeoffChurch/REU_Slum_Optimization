@@ -89,7 +89,7 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
 - **Before/after polish** — the existing `render_after` + the head-to-head webpage; a proper
   emitter with `format=webpage` and side-by-side layout (see flow-refactor spec §2).
 
-## Site: pieces B–F of the redesign, and one artifact drift (2026-08-14)
+## Site: pieces C–F of the redesign, and one artifact drift (2026-08-14)
 
 **Piece A shipped** (PRs #55/#56, merged 2026-08-14): the truth pass and the methodology IA. The
 site is live at `https://geoffchurch.github.io/REU_Slum_Optimization/` — note the host, the repo
@@ -97,10 +97,36 @@ was renamed and GitHub Pages does not follow repo renames. Design for everything
 `specs/2026-08-13-site-redesign-design.md` §7. Each piece ships to the public site on its own and
 none blocks on a later one.
 
-- **B — the graph artifact type.** Python only; the Visualizations bullet above is its origin. Derive
-  the drawable graph once, `render.py` draws it to PNG. Do this before any web work: it gives the
-  Permeability page a figure (it has none today) *and* it becomes every future widget's static
-  fallback, so the site degrades to a picture with JS off.
+- **B — the graph artifact type. SHIPPED** (PR #58, merged 2026-08-15; spec
+  `specs/2026-08-14-perm-graph-artifact-design.md`). `src/reblock/perm_graph.py` derives the drawable
+  graph once (`GraphFigure`, `permeability_graph`) and is deliberately matplotlib-free so C's JSON
+  path and F's Pyodide closure both work; `render.py` gained `render_graph`;
+  `scripts/gen_perm_graph.py` emits four PNGs into `examples/perm-graph/` on the pinned deep block
+  under `clearance`'s Lens-B prefix, and the Permeability page shows them in a 2×2 with every caption
+  number read from `perm_graph.json`. **The reusable win:** `permeability.py` now exposes its
+  Laplacian assembly once as `solve_egress`, so the metric and the figure read the same conductance
+  array instead of two opinions about it — piece C consumes `GraphFigure` unchanged.
+
+  **Two deferred items, both decided rather than forgotten:**
+
+  - **`render_after` buffers roads per row** (`render.py:235`), the pattern `render_graph` unions
+    first (`render.py:316`). Harmless there *only* because that path draws the corridor at full
+    opacity — overlapping translucent patches compound toward opaque, which is what made the graph
+    figure's corridor an unreadable slab for two fix rounds. Left alone because unioning it changes
+    antialiasing at patch joints and would silently regenerate ~90 committed `after_*` PNGs. Read
+    this before touching corridor rendering again.
+  - **`.sbu-hero__figure` is not `.md-typeset`-scoped** (`docs/stylesheets/sbu.css:424`), so by
+    specificity it loses to the generic `.md-typeset figure { margin: 2rem 0 }` it means to override.
+    Pre-existing; the new `.md-typeset .sbu-figure-grid > figure` rule does not share the bug.
+
+  **Three more were raised and closed as no-action**, recorded so they are not re-proposed: extracting
+  a shared road-buffer helper (the two call sites differ in alpha, zorder, linewidth *and*
+  dissolve-vs-per-row, so the helper needs three parameters and a behavioural flag — duplication is
+  cheaper); an explicit `zorder` on `_draw_boundary_and_streets` inside `render_graph` (geopandas'
+  `LineCollection` already defaults to zorder 2 and is added after the corridor, so it draws on top
+  already); and the fault-injection row caught by only `test_per_node_kirchhoff[spine]` (it cannot go
+  vacuously green without `test_upgraded_is_empty_without_roads_and_nonempty_with_a_road` failing
+  first).
 - **C — data bundle + widget substrate.** The risky piece: a `web/` TypeScript tree built by esbuild,
   a mount contract, an injected `StateSource` so a widget never asks whether it is inline or in the
   explorer, and a generated `.d.ts` for the bundle so a renamed Python field is a type error rather

@@ -18,6 +18,7 @@ from reblock.permeability import (
     permeability,
     permeability_curve,
     road_conductance,
+    solve_egress,
     with_width,
 )
 
@@ -116,6 +117,16 @@ def test_ungrounded_returns_zero_benefit_or_guarded():
     P, v = egress_power(b, None)
     assert not np.isfinite(P)     # +inf; permeability() guards this (returns nan) -- assert guard
     assert math.isnan(permeability(b, None))          # exercise the actual nan guard, not just P
+
+def test_solve_egress_conductance_covers_the_whole_mesh():
+    """The returned conductance is one value per mesh edge, at or above the footpath term
+    everywhere -- roads enter only through a max(), so no edge can come back lower."""
+    b = _grid_block(15, cell=10.0)
+    r = _roads([LineString([(15, 0), (15, 135)])])
+    sol = solve_egress(b, r)
+    assert len(sol.conductance) == len(sol.mesh.rows) == len(sol.mesh.footpath_g)
+    assert np.all(sol.conductance >= sol.mesh.footpath_g)
+    assert np.any(sol.conductance > sol.mesh.footpath_g)   # that road really does upgrade edges
 
 def test_permeability_curve_terminal_matches_full_permeability():
     # Two segments (a spur + a cross-connector) on the thin-corridor 15x15/10m grid, so the
