@@ -89,7 +89,7 @@ shows real cross-block headroom over boundary-reconciled block-local reblocking.
 - **Before/after polish** — the existing `render_after` + the head-to-head webpage; a proper
   emitter with `format=webpage` and side-by-side layout (see flow-refactor spec §2).
 
-## Site: pieces C–F of the redesign, and one artifact drift (2026-08-14)
+## Site: pieces D–F of the redesign, and one artifact drift (2026-08-14)
 
 **Piece A shipped** (PRs #55/#56, merged 2026-08-14): the truth pass and the methodology IA. The
 site is live at `https://geoffchurch.github.io/REU_Slum_Optimization/` — note the host, the repo
@@ -127,11 +127,66 @@ none blocks on a later one.
   already); and the fault-injection row caught by only `test_per_node_kirchhoff[spine]` (it cannot go
   vacuously green without `test_upgraded_is_empty_without_roads_and_nonempty_with_a_road` failing
   first).
-- **C — data bundle + widget substrate.** The risky piece: a `web/` TypeScript tree built by esbuild,
-  a mount contract, an injected `StateSource` so a widget never asks whether it is inline or in the
-  explorer, and a generated `.d.ts` for the bundle so a renamed Python field is a type error rather
-  than a blank panel. Prove it with exactly one widget (`PermGraph`), which B has just built a Python
-  twin of, so the two can be diffed.
+- **C — data bundle + widget substrate. SHIPPED** (merged 2026-08-15; spec
+  `specs/2026-08-15-web-bundle-and-widget-substrate-design.md`). `scripts/gen_web_bundle.py` bakes a
+  committed 278 KB `examples/perm-graph/bundle.json` plus a generated `web/src/bundle.d.ts`;
+  `web/src/` holds a DOM-free `view/transform.ts`, a canvas mark layer, an injected `StateSource` and
+  a mount contract that throws on an unknown widget name; esbuild bundles and `tsc` checks, wired
+  into `pixi run typecheck`/`test` and into `deploy-site.yml`. `PermGraph` replaces
+  `graph_current_after.png` on the Permeability page, booting at the Lens-B prefix the caption quotes
+  and running past it to the full 486 m network.
+
+  **Two scope decisions worth knowing.** The city tier (16,451 blocks, ~3 MB) moved to **D**, where
+  `ScreenMap` actually consumes it. And full prefix tables for the REGION flagships were measured at
+  **~12 hours** of solving, recurring on every examples regeneration — per-flagship numbers are in
+  the spec's §1, and whoever first needs a region widget owns that decision. `clearance` on the
+  pinned block is 20 segments, so C's own bake is half a second.
+
+  **Read before piece D — two live hazards in the substrate:**
+
+  - **`mountAll()` has no try/catch** (`web/src/mount.ts`), so one widget throwing during mount
+    silently prevents every later widget on the same page from mounting. Harmless with one widget;
+    a real hazard the moment D adds `DisplacementField`, `Frontier`, `RegionGrow` and `ScreenMap`.
+  - **`register()` has no duplicate-name guard** — a second `register("perm-graph", …)` silently
+    replaces the first. One registration site today, five soon.
+
+  **Parity and staleness gaps left open** (each cheap, none blocking):
+
+  - the canvas fits its bbox to **node centroids** while drawing parcels, boundary, streets and
+    roads; on this block the 4 % pad absorbs it (1 vertex of 1850 lands 0.4 px outside a 600 px
+    canvas), so it is luck rather than design — a boundary spur outside the centroid hull would crop;
+  - three encoding numbers are still hard-coded in TypeScript (parcel `lineWidth` 0.4, boundary 1.3,
+    halo 1.6) against the spec's "the whole encoding travels with the data", and
+    `medianEdgeLength` reimplements a quantity Python could bake once;
+  - nothing asserts the committed `.d.ts` equals `gen_web_bundle.py`'s own `DTS_TEMPLATE` (they match
+    today), so a hand edit is caught only for keys the recursive guard walks;
+  - `web/test/widgets-bundle.test.ts` proves the bundle *evaluates* but never asserts the widget
+    **registered** — dropping the `register(...)` call while keeping the import still passes. One
+    line (`assert.match(source, /perm-graph/)`) closes it;
+  - `scripts/gen_web_bundle.py` is type-checked only *incidentally*, via `tests/test_web_bundle.py`
+    importing it; move or delete that import and a strict-clean script silently leaves the gate.
+
+  **Decided against, recorded so they are not re-proposed:**
+
+  - **Do not add a length-parity guard to `nearest()`** (`web/src/view/transform.ts`).
+    `test_shapes_are_internally_consistent` makes an `xs`/`ys` mismatch unconstructible from the
+    bundle, so a runtime check would be exactly the unreachable guard the static-checkability
+    directive forbids.
+  - **`parsePrefix` coercing a malformed `data-prefix` to 0 is deliberate**, not an oversight:
+    `data-widget` selects component *identity*, where a silent miss leaves a mount point that looks
+    like a widget which failed to draw, whereas `data-prefix` selects a *view parameter* on a widget
+    that renders regardless — and `mountAll`'s loop has no try/catch, so throwing there would take
+    down every later widget on the page.
+
+  **Chores:** `npm ci` runs twice per `pixi run check` (`web-check` + `web-test`, each wiping
+  `node_modules`) — a shared `web-install` task both depend on halves it; `README.md` documents
+  `pixi run typecheck` but not `pixi run web`, which the missing-bundle guard's own error message
+  tells the user to run; and esbuild has no explicit `--target` or sourcemap, so the deployed bundle
+  is minified with no way to read a stack trace.
+
+  **One spec §8 open item now measured:** `first_upgraded_at`'s sentinel is genuinely load-bearing —
+  **398 of 745** edges are never road-raised even by the full 486 m network, so the field is sparse,
+  not dense.
 - **D — the remaining widgets.** `DisplacementField`, `Frontier`, `RegionGrow`, then `ScreenMap`
   last: 16k blocks is the only real rendering-performance problem in the design (Canvas, not SVG —
   recolouring must not touch geometry).
