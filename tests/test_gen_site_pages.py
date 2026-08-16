@@ -14,6 +14,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -245,12 +247,68 @@ def test_perm_graph_figures_carry_no_fix_round_1_regression() -> None:
     assert html.count("Blue edges are the ones a road raised") == 1
 
     # F4: the four figures sit inside the CSS grid that makes the shared scale comparable, not as
-    # four stacked <figure> blocks with no relation to each other in the markup.
-    assert html.count("<figure>") == 4
+    # four stacked <figure> blocks with no relation to each other in the markup. Matched as
+    # "<figure" followed by a space or '>' (not the literal "<figure>") because the current/after
+    # panel's <figure> now carries the widget's data-* mount-point attributes directly (fix wave,
+    # I4) rather than being wrapped in a plain <div> -- a bare "<figure>" substring count would
+    # silently drop to 3 and this guard would never notice the fourth panel moved.
+    assert len(re.findall(r"<figure[ >]", html)) == 4
     assert '<div class="sbu-figure-grid">' in html
-    assert html.index('<div class="sbu-figure-grid">') < html.index("<figure>")
+    assert html.index('<div class="sbu-figure-grid">') < html.index("<figure")
 
-    # F5: the block id and parcel/edge counts are stated once, in the intro, not per caption.
-    assert html.count(meta["block_id"]) == 1
+    # F5: the block id and parcel/edge counts are stated once, in the intro, not per caption. Task
+    # 6 gave the block id a second, distinct occurrence -- the `data-block` attribute on the
+    # current/after figure's widget mount point, which exists for the browser widget to read, not
+    # for a reader to see repeated -- so it is not the caption-repetition F5 guarded against.
+    # Assert both halves separately: exactly one PROSE occurrence (the intro sentence) and exactly
+    # one machine-readable occurrence (the mount point), so a regression in either still fails as
+    # itself rather than being absorbed into a single loosened count.
+    assert html.count(f'data-block="{meta["block_id"]}"') == 1
+    prose_id_count = html.count(meta["block_id"]) - html.count(f'data-block="{meta["block_id"]}"')
+    assert prose_id_count == 1
     assert html.count(str(meta["n_parcels"])) == 1
     assert html.count(str(meta["n_edges"])) == 1
+
+
+def test_write_page_rewrites_data_bundle_url_for_its_depth(tmp_path: Path) -> None:
+    """I6: nothing previously exercised the `data-bundle="assets/` -> `../../assets/` rewrite in
+    `_write_page` -- delete that one `.replace()` line and the whole suite stayed green while the
+    widget's `fetch()` 404s in production (this exact gap already happened once on this branch, per
+    the fix-wave report). `data-bundle` is raw HTML inside a <figure> block (like `src=`/`href=`),
+    so MkDocs never rewrites it itself; `_write_page` must, against the page's SERVED url_depth."""
+    from scripts.gen_site_pages import _write_page
+
+    out = tmp_path / "permeability.md"
+    body = ('<figure data-widget="perm-graph" data-bundle="assets/perm-graph/bundle.json">\n'
+            "</figure>\n")
+    # url_depth=2 mirrors permeability.md's real depth (methodology/permeability.md, served at
+    # <base>/methodology/permeability/).
+    _write_page(out, body, depth=1, url_depth=2, title="Permeability")
+    text = out.read_text(encoding="utf-8")
+    assert 'data-bundle="../../assets/perm-graph/bundle.json"' in text
+    assert 'data-bundle="assets/' not in text
+
+
+def test_assert_widget_bundle_present_fails_the_build_on_a_missing_bundle(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """I6: nothing previously exercised `_assert_widget_bundle_present` -- a site built without
+    `pixi run web` would emit a <script> tag for a file that is not there, every widget would
+    silently fail to boot behind an intact-looking PNG fallback, and no test would notice. Scoped to
+    a throwaway `DOCS` (monkeypatched, not the real repo tree) so this test's pass/fail does not
+    depend on whether `pixi run web` happens to have been run in this checkout."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+
+    # No page carries a widget mount point: must stay silent regardless of the bundle's presence.
+    gsp._assert_widget_bundle_present(False)
+
+    # A page DOES carry one, but docs/js/widgets.js does not exist -- must fail the build rather
+    # than ship a silent 404.
+    with pytest.raises(SystemExit, match="docs/js/widgets.js is missing"):
+        gsp._assert_widget_bundle_present(True)
+
+    # Once the bundle actually exists, the identical call must not raise.
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "widgets.js").write_text("", encoding="utf-8")
+    gsp._assert_widget_bundle_present(True)

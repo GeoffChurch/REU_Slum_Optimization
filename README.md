@@ -20,7 +20,7 @@ pixi install
 
 ```bash
 pixi run test        # pytest + coverage
-pixi run typecheck   # mypy --strict
+pixi run typecheck   # mypy --strict + tsc --noEmit (web/)
 pixi run lint        # ruff check
 pixi run fmt         # ruff format
 pixi run check       # lint + typecheck + test

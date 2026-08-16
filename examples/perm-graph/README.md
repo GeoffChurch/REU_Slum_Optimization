@@ -26,4 +26,9 @@ generator.
 Not one of the flagships in [`../README.md`](../README.md): those are walkthroughs that reproduce a
 result from the CLI, and this is a figure set for one page.
 
-Regenerate: `pixi run python -m scripts.gen_perm_graph`
+This directory also carries `bundle.json`, the data for the interactive `PermGraph` widget on the
+same page -- the same pinned block, method and config as the PNGs above, baked by a separate script
+because it needs no matplotlib. It is this directory's largest committed file, so it is regenerated
+alongside the PNGs, not on its own separate cadence.
+
+Regenerate: `pixi run python -m scripts.gen_perm_graph && pixi run python -m scripts.gen_web_bundle`
