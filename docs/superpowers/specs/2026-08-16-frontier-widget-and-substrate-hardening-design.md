@@ -92,15 +92,17 @@ metres must be metres on both axes, and wrong for a chart: displacement runs 0�
 an SVG `Frontier` would reuse the transform layer unchanged; that claim was false, and this is the
 correction.**
 
-`View` becomes `{ sx, sy, tx, ty }`:
+`View` becomes `{ scaleX, scaleY, tx, ty }` — **not** `{ sx, sy }`, because `toWorld(v, sx, sy)` and
+`zoomed(v, factor, sx, sy)` already use `sx`/`sy` as *screen coordinate* parameter names, and reusing
+them for scales would make every call site ambiguous to a reader:
 
-* `toScreen(v, x, y)` -> `[x * v.sx + v.tx, v.ty - y * v.sy]`, `toWorld` inverting per axis;
+* `toScreen(v, x, y)` -> `[x * v.scaleX + v.tx, v.ty - y * v.scaleY]`, `toWorld` inverting per axis;
 * `panned` unchanged — translation only;
 * `zoomed` multiplies both scales by the same factor, so their ratio survives: correct for maps,
   harmless for charts;
 * `nearest` unchanged — it works in world space.
 
-**`fitBbox` keeps its uniform behaviour, and gets a test that says so.** It sets `sx = sy`, and that
+**`fitBbox` keeps its uniform behaviour, and gets a test that says so.** It sets `scaleX = scaleY`, and that
 is load-bearing rather than incidental: `render/canvas.ts` converts metres to pixels through the
 scale for road widths and node radii, so unequal scales would silently make geographic widths wrong
 on one axis while everything still drew. A test asserting `fitBbox` returns `sx === sy` guards the
@@ -110,12 +112,42 @@ invariant against a later well-meant generalisation — the same reasoning that 
 
 **Named churn, so a reviewer expects it:** `web/src/view/transform.ts`, its six Node tests,
 `web/src/render/canvas.ts` (three `view.scale` reads) and `web/src/widgets/perm-graph.ts`. Every
-map-path read becomes `sx`, which is valid precisely because `fitBbox` guarantees equality.
+map-path read becomes `scaleX`, which is valid precisely because `fitBbox` guarantees equality.
 
 **The risk this carries, stated plainly:** those two files are reviewed, shipped, and live on the
-deployed site. A regression breaks a working widget. The `sx === sy` invariant test is what makes the
+deployed site. A regression breaks a working widget. The `scaleX === scaleY` invariant test is what makes the
 map path's behaviour provably unchanged, and the implementation plan requires re-verifying the
 deployed PermGraph after merge rather than assuming it.
+
+### `StateSource` becomes generic, because widget #2 breaks its shape
+
+Piece C shipped `WidgetState` as one concrete interface — `{ prefix, layer, halos }`, PermGraph's
+exact fields — with a non-generic `StateSource`, and `mountAll` parsing those specific `data-*`
+attributes and handing the same shape to every widget. `Frontier` needs
+`{ targetDisplacement, targetPermeability, isolated }`, so the single-shape assumption breaks at the
+second widget, exactly where C predicted the substrate would first be tested. Widening `WidgetState`
+with optional fields per widget is the wrong repair: it grows with the widget count and every widget
+sees fields it does not use.
+
+Instead the substrate becomes generic in the state type, and attribute parsing moves to the widget
+that owns those attributes:
+
+```ts
+export interface StateSource<T> { get(): T; set(patch: Partial<T>): void; subscribe(fn: (s: T) => void): void }
+export function localState<T>(initial: T): StateSource<T>
+export type StateFactory = <T>(initial: T) => StateSource<T>
+export type Widget = (host: HTMLElement, makeState: StateFactory) => void
+```
+
+**The injection property survives, and that is the point of routing through a factory** rather than
+letting each widget construct its own store: a widget declares its own state type and reads its own
+`data-*` attributes, but still receives the *means of making state* from outside, so piece E can pass
+a URL-synced factory and no widget learns which one it got. `mount.ts` correspondingly stops knowing
+about `data-layer`, `data-halos` and `data-prefix`, which were never its business — they move into
+`perm-graph.ts`, alongside the `parsePrefix` validation C wrote for them.
+
+This changes `Widget`'s signature, so `web/src/widgets/perm-graph.ts` is edited here too — the same
+already-shipped file the transform generalisation touches, and the same risk applies.
 
 ### Two new DOM-free modules
 
@@ -181,8 +213,8 @@ sequence. That is the parent design's compute-model claim exercised rather than 
 **Node.**
 
 * `niceTicks` — round values, count near the target, range covered.
-* The generalised transform — the six existing tests updated, plus the `fitBbox` returns `sx === sy`
-  invariant and `fitAxes`.
+* The generalised transform — the six existing tests updated, plus the `fitBbox` returns
+  `scaleX === scaleY` invariant and `fitAxes`.
 * The target binary search as a pure function over a monotone array: least index clearing a target.
   Directly fault-injectable.
 * The bundle-evaluation smoke test extended to assert **both** widgets register, not just one.
