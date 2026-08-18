@@ -5,9 +5,32 @@ import { draw, sizeCanvas } from "../render/canvas.js";
 // mount.ts's registration comment) -- this module must never import `register` from mount.js.
 import type { Widget } from "../mount.js";
 import { fitBbox, nearest, panned, toWorld, zoomed, type View } from "../view/transform.js";
-import type { StateSource, WidgetState } from "../state.js";
+import type { StateFactory, StateSource } from "../state.js";
 
-export const permGraph: Widget = (host, state) => {
+interface PermGraphState { prefix: number; layer: "conductance" | "current"; halos: boolean }
+
+/** Parse `data-prefix` into a non-negative integer, never NaN.
+ *
+ * The attribute is a string from HTML -- absent, empty, or hand-typed-wrong are all reachable --
+ * and `prefix` goes on to index straight into baked arrays (`b.roads.slice(0, prefix)`,
+ * `b.prefix.current[prefix]`, ...). `Number(raw)` alone lets a malformed attribute (missing,
+ * "abc", "-1", "2.5") become NaN or a value that is numeric but not a valid array index; either
+ * would surface downstream as a silent `undefined` read or a `.slice` with a nonsensical bound
+ * instead of failing here, at the boundary, where the bad string is still in hand. Falling back to
+ * 0 (rather than throwing) matches `layer`/`halos` below, which also coerce a malformed attribute
+ * to a valid default instead of rejecting the whole mount over one cosmetic attribute.
+ */
+function parsePrefix(raw: string | undefined): number {
+  const n = raw === undefined ? 0 : Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
+function initialState(el: HTMLElement): PermGraphState {
+  const layer = el.dataset.layer === "conductance" ? "conductance" : "current";
+  return { prefix: parsePrefix(el.dataset.prefix), layer, halos: el.dataset.halos !== "false" };
+}
+
+export const permGraph: Widget = (host, makeState) => {
   const src = host.dataset.bundle!;
   // I9: a 404, a renamed bundle field, or any throw inside boot() must be VISIBLE on the page, not
   // an unhandled rejection sitting silently in the console while the PNG fallback stays up and the
@@ -18,7 +41,7 @@ export const permGraph: Widget = (host, state) => {
       if (!r.ok) throw new Error(`fetch ${src} failed: ${r.status} ${r.statusText}`);
       return r.json() as Promise<Bundle>;
     })
-    .then((b) => boot(host, state, b))
+    .then((b) => boot(host, makeState, b))
     .catch((err: unknown) => showError(host, err));
 };
 
@@ -34,7 +57,8 @@ function showError(host: HTMLElement, err: unknown): void {
   }
 }
 
-function boot(host: HTMLElement, state: StateSource, b: Bundle): void {
+function boot(host: HTMLElement, makeState: StateFactory, b: Bundle): void {
+  const state: StateSource<PermGraphState> = makeState(initialState(host));
   const fallback = host.querySelector("img");
   const caption = host.querySelector("figcaption");
 
@@ -67,7 +91,7 @@ function boot(host: HTMLElement, state: StateSource, b: Bundle): void {
   }
   layerSelect.value = s0.layer;
   layerSelect.addEventListener("change", () => {
-    state.set({ layer: layerSelect.value as WidgetState["layer"] });
+    state.set({ layer: layerSelect.value as PermGraphState["layer"] });
   });
   layerLabel.append("Layer ", layerSelect);
 

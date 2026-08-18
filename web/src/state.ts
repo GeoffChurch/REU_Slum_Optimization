@@ -1,25 +1,24 @@
 /** The state a widget reads, injected at mount.
  *
- * In prose pages this is a local store seeded from the mount point's data-* attributes; piece E
- * swaps in a URL-synced shared store for the Explore page. The widget never learns which it has --
- * that is the whole reason to inject it rather than grow an `if (embedded)` branch per widget, with
- * the branch count climbing alongside the widget count.
+ * Generic because widget #2 broke the single-shape assumption: piece C shipped one concrete
+ * WidgetState carrying PermGraph's fields, and Frontier needs entirely different ones. Widening one
+ * interface per widget would grow it with the widget count and show every widget fields it does not
+ * use.
+ *
+ * Widgets receive a FACTORY rather than constructing their own store, and that is the whole point:
+ * piece E can pass a URL-synced factory and no widget learns which one it got.
  */
-export interface WidgetState {
-  prefix: number;
-  layer: "conductance" | "current";
-  halos: boolean;
+export interface StateSource<T> {
+  get(): T;
+  set(patch: Partial<T>): void;
+  subscribe(fn: (s: T) => void): void;
 }
 
-export interface StateSource {
-  get(): WidgetState;
-  set(patch: Partial<WidgetState>): void;
-  subscribe(fn: (s: WidgetState) => void): void;
-}
+export type StateFactory = <T>(initial: T) => StateSource<T>;
 
-export function localState(initial: WidgetState): StateSource {
+export function localState<T>(initial: T): StateSource<T> {
   let current = { ...initial };
-  const listeners: ((s: WidgetState) => void)[] = [];
+  const listeners: ((s: T) => void)[] = [];
   return {
     get: () => current,
     set(patch) {
