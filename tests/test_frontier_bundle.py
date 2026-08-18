@@ -3,7 +3,7 @@ thing between a bad bake and a chart that reads wrong."""
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -133,6 +133,8 @@ def test_permeability_matches_the_solver_at_every_prefix(bundle: dict[str, Any])
         pytest.skip("needs the capetown_full cache; run "
                      "`pixi run python -m scripts.gen_frontier_bundle`")
 
+    from geopandas import GeoDataFrame
+
     from reblock.budget import street_first_ordered
     from reblock.compare import load_permeability_config
     from reblock.derive.access import STREET_TOL
@@ -146,7 +148,7 @@ def test_permeability_matches_the_solver_at_every_prefix(bundle: dict[str, Any])
     p0, _ = egress_power(block, None, params, adj=adj)
     for name, roads in roads_by_method.items():
         ordered = street_first_ordered(block, roads, STREET_TOL)
-        got = [permeability(block, ordered.iloc[:m], params, p0=p0, adj=adj)
+        got = [permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0, adj=adj)
                for m in range(len(ordered) + 1)]
         np.testing.assert_allclose(bundle["methods"][name]["permeability"], got, rtol=1e-5,
                                    atol=1e-9, err_msg=name)
