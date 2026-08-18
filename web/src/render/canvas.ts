@@ -55,7 +55,9 @@ export function draw(ctx: CanvasRenderingContext2D, b: Bundle, f: Frame,
     if (group) group.push(r); else byWidth.set(r.width_m, [r]);
   }
   for (const [width_m, group] of byWidth) {
-    ctx.lineWidth = width_m * f.view.scale;
+    // scaleX is correct here (rather than a min/avg of both) precisely because fitBbox guarantees
+    // scaleX === scaleY for every map view -- see transform.ts's uniform-fit test.
+    ctx.lineWidth = width_m * f.view.scaleX;
     ctx.beginPath();
     for (const r of group) {
       r.coords.forEach(([x, y], i) => {
@@ -124,7 +126,9 @@ export function draw(ctx: CanvasRenderingContext2D, b: Bundle, f: Frame,
   // only lower potentials, so this is the shared scale across every slider position.
   const pot = b.prefix.potential[f.prefix]!;
   const vmax = Math.max(...b.prefix.potential[0]!);
-  const r = e.node_radius_frac * medianEdgeLength(b) * f.view.scale;
+  // scaleX is correct here for the same reason as the road-width read above: fitBbox guarantees
+  // scaleX === scaleY for every map view.
+  const r = e.node_radius_frac * medianEdgeLength(b) * f.view.scaleX;
   for (let i = 0; i < pot.length; i++) {
     const [sx, sy] = toScreen(f.view, b.nodes.cx[i]!, b.nodes.cy[i]!);
     if (f.halos && b.nodes.ground_g[i]! > 0) {

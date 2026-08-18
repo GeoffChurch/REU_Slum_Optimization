@@ -9,34 +9,62 @@
  */
 export interface Bbox { minX: number; minY: number; maxX: number; maxY: number }
 
-/** screenX = x * scale + tx; screenY = ty - y * scale  (y flips: world up is screen up). */
-export interface View { scale: number; tx: number; ty: number }
+/** screenX = x * scaleX + tx; screenY = ty - y * scaleY  (y flips: world up is screen up).
+ *
+ * Two scales, not one, because a chart and a map want different things: a map must not stretch
+ * (metres are metres on both axes) while a chart's axes are different quantities entirely --
+ * displacement 0-0.25 against permeability 0-1. `fitBbox` serves maps and keeps scaleX === scaleY;
+ * `fitAxes` serves charts. Piece C's spec claimed one transform served both; it did not.
+ */
+export interface View { scaleX: number; scaleY: number; tx: number; ty: number }
 
 export function fitBbox(b: Bbox, width: number, height: number, pad = 0.04): View {
   const w = Math.max(b.maxX - b.minX, 1e-9);
   const h = Math.max(b.maxY - b.minY, 1e-9);
   const scale = Math.min(width / w, height / h) * (1 - 2 * pad);
-  const tx = (width - w * scale) / 2 - b.minX * scale;
-  const ty = (height + h * scale) / 2 + b.minY * scale;
-  return { scale, tx, ty };
+  return {
+    scaleX: scale,
+    scaleY: scale,
+    tx: (width - w * scale) / 2 - b.minX * scale,
+    ty: (height + h * scale) / 2 + b.minY * scale,
+  };
+}
+
+/** Chart fit: each axis independently, so the plot fills the box. */
+export function fitAxes(bx: [number, number], by: [number, number],
+                        width: number, height: number, pad = 0.04): View {
+  const w = Math.max(bx[1] - bx[0], 1e-9);
+  const h = Math.max(by[1] - by[0], 1e-9);
+  const scaleX = (width / w) * (1 - 2 * pad);
+  const scaleY = (height / h) * (1 - 2 * pad);
+  return {
+    scaleX,
+    scaleY,
+    tx: (width - w * scaleX) / 2 - bx[0] * scaleX,
+    ty: (height + h * scaleY) / 2 + by[0] * scaleY,
+  };
 }
 
 export function toScreen(v: View, x: number, y: number): [number, number] {
-  return [x * v.scale + v.tx, v.ty - y * v.scale];
+  return [x * v.scaleX + v.tx, v.ty - y * v.scaleY];
 }
 
 export function toWorld(v: View, sx: number, sy: number): [number, number] {
-  return [(sx - v.tx) / v.scale, (v.ty - sy) / v.scale];
+  return [(sx - v.tx) / v.scaleX, (v.ty - sy) / v.scaleY];
 }
 
 export function panned(v: View, dxScreen: number, dyScreen: number): View {
-  return { scale: v.scale, tx: v.tx + dxScreen, ty: v.ty + dyScreen };
+  return { scaleX: v.scaleX, scaleY: v.scaleY, tx: v.tx + dxScreen, ty: v.ty + dyScreen };
 }
 
 /** Zoom about a screen anchor, keeping the world point under it fixed. */
 export function zoomed(v: View, factor: number, sx: number, sy: number): View {
-  const scale = v.scale * factor;
-  return { scale, tx: sx - (sx - v.tx) * factor, ty: sy - (sy - v.ty) * factor };
+  return {
+    scaleX: v.scaleX * factor,
+    scaleY: v.scaleY * factor,
+    tx: sx - (sx - v.tx) * factor,
+    ty: sy - (sy - v.ty) * factor,
+  };
 }
 
 /** Index of the nearest of `xs`/`ys` to a world point. Linear: 263 nodes needs no index. */
