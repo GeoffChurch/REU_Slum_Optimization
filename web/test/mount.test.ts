@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { Widget } from "../src/mount.js";
 
@@ -110,13 +111,21 @@ test("every widget name a generated page can emit is registered under exactly th
     stubDocument();
     const { register } = await import("../src/mount.js");
 
-    // The one link in the chain with no test on either side of it (review finding I2): the generator
-    // emits the string `data-widget="frontier"` (asserted on the Python side by
-    // tests/test_gen_site_pages.py), mount.ts registers a string, and nothing paired them --
-    // deleting `register("frontier", frontier)` left the whole suite green while the deployed page
+    // The one link in the chain with no test on either side of it (Task 7 review finding I2): the
+    // generator emits `data-widget="…"` strings, mount.ts registers strings, and nothing paired them
+    // -- deleting `register("frontier", frontier)` left the whole suite green while the deployed page
     // showed a console-only error behind an intact PNG. Re-registering must throw, which it can only
     // do if the name is already taken by the real registration in mount.ts's own module body.
-    for (const name of ["perm-graph", "frontier"]) {
+    //
+    // The names are READ OUT OF THE GENERATOR, not listed here, because the name of this test
+    // promises "every widget name a generated page can emit" and a hardcoded pair would not keep that
+    // promise for a third widget (final review, I4). Same derivation as widgets-bundle.test.ts, which
+    // pins the same property against the shipped artifact rather than the source modules.
+    const generator = readFileSync("../scripts/gen_site_pages.py", "utf8");
+    const emitted = [...new Set([...generator.matchAll(/data-widget="([a-z-]+)"/g)]
+      .map((m) => m[1]!))].sort();
+    assert.ok(emitted.length >= 2, `generator emits too few widget names: ${JSON.stringify(emitted)}`);
+    for (const name of emitted) {
       assert.throws(
         () => register(name, (() => {}) as Widget),
         new RegExp(`widget already registered: ${name}`),

@@ -23,17 +23,32 @@ def _module_level_names(src: str) -> set[str]:
     return names
 
 
+def _bakers() -> list[Path]:
+    """Every script that loads the pinned block, DERIVED rather than listed.
+
+    The listed form named two of the three bakers and missed `gen_frontier_bundle.py` -- the one
+    added by the branch that introduced it -- so injecting a `VARIANT`/`METHOD` re-declaration there
+    left the suite green (final review, I3). That is the hand-maintained-closed-list failure mode
+    this file's own docstring exists to guard against, applied to the guard itself. Membership is
+    now the property that matters: a script is a baker exactly when it imports the shared loader, so
+    the next baker is covered by writing that import.
+    """
+    found = [p for p in sorted(Path("scripts").glob("*.py"))
+             if "scripts._example_block" in p.read_text(encoding="utf-8")]
+    assert len(found) >= 3, f"expected at least the three known bakers, found {found}"
+    return found
+
+
 def test_pin_is_declared_once() -> None:
     """No baker may re-declare the variant or method; they import them."""
     from scripts._example_block import PINNED_METHOD, PINNED_VARIANT
 
     assert PINNED_VARIANT == "method_comparison"
     assert PINNED_METHOD == "clearance"
-    for baker in ("gen_perm_graph.py", "gen_web_bundle.py"):
-        src = Path("scripts") / baker
+    for src in _bakers():
         bound = _module_level_names(src.read_text(encoding="utf-8"))
-        assert "VARIANT" not in bound, f"{baker} still declares its own VARIANT"
-        assert "METHOD" not in bound, f"{baker} still declares its own METHOD"
+        assert "VARIANT" not in bound, f"{src.name} still declares its own VARIANT"
+        assert "METHOD" not in bound, f"{src.name} still declares its own METHOD"
 
 
 def test_example_method_names_includes_osm_footpaths() -> None:

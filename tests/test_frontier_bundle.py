@@ -227,6 +227,13 @@ def test_chart_block_matches_the_figures_own_styling(bundle: dict[str, Any]) -> 
         mag = 10.0 ** math.floor(math.log10(step_size))
         nice = next(k * mag for k in (1, 2, 2.5, 5, 10) if k * mag >= step_size)
         assert axis_max / nice == pytest.approx(round(axis_max / nice)), axis_max
+        # And every tick must be a WHOLE percentage point, because the widget labels ticks with the
+        # same `{:.0%}` it labels targets with (final review, M8 -- latent, not live). An axis max
+        # of 0.125 passes the assertion above and then produces ticks at 0.025/0.05/0.075 labelled
+        # 3%/5%/8%: numbers no tick is at, which this project's own directive calls a defect.
+        assert (nice * 100) == pytest.approx(round(nice * 100)), (
+            f"tick step {nice} on axis [0, {axis_max}] is not a whole percentage point, so the "
+            f"widget would print tick labels no tick is actually at")
 
 
 def test_baked_colours_are_the_colours_in_the_committed_png(bundle: dict[str, Any]) -> None:

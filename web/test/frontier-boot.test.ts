@@ -19,6 +19,9 @@ import type { FrontierBundle } from "../src/frontier.js";
  * called from inside the test below).
  */
 let clock = 0;
+/** How many fake elements have been created so far -- a render rebuilds the whole SVG, so this
+ * counter moving is exactly "a render happened". */
+const created = (): number => clock;
 
 class FakeElement {
   readonly tagName: string;
@@ -56,7 +59,16 @@ class FakeElement {
   insertBefore(node: FakeElement, _ref: FakeElement | null): void { this.children.push(node); }
   replaceChildren(...nodes: FakeElement[]): void { this.children = [...nodes]; }
   remove(): void { this.removedAt = ++clock; }
-  addEventListener(name: string): void { this.listeners.push(name); }
+  addEventListener(name: string, fn?: (ev: unknown) => void): void {
+    this.listeners.push(name);
+    if (fn) (this.handlers[name] ??= []).push(fn);
+  }
+  /** Handlers by event name, so a test can dispatch a real pointer sequence rather than assert that
+   * a listener was merely registered. */
+  readonly handlers: Record<string, ((ev: unknown) => void)[]> = {};
+  dispatch(name: string, ev: unknown): void {
+    for (const fn of this.handlers[name] ?? []) fn(ev);
+  }
   setPointerCapture(): void {}
   releasePointerCapture(): void {}
   /** Every fake element reports the same layout width. The widget measures the <div> it inserts
@@ -128,7 +140,7 @@ test("the widget mounts and draws one curve per method in the bundle, with no Na
     await mount(host);
 
     const caption = host.querySelector("figcaption")!;
-    assert.ok(!caption.textContent.includes("failed to load"),
+    assert.ok(!caption.textContent.includes("could not load interactively"),
       `the widget reported a failure instead of mounting: ${caption.textContent}`);
 
     const svgs = host.all("svg");
@@ -180,6 +192,12 @@ test("the widget mounts and draws one curve per method in the bundle, with no Na
       assert.equal(Number(g.getAttribute("stroke-width")), bundle.chart.guide_width);
       assert.equal(g.getAttribute("stroke"), bundle.chart.guide_colour);
     }
+    // M6: no `role="img"`. That plus an aria-label makes the subtree presentational, hiding the
+    // <text> tick labels and axis titles from assistive tech -- and those being real, reachable text
+    // is half the stated reason this widget draws SVG instead of canvas.
+    assert.equal(svgs[0]!.getAttribute("role"), null,
+      "role on the <svg> makes its axis text unreachable to a screen reader");
+
     const labels = svgs[0]!.all("text").map((t) => t.textContent);
     assert.ok(labels.includes(bundle.chart.x_label) && labels.includes(bundle.chart.y_label),
       String(labels));
@@ -270,7 +288,12 @@ test("the fallback image survives a boot failure and is removed only on success"
   await mount(broken);
   assert.equal(broken.querySelector("img")!.removedAt, null);
   assert.match(broken.querySelector("figcaption")!.textContent,
-    /Frontier failed to load: .*data-target-permeability/);
+    /Frontier could not load interactively .*data-target-permeability/);
+  // The sentence that only one of the three former copies carried (final review, M7): the reader is
+  // told the picture above still stands, which is true exactly because the fallback survives a boot
+  // failure -- asserted on the line above.
+  assert.match(broken.querySelector("figcaption")!.textContent,
+    /The static image above still applies\./);
 });
 
 test("a bundle missing a field the whole chart is scaled by fails LOUDLY and keeps the image",
@@ -288,12 +311,55 @@ test("a bundle missing a field the whole chart is scaled by fails LOUDLY and kee
       assert.equal(host.querySelector("img")!.removedAt, null,
         `${field} missing: the fallback image was removed anyway`);
       assert.match(host.querySelector("figcaption")!.textContent,
-        new RegExp(`Frontier failed to load: .*${field}`),
+        new RegExp(`Frontier could not load interactively .*${field}`),
         `${field} missing: no visible failure on the page`);
       assert.equal(host.all("polyline").length, 0,
         `${field} missing: a curve was drawn from an unvalidated bundle`);
     }
   });
+
+test("a zero aspect ratio is refused instead of scaling the chart to nothing", async () => {
+  // M1: `measure` divides the box width by this, so 0 gives an Infinite height, an Infinite scaleY
+  // and a NaN in every polyline -- which renders nothing, reports nothing, and (before I1) removed
+  // the fallback image anyway. The last number that scales the whole chart, and the one field I1's
+  // sweep did not reach.
+  const host = mountPoint();
+  host.dataset["aspect"] = "0";
+  await mount(host);
+  assert.match(host.querySelector("figcaption")!.textContent,
+    /Frontier could not load interactively .*data-aspect must be positive/);
+  assert.equal(host.querySelector("img")!.removedAt, null);
+  assert.equal(host.all("polyline").length, 0);
+});
+
+test("a drag that does not move the guide past a step boundary does not re-render", async () => {
+  // M2. A render rebuilds the entire SVG -- 8 polylines, 548 markers, 11 gridlines -- so a
+  // pointermove that leaves the snapped target where it was used to rebuild all of it to draw the
+  // identical picture. Driven through the widget's own pointer handlers, and observed by counting
+  // element creations, which is what "a render happened" means in a fake DOM.
+  //
+  // The box is HOST_WIDTH x HOST_WIDTH/aspect = 800x600 at pad 0.15, so the x axis [0, 0.4] maps with
+  // scaleX 1400 and tx 120: the 10% guide sits at screen x = 260, one screen pixel is 0.0007 of the
+  // axis, and the step is 0.01. So +1 px cannot cross a step boundary and +40 px must.
+  const host = mountPoint();
+  await mount(host);
+  const chart = host.children.find((c) => c.tagName === "div")!;
+  assert.ok(host.all("circle").length > 0, "no markers drawn, so a re-render would be unobservable");
+
+  chart.dispatch("pointerdown", { clientX: 260, clientY: 300, pointerId: 1, preventDefault: () => {} });
+  const afterGrab = created();
+
+  chart.dispatch("pointermove", { clientX: 261, clientY: 300, pointerId: 1 });
+  assert.equal(created(), afterGrab,
+    "a pointermove inside one step rebuilt the whole chart to draw the same picture");
+
+  chart.dispatch("pointermove", { clientX: 300, clientY: 300, pointerId: 1 });
+  assert.ok(created() > afterGrab,
+    "a pointermove that DOES cross a step boundary must still re-render -- otherwise the early "
+    + "return is not an optimisation, it is a broken drag");
+  assert.match(host.text(), /Most displacement allowed:\s+13%/,
+    "the guide did not follow the drag to its new step");
+});
 
 test("a boot target outside its own axis is refused rather than drawn off-chart", async () => {
   // M2: finite but off-axis. `drawGuide` would happily place the line outside the plot rect, where

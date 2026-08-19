@@ -1,4 +1,5 @@
 /** The mount contract: a page carries a placeholder and nothing else. */
+import { showWidgetError } from "./dom/error.js";
 import { localState, type StateFactory } from "./state.js";
 
 export type Widget = (host: HTMLElement, makeState: StateFactory) => void;
@@ -36,11 +37,10 @@ export function mountAll(root: ParentNode = document): void {
   }
 }
 
+// One shared renderer for all three failure paths (final review, M7) -- see dom/error.ts for why it
+// is its own module and not this one.
 function showMountError(el: HTMLElement, err: unknown): void {
-  const caption = el.querySelector("figcaption");
-  const msg = `This figure could not load interactively (${String(err)}). The static image above still applies.`;
-  if (caption) caption.textContent = msg;
-  else el.append(Object.assign(document.createElement("p"), { textContent: msg }));
+  showWidgetError(el, "This figure", err);
 }
 
 // Registration lives HERE, not inside the widget module, and that is deliberate: importing the

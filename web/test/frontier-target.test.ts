@@ -99,8 +99,8 @@ test("parseChart rejects a missing, non-numeric or degenerate field instead of d
   // nowhere.
   const full = {
     x_label: "displacement", y_label: "permeability", line_width: 2.5, guide_colour: "gray",
-    guide_width: 1, guide_dash: "6 4", marker_radius: 2.5, tick_target: 5, pad: 0.15,
-    slider_step: 0.01, permeability_max: 1,
+    guide_width: 1, guide_dash: "6 4", marker_radius: 2.5, grid_opacity: 0.12, tick_target: 5,
+    pad: 0.15, slider_step: 0.01, permeability_max: 1,
   };
   assert.equal(parseChart(full).pad, 0.15);
   const { pad: _dropped, ...missing } = full;
@@ -117,6 +117,11 @@ test("parseChart rejects a missing, non-numeric or degenerate field instead of d
   // pad is a fraction of the box applied to both sides, so half the box leaves no plot at all.
   assert.throws(() => parseChart({ ...full, pad: 0.5 }),
     /frontier\.json's chart "pad" must be in \[0, 0\.5\)/);
+  // grid_opacity is the one drawn value where 0 is MEANINGFUL ("no gridlines", which is what the
+  // fallback figure draws), so it is range-checked rather than required positive.
+  assert.equal(parseChart({ ...full, grid_opacity: 0 }).grid_opacity, 0);
+  assert.throws(() => parseChart({ ...full, grid_opacity: 1.5 }),
+    /frontier\.json's chart "grid_opacity" must be in \[0, 1\]/);
   // Not an object at all -- what a truncated or replaced artifact deserializes to.
   assert.throws(() => parseChart(null), /frontier\.json's chart is not an object/);
 });

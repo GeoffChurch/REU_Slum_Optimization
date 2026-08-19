@@ -15,6 +15,7 @@ export interface ChartStyle {
   guide_width: number;
   guide_dash: string;
   marker_radius: number;
+  grid_opacity: number;
   tick_target: number;
   pad: number;
   slider_step: number;

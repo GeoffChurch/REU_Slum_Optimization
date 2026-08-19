@@ -99,6 +99,10 @@ function effectiveBox(t: FakeElement): [xMin: number, xMax: number, yMin: number
 
 const WIDTH = 400;
 const HEIGHT = 300;
+/** A phone-sized column: a 390 px viewport gives about this, and `scripts/gen_site_pages.py` records
+ * the project's own expectation that a phone is how most readers arrive. The aspect is the committed
+ * fallback PNG's own IHDR ratio, which is what the widget sizes its box by. */
+const NARROW = { width: 358, height: Math.round(358 / 1.398) };
 // [0, 0.4] / [0, 1] is the real Frontier axis pairing from the brief -- both `draw` regimes below
 // use it, so the first/last tick on each axis always lands EXACTLY on the world range's own ends
 // (niceTicks(0, 0.4, 5) = [0, 0.1, 0.2, 0.3, 0.4], niceTicks(0, 1, 5) = [0, 0.2, ..., 1]), and the
@@ -112,16 +116,18 @@ const Y_TICKS = niceTicks(0, 1, 5);
  * more than this test's own assumed EM_PX/CHAR_PX) exercises the OTHER proven regime fix round 2
  * added: gutter used, tick labels/titles moved off the plot rect. See drawAxes's own doc comment
  * for why only these two regimes are proven, not a continuum between them. */
-function draw(pad: number, formatTick: (t: number) => string = String): { svg: FakeElement; rect: Rect } {
+function draw(pad: number, formatTick: (t: number) => string = String,
+              box: { width: number; height: number } = { width: WIDTH, height: HEIGHT },
+             ): { svg: FakeElement; rect: Rect } {
   const host = new FakeElement("div");
-  const svg = createSvg(host as unknown as HTMLElement, WIDTH, HEIGHT);
-  const v = fitAxes([0, 0.4], [0, 1], WIDTH, HEIGHT, pad);
+  const svg = createSvg(host as unknown as HTMLElement, box.width, box.height);
+  const v = fitAxes([0, 0.4], [0, 1], box.width, box.height, pad);
   // `String` by default, which is exactly what drawAxes hard-coded before fix round 1 gave it a
   // required `formatTick` -- so every assertion below still runs on the same label TEXT it was
   // written against, and the containment/gutter guards (one of them a Critical from the previous
   // task) are unchanged rather than re-tuned. PERCENT_TICK below covers the units the Frontier
   // widget actually passes, whose labels are up to four characters instead of one.
-  drawAxes(svg, v, X_TICKS, Y_TICKS, "Displacement", "Permeability", formatTick);
+  drawAxes(svg, v, X_TICKS, Y_TICKS, "Displacement", "Permeability", formatTick, GRID_OPACITY);
   const fake = svg as unknown as FakeElement;
   return { svg: fake, rect: plotRectAttrs(fake) };
 }
@@ -129,6 +135,10 @@ function draw(pad: number, formatTick: (t: number) => string = String): { svg: F
 /** The Frontier widget's own formatter: both axes are fractions in [0, 1] drawn as percentages,
  * mirroring the `PercentFormatter(xmax=1)` on the matplotlib figure the widget replaces. */
 const PERCENT_TICK = (t: number): string => `${(t * 100).toFixed(0)}%`;
+
+/** Gridline weight the fixture draws with. The real value comes from the bundle (`grid_opacity`);
+ * what matters here is that whatever the caller passes is what lands on every gridline. */
+const GRID_OPACITY = 0.12;
 
 /** The plot rect `drawAxes` recorded on `svg` via its own `setPlotRect` (see svg.ts) -- read back
  * the same way `drawGuide` itself recovers it, so this test's notion of "the plot rect" is
@@ -171,13 +181,15 @@ function splitLabels(svg: FakeElement): { xTickLabels: FakeElement[]; yTickLabel
 // plays in transform.test.ts and ticks.test.ts.
 const EPS = 1e-6;
 
-function assertContained(t: FakeElement): void {
+function assertContained(t: FakeElement,
+                        box: { width: number; height: number } = { width: WIDTH, height: HEIGHT },
+                       ): void {
   const [xMin, xMax, yMin, yMax] = effectiveBox(t);
-  assert.ok(xMin >= -EPS && xMax <= WIDTH + EPS,
-    `"${t.textContent}" x-range [${xMin}, ${xMax}] escapes [0, ${WIDTH}] ` +
+  assert.ok(xMin >= -EPS && xMax <= box.width + EPS,
+    `"${t.textContent}" x-range [${xMin}, ${xMax}] escapes [0, ${box.width}] ` +
     `(attrs: ${JSON.stringify(Object.fromEntries(t.attrs))})`);
-  assert.ok(yMin >= -EPS && yMax <= HEIGHT + EPS,
-    `"${t.textContent}" y-range [${yMin}, ${yMax}] escapes [0, ${HEIGHT}] ` +
+  assert.ok(yMin >= -EPS && yMax <= box.height + EPS,
+    `"${t.textContent}" y-range [${yMin}, ${yMax}] escapes [0, ${box.height}] ` +
     `(attrs: ${JSON.stringify(Object.fromEntries(t.attrs))})`);
 }
 
@@ -211,9 +223,15 @@ test("drawAxes keeps every label inside the box, and outside the plot rect, once
   const { svg, rect } = draw(GENEROUS_PAD);
   // Sanity check on the fixture itself: if this ever fails, GENEROUS_PAD is not generous enough
   // for EM_PX/CHAR_PX any more and the test below would be exercising the wrong regime silently.
-  assert.ok(HEIGHT - rect.bottom > EM_PX && rect.left > EM_PX,
+  // Two ROWS below the plot (tick labels then the axis title) and, on the left, the widest tick
+  // label plus the rotated title -- not the one em this asserted before, which understated what the
+  // layout needs by about 3x and so did not actually establish the "gutter has room" regime it
+  // claims to (final review, I1).
+  const widestYLabel = Math.max(...Y_TICKS.map((t) => String(t).length)) * CHAR_PX;
+  assert.ok(HEIGHT - rect.bottom > 2 * EM_PX && rect.left > widestYLabel + EM_PX,
     `GENEROUS_PAD ${GENEROUS_PAD} leaves too little gutter to test the "room" regime: ` +
-    `bottom gutter ${HEIGHT - rect.bottom}, left gutter ${rect.left}`);
+    `bottom gutter ${HEIGHT - rect.bottom} (needs > ${2 * EM_PX}), ` +
+    `left gutter ${rect.left} (needs > ${widestYLabel + EM_PX})`);
 
   const plotBox: [number, number, number, number] = [rect.left, rect.right, rect.top, rect.bottom];
   const texts = svg.children.filter((c) => c.tagName === "text");
@@ -330,4 +348,50 @@ test("createSvg sizes the chart with an INLINE STYLE, which a stylesheet rule ca
   // drawAxes compute its layout from NaN.
   assert.equal(svg.getAttribute("width"), String(WIDTH));
   assert.equal(svg.getAttribute("height"), String(HEIGHT));
+});
+
+test("the x-axis title does not overlap any x-tick label -- the mirror of the y-side guard", () => {
+  // Final review I1: the y pair has been guarded since round 2 of the previous task; this pair was
+  // guarded nowhere, and at the fixture's own 400x300 geometry the two were already overlapping by
+  // ~4.6 px on this file's glyph model. Checked at BOTH the fixture box and a phone-sized column,
+  // because the failure was a function of how much gutter the box leaves.
+  for (const box of [{ width: WIDTH, height: HEIGHT }, NARROW]) {
+    const { svg } = draw(GENEROUS_PAD, PERCENT_TICK, box);
+    const { xTickLabels, xTitle } = splitLabels(svg);
+    const titleBox = effectiveBox(xTitle);
+    assertContained(xTitle, box);
+    for (const label of xTickLabels) {
+      assertContained(label, box);
+      assert.ok(!rectsOverlap(titleBox, effectiveBox(label)),
+        `at ${box.width}x${box.height}: x title box [${titleBox.join(", ")}] overlaps x-tick label ` +
+        `"${label.textContent}" box [${effectiveBox(label).join(", ")}]`);
+    }
+  }
+});
+
+test("gridlines are drawn at the caller's opacity, not at full body ink", () => {
+  // Final review I2: they were `currentColor` at full strength -- 11 near-black lines under the
+  // data -- while the matplotlib figure the widget replaces draws no gridlines at all. The weight is
+  // the caller's (it comes from the bundle), and `currentColor` stays so the lines follow the site's
+  // light/dark scheme rather than pinning a grey that vanishes in one of them.
+  const { svg } = draw(GENEROUS_PAD, PERCENT_TICK);
+  const grid = svg.children.filter((c) => c.tagName === "line");
+  assert.equal(grid.length, X_TICKS.length + Y_TICKS.length, "one gridline per tick");
+  for (const line of grid) {
+    assert.equal(line.getAttribute("stroke"), "currentColor");
+    assert.equal(Number(line.getAttribute("stroke-opacity")), GRID_OPACITY,
+      `gridline at full ink: ${JSON.stringify(Object.fromEntries(line.attrs))}`);
+    assert.equal(line.getAttribute("aria-hidden"), "true");
+  }
+  // Zero is a legitimate weight and means "no gridlines" -- exact parity with the fallback figure.
+  const { svg: none } = ((): { svg: FakeElement } => {
+    const host = new FakeElement("div");
+    const s2 = createSvg(host as unknown as HTMLElement, WIDTH, HEIGHT);
+    drawAxes(s2, fitAxes([0, 0.4], [0, 1], WIDTH, HEIGHT, GENEROUS_PAD), X_TICKS, Y_TICKS,
+             "Displacement", "Permeability", PERCENT_TICK, 0);
+    return { svg: s2 as unknown as FakeElement };
+  })();
+  for (const line of none.children.filter((c) => c.tagName === "line")) {
+    assert.equal(Number(line.getAttribute("stroke-opacity")), 0);
+  }
 });

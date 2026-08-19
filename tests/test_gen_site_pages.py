@@ -423,8 +423,8 @@ def test_the_page_ships_the_bundle_it_points_at_with_everything_the_widget_needs
 
     bundle = json.loads(shipped.read_text(encoding="utf-8"))
     chart = bundle["chart"]
-    for name in ("line_width", "guide_width", "tick_target", "pad", "slider_step",
-                 "permeability_max"):
+    for name in ("line_width", "guide_width", "marker_radius", "grid_opacity", "tick_target",
+                 "pad", "slider_step", "permeability_max"):
         assert isinstance(chart[name], int | float), (name, chart.get(name))
     for name in ("x_label", "y_label", "guide_colour", "guide_dash"):
         assert isinstance(chart[name], str) and chart[name], (name, chart.get(name))

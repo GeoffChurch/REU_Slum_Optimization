@@ -1,4 +1,5 @@
 import type { Bundle } from "../bundle.js";
+import { showWidgetError } from "../dom/error.js";
 import { draw, sizeCanvas } from "../render/canvas.js";
 // Type-only: erased at compile time, so this produces no runtime import of mount.js. A runtime
 // import here would recreate the mount<->widget cycle that made the bundle throw on load (see
@@ -42,20 +43,12 @@ export const permGraph: Widget = (host, makeState) => {
       return r.json() as Promise<Bundle>;
     })
     .then((b) => boot(host, makeState, b))
-    .catch((err: unknown) => showError(host, err));
+    // Shared with mount.ts and the Frontier widget (final review, M7): three copies of this had
+    // already diverged, and only one of them mentioned the static image the reader is still looking
+    // at. PermGraph's behaviour is otherwise unchanged -- same trigger, same destination, one
+    // sentence added.
+    .catch((err: unknown) => showWidgetError(host, "PermGraph", err));
 };
-
-function showError(host: HTMLElement, err: unknown): void {
-  const message = `PermGraph failed to load: ${err instanceof Error ? err.message : String(err)}`;
-  const caption = host.querySelector("figcaption");
-  if (caption) {
-    caption.textContent = message;
-  } else {
-    const p = document.createElement("p");
-    p.textContent = message;
-    host.append(p);
-  }
-}
 
 function boot(host: HTMLElement, makeState: StateFactory, b: Bundle): void {
   const state: StateSource<PermGraphState> = makeState(initialState(host));

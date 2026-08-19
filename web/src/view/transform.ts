@@ -67,7 +67,13 @@ export function zoomed(v: View, factor: number, sx: number, sy: number): View {
   };
 }
 
-/** Index of the nearest of `xs`/`ys` to a world point. Linear: 263 nodes needs no index. */
+/** Index of the nearest of `xs`/`ys` to the point `(wx, wy)`, in whatever coordinate space the
+ * caller passes -- the arithmetic is space-agnostic, and both spaces are in use: PermGraph passes
+ * WORLD coordinates (its node positions are metres and metres are isotropic), while the Frontier
+ * chart passes SCREEN coordinates on purpose, because a world-space distance there would mix a
+ * displacement in [0, 0.4] with a permeability in [0, 1] and snap to the wrong sample. Linear, and
+ * the largest caller is now Frontier's hover: up to 228 samples per curve over 8 curves per
+ * pointermove, which is still nothing to index. */
 export function nearest(xs: number[], ys: number[], wx: number, wy: number): number {
   let best = -1;
   let bestD = Infinity;

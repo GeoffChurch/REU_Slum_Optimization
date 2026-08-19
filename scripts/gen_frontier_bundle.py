@@ -69,6 +69,12 @@ CHART = {
     # twice over: hover snaps to measured prefixes the reader cannot see, and a curve clipped to a
     # single sample draws literally nothing where the PNG shows a dot.
     "marker_radius": FRONTIER_LW,
+    # Gridline weight, as an OPACITY on the site's own body ink (so it follows the light/dark
+    # scheme rather than pinning a grey that disappears in one of them). emit draws NO gridlines --
+    # it never calls ax.grid() -- so there is no value to copy: 0 would match the figure exactly,
+    # and this is the lowest ink that still marks where a tick is without competing with eight
+    # curves. The widget accepts 0, so exact parity later is one word here and no code change there.
+    "grid_opacity": 0.12,
     # niceTicks target. 5 puts the x ticks on 0/10/20/30/40% and the y ticks on 0/20/../100%, so
     # the extreme ticks land exactly on the axis ends -- which is what makes svg.ts's plot rect
     # (recovered FROM the tick extremes) the true data area rather than an inset of it.
@@ -162,6 +168,7 @@ export interface ChartStyle {
   guide_width: number;
   guide_dash: string;
   marker_radius: number;
+  grid_opacity: number;
   tick_target: number;
   pad: number;
   slider_step: number;

@@ -117,6 +117,12 @@ function plotRectOf(svg: SVGSVGElement): Rect {
  * real `<text>` label per tick, and the two axis titles. `xTicks`/`yTicks` are `niceTicks` output:
  * round-step values the caller already computed, drawn here and nowhere invented.
  *
+ * GRIDLINE WEIGHT (final review, I2): `gridOpacity` is likewise required and likewise has no
+ * default. The gridlines paint with `currentColor` -- the site's body ink, whichever scheme is
+ * active -- and at full strength that is 11 near-black lines under the data, while the matplotlib
+ * figure the Frontier widget replaces draws none at all. The caller supplies the weight; `0` is a
+ * legitimate value meaning "no gridlines".
+ *
  * UNITS (fix round 1 of the Frontier task, and the one thing that reopened this file): `formatTick`
  * turns a tick VALUE into its label TEXT, and it is REQUIRED -- no default. This module previously
  * printed `String(t)`, so a caller whose data are fractions got bare `0.6` where the matplotlib
@@ -161,7 +167,7 @@ function plotRectOf(svg: SVGSVGElement): Rect {
  */
 export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: number[],
                          xLabel: string, yLabel: string,
-                         formatTick: (t: number) => string): void {
+                         formatTick: (t: number) => string, gridOpacity: number): void {
   const box = sizeOf(svg);
   const { width, height } = box;
   const rect = plotRect(v, xTicks, yTicks, box);
@@ -202,6 +208,13 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
     line.setAttribute("x2", String(sx));
     line.setAttribute("y2", String(rect.bottom));
     line.setAttribute("stroke", "currentColor");
+    // Opacity, not a colour, so the gridlines stay theme-adaptive (`currentColor` follows whichever
+    // ink the site cascades, light scheme or dark) while their WEIGHT comes from the caller like
+    // every other drawn value here. At full ink they were near-black graph paper competing with the
+    // data -- and the matplotlib figure this layer's caller replaces draws no gridlines at all, so
+    // full-ink ones were also a divergence from it (final review, I2). `0` is a legitimate value and
+    // means "no gridlines", matching that figure exactly.
+    line.setAttribute("stroke-opacity", String(gridOpacity));
     line.setAttribute("aria-hidden", "true");
     svg.append(line);
 
@@ -231,6 +244,13 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
     line.setAttribute("x2", String(rect.right));
     line.setAttribute("y2", String(sy));
     line.setAttribute("stroke", "currentColor");
+    // Opacity, not a colour, so the gridlines stay theme-adaptive (`currentColor` follows whichever
+    // ink the site cascades, light scheme or dark) while their WEIGHT comes from the caller like
+    // every other drawn value here. At full ink they were near-black graph paper competing with the
+    // data -- and the matplotlib figure this layer's caller replaces draws no gridlines at all, so
+    // full-ink ones were also a divergence from it (final review, I2). `0` is a legitimate value and
+    // means "no gridlines", matching that figure exactly.
+    line.setAttribute("stroke-opacity", String(gridOpacity));
     line.setAttribute("aria-hidden", "true");
     svg.append(line);
 
@@ -252,15 +272,27 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
   const xTitle = el("text");
   xTitle.setAttribute("x", String(width / 2));
   xTitle.setAttribute("y", String(height));
-  // Negative: further INWARD (up) than the tick-label row, one row's worth of em. The old code
-  // pushed positive (down, "hanging"), which is the direction that overflowed. Left keyed off the
-  // absolute `height` (not `rect.bottom`) rather than round 1: once x-tick labels move into the
-  // gutter above (`hasBottomGutter`), they sit BETWEEN `rect.bottom` and `height`, so a title still
-  // anchored at `height` and pushed inward by ~1 line naturally lands just past them, outward
-  // (closer to the true edge) of the tick-label row -- correct chart ordering (title outermost) --
-  // for a gutter with room for both rows; see the function doc's GUTTER paragraph for the regime
-  // this is and is not proven for.
-  xTitle.setAttribute("dy", "-1.3em");
+  // See the dy comment below: with a gutter the title hugs the box edge instead of reserving a
+  // whole row inside it, which is what stops it growing INTO the tick-label row (final review, I1).
+  // Negative: INWARD (up) from the bottom edge, since positive (down, "hanging") is the direction
+  // that overflows. HOW FAR inward is the I1 fix. The old `-1.3em` reserved a whole row for the
+  // title inside the box, so the title and the tick labels -- which grow DOWN from `rect.bottom` --
+  // approached each other as the gutter shrank and collided once it fell under about 3.1 em: box
+  // heights below ~331 px, i.e. widths below ~463 px, which is every phone. The x pair was the one
+  // adjacency this file's tests never checked (the y pair was), and the test fixture's own 400x300
+  // geometry was already overlapping.
+  //
+  // With a gutter, the title now hugs the bottom edge using the same minimal descender allowance the
+  // tick labels use (`alphabeticDy`, not a second constant), which hands the whole gutter to the tick
+  // row and drops the collision threshold to a box height of ~205 px (~305 px wide) on the glyph
+  // model svg.test.ts measures with. That is a bound, not a guarantee: this file is still given no
+  // font size (see the module doc), so a box narrow enough will still converge -- narrower than any
+  // phone viewport, and now under test at two box sizes rather than none.
+  //
+  // Without a gutter (`pad = 0`) nothing changes: the title keeps its full row inward, which is
+  // round 1's proven-safe containment behaviour, and the tick labels are clamped inward too, so the
+  // two stay a row apart.
+  xTitle.setAttribute("dy", hasBottomGutter ? alphabeticDy : "-1.3em");
   xTitle.setAttribute("text-anchor", "middle");
   xTitle.setAttribute("dominant-baseline", "alphabetic");
   xTitle.setAttribute("fill", "currentColor");

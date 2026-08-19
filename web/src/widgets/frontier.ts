@@ -4,6 +4,7 @@ import type { ChartStyle, FrontierBundle, MethodCurve } from "../frontier.js";
 // evaluation (see mount.ts's registration comment) -- this file must never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory } from "../state.js";
+import { showWidgetError } from "../dom/error.js";
 import { createSvg, drawAxes, drawGuide, drawMarkers, drawPolyline } from "../render/svg.js";
 import { niceTicks } from "../view/ticks.js";
 import { fitAxes, nearest, toScreen, toWorld, type View } from "../view/transform.js";
@@ -138,6 +139,12 @@ export function parseChart(value: unknown): ChartStyle {
   if (!(pad >= 0 && pad < 0.5)) {
     throw new Error(`${CHART_WHAT} "pad" must be in [0, 0.5), got ${pad}`);
   }
+  // Unlike the widths, 0 is MEANINGFUL here -- it is "no gridlines", which is exactly what the
+  // fallback PNG draws -- so this is a range check rather than a positivity one.
+  const gridOpacity = numberField(o, "grid_opacity", CHART_WHAT);
+  if (!(gridOpacity >= 0 && gridOpacity <= 1)) {
+    throw new Error(`${CHART_WHAT} "grid_opacity" must be in [0, 1], got ${gridOpacity}`);
+  }
   return {
     x_label: stringField(o, "x_label", CHART_WHAT),
     y_label: stringField(o, "y_label", CHART_WHAT),
@@ -146,6 +153,7 @@ export function parseChart(value: unknown): ChartStyle {
     guide_width: positiveField(o, "guide_width", CHART_WHAT),
     guide_dash: stringField(o, "guide_dash", CHART_WHAT),
     marker_radius: positiveField(o, "marker_radius", CHART_WHAT),
+    grid_opacity: gridOpacity,
     tick_target: positiveField(o, "tick_target", CHART_WHAT),
     pad,
     slider_step: positiveField(o, "slider_step", CHART_WHAT),
@@ -189,6 +197,12 @@ function requireFinite(raw: string | undefined, what: string): number {
   return n;
 }
 
+function requirePositive(raw: string | undefined, what: string): number {
+  const n = requireFinite(raw, what);
+  if (!(n > 0)) throw new Error(`frontier: ${what} must be positive, got ${n}`);
+  return n;
+}
+
 /** A boot target must sit ON the axis it marks -- 0 through the axis maximum inclusive. Throws
  * rather than clamping: a clamped target would silently disagree with the caption that states it,
  * which is the same contradiction the whole fix round was opened for. */
@@ -219,20 +233,8 @@ export const frontier: Widget = (host, makeState) => {
       return r.json() as Promise<FrontierBundle>;
     })
     .then((b) => boot(host, makeState, b))
-    .catch((err: unknown) => showError(host, err));
+    .catch((err: unknown) => showWidgetError(host, "Frontier", err));
 };
-
-function showError(host: HTMLElement, err: unknown): void {
-  const message = `Frontier failed to load: ${err instanceof Error ? err.message : String(err)}`;
-  const caption = host.querySelector("figcaption");
-  if (caption) {
-    caption.textContent = message;
-  } else {
-    const p = document.createElement("p");
-    p.textContent = message;
-    host.append(p);
-  }
-}
 
 /** The chart's pixel box: the host element's own width, and a height from the fallback PNG's true
  * aspect ratio (`data-chart`'s `aspect`, read from the PNG's own header by the generator), so the
@@ -284,7 +286,11 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   // The one number that is genuinely the PAGE's and not the data's: the fallback image's aspect
   // ratio, which the generator measures off that PNG's own IHDR header. It describes the picture
   // this figure replaces, so it belongs beside it rather than in a bundle about methods.
-  const aspect = requireFinite(host.dataset.aspect, "data-aspect");
+  // M1: POSITIVE, not merely finite -- `measure` divides by it, so 0 makes the box height Infinity
+  // and every polyline coordinate NaN: finding I1's failure shape in the one field the I1 sweep did
+  // not reach. Unreachable from the generator (a valid PNG cannot report a zero height), but the
+  // rule this file states for the bundle's numbers applies to the page's number too.
+  const aspect = requirePositive(host.dataset.aspect, "data-aspect");
 
   // The displayed window. x is clipped to the bundle's own `frontier_xmax` -- display only, the
   // same clip the fallback PNG applies, and nothing measured is lost by it (the full table stays
@@ -411,11 +417,14 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
     const s = state.get();
     chartHost.replaceChildren();
     const svg = createSvg(chartHost, size.width, size.height);
-    svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label",
-      `${chart.y_label} against ${chart.x_label} for ${keys.length} methods, with a target line on `
-      + `each axis. Every number in the chart is repeated as text below it.`);
-    drawAxes(svg, view, xTicks, yTicks, chart.x_label, chart.y_label, formatTarget);
+    // NO `role="img"` (final review, M6). It plus an `aria-label` makes the whole subtree
+    // presentational, which hides the `<text>` tick labels and axis titles from assistive tech --
+    // and those being real, reachable text is half the stated reason this widget draws SVG rather
+    // than canvas (see render/svg.ts's module doc). The chart's meaning is not left to them either:
+    // the aria-live summary, the per-method verdicts and both guide labels below carry every number
+    // as announced prose, and the figure keeps its own <figcaption>.
+    drawAxes(svg, view, xTicks, yTicks, chart.x_label, chart.y_label, formatTarget,
+             chart.grid_opacity);
 
     drawnScreen = [];
     for (const key of keys) {
@@ -509,10 +518,20 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
 
   const dragTo = (sx: number, sy: number): void => {
     const [wx, wy] = toWorld(view, sx, sy);
+    const s = state.get();
+    // M2: a render rebuilds the whole SVG -- 8 polylines, 548 markers, 11 gridlines -- and a
+    // pointermove that does not move the guide past a step boundary would rebuild all of it to draw
+    // the identical picture. Skipping those is not the fix for the rebuild itself (that stays
+    // deferred), just the redundant half of it.
+    //
+    // M4: `dragging` is explicitly "y" here rather than "everything that is not x", so the `null`
+    // case is unrepresentable instead of silently meaning "drag the y guide".
     if (dragging === "x") {
-      state.set({ targetDisplacement: clamp(snap(wx, step), 0, xMax) });
-    } else {
-      state.set({ targetPermeability: clamp(snap(wy, step), 0, yMax) });
+      const next = clamp(snap(wx, step), 0, xMax);
+      if (next !== s.targetDisplacement) state.set({ targetDisplacement: next });
+    } else if (dragging === "y") {
+      const next = clamp(snap(wy, step), 0, yMax);
+      if (next !== s.targetPermeability) state.set({ targetPermeability: next });
     }
   };
 
