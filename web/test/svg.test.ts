@@ -96,19 +96,61 @@ function effectiveBox(t: FakeElement): [xMin: number, xMax: number, yMin: number
 
 const WIDTH = 400;
 const HEIGHT = 300;
+// [0, 0.4] / [0, 1] is the real Frontier axis pairing from the brief -- both `draw` regimes below
+// use it, so the first/last tick on each axis always lands EXACTLY on the world range's own ends
+// (niceTicks(0, 0.4, 5) = [0, 0.1, 0.2, 0.3, 0.4], niceTicks(0, 1, 5) = [0, 0.2, ..., 1]), and the
+// plot-rect recovery in svg.ts ("the tick extremes coincide exactly with the world range ends" --
+// its own doc comment) is exact for every test below, not approximate.
+const X_TICKS = niceTicks(0, 0.4, 5);
+const Y_TICKS = niceTicks(0, 1, 5);
 
-function draw(): FakeElement {
+/** `pad = 0`: no gutter at all, the tightest case and the one fix round 1's containment guard
+ * exists for. A generous `pad` (e.g. 0.15, ~45-60px of gutter on a 300-400px box -- comfortably
+ * more than this test's own assumed EM_PX/CHAR_PX) exercises the OTHER proven regime fix round 2
+ * added: gutter used, tick labels/titles moved off the plot rect. See drawAxes's own doc comment
+ * for why only these two regimes are proven, not a continuum between them. */
+function draw(pad: number): { svg: FakeElement; rect: Rect } {
   const host = new FakeElement("div");
-  // pad = 0 deliberately: the contract this test guards is containment with NO gutter to spare
-  // (see drawAxes's own doc). [0, 0.4] / [0, 1] is the real Frontier axis pairing from the brief,
-  // so the first/last tick on each axis lands EXACTLY on the box edge -- the tightest case, not a
-  // hypothetical one.
   const svg = createSvg(host as unknown as HTMLElement, WIDTH, HEIGHT);
-  const v = fitAxes([0, 0.4], [0, 1], WIDTH, HEIGHT, 0);
-  const xTicks = niceTicks(0, 0.4, 5);
-  const yTicks = niceTicks(0, 1, 5);
-  drawAxes(svg, v, xTicks, yTicks, "Displacement", "Permeability");
-  return svg as unknown as FakeElement;
+  const v = fitAxes([0, 0.4], [0, 1], WIDTH, HEIGHT, pad);
+  drawAxes(svg, v, X_TICKS, Y_TICKS, "Displacement", "Permeability");
+  const fake = svg as unknown as FakeElement;
+  return { svg: fake, rect: plotRectAttrs(fake) };
+}
+
+/** The plot rect `drawAxes` recorded on `svg` via its own `setPlotRect` (see svg.ts) -- read back
+ * the same way `drawGuide` itself recovers it, so this test's notion of "the plot rect" is
+ * guaranteed to be the SAME one the production code used, not a value this test recomputes and
+ * could quietly drift from it. */
+interface Rect { left: number; right: number; top: number; bottom: number }
+function plotRectAttrs(svg: FakeElement): Rect {
+  return {
+    left: Number(svg.getAttribute("data-plot-left")),
+    right: Number(svg.getAttribute("data-plot-right")),
+    top: Number(svg.getAttribute("data-plot-top")),
+    bottom: Number(svg.getAttribute("data-plot-bottom")),
+  };
+}
+
+function rectsOverlap(a: [number, number, number, number], b: [number, number, number, number]): boolean {
+  const [aXMin, aXMax, aYMin, aYMax] = a;
+  const [bXMin, bXMax, bYMin, bYMax] = b;
+  return aXMin < bXMax && aXMax > bXMin && aYMin < bYMax && aYMax > bYMin;
+}
+
+/** `drawAxes` draws, in order: one line+text pair per x tick, one line+text pair per y tick, the
+ * x title, then the y title (see its own source) -- so the `<text>` elements alone, in the same
+ * order, split cleanly into x-tick labels, y-tick labels, x title, y title by COUNT, without
+ * needing to pattern-match attributes or content (content alone cannot disambiguate: this widget's
+ * x and y ticks both include the value 0). */
+function splitLabels(svg: FakeElement): { xTickLabels: FakeElement[]; yTickLabels: FakeElement[]; xTitle: FakeElement; yTitle: FakeElement } {
+  const texts = svg.children.filter((c) => c.tagName === "text");
+  const xTickLabels = texts.slice(0, X_TICKS.length);
+  const yTickLabels = texts.slice(X_TICKS.length, X_TICKS.length + Y_TICKS.length);
+  const xTitle = texts[X_TICKS.length + Y_TICKS.length];
+  const yTitle = texts[X_TICKS.length + Y_TICKS.length + 1];
+  if (xTitle === undefined || yTitle === undefined) throw new Error("drawAxes did not emit both titles");
+  return { xTickLabels, yTickLabels, xTitle, yTitle };
 }
 
 // Absorbs floating-point noise from the rotation matrix (cos(-90 deg) is ~6e-17, not exactly 0, so
@@ -117,23 +159,25 @@ function draw(): FakeElement {
 // plays in transform.test.ts and ticks.test.ts.
 const EPS = 1e-6;
 
+function assertContained(t: FakeElement): void {
+  const [xMin, xMax, yMin, yMax] = effectiveBox(t);
+  assert.ok(xMin >= -EPS && xMax <= WIDTH + EPS,
+    `"${t.textContent}" x-range [${xMin}, ${xMax}] escapes [0, ${WIDTH}] ` +
+    `(attrs: ${JSON.stringify(Object.fromEntries(t.attrs))})`);
+  assert.ok(yMin >= -EPS && yMax <= HEIGHT + EPS,
+    `"${t.textContent}" y-range [${yMin}, ${yMax}] escapes [0, ${HEIGHT}] ` +
+    `(attrs: ${JSON.stringify(Object.fromEntries(t.attrs))})`);
+}
+
 test("drawAxes renders every label inside the SVG box, even at pad = 0", () => {
-  const svg = draw();
+  const { svg } = draw(0);
   const texts = svg.children.filter((c) => c.tagName === "text");
   assert.ok(texts.length >= 4, `expected tick labels + 2 titles, got ${texts.length} text nodes`);
-  for (const t of texts) {
-    const [xMin, xMax, yMin, yMax] = effectiveBox(t);
-    assert.ok(xMin >= -EPS && xMax <= WIDTH + EPS,
-      `"${t.textContent}" x-range [${xMin}, ${xMax}] escapes [0, ${WIDTH}] ` +
-      `(attrs: ${JSON.stringify(Object.fromEntries(t.attrs))})`);
-    assert.ok(yMin >= -EPS && yMax <= HEIGHT + EPS,
-      `"${t.textContent}" y-range [${yMin}, ${yMax}] escapes [0, ${HEIGHT}] ` +
-      `(attrs: ${JSON.stringify(Object.fromEntries(t.attrs))})`);
-  }
+  for (const t of texts) assertContained(t);
 });
 
 test("drawAxes never emits an empty label, and both axis titles are present", () => {
-  const svg = draw();
+  const { svg } = draw(0);
   const texts = svg.children.filter((c) => c.tagName === "text");
   for (const t of texts) {
     assert.ok(t.textContent.length > 0, `empty text content (attrs: ${JSON.stringify(Object.fromEntries(t.attrs))})`);
@@ -141,6 +185,45 @@ test("drawAxes never emits an empty label, and both axis titles are present", ()
   const labels = texts.map((t) => t.textContent);
   assert.ok(labels.includes("Displacement"), "x-axis title missing");
   assert.ok(labels.includes("Permeability"), "y-axis title missing");
+});
+
+// Fix round 2: with a gutter (unlike the pad = 0 test above), containment alone is not the whole
+// contract any more -- gridlines, guides, and DATA live in the plot rect; tick labels and titles
+// live in the gutter around it. GENEROUS_PAD is chosen once, up top, specifically big enough
+// (checked below) for this test's own assumed glyph metrics to clear it, so the two assertions
+// that follow are testing the "gutter has room" regime drawAxes's doc comment claims to guarantee,
+// not merely whichever pad happened to be lying around.
+const GENEROUS_PAD = 0.15;
+
+test("drawAxes keeps every label inside the box, and outside the plot rect, once the gutter has room", () => {
+  const { svg, rect } = draw(GENEROUS_PAD);
+  // Sanity check on the fixture itself: if this ever fails, GENEROUS_PAD is not generous enough
+  // for EM_PX/CHAR_PX any more and the test below would be exercising the wrong regime silently.
+  assert.ok(HEIGHT - rect.bottom > EM_PX && rect.left > EM_PX,
+    `GENEROUS_PAD ${GENEROUS_PAD} leaves too little gutter to test the "room" regime: ` +
+    `bottom gutter ${HEIGHT - rect.bottom}, left gutter ${rect.left}`);
+
+  const plotBox: [number, number, number, number] = [rect.left, rect.right, rect.top, rect.bottom];
+  const texts = svg.children.filter((c) => c.tagName === "text");
+  assert.ok(texts.length >= 4, `expected tick labels + 2 titles, got ${texts.length} text nodes`);
+  for (const t of texts) {
+    assertContained(t);
+    const box = effectiveBox(t);
+    assert.ok(!rectsOverlap(box, plotBox),
+      `"${t.textContent}" box [${box.join(", ")}] overlaps the plot rect [${plotBox.join(", ")}] ` +
+      `(attrs: ${JSON.stringify(Object.fromEntries(t.attrs))})`);
+  }
+});
+
+test("the y-axis title does not overlap any y-tick label", () => {
+  const { svg } = draw(GENEROUS_PAD);
+  const { yTickLabels, yTitle } = splitLabels(svg);
+  const titleBox = effectiveBox(yTitle);
+  for (const label of yTickLabels) {
+    assert.ok(!rectsOverlap(titleBox, effectiveBox(label)),
+      `y title box [${titleBox.join(", ")}] overlaps y-tick label "${label.textContent}" box ` +
+      `[${effectiveBox(label).join(", ")}]`);
+  }
 });
 
 test("drawPolyline throws on an xs/ys length mismatch instead of emitting NaN points", () => {

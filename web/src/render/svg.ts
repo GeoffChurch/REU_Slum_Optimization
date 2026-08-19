@@ -32,93 +32,156 @@ export function createSvg(host: HTMLElement, width: number, height: number): SVG
   return svg;
 }
 
-/** The pixel size `createSvg` gave `svg` -- read back rather than threaded through every call, so
- * axis chrome and guides can span the full drawing surface without the caller repeating it. */
+/** The pixel size `createSvg` gave `svg` -- read back rather than threaded through every call. */
 function sizeOf(svg: SVGSVGElement): { width: number; height: number } {
   return { width: Number(svg.getAttribute("width")), height: Number(svg.getAttribute("height")) };
 }
 
-/** Draw both axes into `svg`: one full-span gridline per tick (so a tick's "length" is the data --
- * the other axis's own drawing extent -- rather than an arbitrary chosen pixel), a real `<text>`
- * label per tick, and the two axis titles. `xTicks`/`yTicks` are `niceTicks` output: round-step
- * values the caller already computed, drawn here and nowhere invented.
+interface Rect { left: number; right: number; top: number; bottom: number }
+
+/** The plot rect: where the DATA lives, as opposed to the gutter around it where axis chrome
+ * lives. Recovered from the tick extremes rather than threaded through as a parameter (fix round
+ * 2's finding): `toScreen(v, xTicks[0], yTicks[0])` is one corner, the last ticks the other. For
+ * this widget's axes ([0, 0.4] step 0.1, [0, 1] step 0.2) the tick extremes coincide exactly with
+ * the world range ends, so the recovery is exact, not approximate -- and `niceTicks`'s own "ticks
+ * span the range and stay inside it" invariant guarantees it is never a poorer approximation than
+ * that in general: the plot rect is always a subset of the SVG box, never larger.
  *
- * CONTAINMENT (fix round 1, Critical): every label must render inside `[0, width] x [0, height]`,
- * even at `pad = 0` -- i.e. even when a tick's screen position lands EXACTLY on the SVG's own
- * outer edge, with no gutter to spare. Round 0 got this backwards: it anchored text at the edge
- * and then grew it OUTWARD (`dominant-baseline="hanging"` at `y = height`, a rotated title's `dy`
- * whose sign flipped the wrong way through the rotation matrix) -- safe only when a caller-chosen
- * `pad` happened to leave room, which the contract explicitly does not get to assume.
+ * Falls back to the full box when a caller passes no ticks on an axis (nothing to derive a
+ * smaller rect FROM in that case -- not a silently-wrong default, there is no better answer). */
+function plotRect(v: View, xTicks: number[], yTicks: number[], box: { width: number; height: number }): Rect {
+  const x0 = xTicks[0];
+  const x1 = xTicks[xTicks.length - 1];
+  const y0 = yTicks[0];
+  const y1 = yTicks[yTicks.length - 1];
+  if (x0 === undefined || x1 === undefined || y0 === undefined || y1 === undefined) {
+    return { left: 0, right: box.width, top: 0, bottom: box.height };
+  }
+  const [left, bottom] = toScreen(v, x0, y0);
+  const [right, top] = toScreen(v, x1, y1);
+  return { left, right, top, bottom };
+}
+
+/** `drawGuide`'s signature has no `xTicks`/`yTicks` parameter to recover a plot rect from the way
+ * `drawAxes` does, so `drawAxes` records the one it computed as data-* attributes on `svg` itself
+ * -- the same "read state back off the element `createSvg` already returned" idiom `sizeOf` uses
+ * for the box's own width/height, just for a second, smaller rect nested inside it. */
+function setPlotRect(svg: SVGSVGElement, rect: Rect): void {
+  svg.setAttribute("data-plot-left", String(rect.left));
+  svg.setAttribute("data-plot-right", String(rect.right));
+  svg.setAttribute("data-plot-top", String(rect.top));
+  svg.setAttribute("data-plot-bottom", String(rect.bottom));
+}
+
+/** Reads back what `setPlotRect` stored. Falls back to the full box if `drawAxes` has not run yet
+ * on this `svg` -- a guide drawn before any axes has no smaller rect to recover, so the box is the
+ * only defensible default (matching `plotRect`'s own empty-ticks fallback above). */
+function plotRectOf(svg: SVGSVGElement): Rect {
+  const box = sizeOf(svg);
+  const left = svg.getAttribute("data-plot-left");
+  const right = svg.getAttribute("data-plot-right");
+  const top = svg.getAttribute("data-plot-top");
+  const bottom = svg.getAttribute("data-plot-bottom");
+  if (left === null || right === null || top === null || bottom === null) {
+    return { left: 0, right: box.width, top: 0, bottom: box.height };
+  }
+  return { left: Number(left), right: Number(right), top: Number(top), bottom: Number(bottom) };
+}
+
+/** Draw both axes into `svg`: gridlines confined to the plot rect (fix round 2 -- see below), a
+ * real `<text>` label per tick, and the two axis titles. `xTicks`/`yTicks` are `niceTicks` output:
+ * round-step values the caller already computed, drawn here and nowhere invented.
  *
- * The fix does not compute a numeric pixel clamp, because that would need to know how many pixels
- * "1em" resolves to, and `drawAxes` is deliberately given no font-size parameter to know it with
- * (see the module doc). Instead every label's anchor and growth direction is chosen so containment
- * holds by CONSTRUCTION, given only geometry already in hand:
- *   - the row that sits at the fixed outer edge (x-tick labels, both titles) grows INWARD from
- *     that edge (`dominant-baseline="alphabetic"` grows up from `y = height`; the y-title's
- *     `dominant-baseline="hanging"` grows, after its -90 deg rotation, in +x from `x = 0` -- worked
- *     through by hand: pre-rotation offset (0, +h) maps to post-rotation (+h, 0), i.e. toward the
- *     box interior, never past x = 0);
- *   - the row whose anchor moves PER TICK (x-tick labels horizontally, y-tick labels vertically)
- *     picks its anchor/baseline by comparing that tick's own screen position against the box edge
- *     (`edgeAnchor`/`edgeBaseline` below), so a tick sitting exactly on the boundary grows away
- *     from it instead of straddling it, and an interior tick still centers normally.
- * Row-stacking (tick label under the axis line, title further inward again) still uses `em`
- * (font-relative units) for the SEPARATION between the two rows -- that reasoning was reviewed and
- * kept: it is a structural constant a working two-row stack needs, the same category as
- * niceTicks's [1, 2, 2.5, 5, 10], not a drawn value. What changed is only the SIGN: both offsets
- * now push inward (negative, toward the box), so no magnitude of the row gap can carry a label
- * outside -- it can at most overshoot the OPPOSITE edge on a pathologically short chart, not this
- * one.
+ * CONTAINMENT (fix round 1, Critical, kept): every label still renders inside
+ * `[0, width] x [0, height]`, even at `pad = 0` where the plot rect fills the whole box and there
+ * is no gutter to spare. That fix picked, for each label, an anchor and a growth direction proven
+ * safe by construction rather than by assuming a caller-chosen pad left room -- unchanged here.
  *
- * One consequence worth stating plainly: because inward is the only direction proven safe without
- * a font-size, a caller's `pad` (`fitAxes`'s gutter) is not spent even when it exists -- labels
- * always hug the inner side of the outer edge rather than floating in the middle of a generous
- * gutter. Adaptive use of a generous pad would need either a font-size parameter this signature
- * does not have, or a real DOM measurement (`getBBox`) unavailable outside a browser -- both out of
- * scope for this fix, which is about containment, not layout polish.
+ * GUTTER (fix round 2): round 1 fixed containment by anchoring every label at the ABSOLUTE box
+ * edge and growing inward. That is safe, but it ignores the plot rect entirely, so three things
+ * collide whenever a real gutter exists: gridlines (still spanning the full box) cross the label
+ * rows; the y-axis title and the y-tick labels are both pinned to x = 0 and print on top of each
+ * other; and nothing uses the gutter a generous `pad` actually provides. The fix is the standard
+ * chart layout: the SVG box is the gutter plus the plot rect. Gridlines and `drawGuide` now span
+ * the PLOT RECT (`plotRect` above), not the box -- so they stop before the label rows regardless
+ * of gutter size, which is what removes the gridline/label collision structurally, with no
+ * gutter-size reasoning needed for that half of the fix.
+ *
+ * Tick labels move OUTWARD to the far side of the gutter when one exists (`dominant-baseline`
+ * "hanging" for x-tick labels growing down from the plot rect's bottom edge; `text-anchor="end"`
+ * for y-tick labels growing left from the plot rect's left edge), which is what lets the y-axis
+ * title -- still anchored at the absolute x = 0 -- stop overlapping them: the tick-label column no
+ * longer sits at x = 0 once a gutter exists, so the two no longer share an anchor. Whether "one
+ * exists" is decided by comparing the gutter's SIZE against zero (with a floating-point epsilon,
+ * `GUTTER_EPS`, not an assumed font size), never by asking whether it is big ENOUGH: this file is
+ * given no font-size parameter to answer that with (see the module doc), so it cannot know how
+ * many pixels a label needs. The two regimes this file DOES guarantee are the two the bounds test
+ * below exercises: a wholly degenerate `pad = 0` (falls back to round 1's proven-safe inward
+ * clamp -- containment holds, labels may overlap the plot, exactly the round-1 behaviour, kept
+ * unchanged) and a generously padded chart (falls back to nothing -- the natural outward placement
+ * has room and is used directly). A caller-chosen pad that is nonzero but still too small for
+ * whatever font actually renders sits between those two proven regimes and is not specifically
+ * defended against -- doing so would need either a font-size parameter or a real DOM measurement
+ * (`getBBox`), neither available here; flagged plainly rather than silently left unmentioned.
  */
 export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: number[],
                          xLabel: string, yLabel: string): void {
-  const { width, height } = sizeOf(svg);
+  const box = sizeOf(svg);
+  const { width, height } = box;
+  const rect = plotRect(v, xTicks, yTicks, box);
+  setPlotRect(svg, rect);
+
+  // See the function doc's GUTTER paragraph: "a gutter exists" is a zero-vs-nonzero comparison
+  // (guarded by a small epsilon against floating-point noise in the rotation/scale arithmetic,
+  // the same failure mode round 1 hit with `cos(-90 deg)`), never a "big enough" one.
+  const GUTTER_EPS = 1e-6;
+  const hasBottomGutter = height - rect.bottom > GUTTER_EPS;
+  const hasLeftGutter = rect.left > GUTTER_EPS;
 
   // A tick whose screen position lands exactly on the box edge (the real Frontier x axis is
   // [0, 0.4] with pad 0, so its first/last tick DOES land exactly on x = 0 / x = width) must not
   // grow its label symmetrically about that point -- half the glyph would sit outside. Comparing
   // against the known-safe absolute edges (0 and the box's own width/height, not an assumed glyph
   // size) is enough to pick a direction that is always safe, and falls back to the ordinary
-  // centered/symmetric mode for every interior tick.
+  // centered/symmetric mode for every interior tick. Unchanged from round 1: this is about the
+  // PERPENDICULAR dimension to the gutter fix above (x-tick labels' own horizontal position,
+  // y-tick labels' own vertical position), which the gutter does not touch.
   const edgeAnchor = (s: number): "start" | "middle" | "end" =>
     s <= 0 ? "start" : s >= width ? "end" : "middle";
   const edgeBaseline = (s: number): "hanging" | "middle" | "alphabetic" =>
     s <= 0 ? "hanging" : s >= height ? "alphabetic" : "middle";
   // "alphabetic" grows mostly upward from its anchor, but still reserves a small allowance BELOW
-  // the anchor for a descender (g, y, p, ...) -- so a glyph anchored EXACTLY on the bottom/right
-  // edge still pokes out by that allowance, which is what the bounds test below caught in this
-  // fix's first pass. Digits/'.'/'-' never actually descend in any common font, but a future tick
-  // format could add a unit suffix that does, so the margin is closed structurally instead of by
-  // trusting today's character set: nudge alphabetic-anchored text a small further step inward.
-  // Negative is always the safe direction here (see the function doc), so the exact magnitude is
-  // not load-bearing the way it would be if it could push the wrong way.
+  // the anchor for a descender (g, y, p, ...) -- so a glyph anchored EXACTLY on an edge still
+  // pokes out by that allowance (caught by the round-1 bounds test). Digits/'.'/'-' never actually
+  // descend in any common font, but the margin is closed structurally rather than by trusting
+  // today's character set. Negative is always the safe direction (see the function doc), so the
+  // exact magnitude is not load-bearing the way it would be if it could push the wrong way.
   const alphabeticDy = "-0.25em";
 
   for (const t of xTicks) {
     const [sx] = toScreen(v, t, 0);
     const line = el("line");
     line.setAttribute("x1", String(sx));
-    line.setAttribute("y1", "0");
+    line.setAttribute("y1", String(rect.top));
     line.setAttribute("x2", String(sx));
-    line.setAttribute("y2", String(height));
+    line.setAttribute("y2", String(rect.bottom));
     line.setAttribute("stroke", "currentColor");
     line.setAttribute("aria-hidden", "true");
     svg.append(line);
 
     const label = el("text");
     label.setAttribute("x", String(sx));
-    label.setAttribute("y", String(height));
-    label.setAttribute("dy", alphabeticDy);
+    label.setAttribute("y", String(rect.bottom));
     label.setAttribute("text-anchor", edgeAnchor(sx));
-    label.setAttribute("dominant-baseline", "alphabetic");
+    if (hasBottomGutter) {
+      // Room to spare: grow DOWN into the gutter, away from the plot rect, the natural position.
+      label.setAttribute("dominant-baseline", "hanging");
+    } else {
+      // No gutter (pad = 0, or a caller-chosen pad too small even for the plot rect's own tick
+      // extremes to clear the box edge): round 1's proven-safe inward clamp, unchanged.
+      label.setAttribute("dy", alphabeticDy);
+      label.setAttribute("dominant-baseline", "alphabetic");
+    }
     label.setAttribute("fill", "currentColor");
     label.textContent = String(t);
     svg.append(label);
@@ -127,9 +190,9 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
   for (const t of yTicks) {
     const [, sy] = toScreen(v, 0, t);
     const line = el("line");
-    line.setAttribute("x1", "0");
+    line.setAttribute("x1", String(rect.left));
     line.setAttribute("y1", String(sy));
-    line.setAttribute("x2", String(width));
+    line.setAttribute("x2", String(rect.right));
     line.setAttribute("y2", String(sy));
     line.setAttribute("stroke", "currentColor");
     line.setAttribute("aria-hidden", "true");
@@ -137,10 +200,13 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
 
     const baseline = edgeBaseline(sy);
     const label = el("text");
-    label.setAttribute("x", "0");
+    // Same gutter test as the x-tick labels above, mirrored onto this axis's own gutter
+    // (`hasLeftGutter`): grow LEFT, away from the plot rect, when there is room; otherwise fall
+    // back to round 1's x = 0, grow-right clamp.
+    label.setAttribute("x", String(hasLeftGutter ? rect.left : 0));
     label.setAttribute("y", String(sy));
     if (baseline === "alphabetic") label.setAttribute("dy", alphabeticDy);
-    label.setAttribute("text-anchor", "start");
+    label.setAttribute("text-anchor", hasLeftGutter ? "end" : "start");
     label.setAttribute("dominant-baseline", baseline);
     label.setAttribute("fill", "currentColor");
     label.textContent = String(t);
@@ -151,7 +217,13 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
   xTitle.setAttribute("x", String(width / 2));
   xTitle.setAttribute("y", String(height));
   // Negative: further INWARD (up) than the tick-label row, one row's worth of em. The old code
-  // pushed positive (down, "hanging"), which is the direction that overflowed.
+  // pushed positive (down, "hanging"), which is the direction that overflowed. Left keyed off the
+  // absolute `height` (not `rect.bottom`) rather than round 1: once x-tick labels move into the
+  // gutter above (`hasBottomGutter`), they sit BETWEEN `rect.bottom` and `height`, so a title still
+  // anchored at `height` and pushed inward by ~1 line naturally lands just past them, outward
+  // (closer to the true edge) of the tick-label row -- correct chart ordering (title outermost) --
+  // for a gutter with room for both rows; see the function doc's GUTTER paragraph for the regime
+  // this is and is not proven for.
   xTitle.setAttribute("dy", "-1.3em");
   xTitle.setAttribute("text-anchor", "middle");
   xTitle.setAttribute("dominant-baseline", "alphabetic");
@@ -165,11 +237,13 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
   yTitle.setAttribute("text-anchor", "middle");
   // "hanging" makes the glyph grow in +y pre-rotation; through this element's own -90 deg
   // rotation, (0, +h) maps to (+h, 0) -- +x, i.e. inward from x = 0. No extra `dy` push: unlike
-  // the unrotated titles, ANY dy here is also rotated, and the old code's `dy="-1.6em"` (chosen to
-  // read as "inward" in the pre-rotation frame) became a horizontal push in the WRONG direction
-  // post-rotation -- exactly the bug the review's hand-derived matrix caught. Leaving it at 0
-  // keeps the title flush against the tick-label column rather than further separated from it;
-  // that overlap is a cosmetic cost accepted in this fix, not a containment violation.
+  // the unrotated titles, ANY dy here is also rotated, and round 0's `dy="-1.6em"` (chosen to read
+  // as "inward" in the pre-rotation frame) became a horizontal push in the WRONG direction
+  // post-rotation -- the bug fix round 1 corrected. Left at the absolute x = 0 rather than
+  // `rect.left`, same reasoning as the x-title above: once y-tick labels move to `rect.left` and
+  // grow LEFT (`hasLeftGutter`), the tick-label column vacates x = 0, so the title -- still there,
+  // growing right by about one line height -- stops overlapping it whenever the gutter has room
+  // for both; see the function doc's GUTTER paragraph.
   yTitle.setAttribute("dominant-baseline", "hanging");
   yTitle.setAttribute("fill", "currentColor");
   yTitle.setAttribute("transform", `rotate(-90 0 ${height / 2})`);
@@ -207,26 +281,27 @@ export function drawPolyline(svg: SVGSVGElement, v: View, xs: number[], ys: numb
   return line;
 }
 
-/** A single reference line at a fixed axis value, spanning the full drawing surface -- vertical
- * for `axis === "x"`, horizontal for `axis === "y"` -- the same full-span convention `drawAxes`
- * uses for its own tick gridlines, so a guide reads as part of the same chart grammar. Decorative,
- * not data, so it is hidden from assistive tech the same way `drawAxes`'s gridlines are.
+/** A single reference line at a fixed axis value, spanning the PLOT RECT (fix round 2 -- see
+ * `drawAxes`'s own doc) -- vertical for `axis === "x"`, horizontal for `axis === "y"` -- the same
+ * rect its own gridlines now use, recovered via `plotRectOf` since this signature has no ticks
+ * parameter to derive one from directly. Decorative, not data, so it is hidden from assistive tech
+ * the same way `drawAxes`'s gridlines are.
  */
 export function drawGuide(svg: SVGSVGElement, v: View, axis: "x" | "y", value: number,
                           colour: string): SVGLineElement {
-  const { width, height } = sizeOf(svg);
+  const rect = plotRectOf(svg);
   const line = el("line");
   if (axis === "x") {
     const [sx] = toScreen(v, value, 0);
     line.setAttribute("x1", String(sx));
-    line.setAttribute("y1", "0");
+    line.setAttribute("y1", String(rect.top));
     line.setAttribute("x2", String(sx));
-    line.setAttribute("y2", String(height));
+    line.setAttribute("y2", String(rect.bottom));
   } else {
     const [, sy] = toScreen(v, 0, value);
-    line.setAttribute("x1", "0");
+    line.setAttribute("x1", String(rect.left));
     line.setAttribute("y1", String(sy));
-    line.setAttribute("x2", String(width));
+    line.setAttribute("x2", String(rect.right));
     line.setAttribute("y2", String(sy));
   }
   line.setAttribute("stroke", colour);
