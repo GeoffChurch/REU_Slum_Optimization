@@ -51,6 +51,10 @@ function showMountError(el: HTMLElement, err: unknown): void {
 // there is nothing left to reorder. Do not move this back into the widget module.
 import { permGraph } from "./widgets/perm-graph.js";
 register("perm-graph", permGraph);
+// Same shape, same reason -- registered HERE, after REGISTRY exists, never from inside the widget
+// module (see the paragraph above).
+import { frontier } from "./widgets/frontier.js";
+register("frontier", frontier);
 
 // DOMContentLoaded fires once per full page load. That is sufficient only because this project's
 // mkdocs.yml does not enable Material's navigation.instant feature (confirmed absent as of this

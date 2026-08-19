@@ -25,11 +25,14 @@ Emits:  docs/index.md, docs/methodology/*.md, docs/methodology/methods/*.md, doc
 from __future__ import annotations
 
 import ast
+import colorsys
 import csv
+import html
 import importlib.util
 import json
 import re
 import shutil
+import struct
 from collections.abc import Callable
 from pathlib import Path
 
@@ -339,6 +342,123 @@ def _perm_graph_figures() -> str:
         f"drain straight to ground."
     )
     return f'{intro}\n\n<div class="sbu-figure-grid">\n' + "".join(figs) + "</div>\n"
+
+
+# ---------------------------------------------------------- the Frontier widget's mount point
+#
+# Everything the browser widget draws with, gathered here rather than in the TypeScript: the
+# project's rule is that a colour, a width, a tick target or a target VALUE is configuration,
+# resolved once upstream where config is read, and never a literal in the code that draws. The
+# widget reads these off its own mount point and chooses nothing itself.
+
+# Kept as a plain dict, not a dataclass, because it is a JSON payload with one consumer (the
+# widget's `parseChart`, which converts it into a declared type at that boundary and throws on a
+# field that is absent or not finite -- so a name dropped here fails loudly there rather than
+# reaching an SVG attribute as "NaN"). Every number mirrors what reblock.emit drew the FALLBACK
+# PNG with, or is a UI resolution this page owns.
+FRONTIER_CHART: dict[str, object] = {
+    "xLabel": "displacement",       # emit.compare_report's set_xlabel on the same plot
+    "yLabel": "permeability",       # emit.compare_report's set_ylabel
+    "lineWidth": 2.5,               # its ax.plot(lw=2.5)
+    "guideColour": "gray",          # its axvline/axhline(color="gray") -- the same CSS keyword
+    "guideDash": "6 4",             # its ls="--", spelled as an SVG dash array
+    # niceTicks target. 5 puts the x ticks on 0/0.1/../0.4 and the y ticks on 0/0.2/../1.0, so the
+    # extreme ticks land exactly on the axis ends -- which is what makes svg.ts's plot rect (which
+    # it recovers FROM the tick extremes) the true data area rather than an inset of it.
+    "tickTarget": 5,
+    # The gutter svg.ts's drawAxes puts tick labels and axis titles in. 0.15, not fitAxes's 0.04
+    # default: on a 300 px box the default reserves under one em and labels land back on the plot.
+    # 0.15 is the value web/test/svg.test.ts pins as GENEROUS_PAD and the only nonzero pad whose
+    # label-containment behaviour is under test.
+    "pad": 0.15,
+    # Slider step and drag quantisation, as a fraction of each axis: a hundredth of the range.
+    "sliderDivisions": 100,
+    # Permeability is a fraction of parcels, and the y axis is all of it -- the same full-range
+    # axis the fallback PNG's PercentFormatter labels.
+    "permeabilityMax": 1.0,
+}
+
+# Saturation/value for the curve colours, the same pair reblock.emit._method_colors uses. Repeated
+# here rather than imported because emit.py pulls in matplotlib and geopandas, which this script's
+# stdlib-only contract (see the module docstring) rules out.
+FRONTIER_HSV_S, FRONTIER_HSV_V = 0.65, 0.85
+
+
+def _frontier_colours(keys: list[str]) -> dict[str, str]:
+    """One hue per method the BUNDLE carries, spread over the whole HSV wheel.
+
+    NOT the fallback PNG's own hues: emit._method_colors indexes the wheel over the FULL method
+    registry (conf/compare_config.yaml's `all_methods`, ~20 entries), which needs Hydra and is
+    therefore out of reach here. Eight curves spread over the whole wheel are more distinguishable
+    than eight twentieths of it, and the widget REPLACES the PNG rather than sitting beside it, so
+    the two legends are never seen together.
+    """
+    n = max(len(keys), 1)
+    out: dict[str, str] = {}
+    for i, key in enumerate(keys):
+        r, g, b = colorsys.hsv_to_rgb(i / n, FRONTIER_HSV_S, FRONTIER_HSV_V)
+        out[key] = f"#{round(255 * r):02x}{round(255 * g):02x}{round(255 * b):02x}"
+    return out
+
+
+def _png_aspect(path: Path) -> float:
+    """A PNG's width/height, from the IHDR fields in its first 24 bytes (stdlib `struct`, no
+    Pillow). Read rather than restated as a constant so the widget's box is the same shape as the
+    fallback image it replaces, and cannot drift from it when the plot's figsize changes."""
+    with path.open("rb") as f:
+        head = f.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError(f"not a PNG: {path}")
+    width, height = struct.unpack(">II", head[16:24])
+    # int() on both: struct.unpack is typed as tuple[Any, ...], and an Any-valued division makes the
+    # declared float return type unverifiable (mypy --strict's no-any-return).
+    return int(width) / int(height)
+
+
+def _frontier_figure() -> str:
+    """The Methods index's one interactive figure: every method's permeability-against-displacement
+    curve on the pinned single block, with the two calibrated standards as draggable targets.
+
+    The fallback PNG stays IN the figure. mount.ts's error path tells the reader "the static image
+    above still applies", which is only true while the image is there -- so the widget removes it
+    itself, and only once it has actually drawn a chart in its place.
+
+    Both target attributes come from `frontier.json` (`matched_displacement`,
+    `matched_permeability`), never typed here: they are the same two cutoffs the fallback PNG draws
+    as dashed guides and the caption below states, so the widget cannot boot contradicting either.
+    Emits nothing when the artifacts are absent, like every other figure on this site.
+    """
+    path = MC / "frontier.json"
+    if not path.exists():
+        return ""
+    bundle = json.loads(path.read_text(encoding="utf-8"))
+    block = bundle["block_id"]
+    png = MC / f"frontier_{block}.png"
+    img_url = _copy_asset(png, "method-comparison")
+    bundle_url = _copy_asset(path, "method-comparison")
+    if img_url is None or bundle_url is None:
+        return ""
+
+    keys = list(bundle["methods"])
+    colours = _frontier_colours(keys)
+    # Keyed off the bundle's OWN method list, so a method added to the bake cannot be silently
+    # dropped from the chart -- and the widget throws if any key here is missing a label or colour.
+    methods = {k: {"label": friendly_method_name(k), "colour": colours[k]} for k in keys}
+    chart = {**FRONTIER_CHART, "aspect": _png_aspect(png)}
+    attrs = (f'data-widget="frontier" data-block="{block}" data-bundle="{bundle_url}" '
+             f'data-target-displacement="{bundle["matched_displacement"]}" '
+             f'data-target-permeability="{bundle["matched_permeability"]}" '
+             f'data-methods="{html.escape(json.dumps(methods), quote=True)}" '
+             f'data-chart="{html.escape(json.dumps(chart), quote=True)}"')
+    caption = (
+        f"Permeability against displacement on block <code>{block}</code>, every method overlaid. "
+        f"The two dashed guides are the calibrated standards every method here is graded against — "
+        f"{_pct(bundle['matched_displacement'])} displacement and "
+        f"{_pct(bundle['matched_permeability'])} permeability. Drag either guide, or use the "
+        f"sliders, to ask which methods clear it and at what least road."
+    )
+    return _figure(img_url, f"permeability against displacement for every method on block {block}",
+                   caption, attrs=attrs)
 
 
 def _bakeoff_scale() -> str:
@@ -900,6 +1020,11 @@ def gen_methods_overview() -> str:
                  "graded on the same basis — permeability (the benefit) against displacement (the "
                  "cost). Each page shows the method's roads on the ground and its numbers from the "
                  "actual runs.\n")
+    # That basis, as one figure, before the reader picks a method to read about: the interactive
+    # frontier (falling back to its own static PNG). Placed here with no heading of its own on
+    # purpose -- it illustrates the sentence directly above it, and a heading between that sentence
+    # and the cards would leave the cards sitting under the wrong one.
+    parts.append(_frontier_figure())
 
     cards = []
     for m in PUBLISHED_METHODS:

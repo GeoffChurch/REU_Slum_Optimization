@@ -312,3 +312,139 @@ def test_assert_widget_bundle_present_fails_the_build_on_a_missing_bundle(
     (tmp_path / "js").mkdir()
     (tmp_path / "js" / "widgets.js").write_text("", encoding="utf-8")
     gsp._assert_widget_bundle_present(True)
+
+
+def _frontier_mount_attrs() -> dict[str, str]:
+    """Every `data-*` attribute on the Methods index's frontier `<figure>`, unescaped.
+
+    Parsed off the real generated markup rather than reconstructed, so what these tests assert is
+    what a browser would actually read. `data-methods`/`data-chart` carry JSON, HTML-escaped by the
+    generator (`&quot;`), which is why this unescapes before any caller parses it.
+    """
+    import re as _re
+    from html import unescape
+
+    from scripts.gen_site_pages import gen_methods_overview
+
+    markup = gen_methods_overview()
+    figures = [f for f in _re.findall(r"<figure[ >][^>]*>", markup)
+               if 'data-widget="frontier"' in f]
+    assert len(figures) == 1, f"expected exactly one frontier mount point, found {len(figures)}"
+    return {name: unescape(value)
+            for name, value in _re.findall(r'(data-[a-z-]+)="([^"]*)"', figures[0])}
+
+
+def test_methods_index_carries_one_frontier_mount_point_over_its_own_png_fallback() -> None:
+    """The interactive figure must not replace the static one in the MARKUP: mount.ts's error path
+    says "The static image above still applies", which is a lie unless the fallback `<img>` is
+    sitting right there in the same `<figure>` (the widget removes it itself, and only once it has
+    drawn a chart in its place). Guards the two halves that made the predecessor widget's failures
+    invisible: a mount point with no image behind it, and a bundle URL in a form `_write_page`'s
+    rewriter does not recognise."""
+    import json
+
+    from scripts.gen_site_pages import MC, gen_methods_overview
+
+    bundle = json.loads((MC / "frontier.json").read_text(encoding="utf-8"))
+    markup = gen_methods_overview()
+
+    assert markup.count('data-widget="frontier"') == 1
+    # The fallback image, and the bundle URL in the exact `assets/...` form _write_page rewrites.
+    assert f'<img src="assets/method-comparison/frontier_{bundle["block_id"]}.png"' in markup
+    assert 'data-bundle="assets/method-comparison/frontier.json"' in markup
+    # The mount point sits on the <figure> itself, never on a wrapping <div>: `.sbu-figure-grid >
+    # figure` resets margin and min-width on DIRECT children only (see _figure's docstring).
+    assert '<div data-widget="frontier"' not in markup
+
+
+def test_frontier_mount_point_states_the_bundles_own_targets_and_methods() -> None:
+    """Both guides boot at the calibrated standards read from `frontier.json`, and every method the
+    bundle carries has a label and a colour. Neither may be typed into this page: a hand-typed
+    target would contradict the dashed guides on the fallback PNG under the same caption, and a
+    method list written anywhere but the bundle would silently drop a curve from a chart of eight
+    while the page still looked entirely correct (the widget throws on that, but only if the two
+    lists actually disagree -- this is the guard on the side that produces them)."""
+    import json
+
+    from scripts.gen_site_pages import MC, friendly_method_name
+
+    bundle = json.loads((MC / "frontier.json").read_text(encoding="utf-8"))
+    attrs = _frontier_mount_attrs()
+
+    assert float(attrs["data-target-displacement"]) == bundle["matched_displacement"]
+    assert float(attrs["data-target-permeability"]) == bundle["matched_permeability"]
+    assert attrs["data-block"] == bundle["block_id"]
+
+    methods = json.loads(attrs["data-methods"])
+    assert sorted(methods) == sorted(bundle["methods"]), "styles and bundle disagree on methods"
+    colours = set()
+    for key, style in methods.items():
+        assert style["label"] == friendly_method_name(key), key
+        assert re.fullmatch(r"#[0-9a-f]{6}", style["colour"]), (key, style["colour"])
+        colours.add(style["colour"])
+    assert len(colours) == len(methods), "two methods share a curve colour"
+
+    # The caption states the same two standards the attributes boot with, from the same source.
+    from scripts.gen_site_pages import _pct, gen_methods_overview
+    markup = gen_methods_overview()
+    assert _pct(bundle["matched_displacement"]) in markup
+    assert _pct(bundle["matched_permeability"]) in markup
+
+
+def test_frontier_chart_config_covers_every_field_the_widget_requires() -> None:
+    """`data-chart` is the whole of the widget's visual configuration -- no colour, width, pad or
+    tick target may be a literal in the TypeScript. `parseChart` throws on a field that is absent
+    or not a finite number, so a name dropped here kills the chart outright; this asserts the
+    generator emits the full set the widget asks for, keyed by the widget's own field names."""
+    import json
+
+    attrs = _frontier_mount_attrs()
+    chart = json.loads(attrs["data-chart"])
+
+    required_numbers = ["lineWidth", "tickTarget", "pad", "aspect", "sliderDivisions",
+                        "permeabilityMax"]
+    required_strings = ["xLabel", "yLabel", "guideColour", "guideDash"]
+    for name in required_numbers:
+        assert isinstance(chart[name], int | float), (name, chart.get(name))
+    for name in required_strings:
+        assert isinstance(chart[name], str) and chart[name], (name, chart.get(name))
+
+    # pad is svg.ts's gutter, and 0.15 is the only nonzero value whose label containment is under
+    # test (web/test/svg.test.ts's GENEROUS_PAD). fitAxes's 0.04 default reserves under one em on a
+    # 300 px box, which puts the tick labels back on top of the plot.
+    assert chart["pad"] == 0.15
+    # aspect is read from the fallback PNG's own IHDR header, so the widget occupies the shape of
+    # the image it replaces; a 4:3-ish plot is the only thing this needs to be near.
+    assert 1.0 < chart["aspect"] < 2.0
+
+
+def test_methods_index_rewrites_the_frontier_bundle_url_for_its_served_depth(
+        tmp_path: Path) -> None:
+    """The same gap piece C closed for permeability.md, now for the Methods index -- and on the REAL
+    generated body, not a synthetic one, so it also catches the generator emitting a bundle URL in
+    some other form (absolute, or already prefixed) that `_write_page`'s rewriter would silently
+    leave alone. methodology/methods/index.md serves at <base>/methodology/methods/, so its raw-HTML
+    asset URLs need two levels up; get it wrong and the widget's fetch 404s while the page and its
+    PNG fallback still look perfect."""
+    from scripts.gen_site_pages import _write_page, gen_methods_overview
+
+    out = tmp_path / "index.md"
+    _write_page(out, gen_methods_overview(), depth=2, url_depth=2, title="The methods")
+    text = out.read_text(encoding="utf-8")
+    assert 'data-bundle="../../assets/method-comparison/frontier.json"' in text
+    assert 'data-bundle="assets/' not in text
+    assert 'src="../../assets/method-comparison/frontier_' in text
+
+
+def test_methods_index_is_written_at_the_url_depth_its_widget_needs() -> None:
+    """The test above proves `_write_page` rewrites correctly AT url_depth=2; this one proves main()
+    actually passes 2. Without it the pair is vacuous -- the rewrite could be perfect and the call
+    site could still pass the source depth (or the sibling method pages' 3) and 404 every asset on
+    the page. Asserted against the source text, the same way this file's method-registry guards
+    read the generator."""
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
+    m = re.search(r'_write_page\(methods_dir / "index\.md", gen_methods_overview\(\),\s*'
+                  r"depth=(\d+), url_depth=(\d+)", src)
+    assert m is not None, "could not find main()'s _write_page call for the methods index"
+    # methodology/methods/index.md serves at <base>/methodology/methods/ -- two segments deep.
+    assert m.group(2) == "2", f"methods index written at url_depth={m.group(2)}, needs 2"
