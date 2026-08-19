@@ -37,8 +37,21 @@ class FakeElement {
   constructor(tagName: string) { this.tagName = tagName; }
   setAttribute(name: string, value: string): void { this.attrs.set(name, value); }
   getAttribute(name: string): string | null { return this.attrs.get(name) ?? null; }
+  /** A plain string appended to a real element becomes a text NODE, so the fake keeps it too --
+   * otherwise the widget's own prose (its control labels) is invisible to `text()` below, and a
+   * test asserting what the page says could only ever see the parts built as elements. Recorded
+   * under a tag name no real selector can match, so element counts and querySelector are
+   * unaffected. */
   append(...nodes: (FakeElement | string)[]): void {
-    for (const n of nodes) if (typeof n !== "string") this.children.push(n);
+    for (const n of nodes) {
+      if (typeof n === "string") {
+        const text = new FakeElement("#text");
+        text.textContent = n;
+        this.children.push(text);
+      } else {
+        this.children.push(n);
+      }
+    }
   }
   insertBefore(node: FakeElement, _ref: FakeElement | null): void { this.children.push(node); }
   replaceChildren(...nodes: FakeElement[]): void { this.children = [...nodes]; }
@@ -79,25 +92,18 @@ const BUNDLE_PATH = "../examples/method-comparison/frontier.json";
 const bundle = JSON.parse(readFileSync(BUNDLE_PATH, "utf8")) as FrontierBundle;
 
 /** The mount point the generator emits, in the shape `scripts/gen_site_pages.py::_frontier_figure`
- * emits it: a `<figure>` carrying the attributes, with the fallback `<img>` and a `<figcaption>`
- * inside it. The style/chart values are this test's own fixture -- what matters is that the widget
- * is given a complete set, and the Python side asserts the generator emits one
- * (tests/test_gen_site_pages.py::test_frontier_chart_config_covers_every_field_the_widget_requires).
- */
+ * emits it: a `<figure>` carrying four scalar attributes, with the fallback `<img>` and a
+ * `<figcaption>` inside it. Since fix round 1 the labels, colours and every drawn dimension come
+ * from the BUNDLE instead of from `data-*` JSON, so this fixture no longer supplies them -- which
+ * means the assertions below run against the real baked chart block and the real legend names, not
+ * a fixture's idea of them. */
 function mountPoint(): FakeElement {
   const figure = new FakeElement("figure");
   figure.children.push(new FakeElement("img"), new FakeElement("figcaption"));
-  const methods = Object.fromEntries(Object.keys(bundle.methods)
-    .map((key, i) => [key, { label: `Method ${i}`, colour: `#00${i}0${i}0` }]));
   figure.dataset["bundle"] = BUNDLE_PATH;
-  figure.dataset["methods"] = JSON.stringify(methods);
   figure.dataset["targetDisplacement"] = String(bundle.matched_displacement);
   figure.dataset["targetPermeability"] = String(bundle.matched_permeability);
-  figure.dataset["chart"] = JSON.stringify({
-    xLabel: "displacement", yLabel: "permeability", lineWidth: 2.5, guideColour: "gray",
-    guideDash: "6 4", tickTarget: 5, pad: 0.15, aspect: 4 / 3, sliderDivisions: 100,
-    permeabilityMax: 1,
-  });
+  figure.dataset["aspect"] = String(4 / 3);
   return figure;
 }
 
@@ -141,7 +147,9 @@ test("the widget mounts and draws one curve per method in the bundle, with no Na
         assert.ok(Number.isFinite(Number(coord)),
           `non-finite coordinate "${coord}" in a polyline: ${points.slice(0, 120)}`);
       }
-      assert.ok(Number(p.getAttribute("stroke-width")) > 0, "a zero-width stroke draws nothing");
+      // The width the fallback PNG's own curves were drawn with (reblock.emit's FRONTIER_LW,
+      // baked into the bundle), not a number this widget chose.
+      assert.equal(Number(p.getAttribute("stroke-width")), bundle.chart.line_width);
     }
 
     // Both target guides, dashed, and the two axis titles: the chrome that makes the picture
@@ -149,8 +157,29 @@ test("the widget mounts and draws one curve per method in the bundle, with no Na
     // carrying the dash the mount point asked for.
     const dashed = svgs[0]!.all("line").filter((l) => l.getAttribute("stroke-dasharray") !== null);
     assert.equal(dashed.length, 2, "expected exactly two dashed target guides");
+    for (const g of dashed) {
+      assert.equal(g.getAttribute("stroke-dasharray"), bundle.chart.guide_dash);
+      assert.equal(Number(g.getAttribute("stroke-width")), bundle.chart.guide_width);
+      assert.equal(g.getAttribute("stroke"), bundle.chart.guide_colour);
+    }
     const labels = svgs[0]!.all("text").map((t) => t.textContent);
-    assert.ok(labels.includes("displacement") && labels.includes("permeability"), String(labels));
+    assert.ok(labels.includes(bundle.chart.x_label) && labels.includes(bundle.chart.y_label),
+      String(labels));
+
+    // UNITS (fix round 1): the figure this widget replaces puts a PercentFormatter(xmax=1) on both
+    // axes, so JS-off reads "60%" -- the widget used to draw the same tick as "0.6", the two
+    // readers of one page seeing different charts. Both axis ranges are checked, since the x axis
+    // is the bundle's frontier_xmax and the y axis is its permeability_max.
+    assert.ok(labels.includes("0%"), `no percent-formatted zero tick: ${String(labels)}`);
+    assert.ok(labels.includes(`${bundle.frontier_xmax * 100}%`),
+      `x axis does not end on a percent tick: ${String(labels)}`);
+    assert.ok(labels.includes(`${bundle.chart.permeability_max * 100}%`),
+      `y axis does not end on a percent tick: ${String(labels)}`);
+    for (const t of labels) {
+      // No bare fraction may survive anywhere in the chrome: a tick reading "0.6" is the exact
+      // contradiction this guard exists for.
+      assert.ok(!/^0\.\d+$/.test(t), `bare fraction "${t}" among the axis labels`);
+    }
   });
 
 test("every number the chart draws is also on the page as text", async () => {
@@ -158,8 +187,10 @@ test("every number the chart draws is also on the page as text", async () => {
   await mount(host);
   const text = host.text();
 
-  // The two booted targets, as the caption states them, and the verdict for every method.
-  assert.match(text, /60\.0% permeability within 10\.0% displacement/);
+  // The two booted targets, in the whole-percent form the caption and the fallback PNG's legend
+  // both state them in -- read off the bundle, so this cannot drift into asserting a typed number.
+  assert.match(text, new RegExp(`${bundle.matched_permeability * 100}% permeability within `
+    + `${bundle.matched_displacement * 100}% displacement`));
 
   // And the ANSWER, against an independent oracle: a linear scan over the same committed arrays,
   // written the other way round from the widget's binary search. Without this the summary could
@@ -173,10 +204,25 @@ test("every number the chart draws is also on the page as text", async () => {
     `summary does not report ${expected} clearing methods`);
   assert.equal(host.all("li").length, Object.keys(bundle.methods).length,
     "one verdict per method, or the readout and the chart disagree about what is drawn");
-  // Every verdict is a real sentence about a real method, never an empty <li>.
-  for (const li of host.all("li")) {
-    assert.match(li.textContent, /^Method \d+: .+\.$/, li.textContent);
+  // Every verdict is a real sentence naming the method by the SAME legend name the fallback PNG
+  // uses (`friendly_method_name`, baked into the bundle) -- "Frontage (street-priced)", never the
+  // raw key `greedy_arterial_access_displacement`, which no widget could reconstruct it from.
+  const verdicts = host.all("li").map((li) => li.textContent);
+  for (const [key, curve] of Object.entries(bundle.methods)) {
+    assert.ok(verdicts.some((v) => v.startsWith(`${curve.label}: `)),
+      `no verdict for ${key} under its baked label "${curve.label}"`);
+    assert.ok(!verdicts.some((v) => v.includes(key)), `verdict names the raw key ${key}`);
   }
+  for (const v of verdicts) assert.match(v, /\.$/, v);
+
+  // Both guide labels name their target in whole percentage points -- `{:.0%}`, the format the
+  // fallback PNG's own legend states the same two standards in.
+  // `\\s+`, not a single space: text() joins each node's text with a space, so the label's own
+  // trailing space and the join add up. Whitespace between a label and its value is not the subject.
+  assert.match(text,
+    new RegExp(`Most displacement allowed:\\s+${bundle.matched_displacement * 100}%`));
+  assert.match(text,
+    new RegExp(`Least permeability required:\\s+${bundle.matched_permeability * 100}%`));
   // Both range inputs exist -- the keyboard path to the same two targets the pointer drags.
   assert.equal(host.all("input").length, 2);
   // One legend button per method, each reporting whether it is the isolated one.

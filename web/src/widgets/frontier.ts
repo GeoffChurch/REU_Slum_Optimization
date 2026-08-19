@@ -1,4 +1,4 @@
-import type { FrontierBundle, MethodCurve } from "../frontier.js";
+import type { ChartStyle, FrontierBundle, MethodCurve } from "../frontier.js";
 // Type-only, both of these: erased at compile time, so this module has NO runtime import of
 // mount.js. A runtime one would recreate the cycle that made the whole bundle throw during module
 // evaluation (see mount.ts's registration comment) -- this file must never import `register`.
@@ -63,107 +63,99 @@ export function clipToXMax(xs: number[], ys: number[], xMax: number): { xs: numb
   return { xs: outX, ys: outY };
 }
 
-// ------------------------------------------------------------------ the mount point's own data
+// ---------------------------------------------------------------- what the widget draws with
 //
-// Every colour, width, label, tick target and pad this widget draws with arrives from the mount
-// point, emitted by scripts/gen_site_pages.py from the bundle and from the values the fallback PNG
-// itself was drawn with (see `_frontier_figure` there). None is chosen in this file: the project's
-// rule is that a visual choice is configuration, resolved once upstream, not a TypeScript literal.
-// Two JSON attributes rather than a dozen data-* ones, converted ONCE here at the boundary into
-// declared types, so exactly one place in the widget deals in strings.
+// All of it comes from the BUNDLE (`scripts/gen_frontier_bundle.py`, whose `CHART` block takes five
+// of these straight from `reblock.emit`, the module that draws the fallback PNG this widget
+// replaces) -- no colour, width, label, tick target or pad is chosen in this file, and none is
+// restated on the page. Fix round 1 moved them out of two JSON `data-*` attributes and into the
+// bundle: same single source, and no literal `{`/`}` left in a markdown raw-HTML block, which was a
+// risk nothing in this repository can observe (mkdocs is importable in no environment here).
+//
+// The bundle is still a BOUNDARY -- it arrives over the network, and a page can outlive the artifact
+// it was generated beside -- so these two converters validate it once, here, and throw rather than
+// let a missing field reach an SVG attribute as "NaN".
 
 export interface MethodStyle { label: string; colour: string }
 
-export interface ChartStyle {
-  xLabel: string;
-  yLabel: string;
-  lineWidth: number;
-  guideColour: string;
-  guideDash: string;
-  tickTarget: number;
-  pad: number;
-  aspect: number;
-  sliderDivisions: number;
-  permeabilityMax: number;
-}
-
-function jsonObject(raw: string, what: string): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(raw);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`${what} is not a JSON object: ${raw}`);
+function fields(value: unknown, what: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${what} is not an object: ${JSON.stringify(value)}`);
   }
-  return parsed as Record<string, unknown>;
+  return value as Record<string, unknown>;
 }
 
 function chartNumber(o: Record<string, unknown>, key: string): number {
-  if (!(key in o)) throw new Error(`data-chart is missing "${key}"`);
+  if (!(key in o)) throw new Error(`frontier.json's chart is missing "${key}"`);
   const v = o[key];
   if (typeof v !== "number" || !Number.isFinite(v)) {
-    throw new Error(`data-chart's "${key}" is not a finite number: ${JSON.stringify(v)}`);
+    throw new Error(`frontier.json's chart "${key}" is not a finite number: ${JSON.stringify(v)}`);
   }
   return v;
 }
 
 function chartString(o: Record<string, unknown>, key: string): string {
-  if (!(key in o)) throw new Error(`data-chart is missing "${key}"`);
+  if (!(key in o)) throw new Error(`frontier.json's chart is missing "${key}"`);
   const v = o[key];
   if (typeof v !== "string" || v === "") {
-    throw new Error(`data-chart's "${key}" is not a non-empty string: ${JSON.stringify(v)}`);
+    throw new Error(`frontier.json's chart "${key}" is not a non-empty string: ${JSON.stringify(v)}`);
   }
   return v;
 }
 
 /** Finite is not enough for these five: 0 passes `Number.isFinite` and then draws nothing while
- * throwing nowhere. A zero `aspect` makes the box height Infinity and every y = 0 coordinate NaN
- * (and one NaN voids a whole `<polyline>`); a zero `lineWidth` strokes nothing; a zero
- * `sliderDivisions` makes the slider step Infinity; a zero `permeabilityMax` collapses the y axis;
- * a zero `tickTarget` divides by zero inside niceTicks. */
+ * throwing nowhere. A zero `line_width` or `guide_width` strokes nothing; a zero `slider_step`
+ * makes every drag `NaN` (`Math.round(v / 0)`); a zero `permeability_max` collapses the y axis; a
+ * zero `tick_target` divides by zero inside niceTicks. */
 function chartPositive(o: Record<string, unknown>, key: string): number {
   const v = chartNumber(o, key);
-  if (!(v > 0)) throw new Error(`data-chart's "${key}" must be positive, got ${v}`);
+  if (!(v > 0)) throw new Error(`frontier.json's chart "${key}" must be positive, got ${v}`);
   return v;
 }
 
-/** Convert `data-chart` into a declared type, or throw. A field the generator stopped emitting
- * would otherwise reach `stroke-width="NaN"` or a NaN-padded view -- both of which draw nothing
- * while throwing nowhere, which is exactly the failure shape this widget must not have. */
-export function parseChart(raw: string): ChartStyle {
-  const o = jsonObject(raw, "data-chart");
+/** Convert the bundle's `chart` block into the declared type, or throw. A field the baker stopped
+ * emitting would otherwise reach `stroke-width="NaN"` or a NaN-padded view -- both of which draw
+ * nothing while throwing nowhere, which is exactly the failure shape this widget must not have. */
+export function parseChart(value: unknown): ChartStyle {
+  const o = fields(value, "frontier.json's chart");
   // `pad` is the one that may legitimately be zero (svg.ts supports a gutterless chart), but it is
   // a fraction of the box applied to BOTH sides, so at 0.5 the plot has no width left at all --
   // fitAxes would return a zero or negative scale and the chart would collapse silently.
   const pad = chartNumber(o, "pad");
-  if (!(pad >= 0 && pad < 0.5)) throw new Error(`data-chart's "pad" must be in [0, 0.5), got ${pad}`);
+  if (!(pad >= 0 && pad < 0.5)) {
+    throw new Error(`frontier.json's chart "pad" must be in [0, 0.5), got ${pad}`);
+  }
   return {
-    xLabel: chartString(o, "xLabel"),
-    yLabel: chartString(o, "yLabel"),
-    lineWidth: chartPositive(o, "lineWidth"),
-    guideColour: chartString(o, "guideColour"),
-    guideDash: chartString(o, "guideDash"),
-    tickTarget: chartPositive(o, "tickTarget"),
+    x_label: chartString(o, "x_label"),
+    y_label: chartString(o, "y_label"),
+    line_width: chartPositive(o, "line_width"),
+    guide_colour: chartString(o, "guide_colour"),
+    guide_width: chartPositive(o, "guide_width"),
+    guide_dash: chartString(o, "guide_dash"),
+    tick_target: chartPositive(o, "tick_target"),
     pad,
-    aspect: chartPositive(o, "aspect"),
-    sliderDivisions: chartPositive(o, "sliderDivisions"),
-    permeabilityMax: chartPositive(o, "permeabilityMax"),
+    slider_step: chartPositive(o, "slider_step"),
+    permeability_max: chartPositive(o, "permeability_max"),
   };
 }
 
-/** A label and a colour for every method the BUNDLE carries -- keyed off `Object.keys(b.methods)`,
- * never a list written here (the keys are longer than they look: the arterial one is
- * `greedy_arterial_access_displacement`). Missing means the page's styles and the fetched bundle
- * disagree about which methods exist, which would otherwise silently drop one curve from a chart
- * of eight on a page that still looks entirely correct. */
-export function parseMethodStyles(raw: string, keys: readonly string[]): Map<string, MethodStyle> {
-  const o = jsonObject(raw, "data-methods");
+/** The legend name and curve colour for every method the bundle carries, keyed off its own
+ * `Object.keys(methods)` -- never a list written here (the keys are longer than they look: the
+ * arterial one is `greedy_arterial_access_displacement`, and its label, "Frontage (street-priced)",
+ * cannot be reconstructed from it at all). Both are baked by the same `friendly_method_name` and
+ * `method_colors` the fallback PNG's legend and curves use, so a missing one means the fetched
+ * bundle predates that bake -- a curve would otherwise be drawn unlabelled, or with
+ * `stroke="undefined"`, which renders as nothing. */
+export function parseMethodStyles(methods: unknown): Map<string, MethodStyle> {
+  const o = fields(methods, "frontier.json's methods");
   const out = new Map<string, MethodStyle>();
-  for (const key of keys) {
-    const entry = o[key];
-    const label = typeof entry === "object" && entry !== null
-      ? (entry as Record<string, unknown>)["label"] : undefined;
-    const colour = typeof entry === "object" && entry !== null
-      ? (entry as Record<string, unknown>)["colour"] : undefined;
+  for (const key of Object.keys(o)) {
+    const curve = fields(o[key], `frontier.json's method ${key}`);
+    const label = curve["label"];
+    const colour = curve["colour"];
     if (typeof label !== "string" || label === "" || typeof colour !== "string" || colour === "") {
-      throw new Error(`data-methods has no label/colour for method ${key}: ${JSON.stringify(entry)}`);
+      throw new Error(`frontier.json has no label/colour for method ${key}: `
+        + `${JSON.stringify({ label, colour })}`);
     }
     out.set(key, { label, colour });
   }
@@ -173,7 +165,8 @@ export function parseMethodStyles(raw: string, keys: readonly string[]): Map<str
 /** A target read off the mount point. Throws rather than defaulting, unlike PermGraph's cosmetic
  * `data-prefix`: these two ARE the calibrated standards the caption beside them claims, so a
  * missing or malformed one must fail loudly instead of booting a chart whose guides quietly
- * contradict the sentence under it. */
+ * contradict the sentence under it. `data-aspect` is read the same way -- it is the fallback
+ * image's own shape, measured off that PNG's header by the generator. */
 function requireFinite(raw: string | undefined, what: string): number {
   const n = raw === undefined ? Number.NaN : Number(raw);
   if (raw === undefined || raw === "" || !Number.isFinite(n)) {
@@ -228,9 +221,23 @@ function measure(el: HTMLElement, aspect: number): { width: number; height: numb
   return { width, height: width / aspect };
 }
 
-function pct(x: number): string {
-  return `${(x * 100).toFixed(1)}%`;
+/** Both axes are fractions in [0, 1] shown as PERCENTAGES, mirroring the
+ * `PercentFormatter(xmax=1)` emit.compare_report puts on both axes of the figure this widget
+ * replaces. Before fix round 1 this widget drew bare fractions, so a reader with JS off saw `60%`
+ * where a reader with JS on saw `0.6`: the same chart contradicting itself on units. */
+function percent(x: number, digits: number): string {
+  return `${(x * 100).toFixed(digits)}%`;
 }
+
+// A TARGET is always a whole number of percentage points -- the bundle's `slider_step` is one
+// percentage point, and both calibrated standards sit on that grid -- so it prints exactly under
+// emit's own `{:.0%}`. A MEASURED value (a prefix's displacement or permeability) is on no grid at
+// all, so it keeps a decimal: rounding 7.14% to 7% would be printing a number that was not measured.
+const TARGET_DIGITS = 0;
+const MEASURED_DIGITS = 1;
+
+const formatTarget = (x: number): string => percent(x, TARGET_DIGITS);
+const formatMeasured = (x: number): string => percent(x, MEASURED_DIGITS);
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -248,8 +255,12 @@ function snap(v: number, step: number): number {
 function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): void {
   const keys = Object.keys(b.methods);
   if (keys.length === 0) throw new Error("frontier: the bundle carries no methods");
-  const styles = parseMethodStyles(requireAttr(host.dataset.methods, "data-methods"), keys);
-  const chart = parseChart(requireAttr(host.dataset.chart, "data-chart"));
+  const styles = parseMethodStyles(b.methods);
+  const chart = parseChart(b.chart);
+  // The one number that is genuinely the PAGE's and not the data's: the fallback image's aspect
+  // ratio, which the generator measures off that PNG's own IHDR header. It describes the picture
+  // this figure replaces, so it belongs beside it rather than in a bundle about methods.
+  const aspect = requireFinite(host.dataset.aspect, "data-aspect");
 
   // The displayed window. x is clipped to the bundle's own `frontier_xmax` -- display only, the
   // same clip the fallback PNG applies, and nothing measured is lost by it (the full table stays
@@ -257,11 +268,11 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   // fraction, which is what makes the last tick land exactly on the axis top, so svg.ts's plot
   // rect (recovered from the tick extremes) is the true data area rather than an inset of it.
   const xMax = b.frontier_xmax;
-  const yMax = chart.permeabilityMax;
-  const xStep = xMax / chart.sliderDivisions;
-  const yStep = yMax / chart.sliderDivisions;
-  const xTicks = niceTicks(0, xMax, chart.tickTarget);
-  const yTicks = niceTicks(0, yMax, chart.tickTarget);
+  const yMax = chart.permeability_max;
+  // One step for both axes, in the units the reader sees: a percentage point.
+  const step = chart.slider_step;
+  const xTicks = niceTicks(0, xMax, chart.tick_target);
+  const yTicks = niceTicks(0, yMax, chart.tick_target);
 
   const state = makeState<FrontierState>({
     targetDisplacement: requireFinite(host.dataset.targetDisplacement, "data-target-displacement"),
@@ -286,28 +297,33 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   xSlider.type = "range";
   xSlider.min = "0";
   xSlider.max = String(xMax);
-  xSlider.step = String(xStep);
+  xSlider.step = String(step);
   xSlider.value = String(s0.targetDisplacement);
   xSlider.addEventListener("input", () => {
     state.set({ targetDisplacement: clamp(Number(xSlider.value), 0, xMax) });
   });
+  // Each slider carries its guide's CURRENT value, formatted exactly as the fallback PNG formats
+  // the same two numbers in its legend (`matched displacement = 10%`, i.e. `{:.0%}`) -- so the two
+  // charts state the two standards identically, and a dragged guide still names itself.
+  const xValue = document.createElement("span");
   const xLabelEl = document.createElement("label");
   // Named off the axis titles themselves, and phrased as the CONSTRAINT each target expresses: the
   // x guide is a ceiling on cost, the y guide a floor on benefit, which is what the readout below
   // then answers against ("N of 8 methods reach ... within ...").
-  xLabelEl.append(`Most ${chart.xLabel} allowed `, xSlider);
+  xLabelEl.append(`Most ${chart.x_label} allowed: `, xValue, " ", xSlider);
 
   const ySlider = document.createElement("input");
   ySlider.type = "range";
   ySlider.min = "0";
   ySlider.max = String(yMax);
-  ySlider.step = String(yStep);
+  ySlider.step = String(step);
   ySlider.value = String(s0.targetPermeability);
   ySlider.addEventListener("input", () => {
     state.set({ targetPermeability: clamp(Number(ySlider.value), 0, yMax) });
   });
+  const yValue = document.createElement("span");
   const yLabelEl = document.createElement("label");
-  yLabelEl.append(`Least ${chart.yLabel} required `, ySlider);
+  yLabelEl.append(`Least ${chart.y_label} required: `, yValue, " ", ySlider);
 
   // Legend entries are real <button>s, so isolating one method is reachable by keyboard and
   // announces its state; each is painted in its own curve's colour, which is the only place the
@@ -344,7 +360,7 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
     host.append(chartHost, controls);
   }
 
-  let size = measure(chartHost, chart.aspect);
+  let size = measure(chartHost, aspect);
   let view: View = fitAxes([0, xMax], [0, yMax], size.width, size.height, chart.pad);
 
   // Screen-space positions of the DRAWN samples, per visible method, rebuilt by render(). Screen
@@ -360,16 +376,16 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
     const svg = createSvg(chartHost, size.width, size.height);
     svg.setAttribute("role", "img");
     svg.setAttribute("aria-label",
-      `${chart.yLabel} against ${chart.xLabel} for ${keys.length} methods, with a target line on `
+      `${chart.y_label} against ${chart.x_label} for ${keys.length} methods, with a target line on `
       + `each axis. Every number in the chart is repeated as text below it.`);
-    drawAxes(svg, view, xTicks, yTicks, chart.xLabel, chart.yLabel);
+    drawAxes(svg, view, xTicks, yTicks, chart.x_label, chart.y_label, formatTarget);
 
     drawnScreen = [];
     for (const key of keys) {
       if (s.isolated !== null && s.isolated !== key) continue;
       const curve = b.methods[key]!;
       const clipped = clipToXMax(curve.displacement, curve.permeability, xMax);
-      drawPolyline(svg, view, clipped.xs, clipped.ys, styles.get(key)!.colour, chart.lineWidth);
+      drawPolyline(svg, view, clipped.xs, clipped.ys, styles.get(key)!.colour, chart.line_width);
       const n = insideCount(curve.displacement, xMax);
       const xs: number[] = [];
       const ys: number[] = [];
@@ -383,12 +399,15 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
 
     for (const [axis, value] of [["x", s.targetDisplacement],
                                  ["y", s.targetPermeability]] as const) {
-      drawGuide(svg, view, axis, value, chart.guideColour)
-        .setAttribute("stroke-dasharray", chart.guideDash);
+      const guide = drawGuide(svg, view, axis, value, chart.guide_colour);
+      guide.setAttribute("stroke-dasharray", chart.guide_dash);
+      guide.setAttribute("stroke-width", String(chart.guide_width));
     }
 
     xSlider.value = String(s.targetDisplacement);
     ySlider.value = String(s.targetPermeability);
+    xValue.textContent = formatTarget(s.targetDisplacement);
+    yValue.textContent = formatTarget(s.targetPermeability);
     for (const [key, btn] of buttons) {
       btn.setAttribute("aria-pressed", String(s.isolated === key));
     }
@@ -410,22 +429,24 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
       const i = leastClearing(curve.permeability, s.targetPermeability);
       if (i === -1) {
         const best = curve.permeability[curve.permeability.length - 1]!;
-        item.textContent = `${label}: never reaches ${pct(s.targetPermeability)} permeability `
-          + `— it tops out at ${pct(best)}.`;
+        item.textContent = `${label}: never reaches ${formatTarget(s.targetPermeability)} `
+          + `permeability — it tops out at ${formatMeasured(best)}.`;
       } else if (curve.displacement[i]! <= s.targetDisplacement) {
         cleared++;
         item.textContent = `${label}: clears both at ${curve.road_m[i]!.toFixed(0)} m of road `
-          + `(road ${i} of ${curve.road_m.length - 1}, ${pct(curve.displacement[i]!)} displaced).`;
+          + `(road ${i} of ${curve.road_m.length - 1}, `
+          + `${formatMeasured(curve.displacement[i]!)} displaced).`;
       } else {
-        item.textContent = `${label}: reaches ${pct(s.targetPermeability)} permeability only at `
-          + `${pct(curve.displacement[i]!)} displaced, past the ${pct(s.targetDisplacement)} `
-          + `budget (${curve.road_m[i]!.toFixed(0)} m of road).`;
+        item.textContent = `${label}: reaches ${formatTarget(s.targetPermeability)} permeability `
+          + `only at ${formatMeasured(curve.displacement[i]!)} displaced, past the `
+          + `${formatTarget(s.targetDisplacement)} budget `
+          + `(${curve.road_m[i]!.toFixed(0)} m of road).`;
       }
       verdicts.append(item);
     }
     summary.textContent = `${cleared} of ${keys.length} methods reach `
-      + `${pct(s.targetPermeability)} permeability within ${pct(s.targetDisplacement)} `
-      + `displacement on block ${b.block_id}.`;
+      + `${formatTarget(s.targetPermeability)} permeability within `
+      + `${formatTarget(s.targetDisplacement)} displacement on block ${b.block_id}.`;
   };
 
   state.subscribe(render);
@@ -443,9 +464,9 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   const dragTo = (sx: number, sy: number): void => {
     const [wx, wy] = toWorld(view, sx, sy);
     if (dragging === "x") {
-      state.set({ targetDisplacement: clamp(snap(wx, xStep), 0, xMax) });
+      state.set({ targetDisplacement: clamp(snap(wx, step), 0, xMax) });
     } else {
-      state.set({ targetPermeability: clamp(snap(wy, yStep), 0, yMax) });
+      state.set({ targetPermeability: clamp(snap(wy, step), 0, yMax) });
     }
   };
 
@@ -466,8 +487,8 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
     const curve = b.methods[bestKey]!;
     hoverOut.textContent = `Nearest measured prefix: ${styles.get(bestKey)!.label}, road `
       + `${bestIndex} of ${curve.road_m.length - 1} — ${curve.road_m[bestIndex]!.toFixed(0)} m, `
-      + `${pct(curve.displacement[bestIndex]!)} displaced, `
-      + `${pct(curve.permeability[bestIndex]!)} permeability.`;
+      + `${formatMeasured(curve.displacement[bestIndex]!)} displaced, `
+      + `${formatMeasured(curve.permeability[bestIndex]!)} permeability.`;
   };
 
   chartHost.addEventListener("pointerdown", (ev) => {
@@ -489,7 +510,7 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   chartHost.addEventListener("pointercancel", endDrag);
 
   window.addEventListener("resize", () => {
-    size = measure(chartHost, chart.aspect);
+    size = measure(chartHost, aspect);
     view = fitAxes([0, xMax], [0, yMax], size.width, size.height, chart.pad);
     render();
   });

@@ -79,39 +79,41 @@ test("clipToXMax survives the repeated-x samples the real bundle contains", () =
   for (const y of ys) assert.ok(Number.isFinite(y), `non-finite y in ${JSON.stringify(ys)}`);
 });
 
-test("parseMethodStyles rejects a bundle method the page gave no style for", () => {
-  // Reachable by drift, not by malformed input: the colours and labels are emitted by
-  // scripts/gen_site_pages.py from the same bundle the widget fetches, so a change that derives
-  // them from any OTHER list (the site's own method registry, say) would silently drop whichever
-  // method the two lists disagree about -- one curve missing from a chart of eight, on a page that
-  // still looks entirely correct.
-  const raw = JSON.stringify({ clearance: { label: "Least-Cost Tree", colour: "#d94" } });
-  assert.deepEqual(parseMethodStyles(raw, ["clearance"]).get("clearance"),
-    { label: "Least-Cost Tree", colour: "#d94" });
-  assert.throws(() => parseMethodStyles(raw, ["clearance", "osm_footpaths"]),
-    /no label\/colour for method osm_footpaths/);
+test("parseMethodStyles rejects a bundle method with no label or colour", () => {
+  // Reachable by staleness, not by malformed input: labels and colours are baked into the bundle by
+  // scripts/gen_frontier_bundle.py, and a deployed page can outlive the artifact it was generated
+  // beside. A curve whose style went missing would be stroked with "undefined" and render as
+  // nothing -- one method absent from a chart of eight, on a page that still looks entirely
+  // correct. The keys come from the bundle itself, so nothing here names a method.
+  const good = { clearance: { label: "Least-Cost Tree", colour: "#d9b64c" } };
+  assert.deepEqual(parseMethodStyles(good).get("clearance"),
+    { label: "Least-Cost Tree", colour: "#d9b64c" });
+  const stale = { ...good, osm_footpaths: { road_m: [0], displacement: [0], permeability: [0] } };
+  assert.throws(() => parseMethodStyles(stale), /no label\/colour for method osm_footpaths/);
 });
 
-test("parseChart rejects a missing or non-numeric field instead of drawing with NaN", () => {
-  // Same drift class one level up: every stroke width, pad and tick target the widget draws with
-  // arrives as this one attribute. A field the generator stopped emitting would otherwise reach
-  // `stroke-width="NaN"` or a NaN-padded view -- both of which render nothing while throwing
+test("parseChart rejects a missing, non-numeric or degenerate field instead of drawing with NaN", () => {
+  // Same staleness class one level up: every stroke width, pad, tick target and axis label the
+  // widget draws with arrives in this one block. A field the baker stopped emitting would otherwise
+  // reach `stroke-width="NaN"` or a NaN-padded view -- both of which render nothing while throwing
   // nowhere.
   const full = {
-    xLabel: "displacement", yLabel: "permeability", lineWidth: 2.5, guideColour: "gray",
-    guideDash: "6 4", tickTarget: 5, pad: 0.15, aspect: 4 / 3, sliderDivisions: 100,
-    permeabilityMax: 1,
+    x_label: "displacement", y_label: "permeability", line_width: 2.5, guide_colour: "gray",
+    guide_width: 1, guide_dash: "6 4", tick_target: 5, pad: 0.15, slider_step: 0.01,
+    permeability_max: 1,
   };
-  assert.equal(parseChart(JSON.stringify(full)).pad, 0.15);
+  assert.equal(parseChart(full).pad, 0.15);
   const { pad: _dropped, ...missing } = full;
-  assert.throws(() => parseChart(JSON.stringify(missing)), /data-chart is missing "pad"/);
-  assert.throws(() => parseChart(JSON.stringify({ ...full, lineWidth: "thick" })),
-    /data-chart's "lineWidth" is not a finite number/);
-  // Finite is not enough: 0 passes Number.isFinite, and a zero aspect makes the chart box's height
-  // Infinity, which makes every y = 0 coordinate NaN, which voids the whole polyline.
-  assert.throws(() => parseChart(JSON.stringify({ ...full, aspect: 0 })),
-    /data-chart's "aspect" must be positive/);
+  assert.throws(() => parseChart(missing), /frontier\.json's chart is missing "pad"/);
+  assert.throws(() => parseChart({ ...full, line_width: "thick" }),
+    /frontier\.json's chart "line_width" is not a finite number/);
+  // Finite is not enough: 0 passes Number.isFinite, and a zero slider_step makes every drag NaN
+  // (Math.round(v / 0)) while a zero line_width strokes nothing at all.
+  assert.throws(() => parseChart({ ...full, slider_step: 0 }),
+    /frontier\.json's chart "slider_step" must be positive/);
   // pad is a fraction of the box applied to both sides, so half the box leaves no plot at all.
-  assert.throws(() => parseChart(JSON.stringify({ ...full, pad: 0.5 })),
-    /data-chart's "pad" must be in \[0, 0\.5\)/);
+  assert.throws(() => parseChart({ ...full, pad: 0.5 }),
+    /frontier\.json's chart "pad" must be in \[0, 0\.5\)/);
+  // Not an object at all -- what a truncated or replaced artifact deserializes to.
+  assert.throws(() => parseChart(null), /frontier\.json's chart is not an object/);
 });

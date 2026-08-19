@@ -4,11 +4,26 @@ export interface MethodCurve {
   road_m: number[];
   displacement: number[];
   permeability: number[];
+  label: string;
+  colour: string;
+}
+export interface ChartStyle {
+  x_label: string;
+  y_label: string;
+  line_width: number;
+  guide_colour: string;
+  guide_width: number;
+  guide_dash: string;
+  tick_target: number;
+  pad: number;
+  slider_step: number;
+  permeability_max: number;
 }
 export interface FrontierBundle {
   block_id: string;
   matched_displacement: number;
   matched_permeability: number;
   frontier_xmax: number;
+  chart: ChartStyle;
   methods: Record<string, MethodCurve>;
 }

@@ -25,9 +25,7 @@ Emits:  docs/index.md, docs/methodology/*.md, docs/methodology/methods/*.md, doc
 from __future__ import annotations
 
 import ast
-import colorsys
 import csv
-import html
 import importlib.util
 import json
 import re
@@ -346,59 +344,18 @@ def _perm_graph_figures() -> str:
 
 # ---------------------------------------------------------- the Frontier widget's mount point
 #
-# Everything the browser widget draws with, gathered here rather than in the TypeScript: the
-# project's rule is that a colour, a width, a tick target or a target VALUE is configuration,
-# resolved once upstream where config is read, and never a literal in the code that draws. The
-# widget reads these off its own mount point and chooses nothing itself.
-
-# Kept as a plain dict, not a dataclass, because it is a JSON payload with one consumer (the
-# widget's `parseChart`, which converts it into a declared type at that boundary and throws on a
-# field that is absent or not finite -- so a name dropped here fails loudly there rather than
-# reaching an SVG attribute as "NaN"). Every number mirrors what reblock.emit drew the FALLBACK
-# PNG with, or is a UI resolution this page owns.
-FRONTIER_CHART: dict[str, object] = {
-    "xLabel": "displacement",       # emit.compare_report's set_xlabel on the same plot
-    "yLabel": "permeability",       # emit.compare_report's set_ylabel
-    "lineWidth": 2.5,               # its ax.plot(lw=2.5)
-    "guideColour": "gray",          # its axvline/axhline(color="gray") -- the same CSS keyword
-    "guideDash": "6 4",             # its ls="--", spelled as an SVG dash array
-    # niceTicks target. 5 puts the x ticks on 0/0.1/../0.4 and the y ticks on 0/0.2/../1.0, so the
-    # extreme ticks land exactly on the axis ends -- which is what makes svg.ts's plot rect (which
-    # it recovers FROM the tick extremes) the true data area rather than an inset of it.
-    "tickTarget": 5,
-    # The gutter svg.ts's drawAxes puts tick labels and axis titles in. 0.15, not fitAxes's 0.04
-    # default: on a 300 px box the default reserves under one em and labels land back on the plot.
-    # 0.15 is the value web/test/svg.test.ts pins as GENEROUS_PAD and the only nonzero pad whose
-    # label-containment behaviour is under test.
-    "pad": 0.15,
-    # Slider step and drag quantisation, as a fraction of each axis: a hundredth of the range.
-    "sliderDivisions": 100,
-    # Permeability is a fraction of parcels, and the y axis is all of it -- the same full-range
-    # axis the fallback PNG's PercentFormatter labels.
-    "permeabilityMax": 1.0,
-}
-
-# Saturation/value for the curve colours, the same pair reblock.emit._method_colors uses. Repeated
-# here rather than imported because emit.py pulls in matplotlib and geopandas, which this script's
-# stdlib-only contract (see the module docstring) rules out.
-FRONTIER_HSV_S, FRONTIER_HSV_V = 0.65, 0.85
-
-
-def _frontier_colours(keys: list[str]) -> dict[str, str]:
-    """One hue per method the BUNDLE carries, spread over the whole HSV wheel.
-
-    NOT the fallback PNG's own hues: emit._method_colors indexes the wheel over the FULL method
-    registry (conf/compare_config.yaml's `all_methods`, ~20 entries), which needs Hydra and is
-    therefore out of reach here. Eight curves spread over the whole wheel are more distinguishable
-    than eight twentieths of it, and the widget REPLACES the PNG rather than sitting beside it, so
-    the two legends are never seen together.
-    """
-    n = max(len(keys), 1)
-    out: dict[str, str] = {}
-    for i, key in enumerate(keys):
-        r, g, b = colorsys.hsv_to_rgb(i / n, FRONTIER_HSV_S, FRONTIER_HSV_V)
-        out[key] = f"#{round(255 * r):02x}{round(255 * g):02x}{round(255 * b):02x}"
-    return out
+# The widget's colours, labels, stroke widths, tick target and pad are NOT here: fix round 1 moved
+# them into examples/method-comparison/frontier.json, where scripts/gen_frontier_bundle.py bakes
+# them from reblock.emit -- the module that draws the fallback PNG the widget replaces -- so the two
+# charts agree by construction rather than by this file and that one being kept in step by hand.
+# What stays here is what belongs to the PAGE: the bundle's URL, the block id, the two boot targets
+# beside the caption that states them, and the fallback image's own aspect ratio.
+#
+# Every attribute below is a SCALAR. The previous round passed two JSON payloads, which put literal
+# `{`/`}` and `&quot;` into a markdown raw-HTML block; that is very probably fine (python-markdown
+# stashes such a block before any inline or attr_list pass) but nothing in this repository can
+# observe it -- neither `markdown` nor `mkdocs` is importable in any environment here -- and
+# removing an unobservable risk beats reasoning about it.
 
 
 def _png_aspect(path: Path) -> float:
@@ -439,22 +396,19 @@ def _frontier_figure() -> str:
     if img_url is None or bundle_url is None:
         return ""
 
-    keys = list(bundle["methods"])
-    colours = _frontier_colours(keys)
-    # Keyed off the bundle's OWN method list, so a method added to the bake cannot be silently
-    # dropped from the chart -- and the widget throws if any key here is missing a label or colour.
-    methods = {k: {"label": friendly_method_name(k), "colour": colours[k]} for k in keys}
-    chart = {**FRONTIER_CHART, "aspect": _png_aspect(png)}
     attrs = (f'data-widget="frontier" data-block="{block}" data-bundle="{bundle_url}" '
              f'data-target-displacement="{bundle["matched_displacement"]}" '
              f'data-target-permeability="{bundle["matched_permeability"]}" '
-             f'data-methods="{html.escape(json.dumps(methods), quote=True)}" '
-             f'data-chart="{html.escape(json.dumps(chart), quote=True)}"')
+             f'data-aspect="{_png_aspect(png)}"')
+    # The two standards are stated as WHOLE percentages, the same `{:.0%}` the fallback PNG's own
+    # legend uses for its two dashed guides (emit.compare_report) and the same text the widget's
+    # slider labels show -- not the site's usual one-decimal `_pct`, which would read 10.0% beside
+    # an image that reads 10%.
     caption = (
         f"Permeability against displacement on block <code>{block}</code>, every method overlaid. "
         f"The two dashed guides are the calibrated standards every method here is graded against — "
-        f"{_pct(bundle['matched_displacement'])} displacement and "
-        f"{_pct(bundle['matched_permeability'])} permeability. Drag either guide, or use the "
+        f"{bundle['matched_displacement']:.0%} displacement and "
+        f"{bundle['matched_permeability']:.0%} permeability. Drag either guide, or use the "
         f"sliders, to ask which methods clear it and at what least road."
     )
     return _figure(img_url, f"permeability against displacement for every method on block {block}",

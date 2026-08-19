@@ -1,6 +1,7 @@
 """Nothing recomputes this bundle between the baker and the browser, so these tests are the only
 thing between a bad bake and a chart that reads wrong."""
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, cast
@@ -152,3 +153,72 @@ def test_permeability_matches_the_solver_at_every_prefix(bundle: dict[str, Any])
                for m in range(len(ordered) + 1)]
         np.testing.assert_allclose(bundle["methods"][name]["permeability"], got, rtol=1e-5,
                                    atol=1e-9, err_msg=name)
+
+
+def test_labels_and_colours_match_what_reblock_draws(bundle: dict[str, Any]) -> None:
+    """The widget's legend must be the FALLBACK PNG's legend. `emit.compare_report` names each curve
+    with `friendly_method_name` and colours it with `method_colors(method_order)`, where
+    `run_permeability_lenses` passes `method_order=list(methods)` -- the selected set, in order --
+    and the baker bakes both from those same two functions.
+
+    "Parity by construction" is only true while something checks the construction, and this bundle
+    is a COMMITTED artifact: it can be regenerated at a different time from the code that draws the
+    PNG, or not regenerated at all after a label or a hue changes. That staleness is what this
+    catches -- the baker sharing its inputs with emit.py cannot.
+    """
+    from reblock.emit import method_colors
+    from reblock.method_labels import friendly_method_name
+
+    try:
+        from matplotlib.colors import to_hex
+    except ModuleNotFoundError:                                     # pragma: no cover
+        pytest.skip("needs matplotlib for the exact hex conversion emit.py's colours go through")
+
+    names = list(bundle["methods"])
+    expected = {n: to_hex(rgb) for n, rgb in method_colors(names).items()}
+    for name, curve in bundle["methods"].items():
+        assert curve["label"] == friendly_method_name(name), name
+        assert curve["colour"] == expected[name], name
+    # Distinct colours, or two curves are indistinguishable on the chart while every per-method
+    # assertion above still passes.
+    colours = {c["colour"] for c in bundle["methods"].values()}
+    assert len(colours) == len(names), f"methods share a colour: {sorted(colours)}"
+
+
+def test_chart_block_matches_the_figures_own_styling(bundle: dict[str, Any]) -> None:
+    """Same staleness guard for the chart block: the widget's axis titles, curve width and guide
+    styling are `reblock.emit`'s own module constants -- the values `compare_report` draws the PNG
+    with -- so a change there that is not re-baked here would have JS-on and JS-off readers looking
+    at two different charts (which is exactly what fix round 1 was opened for)."""
+    from reblock.emit import (
+        FRONTIER_GUIDE_COLOR,
+        FRONTIER_GUIDE_LW,
+        FRONTIER_LW,
+        FRONTIER_X_LABEL,
+        FRONTIER_Y_LABEL,
+    )
+
+    chart = bundle["chart"]
+    assert chart["x_label"] == FRONTIER_X_LABEL
+    assert chart["y_label"] == FRONTIER_Y_LABEL
+    assert chart["line_width"] == pytest.approx(FRONTIER_LW)
+    assert chart["guide_colour"] == FRONTIER_GUIDE_COLOR
+    assert chart["guide_width"] == pytest.approx(FRONTIER_GUIDE_LW)
+
+    # The web chart's own affordances, which the PNG has no equivalent for. `slider_step` must be a
+    # WHOLE percentage point: every target the widget can be set to is printed as `{:.0%}` (emit's
+    # own format for the same two numbers), and a finer step would print a percentage the guide is
+    # not actually at. Both calibrated standards must sit on that grid for the same reason.
+    step = chart["slider_step"]
+    assert step == pytest.approx(0.01), "slider_step is no longer one percentage point"
+    for target in ("matched_displacement", "matched_permeability"):
+        assert bundle[target] / step == pytest.approx(round(bundle[target] / step)), target
+    # niceTicks(0, max, tick_target) must put its LAST tick exactly on each axis end, or svg.ts's
+    # plot rect (recovered from the tick extremes) is an inset of the data area rather than equal to
+    # it. Reproduced here rather than trusted: this is the one chart value with a geometric
+    # consequence, and it is chosen in the baker, not in reblock.
+    for axis_max in (bundle["frontier_xmax"], chart["permeability_max"]):
+        step_size = axis_max / chart["tick_target"]
+        mag = 10.0 ** math.floor(math.log10(step_size))
+        nice = next(k * mag for k in (1, 2, 2.5, 5, 10) if k * mag >= step_size)
+        assert axis_max / nice == pytest.approx(round(axis_max / nice)), axis_max

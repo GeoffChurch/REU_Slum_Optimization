@@ -12,8 +12,9 @@ import { toScreen, type View } from "../view/transform.js";
  * colour, stroke-width or font-size chosen in here: those are exactly the kind of per-widget
  * visual choice the project's global rule says must come from configuration, not a TypeScript
  * literal. `drawPolyline` and `drawGuide` take colour/width as parameters because their signatures
- * have room for them; `drawAxes` does not (its signature is fixed by the brief this module was
- * built against), so its chrome uses `currentColor` for paint -- a keyword that defers the actual
+ * have room for them; `drawAxes` does not (its signature carries only what a caller cannot
+ * possibly derive here -- tick values, titles, and since fix round 1 a tick FORMATTER; see its own
+ * doc), so its chrome uses `currentColor` for paint -- a keyword that defers the actual
  * value to whatever CSS `color` is cascaded onto the widget's host, never a value this file picks
  * -- and leaves stroke-width unset, taking SVG's own initial value (1) rather than a chosen one.
  */
@@ -92,6 +93,16 @@ function plotRectOf(svg: SVGSVGElement): Rect {
  * real `<text>` label per tick, and the two axis titles. `xTicks`/`yTicks` are `niceTicks` output:
  * round-step values the caller already computed, drawn here and nowhere invented.
  *
+ * UNITS (fix round 1 of the Frontier task, and the one thing that reopened this file): `formatTick`
+ * turns a tick VALUE into its label TEXT, and it is REQUIRED -- no default. This module previously
+ * printed `String(t)`, so a caller whose data are fractions got bare `0.6` where the matplotlib
+ * figure the widget replaces prints `60%` (emit.compare_report puts a `PercentFormatter(xmax=1)` on
+ * both axes). A defaulted parameter would have let that divergence come back silently at the next
+ * call site, which is the failure mode this project keeps finding: nothing throws, the chart draws,
+ * and only a human comparing two pictures notices. Required means a new caller must state its units
+ * or fail to compile. The formatter's OUTPUT is deliberately unconstrained -- an empty string is a
+ * legitimate "hide this tick" -- so nothing here validates it beyond drawing it.
+ *
  * CONTAINMENT (fix round 1, Critical, kept): every label still renders inside
  * `[0, width] x [0, height]`, even at `pad = 0` where the plot rect fills the whole box and there
  * is no gutter to spare. That fix picked, for each label, an anchor and a growth direction proven
@@ -125,7 +136,8 @@ function plotRectOf(svg: SVGSVGElement): Rect {
  * (`getBBox`), neither available here; flagged plainly rather than silently left unmentioned.
  */
 export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: number[],
-                         xLabel: string, yLabel: string): void {
+                         xLabel: string, yLabel: string,
+                         formatTick: (t: number) => string): void {
   const box = sizeOf(svg);
   const { width, height } = box;
   const rect = plotRect(v, xTicks, yTicks, box);
@@ -183,7 +195,7 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
       label.setAttribute("dominant-baseline", "alphabetic");
     }
     label.setAttribute("fill", "currentColor");
-    label.textContent = String(t);
+    label.textContent = formatTick(t);
     svg.append(label);
   }
 
@@ -209,7 +221,7 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
     label.setAttribute("text-anchor", hasLeftGutter ? "end" : "start");
     label.setAttribute("dominant-baseline", baseline);
     label.setAttribute("fill", "currentColor");
-    label.textContent = String(t);
+    label.textContent = formatTick(t);
     svg.append(label);
   }
 

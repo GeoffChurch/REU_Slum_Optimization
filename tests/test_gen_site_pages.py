@@ -314,24 +314,21 @@ def test_assert_widget_bundle_present_fails_the_build_on_a_missing_bundle(
     gsp._assert_widget_bundle_present(True)
 
 
-def _frontier_mount_attrs() -> dict[str, str]:
-    """Every `data-*` attribute on the Methods index's frontier `<figure>`, unescaped.
-
-    Parsed off the real generated markup rather than reconstructed, so what these tests assert is
-    what a browser would actually read. `data-methods`/`data-chart` carry JSON, HTML-escaped by the
-    generator (`&quot;`), which is why this unescapes before any caller parses it.
-    """
-    import re as _re
-    from html import unescape
-
+def _frontier_figure_markup() -> str:
+    """The Methods index's frontier `<figure>` element, opening tag through `</figure>`."""
     from scripts.gen_site_pages import gen_methods_overview
 
     markup = gen_methods_overview()
-    figures = [f for f in _re.findall(r"<figure[ >][^>]*>", markup)
-               if 'data-widget="frontier"' in f]
-    assert len(figures) == 1, f"expected exactly one frontier mount point, found {len(figures)}"
-    return {name: unescape(value)
-            for name, value in _re.findall(r'(data-[a-z-]+)="([^"]*)"', figures[0])}
+    opens = [m.start() for m in re.finditer(r"<figure[ >]", markup)
+             if 'data-widget="frontier"' in markup[m.start():markup.index("</figure>", m.start())]]
+    assert len(opens) == 1, f"expected exactly one frontier mount point, found {len(opens)}"
+    return markup[opens[0]:markup.index("</figure>", opens[0]) + len("</figure>")]
+
+
+def _frontier_mount_attrs() -> dict[str, str]:
+    """Every `data-*` attribute on that figure. Parsed off the real generated markup rather than
+    reconstructed, so what these tests assert is what a browser would actually read."""
+    return dict(re.findall(r'(data-[a-z-]+)="([^"]*)"', _frontier_figure_markup()))
 
 
 def test_methods_index_carries_one_frontier_mount_point_over_its_own_png_fallback() -> None:
@@ -357,16 +354,28 @@ def test_methods_index_carries_one_frontier_mount_point_over_its_own_png_fallbac
     assert '<div data-widget="frontier"' not in markup
 
 
-def test_frontier_mount_point_states_the_bundles_own_targets_and_methods() -> None:
-    """Both guides boot at the calibrated standards read from `frontier.json`, and every method the
-    bundle carries has a label and a colour. Neither may be typed into this page: a hand-typed
-    target would contradict the dashed guides on the fallback PNG under the same caption, and a
-    method list written anywhere but the bundle would silently drop a curve from a chart of eight
-    while the page still looked entirely correct (the widget throws on that, but only if the two
-    lists actually disagree -- this is the guard on the side that produces them)."""
+def test_frontier_mount_point_carries_only_scalars_no_json() -> None:
+    """Fix round 1: the mount point passed two HTML-escaped JSON payloads, which put literal `{`/`}`
+    into a markdown raw-HTML block. python-markdown very probably stashes such a block untouched --
+    but NOTHING here can observe that (neither `markdown` nor `mkdocs` is importable in any
+    environment in this repo), so the payloads moved into the bundle rather than the risk being
+    reasoned about. This keeps them out: every attribute is a bare scalar, and the whole element is
+    brace-free."""
+    figure = _frontier_figure_markup()
+    assert "{" not in figure and "}" not in figure, figure
+    assert "&quot;" not in figure, figure
+    attrs = _frontier_mount_attrs()
+    assert set(attrs) == {"data-widget", "data-block", "data-bundle", "data-target-displacement",
+                          "data-target-permeability", "data-aspect"}, sorted(attrs)
+
+
+def test_frontier_mount_point_states_the_bundles_own_targets() -> None:
+    """Both guides boot at the calibrated standards read from `frontier.json`, and the caption
+    states those two numbers in the same whole-percent form the fallback PNG's legend uses. A
+    hand-typed target here would contradict the dashed guides on the image directly above it."""
     import json
 
-    from scripts.gen_site_pages import MC, friendly_method_name
+    from scripts.gen_site_pages import MC
 
     bundle = json.loads((MC / "frontier.json").read_text(encoding="utf-8"))
     attrs = _frontier_mount_attrs()
@@ -374,48 +383,45 @@ def test_frontier_mount_point_states_the_bundles_own_targets_and_methods() -> No
     assert float(attrs["data-target-displacement"]) == bundle["matched_displacement"]
     assert float(attrs["data-target-permeability"]) == bundle["matched_permeability"]
     assert attrs["data-block"] == bundle["block_id"]
+    # data-aspect is the FALLBACK IMAGE's own shape, read from that PNG's IHDR header rather than
+    # restated, so the widget occupies the space the image it replaces occupied.
+    assert 1.0 < float(attrs["data-aspect"]) < 2.0
 
-    methods = json.loads(attrs["data-methods"])
-    assert sorted(methods) == sorted(bundle["methods"]), "styles and bundle disagree on methods"
-    colours = set()
-    for key, style in methods.items():
-        assert style["label"] == friendly_method_name(key), key
-        assert re.fullmatch(r"#[0-9a-f]{6}", style["colour"]), (key, style["colour"])
-        colours.add(style["colour"])
-    assert len(colours) == len(methods), "two methods share a curve colour"
-
-    # The caption states the same two standards the attributes boot with, from the same source.
-    from scripts.gen_site_pages import _pct, gen_methods_overview
-    markup = gen_methods_overview()
-    assert _pct(bundle["matched_displacement"]) in markup
-    assert _pct(bundle["matched_permeability"]) in markup
+    caption = _frontier_figure_markup()
+    assert f"{bundle['matched_displacement']:.0%} displacement" in caption
+    assert f"{bundle['matched_permeability']:.0%} permeability" in caption
+    # ...and NOT the site's usual one-decimal form, which would read 10.0% beside an image whose own
+    # legend reads 10%.
+    assert f"{bundle['matched_displacement'] * 100:.1f}% displacement" not in caption
 
 
-def test_frontier_chart_config_covers_every_field_the_widget_requires() -> None:
-    """`data-chart` is the whole of the widget's visual configuration -- no colour, width, pad or
-    tick target may be a literal in the TypeScript. `parseChart` throws on a field that is absent
-    or not a finite number, so a name dropped here kills the chart outright; this asserts the
-    generator emits the full set the widget asks for, keyed by the widget's own field names."""
+def test_the_page_ships_the_bundle_it_points_at_with_everything_the_widget_needs() -> None:
+    """`data-bundle` is a URL, and a URL that 404s (or resolves to a bundle predating the widget's
+    requirements) fails silently behind an intact-looking PNG. So: the figure's own URL must resolve
+    to a file under docs/assets that is byte-identical to the artifact, and that shipped copy must
+    carry the chart block and the per-method label/colour the widget refuses to draw without.
+
+    Generating the page is what copies the asset, so calling the generator first is the fixture."""
     import json
 
-    attrs = _frontier_mount_attrs()
-    chart = json.loads(attrs["data-chart"])
+    from scripts.gen_site_pages import DOCS, MC, gen_methods_overview
 
-    required_numbers = ["lineWidth", "tickTarget", "pad", "aspect", "sliderDivisions",
-                        "permeabilityMax"]
-    required_strings = ["xLabel", "yLabel", "guideColour", "guideDash"]
-    for name in required_numbers:
+    gen_methods_overview()
+    url = _frontier_mount_attrs()["data-bundle"]
+    shipped = DOCS / url
+    assert shipped.exists(), f"the page points at {url}, which was never copied into docs/"
+    assert shipped.read_bytes() == (MC / "frontier.json").read_bytes()
+
+    bundle = json.loads(shipped.read_text(encoding="utf-8"))
+    chart = bundle["chart"]
+    for name in ("line_width", "guide_width", "tick_target", "pad", "slider_step",
+                 "permeability_max"):
         assert isinstance(chart[name], int | float), (name, chart.get(name))
-    for name in required_strings:
+    for name in ("x_label", "y_label", "guide_colour", "guide_dash"):
         assert isinstance(chart[name], str) and chart[name], (name, chart.get(name))
-
-    # pad is svg.ts's gutter, and 0.15 is the only nonzero value whose label containment is under
-    # test (web/test/svg.test.ts's GENEROUS_PAD). fitAxes's 0.04 default reserves under one em on a
-    # 300 px box, which puts the tick labels back on top of the plot.
-    assert chart["pad"] == 0.15
-    # aspect is read from the fallback PNG's own IHDR header, so the widget occupies the shape of
-    # the image it replaces; a 4:3-ish plot is the only thing this needs to be near.
-    assert 1.0 < chart["aspect"] < 2.0
+    for method, curve in bundle["methods"].items():
+        assert curve["label"] and isinstance(curve["label"], str), method
+        assert re.fullmatch(r"#[0-9a-f]{6}", curve["colour"]), (method, curve["colour"])
 
 
 def test_methods_index_rewrites_the_frontier_bundle_url_for_its_served_depth(

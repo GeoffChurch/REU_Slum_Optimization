@@ -15,7 +15,7 @@ from reblock.emit import (
     RenderConfig,
     _displaced_points,
     _member_ids,
-    _method_colors,
+    method_colors,
     region_map,
     render_results,
 )
@@ -231,19 +231,19 @@ def test_method_colors_are_stable_when_a_method_is_dropped() -> None:
     # identically -- so a method keeps its colour even when another is absent from the run.
     registry = ["topology", "greedy_arterial_buildable", "greedy_arterial_aspirational",
                 "greedy_arterial_displacement", "clearance", "clearance_grid", "osm_footpaths"]
-    colors = _method_colors(registry)
+    colors = method_colors(registry)
     # Every method in the registry gets a distinct colour (evenly spaced hues, no wrap collision).
     assert len(set(colors.values())) == len(registry)
     # Deterministic, and dropping a method from the *plotted subset* never touches the map, because
     # the map is keyed on the registry, not the subset.
-    assert _method_colors(registry) == colors
+    assert method_colors(registry) == colors
 
 
 def test_method_colors_hues_are_evenly_spaced_from_zero() -> None:
     # Contract: hue of method i is exactly i/N (N points from [0, 1), so the wheel's wrap -- hue 0
     # == hue 1 -- never lands the last method on the first's colour).
     registry = ["a", "b", "c", "d", "e"]
-    colors = _method_colors(registry)
+    colors = method_colors(registry)
     for i, name in enumerate(registry):
         h, s, v = colorsys.rgb_to_hsv(*colors[name])
         assert h == pytest.approx(i / len(registry))

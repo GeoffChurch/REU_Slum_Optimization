@@ -109,14 +109,23 @@ const Y_TICKS = niceTicks(0, 1, 5);
  * more than this test's own assumed EM_PX/CHAR_PX) exercises the OTHER proven regime fix round 2
  * added: gutter used, tick labels/titles moved off the plot rect. See drawAxes's own doc comment
  * for why only these two regimes are proven, not a continuum between them. */
-function draw(pad: number): { svg: FakeElement; rect: Rect } {
+function draw(pad: number, formatTick: (t: number) => string = String): { svg: FakeElement; rect: Rect } {
   const host = new FakeElement("div");
   const svg = createSvg(host as unknown as HTMLElement, WIDTH, HEIGHT);
   const v = fitAxes([0, 0.4], [0, 1], WIDTH, HEIGHT, pad);
-  drawAxes(svg, v, X_TICKS, Y_TICKS, "Displacement", "Permeability");
+  // `String` by default, which is exactly what drawAxes hard-coded before fix round 1 gave it a
+  // required `formatTick` -- so every assertion below still runs on the same label TEXT it was
+  // written against, and the containment/gutter guards (one of them a Critical from the previous
+  // task) are unchanged rather than re-tuned. PERCENT_TICK below covers the units the Frontier
+  // widget actually passes, whose labels are up to four characters instead of one.
+  drawAxes(svg, v, X_TICKS, Y_TICKS, "Displacement", "Permeability", formatTick);
   const fake = svg as unknown as FakeElement;
   return { svg: fake, rect: plotRectAttrs(fake) };
 }
+
+/** The Frontier widget's own formatter: both axes are fractions in [0, 1] drawn as percentages,
+ * mirroring the `PercentFormatter(xmax=1)` on the matplotlib figure the widget replaces. */
+const PERCENT_TICK = (t: number): string => `${(t * 100).toFixed(0)}%`;
 
 /** The plot rect `drawAxes` recorded on `svg` via its own `setPlotRect` (see svg.ts) -- read back
  * the same way `drawGuide` itself recovers it, so this test's notion of "the plot rect" is
@@ -232,4 +241,33 @@ test("drawPolyline throws on an xs/ys length mismatch instead of emitting NaN po
   const v = fitAxes([0, 1], [0, 1], WIDTH, HEIGHT, 0);
   assert.throws(() => drawPolyline(svg, v, [0, 1, 2], [0, 1], "red", 2),
     /xs and ys must be the same length/);
+});
+
+test("percent tick labels -- four characters, not one -- still stay in the gutter", () => {
+  // The regime the Frontier widget actually draws in. "100%" is four times the width of "1", and
+  // y-tick labels grow LEFT from the plot rect while the rotated y-axis title grows right from
+  // x = 0, so a wider tick column is exactly what would collide with it -- silently, since nothing
+  // in SVG complains about overlapping text. Containment is asserted the same way as for the
+  // one-character labels, plus the plot rect and the y-title, so this is the same three guarantees
+  // over the label set that ships.
+  const { svg, rect } = draw(GENEROUS_PAD, PERCENT_TICK);
+  const { xTickLabels, yTickLabels, yTitle } = splitLabels(svg);
+  const plotBox: [number, number, number, number] = [rect.left, rect.right, rect.top, rect.bottom];
+
+  assert.deepEqual(xTickLabels.map((t) => t.textContent), ["0%", "10%", "20%", "30%", "40%"]);
+  assert.deepEqual(yTickLabels.map((t) => t.textContent),
+    ["0%", "20%", "40%", "60%", "80%", "100%"]);
+
+  for (const t of [...xTickLabels, ...yTickLabels]) {
+    assertContained(t);
+    const box = effectiveBox(t);
+    assert.ok(!rectsOverlap(box, plotBox),
+      `"${t.textContent}" box [${box.join(", ")}] overlaps the plot rect [${plotBox.join(", ")}]`);
+  }
+  const titleBox = effectiveBox(yTitle);
+  for (const label of yTickLabels) {
+    assert.ok(!rectsOverlap(titleBox, effectiveBox(label)),
+      `y title [${titleBox.join(", ")}] overlaps percent y-tick label "${label.textContent}" ` +
+      `[${effectiveBox(label).join(", ")}]`);
+  }
 });
