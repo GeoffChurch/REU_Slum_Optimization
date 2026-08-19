@@ -12,9 +12,11 @@ import { toScreen, type View } from "../view/transform.js";
  * colour, stroke-width or font-size chosen in here: those are exactly the kind of per-widget
  * visual choice the project's global rule says must come from configuration, not a TypeScript
  * literal. `drawPolyline` and `drawGuide` take colour/width as parameters because their signatures
- * have room for them; `drawAxes` does not (its signature carries only what a caller cannot
- * possibly derive here -- tick values, titles, and since fix round 1 a tick FORMATTER; see its own
- * doc), so its chrome uses `currentColor` for paint -- a keyword that defers the actual
+ * have room for them; `drawAxes` takes only the values a caller cannot
+ * derive here -- tick values, titles, a tick FORMATTER (fix round 1), and a gridline OPACITY (final
+ * review I2: gridlines had to be able to recede behind the data, and 0 has to mean none, so the
+ * amount is the caller's to supply from the bundle; see its own doc) -- so its remaining chrome uses
+ * `currentColor` for paint -- a keyword that defers the actual
  * value to whatever CSS `color` is cascaded onto the widget's host, never a value this file picks
  * -- and leaves stroke-width unset, taking SVG's own initial value (1) rather than a chosen one.
  */
@@ -284,8 +286,11 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
   //
   // With a gutter, the title now hugs the bottom edge using the same minimal descender allowance the
   // tick labels use (`alphabeticDy`, not a second constant), which hands the whole gutter to the tick
-  // row and drops the collision threshold to a box height of ~205 px (~305 px wide) on the glyph
-  // model svg.test.ts measures with. That is a bound, not a guarantee: this file is still given no
+  // row and drops the collision threshold far below any phone viewport on the glyph
+  // model svg.test.ts measures with. No pixel pair is quoted here on purpose: the one that used to be
+  // was both wrong and internally inconsistent with its own stated aspect (final review, N2), and a
+  // number in a comment drifts away from the tests silently. The two box sizes the tests actually pin
+  // ARE the statement. That is a bound, not a guarantee: this file is still given no
   // font size (see the module doc), so a box narrow enough will still converge -- narrower than any
   // phone viewport, and now under test at two box sizes rather than none.
   //

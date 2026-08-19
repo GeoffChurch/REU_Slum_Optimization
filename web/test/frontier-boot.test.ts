@@ -192,6 +192,18 @@ test("the widget mounts and draws one curve per method in the bundle, with no Na
       assert.equal(Number(g.getAttribute("stroke-width")), bundle.chart.guide_width);
       assert.equal(g.getAttribute("stroke"), bundle.chart.guide_colour);
     }
+    // N4 (final review): the gridlines' opacity is a bundle-sourced DRAWN value, and it was the only
+    // one of them not pinned here -- line_width, marker_radius and every guide_* above are. Hard-coding
+    // it to full ink in the widget left all 45 node tests green, which is the same hole as every other
+    // "the chart still drew something, so nothing failed" defect on this branch. Gridlines are the
+    // <line>s WITHOUT the guides' dash (see the comment above), and there must be some, or the
+    // assertion would hold vacuously over an empty list.
+    const gridlines = svgs[0]!.all("line").filter((l) => l.getAttribute("stroke-dasharray") === null);
+    assert.ok(gridlines.length > 0, "no gridlines emitted, so their opacity is untested");
+    for (const g of gridlines) {
+      assert.equal(Number(g.getAttribute("stroke-opacity")), bundle.chart.grid_opacity,
+        "gridline opacity must come from the bundle, not from a TypeScript literal");
+    }
     // M6: no `role="img"`. That plus an aria-label makes the subtree presentational, hiding the
     // <text> tick labels and axis titles from assistive tech -- and those being real, reachable text
     // is half the stated reason this widget draws SVG instead of canvas.

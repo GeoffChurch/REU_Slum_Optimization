@@ -20,8 +20,8 @@ pixi install
 
 ```bash
 pixi run test        # pytest + coverage, then the web/ node suite (~22 min with the city cache
-                     #   warm: one developer-local parity test re-solves permeability at all 784
-                     #   baked prefixes. `pixi run pytest -m "not slow"` skips it, ~40 s.)
+                     #   warm: two developer-local parity tests, one re-solving permeability at all
+                     #   784 baked prefixes. `pixi run pytest -m "not slow"` skips both, ~1.5 min.)
 pixi run typecheck   # mypy --strict + tsc --noEmit (web/)
 pixi run lint        # ruff check
 pixi run fmt         # ruff format
