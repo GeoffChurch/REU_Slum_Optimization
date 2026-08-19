@@ -250,6 +250,13 @@ none blocks on a later one.
   pixel-level guard ties them to the committed PNG, so the widget cannot drift from its own figure
   whichever way this is decided.
 
+  **Decided 2026-08-19 (owner): leave the colouring as is for now.** Not a null result — the
+  subset-indexed hues stay, and the docstrings that misdescribed them are corrected, so the behaviour
+  is now documented rather than accidental. What would reopen it: publishing a second frontier figure
+  that readers are meant to compare against the flagship, or changing the example's method set (either
+  makes the hue shift visible to a reader rather than latent). Re-read this entry before doing either;
+  the fix is to pass the full registry as `method_order`, at the cost of 8-of-20 hue separation.
+
   **Outstanding wiki obligation** (from piece C, still unwritten): the coordinate-precision trap —
   significant-figure rounding is wrong for projected coordinates, because 6 sig figs on a ~6,240,000
   UTM northing quantises to 10 m. `gen_web_bundle.py` splits `_r` (6 sig figs, field values) from `_c`
