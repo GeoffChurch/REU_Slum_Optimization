@@ -142,7 +142,7 @@ none blocks on a later one.
   the spec's §1, and whoever first needs a region widget owns that decision. `clearance` on the
   pinned block is 20 segments, so C's own bake is half a second.
 
-  **Read before piece D — two live hazards in the substrate:**
+  **Two hazards that were live for piece D — BOTH CLOSED by D1, kept for the reasoning:**
 
   - **`mountAll()` has no try/catch** (`web/src/mount.ts`), so one widget throwing during mount
     silently prevents every later widget on the same page from mounting. Harmless with one widget;
@@ -160,9 +160,10 @@ none blocks on a later one.
     `medianEdgeLength` reimplements a quantity Python could bake once;
   - nothing asserts the committed `.d.ts` equals `gen_web_bundle.py`'s own `DTS_TEMPLATE` (they match
     today), so a hand edit is caught only for keys the recursive guard walks;
-  - `web/test/widgets-bundle.test.ts` proves the bundle *evaluates* but never asserts the widget
-    **registered** — dropping the `register(...)` call while keeping the import still passes. One
-    line (`assert.match(source, /perm-graph/)`) closes it;
+  - ~~`web/test/widgets-bundle.test.ts` proves the bundle *evaluates* but never asserts the widget
+    **registered**~~ — **CLOSED by D1**, and not with the one-line `assert.match` suggested here: the
+    test now evaluates the shipped artifact in a `vm` realm and asserts every widget name a generated
+    page emits is registered, with the names derived from the generator rather than listed;
   - `scripts/gen_web_bundle.py` is type-checked only *incidentally*, via `tests/test_web_bundle.py`
     importing it; move or delete that import and a strict-clean script silently leaves the gate.
 
@@ -187,9 +188,73 @@ none blocks on a later one.
   **One spec §8 open item now measured:** `first_upgraded_at`'s sentinel is genuinely load-bearing —
   **398 of 745** edges are never road-raised even by the full 486 m network, so the field is sparse,
   not dense.
-- **D — the remaining widgets.** `DisplacementField`, `Frontier`, `RegionGrow`, then `ScreenMap`
-  last: 16k blocks is the only real rendering-performance problem in the design (Canvas, not SVG —
-  recolouring must not touch geometry).
+- **D — the remaining widgets.** Split into three specs. **D1 SHIPPED** (spec
+  `specs/2026-08-16-frontier-widget-and-substrate-hardening-design.md`): `Frontier` on the Methods
+  index, plus the substrate hardening piece C left as live hazards. **D2** is `DisplacementField`,
+  **D3** is `RegionGrow` then `ScreenMap` last — 16k blocks is the only real rendering-performance
+  problem in the design (Canvas, not SVG — recolouring must not touch geometry).
+
+  **What D1 closed from piece C's own hazard list above:** `mountAll()` now wraps each widget in
+  try/catch and renders the failure where it happened; `register()` throws on a duplicate name; and
+  `widgets-bundle.test.ts` now asserts the *shipped artifact* registers every widget name a generated
+  page emits, with the names derived from the generator rather than listed.
+
+  **The one lesson worth carrying into D2/D3, because it cost a Critical at the very last gate:**
+  Material ships `.md-typeset img,.md-typeset svg,.md-typeset video{height:auto;max-width:100%}`, and
+  **presentation attributes lose the cascade to it.** `createSvg` sized its `<svg>` with
+  `setAttribute("width"/"height")`, so every gutter, tick-row and plot-rect number on the branch was
+  provably correct against a box the browser would never use — 45 green tests, correct arithmetic,
+  wrong object. Size widget-owned elements with an **inline style** (`perm-graph.ts` always did, which
+  is the only reason it never had the bug), and note `.md-typeset figure{width:fit-content}` makes the
+  inline *width* load-bearing a second time: it is what stops the figure collapsing after the fallback
+  `<img>` is removed. `web/test/svg.test.ts` guards this now.
+
+  **Deferred from D1, decided rather than forgotten:**
+
+  - **The widgets do not reflow.** Both size in absolute pixels with no `viewBox`, so a container
+    narrowing without a `window` resize event overflows. **Do not "fix" this by adding `max-width`
+    alone** — with no `viewBox` that clips instead of scaling, converting a visible overflow into
+    silently hidden chart content, which is the exact failure shape this branch spent seven defects
+    eliminating. The real fix is a `viewBox`, and it interacts with `svg.test.ts`'s containment and
+    gutter guards, so it wants its own piece.
+  - **`Frontier.boot()` is ~270 lines with five nested closures** (`web/src/widgets/frontier.ts`), and
+    it rebuilds the whole SVG on every render — now ~550 `<circle>` markers among them. `dragTo` early-
+    returns when the snapped value is unchanged, so a drag no longer rebuilds per pointer event, but
+    incremental update (recolour/reposition rather than rebuild) is untouched. No browser exists in
+    this pipeline, so nobody has measured whether it matters.
+  - **The resize handler throws at zero box width** (console-only; the last drawing stays). Chosen over
+    silently drawing a zero-width chart. A figure landing in a hidden container needs a
+    `ResizeObserver` instead.
+  - **`data-block` is emitted, tested and never read** by either widget. Substrate-wide question, not
+    a `Frontier` one.
+  - **`mountAll`'s try/catch covers the synchronous mount call only** — not `boot()`'s async chain
+    (each widget has its own `.catch`) nor a throw from an interaction handler registered inside it,
+    where a later failure would be silent and permanent.
+  - **`fitBbox`'s uniformity test asserts only `scaleX === scaleY`**, not that the value is the
+    width/height-bound *minimum*, so a `Math.max`-for-`Math.min` regression stays green there and is
+    caught only incidentally by a neighbouring hardcoded expectation. `tx`/`ty` centring is also
+    duplicated between `fitBbox` and `fitAxes`.
+
+  **One real finding that is NOT a widget bug — decide it before the next figure regeneration.**
+  `emit.method_colors` assigns each method a hue by *index over N*, and `compare_budgets.py:183` passes
+  the run's **selected subset** (`list(methods)`), not the full registry the three `emit.py` docstrings
+  described (now corrected). So adding or dropping one method shifts **every** colour: measured,
+  `clearance_looped` is `#d94c4c` in `examples/multiblock_depth`'s frontier and `#92d94c` in the
+  flagship. `compare.py:174-175`'s comment says the full-registry argument exists precisely to prevent
+  this, and the example pipeline does not get that protection. `tests/test_emit.py`'s guard was *named*
+  for the property while asserting only determinism over one fixed list, which is why the drift went
+  unnoticed — the purest specimen of a canary that cannot fire this project has produced, and the
+  reason `~/wiki/pages/methodology/silent-failure-canaries.md` gained a section on them. The tradeoff
+  is real either way: 8-of-8 hues are genuinely more distinguishable than 8-of-20, against
+  cross-version comparability of published figures. `frontier.json` now bakes the colours and a
+  pixel-level guard ties them to the committed PNG, so the widget cannot drift from its own figure
+  whichever way this is decided.
+
+  **Outstanding wiki obligation** (from piece C, still unwritten): the coordinate-precision trap —
+  significant-figure rounding is wrong for projected coordinates, because 6 sig figs on a ~6,240,000
+  UTM northing quantises to 10 m. `gen_web_bundle.py` splits `_r` (6 sig figs, field values) from `_c`
+  (absolute 0.01 m, coordinates relative to an origin) for exactly this reason. Cross-project enough
+  to belong in `~/wiki`, not here.
 - **E — the Explore chain.** Shared store + URL-as-state, so a reviewer can cite a specific view.
   Thin once D lands.
 - **F — draw-your-own-road.** Pinned Pyodide (`indexURL` with an explicit version — `geopandas`,
