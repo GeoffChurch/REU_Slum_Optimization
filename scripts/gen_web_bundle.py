@@ -20,20 +20,15 @@ from typing import cast
 
 import numpy as np
 from geopandas import GeoDataFrame
-from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from matplotlib import colormaps
 from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from reblock.budget import prefix_to_permeability, street_first_ordered
 from reblock.compare import load_permeability_config
-from reblock.contracts import Block, Method, Screen, Source
-from reblock.derivations import propose
+from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
 from reblock.perm_graph import GRAPH_LAYERS, permeability_graph
-from reblock.pipeline import build_regions
-from reblock.region import RegionBuilder
 from reblock.render import (
     _BOUNDARY_COLOR,
     _CONTEXT_OUTLINE,
@@ -45,35 +40,19 @@ from reblock.render import (
     _ROAD_COLOR,
     _UPGRADED_LW,
 )
+from scripts._example_block import PINNED_METHOD, load_example_block
 
 log = logging.getLogger(__name__)
 
-VARIANT = "method_comparison"      # pins ZAF.9.3.1_1_40972; see conf/example/method_comparison.yaml
-METHOD = "clearance"
 OUT = Path("examples/perm-graph")
 DTS = Path("web/src/bundle.d.ts")
 SIGFIGS = 6
 
 
 def load_block_and_roads() -> tuple[Block, GeoDataFrame]:
-    """The pinned block and `clearance`'s full road set. A FUNCTION rather than inline setup because
-    tests/test_web_bundle.py's parity test re-derives the same inputs to check the committed bundle
-    against them -- if the test loaded the block a second, independent way, the two could drift and
-    the parity check would be comparing the wrong things."""
-    with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
-        cfg = compose(config_name="compare_config",
-                      overrides=[f"+example={VARIANT}", "data=capetown_full"])
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
-    groups = [list(g) for g in cfg.block_ids]
-    region = build_regions(source, screen, region_builder, groups, int(cfg.max_blocks))[0]
-    assert len(region) == 1, "this figure set is single-block by design"
-    block = region[0]
-
-    method = cast(Method, instantiate(cfg.all_methods[METHOD]))
-    roads = cast(GeoDataFrame, propose(method, block).roads)
-    return block, roads
+    """Kept as a thin alias so tests/test_web_bundle.py's parity test still imports one name."""
+    block, roads = load_example_block(PINNED_METHOD)
+    return block, roads[PINNED_METHOD]
 
 
 def _r(x: float) -> float:
@@ -180,7 +159,7 @@ def main() -> None:
     prefix, reached = prefix_to_permeability(block, roads, pcfg.matched_permeability, params,
                                             tol=STREET_TOL)
     if not reached:
-        raise SystemExit(f"{METHOD} never reached P*={pcfg.matched_permeability}")
+        raise SystemExit(f"{PINNED_METHOD} never reached P*={pcfg.matched_permeability}")
     # prefix_to_permeability returns `ordered.iloc[:lo]`, so its LENGTH is the index into the
     # canonical sequence -- this is the prefix graph_current_after.png shows, and the widget must
     # boot here or the caption below it describes a different picture.
@@ -258,7 +237,7 @@ def main() -> None:
 
     bundle = {
         "block_id": block.block_id,
-        "method": METHOD,
+        "method": PINNED_METHOD,
         "lens_b_index": lens_b_index,
         "n_prefixes": len(figs),
         "origin": [ox, oy],

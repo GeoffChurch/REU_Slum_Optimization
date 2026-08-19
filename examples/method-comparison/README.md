@@ -92,3 +92,11 @@ pixi run python -m scripts.gen_example method_comparison
 ```
 The full run log is in [`run.log`](run.log).
 
+This directory also carries `frontier.json`, the data for the interactive Frontier widget on the
+Methods index page — every method's full drainage-ordered prefix table (road length, displacement,
+permeability) on this same pinned block, baked by a separate script because it is a different page's
+data and shares none of the run above's maps or curves:
+
+```bash
+pixi run python -m scripts.gen_frontier_bundle
+```

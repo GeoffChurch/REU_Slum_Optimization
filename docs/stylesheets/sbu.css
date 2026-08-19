@@ -766,3 +766,19 @@ body,
 .glightbox-clean .gslide-description {
   font-family: var(--sbu-body);
 }
+
+/* ------------------------------------------------------------------------- widget controls */
+
+/* Material 9.7.7 ships `.md-typeset figure{text-align:center}`, and both interactive widgets insert
+   their controls INTO the <figure> that carries their mount point -- so sliders, legend buttons, the
+   aria-live summary and Frontier's eight full-sentence verdicts all inherit centring. One centred
+   slider row reads as a caption; eight centred sentences read as a mistake. Scoped by
+   `figure[data-widget]`, so it reaches whatever a widget inserts (both widgets, and any later one)
+   without needing a class the TypeScript has to remember to set, and without touching the ordinary
+   figures on the site whose centring is deliberate.
+
+   The <figcaption> keeps its own left-aligned rule further up this file; this covers everything the
+   widget itself builds. */
+.md-typeset figure[data-widget] > * {
+  text-align: left;
+}

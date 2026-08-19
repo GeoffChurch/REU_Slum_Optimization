@@ -17,57 +17,37 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import cast
 
 import matplotlib.pyplot as plt
 import numpy as np
-from geopandas import GeoDataFrame
-from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 
 from reblock.budget import prefix_to_permeability
 from reblock.compare import load_permeability_config
-from reblock.contracts import Method, Screen, Source
-from reblock.derivations import propose
 from reblock.perm_graph import GRAPH_LAYERS, permeability_graph
 from reblock.permeability import permeability
-from reblock.pipeline import build_regions
-from reblock.region import RegionBuilder
 from reblock.render import frame_bbox, render_graph, save_render
+from scripts._example_block import PINNED_METHOD, load_example_block
 
 log = logging.getLogger(__name__)
 
-VARIANT = "method_comparison"      # pins ZAF.9.3.1_1_40972; see conf/example/method_comparison.yaml
-METHOD = "clearance"
 OUT = Path("examples/perm-graph")
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
     OUT.mkdir(parents=True, exist_ok=True)
-    with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
-        cfg = compose(config_name="compare_config",
-                      overrides=[f"+example={VARIANT}", "data=capetown_full"])
     pcfg = load_permeability_config()
     params = pcfg.params
 
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
-    groups = [list(g) for g in cfg.block_ids]
-    region = build_regions(source, screen, region_builder, groups, int(cfg.max_blocks))[0]
-    assert len(region) == 1, "this figure set is single-block by design"
-    block = region[0]
-
-    method = cast(Method, instantiate(cfg.all_methods[METHOD]))
-    roads = cast(GeoDataFrame, propose(method, block).roads)
+    block, roads_by_method = load_example_block(PINNED_METHOD)
+    roads = roads_by_method[PINNED_METHOD]
     prefix, reached = prefix_to_permeability(block, roads, pcfg.matched_permeability, params)
     if not reached:
         raise SystemExit(
-            f"{METHOD} never reached P*={pcfg.matched_permeability} on {block.block_id}; the "
-            f"'after' figure would not be the Lens-B prefix the site publishes")
+            f"{PINNED_METHOD} never reached P*={pcfg.matched_permeability} on {block.block_id}; "
+            f"the 'after' figure would not be the Lens-B prefix the site publishes")
     log.info("block %s: %d parcels, %s prefix %.0f m", block.block_id, len(block.parcels),
-             METHOD, float(prefix.geometry.length.sum()))
+             PINNED_METHOD, float(prefix.geometry.length.sum()))
 
     before = permeability_graph(block, None, params)
     after = permeability_graph(block, prefix, params)
@@ -99,7 +79,7 @@ def main() -> None:
 
     meta = {
         "block_id": block.block_id,
-        "method": METHOD,
+        "method": PINNED_METHOD,
         "p_star": pcfg.matched_permeability,
         "permeability_before": 0.0,      # by definition: 1 - P(no roads)/P(no roads)
         "permeability_after": permeability(block, prefix, params),

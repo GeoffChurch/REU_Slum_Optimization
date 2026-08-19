@@ -14,6 +14,20 @@ import vm from "node:vm";
  */
 const BUNDLE_PATH = "../docs/js/widgets.js";
 
+/** The widget names a generated page can actually emit, read out of the generator that emits them --
+ * `scripts/gen_site_pages.py` is the single source of the `data-widget="…"` strings on the site, so
+ * deriving them here means a third widget is covered by the act of putting it on a page. Spec §5 asked
+ * for "both widgets register"; a hardcoded pair would have satisfied the letter of that and none of
+ * the point, which is the pattern this branch has been punishing all along (final review, I4). */
+function emittedWidgetNames(): string[] {
+  const generator = readFileSync("../scripts/gen_site_pages.py", "utf8");
+  const names = [...generator.matchAll(/data-widget="([a-z-]+)"/g)].map((m) => m[1]!);
+  const unique = [...new Set(names)].sort();
+  assert.ok(unique.length >= 2,
+    `expected at least perm-graph and frontier in the generator, found ${JSON.stringify(unique)}`);
+  return unique;
+}
+
 test("the built bundle evaluates without throwing", () => {
   const source = readFileSync(BUNDLE_PATH, "utf8");
 
@@ -38,4 +52,50 @@ test("the built bundle evaluates without throwing", () => {
   // and wired up the listener, so a change that made the whole IIFE body a no-op could not pass
   // this test by accident.
   assert.deepEqual(registeredEvents, ["DOMContentLoaded"]);
+});
+
+test("the shipped bundle registers every widget name a generated page emits", () => {
+  // Spec §5's actual requirement, and the level that matters: piece C's defect was a circular import
+  // that made the BUNDLE throw behind an intact PNG, so source-module coverage (mount.test.ts) is not
+  // the same guard. This evaluates ../docs/js/widgets.js, then drives its own DOMContentLoaded
+  // listener over one mount point per emitted name and checks what each element was told.
+  //
+  // Neither widget can boot here (no fetch, no layout), so both legitimately report a failure -- what
+  // must NOT appear is "unknown data-widget", which is precisely what an unregistered name produces.
+  const names = emittedWidgetNames();
+  const source = readFileSync(BUNDLE_PATH, "utf8");
+
+  interface FakeNode { textContent: string }
+  const mounts = names.map((name) => ({
+    dataset: { widget: name },
+    appended: [] as FakeNode[],
+    style: {} as Record<string, string>,
+    querySelector: (): null => null,
+    append(...nodes: FakeNode[]): void { this.appended.push(...nodes); },
+    insertBefore(node: FakeNode): void { this.appended.push(node); },
+    getBoundingClientRect: () => ({ width: 0, height: 0, left: 0, top: 0 }),
+    addEventListener: (): void => {},
+  }));
+
+  let domReady: (() => void) | undefined;
+  const context = vm.createContext({
+    document: {
+      addEventListener: (event: string, fn: () => void) => {
+        if (event === "DOMContentLoaded") domReady = fn;
+      },
+      querySelectorAll: () => mounts,
+      createElement: (): FakeNode => ({ textContent: "" }),
+    },
+  });
+  vm.runInContext(source, context, { filename: BUNDLE_PATH });
+  assert.ok(domReady !== undefined, "the bundle never wired its DOMContentLoaded listener");
+  domReady();
+
+  for (const [i, name] of names.entries()) {
+    const said = mounts[i]!.appended.map((n) => n.textContent).join(" ");
+    assert.ok(!said.includes("unknown data-widget"),
+      `"${name}" is not registered in the shipped bundle: ${said}`);
+    assert.ok(said.length > 0,
+      `"${name}" produced no message at all, so mountAll never reached its widget`);
+  }
 });

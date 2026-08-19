@@ -30,6 +30,7 @@ import importlib.util
 import json
 import re
 import shutil
+import struct
 from collections.abc import Callable
 from pathlib import Path
 
@@ -339,6 +340,86 @@ def _perm_graph_figures() -> str:
         f"drain straight to ground."
     )
     return f'{intro}\n\n<div class="sbu-figure-grid">\n' + "".join(figs) + "</div>\n"
+
+
+# ---------------------------------------------------------- the Frontier widget's mount point
+#
+# The widget's colours, labels, stroke widths, tick target and pad are NOT here: fix round 1 moved
+# them into examples/method-comparison/frontier.json, where scripts/gen_frontier_bundle.py bakes
+# them from reblock.emit -- the module that draws the fallback PNG the widget replaces -- so the two
+# charts agree by construction rather than by this file and that one being kept in step by hand.
+# What stays here is what belongs to the PAGE: the bundle's URL, the block id, the two boot targets
+# beside the caption that states them, and the fallback image's own aspect ratio.
+#
+# Every attribute below is a SCALAR. The previous round passed two JSON payloads, which put literal
+# `{`/`}` and `&quot;` into a markdown raw-HTML block. python-markdown stashes such a block before
+# any inline or attr_list pass, so it was very probably fine -- and unlike the earlier claim in
+# this comment, that IS checkable here: `/usr/bin/python3` carries python-markdown 3.5.2 and all
+# five extensions mkdocs.yml configures are core. Rendering this page through that exact set keeps
+# the <figure>, its six data-* attributes, the <img> and the <figcaption> intact (fix round 2).
+# Scalars stay, because a payload that needs no escaping cannot be broken by an escaping change;
+# what is gone is the pretence that the question was unanswerable. `mkdocs` itself -- theme, nav,
+# --strict -- has since been run locally (mkdocs 1.6.1 + Material lives in a rattler cached env;
+# see the backlog's piece-D entry for the path): exit 0, and the rendered <figure> keeps all six
+# data-* attributes, its <img> and its <figcaption>. A BROWSER is still absent, so the chart's
+# real glyph metrics, drag feel and legend wrapping remain unverified.
+
+
+def _png_aspect(path: Path) -> float:
+    """A PNG's width/height, from the IHDR fields in its first 24 bytes (stdlib `struct`, no
+    Pillow). Read rather than restated as a constant so the widget's box is the same shape as the
+    fallback image it replaces, and cannot drift from it when the plot's figsize changes."""
+    with path.open("rb") as f:
+        head = f.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError(f"not a PNG: {path}")
+    width, height = struct.unpack(">II", head[16:24])
+    # int() on both: struct.unpack is typed as tuple[Any, ...], and an Any-valued division makes the
+    # declared float return type unverifiable (mypy --strict's no-any-return).
+    return int(width) / int(height)
+
+
+def _frontier_figure() -> str:
+    """The Methods index's one interactive figure: every method's permeability-against-displacement
+    curve on the pinned single block, with the two calibrated standards as draggable targets.
+
+    The fallback PNG stays IN the figure. mount.ts's error path tells the reader "the static image
+    above still applies", which is only true while the image is there -- so the widget removes it
+    itself, and only once it has actually drawn a chart in its place.
+
+    Both target attributes come from `frontier.json` (`matched_displacement`,
+    `matched_permeability`), never typed here: they are the same two cutoffs the fallback PNG draws
+    as dashed guides and the caption below states, so the widget cannot boot contradicting either.
+    Emits nothing when the artifacts are absent, like every other figure on this site.
+    """
+    path = MC / "frontier.json"
+    if not path.exists():
+        return ""
+    bundle = json.loads(path.read_text(encoding="utf-8"))
+    block = bundle["block_id"]
+    png = MC / f"frontier_{block}.png"
+    img_url = _copy_asset(png, "method-comparison")
+    bundle_url = _copy_asset(path, "method-comparison")
+    if img_url is None or bundle_url is None:
+        return ""
+
+    attrs = (f'data-widget="frontier" data-block="{block}" data-bundle="{bundle_url}" '
+             f'data-target-displacement="{bundle["matched_displacement"]}" '
+             f'data-target-permeability="{bundle["matched_permeability"]}" '
+             f'data-aspect="{_png_aspect(png)}"')
+    # The two standards are stated as WHOLE percentages, the same `{:.0%}` the fallback PNG's own
+    # legend uses for its two dashed guides (emit.compare_report) and the same text the widget's
+    # slider labels show -- not the site's usual one-decimal `_pct`, which would read 10.0% beside
+    # an image that reads 10%.
+    caption = (
+        f"Permeability against displacement on block <code>{block}</code>, every method overlaid. "
+        f"The two dashed guides are the calibrated standards every method here is graded against — "
+        f"{bundle['matched_displacement']:.0%} displacement and "
+        f"{bundle['matched_permeability']:.0%} permeability. Drag either guide, or use the "
+        f"sliders, to ask which methods clear it and at what least road."
+    )
+    return _figure(img_url, f"permeability against displacement for every method on block {block}",
+                   caption, attrs=attrs)
 
 
 def _bakeoff_scale() -> str:
@@ -900,6 +981,11 @@ def gen_methods_overview() -> str:
                  "graded on the same basis — permeability (the benefit) against displacement (the "
                  "cost). Each page shows the method's roads on the ground and its numbers from the "
                  "actual runs.\n")
+    # That basis, as one figure, before the reader picks a method to read about: the interactive
+    # frontier (falling back to its own static PNG). Placed here with no heading of its own on
+    # purpose -- it illustrates the sentence directly above it, and a heading between that sentence
+    # and the cards would leave the cards sitting under the wrong one.
+    parts.append(_frontier_figure())
 
     cards = []
     for m in PUBLISHED_METHODS:

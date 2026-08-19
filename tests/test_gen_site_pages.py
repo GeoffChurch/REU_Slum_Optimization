@@ -312,3 +312,154 @@ def test_assert_widget_bundle_present_fails_the_build_on_a_missing_bundle(
     (tmp_path / "js").mkdir()
     (tmp_path / "js" / "widgets.js").write_text("", encoding="utf-8")
     gsp._assert_widget_bundle_present(True)
+
+
+def _frontier_figure_markup() -> str:
+    """The Methods index's frontier `<figure>` element, opening tag through `</figure>`."""
+    from scripts.gen_site_pages import gen_methods_overview
+
+    markup = gen_methods_overview()
+    opens = [m.start() for m in re.finditer(r"<figure[ >]", markup)
+             if 'data-widget="frontier"' in markup[m.start():markup.index("</figure>", m.start())]]
+    assert len(opens) == 1, f"expected exactly one frontier mount point, found {len(opens)}"
+    return markup[opens[0]:markup.index("</figure>", opens[0]) + len("</figure>")]
+
+
+def _frontier_mount_attrs() -> dict[str, str]:
+    """Every `data-*` attribute on that figure. Parsed off the real generated markup rather than
+    reconstructed, so what these tests assert is what a browser would actually read."""
+    return dict(re.findall(r'(data-[a-z-]+)="([^"]*)"', _frontier_figure_markup()))
+
+
+def test_methods_index_carries_one_frontier_mount_point_over_its_own_png_fallback() -> None:
+    """The interactive figure must not replace the static one in the MARKUP: mount.ts's error path
+    says "The static image above still applies", which is a lie unless the fallback `<img>` is
+    sitting right there in the same `<figure>` (the widget removes it itself, and only once it has
+    drawn a chart in its place). Guards the two halves that made the predecessor widget's failures
+    invisible: a mount point with no image behind it, and a bundle URL in a form `_write_page`'s
+    rewriter does not recognise."""
+    import json
+
+    from scripts.gen_site_pages import MC, gen_methods_overview
+
+    bundle = json.loads((MC / "frontier.json").read_text(encoding="utf-8"))
+    markup = gen_methods_overview()
+
+    assert markup.count('data-widget="frontier"') == 1
+    # The fallback image, and the bundle URL in the exact `assets/...` form _write_page rewrites.
+    assert f'<img src="assets/method-comparison/frontier_{bundle["block_id"]}.png"' in markup
+    assert 'data-bundle="assets/method-comparison/frontier.json"' in markup
+    # The mount point sits on the <figure> itself, never on a wrapping <div>: `.sbu-figure-grid >
+    # figure` resets margin and min-width on DIRECT children only (see _figure's docstring).
+    assert '<div data-widget="frontier"' not in markup
+
+
+def test_frontier_mount_point_carries_only_scalars_no_json() -> None:
+    """Fix round 1: the mount point passed two HTML-escaped JSON payloads, which put literal `{`/`}`
+    into a markdown raw-HTML block. python-markdown very probably stashes such a block untouched --
+    and fix round 2 confirmed it by rendering the generated page through mkdocs' exact extension
+    set under `/usr/bin/python3`'s python-markdown 3.5.2 (the earlier claim that nothing here could
+    check this was wrong). The payloads still belong in the bundle -- an attribute that needs no
+    escaping cannot be broken by an escaping change -- so this keeps them out: every attribute is a
+    bare scalar, and the whole element is brace-free."""
+    figure = _frontier_figure_markup()
+    assert "{" not in figure and "}" not in figure, figure
+    assert "&quot;" not in figure, figure
+    attrs = _frontier_mount_attrs()
+    assert set(attrs) == {"data-widget", "data-block", "data-bundle", "data-target-displacement",
+                          "data-target-permeability", "data-aspect"}, sorted(attrs)
+
+
+def test_frontier_mount_point_states_the_bundles_own_targets() -> None:
+    """Both guides boot at the calibrated standards read from `frontier.json`, and the caption
+    states those two numbers in the same whole-percent form the fallback PNG's legend uses. A
+    hand-typed target here would contradict the dashed guides on the image directly above it."""
+    import json
+
+    from scripts.gen_site_pages import MC
+
+    bundle = json.loads((MC / "frontier.json").read_text(encoding="utf-8"))
+    attrs = _frontier_mount_attrs()
+
+    assert float(attrs["data-target-displacement"]) == bundle["matched_displacement"]
+    assert float(attrs["data-target-permeability"]) == bundle["matched_permeability"]
+    assert attrs["data-block"] == bundle["block_id"]
+    # data-aspect is the FALLBACK IMAGE's own shape, read from that PNG's IHDR header rather than
+    # restated, so the widget occupies the space the image it replaces occupied.
+    assert 1.0 < float(attrs["data-aspect"]) < 2.0
+
+    caption = _frontier_figure_markup()
+    assert f"{bundle['matched_displacement']:.0%} displacement" in caption
+    assert f"{bundle['matched_permeability']:.0%} permeability" in caption
+    # ...and NOT the site's usual one-decimal form, which would read 10.0% beside an image whose own
+    # legend reads 10%.
+    assert f"{bundle['matched_displacement'] * 100:.1f}% displacement" not in caption
+
+
+def test_the_page_ships_the_bundle_it_points_at_with_everything_the_widget_needs(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`data-bundle` is a URL, and a URL that 404s (or resolves to a bundle predating the widget's
+    requirements) fails silently behind an intact-looking PNG. So: the figure's own URL must resolve
+    to a file the generator actually copied, byte-identical to the artifact, and that shipped copy
+    must carry the chart block and the per-method label/colour the widget refuses to draw without.
+
+    `DOCS`/`ASSETS` are redirected into `tmp_path` so this reads a copy no other test can be
+    mid-write on: `pixi run pytest` runs under xdist, several tests call `gen_methods_overview()`
+    (which copies these assets), and comparing bytes against the shared `docs/assets` copy made this
+    test fail intermittently -- a flake I introduced and would rather not ship. Generating the page
+    is what performs the copy, so calling the generator here is the fixture."""
+    import json
+
+    import scripts.gen_site_pages as gsp
+    from scripts.gen_site_pages import MC, gen_methods_overview
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    gen_methods_overview()
+    url = _frontier_mount_attrs()["data-bundle"]
+    shipped = tmp_path / url
+    assert shipped.exists(), f"the page points at {url}, which was never copied into docs/"
+    assert shipped.read_bytes() == (MC / "frontier.json").read_bytes()
+
+    bundle = json.loads(shipped.read_text(encoding="utf-8"))
+    chart = bundle["chart"]
+    for name in ("line_width", "guide_width", "marker_radius", "grid_opacity", "tick_target",
+                 "pad", "slider_step", "permeability_max"):
+        assert isinstance(chart[name], int | float), (name, chart.get(name))
+    for name in ("x_label", "y_label", "guide_colour", "guide_dash"):
+        assert isinstance(chart[name], str) and chart[name], (name, chart.get(name))
+    for method, curve in bundle["methods"].items():
+        assert curve["label"] and isinstance(curve["label"], str), method
+        assert re.fullmatch(r"#[0-9a-f]{6}", curve["colour"]), (method, curve["colour"])
+
+
+def test_methods_index_rewrites_the_frontier_bundle_url_for_its_served_depth(
+        tmp_path: Path) -> None:
+    """The same gap piece C closed for permeability.md, now for the Methods index -- and on the REAL
+    generated body, not a synthetic one, so it also catches the generator emitting a bundle URL in
+    some other form (absolute, or already prefixed) that `_write_page`'s rewriter would silently
+    leave alone. methodology/methods/index.md serves at <base>/methodology/methods/, so its raw-HTML
+    asset URLs need two levels up; get it wrong and the widget's fetch 404s while the page and its
+    PNG fallback still look perfect."""
+    from scripts.gen_site_pages import _write_page, gen_methods_overview
+
+    out = tmp_path / "index.md"
+    _write_page(out, gen_methods_overview(), depth=2, url_depth=2, title="The methods")
+    text = out.read_text(encoding="utf-8")
+    assert 'data-bundle="../../assets/method-comparison/frontier.json"' in text
+    assert 'data-bundle="assets/' not in text
+    assert 'src="../../assets/method-comparison/frontier_' in text
+
+
+def test_methods_index_is_written_at_the_url_depth_its_widget_needs() -> None:
+    """The test above proves `_write_page` rewrites correctly AT url_depth=2; this one proves main()
+    actually passes 2. Without it the pair is vacuous -- the rewrite could be perfect and the call
+    site could still pass the source depth (or the sibling method pages' 3) and 404 every asset on
+    the page. Asserted against the source text, the same way this file's method-registry guards
+    read the generator."""
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
+    m = re.search(r'_write_page\(methods_dir / "index\.md", gen_methods_overview\(\),\s*'
+                  r"depth=(\d+), url_depth=(\d+)", src)
+    assert m is not None, "could not find main()'s _write_page call for the methods index"
+    # methodology/methods/index.md serves at <base>/methodology/methods/ -- two segments deep.
+    assert m.group(2) == "2", f"methods index written at url_depth={m.group(2)}, needs 2"

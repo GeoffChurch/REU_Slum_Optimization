@@ -81,4 +81,7 @@ else
   # largest committed file -- it belongs in the same regeneration path as the PNGs it must stay in
   # sync with (fix wave, I7), not off it where a re-bake is easy to forget.
   run pixi run python -m scripts.gen_web_bundle
+  # The frontier bundle shares the same pinned block (via scripts/_example_block.py) but is a
+  # separate file for a separate page -- see gen_frontier_bundle's module docstring.
+  run pixi run python -m scripts.gen_frontier_bundle
 fi

@@ -19,7 +19,9 @@ pixi install
 ## Common tasks
 
 ```bash
-pixi run test        # pytest + coverage
+pixi run test        # pytest + coverage, then the web/ node suite (~22 min with the city cache
+                     #   warm: two developer-local parity tests, one re-solving permeability at all
+                     #   784 baked prefixes. `pixi run pytest -m "not slow"` skips both, ~1.5 min.)
 pixi run typecheck   # mypy --strict + tsc --noEmit (web/)
 pixi run lint        # ruff check
 pixi run fmt         # ruff format
