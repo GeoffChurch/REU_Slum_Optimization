@@ -359,7 +359,10 @@ def _perm_graph_figures() -> str:
 # the <figure>, its six data-* attributes, the <img> and the <figcaption> intact (fix round 2).
 # Scalars stay, because a payload that needs no escaping cannot be broken by an escaping change;
 # what is gone is the pretence that the question was unanswerable. `mkdocs` itself -- theme, nav,
-# --strict -- and a browser remain unavailable, so the CHART has still never been rendered.
+# --strict -- has since been run locally (mkdocs 1.6.1 + Material lives in a rattler cached env;
+# see the backlog's piece-D entry for the path): exit 0, and the rendered <figure> keeps all six
+# data-* attributes, its <img> and its <figcaption>. A BROWSER is still absent, so the chart's
+# real glyph metrics, drag feel and legend wrapping remain unverified.
 
 
 def _png_aspect(path: Path) -> float:

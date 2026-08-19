@@ -235,6 +235,34 @@ none blocks on a later one.
     caught only incidentally by a neighbouring hardcoded expectation. `tx`/`ty` centring is also
     duplicated between `fitBbox` and `fitAxes`.
 
+  - **`nearest`, `zoomed` and `panned` are never tested under unequal scales.** Every transform test
+    runs on `fitBbox` output, where the two scales enter equal and stay equal, so a copy-paste swap
+    inside `zoomed` (`scaleX: v.scaleY * factor`) is invisible to the whole suite. `toWorld` *is*
+    covered (`web/test/transform.test.ts:81`), which is what makes the gap easy to mistake for closed —
+    a controller note in D1 asserted the whole area was unguarded and was wrong about that half.
+    Frontier does not pan or zoom, so nothing exercises it today; the first widget that does will.
+  - **The pin guard's AST walk misses tuple unpacking.** It covers `Assign`/`AnnAssign` with `Name`
+    targets, so `VARIANT, METHOD = "a", "b"` still evades it (`tests/test_example_block.py`). Neither of
+    the two evasion forms that actually motivated the guard, so it was left.
+  - **`_compose_pinned_config()` runs hydra compose twice** on the `method=None` path
+    (`scripts/_example_block.py`). Cheap, deterministic, harmless.
+  - **`permeability()` is called without `radii=` in the frontier bake**, so `parcel_radii` recomputes
+    on each of the 784 prefix calls, though `permeability_curve`
+    (`src/reblock/permeability.py:425-427`) already establishes hoisting exactly that. Measured
+    negligible against the union cost (26.2 s warm), which is why it was left — the union is the real
+    cost, see the Incremental-displacement entry.
+  - **`street_first_ordered` is called without the `len(roads) == 0` guard its docstring requires of
+    callers** (`budget.py:656`). Not a live bug — all 8 methods yield R>=9 on the pinned block — and the
+    merged `gen_web_bundle.py:158` has the same gap, so it is inherited convention rather than newly
+    introduced. Fix both or neither.
+  - **Removing the fallback `<img>` leaves glightbox's empty `<a>` behind.** Verified in the rendered
+    HTML: `mkdocs-glightbox` wraps every figure image in
+    `<a class="glightbox" href="…png">`, and both widgets do `host.querySelector("img")` then
+    `.remove()`, so an empty anchor with an `href` survives — invisible, but focusable and announced by
+    a screen reader as a link with no text, which cuts against the accessibility rationale for drawing
+    SVG. Pre-existing: `PermGraph` ships this on the live site today, so it is a substrate fix (remove
+    the anchor when the image was its only child), not a `Frontier` one.
+
   **One real finding that is NOT a widget bug — decide it before the next figure regeneration.**
   `emit.method_colors` assigns each method a hue by *index over N*, and `compare_budgets.py:183` passes
   the run's **selected subset** (`list(methods)`), not the full registry the three `emit.py` docstrings
@@ -256,6 +284,17 @@ none blocks on a later one.
   that readers are meant to compare against the flagship, or changing the example's method set (either
   makes the hue shift visible to a reader rather than latent). Re-read this entry before doing either;
   the fix is to pass the full registry as `method_order`, at the cost of 8-of-20 hue separation.
+
+  **`mkdocs build --strict` IS runnable locally — the "nothing has ever rendered this" claim was
+  false.** Three separate agents and I repeated it; there is a complete mkdocs 1.6.1 + Material env at
+  `~/.cache/rattler/cache/cached-envs-v0/4937c48afb8986c1/bin/mkdocs`. Run it as
+  `<that>/mkdocs build --strict --site-dir <scratch>` to keep the repo clean. Done for D1 after the PR
+  opened: exit 0, and the rendered `<figure>` keeps all six `data-*` attributes, its `<img>` and its
+  `<figcaption>`, with no stray braces. A **browser** is still genuinely absent, so drag feel, real
+  glyph metrics against the 0.15 gutter, and how eight legend buttons wrap remain unverified. Verify
+  the render locally before the next widget piece rather than treating the deployed page as the first
+  look — and note `deploy-site.yml` runs `mkdocs build --strict` only on push to `main`, never on a
+  pull request, so a `--strict` failure breaks the deploy rather than the PR.
 
   **Outstanding wiki obligation** (from piece C, still unwritten): the coordinate-precision trap —
   significant-figure rounding is wrong for projected coordinates, because 6 sig figs on a ~6,240,000
@@ -416,6 +455,18 @@ published examples, not smuggled in as a perf commit -- or a formulation that is
 
 The safe half of that work IS shipped: `2170190` vectorized the peel's frontier seed for a
 bit-identical **1.76x** that benefits every caller of `parcel_access_layers`.
+
+
+**UNBLOCKED for one specific caller, found during site piece D1 (2026-08-16).** The objection above
+is about a greedy's ARGMAX: last-bit differences flip tie-breaks and the trajectory cascades. A
+**monotone prefix walk takes no argmax, so there is nothing to flip.** Distance to a union is the
+elementwise min of distances to its parts, so walking a prefix sequence lets each step take
+`min(previous distances, distance to the one new segment)` -- turning 784 unions into 784
+single-segment distances plus a running min. `scripts/gen_frontier_bundle.py` is exactly that shape
+and pays ~9 minutes per regeneration where ~1 would do. Deliberately NOT taken in D1: `displacement`
+is exposed to every caller, so changing it belongs in its own change with its own review rather than
+smuggled into a widget's data bake. Whoever takes it should note the safety argument is
+prefix-specific and does **not** rehabilitate the greedy path above.
 
 ## Making the access objective affordable at REGION scale (2026-08-10) -- RESOLVED 2026-08-12
 
