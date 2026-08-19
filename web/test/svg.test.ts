@@ -16,6 +16,9 @@ class FakeElement {
   readonly tagName: string;
   readonly attrs = new Map<string, string>();
   readonly children: FakeElement[] = [];
+  /** Inline style, which is what actually sizes the chart -- see createSvg's own doc. A plain record
+   * is enough: the code under test only assigns to it. */
+  readonly style: Record<string, string> = {};
   textContent = "";
   constructor(tagName: string) { this.tagName = tagName; }
   setAttribute(name: string, value: string): void { this.attrs.set(name, value); }
@@ -307,4 +310,24 @@ test("drawMarkers throws on an xs/ys length mismatch instead of emitting NaN cen
   const v = fitAxes([0, 1], [0, 1], WIDTH, HEIGHT, 0);
   assert.throws(() => drawMarkers(svg, v, [0, 1, 2], [0, 1], "red", 2),
     /xs and ys must be the same length/);
+});
+
+test("createSvg sizes the chart with an INLINE STYLE, which a stylesheet rule cannot override", () => {
+  // Final review C1. The pinned mkdocs-material ships
+  // `.md-typeset img,.md-typeset svg,.md-typeset video{height:auto;max-width:100%}` and wraps page
+  // content in `.md-typeset`, so a presentation attribute -- specificity zero, sorted before every
+  // author sheet -- loses the height. The box that renders would then not be the box drawAxes
+  // computed every gutter and tick row from: nothing throws, and most of the chart is simply not
+  // there. An inline style wins the cascade, which is the same mechanism the shipped sibling widget
+  // relies on (perm-graph sizes its canvas with `cv.style.width`).
+  const host = new FakeElement("div");
+  const svg = createSvg(host as unknown as HTMLElement, WIDTH, HEIGHT) as unknown as FakeElement;
+
+  assert.equal(svg.style["width"], `${WIDTH}px`, "no inline width: a stylesheet rule can override it");
+  assert.equal(svg.style["height"], `${HEIGHT}px`,
+    "no inline height: Material's `.md-typeset svg{height:auto}` wins and the box collapses");
+  // The attributes stay too -- `sizeOf` reads the box back off them, so dropping them would make
+  // drawAxes compute its layout from NaN.
+  assert.equal(svg.getAttribute("width"), String(WIDTH));
+  assert.equal(svg.getAttribute("height"), String(HEIGHT));
 });

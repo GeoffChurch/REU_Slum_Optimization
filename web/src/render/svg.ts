@@ -24,11 +24,35 @@ function el<K extends keyof SVGElementTagNameMap>(name: K): SVGElementTagNameMap
   return document.createElementNS(SVG_NS, name);
 }
 
-/** Create the root <svg>, sized to `width`x`height` CSS pixels, and mount it in `host`. */
+/** Create the root <svg>, sized to `width`x`height` CSS pixels, and mount it in `host`.
+ *
+ * The size is set BOTH as presentation attributes and as inline style, and the inline style is the
+ * load-bearing half (final review, C1). Presentation attributes are author-origin declarations with
+ * specificity zero, sorted before every author style sheet, so any real selector beats them -- and
+ * the pinned `mkdocs-material==9.7.7` ships exactly such a rule,
+ * `.md-typeset img,.md-typeset svg,.md-typeset video{height:auto;max-width:100%}`, with `base.html`
+ * wrapping all page content in `.md-typeset`. The used `height` would therefore be `auto`, and with
+ * no `viewBox` there is no intrinsic ratio to resolve it from, so the box collapses (to the CSS
+ * default object size, 150 px) and clips most of the plot and the whole x-tick row -- while every
+ * gutter, tick row and plot-rect number in `drawAxes` below stays computed from the height passed
+ * in. An inline style is a specificity-beating author declaration, so it wins.
+ *
+ * `docs/stylesheets/sbu.css` already documents this same Material rule beating a lower-specificity
+ * author rule on this site, and the shipped sibling widget escapes it only because
+ * `perm-graph.ts` sizes its canvas with `cv.style.width` -- an inline style, the same fix. This is
+ * NOT the deferred `viewBox`/reflow item: no `viewBox` is added here, so nothing about the
+ * containment or gutter geometry changes.
+ *
+ * The attributes stay for `sizeOf`, which reads the box back off the element rather than threading
+ * it through every call -- and for a rendering surface (a PNG export, an `<img src=…svg>`) that
+ * takes them as the intrinsic size.
+ */
 export function createSvg(host: HTMLElement, width: number, height: number): SVGSVGElement {
   const svg = el("svg");
   svg.setAttribute("width", String(width));
   svg.setAttribute("height", String(height));
+  svg.style.width = `${width}px`;
+  svg.style.height = `${height}px`;
   host.append(svg);
   return svg;
 }
