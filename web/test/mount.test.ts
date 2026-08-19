@@ -104,3 +104,51 @@ test("a widget that throws during mount does not block a later widget, and the f
     `failing widget's mount point shows no visible error: ${JSON.stringify(failEl.appended)}`,
   );
 });
+
+test("every widget name a generated page can emit is registered under exactly that string",
+  async () => {
+    stubDocument();
+    const { register } = await import("../src/mount.js");
+
+    // The one link in the chain with no test on either side of it (review finding I2): the generator
+    // emits the string `data-widget="frontier"` (asserted on the Python side by
+    // tests/test_gen_site_pages.py), mount.ts registers a string, and nothing paired them --
+    // deleting `register("frontier", frontier)` left the whole suite green while the deployed page
+    // showed a console-only error behind an intact PNG. Re-registering must throw, which it can only
+    // do if the name is already taken by the real registration in mount.ts's own module body.
+    for (const name of ["perm-graph", "frontier"]) {
+      assert.throws(
+        () => register(name, (() => {}) as Widget),
+        new RegExp(`widget already registered: ${name}`),
+        `"${name}" is not registered, so a page emitting it mounts nothing`,
+      );
+    }
+  });
+
+test("an unknown widget name renders a visible error rather than a console-only throw",
+  async () => {
+    stubDocument();
+    const { mountAll, register } = await import("../src/mount.js");
+
+    // M7: this throw used to sit OUTSIDE mountAll's per-element try/catch, so the one failure mode
+    // that also skips every later mount point was the only one the reader never heard about. It is
+    // also what made I2 invisible rather than merely untested.
+    // A registered widget AFTER the unknown one, so this also pins that an unknown name no longer
+    // aborts the loop. Registered here under a name unique to this test rather than reusing another
+    // test's, so the two stay order-independent (node:test shares a module graph within a file).
+    const okay: Widget = (host) => {
+      (host as unknown as FakeMountPoint).append({ textContent: "mounted-after-unknown" });
+    };
+    register("m7-later-widget", okay);
+    const el = makeMountPoint("no-such-widget");
+    const later = makeMountPoint("m7-later-widget");
+    mountAll({ querySelectorAll: () => [el, later] } as unknown as ParentNode);
+    assert.ok(later.appended.some((n) => n.textContent === "mounted-after-unknown"),
+      "an unknown name aborted the mount loop instead of failing only its own element");
+
+    assert.ok(
+      el.appended.some((n) => n.textContent.includes("could not load interactively")
+        && n.textContent.includes("unknown data-widget: no-such-widget")),
+      `unknown name produced no on-page message: ${JSON.stringify(el.appended)}`,
+    );
+  });

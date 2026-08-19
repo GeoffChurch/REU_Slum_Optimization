@@ -224,19 +224,36 @@ def test_render_results_marks_displaced_points(tmp_path: Path) -> None:
     assert len(afters) == 1 and afters[0].stat().st_size > 0
 
 
-def test_method_colors_are_stable_when_a_method_is_dropped() -> None:
-    # The bug: the length pass (with topology) and the displacement pass (topology dropped) drew
-    # the same method in different colours, because matplotlib's default cycle assigns by plot
-    # order. The fix: colour is a method's index in the FULL registry, which both passes hand in
-    # identically -- so a method keeps its colour even when another is absent from the run.
+def test_method_colors_are_fixed_by_the_order_they_are_given_and_only_by_that() -> None:
+    """Renamed from `..._are_stable_when_a_method_is_dropped`, which asserted a guarantee it did not
+    check: it passed ONE fixed list twice, so it could only prove determinism, and the property
+    its name claimed is false on the caller that draws every published frontier PNG (Task 7
+    review, Claim 2 -- `scripts.compare_budgets` passes the run's own subset, not the registry).
+    Both regimes are asserted below, so the name matches the checks and the divergence cannot
+    drift unnoticed again."""
     registry = ["topology", "greedy_arterial_buildable", "greedy_arterial_aspirational",
                 "greedy_arterial_displacement", "clearance", "clearance_grid", "osm_footpaths"]
     colors = method_colors(registry)
-    # Every method in the registry gets a distinct colour (evenly spaced hues, no wrap collision).
+    # Every method in the list gets a distinct colour (evenly spaced hues, no wrap collision).
     assert len(set(colors.values())) == len(registry)
-    # Deterministic, and dropping a method from the *plotted subset* never touches the map, because
-    # the map is keyed on the registry, not the subset.
+    # Deterministic for a given list -- all the old assertion actually proved.
     assert method_colors(registry) == colors
+
+    # REGIME 1 (`compare.compare_report`'s caller): the argument is the full registry, so a pass
+    # that PLOTS only a subset still hands the same list in and every method keeps its colour. That
+    # is the matplotlib-default-cycle fix, and it is a property of the ARGUMENT, not of this func.
+    plotted = ["topology", "clearance"]
+    for name in plotted:
+        assert method_colors(registry)[name] == colors[name]
+
+    # REGIME 2 (`scripts.compare_budgets`, which draws the published frontiers): the argument is the
+    # subset itself, so N changes and the hues move. Measured consequence, asserted rather than
+    # described: dropping one method re-colours the methods after it while index 0 is unchanged.
+    subset = [n for n in registry if n != "clearance"]
+    assert method_colors(subset)["topology"] == colors["topology"], "index 0 is hue 0 either way"
+    assert method_colors(subset)["osm_footpaths"] != colors["osm_footpaths"], (
+        "a shorter method_order must re-hue the methods after the dropped one -- if this ever "
+        "holds, the subset/registry difference the emit.py note describes has gone away")
 
 
 def test_method_colors_hues_are_evenly_spaced_from_zero() -> None:

@@ -4,7 +4,7 @@ import type { ChartStyle, FrontierBundle, MethodCurve } from "../frontier.js";
 // evaluation (see mount.ts's registration comment) -- this file must never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory } from "../state.js";
-import { createSvg, drawAxes, drawGuide, drawPolyline } from "../render/svg.js";
+import { createSvg, drawAxes, drawGuide, drawMarkers, drawPolyline } from "../render/svg.js";
 import { niceTicks } from "../view/ticks.js";
 import { fitAxes, nearest, toScreen, toWorld, type View } from "../view/transform.js";
 
@@ -70,7 +70,10 @@ export function clipToXMax(xs: number[], ys: number[], xMax: number): { xs: numb
 // replaces) -- no colour, width, label, tick target or pad is chosen in this file, and none is
 // restated on the page. Fix round 1 moved them out of two JSON `data-*` attributes and into the
 // bundle: same single source, and no literal `{`/`}` left in a markdown raw-HTML block, which was a
-// risk nothing in this repository can observe (mkdocs is importable in no environment here).
+// risk that was measurable after all: `/usr/bin/python3` here has python-markdown 3.5.2 and every
+// extension mkdocs.yml configures is core, and rendering the generated page through exactly that set
+// shows the figure and all six attributes surviving intact. Scalars are still the better shape --
+// but the earlier claim that nothing here could check it was wrong (fix round 2).
 //
 // The bundle is still a BOUNDARY -- it arrives over the network, and a page can outlive the artifact
 // it was generated beside -- so these two converters validate it once, here, and throw rather than
@@ -85,31 +88,41 @@ function fields(value: unknown, what: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function chartNumber(o: Record<string, unknown>, key: string): number {
-  if (!(key in o)) throw new Error(`frontier.json's chart is missing "${key}"`);
+// `what` names the containing object in the error, so one set of validators serves the `chart` block
+// and the bundle's own top level. Both are the same boundary: a page can outlive the artifact it was
+// generated beside, and the top level is where the two numbers that scale the WHOLE chart live.
+const CHART_WHAT = "frontier.json's chart";
+const BUNDLE_WHAT = "frontier.json";
+
+function numberField(o: Record<string, unknown>, key: string, what: string): number {
+  if (!(key in o)) throw new Error(`${what} is missing "${key}"`);
   const v = o[key];
   if (typeof v !== "number" || !Number.isFinite(v)) {
-    throw new Error(`frontier.json's chart "${key}" is not a finite number: ${JSON.stringify(v)}`);
+    throw new Error(`${what} "${key}" is not a finite number: ${JSON.stringify(v)}`);
   }
   return v;
 }
 
-function chartString(o: Record<string, unknown>, key: string): string {
-  if (!(key in o)) throw new Error(`frontier.json's chart is missing "${key}"`);
+function stringField(o: Record<string, unknown>, key: string, what: string): string {
+  if (!(key in o)) throw new Error(`${what} is missing "${key}"`);
   const v = o[key];
   if (typeof v !== "string" || v === "") {
-    throw new Error(`frontier.json's chart "${key}" is not a non-empty string: ${JSON.stringify(v)}`);
+    throw new Error(`${what} "${key}" is not a non-empty string: ${JSON.stringify(v)}`);
   }
   return v;
 }
 
-/** Finite is not enough for these five: 0 passes `Number.isFinite` and then draws nothing while
- * throwing nowhere. A zero `line_width` or `guide_width` strokes nothing; a zero `slider_step`
- * makes every drag `NaN` (`Math.round(v / 0)`); a zero `permeability_max` collapses the y axis; a
- * zero `tick_target` divides by zero inside niceTicks. */
-function chartPositive(o: Record<string, unknown>, key: string): number {
-  const v = chartNumber(o, key);
-  if (!(v > 0)) throw new Error(`frontier.json's chart "${key}" must be positive, got ${v}`);
+/** Finite is not enough for any of these: 0 passes `Number.isFinite` and then draws nothing while
+ * throwing nowhere. A zero `line_width`, `guide_width` or `marker_radius` strokes nothing; a zero
+ * `slider_step` makes every drag `NaN` (`Math.round(v / 0)`); a zero `permeability_max` collapses
+ * the y axis; a zero `tick_target` divides by zero inside niceTicks; and a missing or zero
+ * `frontier_xmax` -- the review's finding I1 -- put `NaN` in every one of the eight polylines while
+ * the widget reported success and removed the fallback image, leaving a blank frame with no message
+ * anywhere. That is the exact failure shape this file is built against, and it got in because the
+ * one number that scales the whole x axis was read straight off the bundle. */
+function positiveField(o: Record<string, unknown>, key: string, what: string): number {
+  const v = numberField(o, key, what);
+  if (!(v > 0)) throw new Error(`${what} "${key}" must be positive, got ${v}`);
   return v;
 }
 
@@ -121,21 +134,22 @@ export function parseChart(value: unknown): ChartStyle {
   // `pad` is the one that may legitimately be zero (svg.ts supports a gutterless chart), but it is
   // a fraction of the box applied to BOTH sides, so at 0.5 the plot has no width left at all --
   // fitAxes would return a zero or negative scale and the chart would collapse silently.
-  const pad = chartNumber(o, "pad");
+  const pad = numberField(o, "pad", CHART_WHAT);
   if (!(pad >= 0 && pad < 0.5)) {
-    throw new Error(`frontier.json's chart "pad" must be in [0, 0.5), got ${pad}`);
+    throw new Error(`${CHART_WHAT} "pad" must be in [0, 0.5), got ${pad}`);
   }
   return {
-    x_label: chartString(o, "x_label"),
-    y_label: chartString(o, "y_label"),
-    line_width: chartPositive(o, "line_width"),
-    guide_colour: chartString(o, "guide_colour"),
-    guide_width: chartPositive(o, "guide_width"),
-    guide_dash: chartString(o, "guide_dash"),
-    tick_target: chartPositive(o, "tick_target"),
+    x_label: stringField(o, "x_label", CHART_WHAT),
+    y_label: stringField(o, "y_label", CHART_WHAT),
+    line_width: positiveField(o, "line_width", CHART_WHAT),
+    guide_colour: stringField(o, "guide_colour", CHART_WHAT),
+    guide_width: positiveField(o, "guide_width", CHART_WHAT),
+    guide_dash: stringField(o, "guide_dash", CHART_WHAT),
+    marker_radius: positiveField(o, "marker_radius", CHART_WHAT),
+    tick_target: positiveField(o, "tick_target", CHART_WHAT),
     pad,
-    slider_step: chartPositive(o, "slider_step"),
-    permeability_max: chartPositive(o, "permeability_max"),
+    slider_step: positiveField(o, "slider_step", CHART_WHAT),
+    permeability_max: positiveField(o, "permeability_max", CHART_WHAT),
   };
 }
 
@@ -173,6 +187,16 @@ function requireFinite(raw: string | undefined, what: string): number {
     throw new Error(`frontier: ${what} is missing or not a number (${String(raw)})`);
   }
   return n;
+}
+
+/** A boot target must sit ON the axis it marks -- 0 through the axis maximum inclusive. Throws
+ * rather than clamping: a clamped target would silently disagree with the caption that states it,
+ * which is the same contradiction the whole fix round was opened for. */
+function inRange(value: number, max: number, what: string): number {
+  if (!(value >= 0 && value <= max)) {
+    throw new Error(`frontier: ${what} (${value}) is outside its axis [0, ${max}]`);
+  }
+  return value;
 }
 
 function requireAttr(raw: string | undefined, what: string): string {
@@ -267,16 +291,29 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   // in the bundle and drives every number in the readout). y spans the whole permeability
   // fraction, which is what makes the last tick land exactly on the axis top, so svg.ts's plot
   // rect (recovered from the tick extremes) is the true data area rather than an inset of it.
-  const xMax = b.frontier_xmax;
+  // I1: `frontier_xmax` scales the entire x axis and bounds `clipToXMax`, and `block_id` is quoted
+  // in the readout, so both go through the same gate the chart block does. Read off the bundle
+  // unvalidated they produced the branch's signature failure in its purest form -- eight all-NaN
+  // polylines, no error text, and the fallback image removed anyway.
+  const top = fields(b, BUNDLE_WHAT);
+  const xMax = positiveField(top, "frontier_xmax", BUNDLE_WHAT);
+  const blockId = stringField(top, "block_id", BUNDLE_WHAT);
   const yMax = chart.permeability_max;
   // One step for both axes, in the units the reader sees: a percentage point.
   const step = chart.slider_step;
   const xTicks = niceTicks(0, xMax, chart.tick_target);
   const yTicks = niceTicks(0, yMax, chart.tick_target);
 
+  // M2: a target OUTSIDE its axis is finite, so `requireFinite` accepts it -- and then `drawGuide`
+  // draws a line outside the plot rect, where the reader cannot see it, while the readout keeps
+  // answering truthfully about a guide that is not on the chart. Both bounds are already in hand.
   const state = makeState<FrontierState>({
-    targetDisplacement: requireFinite(host.dataset.targetDisplacement, "data-target-displacement"),
-    targetPermeability: requireFinite(host.dataset.targetPermeability, "data-target-permeability"),
+    targetDisplacement: inRange(
+      requireFinite(host.dataset.targetDisplacement, "data-target-displacement"),
+      xMax, "data-target-displacement"),
+    targetPermeability: inRange(
+      requireFinite(host.dataset.targetPermeability, "data-target-permeability"),
+      yMax, "data-target-permeability"),
     isolated: null,
   });
   const s0 = state.get();
@@ -385,8 +422,14 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
       if (s.isolated !== null && s.isolated !== key) continue;
       const curve = b.methods[key]!;
       const clipped = clipToXMax(curve.displacement, curve.permeability, xMax);
-      drawPolyline(svg, view, clipped.xs, clipped.ys, styles.get(key)!.colour, chart.line_width);
+      const colour = styles.get(key)!.colour;
+      drawPolyline(svg, view, clipped.xs, clipped.ys, colour, chart.line_width);
       const n = insideCount(curve.displacement, xMax);
+      // M1: the samples themselves, as the fallback PNG draws them (`marker="o"`). Only the REAL
+      // samples get a dot -- never `clipToXMax`'s interpolated edge point, which is a drawing
+      // artifact and not a measurement, and which the hover readout must never be able to name.
+      drawMarkers(svg, view, curve.displacement.slice(0, n), curve.permeability.slice(0, n),
+                  colour, chart.marker_radius);
       const xs: number[] = [];
       const ys: number[] = [];
       for (let i = 0; i < n; i++) {
@@ -408,6 +451,9 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
     ySlider.value = String(s.targetPermeability);
     xValue.textContent = formatTarget(s.targetDisplacement);
     yValue.textContent = formatTarget(s.targetPermeability);
+    // M6: without this a screen reader announces the raw `0.1` while the label beside it reads 10%.
+    xSlider.setAttribute("aria-valuetext", xValue.textContent);
+    ySlider.setAttribute("aria-valuetext", yValue.textContent);
     for (const [key, btn] of buttons) {
       btn.setAttribute("aria-pressed", String(s.isolated === key));
     }
@@ -446,7 +492,7 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
     }
     summary.textContent = `${cleared} of ${keys.length} methods reach `
       + `${formatTarget(s.targetPermeability)} permeability within `
-      + `${formatTarget(s.targetDisplacement)} displacement on block ${b.block_id}.`;
+      + `${formatTarget(s.targetDisplacement)} displacement on block ${blockId}.`;
   };
 
   state.subscribe(render);

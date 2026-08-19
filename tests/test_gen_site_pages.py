@@ -357,10 +357,11 @@ def test_methods_index_carries_one_frontier_mount_point_over_its_own_png_fallbac
 def test_frontier_mount_point_carries_only_scalars_no_json() -> None:
     """Fix round 1: the mount point passed two HTML-escaped JSON payloads, which put literal `{`/`}`
     into a markdown raw-HTML block. python-markdown very probably stashes such a block untouched --
-    but NOTHING here can observe that (neither `markdown` nor `mkdocs` is importable in any
-    environment in this repo), so the payloads moved into the bundle rather than the risk being
-    reasoned about. This keeps them out: every attribute is a bare scalar, and the whole element is
-    brace-free."""
+    and fix round 2 confirmed it by rendering the generated page through mkdocs' exact extension
+    set under `/usr/bin/python3`'s python-markdown 3.5.2 (the earlier claim that nothing here could
+    check this was wrong). The payloads still belong in the bundle -- an attribute that needs no
+    escaping cannot be broken by an escaping change -- so this keeps them out: every attribute is a
+    bare scalar, and the whole element is brace-free."""
     figure = _frontier_figure_markup()
     assert "{" not in figure and "}" not in figure, figure
     assert "&quot;" not in figure, figure
@@ -395,20 +396,28 @@ def test_frontier_mount_point_states_the_bundles_own_targets() -> None:
     assert f"{bundle['matched_displacement'] * 100:.1f}% displacement" not in caption
 
 
-def test_the_page_ships_the_bundle_it_points_at_with_everything_the_widget_needs() -> None:
+def test_the_page_ships_the_bundle_it_points_at_with_everything_the_widget_needs(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """`data-bundle` is a URL, and a URL that 404s (or resolves to a bundle predating the widget's
     requirements) fails silently behind an intact-looking PNG. So: the figure's own URL must resolve
-    to a file under docs/assets that is byte-identical to the artifact, and that shipped copy must
-    carry the chart block and the per-method label/colour the widget refuses to draw without.
+    to a file the generator actually copied, byte-identical to the artifact, and that shipped copy
+    must carry the chart block and the per-method label/colour the widget refuses to draw without.
 
-    Generating the page is what copies the asset, so calling the generator first is the fixture."""
+    `DOCS`/`ASSETS` are redirected into `tmp_path` so this reads a copy no other test can be
+    mid-write on: `pixi run pytest` runs under xdist, several tests call `gen_methods_overview()`
+    (which copies these assets), and comparing bytes against the shared `docs/assets` copy made this
+    test fail intermittently -- a flake I introduced and would rather not ship. Generating the page
+    is what performs the copy, so calling the generator here is the fixture."""
     import json
 
-    from scripts.gen_site_pages import DOCS, MC, gen_methods_overview
+    import scripts.gen_site_pages as gsp
+    from scripts.gen_site_pages import MC, gen_methods_overview
 
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
     gen_methods_overview()
     url = _frontier_mount_attrs()["data-bundle"]
-    shipped = DOCS / url
+    shipped = tmp_path / url
     assert shipped.exists(), f"the page points at {url}, which was never copied into docs/"
     assert shipped.read_bytes() == (MC / "frontier.json").read_bytes()
 

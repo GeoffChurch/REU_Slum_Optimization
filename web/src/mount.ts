@@ -14,15 +14,21 @@ export function register(name: string, w: Widget): void {
 
 export function mountAll(root: ParentNode = document): void {
   for (const el of Array.from(root.querySelectorAll<HTMLElement>("[data-widget]"))) {
-    const name = el.dataset.widget!;
-    const widget = REGISTRY.get(name);
-    // No default. The name arrives from HTML -- a genuinely open boundary, so a string lookup is
-    // right here -- but an unknown one must throw rather than leave a silently empty mount point
-    // that looks like a widget which merely failed to draw.
-    if (widget === undefined) throw new Error(`unknown data-widget: ${name}`);
     // Per-widget isolation: one widget throwing must not stop the widgets after it from mounting,
     // and the failure must be visible where it happened rather than console-only.
+    //
+    // The unknown-name lookup is INSIDE this try (fix round 2, review finding M7). It used to throw
+    // one line above it, which made the single failure mode that also aborts every LATER mount point
+    // the only one with no on-page message: a widget whose registration was lost -- exactly what
+    // finding I2 showed nothing tested -- produced a console-only error behind an intact-looking PNG
+    // fallback, which is this project's signature defect. Now it renders like any other failure.
     try {
+      const name = el.dataset.widget!;
+      const widget = REGISTRY.get(name);
+      // No default. The name arrives from HTML -- a genuinely open boundary, so a string lookup is
+      // right here -- but an unknown one must throw rather than leave a silently empty mount point
+      // that looks like a widget which merely failed to draw.
+      if (widget === undefined) throw new Error(`unknown data-widget: ${name}`);
       widget(el, localState);
     } catch (err) {
       showMountError(el, err);

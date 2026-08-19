@@ -272,14 +272,27 @@ def region_map(source: Source, regions: list[list[str]],
     return out_path
 
 
-# Every method draws in a fixed colour, keyed on its position in the canonical method registry
-# (`list(cfg.all_methods)` -- the global list of all methods, threaded in as `method_order`), so a
-# method reads the SAME colour in every curve no matter which others share the run. Hues are spaced
-# evenly around the HSV wheel at i/N; the N points are taken from [0, 1) -- NOT [0, 1] -- because
-# the wheel wraps (hue 0 == hue 1), so an inclusive endpoint would land the last method on the
-# first's colour (the "n+1 bound"). The index is into the FULL registry, not the subset a run
-# selected, which is what makes the colour run-independent: a method dropped from one pass no
-# longer recolours the rest (the matplotlib-default-cycle bug this replaced).
+# Every method draws in a fixed colour, keyed on its position in whatever ordered list the caller
+# passes as `method_order`. Hues are spaced evenly around the HSV wheel at i/N; the N points are
+# taken from [0, 1) -- NOT [0, 1] -- because the wheel wraps (hue 0 == hue 1), so an inclusive
+# endpoint would land the last method on the first's colour (the "n+1 bound").
+#
+# WHAT `method_order` ACTUALLY IS, per caller -- these docstrings claimed "always the full registry"
+# until it was measured (Task 7 review, Claim 2), and only one of the two callers does that:
+#   * `reblock.compare.compare_report`'s caller passes `list(cfg.all_methods)`, the full registry,
+#     so a method keeps its colour whichever subset that run plots. This is the run-independence
+#     the "matplotlib default cycle" fix was written for.
+#   * `scripts.compare_budgets.run_permeability_lenses` passes `list(methods)` -- the RUN'S OWN
+#     SUBSET, in order -- and that is the path which draws every frontier PNG published on the site.
+#     There, N is the subset's size, so adding, dropping or reordering a method in
+#     `conf/example/*.yaml` re-hues every curve in that figure. Measured: `clearance_looped` is
+#     `#d94c4c` in examples/multiblock_depth's 6-method frontier and `#92d94c` in the 8-method
+#     flagship.
+# Neither is a bug to be fixed in passing: 8 hues out of 8 are further apart than 8 out of ~20, so
+# the subset gives a more legible figure at the cost of colour stability across runs. That tradeoff
+# changes every published figure once and is deliberately NOT settled here -- these comments only
+# say what the code does. The web widget's curves are baked from this function with the same
+# `method_order` its own figure used (see FRONTIER_* below), so widget and PNG agree either way.
 _HSV_S, _HSV_V = 0.65, 0.85
 
 # The frontier plot's own axis labels and stroke styling, named rather than written inline in
@@ -299,8 +312,11 @@ FRONTIER_GUIDE_COLOR = "gray"
 
 def method_colors(method_order: Sequence[str]) -> dict[str, tuple[float, float, float]]:
     """Map each method name to its RGB colour, hue = i/N around the HSV wheel where i is the
-    method's index in `method_order` (the canonical registry) and N = len(method_order). N hues
-    from [0, 1) so the wheel's wrap never collides two methods; see the note above `_HSV_S`."""
+    method's index in `method_order` and N = len(method_order). N hues from [0, 1) so the wheel's
+    wrap never collides two methods. `method_order` is whatever ordered list the CALLER chose --
+    the full registry for `compare.compare_report`'s caller, the run's own subset for
+    `scripts.compare_budgets`, which is what draws the published frontier PNGs; see the note above
+    `_HSV_S` for why that difference matters and why it is not settled here."""
     n = max(len(method_order), 1)
     return {name: colorsys.hsv_to_rgb(i / n, _HSV_S, _HSV_V)
             for i, name in enumerate(method_order)}
@@ -320,8 +336,11 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     `disp_x` below. Writes `frontier_permeability.csv` (the full (displacement, permeability)
     samples per method) and one `frontier_{block_id}.png` per block/region -- x-axis
     "displacement", y-axis "permeability", both `PercentFormatter`'d (both are [0,1) fractions).
-    `method_order` is the canonical method registry (`list(cfg.all_methods)`) that fixes each
-    method's curve colour run-independently -- it must cover every method in `results`. Each
+    `method_order` is the ordered list the curve colours are indexed over -- it must cover every
+    method in `results`, and it decides whether a method's colour survives a change of run set:
+    `compare.compare_report`'s caller passes the full registry (colours stable across runs), while
+    `scripts.compare_budgets`, which draws the published frontiers, passes the run's own subset
+    (colours further apart, but re-hued when the set changes). See the note above `_HSV_S`. Each
     frontier also draws the two calibrated lens cutoffs from `conf/permeability.yaml` (the same
     thresholds `scripts.compare_budgets`'s two-lens driver grades methods against) as thin dashed
     guide lines: `matched_displacement` (Lens A, vertical) and `matched_permeability` (Lens B,

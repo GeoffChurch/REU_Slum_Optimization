@@ -352,10 +352,14 @@ def _perm_graph_figures() -> str:
 # beside the caption that states them, and the fallback image's own aspect ratio.
 #
 # Every attribute below is a SCALAR. The previous round passed two JSON payloads, which put literal
-# `{`/`}` and `&quot;` into a markdown raw-HTML block; that is very probably fine (python-markdown
-# stashes such a block before any inline or attr_list pass) but nothing in this repository can
-# observe it -- neither `markdown` nor `mkdocs` is importable in any environment here -- and
-# removing an unobservable risk beats reasoning about it.
+# `{`/`}` and `&quot;` into a markdown raw-HTML block. python-markdown stashes such a block before
+# any inline or attr_list pass, so it was very probably fine -- and unlike the earlier claim in
+# this comment, that IS checkable here: `/usr/bin/python3` carries python-markdown 3.5.2 and all
+# five extensions mkdocs.yml configures are core. Rendering this page through that exact set keeps
+# the <figure>, its six data-* attributes, the <img> and the <figcaption> intact (fix round 2).
+# Scalars stay, because a payload that needs no escaping cannot be broken by an escaping change;
+# what is gone is the pretence that the question was unanswerable. `mkdocs` itself -- theme, nav,
+# --strict -- and a browser remain unavailable, so the CHART has still never been rendered.
 
 
 def _png_aspect(path: Path) -> float:

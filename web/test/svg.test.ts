@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { fitAxes } from "../src/view/transform.js";
 import { niceTicks } from "../src/view/ticks.js";
-import { createSvg, drawAxes, drawPolyline } from "../src/render/svg.js";
+import { createSvg, drawAxes, drawMarkers, drawPolyline } from "../src/render/svg.js";
 
 /** svg.ts's real `document.createElementNS(...)` calls are all *inside* functions, never at
  * module top level (unlike mount.ts's `document.addEventListener`), so -- unlike
@@ -270,4 +270,41 @@ test("percent tick labels -- four characters, not one -- still stay in the gutte
       `y title [${titleBox.join(", ")}] overlaps percent y-tick label "${label.textContent}" ` +
       `[${effectiveBox(label).join(", ")}]`);
   }
+});
+
+test("drawMarkers puts one dot on every sample, at the polyline's own projected positions", () => {
+  // The marks exist because a curve clipped to a SINGLE sample has no segment to stroke and draws
+  // nothing at all -- so the count and the coincidence with the line are the whole contract.
+  const host = new FakeElement("div");
+  const svg = createSvg(host as unknown as HTMLElement, WIDTH, HEIGHT);
+  const v = fitAxes([0, 0.4], [0, 1], WIDTH, HEIGHT, GENEROUS_PAD);
+  const xs = [0, 0.1, 0.4];
+  const ys = [0, 0.55, 1];
+  const line = drawPolyline(svg, v, xs, ys, "#123456", 2.5) as unknown as FakeElement;
+  const dots = drawMarkers(svg, v, xs, ys, "#123456", 2.5) as unknown as FakeElement[];
+
+  assert.equal(dots.length, xs.length);
+  const points = line.getAttribute("points")!.split(" ");
+  assert.equal(points.length, dots.length);
+  for (const [i, dot] of dots.entries()) {
+    assert.equal(`${dot.getAttribute("cx")},${dot.getAttribute("cy")}`, points[i],
+      "a marker sits somewhere the line does not");
+    assert.ok(Number(dot.getAttribute("r")) > 0, "a zero-radius marker draws nothing");
+    assert.equal(dot.getAttribute("fill"), "#123456");
+    // The samples are already conveyed by the line and by the widget's text readout; announcing 229
+    // of them per curve would drown the readout that carries the actual numbers.
+    assert.equal(dot.getAttribute("aria-hidden"), "true");
+  }
+
+  // A single sample: no polyline segment exists, so the dot is the only thing that renders.
+  const lone = drawMarkers(svg, v, [0.2], [0.5], "#123456", 2.5);
+  assert.equal(lone.length, 1);
+});
+
+test("drawMarkers throws on an xs/ys length mismatch instead of emitting NaN centres", () => {
+  const host = new FakeElement("div");
+  const svg = createSvg(host as unknown as HTMLElement, WIDTH, HEIGHT);
+  const v = fitAxes([0, 1], [0, 1], WIDTH, HEIGHT, 0);
+  assert.throws(() => drawMarkers(svg, v, [0, 1, 2], [0, 1], "red", 2),
+    /xs and ys must be the same length/);
 });

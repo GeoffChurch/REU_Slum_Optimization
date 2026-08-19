@@ -293,6 +293,36 @@ export function drawPolyline(svg: SVGSVGElement, v: View, xs: number[], ys: numb
   return line;
 }
 
+/** One `<circle>` per sample, at the same projected positions `drawPolyline` joins with segments --
+ * matplotlib's `marker="o"` on the figure this layer's caller replaces (`emit.compare_report` plots
+ * `marker="o", ms=9`). Not decoration: without markers a curve clipped to a SINGLE sample draws
+ * nothing at all (a one-point `<polyline>` has no segment to stroke, and nothing anywhere reports
+ * it), and a hover readout that snaps to the nearest measured prefix is snapping to positions the
+ * reader cannot see. `radius` is the caller's, like every other visual property here.
+ *
+ * Same length contract, and the same reason, as `drawPolyline`: a mismatch would pair a value with
+ * `undefined` and put `NaN` in `cx`/`cy`, which draws nothing and raises nothing.
+ */
+export function drawMarkers(svg: SVGSVGElement, v: View, xs: number[], ys: number[],
+                            colour: string, radius: number): SVGCircleElement[] {
+  if (xs.length !== ys.length) {
+    throw new Error(`drawMarkers: xs and ys must be the same length (${xs.length} vs ${ys.length})`);
+  }
+  return xs.map((x, i) => {
+    const [sx, sy] = toScreen(v, x, ys[i]!);
+    const dot = el("circle");
+    dot.setAttribute("cx", String(sx));
+    dot.setAttribute("cy", String(sy));
+    dot.setAttribute("r", String(radius));
+    dot.setAttribute("fill", colour);
+    // The marks are the polyline's own samples, already conveyed by the line and by the widget's
+    // text readout, so they are hidden from assistive tech rather than announced 229 times.
+    dot.setAttribute("aria-hidden", "true");
+    svg.append(dot);
+    return dot;
+  });
+}
+
 /** A single reference line at a fixed axis value, spanning the PLOT RECT (fix round 2 -- see
  * `drawAxes`'s own doc) -- vertical for `axis === "x"`, horizontal for `axis === "y"` -- the same
  * rect its own gridlines now use, recovered via `plotRectOf` since this signature has no ticks

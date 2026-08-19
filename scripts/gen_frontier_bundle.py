@@ -60,6 +60,15 @@ CHART = {
     "guide_width": FRONTIER_GUIDE_LW,
     # emit's guides are `ls="--"`; this is that dash, spelled as SVG's own dash-array.
     "guide_dash": "6 4",
+    # Per-sample marker radius. emit plots `marker="o", ms=9` -- 9 POINTS of diameter on a 12-inch
+    # figure -- and the widget's box is a few hundred CSS pixels, so the two cannot share a number:
+    # copying 9 would draw a marker three times the PNG's relative size. Expressed as a RATIO to the
+    # curve's own stroke width instead (radius = one line width, i.e. a dot twice as thick as the
+    # line it sits on, which is close to emit's own 9pt-on-2.5pt), so it tracks `line_width` and
+    # stays sourced from emit rather than invented. Without markers the widget contradicts the PNG
+    # twice over: hover snaps to measured prefixes the reader cannot see, and a curve clipped to a
+    # single sample draws literally nothing where the PNG shows a dot.
+    "marker_radius": FRONTIER_LW,
     # niceTicks target. 5 puts the x ticks on 0/10/20/30/40% and the y ticks on 0/20/../100%, so
     # the extreme ticks land exactly on the axis ends -- which is what makes svg.ts's plot rect
     # (recovered FROM the tick extremes) the true data area rather than an inset of it.
@@ -152,6 +161,7 @@ export interface ChartStyle {
   guide_colour: string;
   guide_width: number;
   guide_dash: string;
+  marker_radius: number;
   tick_target: number;
   pad: number;
   slider_step: number;

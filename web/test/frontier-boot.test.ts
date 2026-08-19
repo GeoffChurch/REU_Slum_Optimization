@@ -111,12 +111,12 @@ function mountPoint(): FakeElement {
  * boot failure into caption text rather than an unhandled rejection, so this resolves either way --
  * which is exactly why the assertions below check what was DRAWN, never merely that nothing threw.
  */
-async function mount(host: FakeElement): Promise<void> {
+async function mount(host: FakeElement, payload: unknown = bundle): Promise<void> {
   (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
     ok: true,
     status: 200,
     statusText: "OK",
-    json: (): Promise<FrontierBundle> => Promise.resolve(bundle),
+    json: (): Promise<unknown> => Promise.resolve(payload),
   });
   frontier(host as unknown as HTMLElement, localState);
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -150,6 +150,24 @@ test("the widget mounts and draws one curve per method in the bundle, with no Na
       // The width the fallback PNG's own curves were drawn with (reblock.emit's FRONTIER_LW,
       // baked into the bundle), not a number this widget chose.
       assert.equal(Number(p.getAttribute("stroke-width")), bundle.chart.line_width);
+    }
+
+    // M1: one visible dot per MEASURED sample, as the fallback PNG draws them. Without these the
+    // hover readout snaps to prefixes the reader cannot see, and a curve clipped to one sample draws
+    // nothing whatsoever. The count is the number of samples inside the displayed window, summed
+    // over the eight curves -- and never one more, which is what would happen if the interpolated
+    // clip point (a drawing artifact, not a measurement) got a dot too.
+    const measured = Object.values(bundle.methods)
+      .map((c) => c.displacement.filter((d) => d <= bundle.frontier_xmax).length)
+      .reduce((a, b) => a + b, 0);
+    const dots = svgs[0]!.all("circle");
+    assert.equal(dots.length, measured, "one marker per measured sample inside the window");
+    for (const d of dots) {
+      assert.equal(Number(d.getAttribute("r")), bundle.chart.marker_radius);
+      for (const attr of ["cx", "cy"]) {
+        assert.ok(Number.isFinite(Number(d.getAttribute(attr))),
+          `non-finite marker ${attr}: ${d.getAttribute(attr)}`);
+      }
     }
 
     // Both target guides, dashed, and the two axis titles: the chrome that makes the picture
@@ -253,4 +271,38 @@ test("the fallback image survives a boot failure and is removed only on success"
   assert.equal(broken.querySelector("img")!.removedAt, null);
   assert.match(broken.querySelector("figcaption")!.textContent,
     /Frontier failed to load: .*data-target-permeability/);
+});
+
+test("a bundle missing a field the whole chart is scaled by fails LOUDLY and keeps the image",
+  async () => {
+    // Review finding I1, as its own regression guard. `frontier_xmax` scales the x axis and bounds
+    // the clip; read unvalidated it made every one of the eight polylines all-NaN -- which renders
+    // nothing -- while the widget reported success in the caption and removed the fallback <img>,
+    // leaving a blank frame with no message anywhere. The other tests here would catch the NaN; this
+    // one catches the part that made it lethal, which is that nothing was reported and the image went
+    // anyway. Same shape for `block_id`, which the readout quotes.
+    for (const field of ["frontier_xmax", "block_id"] as const) {
+      const { [field]: _dropped, ...stale } = bundle;
+      const host = mountPoint();
+      await mount(host, stale);
+      assert.equal(host.querySelector("img")!.removedAt, null,
+        `${field} missing: the fallback image was removed anyway`);
+      assert.match(host.querySelector("figcaption")!.textContent,
+        new RegExp(`Frontier failed to load: .*${field}`),
+        `${field} missing: no visible failure on the page`);
+      assert.equal(host.all("polyline").length, 0,
+        `${field} missing: a curve was drawn from an unvalidated bundle`);
+    }
+  });
+
+test("a boot target outside its own axis is refused rather than drawn off-chart", async () => {
+  // M2: finite but off-axis. `drawGuide` would happily place the line outside the plot rect, where
+  // the reader cannot see it, while the readout kept answering truthfully about a guide that is not
+  // on the chart -- a picture and a caption that disagree, which is what this whole round was about.
+  const host = mountPoint();
+  host.dataset["targetPermeability"] = String(bundle.chart.permeability_max + 0.5);
+  await mount(host);
+  assert.match(host.querySelector("figcaption")!.textContent,
+    /data-target-permeability \(1\.5\) is outside its axis \[0, 1\]/);
+  assert.equal(host.querySelector("img")!.removedAt, null);
 });

@@ -99,8 +99,8 @@ test("parseChart rejects a missing, non-numeric or degenerate field instead of d
   // nowhere.
   const full = {
     x_label: "displacement", y_label: "permeability", line_width: 2.5, guide_colour: "gray",
-    guide_width: 1, guide_dash: "6 4", tick_target: 5, pad: 0.15, slider_step: 0.01,
-    permeability_max: 1,
+    guide_width: 1, guide_dash: "6 4", marker_radius: 2.5, tick_target: 5, pad: 0.15,
+    slider_step: 0.01, permeability_max: 1,
   };
   assert.equal(parseChart(full).pad, 0.15);
   const { pad: _dropped, ...missing } = full;
@@ -111,6 +111,9 @@ test("parseChart rejects a missing, non-numeric or degenerate field instead of d
   // (Math.round(v / 0)) while a zero line_width strokes nothing at all.
   assert.throws(() => parseChart({ ...full, slider_step: 0 }),
     /frontier\.json's chart "slider_step" must be positive/);
+  // A zero marker radius draws no dot, which is how the samples became invisible in the first place.
+  assert.throws(() => parseChart({ ...full, marker_radius: 0 }),
+    /frontier\.json's chart "marker_radius" must be positive/);
   // pad is a fraction of the box applied to both sides, so half the box leaves no plot at all.
   assert.throws(() => parseChart({ ...full, pad: 0.5 }),
     /frontier\.json's chart "pad" must be in \[0, 0\.5\)/);

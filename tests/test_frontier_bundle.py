@@ -116,8 +116,13 @@ def test_curve_length_matches_the_run_log_segment_count(bundle: dict[str, Any]) 
     log_text = RUN_LOG.read_text(encoding="utf-8")
     counts = dict(re.findall(r"reblocked (\w+): (\d+) segments", log_text))
     assert counts, "run.log format changed -- update the regex rather than let this pass on 0 rows"
-    assert set(counts) == set(bundle["methods"]), (
-        f"log/bundle method sets differ: {sorted(set(counts) ^ set(bundle['methods']))}")
+    # ORDER, not just membership (review finding I3): the PNG's hues are `method_colors`' output
+    # over this exact sequence, so a REORDERED `conf/example/method_comparison.yaml` lineup
+    # re-colours every curve in the figure while leaving both method SETS identical. `run.log`
+    # records the order the example actually ran in, independently of this bundle, so comparing
+    # lists costs nothing and closes the permutation hole a set comparison leaves open.
+    assert list(counts) == list(bundle["methods"]), (
+        f"log/bundle method order differs: {list(counts)} vs {list(bundle['methods'])}")
     for name, n in counts.items():
         c = bundle["methods"][name]
         # N segments -> N+1 prefixes (index 0 is the no-roads prefix, matching test_starts_at_zero).
@@ -222,3 +227,43 @@ def test_chart_block_matches_the_figures_own_styling(bundle: dict[str, Any]) -> 
         mag = 10.0 ** math.floor(math.log10(step_size))
         nice = next(k * mag for k in (1, 2, 2.5, 5, 10) if k * mag >= step_size)
         assert axis_max / nice == pytest.approx(round(axis_max / nice)), axis_max
+
+
+def test_baked_colours_are_the_colours_in_the_committed_png(bundle: dict[str, Any]) -> None:
+    """The decisive parity check, and the only one here that does not re-derive from the code under
+    test: every baked hex must actually OCCUR in the committed frontier PNG's pixels.
+
+    `test_labels_and_colours_match_what_reblock_draws` recomputes `method_colors` over the bundle's
+    own key list, so it shares its inputs with the baker and cannot see the two realistic ways the
+    PNG's hues move (review finding I3): `scripts/compare_budgets.py` switching to the full-registry
+    `method_order` its docstrings once promised, or the example's method lineup being reordered and
+    the figure regenerated without a re-bake. The image is the ground truth for what a reader sees,
+    so this reads the image.
+    """
+    png = BUNDLE.parent / f"frontier_{bundle['block_id']}.png"
+    if not png.exists():                                            # pragma: no cover
+        pytest.skip(f"{png} is not in this checkout")
+    try:
+        import matplotlib.image as mpimg
+        from matplotlib.colors import to_hex
+    except ModuleNotFoundError:                                     # pragma: no cover
+        pytest.skip("needs matplotlib to read the PNG and convert emit's colours to hex")
+
+    rgb = (np.asarray(mpimg.imread(png))[..., :3] * 255).round().astype(np.int64)
+    packed = (rgb[..., 0] << 16) | (rgb[..., 1] << 8) | rgb[..., 2]
+    values, counts = np.unique(packed, return_counts=True)
+    pixels = {f"#{v >> 16:02x}{(v >> 8) & 0xFF:02x}{v & 0xFF:02x}": int(c)
+              for v, c in zip(values, counts, strict=True)}
+
+    # A 2.5pt curve with 9pt markers across a 12x9in figure paints tens of thousands of pixels of
+    # its own flat colour; antialiasing only adds intermediate shades. 1000 is far below the
+    # smallest observed (27020) and far above anything antialiasing could produce by coincidence.
+    floor = 1000
+    for name, curve in bundle["methods"].items():
+        assert pixels.get(curve["colour"], 0) >= floor, (
+            f"{name}'s baked colour {curve['colour']} is not in the PNG "
+            f"({pixels.get(curve['colour'], 0)} px) -- the widget would draw a curve the image "
+            f"does not, so the chart a reader sees with JS off is not the one they see with JS on")
+    # The guide colour travels the same way: emit draws both dashed guides in it.
+    guide = to_hex(bundle["chart"]["guide_colour"])
+    assert pixels.get(guide, 0) >= floor, f"guide colour {guide} is not in the PNG"
