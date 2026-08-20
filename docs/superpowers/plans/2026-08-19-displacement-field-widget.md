@@ -65,7 +65,7 @@
 
 **Interfaces:**
 - Consumes: `budget.building_radii`, `budget.corridor_distance`, `render.py`'s `_CONTEXT_OUTLINE`, `_ROAD_COLOR`, `_DISPLACED_PT`, `_draw_boundary_and_streets`, `frame_bbox`, `BBox`
-- Produces: `render_field(block, roads, radii, *, frame=None) -> Figure`, and `field_contributions(block, roads, radii) -> NDArray[np.float64]` — the per-building `cᵢ` the figure shades by, returned so the bake can put the same array in the bundle instead of recomputing it
+- Produces: `render_field(block, roads, radii, *, frame=None) -> Figure`, and `field_contributions(block, roads, radii) -> NDArray[np.float64]` — the per-building `cᵢ` the figure shades by, returned rather than kept private so a test can assert on the shading directly. **It is not baked into the bundle:** the widget computing `cᵢ` live is the entire point of the piece, and a baked copy of the boot state's values would be a second source of truth for a number the browser derives anyway.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -131,9 +131,9 @@ def field_contributions(block: Block, roads: gpd.GeoDataFrame,
     """Per-building displacement contribution `c_i = clip(1 - d_i/r_i, 0, 1)`, in
     `block.building_points` order.
 
-    Returned rather than recomputed inside `render_field` so the bake can put the SAME array in the
-    widget's bundle: the figure and the widget must shade the same numbers, and two call sites of
-    the same formula is how they would drift.
+    Returned rather than left private inside `render_field` so a test can assert on the shading
+    without reading pixels. NOT baked into the widget's bundle: the widget derives `c` itself from
+    the road position, which is what makes the road draggable at all.
     """
     from reblock.budget import corridor_distance   # deferred: budget imports render's siblings
     n = len(block.building_points)
@@ -639,14 +639,17 @@ def roads_from_case(block: Block, case: ReferenceCase,
     without re-deriving how a case is defined -- the bundle is the single description of it.
 
     A fixture's coordinates are ORIGIN-RELATIVE, like every other coordinate in the bundle, so the
-    origin has to come back in here. `ReferenceCase` is a frozen dataclass rather than a dict: the
-    key set is closed and known while this line is being written, so `case.roads` is a rename the
-    checker catches and `case["roads"]` is one it does not.
+    origin has to come back in here.
+
+    `ReferenceCase` is a `TypedDict`, not a frozen dataclass: this value arrives through
+    `json.loads`, and the directives' own carve-out is exactly that -- dict-ness forced by an
+    external interface. A dataclass here would mean every caller converting at the boundary for a
+    checker benefit a TypedDict already gives.
     """
     ox, oy = origin
     return GeoDataFrame(
-        {"width_m": [r.width_m for r in case.roads]},
-        geometry=[LineString([(x + ox, y + oy) for x, y in r.coords]) for r in case.roads],
+        {"width_m": [float(r["width_m"]) for r in case["roads"]]},
+        geometry=[LineString([(x + ox, y + oy) for x, y in r["coords"]]) for r in case["roads"]],
         crs=block.crs)
 
 
@@ -1105,20 +1108,40 @@ Both widgets' `showWidgetError` paths stay exactly as they are.
 - `web/test/transform.test.ts`: strengthen `fitBbox`'s uniformity test to assert the scale equals `Math.min(width / bw, height / bh)` scaled by the pad, not merely that `scaleX === scaleY` — a `Math.max`-for-`Math.min` regression is currently green there.
 - `scripts/gen_site_pages.py`: delete `data-block` from every mount point it emits, and the assertions in `tests/test_gen_site_pages.py` that expect it. Every bundle carries `block_id`; a second source of one fact is drift waiting to happen. Confirm with `grep -rn "data-block\|dataset.block" web/ scripts/ tests/ docs/` that nothing reads it.
 
-- [ ] **Step 6: Run the gates**
+- [ ] **Step 6: Guard the shipped bundle against going stale**
+
+`docs/js/widgets.js` is committed, and **nothing asserts it matches `web/src`.**
+`tests/test_gen_site_pages.py:308` checks only that it *exists*, and
+`web/test/widgets-bundle.test.ts` evaluates the committed artifact — so a source change that was
+never rebuilt leaves a stale bundle that passes every gate, including the artifact test, which is
+looking at the stale file and finding it fine. This task edits both shipped widgets, so it is the
+task that would ship that.
+
+Add to `web/test/widgets-bundle.test.ts`: rebuild with esbuild into a temp path and assert the
+bytes equal the committed `docs/js/widgets.js`. Fault-inject by editing one character of
+`web/src/mount.ts` without rebuilding — it must go red.
+
+If esbuild output turns out not to be byte-reproducible across runs, **report that** rather than
+weakening the assertion to a substring check: a "the bundle is current" test that passes on a stale
+bundle is worse than no test, because its green tick is what stops anyone looking.
+
+- [ ] **Step 7: Run the gates**
 
 ```bash
-pixi run web-test && pixi run web-check && pixi run test-py -k "site_pages or web_bundle"
+pixi run web && pixi run web-test && pixi run web-check && pixi run test-py -k "site_pages or web_bundle"
 ```
 
-- [ ] **Step 7: Fault-inject**
+`pixi run web` **first**, and commit the rebuilt `docs/js/widgets.js` with this task. Every task that
+touches `web/src/**` does this.
+
+- [ ] **Step 8: Fault-inject**
 
 Remove the `width > 0` guard → the zero-width test reddens. Remove `disconnect()` → the disposer test reddens. Restore the `<img>`-only removal in `fallback.ts` (leave the anchor) → add/confirm an assertion in `frontier-boot.test.ts` that no `<a>` survives, and confirm it reddens. Re-add `data-block` → the generator test must be *green* (it no longer asserts it) but `grep` must find one unread attribute; note this rider has no test guarding its absence and say so.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add web/src/dom/resize.ts web/src/dom/fallback.ts web/src/widgets/ web/test/ \
+git add web/src/dom/resize.ts web/src/dom/fallback.ts web/src/widgets/ web/test/ docs/js/widgets.js \
         scripts/gen_site_pages.py tests/test_gen_site_pages.py
 git commit -m "fix: reflow by re-render, not by viewBox -- one ResizeObserver for both widgets"
 ```
@@ -1302,6 +1325,11 @@ def test_the_page_no_longer_claims_a_parcel_can_lack_a_building():
 
 Run: `pixi run pytest tests/test_gen_site_pages.py -v`
 Expected: FAIL on all three.
+
+**Task 5 already edited both files this task edits.** It deleted `data-block` from every mount
+point `gen_site_pages.py` emits, and the assertions expecting it. Do not reintroduce the attribute
+on the new `<figure>`, and do not restore those assertions — check `git log -p -- scripts/gen_site_pages.py`
+for what Task 5 did before adding to it.
 
 - [ ] **Step 3: The producer**
 
