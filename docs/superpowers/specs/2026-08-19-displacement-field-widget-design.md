@@ -182,7 +182,7 @@ roads:     [{ coords: [[x, y], [x, y]], width_m }, ...]   # road 1, road 2 (§2)
 width:     { floor_m: 7.0, max_m: 20.0, step_m: 0.5, default_m: 7.0 }
 encoding:  { parcel_color, parcel_lw, boundary_color, boundary_lw, street_lw,
              road_color, road_alpha, disk_color, disk_outline_lw, handle_radius_px, pad }
-reference: [{ roads: [...], sum_c, fraction } × 5]        # §6 parity fixtures
+reference: [{ name, roads: [...], sum_c, fraction } × 6]  # §6 parity fixtures
 ```
 
 Payload is trivial: 263 buildings × 3 numbers. `parcels` dominates, and the perm-graph bundle
@@ -229,11 +229,30 @@ Every guard must be shown to fail before it counts — the standard B, C and D1 
    eight methods on the pinned block, at the tolerance §1 measured. This pins the identity the
    TypeScript implements *in the language where ground truth lives*, so a future change to
    `corridor_distance` breaks here rather than in a widget nobody re-runs.
-2. **Python ↔ TypeScript parity.** The bake writes `reference`: five road configurations with Python's
-   `Σcᵢ` for each. A DOM-free test feeds the same coordinates through
-   `model/displacement.ts` and asserts agreement within 1e-3 relative. The fixtures must include the
-   two default roads apart, the two coincident (overlap), one at 20 m, one threading a gap, and one
-   entirely outside the block — the last asserted as **exactly 0**, not within tolerance.
+2. **Python ↔ TypeScript parity.** The bake writes `reference`: **six** road configurations with
+   Python's `Σcᵢ` for each. A DOM-free test feeds the same coordinates through
+   `model/displacement.ts` and asserts agreement within 1e-3 relative.
+
+   Each fixture isolates exactly one of the page's claims **against a single-road baseline**, which
+   is why the baseline is in the set: without it, "the gap road is cheaper than the two default
+   roads" compares one road against two and demonstrates nothing about gaps. Measured on the pinned
+   block:
+
+   | fixture | Σcᵢ | isolates |
+   |---|---|---|
+   | `road1` | 32.0260 | the baseline, and the PNG's own number |
+   | `apart` | 47.8488 | a disjoint road adds cost |
+   | `coincident` | **32.0260** | overlap is free — an *equality* with `road1` |
+   | `widest` | 68.1581 | width is per-road (20 m against 7 m) |
+   | `in_a_gap` | 21.8465 | position (same width, 144.3 m against 143.7 m) |
+   | `outside` | **0.0** | the clip at `d = r`, asserted exactly |
+
+   The `coincident == road1` equality is the strongest guard in the set: it is an exact algebraic
+   consequence of buffering each road on its own width *before* unioning, so an implementation that
+   charged per-road rather than per-union would fail it while still passing any inequality. And
+   `in_a_gap` is **not** free — the widest gap here has radius 6.95 m against a 2.19 m median, so a
+   7 m road down its middle still leaves its neighbours at `d = 3.45` against `r = 6.95`. A chord
+   across a block cannot stay outside every disk; `outside` is what pins the clip.
 3. **Figure ↔ widget parity.** The widget's boot state against the committed PNG, D1's pixel-level
    pattern, plus the baked colours (§3) so neither can drift from the other.
 4. **Reflow.** §7 — containment at 320 / 700 / 1200 px, driven by a fake `ResizeObserver`.

@@ -518,20 +518,28 @@ def test_every_declared_field_is_present_and_the_shapes_agree(bundle):
         "the slider floor must be min_road_width_m: permeability.py:205 RAISES below it")
     assert b["width"]["default_m"] >= b["width"]["floor_m"]
     assert b["width"]["max_m"] > b["width"]["default_m"]
-    assert len(b["reference"]) == 5, "five parity fixtures (spec §6)"
+    assert len(b["reference"]) == 6, "six parity fixtures (spec §6)"
 
 
 def test_the_reference_fixtures_cover_the_cases_that_could_hide_a_bug(bundle):
     """A fixture set that is five variations of the same road proves one thing five times."""
     cases = {c["name"]: c for c in bundle["reference"]}
-    assert set(cases) == {"apart", "coincident", "widest", "in_a_gap", "outside"}, sorted(cases)
+    assert set(cases) == {"road1", "apart", "coincident", "widest", "in_a_gap", "outside"}, sorted(cases)
     assert cases["outside"]["sum_c"] == 0.0, (
         "the outside-the-block fixture must be EXACTLY zero -- it is the only fixture that pins the "
         "clip at d = r rather than a tolerance")
-    assert cases["coincident"]["sum_c"] < cases["apart"]["sum_c"], (
-        "overlap is free: two coincident roads must cost LESS than the same two apart")
-    assert cases["widest"]["sum_c"] > cases["apart"]["sum_c"]
-    assert 0.0 < cases["in_a_gap"]["sum_c"] < cases["apart"]["sum_c"]
+    # Overlap is free, and the honest form of that is an EQUALITY, not an inequality: a road drawn
+    # twice IS one road, because each road is buffered on its own and only then unioned. Measured:
+    # both 32.0260. Any implementation that charges per-road instead of per-union breaks this
+    # immediately, where "coincident < apart" would still pass.
+    assert cases["coincident"]["sum_c"] == cases["road1"]["sum_c"], (
+        "two coincident roads must cost EXACTLY what one costs")
+    assert cases["apart"]["sum_c"] > cases["road1"]["sum_c"], "adding a disjoint road adds cost"
+    # Width, isolated: same road, 20 m against 7 m. Measured 68.1581 against 32.0260.
+    assert cases["widest"]["sum_c"] > cases["road1"]["sum_c"]
+    # Position, isolated: same width, near-identical length (144.3 m against 143.7 m), through the
+    # field's widest gap. Measured 21.8465 against 32.0260. NOT zero -- see _cases' docstring.
+    assert 0.0 < cases["in_a_gap"]["sum_c"] < cases["road1"]["sum_c"]
 
 
 def test_the_bundle_still_matches_what_python_computes_now(bundle):
@@ -667,14 +675,22 @@ def roads_from_case(block: Block, case: ReferenceCase,
 def _cases(block: Block, roads: GeoDataFrame, ox: float, oy: float) -> list[dict[str, object]]:
     """The five parity fixtures. Chosen so no two of them could pass for the same reason:
 
-    apart      -- the two default roads, corridors disjoint
-    coincident -- road 2 moved onto road 1: overlap is free, so this must cost LESS
-    widest     -- road 1 alone at WIDTH_MAX_M: width is per-road
-    in_a_gap   -- road 1 shifted onto the field's widest gap: free, the clip at d = r
-    outside    -- road 1 translated clear of the block: EXACTLY zero
+    road1      -- road 1 alone at the floor width. The BASELINE, and the PNG's own number.
+    apart      -- both default roads, corridors disjoint
+    coincident -- road 2 moved onto road 1: costs EXACTLY what road1 costs
+    widest     -- road 1 alone at WIDTH_MAX_M: isolates width
+    in_a_gap   -- road 1's direction through the field's widest gap: isolates position
+    outside    -- road 1 translated clear of the block: exactly zero
 
-    No two of them can pass for the same reason, which is the property a fixture set needs -- five
-    variations of one road would prove one thing five times.
+    Each isolates ONE of the page's claims against `road1`, which is why the baseline is in the set:
+    without it, "in_a_gap is cheaper than apart" compares one road against two and demonstrates
+    nothing about gaps. Measured on the pinned block -- road1 32.0260, apart 47.8488, coincident
+    32.0260, widest 68.1581, in_a_gap 21.8465, outside 0.0.
+
+    `in_a_gap` is NOT free, and do not chase a zero: the widest gap here has radius 6.95 m against a
+    2.19 m median, so a 7 m road down its middle still leaves its two neighbours at d = 3.45 m
+    against r = 6.95, i.e. c ~ 0.5 each. A chord across a block cannot stay outside every disk.
+    `outside` is the fixture that pins the clip at d = r.
     """
     pts = block.building_points
     radii = building_radii(pts)
@@ -695,6 +711,7 @@ def _cases(block: Block, roads: GeoDataFrame, ox: float, oy: float) -> list[dict
         block.parcels.union_all())
 
     named: list[tuple[str, GeoDataFrame]] = [
+        ("road1", _set(block, [r1], WIDTH_FLOOR_M)),
         ("apart", roads),
         ("coincident", _set(block, [r1, r1], WIDTH_FLOOR_M)),
         ("widest", _set(block, [r1], WIDTH_MAX_M)),
@@ -831,7 +848,7 @@ const TOL = 1e-3;
 
 test("every baked fixture's sum_c is reproduced from its own coordinates", () => {
   const { x, y, r } = bundle.buildings;
-  assert.equal(bundle.reference.length, 5);
+  assert.equal(bundle.reference.length, 6);
   for (const c of bundle.reference) {
     const got = sumC(r, corridorDistance(x, y, flatten(c.roads)));
     const rel = Math.abs(got - c.sum_c) / Math.max(c.sum_c, 1);
@@ -846,14 +863,18 @@ test("the outside-the-block fixture is exactly zero, not merely close", () => {
     "c must clip to exactly 0 at d = r -- a tolerance here would hide a soft tail");
 });
 
-test("two coincident roads cost less than the same two apart", () => {
+test("a road drawn twice costs exactly what one costs", () => {
+  // The honest form of "overlap is free". Each road is buffered on its OWN width and only then
+  // unioned, so two coincident roads occupy one corridor and are charged once -- an equality, not
+  // a discount. A TypeScript port that summed per-road distances instead of minimising over
+  // segments would pass a `coincident < apart` check and fail this one.
   const { x, y, r } = bundle.buildings;
   const cost = (name: string): number => {
     const c = bundle.reference.find((k) => k.name === name)!;
     return sumC(r, corridorDistance(x, y, flatten(c.roads)));
   };
-  assert.ok(cost("coincident") < cost("apart"),
-    "overlap must be free: merging two corridors cannot raise the cost");
+  assert.equal(cost("coincident"), cost("road1"));
+  assert.ok(cost("apart") > cost("road1"), "a disjoint second road must add cost");
 });
 
 test("a zero-length road is its own endpoint rather than a NaN", () => {
