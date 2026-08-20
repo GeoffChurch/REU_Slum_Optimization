@@ -1527,6 +1527,15 @@ The mkdocs run is **not optional**. D1's backlog entry records that three agents
 
 Delete the `MARKERS` entry → the unknown-marker test and the widget-count test must both redden. Change one caption number by hand → the baked-numbers test reddens. Restore.
 
+**Also re-run the injection Task 6 could not.** `web/test/widgets-bundle.test.ts` derives the widget
+names it checks from `gen_site_pages.py`, so until this task emits a `data-widget="displacement-field"`
+figure, deleting the registration in `web/src/mount.ts` reddens **nothing**. Task 6 proved the
+mechanism by temporarily adding the string to the generator (2 red without the registration, green
+with it) and confirmed the registered name is byte-identical to the one this task emits — but the
+real guard only closes here. Delete the `mount.ts` registration, confirm it now reddens against the
+*actual* generated page, and restore. If it does not redden, the name this task emits and the name
+`mount.ts` registers have diverged, which is the one failure this guard exists to catch.
+
 - [ ] **Step 8: Backlog**
 
 Record in `docs/superpowers/backlog.md`, under the piece-D entry: D2 shipped and what it closed (the reflow deferral, the glightbox anchor, `data-block`, the `fitBbox` test, the `.d.ts` template guard); that **`viewBox` was rejected rather than deferred**, with the 11 px → 5 px reason, so nobody re-proposes it; the closed-form finding and its consequence for piece F; and the Displacement page's corrected sentence. Anything deferred here goes in with *why*, not just *that*.
