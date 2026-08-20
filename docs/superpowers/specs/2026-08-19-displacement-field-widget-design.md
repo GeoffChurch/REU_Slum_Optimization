@@ -104,6 +104,17 @@ Both roads are derived deterministically so the bake, the figure and the caption
 Any deterministic rule would serve; what matters is that it is a rule, so the PNG and the widget's
 boot state are the same road and the caption's numbers are measurements of it.
 
+**Measured, because the obvious objection is wrong.** The building field on this block is nearly
+isotropic — singular values 567.4 and 523.0, anisotropy **1.085** — so it is tempting to read the
+principal axis as ill-conditioned and reach for the convex-hull diameter or the longest interior
+chord instead. Both are *much* worse: the hull diameter beats its runner-up pair by **0.07%**
+(161.19 m against 161.07 m) and its direction swings **3.28°** under 10 cm of coordinate jitter,
+where the principal axis swings **0.23°**. A principal axis averages 263 points; a diameter is
+decided by two extreme vertices. The 7.8% eigenvalue gap is also enormous next to float noise, so
+the "a LAPACK change could rotate it" worry does not hold either. Keep the principal axis, and call
+it a *reference line* rather than the settlement's long axis — because at 1.085 there is no long
+axis to follow.
+
 ## §3 The Python half: a field figure
 
 D1 deferred this piece precisely because no static figure existed, and the closest existing render

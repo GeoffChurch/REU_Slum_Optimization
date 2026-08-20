@@ -353,6 +353,17 @@ def default_roads(block: Block, width_m: float) -> GeoDataFrame:
     corridors start disjoint, so merging them is something the reader DOES rather than something
     they arrive to find already done.
 
+    This is a REFERENCE LINE, not a discovered structural axis, and the docstring must not imply
+    otherwise: measured on the pinned block the field is nearly isotropic (singular values 567.4 and
+    523.0, anisotropy 1.085), so there is no meaningful "long axis" of this settlement to follow.
+
+    Do not "improve" this to the convex-hull diameter or the longest interior chord. Both were
+    measured and both are far WORSE conditioned: the hull diameter beats its runner-up pair by 0.07%
+    (161.19 m against 161.07 m) and swings 3.28 degrees under 10 cm of coordinate jitter, where the
+    principal axis swings 0.23 degrees -- because it averages 263 points while a diameter is decided
+    by exactly two extreme vertices. The two alternatives also agree with each other to 0.0 degrees
+    here, so they are one idea, not two.
+
     A rule rather than a hand-placed line: the widget's boot state and the committed PNG have to be
     the same road for fallback parity to mean anything, and the caption's numbers have to be
     measurements of it.
