@@ -28,12 +28,15 @@ import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
+from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from pyproj import CRS
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from reblock.budget import corridor_distance, displacement_contributions
 from reblock.contracts import BBox, Block, Metrics, Proposal
 from reblock.perm_graph import GRAPH_LAYERS, GraphFigure, GraphLayer
 
@@ -46,6 +49,18 @@ _CONTEXT_PT = "#c9c9c9"
 _OWN_PT = "#333333"
 _DISPLACED_PT = "#c0392b"
 _POINT_RADIUS_M = 2.0   # geographic radius (m) of a building/parcel point marker (x sqrt(weight))
+
+# Line weights and the corridor's alpha, named rather than inline at the call sites for the reason
+# `render_field`'s docstring already gives about `_DISPLACED_PT`: a named constant is a thing a bake
+# can put in a widget's bundle, where a literal in a function body would have to be retyped in
+# TypeScript and could then drift. `scripts/gen_displacement_field.py`'s `ENCODING` reads all four,
+# and tests/test_displacement_field_bundle.py pins the committed bundle against them -- so editing
+# one here fails that test rather than silently leaving the interactive figure and its own fallback
+# image drawn at different weights.
+_PARCEL_LW = 0.4          # the pale parcel wireframe, in every figure that draws one
+_BOUNDARY_LW = 1.3        # the block outline AND the existing street network (_draw_boundary...)
+_CORRIDOR_ALPHA = 0.25    # the road corridor's fill, drawn under everything else
+_DISK_OUTLINE_LW = 0.5    # an untouched building's disk, drawn as an outline rather than a fill
 
 
 def short_label(label: str, limit: int = 80) -> str:
@@ -133,9 +148,36 @@ def _draw_boundary_and_streets(ax: Axes, block: Block) -> None:
     """
     if isinstance(block.boundary, Polygon):
         gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
-            ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
+            ax=ax, color=_BOUNDARY_COLOR, linewidth=_BOUNDARY_LW)
     if block.streets is not None and not block.streets.empty:
-        block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
+        block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=_BOUNDARY_LW)
+
+
+def _draw_corridor(ax: Axes, roads: gpd.GeoDataFrame | None, crs: CRS) -> None:
+    """The road corridor(s), dissolved PER WIDTH GROUP before buffering, mirroring
+    permeability._road_corridor's unary_union-then-buffer -- GeoDataFrame.plot() draws one patch per
+    row, and overlapping translucent patches compound toward opacity wherever segments join (a
+    drainage-ordered prefix is many short segments along one corridor, overlapping heavily at every
+    joint), so a per-row buffer would never actually deliver alpha=0.25 along most of the corridor.
+    Road width is per-road here (no global corridor width -- see permeability.py's module
+    docstring), so union within each width group and buffer each group's union at its own
+    half-width; this collapses to a single polygon in the normal case where every road in the set
+    shares one width.
+
+    Shared by `render_graph` and `render_field`: both call sites are identical (same alpha, zorder,
+    linewidth, dissolve), so the compounding-opacity rule -- the reason this exists at all -- lives
+    in exactly one place. Drawn at `zorder=2`, UNDER whatever sits above it (disks, graph edges):
+    a translucent corridor drawn OVER the thing it is meant to be read against would tint that
+    thing rather than let it read on its own.
+    """
+    if roads is None or roads.empty:
+        return
+    road_w = roads["width_m"].to_numpy(dtype=float)
+    corridor = gpd.GeoDataFrame(
+        geometry=[unary_union(list(roads.geometry[road_w == w])).buffer(float(w) / 2.0)
+                  for w in np.unique(road_w)],
+        crs=crs)
+    corridor.plot(ax=ax, color=_ROAD_COLOR, alpha=_CORRIDOR_ALPHA, zorder=2, linewidth=0)
 
 
 def _draw_heatmap(
@@ -166,7 +208,8 @@ def _draw_heatmap(
     # Dimmed context (neighbouring blocks' outlines + building points), drawn under the
     # selection's own boundary/streets/points so the selection reads unambiguously on top.
     if context_outlines is not None and not context_outlines.empty:
-        context_outlines.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.4)
+        context_outlines.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE,
+                              linewidth=_PARCEL_LW)
     if context_points is not None and not context_points.empty:
         _point_disks(context_points, _POINT_RADIUS_M).plot(
             ax=ax, color=_CONTEXT_PT, alpha=0.6, linewidth=0)
@@ -295,28 +338,15 @@ def render_graph(
     """
     fig, ax = plt.subplots(figsize=(16, 16))
 
-    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.4)
+    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=_PARCEL_LW)
 
     view = frame if frame is not None else frame_bbox(block.parcels)
     ax.set_xlim(view[0], view[2])
     ax.set_ylim(view[1], view[3])
 
-    # The corridor under the graph, so corridor and upgraded edges read as one fact. Dissolved PER
-    # WIDTH GROUP before buffering, mirroring permeability._road_corridor's unary_union-then-buffer
-    # -- GeoDataFrame.plot() draws one patch per row, and overlapping translucent patches compound
-    # toward opacity wherever segments join (a drainage-ordered prefix is many short segments along
-    # one corridor, overlapping heavily at every joint), so a per-row buffer would never actually
-    # deliver alpha=0.25 along most of the corridor. Road width is per-road here (no global corridor
-    # width -- see permeability.py's module docstring), so union within each width group and buffer
-    # each group's union at its own half-width; this collapses to a single polygon in the normal
-    # case where every road in the set shares one width.
-    if roads is not None and not roads.empty:
-        road_w = roads["width_m"].to_numpy(dtype=float)
-        corridor = gpd.GeoDataFrame(
-            geometry=[unary_union(list(roads.geometry[road_w == w])).buffer(float(w) / 2.0)
-                      for w in np.unique(road_w)],
-            crs=block.crs)
-        corridor.plot(ax=ax, color=_ROAD_COLOR, alpha=0.25, zorder=2, linewidth=0)
+    # The corridor under the graph, so corridor and upgraded edges read as one fact -- dissolve
+    # rule lives in `_draw_corridor`'s docstring.
+    _draw_corridor(ax, roads, block.crs)
 
     _draw_boundary_and_streets(ax, block)
 
@@ -356,6 +386,81 @@ def render_graph(
         nodes[grounded].geometry.buffer(node_r * 0.6).plot(
             ax=ax, facecolor="none", edgecolor=_BOUNDARY_COLOR, linewidth=1.6, zorder=5)
     nodes.plot(ax=ax, column="phi", cmap=_PERM_CMAP, vmin=0.0, vmax=vmax, linewidth=0, zorder=6)
+
+    ax.set_aspect("equal")
+    ax.axis("off")
+    return fig
+
+
+def field_contributions(building_points: gpd.GeoDataFrame, roads: gpd.GeoDataFrame | None,
+                        radii: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Per-building displacement contribution `c_i = clip(1 - d_i/r_i, 0, 1)`, in `building_points`
+    order. Delegates to `budget.displacement_contributions` for the formula itself (including the
+    `r == 0` convention) so it is written in exactly one place --
+    `budget.displacement_from_distance` sums the same array.
+
+    Returned rather than left private inside `render_field` so a test can assert on the shading
+    without reading pixels. NOT baked into the widget's bundle: the widget derives `c` itself from
+    the road position, which is what makes the road draggable at all.
+    """
+    n = len(building_points)
+    if n == 0 or roads is None or roads.empty:
+        return np.zeros(n, dtype=np.float64)
+    d = corridor_distance(building_points, roads)
+    return displacement_contributions(radii, d)
+
+
+def render_field(
+    block: Block,
+    roads: gpd.GeoDataFrame | None,
+    radii: NDArray[np.float64],
+    *,
+    frame: BBox | None = None,
+) -> Figure:
+    """The displacement model, drawn literally: every building a disk of its own radius, the road
+    corridor drawn beneath it, each disk shaded by how much of it the corridor takes.
+
+    Differs from `render_after` in the one way that matters for this page: no choropleth underneath,
+    and EVERY building drawn, not only the displaced ones. `render_after` shades displaced disks at
+    `alpha = c` on top of the depth fill (`_draw_heatmap`), so disk shading and parcel fill compete
+    in the same pixels -- which makes it impossible for a widget drawing disks over a wireframe to
+    match, and impossible for a reader to see that a road threaded a GAP rather than merely missing
+    some homes. The gap is the subject: `c` clips to exactly 0 at `d = r`, so a road in a gap is
+    free, and only the disks it missed show that.
+    """
+    fig, ax = plt.subplots(figsize=(16, 16))
+
+    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=_PARCEL_LW)
+
+    view = frame if frame is not None else frame_bbox(block.parcels)
+    ax.set_xlim(view[0], view[2])
+    ax.set_ylim(view[1], view[3])
+
+    # Load-bearing here rather than merely tidy: this figure exists to show overlapping corridors
+    # as CHEAP, and a translucent patch per road compounds toward opaque exactly where they
+    # overlap, drawing the opposite of the claim -- dissolve rule lives in `_draw_corridor`'s
+    # docstring.
+    _draw_corridor(ax, roads, block.crs)
+
+    _draw_boundary_and_streets(ax, block)
+
+    # Every building as its own disk. Two collections: the ones the corridor reaches, filled at
+    # alpha = c, and the ones it does not, as a thin outline. `_DISPLACED_PT` rather than
+    # render_after's inline `(1.0, 0.0, 0.0, c)` -- a named constant is a thing the bake can put in
+    # the widget's bundle, where a literal in a function body would have to be retyped in
+    # TypeScript and could then drift.
+    c = field_contributions(block.building_points, roads, radii)
+    disks = gpd.GeoDataFrame(
+        geometry=block.building_points.geometry.buffer(np.asarray(radii, dtype=np.float64)),
+        crs=block.crs)
+    grazed = c > 0.0
+    if (~grazed).any():
+        disks[~grazed].plot(ax=ax, facecolor="none", edgecolor=_DISPLACED_PT,
+                            linewidth=_DISK_OUTLINE_LW, zorder=5)
+    if grazed.any():
+        rgba = to_rgba(_DISPLACED_PT)
+        disks[grazed].plot(ax=ax, color=[(*rgba[:3], float(ci)) for ci in c[grazed]],
+                           linewidth=0, zorder=6)
 
     ax.set_aspect("equal")
     ax.axis("off")

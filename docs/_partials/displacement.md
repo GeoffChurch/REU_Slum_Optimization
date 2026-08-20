@@ -1,11 +1,14 @@
 <!-- Handwritten partial for docs/methodology/displacement.md. scripts/gen_site_pages.py prepends
-     the do-not-edit note and writes this straight through -- there are no markers to fill on this
-     page (this page adds no markers and no producers). Edit HERE, never
+     the do-not-edit note and fills the markers below. Edit HERE, never
      docs/methodology/displacement.md (it is generated and gitignored). This file is committed but
      excluded from the built site (see exclude_docs in mkdocs.yml).
 
-     This page describes a MODEL, so its only quantities are symbolic parameters (rᵢ, dᵢ, cᵢ), never
-     measured values -- no typed number belongs in this file. -->
+     Markers: DISPFIELD (the interactive field figure -- fallback PNG, mount point, and a caption
+     whose every number is read out of examples/displacement-field/field.json).
+
+     This page describes a MODEL, so the prose's only quantities are symbolic parameters (rᵢ, dᵢ,
+     cᵢ). No measured number is typed HERE: the figure's numbers arrive through DISPFIELD, off the
+     baked artifact. -->
 
 # Displacement
 
@@ -16,7 +19,11 @@
 > Displacement is `Σcᵢ`; the reported fraction divides by the number of buildings.
 
 This is the cost half of the project's one graded tradeoff — the benefit half is
-[permeability](permeability.md).
+[permeability](permeability.md). The figure below prices the cost and nothing else: it says what a
+road set displaces, never whether that road set is worth building. A road it reports as cheap is not
+thereby a good road — what the road buys is permeability, and nothing here computes it.
+
+<!-- DISPFIELD -->
 
 ## Width is per-road
 
@@ -36,9 +43,19 @@ buffering each road on its own and only then taking the union, before any distan
 ## Parcels are not buildings
 
 `Block.parcels` and `Block.building_points` are two distinct fields on the same block. A parcel is a
-cell of the tessellated block interior — land, not a structure. A building is the structure actually
-standing on some of that land. Displacement is counted over buildings, because a building is the
-thing a road corridor threatens; a parcel with no building standing on it costs nothing to cross.
+cell of the tessellated block interior — land, not a structure — and that tessellation is the
+**Voronoi diagram of the building points**, so a parcel is normally one building's own share of the
+block: one cell, one building, as on the block drawn above. Normally, not always — clipping a cell
+against a ragged block edge can split it into separate lobes, and each lobe becomes a parcel in its
+own right. A lobe that ends up holding no building is charged nothing, because there is nothing
+inside it to charge.
+
+What separates the two is therefore not whether a parcel holds a building, but what the charge is
+measured against. Displacement is charged **per building, against that building's own radius `rᵢ`**
+— half its nearest-neighbour distance — and never per parcel against parcel *area*. A road crossing
+one large parcel out at the sparse edge of a block is charged by how close it comes to the one
+building standing in it, not by how much land it takes; the same road through the packed core is
+charged, building by building, the share `cᵢ` of each disk it reaches into.
 
 ## Gap-hugging is free
 

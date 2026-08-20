@@ -127,7 +127,7 @@ def _figure(url: str, alt: str, caption: str, *, fig_class: str = "",
     skip_classes: [skip-lightbox] so those images are not zoom targets.
 
     `attrs` is raw HTML attributes appended to the <figure> tag itself -- e.g. a widget's
-    `data-widget`/`data-block`/`data-bundle`/... mount-point attributes (fix wave, I4). Those MUST
+    `data-widget`/`data-bundle`/... mount-point attributes (fix wave, I4). Those MUST
     land on the figure element and not on a wrapping <div>: `.sbu-figure-grid > figure` in
     docs/stylesheets/sbu.css resets `margin` and the mandatory `min-width: 0` on DIRECT children
     only, and a wrapping div would put the figure one level too deep to be reset."""
@@ -325,8 +325,8 @@ def _perm_graph_figures() -> str:
                     # than the widget hardcoding it on every boot (fix wave, I8).
                     bundle_meta = json.loads(
                         (PERMGRAPH / "bundle.json").read_text(encoding="utf-8"))
-                    attrs = (f'data-widget="perm-graph" data-block="{block}" '
-                            f'data-bundle="{bundle_url}" data-layer="current" '
+                    attrs = (f'data-widget="perm-graph" data-bundle="{bundle_url}" '
+                            f'data-layer="current" '
                             f'data-prefix="{bundle_meta["lens_b_index"]}"')
             figs.append(_figure(url, f"egress graph, {layer}, {state} roads", caption, attrs=attrs))
     if not figs:
@@ -403,7 +403,7 @@ def _frontier_figure() -> str:
     if img_url is None or bundle_url is None:
         return ""
 
-    attrs = (f'data-widget="frontier" data-block="{block}" data-bundle="{bundle_url}" '
+    attrs = (f'data-widget="frontier" data-bundle="{bundle_url}" '
              f'data-target-displacement="{bundle["matched_displacement"]}" '
              f'data-target-permeability="{bundle["matched_permeability"]}" '
              f'data-aspect="{_png_aspect(png)}"')
@@ -419,6 +419,74 @@ def _frontier_figure() -> str:
         f"sliders, to ask which methods clear it and at what least road."
     )
     return _figure(img_url, f"permeability against displacement for every method on block {block}",
+                   caption, attrs=attrs)
+
+
+def _displacement_field_figure() -> str:
+    """The Displacement page's one interactive figure: the model drawn literally -- every building a
+    disk of its own radius `rᵢ`, the road corridor beneath it, each disk shaded by the fraction `cᵢ`
+    of it the corridor takes -- with both roads draggable, the corridor width on a slider, and the
+    running cost read out beside the picture.
+
+    The fallback PNG stays IN the figure, like every other mount point on this site: `dom/error.ts`
+    tells the reader "the static image above still applies", which is only true while the image is
+    there, so the widget removes it itself and only once it has drawn in its place.
+
+    The caption carries the whole argument for a reader with JavaScript off, so it quotes three
+    numbers, all read out of `field.json`'s baked `reference` cases and none of them typed here:
+    `road1` because that configuration is exactly what the fallback PNG draws, and then `apart`
+    against `coincident`, which IS the *Overlap is free* section's claim in numbers -- two roads
+    side by side cost more than the same two merged, and merged they cost precisely what one road
+    costs. Those three are the same fixtures `web/test/field-boot.test.ts` drives the widget
+    against, so the sentence a JS-off reader is given and the numbers the widget shows a JS-on
+    reader cannot disagree.
+
+    THE TWO CLAUSES CARRYING `apart` AND `coincident` ARE LOAD-BEARING WORDING, not prose to
+    reflow freely: `tests/test_gen_site_pages.py` matches each number inside its own clause, so
+    that swapping the two -- which would publish the exact inverse of the claim, that merging two
+    roads costs MORE -- fails a test instead of shipping. Reword them and that test reddens, which
+    is the point; re-read what it is asserting before changing the sentence.
+
+    No `data-aspect` here (unlike `_frontier_figure`): this widget's canvas is square by
+    construction -- `render_field` plots at `figsize=(16, 16)` and the widget sets
+    `aspectRatio: 1 / 1` -- so an emitted aspect would be a second source for one fact and read by
+    nobody, which is exactly what `data-block` was before it was deleted.
+
+    Emits nothing when the artifacts are absent, like every other figure on this site.
+    """
+    field = EXAMPLES / "displacement-field"
+    path, png = field / "field.json", field / "field.png"
+    # The copies ARE the existence test -- `_copy_asset` returns None for a file that is not there.
+    # No `path.exists()` before this: `_frontier_figure` above has one, which makes its own
+    # `bundle_url is None` branch unreachable (it can never fire, so it can never be right or
+    # wrong). Here both branches can fire, the bundle is read only once its copy has succeeded, and
+    # the same test that decides whether to emit is what narrows both URLs to `str` for the checker.
+    img_url = _copy_asset(png, "displacement-field")
+    bundle_url = _copy_asset(path, "displacement-field")
+    if img_url is None or bundle_url is None:
+        return ""
+    bundle = json.loads(path.read_text(encoding="utf-8"))
+    cases = {c["name"]: c for c in bundle["reference"]}
+    one, apart, merged = cases["road1"], cases["apart"], cases["coincident"]
+    n = bundle["n_buildings"]
+    block, floor = bundle["block_id"], bundle["width"]["floor_m"]
+
+    attrs = f'data-widget="displacement-field" data-bundle="{bundle_url}"'
+    caption = (
+        f"The model drawn literally on block <code>{block}</code>: every one of its {n} buildings "
+        f"is a disk of its own radius <code>rᵢ</code>, the road corridor runs beneath them, and "
+        f"each disk is shaded by the share <code>cᵢ</code> of it the corridor takes. The road "
+        f"drawn here is one road at the {floor:.0f} m floor, and it costs "
+        f"<strong>{one['sum_c']:.1f}</strong> buildings — {one['fraction']:.1%} of the block. "
+        f"Drag either end of a road, widen the corridor, or switch the second road on. Switched on "
+        f"where it is baked, the two roads cost {apart['sum_c']:.1f} between them; dragged onto "
+        f"each other, the same two cost {merged['sum_c']:.1f} — exactly what the one road costs, "
+        f"because what is charged is the union of the roads' own buffers, so the overlap is paid "
+        f"for once."
+    )
+    return _figure(img_url,
+                   f"the displacement model on block {block}: buildings as disks, shaded by the "
+                   f"share of each that the road corridor takes",
                    caption, attrs=attrs)
 
 
@@ -1127,6 +1195,7 @@ MARKERS: dict[str, Callable[[], str]] = {
     "BAKEOFFFLOORS": _bakeoff_floors_table,
     "BAKEOFFFIGS": _bakeoff_figures,
     "PERMGRAPHFIGS": _perm_graph_figures,
+    "DISPFIELD": _displacement_field_figure,
     "NAIROBITABLE": _nairobi_table,
     "REPROCOMMANDS": _repro_commands,
 }

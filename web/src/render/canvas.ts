@@ -1,15 +1,20 @@
 import type { Bundle } from "../bundle.js";
 import { toScreen, type View } from "../view/transform.js";
 
-/** Resize the backing store for devicePixelRatio and return the CSS-pixel size to draw in. */
-export function sizeCanvas(cv: HTMLCanvasElement): { width: number; height: number } {
+/** Resize the backing store for devicePixelRatio, to the CSS-pixel box the caller measured.
+ *
+ * The box is a PARAMETER rather than a `getBoundingClientRect()` this function performs itself: the
+ * caller now learns its size from a ResizeObserver (dom/resize.ts), whose `contentRect` is the same
+ * measurement delivered without a second forced layout -- and measuring twice is how the drawing
+ * and the box it is scaled for come to disagree. Setting `cv.width`/`cv.height` changes only the
+ * backing store, never the laid-out size (that is CSS: `width: 100%` and `aspect-ratio`), so this
+ * cannot feed the observer that called it. */
+export function sizeCanvas(cv: HTMLCanvasElement, size: { width: number; height: number }): void {
   const dpr = window.devicePixelRatio || 1;
-  const { width, height } = cv.getBoundingClientRect();
-  cv.width = Math.round(width * dpr);
-  cv.height = Math.round(height * dpr);
+  cv.width = Math.round(size.width * dpr);
+  cv.height = Math.round(size.height * dpr);
   const ctx = cv.getContext("2d")!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { width, height };
 }
 
 function rampColor(ramp: string[], t: number): string {

@@ -10,7 +10,9 @@ import vm from "node:vm";
  * itself. This test closes that gap.
  *
  * scripts/test.sh builds the bundle immediately before running this file (see that script's own
- * comment), so BUNDLE_PATH always points at a fresh build, never a stale one.
+ * comment), so BUNDLE_PATH always points at a fresh build, never a stale one. And it is not
+ * committed -- `.gitignore` excludes `docs/js/`, and `deploy-site.yml` runs `npm run build` before
+ * `mkdocs build` -- so there is no committed artifact here that could go stale behind the source.
  */
 const BUNDLE_PATH = "../docs/js/widgets.js";
 
@@ -65,6 +67,13 @@ test("the shipped bundle registers every widget name a generated page emits", ()
   const names = emittedWidgetNames();
   const source = readFileSync(BUNDLE_PATH, "utf8");
 
+  // No `getBoundingClientRect` and no `ResizeObserver` in this harness, deliberately: neither widget
+  // reaches layout here, and both were MEASURED not to (0 calls, 0 observers constructed). PermGraph
+  // throws at `fetch is not defined` and Frontier at `data-bundle is missing`, both synchronously,
+  // inside their own bodies -- which is the whole point of this test, since a widget that never got
+  // registered cannot throw from inside itself at all. A zero-width rect stub was standing in for a
+  // dependency that is never touched; the width-0 skip introduced in dom/resize.ts therefore changes
+  // nothing about what this test exercises.
   interface FakeNode { textContent: string }
   const mounts = names.map((name) => ({
     dataset: { widget: name },
@@ -73,8 +82,6 @@ test("the shipped bundle registers every widget name a generated page emits", ()
     querySelector: (): null => null,
     append(...nodes: FakeNode[]): void { this.appended.push(...nodes); },
     insertBefore(node: FakeNode): void { this.appended.push(node); },
-    getBoundingClientRect: () => ({ width: 0, height: 0, left: 0, top: 0 }),
-    addEventListener: (): void => {},
   }));
 
   let domReady: (() => void) | undefined;
@@ -95,7 +102,12 @@ test("the shipped bundle registers every widget name a generated page emits", ()
     const said = mounts[i]!.appended.map((n) => n.textContent).join(" ");
     assert.ok(!said.includes("unknown data-widget"),
       `"${name}" is not registered in the shipped bundle: ${said}`);
-    assert.ok(said.length > 0,
-      `"${name}" produced no message at all, so mountAll never reached its widget`);
+    // The whole message, with a NON-EMPTY parenthesised cause -- not merely "something was said".
+    // An unregistered name, a widget stubbed out to a no-op, and a failure swallowed on the way to
+    // the page all produce a message this pattern rejects, and the cause being non-empty is what
+    // says the widget's own body ran far enough to throw its own error.
+    assert.match(said,
+      /^This figure could not load interactively \(.+\)\. The static image above still applies\.$/,
+      `"${name}" did not report its own failure through dom/error.ts: ${JSON.stringify(said)}`);
   }
 });

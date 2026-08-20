@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
+from geopandas import GeoDataFrame
 from matplotlib.colors import to_hex
 
 from reblock.budget import building_radii, displacement, street_first_ordered
@@ -36,11 +38,11 @@ from reblock.emit import (
 )
 from reblock.method_labels import friendly_method_name
 from reblock.permeability import egress_power, permeability
+from scripts._bundle_io import sigfig
 from scripts._example_block import load_example_block
 
 OUT = Path("examples/method-comparison/frontier.json")
 DTS = Path("web/src/frontier.d.ts")
-SIGFIGS = 6
 
 # What the widget DRAWS with, baked here rather than chosen in the TypeScript or restated on the
 # page. Five of these come straight from reblock.emit, which draws the fallback PNG the widget
@@ -95,12 +97,6 @@ CHART = {
 }
 
 
-def _r(x: float) -> float:
-    """6 significant digits. Safe here because every value is a metric in [0, 1] or a road length in
-    the hundreds -- unlike coordinates, which need absolute rounding (see gen_web_bundle._c)."""
-    return float(f"%.{SIGFIGS}g" % x)
-
-
 def main() -> None:
     block, roads_by_method = load_example_block()
     pcfg = load_permeability_config()
@@ -122,12 +118,21 @@ def main() -> None:
     for name, roads in roads_by_method.items():
         ordered = street_first_ordered(block, roads, STREET_TOL)
         road_m, disp, perm = [], [], []
+        # `sigfig` (scripts/_bundle_io.py) is the same 6-significant-digit quantiser the other two
+        # bundles are written through. Safe for every value here because they are all a metric in
+        # [0, 1] or a road length in the hundreds -- this bundle carries no COORDINATES, which is
+        # the one case significant digits ruin (see `_bundle_io.cm`).
         for m in range(len(ordered) + 1):
-            prefix = ordered.iloc[:m]
-            road_m.append(_r(float(prefix.geometry.length.sum())))
-            disp.append(_r(displacement(block.building_points, radii, prefix) / n_buildings
-                           if n_buildings else 0.0))
-            perm.append(_r(permeability(block, prefix, params, p0=p0, adj=adj)))
+            # `cast`, not a bare slice: pandas-stubs types `.iloc[slice]` as `Series`, so the two
+            # metric calls below take it as one and mypy has no way to know a GeoDataFrame slice is
+            # a GeoDataFrame. Same treatment as every other prefix slice in the tree
+            # (`budget.py:761`, `animate.py:43`). This module only entered `mypy --strict` when
+            # `tests/test_frontier_bundle.py` began importing its `DTS_TEMPLATE`.
+            prefix = cast(GeoDataFrame, ordered.iloc[:m])
+            road_m.append(sigfig(float(prefix.geometry.length.sum())))
+            disp.append(sigfig(displacement(block.building_points, radii, prefix) / n_buildings
+                               if n_buildings else 0.0))
+            perm.append(sigfig(permeability(block, prefix, params, p0=p0, adj=adj)))
         methods[name] = {
             "road_m": road_m, "displacement": disp, "permeability": perm,
             # The legend name and the curve colour travel WITH the curve: the widget iterates the

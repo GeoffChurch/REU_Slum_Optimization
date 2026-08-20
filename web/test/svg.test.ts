@@ -99,10 +99,16 @@ function effectiveBox(t: FakeElement): [xMin: number, xMax: number, yMin: number
 
 const WIDTH = 400;
 const HEIGHT = 300;
-/** A phone-sized column: a 390 px viewport gives about this, and `scripts/gen_site_pages.py` records
- * the project's own expectation that a phone is how most readers arrive. The aspect is the committed
- * fallback PNG's own IHDR ratio, which is what the widget sizes its box by. */
-const NARROW = { width: 358, height: Math.round(358 / 1.398) };
+/** The widths one page load can actually reach. Before `src/dom/resize.ts` the box was measured once
+ * at mount and re-measured only when the WINDOW moved, so a single width was very nearly the whole
+ * story; now the chart is re-laid-out at whatever the CONTAINER reports, and a label that escapes the
+ * box only on a narrow screen is invisible to a single-width test. 320 px is a real phone, 1200 px the
+ * widest column Material gives a figure. The aspect is the committed fallback PNG's own IHDR ratio,
+ * which is what the widget sizes its box by (`scripts/gen_site_pages.py`'s `data-aspect`). */
+const SWEEP_WIDTHS = [320, 700, 1200] as const;
+function boxAt(width: number): { width: number; height: number } {
+  return { width, height: Math.round(width / 1.398) };
+}
 // [0, 0.4] / [0, 1] is the real Frontier axis pairing from the brief -- both `draw` regimes below
 // use it, so the first/last tick on each axis always lands EXACTLY on the world range's own ends
 // (niceTicks(0, 0.4, 5) = [0, 0.1, 0.2, 0.3, 0.4], niceTicks(0, 1, 5) = [0, 0.2, ..., 1]), and the
@@ -355,7 +361,7 @@ test("the x-axis title does not overlap any x-tick label -- the mirror of the y-
   // guarded nowhere, and at the fixture's own 400x300 geometry the two were already overlapping by
   // ~4.6 px on this file's glyph model. Checked at BOTH the fixture box and a phone-sized column,
   // because the failure was a function of how much gutter the box leaves.
-  for (const box of [{ width: WIDTH, height: HEIGHT }, NARROW]) {
+  for (const box of [{ width: WIDTH, height: HEIGHT }, ...SWEEP_WIDTHS.map(boxAt)]) {
     const { svg } = draw(GENEROUS_PAD, PERCENT_TICK, box);
     const { xTickLabels, xTitle } = splitLabels(svg);
     const titleBox = effectiveBox(xTitle);
@@ -368,6 +374,26 @@ test("the x-axis title does not overlap any x-tick label -- the mirror of the y-
     }
   }
 });
+
+// The containment guarantee, swept across the widths a reflow reaches rather than asserted at one.
+// Same three checks the percent-tick test makes at the fixture box -- inside the SVG, outside the
+// plot rect -- but at the box the widget is actually handed on a phone, a column and a wide screen.
+for (const width of SWEEP_WIDTHS) {
+  test(`every axis label stays inside the viewport at ${width} px`, () => {
+    const box = boxAt(width);
+    const { svg, rect } = draw(GENEROUS_PAD, PERCENT_TICK, box);
+    const plotBox: [number, number, number, number] = [rect.left, rect.right, rect.top, rect.bottom];
+    const texts = svg.children.filter((c) => c.tagName === "text");
+    assert.ok(texts.length >= 4, `expected tick labels + 2 titles, got ${texts.length} text nodes`);
+    for (const t of texts) {
+      assertContained(t, box);
+      const glyph = effectiveBox(t);
+      assert.ok(!rectsOverlap(glyph, plotBox),
+        `at ${box.width}x${box.height}: "${t.textContent}" box [${glyph.join(", ")}] overlaps the ` +
+        `plot rect [${plotBox.join(", ")}]`);
+    }
+  });
+}
 
 test("gridlines are drawn at the caller's opacity, not at full body ink", () => {
   // Final review I2: they were `currentColor` at full strength -- 11 near-black lines under the

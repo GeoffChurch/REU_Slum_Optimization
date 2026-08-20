@@ -1,5 +1,8 @@
 import type { Bundle } from "../bundle.js";
-import { showWidgetError } from "../dom/error.js";
+import { requireAttr } from "../dom/attrs.js";
+import { runOrReport, showWidgetError } from "../dom/error.js";
+import { removeFallbackImage } from "../dom/fallback.js";
+import { observeSize } from "../dom/resize.js";
 import { draw, sizeCanvas } from "../render/canvas.js";
 // Type-only: erased at compile time, so this produces no runtime import of mount.js. A runtime
 // import here would recreate the mount<->widget cycle that made the bundle throw on load (see
@@ -9,6 +12,11 @@ import { fitBbox, nearest, panned, toWorld, zoomed, type View } from "../view/tr
 import type { StateFactory, StateSource } from "../state.js";
 
 interface PermGraphState { prefix: number; layer: "conductance" | "current"; halos: boolean }
+
+/** The name every failure of this widget is reported under -- one constant, because it is used from
+ * two unrelated places (the fetch chain and the resize callback) and two spellings of it would be a
+ * reader seeing two different widgets fail. */
+const LABEL = "PermGraph";
 
 /** Parse `data-prefix` into a non-negative integer, never NaN.
  *
@@ -32,7 +40,11 @@ function initialState(el: HTMLElement): PermGraphState {
 }
 
 export const permGraph: Widget = (host, makeState) => {
-  const src = host.dataset.bundle!;
+  // Not `host.dataset.bundle!`: a missing attribute then reaches `fetch(undefined)` and surfaces as
+  // "fetch undefined failed: 404", which sends the reader (and whoever wrote the page) looking for a
+  // missing FILE rather than the missing ATTRIBUTE that is actually wrong. This was the third call
+  // site of a helper extracted for the other two.
+  const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
   // I9: a 404, a renamed bundle field, or any throw inside boot() must be VISIBLE on the page, not
   // an unhandled rejection sitting silently in the console while the PNG fallback stays up and the
   // page looks fine -- verbatim the defect class this branch already found once (mount.ts's
@@ -47,17 +59,21 @@ export const permGraph: Widget = (host, makeState) => {
     // already diverged, and only one of them mentioned the static image the reader is still looking
     // at. PermGraph's behaviour is otherwise unchanged -- same trigger, same destination, one
     // sentence added.
-    .catch((err: unknown) => showWidgetError(host, "PermGraph", err));
+    .catch((err: unknown) => showWidgetError(host, LABEL, err));
 };
 
 function boot(host: HTMLElement, makeState: StateFactory, b: Bundle): void {
   const state: StateSource<PermGraphState> = makeState(initialState(host));
-  const fallback = host.querySelector("img");
   const caption = host.querySelector("figcaption");
 
   const cv = document.createElement("canvas");
   cv.style.width = "100%";
   cv.style.aspectRatio = "1 / 1";
+  // The canvas PANS on a pointer drag, so without this a touch drag scrolls the page and the
+  // browser CANCELS the pointer stream mid-drag -- the view lurches and then sticks. It is the one
+  // line that makes Pointer Events actually serve touch rather than only appear to, and it was
+  // missing here while both other widgets carried it.
+  cv.style.touchAction = "none";
 
   const controls = document.createElement("div");
 
@@ -100,23 +116,30 @@ function boot(host: HTMLElement, makeState: StateFactory, b: Bundle): void {
   const readout = document.createElement("p");
   controls.append(sliderLabel, layerLabel, haloLabel, readout);
 
-  // Insert the canvas and controls BEFORE the figcaption, and remove the <img> -- so the mount
-  // point (now the <figure> itself, fix wave I4) keeps picture-then-caption reading order, the
-  // same order every sibling figure in .sbu-figure-grid uses. Appending after </figure> (the prior
-  // behaviour) put this one cell's caption ahead of its picture, out of step with its neighbours.
+  // Insert the canvas and controls BEFORE the figcaption -- so the mount point (now the <figure>
+  // itself, fix wave I4) keeps picture-then-caption reading order, the same order every sibling
+  // figure in .sbu-figure-grid uses. Appending after </figure> (the prior behaviour) put this one
+  // cell's caption ahead of its picture, out of step with its neighbours.
+  //
+  // The fallback <img> is NOT removed here. It used to go on this line, before anything had been
+  // drawn -- so a canvas that mounted into a zero-width container, or a draw that threw, left a
+  // blank figure with the static picture already gone. It now goes where Frontier has always put
+  // it: after the first successful draw, below.
   if (caption) {
     host.insertBefore(cv, caption);
     host.insertBefore(controls, caption);
   } else {
     host.append(cv, controls);
   }
-  if (fallback) fallback.remove();
 
   const xs = b.nodes.cx, ys = b.nodes.cy;
   const bbox = { minX: Math.min(...xs), minY: Math.min(...ys),
                  maxX: Math.max(...xs), maxY: Math.max(...ys) };
-  let size = sizeCanvas(cv);
-  let view: View = fitBbox(bbox, size.width, size.height);
+  // Both assigned by the observer below and by nothing else. Everything that reads them -- `render`,
+  // the pan/zoom handlers -- is wired from inside the first sized callback, so there is no ordering
+  // in which they are read before that callback has run.
+  let size: { width: number; height: number };
+  let view: View;
   const ctx = cv.getContext("2d")!;
 
   const render = (): void => {
@@ -127,32 +150,71 @@ function boot(host: HTMLElement, makeState: StateFactory, b: Bundle): void {
       `${b.prefix.road_m[s.prefix]!.toFixed(0)} m of road · ` +
       `${(b.prefix.permeability[s.prefix]! * 100).toFixed(1)}% permeability`;
   };
-  state.subscribe(render);
 
-  let dragging: [number, number] | null = null;
-  cv.addEventListener("pointerdown", (ev) => { dragging = [ev.offsetX, ev.offsetY]; });
-  cv.addEventListener("pointerup", () => { dragging = null; });
-  cv.addEventListener("pointermove", (ev) => {
-    if (dragging) {
-      view = panned(view, ev.offsetX - dragging[0], ev.offsetY - dragging[1]);
+  const wireInteraction = (): void => {
+    let dragging: [number, number] | null = null;
+    cv.addEventListener("pointerdown", (ev) => {
       dragging = [ev.offsetX, ev.offsetY];
+      // So a pan that leaves the canvas still tracks -- without it the view freezes at the edge and
+      // the pointerup never arrives, leaving the pan glued to the cursor until the next press.
+      cv.setPointerCapture(ev.pointerId);
+    });
+    // `pointercancel` as well as `pointerup`: a captured stream can still be cancelled (the OS takes
+    // the gesture, the element is removed), and only releasing on `pointerup` leaves `dragging` set
+    // so the next hover pans instead of reading out a potential.
+    const release = (ev: PointerEvent): void => {
+      if (dragging === null) return;
+      dragging = null;
+      cv.releasePointerCapture(ev.pointerId);
+    };
+    cv.addEventListener("pointerup", release);
+    cv.addEventListener("pointercancel", release);
+    cv.addEventListener("pointermove", (ev) => {
+      if (dragging) {
+        view = panned(view, ev.offsetX - dragging[0], ev.offsetY - dragging[1]);
+        dragging = [ev.offsetX, ev.offsetY];
+        render();
+        return;
+      }
+      const [wx, wy] = toWorld(view, ev.offsetX, ev.offsetY);
+      const i = nearest(xs, ys, wx, wy);
+      cv.title = `φ = ${b.prefix.potential[state.get().prefix]![i]!.toPrecision(4)}`;
+    });
+    cv.addEventListener("wheel", (ev) => {
+      ev.preventDefault();
+      view = zoomed(view, ev.deltaY < 0 ? 1.15 : 1 / 1.15, ev.offsetX, ev.offsetY);
       render();
-      return;
-    }
-    const [wx, wy] = toWorld(view, ev.offsetX, ev.offsetY);
-    const i = nearest(xs, ys, wx, wy);
-    cv.title = `φ = ${b.prefix.potential[state.get().prefix]![i]!.toPrecision(4)}`;
-  });
-  cv.addEventListener("wheel", (ev) => {
-    ev.preventDefault();
-    view = zoomed(view, ev.deltaY < 0 ? 1.15 : 1 / 1.15, ev.offsetX, ev.offsetY);
-    render();
-  }, { passive: false });
-  window.addEventListener("resize", () => {
-    size = sizeCanvas(cv);
+    }, { passive: false });
+  };
+
+  // The observed element is the CANVAS ITSELF, not the container. `cv.style.width = "100%"` makes
+  // the canvas's own content box track the container's content width, so observing it answers the
+  // question this widget actually has ("how many CSS pixels am I drawing into?") in one hop instead
+  // of two -- and it is the box `sizeCanvas` scales the backing store to, so there is no second
+  // element whose padding or border could put the two out of step.
+  //
+  // Re-fitting on every such change is the fix: `width: 100%` already stretched the canvas when its
+  // container narrowed, but nothing re-sized the backing store or re-fitted the bbox, so the drawing
+  // stayed scaled for the width it had at mount -- and a window listener never saw it, because the
+  // window had not moved. No dedupe on width here (as Frontier needs): `aspect-ratio: 1 / 1` ties
+  // this box's height to its width, and `sizeCanvas` touches only the backing store, so the observer
+  // cannot be re-entered by our own drawing.
+  //
+  // `runOrReport`: a real ResizeObserver delivers its callbacks from the browser's own dispatch,
+  // NOT from inside boot()'s promise chain, so that chain's `.catch` cannot see a throw in here --
+  // it would be an uncaught exception with a blank figure and no message (see dom/error.ts).
+  let firstDraw = true;
+  observeSize(cv, (measured) => runOrReport(host, LABEL, () => {
+    size = measured;
+    sizeCanvas(cv, size);
     view = fitBbox(bbox, size.width, size.height);
     render();
-  });
-
-  render();
+    if (firstDraw) {
+      firstDraw = false;
+      state.subscribe(render);
+      wireInteraction();
+      // Only now: the static picture is the honest one until a real one has replaced it.
+      removeFallbackImage(host);
+    }
+  }));
 }

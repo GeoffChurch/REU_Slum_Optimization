@@ -21,8 +21,6 @@ from typing import cast
 import numpy as np
 from geopandas import GeoDataFrame
 from matplotlib import colormaps
-from shapely.geometry import LineString, MultiLineString, Polygon
-from shapely.geometry.base import BaseGeometry
 
 from reblock.budget import prefix_to_permeability, street_first_ordered
 from reblock.compare import load_permeability_config
@@ -40,56 +38,19 @@ from reblock.render import (
     _ROAD_COLOR,
     _UPGRADED_LW,
 )
+from scripts._bundle_io import cm, line_coords, polygon_ring, sigfig
 from scripts._example_block import PINNED_METHOD, load_example_block
 
 log = logging.getLogger(__name__)
 
 OUT = Path("examples/perm-graph")
 DTS = Path("web/src/bundle.d.ts")
-SIGFIGS = 6
 
 
 def load_block_and_roads() -> tuple[Block, GeoDataFrame]:
     """Kept as a thin alias so tests/test_web_bundle.py's parity test still imports one name."""
     block, roads = load_example_block(PINNED_METHOD)
     return block, roads[PINNED_METHOD]
-
-
-def _r(x: float) -> float:
-    """FIELD VALUES at 6 significant digits -- far beyond what a canvas shows or the readout
-    quotes, and it keeps the payload near 300 KB. tests/test_web_bundle.py's parity assertion is
-    stated at this precision, so changing it means changing that tolerance too.
-
-    NOT for coordinates -- see `_c`."""
-    return float(f"%.{SIGFIGS}g" % x)
-
-
-def _c(x: float) -> float:
-    """COORDINATES, as centimetres of absolute precision.
-
-    Significant digits are the wrong tool here and dangerously so: a Cape Town UTM northing is
-    ~6,240,000, so `%.6g` would round it to the nearest 10 METRES and dissolve the parcel geometry.
-    Coordinates are emitted relative to `origin` (see below), which both fixes the precision problem
-    and shrinks the payload, since local metres are 3-4 digits instead of 7."""
-    return round(x, 2)
-
-
-def _line_coords(geom: BaseGeometry, ox: float, oy: float) -> list[list[list[float]]]:
-    """Explode a LineString/MultiLineString into one coordinate list per component, at the same
-    centimetre precision `_c` gives every other coordinate in this bundle (see its docstring): a
-    street's northing is exactly as far from the origin as a parcel's, and significant-digit
-    rounding would dissolve it the same way. `Block.streets` is documented as line geometry
-    (`_draw_boundary_and_streets` in render.py draws it with no other case); anything else is a
-    contract violation worth raising on, not silently dropping."""
-    if isinstance(geom, LineString):
-        lines: list[LineString] = [geom]
-    elif isinstance(geom, MultiLineString):
-        lines = list(geom.geoms)
-    else:
-        raise ValueError(
-            f"unexpected street geometry type {geom.geom_type!r} -- report this instead of "
-            f"silently dropping it")
-    return [[[_c(x - ox), _c(y - oy)] for x, y in line.coords] for line in lines]
 
 
 def _ramp(name: str, n: int = 256) -> list[str]:
@@ -190,9 +151,9 @@ def main() -> None:
     # reproduces the PNG's 3.9367 precisely. It clips nothing, by construction: every prefix's own
     # mesh p99 is <= this maximum, so no mesh edge at any prefix can exceed `edge_lw_max`.
     width_norm = {
-        layer: _r(max(float(np.percentile(np.abs(read(f)[~f.upgraded]), 99)) if (~f.upgraded).any()
-                      else 0.0
-                      for f in figs))
+        layer: sigfig(max(float(np.percentile(np.abs(read(f)[~f.upgraded]), 99))
+                          if (~f.upgraded).any() else 0.0
+                          for f in figs))
         for layer, read in GRAPH_LAYERS.items()
     }
 
@@ -200,40 +161,24 @@ def main() -> None:
     # and never learns the CRS; `width_m` is a length, so translation leaves it alone.
     ox, oy = float(base.cx.min()), float(base.cy.min())
 
-    parcel_coords = []
-    for g in block.parcels.geometry:
-        # isinstance, not geom_type, so this line IS the runtime guard mypy can also verify: it
-        # narrows `g` to Polygon, which is what makes `.interiors`/`.exterior` below type-check
-        # instead of resolving through BaseGeometry, the union GeoSeries iteration yields.
-        if not isinstance(g, Polygon):
-            raise ValueError(
-                f"block {block.block_id!r} has a non-Polygon parcel ({g.geom_type}) -- the "
-                f"bundle format assumes every parcel is a simple Polygon with an exterior ring "
-                f"and no holes; report this instead of silently dropping geometry")
-        if len(g.interiors) != 0:
-            raise ValueError(
-                f"block {block.block_id!r} has a non-simple parcel (Polygon, "
-                f"{len(g.interiors)} interior rings) -- the bundle format assumes every parcel "
-                f"is a simple Polygon with an exterior ring and no holes; report this instead "
-                f"of silently dropping geometry")
-        parcel_coords.append([[_c(x - ox), _c(y - oy)] for x, y in g.exterior.coords])
+    parcel_coords = [polygon_ring(g, ox, oy, what=f"block {block.block_id!r}'s parcel")
+                     for g in block.parcels.geometry]
 
     # Fallback parity: _draw_boundary_and_streets (render.py) draws the block outline and the
     # EXISTING street network under every graph PNG, including graph_current_after.png -- the
     # exact image this widget replaces. The widget draws neither unless the bundle carries the
     # geometry, so bake it here rather than let the interactive version silently omit context the
     # static fallback always shows.
-    if not isinstance(block.boundary, Polygon):
-        raise ValueError(
-            f"block {block.block_id!r} has a non-Polygon boundary ({block.boundary.geom_type}) "
-            f"-- load_block_and_roads asserts this figure set is single-block, so the gappy-"
-            f"region MultiPolygon case _draw_boundary_and_streets skips should not arise here; "
-            f"report this instead of silently dropping the boundary")
-    boundary_coords = [[_c(x - ox), _c(y - oy)] for x, y in block.boundary.exterior.coords]
+    #
+    # `polygon_ring` raises on a MultiPolygon boundary: `load_block_and_roads` asserts this figure
+    # set is single-block, so the gappy-region case _draw_boundary_and_streets skips should not
+    # arise here, and if it ever does it is worth reporting rather than dropping.
+    boundary_coords = polygon_ring(block.boundary, ox, oy,
+                                   what=f"block {block.block_id!r}'s boundary")
 
     street_coords: list[list[list[float]]] = []
     for g in block.streets.geometry:
-        street_coords.extend(_line_coords(g, ox, oy))
+        street_coords.extend(line_coords(g, ox, oy))
 
     bundle = {
         "block_id": block.block_id,
@@ -244,24 +189,24 @@ def main() -> None:
         "parcels": parcel_coords,
         "boundary": boundary_coords,
         "streets": street_coords,
-        "nodes": {"cx": [_c(v - ox) for v in base.cx], "cy": [_c(v - oy) for v in base.cy],
-                  "ground_g": [_r(v) for v in base.ground_g]},
+        "nodes": {"cx": [cm(v - ox) for v in base.cx], "cy": [cm(v - oy) for v in base.cy],
+                  "ground_g": [sigfig(v) for v in base.ground_g]},
         "edges": {"rows": base.rows.tolist(), "cols": base.cols.tolist(),
-                  "footpath_g": [_r(v) for v in base.footpath_g],
+                  "footpath_g": [sigfig(v) for v in base.footpath_g],
                   "first_upgraded_at": first_upgraded_at.tolist()},
-        "roads": [{"coords": [[_c(x - ox), _c(y - oy)] for x, y in g.coords],
+        "roads": [{"coords": [[cm(x - ox), cm(y - oy)] for x, y in g.coords],
                    "width_m": float(w)}
                   for g, w in zip(ordered.geometry, ordered["width_m"], strict=True)],
         "prefix": {
-            "potential": [[_r(v) for v in f.potential] for f in figs],
-            "current": [[_r(v) for v in f.current] for f in figs],
-            "permeability": [_r(1.0 - f.p / base.p) for f in figs],
+            "potential": [[sigfig(v) for v in f.potential] for f in figs],
+            "current": [[sigfig(v) for v in f.current] for f in figs],
+            "permeability": [sigfig(1.0 - f.p / base.p) for f in figs],
             # `ordered.geometry.iloc[:m]` types (wrongly) as a scalar BaseGeometry -- the same
             # geopandas-stub slice-collapse the `cast`s elsewhere on this page work around --
             # which then makes `.length` resolve to a single float instead of a Series. Slicing
             # the frame (not the geometry column) before reading `.length` sidesteps it and is
             # the same value: selecting first-m-then-geometry equals geometry-then-first-m.
-            "road_m": [_r(float(cast(GeoDataFrame, ordered.iloc[:m]).length.sum()))
+            "road_m": [sigfig(float(cast(GeoDataFrame, ordered.iloc[:m]).length.sum()))
                        for m in range(len(figs))],
         },
         "encoding": {

@@ -37,7 +37,13 @@ class FakeElement {
   readonly createdAt = ++clock;
   removedAt: number | null = null;
 
-  constructor(tagName: string) { this.tagName = tagName; }
+  /** UPPERCASE, as a real element reports it -- `dom/fallback.ts` tests `tagName === "A"` to decide
+   * whether the thing wrapping the fallback image is the glightbox anchor, so a lowercase fake would
+   * make that branch untestable here while looking tested. Every selector below is upper-cased at
+   * the point of comparison instead, so call sites still read `querySelector("img")`. */
+  constructor(tagName: string) { this.tagName = tagName.toUpperCase(); }
+  /** Set by `append`/`insertBefore`, read by `remove` and by `dom/fallback.ts`'s `parentElement`. */
+  parent: FakeElement | null = null;
   setAttribute(name: string, value: string): void { this.attrs.set(name, value); }
   getAttribute(name: string): string | null { return this.attrs.get(name) ?? null; }
   /** A plain string appended to a real element becomes a text NODE, so the fake keeps it too --
@@ -48,17 +54,33 @@ class FakeElement {
   append(...nodes: (FakeElement | string)[]): void {
     for (const n of nodes) {
       if (typeof n === "string") {
-        const text = new FakeElement("#text");
+        const text = new FakeElement("#TEXT");
         text.textContent = n;
+        text.parent = this;
         this.children.push(text);
       } else {
+        n.parent = this;
         this.children.push(n);
       }
     }
   }
-  insertBefore(node: FakeElement, _ref: FakeElement | null): void { this.children.push(node); }
+  insertBefore(node: FakeElement, _ref: FakeElement | null): void {
+    node.parent = this;
+    this.children.push(node);
+  }
   replaceChildren(...nodes: FakeElement[]): void { this.children = [...nodes]; }
-  remove(): void { this.removedAt = ++clock; }
+  /** DETACHES, as a real `remove()` does -- not merely a timestamp. `dom/fallback.ts` removes the
+   * <img> and then asks whether its anchor has any element children left; a fake that only recorded
+   * the removal would leave that count at 1 forever and the anchor branch would never be reached. */
+  remove(): void {
+    this.removedAt = ++clock;
+    if (this.parent) {
+      this.parent.children = this.parent.children.filter((c) => c !== this);
+      this.parent = null;
+    }
+  }
+  /** Real `parentElement` is null once removed, which is exactly what `remove()` above leaves. */
+  get parentElement(): FakeElement | null { return this.parent; }
   addEventListener(name: string, fn?: (ev: unknown) => void): void {
     this.listeners.push(name);
     if (fn) (this.handlers[name] ??= []).push(fn);
@@ -71,21 +93,22 @@ class FakeElement {
   }
   setPointerCapture(): void {}
   releasePointerCapture(): void {}
-  /** Every fake element reports the same layout width. The widget measures the <div> it inserts
-   * into the figure, which in a browser inherits the figure's own content width -- there is no
-   * layout engine here to compute that, and the number itself is not what any assertion turns on. */
+  /** Every fake element reports the same layout width. It is what `FakeResizeObserver.observe`
+   * delivers as the initial observation of the <div> the widget inserts into the figure, which in a
+   * browser inherits the figure's own content width -- there is no layout engine here to compute
+   * that, and the number itself is not what any assertion turns on. */
   getBoundingClientRect(): { width: number; height: number; left: number; top: number } {
     return { width: HOST_WIDTH, height: HOST_WIDTH, left: 0, top: 0 };
   }
   querySelector(selector: string): FakeElement | null {
-    return this.descendants().find((c) => c.tagName === selector) ?? null;
+    return this.descendants().find((c) => c.tagName === selector.toUpperCase()) ?? null;
   }
   descendants(): FakeElement[] {
     return this.children.flatMap((c) => [c, ...c.descendants()]);
   }
   /** Every element of `tagName` anywhere below this one, in document order. */
   all(tagName: string): FakeElement[] {
-    return this.descendants().filter((c) => c.tagName === tagName);
+    return this.descendants().filter((c) => c.tagName === tagName.toUpperCase());
   }
   /** All text this element and its descendants carry -- the widget's readout, as a reader sees it. */
   text(): string {
@@ -97,7 +120,40 @@ class FakeElement {
   createElement: (tag: string): FakeElement => new FakeElement(tag),
   createElementNS: (_ns: string, tag: string): FakeElement => new FakeElement(tag),
 };
-(globalThis as Record<string, unknown>).window = { addEventListener: (): void => {} };
+/** The observer the widget now lays itself out from (src/dom/resize.ts). A real one delivers an
+ * initial observation once `observe()` has been called, so the fake does too -- but DEFERRED to a
+ * microtask, never synchronously, because a real ResizeObserver delivers from the browser's own
+ * dispatch after the caller has returned. Firing synchronously would put the first draw inside the
+ * mount's `fetch().then(boot).catch(showWidgetError)` chain, where that chain's `.catch` absorbs any
+ * throw -- making `runOrReport` redundant in the fake and in the fake only. A microtask scheduled
+ * from within a `.then` handler runs after the handler returns, so it is outside the chain just as
+ * the browser's dispatch is, while still landing before the `setTimeout(0)` `mount()` awaits, which
+ * is what keeps "the chart is drawn by the time mount() resolves" true for every test below. `fire`
+ * then lets a test do the thing this whole task exists for: change the CONTAINER's width with the
+ * window untouched.
+ *
+ * Installed on globalThis at module top level, exactly like the `document` stub above and for the
+ * same reason: neither frontier.ts nor resize.ts touches either global in its module body, only
+ * inside functions the tests call. */
+class FakeResizeObserver {
+  static live: FakeResizeObserver[] = [];
+  disconnected = false;
+  constructor(private readonly cb:
+              (entries: { contentRect: { width: number; height: number } }[]) => void) {
+    FakeResizeObserver.live.push(this);
+  }
+  observe(el: FakeElement): void {
+    const { width, height } = el.getBoundingClientRect();
+    queueMicrotask(() => this.fire(width, height));
+  }
+  disconnect(): void { this.disconnected = true; }
+  fire(width: number, height: number): void { this.cb([{ contentRect: { width, height } }]); }
+}
+(globalThis as Record<string, unknown>).ResizeObserver = FakeResizeObserver;
+// NOTE: there is deliberately no `window` stub here any more. It existed only to absorb the
+// `window.addEventListener("resize", ...)` this widget used to register; nothing in frontier.ts or
+// anything it imports reads `window` now, so a stub would be scenery standing in for a dependency
+// that no longer exists.
 
 const HOST_WIDTH = 800;
 const BUNDLE_PATH = "../examples/method-comparison/frontier.json";
@@ -111,7 +167,13 @@ const bundle = JSON.parse(readFileSync(BUNDLE_PATH, "utf8")) as FrontierBundle;
  * a fixture's idea of them. */
 function mountPoint(): FakeElement {
   const figure = new FakeElement("figure");
-  figure.children.push(new FakeElement("img"), new FakeElement("figcaption"));
+  // The <img> sits inside an <a class="glightbox">, because that is what the SERVED page carries:
+  // mkdocs-glightbox rewrites every non-skip_lightbox figure image into a lightbox link at build
+  // time. A fixture with a bare <img> would let a widget that removes only the image pass, while the
+  // live page kept an empty, focusable, screen-reader-announced link where the picture was.
+  const anchor = new FakeElement("a");
+  anchor.append(new FakeElement("img"));
+  figure.append(anchor, new FakeElement("figcaption"));
   figure.dataset["bundle"] = BUNDLE_PATH;
   figure.dataset["targetDisplacement"] = String(bundle.matched_displacement);
   figure.dataset["targetPermeability"] = String(bundle.matched_permeability);
@@ -281,11 +343,21 @@ test("every number the chart draws is also on the page as text", async () => {
 
 test("the fallback image survives a boot failure and is removed only on success", async () => {
   const ok = mountPoint();
-  await mount(ok);
+  // Captured BEFORE the mount: `remove()` detaches, so after a successful mount there is no <img>
+  // left in the tree to query for -- which is the point.
   const img = ok.querySelector("img")!;
+  const anchor = ok.querySelector("a")!;
+  await mount(ok);
   const svg = ok.all("svg")[0]!;
   assert.notEqual(img.removedAt, null,
     "the fallback image is still there after a successful mount -- the reader sees both");
+  // ...and so is the glightbox <a> that wrapped it. An anchor emptied of its image is invisible but
+  // still focusable, and a screen reader announces it as a link with no text -- inside the figure
+  // whose whole accessibility argument is that its contents are reachable text. PermGraph shipped
+  // exactly that to the live site.
+  assert.notEqual(anchor.removedAt, null,
+    "the glightbox anchor outlived its image: an empty, focusable, unlabelled link");
+  assert.equal(ok.all("a").length, 0, "an <a> survives inside the mounted figure");
   // ORDER, not merely both: removing the image before the chart exists would leave a gap on the
   // page for however long the drawing takes, and -- if the drawing then threw -- for good, under an
   // error message that says "the static image above still applies".
@@ -299,6 +371,8 @@ test("the fallback image survives a boot failure and is removed only on success"
   delete broken.dataset["targetPermeability"];
   await mount(broken);
   assert.equal(broken.querySelector("img")!.removedAt, null);
+  assert.equal(broken.querySelector("a")!.removedAt, null,
+    "the anchor went even though the image it wraps -- the picture the error text points at -- stayed");
   assert.match(broken.querySelector("figcaption")!.textContent,
     /Frontier could not load interactively .*data-target-permeability/);
   // The sentence that only one of the three former copies carried (final review, M7): the reader is
@@ -355,7 +429,7 @@ test("a drag that does not move the guide past a step boundary does not re-rende
   // axis, and the step is 0.01. So +1 px cannot cross a step boundary and +40 px must.
   const host = mountPoint();
   await mount(host);
-  const chart = host.children.find((c) => c.tagName === "div")!;
+  const chart = host.children.find((c) => c.tagName === "DIV")!;
   assert.ok(host.all("circle").length > 0, "no markers drawn, so a re-render would be unobservable");
 
   chart.dispatch("pointerdown", { clientX: 260, clientY: 300, pointerId: 1, preventDefault: () => {} });
@@ -384,3 +458,71 @@ test("a boot target outside its own axis is refused rather than drawn off-chart"
     /data-target-permeability \(1\.5\) is outside its axis \[0, 1\]/);
   assert.equal(host.querySelector("img")!.removedAt, null);
 });
+
+test("a container narrowing with the window untouched re-lays the chart out at the new width",
+  async () => {
+    // The defect this task exists for. `cv.style.width`/`getBoundingClientRect` made the box right
+    // AT MOUNT, and a `window` resize listener made it right again when the WINDOW moved -- neither
+    // covers a container narrowing on its own (Material's nav drawer at a breakpoint, a <details>
+    // opening, a tab panel, print), which is where this absolute-pixel SVG overflowed its figure.
+    const host = mountPoint();
+    await mount(host);
+    const before = host.all("svg")[0]!;
+    assert.equal(before.getAttribute("width"), String(HOST_WIDTH));
+
+    FakeResizeObserver.live.at(-1)!.fire(320, 200);
+
+    const after = host.all("svg")[0]!;
+    assert.equal(host.all("svg").length, 1, "the old chart was left on the page beside the new one");
+    assert.equal(after.getAttribute("width"), "320", "the chart kept the width it mounted at");
+    // The INLINE style, not the presentation attribute: Material ships
+    // `.md-typeset svg{height:auto;max-width:100%}`, which beats a zero-specificity attribute.
+    assert.equal(after.style["width"], "320px");
+    assert.equal(after.style["height"], `${320 / (4 / 3)}px`);
+    // Re-laid out, not scaled: the labels are still real text at their designed size, which is the
+    // whole reason this is a re-render and not a viewBox.
+    assert.ok(after.all("text").length >= 4, "the narrowed chart lost its axis chrome");
+    assert.ok(!host.querySelector("figcaption")!.textContent.includes("could not load"),
+      host.querySelector("figcaption")!.textContent);
+  });
+
+test("a resize that does not change the width does not rebuild the chart", async () => {
+  // Our own render changes the box being observed: `chartHost` is 0 px tall until the SVG lands in
+  // it, so the first draw fires a second callback carrying the SAME width. Without the guard that
+  // rebuilds 8 polylines and 548 markers to draw the identical picture, on every resize.
+  const host = mountPoint();
+  await mount(host);
+  const obs = FakeResizeObserver.live.at(-1)!;
+  const afterMount = created();
+  obs.fire(HOST_WIDTH, 613);
+  assert.equal(created(), afterMount,
+    "a height-only resize rebuilt the whole chart -- and each rebuild changes the height again");
+  obs.fire(321, 613);
+  assert.ok(created() > afterMount, "a real width change must still re-render");
+});
+
+test("a throw while re-laying out reaches the caption instead of vanishing into the console",
+  async () => {
+    // The failure path this task introduced. Everything up to and including the first draw used to
+    // run inside the mount's `fetch().then().catch(showWidgetError)` chain; drawing now happens in a
+    // ResizeObserver callback, which is OUTSIDE it -- a throw there is an unhandled rejection and
+    // nothing else, and by then the fallback <img> is already gone, so the reader is left with a
+    // blank figure and no message. That is this branch's signature defect, so it gets its own route
+    // back to the page (`runOrReport`, dom/error.ts).
+    const host = mountPoint();
+    await mount(host);
+    const obs = FakeResizeObserver.live.at(-1)!;
+    const doc = (globalThis as Record<string, unknown>)["document"] as
+      { createElementNS: (ns: string, tag: string) => FakeElement };
+    const real = doc.createElementNS;
+    doc.createElementNS = (): FakeElement => { throw new Error("boom while re-laying out"); };
+    try {
+      obs.fire(320, 200);
+    } finally {
+      doc.createElementNS = real;
+    }
+    assert.match(host.querySelector("figcaption")!.textContent,
+      /Frontier could not load interactively .*boom while re-laying out/);
+    assert.match(host.querySelector("figcaption")!.textContent,
+      /The static image above still applies\./);
+  });

@@ -182,6 +182,22 @@ def test_displacement_counts_a_shared_site_once_under_overlapping_corridors():
     assert displacement(pts, radii, roads) == 3.0
 
 
+def test_displacement_contributions_pins_the_r_equals_zero_convention() -> None:
+    # r_i = 0 (coincident points) is the one branch `displacement_from_distance`'s sum can hide --
+    # a 0-or-1 contribution changes a total either way, so pin it on the per-building array
+    # directly: d <= 0 -> c = 1 (a coincident point sitting exactly on the corridor is fully
+    # displaced), d > 0 -> c = 0 (off the corridor with no radius to graze it at all). The third
+    # point (r=3, d=1.5) is the ordinary ramp, included so this isn't a degenerate all-zero-radius
+    # case.
+    import numpy as np
+
+    from reblock.budget import displacement_contributions
+    radii = np.array([0.0, 0.0, 3.0])
+    d = np.array([0.0, 1.0, 1.5])
+    got = displacement_contributions(radii, d)
+    assert list(got) == [1.0, 0.0, 0.5]
+
+
 def test_repulsion_is_positive_even_far_from_all_buildings():
     from shapely.geometry import LineString, Point
 

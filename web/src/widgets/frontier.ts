@@ -4,7 +4,10 @@ import type { ChartStyle, FrontierBundle, MethodCurve } from "../frontier.js";
 // evaluation (see mount.ts's registration comment) -- this file must never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory } from "../state.js";
-import { showWidgetError } from "../dom/error.js";
+import { requireAttr } from "../dom/attrs.js";
+import { runOrReport, showWidgetError } from "../dom/error.js";
+import { removeFallbackImage } from "../dom/fallback.js";
+import { observeSize } from "../dom/resize.js";
 import { createSvg, drawAxes, drawGuide, drawMarkers, drawPolyline } from "../render/svg.js";
 import { niceTicks } from "../view/ticks.js";
 import { fitAxes, nearest, toScreen, toWorld, type View } from "../view/transform.js";
@@ -213,17 +216,17 @@ function inRange(value: number, max: number, what: string): number {
   return value;
 }
 
-function requireAttr(raw: string | undefined, what: string): string {
-  if (raw === undefined || raw === "") throw new Error(`frontier: ${what} is missing`);
-  return raw;
-}
-
 // ------------------------------------------------------------------------------------ the widget
 
 interface FrontierState { targetDisplacement: number; targetPermeability: number; isolated: string | null }
 
+/** The name every failure of this widget is reported under -- one constant, because it is used from
+ * two unrelated places (the fetch chain and the resize callback) and two spellings of it would be a
+ * reader seeing two different widgets fail. */
+const LABEL = "Frontier";
+
 export const frontier: Widget = (host, makeState) => {
-  const src = requireAttr(host.dataset.bundle, "data-bundle");
+  const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
   // A 404, a renamed bundle field, or any throw inside boot() must be VISIBLE on the page, not an
   // unhandled rejection in the console while the PNG fallback keeps the page looking correct --
   // the same pattern PermGraph settled on, for the same reason.
@@ -233,19 +236,8 @@ export const frontier: Widget = (host, makeState) => {
       return r.json() as Promise<FrontierBundle>;
     })
     .then((b) => boot(host, makeState, b))
-    .catch((err: unknown) => showWidgetError(host, "Frontier", err));
+    .catch((err: unknown) => showWidgetError(host, LABEL, err));
 };
-
-/** The chart's pixel box: the host element's own width, and a height from the fallback PNG's true
- * aspect ratio (`data-chart`'s `aspect`, read from the PNG's own header by the generator), so the
- * widget occupies the shape of the image it replaces. Throws on a non-positive width rather than
- * building a zero-width SVG, which would look exactly like a widget that mounted and then failed
- * to draw. */
-function measure(el: HTMLElement, aspect: number): { width: number; height: number } {
-  const { width } = el.getBoundingClientRect();
-  if (!(width > 0)) throw new Error(`frontier: the chart box has no width (${width})`);
-  return { width, height: width / aspect };
-}
 
 /** Both axes are fractions in [0, 1] shown as PERCENTAGES, mirroring the
  * `PercentFormatter(xmax=1)` emit.compare_report puts on both axes of the figure this widget
@@ -286,7 +278,7 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   // The one number that is genuinely the PAGE's and not the data's: the fallback image's aspect
   // ratio, which the generator measures off that PNG's own IHDR header. It describes the picture
   // this figure replaces, so it belongs beside it rather than in a bundle about methods.
-  // M1: POSITIVE, not merely finite -- `measure` divides by it, so 0 makes the box height Infinity
+  // M1: POSITIVE, not merely finite -- the resize callback divides by it, so 0 makes the box height Infinity
   // and every polyline coordinate NaN: finding I1's failure shape in the one field the I1 sweep did
   // not reach. Unreachable from the generator (a valid PNG cannot report a zero height), but the
   // rule this file states for the bundle's numbers applies to the page's number too.
@@ -325,7 +317,6 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   const s0 = state.get();
 
   const caption = host.querySelector("figcaption");
-  const fallback = host.querySelector("img");
 
   const chartHost = document.createElement("div");
   // Pointer events on the guides are drags, not scrolls: without this a touch drag pans the page.
@@ -403,8 +394,11 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
     host.append(chartHost, controls);
   }
 
-  let size = measure(chartHost, aspect);
-  let view: View = fitAxes([0, xMax], [0, yMax], size.width, size.height, chart.pad);
+  // Both assigned by the observer at the bottom of this function and by nothing else. Everything
+  // that reads them -- `render`, the drag and hover handlers -- is wired from inside the first sized
+  // callback, so there is no ordering in which they are read before that callback has run.
+  let size: { width: number; height: number };
+  let view: View;
 
   // Screen-space positions of the DRAWN samples, per visible method, rebuilt by render(). Screen
   // space and not world space because "nearest" must mean nearest in pixels: a world-space
@@ -504,8 +498,22 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
       + `${formatTarget(s.targetDisplacement)} displacement on block ${blockId}.`;
   };
 
-  state.subscribe(render);
-
+  /** A pointer event's position inside the chart, in the same pixel frame `view` maps world
+   * coordinates into.
+   *
+   * TWO DIFFERENT BOXES MEET HERE, and they used to be one. `view` is built from the observer's
+   * `contentRect`, which is the CONTENT box; `getBoundingClientRect()` returns the BORDER box,
+   * because client coordinates exist in no other frame -- there is no API that gives a pointer's
+   * position relative to an element's content box, so this cannot be avoided, only stated.
+   *
+   * They coincide exactly while `chartHost` has no border and no padding, which it has none of
+   * today (it is a bare <div> this file creates, and it sets only `touch-action`). Give it either
+   * and every drag is offset by that much: the guide would land where the pointer was not, on a
+   * chart that still looks perfectly drawn, with nothing thrown anywhere. If such a rule ever
+   * arrives it lands in docs/stylesheets/sbu.css, most plausibly on
+   * `.md-typeset .sbu-figure-grid > figure` or a descendant of it -- and the fix is then to subtract
+   * the computed border and padding here, not to re-measure `view` from the border box.
+   */
   const localPoint = (ev: PointerEvent): [number, number] => {
     const r = chartHost.getBoundingClientRect();
     return [ev.clientX - r.left, ev.clientY - r.top];
@@ -556,33 +564,55 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
       + `${formatMeasured(curve.permeability[bestIndex]!)} permeability.`;
   };
 
-  chartHost.addEventListener("pointerdown", (ev) => {
-    ev.preventDefault();
-    const [sx, sy] = localPoint(ev);
-    const s = state.get();
-    const [guideX] = toScreen(view, s.targetDisplacement, 0);
-    const [, guideY] = toScreen(view, 0, s.targetPermeability);
-    dragging = Math.abs(sx - guideX) <= Math.abs(sy - guideY) ? "x" : "y";
-    chartHost.setPointerCapture(ev.pointerId);
-    dragTo(sx, sy);
-  });
-  chartHost.addEventListener("pointermove", (ev) => {
-    const [sx, sy] = localPoint(ev);
-    if (dragging !== null) dragTo(sx, sy); else hoverAt(sx, sy);
-  });
-  const endDrag = (): void => { dragging = null; };
-  chartHost.addEventListener("pointerup", endDrag);
-  chartHost.addEventListener("pointercancel", endDrag);
+  const wireInteraction = (): void => {
+    chartHost.addEventListener("pointerdown", (ev) => {
+      ev.preventDefault();
+      const [sx, sy] = localPoint(ev);
+      const s = state.get();
+      const [guideX] = toScreen(view, s.targetDisplacement, 0);
+      const [, guideY] = toScreen(view, 0, s.targetPermeability);
+      dragging = Math.abs(sx - guideX) <= Math.abs(sy - guideY) ? "x" : "y";
+      chartHost.setPointerCapture(ev.pointerId);
+      dragTo(sx, sy);
+    });
+    chartHost.addEventListener("pointermove", (ev) => {
+      const [sx, sy] = localPoint(ev);
+      if (dragging !== null) dragTo(sx, sy); else hoverAt(sx, sy);
+    });
+    const endDrag = (): void => { dragging = null; };
+    chartHost.addEventListener("pointerup", endDrag);
+    chartHost.addEventListener("pointercancel", endDrag);
+  };
 
-  window.addEventListener("resize", () => {
-    size = measure(chartHost, aspect);
+  // The chart is laid out at the width the CONTAINER reports, every time that width changes -- not
+  // measured once at mount and then only when the window moves, which missed every container-only
+  // resize (Material's nav drawer, a <details>, print) and left this absolute-pixel SVG overflowing.
+  // Height comes from the fallback PNG's own aspect ratio, so the widget keeps occupying the shape
+  // of the image it replaces; only the width is ever measured.
+  //
+  // `runOrReport`: this callback is outside the mount's `.catch`, so without it a throw in here is
+  // an unhandled rejection and a blank figure (see dom/error.ts).
+  //
+  // `drawnWidth` is BOTH the "have we drawn yet" flag (-1 until the first draw) and the guard
+  // against a redraw feeding the observer back into itself: `chartHost` is 0 px tall until the SVG
+  // lands in it, so our own first render changes the content box it is being observed by, and the
+  // second callback carries the same width and would rebuild the identical picture -- 8 polylines
+  // and 548 markers of it.
+  let drawnWidth = -1;
+  observeSize(chartHost, ({ width }) => runOrReport(host, LABEL, () => {
+    if (width === drawnWidth) return;
+    const first = drawnWidth < 0;
+    size = { width, height: width / aspect };
     view = fitAxes([0, xMax], [0, yMax], size.width, size.height, chart.pad);
     render();
-  });
-
-  render();
-  // The fallback image goes only once a real chart has been drawn in its place. A throw anywhere
-  // above lands in the widget's own `.catch`, which replaces the caption with the failure -- and
-  // that message is only honest while the static image it points at is still on the page.
-  if (fallback) fallback.remove();
+    drawnWidth = width;
+    if (first) {
+      state.subscribe(render);
+      wireInteraction();
+      // The fallback image goes only once a real chart has been drawn in its place. A throw anywhere
+      // above lands in `runOrReport`, which replaces the caption with the failure -- and that message
+      // is only honest while the static image it points at is still on the page.
+      removeFallbackImage(host);
+    }
+  }));
 }
