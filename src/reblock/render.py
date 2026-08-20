@@ -36,6 +36,7 @@ from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from reblock.budget import corridor_distance
 from reblock.contracts import BBox, Block, Metrics, Proposal
 from reblock.perm_graph import GRAPH_LAYERS, GraphFigure, GraphLayer
 
@@ -373,7 +374,6 @@ def field_contributions(block: Block, roads: gpd.GeoDataFrame,
     without reading pixels. NOT baked into the widget's bundle: the widget derives `c` itself from
     the road position, which is what makes the road draggable at all.
     """
-    from reblock.budget import corridor_distance   # deferred: budget imports render's siblings
     n = len(block.building_points)
     if n == 0 or roads is None or roads.empty:
         return np.zeros(n, dtype=np.float64)

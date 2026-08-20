@@ -8,8 +8,9 @@ import pandas as pd
 import pytest
 
 matplotlib.use("Agg")
+from matplotlib.axes import Axes
 from matplotlib.collections import PatchCollection
-from matplotlib.colors import to_hex
+from matplotlib.colors import to_hex, to_rgba
 from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
@@ -450,20 +451,36 @@ def test_render_graph_draws_upgraded_edges_in_the_road_colour() -> None:
         assert widths == [_UPGRADED_LW] * len(widths)
 
 
+def _disk_paths(ax: Axes) -> int:
+    """Total paths across the disk collections, found by COLOUR rather than by count.
+
+    Both disk layers draw in `_DISPLACED_PT` -- filled for grazed buildings, outlined for untouched
+    ones -- while the parcel wireframe is `_CONTEXT_OUTLINE` and the corridor is `_ROAD_COLOR`. A
+    path COUNT cannot separate them: parcels are Voronoi cells of the building points
+    (src/reblock/mesh.py:59), so a block has exactly as many parcels as buildings (263 and 263 on
+    the pinned block), and the first version of this test matched the parcel wireframe and passed
+    while the untouched disks were not drawn at all.
+    """
+    want = to_rgba(_DISPLACED_PT)[:3]
+
+    def matches(arr: object) -> bool:
+        rows = np.atleast_2d(np.asarray(arr, dtype=float))
+        return any(row.size >= 3 and np.allclose(row[:3], want, atol=1.0 / 255.0) for row in rows)
+
+    return sum(len(c.get_paths()) for c in ax.collections
+               if matches(c.get_facecolor()) or matches(c.get_edgecolor()))
+
+
 def test_render_field_draws_every_building_not_only_the_displaced_ones():
-    """The point of the figure: a reader must be able to see that a road THREADED a gap, which
-    means seeing the disks it missed. render_after draws only the displaced ones."""
+    """The point of the figure: a reader must be able to see that a road THREADED a gap, which means
+    seeing the disks it missed. `render_after` draws only the displaced ones."""
     block = _field_block()
-    roads = _mid_road(block)
     radii = building_radii(block.building_points)
-    fig = render_field(block, roads, radii)
-    ax = fig.axes[0]
-    # One PatchCollection per disk group; every building appears exactly once.
-    disk_counts = [len(c.get_paths()) for c in ax.collections
-                   if len(c.get_paths()) == len(block.building_points)]
-    assert disk_counts, (
-        f"no collection covers all {len(block.building_points)} buildings; "
-        f"collection sizes were {[len(c.get_paths()) for c in ax.collections]}")
+    fig = render_field(block, _mid_road(block), radii)
+    n = len(block.building_points)
+    assert _disk_paths(fig.axes[0]) == n, (
+        f"{_disk_paths(fig.axes[0])} disks drawn for {n} buildings -- one of the two disk layers is "
+        f"missing, so a road that threaded a gap would look like a road that merely missed")
 
 
 def test_render_field_shades_by_c_and_uses_the_named_constant():
