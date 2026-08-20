@@ -23,6 +23,9 @@
 - **Every guard must be shown to fail before it counts.** Break it, observe red, restore. An injection that will not go red is reported, not tuned.
 - **`import type` for every `.d.ts` import in widget code**; relative imports carry the `.js` extension.
 - Run Python as `pixi run python -m scripts.<name>` — `pythonpath` is pytest-only.
+- **`pixi run lint` is a gate on every task, not just the Python ones.** Task 1 shipped a
+  101-column line green because its brief listed only pytest and typecheck. If a task's own gate
+  list below omits it, it is still required.
 
 ## File Structure
 
@@ -213,7 +216,7 @@ Add `from matplotlib.colors import to_rgba` to the imports.
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pixi run pytest tests/test_render.py -v`
+Run: `pixi run pytest tests/test_render.py -v`, then `pixi run typecheck` and `pixi run lint`.
 Expected: PASS, and no existing `render_before`/`render_after`/`render_graph` test regresses.
 
 - [ ] **Step 5: Fault-inject each new guard**
@@ -441,7 +444,8 @@ def closed_form_distance(px: NDArray[np.float64], py: NDArray[np.float64],
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pixi run pytest tests/test_displacement_closed_form.py -v`
+Run: `pixi run pytest tests/test_displacement_closed_form.py -v`, then `pixi run typecheck` and
+`pixi run lint`.
 Expected: PASS. First run loads the pinned block (minutes if the derivation cache is cold).
 
 - [ ] **Step 5: Fault-inject**
@@ -769,6 +773,7 @@ For `outside`, translate road 1 by `2 × the block's diagonal` along its normal.
 ```bash
 pixi run python -m scripts.gen_displacement_field
 pixi run pytest tests/test_displacement_field_bundle.py tests/test_web_bundle.py -v
+pixi run typecheck && pixi run lint
 ```
 Expected: PASS. `examples/displacement-field/field.json` under ~350 KB.
 
@@ -969,7 +974,7 @@ export function sumC(radii: readonly number[], d: Float64Array): number {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pixi run web-test` then `pixi run web-check`
+Run: `pixi run web-test`, then `pixi run web-check`, then `pixi run lint`.
 Expected: PASS, and `tsc --noEmit` clean under `noUncheckedIndexedAccess`.
 
 - [ ] **Step 5: Fault-inject**
@@ -1160,7 +1165,8 @@ bundle is worse than no test, because its green tick is what stops anyone lookin
 - [ ] **Step 7: Run the gates**
 
 ```bash
-pixi run web && pixi run web-test && pixi run web-check && pixi run test-py -k "site_pages or web_bundle"
+pixi run web && pixi run web-test && pixi run web-check && pixi run lint \
+  && pixi run test-py -k "site_pages or web_bundle"
 ```
 
 `pixi run web` **first**, and commit the rebuilt `docs/js/widgets.js` with this task. Every task that
@@ -1296,7 +1302,7 @@ Boot order:
 - [ ] **Step 5: Run the gates**
 
 ```bash
-pixi run web-test && pixi run web-check && pixi run web
+pixi run web && pixi run web-test && pixi run web-check && pixi run lint
 ```
 The last one rebuilds `docs/js/widgets.js`; commit it, as D1 did.
 

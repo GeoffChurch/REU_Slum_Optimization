@@ -65,7 +65,9 @@ separately. F reduces to permeability-in-Pyodide on a road the reader has alread
 ## §2 What the reader does
 
 The widget boots showing the block: parcels as a pale wireframe, the block boundary and existing
-streets, every building as a disk of its own radius `rᵢ`, and **two roads** — one live, one toggled
+streets, the road corridor, every building as a disk of its own radius `rᵢ` drawn **over** that
+corridor (a translucent corridor on top would tint the shading it exists to be read against), and
+**two roads** — one live, one toggled
 off. Each road is a straight segment with a draggable handle at each end. A width slider sets the
 live road's `width_m`. A readout gives `Σcᵢ` and the fraction, recomputed every frame.
 
