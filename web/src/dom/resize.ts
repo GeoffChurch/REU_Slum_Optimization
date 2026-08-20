@@ -15,6 +15,18 @@
  *
  * `ResizeObserver` needs no shim: it is declared in the checked `lib: ["ES2022", "DOM"]` surface,
  * and it has been unprefixed in every browser this site supports since 2020.
+ *
+ * THE RETURNED DISPOSER HAS NO CALLER TODAY, and that is a consequence of a decision the project has
+ * already recorded rather than an unused hook kept in hope. A widget lives exactly as long as its
+ * page because Material's `navigation.instant` is deliberately OFF -- see
+ * docs/superpowers/specs/2026-08-13-site-redesign-design.md ("Do not enable Material's
+ * `navigation.instant`. It swaps pages without reload and breaks naive widget initialisation") and
+ * mount.ts's own DOMContentLoaded comment, which turns on the same fact. With it off there is
+ * nothing to dispose: the page unload takes the observer with it. Turn it on and page swaps stop
+ * reloading, `mountAll` has to move to Material's `document$` subscription, and observers from the
+ * page you navigated AWAY from keep firing against detached elements -- accumulating one per widget
+ * per navigation. This return value is the hook that stops that, and it is the reason the two lines
+ * exist now rather than being reconstructed under time pressure later.
  */
 export function observeSize(el: HTMLElement,
                             onSize: (size: { width: number; height: number }) => void): () => void {

@@ -502,6 +502,22 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
       + `${formatTarget(s.targetDisplacement)} displacement on block ${blockId}.`;
   };
 
+  /** A pointer event's position inside the chart, in the same pixel frame `view` maps world
+   * coordinates into.
+   *
+   * TWO DIFFERENT BOXES MEET HERE, and they used to be one. `view` is built from the observer's
+   * `contentRect`, which is the CONTENT box; `getBoundingClientRect()` returns the BORDER box,
+   * because client coordinates exist in no other frame -- there is no API that gives a pointer's
+   * position relative to an element's content box, so this cannot be avoided, only stated.
+   *
+   * They coincide exactly while `chartHost` has no border and no padding, which it has none of
+   * today (it is a bare <div> this file creates, and it sets only `touch-action`). Give it either
+   * and every drag is offset by that much: the guide would land where the pointer was not, on a
+   * chart that still looks perfectly drawn, with nothing thrown anywhere. If such a rule ever
+   * arrives it lands in docs/stylesheets/sbu.css, most plausibly on
+   * `.md-typeset .sbu-figure-grid > figure` or a descendant of it -- and the fix is then to subtract
+   * the computed border and padding here, not to re-measure `view` from the border box.
+   */
   const localPoint = (ev: PointerEvent): [number, number] => {
     const r = chartHost.getBoundingClientRect();
     return [ev.clientX - r.left, ev.clientY - r.top];

@@ -15,10 +15,18 @@ import type { Bundle } from "../src/bundle.js";
  */
 let clock = 0;
 
+/** Armed by `mount(host, width, drawFailure)` to make the FIRST draw throw. It has to be a module
+ * variable rather than a field set on the element: the canvas is created inside `boot()`, which runs
+ * a microtask after `permGraph` returns, so no test holds a reference to it in time. */
+let NEXT_DRAW_FAILURE: string | null = null;
+
 /** Every canvas call, in order. `draw()` is a long sequence of strokes and fills with no return
  * value anywhere, so "did it draw" is a question about this list and nothing else. */
 class RecordingContext {
   readonly calls: string[] = [];
+  /** When set, the next drawing call throws this. The only way to make `draw()` fail from a test:
+   * every path through it is canvas calls, so there is nothing else to reach in. */
+  failWith: string | null = NEXT_DRAW_FAILURE;
   fillStyle = "";
   strokeStyle = "";
   lineWidth = 0;
@@ -33,6 +41,7 @@ class RecordingContext {
    * merely after a canvas element did. The element is created either way; the drawing is not. */
   firstDrawAt: number | null = null;
   private record(name: string): void {
+    if (this.failWith !== null) throw new Error(this.failWith);
     this.calls.push(name);
     this.firstDrawAt ??= ++clock;
   }
@@ -116,7 +125,17 @@ class FakeElement {
 
 /** The observer the widget lays itself out from. `observe()` delivers an initial observation the way
  * a real one does, taking the width from `NEXT_WIDTH` -- the canvas has no layout engine here, and
- * a zero is the case that matters (a hidden container, a collapsed <details>). */
+ * a zero is the case that matters (a hidden container, a collapsed <details>).
+ *
+ * That delivery is DEFERRED to a microtask, and the deferral is the whole point rather than a
+ * detail. A real ResizeObserver never calls back from inside `observe()`; it delivers from the
+ * browser's own dispatch, after the code that called `observe()` has returned. Firing synchronously
+ * instead put the first draw INSIDE the mount's `fetch().then(boot).catch(showWidgetError)` chain,
+ * where that chain's `.catch` absorbs any throw -- so `runOrReport` was redundant in the fake and in
+ * the fake only, and a test proving the throw reaches the page passed with the wrapper deleted. A
+ * microtask scheduled from within a `.then` handler runs after the handler returns, so it is outside
+ * the chain exactly as the browser's dispatch is, while still landing before the `setTimeout(0)`
+ * `mount()` awaits -- which is what keeps "the chart is drawn by the time mount() resolves" true. */
 let NEXT_WIDTH = 0;
 class FakeResizeObserver {
   static live: FakeResizeObserver[] = [];
@@ -124,7 +143,10 @@ class FakeResizeObserver {
               (entries: { contentRect: { width: number; height: number } }[]) => void) {
     FakeResizeObserver.live.push(this);
   }
-  observe(): void { this.fire(NEXT_WIDTH, NEXT_WIDTH); }
+  observe(): void {
+    const [width, height] = [NEXT_WIDTH, NEXT_WIDTH];
+    queueMicrotask(() => this.fire(width, height));
+  }
   disconnect(): void {}
   fire(width: number, height: number): void { this.cb([{ contentRect: { width, height } }]); }
 }
@@ -151,8 +173,10 @@ function mountPoint(): FakeElement {
   return figure;
 }
 
-async function mount(host: FakeElement, width: number): Promise<void> {
+async function mount(host: FakeElement, width: number,
+                    drawFailure: string | null = null): Promise<void> {
   NEXT_WIDTH = width;
+  NEXT_DRAW_FAILURE = drawFailure;
   (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
     ok: true,
     status: 200,
@@ -160,7 +184,10 @@ async function mount(host: FakeElement, width: number): Promise<void> {
     json: (): Promise<unknown> => Promise.resolve(bundle),
   });
   permGraph(host as unknown as HTMLElement, localState);
+  // A macrotask, so every microtask -- the fetch chain AND the observer's deferred first delivery --
+  // has drained by the time this resolves.
   await new Promise((resolve) => setTimeout(resolve, 0));
+  NEXT_DRAW_FAILURE = null;
 }
 
 function canvasOf(host: FakeElement): FakeElement {
@@ -239,4 +266,41 @@ test("the container becoming visible later draws at the width it finally gets", 
   assert.ok(cv.ctx.calls.length > 0, "still blank after the container was laid out");
   assert.equal(cv.width, 320 * DPR);
   assert.notEqual(img.removedAt, null, "the fallback outlived a real drawing");
+});
+
+test("a throw while RE-drawing reaches the caption instead of vanishing into the console",
+  async () => {
+    // The failure path the observer introduced. A resize callback runs from the browser's own
+    // dispatch, outside the mount's `fetch().then(boot).catch(showWidgetError)` chain, so a throw in
+    // it is an uncaught exception and nothing else -- and by then the fallback <img> is gone, so the
+    // reader is left with a blank figure, no message, and a page that still looks laid out. This
+    // widget is the one live on the public site, and it had nothing covering that at all.
+    const host = mountPoint();
+    await mount(host, 640);
+    const cv = canvasOf(host);
+    assert.ok(cv.ctx.calls.length > 0, "nothing drew, so the re-draw below proves nothing");
+
+    cv.ctx.failWith = "boom while re-drawing";
+    FakeResizeObserver.live.at(-1)!.fire(320, 320);
+
+    assert.match(host.querySelector("figcaption")!.textContent,
+      /PermGraph could not load interactively .*boom while re-drawing/);
+    assert.match(host.querySelector("figcaption")!.textContent,
+      /The static image above still applies\./);
+  });
+
+test("a throw on the FIRST draw is reported and keeps the static image", async () => {
+  // The same route, on the delivery that is not a resize at all: the observer's initial observation.
+  // It arrives after `boot()` has returned (a real one always does), so the mount's `.catch` is
+  // already spent -- and this is the case where the message it writes has to be true, because the
+  // picture it points the reader at is the one that must NOT have been removed.
+  const host = mountPoint();
+  const img = host.querySelector("img")!;
+  await mount(host, 640, "boom on the first draw");
+
+  assert.match(host.querySelector("figcaption")!.textContent,
+    /PermGraph could not load interactively .*boom on the first draw/);
+  assert.equal(img.removedAt, null,
+    "the fallback image was removed although the drawing that replaces it threw");
+  assert.equal(host.all("a").length, 1, "the lightbox link went with an image that is still needed");
 });

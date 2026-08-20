@@ -121,7 +121,13 @@ class FakeElement {
   createElementNS: (_ns: string, tag: string): FakeElement => new FakeElement(tag),
 };
 /** The observer the widget now lays itself out from (src/dom/resize.ts). A real one delivers an
- * initial observation as soon as `observe()` is called, so the fake does too -- synchronously, which
+ * initial observation once `observe()` has been called, so the fake does too -- but DEFERRED to a
+ * microtask, never synchronously, because a real ResizeObserver delivers from the browser's own
+ * dispatch after the caller has returned. Firing synchronously would put the first draw inside the
+ * mount's `fetch().then(boot).catch(showWidgetError)` chain, where that chain's `.catch` absorbs any
+ * throw -- making `runOrReport` redundant in the fake and in the fake only. A microtask scheduled
+ * from within a `.then` handler runs after the handler returns, so it is outside the chain just as
+ * the browser's dispatch is, while still landing before the `setTimeout(0)` `mount()` awaits, which
  * is what keeps "the chart is drawn by the time mount() resolves" true for every test below. `fire`
  * then lets a test do the thing this whole task exists for: change the CONTAINER's width with the
  * window untouched.
@@ -138,7 +144,7 @@ class FakeResizeObserver {
   }
   observe(el: FakeElement): void {
     const { width, height } = el.getBoundingClientRect();
-    this.fire(width, height);
+    queueMicrotask(() => this.fire(width, height));
   }
   disconnect(): void { this.disconnected = true; }
   fire(width: number, height: number): void { this.cb([{ contentRect: { width, height } }]); }

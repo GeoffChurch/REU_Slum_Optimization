@@ -163,14 +163,22 @@ function boot(host: HTMLElement, makeState: StateFactory, b: Bundle): void {
     }, { passive: false });
   };
 
-  // The canvas re-fits itself to its CONTAINER, not to the window: `cv.style.width = "100%"` already
-  // stretched it on a container resize, but nothing re-sized the backing store or re-fitted the
-  // bbox, so the drawing was left scaled for the width it had at mount. No dedupe on width here (as
-  // Frontier needs): `aspect-ratio: 1 / 1` ties this box's height to its width, and `sizeCanvas`
-  // touches only the backing store, so the observer cannot be re-entered by our own drawing.
+  // The observed element is the CANVAS ITSELF, not the container. `cv.style.width = "100%"` makes
+  // the canvas's own content box track the container's content width, so observing it answers the
+  // question this widget actually has ("how many CSS pixels am I drawing into?") in one hop instead
+  // of two -- and it is the box `sizeCanvas` scales the backing store to, so there is no second
+  // element whose padding or border could put the two out of step.
   //
-  // `runOrReport`: this callback is outside boot()'s `.catch`, so without it a throw in here is an
-  // unhandled rejection and a blank figure (see dom/error.ts).
+  // Re-fitting on every such change is the fix: `width: 100%` already stretched the canvas when its
+  // container narrowed, but nothing re-sized the backing store or re-fitted the bbox, so the drawing
+  // stayed scaled for the width it had at mount -- and a window listener never saw it, because the
+  // window had not moved. No dedupe on width here (as Frontier needs): `aspect-ratio: 1 / 1` ties
+  // this box's height to its width, and `sizeCanvas` touches only the backing store, so the observer
+  // cannot be re-entered by our own drawing.
+  //
+  // `runOrReport`: a real ResizeObserver delivers its callbacks from the browser's own dispatch,
+  // NOT from inside boot()'s promise chain, so that chain's `.catch` cannot see a throw in here --
+  // it would be an uncaught exception with a blank figure and no message (see dom/error.ts).
   let firstDraw = true;
   observeSize(cv, (measured) => runOrReport(host, LABEL, () => {
     size = measured;

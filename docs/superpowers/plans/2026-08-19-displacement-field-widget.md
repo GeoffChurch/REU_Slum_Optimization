@@ -23,6 +23,12 @@
 - **Every guard must be shown to fail before it counts.** Break it, observe red, restore. An injection that will not go red is reported, not tuned.
 - **`import type` for every `.d.ts` import in widget code**; relative imports carry the `.js` extension.
 - Run Python as `pixi run python -m scripts.<name>` — `pythonpath` is pytest-only.
+- **`docs/js/widgets.js` is NOT committed** — `.gitignore:69` ignores `docs/js/`, CI builds it in
+  `deploy-site.yml`, and `web/scripts/test.sh` rebuilds it as its own first step with `|| exit 1` so
+  that a failed build cannot leave a stale bundle for `widgets-bundle.test.ts` to evaluate. There is
+  therefore nothing to stage and nothing to go stale. An earlier ruling in this plan asserted the
+  opposite and required a staleness guard; it was **retracted** in Task 5 after the guard was built
+  and found to be guarding nothing. Do not re-propose it.
 - **A new script module goes into BOTH mypy lists.** `pixi run typecheck-py` passes explicit file
   args, which override `[tool.mypy] files`, so `files` alone is inert for the gate. Task 3 adds a
   test pinning the two lists together.
@@ -1260,22 +1266,24 @@ Both widgets' `showWidgetError` paths stay exactly as they are.
 - `web/test/transform.test.ts`: strengthen `fitBbox`'s uniformity test to assert the scale equals `Math.min(width / bw, height / bh)` scaled by the pad, not merely that `scaleX === scaleY` — a `Math.max`-for-`Math.min` regression is currently green there.
 - `scripts/gen_site_pages.py`: delete `data-block` from every mount point it emits, and the assertions in `tests/test_gen_site_pages.py` that expect it. Every bundle carries `block_id`; a second source of one fact is drift waiting to happen. Confirm with `grep -rn "data-block\|dataset.block" web/ scripts/ tests/ docs/` that nothing reads it.
 
-- [ ] **Step 6: Guard the shipped bundle against going stale**
+- [ ] **Step 6: RETRACTED — there is no committed bundle to guard**
 
-`docs/js/widgets.js` is committed, and **nothing asserts it matches `web/src`.**
+*(Kept, struck, because the reasoning is instructive: it is the second time in this plan that a
+hazard I "found" was already closed in the repo.)* This step asserted that
+`docs/js/widgets.js` is committed and **nothing asserts it matches `web/src`.**
 `tests/test_gen_site_pages.py:308` checks only that it *exists*, and
 `web/test/widgets-bundle.test.ts` evaluates the committed artifact — so a source change that was
 never rebuilt leaves a stale bundle that passes every gate, including the artifact test, which is
 looking at the stale file and finding it fine. This task edits both shipped widgets, so it is the
 task that would ship that.
 
-Add to `web/test/widgets-bundle.test.ts`: rebuild with esbuild into a temp path and assert the
-bytes equal the committed `docs/js/widgets.js`. Fault-inject by editing one character of
-`web/src/mount.ts` without rebuilding — it must go red.
-
-If esbuild output turns out not to be byte-reproducible across runs, **report that** rather than
-weakening the assertion to a substring check: a "the bundle is current" test that passes on a stale
-bundle is worse than no test, because its green tick is what stops anyone looking.
+Both halves are false. `.gitignore:69` ignores `docs/js/`, so the bundle is never committed — CI
+builds it in `deploy-site.yml`. And `web/scripts/test.sh` runs `npm run build || exit 1` as its
+**first line**, with a comment written in piece C explaining exactly the failure I thought I had
+found: *"esbuild does NOT overwrite ../docs/js/widgets.js on a failed build — without checking the
+exit code, a build failure would leave a STALE bundle in place and widgets-bundle.test.ts would
+happily evaluate yesterday's successful build instead."* The test suite is self-sufficient by
+construction. **Skip this step.**
 
 - [ ] **Step 7: Run the gates**
 
@@ -1284,8 +1292,8 @@ pixi run web && pixi run web-test && pixi run web-check && pixi run lint \
   && pixi run test-py -k "site_pages or web_bundle"
 ```
 
-`pixi run web` **first**, and commit the rebuilt `docs/js/widgets.js` with this task. Every task that
-touches `web/src/**` does this.
+`pixi run web` first is harmless but not required — `web-test` rebuilds the bundle itself. Nothing
+to commit: `docs/js/` is gitignored.
 
 - [ ] **Step 9: Fault-inject**
 
@@ -1425,7 +1433,8 @@ Boot order:
 ```bash
 pixi run web && pixi run web-test && pixi run web-check && pixi run lint
 ```
-The last one rebuilds `docs/js/widgets.js`; commit it, as D1 did.
+The last one rebuilds `docs/js/widgets.js`. **Do not stage it** — `docs/js/` is gitignored and CI
+builds it; `web-test` rebuilds it too, so it can never be stale.
 
 - [ ] **Step 6: Fault-inject**
 
@@ -1435,7 +1444,7 @@ Delete the registration in `mount.ts` → `widgets-bundle.test.ts` must redden (
 
 ```bash
 git add web/src/render/field.ts web/src/widgets/displacement-field.ts web/src/mount.ts \
-        web/test/field-boot.test.ts docs/js/widgets.js
+        web/test/field-boot.test.ts
 git commit -m "feat: DisplacementField -- drag a road, watch what it costs"
 ```
 
