@@ -4,6 +4,7 @@ import type { ChartStyle, FrontierBundle, MethodCurve } from "../frontier.js";
 // evaluation (see mount.ts's registration comment) -- this file must never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory } from "../state.js";
+import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
 import { observeSize } from "../dom/resize.js";
@@ -215,11 +216,6 @@ function inRange(value: number, max: number, what: string): number {
   return value;
 }
 
-function requireAttr(raw: string | undefined, what: string): string {
-  if (raw === undefined || raw === "") throw new Error(`frontier: ${what} is missing`);
-  return raw;
-}
-
 // ------------------------------------------------------------------------------------ the widget
 
 interface FrontierState { targetDisplacement: number; targetPermeability: number; isolated: string | null }
@@ -230,7 +226,7 @@ interface FrontierState { targetDisplacement: number; targetPermeability: number
 const LABEL = "Frontier";
 
 export const frontier: Widget = (host, makeState) => {
-  const src = requireAttr(host.dataset.bundle, "data-bundle");
+  const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
   // A 404, a renamed bundle field, or any throw inside boot() must be VISIBLE on the page, not an
   // unhandled rejection in the console while the PNG fallback keeps the page looking correct --
   // the same pattern PermGraph settled on, for the same reason.

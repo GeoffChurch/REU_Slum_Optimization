@@ -1,11 +1,11 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import type { FieldBundle, ReferenceCase } from "../src/field.js";
+import type { FieldBundle, ReferenceCase, Road } from "../src/field.js";
 import { contributions, corridorDistance, flatten } from "../src/model/displacement.js";
 import { handles } from "../src/render/field.js";
 import { localState } from "../src/state.js";
-import { fitBbox, toScreen, type Bbox } from "../src/view/transform.js";
+import { fitBbox, toScreen, toWorld, type Bbox } from "../src/view/transform.js";
 import { displacementField } from "../src/widgets/displacement-field.js";
 
 /** The DisplacementField widget, mounted for real against the COMMITTED `field.json`.
@@ -40,6 +40,11 @@ interface Call {
   strokeStyle: string;
   fillStyle: string;
   lineWidth: number;
+  /** Recorded because it is CONTEXT STATE that outlives the call that set it: the corridor wants
+   * round caps and nothing else does, so a missing reset gives every later layer round caps AND
+   * makes frame 1 (which reaches those layers before the corridor has ever run) differ from frame
+   * 2. Neither is visible in a count. */
+  lineCap: string;
   globalAlpha: number;
   path: PathOp[];
 }
@@ -55,7 +60,7 @@ class RecordingContext {
   fillStyle = "";
   strokeStyle = "";
   lineWidth = 0;
-  lineCap = "";
+  lineCap = "butt";      // the real canvas default, so "never set" is not a distinct value
   globalAlpha = 1;
   readonly transforms: number[][] = [];
   /** The instant of the first drawing call, on the same counter `FakeElement` stamps creations and
@@ -88,6 +93,7 @@ class RecordingContext {
       strokeStyle: this.strokeStyle,
       fillStyle: this.fillStyle,
       lineWidth: this.lineWidth,
+      lineCap: this.lineCap,
       globalAlpha: this.globalAlpha,
       path: [...this.path],
     });
@@ -148,6 +154,9 @@ class FakeElement {
     }
   }
   get parentElement(): FakeElement | null { return this.parent; }
+  readonly attrs = new Map<string, string>();
+  setAttribute(name: string, value: string): void { this.attrs.set(name, value); }
+  getAttribute(name: string): string | null { return this.attrs.get(name) ?? null; }
   readonly handlers: Record<string, ((ev: unknown) => void)[]> = {};
   addEventListener(name: string, fn?: (ev: unknown) => void): void {
     if (fn) (this.handlers[name] ??= []).push(fn);
@@ -254,13 +263,14 @@ function mountPoint(): FakeElement {
   return figure;
 }
 
-async function mount(host: FakeElement, drawFailure: string | null = null): Promise<void> {
+async function mount(host: FakeElement, drawFailure: string | null = null,
+                     payload: unknown = bundle): Promise<void> {
   NEXT_DRAW_FAILURE = drawFailure;
   (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
     ok: true,
     status: 200,
     statusText: "OK",
-    json: (): Promise<unknown> => Promise.resolve(bundle),
+    json: (): Promise<unknown> => Promise.resolve(payload),
   });
   displacementField(host as unknown as HTMLElement, localState);
   // A macrotask, so the fetch chain has drained by the time this resolves.
@@ -287,6 +297,20 @@ function lastFrame(cv: FakeElement): Call[] {
   const from = starts.at(-1);
   assert.ok(from !== undefined, "nothing was ever drawn: no clearRect in the call log");
   return cv.ctx.calls.slice(from);
+}
+
+/** Exactly the state a call CONSUMES, and nothing else.
+ *
+ * A canvas context keeps its last style until something reassigns it, so a frame legitimately
+ * starts holding whatever the previous frame left: `clearRect` records a `fillStyle`, and a stroke
+ * records a `fillStyle` it cannot possibly use. Comparing whole `Call`s across frames would flag
+ * all of that as a leak, so the comparison is over what each op actually paints with -- which keeps
+ * `lineCap` on strokes, where a leak really does change the pixels. */
+function consumed(c: Call): Record<string, unknown> {
+  if (c.op === "clearRect") return { op: c.op };
+  if (c.op === "fill") return { op: c.op, fillStyle: c.fillStyle, alpha: c.globalAlpha, path: c.path };
+  return { op: c.op, strokeStyle: c.strokeStyle, lineWidth: c.lineWidth, lineCap: c.lineCap,
+           alpha: c.globalAlpha, path: c.path };
 }
 
 const isArc = (c: Call): boolean => c.path.length === 1 && c.path[0]?.op === "arc";
@@ -328,6 +352,73 @@ function cost(host: FakeElement): number {
   const m = /([\d.]+) homes displaced/.exec(p.textContent);
   assert.ok(m !== null, `the readout does not state a cost: ${JSON.stringify(p.textContent)}`);
   return Number(m[1]);
+}
+
+/** The picture prices the road it is drawn beside -- asserted against the model for the road set
+ * that is live RIGHT NOW, not the one the widget booted with.
+ *
+ * This is the guard the `contributions()` split exists to make possible, and testing it only at
+ * boot is what made it worthless: the reviewer cached the boot frame's `contributions` while
+ * leaving the readout live (the picture freezes, the number keeps moving) and stroked the corridor
+ * from the BAKED coordinates instead of the dragged ones (the road draws where it started while the
+ * cost reports where it was dragged to), and both left the whole suite green. Every interaction
+ * test below ends here, so the two halves of the figure are pinned to each other after the reader
+ * has actually done something.
+ *
+ * `roads` is built by the caller from `toWorld(VIEW, ...)` of the very pointer positions it
+ * dispatched, so the expected coordinates are bit-identical to the widget's own -- no tolerance is
+ * needed anywhere below, and none is used. */
+function assertPictureMatchesRoads(cv: FakeElement, roads: Road[], why: string): void {
+  const { x, y, r } = bundle.buildings;
+  const c = contributions(r, corridorDistance(x, y, flatten(roads)));
+  const grazed: number[] = [];
+  const missed: number[] = [];
+  for (let i = 0; i < r.length; i++) (c[i]! > 0 ? grazed : missed).push(i);
+  assert.ok(grazed.length > 0 && missed.length > 0,
+    `${why}: this road neither grazes nor misses anything, so both branches must be live here`);
+  const l = layers(cv);
+
+  // The CORRIDOR is drawn along the road the readout is pricing. One stroke per distinct width
+  // (the slider sets every live road, so in practice one), and the vertices of every road in it, in
+  // order -- which is what a corridor stroked from stale coordinates cannot produce.
+  const widths = [...new Set(roads.map((road) => road.width_m))];
+  assert.equal(l.corridor.length, widths.length, `${why}: one stroke per width group`);
+  l.corridor.forEach((stroke, k) => assert.equal(stroke.lineWidth, widths[k]! * VIEW.scaleX,
+    `${why}: the corridor is not at the live road width`));
+  assert.deepEqual(
+    l.corridor.flatMap((stroke) => stroke.path.map((op) => op.args)),
+    roads.flatMap((road) => road.coords.map(([wx, wy]) => [...toScreen(VIEW, wx, wy)])),
+    `${why}: the corridor is not drawn where the road now is`);
+
+  // The DISKS are shaded by the cost of that same road: one fill per grazed building at exactly its
+  // own alpha, one outline per untouched one, each at its own place and radius.
+  assert.equal(l.diskFills.length, grazed.length, `${why}: the grazed disks and the model disagree`);
+  assert.equal(l.diskOutlines.length, missed.length,
+    `${why}: the untouched disks and the model disagree`);
+  grazed.forEach((i, k) => {
+    const call = l.diskFills[k]!;
+    assert.equal(call.globalAlpha, c[i]!,
+      `${why}: disk ${i} was filled at alpha ${call.globalAlpha}, its cost is ${c[i]!}`);
+    assert.deepEqual(arcArgs(call).slice(0, 3),
+      [...toScreen(VIEW, x[i]!, y[i]!), r[i]! * VIEW.scaleX],
+      `${why}: disk ${i} is not at its own place and radius`);
+  });
+  // The zero-cost disks are outlines at FULL alpha -- not faint versions of a grazed disk, but a
+  // different statement: this home is not touched at all.
+  for (const call of l.diskOutlines) assert.equal(call.globalAlpha, 1, why);
+}
+
+/** A road as the widget holds it after a drag: the reader's pointer, put back through the same
+ * `toWorld` the widget used. */
+function roadWith(road: Road, moved: Record<number, { x: number; y: number }>,
+                  width_m = bundle.width.default_m): Road {
+  return {
+    width_m,
+    coords: road.coords.map((pt, v): [number, number] => {
+      const to = moved[v];
+      return to === undefined ? pt : toWorld(VIEW, to.x, to.y);
+    }),
+  };
 }
 
 function drag(cv: FakeElement, from: { x: number; y: number }, to: { x: number; y: number }): void {
@@ -390,6 +481,15 @@ test("boots, draws every layer in render_field's own order, and quotes Python's 
       "the disks and the buildings disagree about how many there are");
     for (const c of l.diskOutlines) assert.equal(c.lineWidth, E.disk_outline_lw);
 
+    // Context state, not a count. The corridor is the only layer that wants round caps; every layer
+    // after it must have them reset, or the boundary, the streets and the disks quietly inherit
+    // them -- and the parcels inherit them on frame 2+ only, which is a first-paint-differs bug
+    // that no single frame can show. The frame-identity test below is the other half of this.
+    assert.equal(l.corridor[0]!.lineCap, "round");
+    for (const c of [...l.outline, ...l.streets, ...l.diskOutlines, ...l.handleOutlines]) {
+      assert.equal(c.lineCap, "butt", "a layer drawn after the corridor inherited its round caps");
+    }
+
     // (5) One handle per endpoint of the one live road, and they are drawn LAST -- under nothing.
     assert.equal(l.handleFills.length, bundle.roads[0]!.coords.length);
     assert.equal(l.handleOutlines.length, l.handleFills.length, "a handle lost its outline");
@@ -430,29 +530,10 @@ test("each grazed disk is drawn at exactly its own cost, in its own place, at it
     await mount(host);
     fireResize(SIZE, SIZE);
 
-    const { x, y, r } = bundle.buildings;
-    const c = contributions(r, corridorDistance(x, y, flatten([bundle.roads[0]!])));
-    const grazed: number[] = [];
-    const missed: number[] = [];
-    for (let i = 0; i < r.length; i++) (c[i]! > 0 ? grazed : missed).push(i);
-    assert.ok(grazed.length > 0 && missed.length > 0,
-      "the boot road neither grazes nor misses anything -- both branches must be live here");
-
-    const l = layers(canvasOf(host));
-    assert.equal(l.diskFills.length, grazed.length, "the grazed disks and the model disagree");
-    assert.equal(l.diskOutlines.length, missed.length,
-      "the untouched disks were not all drawn -- a reader cannot see a road threaded a GAP without them");
-    grazed.forEach((i, k) => {
-      const call = l.diskFills[k]!;
-      assert.equal(call.globalAlpha, c[i]!,
-        `disk ${i} was filled at alpha ${call.globalAlpha}, its cost is ${c[i]!}`);
-      const [sx, sy] = toScreen(VIEW, x[i]!, y[i]!);
-      assert.deepEqual(arcArgs(call).slice(0, 3), [sx, sy, r[i]! * VIEW.scaleX],
-        `disk ${i} is not at its own place and radius`);
-    });
-    // The zero-cost disks are outlines, and their alpha is FULL -- they are not faint versions of a
-    // grazed disk, they are a different statement (this home is not touched at all).
-    for (const call of l.diskOutlines) assert.equal(call.globalAlpha, 1);
+    assertPictureMatchesRoads(canvasOf(host), [bundle.roads[0]!], "at boot");
+    // ...and the untouched disks are the half `render_after` leaves out. Without them a reader
+    // cannot see that a road threaded a GAP, only that some homes went red.
+    assert.ok(layers(canvasOf(host)).diskOutlines.length > 0);
   });
 
 test("the view fits the parcels too, not just the buildings", async () => {
@@ -470,10 +551,11 @@ test("the view fits the parcels too, not just the buildings", async () => {
   }
 
   // ...and the assertion above is not vacuous: under the fit PermGraph uses -- the BUILDING
-  // centroids alone, with parcels drawn anyway -- the same rings leave the canvas. The backlog
-  // records that shape working by luck on this block (one vertex of 1850, 0.4 px out, absorbed by
-  // the pad); here the buildings span 5.8-149.5 m inside parcels spanning 0-157.8 m, so the luck
-  // does not hold, and this is the number that says so.
+  // centroids alone, with parcels drawn anyway -- a ring vertex leaves the canvas. Measured on this
+  // block at this pad: the scale inflates 9.8 % and exactly 1 parcel vertex of 1850 lands 9.3 px
+  // past the max-x edge of a 700 px canvas (the same vertex is on the boundary ring, which spans
+  // the parcel bbox exactly). Small, real, and enough to make this assertion discriminate -- which
+  // is all it is here to do.
   const buildingsOnly = fitBbox({
     minX: Math.min(...bundle.buildings.x), minY: Math.min(...bundle.buildings.y),
     maxX: Math.max(...bundle.buildings.x), maxY: Math.max(...bundle.buildings.y),
@@ -555,6 +637,8 @@ test("dragging a handle moves the road and re-prices it", async () => {
   // ...and it was RE-PRICED. Σcᵢ is recomputed every frame; a drag that redraws without recomputing
   // leaves a correct picture beside a stale number, which is worse than either alone.
   assert.notEqual(cost(host), before, "the drag changed the road but not what it costs");
+  // And the two halves still agree with each other AND with the model, for the road as it is NOW.
+  assertPictureMatchesRoads(cv, [roadWith(bundle.roads[0]!, { 0: to })], "after the drag");
 });
 
 test("a press on empty canvas moves nothing", async () => {
@@ -613,6 +697,8 @@ test("widening the road raises the cost, to Python's own number for that width",
     "the slider moved the road as well as its width");
   assert.equal(layers(cv).corridor[0]!.lineWidth, widest.roads[0]!.width_m * VIEW.scaleX,
     "the corridor was not redrawn at the new width");
+  assertPictureMatchesRoads(cv, [roadWith(bundle.roads[0]!, {}, widest.roads[0]!.width_m)],
+    "after widening");
 });
 
 test("switching the second road on RAISES the cost; dragging them together is what lowers it",
@@ -638,6 +724,7 @@ test("switching the second road on RAISES the cost; dragging them together is wh
     assert.equal(cost(host).toFixed(1), apart.sum_c.toFixed(1),
       `two roads apart cost ${cost(host)}; Python measures ${apart.sum_c}`);
     assert.equal(layers(cv).handleFills.length, 4, "the second road brought no handles");
+    assertPictureMatchesRoads(cv, [bundle.roads[0]!, bundle.roads[1]!], "with both roads apart");
 
     // Now drag road 2 onto road 1, endpoint by endpoint. `toWorld` inverts the same `toScreen` the
     // handle positions came through, so the two roads end up coincident to float precision -- and
@@ -651,6 +738,12 @@ test("switching the second road on RAISES the cost; dragging them together is wh
     assert.equal(cost(host).toFixed(1), coincident.sum_c.toFixed(1),
       `two coincident roads cost ${cost(host)}; Python measures ${coincident.sum_c}, `
       + `which is what ONE road costs`);
+    // Road 2 -- and ONLY road 2 -- ended up on road 1. This is also what pins `Handle.road` to the
+    // array the drag writes back into: if the hit test indexed a different array from `pointermove`,
+    // the wrong road would have moved and the corridor path below would be drawn somewhere else.
+    assertPictureMatchesRoads(cv,
+      [bundle.roads[0]!, roadWith(bundle.roads[1]!, { 0: handleAt(0, 0), 1: handleAt(0, 1) })],
+      "after dragging road 2 onto road 1");
   });
 
 test("two roads share ONE corridor stroke, so overlapping them cannot compound toward opaque",
@@ -693,4 +786,68 @@ test("the widget is re-fitted, not merely re-scaled, when its container changes 
   // The handle keeps its PIXEL radius across the reflow: a grab target that shrank with the box
   // would stop being grabbable exactly where the box is smallest.
   assert.equal(arcArgs(handle)[2], E.handle_radius_px);
+});
+
+test("every frame is identical: no context state leaks from one draw into the next", async () => {
+  // A widget whose first paint differs from its second is a genuinely nasty thing to chase later,
+  // and `ctx` is full of state that outlives the call that set it (`lineCap`, `globalAlpha`,
+  // `lineWidth`, both styles). Redrawing at the SAME size must produce the same call log, call for
+  // call, including every style snapshot -- which is a much stronger statement than any per-layer
+  // assertion, and the only one that can see a leak that only exists from frame 2 onwards.
+  const host = mountPoint();
+  await mount(host);
+  fireResize(SIZE, SIZE);
+  const first = lastFrame(canvasOf(host));
+  fireResize(SIZE, SIZE);
+  const second = lastFrame(canvasOf(host));
+
+  assert.deepEqual(second.map(consumed), first.map(consumed),
+    "the second paint differs from the first: context state leaked across frames");
+  assert.ok(first.length > 500, `only ${first.length} calls compared, which is not a whole frame`);
+});
+
+test("the readout is announced, because a canvas says nothing to a screen reader", async () => {
+  // A screen-reader user moving the width slider with the arrow keys hears the width they set and
+  // nothing about what it cost -- the entire subject of the figure, silent -- unless the one line
+  // that changes is a live region. `frontier.ts` set the precedent inside this same branch.
+  const host = mountPoint();
+  await mount(host);
+  fireResize(SIZE, SIZE);
+
+  const readout = host.find("p");
+  assert.ok(readout !== null, "the widget wrote no readout");
+  assert.equal(readout.getAttribute("aria-live"), "polite",
+    "the number that changes on every frame is not announced");
+});
+
+test("a bundle that is not exactly two roads is refused, loudly, with the image left in place",
+  async () => {
+    // External JSON, so this is a boundary check rather than an unreachable guard -- and a THIRD
+    // road is the dangerous direction: it would be silently dropped, charged by nothing and drawn
+    // by nothing, and the reader would be given a cost for a road set that is not the one on disk.
+    for (const [what, roads] of [
+      ["a third road", [...bundle.roads, bundle.roads[0]!]],
+      ["only one road", [bundle.roads[0]!]],
+    ] as const) {
+      const host = mountPoint();
+      const img = host.find("img")!;
+      await mount(host, null, { ...bundle, roads });
+
+      assert.match(host.find("figcaption")!.textContent,
+        new RegExp(`DisplacementField could not load interactively .*${roads.length} roads`),
+        `${what} was accepted or reported without saying what was wrong`);
+      assert.equal(img.removedAt, null, `${what}: the fallback image went anyway`);
+      assert.equal(host.find("canvas"), null, `${what}: a canvas was inserted for a refused bundle`);
+    }
+  });
+
+test("a mount point with no data-bundle names the ATTRIBUTE, not a missing file", async () => {
+  // `host.dataset.bundle!` would reach `fetch(undefined)` and surface as "fetch undefined failed:
+  // 404", sending whoever wrote the page looking for a file rather than for the attribute they
+  // forgot. The throw is synchronous, before the fetch chain exists, which is exactly the path
+  // `mountAll` catches and renders through dom/error.ts (mount.test.ts covers that half).
+  const host = mountPoint();
+  delete host.dataset["bundle"];
+  assert.throws(() => displacementField(host as unknown as HTMLElement, localState),
+    /DisplacementField: data-bundle is missing/);
 });

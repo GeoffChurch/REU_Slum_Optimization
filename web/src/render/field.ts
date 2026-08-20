@@ -5,10 +5,17 @@ import { toScreen, type View } from "../view/transform.js";
  *
  * A named record rather than a bare `[number, number]` pair, because the widget's hit test has to
  * answer "which vertex did the reader grab" and a positional tuple makes that a `h[0]`/`h[1]` the
- * checker cannot audit (owner directive on closed sets). */
+ * checker cannot audit (owner directive on closed sets).
+ *
+ * **`road` indexes the array that was passed to `handles()`, and nothing else.** Say which array
+ * that is at every call site: the widget passes its FULL road list (so a hit can be written back to
+ * the right entry) while `drawField` passes only the live ones (and reads nothing but `x`/`y`).
+ * Two callers indexing two different arrays through one field is the shape that is correct only
+ * while one array happens to be a prefix of the other -- an invariant nothing states and nothing
+ * enforces, so neither end relies on it. */
 export interface Handle { road: number; vertex: number; x: number; y: number }
 
-/** Every vertex of every ACTIVE road, in draw order.
+/** Every vertex of every road in `roads`, in order, with `road` indexing `roads` itself.
  *
  * Exported and used by BOTH the drawing and the widget's pointer hit test, deliberately: two
  * derivations of "where the handles are" is how a handle comes to be drawn somewhere the reader
@@ -104,6 +111,12 @@ export function drawField(ctx: CanvasRenderingContext2D, b: FieldBundle, f: Fiel
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  // Reset explicitly, and not merely for tidiness: `lineCap` is context state, so leaving it round
+  // would give the boundary, the streets and the parcels round caps -- AND would make frame 1
+  // differ from every later frame, since only frame 1 reaches those layers before the corridor has
+  // ever set it. A widget whose first paint differs from its second is a genuinely nasty thing to
+  // chase later, and it costs one line to make every frame identical.
+  ctx.lineCap = "butt";
 
   // (3) Boundary and streets, in one colour and two weights -- both read from the bundle, which is
   // where `render.py`'s own `_BOUNDARY_LW` was baked.
