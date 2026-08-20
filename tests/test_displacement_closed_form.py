@@ -19,7 +19,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.ops import unary_union
 
-from reblock.budget import displacement_from_distance
+from reblock.budget import corridor_distance, displacement_from_distance
 from reblock.contracts import Block
 from scripts._default_road import closed_form_distance, default_roads, segments
 
@@ -41,9 +41,13 @@ def _frame() -> tuple[GeoDataFrame, np.ndarray, np.ndarray, np.ndarray]:
 
 
 def test_the_closed_form_reproduces_shapely_to_within_its_discretisation() -> None:
-    roads, px, py, radii = _frame()
-    corridor = unary_union([g.buffer(w / 2.0) for g, w in ROADS])
-    truth = np.array([Point(x, y).distance(corridor) for x, y in zip(px, py, strict=True)])
+    """Pinned against the PRODUCTION distance function (`reblock.budget.corridor_distance`), not a
+    hand-rolled reimplementation of it -- so a change to `corridor_distance` (a different join
+    style, a different buffer resolution) breaks HERE rather than leaving the widget silently
+    desynced from the metric it is supposed to mirror."""
+    roads, px, py, _ = _frame()
+    points = GeoDataFrame(geometry=[Point(x, y) for x, y in zip(px, py, strict=True)], crs=UTM)
+    truth = corridor_distance(points, roads)
     mine = closed_form_distance(px, py, segments(roads))
     assert np.abs(mine - truth).max() < 0.01, (
         f"max distance disagreement {np.abs(mine - truth).max():.4g} m exceeds shapely's own "
@@ -55,7 +59,12 @@ def test_the_closed_form_reproduces_shapely_to_within_its_discretisation() -> No
 
 def test_the_residual_is_shapelys_discretisation_and_not_our_error() -> None:
     """The decisive test. If the formula were wrong the gap would be constant in `quad_segs`; it
-    falls quadratically, which identifies the residual as shapely's polygonal buffer."""
+    falls quadratically, which identifies the residual as shapely's polygonal buffer.
+
+    Hand-rolled rather than routed through `corridor_distance` on purpose, unlike the test above:
+    this one has to vary buffer resolution (`quad_segs`), which `corridor_distance` deliberately
+    does not expose -- its job is to characterise SHAPELY's discretisation, not to pin production.
+    """
     roads, px, py, _ = _frame()
     mine = closed_form_distance(px, py, segments(roads))
     errs = []
@@ -102,8 +111,9 @@ def _synthetic_block(n: int = 4, cell: float = 25.0) -> Block:
 
 
 def test_default_roads_are_reproducible_disjoint_and_inside_the_block() -> None:
+    width_m = 7.0
     block = _synthetic_block()
-    a, b = default_roads(block, 7.0), default_roads(block, 7.0)
+    a, b = default_roads(block, width_m), default_roads(block, width_m)
     assert len(a) == 2
     for i in (0, 1):
         assert a.geometry.iloc[i].equals(b.geometry.iloc[i]), f"road {i + 1} is not reproducible"
@@ -111,6 +121,8 @@ def test_default_roads_are_reproducible_disjoint_and_inside_the_block() -> None:
     for i, g in enumerate(a.geometry):
         assert g.length > 0, f"road {i + 1} is degenerate"
         assert hull.buffer(1e-6).contains(g), f"road {i + 1} leaves the block"
-    assert not a.geometry.iloc[0].buffer(3.5).intersects(a.geometry.iloc[1].buffer(3.5)), (
+    half_width = width_m / 2.0
+    assert not (a.geometry.iloc[0].buffer(half_width)
+                .intersects(a.geometry.iloc[1].buffer(half_width))), (
         "the two default corridors already overlap, so merging them is not something the reader "
         "does")

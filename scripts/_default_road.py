@@ -1,7 +1,9 @@
 """The two default roads, and the closed-form corridor distance the widget implements.
 
-Declared once because three callers need it: the bake (scripts/gen_displacement_field.py), the
-identity test (tests/test_displacement_closed_form.py), and the fixture generator inside the bake.
+Declared once because more than one caller needs it: today,
+`tests/test_displacement_closed_form.py`'s identity tests; per the implementation plan, a later
+task's bake script and its fixture generator will need the same two functions to produce the
+widget's boot payload, without duplicating them.
 `scripts/_example_block.py` set this precedent -- when each caller declared its own copy, changing
 one left the others describing something else while every test still passed.
 """
@@ -42,9 +44,21 @@ def default_roads(block: Block, width_m: float) -> GeoDataFrame:
     pts = block.building_points
     xy = np.column_stack([pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy()])
     centre = xy.mean(axis=0)
-    # First principal component. `np.linalg.svd` on the centred cloud; the sign of a singular
-    # vector is arbitrary, so normalise it -- otherwise the "deterministic" road flips between runs
-    # of the same code on the same data.
+    # First principal component. `np.linalg.svd` on the centred cloud; the SIGN of a singular
+    # vector is arbitrary in the linear algebra, not in this code's execution -- SVD is
+    # deterministic for one fixed input on one machine, but the sign can still differ across LAPACK
+    # builds, platforms, or a reordering of the input points, so it is normalised for stability
+    # across those, not against nondeterminism that doesn't exist here.
+    #
+    # If the normalisation were ever dropped, only ROAD 2 would move: road 1's chord is the same
+    # line either way (`_chord`'s +-direction extension is direction-sign-symmetric), but `normal`
+    # flips, putting road 2's offset on the other side of `centre`. Nothing in THIS module is meant
+    # to catch that flip: a reviewer confirmed containment and disjointness survive it even on an
+    # asymmetric block (only a pinned coordinate would notice), and on the symmetric synthetic
+    # fixture the tests here use, the principal axis is genuinely degenerate (equal singular
+    # values) -- a pinned coordinate there would pin arbitrary LAPACK output, not a real invariant.
+    # Task 3's committed artifact plus its staleness test is the intended guard against a flip on
+    # the real, non-degenerate block.
     _, _, vt = np.linalg.svd(xy - centre, full_matrices=False)
     axis = vt[0]
     if axis[int(np.argmax(np.abs(axis)))] < 0:
@@ -65,12 +79,23 @@ def _chord(hull: BaseGeometry, through: NDArray[np.float64],
 
     Longest, not first: a concave block cuts the line into several pieces and only the longest is
     the road a reader would recognise as crossing the settlement.
+
+    Raises `ValueError` if no piece has positive length -- either the line misses the hull's
+    interior entirely, or it only grazes the boundary tangentially. Both are reachable, not
+    defensive: a thin block, or the widget's own 20 m width slider (`3 * 20 = 60 m` of offset for
+    road 2), can push the offset line clear of the hull.
     """
     span = float(np.hypot(*(np.asarray(hull.bounds[2:]) - np.asarray(hull.bounds[:2])))) * 2.0
     line = LineString([through - direction * span, through + direction * span])
     inside = line.intersection(hull)
     parts = list(inside.geoms) if isinstance(inside, BaseMultipartGeometry) else [inside]
-    longest = max(parts, key=lambda g: g.length)
+    longest = max(parts, key=lambda g: g.length, default=None)
+    if longest is None or longest.length <= 0.0:
+        minx, miny, maxx, maxy = hull.bounds
+        raise ValueError(
+            f"no chord through {tuple(through)} heading {tuple(direction)} crosses the block's "
+            f"interior (block extent x=[{minx:.1f}, {maxx:.1f}], y=[{miny:.1f}, {maxy:.1f}]); the "
+            "offset pushed the line clear of the hull, or it only grazed the hull's boundary")
     return LineString([longest.coords[0], longest.coords[-1]])
 
 
@@ -104,7 +129,10 @@ def closed_form_distance(px: NDArray[np.float64], py: NDArray[np.float64],
     x0, y0, x1, y1, hw = segs.T
     dx, dy = x1 - x0, y1 - y0
     L2 = dx * dx + dy * dy
+    # A zero-length road has dx=dy=0, so the numerator is 0 regardless of (px, py); dividing by
+    # 1.0 instead of L2 here avoids the 0/0 that would otherwise turn that already-correct t=0
+    # into NaN -- t=0 is what makes a zero-length road its own endpoint.
     t = ((px[:, None] - x0) * dx + (py[:, None] - y0) * dy) / np.where(L2 > 0, L2, 1.0)
-    t = np.clip(np.where(L2 > 0, t, 0.0), 0.0, 1.0)      # a zero-length road is its own endpoint
+    t = np.clip(t, 0.0, 1.0)
     d = np.hypot(px[:, None] - (x0 + t * dx), py[:, None] - (y0 + t * dy)) - hw
     return np.maximum(0.0, d).min(axis=1)
