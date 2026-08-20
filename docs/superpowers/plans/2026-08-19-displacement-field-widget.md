@@ -26,6 +26,16 @@
 - **`pixi run lint` is a gate on every task, not just the Python ones.** Task 1 shipped a
   101-column line green because its brief listed only pytest and typecheck. If a task's own gate
   list below omits it, it is still required.
+- **At most ONE test per module may load the pinned block, and it carries `@pytest.mark.slow`.**
+  pytest `addopts` is `-n auto --dist worksteal`, and xdist scopes a `scope="module"` fixture **per
+  worker** — so N tests sharing a block-loading fixture become up to N concurrent loads, each
+  solving eight methods and contending for the same derivation cache. Task 2's first attempt hung
+  for 18 minutes this way. The established pattern is `tests/test_frontier_bundle.py`: one
+  `@pytest.mark.slow` test that imports `load_example_block` *inside its own body*, and every other
+  test in the file asserting against the committed artifact. Every test that needs live solving goes
+  in that one function, with assertion messages detailed enough to replace the granularity being
+  given up — and a comment saying why it is one test, because splitting it is the obvious tidiness
+  improvement and it triples the cost invisibly.
 
 ## File Structure
 
