@@ -50,6 +50,18 @@ _OWN_PT = "#333333"
 _DISPLACED_PT = "#c0392b"
 _POINT_RADIUS_M = 2.0   # geographic radius (m) of a building/parcel point marker (x sqrt(weight))
 
+# Line weights and the corridor's alpha, named rather than inline at the call sites for the reason
+# `render_field`'s docstring already gives about `_DISPLACED_PT`: a named constant is a thing a bake
+# can put in a widget's bundle, where a literal in a function body would have to be retyped in
+# TypeScript and could then drift. `scripts/gen_displacement_field.py`'s `ENCODING` reads all four,
+# and tests/test_displacement_field_bundle.py pins the committed bundle against them -- so editing
+# one here fails that test rather than silently leaving the interactive figure and its own fallback
+# image drawn at different weights.
+_PARCEL_LW = 0.4          # the pale parcel wireframe, in every figure that draws one
+_BOUNDARY_LW = 1.3        # the block outline AND the existing street network (_draw_boundary...)
+_CORRIDOR_ALPHA = 0.25    # the road corridor's fill, drawn under everything else
+_DISK_OUTLINE_LW = 0.5    # an untouched building's disk, drawn as an outline rather than a fill
+
 
 def short_label(label: str, limit: int = 80) -> str:
     """A filesystem-safe shortening of a (possibly huge) block/region label: kept verbatim when
@@ -136,9 +148,9 @@ def _draw_boundary_and_streets(ax: Axes, block: Block) -> None:
     """
     if isinstance(block.boundary, Polygon):
         gpd.GeoSeries([block.boundary], crs=block.crs).boundary.plot(
-            ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
+            ax=ax, color=_BOUNDARY_COLOR, linewidth=_BOUNDARY_LW)
     if block.streets is not None and not block.streets.empty:
-        block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=1.3)
+        block.streets.plot(ax=ax, color=_BOUNDARY_COLOR, linewidth=_BOUNDARY_LW)
 
 
 def _draw_corridor(ax: Axes, roads: gpd.GeoDataFrame | None, crs: CRS) -> None:
@@ -165,7 +177,7 @@ def _draw_corridor(ax: Axes, roads: gpd.GeoDataFrame | None, crs: CRS) -> None:
         geometry=[unary_union(list(roads.geometry[road_w == w])).buffer(float(w) / 2.0)
                   for w in np.unique(road_w)],
         crs=crs)
-    corridor.plot(ax=ax, color=_ROAD_COLOR, alpha=0.25, zorder=2, linewidth=0)
+    corridor.plot(ax=ax, color=_ROAD_COLOR, alpha=_CORRIDOR_ALPHA, zorder=2, linewidth=0)
 
 
 def _draw_heatmap(
@@ -196,7 +208,8 @@ def _draw_heatmap(
     # Dimmed context (neighbouring blocks' outlines + building points), drawn under the
     # selection's own boundary/streets/points so the selection reads unambiguously on top.
     if context_outlines is not None and not context_outlines.empty:
-        context_outlines.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.4)
+        context_outlines.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE,
+                              linewidth=_PARCEL_LW)
     if context_points is not None and not context_points.empty:
         _point_disks(context_points, _POINT_RADIUS_M).plot(
             ax=ax, color=_CONTEXT_PT, alpha=0.6, linewidth=0)
@@ -325,7 +338,7 @@ def render_graph(
     """
     fig, ax = plt.subplots(figsize=(16, 16))
 
-    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.4)
+    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=_PARCEL_LW)
 
     view = frame if frame is not None else frame_bbox(block.parcels)
     ax.set_xlim(view[0], view[2])
@@ -417,7 +430,7 @@ def render_field(
     """
     fig, ax = plt.subplots(figsize=(16, 16))
 
-    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.4)
+    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=_PARCEL_LW)
 
     view = frame if frame is not None else frame_bbox(block.parcels)
     ax.set_xlim(view[0], view[2])
@@ -443,7 +456,7 @@ def render_field(
     grazed = c > 0.0
     if (~grazed).any():
         disks[~grazed].plot(ax=ax, facecolor="none", edgecolor=_DISPLACED_PT,
-                            linewidth=0.5, zorder=5)
+                            linewidth=_DISK_OUTLINE_LW, zorder=5)
     if grazed.any():
         rgba = to_rgba(_DISPLACED_PT)
         disks[grazed].plot(ax=ax, color=[(*rgba[:3], float(ci)) for ci in c[grazed]],

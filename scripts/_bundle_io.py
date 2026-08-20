@@ -1,10 +1,12 @@
 """The quantisers and geometry exploders every committed browser bundle is written through.
 
-Declared once because more than one baker needs them: `scripts/gen_web_bundle.py` (the PermGraph
-widget) and `scripts/gen_displacement_field.py` (the DisplacementField widget). They started private
-to the first of those, which left the second a choice between importing private names and copying
-them -- and copying is how the coordinate-precision trap in `cm` gets reintroduced in a file where
-nobody is looking for it, and how `polygon_ring`'s two raises quietly become one.
+Declared once because all three bakers need them: `scripts/gen_web_bundle.py` (PermGraph),
+`scripts/gen_frontier_bundle.py` (Frontier) and `scripts/gen_displacement_field.py`
+(DisplacementField). They started private to the first, and by the time the third arrived there were
+already two live copies of `sigfig` differing only in name -- one of them carrying a docstring that
+pointed at a function in the other file. Copying is how the coordinate-precision trap in `cm` gets
+reintroduced in a file where nobody is looking for it, and how `polygon_ring`'s two raises quietly
+become one.
 """
 from __future__ import annotations
 
@@ -64,6 +66,12 @@ def polygon_ring(geom: BaseGeometry, ox: float, oy: float, *, what: str) -> list
     MultiPolygon or a polygon with holes would have to lose geometry to fit -- and geometry that
     silently vanishes from a committed artifact is a wrong picture nobody is looking for.
     `what` names the offender, since a bundle has many polygons and only one of them is wrong.
+
+    DELIBERATE ADDITION when this moved out of `gen_web_bundle.py`: that file checked `interiors`
+    on parcels but not on the BOUNDARY, whose inline guard only rejected a MultiPolygon. A
+    boundary with a hole would have had its hole silently dropped. Nothing observable changed --
+    the pinned block's boundary has no interior rings, and `examples/perm-graph/bundle.json`
+    regenerates byte-identical -- so this widens an error path only.
     """
     if not isinstance(geom, Polygon):
         raise ValueError(

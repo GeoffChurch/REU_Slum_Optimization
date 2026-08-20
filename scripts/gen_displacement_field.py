@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import NamedTuple, TypedDict, cast
 
 import numpy as np
 from geopandas import GeoDataFrame, points_from_xy
@@ -26,11 +26,15 @@ from shapely.geometry import LineString
 
 from reblock.budget import building_radii, displacement
 from reblock.contracts import Block
-from reblock.permeability import PermeabilityParams
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
 from reblock.render import (
     _BOUNDARY_COLOR,
+    _BOUNDARY_LW,
     _CONTEXT_OUTLINE,
+    _CORRIDOR_ALPHA,
+    _DISK_OUTLINE_LW,
     _DISPLACED_PT,
+    _PARCEL_LW,
     _ROAD_COLOR,
     render_field,
     save_render,
@@ -44,29 +48,59 @@ log = logging.getLogger(__name__)
 OUT = Path("examples/displacement-field")
 DTS = Path("web/src/field.d.ts")
 
-# The slider's floor is not "7.0" but the value permeability.py:205 RAISES below, read from the
-# declaration rather than retyped: a road narrower than this is one the pipeline rejects, so a
-# slider that could produce one would offer the reader a configuration the metric refuses to score.
+# The slider's floor is not "7.0" but the value permeability.py:205 RAISES below, and the default is
+# the width a method emits when nothing else specifies one -- both read from their declarations
+# rather than retyped. A road narrower than the floor is one the pipeline rejects, so a slider that
+# could produce one would offer the reader a configuration the metric refuses to score.
+#
+# NOTE these are the CODE's defaults (`PermeabilityParams`' dataclass field and
+# `permeability.DEFAULT_ROAD_WIDTH_M`), NOT conf/permeability.yaml:31 -- which happens to set the
+# same 7.0. The dataclass is the right binding because it is what the validator at :205 compares
+# against when no config overrides it, so the slider and the validator cannot disagree. Editing the
+# yaml does NOT move the slider; re-basing the dataclass default does, and fails
+# tests/test_displacement_field_bundle.py until the bundle is re-baked.
 WIDTH_FLOOR_M = PermeabilityParams.min_road_width_m
+WIDTH_DEFAULT_M = DEFAULT_ROAD_WIDTH_M
 WIDTH_MAX_M = 20.0
 WIDTH_STEP_M = 0.5
 
-# What the widget draws with, taken from the constants render_field itself uses, so the PNG and the
-# canvas cannot drift: a reader with JS off and a reader with JS on must see the same figure. The
-# last two have no PNG equivalent -- they are the web figure's own affordances.
-ENCODING: dict[str, str | float] = {
-    "parcel_color": _CONTEXT_OUTLINE,
-    "parcel_lw": 0.4,
-    "boundary_color": _BOUNDARY_COLOR,
-    "boundary_lw": 1.3,
-    "street_lw": 1.0,
-    "road_color": _ROAD_COLOR,
-    "road_alpha": 0.25,
-    "disk_color": _DISPLACED_PT,
-    "disk_outline_lw": 0.5,
-    "handle_radius_px": 7.0,
-    "pad": 0.04,
-}
+
+class Encoding(TypedDict):
+    """What the widget draws with. Every value that the PNG also draws with is read from the
+    `reblock.render` constant `render_field` itself uses, so the two cannot drift: a reader with JS
+    off and a reader with JS on must see the same figure. The last two have no PNG equivalent --
+    they are the web figure's own affordances, and `render_field`'s framing is not pinned here at
+    all (see the widget's own sizing)."""
+    parcel_color: str
+    parcel_lw: float
+    boundary_color: str
+    boundary_lw: float
+    street_lw: float
+    road_color: str
+    road_alpha: float
+    disk_color: str
+    disk_outline_lw: float
+    handle_radius_px: float
+    pad: float
+
+
+# `street_lw` is `_BOUNDARY_LW`, not a separate number: `_draw_boundary_and_streets` draws the
+# outline and the street network in ONE pair of calls at one width, so a widget drawing streets
+# thinner than the PNG does is drawing a different figure. It is kept as its own key because the
+# canvas draws the two layers separately and a future divergence should be expressible.
+ENCODING: Encoding = Encoding(
+    parcel_color=_CONTEXT_OUTLINE,
+    parcel_lw=_PARCEL_LW,
+    boundary_color=_BOUNDARY_COLOR,
+    boundary_lw=_BOUNDARY_LW,
+    street_lw=_BOUNDARY_LW,
+    road_color=_ROAD_COLOR,
+    road_alpha=_CORRIDOR_ALPHA,
+    disk_color=_DISPLACED_PT,
+    disk_outline_lw=_DISK_OUTLINE_LW,
+    handle_radius_px=7.0,
+    pad=0.04,
+)
 
 
 class RoadSpec(TypedDict):
@@ -81,6 +115,39 @@ class ReferenceCase(TypedDict):
     roads: list[RoadSpec]
     sum_c: float
     fraction: float
+
+
+class Buildings(TypedDict):
+    """Disk centres (origin-relative, `cm`) and radii (`sigfig`), in building order."""
+    x: list[float]
+    y: list[float]
+    r: list[float]
+
+
+class Width(TypedDict):
+    """The slider's own range."""
+    floor_m: float
+    max_m: float
+    step_m: float
+    default_m: float
+
+
+class FieldBundle(TypedDict):
+    """The whole artifact. A TypedDict rather than a bare dict for the same reason `ReferenceCase`
+    is one: it is a closed key set at a JSON boundary, and `web/src/field.d.ts` declares exactly
+    these names -- tests/test_displacement_field_bundle.py pins the two together in both
+    directions, so a rename here is a TypeScript error rather than a blank panel."""
+    block_id: str
+    n_buildings: int
+    origin: list[float]
+    buildings: Buildings
+    parcels: list[list[list[float]]]
+    boundary: list[list[float]]
+    streets: list[list[list[float]]]
+    roads: list[RoadSpec]
+    width: Width
+    encoding: Encoding
+    reference: list[ReferenceCase]
 
 
 def roads_from_case(block: Block, case: ReferenceCase,
@@ -135,10 +202,22 @@ def road_specs(roads: GeoDataFrame, ox: float, oy: float) -> list[RoadSpec]:
     return out
 
 
+class QuantisedField(NamedTuple):
+    """The building field exactly as the bundle carries it, in the two forms the bake needs.
+
+    `stored` is what gets written -- origin-relative, `cm` for the centres and `sigfig` for the
+    radii. `points`/`radii` are those SAME numbers put back in the block's CRS, for measuring
+    fixtures against. One derivation, two shapes: `main` must not re-quantise the centres for the
+    payload, or the file and the measurement stop being guaranteed to describe each other.
+    """
+    stored: Buildings
+    points: GeoDataFrame
+    radii: NDArray[np.float64]
+
+
 def quantised_field(block: Block, radii: NDArray[np.float64], ox: float,
-                    oy: float) -> tuple[GeoDataFrame, NDArray[np.float64]]:
-    """The building field exactly as the bundle carries it: centres at centimetre precision,
-    radii at six significant figures, back in the block's CRS.
+                    oy: float) -> QuantisedField:
+    """The building field as the bundle carries it -- see `QuantisedField`.
 
     Every fixture is measured against THIS field rather than the raw one, and that is not a
     rounding nicety. The browser reads `buildings.x/y/r` and a fixture's `coords`, and the parity
@@ -150,10 +229,14 @@ def quantised_field(block: Block, radii: NDArray[np.float64], ox: float,
     unchecked.
     """
     pts = block.building_points
-    bx = np.asarray([cm(v - ox) for v in pts.geometry.x], dtype=np.float64) + ox
-    by = np.asarray([cm(v - oy) for v in pts.geometry.y], dtype=np.float64) + oy
-    return (GeoDataFrame(geometry=points_from_xy(bx, by), crs=block.crs),
-            np.asarray([sigfig(v) for v in radii], dtype=np.float64))
+    stored = Buildings(x=[cm(v - ox) for v in pts.geometry.x],
+                       y=[cm(v - oy) for v in pts.geometry.y],
+                       r=[sigfig(v) for v in radii])
+    bx = np.asarray(stored["x"], dtype=np.float64) + ox
+    by = np.asarray(stored["y"], dtype=np.float64) + oy
+    return QuantisedField(stored=stored,
+                          points=GeoDataFrame(geometry=points_from_xy(bx, by), crs=block.crs),
+                          radii=np.asarray(stored["r"], dtype=np.float64))
 
 
 def _set(block: Block, geoms: list[LineString], width_m: float) -> GeoDataFrame:
@@ -326,8 +409,8 @@ def main() -> None:
     save_render(render_field(block, cast(GeoDataFrame, roads.iloc[[0]]), radii), OUT / "field.png")
     log.info("wrote %s", OUT / "field.png")
 
-    pts_q, radii_q = quantised_field(block, radii, ox, oy)
-    cases = _cases(block, pts_q, radii_q, roads, ox, oy)
+    field = quantised_field(block, radii, ox, oy)
+    cases = _cases(block, field.points, field.radii, roads, ox, oy)
 
     # No `is not None` guard: `Block.streets` is a required, non-Optional field whose geometry
     # column `__post_init__` checks, so an empty frame is the only reachable "no streets" case and
@@ -336,28 +419,24 @@ def main() -> None:
     for g in block.streets.geometry:
         street_coords.extend(line_coords(g, ox, oy))
 
-    bundle = {
-        "block_id": block.block_id,
-        "n_buildings": len(block.building_points),
-        "origin": [ox, oy],
-        "buildings": {
-            "x": [cm(v - ox) for v in block.building_points.geometry.x],
-            "y": [cm(v - oy) for v in block.building_points.geometry.y],
-            "r": [sigfig(v) for v in radii],
-        },
-        "parcels": [polygon_ring(g, ox, oy, what=f"block {block.block_id!r}'s parcel")
-                    for g in block.parcels.geometry],
+    bundle = FieldBundle(
+        block_id=block.block_id,
+        n_buildings=len(block.building_points),
+        origin=[ox, oy],
+        buildings=field.stored,
+        parcels=[polygon_ring(g, ox, oy, what=f"block {block.block_id!r}'s parcel")
+                 for g in block.parcels.geometry],
         # `block.boundary`, not the parcel union: this layer exists for fallback parity, and
         # `_draw_boundary_and_streets` (render.py) is what the committed PNG draws it with.
-        "boundary": polygon_ring(block.boundary, ox, oy,
-                                 what=f"block {block.block_id!r}'s boundary"),
-        "streets": street_coords,
-        "roads": road_specs(roads, ox, oy),
-        "width": {"floor_m": WIDTH_FLOOR_M, "max_m": WIDTH_MAX_M, "step_m": WIDTH_STEP_M,
-                  "default_m": WIDTH_FLOOR_M},
-        "encoding": ENCODING,
-        "reference": cases,
-    }
+        boundary=polygon_ring(block.boundary, ox, oy,
+                              what=f"block {block.block_id!r}'s boundary"),
+        streets=street_coords,
+        roads=road_specs(roads, ox, oy),
+        width=Width(floor_m=WIDTH_FLOOR_M, max_m=WIDTH_MAX_M, step_m=WIDTH_STEP_M,
+                    default_m=WIDTH_DEFAULT_M),
+        encoding=ENCODING,
+        reference=cases,
+    )
     (OUT / "field.json").write_text(json.dumps(bundle) + "\n", encoding="utf-8")
     log.info("wrote %s (%.1f KB)", OUT / "field.json",
              (OUT / "field.json").stat().st_size / 1024.0)

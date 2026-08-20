@@ -1,12 +1,13 @@
 """The bundle is a committed artifact, so nothing recomputes it on the way to the browser. These
 tests are the only thing standing between a bad bake and a wrong picture."""
 import json
-import re
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
+
+from tests.dts_keys import json_keys, ts_field_names
 
 BUNDLE = Path("examples/perm-graph/bundle.json")
 DTS = Path("web/src/bundle.d.ts")
@@ -69,37 +70,6 @@ def test_permeability_is_zero_at_prefix_zero_and_monotone(bundle: dict[str, Any]
                for a, b in zip(perm, perm[1:], strict=False)), "permeability must not fall"
 
 
-_LINE_COMMENT = re.compile(r"//.*")
-_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
-
-
-def _ts_field_names(dts: str) -> set[str]:
-    """Every field name the .d.ts declares, at ANY nesting depth -- not just 2-space-indented
-    top-level lines. `bundle.d.ts` mixes two nesting styles (`prefix`'s fields sit on their own
-    4-space-indented lines; `nodes`/`edges`/`width_norm`'s sit inline on one line, e.g. `nodes: {
-    cx: number[]; cy: number[]; ground_g: number[] }`), so a line-anchored, fixed-indent regex only
-    ever sees the outer style. Comments are stripped first: a bare `key:` regex would otherwise
-    treat "// Regenerate: pixi run ..." as declaring a field named `Regenerate`."""
-    stripped = _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", dts))
-    return set(re.findall(r"(\w+)\s*\??:\s", stripped))
-
-
-def _json_keys(obj: Any) -> set[str]:
-    """Every dict key appearing anywhere inside `obj`, through both dicts and lists, as bare names
-    (not paths) -- e.g. `edges.footpath_g` and `roads[].width_m` both surface as `footpath_g` and
-    `width_m`. Bare names are what a `.d.ts` interface declares too, so this is the comparable shape
-    on both sides."""
-    keys: set[str] = set()
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            keys.add(k)
-            keys |= _json_keys(v)
-    elif isinstance(obj, list):
-        for item in obj:
-            keys |= _json_keys(item)
-    return keys
-
-
 def test_dts_declares_exactly_the_bundle_keys(bundle: dict[str, Any]) -> None:
     """Catches 'regenerated one file, not the other'. Structural and fast -- no solving.
 
@@ -107,12 +77,12 @@ def test_dts_declares_exactly_the_bundle_keys(bundle: dict[str, Any]) -> None:
     it checked the top-level `Bundle`/`Encoding` keys but NOT `nodes.{cx,cy,ground_g}`,
     `edges.{rows,cols,footpath_g,first_upgraded_at}`, `prefix.{potential,current,permeability,
     road_m}`, `width_norm.*`, `roads[].*` -- every field the canvas actually reads each frame was in
-    the unguarded half. Walking the parsed JSON recursively (`_json_keys`) closes that. Also made
-    BIDIRECTIONAL: `.d.ts` declaring a key the bundle no longer has is a regression too (a renamed
-    Python field otherwise leaves a dead, misleading declaration behind), and this direction was
-    free -- `declared - bundle_keys` was already empty before this fix."""
-    declared = _ts_field_names(DTS.read_text(encoding="utf-8"))
-    present = _json_keys(bundle)
+    the unguarded half. Walking the parsed JSON recursively (`tests.dts_keys.json_keys`) closes
+    that. Also made BIDIRECTIONAL: `.d.ts` declaring a key the bundle no longer has is a regression
+    too (a renamed Python field otherwise leaves a dead, misleading declaration behind), and this
+    direction was free -- `declared - bundle_keys` was already empty before this fix."""
+    declared = ts_field_names(DTS.read_text(encoding="utf-8"))
+    present = json_keys(bundle)
     missing = present - declared
     assert not missing, f"bundle keys missing from bundle.d.ts: {sorted(missing)}"
     extra = declared - present
