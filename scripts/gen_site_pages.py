@@ -422,6 +422,64 @@ def _frontier_figure() -> str:
                    caption, attrs=attrs)
 
 
+def _displacement_field_figure() -> str:
+    """The Displacement page's one interactive figure: the model drawn literally -- every building a
+    disk of its own radius `rᵢ`, the road corridor beneath it, each disk shaded by the fraction `cᵢ`
+    of it the corridor takes -- with both roads draggable, the corridor width on a slider, and the
+    running cost read out beside the picture.
+
+    The fallback PNG stays IN the figure, like every other mount point on this site: `dom/error.ts`
+    tells the reader "the static image above still applies", which is only true while the image is
+    there, so the widget removes it itself and only once it has drawn in its place.
+
+    The caption carries the whole argument for a reader with JavaScript off, so it quotes three
+    numbers, all read out of `field.json`'s baked `reference` cases and none of them typed here:
+    `road1` because that configuration is exactly what the fallback PNG draws, and then `apart`
+    against `coincident`, which IS the *Overlap is free* section's claim in numbers -- two roads
+    side by side cost more than the same two merged, and merged they cost precisely what one road
+    costs. Those three are the same fixtures `web/test/field-boot.test.ts` drives the widget
+    against, so the sentence a JS-off reader is given and the numbers the widget shows a JS-on
+    reader cannot disagree.
+
+    No `data-aspect` here (unlike `_frontier_figure`): this widget's canvas is square by
+    construction -- `render_field` plots at `figsize=(16, 16)` and the widget sets
+    `aspectRatio: 1 / 1` -- so an emitted aspect would be a second source for one fact and read by
+    nobody, which is exactly what `data-block` was before it was deleted.
+
+    Emits nothing when the artifacts are absent, like every other figure on this site.
+    """
+    field = EXAMPLES / "displacement-field"
+    path = field / "field.json"
+    if not path.exists():
+        return ""
+    img_url = _copy_asset(field / "field.png", "displacement-field")
+    bundle_url = _copy_asset(path, "displacement-field")
+    if img_url is None or bundle_url is None:
+        return ""
+    bundle = json.loads(path.read_text(encoding="utf-8"))
+    cases = {c["name"]: c for c in bundle["reference"]}
+    one, apart, merged = cases["road1"], cases["apart"], cases["coincident"]
+    n = bundle["n_buildings"]
+    block, floor = bundle["block_id"], bundle["width"]["floor_m"]
+
+    attrs = f'data-widget="displacement-field" data-bundle="{bundle_url}"'
+    caption = (
+        f"The model drawn literally on block <code>{block}</code>: every one of its {n} buildings "
+        f"is a disk of its own radius <code>rᵢ</code>, the road corridor runs beneath them, and "
+        f"each disk is shaded by the share <code>cᵢ</code> of it the corridor takes. The road "
+        f"drawn here is one road at the {floor:.0f} m floor, and it costs "
+        f"<strong>{one['sum_c']:.1f}</strong> buildings — {one['fraction']:.1%} of the block. "
+        f"Drag either end of a road, widen the corridor, or switch the second road on. Switched on "
+        f"where it is baked, the pair costs {apart['sum_c']:.1f}; drag the two onto each other and "
+        f"the pair costs {merged['sum_c']:.1f} again — exactly what the one road costs, because "
+        f"what is charged is the union of the roads' own buffers, so the overlap is paid for once."
+    )
+    return _figure(img_url,
+                   f"the displacement model on block {block}: buildings as disks, shaded by the "
+                   f"share of each that the road corridor takes",
+                   caption, attrs=attrs)
+
+
 def _bakeoff_scale() -> str:
     """Survey scale, read from the ground-truth artifact rather than typed into prose -- and a
     COMPLETE SENTENCE, never a noun phrase (ruling F5). The generator's dir-reader contract lets
@@ -1127,6 +1185,7 @@ MARKERS: dict[str, Callable[[], str]] = {
     "BAKEOFFFLOORS": _bakeoff_floors_table,
     "BAKEOFFFIGS": _bakeoff_figures,
     "PERMGRAPHFIGS": _perm_graph_figures,
+    "DISPFIELD": _displacement_field_figure,
     "NAIROBITABLE": _nairobi_table,
     "REPROCOMMANDS": _repro_commands,
 }

@@ -435,3 +435,20 @@ def test_the_baked_colours_are_actually_in_the_committed_png(bundle: dict[str, A
             f"encoding.{key} = {want} appears nowhere in {PNG} (closest pixel is {closest} away "
             f"summed over three channels): the widget and its own fallback image are drawing "
             f"different colours")
+
+
+def test_the_committed_readme_is_what_the_generator_writes() -> None:
+    """Same guard as the `.d.ts` one above, for the same reason and against a documented specimen:
+    `examples/nairobi/README.md` claims 89 blocks while every `meta.json` beside it says 43. This
+    README's every fact is read out of the bundle, so a hand edit -- or a re-bake nobody
+    regenerated the prose for -- fails here rather than shipping a wrong number in a directory
+    nobody re-reads. Recomputed from the COMMITTED `field.json`, so it needs no bake to run."""
+    from scripts.gen_displacement_field import readme_markdown
+    readme = ROOT / "examples/displacement-field/README.md"
+    # Loaded here rather than through the `bundle` fixture: the fixture is declared
+    # `dict[str, Any]`, and `readme_markdown` takes the `FieldBundle` TypedDict, so the fixture
+    # would need a `cast` that asserts exactly what this test is checking.
+    loaded = json.loads(BUNDLE.read_text(encoding="utf-8"))
+    assert readme.read_text(encoding="utf-8") == readme_markdown(loaded), (
+        "examples/displacement-field/README.md is stale or hand-edited; regenerate it: "
+        "pixi run python -m scripts.gen_displacement_field")

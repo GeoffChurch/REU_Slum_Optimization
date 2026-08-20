@@ -190,9 +190,75 @@ none blocks on a later one.
   not dense.
 - **D — the remaining widgets.** Split into three specs. **D1 SHIPPED** (spec
   `specs/2026-08-16-frontier-widget-and-substrate-hardening-design.md`): `Frontier` on the Methods
-  index, plus the substrate hardening piece C left as live hazards. **D2** is `DisplacementField`,
-  **D3** is `RegionGrow` then `ScreenMap` last — 16k blocks is the only real rendering-performance
-  problem in the design (Canvas, not SVG — recolouring must not touch geometry).
+  index, plus the substrate hardening piece C left as live hazards. **D2 SHIPPED** (spec
+  `specs/2026-08-19-displacement-field-widget-design.md`): `DisplacementField` on the Displacement
+  page — two draggable roads over one disk per building, a width slider, a second-road toggle, and a
+  live cost readout, over a committed PNG fallback. **D3** is `RegionGrow` then `ScreenMap` last —
+  16k blocks is the only real rendering-performance problem in the design (Canvas, not SVG —
+  recolouring must not touch geometry).
+
+  **What D2 closed, beyond its own widget** — five of D1's deferrals, struck in the list below:
+
+  - **The reflow deferral.** `web/src/dom/resize.ts` (`observeSize`) replaces the `window` resize
+    listener in *both* shipped widgets, so a container narrowing with the window untouched — the
+    nav drawer, a `<details>`, print — re-lays out instead of overflowing. Zero width means "not
+    laid out yet" and is SKIPPED, which is only safe because the fallback `<img>` now goes after
+    the first successful draw rather than the moment a canvas is inserted.
+  - **The glightbox anchor.** `web/src/dom/fallback.ts` removes the empty `<a class="glightbox">`
+    when the image was its only child. Shared by all three widgets, so `PermGraph`'s live-site
+    anchor goes with this deploy.
+  - **`data-block`.** Deleted from the generator and from the assertions that only ever checked it
+    was emitted. Every bundle carries `block_id`, which is what the widgets actually read.
+  - **`fitBbox`'s uniformity test.** Now asserts the binding axis is the *smaller* ratio at every
+    box shape, so `Math.max`-for-`Math.min` reddens.
+  - **The `.d.ts` template guard.** `web/src/field.d.ts` is pinned byte-for-byte to the generator's
+    own `DTS_TEMPLATE`, so a hand edit fails rather than being caught only for the keys the
+    recursive key-walk happens to reach.
+
+  **`viewBox` was REJECTED, not deferred — do not re-propose it.** D1's entry below called it "the
+  real fix" for reflow. It is not: a `viewBox` scales *text* with the box, so `Frontier`'s 11 px
+  axis labels land at **~5 px on a 320 px screen**. Re-rendering at the measured width keeps type at
+  its designed size and re-nices the ticks for the narrower span, which is what shipped.
+
+  **The displacement metric is exactly computable in a browser, and that shrinks piece F.**
+  `Σ max(0, 1 − dᵢ/rᵢ)` over a *union of buffered segments* needs no geometry library at all: the
+  distance from a point to the union is the min over segments of the point-to-segment distance,
+  minus that segment's half-width — so `web/src/model/displacement.ts` is 45 lines of arithmetic
+  and matches Python to 1e-3 on all six baked fixtures (exact 0 outside). Only **permeability**
+  actually needs `shapely`/`geopandas`, so F's Pyodide boot is no longer "the metrics in the
+  browser" but one metric in the browser, with the other already there.
+
+  **There is no committed bundle to go stale.** `docs/js/` is gitignored and `deploy-site.yml` runs
+  `npm run build` before `mkdocs build`, so `widgets.js` is always built from the source in the same
+  commit. `gen_site_pages.py` fails the build when a page carries a mount point and that file is
+  absent, which is what makes "built without `pixi run web`" loud instead of a silently dead widget
+  behind an intact PNG.
+
+  **One published sentence was wrong and is now right.** The Displacement page's *Parcels are not
+  buildings* ended "a parcel with no building standing on it costs nothing to cross". Parcels are
+  Voronoi cells **of the building points** (`src/reblock/mesh.py:51-66`), so there is one cell per
+  building by construction and a building-less parcel is a degenerate geometry (radius 0), not the
+  vacant lot the sentence implied. The section now makes the distinction that is actually true and
+  is the more interesting one: displacement is charged per building against **its own radius
+  `rᵢ`**, never per parcel against parcel *area*.
+
+  **Deferred by D2, decided rather than forgotten:**
+
+  - **No `data-aspect` on the field figure**, unlike `Frontier`'s. The canvas is square by
+    construction — `render_field` plots at `figsize=(16, 16)`, the widget sets `aspectRatio: 1/1` —
+    so emitting the PNG's measured aspect would be a second source for one fact, read by nobody.
+    That is exactly what `data-block` was.
+  - **One correctness fix in the widget has no test that can fail, deliberately.** `pickHandle`
+    hit-tests `handles(s.roads)` filtered by which are live, not `handles(activeRoads(s))`, so the
+    index it writes back is an index into the array it came from. Reverting that stays green: the
+    live set is a *prefix* of the full array today, and the only input that distinguishes them —
+    road 2 on with road 1 off — is one the widget cannot construct. A test for it would be a test
+    against an unconstructible input, which this project classes as negative evidence. The change
+    removes an unstated invariant; it does not change behaviour.
+  - **`examples/displacement-field/README.md` is GENERATED** (`readme_markdown`, pinned by a
+    staleness test that recomputes from the committed `field.json`), unlike every other
+    hand-written example README. The drift class those are in is live and documented — see the
+    `examples/nairobi/README.md` entry below, 89 blocks against a `meta.json` that says 43.
 
   **What D1 closed from piece C's own hazard list above:** `mountAll()` now wraps each widget in
   try/catch and renders the failure where it happened; `register()` throws on a duplicate name; and
@@ -211,29 +277,27 @@ none blocks on a later one.
 
   **Deferred from D1, decided rather than forgotten:**
 
-  - **The widgets do not reflow.** Both size in absolute pixels with no `viewBox`, so a container
-    narrowing without a `window` resize event overflows. **Do not "fix" this by adding `max-width`
-    alone** — with no `viewBox` that clips instead of scaling, converting a visible overflow into
-    silently hidden chart content, which is the exact failure shape this branch spent seven defects
-    eliminating. The real fix is a `viewBox`, and it interacts with `svg.test.ts`'s containment and
-    gutter guards, so it wants its own piece.
+  - ~~**The widgets do not reflow.**~~ — **CLOSED by D2** (`dom/resize.ts`). The warning still
+    stands: **do not "fix" this by adding `max-width` alone** — with no `viewBox` that clips instead
+    of scaling, converting a visible overflow into silently hidden chart content, which is the exact
+    failure shape this branch spent seven defects eliminating. But the "real fix is a `viewBox`"
+    written here was **wrong**, and D2's entry above says why (11 px labels → ~5 px at 320 px).
   - **`Frontier.boot()` is ~270 lines with five nested closures** (`web/src/widgets/frontier.ts`), and
     it rebuilds the whole SVG on every render — now ~550 `<circle>` markers among them. `dragTo` early-
     returns when the snapped value is unchanged, so a drag no longer rebuilds per pointer event, but
     incremental update (recolour/reposition rather than rebuild) is untouched. No browser exists in
     this pipeline, so nobody has measured whether it matters.
-  - **The resize handler throws at zero box width** (console-only; the last drawing stays). Chosen over
-    silently drawing a zero-width chart. A figure landing in a hidden container needs a
-    `ResizeObserver` instead.
-  - **`data-block` is emitted, tested and never read** by either widget. Substrate-wide question, not
-    a `Frontier` one.
+  - ~~**The resize handler throws at zero box width.**~~ — **CLOSED by D2**: it is a
+    `ResizeObserver` now, and zero width is skipped rather than drawn or thrown on, which is safe
+    only because the fallback `<img>` outlives the first draw attempt.
+  - ~~**`data-block` is emitted, tested and never read** by either widget.~~ — **CLOSED by D2**:
+    deleted from the generator and from the assertions that only checked it was emitted.
   - **`mountAll`'s try/catch covers the synchronous mount call only** — not `boot()`'s async chain
     (each widget has its own `.catch`) nor a throw from an interaction handler registered inside it,
     where a later failure would be silent and permanent.
-  - **`fitBbox`'s uniformity test asserts only `scaleX === scaleY`**, not that the value is the
-    width/height-bound *minimum*, so a `Math.max`-for-`Math.min` regression stays green there and is
-    caught only incidentally by a neighbouring hardcoded expectation. `tx`/`ty` centring is also
-    duplicated between `fitBbox` and `fitAxes`.
+  - ~~**`fitBbox`'s uniformity test asserts only `scaleX === scaleY`**~~ — **CLOSED by D2**: it now
+    asserts the binding axis is the smaller ratio at every box shape, so `Math.max`-for-`Math.min`
+    reddens. `tx`/`ty` centring is still duplicated between `fitBbox` and `fitAxes` — open.
 
   - **`nearest`, `zoomed` and `panned` are never tested under unequal scales.** Every transform test
     runs on `fitBbox` output, where the two scales enter equal and stay equal, so a copy-paste swap
@@ -255,13 +319,12 @@ none blocks on a later one.
     callers** (`budget.py:656`). Not a live bug — all 8 methods yield R>=9 on the pinned block — and the
     merged `gen_web_bundle.py:158` has the same gap, so it is inherited convention rather than newly
     introduced. Fix both or neither.
-  - **Removing the fallback `<img>` leaves glightbox's empty `<a>` behind.** Verified in the rendered
-    HTML: `mkdocs-glightbox` wraps every figure image in
-    `<a class="glightbox" href="…png">`, and both widgets do `host.querySelector("img")` then
-    `.remove()`, so an empty anchor with an `href` survives — invisible, but focusable and announced by
-    a screen reader as a link with no text, which cuts against the accessibility rationale for drawing
-    SVG. Pre-existing: `PermGraph` ships this on the live site today, so it is a substrate fix (remove
-    the anchor when the image was its only child), not a `Frontier` one.
+  - ~~**Removing the fallback `<img>` leaves glightbox's empty `<a>` behind.**~~ — **CLOSED by D2**
+    (`dom/fallback.ts`, shared by all three widgets, so `PermGraph`'s live-site anchor goes with the
+    next deploy). Kept for the finding: `mkdocs-glightbox` wraps every figure image in
+    `<a class="glightbox" href="…png">`, so removing only the `<img>` leaves an anchor that is
+    invisible but focusable and announced by a screen reader as a link with no text. It is removed
+    only when the image was its only element child — an anchor with other content is somebody else's.
 
   **One real finding that is NOT a widget bug — decide it before the next figure regeneration.**
   `emit.method_colors` assigns each method a hue by *index over N*, and `compare_budgets.py:183` passes

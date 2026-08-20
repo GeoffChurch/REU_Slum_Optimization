@@ -24,7 +24,10 @@ overlaid on every heatmap automatically.
 Alongside the flagships, [`perm-graph/`](perm-graph/) holds the egress graph itself drawn four ways
 — conductance and current, before and after roads — on the same pinned block `method-comparison`
 grades. It is a figure set for the site's Permeability section rather than a graded example, which
-is why it is not in the table above.
+is why it is not in the table above. [`displacement-field/`](displacement-field/) is the same thing
+for the site's Displacement section: that block drawn as the displacement model itself — one disk
+per building, shaded by the share of it the road corridor takes — plus the payload the page's
+interactive figure fetches.
 
 A second city, **[Nairobi](nairobi/)**, runs the same three variants on central Nairobi data. It's
 shipped as-is: the screens and metric behaviour carry over, but Nairobi's block-size distribution and
