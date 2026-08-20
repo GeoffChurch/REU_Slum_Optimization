@@ -41,8 +41,11 @@ export function corridorDistance(px: readonly number[], py: readonly number[],
     for (const s of segs) {
       const dx = s.x1 - s.x0, dy = s.y1 - s.y0;
       const l2 = dx * dx + dy * dy;
-      // A zero-length road is its own endpoint. Without this, t is 0/0 and every distance is NaN --
-      // and NaN propagates silently through Math.min to a readout of "NaN homes".
+      // A zero-length road is its own endpoint. Without this, t is 0/0 = NaN, d becomes NaN, and
+      // "NaN < best" is always false -- so best never leaves its initial Infinity and the
+      // degenerate road silently contributes ZERO cost, not a visible NaN. That is the more
+      // dangerous failure: silent and plausible (a road reads as free) instead of loud and
+      // obviously wrong, and it's exactly what this guard prevents.
       const t = l2 > 0 ? Math.min(1, Math.max(0, ((x - s.x0) * dx + (y - s.y0) * dy) / l2)) : 0;
       const d = Math.hypot(x - (s.x0 + t * dx), y - (s.y0 + t * dy)) - s.hw;
       if (d < best) best = d;
@@ -59,6 +62,16 @@ export function sumC(radii: readonly number[], d: Float64Array): number {
   for (let i = 0; i < radii.length; i++) {
     const r = radii[i]!, di = d[i]!;
     const c = r > 0 ? 1 - di / r : (di <= 0 ? 1 : 0);
+    // The upper bound here is unreachable: corridorDistance always returns d >= 0 (its own
+    // Math.max(0, best) floor), so c = 1 - d/r <= 1 whenever r > 0, and c is exactly 1 or 0 when
+    // r == 0 -- c can never exceed 1 through this pipeline. Same story in the Python reference:
+    // corridor_distance is a shapely .distance(), also always >= 0, so
+    // budget.displacement_contributions's own upper clip is equally dead there. Kept anyway --
+    // this module's job is to mirror that formula line for line, and the mirror is worth more than
+    // the dead branch costs. This comment exists so a future reader neither tests that branch nor
+    // trusts it to defend against anything. The LOWER bound is the live one: d > r gives c < 0 (any
+    // building outside its corridor-touch radius), and Math.max(0, ...) is what turns that into
+    // zero cost rather than negative cost.
     total += Math.min(1, Math.max(0, c));
   }
   return total;

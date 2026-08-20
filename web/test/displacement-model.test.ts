@@ -57,6 +57,21 @@ test("a zero-length road is its own endpoint rather than a NaN", () => {
   assert.equal(d[0], 10 - 3.5);
 });
 
+test("distance clamps to the segment, not the infinite line it lies on", () => {
+  // No baked fixture reaches this: every fixture road is a chord spanning (or nearly spanning) the
+  // whole block, so every building's perpendicular foot lands within [0, 1] of the segment and the
+  // clamp never binds there (confirmed by recomputing every fixture's projection parameter directly
+  // -- see task-4-report.md). This synthetic case is chosen so the clamp dominates: a short segment
+  // and a building well past one end, positioned so the clamped and unclamped answers are nowhere
+  // close.
+  const segs = flatten([{ coords: [[0, 0], [10, 0]], width_m: 4 }]);
+  const d = corridorDistance([60], [0], segs);
+  // Clamped: the nearest point on the SEGMENT is its (10, 0) endpoint, so distance = 50 - hw = 48.
+  // Unclamped, the projection parameter is t = 6, landing the "nearest point" at (60, 0) -- i.e. on
+  // top of the building -- for a distance near 0. 48 and 0 are not close by any tolerance.
+  assert.equal(d[0], 50 - 2);
+});
+
 test("no roads means no cost, not an empty-array minimum of Infinity leaking into sumC", () => {
   assert.strictEqual(sumC(bundle.buildings.r, corridorDistance(
     bundle.buildings.x, bundle.buildings.y, [])), 0);
