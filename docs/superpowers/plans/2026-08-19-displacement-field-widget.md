@@ -758,7 +758,8 @@ ENCODING = {
     "parcel_lw": 0.4,
     "boundary_color": _BOUNDARY_COLOR,
     "boundary_lw": 1.3,
-    "street_lw": 1.0,
+    "street_lw": _BOUNDARY_LW,   # 1.3 -- _draw_boundary_and_streets draws BOTH at 1.3;
+                                 # the 1.0 first written here was invented, and a guard caught it
     "road_color": _ROAD_COLOR,
     "road_alpha": 0.25,
     "disk_color": _DISPLACED_PT,
@@ -1397,6 +1398,12 @@ Expected: FAIL — module not found.
 Spec §3's four layers, in order, mirroring `render_field`: parcel wireframe (`encoding.parcel_color`, `parcel_lw`, never filled) → corridor (one `beginPath()` per width group covering every road in it, then **one** `stroke()`, at `road_alpha`; a `stroke()` per road compounds translucency at every overlap, which would draw the opposite of the claim) → boundary and streets → disks (zero-cost as `disk_outline_lw` outlines, grazed filled at `globalAlpha = cᵢ`) → the drag handles as small filled circles at `handle_radius_px`, drawn last so they are never under a disk.
 
 Read `ctx.lineWidth = width_m * view.scaleX` for the corridor, as `canvas.ts` does, and for the same stated reason: `fitBbox` guarantees `scaleX === scaleY` for a map view.
+
+**Every line weight, colour and alpha comes from `bundle.encoding` — never a TypeScript literal.**
+Task 3 found why this matters concretely: `street_lw` was baked as 1.0 while `render.py` draws
+streets at 1.3, so a JS-on reader would have seen thinner streets than the fallback PNG. The bundle
+now carries 1.3, pinned to `render.py`'s own `_BOUNDARY_LW` by a test. A literal here would reopen
+exactly that divergence.
 
 - [ ] **Step 4: Implement the widget**
 
