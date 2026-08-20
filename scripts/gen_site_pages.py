@@ -441,6 +441,12 @@ def _displacement_field_figure() -> str:
     against, so the sentence a JS-off reader is given and the numbers the widget shows a JS-on
     reader cannot disagree.
 
+    THE TWO CLAUSES CARRYING `apart` AND `coincident` ARE LOAD-BEARING WORDING, not prose to
+    reflow freely: `tests/test_gen_site_pages.py` matches each number inside its own clause, so
+    that swapping the two -- which would publish the exact inverse of the claim, that merging two
+    roads costs MORE -- fails a test instead of shipping. Reword them and that test reddens, which
+    is the point; re-read what it is asserting before changing the sentence.
+
     No `data-aspect` here (unlike `_frontier_figure`): this widget's canvas is square by
     construction -- `render_field` plots at `figsize=(16, 16)` and the widget sets
     `aspectRatio: 1 / 1` -- so an emitted aspect would be a second source for one fact and read by
@@ -449,10 +455,13 @@ def _displacement_field_figure() -> str:
     Emits nothing when the artifacts are absent, like every other figure on this site.
     """
     field = EXAMPLES / "displacement-field"
-    path = field / "field.json"
-    if not path.exists():
-        return ""
-    img_url = _copy_asset(field / "field.png", "displacement-field")
+    path, png = field / "field.json", field / "field.png"
+    # The copies ARE the existence test -- `_copy_asset` returns None for a file that is not there.
+    # No `path.exists()` before this: `_frontier_figure` above has one, which makes its own
+    # `bundle_url is None` branch unreachable (it can never fire, so it can never be right or
+    # wrong). Here both branches can fire, the bundle is read only once its copy has succeeded, and
+    # the same test that decides whether to emit is what narrows both URLs to `str` for the checker.
+    img_url = _copy_asset(png, "displacement-field")
     bundle_url = _copy_asset(path, "displacement-field")
     if img_url is None or bundle_url is None:
         return ""
@@ -470,9 +479,10 @@ def _displacement_field_figure() -> str:
         f"drawn here is one road at the {floor:.0f} m floor, and it costs "
         f"<strong>{one['sum_c']:.1f}</strong> buildings — {one['fraction']:.1%} of the block. "
         f"Drag either end of a road, widen the corridor, or switch the second road on. Switched on "
-        f"where it is baked, the pair costs {apart['sum_c']:.1f}; drag the two onto each other and "
-        f"the pair costs {merged['sum_c']:.1f} again — exactly what the one road costs, because "
-        f"what is charged is the union of the roads' own buffers, so the overlap is paid for once."
+        f"where it is baked, the two roads cost {apart['sum_c']:.1f} between them; dragged onto "
+        f"each other, the same two cost {merged['sum_c']:.1f} — exactly what the one road costs, "
+        f"because what is charged is the union of the roads' own buffers, so the overlap is paid "
+        f"for once."
     )
     return _figure(img_url,
                    f"the displacement model on block {block}: buildings as disks, shaded by the "

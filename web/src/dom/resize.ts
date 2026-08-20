@@ -5,9 +5,13 @@
  * nav drawer at some breakpoints, a <details> opening, a tab panel switching, print. There,
  * Frontier's absolute-pixel SVG overflows and PermGraph's canvas stretches a stale backing store.
  *
- * Deliberately NOT a viewBox, which was the recorded plan: a viewBox scales text with the box, so
- * Frontier's 11 px axis labels would land at ~5 px on a 320 px screen. Re-laying out at the
+ * Deliberately NOT a viewBox, which was the recorded plan: a viewBox scales the whole drawing,
+ * text included, so the narrower the screen the smaller the axis labels get. Re-laying out at the
  * measured width keeps type at its designed size and re-nices the ticks for the narrower span.
+ * (No pixel figures in that claim on purpose. An earlier version of this comment said "11 px labels
+ * would land at ~5 px on a 320 px screen"; there is no font size anywhere in web/src or
+ * docs/stylesheets/sbu.css -- render/svg.ts:160 says it is given none -- and no browser in this
+ * pipeline to have measured one, so both numbers were invented. The mechanism decides it alone.)
  *
  * A zero width means "not laid out yet" (a hidden container, a collapsed tab), so it is SKIPPED
  * rather than drawn or thrown on. Skipping is only safe because both widgets now remove their

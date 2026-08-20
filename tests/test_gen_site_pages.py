@@ -464,24 +464,34 @@ def test_methods_index_is_written_at_the_url_depth_its_widget_needs() -> None:
 
 # ------------------------------------------------- the Displacement page's field widget (D2)
 
-def _displacement_body() -> str:
+@pytest.fixture
+def displacement_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
     """The rendered Displacement partial -- markers filled, exactly what `main()` writes out.
 
     Rendered here rather than read off `docs/methodology/displacement.md`, which is GITIGNORED: a
     fresh checkout does not have it, so a test reading that file would assert nothing (or error)
-    depending on whether someone had run the generator first."""
-    from scripts.gen_site_pages import _render_partial
+    depending on whether someone had run the generator first.
 
-    return _render_partial("displacement")
+    `DOCS`/`ASSETS` are redirected into `tmp_path` because rendering a partial RUNS EVERY PRODUCER
+    (`_render_partial` calls each entry of `MARKERS` whether or not that marker appears in the
+    page), and producers copy assets. Left pointing at the real tree, every test using this would
+    write megabytes into the working copy -- and `pixi run pytest` runs under xdist, so several
+    workers would do it to the same paths at once. The partials themselves still come from the real
+    repo: `PARTIALS` is bound at import time, so moving `DOCS` does not move it."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    return gsp._render_partial("displacement")
 
 
-def test_the_displacement_page_carries_exactly_one_field_widget() -> None:
+def test_the_displacement_page_carries_exactly_one_field_widget(displacement_body: str) -> None:
     """One mount point, over its own PNG fallback, with the marker actually substituted.
 
     An unfilled `<!-- DISPFIELD -->` ships as a literal HTML comment and the page looks fine while
     the figure is simply absent -- the same silence a widget that never boots produces, one stage
     earlier."""
-    body = _displacement_body()
+    body = displacement_body
     assert body.count('data-widget="displacement-field"') == 1
     # The bundle URL in the exact `assets/...` form `_write_page` rewrites (see the test below).
     assert 'data-bundle="assets/displacement-field/field.json"' in body
@@ -494,23 +504,20 @@ def test_the_displacement_page_carries_exactly_one_field_widget() -> None:
 
 
 def test_the_field_figure_ships_the_bundle_and_png_it_points_at(
-        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        displacement_body: str, tmp_path: Path) -> None:
     """Both halves of the 404 that fails silently: the asset has to be COPIED into docs/, and the
     URL has to be rewritten for the depth displacement.md is SERVED at. It serves at
     <base>/methodology/displacement/ -- two segments -- so `../assets/` would 404 the widget's
     fetch while the page and its PNG still look perfect.
 
-    `DOCS`/`ASSETS` are redirected into `tmp_path` for the same reason the frontier's copy test
-    does it: `pixi run pytest` runs under xdist and several tests copy these assets, so comparing
-    bytes against the shared `docs/assets` copy flakes."""
-    import scripts.gen_site_pages as gsp
-    from scripts.gen_site_pages import EXAMPLES, _render_partial, _write_page
+    The `displacement_body` fixture has already redirected `ASSETS` into this test's own
+    `tmp_path`, which is where the copies below are looked for -- and why comparing bytes here
+    cannot race the shared `docs/assets` copy that other xdist workers may be mid-write on."""
+    from scripts.gen_site_pages import EXAMPLES, _write_page
 
-    monkeypatch.setattr(gsp, "DOCS", tmp_path)
-    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
     out = tmp_path / "displacement.md"
     # depth/url_depth verbatim from main()'s own call for this page (asserted below).
-    _write_page(out, _render_partial("displacement"), depth=1, url_depth=2, title="Displacement")
+    _write_page(out, displacement_body, depth=1, url_depth=2, title="Displacement")
     text = out.read_text(encoding="utf-8")
 
     assert 'data-bundle="../../assets/displacement-field/field.json"' in text
@@ -530,7 +537,7 @@ def test_the_field_figure_ships_the_bundle_and_png_it_points_at(
     assert m.group(2) == "2", f"displacement.md written at url_depth={m.group(2)}, needs 2"
 
 
-def test_the_caption_quotes_baked_numbers_and_not_typed_ones() -> None:
+def test_the_caption_quotes_baked_numbers_and_not_typed_ones(displacement_body: str) -> None:
     """Every number on this page comes off disk. The apart/coincident pair is the whole point of
     the caption -- it is how a reader with JavaScript off gets the overlap-is-free comparison, and
     the two roads merged costing exactly what one road costs is the claim the section above it
@@ -542,25 +549,35 @@ def test_the_caption_quotes_baked_numbers_and_not_typed_ones() -> None:
     bundle = json.loads(
         (EXAMPLES / "displacement-field" / "field.json").read_text(encoding="utf-8"))
     cases = {c["name"]: c for c in bundle["reference"]}
-    body = _displacement_body()
-    figure = body[body.index("<figure data-widget=\"displacement-field\""):]
-    figure = figure[:figure.index("</figure>") + len("</figure>")]
+    start = displacement_body.index('<figure data-widget="displacement-field"')
+    figure = displacement_body[start:displacement_body.index("</figure>", start) + len("</figure>")]
 
-    # Scoped to the figure, and each number pinned to its ROLE rather than merely present
-    # somewhere. A bare `"32.0" in body` for `road1` is satisfied by the `coincident` quote, which
-    # is the same number by construction -- verified: hand-typing the road1 figure as 32.5 left
-    # that spelling of this test green.
-    assert f"<strong>{cases['road1']['sum_c']:.1f}</strong>" in figure, (
-        "the fallback PNG's own number is not the caption's headline")
-    assert f"{cases['apart']['sum_c']:.1f}" in figure, "the caption does not quote `apart`"
-    # `coincident` IS road 1 twice, so its cost is identically road 1's -- and that identity is the
-    # whole overlap-is-free claim. It therefore has to appear TWICE in the figure: once as what one
-    # road costs, once as what the merged pair costs. One occurrence means a number was typed or a
-    # half of the comparison was dropped.
+    # First, what the artifact has to still SAY for the caption to be worth printing. Both are
+    # properties of the bake, not of this file: `coincident` is road 1 twice, so its cost is
+    # identically road 1's, and two roads held apart must cost more than the same two merged. If a
+    # re-bake ever broke either, the caption would be publishing a false claim in correct numbers,
+    # and this fails with a message that says to re-bake rather than to edit the test.
     assert cases["coincident"]["sum_c"] == cases["road1"]["sum_c"], (
         "the bundle no longer says merging two roads costs what one costs; the caption's whole "
         "comparison is stale -- re-bake before rewriting this test")
-    assert figure.count(f"{cases['coincident']['sum_c']:.1f}") == 2, figure
+    assert cases["apart"]["sum_c"] > cases["coincident"]["sum_c"], (
+        "the bundle no longer says pulling two roads apart costs more than merging them")
+
+    # Then each number PINNED TO ITS OWN CLAUSE, which is what makes the assertions asymmetric.
+    # Two weaker spellings were measured to guard nothing:
+    #   * `f"{road1:.1f}" in body` is satisfied by the `coincident` sentence, since those two are
+    #     the same number -- hand-typing the headline as 32.5 left it green;
+    #   * counting occurrences (`figure.count(...) == 2`) is symmetric under SWAPPING `apart` and
+    #     `coincident`, and that swap publishes the exact inverse of the claim -- that merging two
+    #     roads makes them dearer -- with every test still green.
+    # Matching the clause text is therefore deliberate, not incidental: the wording IS the claim,
+    # and `_displacement_field_figure`'s docstring says so where a rewriter would see it.
+    assert f"<strong>{cases['road1']['sum_c']:.1f}</strong>" in figure, (
+        "the fallback PNG's own number is not the caption's headline")
+    assert f"the two roads cost {cases['apart']['sum_c']:.1f} between them" in figure, (
+        "the apart cost is not stated as what the two roads cost held apart")
+    assert f"the same two cost {cases['coincident']['sum_c']:.1f}" in figure, (
+        "the merged cost is not stated as what the same two cost dragged together")
     assert f"{cases['road1']['fraction']:.1%}" in figure
     assert str(bundle["n_buildings"]) in figure
     # Brace-free, like the frontier mount point: a literal `{` inside a raw-HTML block is what fix
@@ -583,10 +600,10 @@ def test_the_caption_quotes_baked_numbers_and_not_typed_ones() -> None:
         f"spell it without a decimal point rather than weakening the guard.)")
 
 
-def test_the_page_no_longer_claims_a_parcel_can_lack_a_building() -> None:
+def test_the_page_no_longer_claims_a_parcel_can_lack_a_building(displacement_body: str) -> None:
     """`src/reblock/mesh.py`: parcels are Voronoi cells OF the building points, so the
     correspondence is exactly one cell per building. The old sentence described a vacant lot this
     pipeline cannot produce."""
-    body = _displacement_body()
+    body = displacement_body
     assert "no building standing on it" not in body
     assert "Voronoi" in body, "the corrected section should say what parcels actually are"

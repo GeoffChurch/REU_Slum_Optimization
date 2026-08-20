@@ -44,15 +44,18 @@ buffering each road on its own and only then taking the union, before any distan
 
 `Block.parcels` and `Block.building_points` are two distinct fields on the same block. A parcel is a
 cell of the tessellated block interior — land, not a structure — and that tessellation is the
-**Voronoi diagram of the building points**, so there is exactly one cell per building by
-construction.
+**Voronoi diagram of the building points**, so a parcel is normally one building's own share of the
+block: one cell, one building, as on the block drawn above. Normally, not always — clipping a cell
+against a ragged block edge can split it into separate lobes, and each lobe becomes a parcel in its
+own right. A lobe that ends up holding no building is charged nothing, because there is nothing
+inside it to charge.
 
 What separates the two is therefore not whether a parcel holds a building, but what the charge is
 measured against. Displacement is charged **per building, against that building's own radius `rᵢ`**
 — half its nearest-neighbour distance — and never per parcel against parcel *area*. A road crossing
-one large parcel out at the sparse edge of a block is charged by how close it comes to the single
-building standing in it, not by how much land it takes; the same road through the packed core
-crosses many small parcels and is still charged once per building it actually reaches.
+one large parcel out at the sparse edge of a block is charged by how close it comes to the one
+building standing in it, not by how much land it takes; the same road through the packed core is
+charged, building by building, the share `cᵢ` of each disk it reaches into.
 
 ## Gap-hugging is free
 

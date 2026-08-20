@@ -216,9 +216,14 @@ none blocks on a later one.
     recursive key-walk happens to reach.
 
   **`viewBox` was REJECTED, not deferred — do not re-propose it.** D1's entry below called it "the
-  real fix" for reflow. It is not: a `viewBox` scales *text* with the box, so `Frontier`'s 11 px
-  axis labels land at **~5 px on a 320 px screen**. Re-rendering at the measured width keeps type at
-  its designed size and re-nices the ticks for the narrower span, which is what shipped.
+  real fix" for reflow. It is not: a `viewBox` scales the whole drawing, **text included**, so the
+  narrower the screen the smaller the axis labels — the figure stays correct as a shape and stops
+  being readable as a chart, which is the failure a phone reader actually gets. Re-rendering at the
+  measured width instead keeps type at its designed size and re-nices the ticks for the narrower
+  span, which is what shipped. **Stated as a mechanism and deliberately with no pixel figures:**
+  there is no browser in this pipeline and no font size in `web/src` or `docs/stylesheets/sbu.css`
+  (`render/svg.ts:160` says outright that it is given none), so any "11 px becomes 5 px" here would
+  be invention. An earlier draft of this entry carried exactly that pair of numbers.
 
   **The displacement metric is exactly computable in a browser, and that shrinks piece F.**
   `Σ max(0, 1 − dᵢ/rᵢ)` over a *union of buffered segments* needs no geometry library at all: the
@@ -281,7 +286,8 @@ none blocks on a later one.
     stands: **do not "fix" this by adding `max-width` alone** — with no `viewBox` that clips instead
     of scaling, converting a visible overflow into silently hidden chart content, which is the exact
     failure shape this branch spent seven defects eliminating. But the "real fix is a `viewBox`"
-    written here was **wrong**, and D2's entry above says why (11 px labels → ~5 px at 320 px).
+    written here was **wrong**, and D2's entry above says why (a `viewBox` shrinks the labels with
+    the box).
   - **`Frontier.boot()` is ~270 lines with five nested closures** (`web/src/widgets/frontier.ts`), and
     it rebuilds the whole SVG on every render — now ~550 `<circle>` markers among them. `dragTo` early-
     returns when the snapped value is unchanged, so a drag no longer rebuilds per pointer event, but
