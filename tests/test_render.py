@@ -3,19 +3,30 @@ from typing import cast
 
 import geopandas as gpd
 import matplotlib
+import numpy as np
 import pandas as pd
 import pytest
 
 matplotlib.use("Agg")
 from matplotlib.collections import PatchCollection
+from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
+from reblock.budget import building_radii
 from reblock.contracts import Block, Metrics, Proposal
 from reblock.derive.access import parcel_access_layers
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
-from reblock.render import frame_bbox, render_after, render_before, save_render
+from reblock.render import (
+    _DISPLACED_PT,
+    field_contributions,
+    frame_bbox,
+    render_after,
+    render_before,
+    render_field,
+    save_render,
+)
 
 UTM = CRS.from_epsg(32643)
 
@@ -39,6 +50,37 @@ def _connector_proposal(block: Block) -> Proposal:
     connector = with_width(gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM),
                            DEFAULT_ROAD_WIDTH_M)
     return Proposal(block_id=block.block_id, crs=UTM, roads=connector, method="topology")
+
+
+def _field_block(n: int = 3, cell: float = 20.0) -> Block:
+    """A grid block WITH building points -- `_grid_block` has none, and render_field draws them.
+
+    20 m cells rather than `_grid_block`'s 1 m: a 7 m road (DEFAULT_ROAD_WIDTH_M, and
+    permeability.py:205 RAISES below it) buffers to 3.5 m, which on unit parcels swallows the whole
+    block and leaves every building fully displaced -- so there would be no zero-cost disk to
+    assert on, which is exactly the case these tests exist to check.
+    """
+    polys, ids, pts = [], [], []
+    for i in range(n):
+        for j in range(n):
+            polys.append(Polygon([(i * cell, j * cell), ((i + 1) * cell, j * cell),
+                                  ((i + 1) * cell, (j + 1) * cell), (i * cell, (j + 1) * cell)]))
+            ids.append(i * n + j)
+            pts.append(Point((i + 0.5) * cell, (j + 0.5) * cell))
+    parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    return Block(block_id="f", crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM),
+                 building_points=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+
+
+def _mid_road(block: Block) -> gpd.GeoDataFrame:
+    """A 7 m road up the middle column of `_field_block`: grazes the two nearest columns and misses
+    the far one entirely, so both disk collections are non-empty and the shading is partial."""
+    x0, y0, x1, y1 = block.parcels.total_bounds
+    x = float(x0 + (x1 - x0) / 3.0)
+    return with_width(gpd.GeoDataFrame(
+        geometry=[LineString([(x, y0), (x, y1)])], crs=UTM), DEFAULT_ROAD_WIDTH_M)
 
 
 def test_render_before_returns_figure_with_axes() -> None:
@@ -406,4 +448,48 @@ def test_render_graph_draws_upgraded_edges_in_the_road_colour() -> None:
     for coll in _blue_collections(b, blue):
         widths = _linewidths(coll)
         assert widths == [_UPGRADED_LW] * len(widths)
+
+
+def test_render_field_draws_every_building_not_only_the_displaced_ones():
+    """The point of the figure: a reader must be able to see that a road THREADED a gap, which
+    means seeing the disks it missed. render_after draws only the displaced ones."""
+    block = _field_block()
+    roads = _mid_road(block)
+    radii = building_radii(block.building_points)
+    fig = render_field(block, roads, radii)
+    ax = fig.axes[0]
+    # One PatchCollection per disk group; every building appears exactly once.
+    disk_counts = [len(c.get_paths()) for c in ax.collections
+                   if len(c.get_paths()) == len(block.building_points)]
+    assert disk_counts, (
+        f"no collection covers all {len(block.building_points)} buildings; "
+        f"collection sizes were {[len(c.get_paths()) for c in ax.collections]}")
+
+
+def test_render_field_shades_by_c_and_uses_the_named_constant():
+    block = _field_block()
+    roads = _mid_road(block)
+    radii = building_radii(block.building_points)
+    c = field_contributions(block, roads, radii)
+    fig = render_field(block, roads, radii)
+    alphas = sorted({round(float(a), 6) for coll in fig.axes[0].collections
+                     for a in np.atleast_1d(coll.get_alpha() or 1.0)})
+    assert any(a not in (0.0, 1.0) for a in alphas), (
+        "no partial alpha anywhere: the disks are not shaded by c")
+    assert _DISPLACED_PT in {to_hex(col) for coll in fig.axes[0].collections
+                             for col in np.atleast_2d(coll.get_facecolor())}, (
+        f"the grazed disks must use the named constant {_DISPLACED_PT}, not an inline literal")
+    assert 0.0 < c.max() <= 1.0
+
+
+def test_render_field_never_fills_parcels():
+    """Piece B's finding, restated: filling parcels states one quantity twice and drowns the
+    subject. The parcel collection must be face-transparent."""
+    block = _field_block()
+    fig = render_field(block, _mid_road(block), building_radii(block.building_points))
+    parcel_faces = [coll.get_facecolor() for coll in fig.axes[0].collections
+                    if len(coll.get_paths()) == len(block.parcels)]
+    assert parcel_faces, "no collection matches the parcel count"
+    assert all(np.asarray(f).size == 0 or float(np.asarray(f)[0][3]) == 0.0
+               for f in parcel_faces), "parcels are filled"
 

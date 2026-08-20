@@ -28,7 +28,9 @@ import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.collections import LineCollection
+from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
+from numpy.typing import NDArray
 from pyproj import CRS
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
@@ -356,6 +358,89 @@ def render_graph(
         nodes[grounded].geometry.buffer(node_r * 0.6).plot(
             ax=ax, facecolor="none", edgecolor=_BOUNDARY_COLOR, linewidth=1.6, zorder=5)
     nodes.plot(ax=ax, column="phi", cmap=_PERM_CMAP, vmin=0.0, vmax=vmax, linewidth=0, zorder=6)
+
+    ax.set_aspect("equal")
+    ax.axis("off")
+    return fig
+
+
+def field_contributions(block: Block, roads: gpd.GeoDataFrame,
+                        radii: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Per-building displacement contribution `c_i = clip(1 - d_i/r_i, 0, 1)`, in
+    `block.building_points` order.
+
+    Returned rather than left private inside `render_field` so a test can assert on the shading
+    without reading pixels. NOT baked into the widget's bundle: the widget derives `c` itself from
+    the road position, which is what makes the road draggable at all.
+    """
+    from reblock.budget import corridor_distance   # deferred: budget imports render's siblings
+    n = len(block.building_points)
+    if n == 0 or roads is None or roads.empty:
+        return np.zeros(n, dtype=np.float64)
+    d = corridor_distance(block.building_points, roads)
+    r = np.asarray(radii, dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        c = np.where(r > 0.0, 1.0 - d / r, np.where(d <= 0.0, 1.0, 0.0))
+    return np.clip(c, 0.0, 1.0).astype(np.float64)
+
+
+def render_field(
+    block: Block,
+    roads: gpd.GeoDataFrame,
+    radii: NDArray[np.float64],
+    *,
+    frame: BBox | None = None,
+) -> Figure:
+    """The displacement model, drawn literally: every building a disk of its own radius, the road
+    corridor over it, each disk shaded by how much of it the corridor takes.
+
+    Differs from `render_after` in the one way that matters for this page: no choropleth underneath,
+    and EVERY building drawn, not only the displaced ones. `render_after` shades displaced disks at
+    `alpha = c` on top of the depth fill (`_draw_heatmap`), so disk shading and parcel fill compete
+    in the same pixels -- which makes it impossible for a widget drawing disks over a wireframe to
+    match, and impossible for a reader to see that a road threaded a GAP rather than merely missing
+    some homes. The gap is the subject: `c` clips to exactly 0 at `d = r`, so a road in a gap is
+    free, and only the disks it missed show that.
+    """
+    fig, ax = plt.subplots(figsize=(16, 16))
+
+    block.parcels.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE, linewidth=0.4)
+
+    view = frame if frame is not None else frame_bbox(block.parcels)
+    ax.set_xlim(view[0], view[2])
+    ax.set_ylim(view[1], view[3])
+
+    # Dissolve per width group BEFORE buffering -- render.py:304-319's rule, and load-bearing here
+    # rather than merely tidy: this figure exists to show overlapping corridors as CHEAP, and a
+    # translucent patch per road compounds toward opaque exactly where they overlap, drawing the
+    # opposite of the claim.
+    if roads is not None and not roads.empty:
+        road_w = roads["width_m"].to_numpy(dtype=float)
+        corridor = gpd.GeoDataFrame(
+            geometry=[unary_union(list(roads.geometry[road_w == w])).buffer(float(w) / 2.0)
+                      for w in np.unique(road_w)],
+            crs=block.crs)
+        corridor.plot(ax=ax, color=_ROAD_COLOR, alpha=0.25, zorder=2, linewidth=0)
+
+    _draw_boundary_and_streets(ax, block)
+
+    # Every building as its own disk. Two collections: the ones the corridor reaches, filled at
+    # alpha = c, and the ones it does not, as a thin outline. `_DISPLACED_PT` rather than
+    # render_after's inline `(1.0, 0.0, 0.0, c)` -- a named constant is a thing the bake can put in
+    # the widget's bundle, where a literal in a function body would have to be retyped in
+    # TypeScript and could then drift.
+    c = field_contributions(block, roads, radii)
+    disks = gpd.GeoDataFrame(
+        geometry=block.building_points.geometry.buffer(np.asarray(radii, dtype=np.float64)),
+        crs=block.crs)
+    grazed = c > 0.0
+    if (~grazed).any():
+        disks[~grazed].plot(ax=ax, facecolor="none", edgecolor=_DISPLACED_PT,
+                            linewidth=0.5, zorder=5)
+    if grazed.any():
+        rgba = to_rgba(_DISPLACED_PT)
+        disks[grazed].plot(ax=ax, color=[(*rgba[:3], float(ci)) for ci in c[grazed]],
+                           linewidth=0, zorder=6)
 
     ax.set_aspect("equal")
     ax.axis("off")
