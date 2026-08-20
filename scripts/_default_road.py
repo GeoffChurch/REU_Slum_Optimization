@@ -51,7 +51,7 @@ def default_roads(block: Block, width_m: float) -> GeoDataFrame:
     # across those, not against nondeterminism that doesn't exist here.
     #
     # If the normalisation were ever dropped, only ROAD 2 would move: road 1's chord is the same
-    # line either way (`_chord`'s +-direction extension is direction-sign-symmetric), but `normal`
+    # line either way (`chord`'s +-direction extension is direction-sign-symmetric), but `normal`
     # flips, putting road 2's offset on the other side of `centre`. Nothing in THIS module is meant
     # to catch that flip: a reviewer confirmed containment and disjointness survive it even on an
     # asymmetric block (only a pinned coordinate would notice), and on the symmetric synthetic
@@ -68,14 +68,18 @@ def default_roads(block: Block, width_m: float) -> GeoDataFrame:
     hull = block.parcels.union_all()
     return GeoDataFrame(
         {"width_m": [float(width_m), float(width_m)]},
-        geometry=[_chord(hull, centre, axis),
-                  _chord(hull, centre + normal * (3.0 * float(width_m)), axis)],
+        geometry=[chord(hull, centre, axis),
+                  chord(hull, centre + normal * (3.0 * float(width_m)), axis)],
         crs=block.crs)
 
 
-def _chord(hull: BaseGeometry, through: NDArray[np.float64],
-           direction: NDArray[np.float64]) -> LineString:
+def chord(hull: BaseGeometry, through: NDArray[np.float64],
+          direction: NDArray[np.float64]) -> LineString:
     """The longest piece of the infinite line `through + t*direction` that lies inside `hull`.
+
+    Public, not private: `scripts/gen_displacement_field.py`'s `in_a_gap` fixture is a chord too,
+    and the rule below -- longest piece, raise if the line misses the interior -- is exactly the
+    thing a second copy would get subtly wrong.
 
     Longest, not first: a concave block cuts the line into several pieces and only the longest is
     the road a reader would recognise as crossing the settlement.

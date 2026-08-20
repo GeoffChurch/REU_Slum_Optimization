@@ -99,7 +99,10 @@ default = { features = ["dev", "research"], solve-group = "default" }
 test-py = "pytest"
 web-test = { cmd = "npm ci && npm test", cwd = "web" }
 test = { depends-on = ["test-py", "web-test"] }
-typecheck-py = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py scripts/_default_road.py"
+# NOTE: these explicit file arguments OVERRIDE `[tool.mypy] files` entirely -- a module
+# listed there and not here is NOT checked by the gate. tests/test_typecheck_config.py
+# pins the two lists together.
+typecheck-py = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py scripts/_default_road.py scripts/_bundle_io.py scripts/gen_displacement_field.py"
 web = { cmd = "npm ci && npm run build", cwd = "web" }
 web-check = { cmd = "npm ci && npm run check", cwd = "web" }
 typecheck = { depends-on = ["typecheck-py", "web-check"] }
@@ -121,8 +124,13 @@ strict = true
 # are added here as they are made strict-clean -- scripts/perf/{records,region_cap_report}.py are
 # the typed boundary and analysis for the region-cap experiments, and are listed so the dataclasses
 # that replaced their string-keyed dict access cannot silently rot back.
+#
+# THIS LIST IS INERT FOR THE GATE ON ITS OWN: `typecheck-py` above passes explicit file arguments,
+# which override `files` entirely, so every entry here has to appear there too. Adding a module to
+# one list and not the other is the failure tests/test_typecheck_config.py exists to catch.
 files = ["src", "tests", "scripts/crossblock_probe.py", "scripts/calibrate_permeability.py",
-         "scripts/perf/records.py", "scripts/perf/region_cap_report.py", "scripts/_default_road.py"]
+         "scripts/perf/records.py", "scripts/perf/region_cap_report.py", "scripts/_default_road.py",
+         "scripts/_bundle_io.py", "scripts/gen_displacement_field.py"]
 # topology is installed via a PEP 660 "strict" editable install, whose .pth
 # registers a sys.meta_path finder at runtime rather than a plain sys.path
 # entry — mypy's static .pth scan can't see through that, so point it at the
