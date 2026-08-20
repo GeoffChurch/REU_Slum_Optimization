@@ -256,16 +256,11 @@ def test_perm_graph_figures_carry_no_fix_round_1_regression() -> None:
     assert '<div class="sbu-figure-grid">' in html
     assert html.index('<div class="sbu-figure-grid">') < html.index("<figure")
 
-    # F5: the block id and parcel/edge counts are stated once, in the intro, not per caption. Task
-    # 6 gave the block id a second, distinct occurrence -- the `data-block` attribute on the
-    # current/after figure's widget mount point, which exists for the browser widget to read, not
-    # for a reader to see repeated -- so it is not the caption-repetition F5 guarded against.
-    # Assert both halves separately: exactly one PROSE occurrence (the intro sentence) and exactly
-    # one machine-readable occurrence (the mount point), so a regression in either still fails as
-    # itself rather than being absorbed into a single loosened count.
-    assert html.count(f'data-block="{meta["block_id"]}"') == 1
-    prose_id_count = html.count(meta["block_id"]) - html.count(f'data-block="{meta["block_id"]}"')
-    assert prose_id_count == 1
+    # F5: the block id and parcel/edge counts are stated once, in the intro, not per caption. The
+    # count is back to a flat 1: task 6 had added a second, machine-readable occurrence in a
+    # `data-block` mount-point attribute, and that attribute is gone -- no widget ever read it, and
+    # every bundle already carries `block_id`, so it was a second source for one fact.
+    assert html.count(meta["block_id"]) == 1
     assert html.count(str(meta["n_parcels"])) == 1
     assert html.count(str(meta["n_edges"])) == 1
 
@@ -366,7 +361,10 @@ def test_frontier_mount_point_carries_only_scalars_no_json() -> None:
     assert "{" not in figure and "}" not in figure, figure
     assert "&quot;" not in figure, figure
     attrs = _frontier_mount_attrs()
-    assert set(attrs) == {"data-widget", "data-block", "data-bundle", "data-target-displacement",
+    # No `data-block`: it was emitted and asserted here and read by nobody, while `frontier.json`
+    # (which the widget fetches anyway) carries `block_id` -- and the widget quotes THAT in its
+    # readout. Two sources for one fact is drift waiting to happen.
+    assert set(attrs) == {"data-widget", "data-bundle", "data-target-displacement",
                           "data-target-permeability", "data-aspect"}, sorted(attrs)
 
 
@@ -383,7 +381,6 @@ def test_frontier_mount_point_states_the_bundles_own_targets() -> None:
 
     assert float(attrs["data-target-displacement"]) == bundle["matched_displacement"]
     assert float(attrs["data-target-permeability"]) == bundle["matched_permeability"]
-    assert attrs["data-block"] == bundle["block_id"]
     # data-aspect is the FALLBACK IMAGE's own shape, read from that PNG's IHDR header rather than
     # restated, so the widget occupies the space the image it replaces occupied.
     assert 1.0 < float(attrs["data-aspect"]) < 2.0

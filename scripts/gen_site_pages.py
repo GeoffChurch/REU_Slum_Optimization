@@ -127,7 +127,7 @@ def _figure(url: str, alt: str, caption: str, *, fig_class: str = "",
     skip_classes: [skip-lightbox] so those images are not zoom targets.
 
     `attrs` is raw HTML attributes appended to the <figure> tag itself -- e.g. a widget's
-    `data-widget`/`data-block`/`data-bundle`/... mount-point attributes (fix wave, I4). Those MUST
+    `data-widget`/`data-bundle`/... mount-point attributes (fix wave, I4). Those MUST
     land on the figure element and not on a wrapping <div>: `.sbu-figure-grid > figure` in
     docs/stylesheets/sbu.css resets `margin` and the mandatory `min-width: 0` on DIRECT children
     only, and a wrapping div would put the figure one level too deep to be reset."""
@@ -325,8 +325,8 @@ def _perm_graph_figures() -> str:
                     # than the widget hardcoding it on every boot (fix wave, I8).
                     bundle_meta = json.loads(
                         (PERMGRAPH / "bundle.json").read_text(encoding="utf-8"))
-                    attrs = (f'data-widget="perm-graph" data-block="{block}" '
-                            f'data-bundle="{bundle_url}" data-layer="current" '
+                    attrs = (f'data-widget="perm-graph" data-bundle="{bundle_url}" '
+                            f'data-layer="current" '
                             f'data-prefix="{bundle_meta["lens_b_index"]}"')
             figs.append(_figure(url, f"egress graph, {layer}, {state} roads", caption, attrs=attrs))
     if not figs:
@@ -403,7 +403,7 @@ def _frontier_figure() -> str:
     if img_url is None or bundle_url is None:
         return ""
 
-    attrs = (f'data-widget="frontier" data-block="{block}" data-bundle="{bundle_url}" '
+    attrs = (f'data-widget="frontier" data-bundle="{bundle_url}" '
              f'data-target-displacement="{bundle["matched_displacement"]}" '
              f'data-target-permeability="{bundle["matched_permeability"]}" '
              f'data-aspect="{_png_aspect(png)}"')

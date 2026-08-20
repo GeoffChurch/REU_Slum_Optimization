@@ -28,3 +28,24 @@ export function showWidgetError(host: HTMLElement, label: string, err: unknown):
     host.append(p);
   }
 }
+
+/** Run `fn`, routing any throw to `showWidgetError` instead of letting it escape.
+ *
+ * Both widgets do their drawing from inside a `ResizeObserver` callback (see dom/resize.ts), and
+ * that callback is OUTSIDE the `fetch(...).then(boot).catch(showWidgetError)` chain the mount runs
+ * in. A throw there is an unhandled rejection in the console and nothing else -- and after the
+ * first successful draw the fallback <img> is already gone, so the reader is left with a blank
+ * figure, no message, and a page that still looks laid out. That is verbatim this branch's
+ * signature defect ("the page still looks fine while the widget is silently dead"), so the callback
+ * body gets its own route back to the caption.
+ *
+ * It does NOT stop observing: the next resize retries, and a failure that was a function of one
+ * particular width then heals itself instead of leaving the figure dead until a reload.
+ */
+export function runOrReport(host: HTMLElement, label: string, fn: () => void): void {
+  try {
+    fn();
+  } catch (err: unknown) {
+    showWidgetError(host, label, err);
+  }
+}

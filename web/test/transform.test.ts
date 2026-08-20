@@ -56,13 +56,30 @@ test("nearest returns the closest index, not merely a close one", () => {
   assert.equal(nearest(xs, ys, 4.9, 0), 0);
 });
 
-test("fitBbox is uniform: a map must never stretch", () => {
+test("fitBbox is uniform AND fits: the binding axis is the smaller ratio, at every box shape", () => {
   // Load-bearing, not cosmetic: render/canvas.ts converts metres to pixels through this scale for
   // road widths and node radii, so unequal scales would silently make geographic widths wrong on
   // one axis while everything still drew.
-  for (const [w, h] of [[400, 400], [800, 200], [123, 457]] as [number, number][]) {
-    const v = fitBbox({ minX: 0, minY: 0, maxX: 100, maxY: 50 }, w, h, 0);
-    assert.equal(v.scaleX, v.scaleY, `${w}x${h}`);
+  //
+  // `scaleX === scaleY` alone is not that guarantee, and the widths this chart is now laid out at
+  // are exactly what would expose the difference: swap the `Math.min` for a `Math.max` and the two
+  // scales stay equal -- uniform, so the old assertion held -- while the drawing overflows its box
+  // on the binding axis, silently, at every aspect ratio but one. So the VALUE is pinned, computed
+  // here the other way round from fitBbox's own expression.
+  const bbox = { minX: 0, minY: 0, maxX: 100, maxY: 50 };
+  const bw = bbox.maxX - bbox.minX;
+  const bh = bbox.maxY - bbox.minY;
+  for (const [w, h] of [[400, 400], [800, 200], [123, 457], [320, 320], [1200, 858]] as [number, number][]) {
+    for (const pad of [0, 0.04, 0.15]) {
+      const v = fitBbox(bbox, w, h, pad);
+      const expected = Math.min(w / bw, h / bh) * (1 - 2 * pad);
+      assert.equal(v.scaleX, v.scaleY, `${w}x${h} pad ${pad}`);
+      assert.ok(Math.abs(v.scaleX - expected) < 1e-9,
+        `${w}x${h} pad ${pad}: scale ${v.scaleX}, expected ${expected}`);
+      // And the consequence, stated independently of the formula: the drawing fits inside the box.
+      assert.ok(bw * v.scaleX <= w + 1e-9 && bh * v.scaleY <= h + 1e-9,
+        `${w}x${h} pad ${pad}: ${bw * v.scaleX}x${bh * v.scaleY} overflows`);
+    }
   }
 });
 
