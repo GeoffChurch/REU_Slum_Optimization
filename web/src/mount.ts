@@ -61,6 +61,10 @@ register("perm-graph", permGraph);
 // module (see the paragraph above).
 import { frontier } from "./widgets/frontier.js";
 register("frontier", frontier);
+// Third widget, same shape, same reason -- registered HERE, after REGISTRY exists, never from
+// inside the widget module (see the paragraph above).
+import { displacementField } from "./widgets/displacement-field.js";
+register("displacement-field", displacementField);
 
 // DOMContentLoaded fires once per full page load. That is sufficient only because this project's
 // mkdocs.yml does not enable Material's navigation.instant feature (confirmed absent as of this

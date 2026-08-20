@@ -63,10 +63,14 @@ export function corridorDistance(px: readonly number[], py: readonly number[],
   return out;
 }
 
-/** `Σ clip(1 - d_i/r_i, 0, 1)`. Mirrors `budget.displacement_from_distance`, including its r == 0
- * case: a coincident-points building counts iff the corridor actually touches it. */
-export function sumC(radii: readonly number[], d: Float64Array): number {
-  let total = 0;
+/** Per-building `c_i = clip(1 - d_i/r_i, 0, 1)`. Mirrors `budget.displacement_contributions`.
+ *
+ * Split out from `sumC` for the same reason ruling R8 split it out in Python: the widget needs the
+ * per-building values (each disk is shaded at `alpha = c_i`) AND their sum (the readout), and
+ * writing the formula twice is how a picture comes to disagree with the number printed beside it.
+ * One formula, two callers, and `sumC` below is now literally a sum of this. */
+export function contributions(radii: readonly number[], d: Float64Array): Float64Array {
+  const out = new Float64Array(radii.length);
   for (let i = 0; i < radii.length; i++) {
     const r = radii[i]!, di = d[i]!;
     const c = r > 0 ? 1 - di / r : (di <= 0 ? 1 : 0);
@@ -80,7 +84,18 @@ export function sumC(radii: readonly number[], d: Float64Array): number {
     // trusts it to defend against anything. The LOWER bound is the live one: d > r gives c < 0 (any
     // building outside its corridor-touch radius), and Math.max(0, ...) is what turns that into
     // zero cost rather than negative cost.
-    total += Math.min(1, Math.max(0, c));
+    out[i] = Math.min(1, Math.max(0, c));
   }
+  return out;
+}
+
+/** `Σ clip(1 - d_i/r_i, 0, 1)`. Mirrors `budget.displacement_from_distance`, including its r == 0
+ * case: a coincident-points building counts iff the corridor actually touches it. A sum over
+ * `contributions` rather than a second copy of the formula -- the six baked fixtures pin THIS
+ * function against `budget.displacement`, so the widget's readout and the widget's shading are
+ * pinned by the same measurement. */
+export function sumC(radii: readonly number[], d: Float64Array): number {
+  let total = 0;
+  for (const c of contributions(radii, d)) total += c;
   return total;
 }
