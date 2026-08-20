@@ -182,7 +182,7 @@ def test_displacement_counts_a_shared_site_once_under_overlapping_corridors():
     assert displacement(pts, radii, roads) == 3.0
 
 
-def test_displacement_contributions_pins_the_r_equals_zero_convention():
+def test_displacement_contributions_pins_the_r_equals_zero_convention() -> None:
     # r_i = 0 (coincident points) is the one branch `displacement_from_distance`'s sum can hide --
     # a 0-or-1 contribution changes a total either way, so pin it on the per-building array
     # directly: d <= 0 -> c = 1 (a coincident point sitting exactly on the corridor is fully
