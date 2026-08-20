@@ -526,7 +526,7 @@ git commit -m "feat: the default road rule, and the closed form pinned against s
 
 ---
 
-### Task 3: The bake — one PNG, one bundle, one `.d.ts`, five fixtures
+### Task 3: The bake — one PNG, one bundle, one `.d.ts`, six fixtures
 
 **Files:**
 - Create: `scripts/_bundle_io.py`
@@ -875,7 +875,7 @@ def _set(block: Block, geoms: list[LineString], width_m: float) -> GeoDataFrame:
 4. PNG: `save_render(render_field(block, roads.iloc[[0]], radii), OUT / "field.png")` — **road 1 only**, the boot state
 5. bundle: buildings (`cm` for x/y relative to origin, `sigfig` for r), `parcels` and `streets` via `line_coords`, `boundary` from `block.parcels.union_all().exterior`, `roads`, `width`, `ENCODING`, `reference` from `_cases`, `n_buildings`, `block_id` from `block.identity`
 6. `(OUT / "field.json").write_text(json.dumps(bundle) + "\n", encoding="utf-8")`; `DTS.write_text(DTS_TEMPLATE, encoding="utf-8")`
-7. print the five fixtures' `sum_c` so the caption numbers are visible in the run log
+7. print the six fixtures' `sum_c` so the caption numbers are visible in the run log
 
 For `in_a_gap`, do not hand-pick a line: take the building pair with the largest nearest-neighbour distance (`radii.argmax()`), and run road 1's direction through the midpoint of that building and its nearest neighbour. Deterministic, and it is genuinely in a gap because that is what a large NN distance *is*.
 
@@ -1492,7 +1492,7 @@ for what Task 5 did before adding to it.
 
 - [ ] **Step 3: The producer**
 
-`_displacement_field_figure()` in `gen_site_pages.py`, modelled on `_frontier_figure()` (`:382`): copy `field.png` and `field.json` through `_copy_asset` (`:101`), read the five fixtures out of the JSON, and emit the `<figure>` with `data-widget="displacement-field"`, `data-bundle`, the fallback `<img>`, and a `<figcaption>` quoting the *apart* and *coincident* `sum_c` values and the building count. Register `"DISPFIELD": _displacement_field_figure` in `MARKERS` (`:1119`). **stdlib only** — the numbers come from the JSON, never from importing `reblock`.
+`_displacement_field_figure()` in `gen_site_pages.py`, modelled on `_frontier_figure()` (`:382`): copy `field.png` and `field.json` through `_copy_asset` (`:101`), read the six fixtures out of the JSON, and emit the `<figure>` with `data-widget="displacement-field"`, `data-bundle`, the fallback `<img>`, and a `<figcaption>`. The caption carries the whole story for a reader with JS off, so quote three baked numbers: **`road1`** (32.0260, 12.18% of 263 buildings) because that is what the PNG shows, and then **`apart` against `coincident`** (47.8436 against 32.0260) because that pair *is* the overlap-is-free claim — two roads side by side cost more than the same two merged, and merged costs exactly what one costs. Register `"DISPFIELD": _displacement_field_figure` in `MARKERS` (`:1119`). **stdlib only** — the numbers come from the JSON, never from importing `reblock`.
 
 - [ ] **Step 4: The prose**
 
