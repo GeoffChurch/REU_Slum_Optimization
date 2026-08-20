@@ -23,6 +23,9 @@
 - **Every guard must be shown to fail before it counts.** Break it, observe red, restore. An injection that will not go red is reported, not tuned.
 - **`import type` for every `.d.ts` import in widget code**; relative imports carry the `.js` extension.
 - Run Python as `pixi run python -m scripts.<name>` — `pythonpath` is pytest-only.
+- **A new script module goes into BOTH mypy lists.** `pixi run typecheck-py` passes explicit file
+  args, which override `[tool.mypy] files`, so `files` alone is inert for the gate. Task 3 adds a
+  test pinning the two lists together.
 - **`pixi run lint` is a gate on every task, not just the Python ones.** Task 1 shipped a
   101-column line green because its brief listed only pytest and typecheck. If a task's own gate
   list below omits it, it is still required.
@@ -658,13 +661,46 @@ def test_coordinates_are_relative_to_the_origin_and_not_significant_figure_round
 Run: `pixi run pytest tests/test_displacement_field_bundle.py -v`
 Expected: FAIL — `FileNotFoundError` on the bundle and `ModuleNotFoundError` on the generator.
 
-- [ ] **Step 3: Extract the shared quantisers**
+- [ ] **Step 3: Guard the two mypy lists against drifting apart**
+
+Task 2 found that my ruling on this was half wrong, and the same trap is waiting for the two modules
+this task adds. `pixi run typecheck-py` is `mypy --strict src tests scripts/...` with **explicit file
+arguments**, and explicit args **override** `[tool.mypy] files` entirely. So adding a module to
+`files` alone is inert for the gate; it has to go in both, and the repo keeps them in sync by
+convention with nothing checking it.
+
+Add both `scripts/_bundle_io.py` and `scripts/gen_displacement_field.py` to **both** lists, then
+close the class with a test in `tests/test_gen_site_pages.py` (or a new `tests/test_typecheck_config.py`
+if that reads better):
+
+```python
+def test_the_two_mypy_lists_name_the_same_scripts() -> None:
+    """`typecheck-py` passes explicit file args, which OVERRIDE `[tool.mypy] files` -- so a module
+    added to `files` alone is silently not type-checked by the gate, and a module dropped from the
+    cmdline is silently not checked even though `files` still lists it. The repo keeps the two in
+    sync by convention; this is the check that convention never had.
+    """
+    import tomllib
+    cfg = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    cmd = cfg["tool"]["pixi"]["tasks"]["typecheck-py"]
+    cmdline = {a for a in cmd.split() if a.endswith(".py")}
+    listed = {f for f in cfg["tool"]["mypy"]["files"] if f.endswith(".py")}
+    assert cmdline == listed, (
+        f"only on the cmdline: {sorted(cmdline - listed)}; only in [tool.mypy] files: "
+        f"{sorted(listed - cmdline)}. A module in just one list is not covered by the gate.")
+```
+
+Fault-inject it: remove one script from `typecheck-py` only, confirm red, restore. Note the exact
+shape of the `typecheck-py` value first — if it is a table (`{ cmd = ... }`) rather than a bare
+string, read `["cmd"]`.
+
+- [ ] **Step 4: Extract the shared quantisers**
 
 Create `scripts/_bundle_io.py` holding `SIGFIGS = 6`, `sigfig(x)`, `cm(x)`, `line_coords(geom, ox, oy)` — bodies and docstrings moved verbatim from `gen_web_bundle.py:58-92`, renamed off the underscore since they are now a shared surface. Then in `gen_web_bundle.py`: delete `_r`, `_c`, `_line_coords` and `SIGFIGS`, import the new names, and update every call site. **No aliases** — `_r = sigfig` would be exactly the compatibility shim the directives forbid.
 
 Run `pixi run pytest tests/test_web_bundle.py -v` and `pixi run python -m scripts.gen_web_bundle`; the regenerated `bundle.json` must be **byte-identical** to the committed one (`git diff --stat` shows nothing). If it differs, the extraction changed behaviour and that is a bug in the extraction, not a new baseline.
 
-- [ ] **Step 4: Write the generator**
+- [ ] **Step 5: Write the generator**
 
 `scripts/gen_displacement_field.py`:
 
@@ -828,7 +864,7 @@ def _set(block: Block, geoms: list[LineString], width_m: float) -> GeoDataFrame:
                         geometry=list(geoms), crs=block.crs)
 ```
 
-- [ ] **Step 5: Finish the generator body**
+- [ ] **Step 6: Finish the generator body**
 
 `main()`:
 
@@ -846,7 +882,7 @@ For `outside`, translate road 1 by `2 × the block's diagonal` along its normal.
 
 `DTS_TEMPLATE` follows `gen_web_bundle.py:107`'s shape: a header naming the generator and the regeneration command, then `export interface FieldBundle { … }` with a nested `Encoding`, `Width`, `Road` and `ReferenceCase`.
 
-- [ ] **Step 6: Run the bake, then the tests**
+- [ ] **Step 7: Run the bake, then the tests**
 
 ```bash
 pixi run python -m scripts.gen_displacement_field
@@ -855,7 +891,7 @@ pixi run typecheck && pixi run lint
 ```
 Expected: PASS. `examples/displacement-field/field.json` under ~350 KB.
 
-- [ ] **Step 7: Pixel parity between the figure and the bundle**
+- [ ] **Step 8: Pixel parity between the figure and the bundle**
 
 Spec §6.3. The widget draws from `ENCODING`; the PNG draws from the `render.py` constants
 `ENCODING` was built out of. Nothing yet stops those diverging, and a divergence is invisible —
@@ -882,11 +918,11 @@ the tolerance is doing real work: widen one constant by a single hex step and ch
 passes, then change it to a clearly different hue and check it fails. If a *single hex step* fails,
 the tolerance is too tight and the test will break on an unrelated matplotlib upgrade.
 
-- [ ] **Step 8: Fault-inject**
+- [ ] **Step 9: Fault-inject**
 
 Hand-edit one character of `web/src/field.d.ts` → the `.d.ts` test must go red. Bump one `sum_c` in the committed JSON → the recompute test must go red. Swap `cm` for `sigfig` on a coordinate → the coordinate-precision test must go red. Restore all three.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add scripts/_bundle_io.py scripts/gen_web_bundle.py scripts/gen_displacement_field.py \
@@ -1250,11 +1286,11 @@ pixi run web && pixi run web-test && pixi run web-check && pixi run lint \
 `pixi run web` **first**, and commit the rebuilt `docs/js/widgets.js` with this task. Every task that
 touches `web/src/**` does this.
 
-- [ ] **Step 8: Fault-inject**
+- [ ] **Step 9: Fault-inject**
 
 Remove the `width > 0` guard → the zero-width test reddens. Remove `disconnect()` → the disposer test reddens. Restore the `<img>`-only removal in `fallback.ts` (leave the anchor) → add/confirm an assertion in `frontier-boot.test.ts` that no `<a>` survives, and confirm it reddens. Re-add `data-block` → the generator test must be *green* (it no longer asserts it) but `grep` must find one unread attribute; note this rider has no test guarding its absence and say so.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add web/src/dom/resize.ts web/src/dom/fallback.ts web/src/widgets/ web/test/ docs/js/widgets.js \
@@ -1479,7 +1515,7 @@ Delete the `MARKERS` entry → the unknown-marker test and the widget-count test
 
 Record in `docs/superpowers/backlog.md`, under the piece-D entry: D2 shipped and what it closed (the reflow deferral, the glightbox anchor, `data-block`, the `fitBbox` test, the `.d.ts` template guard); that **`viewBox` was rejected rather than deferred**, with the 11 px → 5 px reason, so nobody re-proposes it; the closed-form finding and its consequence for piece F; and the Displacement page's corrected sentence. Anything deferred here goes in with *why*, not just *that*.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add docs/ scripts/gen_site_pages.py tests/test_gen_site_pages.py examples/displacement-field/
