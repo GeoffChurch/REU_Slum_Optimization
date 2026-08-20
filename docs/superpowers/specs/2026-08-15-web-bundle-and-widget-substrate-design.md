@@ -211,11 +211,15 @@ picture shows is also present as text. Any transition honours `prefers-reduced-m
 
 ```html
 <div data-widget="perm-graph"
-     data-block="ZAF.9.3.1_1_40972"
      data-method="clearance">
   <!-- B's graph_current_after.png sits here as the fallback -->
 </div>
 ```
+
+**Amended after piece D2 (2026-08-19):** the example above carried a `data-block="…"` attribute.
+It shipped, was asserted in `tests/test_gen_site_pages.py`, and was read by no widget; D2 deleted
+it from the generator and from those assertions, since every bundle carries `block_id`. Corrected
+here rather than left as a record, because example markup in a spec reads as the contract.
 
 Controls: a prefix slider over `m = 0…20`, a layer switch between conductance-width and
 current-width mirroring `render_graph`'s `layer` argument, a ground-halo toggle, and a hover readout

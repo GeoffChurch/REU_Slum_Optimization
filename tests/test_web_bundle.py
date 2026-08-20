@@ -70,6 +70,22 @@ def test_permeability_is_zero_at_prefix_zero_and_monotone(bundle: dict[str, Any]
                for a, b in zip(perm, perm[1:], strict=False)), "permeability must not fall"
 
 
+def test_the_committed_dts_is_what_the_generator_writes() -> None:
+    """Byte-for-byte, not key-for-key. The bidirectional key check below catches a bundle and a
+    declaration that name different fields; it cannot catch a hand edit that leaves the key SET
+    alone -- a changed type (`number[]` for `number`), a deleted doc comment, a `?` made optional --
+    and `web/src/bundle.d.ts` says "do not edit" in its first line while nothing enforced it.
+
+    One of three: `field.d.ts` got this guard when it was generated, and the same constant with the
+    same hazard sits in `gen_web_bundle.py` and `gen_frontier_bundle.py`. All three now have it,
+    because the drift is the same drift.
+    """
+    from scripts.gen_web_bundle import DTS_TEMPLATE
+    assert DTS.read_text(encoding="utf-8") == DTS_TEMPLATE, (
+        "web/src/bundle.d.ts was hand-edited; regenerate it: "
+        "pixi run python -m scripts.gen_web_bundle")
+
+
 def test_dts_declares_exactly_the_bundle_keys(bundle: dict[str, Any]) -> None:
     """Catches 'regenerated one file, not the other'. Structural and fast -- no solving.
 

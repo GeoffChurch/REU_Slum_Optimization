@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
+from geopandas import GeoDataFrame
 from matplotlib.colors import to_hex
 
 from reblock.budget import building_radii, displacement, street_first_ordered
@@ -121,7 +123,12 @@ def main() -> None:
         # [0, 1] or a road length in the hundreds -- this bundle carries no COORDINATES, which is
         # the one case significant digits ruin (see `_bundle_io.cm`).
         for m in range(len(ordered) + 1):
-            prefix = ordered.iloc[:m]
+            # `cast`, not a bare slice: pandas-stubs types `.iloc[slice]` as `Series`, so the two
+            # metric calls below take it as one and mypy has no way to know a GeoDataFrame slice is
+            # a GeoDataFrame. Same treatment as every other prefix slice in the tree
+            # (`budget.py:761`, `animate.py:43`). This module only entered `mypy --strict` when
+            # `tests/test_frontier_bundle.py` began importing its `DTS_TEMPLATE`.
+            prefix = cast(GeoDataFrame, ordered.iloc[:m])
             road_m.append(sigfig(float(prefix.geometry.length.sum())))
             disp.append(sigfig(displacement(block.building_points, radii, prefix) / n_buildings
                                if n_buildings else 0.0))

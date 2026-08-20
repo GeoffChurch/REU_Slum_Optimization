@@ -85,9 +85,23 @@ def chord(hull: BaseGeometry, through: NDArray[np.float64],
     the road a reader would recognise as crossing the settlement.
 
     Raises `ValueError` if no piece has positive length -- either the line misses the hull's
-    interior entirely, or it only grazes the boundary tangentially. Both are reachable, not
-    defensive: a thin block, or the widget's own 20 m width slider (`3 * 20 = 60 m` of offset for
-    road 2), can push the offset line clear of the hull.
+    interior entirely, or it only grazes the boundary tangentially. It is a real input check and
+    not a defensive one, because `through` is a COMPUTED point that both callers derive rather than
+    choose, and neither derivation is constrained to land inside the hull:
+
+    * `default_roads` offsets road 2 by `3 * width_m` perpendicular to the centroid, so a block
+      whose short dimension is under three road widths puts it clear of the parcels entirely;
+    * `gen_displacement_field`'s `in_a_gap` fixture passes the MIDPOINT of the widest
+      nearest-neighbour pair, which on a concave block can sit in a notch outside the parcel union
+      even though both of its endpoints are inside.
+
+    Neither fires on the pinned block at the width the bake runs today, and the alternative to
+    raising is not "no branch" but returning whatever `max(..., default=None)` found -- an empty
+    geometry that would travel silently into `road_specs` and bake a road with no coordinates.
+
+    NOT reachable through the widget's 20 m width slider, which an earlier draft of this note
+    claimed: the slider is a browser control that re-widths roads already baked into `field.json`,
+    and nothing in the browser ever calls this. Only the bake does.
     """
     span = float(np.hypot(*(np.asarray(hull.bounds[2:]) - np.asarray(hull.bounds[:2])))) * 2.0
     line = LineString([through - direction * span, through + direction * span])

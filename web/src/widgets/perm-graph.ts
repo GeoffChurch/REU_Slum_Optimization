@@ -1,4 +1,5 @@
 import type { Bundle } from "../bundle.js";
+import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
 import { observeSize } from "../dom/resize.js";
@@ -39,7 +40,11 @@ function initialState(el: HTMLElement): PermGraphState {
 }
 
 export const permGraph: Widget = (host, makeState) => {
-  const src = host.dataset.bundle!;
+  // Not `host.dataset.bundle!`: a missing attribute then reaches `fetch(undefined)` and surfaces as
+  // "fetch undefined failed: 404", which sends the reader (and whoever wrote the page) looking for a
+  // missing FILE rather than the missing ATTRIBUTE that is actually wrong. This was the third call
+  // site of a helper extracted for the other two.
+  const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
   // I9: a 404, a renamed bundle field, or any throw inside boot() must be VISIBLE on the page, not
   // an unhandled rejection sitting silently in the console while the PNG fallback stays up and the
   // page looks fine -- verbatim the defect class this branch already found once (mount.ts's
@@ -64,6 +69,11 @@ function boot(host: HTMLElement, makeState: StateFactory, b: Bundle): void {
   const cv = document.createElement("canvas");
   cv.style.width = "100%";
   cv.style.aspectRatio = "1 / 1";
+  // The canvas PANS on a pointer drag, so without this a touch drag scrolls the page and the
+  // browser CANCELS the pointer stream mid-drag -- the view lurches and then sticks. It is the one
+  // line that makes Pointer Events actually serve touch rather than only appear to, and it was
+  // missing here while both other widgets carried it.
+  cv.style.touchAction = "none";
 
   const controls = document.createElement("div");
 
@@ -143,8 +153,22 @@ function boot(host: HTMLElement, makeState: StateFactory, b: Bundle): void {
 
   const wireInteraction = (): void => {
     let dragging: [number, number] | null = null;
-    cv.addEventListener("pointerdown", (ev) => { dragging = [ev.offsetX, ev.offsetY]; });
-    cv.addEventListener("pointerup", () => { dragging = null; });
+    cv.addEventListener("pointerdown", (ev) => {
+      dragging = [ev.offsetX, ev.offsetY];
+      // So a pan that leaves the canvas still tracks -- without it the view freezes at the edge and
+      // the pointerup never arrives, leaving the pan glued to the cursor until the next press.
+      cv.setPointerCapture(ev.pointerId);
+    });
+    // `pointercancel` as well as `pointerup`: a captured stream can still be cancelled (the OS takes
+    // the gesture, the element is removed), and only releasing on `pointerup` leaves `dragging` set
+    // so the next hover pans instead of reading out a potential.
+    const release = (ev: PointerEvent): void => {
+      if (dragging === null) return;
+      dragging = null;
+      cv.releasePointerCapture(ev.pointerId);
+    };
+    cv.addEventListener("pointerup", release);
+    cv.addEventListener("pointercancel", release);
     cv.addEventListener("pointermove", (ev) => {
       if (dragging) {
         view = panned(view, ev.offsetX - dragging[0], ev.offsetY - dragging[1]);

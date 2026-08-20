@@ -73,6 +73,19 @@ def _json_keys(node: Any) -> set[str]:
     return out
 
 
+def test_the_committed_dts_is_what_the_generator_writes() -> None:
+    """Byte-for-byte, not key-for-key. The key check below is one-directional and set-valued, so it
+    cannot see a hand edit that leaves the key set alone -- a changed type, a dropped `[]`, a
+    deleted doc comment -- and `web/src/frontier.d.ts` says "do not edit" in its first line while
+    nothing enforced it. Third of three: the same constant with the same hazard sits in
+    `gen_displacement_field.py` and `gen_web_bundle.py`, both now guarded the same way.
+    """
+    from scripts.gen_frontier_bundle import DTS_TEMPLATE
+    assert DTS.read_text(encoding="utf-8") == DTS_TEMPLATE, (
+        "web/src/frontier.d.ts was hand-edited; regenerate it: "
+        "pixi run python -m scripts.gen_frontier_bundle")
+
+
 def test_dts_declares_the_bundle_keys(bundle: dict[str, Any]) -> None:
     """Catches 'regenerated one file, not the other'. Recursive, because every field the chart reads
     per frame is nested -- a top-level-only check would miss all of them."""

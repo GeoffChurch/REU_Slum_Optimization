@@ -214,6 +214,11 @@ test("the widget mounts, draws, and only then drops the fallback image and its l
     assert.equal(cv.width, 640 * DPR);
     assert.equal(cv.height, 640 * DPR);
     assert.deepEqual(cv.ctx.transforms.at(-1), [DPR, 0, 0, DPR, 0, 0]);
+    // The canvas pans on a pointer drag; without this a touch drag scrolls the page and the browser
+    // cancels the pointer stream mid-gesture. The pointer CAPTURE that goes with it is deliberately
+    // not asserted anywhere -- there is no browser here, so no assertion could tell a captured drag
+    // from an uncaptured one, and field-boot.test.ts says the same of its own pair.
+    assert.equal(cv.style["touchAction"], "none");
 
     // ORDER, not merely both. This is the change: the <img> used to go the instant the canvas was
     // inserted, before a single pixel had been drawn.

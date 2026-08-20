@@ -9,6 +9,7 @@ its own fallback image from becoming two different pictures under one caption.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,11 @@ def test_the_encoding_matches_reblock_renders_live_constants(bundle: dict[str, A
     Every value with a render.py source is pinned to that source. `handle_radius_px` and `pad` have
     none -- they are the web figure's own affordances -- and are the only two omitted.
 
+    What this CANNOT pin, because it compares numbers and not pixels: the four stroke weights are
+    one number read by two APIs with different units (matplotlib points against CSS pixels), so
+    equal values here still draw ~1.27x heavier on the canvas at a 700 px figure. Measured and
+    written up at `ENCODING` in scripts/gen_displacement_field.py; open under piece D.
+
     `street_lw` is pinned to `_BOUNDARY_LW` because `_draw_boundary_and_streets` draws the outline
     and the street network in one pair of calls at one width. The first bake shipped 1.0 here
     against the PNG's 1.3, which is exactly the divergence this test exists to catch, found by
@@ -113,7 +119,13 @@ def test_the_encoding_matches_reblock_renders_live_constants(bundle: dict[str, A
     assert e["road_alpha"] == _CORRIDOR_ALPHA
     assert e["disk_color"] == _DISPLACED_PT
     assert e["disk_outline_lw"] == _DISK_OUTLINE_LW
-    # The two with no render.py source are still pinned to SOMETHING, so a stray edit is visible.
+    # POSITIVITY, and nothing more -- said plainly because the comment here used to claim "a stray
+    # edit is visible", which is false: any other positive value passes, and nothing else in the
+    # tree pins either number (`field-boot.test.ts` reads both back out of this same bundle). What
+    # positivity is worth: zero or negative is the one wrong value that draws NOTHING and reports
+    # nothing -- a zero `handle_radius_px` gives the drag a hit radius of zero, so the road stops
+    # being draggable with no error anywhere, and a zero `pad` fits the drawing flush to the canvas
+    # edge, clipping the outermost disks by half their radius.
     assert e["handle_radius_px"] > 0.0 and e["pad"] > 0.0
     assert set(e) == {"parcel_color", "parcel_lw", "boundary_color", "boundary_lw", "street_lw",
                       "road_color", "road_alpha", "disk_color", "disk_outline_lw",
@@ -221,7 +233,10 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
 
     Measured expectations, worst relative disagreement 4.36e-04, closed form higher in all eight
     (shapely's buffer is INSCRIBED, so shapely's distance is the one that is too large, and a
-    larger d means a smaller c): clearance 102.3728/102.3888, clearance_looped 217.6588/217.6764,
+    larger d means a smaller c). Each pair below is `truth/closed` -- SHAPELY'S number first, the
+    closed form's second, so it is the SECOND of each pair that is the larger one; the sentence
+    above names the closed form first and the pairs do not, which read as a contradiction until it
+    was stated: clearance 102.3728/102.3888, clearance_looped 217.6588/217.6764,
     cycle_native 51.2719/51.2880, euclidean_grid 123.9661/123.9667,
     greedy_arterial_access_displacement 138.1986/138.2589, osm_footpaths 90.3466/90.3619,
     resistance_lp 52.5456/52.5624, topology 178.7863/178.8301.
@@ -345,22 +360,105 @@ def _coordinates(b: dict[str, Any]) -> list[tuple[str, float]]:
     return out
 
 
+def _coordinate_shaped(node: Any, path: str = "") -> dict[str, list[float]]:
+    """Every coordinate-SHAPED thing in the parsed artifact, discovered rather than named.
+
+    The counterpart to `_coordinates` above, and deliberately the opposite discipline: that one
+    enumerates by name because it has to know which quantiser each field went through; this one
+    knows nothing about the schema and reports what the JSON's own shape says is geometry. The two
+    are compared below, which is the only way the coverage question can be answered at all -- a
+    guard whose expectation is a second copy of the list it checks cannot see a layer that is in
+    NEITHER list, which is precisely the case it exists for.
+
+    Two shapes count, and they are the only two the bundle's layers take:
+
+    * a non-empty list whose every element is a list of exactly two numbers -- a ring, a polyline,
+      or a road's `coords`;
+    * a dict carrying `x` and `y` as equal-length numeric lists -- the struct-of-arrays form
+      `buildings` uses. Its `r` is NOT a coordinate (it goes through `sigfig`, not `cm`) and is not
+      matched, because the rule keys on the pair of names, not on numeric-ness.
+
+    A bare list of exactly two numbers counts too, so that a single point added as `[x, y]` cannot
+    slip through as a third shape. `origin` is the one such value the bundle carries today, and the
+    caller exempts it BY NAME with a reason -- it is absolute UTM, the one coordinate that must not
+    be centimetre-quantised. A second bare pair therefore reddens instead of being absorbed.
+
+    LIMIT, stated because it bounds what the caller can claim: a coordinate stored under a shape
+    that is neither of these -- three interleaved arrays, a flat `[x0, y0, x1, y1, ...]`, a string
+    of WKT -- is invisible here, and the bundle would have to grow one for that to matter.
+
+    No FALSE POSITIVES on this artifact, measured: it finds 278 paths, and every one of them
+    normalises to one of the seven carriers `_coordinates` names (263 of them are parcel rings) --
+    plus `origin`. Nothing else in the bundle is coordinate-shaped: `width` and `encoding` hold
+    scalars, `buildings.r` is a bare float list, and `reference[].sum_c`/`fraction` are scalars.
+    """
+    def num(v: Any) -> bool:
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    found: dict[str, list[float]] = {}
+    if isinstance(node, dict):
+        rest = dict(node)
+        x, y = rest.get("x"), rest.get("y")
+        if (isinstance(x, list) and isinstance(y, list) and len(x) == len(y) and len(x) > 0
+                and all(num(v) for v in x) and all(num(v) for v in y)):
+            found[f"{path}.x"] = [float(v) for v in x]
+            found[f"{path}.y"] = [float(v) for v in y]
+            del rest["x"], rest["y"]
+        for key, value in rest.items():
+            found |= _coordinate_shaped(value, f"{path}.{key}" if path else key)
+    elif isinstance(node, list):
+        if node and all(isinstance(v, list) and len(v) == 2 and all(num(c) for c in v)
+                        for v in node):
+            found[path] = [float(c) for xy in node for c in xy]
+        elif len(node) == 2 and all(num(v) for v in node):
+            found[path] = [float(v) for v in node]
+        else:
+            for i, value in enumerate(node):
+                found |= _coordinate_shaped(value, f"{path}[{i}]")
+    return found
+
+
 def test_every_coordinate_carrier_is_covered_by_the_precision_guard(
         bundle: dict[str, Any]) -> None:
     """`_coordinates` is a hand-written enumeration, so it can go stale the moment the schema grows
-    a layer -- and a guard that silently stops covering a field is worse than no guard. This pins
-    its total against the shapes the bundle declares, so a new coordinate carrier makes this fail
-    rather than quietly slip past the precision check."""
-    b = bundle
-    expected = (2 * b["n_buildings"]
-                + sum(2 * len(ring) for ring in b["parcels"])
-                + 2 * len(b["boundary"])
-                + sum(2 * len(line) for line in b["streets"])
-                + sum(2 * len(r["coords"]) for r in b["roads"])
-                + sum(2 * len(r["coords"]) for c in b["reference"] for r in c["roads"]))
-    assert len(_coordinates(b)) == expected, (
-        f"_coordinates yields {len(_coordinates(b))} values but the bundle's own shapes account "
-        f"for {expected}: a coordinate carrier was added to the schema and not to the guard")
+    a layer -- and a guard that silently stops covering a field is worse than no guard.
+
+    The expectation is derived from the ARTIFACT, not from a second copy of the enumeration. It
+    used to be the latter: a hand-written sum, term for term over the same closed list
+    `_coordinates` walks, which meant a carrier added to the bundle and to neither list passed --
+    exactly the case this test's name promises to catch, and confirmed by fault injection that it
+    did. What was actually being checked was that two adjacent hand-written lists had been edited
+    together.
+
+    Compared as a MULTISET of values rather than as a set of paths, because the two sides label
+    differently on purpose: `_coordinates` groups by layer (`parcels`, one bucket for all 263
+    rings) since that is the granularity its coarseness check needs, while the walk reports each
+    ring at its own JSON path. Values are exact -- both sides read the same parsed floats -- so
+    equality is available and any surplus is a carrier nobody quantises, checks, or draws.
+    """
+    found = _coordinate_shaped(bundle)
+    # `origin` is the ONE coordinate `_coordinates` must not walk: it is the absolute UTM offset
+    # every other coordinate is measured from, so it is neither origin-relative nor `cm`-quantised
+    # and the precision guard would reject it correctly. Exempted here by name, with that reason,
+    # rather than by making the shape rule blind to bare pairs -- a SECOND bare pair is a new
+    # carrier and must redden.
+    assert "origin" in found, (
+        f"the bundle no longer carries `origin` as a bare coordinate pair (found "
+        f"{sorted(found)}); the exemption below is now describing nothing")
+    del found["origin"]
+
+    carried = Counter(v for values in found.values() for v in values)
+    walked = Counter(v for _, v in _coordinates(bundle))
+    surplus, missing = carried - walked, walked - carried
+    unguarded = sorted(p for p, values in found.items() if any(surplus[v] for v in values))
+    assert carried == walked, (
+        f"the bundle carries {sum(carried.values())} coordinate-shaped values but `_coordinates` "
+        f"walks {sum(walked.values())}. Unwalked carriers: {unguarded[:6]}"
+        + (f" (+{len(unguarded) - 6} more)" if len(unguarded) > 6 else "")
+        + (f"; {sum(missing.values())} value(s) `_coordinates` names are not coordinate-shaped in "
+           f"the artifact" if missing else "")
+        + ". A coordinate carrier was added to the schema and not to `_coordinates`, so it is "
+          "skipping the precision guard below.")
 
 
 def test_coordinates_are_relative_to_the_origin_and_not_significant_figure_rounded(

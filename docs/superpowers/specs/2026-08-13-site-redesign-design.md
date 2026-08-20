@@ -256,9 +256,14 @@ Pyodide sits outside all of it, touched by one widget.
 
 ```html
 <div data-widget="perm-graph"
-     data-block="ZAF.9.3.1_1_44882"
      data-layers="current,ground"></div>
 ```
+
+**Amended after piece D2 (2026-08-19):** the example above carried a `data-block="…"` attribute,
+which shipped in C and was deleted end to end in D2 — every bundle already carries `block_id`, no
+widget ever read the attribute, and a second source for one fact is drift waiting to happen. The
+markup is corrected here rather than left as a record, because a spec's example markup is read as
+the contract and `grep data-block` was returning it as if it were current.
 
 `attr_list` and `md_in_html` are already enabled in `mkdocs.yml`; this needs no plugin.
 

@@ -110,13 +110,27 @@ def _synthetic_block(n: int = 4, cell: float = 25.0) -> Block:
                  building_points=GeoDataFrame(geometry=pts, crs=UTM))
 
 
-def test_default_roads_are_reproducible_disjoint_and_inside_the_block() -> None:
+def test_default_roads_are_stateless_disjoint_and_inside_the_block() -> None:
+    """What the two-call comparison below pins, exactly: `default_roads` carries NO HIDDEN STATE --
+    no cached axis, no rng, no mutation of the block it was handed -- so a second call on the same
+    input answers the same thing. That is a real property and a cheap one to lose (an `lru_cache`
+    keyed on the wrong thing, a `block.parcels` mutated in place) but it is all this can say.
+
+    It is NOT the cross-LAPACK, cross-platform reproducibility the SVD sign normalisation in
+    `_default_road.py:53-62` exists for: one process links one LAPACK, so `f(x) == f(x)` cannot
+    observe a sign that differs in another build. The guard against a flipped axis is the slow
+    test's re-derivation of `bundle.roads` from the live block in
+    `tests/test_displacement_field_bundle.py`, which compares against a COMMITTED artifact and so
+    can see a road 2 that moved to the other side of the centre.
+    """
     width_m = 7.0
     block = _synthetic_block()
     a, b = default_roads(block, width_m), default_roads(block, width_m)
     assert len(a) == 2
     for i in (0, 1):
-        assert a.geometry.iloc[i].equals(b.geometry.iloc[i]), f"road {i + 1} is not reproducible"
+        assert a.geometry.iloc[i].equals(b.geometry.iloc[i]), (
+            f"road {i + 1} differs between two calls on one input: `default_roads` is carrying "
+            f"state between calls")
     hull = block.parcels.union_all()
     for i, g in enumerate(a.geometry):
         assert g.length > 0, f"road {i + 1} is degenerate"

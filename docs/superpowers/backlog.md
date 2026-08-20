@@ -247,6 +247,22 @@ none blocks on a later one.
   is the more interesting one: displacement is charged per building against **its own radius
   `rᵢ`**, never per parcel against parcel *area*.
 
+  **OPEN after D2's final review — the stroke weights are one number in two units.**
+  `ENCODING` in `scripts/gen_displacement_field.py` bakes `parcel_lw`, `boundary_lw`, `street_lw`
+  and `disk_outline_lw` once and hands each to both matplotlib, where a linewidth is **points**
+  (1/72 inch of figure, at `dpi=300`), and canvas, where `lineWidth` is **CSS pixels**. The
+  committed `field.png` is 3695 px wide, so the two coincide only at a figure width of 886.8 CSS px
+  — at a 700 px figure the canvas strokes measure **1.27× heavier** than the same number in the PNG.
+  Colours, layers and layer order are pinned and identical; only these four weights diverge, and
+  `test_the_encoding_matches_reblock_renders_live_constants` cannot see it because it compares
+  numbers, not pixels. **Deliberately not converted yet:** there is no browser in this pipeline, so
+  nobody here can look at the result, and a blind visual change to a shipped figure is worse than a
+  measured divergence written down — the same reasoning that struck the invented reflow pixel
+  figures above. D1 solved exactly this for `marker_radius` by baking a **ratio** of a measured
+  dimension instead of an absolute, which is the shape of the fix. What would settle it: view the
+  page at the widths Material actually lays the figure out at, compare canvas against `<img>`, and
+  if they read differently, re-express the four weights as ratios and re-bake.
+
   **Deferred by D2, decided rather than forgotten:**
 
   - **No `data-aspect` on the field figure**, unlike `Frontier`'s. The canvas is square by

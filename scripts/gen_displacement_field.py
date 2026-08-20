@@ -68,9 +68,15 @@ WIDTH_STEP_M = 0.5
 class Encoding(TypedDict):
     """What the widget draws with. Every value that the PNG also draws with is read from the
     `reblock.render` constant `render_field` itself uses, so the two cannot drift: a reader with JS
-    off and a reader with JS on must see the same figure. The last two have no PNG equivalent --
-    they are the web figure's own affordances, and `render_field`'s framing is not pinned here at
-    all (see the widget's own sizing)."""
+    off and a reader with JS on see the same COLOURS, the same layers and the same ordering. The
+    last two have no PNG equivalent -- they are the web figure's own affordances, and
+    `render_field`'s framing is not pinned here at all (see the widget's own sizing).
+
+    Two things are deliberately NOT the same on the two paths, and the second was unstated until
+    the branch's final review: the framing (above), and the UNITS of the four stroke weights (see
+    the note on `ENCODING` below). Neither is a colour or a layer, so neither can make the two
+    pictures show different geometry -- but "the same figure" is more than is pinned, and this
+    docstring used to say it."""
     parcel_color: str
     parcel_lw: float
     boundary_color: str
@@ -88,6 +94,31 @@ class Encoding(TypedDict):
 # outline and the street network in ONE pair of calls at one width, so a widget drawing streets
 # thinner than the PNG does is drawing a different figure. It is kept as its own key because the
 # canvas draws the two layers separately and a future divergence should be expressible.
+#
+# UNITS: the four stroke weights below (`parcel_lw`, `boundary_lw`, `street_lw`, `disk_outline_lw`)
+# are ONE number handed to two APIs that measure in different units, and the canvas draws them
+# HEAVIER than the PNG does. This is known and deliberately not corrected. The arithmetic:
+#
+#   * matplotlib `linewidth` is in POINTS -- 1/72 inch of FIGURE -- and `save_render` writes at
+#     `dpi=300`, so one point is 300/72 = 4.167 pixels of the saved image. The committed
+#     `field.png` is 3695 px wide (a `bbox_inches="tight"` crop of `figsize=(16, 16)`).
+#   * canvas `lineWidth` is in the context's user units, and `render/canvas.ts`'s `sizeCanvas` sets
+#     the transform to `devicePixelRatio`, so one unit is one CSS pixel of the laid-out box.
+#   * Both the `<img>` and the canvas occupy the same figure width W (CSS px), so a weight of L
+#     lands as `L * 3695 * (72/300) / W` CSS px in the PNG against `L` on the canvas. They coincide
+#     at W = 886.8 px and nowhere else; at a 700 px figure the canvas strokes measure 1.27x heavier.
+#
+# NOT converted, for the reason the branch already applied to the invented reflow pixel figures:
+# there is no browser anywhere in this pipeline, so nobody here can look at the result of changing
+# these numbers, and a blind visual change to a shipped figure is worse than a divergence that is
+# written down. D1 hit exactly this with `marker_radius` and fixed it the right way -- by baking a
+# RATIO of a measured dimension rather than a copied absolute -- which is the shape of the fix here
+# too, and it needs a measurement first.
+#
+# WHAT WOULD SETTLE IT: render the page at the widths Material actually lays this figure out at,
+# compare the canvas against the `<img>` at each, and if they read differently, express the four
+# weights as ratios (of the figure width, as D1 did) and re-bake. Tracked as an open item under
+# piece D in docs/superpowers/backlog.md.
 ENCODING: Encoding = Encoding(
     parcel_color=_CONTEXT_OUTLINE,
     parcel_lw=_PARCEL_LW,
