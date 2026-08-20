@@ -256,77 +256,128 @@ A separate module from `gen_displacement_field.py` because Task 3's bake and thi
 
 - [ ] **Step 1: Write the failing test**
 
-`tests/test_displacement_closed_form.py`:
+`tests/test_displacement_closed_form.py` — **synthetic geometry only, no block load.**
+
+The identity is a statement about arithmetic, and it is testable against shapely without a city
+block. Testing it on synthetic roads is in one way *stronger* than on real ones: it can sweep
+thousands of random point positions, mix three road widths in one union, and — decisively — show
+that the residual **shrinks quadratically as shapely's buffer resolution rises**, which is what
+proves the disagreement is shapely's discretisation rather than the formula's error. The
+eight-method real-data check lives in Task 3, folded into the one block load that task already pays.
 
 ```python
-"""The identity the TypeScript widget implements, pinned in the language where ground truth lives.
+"""The identity the TypeScript widget implements, pinned against shapely.
 
     dist(p, U_i buffer(L_i, w_i/2)) == min_i max(0, dist(p, L_i) - w_i/2)
 
 A buffer IS the set of points within w/2 of the line, and distance to a union is the minimum over
-its parts, so this is exact -- the residual against shapely is shapely's own inscribed-polygon
-discretisation, which is why the closed form comes out HIGHER every time. Measured worst case over
-the eight methods on the pinned block: 4.4e-04 relative.
+its parts, so this is exact. Shapely's buffer is an inscribed POLYGON, slightly smaller than the
+true round buffer, so it reports slightly larger distances -- which is why the closed form comes out
+higher, and why the gap closes as `quad_segs` rises.
 
-If someone changes `corridor_distance`, this fails HERE, not in a browser nobody re-runs.
+No block load here on purpose: see the plan's global constraint on block-loading tests. Task 3's
+one slow test carries the real-data check across all eight methods.
 """
 import numpy as np
 import pytest
+from geopandas import GeoDataFrame
+from pyproj import CRS
+from shapely.geometry import LineString, Point, Polygon
+from shapely.ops import unary_union
 
-from reblock.budget import building_radii, displacement, displacement_from_distance
-from scripts._default_road import closed_form_distance, segments
-from scripts._example_block import load_example_block
+from reblock.budget import displacement_from_distance
+from reblock.contracts import Block
+from scripts._default_road import closed_form_distance, default_roads, segments
 
-TOL = 1e-3   # 2.3x the measured worst case (4.4e-04), which is shapely's error, not ours
-
-
-@pytest.fixture(scope="module")
-def pinned():
-    block, roads_by_method = load_example_block(None)
-    return block, roads_by_method, building_radii(block.building_points)
-
-
-def test_closed_form_matches_shapely_for_every_method(pinned):
-    block, roads_by_method, radii = pinned
-    px = block.building_points.geometry.x.to_numpy()
-    py = block.building_points.geometry.y.to_numpy()
-    assert len(roads_by_method) == 8, f"expected the eight example methods, got {sorted(roads_by_method)}"
-    for name, roads in sorted(roads_by_method.items()):
-        truth = displacement(block.building_points, radii, roads)
-        mine = displacement_from_distance(
-            radii, closed_form_distance(px, py, segments(roads)))
-        assert truth > 0, f"{name} displaces nothing, so this comparison proves nothing"
-        assert abs(mine - truth) / truth < TOL, f"{name}: closed {mine} vs shapely {truth}"
+UTM = CRS.from_epsg(32643)
+# Every width at or above min_road_width_m (permeability.py:125); a narrower road is one this
+# pipeline raises on, so it has no business in a fixture even for a pure-arithmetic test.
+ROADS = [(LineString([(0, 0), (100, 20), (140, 90)]), 7.0),
+         (LineString([(20, 80), (120, 10)]), 9.0),
+         (LineString([(60, 60), (60, 140)]), 14.0)]
 
 
-def test_the_closed_form_is_the_higher_of_the_two(pinned):
-    """Direction matters: shapely's buffer is an INSCRIBED polygon, so it is slightly small, so it
-    reports slightly larger distances and slightly smaller c. A closed form that came out LOWER
-    would mean the formula is wrong rather than shapely being discrete."""
-    block, roads_by_method, radii = pinned
-    px = block.building_points.geometry.x.to_numpy()
-    py = block.building_points.geometry.y.to_numpy()
-    for name, roads in sorted(roads_by_method.items()):
-        truth = displacement(block.building_points, radii, roads)
-        mine = displacement_from_distance(
-            radii, closed_form_distance(px, py, segments(roads)))
-        assert mine >= truth, f"{name}: closed form {mine} below shapely {truth}"
+def _frame() -> tuple[GeoDataFrame, np.ndarray, np.ndarray, np.ndarray]:
+    roads = GeoDataFrame({"width_m": [w for _, w in ROADS]},
+                         geometry=[g for g, _ in ROADS], crs=UTM)
+    rng = np.random.default_rng(0)
+    pts = rng.uniform(-20, 160, size=(4000, 2))
+    radii = rng.uniform(1.0, 6.0, size=len(pts))
+    return roads, pts[:, 0], pts[:, 1], radii
 
 
-def test_default_roads_are_deterministic_and_inside_the_block(pinned):
-    from scripts._default_road import default_roads
-    block, _, _ = pinned
-    a = default_roads(block, 7.0)
-    b = default_roads(block, 7.0)
+def test_the_closed_form_reproduces_shapely_to_within_its_discretisation() -> None:
+    roads, px, py, radii = _frame()
+    corridor = unary_union([g.buffer(w / 2.0) for g, w in ROADS])
+    truth = np.array([Point(x, y).distance(corridor) for x, y in zip(px, py)])
+    mine = closed_form_distance(px, py, segments(roads))
+    assert np.abs(mine - truth).max() < 0.01, (
+        f"max distance disagreement {np.abs(mine - truth).max():.4g} m exceeds shapely's own "
+        f"discretisation scale at quad_segs=16")
+    assert (mine <= truth + 1e-9).all(), (
+        "the closed form must never exceed shapely's distance: shapely's buffer is INSCRIBED, so "
+        "it is the one that reports distances too large")
+
+
+def test_the_residual_is_shapelys_discretisation_and_not_our_error() -> None:
+    """The decisive test. If the formula were wrong the gap would be constant in `quad_segs`; it
+    falls quadratically, which identifies the residual as shapely's polygonal buffer."""
+    roads, px, py, _ = _frame()
+    mine = closed_form_distance(px, py, segments(roads))
+    errs = []
+    for qs in (16, 64, 256):
+        corridor = unary_union([g.buffer(w / 2.0, quad_segs=qs) for g, w in ROADS])
+        truth = np.array([Point(x, y).distance(corridor) for x, y in zip(px, py)])
+        errs.append(float(np.abs(mine - truth).max()))
+    assert errs[0] > errs[1] > errs[2], f"error did not fall with resolution: {errs}"
+    assert errs[2] < errs[0] / 100.0, (
+        f"a 16x resolution rise should cut a quadratic error ~256x; got {errs[0]:.3g} -> "
+        f"{errs[2]:.3g}. A constant residual would mean the formula is wrong, not shapely coarse.")
+
+
+def test_no_roads_costs_nothing_rather_than_producing_nan() -> None:
+    _, px, py, radii = _frame()
+    d = closed_form_distance(px, py, np.empty((0, 5)))
+    assert np.isinf(d).all(), "an empty road set must give infinite distance, not zero"
+    assert displacement_from_distance(radii, d) == 0.0
+
+
+def test_a_zero_length_road_is_its_own_endpoint() -> None:
+    roads = GeoDataFrame({"width_m": [7.0]},
+                         geometry=[LineString([(0, 0), (0, 0)])], crs=UTM)
+    d = closed_form_distance(np.array([10.0]), np.array([0.0]), segments(roads))
+    assert np.isfinite(d[0]), f"degenerate road produced {d[0]}"
+    assert d[0] == pytest.approx(10.0 - 3.5)
+
+
+def _synthetic_block(n: int = 4, cell: float = 25.0) -> Block:
+    """A square block with one building per cell -- enough for `default_roads`, which needs only
+    the parcel hull and the building points."""
+    polys, ids, pts = [], [], []
+    for i in range(n):
+        for j in range(n):
+            polys.append(Polygon([(i * cell, j * cell), ((i + 1) * cell, j * cell),
+                                  ((i + 1) * cell, (j + 1) * cell), (i * cell, (j + 1) * cell)]))
+            ids.append(i * n + j)
+            pts.append(Point((i + 0.5) * cell, (j + 0.5) * cell))
+    parcels = GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
+    boundary = parcels.geometry.union_all()
+    return Block(block_id="s", crs=UTM, boundary=boundary, parcels=parcels,
+                 streets=GeoDataFrame(geometry=[boundary.boundary], crs=UTM),
+                 building_points=GeoDataFrame(geometry=pts, crs=UTM))
+
+
+def test_default_roads_are_reproducible_disjoint_and_inside_the_block() -> None:
+    block = _synthetic_block()
+    a, b = default_roads(block, 7.0), default_roads(block, 7.0)
     assert len(a) == 2
-    assert a.geometry.iloc[0].equals(b.geometry.iloc[0]), "road 1 is not reproducible"
-    assert a.geometry.iloc[1].equals(b.geometry.iloc[1]), "road 2 is not reproducible"
+    for i in (0, 1):
+        assert a.geometry.iloc[i].equals(b.geometry.iloc[i]), f"road {i + 1} is not reproducible"
     hull = block.parcels.union_all()
-    for g in a.geometry:
-        assert g.length > 0
-        assert hull.buffer(1e-6).contains(g), "a default road leaves the block"
-    assert not (a.geometry.iloc[0].buffer(3.5)
-                .intersects(a.geometry.iloc[1].buffer(3.5))), (
+    for i, g in enumerate(a.geometry):
+        assert g.length > 0, f"road {i + 1} is degenerate"
+        assert hull.buffer(1e-6).contains(g), f"road {i + 1} leaves the block"
+    assert not a.geometry.iloc[0].buffer(3.5).intersects(a.geometry.iloc[1].buffer(3.5)), (
         "the two default corridors already overlap, so merging them is not something the reader does")
 ```
 
@@ -456,7 +507,8 @@ def closed_form_distance(px: NDArray[np.float64], py: NDArray[np.float64],
 
 Run: `pixi run pytest tests/test_displacement_closed_form.py -v`, then `pixi run typecheck` and
 `pixi run lint`.
-Expected: PASS. First run loads the pinned block (minutes if the derivation cache is cold).
+Expected: PASS in **seconds** — no block is loaded. If this takes minutes, something is importing
+`load_example_block`.
 
 - [ ] **Step 5: Fault-inject**
 
@@ -556,9 +608,25 @@ def test_the_reference_fixtures_cover_the_cases_that_could_hide_a_bug(bundle):
     assert 0.0 < cases["in_a_gap"]["sum_c"] < cases["road1"]["sum_c"]
 
 
-def test_the_bundle_still_matches_what_python_computes_now(bundle):
-    """The bundle is committed, so it can go stale against the code that made it. Recompute one
-    fixture from the pinned block and compare."""
+@pytest.mark.slow
+def test_the_bundle_and_the_closed_form_both_still_match_live_python(bundle):
+    """THE one block-loading test in this feature. It carries two jobs, because the load is the
+    cost and everything else is microseconds:
+
+    1. the committed bundle has not gone stale against the code that made it, and
+    2. the closed-form identity holds on all EIGHT methods' real road sets -- 9 to 337 segments,
+       including multi-part geometry that synthetic fixtures do not produce.
+
+    Job 2 lived in Task 2 until it was measured: three tests sharing a module-scoped fixture became
+    three concurrent block loads under `-n auto` (18 minutes, killed). Task 2 now pins the identity
+    against shapely on synthetic geometry, which is fast and in one respect stronger (it can show
+    the residual falling quadratically with `quad_segs`); this is where it meets real roads.
+
+    Measured expectations, worst relative disagreement 4.36e-04, closed form higher in all eight:
+    clearance 102.3728/102.3888, clearance_looped 217.6588/217.6764, cycle_native 51.2719/51.2880,
+    euclidean_grid 123.9661/123.9667, greedy_arterial_access_displacement 138.1986/138.2589,
+    osm_footpaths 90.3466/90.3619, resistance_lp 52.5456/52.5624, topology 178.7863/178.8301.
+    """
     from reblock.budget import building_radii, displacement
     from scripts._example_block import load_example_block
     from scripts.gen_displacement_field import roads_from_case
