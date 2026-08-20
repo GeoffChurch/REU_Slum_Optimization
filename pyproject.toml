@@ -102,7 +102,7 @@ test = { depends-on = ["test-py", "web-test"] }
 # NOTE: these explicit file arguments OVERRIDE `[tool.mypy] files` entirely -- a module
 # listed there and not here is NOT checked by the gate. tests/test_typecheck_config.py
 # pins the two lists together.
-typecheck-py = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py scripts/_default_road.py scripts/_bundle_io.py scripts/gen_displacement_field.py"
+typecheck-py = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py scripts/_default_road.py scripts/_bundle_io.py scripts/gen_displacement_field.py scripts/gen_web_bundle.py scripts/gen_frontier_bundle.py"
 web = { cmd = "npm ci && npm run build", cwd = "web" }
 web-check = { cmd = "npm ci && npm run check", cwd = "web" }
 typecheck = { depends-on = ["typecheck-py", "web-check"] }
@@ -130,6 +130,7 @@ strict = true
 # one list and not the other is the failure tests/test_typecheck_config.py exists to catch.
 files = ["src", "tests", "scripts/crossblock_probe.py", "scripts/calibrate_permeability.py",
          "scripts/perf/records.py", "scripts/perf/region_cap_report.py", "scripts/_default_road.py",
+         "scripts/gen_web_bundle.py", "scripts/gen_frontier_bundle.py",
          "scripts/_bundle_io.py", "scripts/gen_displacement_field.py"]
 # topology is installed via a PEP 660 "strict" editable install, whose .pth
 # registers a sys.meta_path finder at runtime rather than a plain sys.path
