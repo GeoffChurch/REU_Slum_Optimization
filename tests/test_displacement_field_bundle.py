@@ -146,6 +146,61 @@ def test_the_reference_fixtures_cover_the_cases_that_could_hide_a_bug(
     assert 0.0 < cases["in_a_gap"]["sum_c"] < cases["road1"]["sum_c"]
 
 
+def test_each_derivable_fixture_moves_exactly_one_variable(bundle: dict[str, Any]) -> None:
+    """The property that gives the fixture set its meaning, and the only one a reviewer previously
+    had to verify BY HAND.
+
+    Four of the six fixtures are functions of `bundle.roads` alone, and each is supposed to differ
+    from `road1` in exactly one respect. If `widest` ever differed in position as well as width it
+    would isolate nothing -- and every other test in this file would still pass, because the parity
+    tests only ever compare a fixture's `sum_c` to a recomputation from that same fixture's own
+    coordinates. An unasserted invariant a human checked once is exactly the kind that rots.
+
+    Also the only thing that checks `reference[].roads[].coords` against anything external. Job 1b
+    recomputes `sum_c` from the bundle's own fixture coordinates, so a vertex corrupted somewhere no
+    building is near moves no grazing distance, leaves `sum_c` bit-identical, and passes. Here the
+    coordinates are compared to `bundle.roads` DIRECTLY -- lists against lists, not lengths or
+    bearings or anything else derived, because a derived quantity is exactly what a compensating
+    corruption survives.
+
+    The remaining two (`in_a_gap`, `outside`) are functions of the block's geometry rather than of
+    `bundle.roads`, so they are re-derived from the live block in the slow test's Job 1a instead.
+    """
+    cases = {c["name"]: c for c in bundle["reference"]}
+    r0, r1 = bundle["roads"][0], bundle["roads"][1]
+    floor, widest_m = bundle["width"]["floor_m"], bundle["width"]["max_m"]
+
+    assert cases["road1"]["roads"] == [{"coords": r0["coords"], "width_m": floor}], (
+        "road1 must be exactly road 1 of the default pair at the floor width -- it is the baseline "
+        "every other fixture is read against, so if IT moves, all five comparisons change meaning")
+
+    assert cases["apart"]["roads"] == [{"coords": r0["coords"], "width_m": floor},
+                                       {"coords": r1["coords"], "width_m": floor}], (
+        "apart must differ from road1 by the ADDITION OF ROAD 2 ONLY; its first road, or a width, "
+        "also changed")
+
+    coincident = cases["coincident"]["roads"]
+    assert len(coincident) == 2, f"coincident must be two roads, not {len(coincident)}"
+    assert coincident[0]["coords"] == coincident[1]["coords"], (
+        "coincident's two roads are not coincident -- that is the whole fixture: it proves overlap "
+        "is free by costing EXACTLY what one road costs")
+    assert coincident == [{"coords": r0["coords"], "width_m": floor},
+                          {"coords": r0["coords"], "width_m": floor}], (
+        "coincident must differ from road1 by DUPLICATION ONLY; the road drawn twice is not "
+        "road 1, or a width also changed")
+
+    assert cases["widest"]["roads"] == [{"coords": r0["coords"], "width_m": widest_m}], (
+        "widest must differ from road1 in WIDTH ONLY; its coordinates also changed, so it isolates "
+        "nothing and the page's width claim rests on two variables moving at once")
+
+    # ...and the two that are not derivable from `bundle.roads` are still each a single road at the
+    # floor width, so "same width, different position" is at least locally true of `in_a_gap`.
+    for name in ("in_a_gap", "outside"):
+        assert [r["width_m"] for r in cases[name]["roads"]] == [floor], (
+            f"{name} must be ONE road at the floor width -- it isolates position, so its width "
+            f"must match road1's exactly")
+
+
 @pytest.mark.slow
 def test_the_bundle_and_the_closed_form_both_still_match_live_python(
         bundle: dict[str, Any]) -> None:
@@ -188,6 +243,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     from scripts._example_block import load_example_block
     from scripts.gen_displacement_field import (
         WIDTH_FLOOR_M,
+        fixture_roads,
         quantised_field,
         road_specs,
         roads_from_case,
@@ -218,7 +274,24 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     assert bundle["boundary"] == polygon_ring(block.boundary, ox, oy, what="boundary")
     assert bundle["streets"] == [line for g in block.streets.geometry
                                  for line in line_coords(g, ox, oy)]
-    assert bundle["roads"] == road_specs(default_roads(block, WIDTH_FLOOR_M), ox, oy)
+    default = default_roads(block, WIDTH_FLOOR_M)
+    assert bundle["roads"] == road_specs(default, ox, oy)
+
+    # The SEVENTH carrier, and the only one nothing else can see. `in_a_gap` and `outside` are
+    # derived from the block's geometry (the largest nearest-neighbour gap; a translation by twice
+    # the diagonal), so `bundle.roads` cannot pin them the way it pins the other four -- and Job 1b
+    # cannot either, because it recomputes `sum_c` from these very coordinates: a vertex corrupted
+    # where no building sits moves no grazing distance and leaves `sum_c` bit-identical. Re-derived
+    # through the generator's own `fixture_roads`, which is why that was split out of `_cases`.
+    derived = {name: road_specs(rs, ox, oy)
+               for name, rs in fixture_roads(block, field.points, field.radii, default)}
+    assert [c["name"] for c in bundle["reference"]] == list(derived), (
+        f"the committed fixtures are {[c['name'] for c in bundle['reference']]} but the generator "
+        f"now produces {list(derived)}")
+    for case in bundle["reference"]:
+        assert case["roads"] == derived[case["name"]], (
+            f"fixture {case['name']}'s road geometry is not what the generator now derives; "
+            f"regenerate: pixi run python -m scripts.gen_displacement_field")
 
     # Job 1b: every fixture's `sum_c`, recomputed from the bundle's OWN coordinates. Exact through
     # the same quantiser, not a tolerance: `sum_c` IS `sigfig(displacement(...))` of the quantised
