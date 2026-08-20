@@ -278,9 +278,11 @@ aspect, wrong resolution, and a view fitted to the old box.
 
 **The fix is a `ResizeObserver`**, in one shared `web/src/dom/resize.ts`, replacing both
 `window.addEventListener("resize", …)` sites. Not a `viewBox`, which would be actively worse: a
-`viewBox` scales text down with the box, so Frontier's 11 px axis labels land at ~5 px on a 320 px
-screen. Re-laying out at the measured width keeps type at its designed size and re-nices the ticks
-for the narrower span — which is what `niceTicks` is for.
+**[Corrected 2026-08-20: the pixel figures below were invented.]** No font size exists in `web/src`, in `docs/stylesheets/sbu.css`, or in any bundle's encoding, and there is no browser in this pipeline to have measured one. The rejection stands on its mechanism alone — a `viewBox` scales text *in proportion to the box*, so labels shrink on a narrow screen, where re-laying out at the measured width keeps type at its designed size and re-nices the ticks. Left in place rather than rewritten, because silently correcting a spec hides that the number was ever believed.
+
+~~`viewBox` scales text down with the box, so Frontier's 11 px axis labels land at ~5 px on a 320 px
+screen.~~ Re-laying out at the measured width keeps type at its designed size and re-nices the
+ticks for the narrower span — which is what `niceTicks` is for.
 
 Three things fall out of it:
 

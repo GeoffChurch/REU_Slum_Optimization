@@ -16,7 +16,7 @@
 - **Bundles and their `.d.ts` are generated and committed, never hand-edited.** A `.d.ts` is written by its own bake script from a `DTS_TEMPLATE` in that script.
 - **The width slider floors at 7 m.** `PermeabilityParams.min_road_width_m = 7.0` (`src/reblock/permeability.py:125`) and `:205-209` raises below it. Range 7–20 m, step 0.5, default 7 — all baked, never TypeScript literals.
 - **Widget-owned elements are sized with an inline style, never a presentation attribute.** Material ships `.md-typeset svg{height:auto;max-width:100%}` and presentation attributes lose that cascade. This cost D1 a Critical at its last gate.
-- **No `viewBox`.** Spec §7 rejects it with the reason: it would scale 11 px axis labels to ~5 px at 320 px wide.
+- **No `viewBox`.** Spec §7 rejects it with the reason: it scales text in proportion to the box, so labels shrink on a narrow screen. (The spec's `11 px → ~5 px` figures were invented and are struck there; the mechanism is the reason, not the numbers.)
 - **The fallback `<img>` is removed only after a successful first draw.** A widget that removes it and then fails leaves a blank figure and an honest-looking page.
 - **No `# type: ignore`, no mypy excludes, no unreachable guards.** A default that cannot be reached is a silencer, not a defence.
 - **Never reach into a closed, known-at-authoring-time set with a runtime string.** Frozen dataclass or named field, not `d["key"]`.
@@ -1208,7 +1208,9 @@ Expected: FAIL — `Cannot find module '../src/dom/resize.js'`, and the paramete
  * Frontier's absolute-pixel SVG overflows and PermGraph's canvas stretches a stale backing store.
  *
  * Deliberately NOT a viewBox, which was the recorded plan: a viewBox scales text with the box, so
- * Frontier's 11 px axis labels would land at ~5 px on a 320 px screen. Re-laying out at the
+ * text scales in proportion to the box, so labels shrink on a narrow screen (an earlier draft
+ * quoted `11 px -> ~5 px`; those numbers were invented -- no font size exists anywhere in this
+ * tree). Re-laying out at the
  * measured width keeps type at its designed size and re-nices the ticks for the narrower span.
  *
  * A zero width means "not laid out yet" (a hidden container, a collapsed tab), so it is SKIPPED
@@ -1538,7 +1540,9 @@ real guard only closes here. Delete the `mount.ts` registration, confirm it now 
 
 - [ ] **Step 8: Backlog**
 
-Record in `docs/superpowers/backlog.md`, under the piece-D entry: D2 shipped and what it closed (the reflow deferral, the glightbox anchor, `data-block`, the `fitBbox` test, the `.d.ts` template guard); that **`viewBox` was rejected rather than deferred**, with the 11 px → 5 px reason, so nobody re-proposes it; the closed-form finding and its consequence for piece F; and the Displacement page's corrected sentence. Anything deferred here goes in with *why*, not just *that*.
+Record in `docs/superpowers/backlog.md`, under the piece-D entry: D2 shipped and what it closed (the reflow deferral, the glightbox anchor, `data-block`, the `fitBbox` test, the `.d.ts` template guard); that **`viewBox` was rejected rather than deferred**, with its *mechanism* as the reason — text
+scales in proportion to the box — and explicitly NOT with the invented `11 px → ~5 px` figures an
+earlier draft carried, so nobody re-proposes it *or* restores them; the closed-form finding and its consequence for piece F; and the Displacement page's corrected sentence. Anything deferred here goes in with *why*, not just *that*.
 
 - [ ] **Step 10: Commit**
 
