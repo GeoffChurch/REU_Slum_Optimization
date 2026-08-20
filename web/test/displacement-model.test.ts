@@ -8,15 +8,20 @@ import { corridorDistance, flatten, sumC } from "../src/model/displacement.js";
 const bundle = JSON.parse(
   readFileSync("../examples/displacement-field/field.json", "utf8")) as FieldBundle;
 
-// 1e-3 relative. This is SHAPELY's residual, not slack invented for this test: I recomputed all six
-// fixtures from the bundle's own quantised (x, y, r) with this exact closed form and diffed against
-// the baked `sum_c` values. Worst relative disagreement is 6.07e-05 (the "widest" fixture, a 20 m
-// road), so TOL carries ~16x headroom. The residual is smallest for the 7 m roads and largest for
-// "widest" because it scales with radius: shapely's buffer is an INSCRIBED polygon (its corners cut
-// the true circular arc's sagitta), so shapely reports slightly larger distances -- and slightly
-// smaller c -- than this closed form's exact circular offset, by an amount proportional to the
-// buffer's own width. That gap is the entire budget TOL has to cover; it is not measuring anything
-// about this module's correctness.
+// 1e-3 relative. This is SHAPELY's residual, not slack invented for this test -- and the mechanism
+// is specific, not "bigger roads have bigger residuals" (an earlier draft of this comment claimed
+// exactly that on two data points and was wrong; see task-4-report.md's fix round 2). A buffer's
+// STRAIGHT SIDES are exact offsets of the line, so both shapely and this closed form agree on them
+// to float noise (~1e-16, confirmed for road1/coincident/in_a_gap, where every building's nearest
+// corridor point lands on a side). Only the ROUND CAPS at a segment's ends -- and any joins, for a
+// multi-segment road -- are polygonised by shapely, so only a building whose nearest corridor point
+// falls past an end, on a cap, can disagree at all; and the size of that disagreement still scales
+// with the corridor's half-width once it does. That is why "apart" (a 7 m fixture, but TWO roads,
+// hence four caps instead of two) shows a residual where the single 7 m roads do not, and why
+// "widest" (road1's own geometry, just 20 m instead of 7 m wide) shows the worst one: the same
+// capped buildings, a wider corridor. Recomputing all six fixtures from the bundle's own quantised
+// (x, y, r) against the baked `sum_c` values, worst relative disagreement is 6.07e-05 ("widest"), so
+// TOL carries ~16.5x headroom.
 const TOL = 1e-3;
 
 test("every baked fixture's sum_c is reproduced from its own coordinates", () => {
@@ -33,7 +38,8 @@ test("the outside-the-block fixture is exactly zero, not merely close", () => {
   const { x, y, r } = bundle.buildings;
   const outside = bundle.reference.find((c) => c.name === "outside")!;
   assert.strictEqual(sumC(r, corridorDistance(x, y, flatten(outside.roads))), 0,
-    "c must clip to exactly 0 at d = r -- a tolerance here would hide a soft tail");
+    "outside's road clears every building by hundreds of metres, pinning compact support (far " +
+    "away costs exactly nothing) -- not the clip boundary itself, which needs its own case below");
 });
 
 test("a road drawn twice costs exactly what one costs", () => {
@@ -70,6 +76,26 @@ test("distance clamps to the segment, not the infinite line it lies on", () => {
   // Unclamped, the projection parameter is t = 6, landing the "nearest point" at (60, 0) -- i.e. on
   // top of the building -- for a distance near 0. 48 and 0 are not close by any tolerance.
   assert.equal(d[0], 50 - 2);
+});
+
+test("the clip's real boundary: d == r gives exactly zero, d just inside gives something positive", () => {
+  // "outside" pins compact support, but its road clears everything by hundreds of metres, nowhere
+  // near this boundary. "Gap-hugging is free" is entirely about d == r, so it needs a direct case.
+  const eps = 1e-6;
+  assert.strictEqual(sumC([10], new Float64Array([10])), 0, "d == r must clip to exactly 0");
+  assert.ok(sumC([10], new Float64Array([10 - eps])) > 0, "d just inside r must be strictly positive");
+});
+
+test("r == 0 (a coincident-points building) contributes exactly 1 or 0, never a fraction", () => {
+  // Mirrors tests/test_budget.py::test_displacement_contributions_pins_the_r_equals_zero_convention.
+  // Untested otherwise: this bundle's minimum baked radius is 1.13973, so r == 0 is unreachable
+  // through any baked fixture. r_i = 0 is the one branch sumC's total can hide -- a 0-or-1
+  // contribution moves an aggregate either way just as easily as any other -- so pin it directly:
+  // a coincident point sitting exactly on the corridor (d <= 0) is fully displaced, with no radius
+  // to graze it partially; one that is not touching (d > 0) contributes nothing at all, however
+  // close.
+  assert.equal(sumC([0], new Float64Array([0])), 1);
+  assert.equal(sumC([0], new Float64Array([0.001])), 0);
 });
 
 test("no roads means no cost, not an empty-array minimum of Infinity leaking into sumC", () => {

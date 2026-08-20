@@ -36,6 +36,14 @@ export function corridorDistance(px: readonly number[], py: readonly number[],
                                  segs: readonly Segment[]): Float64Array {
   const out = new Float64Array(px.length).fill(Infinity);
   for (let i = 0; i < px.length; i++) {
+    // px[i]/py[i] cannot actually be undefined: every real caller passes
+    // bundle.buildings.x/.y, and tests/test_displacement_field_bundle.py asserts both have
+    // length n_buildings at the artifact boundary -- a length mismatch here is unconstructible,
+    // not merely unlikely. Same reasoning web/src/view/transform.ts's nearest() already relies on
+    // for its own xs[i]!/ys[i]!, left unguarded for the same reason. A runtime length check here
+    // would be exactly the unreachable guard this project's directives forbid -- and worth writing
+    // down, because the failure it would catch (an x/y mismatch reading as silent zero cost) is
+    // the same silent-and-plausible shape this module keeps finding elsewhere.
     const x = px[i]!, y = py[i]!;
     let best = Infinity;
     for (const s of segs) {
