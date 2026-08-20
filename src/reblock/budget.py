@@ -102,13 +102,24 @@ def corridor_distance(building_points: GeoDataFrame, roads: GeoDataFrame) -> NDA
     return cast(NDArray[np.float64], building_points.geometry.distance(corridor).to_numpy())
 
 
-def displacement_from_distance(radii: NDArray[np.float64],
-                               d: NDArray[np.float64]) -> float:
-    """`Sum clip(1 - d_i/r_i, 0, 1)` given precomputed per-building corridor distances."""
+def displacement_contributions(radii: NDArray[np.float64],
+                               d: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Per-building `c_i = clip(1 - d_i/r_i, 0, 1)` given precomputed per-building corridor
+    distances `d`. r_i = 0 (coincident points) counts as fully displaced (`c_i = 1`) iff `d_i <= 0`,
+    else 0 -- the convention `displacement_from_distance` sums and `render.field_contributions`
+    (the figure that shades buildings by this same value) now calls directly, so it is written in
+    exactly one place.
+    """
     r = np.asarray(radii, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
         c = np.where(r > 0.0, 1.0 - d / r, np.where(d <= 0.0, 1.0, 0.0))
-    return float(np.clip(c, 0.0, 1.0).sum())
+    return np.clip(c, 0.0, 1.0)
+
+
+def displacement_from_distance(radii: NDArray[np.float64],
+                               d: NDArray[np.float64]) -> float:
+    """`Sum clip(1 - d_i/r_i, 0, 1)` given precomputed per-building corridor distances."""
+    return float(displacement_contributions(radii, d).sum())
 
 
 def repulsion(building_points: GeoDataFrame, radii: NDArray[np.float64],

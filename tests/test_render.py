@@ -10,7 +10,7 @@ import pytest
 matplotlib.use("Agg")
 from matplotlib.axes import Axes
 from matplotlib.collections import PatchCollection
-from matplotlib.colors import to_hex, to_rgba
+from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
@@ -20,6 +20,7 @@ from reblock.contracts import Block, Metrics, Proposal
 from reblock.derive.access import parcel_access_layers
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 from reblock.render import (
+    _CONTEXT_OUTLINE,
     _DISPLACED_PT,
     field_contributions,
     frame_bbox,
@@ -471,42 +472,87 @@ def _disk_paths(ax: Axes) -> int:
                if matches(c.get_facecolor()) or matches(c.get_edgecolor()))
 
 
-def test_render_field_draws_every_building_not_only_the_displaced_ones():
+def test_render_field_draws_every_building_not_only_the_displaced_ones() -> None:
     """The point of the figure: a reader must be able to see that a road THREADED a gap, which means
     seeing the disks it missed. `render_after` draws only the displaced ones."""
     block = _field_block()
     radii = building_radii(block.building_points)
     fig = render_field(block, _mid_road(block), radii)
     n = len(block.building_points)
-    assert _disk_paths(fig.axes[0]) == n, (
-        f"{_disk_paths(fig.axes[0])} disks drawn for {n} buildings -- one of the two disk layers is "
-        f"missing, so a road that threaded a gap would look like a road that merely missed")
+    drawn = _disk_paths(fig.axes[0])
+    assert drawn == n, (
+        f"{drawn} disks drawn for {n} buildings -- one of the two disk layers is missing, so a "
+        f"road that threaded a gap would look like a road that merely missed")
 
 
-def test_render_field_shades_by_c_and_uses_the_named_constant():
+def _grazed_disk_collection(ax: Axes) -> PatchCollection:
+    """The FILLED disk layer, found by its face colour.
+
+    The untouched layer carries `_DISPLACED_PT` on its EDGE with `facecolor="none"` (an empty
+    array), and the wireframe and corridor are other colours entirely -- so a non-empty facecolor in
+    `_DISPLACED_PT` names exactly one layer.
+    """
+    want = to_rgba(_DISPLACED_PT)[:3]
+    hits = []
+    for coll in ax.collections:
+        faces = np.atleast_2d(np.asarray(coll.get_facecolor(), dtype=float))
+        if faces.shape[0] and faces.shape[1] >= 3 and np.allclose(faces[0][:3], want, atol=1 / 255):
+            hits.append(coll)
+    assert len(hits) == 1, f"expected exactly one filled disk layer, found {len(hits)}"
+    # Every collection `.plot()` adds here is a PatchCollection; `ax.collections` is typed to the
+    # looser matplotlib base `Collection`, same narrowing this file already does at e.g. line 148.
+    return cast(PatchCollection, hits[0])
+
+
+def test_render_field_shades_grazed_disks_by_their_own_c() -> None:
+    """The alphas on the grazed-disk layer must BE the c values, not merely lie in (0, 1).
+
+    The first version asserted "some collection has a partial alpha" and passed against a solid
+    fill, because the corridor's own alpha=0.25 satisfied it. Asserting the actual multiset is what
+    makes a solid fill fail.
+    """
     block = _field_block()
     roads = _mid_road(block)
     radii = building_radii(block.building_points)
-    c = field_contributions(block, roads, radii)
+    c = field_contributions(block.building_points, roads, radii)
     fig = render_field(block, roads, radii)
-    alphas = sorted({round(float(a), 6) for coll in fig.axes[0].collections
-                     for a in np.atleast_1d(coll.get_alpha() or 1.0)})
-    assert any(a not in (0.0, 1.0) for a in alphas), (
-        "no partial alpha anywhere: the disks are not shaded by c")
-    assert _DISPLACED_PT in {to_hex(col) for coll in fig.axes[0].collections
-                             for col in np.atleast_2d(coll.get_facecolor())}, (
-        f"the grazed disks must use the named constant {_DISPLACED_PT}, not an inline literal")
-    assert 0.0 < c.max() <= 1.0
+    alphas = sorted(round(float(row[3]), 6)
+                    for row in np.atleast_2d(np.asarray(
+                        _grazed_disk_collection(fig.axes[0]).get_facecolor(), dtype=float)))
+    assert alphas == sorted(round(float(v), 6) for v in c[c > 0.0]), (
+        f"grazed-disk alphas {alphas} are not the c values {sorted(c[c > 0.0])}")
+    assert 0.0 < min(alphas) and max(alphas) < 1.0, (
+        "every alpha is 0 or 1, so the disks are not shaded by c at all")
 
 
-def test_render_field_never_fills_parcels():
+def _wireframe_collection(ax: Axes) -> PatchCollection:
+    """The parcel WIREFRAME layer, found by its edge colour.
+
+    A path count cannot identify it: parcels are Voronoi cells of the building points
+    (src/reblock/mesh.py:59), so a block has exactly as many parcels as buildings, and once enough
+    roads graze every building the grazed-disk layer also has as many paths as the wireframe does --
+    the same defect the disk-layer tests above already had to work around, on the layer this test is
+    actually about.
+    """
+    want = to_rgba(_CONTEXT_OUTLINE)[:3]
+    hits = []
+    for coll in ax.collections:
+        edges = np.atleast_2d(np.asarray(coll.get_edgecolor(), dtype=float))
+        if edges.shape[0] and edges.shape[1] >= 3 and np.allclose(edges[0][:3], want, atol=1 / 255):
+            hits.append(coll)
+    assert len(hits) == 1, f"expected exactly one parcel wireframe layer, found {len(hits)}"
+    return cast(PatchCollection, hits[0])
+
+
+def test_render_field_never_fills_parcels() -> None:
     """Piece B's finding, restated: filling parcels states one quantity twice and drowns the
-    subject. The parcel collection must be face-transparent."""
+    subject. The parcel collection must be face-transparent. Identified by its EDGE colour, not a
+    path count: once enough roads graze all nine buildings, the grazed-disk layer also has nine
+    paths and a count would mistake it for the wireframe.
+    """
     block = _field_block()
     fig = render_field(block, _mid_road(block), building_radii(block.building_points))
-    parcel_faces = [coll.get_facecolor() for coll in fig.axes[0].collections
-                    if len(coll.get_paths()) == len(block.parcels)]
-    assert parcel_faces, "no collection matches the parcel count"
-    assert all(np.asarray(f).size == 0 or float(np.asarray(f)[0][3]) == 0.0
-               for f in parcel_faces), "parcels are filled"
+    face = np.atleast_2d(np.asarray(
+        _wireframe_collection(fig.axes[0]).get_facecolor(), dtype=float))
+    assert face.size == 0 or float(face[0][3]) == 0.0, "parcels are filled"
 
