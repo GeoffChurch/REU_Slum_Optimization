@@ -1198,45 +1198,38 @@ test("a prototype key is not a method name", async () => {
 });
 ```
 
-Each boot-test file gets its own `mountWithSearch`, next to that file's existing fixture — it needs
-that widget's codec and bundle, which `harness.ts` deliberately does not know about. The
-`region-grow-boot.test.ts` one, verbatim; the other three are the same shape with their own codec,
-fixture and DOM handles:
+**Do not add a `mountWithSearch` helper.** Every boot test already has its own `mount(...)` — with
+three different signatures (`mount(width, drawFailure)` in region-grow, `mount(host, drawFailure,
+...)` in field, `mount(host, width, ...)` in perm-graph, `mount(host, payload)` in frontier,
+`mount(width, drawFailure)` in screen-map) — and each already loads the **real committed bundle**
+via `JSON.parse(readFileSync(...))`, not a synthetic fixture. Extend the existing helper instead:
+
+1. Add `search: string = ""` as a new **trailing** optional parameter.
+2. Replace the `localState` argument with a store bound to this widget's codec, and return the
+   bound `StateSource` and the fake location alongside whatever the helper already returns:
 
 ```ts
-/** Mounts the widget over `search`, and hands back everything a URL test asserts on: the bound
- * store, the fake location's write log, and the DOM the widget built.
- *
- * `writeNow`, not `debounce`: the debounce has its own test in url-store.test.ts, and a boot test
- * that had to drive a timer queue before it could see a URL write would be asserting two
- * mechanisms at once. */
-async function mountWithSearch(search: string): Promise<{
-  loc: ReturnType<typeof fakeLocation>;
-  store: StateSource<RegionGrowState>;
-  host: FakeElement;
-  slider: FakeElement;
-}> {
-  installStubs();
-  const loc = fakeLocation(search);
-  const urls = urlStore(loc, writeNow);
-  let bound: StateSource<RegionGrowState> | null = null;
-  const host = mountPoint();
-  host.dataset.bundle = "hood.json";
-  // The same fetch stub this file already installs for its other tests -- do not add a second one.
-  stubFetchJson(FIXTURE_BUNDLE);
-  regionGrow(host as unknown as HTMLElement, (initial) => {
-    bound = urls.bind(REGION_GROW_URL, initial);
-    return bound;
-  });
-  await settleFetch();          // this file's existing "let the fetch chain resolve" await
-  fireResize(700, 700);
-  assert.ok(bound !== null, "the widget never asked for a state store");
-  return { loc, store: bound, host, slider: inputOf(host, "range") };
-}
+// in the existing mount(...) helper, in place of the bare `localState` argument
+const loc = fakeLocation(search);
+const urls = urlStore(loc, writeNow);
+let bound: StateSource<RegionGrowState> | null = null;
+regionGrow(host as never, (initial) => {
+  bound = urls.bind(REGION_GROW_URL, initial);
+  return bound;
+});
+// ... the helper's existing "let the fetch chain settle" await and fireResize stay exactly as they
+// are ...
+assert.ok(bound !== null, "the widget never asked for a state store");
 ```
 
-If a boot-test file's existing fetch stub or "let the promise chain settle" helper is named
-differently, use ITS names — do not add a second stub alongside the one already there.
+Defaulting `search` to `""` means every EXISTING test in the file now runs through the production
+store rather than `localState` — deliberately. An empty query yields the widget's own initial state
+and writes nothing, so they must all still pass; if one does not, that is a real finding about the
+store, not a reason to branch the helper back to `localState`.
+
+Substitute each file's own names: the region-grow fixture is `bundle`; screen-map's are `ct` and
+`nb`; field, frontier and perm-graph each call theirs `bundle`. Never add a second fetch stub
+alongside the one a file already installs.
 
 - [ ] **Step 2: Run them to make sure they fail**
 
@@ -1376,7 +1369,11 @@ out right with no "did the URL set this?" question. Design §1.6 carries the tab
 
 - [ ] **Step 1: Write the failing tests**
 
-In `web/test/screen-map-boot.test.ts`, using the same `mountWithSearch` shape as Task 4:
+In `web/test/screen-map-boot.test.ts`, extending that file's existing `mount(width, drawFailure)`
+helper with a trailing `search` parameter exactly as Task 4 describes. Its fixtures `ct` and `nb`
+are the REAL committed bundles, so `ct.floors` genuinely carries both `depth_density_proxy` and
+`density_compactness` — no fixture needs extending. Use the file's existing `setMetric`, `setCity`,
+`setFloor` and `readoutText` helpers rather than poking DOM nodes directly.
 
 ```ts
 test("?metric= alone takes THAT metric's own default floor, not the previous metric's number", async () => {
@@ -1403,7 +1400,7 @@ test("switching metric drops ?floor= from the URL", async () => {
 });
 
 test("switching city PINS the floor, carrying the absolute number across corpora", async () => {
-  const { loc, cityToggle, store } = await mountWithSearch("");
+  const { loc, cityToggle, store } = await mount(700, null, "");
   cityToggle.checked = true;
   cityToggle.fire("change");
   assert.equal(typeof store.get().floor, "number", "resolved at the switch, never left null");
@@ -1744,9 +1741,10 @@ sized in **screen pixels**, on the frame layer, so a floor or metric change neve
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-These use `screen-map-boot.test.ts`'s own `mountWithSearch` from Task 5 (`mountWithSearch("")`
-mounts Cape Town; `mountWithSearch("city=nairobi")` mounts Nairobi), plus that file's existing
-`viewOf` bbox helper — add one if the file computes the view inline.
+These use `screen-map-boot.test.ts`'s `mount(...)` as extended in Task 5 — `mount(700, null, "")`
+for Cape Town, `mount(700, null, "city=nairobi")` for Nairobi. That file already has `cityBbox` and
+`VIEW_CT`; `viewOf(bundle)` below is `fitBbox(cityBbox(bundle), SIZE, SIZE, E.pad)`, which for Cape
+Town is the existing `VIEW_CT` constant — use it rather than recomputing.
 
 **`arc` is a `PathOp`, not a `Call`** — verified in `harness.ts`: `RecordingContext` records only
 `clearRect`/`stroke`/`fill`/`drawImage` as `Call`s, and path construction (`moveTo`/`lineTo`/`arc`/
@@ -1764,7 +1762,7 @@ function followRings(cv: FakeElement): Call[] {
 }
 
 test("the followed block is ringed, at a fixed screen radius, on the frame layer", async () => {
-  const { cv, bundle } = await mountWithSearch("");
+  const { cv, bundle } = await mount(700, null, "");
   const rings = followRings(cv);
   assert.equal(rings.length, 1, "exactly one ring, on the frame -- not one per block");
   const [x, y, r] = rings[0]!.path[0]!.args;
@@ -1778,12 +1776,12 @@ test("the followed block is ringed, at a fixed screen radius, on the frame layer
 });
 
 test("a bundle with no follow draws no ring", async () => {
-  const { cv } = await mountWithSearch("city=nairobi");
+  const { cv } = await mount(700, null, "city=nairobi");
   assert.equal(followRings(cv).length, 0);
 });
 
 test("the ring survives a floor change, which never repaints the base layer", async () => {
-  const { cv, floorSlider } = await mountWithSearch("");
+  const { cv, floorSlider } = await mount(700, null, "");
   floorSlider.value = "0.02";
   floorSlider.fire("input");
   fireAnimationFrame();
