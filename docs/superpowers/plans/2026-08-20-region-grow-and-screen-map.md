@@ -591,14 +591,24 @@ name — one of them carrying a docstring that pointed at a function in the othe
 - [ ] **Step 1: Record the baseline**
 
 ```bash
-cd web && npm ci && npx tsx --test test/field-boot.test.ts test/perm-graph-boot.test.ts test/frontier-boot.test.ts 2>&1 | tee /tmp/harness-before.txt | tail -20
+cd web && npm ci && npm test 2>&1 | tee /tmp/harness-before.txt | tail -20
 grep -c "^ok\|^not ok" /tmp/harness-before.txt
 ```
 
 Record the pass count and the full list of test names. The report must quote both.
 
-**Implementer note:** if the project's runner is not `tsx --test`, use whatever `web/package.json`'s
-`test` script invokes — read it first and use that, reporting which command you used.
+**The runner, verified.** `web/package.json`'s `test` script is `bash scripts/test.sh`: it
+esbuild-builds `../docs/js/widgets.js`, compiles the suite with `tsc -p tsconfig.test.json`, then
+hands `node --test` an explicit file list. There is no `tsx` in this project. The whole suite is
+`npm test` (or `pixi run web-test`); one file is:
+
+```bash
+cd web && OUT=$(mktemp -d) && ./node_modules/.bin/tsc -p tsconfig.test.json --outDir "$OUT" \
+  --noEmit false; node --test "$OUT/test/<name>.test.js"; rm -rf "$OUT"
+```
+
+Capture the baseline with the FULL suite: `test.sh` runs every file, and the before/after test-name
+diff is what proves no assertion moved.
 
 - [ ] **Step 2: Create `web/test/harness.ts`**
 
@@ -652,7 +662,7 @@ about faking a DOM, and moving them would make the harness a dumping ground.
 - [ ] **Step 4: Verify the baseline is unchanged**
 
 ```bash
-cd web && npx tsx --test test/field-boot.test.ts test/perm-graph-boot.test.ts test/frontier-boot.test.ts 2>&1 | tee /tmp/harness-after.txt | tail -20
+cd web && npm test 2>&1 | tee /tmp/harness-after.txt | tail -20
 diff <(grep "^ok\|^not ok" /tmp/harness-before.txt | sed 's/[0-9]\+//') \
      <(grep "^ok\|^not ok" /tmp/harness-after.txt | sed 's/[0-9]\+//')
 ```
@@ -1115,7 +1125,7 @@ test("growth is nested in the budget", () => {
 
 - [ ] **Step 2: Run it and watch it fail**
 
-Run: `cd web && npx tsx --test test/accretion.test.ts`
+Run: `cd web && OUT=$(mktemp -d) && ./node_modules/.bin/tsc -p tsconfig.test.json --outDir "$OUT" --noEmit false; node --test "$OUT/test/accretion.test.js"; rm -rf "$OUT"`
 Expected: FAIL — `Cannot find module '../src/model/accretion.js'`.
 
 - [ ] **Step 3: Implement**
@@ -1191,7 +1201,7 @@ export function grow(blocks: HoodBlock[], seedIndex: number, maxBuildings: numbe
 
 - [ ] **Step 4: Run and watch it pass**
 
-Run: `cd web && npx tsx --test test/accretion.test.ts`
+Run: `cd web && OUT=$(mktemp -d) && ./node_modules/.bin/tsc -p tsconfig.test.json --outDir "$OUT" --noEmit false; node --test "$OUT/test/accretion.test.js"; rm -rf "$OUT"`
 Expected: PASS.
 
 - [ ] **Step 5: Fault injection**
@@ -1330,7 +1340,7 @@ test("the picture still matches the model after a reseed and a budget change", a
 
 - [ ] **Step 2: Run it and watch it fail**
 
-Run: `cd web && npx tsx --test test/region-grow-boot.test.ts`
+Run: `cd web && OUT=$(mktemp -d) && ./node_modules/.bin/tsc -p tsconfig.test.json --outDir "$OUT" --noEmit false; node --test "$OUT/test/region-grow-boot.test.js"; rm -rf "$OUT"`
 Expected: FAIL — `Cannot find module '../src/widgets/region-grow.js'`.
 
 - [ ] **Step 3: Write `web/src/render/region.ts`**
@@ -1381,7 +1391,7 @@ register("region-grow", regionGrow);
 
 - [ ] **Step 6: Run and watch it pass**
 
-Run: `cd web && npm run check && npx tsx --test test/region-grow-boot.test.ts`
+Run: `cd web && npm run check` then `cd web && OUT=$(mktemp -d) && ./node_modules/.bin/tsc -p tsconfig.test.json --outDir "$OUT" --noEmit false; node --test "$OUT/test/region-grow-boot.test.js"; rm -rf "$OUT"`
 Expected: PASS.
 
 - [ ] **Step 7: Fault injection**
@@ -1719,7 +1729,7 @@ test("raising the floor never enlarges the selection", () => {
 
 - [ ] **Step 2: Run it and watch it fail**
 
-Run: `cd web && npx tsx --test test/screen-model.test.ts`
+Run: `cd web && OUT=$(mktemp -d) && ./node_modules/.bin/tsc -p tsconfig.test.json --outDir "$OUT" --noEmit false; node --test "$OUT/test/screen-model.test.js"; rm -rf "$OUT"`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement `web/src/model/screen.ts`**
@@ -1730,7 +1740,7 @@ prefix length and a prefix sum over ground truth for precision/recall. `precisio
 
 - [ ] **Step 4: Run and watch it pass**
 
-Run: `cd web && npx tsx --test test/screen-model.test.ts`
+Run: `cd web && OUT=$(mktemp -d) && ./node_modules/.bin/tsc -p tsconfig.test.json --outDir "$OUT" --noEmit false; node --test "$OUT/test/screen-model.test.js"; rm -rf "$OUT"`
 
 - [ ] **Step 5: Fault injection**
 
@@ -1824,7 +1834,7 @@ register("screen-map", screenMap);
 
 - [ ] **Step 6: Run and watch it pass**
 
-Run: `cd web && npm run check && npx tsx --test test/screen-map-boot.test.ts`
+Run: `cd web && npm run check` then `cd web && OUT=$(mktemp -d) && ./node_modules/.bin/tsc -p tsconfig.test.json --outDir "$OUT" --noEmit false; node --test "$OUT/test/screen-map-boot.test.js"; rm -rf "$OUT"`
 
 - [ ] **Step 7: Fault injection**
 
