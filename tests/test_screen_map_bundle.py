@@ -121,3 +121,65 @@ def test_precision_and_recall_at_the_shipped_floor_match_the_bakeoff(
         assert len(selected) == int(float(row["floor_n"])), floor["metric"]
         assert math.isclose(hits / len(selected), float(row["floor_prec"]), rel_tol=1e-6)
         assert math.isclose(hits / total_informal, float(row["floor_recall"]), rel_tol=1e-6)
+
+
+@pytest.mark.slow
+def test_bundle_matches_a_fresh_reload(capetown: dict[str, Any], nairobi: dict[str, Any]) -> None:
+    """The staleness guard the tests above cannot provide: they only read the committed JSON and
+    the bake-off CSV, so nothing here detects a stale capetown.json/nairobi.json if the kblock data
+    or the ground-truth labelling changes upstream. This reloads both cities LIVE via
+    `scripts.gen_screen_map.load_blocks` and diffs `block_id`/`n` against the committed columns,
+    plus Cape Town's `informal` column against a fresh `reblock.data.informal.label_blocks` call.
+
+    Deliberately does NOT re-simplify geometry or recompute `rings` byte-for-byte:
+    `test_the_interior_rings_survived` and `test_every_column_has_n_blocks_entries` already cover
+    geometry shape, and the `polygon_rings`-vs-`polygon_ring` fault injection (task-7-report.md)
+    covers the encoding path -- redoing either here would only make this test slower for no added
+    signal. Measured: ~1.2 s warm-cache for both cities' `block_id`/`n` -- there is no per-block
+    solver in this generator, unlike RegionGrow's `DenseClusterRegionBuilder`.
+
+    DEVELOPER-LOCAL BY DESIGN, same rationale as
+    `tests/test_region_grow_bundle.py::test_bundle_is_what_production_builds_today` (`slow` is
+    deliberately not deselected in CI, so the guard is opt-in via a cache check rather than opt-out
+    via addopts -- a contributor with a warm cache gets the real guard for free, and CI gets neither
+    the guard nor the download).
+
+    Guards TWICE, on two different artifacts, rather than once: the two block parquets (needed for
+    every assertion here), and -- only for the `informal` check -- the informal-structures
+    shapefile too. `reblock.data.informal.settlement_extents` needs an 18 MB Edinburgh DataShare
+    download when it is absent (`tests/test_informal_ground_truth.py`: "the network-touching path
+    is exercised by the example generator, not the suite"), and a contributor can easily have the
+    block parquets (from running almost any other example generator) without ever having fetched
+    that. Skipping the WHOLE test over one missing file would throw away the free block_id/n guard
+    for everyone in that position.
+    """
+    capetown_cache = Path.home() / ".cache" / "reblock" / "blocks_capetown_full.parquet"
+    nairobi_cache = Path.home() / ".cache" / "reblock" / "blocks_nairobi_full.parquet"
+    if not capetown_cache.exists() or not nairobi_cache.exists():
+        pytest.skip("needs the capetown_full and nairobi_full caches; run "
+                    "`pixi run python -m scripts.gen_screen_map`")
+
+    from scripts.gen_screen_map import CITIES, load_blocks
+
+    fresh_capetown = load_blocks("capetown", CITIES["capetown"])
+    assert [str(x) for x in fresh_capetown["block_id"]] == capetown["block_id"], (
+        "capetown: block_id is stale")
+    assert [int(x) for x in fresh_capetown["building_count"]] == capetown["n"], (
+        "capetown: n is stale")
+
+    fresh_nairobi = load_blocks("nairobi", CITIES["nairobi"])
+    assert [str(x) for x in fresh_nairobi["block_id"]] == nairobi["block_id"], (
+        "nairobi: block_id is stale")
+    assert [int(x) for x in fresh_nairobi["building_count"]] == nairobi["n"], (
+        "nairobi: n is stale")
+
+    shapefile = Path.home() / ".cache" / "reblock" / "coct_is" / "CoCT_IS_STRUCTURES_201802.shp"
+    if not shapefile.exists():
+        pytest.skip("needs the informal-structures shapefile (an 18 MB fetch no other test "
+                    "performs); run `pixi run python -m scripts.gen_screen_bakeoff` once")
+
+    from reblock.data.informal import label_blocks, settlement_extents
+
+    extents = settlement_extents("capetown", epsg=CITIES["capetown"])
+    _, label = label_blocks(fresh_capetown, extents)
+    assert [int(x) for x in label] == capetown["informal"], "capetown: informal is stale"

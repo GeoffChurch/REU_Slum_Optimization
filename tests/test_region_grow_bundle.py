@@ -97,7 +97,26 @@ def test_bundle_is_what_production_builds_today() -> None:
     `hops=HOPS` (the generator's own constant), NOT a re-typed `7`: this is the exact value a
     stale-neighbourhood regression would drift against, and re-typing it here would make the
     re-typed copy, not the generator, the thing this test actually pins.
+
+    DEVELOPER-LOCAL BY DESIGN. This is `slow` (needs a warm derivation cache -- `load_blocks`
+    reaches `ensure_city_data`, which downloads the Cape Town blocks parquet from Dataverse on a
+    cold cache) and `pixi run test` -- which `.github/workflows/ci.yml` runs on every PR -- does
+    not deselect `slow` (see the marker's own registration comment in pyproject.toml: deselecting
+    it by default would stop anyone running the guard without remembering an override, so it stays
+    opt-in via a cache check instead of opt-out via addopts). This test's own `pytestmark` only
+    skips when the BUNDLE is missing, and the bundle is committed -- so without a cache check here
+    too, a fresh CI runner with an empty `~/.cache/reblock` downloads the parquet on every run. So
+    instead, this SKIPS when the local artifact it needs is absent, mirroring the established
+    convention at `tests/test_web_bundle.py:158-177`, `tests/test_frontier_bundle.py:150-153` and
+    `tests/test_displacement_field_bundle.py:247-249`. A contributor with a warm `~/.cache/reblock`
+    (anyone who has run the baker or an example generator) gets the real guard for free; CI and a
+    fresh clone get neither the guard nor the download.
     """
+    blocks_cache = Path.home() / ".cache" / "reblock" / "blocks_capetown_full.parquet"
+    if not blocks_cache.exists():
+        pytest.skip("needs the capetown_full cache; run "
+                    "`pixi run python -m scripts.gen_region_grow`")
+
     from reblock.region import DenseClusterRegionBuilder
     from scripts.gen_region_grow import HOPS, load_blocks, neighbourhood
 
