@@ -7,6 +7,10 @@ import { handles } from "../src/render/field.js";
 import { localState } from "../src/state.js";
 import { fitBbox, toScreen, toWorld, type Bbox } from "../src/view/transform.js";
 import { displacementField } from "../src/widgets/displacement-field.js";
+import {
+  armDrawFailure, canvasOf, Call, DPR, FakeElement, fireResize, installStubs, lastFrame,
+  mountPoint as mountPointBase,
+} from "./harness.js";
 
 /** The DisplacementField widget, mounted for real against the COMMITTED `field.json`.
  *
@@ -23,194 +27,7 @@ import { displacementField } from "../src/widgets/displacement-field.js";
  * touches `document`, `window` or `ResizeObserver` at evaluation time -- only their function bodies
  * do -- so static imports above and stubs installed below are in the right order.
  */
-let clock = 0;
-
-interface PathOp { op: "moveTo" | "lineTo" | "arc" | "closePath"; args: number[] }
-
-/** One drawing call, with the whole style state it was made under and the path it painted.
- *
- * The style snapshot is the point. `ctx.strokeStyle` is a mutable property, so "the widget set
- * road_color at some moment" says nothing about what was stroked with it; recording the value AT
- * the call is what makes "the corridor is drawn in the bundle's road colour at the bundle's alpha"
- * an assertion rather than a hope. The path lets each layer be named by its own shape -- polylines
- * for parcels, boundary and streets, a single arc for a disk or a handle -- which is how the
- * boundary strokes stay distinguishable from the handle outlines that share their colour. */
-interface Call {
-  op: "clearRect" | "stroke" | "fill";
-  strokeStyle: string;
-  fillStyle: string;
-  lineWidth: number;
-  /** Recorded because it is CONTEXT STATE that outlives the call that set it: the corridor wants
-   * round caps and nothing else does, so a missing reset gives every later layer round caps AND
-   * makes frame 1 (which reaches those layers before the corridor has ever run) differ from frame
-   * 2. Neither is visible in a count. */
-  lineCap: string;
-  globalAlpha: number;
-  path: PathOp[];
-}
-
-/** Armed by `mount(host, width, drawFailure)` to make the first drawing call throw. It has to be a
- * module variable rather than a field on the element: the canvas is created inside `boot()`, which
- * runs a microtask after the widget function returns, so no test holds a reference to it in time. */
-let NEXT_DRAW_FAILURE: string | null = null;
-
-class RecordingContext {
-  readonly calls: Call[] = [];
-  failWith: string | null = NEXT_DRAW_FAILURE;
-  fillStyle = "";
-  strokeStyle = "";
-  lineWidth = 0;
-  lineCap = "butt";      // the real canvas default, so "never set" is not a distinct value
-  globalAlpha = 1;
-  readonly transforms: number[][] = [];
-  /** The instant of the first drawing call, on the same counter `FakeElement` stamps creations and
-   * removals with -- so a test can assert the fallback image went after a PICTURE existed, not
-   * merely after a canvas element did. The element is created either way; the drawing is not. */
-  firstDrawAt: number | null = null;
-  private path: PathOp[] = [];
-
-  setTransform(a: number, b: number, c: number, d: number, e: number, f: number): void {
-    this.transforms.push([a, b, c, d, e, f]);
-  }
-  /** Real `beginPath` discards the current path; real `stroke`/`fill` do NOT. The handles rely on
-   * exactly that (one arc, filled and then stroked), so the fake has to model it or the second call
-   * would record an empty path and the handle-outline assertions would be vacuous. */
-  beginPath(): void { this.path = []; }
-  closePath(): void { this.path.push({ op: "closePath", args: [] }); }
-  moveTo(x: number, y: number): void { this.path.push({ op: "moveTo", args: [x, y] }); }
-  lineTo(x: number, y: number): void { this.path.push({ op: "lineTo", args: [x, y] }); }
-  arc(x: number, y: number, r: number, a0: number, a1: number): void {
-    this.path.push({ op: "arc", args: [x, y, r, a0, a1] });
-  }
-  clearRect(): void { this.record("clearRect"); }
-  stroke(): void { this.record("stroke"); }
-  fill(): void { this.record("fill"); }
-
-  private record(op: Call["op"]): void {
-    if (this.failWith !== null) throw new Error(this.failWith);
-    this.calls.push({
-      op,
-      strokeStyle: this.strokeStyle,
-      fillStyle: this.fillStyle,
-      lineWidth: this.lineWidth,
-      lineCap: this.lineCap,
-      globalAlpha: this.globalAlpha,
-      path: [...this.path],
-    });
-    this.firstDrawAt ??= ++clock;
-  }
-}
-
-class FakeElement {
-  readonly tagName: string;
-  children: FakeElement[] = [];
-  parent: FakeElement | null = null;
-  readonly style: Record<string, string> = {};
-  readonly dataset: Record<string, string> = {};
-  textContent = "";
-  /** Only a canvas has one; the widget reads it back through `getContext`. */
-  readonly ctx = new RecordingContext();
-  /** The backing store `sizeCanvas` sets from the observed box times devicePixelRatio. */
-  width = 0;
-  height = 0;
-  /** The <input> surface the widget writes and the tests read back. */
-  type = "";
-  min = "";
-  max = "";
-  step = "";
-  value = "";
-  checked = false;
-  readonly createdAt = ++clock;
-  removedAt: number | null = null;
-
-  /** UPPERCASE, as a real element reports it -- `dom/fallback.ts` decides whether the wrapper around
-   * the fallback image is the glightbox anchor by testing `tagName === "A"`. */
-  constructor(tagName: string) { this.tagName = tagName.toUpperCase(); }
-  getContext(): RecordingContext { return this.ctx; }
-  append(...nodes: (FakeElement | string)[]): void {
-    for (const n of nodes) {
-      if (typeof n === "string") {
-        const text = new FakeElement("#TEXT");
-        text.textContent = n;
-        text.parent = this;
-        this.children.push(text);
-      } else {
-        n.parent = this;
-        this.children.push(n);
-      }
-    }
-  }
-  insertBefore(node: FakeElement, _ref: FakeElement | null): void {
-    node.parent = this;
-    this.children.push(node);
-  }
-  /** DETACHES, as a real `remove()` does -- `dom/fallback.ts` asks whether the anchor has element
-   * children left after the image goes, and a fake that only timestamped would answer "yes". */
-  remove(): void {
-    this.removedAt = ++clock;
-    if (this.parent) {
-      this.parent.children = this.parent.children.filter((c) => c !== this);
-      this.parent = null;
-    }
-  }
-  get parentElement(): FakeElement | null { return this.parent; }
-  readonly attrs = new Map<string, string>();
-  setAttribute(name: string, value: string): void { this.attrs.set(name, value); }
-  getAttribute(name: string): string | null { return this.attrs.get(name) ?? null; }
-  readonly handlers: Record<string, ((ev: unknown) => void)[]> = {};
-  addEventListener(name: string, fn?: (ev: unknown) => void): void {
-    if (fn) (this.handlers[name] ??= []).push(fn);
-  }
-  /** Dispatches a real event object to real handlers, so the pointer tests drive the widget the way
-   * a reader's finger does -- not by asserting that a listener was merely registered. */
-  dispatch(name: string, ev: unknown = {}): void {
-    for (const fn of this.handlers[name] ?? []) fn(ev);
-  }
-  /** Present so the widget's drag can call them, and deliberately NOT counted: no assertion here
-   * could tell a captured drag from an uncaptured one, because the whole difference is what the
-   * BROWSER does with events after the pointer leaves the element -- and there is no browser here.
-   * Deleting both calls from the widget leaves this file green, which is reported rather than
-   * papered over with an assertion that an API was called. */
-  setPointerCapture(): void {}
-  releasePointerCapture(): void {}
-  querySelector(selector: string): FakeElement | null { return this.find(selector); }
-  descendants(): FakeElement[] { return this.children.flatMap((c) => [c, ...c.descendants()]); }
-  find(tagName: string): FakeElement | null {
-    return this.descendants().find((c) => c.tagName === tagName.toUpperCase()) ?? null;
-  }
-  findAll(tagName: string): FakeElement[] {
-    return this.descendants().filter((c) => c.tagName === tagName.toUpperCase());
-  }
-  text(): string {
-    return [this.textContent, ...this.descendants().map((c) => c.textContent)].join(" ");
-  }
-}
-
-(globalThis as Record<string, unknown>).document = {
-  createElement: (tag: string): FakeElement => new FakeElement(tag),
-};
-/** `render/canvas.ts` reads `devicePixelRatio` off it, and 2 rather than 1 is what makes the
- * backing-store assertion able to fail: at 1 the scaled size and the CSS size coincide. */
-const DPR = 2;
-(globalThis as Record<string, unknown>).window = { devicePixelRatio: DPR };
-
-/** The observer the widget lays itself out from. It delivers NOTHING on `observe()`: there is no
- * layout engine here, so the test plays layout with `fireResize`, and it does so from its own body
- * -- after the mount's `fetch().then(boot).catch(...)` chain has settled. That is where a real
- * ResizeObserver delivers from too (the browser's own dispatch, never from inside `observe()`), and
- * it is what makes `runOrReport` load-bearing rather than redundant: a throw in the callback has no
- * promise `.catch` above it, which is exactly what the drawing-failure test below exercises. */
-class FakeResizeObserver {
-  static live: FakeResizeObserver[] = [];
-  constructor(private readonly cb:
-              (entries: { contentRect: { width: number; height: number } }[]) => void) {
-    FakeResizeObserver.live.push(this);
-  }
-  observe(): void {}
-  disconnect(): void {}
-  fire(width: number, height: number): void { this.cb([{ contentRect: { width, height } }]); }
-}
-(globalThis as Record<string, unknown>).ResizeObserver = FakeResizeObserver;
+installStubs();
 
 const BUNDLE_PATH = "../examples/displacement-field/field.json";
 const bundle = JSON.parse(readFileSync(BUNDLE_PATH, "utf8")) as FieldBundle;
@@ -250,22 +67,18 @@ function handleAt(r: number, v: number): { x: number; y: number } {
   return { x, y };
 }
 
-/** The mount point the generator will emit: the `<figure>` itself, carrying the bundle URL, with the
- * fallback `<img>` inside the `<a class="glightbox">` mkdocs-glightbox wraps it in, and a
- * `<figcaption>` after it. A fixture with a bare `<img>` would let a widget that removes only the
- * image pass while the live page kept an empty, focusable, screen-reader-announced link. */
+/** field-boot's own addition to the shared mount point: the bundle URL every generated figure
+ * carries in `data-bundle`. The DOM shape itself (figure, glightbox anchor, image, figcaption) comes
+ * from the harness -- it is identical to what perm-graph-boot.test.ts mounts against. */
 function mountPoint(): FakeElement {
-  const figure = new FakeElement("figure");
-  const anchor = new FakeElement("a");
-  anchor.append(new FakeElement("img"));
-  figure.append(anchor, new FakeElement("figcaption"));
+  const figure = mountPointBase();
   figure.dataset["bundle"] = BUNDLE_PATH;
   return figure;
 }
 
 async function mount(host: FakeElement, drawFailure: string | null = null,
                      payload: unknown = bundle): Promise<void> {
-  NEXT_DRAW_FAILURE = drawFailure;
+  armDrawFailure(drawFailure);
   (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
     ok: true,
     status: 200,
@@ -275,28 +88,7 @@ async function mount(host: FakeElement, drawFailure: string | null = null,
   displacementField(host as unknown as HTMLElement, localState);
   // A macrotask, so the fetch chain has drained by the time this resolves.
   await new Promise((resolve) => setTimeout(resolve, 0));
-  NEXT_DRAW_FAILURE = null;
-}
-
-function fireResize(width: number, height: number): void {
-  const obs = FakeResizeObserver.live.at(-1);
-  assert.ok(obs !== undefined, "the widget never observed anything");
-  obs.fire(width, height);
-}
-
-function canvasOf(host: FakeElement): FakeElement {
-  const cv = host.find("canvas");
-  assert.ok(cv !== null, "no canvas was inserted into the figure");
-  return cv;
-}
-
-/** The calls of the LAST frame only. Every control writes state, and state re-renders, so a test
- * that looked at the whole log would be reading the boot frame and the current one at once. */
-function lastFrame(cv: FakeElement): Call[] {
-  const starts = cv.ctx.calls.flatMap((c, i) => c.op === "clearRect" ? [i] : []);
-  const from = starts.at(-1);
-  assert.ok(from !== undefined, "nothing was ever drawn: no clearRect in the call log");
-  return cv.ctx.calls.slice(from);
+  armDrawFailure(null);
 }
 
 /** Exactly the state a call CONSUMES, and nothing else.

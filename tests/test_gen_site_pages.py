@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import re
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -607,3 +608,193 @@ def test_the_page_no_longer_claims_a_parcel_can_lack_a_building(displacement_bod
     body = displacement_body
     assert "no building standing on it" not in body
     assert "Voronoi" in body, "the corrected section should say what parcels actually are"
+
+
+# ------------------------------------------------- the Screening page's two widgets (D3)
+
+def render_page(name: str) -> str:
+    """Fully render partial NAME the way `main()` ships it: fill its markers, then apply
+    `_write_page`'s depth/url_depth rewrite for wherever `main()` actually writes it -- so a test
+    reading this sees the SERVED markup, `../../assets/` prefixes and all, not `_render_partial`'s
+    intermediate output before that rewrite runs. depth/url_depth are read off `main()`'s own
+    `_write_page` call for this partial rather than duplicated here -- the same reasoning
+    `test_the_field_figure_ships_the_bundle_and_png_it_points_at`'s tail applies to displacement.md
+    below: a hardcoded second copy of those two numbers could silently drift from what `main()`
+    actually passes.
+
+    `DOCS`/`ASSETS` are redirected into a throwaway directory for the call, exactly
+    `displacement_body`'s own fixture reasoning: `_render_partial` runs EVERY producer in MARKERS,
+    whether or not that marker appears on THIS page, and producers copy assets -- pointed at the
+    real tree this would write megabytes into the working copy on every test collection, and race
+    other xdist workers doing the same. `PARTIALS` stays bound to the real repo (bound at import
+    time), so the partial's own committed markup is still what gets rendered.
+    """
+    import scripts.gen_site_pages as gsp
+
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
+    m = re.search(rf'_write_page\(methodology_dir / "{name}\.md",\s*'
+                  rf'_render_partial\("{name}"\),\s*depth=(\d+), url_depth=(\d+)', src)
+    assert m is not None, f"could not find main()'s _write_page call for {name}.md"
+    depth, url_depth = int(m.group(1)), int(m.group(2))
+
+    with tempfile.TemporaryDirectory() as tmp, pytest.MonkeyPatch.context() as mp:
+        tmp_path = Path(tmp)
+        mp.setattr(gsp, "DOCS", tmp_path)
+        mp.setattr(gsp, "ASSETS", tmp_path / "assets")
+        out = tmp_path / f"{name}.md"
+        gsp._write_page(out, gsp._render_partial(name), depth=depth, url_depth=url_depth,
+                        title=name.title())
+        return out.read_text(encoding="utf-8")
+
+
+def test_screening_page_mounts_both_widgets() -> None:
+    """Each mount point carries data-widget and data-bundle, and the bundle path is relative to
+    the GENERATED page's directory (docs/methodology/), not to docs/. D2 shipped `../assets/`
+    where `../../assets/` was needed and the widget 404'd behind an intact-looking PNG."""
+    page = render_page("screening")
+    assert 'data-widget="screen-map"' in page
+    assert 'data-widget="region-grow"' in page
+    for url in re.findall(r'data-bundle="([^"]+)"', page):
+        assert url.startswith("../../assets/"), url
+
+
+def test_screening_page_rewrites_the_screen_maps_two_bundle_urls() -> None:
+    """ScreenMap carries TWO bundle attributes -- `data-bundle-capetown`, `data-bundle-nairobi` --
+    not the single `data-bundle` every other widget on this site uses, and the test right above
+    this one cannot see either: its `data-bundle="([^"]+)"` regex does not match a `-capetown`/
+    `-nairobi`-suffixed attribute name (that literal substring `data-bundle="` never occurs inside
+    `data-bundle-capetown="`). Without a `_write_page` rewrite entry for each of these two exact
+    names, ScreenMap's bundles would ship un-rewritten and 404 behind an intact-looking PNG --
+    silently, since nothing else on the page would look wrong. This is the `data-bundle` path trap
+    this task's own brief is named for, on the one mount point the general regex cannot audit."""
+    page = render_page("screening")
+    assert 'data-bundle-capetown="../../assets/screen-map/capetown.json"' in page
+    assert 'data-bundle-nairobi="../../assets/screen-map/nairobi.json"' in page
+    assert 'data-bundle-capetown="assets/' not in page
+    assert 'data-bundle-nairobi="assets/' not in page
+
+
+@pytest.fixture
+def screening_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    """The rendered Screening partial -- markers filled, exactly `displacement_body`'s own
+    reasoning applied to this page: `DOCS`/`ASSETS` are redirected so producers don't write into
+    the real tree or race other xdist workers, and `PARTIALS` stays bound to the real repo (bound
+    at import time)."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    return gsp._render_partial("screening")
+
+
+def test_the_screening_page_carries_exactly_one_of_each_widget(screening_body: str) -> None:
+    """One mount point each, over their own PNG fallbacks, with both markers actually substituted
+    -- `test_the_displacement_page_carries_exactly_one_field_widget`'s own reasoning, doubled."""
+    body = screening_body
+    assert body.count('data-widget="region-grow"') == 1
+    assert body.count('data-widget="screen-map"') == 1
+    assert 'data-bundle="assets/region-grow/hood.json"' in body
+    assert 'data-bundle-capetown="assets/screen-map/capetown.json"' in body
+    assert 'data-bundle-nairobi="assets/screen-map/nairobi.json"' in body
+    assert '<img src="assets/region-grow/hood.png"' in body
+    assert '<img src="assets/screen-map/screen_map.png"' in body
+    assert "<!-- SCREENMAP -->" not in body, "the marker was emitted instead of replaced"
+    assert "<!-- REGIONGROW -->" not in body, "the marker was emitted instead of replaced"
+    # The mount point sits on the <figure> itself, never a wrapping <div> -- see `_figure`.
+    assert '<div data-widget="region-grow"' not in body
+    assert '<div data-widget="screen-map"' not in body
+
+
+def test_the_region_grow_caption_states_the_two_regimes_finding(screening_body: str) -> None:
+    """The finding the widget publishes (design §1.3 / §2.2): at the shipped floor, growth stops
+    at the seed alone because `max_buildings` is a block budget under the default data source and
+    a building budget here. Both halves of the caption's headline numbers -- the default-budget
+    boot state (3,000 buildings / 11 blocks / 3,072 buildings) AND the floor state (150 buildings /
+    1 block / 165 buildings) -- are pinned to `hood.json`, never typed: guarded the same way
+    `test_the_caption_quotes_baked_numbers_and_not_typed_ones` guards the displacement page.
+
+    Fix round 1 (2026-08-21): this test originally asserted only the floor half. A reviewer's
+    fault injection (`boot = by_budget[budget["default"]]` -> `by_budget[600]`, a plausible
+    wrong-key bug producing "default budget of 600 buildings -- 3 blocks, 721 buildings") left it
+    green, because nothing checked that the BOOT numbers in the figure actually came from the
+    `budget["default"]` case. The three `boot`-derived assertions below close that gap."""
+    import json
+
+    from scripts.gen_site_pages import REGIONGROW
+
+    bundle = json.loads((REGIONGROW / "hood.json").read_text(encoding="utf-8"))
+    blocks, seed, budget = bundle["blocks"], bundle["seed"], bundle["budget"]
+    seed_block = next(b for b in blocks if b["block_id"] == seed)
+    by_budget = {r["max_buildings"]: r for r in bundle["reference"] if r["seed"] == seed}
+    boot, floor_case = by_budget[budget["default"]], by_budget[budget["min"]]
+    assert len(floor_case["order"]) == 1, (
+        "the pinned seed no longer collapses to itself at the shipped floor; the caption's whole "
+        "claim is stale -- re-bake before rewriting this test")
+
+    start = screening_body.index('<figure data-widget="region-grow"')
+    figure = screening_body[start:screening_body.index("</figure>", start) + len("</figure>")]
+
+    assert f"{len(blocks):,}-block neighbourhood" in figure
+    assert f"{seed_block['n']:,}" in figure
+    assert f"{budget['min']:,}-building floor" in figure
+    assert "the seed alone" in figure
+    assert "block budget" in figure
+    assert "building budget" in figure
+    assert "two regimes" in figure
+
+    # The boot (default-budget) half -- absent before fix round 1, which is exactly why a wrong
+    # `by_budget` key there was invisible to this test.
+    assert f"{boot['max_buildings']:,}" in figure
+    assert f"{len(boot['order']):,}" in figure
+    assert f"{boot['buildings']:,}" in figure
+
+    # ...and no literal number in the PRODUCER itself -- `test_the_caption_quotes_baked_numbers_
+    # and_not_typed_ones`'s own reasoning: a number typed as its current value passes every
+    # presence check above and only breaks on the next re-bake. Decimals only (format specs like
+    # `:,` carry no digit-dot-digit), matching the displacement-field guard's own scan.
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
+    start = src.index("def _region_grow_figure")
+    producer = src[start:src.index("\ndef ", start)]
+    typed = re.findall(r"\d+\.\d+", producer)
+    assert not typed, (
+        f"decimal literals in _region_grow_figure: {typed}. Every number in that caption must be "
+        f"read from hood.json.")
+
+
+def test_the_screen_map_caption_quotes_the_floor_and_is_honest_about_nairobi(
+        screening_body: str) -> None:
+    """Pool size, precision and recall are pinned to `capetown.json`'s own `floors`, never typed;
+    Nairobi's absent ground truth must not be papered over with an invented number (design §3.4)."""
+    import json
+
+    from scripts.gen_site_pages import SCREENMAP
+
+    capetown = json.loads((SCREENMAP / "capetown.json").read_text(encoding="utf-8"))
+    nairobi = json.loads((SCREENMAP / "nairobi.json").read_text(encoding="utf-8"))
+    cape_floor = next(f for f in capetown["floors"] if f["metric"] == "depth_density_proxy")
+    nai_floor = next(f for f in nairobi["floors"] if f["metric"] == "depth_density_proxy")
+    assert cape_floor["precision"] is not None and cape_floor["recall"] is not None
+    assert nai_floor["precision"] is None and nai_floor["recall"] is None, (
+        "nairobi.json now carries a precision/recall for its floor -- the caption's claim that no "
+        "ground truth exists for Nairobi is stale")
+
+    start = screening_body.index('<figure data-widget="screen-map"')
+    figure = screening_body[start:screening_body.index("</figure>", start) + len("</figure>")]
+
+    assert f"{cape_floor['n']:,}" in figure
+    assert f"{capetown['n_blocks']:,}" in figure
+    assert f"{100 * cape_floor['precision']:.1f}%" in figure
+    assert f"{100 * cape_floor['recall']:.1f}%" in figure
+    assert f"{nai_floor['n']:,}" in figure
+    assert f"{nairobi['n_blocks']:,}" in figure
+    # No Nairobi precision/recall number exists to quote, and the caption must say so rather than
+    # silently omitting the topic.
+    assert "no precision or recall" in figure
+
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
+    start = src.index("def _screen_map_figure")
+    producer = src[start:src.index("\ndef ", start)]
+    typed = re.findall(r"\d+\.\d+", producer)
+    assert not typed, (
+        f"decimal literals in _screen_map_figure: {typed}. Every number in that caption must be "
+        f"read from capetown.json/nairobi.json.")

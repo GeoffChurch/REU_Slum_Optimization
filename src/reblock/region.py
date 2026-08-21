@@ -45,6 +45,27 @@ def _check(blocks: list[Block], name: str) -> CRS:
     return crs
 
 
+def _projected(block_geoms: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """`block_geoms` in a METRIC frame, reprojected from a geographic one if needed.
+
+    Every builder needs this for two separate reasons that used to be handled separately and
+    inconsistently. The growing builders reprojected for their METRIC (`sqrt(n*A)/P` and the shape
+    objectives are meaningless where area and length are anisotropic) but deliberately left
+    ADJACENCY on the caller's frame -- and adjacency is `_block_adjacency`'s
+    `dwithin(STREET_TOL)`, with `STREET_TOL = 0.5`. That is 0.5 metres in UTM and about 55 km in
+    lon/lat, so a geographic frame made every block in a metro adjacent to every other and growth
+    silently assembled regions from blocks kilometres apart.
+
+    A no-op on every shipped path -- `KblockSource.block_geometries()` already returns UTM -- so
+    this changes no production output. It exists because `scripts/pair_matrix.py:304` reads its
+    frame straight out of the parquet (lon/lat) and reaches `build()` through a
+    `cast(gpd.GeoDataFrame, ...)`, which is a type-checker assertion and not a runtime conversion.
+    """
+    if block_geoms.crs is not None and block_geoms.crs.is_geographic:
+        return block_geoms.to_crs(block_geoms.estimate_utm_crs())
+    return block_geoms
+
+
 def _union_streets(blocks: list[Block]) -> BaseGeometry:
     """Union of every block's OWN existing streets -- the full existing road network (outer
     perimeter + inter-block streets). This is `region_block.streets`: the network a method
@@ -57,8 +78,28 @@ def _shared_parts(blocks: list[Block]) -> tuple[gpd.GeoDataFrame, Polygon | Mult
     (the true union of member boundaries -- a MultiPolygon when members are separated by street
     gaps, NOT a convex hull, which would enclose the empty gaps and inflate the area), crs
     (asserted shared), and source_content_hash (a deterministic hash of the sorted constituent
-    identities, or "" if any is uncacheable)."""
+    identities, or "" if any is uncacheable).
+
+    MEMBERS ARE SORTED BY block_id FIRST, and that is load-bearing rather than tidiness: the
+    `parcel_id` assignment below numbers parcels by member order, while `block_id` and
+    `source_content_hash` are both built from `sorted(...)` and would NOT change. Handed members in
+    a different order, this would renumber every parcel under an identity the derivation cache
+    treats as unchanged.
+
+    Load-bearing, not inert, for the two growing builders. `pipeline.build_regions` returns each
+    region's Blocks in whichever order `RegionBuilder.build` produced -- accretion order for
+    `DenseClusterRegionBuilder` / `ShapeStandardizingRegionBuilder` -- and nothing re-sorts them
+    before `pipeline.run` passes that straight to `region_reblock(rblocks, ...)`
+    (`pipeline.py:216`), which calls `region_block(blocks)` (`region.py:154`) -> here: one hop
+    from `build_regions` to this sort. For `region_builder=dense_cluster` /
+    `shape_standardizing` (`conf/region_builder/*.yaml`, selectable today, not hypothetical) that
+    member order is genuinely unsorted, and this line is what keeps `parcel_id` numbering
+    consistent with the unchanged `block_id` / `source_content_hash`. It is inert only under the
+    default `identity` builder, whose output is already sorted. Do not delete it as dead
+    insurance.
+    """
     crs = _check(blocks, "region_block")
+    blocks = sorted(blocks, key=lambda b: b.block_id)
 
     parcels = pd.concat([b.parcels for b in blocks], ignore_index=True)
     parcels["parcel_id"] = range(len(parcels))
@@ -123,8 +164,20 @@ def region_reblock(blocks: list[Block], method: Method, evals: list[Eval]) -> Re
 class RegionBuilder(Protocol):
     """Maps user seed groups to expanded region member groups, on cheap block GEOMETRIES (no
     Voronoi) -- so members are chosen before the expensive full-Block build. `groups` is a list
-    of seed groups (block_ids); returns the expanded groups (block_ids), each sorted for
-    determinism, group order preserved."""
+    of seed groups (block_ids); returns the expanded groups (block_ids), each in BUILD ORDER,
+    group order preserved.
+
+    Build order means accretion order where there is one: `DenseClusterRegionBuilder` and
+    `ShapeStandardizingRegionBuilder` return the seed group (sorted) followed by each block in the
+    order it was added, which is what the site's RegionGrow widget replays and what pins its
+    browser-side greedy to this code. `IdentityRegionBuilder` and `ConvexHullRegionBuilder` have no
+    accretion, so sorted IS their build order. Determinism is unchanged either way -- accretion
+    order is fixed by the tie-break rule.
+
+    Consumers that need a SET must sort: `region._shared_parts` does, because it numbers parcels by
+    member order and a renumbering under an unchanged `source_content_hash` would corrupt cached
+    derivations.
+    """
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
               depth_fn: Callable[[str], float] | None = None) -> list[list[str]]: ...
@@ -171,6 +224,7 @@ class IdentityRegionBuilder:
               depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
         del depth_fn   # these builders don't rank by depth
         _validate_group_ids(block_geoms, groups)
+        block_geoms = _projected(block_geoms)
         by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
         result: list[list[str]] = []
         for group in groups:
@@ -201,6 +255,7 @@ class ConvexHullRegionBuilder:
               depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
         del depth_fn   # these builders don't rank by depth
         _validate_group_ids(block_geoms, groups)
+        block_geoms = _projected(block_geoms)
         by_id = dict(zip(block_geoms["block_id"], block_geoms.geometry, strict=True))
         result: list[list[str]] = []
         for group in groups:
@@ -300,14 +355,11 @@ class DenseClusterRegionBuilder:
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
               depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
         _validate_group_ids(block_geoms, groups)
+        metric = _projected(block_geoms)
         ids = cast(list[str], list(block_geoms["block_id"]))
-        geoms = list(block_geoms.geometry)
-        # The growth metric is the depth proxy sqrt(n*A)/P, so A and P must be in METRES -- the
-        # block geometries are usually lon/lat, where raw .area/.length are anisotropic. Reproject
-        # for the metric only (when geographic); `geoms` (original CRS) still drives adjacency.
-        metric = block_geoms
-        if metric.crs is not None and metric.crs.is_geographic:
-            metric = metric.to_crs(metric.estimate_utm_crs())
+        # ONE frame drives everything: adjacency, the touch-adjacency warning AND the metric. The
+        # previous split -- metric reprojected, adjacency on the caller's frame -- is the §1.5 bug.
+        geoms = list(metric.geometry)
         areas = [float(g.area) for g in metric.geometry]
         perims = [float(g.length) for g in metric.geometry]
         has_count = "building_count" in block_geoms.columns
@@ -339,6 +391,7 @@ class DenseClusterRegionBuilder:
                     sorted(group),
                 )
             cluster = {idx_by_id[b] for b in group}
+            order = sorted(cluster, key=lambda i: ids[i])   # the seed group, deterministically
             size = sum(counts[i] for i in cluster)
             while size < self.max_buildings:
                 frontier = {j for i in cluster for j in adj[i]} - cluster
@@ -349,8 +402,9 @@ class DenseClusterRegionBuilder:
                     key=lambda j: (-_score(j), -counts[j], ids[j]),
                 )
                 cluster.add(best)
+                order.append(best)
                 size += counts[best]
-            result.append(sorted(ids[i] for i in cluster))
+            result.append([ids[i] for i in order])
         return result
 
 
@@ -475,15 +529,13 @@ class ShapeStandardizingRegionBuilder:
               depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
         del depth_fn                      # shape is scored on geometry; access depth plays no part
         _validate_group_ids(block_geoms, groups)
+        metric = _projected(block_geoms)
         ids = cast(list[str], list(block_geoms["block_id"]))
-        geoms = list(block_geoms.geometry)
-        # Shape must be measured in METRES: in lon/lat, area and length are anisotropic, so every
-        # objective here would score a north-south region differently from an identical east-west
-        # one. Adjacency still runs on the original geometries.
-        metric = block_geoms
-        if metric.crs is not None and metric.crs.is_geographic:
-            metric = metric.to_crs(metric.estimate_utm_crs())
-        shape_geoms = list(metric.geometry)
+        # ONE frame drives everything: adjacency, the touch-adjacency warning AND the shape
+        # objective. The previous split -- shape reprojected, adjacency on the caller's frame --
+        # is the §1.5 bug.
+        geoms = list(metric.geometry)
+        shape_geoms = geoms
         counts = (
             [0.0 if pd.isna(c) else float(c) for c in block_geoms["building_count"]]
             if "building_count" in block_geoms.columns else [1.0] * len(ids)
@@ -502,6 +554,7 @@ class ShapeStandardizingRegionBuilder:
                     sorted(group),
                 )
             cluster = {idx_by_id[b] for b in group}
+            order = sorted(cluster, key=lambda i: ids[i])   # the seed group, deterministically
             size = sum(counts[i] for i in cluster)
             union = unary_union([shape_geoms[i] for i in cluster])
             while size < self.max_buildings:
@@ -513,7 +566,8 @@ class ShapeStandardizingRegionBuilder:
                 scored = {j: self.objective.score(union.union(shape_geoms[j])) for j in frontier}
                 best = min(frontier, key=lambda j: (-scored[j], -counts[j], ids[j]))
                 cluster.add(best)
+                order.append(best)
                 size += counts[best]
                 union = union.union(shape_geoms[best])
-            result.append(sorted(ids[i] for i in cluster))
+            result.append([ids[i] for i in order])
         return result

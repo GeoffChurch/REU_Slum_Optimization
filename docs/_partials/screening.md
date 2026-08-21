@@ -1,9 +1,15 @@
 <!-- Handwritten partial for docs/methodology/screening.md. scripts/gen_site_pages.py prepends the
-     do-not-edit note and fills the SCREENTABLE marker (named, not spelled out in full here, for
-     the same reason docs/_partials/intro.md's own note gives -- spelling it out would fill this
-     note too) from examples/screen-bakeoff/screen_comparison.csv. Edit HERE, never
-     docs/methodology/screening.md (it is generated and gitignored). This file is committed but
-     excluded from the built site (see exclude_docs in mkdocs.yml).
+     do-not-edit note and fills three markers (named, not spelled out in full here, for the same
+     reason docs/_partials/intro.md's own note gives -- spelling it out would fill this note too):
+
+     * SCREENTABLE -- the bake-off ranking, from examples/screen-bakeoff/screen_comparison.csv.
+     * SCREENMAP -- the interactive city-scale screen: fallback PNG, mount point, and a caption
+       read off examples/screen-map/{capetown,nairobi}.json's own `floors`.
+     * REGIONGROW -- the interactive block-to-region figure: fallback PNG, mount point, and a
+       caption read off examples/region-grow/hood.json.
+
+     Edit HERE, never docs/methodology/screening.md (it is generated and gitignored). This file is
+     committed but excluded from the built site (see exclude_docs in mkdocs.yml).
 
      The "why n/P^2 was retired" section below links to the published results/bakeoff.md page.
      It originally linked to the screen-bakeoff example on GitHub instead (mirroring how
@@ -12,7 +18,8 @@
      that page ships.
 
      No typed numbers anywhere in this file: the floor and the precision/AUC figures come from
-     SCREENTABLE, not from prose. -->
+     SCREENTABLE, and the two widgets' own captions come from SCREENMAP/REGIONGROW -- never from
+     prose. -->
 
 # Screening
 
@@ -36,6 +43,8 @@ survey — AUC across the whole ranking, precision at the top of it — plus eac
 absolute floor where it has one; a screen never shipped as a gate carries none:
 
 <!-- SCREENTABLE -->
+
+<!-- SCREENMAP -->
 
 ## Why `n/P²` was retired
 
@@ -71,6 +80,8 @@ boundary, whether or not the settlement's fabric continues past it; growing a re
 the roads that follow run continuous across block boundaries instead. This is also the hinge in
 the pipeline: under the shipped default, everything up to and including the screen is cheap enough
 to sweep a whole city at once, and everything from `region_builder` on is per-block and expensive.
+
+<!-- REGIONGROW -->
 
 The peel-based metrics — `depth` and `depth_density`, selectable in place of the default — blur
 that line deliberately. Neither can score a block without its true access depth, so the screen runs

@@ -380,6 +380,8 @@ site.
 * **The Khayelitsha claim** (`docs/background.md:39`) was measured under the retired
   `density_compactness` metric. Whether `depth_density_proxy` also peaks there must be checked
   before the sentence is rewritten rather than assumed; piece A should verify, not paraphrase.
-* **Nairobi's screening tier.** Cape Town has ground truth; Nairobi has none
-  (`examples/screen-bakeoff/README.md` says so explicitly). Whether the city tier ships for Nairobi
-  at all — and if so, without the precision/recall readout — is a piece-D decision.
+* ~~**Nairobi's screening tier.**~~ **Resolved by D3**
+  (`specs/2026-08-20-region-grow-and-screen-map-design.md` §3.4): both cities ship, selected by a
+  city toggle on `ScreenMap` — Cape Town with the precision/recall readout, Nairobi without one,
+  since the City of Cape Town's own informal-structure survey has no Kenyan equivalent
+  (`examples/screen-bakeoff/README.md` says so explicitly).

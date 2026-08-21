@@ -340,7 +340,8 @@ def test_dense_cluster_deepest_neighbor_first() -> None:
         ("seed", 10.0, seed), ("deep", 5.0, deep), ("shallow", 5.0, shallow))
 
     out = DenseClusterRegionBuilder(max_buildings=15).build(geoms, [["seed"]])
-    assert out == [["deep", "seed"]]
+    # membership, not build order: this test is about WHICH neighbor wins, not accretion order.
+    assert [sorted(g) for g in out] == [["deep", "seed"]]
 
 
 def test_dense_cluster_falls_back_to_block_count_without_building_count() -> None:
@@ -469,8 +470,10 @@ def test_dense_cluster_grows_by_depth_fn_not_proxy() -> None:
     builder = DenseClusterRegionBuilder(max_buildings=15)        # seed(10) + exactly one more
     depth = {"s": 5.0, "a": 1.0, "b": 9.0}
     # depth-growth picks the deeper neighbor b; proxy-growth (equal proxy) ties to a by id.
-    assert builder.build(gdf, [["s"]], depth_fn=lambda bid: depth[bid]) == [["b", "s"]]
-    assert builder.build(gdf, [["s"]]) == [["a", "s"]]           # proxy tie -> "a"
+    # membership, not build order: seed is always first, so this checks WHICH neighbor joined it.
+    assert [sorted(g) for g in builder.build(gdf, [["s"]], depth_fn=lambda bid: depth[bid])] == [
+        ["b", "s"]]
+    assert [sorted(g) for g in builder.build(gdf, [["s"]])] == [["a", "s"]]  # proxy tie -> "a"
 
 
 def test_dense_cluster_depth_fn_none_is_proxy_behaviour() -> None:
