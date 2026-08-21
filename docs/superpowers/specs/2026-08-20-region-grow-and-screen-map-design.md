@@ -48,7 +48,24 @@ Payload against simplification tolerance, **including interior rings**, encoded 
 | Nairobi | 3 m | 64,243 | 1.25 MB | 0.42 MB |
 | Nairobi | **5 m** | **53,315** | **1.04 MB** | **0.35 MB** |
 
-**5 m is the shipped choice: 6.53 MB in-repo, 2.20 MB on the wire for both cities.**
+**5 m is the shipped choice.** Predicted from the table above: 6.53 MB in-repo, 2.20 MB on the wire.
+
+> **Corrected after Task 7 built it.** The table measures the **rings only**. The shipped bundle also
+> carries the schema's own columns — `block_id`, `n`, `area_m2`, `perimeter_m` — and the `floors`
+> and `encoding` blocks. Actual committed sizes, with compact JSON separators:
+>
+> | city | plain | gzipped |
+> |---|---|---|
+> | Cape Town | **6.17 MB** | **2.03 MB** |
+> | Nairobi | **1.17 MB** | **0.39 MB** |
+> | **both** | **7.33 MB** | **2.42 MB** |
+>
+> Still inside the parent design's ~3 MB wire budget, with less room than §1.1 first claimed. Task 7
+> reproduced the rings-only figure bit-for-bit, so the table is not wrong — it was measuring a part
+> and being read as the whole. That is the **third** figure in this spec to move once it was built
+> rather than estimated (after exteriors-vs-interiors in this same section, and the 5-hop
+> neighbourhood in §1.2). The pattern is consistent enough to state as a rule: **a payload figure
+> measured from a component is not a payload figure.**
 
 > **An earlier draft of this spec said 4.35 MB / 1.45 MB for Cape Town at 5 m. That figure was
 > measured with exteriors only** — the shape `_bundle_io.polygon_ring` produces — and was 21% low.
