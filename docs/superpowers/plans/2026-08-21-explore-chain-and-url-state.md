@@ -1291,7 +1291,7 @@ draw(ctx, blocks, e, { view, region: g.order, frontier, seed }, size);
 
 In the `pointerdown` handler, write the id: `state.set({ seed: blocks[hit]!.block_id });`
 
-- [ ] **Step 4: `displacement-field.ts` — the width slider**
+- [ ] **Step 4: `displacement-field.ts` — the width slider, and the segment invariant**
 
 Change `slider.value = String(width0);` to:
 
@@ -1300,6 +1300,43 @@ Change `slider.value = String(width0);` to:
 // URL (piece E) may have overridden it before this line, and a slider showing 7 while the corridor
 // is drawn at 12 is the exact desync this widget's own state exists to prevent.
 slider.value = String(state.get().roads[0]!.width_m);
+```
+
+**Then extend `boot`'s bundle validation.** It currently checks the road *count* (exactly two) and
+not the *points per road*, while `roadsParam` (Task 1) indexes `coords[0]`/`coords[1]` directly and
+spells a road as `x1,y1,x2,y2`. Task 1's review found the gap: its own docstring claimed the codec
+checked this, and it does not. Enforce it once, at the boundary the bundle actually crosses —
+immediately after the existing `b.roads.length !== 2` throw, in the same idiom:
+
+```ts
+  // Each road is a two-point SEGMENT, for the same reason the count is exactly two: the drag
+  // handles, the corridor geometry, and piece E's URL spelling of a road (`x1,y1,x2,y2`, whose
+  // encoder indexes `coords[0]`/`coords[1]` directly) all assume it. Enforced HERE, once, where the
+  // bundle crosses into the widget -- a second length check inside the codec would be a guard that
+  // cannot fire, which this project treats as a defect of its own.
+  for (const [i, r] of b.roads.entries()) {
+    if (r.coords.length !== 2) {
+      throw new Error(
+        `field.json's road ${i + 1} has ${r.coords.length} points; this widget needs exactly two`);
+    }
+  }
+```
+
+and add the guard's test to `web/test/field-boot.test.ts`, mounting over a modified payload
+(`frontier-boot.test.ts`'s `mount(host, payload = bundle)` is the precedent; if `field-boot`'s own
+`mount` has no payload override, add one in that same shape rather than a second helper):
+
+```ts
+test("a road that is not a two-point segment fails LOUDLY, on the page", async () => {
+  const host = mountPoint();
+  const bad = {
+    ...bundle,
+    roads: [{ ...bundle.roads[0]!, coords: [[0, 0], [1, 1], [2, 2]] }, bundle.roads[1]!],
+  };
+  await mount(host, null, bad);
+  // The message reaches the reader where the caption was -- not the console behind an intact PNG.
+  assert.match(captionText(host), /road 1 has 3 points/);
+});
 ```
 
 - [ ] **Step 5: `perm-graph.ts` — clamp the prefix**
@@ -1339,6 +1376,9 @@ Expected: type-check clean, `# fail 0`.
 
 1. Revert `slider.value` in `region-grow.ts` to `String(b.budget.default)` ⇒ the budget test reddens.
 2. Revert the width slider to `String(width0)` ⇒ the field test reddens.
+2b. Delete the `coords.length !== 2` loop ⇒ the segment-invariant test reddens. Confirm the failure
+   is the ASSERTION and not an uncaught `TypeError` from somewhere downstream — if it is the latter,
+   the guard is not the thing being tested and you must say so rather than accept the red.
 3. Delete the prefix clamp ⇒ the perm-graph test reddens.
 4. Swap `Object.hasOwn(b.methods, isolated)` for `isolated in b.methods` ⇒ the `toString` test
    reddens (and only that one).
