@@ -98,7 +98,7 @@ def polygon_rings(geom: BaseGeometry, ox: float, oy: float, *,
     consumers fill with the even-odd rule.
 
     Measured on the data these bundles are baked from: 6,990 of 16,451 Cape Town blocks and 1,139
-    of 3,500 Nairobi blocks have interior rings, as do 3 of the 129 blocks in RegionGrow's
+    of 3,500 Nairobi blocks have interior rings, as do 7 of the 213 blocks in RegionGrow's
     neighbourhood. Neither city has a single MultiPolygon block, which is why that case raises
     rather than being flattened.
     """
