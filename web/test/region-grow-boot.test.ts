@@ -27,6 +27,12 @@ const E = bundle.encoding;
   json: (): Promise<unknown> => Promise.resolve(bundle),
 });
 
+/** Every neighbourhood block's own context outline -- layer (1), drawn first, in `hood_color` at
+ * `hood_lw`. Same colour-first reasoning as the other layer helpers below. */
+function hoodPaths(cv: unknown): Call[] {
+  return lastFrame(cv as never).filter((c) => c.op === "stroke" && c.strokeStyle === E.hood_color);
+}
+
 /** Blocks the picture currently shows as REGION -- identified by the bundle's own fill colour,
  * never by a path count. D2's defect #1 was a layer identified by count, in a figure where two
  * layers happened to have the same number of paths; and defect #2 matched a partial alpha that
@@ -159,6 +165,18 @@ function clickBlock(cv: unknown, block: HoodBlock): void {
   (cv as { dispatch: (name: string, ev: unknown) => void })
     .dispatch("pointerdown", { offsetX: sx, offsetY: sy, pointerId: 1 });
 }
+
+test("the neighbourhood context is stroked at the bundle's own hood_lw, not a literal", async () => {
+  // The same JavaScript-on/off width divergence `region_lw` (finding 4) and D2's own `street_lw`
+  // already cost this project, on the one width in this file's draw() that was still never
+  // asserted: layer (1)'s `hood_lw`. Setting it to `region_lw` (0.4 -> 1.3 across all 213 blocks)
+  // leaves the rest of this suite green.
+  const { cv } = await mount();
+  const strokes = hoodPaths(cv);
+  assert.equal(strokes.length, bundle.blocks.length,
+    "every neighbourhood block should be outlined once, in the context layer");
+  for (const c of strokes) assert.equal(c.lineWidth, E.hood_lw);
+});
 
 test("the region drawn at the default budget is the one the model computes", async () => {
   const { cv } = await mount();

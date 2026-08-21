@@ -62,7 +62,7 @@ Copied verbatim from the spec and from standing project rules. **Every task's re
 | `web/src/model/accretion.ts` | the greedy, mirroring `DenseClusterRegionBuilder` |
 | `web/src/model/screen.ts` | four metrics, metric-sorted order, prefix precision/recall |
 | `web/src/render/region.ts` | neighbourhood + grown-region canvas draw |
-| `web/src/render/city.ts` | base layer + selected prefix, `Path2D` cache |
+| `web/src/render/city.ts` | base layer + selected prefix, cached screen-space rings + offscreen blit |
 | `web/src/widgets/region-grow.ts` | budget slider, click-to-reseed, readout |
 | `web/src/widgets/screen-map.ts` | metric select, floor slider, city toggle, precision/recall readout |
 | `web/test/accretion.test.ts`, `web/test/screen-model.test.ts` | model unit tests |
@@ -1839,11 +1839,12 @@ git commit -m "feat: the screening metrics, ranking and prefix precision/recall 
 
 ### Rendering
 
-`web/src/render/city.ts` builds **one `Path2D` per block at load** and never rebuilds it. A frame is:
+`web/src/render/city.ts` builds no `Path2D` -- instead it caches each block's own screen-projected
+ring coordinates at load and retraces a canvas path from that cache on every draw call. A frame is:
 
 1. blit the pre-rendered base layer (every block filled `encoding.base_color`) from an offscreen
    canvas;
-2. fill `paths[order[0..k]]` in `encoding.selected_color`.
+2. OUTLINE `order[0..k]` in `encoding.selected_color` directly on the visible canvas, never filled.
 
 That is what keeps a floor-slider drag cheap: at the shipped Cape Town floor the prefix is 1,655
 blocks, not 16,451. Redraws are `requestAnimationFrame`-coalesced so a drag cannot queue frames

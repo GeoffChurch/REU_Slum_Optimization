@@ -350,16 +350,21 @@ test("the base layer is drawn once, not per frame, and blitted every frame in de
     for (const c of fills1) assert.equal(c.fillRule, "evenodd");
 
     // block_lw consumed: every block outlined once on the offscreen layer, at the bundle's own
-    // width -- not a literal, and not a field that ships and is never read. The outline colour is
-    // EITHER base_color or informal_color, never a fixed constant: an informal block is outlined in
-    // its own gold, not base_color, or that outline would paint over the fill it surrounds (its own
-    // dedicated test, below, pins that on one known block -- this is the corpus-wide shape check).
+    // width -- not a literal, and not a field that ships and is never read. The outline colour must
+    // match THAT BLOCK'S OWN fill, not merely be "one of the two colours in play" -- an `assert.ok`
+    // accepting either constant for every block would pass an injection that outlined ALL 16,451
+    // blocks gold just as readily as one that left the pre-fix bug (all outlined base_color) in
+    // place, since both colours are individually valid somewhere in the bundle. Pairing each stroke
+    // with the fill it was drawn immediately after -- `fillBlock`/`strokeBlock` run back-to-back per
+    // block inside `paintBase`'s own loop, so `fills1[i]`/`strokes1[i]` are the same block's two
+    // calls -- is what actually pins "outline = fill", in both directions, corpus-wide.
     const strokes1 = offscreen1.ctx.calls.filter((c) => c.op === "stroke");
     assert.equal(strokes1.length, ct.n_blocks, "every block should be outlined once on the base layer");
-    for (const c of strokes1) {
-      assert.ok(c.strokeStyle === E.base_color || c.strokeStyle === E.informal_color,
-        `every block's own outline should be base_color or informal_color, not ${c.strokeStyle}`);
-      assert.equal(c.lineWidth, E.block_lw);
+    for (let i = 0; i < strokes1.length; i++) {
+      assert.equal(strokes1[i]!.strokeStyle, fills1[i]!.fillStyle,
+        `block ${i}'s outline (${strokes1[i]!.strokeStyle}) does not match its own fill `
+        + `(${fills1[i]!.fillStyle}) -- one colour would paint over the other`);
+      assert.equal(strokes1[i]!.lineWidth, E.block_lw);
     }
 
     // The blit's own transform bracket: reset to identity, THEN restored to the DPR scale --
