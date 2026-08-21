@@ -1,5 +1,5 @@
 """`_bundle_io`'s encoders. The multi-ring one exists because 6,990 Cape Town blocks, 1,139
-Nairobi blocks and 3 of RegionGrow's 129 neighbourhood blocks have interior rings -- and
+Nairobi blocks and 7 of RegionGrow's 213 neighbourhood blocks have interior rings -- and
 `polygon_ring`, which the three older bundles use, raises on every one of them."""
 from __future__ import annotations
 
@@ -14,6 +14,13 @@ def _donut() -> Polygon:
                    [[(3, 3), (3, 6), (6, 6), (6, 3)]])
 
 
+def _fractional() -> Polygon:
+    """Coordinates that ACTUALLY need rounding. `_donut()`'s are whole numbers, so a
+    `round(v, 2) == v` assertion over it holds even when `cm` does nothing at all -- which is
+    exactly what a fault injection (replacing `cm`'s body with `return x`) demonstrated."""
+    return Polygon([(0.123456, 0.987654), (10.567891, 0.111111), (10.5, 10.5), (0.0, 10.0)])
+
+
 def test_polygon_rings_keeps_the_hole() -> None:
     rings = polygon_rings(_donut(), 0.0, 0.0, what="test block")
     assert len(rings) == 2, "exterior plus one interior"
@@ -24,6 +31,19 @@ def test_polygon_rings_keeps_the_hole() -> None:
 def test_polygon_rings_is_origin_relative_at_cm_precision() -> None:
     rings = polygon_rings(_donut(), 1.0, 2.0, what="test block")
     assert rings[0][0] == [-1.0, -2.0]
+    assert all(round(v, 2) == v for ring in rings for pt in ring for v in pt)
+
+
+def test_polygon_rings_rounds_to_cm_precision() -> None:
+    """Precision assertion on coordinates that actually need rounding. `_fractional()` has
+    values like 0.123456 and 10.567891 that must round to exactly 2 decimals."""
+    rings = polygon_rings(_fractional(), 0.0, 0.0, what="test block")
+    # First ring is the exterior
+    assert rings[0][0] == [0.12, 0.99], "0.123456 rounds to 0.12, 0.987654 to 0.99"
+    assert rings[0][1] == [10.57, 0.11], "10.567891 rounds to 10.57, 0.111111 to 0.11"
+    assert rings[0][2] == [10.5, 10.5], "10.5 stays 10.5"
+    assert rings[0][3] == [0.0, 10.0], "0.0 stays 0.0"
+    # All values must be at cm precision (2 decimals)
     assert all(round(v, 2) == v for ring in rings for pt in ring for v in pt)
 
 
