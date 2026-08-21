@@ -250,10 +250,16 @@ export interface Param<V> {
  * error at this object rather than a query key that silently stops being written. */
 export type UrlCodec<T> = { readonly [K in keyof T]-?: Param<T[K]> };
 
-/** A finite number, or `null`. Rejects "" (which `Number` reads as 0), NaN and both infinities.
- * The empty string matters: `?prefix=` is a real thing a reader can type. */
+/** ONE spelling of a number, and nothing else -- the same reasoning `boolParam` carries for 0/1.
+ *
+ * The regex is not belt-and-braces over `Number.isFinite`: `Number("0x10")` is 16 and finite, and
+ * `Number("")` is 0, so a bare `Number()` admits hex and the empty string as valid readings of
+ * `?floor=`. Both matter -- `?prefix=` with nothing after it is a real thing a reader can type, and
+ * a URL grammar whose acceptance depends on which spelling somebody guessed is not a grammar. */
+const DECIMAL = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/;
+
 function finite(raw: string): number | null {
-  if (raw.trim() === "") return null;
+  if (!DECIMAL.test(raw.trim())) return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
 }
@@ -355,9 +361,16 @@ function segment(raw: string): [[number, number], [number, number]] | null {
   return [[n[0]!, n[1]!], [n[2]!, n[3]!]];
 }
 
+/** `String(Number(v.toFixed(...)))`, never a bare `toFixed`: `(1).toFixed(1)` is "1.0", and a URL
+ * whose coordinates all carry a trailing ".0" is longer for nothing. The width key below spells
+ * itself the same way, so one param never emits two number formats. */
+function fmtCoord(v: number): string {
+  return String(Number(v.toFixed(COORD_DP)));
+}
+
 function fmtSegment(r: Road): string {
   const [a, b] = [r.coords[0]!, r.coords[1]!];
-  return [a[0], a[1], b[0], b[1]].map((v) => v.toFixed(COORD_DP)).join(",");
+  return [a[0], a[1], b[0], b[1]].map(fmtCoord).join(",");
 }
 
 function sameCoords(a: [number, number][], b: [number, number][]): boolean {
@@ -384,9 +397,7 @@ export function roadsParam(k1: string, k2: string, kWidth: string): Param<Road[]
         out[k1] = fmtSegment(v[0]!);
         out[k2] = fmtSegment(v[1]!);
       }
-      if (v[0]!.width_m !== initial[0]!.width_m) {
-        out[kWidth] = String(Number(v[0]!.width_m.toFixed(COORD_DP)));
-      }
+      if (v[0]!.width_m !== initial[0]!.width_m) out[kWidth] = fmtCoord(v[0]!.width_m);
       return out;
     },
     decode(present, initial) {
@@ -437,6 +448,8 @@ non-zero fail count, then **restore**:
    must redden.
 4. In `roadsParam.encode`, always emit both segments (drop the `movedGeometry` guard) ⇒ the
    width-only case must redden.
+5. In `fmtCoord`, return `v.toFixed(COORD_DP)` directly ⇒ the moved-segment case must redden on
+   `"1.0,2.0,3.0,4.0"` vs `"1,2,3,4"`.
 
 Record each result in the task report. An injection that will not redden is reported, not tuned.
 
@@ -1038,7 +1051,13 @@ test("two mount points claiming one URL key throw, with the message ON THE PAGE"
   const a = makeMountPoint("collide-a");
   const b = makeMountPoint("collide-b");
   const root = { querySelectorAll: () => [a, b] } as unknown as ParentNode;
-  mountAll(root, { bind: (_c, initial) => ({ get: () => initial, set: () => {}, subscribe: () => {} }) });
+  // The stub must preserve the generic: `bind<T>(codec: UrlCodec<T>, initial: T): StateSource<T>`
+  // is a generic METHOD, and a non-generic arrow does not satisfy it.
+  const noStore: UrlStore = {
+    bind: <T>(_c: UrlCodec<T>, initial: T) =>
+      ({ get: () => initial, set: () => {}, subscribe: () => {} }),
+  };
+  mountAll(root, noStore);
   // The FIRST mount point is fine; the second is the one that collides, and its failure must be
   // rendered where it happened rather than aborting the page or landing only in the console.
   assert.equal(b.appended.length, 1);
@@ -1846,7 +1865,10 @@ def test_explore_rewrites_screenmaps_two_bundle_attributes(explore_page: str) ->
     explore.md serves at <base>/explore/ -- url_depth 1 -- so both must carry exactly one `../`."""
     for attr in ("data-bundle-capetown", "data-bundle-nairobi"):
         assert f'{attr}="../assets/' in explore_page, attr
-    assert f'{attr}="assets/' not in explore_page
+        # INSIDE the loop. Hoisted out, this runs once against whichever `attr` the loop left
+        # behind -- checking one of the two, which is the exact half-blind shape D3's own guard
+        # had and the reason this test exists.
+        assert f'{attr}="assets/' not in explore_page, attr
 
 
 def test_explore_is_generated_and_gitignored() -> None:
