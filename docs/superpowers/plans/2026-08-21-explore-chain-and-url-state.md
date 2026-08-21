@@ -1302,6 +1302,13 @@ Change `slider.value = String(width0);` to:
 slider.value = String(state.get().roads[0]!.width_m);
 ```
 
+**Then extend `boot`'s bundle validation.** This step also DISCHARGES A DEBT: Task 1's
+`roadsParam` docstring points forward to this check, deliberately without claiming it already
+exists (it does not, as of Task 1). If this step is dropped or renamed, that docstring becomes
+a comment naming a guard that is nowhere — the same defect Task 1's review just fixed, one file
+over. Re-read `web/src/url/param.ts`'s `roadsParam` docstring after landing this, and make its
+forward reference true.
+
 **Then extend `boot`'s bundle validation.** It currently checks the road *count* (exactly two) and
 not the *points per road*, while `roadsParam` (Task 1) indexes `coords[0]`/`coords[1]` directly and
 spells a road as `x1,y1,x2,y2`. Task 1's review found the gap: its own docstring claimed the codec
