@@ -277,9 +277,17 @@ derivation keyed on that unchanged hash would be reused against differently numb
 is silent corruption, not churn.
 
 **The fix goes where the sensitivity lives: `_shared_parts` sorts its own members by `block_id`.**
-Not at the one call site that happens to be safe today —
-`pipeline.build_regions` already passes sorted members, so sorting inside `_shared_parts` is
-**provably a no-op right now** and protects every future caller, including the bake.
+Not at the one call site that happens to be safe today — `pipeline.build_regions` already passes
+sorted members, so sorting inside `_shared_parts` is **a no-op at the moment it lands**, which is
+what makes it safe to land first.
+
+> **Corrected during execution (Task 1 review).** It is a no-op only *until the ordering change in
+> the same task*. Afterwards the two growing builders hand `_shared_parts` accretion order through
+> `pipeline.build_regions` → `region_reblock` → `region_block`, with no re-sort in between, so the
+> sort is **load-bearing** for `region_builder=dense_cluster` and `shape_standardizing` — inert only
+> under the default `identity`. The sequencing above is still right; describing the END STATE as a
+> no-op would invite a future reader to delete the sort as dead insurance and reintroduce exactly
+> the silent parcel renumbering this section exists to prevent.
 
 Acceptance: a regenerated multiblock example must come back **byte-identical**. If it does not, the
 premise of this section is wrong and the task stops.
