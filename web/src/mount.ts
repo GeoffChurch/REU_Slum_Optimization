@@ -69,6 +69,10 @@ register("displacement-field", displacementField);
 // inside the widget module (see the paragraph above).
 import { regionGrow } from "./widgets/region-grow.js";
 register("region-grow", regionGrow);
+// Fifth widget, same shape, same reason -- registered HERE, after REGISTRY exists, never from
+// inside the widget module (see the paragraph above).
+import { screenMap } from "./widgets/screen-map.js";
+register("screen-map", screenMap);
 
 // DOMContentLoaded fires once per full page load. That is sufficient only because this project's
 // mkdocs.yml does not enable Material's navigation.instant feature (confirmed absent as of this
