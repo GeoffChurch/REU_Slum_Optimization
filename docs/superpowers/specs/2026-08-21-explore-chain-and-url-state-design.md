@@ -82,19 +82,58 @@ value already reaches the control for free:
 | Widget | control initial | reads |
 | --- | --- | --- |
 | `PermGraph` | `perm-graph.ts:87,101,112` | `state.get()` ✅ |
-| `ScreenMap` | `screen-map.ts:231,232` | `state.get()` ✅ |
+| `ScreenMap` | `screen-map.ts:231,232` (`metric`, `city`) | `state.get()` ✅ |
+| `ScreenMap` | `screen-map.ts:125` via `syncFloor` (`floor`) | **the bundle, before `makeState`** ❌ |
 | `Frontier` | `frontier.ts:335,354` | `state.get()` ✅ (and writes back at `453-454`) |
 | `RegionGrow` | `region-grow.ts:101` | **`b.budget.default`** ❌ |
 | `DisplacementField` | `displacement-field.ts:129` | **`b.width.default_m`** ❌ |
 
-The two ❌ rows are the whole of the "E touches no widget" claim being wrong (the backlog entry is
-mine and is corrected by this document). Each is a one-line fix; without them `?budget=5000` draws
-the region at 5,000 while the slider reads 3,000.
+The three ❌ rows are the whole of the "E touches no widget" claim being wrong (the backlog entry is
+mine and is corrected by this document). Without them `?budget=5000` draws the region at 5,000 while
+the slider reads 3,000.
+
+**Two of the three are one-line fixes. `ScreenMap`'s floor is not**, and §1.6 says why.
 
 **`width` is already in state.** `displacement-field.ts:130-138` writes the slider's value onto
 `width_m` of **every** road (live or not, deliberately — "two coincident roads of one width are
 algebraically one road"). So the corridor width is `roads[*].width_m` and needs no state-shape
 change; only the slider's initial is wrong.
+
+### §1.6 `ScreenState.floor` needs a model fix, not a write-back
+
+`syncFloor` (`screen-map.ts:106-127`) computes the floor's live **bounds** for a (bundle, metric)
+pair, resolves a value, writes all four slider attributes, and returns the value. `boot` calls it
+*before* `makeState`, so a URL-supplied `floor` never reaches the slider — that is the desync above.
+But re-applying the value afterwards is not sufficient, because **the floor's default is a function
+of the metric**:
+
+| URL | today's `initial` | what a write-back would do |
+| --- | --- | --- |
+| — | `depth_density_proxy`'s 0.0128 | correct |
+| `?floor=X` | 0.0128, overridden to X | correct |
+| `?metric=density` | 0.0128, metric now `density` | **0.0128 clamped into `density`'s range** |
+| `?metric=density&floor=X` | X | correct |
+
+The four metrics have unrelated score scales, so row 3 clamps to `density`'s minimum and selects all
+16,451 blocks — a silently wrong picture from a URL that asked for nothing unusual. Resolving it by
+asking "did the URL set `floor`?" would put a `fromUrl(key)` member on `StateSource<T>` for one
+widget's benefit.
+
+**The fix is the honest model: `floor: number | null`, where `null` means "this metric's own
+default".** That is already exactly what `syncFloor`'s `preferred` parameter means, so all four rows
+come out right with no new interface member, and an untouched floor emits no URL key at all.
+
+Two consequences, both improvements:
+
+* The metric `<select>` handler sets `floor: null` instead of a computed number, so switching metric
+  resets to the new metric's calibration **and drops `?floor=` from the URL**.
+* The city toggle must **resolve** the floor at the moment of the switch (`state.set({ city, floor:
+  resolved })`), preserving the deliberate behaviour `syncFloor`'s docstring argues for — an
+  absolute floor carries across corpora rather than being redefined. Pinning the number there is
+  also honest: the reader chose to carry it, so the URL should say so.
+
+`render` resolves `st.floor ?? defaultFloorFor(bundle, st.metric)`, where `defaultFloorFor` is the
+`shipped ?? floorAtShippedPoolSize` half factored out of `syncFloor` so both resolve identically.
 
 ---
 
@@ -264,7 +303,7 @@ narrowed factory, so `web/test/*-boot.test.ts` need no edits.
 | --- | --- | --- | --- |
 | `ScreenMap` | `city` | `city` | `capetown` \| `nairobi` |
 | | `metric` | `metric` | one of the four `MetricName`s |
-| | `floor` | `floor` | number, 6 significant figures |
+| | `floor` | `floor` | number, 6 significant figures; **absent ⇒ the metric's own default** (§1.6) |
 | `RegionGrow` | `seed` | `seed` | **block_id** (see below) |
 | | `budget` | `budget` | integer |
 | `PermGraph` | `prefix` | `prefix` | non-negative integer |
@@ -420,6 +459,9 @@ and takes no URL key.
 7. Three boot-time resets for bundle-dependent URL values (§2.3): `region-grow.ts` (unknown
    `seed` ⇒ the bundle's own), `frontier.ts` (unknown `isolated` ⇒ `null`), `perm-graph.ts`
    (`prefix` past the last ⇒ clamped).
+8. `web/src/widgets/screen-map.ts` — `ScreenState.floor` becomes `number | null`, `defaultFloorFor`
+   is factored out of `syncFloor`, the metric handler sets `null`, the city handler resolves, and
+   `render` resolves (§1.6). This is the one non-mechanical widget change in the piece.
 
 ---
 
@@ -442,6 +484,10 @@ Node's built-in runner, `web/test/`, through the existing `web/test/harness.ts`.
 * **`ScreenMap` specifically** — the widget D3's path guard was structurally blind to: assert
   `docs/explore.md` carries `data-bundle-capetown` and `data-bundle-nairobi` rewritten for
   `url_depth=1`, in `tests/test_gen_site_pages.py`.
+* **`ScreenMap`'s floor default** (§1.6), the row a write-back would have got wrong:
+  `?metric=density` alone ⇒ `density`'s **own** calibrated floor, not 0.0128 clamped, and the pool
+  is not all 16,451 blocks. Plus `?metric=density&floor=X` ⇒ X, and a metric switch after a manual
+  floor drag ⇒ `?floor=` gone from the emitted query.
 * **Bundle-dependent resets** (§2.3), one per widget: `?seed=NOPE` ⇒ the hood's own seed and the
   key gone; `?method=nope` ⇒ every curve still drawn, not an empty chart; `?prefix=99999` ⇒ clamped
   to the last prefix. Each asserts the *emitted query*, not only the state.
