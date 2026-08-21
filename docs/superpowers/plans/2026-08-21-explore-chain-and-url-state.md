@@ -35,6 +35,11 @@ Python 3 stdlib + geopandas/matplotlib for the bakers, MkDocs Material.
   RED, restore. An injection that will not redden is **reported**, not tuned.
 - Web tests run with `cd web && npm test` (which builds the esbuild bundle first). Type-check with
   `cd web && npm run check`. Python tests run with `pixi run test`; lint with `pixi run lint`.
+- This machine runs **Node v24.12.0**, whose default `node --test` reporter is `spec`, not TAP:
+  the summary lines read `ℹ pass 139` / `ℹ fail 0`, **not** `# pass 139`. Every grep in this plan
+  is written as `grep -E "(pass|fail) [0-9]+"`, which matches either. Verify any pattern you
+  substitute against a GREEN baseline first, so a grep that matches nothing is not mistaken for a
+  suite that passed.
 
 ---
 
@@ -439,7 +444,7 @@ Expected: type-check clean; all `url-param` tests PASS.
 
 - [ ] **Step 5: Fault injection**
 
-For each, make the edit, run `cd web && npm test 2>&1 | grep -E "^# (pass|fail)"`, confirm a
+For each, make the edit, run `cd web && npm test 2>&1 | grep -E "(pass|fail) [0-9]+"`, confirm a
 non-zero fail count, then **restore**:
 1. In `finite`, delete the `raw.trim() === ""` line ⇒ `intParam`'s `""` case must redden.
 2. In `enumParam.decode`, swap `values.includes(raw as V)` for `raw in values` ⇒ the `toString` case
@@ -1233,7 +1238,7 @@ alongside the one a file already installs.
 
 - [ ] **Step 2: Run them to make sure they fail**
 
-Run: `cd web && npm test 2>&1 | grep -E "^# (pass|fail)"`
+Run: `cd web && npm test 2>&1 | grep -E "(pass|fail) [0-9]+"`
 Expected: 7 failures — three region-grow, one field, one perm-graph, two frontier.
 
 - [ ] **Step 3: `region-grow.ts` — `seed` becomes a block_id**
@@ -1327,7 +1332,7 @@ if (isolated !== null && !Object.hasOwn(b.methods, isolated)) state.set({ isolat
 
 - [ ] **Step 7: Run the tests and the type-check**
 
-Run: `cd web && npm run check && npm test 2>&1 | grep -E "^# (pass|fail)"`
+Run: `cd web && npm run check && npm test 2>&1 | grep -E "(pass|fail) [0-9]+"`
 Expected: type-check clean, `# fail 0`.
 
 - [ ] **Step 8: Fault injection**
@@ -1417,7 +1422,7 @@ test("an out-of-range ?floor= is clamped AND stops being emitted at that value",
 
 - [ ] **Step 2: Run them to make sure they fail**
 
-Run: `cd web && npm test 2>&1 | grep -E "^# (pass|fail)"`
+Run: `cd web && npm test 2>&1 | grep -E "(pass|fail) [0-9]+"`
 Expected: 5 failures in `screen-map-boot`.
 
 - [ ] **Step 3: Change the interface and the codec**
@@ -1520,7 +1525,7 @@ const sel = selectAt(bundle, order, s, floor);
 
 - [ ] **Step 6: Run the tests and the type-check**
 
-Run: `cd web && npm run check && npm test 2>&1 | grep -E "^# (pass|fail)"`
+Run: `cd web && npm run check && npm test 2>&1 | grep -E "(pass|fail) [0-9]+"`
 Expected: type-check clean, `# fail 0`.
 
 - [ ] **Step 7: Fault injection**
@@ -1791,7 +1796,7 @@ test("the ring survives a floor change, which never repaints the base layer", as
 
 - [ ] **Step 2: Run it to make sure it fails**
 
-Run: `cd web && npm test 2>&1 | grep -E "^# (pass|fail)"`
+Run: `cd web && npm test 2>&1 | grep -E "(pass|fail) [0-9]+"`
 Expected: 2 failures (the third passes vacuously until the ring exists — note that in the report).
 
 - [ ] **Step 3: Draw it in `render/city.ts`**
@@ -1830,7 +1835,7 @@ ring is there. Read the block id from `bundle.follow.block_id`, never typed.
 
 - [ ] **Step 5: Run the tests and the type-check**
 
-Run: `cd web && npm run check && npm test 2>&1 | grep -E "^# (pass|fail)"`
+Run: `cd web && npm run check && npm test 2>&1 | grep -E "(pass|fail) [0-9]+"`
 Expected: type-check clean, `# fail 0`.
 
 - [ ] **Step 6: Fault injection**
