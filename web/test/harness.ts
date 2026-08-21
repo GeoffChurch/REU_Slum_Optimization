@@ -261,14 +261,18 @@ export class FakeResizeObserver {
  * instead of each keeping its own `const DPR = 2` tied to `installStubs()` only by a comment. */
 export const DPR = 2;
 
-/** `window.requestAnimationFrame` stub: QUEUES `cb` (a real browser's rAF queues every call, it
- * does not collapse repeated calls into one -- coalescing is a property a WIDGET implements on top
- * of rAF, by guarding its own call to `requestAnimationFrame` behind an "already scheduled" flag,
- * not a property rAF gives away for free) and returns an id `cancelAnimationFrame` can remove by.
- * Nothing here fires on its own, the way a real one fires on the next display refresh -- there is
- * no display -- so a test drives it explicitly with `fireAnimationFrame`, the same shape as
- * `fireResize` playing layout for `ResizeObserver`. */
-let pendingFrames: [id: number, cb: FrameRequestCallback][] = [];
+/** `requestAnimationFrame` stub: QUEUES `cb` (a real browser's rAF queues every call, it does not
+ * collapse repeated calls into one -- coalescing is a property a WIDGET implements on top of rAF,
+ * by guarding its own call to `requestAnimationFrame` behind an "already scheduled" flag, not a
+ * property rAF gives away for free) and returns a monotonic id, matching the real function's own
+ * return contract. Nothing here fires on its own, the way a real one fires on the next display
+ * refresh -- there is no display -- so a test drives it explicitly with `fireAnimationFrame`, the
+ * same shape as `fireResize` playing layout for `ResizeObserver`.
+ *
+ * No `cancelAnimationFrame`: nothing in this codebase, widget or test, calls it, and a stub with no
+ * caller is exactly the surface-area-nothing-exercises `fill`'s own comment above argues against.
+ * Add it back the day something actually needs to cancel a queued frame. */
+let pendingFrames: FrameRequestCallback[] = [];
 let nextFrameId = 0;
 
 /** Flushes every callback currently queued, in the order they were requested -- a widget that
@@ -278,16 +282,25 @@ let nextFrameId = 0;
 export function fireAnimationFrame(time = 0): void {
   const frames = pendingFrames;
   pendingFrames = [];
-  for (const [, cb] of frames) cb(time);
+  for (const cb of frames) cb(time);
 }
 
 /** Installs the fake globals every canvas widget boot test needs -- `document.createElement`,
- * `window.devicePixelRatio`/`requestAnimationFrame`/`cancelAnimationFrame` and `ResizeObserver` --
- * in place of the three top-level assignments field-boot.test.ts and perm-graph-boot.test.ts each
- * repeated. One call, before anything that might construct a widget; see this module's own
- * docstring for why the exact position relative to a consumer's own static imports does not
- * matter. Also resets the rAF queue, so a test file that (unusually) leaves a frame unflushed
- * cannot leak it into a later file sharing this module in the same process. */
+ * `window.devicePixelRatio`, `ResizeObserver` and `requestAnimationFrame` -- in place of the three
+ * top-level assignments field-boot.test.ts and perm-graph-boot.test.ts each repeated. One call,
+ * before anything that might construct a widget; see this module's own docstring for why the
+ * exact position relative to a consumer's own static imports does not matter.
+ *
+ * `requestAnimationFrame` is installed on `globalThis`, NOT as a property of the fake `window`
+ * object just below -- exactly where a real browser puts it too (`requestAnimationFrame` is a
+ * bare global, callable unqualified; `window.requestAnimationFrame` merely happens to resolve to
+ * the same function there because `window` IS the global object). Code that wrote
+ * `window.requestAnimationFrame` against THIS fake would find nothing on the fake `window` and
+ * fail loudly -- correct, since nothing in this codebase writes that qualified form, and this stub
+ * should not silently paper over it if something someday does.
+ *
+ * Also resets the rAF queue, so a test file that (unusually) leaves a frame unflushed cannot leak
+ * it into a later file sharing this module in the same process. */
 export function installStubs(): void {
   (globalThis as Record<string, unknown>).document = {
     createElement: (tag: string): FakeElement => new FakeElement(tag),
@@ -295,12 +308,8 @@ export function installStubs(): void {
   (globalThis as Record<string, unknown>).window = { devicePixelRatio: DPR };
   (globalThis as Record<string, unknown>).ResizeObserver = FakeResizeObserver;
   (globalThis as Record<string, unknown>).requestAnimationFrame = (cb: FrameRequestCallback): number => {
-    const id = ++nextFrameId;
-    pendingFrames.push([id, cb]);
-    return id;
-  };
-  (globalThis as Record<string, unknown>).cancelAnimationFrame = (id: number): void => {
-    pendingFrames = pendingFrames.filter(([pid]) => pid !== id);
+    pendingFrames.push(cb);
+    return ++nextFrameId;
   };
   pendingFrames = [];
 }

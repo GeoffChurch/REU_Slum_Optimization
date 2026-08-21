@@ -1,6 +1,18 @@
 /** The ScreenMap canvas: 16,451 Cape Town blocks (3,500 Nairobi), a pale base layer painted once
- * onto an offscreen canvas and blitted back every frame, with a red selected-prefix layer filled
- * directly on top.
+ * onto an offscreen canvas and blitted back every frame, with the selected prefix OUTLINED on top
+ * of it -- never filled over it.
+ *
+ * **Why the selected prefix is a stroke, not a fill.** An opaque `selected_color` fill over the
+ * base layer erases whatever `paintBase` painted underneath, including `e.informal_color`. That
+ * is not merely a colour swap: `gen_screen_map.py`'s `_render_screen_map` draws Cape Town's real
+ * informal blocks filled gold (zorder 2) and the current selection OUTLINED red on top of that
+ * (zorder 3, `facecolor="none"`), so a hit reads as "gold with a red ring", a false positive as
+ * "red ring, no gold", and a miss as "gold, no ring" -- the legend `_render_screen_map`'s own
+ * docstring states. A fill collapses the first two into indistinguishable solid red, silently
+ * turning "gold" from "ground truth" into "what the screen missed", which shrinks toward zero as
+ * the reader lowers the floor -- the opposite of what the widget is showing. Stroking at
+ * `e.block_lw * 2` (matching the PNG's own selected linewidth) restores the legend exactly, at
+ * the same O(k) cost a fill would have been.
  *
  * **Why a real blit, not a "paint minus undo" delta.** An earlier version of this module painted
  * the base layer once onto the VISIBLE canvas and, on every later frame, tried to restore just the
@@ -23,7 +35,7 @@
  * free. At city scale it is not: `paintBase` below is the ONE O(n_blocks) pass this module ever
  * makes for a given (bundle, view) pair, run once into the offscreen canvas. Every later frame --
  * a floor drag, a metric switch -- goes through `paintFrame` alone: one `clearRect`, one
- * `drawImage` (the whole base layer, correctly restored, in one call), and O(k) fills for the
+ * `drawImage` (the whole base layer, correctly restored, in one call), and O(k) strokes for the
  * current selected prefix -- never another O(n_blocks) pass. That is what keeps a floor-slider
  * drag cheap at 1,655 selected blocks rather than 16,451; `web/test/screen-map-boot.test.ts`'s
  * base-layer test makes the claim checkable by following a frame's own `drawImage` call to the
@@ -58,9 +70,10 @@ function tracePath(ctx: CanvasRenderingContext2D, rings: ScreenRings): void {
   }
 }
 
-/** One beginPath()/fill() PER block, matching `region.ts`'s own reasoning: the boot test counts
- * selected blocks by counting `fill()` calls in `selected_color`, and a single batched path across
- * many blocks would collapse that count to one regardless of how many blocks it covers. */
+/** One beginPath()/fill() PER block, matching `region.ts`'s own reasoning: a test that counts
+ * layer membership by counting `fill()` calls in a given colour needs one call per block, not one
+ * batched path across many. Used only for the offscreen base layer now -- the selected prefix is
+ * `strokeBlock`, below. */
 function fillBlock(ctx: CanvasRenderingContext2D, rings: ScreenRings, style: string): void {
   ctx.fillStyle = style;
   tracePath(ctx, rings);
@@ -87,8 +100,10 @@ export interface CityLayer {
            size: { width: number; height: number }): void;
   /** Every frame: clear `ctx`, blit the offscreen base layer onto it (a single `drawImage`, in
    * device-pixel space so a DPR-scaled backing store is copied 1:1 rather than re-scaled), then
-   * fill `order[0..k)` in `e.selected_color` directly on `ctx`, in the CSS-pixel space every other
-   * draw call in this codebase uses. */
+   * OUTLINE `order[0..k)` in `e.selected_color` at `e.block_lw * 2` directly on `ctx`, in the
+   * CSS-pixel space every other draw call in this codebase uses -- never filled, so whatever
+   * `paintBase` painted underneath (in particular `e.informal_color`) stays visible through the
+   * ring. */
   paintFrame(ctx: CanvasRenderingContext2D, bundle: CityBundle, view: View, e: CityEncoding,
             order: Int32Array, k: number, size: { width: number; height: number }): void;
 }
@@ -100,8 +115,21 @@ export interface CityLayer {
 export function createLayer(): CityLayer {
   const base = document.createElement("canvas");
   const baseCtx = base.getContext("2d")!;
+  // The DPR `base`'s backing store was actually sized for -- read exactly once, inside `paintBase`
+  // (the same moment `sizeCanvas` reads `window.devicePixelRatio` to size `base` itself, so the
+  // two can never disagree even though they are technically two reads of the same global: nothing
+  // can mutate it between two synchronous statements in the same call). `paintFrame` reuses THIS
+  // value for its own transform reset/restore around the blit rather than re-deriving it
+  // independently on every frame -- a floor-only change never re-runs `paintBase`, so an
+  // independent re-read there could disagree with what `base` is actually sized for if the
+  // display's DPR changed with no resize in between (ResizeObserver fires on a CSS box-size
+  // change, not a DPR-only one -- ScreenMap does not special-case that, matching every other
+  // widget in this codebase). Reusing the stored value keeps the selected-prefix overlay at the
+  // SAME scale as the just-blitted base layer regardless, rather than silently drifting.
+  let dpr = 1;
   return {
     paintBase(bundle, view, e, size) {
+      dpr = window.devicePixelRatio || 1;
       sizeCanvas(base, size); // matches the DESTINATION's own backing-store size exactly, so
                               // `paintFrame`'s blit is a 1:1 device-pixel copy, never a rescale
       baseCtx.clearRect(0, 0, size.width, size.height);
@@ -116,16 +144,17 @@ export function createLayer(): CityLayer {
     paintFrame(ctx, bundle, view, e, order, k, size) {
       ctx.clearRect(0, 0, size.width, size.height);
       // The blit happens in DEVICE-PIXEL space: `base` and `ctx`'s own canvas were sized to the
-      // same backing-store dimensions by the same `sizeCanvas` call (above, and in screen-map.ts's
-      // resize handler), so copying them 1:1 needs the identity transform, not the CSS-pixel-space
-      // one `sizeCanvas` leaves active -- drawing `base` under THAT transform would scale its
-      // already-DPR-sized pixels up by another factor of `dpr`, blurring the whole picture.
-      const dpr = window.devicePixelRatio || 1;
+      // same backing-store dimensions (this module's own `dpr`, above), so copying them 1:1 needs
+      // the identity transform, not the CSS-pixel-space one `sizeCanvas` leaves active -- drawing
+      // `base` under THAT transform would scale its already-DPR-sized pixels up by another factor
+      // of `dpr`, blitting only the top-left 1/dpr² of the base layer at the wrong scale.
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(base, 0, 0);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // back to CSS-pixel space for the fills below
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // back to CSS-pixel space for the stroke below
       const screen = screenRingsOf(bundle, view);
-      for (let i = 0; i < k; i++) fillBlock(ctx, screen[order[i]!]!, e.selected_color);
+      for (let i = 0; i < k; i++) {
+        strokeBlock(ctx, screen[order[i]!]!, e.selected_color, e.block_lw * 2);
+      }
     },
   };
 }
