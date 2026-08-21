@@ -1861,45 +1861,73 @@ git commit -m "feat(web): ring the followed block on the city map's frame layer"
 
 - [ ] **Step 1: Write the failing test**
 
-In `tests/test_gen_site_pages.py`, using the file's existing rendered-partial fixture shape:
+`tests/test_gen_site_pages.py` already has both helpers this needs — use them, do not add parallels:
+
+* `render_page(name)` renders a partial AND applies `_write_page`'s depth/url_depth rewrite, reading
+  those two numbers off `main()`'s own call **so a hardcoded copy cannot drift**. Its regex is
+  currently anchored to `_write_page(methodology_dir / "<name>.md", …)`, and Explore is written to
+  `DOCS / "explore.md"`. **Generalise the regex to accept either receiver** — keep the
+  read-it-off-`main()` property, which is the whole point of the helper:
+
+  ```python
+      m = re.search(rf'_write_page\((?:DOCS|methodology_dir|results_dir) / "{name}\.md",\s*'
+                    rf'_render_partial\("{name}"\),\s*depth=(\d+), url_depth=(\d+)', src)
+  ```
+
+* a `<name>_body` fixture (see `screening_body`) returns `_render_partial(name)` with `DOCS`/`ASSETS`
+  monkeypatched into `tmp_path`, because `_render_partial` runs **every** producer in `MARKERS` and
+  producers copy assets. Add `explore_body` in exactly that shape.
+
+Then add:
 
 ```python
 def test_explore_carries_all_five_mount_points(explore_body: str) -> None:
-    """The page the whole piece exists for. One mount point per stage, in pipeline order."""
+    """The page the whole piece exists for: one mount point per stage, in pipeline order, each
+    substituted from a marker rather than typed."""
     order = ["screen-map", "region-grow", "perm-graph", "displacement-field", "frontier"]
-    found = re.findall(r'data-widget="([a-z-]+)"', explore_body)
-    assert found == order
+    assert re.findall(r'data-widget="([a-z-]+)"', explore_body) == order
 
 
-def test_explore_rewrites_screenmaps_two_bundle_attributes(explore_page: str) -> None:
-    """ScreenMap is the asymmetric widget: two bundle attributes where every other has one, and
-    D3's own path guard was a regex over `data-bundle="..."` that was structurally blind to both.
-    explore.md serves at <base>/explore/ -- url_depth 1 -- so both must carry exactly one `../`."""
+def test_explore_rewrites_the_screen_maps_two_bundle_urls() -> None:
+    """explore.md serves at <base>/explore/ -- url_depth 1 -- so each bundle path needs exactly one
+    `../`. ScreenMap carries TWO bundle attributes where every other widget carries one, and the
+    general `data-bundle="([^"]+)"` regex matches NEITHER of them (that literal substring never
+    occurs inside `data-bundle-capetown="`). This is the same trap the Screening page's own twin of
+    this test guards, on the page that now carries the most mount points on the site."""
+    page = render_page("explore")
+    assert 'data-bundle-capetown="../assets/screen-map/capetown.json"' in page
+    assert 'data-bundle-nairobi="../assets/screen-map/nairobi.json"' in page
     for attr in ("data-bundle-capetown", "data-bundle-nairobi"):
-        assert f'{attr}="../assets/' in explore_page, attr
         # INSIDE the loop. Hoisted out, this runs once against whichever `attr` the loop left
         # behind -- checking one of the two, which is the exact half-blind shape D3's own guard
         # had and the reason this test exists.
-        assert f'{attr}="assets/' not in explore_page, attr
+        assert f'{attr}="assets/' not in page, attr
+    for url in re.findall(r'data-bundle="([^"]+)"', page):
+        assert url.startswith("../assets/"), url
 
 
 def test_explore_is_generated_and_gitignored() -> None:
-    """A generated page that is committed drifts from its artifacts the moment anything re-bakes."""
-    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert "docs/explore.md" in [line.strip() for line in ignored]
+    """A generated page that is committed drifts from its artifacts the moment anything re-bakes --
+    the reason docs/index.md and docs/reproduce.md are ignored too."""
+    ignored = [line.strip() for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
+    assert "docs/explore.md" in ignored
 
 
 def test_the_widget_bundle_guard_can_see_the_explore_page() -> None:
-    """_assert_widget_bundle_present scans a HAND-WRITTEN page list. Explore carries the most mount
-    points of any page on the site; leaving it out would make the guard blind exactly where a
-    missing docs/js/widgets.js does the most damage."""
+    """`_assert_widget_bundle_present` scans a HAND-WRITTEN page list. Explore carries the most
+    mount points of any page on the site; leaving it out would make the guard blind exactly where a
+    missing docs/js/widgets.js does the most damage -- five dead widgets behind five intact PNGs."""
     src = (ROOT / "scripts" / "gen_site_pages.py").read_text(encoding="utf-8")
     block = re.search(r"generated_pages = \(([^)]*)\)", src, flags=re.S)
-    assert block and '"explore.md"' in block.group(1)
+    assert block is not None, "main()'s generated_pages assignment moved; update this derivation"
+    assert '"explore.md"' in block.group(1)
 
 
 def test_explore_is_in_the_nav() -> None:
-    assert re.search(r"^\s+- Explore: explore\.md$", (ROOT / "mkdocs.yml").read_text(), flags=re.M)
+    """An orphan page -- one outside nav -- logs at INFO under `mkdocs build --strict` and the
+    build still exits 0, so nothing else here would catch its absence."""
+    assert re.search(r"^\s+- Explore: explore\.md$",
+                     (ROOT / "mkdocs.yml").read_text(encoding="utf-8"), flags=re.M)
 ```
 
 - [ ] **Step 2: Run it to make sure it fails**
