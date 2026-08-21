@@ -1748,20 +1748,38 @@ These use `screen-map-boot.test.ts`'s own `mountWithSearch` from Task 5 (`mountW
 mounts Cape Town; `mountWithSearch("city=nairobi")` mounts Nairobi), plus that file's existing
 `viewOf` bbox helper — add one if the file computes the view inline.
 
+**`arc` is a `PathOp`, not a `Call`** — verified in `harness.ts`: `RecordingContext` records only
+`clearRect`/`stroke`/`fill`/`drawImage` as `Call`s, and path construction (`moveTo`/`lineTo`/`arc`/
+`closePath`) accumulates into that call's `path`. So the ring is a **`stroke` whose path is exactly
+one `arc`**, which is a sharper assertion than a bare op count: it distinguishes the ring from the
+`e.block_lw * 2` block outlines that share the frame. Do NOT widen the harness to make this easier.
+
 ```ts
+/** The follow ring: the one stroke whose whole path is a single arc. Every other stroke on this
+ * frame is a block outline -- a polyline of moveTo/lineTo/closePath -- so this shape test names the
+ * ring by what it IS, rather than by counting ops and hoping. */
+function followRings(cv: FakeElement): Call[] {
+  return lastFrame(cv).filter(
+    (c) => c.op === "stroke" && c.path.length === 1 && c.path[0]!.op === "arc");
+}
+
 test("the followed block is ringed, at a fixed screen radius, on the frame layer", async () => {
   const { cv, bundle } = await mountWithSearch("");
-  const arcs = lastFrame(cv).filter((c) => c.op === "arc");
-  assert.equal(arcs.length, 1, "exactly one ring, on the frame -- not one per block");
-  const [x, y, r] = arcs[0]!.args;
+  const rings = followRings(cv);
+  assert.equal(rings.length, 1, "exactly one ring, on the frame -- not one per block");
+  const [x, y, r] = rings[0]!.path[0]!.args;
   const expected = toScreen(viewOf(bundle), bundle.follow!.x, bundle.follow!.y);
   assert.ok(Math.abs(x - expected[0]) < 0.5 && Math.abs(y - expected[1]) < 0.5);
   assert.equal(r, FOLLOW_RADIUS_PX, "a WORLD radius would shrink to nothing at city zoom");
+  // Recorded AT the call, which is the whole point of the style snapshot: "the widget assigned
+  // follow_color at some moment" says nothing about what was stroked with it.
+  assert.equal(rings[0]!.strokeStyle, bundle.encoding.follow_color);
+  assert.equal(rings[0]!.lineWidth, 2);
 });
 
 test("a bundle with no follow draws no ring", async () => {
   const { cv } = await mountWithSearch("city=nairobi");
-  assert.equal(lastFrame(cv).filter((c) => c.op === "arc").length, 0);
+  assert.equal(followRings(cv).length, 0);
 });
 
 test("the ring survives a floor change, which never repaints the base layer", async () => {
@@ -1769,13 +1787,9 @@ test("the ring survives a floor change, which never repaints the base layer", as
   floorSlider.value = "0.02";
   floorSlider.fire("input");
   fireAnimationFrame();
-  assert.equal(lastFrame(cv).filter((c) => c.op === "arc").length, 1);
+  assert.equal(followRings(cv).length, 1);
 });
 ```
-
-`RecordingContext` already records `arc` as a `PathOp`; check `harness.ts`'s `PathOp` union and, if
-`arc` is recorded only inside a path op list rather than as a `Call`, assert against the path ops
-instead — do **not** widen the harness to make the assertion easier.
 
 - [ ] **Step 2: Run it to make sure it fails**
 
