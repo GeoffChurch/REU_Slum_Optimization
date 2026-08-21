@@ -54,6 +54,13 @@ export function armDrawFailure(message: string | null): void {
 }
 
 export class RecordingContext {
+  /** Only the three PAINT operations land here -- `clearRect`, `stroke`, `fill` -- not the
+   * path-construction calls (`beginPath`/`moveTo`/`lineTo`/`arc`/`closePath`) that build up what
+   * they paint; those only mutate `path` below. So `deepEqual(calls, [])` proves no paint happened,
+   * not that nothing was called at all -- a hypothetical widget that built a path and never painted
+   * it would pass that check too. Not reachable through `draw()` (render/canvas.ts), which always
+   * opens with `clearRect` before it builds anything, but it is a real gap in what an empty `calls`
+   * array can prove, not a closed one. */
   readonly calls: Call[] = [];
   failWith: string | null = NEXT_DRAW_FAILURE;
   fillStyle = "";
@@ -223,6 +230,12 @@ export class FakeResizeObserver {
   fire(width: number, height: number): void { this.cb([{ contentRect: { width, height } }]); }
 }
 
+/** `render/canvas.ts` reads `devicePixelRatio` off `window`, and 2 rather than 1 is what makes the
+ * backing-store assertions able to fail: at 1 the scaled size and the CSS size coincide. Exported so
+ * each consumer's own backing-store assertions (`cv.width`, `cv.height`, ...) read it from one place
+ * instead of each keeping its own `const DPR = 2` tied to `installStubs()` only by a comment. */
+export const DPR = 2;
+
 /** Installs the fake globals every canvas widget boot test needs -- `document.createElement`,
  * `window.devicePixelRatio` and `ResizeObserver` -- in place of the three top-level assignments
  * field-boot.test.ts and perm-graph-boot.test.ts each repeated. One call, before anything that might
@@ -232,10 +245,7 @@ export function installStubs(): void {
   (globalThis as Record<string, unknown>).document = {
     createElement: (tag: string): FakeElement => new FakeElement(tag),
   };
-  // `render/canvas.ts` reads `devicePixelRatio` off it, and 2 rather than 1 is what makes the
-  // backing-store assertions able to fail: at 1 the scaled size and the CSS size coincide. Each
-  // consumer keeps its own local `DPR` constant for its own assertions; it must match this 2.
-  (globalThis as Record<string, unknown>).window = { devicePixelRatio: 2 };
+  (globalThis as Record<string, unknown>).window = { devicePixelRatio: DPR };
   (globalThis as Record<string, unknown>).ResizeObserver = FakeResizeObserver;
 }
 
@@ -261,9 +271,17 @@ export function mountPoint(): FakeElement {
   return figure;
 }
 
+/** DIRECT CHILDREN only -- never `host.find("canvas")`, a descendant search. Both widgets currently
+ * insert the canvas straight into the mount point, so a descendant search would find it either way,
+ * which is exactly the trap: it would keep finding it if a widget's insertion code ever changed to
+ * wrap the canvas in another element, silently losing this test's ability to fail on exactly that
+ * change. perm-graph-boot.test.ts's pre-extraction `canvasOf` already searched `host.children` only;
+ * field-boot's searched descendants. Verified by counterfactual (see the task report): wrapping the
+ * canvas in a `<div>` before `host.insertBefore` in either widget's source reddens the relevant boot
+ * tests against this direct-children search, and reddens none against a descendant search. */
 export function canvasOf(host: FakeElement): FakeElement {
-  const cv = host.find("canvas");
-  assert.ok(cv !== null, "no canvas was inserted into the figure");
+  const cv = host.children.find((c) => c.tagName === "CANVAS");
+  assert.ok(cv !== undefined, "no canvas was inserted into the figure");
   return cv;
 }
 

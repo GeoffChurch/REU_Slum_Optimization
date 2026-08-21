@@ -8,7 +8,7 @@ import { localState } from "../src/state.js";
 import { fitBbox, toScreen, toWorld, type Bbox } from "../src/view/transform.js";
 import { displacementField } from "../src/widgets/displacement-field.js";
 import {
-  armDrawFailure, canvasOf, Call, FakeElement, fireResize, installStubs, lastFrame,
+  armDrawFailure, canvasOf, Call, DPR, FakeElement, fireResize, installStubs, lastFrame,
   mountPoint as mountPointBase,
 } from "./harness.js";
 
@@ -28,9 +28,6 @@ import {
  * do -- so static imports above and stubs installed below are in the right order.
  */
 installStubs();
-// DPR must match what `installStubs()` puts on `window.devicePixelRatio` -- kept local because it
-// is used directly in this file's own backing-store assertions below.
-const DPR = 2;
 
 const BUNDLE_PATH = "../examples/displacement-field/field.json";
 const bundle = JSON.parse(readFileSync(BUNDLE_PATH, "utf8")) as FieldBundle;

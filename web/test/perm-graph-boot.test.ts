@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { Bundle } from "../src/bundle.js";
 import {
-  armDrawFailure, canvasOf, FakeElement, fireResize, installStubs,
+  armDrawFailure, canvasOf, DPR, FakeElement, fireResize, installStubs,
   mountPoint as mountPointBase,
 } from "./harness.js";
 
@@ -24,7 +24,6 @@ const { permGraph } = await import("../src/widgets/perm-graph.js");
 
 const BUNDLE_PATH = "../examples/perm-graph/bundle.json";
 const bundle = JSON.parse(readFileSync(BUNDLE_PATH, "utf8")) as Bundle;
-const DPR = 2;
 
 /** perm-graph-boot's own additions to the shared mount point: the bundle URL, the layer, and the
  * boot prefix `scripts/gen_site_pages.py` emits as `data-*` attributes. The DOM shape itself
