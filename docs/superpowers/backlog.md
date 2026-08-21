@@ -283,6 +283,15 @@ none blocks on a later one.
     `ResizeObserver` timing, or to the harness's own model of it, should re-derive whether
     `runOrReport` is still provably load-bearing rather than assuming today's green suite still
     covers it.
+  - **Three smaller things the whole-branch review noted and nobody has acted on.** (a)
+    `region_block`'s `building_points` is **not** member-order canonical, while `parcels`,
+    `block_id` and `source_content_hash` all are — newly reachable now that builders return
+    accretion order, though no consumer of its row order was found (`derive/` keys on `parcel_id`,
+    `mesh.py` resolves by containment, `budget.py` aggregates). Latent inconsistency, not a live bug.
+    (b) `MIN_COUNT = 30` is written in three places, and `gen_region_grow.py` and
+    `gen_screen_map.py` reach the same corpus by two different routes (`block_geometries()` versus
+    a raw `read_parquet`). (c) `scripts/_bundle_io.py`'s module docstring still says "all three
+    bakers"; there are five.
   - **`scripts/pair_matrix.py:485` divides 0/0 into a silent NaN, surfaced as a `RuntimeWarning`
     by the full test suite.** `within_recipient_regression`'s `beta = float(np.sum(dx * dy) / sxx)`
     (`sxx = float(np.sum(dx * dx))`, both from `_demean_by_group`) is unguarded against `sxx == 0`
@@ -486,6 +495,39 @@ none blocks on a later one.
   to belong in `~/wiki`, not here.
 - **E — the Explore chain.** Shared store + URL-as-state, so a reviewer can cite a specific view.
   Thin once D lands.
+
+  **What E needs to know now that D has landed, because none of it is obvious from the entry above:**
+
+  - **The seam is already built and deliberately generic.** `web/src/state.ts` exports
+    `StateFactory = <T>(initial: T) => StateSource<T>`; every widget takes `makeState` as its second
+    argument and never learns which factory it got. That file's own docstring names piece E as the
+    reason. So E supplies a URL-synced factory and touches no widget — **if** the points below hold.
+  - **Each of the five widgets has its OWN state shape** (`PermGraphState`, `ScreenState`, the
+    frontier's target, RegionGrow's budget+seed, DisplacementField's roads+width). There is no
+    common field. URL-as-state therefore needs a per-shape serialisation or a declared convention;
+    a single flat query-string schema will not fall out of the existing types.
+  - **`ScreenMap` is the asymmetric one: it reads TWO bundle attributes**,
+    `data-bundle-capetown` and `data-bundle-nairobi`, where every other widget reads a single
+    `data-bundle`. D3's own path-rewriting guard was a regex over `data-bundle="…"` and was
+    structurally blind to both of them — the widget most likely to trip the bug was the one the
+    guard could not see. Any E-side machinery that enumerates mount points or their attributes must
+    handle the two-attribute case explicitly, and be tested against `screen-map` specifically.
+  - **THE TRAP: do not enable Material's `navigation.instant`.** URL-as-state is exactly the feature
+    that makes it tempting, and two documented mechanisms fail the moment it is on. (1) `mount.ts`
+    mounts from `DOMContentLoaded`, which fires once per full load; with instant navigation, page
+    swaps are fetch+DOM-replacement and `mountAll()` never runs again — every widget after the first
+    page is silently dead behind an intact-looking PNG. (2) `dom/resize.ts`'s `observeSize` returns
+    a disposer that **has no caller today**, and its docstring says why: widgets live exactly as long
+    as their page only because instant navigation is off. Turn it on and every navigation leaks one
+    `ResizeObserver` per widget, firing against detached elements. Both files carry the full
+    reasoning; read them before touching `mkdocs.yml`.
+  - **`StateSource.subscribe` has no unsubscribe**, and that is safe for the same single reason —
+    page-lifetime widgets. A URL-synced store that outlives a widget would need one.
+  - **Test infrastructure exists.** `web/test/harness.ts` (fake DOM + recording canvas +
+    `installStubs`/`fireResize`/`mountPoint`/`canvasOf`/`lastFrame`/`armDrawFailure`/`DPR`) is shared
+    by every canvas boot test. E's store gets tested through it, not through a new fake.
+    `FakeResizeObserver.observe()` is a no-op; tests drive the first observation with an explicit
+    `fireResize()` after `mount()`'s await resolves.
 - **F — draw-your-own-road.** Pinned Pyodide (`indexURL` with an explicit version — `geopandas`,
   `pyproj` and `shapely` have twice fallen out of the distribution), lazy-booted on click. Add the CI
   guard the spec specifies: assert `reblock.permeability`'s import closure stays inside the
