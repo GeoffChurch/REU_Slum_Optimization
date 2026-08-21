@@ -33,6 +33,18 @@ function regionPaths(cv: unknown): Call[] {
   return lastFrame(cv as never).filter((c) => c.op === "fill" && c.fillStyle === E.region_color);
 }
 
+/** Blocks the picture currently shows as FRONTIER -- same colour-first reasoning as
+ * `regionPaths`, stroked rather than filled (layer 3 is an outline, never a fill). */
+function frontierPaths(cv: unknown): Call[] {
+  return lastFrame(cv as never)
+    .filter((c) => c.op === "stroke" && c.strokeStyle === E.frontier_color);
+}
+
+/** The seed's own outline -- there is exactly one seed, so exactly one such stroke. */
+function seedPaths(cv: unknown): Call[] {
+  return lastFrame(cv as never).filter((c) => c.op === "stroke" && c.strokeStyle === E.seed_color);
+}
+
 /** Mounts the widget and waits for its fetch chain to settle BEFORE playing the first resize --
  * exactly perm-graph-boot.test.ts's `mount` shape (field-boot.test.ts's and frontier-boot.test.ts's
  * own `mount` helpers agree). `regionGrow(...)` only starts a promise chain; it does not run
@@ -50,13 +62,20 @@ async function mount(width = 700): Promise<{ host: ReturnType<typeof mountPoint>
   return { host, cv: canvasOf(host) };
 }
 
-/** Finds the `<input type="range">` the widget wrote and drives it the way a reader's pointer or
- * keyboard would: set `.value`, then dispatch the `"input"` event the widget listens for. Same
- * shape as field-boot.test.ts's own width-slider helper, not its selector -- this widget writes
- * exactly one range input, the budget. */
-function setSlider(host: ReturnType<typeof mountPoint>, value: number): void {
+/** Finds the `<input type="range">` the widget wrote -- the one place that lookup happens, so
+ * `setSlider` and the bounds test below cannot drift onto two different selectors. */
+function budgetSlider(host: ReturnType<typeof mountPoint>): ReturnType<typeof mountPoint> {
   const slider = host.findAll("input").find((i) => i.type === "range");
   assert.ok(slider !== undefined, "there is no budget slider");
+  return slider;
+}
+
+/** Drives the budget slider the way a reader's pointer or keyboard would: set `.value`, then
+ * dispatch the `"input"` event the widget listens for. Same shape as field-boot.test.ts's own
+ * width-slider helper, not its selector -- this widget writes exactly one range input, the
+ * budget. */
+function setSlider(host: ReturnType<typeof mountPoint>, value: number): void {
+  const slider = budgetSlider(host);
   slider.value = String(value);
   slider.dispatch("input");
 }
@@ -114,12 +133,55 @@ test("the region drawn at the default budget is the one the model computes", asy
   assert.equal(regionPaths(cv).length, expected.length);
 });
 
+test("the region fill is drawn at the bundle's own alpha, not full opacity", async () => {
+  // `gen_region_grow.py`'s `_render_hood` draws the region fill at `region_alpha` in the fallback
+  // PNG; a widget drawing it at `globalAlpha` 1 would be a live JS-on/JS-off divergence of exactly
+  // the kind `street_lw: 1.0` vs. a PNG drawn at 1.3 already cost this project once, undetected.
+  const { cv } = await mount();
+  const paths = regionPaths(cv);
+  assert.ok(paths.length > 0, "no region fill to check the alpha of");
+  for (const c of paths) assert.equal(c.globalAlpha, E.region_alpha);
+});
+
 test("at the slider floor the region is the seed alone", async () => {
   // The design's §1.3 finding, published rather than hidden. If this stops holding, the widget's
   // caption is wrong.
   const { host, cv } = await mount();
   setSlider(host, bundle.budget.min);
   assert.equal(regionPaths(cv).length, 1);
+});
+
+test("the budget slider's bounds come from the bundle, not a literal", async () => {
+  // A real `<input type=range>` clamps `.value` to `[min, max]`; the fake DOM this suite mounts
+  // against does not (`setSlider` writes `.value` directly), so nothing else here would notice a
+  // wrong bound. Mirrors field-boot.test.ts's own floor test for the same reason: that is a real
+  // gap the fake DOM leaves open, and a direct attribute assertion is what closes it.
+  const { host } = await mount();
+  const slider = budgetSlider(host);
+  assert.equal(Number(slider.min), bundle.budget.min);
+  assert.equal(Number(slider.max), bundle.budget.max);
+  assert.equal(Number(slider.step), bundle.budget.step);
+});
+
+test("the frontier is drawn one stroke per block adjacent to the region and not in it", async () => {
+  // Independently derived from `blocks[i].adj`, not by calling `region-grow.ts`'s own `frontierOf`
+  // -- the same reasoning `hoodBbox`/`VIEW` above already follow. The frontier layer is what makes
+  // "greedy" visible rather than merely asserted by the caption; a widget that silently failed to
+  // draw it would gut that teaching point while every other test here stayed green.
+  const { cv } = await mount();
+  const seedIndex = bundle.blocks.findIndex((b) => b.block_id === bundle.seed);
+  const region = grow(bundle.blocks, seedIndex, bundle.budget.default);
+  const inRegion = new Set(region);
+  const frontier = new Set<number>();
+  for (const i of region) {
+    for (const j of bundle.blocks[i]!.adj) if (!inRegion.has(j)) frontier.add(j);
+  }
+  assert.equal(frontierPaths(cv).length, frontier.size);
+});
+
+test("the seed is stroked in the bundle's own seed colour", async () => {
+  const { cv } = await mount();
+  assert.equal(seedPaths(cv).length, 1);
 });
 
 test("the fallback image survives until the first successful draw", async () => {

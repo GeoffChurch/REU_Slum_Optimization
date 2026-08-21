@@ -70,8 +70,15 @@ export function draw(ctx: CanvasRenderingContext2D, blocks: HoodBlock[], e: Hood
   // whole region: `region-grow-boot.test.ts` counts region blocks by counting fill() calls in
   // `region_color`, and a single batched path would collapse that count to one regardless of how
   // many blocks are actually in the region.
+  //
+  // `globalAlpha` is reset to 1 immediately after, not merely for tidiness: it is context state
+  // that outlives the call that set it (field.ts's corridor layer resets it for the same reason),
+  // so leaving it at `region_alpha` would tint the frontier and seed outlines drawn after it in
+  // THIS frame, and the hood outline drawn first in the NEXT one.
   ctx.fillStyle = e.region_color;
+  ctx.globalAlpha = e.region_alpha;
   for (const i of f.region) fillBlock(ctx, screen[i]!);
+  ctx.globalAlpha = 1;
 
   // (3) The frontier -- adjacent to the region, not yet in it -- outlined so growth's next
   // candidates are visible rather than merely asserted by the caption.

@@ -105,7 +105,11 @@ class Encoding:
     """What `hood.png` draws with AND what `encoding` in the bundle carries -- one source for
     both, not two lists kept in step by hand. D2 shipped `street_lw: 1.0` in a bundle while the PNG
     it sat beside drew `1.3`, a JS-on/JS-off divergence no test caught; a dataclass whose fields
-    feed both the matplotlib call and the JSON field cannot drift the same way.
+    feed both the matplotlib call and the JSON field cannot drift the same way. `region_alpha` is
+    the same fix applied to itself: it used to be a bare `alpha=0.55` inside `_render_hood`'s own
+    `region.plot(...)` call, with no field for the widget to read, so the widget drew the region
+    fill at full opacity while the PNG beside it drew translucent -- correct by the schema, wrong
+    on the page, precisely the class of bug this docstring already warns about.
 
     No named `render.py` constant serves this exact combination (neighbourhood context + a grown
     region's fill + its frontier + the seed) the way `render_field` serves DisplacementField, so
@@ -120,6 +124,7 @@ class Encoding:
     hood_lw: float
     region_color: str
     region_lw: float
+    region_alpha: float
     seed_color: str
     frontier_color: str
     pad: float
@@ -131,6 +136,7 @@ class EncodingDict(TypedDict):
     hood_lw: float
     region_color: str
     region_lw: float
+    region_alpha: float
     seed_color: str
     frontier_color: str
     pad: float
@@ -170,7 +176,7 @@ REFERENCE_SEEDS = (SEED, "ZAF.9.3.1_1_40973", "ZAF.9.3.1_1_40144")
 # framing is not pinned by it either), so `hood.png` below does not consume it.
 ENCODING = Encoding(
     hood_color=_CONTEXT_OUTLINE, hood_lw=_PARCEL_LW,
-    region_color=_DISPLACED_PT, region_lw=_BOUNDARY_LW,
+    region_color=_DISPLACED_PT, region_lw=_BOUNDARY_LW, region_alpha=0.55,
     seed_color=_BOUNDARY_COLOR,
     frontier_color="#f5a623",
     pad=0.04,
@@ -204,6 +210,8 @@ export interface HoodEncoding {
   hood_lw: number;
   region_color: string;
   region_lw: number;
+  /** The region fill's opacity -- matches hood.png's own alpha, so JS-on and JS-off draw the same fill. */
+  region_alpha: number;
   seed_color: string;
   frontier_color: string;
   pad: number;
@@ -280,7 +288,7 @@ def _render_hood(hood_gdf: gpd.GeoDataFrame, region_ids: set[str], frontier_ids:
                  linewidth=ENCODING.hood_lw, zorder=1)
     region = cast(gpd.GeoDataFrame, hood_gdf[hood_gdf["block_id"].isin(region_ids)])
     region.plot(ax=ax, facecolor=ENCODING.region_color, edgecolor=ENCODING.region_color,
-               linewidth=ENCODING.region_lw, alpha=0.55, zorder=2)
+               linewidth=ENCODING.region_lw, alpha=ENCODING.region_alpha, zorder=2)
     frontier = cast(gpd.GeoDataFrame, hood_gdf[hood_gdf["block_id"].isin(frontier_ids)])
     if not frontier.empty:
         frontier.plot(ax=ax, facecolor="none", edgecolor=ENCODING.frontier_color,
@@ -432,6 +440,7 @@ def main() -> None:
                           default=BUDGET.default),
         encoding=EncodingDict(hood_color=ENCODING.hood_color, hood_lw=ENCODING.hood_lw,
                               region_color=ENCODING.region_color, region_lw=ENCODING.region_lw,
+                              region_alpha=ENCODING.region_alpha,
                               seed_color=ENCODING.seed_color,
                               frontier_color=ENCODING.frontier_color, pad=ENCODING.pad),
         reference=reference,
