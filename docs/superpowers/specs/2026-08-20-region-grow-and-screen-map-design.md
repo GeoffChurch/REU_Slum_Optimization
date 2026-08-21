@@ -242,6 +242,21 @@ and they are the whole performance design:
   built at load and never rebuilt, which is the parent design's "recolouring must not touch
   geometry" made concrete.
 
+> **Corrected during execution (whole-branch review).** `render/city.ts` as shipped uses neither
+> mechanism above. There is no `Path2D` anywhere in `web/src` (`grep -rn Path2D web/src` returns
+> nothing): what is cached at load is each block's own SCREEN-PROJECTED ring coordinates
+> (`screenRingsOf`), and every `fill()`/`stroke()` call retraces a fresh canvas path from that
+> cached array via `beginPath`/`moveTo`/`lineTo`/`closePath` — every frame, for every block drawn
+> that frame. "Recolouring must not touch geometry" still holds under this shape: a floor or metric
+> change never re-touches the cached coordinates, only which blocks get traced and in which colour.
+>
+> The selected prefix is not re-filled either — it is OUTLINED (`e.selected_color` at
+> `block_lw * 2`, stroked directly on the visible canvas, never filled), so the base layer's own
+> fill underneath — including Cape Town's gold `informal_color` — stays visible through the ring. A
+> fill would erase it outright, collapsing "gold with a red ring" (a hit) and "red ring, no gold" (a
+> false positive) into the same solid red. "Re-fills only the selected prefix" above was the plan;
+> stroking is what shipped, and `render/city.ts`'s own module docstring records why.
+
 Sorting is per metric and cached, so switching metric costs one sort of 16,451 elements.
 
 ### 3.3 Interior rings
@@ -337,7 +352,7 @@ stdlib-only and must never import `reblock`).
 
 | artifact | content |
 |---|---|
-| `hood.json` | 129 blocks: `block_id`, `building_count`, `area_m2`, `perimeter_m`, **rings**, adjacency |
+| `hood.json` | 213 blocks (§1.2's corrected 7-hop hood): `block_id`, `building_count`, `area_m2`, `perimeter_m`, **rings**, adjacency |
 | `hood.d.ts` | generated type, copied to `web/src/hood.d.ts` |
 | `hood.png` | fallback figure — the region at the caption's budget |
 | `README.md` | generated, per the existing `readme_markdown()` pattern |
@@ -349,8 +364,9 @@ for several seeds and budgets, which is what `web/test/` drives the TypeScript a
 
 1. Its block frame is **projected** before `build()` is called (§1.5).
 2. The accretion at the slider's maximum budget is **contained in the shipped neighbourhood**. The
-   5-hop hood is 129 blocks and growth at 10,000 is 54, but containment does not follow from those
-   counts — a 54-block accretion could in principle reach 53 hops. Assert it; do not reason about it.
+   shipped 7-hop hood is 213 blocks (§1.2) and growth at 10,000 is 54, but containment does not
+   follow from those counts — a 54-block accretion could in principle reach 53 hops. Assert it; do
+   not reason about it.
 
 ### 5.2 `scripts/gen_screen_map.py` → `examples/screen-map/`
 
@@ -376,7 +392,7 @@ New TypeScript, following the D1/D2 layout:
 web/src/model/accretion.ts     the greedy, mirroring DenseClusterRegionBuilder
 web/src/model/screen.ts        the four metrics, the sorted prefix, precision/recall
 web/src/render/region.ts       the neighbourhood + region outline
-web/src/render/city.ts         base layer + selected prefix, Path2D cache
+web/src/render/city.ts         base layer + selected prefix, screen-coordinate cache (§3.2)
 web/src/widgets/region-grow.ts
 web/src/widgets/screen-map.ts
 ```
@@ -440,7 +456,8 @@ D2 lost 18 minutes to a module-scoped fixture loading a block under `pytest-xdis
 * **D1's 843,838 vertices is confirmed** — including 6,990 interior rings, which is why an
   exteriors-only recount gives 697,031.
 * **"~2× over budget" was an uncompressed-bytes framing.** The parent design's ~3 MB budget is met
-  on the wire at 5 m for both cities combined (2.20 MB gz).
+  on the wire at 5 m for both cities combined (**2.42 MB gz** — §1.1's own correction superseded
+  this section's original 2.20 MB, which measured rings only).
 * **The parent design's Nairobi Open Question is resolved** by §3.4 and should be struck there.
 
 ## §9 Reproducing the measurements

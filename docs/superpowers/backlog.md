@@ -211,12 +211,18 @@ none blocks on a later one.
     build order (design §4), so `examples/region-grow/hood.json`'s `reference` fixtures pin the
     browser greedy against production's own accretion order, not a re-implementation of the rule.
   - ~~**The city tier is ~2× its budget, measured.**~~ — **CLOSED by D3**: the "~2×" figure was an
-    uncompressed-bytes framing — the parent design's ~3 MB budget is met on the wire, 2.20 MB gz for
-    both cities combined at the 5 m simplification tolerance D3 settled on and shipped (design §1.1,
-    §8).
+    uncompressed-bytes framing — the parent design's ~3 MB budget is met on the wire, **2.42 MB gz**
+    for both cities combined at the 5 m simplification tolerance D3 settled on and shipped (design
+    §1.1, §8; the 2.20 MB first quoted here measured rings only, corrected in §1.1 once the shipped
+    bundle's other columns were counted).
   - ~~**Canvas, not SVG, and recolouring must not touch geometry.**~~ — **CLOSED by D3**: shipped as
-    Canvas2D with a `Path2D` cache built once at load (`render/city.ts`) and re-filled, never
-    rebuilt, per frame (design §3.2).
+    Canvas2D, with each block's screen-projected ring coordinates cached at load (`screenRingsOf` in
+    `render/city.ts`) and a fresh canvas path retraced from that cache on every `fill()`/`stroke()`
+    call — there is no `Path2D` anywhere in `web/src` (checked: `grep -rn Path2D web/src` returns
+    nothing). "Recolouring must not touch geometry" still holds: a floor or metric change never
+    re-touches the cached coordinates. The selected prefix is OUTLINED on top of the base layer,
+    never re-filled — filling it would erase the base layer's own `informal_color` fill underneath
+    (design §3.2, corrected there from an earlier Path2D/re-fill plan that was never built).
   - ~~**A decision D3 owns and does not know it owns:** whether the city tier ships for
     **Nairobi**~~ — **CLOSED by D3**: both cities ship; Nairobi shows the map, the floor and the
     pool size, with no precision/recall readout (design §3.4). The parent spec's Open Question is
@@ -239,6 +245,55 @@ none blocks on a later one.
   this finding directly, with every number read from `examples/region-grow/hood.json`, never typed
   (`scripts/gen_site_pages.py`'s `_region_grow_figure`). Whoever next touches `max_buildings`'s
   default should re-read this before "fixing" it against only the kblock regime.
+
+  **Deferred by D3's whole-branch review, routed here rather than fixed in D3 (out of scope for
+  the piece; recorded so they are not rediscovered from scratch):**
+
+  - **`build_regions`'s `max_buildings` probe is a `getattr` with a default, guarding a real
+    precompute.** `src/reblock/pipeline.py:161/167/174`: `mb = getattr(region_builder,
+    "max_buildings", None)` (line 167) decides whether the region score-map precompute
+    (`_region_score_map`, gated by `isinstance(mb, int) and mb > 0`, lines 161–174) runs at all
+    before `region_builder.build(...)` is called. `RegionBuilder` (`src/reblock/region.py:164`) is
+    a CLOSED, known-at-write-time `Protocol` — exactly four implementations exist
+    (`IdentityRegionBuilder`, `ConvexHullRegionBuilder`, `DenseClusterRegionBuilder`,
+    `ShapeStandardizingRegionBuilder`) — so this is a live instance of this project's own
+    static-checkability incident pattern (`~/wiki/pages/methodology/static-checkability.md`): a
+    rename or refactor of `max_buildings` on either growing builder would silently disable the
+    precompute rather than raising, and `isinstance(mb, int) and mb > 0` would keep producing
+    output of the right shape with the depth-scoring precompute silently skipped. The real fix is a
+    `max_buildings` field on the `RegionBuilder` Protocol itself (or a `GrowingRegionBuilder`
+    sub-Protocol only the two growing builders satisfy, with `Identity`/`ConvexHull` left off it) —
+    touching all four builders, `pipeline.py:167`, and `run.py`/`compare.py`'s own
+    `cast(RegionBuilder, instantiate(cfg.region_builder))` call sites, whose declared type would
+    need to reflect whichever shape the Protocol change takes.
+  - **A masking gap in the draw-failure guards, recorded in `web/test/harness.ts`'s own
+    `FakeResizeObserver` docstring — predates D3 (inherited from D1/D2's original
+    field-boot/perm-graph-boot harness) and is still unresolved.** Every "a throw on the first draw
+    is reported" test can only prove `runOrReport` catches a throw delivered OUTSIDE the widget's
+    `fetch().then(boot).catch(...)` chain, because `FakeResizeObserver.observe()` delivers nothing
+    and every test drives the first observation out-of-band via an explicit `fireResize()` call made
+    after `mount()`'s own await has already resolved. If a resize observation were ever delivered
+    SYNCHRONOUSLY/in-band instead (real `ResizeObserver`s do not do this today, but nothing pins
+    that as a guarantee) — or if the harness's own delivery model changed to match — a `runOrReport`
+    silently shadowed with a pass-through would go undetected: the outer `.catch` would absorb the
+    throw and call the same `showWidgetError`, producing an observably identical caption and leaving
+    the fallback image in place, so no test could tell "`runOrReport` caught it" from "the fetch
+    chain's own catch happened to catch it instead". Not actionable today — no reachable code path
+    in this pipeline constructs the precondition — but it is the reason a future change to
+    `ResizeObserver` timing, or to the harness's own model of it, should re-derive whether
+    `runOrReport` is still provably load-bearing rather than assuming today's green suite still
+    covers it.
+  - **`scripts/pair_matrix.py:485` divides 0/0 into a silent NaN, surfaced as a `RuntimeWarning`
+    by the full test suite.** `within_recipient_regression`'s `beta = float(np.sum(dx * dy) / sxx)`
+    (`sxx = float(np.sum(dx * dx))`, both from `_demean_by_group`) is unguarded against `sxx == 0`
+    — every within-group value demeaning to exactly zero, e.g. a group of size 1, or a group whose
+    `real_gw_dist` does not vary — which produces `RuntimeWarning: invalid value encountered in
+    scalar divide` and a `NaN` `beta` rather than a raised error. `se`/`t_stat`/`p_value` already
+    guard their own divisions with `if dof > 0 else float("nan")` / `if se else float("nan")`
+    immediately below; `beta`'s own division has no equivalent guard. Not chased further here
+    (not reproduced against a specific failing assertion, only the warning) — worth either an
+    explicit `sxx > 0` guard returning `nan` the same way its neighbours do, or confirming the
+    degenerate group that trips it should not reach this function at all.
 
   **What D2 closed, beyond its own widget** — five of D1's deferrals, struck in the list below:
 

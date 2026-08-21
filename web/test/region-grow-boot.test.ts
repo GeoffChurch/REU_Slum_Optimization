@@ -2,10 +2,12 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { HoodBlock, HoodBundle } from "../src/hood.js";
-import { grow } from "../src/model/accretion.js";
+import { grow, growth } from "../src/model/accretion.js";
 import { localState } from "../src/state.js";
 import { fitBbox, toScreen, type Bbox } from "../src/view/transform.js";
-import { canvasOf, Call, fireResize, installStubs, lastFrame, mountPoint } from "./harness.js";
+import {
+  armDrawFailure, canvasOf, Call, fireResize, installStubs, lastFrame, mountPoint,
+} from "./harness.js";
 import { regionGrow } from "../src/widgets/region-grow.js";
 
 installStubs();
@@ -45,20 +47,52 @@ function seedPaths(cv: unknown): Call[] {
   return lastFrame(cv as never).filter((c) => c.op === "stroke" && c.strokeStyle === E.seed_color);
 }
 
+/** Blocks the picture strokes as REGION -- `region.ts`'s own layer (2) now strokes every accreted
+ * block in `region_color` at `region_lw`, matching `hood.png`'s `region.plot(..., edgecolor=
+ * region_color, linewidth=region_lw)`. Same colour-first reasoning as `regionPaths`/`frontierPaths`,
+ * kept as its own function rather than folded into `frontierPaths` so a mismatch between the two
+ * stroke colours (`region_color` vs. `frontier_color`) cannot silently merge them into one count. */
+function regionStrokes(cv: unknown): Call[] {
+  return lastFrame(cv as never)
+    .filter((c) => c.op === "stroke" && c.strokeStyle === E.region_color);
+}
+
+/** The `aria-live="polite"` element's own text -- found by that attribute, not merely by tag, so
+ * this fails loudly if the readout is ever rendered without it rather than silently reading some
+ * OTHER paragraph. Mirrors screen-map-boot.test.ts's own `readoutText`; `ScreenMap` got this guard
+ * in an earlier fix round and `RegionGrow` never did. */
+function readoutText(host: ReturnType<typeof mountPoint>): string {
+  const live = host.descendants().find((el) => el.getAttribute("aria-live") === "polite");
+  assert.ok(live !== undefined, `there is no aria-live="polite" readout`);
+  return live.textContent;
+}
+
 /** Mounts the widget and waits for its fetch chain to settle BEFORE playing the first resize --
  * exactly perm-graph-boot.test.ts's `mount` shape (field-boot.test.ts's and frontier-boot.test.ts's
  * own `mount` helpers agree). `regionGrow(...)` only starts a promise chain; it does not run
  * `boot()` -- and so does not construct a canvas or a ResizeObserver -- until that chain's `.then`s
  * have had a turn, which happens no sooner than the next macrotask (checked empirically, not
- * assumed). Calling `fireResize` before that drain finds no observer to fire. */
-async function mount(width = 700): Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown }> {
+ * assumed). Calling `fireResize` before that drain finds no observer to fire.
+ *
+ * `drawFailure` arms `armDrawFailure` (harness.ts) BEFORE `regionGrow` runs, so the canvas `boot()`
+ * creates during the awaited macrotask below captures it as its `RecordingContext.failWith` --
+ * perm-graph-boot.test.ts's own `mount` does the same, for the same timing reason. Cleared in a
+ * `finally` after `fireResize` so a later call to `mount()` with no `drawFailure` is not
+ * accidentally armed by a previous test's leftover state. */
+async function mount(width = 700, drawFailure: string | null = null):
+    Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown }> {
   const host = mountPoint();
   host.dataset.bundle = "../examples/region-grow/hood.json";
+  armDrawFailure(drawFailure);
   regionGrow(host as never, localState);
   // A macrotask, so the fetch chain has drained -- boot() has run and the canvas exists -- by the
   // time this resolves.
   await new Promise((resolve) => setTimeout(resolve, 0));
-  fireResize(width, width);
+  try {
+    fireResize(width, width);
+  } finally {
+    armDrawFailure(null);
+  }
   return { host, cv: canvasOf(host) };
 }
 
@@ -143,6 +177,33 @@ test("the region fill is drawn at the bundle's own alpha, not full opacity", asy
   for (const c of paths) assert.equal(c.globalAlpha, E.region_alpha);
 });
 
+test("the region fill cuts interior rings out (evenodd), rather than filling them solid", async () => {
+  // screen-map-boot.test.ts:326 asserts this for `city.ts`'s own base layer; `region.ts`'s region
+  // layer draws through the SAME `fillBlock` shape but never got the twin assertion. 7 of
+  // hood.json's 213 blocks carry interior rings, and any one of them could be in the default-budget
+  // region -- a nonzero-winding fill would paint straight over the hole.
+  const { cv } = await mount();
+  const paths = regionPaths(cv);
+  assert.ok(paths.length > 0, "no region fill to check the fill rule of");
+  for (const c of paths) assert.equal(c.fillRule, "evenodd");
+});
+
+test("the region is stroked in its own colour at region_lw, not merely filled", async () => {
+  // `hood.png`'s own `region.plot(..., edgecolor=region_color, linewidth=region_lw,
+  // alpha=region_alpha)` strokes every accreted block; a fill-only widget draws JS-off's
+  // individually-outlined blocks as a single indistinguishable blob. `region_lw` was otherwise
+  // never asserted anywhere in this suite.
+  const { cv } = await mount();
+  const fillCount = regionPaths(cv).length;
+  const strokes = regionStrokes(cv);
+  assert.equal(strokes.length, fillCount,
+    "the region should be stroked exactly once per block, matching the fill count");
+  for (const c of strokes) {
+    assert.equal(c.lineWidth, E.region_lw);
+    assert.equal(c.globalAlpha, E.region_alpha);
+  }
+});
+
 test("at the slider floor the region is the seed alone", async () => {
   // The design's §1.3 finding, published rather than hidden. If this stops holding, the widget's
   // caption is wrong.
@@ -199,4 +260,36 @@ test("the picture still matches the model after a reseed and a budget change", a
   setSlider(host, 600);
   const seed = 3;
   assert.equal(regionPaths(cv).length, grow(bundle.blocks, seed, 600).length);
+});
+
+test("the readout pins the region's own block and building counts, live-announced", async () => {
+  // The tenth unguarded canvas-only readout on this branch: `ScreenMap`'s twin got exactly this
+  // guard in an earlier fix round; `RegionGrow`'s never did. A canvas carries no accessible text of
+  // its own, so this `aria-live="polite"` paragraph -- both its presence (asserted inside
+  // `readoutText` itself) and its content (asserted below) -- is the ONLY accessible content this
+  // widget has.
+  const { host } = await mount();
+  const seedIndex = bundle.blocks.findIndex((b) => b.block_id === bundle.seed);
+  const expected = growth(bundle.blocks, seedIndex, bundle.budget.default);
+  const text = readoutText(host);
+  assert.ok(text.includes(`${expected.order.length} blocks in the region`),
+    `readout is missing the block count: "${text}"`);
+  assert.ok(text.includes(`${expected.buildings} buildings`),
+    `readout is missing the building count: "${text}"`);
+});
+
+test("a throw on the first draw is reported and keeps the static image", async () => {
+  // The resize callback runs from the browser's own dispatch, OUTSIDE the mount's
+  // `fetch().then(boot).catch(...)` chain, so a throw in it is an uncaught exception and nothing
+  // else -- a blank figure, no message, and a page that still looks laid out -- unless
+  // `region-grow.ts`'s own `runOrReport` catches it. field-boot.test.ts's and
+  // perm-graph-boot.test.ts's own boot suites both have this guard; neither new widget's did.
+  const { host } = await mount(700, "boom on the first draw");
+
+  assert.match(host.querySelector("figcaption")!.textContent,
+    /RegionGrow could not load interactively .*boom on the first draw/);
+  assert.match(host.querySelector("figcaption")!.textContent,
+    /The static image above still applies\./);
+  assert.ok(host.querySelector("img") !== null,
+    "the fallback image was removed although the drawing that replaces it threw");
 });

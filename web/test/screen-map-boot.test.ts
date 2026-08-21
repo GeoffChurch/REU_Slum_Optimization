@@ -6,8 +6,8 @@ import { ranking, scores, selectAt, type MetricName } from "../src/model/screen.
 import { localState } from "../src/state.js";
 import { fitBbox, toScreen, type Bbox, type View } from "../src/view/transform.js";
 import {
-  canvasOf, Call, DPR, FakeElement, fireAnimationFrame, fireResize, installStubs, lastFrame,
-  mountPoint,
+  armDrawFailure, canvasOf, Call, DPR, FakeElement, fireAnimationFrame, fireResize, installStubs,
+  lastFrame, mountPoint,
 } from "./harness.js";
 import { screenMap } from "../src/widgets/screen-map.js";
 
@@ -44,14 +44,26 @@ const E = ct.encoding;
  * The FIRST frame is drawn synchronously from inside the resize callback (screen-map.ts's own
  * `render(true)`, not routed through `requestAnimationFrame`), so this needs no
  * `fireAnimationFrame()` of its own -- only STATE-driven redraws (a floor drag, a metric switch, a
- * city toggle) are rAF-coalesced; see `setFloor`/`setMetric`/`setCity` below. */
-async function mount(width = 700): Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown }> {
+ * city toggle) are rAF-coalesced; see `setFloor`/`setMetric`/`setCity` below.
+ *
+ * `drawFailure` arms `armDrawFailure` (harness.ts) BEFORE `screenMap` runs, so every canvas `boot()`
+ * creates during the awaited macrotask below -- the visible one AND `createLayer`'s offscreen one --
+ * captures it as its own `RecordingContext.failWith`, region-grow-boot.test.ts's own `mount` doing
+ * the same for the same timing reason. Cleared in a `finally` after `fireResize` so a later call to
+ * `mount()` with no `drawFailure` is not accidentally armed by a previous test's leftover state. */
+async function mount(width = 700, drawFailure: string | null = null):
+    Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown }> {
   const host = mountPoint();
   host.dataset.bundleCapetown = "../examples/screen-map/capetown.json";
   host.dataset.bundleNairobi = "../examples/screen-map/nairobi.json";
+  armDrawFailure(drawFailure);
   screenMap(host as never, localState);
   await new Promise((resolve) => setTimeout(resolve, 0));
-  fireResize(width, width);
+  try {
+    fireResize(width, width);
+  } finally {
+    armDrawFailure(null);
+  }
   return { host, cv: canvasOf(host) };
 }
 
@@ -149,9 +161,21 @@ function firstVertexScreen(view: View, bundle: CityBundle, blockIndex: number): 
  * the way `render/city.ts`'s `tracePath` always starts one, whether the call that follows is a
  * `fill` (the offscreen base layer) or a `stroke` (the selected-prefix outline). Shared by
  * `isSelected`, `baseFillColorOf` and the informal/selection interaction test below, so the
- * first-vertex matching logic exists in exactly one place. */
+ * first-vertex matching logic exists in exactly one place.
+ *
+ * Cape Town's own geometry makes that key a real collision risk -- 606 first-vertex keys are shared
+ * by 1,213 of 16,451 blocks, measured against the committed bundle -- so a caller could silently be
+ * handed another block's draws instead of `blockIndex`'s own. Asserted here, not merely trusted,
+ * because three of this file's four callers pick `blockIndex` FROM THE DATA at test time (`findFlip`,
+ * `findHit`, `ct.informal!.findIndex(...)`), so a re-bake can move any of them onto a colliding key
+ * with no test edit -- turning that into a loud failure instead of a silently weakened assertion. */
 function callsForBlock(calls: Call[], view: View, bundle: CityBundle, blockIndex: number): Call[] {
   const [sx, sy] = firstVertexScreen(view, bundle, blockIndex);
+  const owners = bundle.rings
+    .map((_, i) => firstVertexScreen(view, bundle, i))
+    .filter(([ix, iy]) => ix === sx && iy === sy).length;
+  assert.equal(owners, 1, `block ${blockIndex}'s first-vertex key (${sx}, ${sy}) is shared by `
+    + `${owners} blocks -- callsForBlock would conflate their draws`);
   return calls.filter((c) => {
     const first = c.path[0];
     return first !== undefined && first.op === "moveTo" && first.args[0] === sx
@@ -326,11 +350,15 @@ test("the base layer is drawn once, not per frame, and blitted every frame in de
     for (const c of fills1) assert.equal(c.fillRule, "evenodd");
 
     // block_lw consumed: every block outlined once on the offscreen layer, at the bundle's own
-    // width -- not a literal, and not a field that ships and is never read.
+    // width -- not a literal, and not a field that ships and is never read. The outline colour is
+    // EITHER base_color or informal_color, never a fixed constant: an informal block is outlined in
+    // its own gold, not base_color, or that outline would paint over the fill it surrounds (its own
+    // dedicated test, below, pins that on one known block -- this is the corpus-wide shape check).
     const strokes1 = offscreen1.ctx.calls.filter((c) => c.op === "stroke");
     assert.equal(strokes1.length, ct.n_blocks, "every block should be outlined once on the base layer");
     for (const c of strokes1) {
-      assert.equal(c.strokeStyle, E.base_color);
+      assert.ok(c.strokeStyle === E.base_color || c.strokeStyle === E.informal_color,
+        `every block's own outline should be base_color or informal_color, not ${c.strokeStyle}`);
       assert.equal(c.lineWidth, E.block_lw);
     }
 
@@ -391,6 +419,30 @@ test("Cape Town's real informal blocks are painted informal_color on the base la
   assert.ok(informalIndex >= 0 && plainIndex >= 0, "sanity: both kinds of block should exist");
   assert.equal(baseFillColorOf(offscreen, VIEW_CT, ct, informalIndex), E.informal_color);
   assert.equal(baseFillColorOf(offscreen, VIEW_CT, ct, plainIndex), E.base_color);
+});
+
+test("a known informal block's own outline does not overpaint its gold fill", async () => {
+  // The reviewer's finding: `paintBase` filled informal blocks gold but then unconditionally
+  // outlined EVERY block, informal or not, in `base_color` at `block_lw` -- and the median informal
+  // block is ~0.335 CSS px² at this canvas size, smaller than the outline itself, so that outline
+  // covers the whole interior, not merely the edge. The `Call` log cannot see pixel coverage
+  // directly, but it can see the colour the outline was drawn in: the fix makes each block's own
+  // outline match its own fill, so an informal block's outline can never be a DIFFERENT, opaque
+  // colour that would paint over the fill underneath it.
+  const { cv } = await mount();
+  const offscreen = offscreenOf(cv);
+  const informalIndex = ct.informal!.findIndex((v) => v === 1);
+  assert.ok(informalIndex >= 0, "sanity: an informal block should exist");
+
+  const calls = callsForBlock(offscreen.ctx.calls, VIEW_CT, ct, informalIndex);
+  const fill = calls.find((c) => c.op === "fill");
+  const stroke = calls.find((c) => c.op === "stroke");
+  assert.ok(fill !== undefined, "sanity: the informal block should be filled on the base layer");
+  assert.equal(fill.fillStyle, E.informal_color);
+  assert.ok(stroke !== undefined, "sanity: the informal block should be outlined on the base layer");
+  assert.equal(stroke.strokeStyle, E.informal_color,
+    `the informal block's own outline is drawn in ${stroke.strokeStyle}, which would paint over `
+    + `its gold fill at this block's sub-pixel size`);
 });
 
 test("a selected block that is really informal still shows gold underneath the red outline",
@@ -458,4 +510,20 @@ test("an uncalibrated metric defaults to the shipped default's own pool size", a
     `density's own default pool should match depth_density_proxy's shipped pool size `
     + `(${shippedDefault.n}), not select every block`);
   assert.notEqual(drawn, ct.n_blocks);
+});
+
+test("a throw on the first draw is reported and keeps the static image", async () => {
+  // The resize callback runs from the browser's own dispatch, OUTSIDE the mount's
+  // `Promise.all([...]).then(boot).catch(...)` chain, so a throw in it is an uncaught exception and
+  // nothing else -- a blank figure, no message, and a page that still looks laid out -- unless
+  // `screen-map.ts`'s own `runOrReport` catches it. field-boot.test.ts's and
+  // perm-graph-boot.test.ts's own boot suites both have this guard; neither new widget's did.
+  const { host } = await mount(700, "boom on the first draw");
+
+  assert.match(host.querySelector("figcaption")!.textContent,
+    /ScreenMap could not load interactively .*boom on the first draw/);
+  assert.match(host.querySelector("figcaption")!.textContent,
+    /The static image above still applies\./);
+  assert.ok(host.querySelector("img") !== null,
+    "the fallback image was removed although the drawing that replaces it threw");
 });

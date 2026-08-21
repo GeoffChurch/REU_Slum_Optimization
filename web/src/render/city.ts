@@ -92,10 +92,13 @@ function strokeBlock(ctx: CanvasRenderingContext2D, rings: ScreenRings, style: s
 
 export interface CityLayer {
   /** The one expensive pass: paints the OFFSCREEN base layer (every block filled `e.base_color`,
-   * Cape Town's real informal blocks filled `e.informal_color` instead, every block outlined in
-   * `e.base_color` at `e.block_lw` so adjacent same-coloured blocks stay distinguishable). Call
-   * only when the view or the active bundle changes (a resize or a city switch) -- never for a
-   * floor or metric change, which `paintFrame` alone handles by re-blitting this unchanged. */
+   * Cape Town's real informal blocks filled `e.informal_color` instead, every block outlined at
+   * `e.block_lw` in ITS OWN fill colour -- never unconditionally `e.base_color`, which would paint
+   * over an informal block's gold: the median informal block is ~0.335 CSS px² at the shipped
+   * canvas size, smaller than the outline itself, so an outline in a DIFFERENT colour from the
+   * fill covers the whole interior, not merely the edge). Call only when the view or the active
+   * bundle changes (a resize or a city switch) -- never for a floor or metric change, which
+   * `paintFrame` alone handles by re-blitting this unchanged. */
   paintBase(bundle: CityBundle, view: View, e: CityEncoding,
            size: { width: number; height: number }): void;
   /** Every frame: clear `ctx`, blit the offscreen base layer onto it (a single `drawImage`, in
@@ -137,8 +140,12 @@ export function createLayer(): CityLayer {
       const informal = bundle.informal;
       for (let i = 0; i < screen.length; i++) {
         const rings = screen[i]!;
-        fillBlock(baseCtx, rings, informal?.[i] ? e.informal_color : e.base_color);
-        strokeBlock(baseCtx, rings, e.base_color, e.block_lw);
+        // Fill and outline in the SAME colour, so the outline can never obliterate the fill it
+        // surrounds -- see this function's own docstring for why that is not merely cosmetic at
+        // this bundle's block sizes.
+        const style = informal?.[i] ? e.informal_color : e.base_color;
+        fillBlock(baseCtx, rings, style);
+        strokeBlock(baseCtx, rings, style, e.block_lw);
       }
     },
     paintFrame(ctx, bundle, view, e, order, k, size) {

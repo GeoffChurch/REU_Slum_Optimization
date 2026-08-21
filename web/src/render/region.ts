@@ -66,18 +66,24 @@ export function draw(ctx: CanvasRenderingContext2D, blocks: HoodBlock[], e: Hood
   ctx.lineWidth = e.hood_lw;
   for (const rings of screen) strokeBlock(ctx, rings);
 
-  // (2) The grown region, filled. One beginPath()/fill() PER block rather than one path for the
-  // whole region: `region-grow-boot.test.ts` counts region blocks by counting fill() calls in
-  // `region_color`, and a single batched path would collapse that count to one regardless of how
-  // many blocks are actually in the region.
+  // (2) The grown region, filled AND stroked -- matching hood.png's own `region.plot(...,
+  // facecolor=region_color, edgecolor=region_color, linewidth=region_lw, alpha=region_alpha)`.
+  // A fill-only region draws JS-off's eleven individually-outlined blocks as a single
+  // indistinguishable blob: the accretion is the widget's whole teaching point, and the stroke is
+  // what separates one accreted block from the next one drawn on top of it. One beginPath()/
+  // fill()+stroke() PER block rather than one path for the whole region: `region-grow-boot.test.ts`
+  // counts region blocks by counting fill() calls in `region_color`, and a single batched path
+  // would collapse that count to one regardless of how many blocks are actually in the region.
   //
   // `globalAlpha` is reset to 1 immediately after, not merely for tidiness: it is context state
   // that outlives the call that set it (field.ts's corridor layer resets it for the same reason),
   // so leaving it at `region_alpha` would tint the frontier and seed outlines drawn after it in
   // THIS frame, and the hood outline drawn first in the NEXT one.
   ctx.fillStyle = e.region_color;
+  ctx.strokeStyle = e.region_color;
+  ctx.lineWidth = e.region_lw;
   ctx.globalAlpha = e.region_alpha;
-  for (const i of f.region) fillBlock(ctx, screen[i]!);
+  for (const i of f.region) { fillBlock(ctx, screen[i]!); strokeBlock(ctx, screen[i]!); }
   ctx.globalAlpha = 1;
 
   // (3) The frontier -- adjacent to the region, not yet in it -- outlined so growth's next
