@@ -84,3 +84,28 @@ def polygon_ring(geom: BaseGeometry, ox: float, oy: float, *, what: str) -> list
             f"format assumes an exterior ring and no holes; report this instead of silently "
             f"dropping geometry")
     return [[cm(x - ox), cm(y - oy)] for x, y in geom.exterior.coords]
+
+
+def polygon_rings(geom: BaseGeometry, ox: float, oy: float, *,
+                  what: str) -> list[list[list[float]]]:
+    """Every ring of a simple Polygon -- exterior first, then interiors -- origin-relative at `cm`.
+
+    The multi-ring counterpart to `polygon_ring`, and a SEPARATE function rather than a flag on it.
+    `polygon_ring` raises on interior rings because the three bundles that use it give a polygon
+    exactly one ring, so a hole there would have to lose geometry to fit; that guard is still right
+    and a parameter letting a caller switch it off would be a way to lose geometry quietly. The
+    city tier and the region neighbourhood have a different contract: they CARRY holes, and their
+    consumers fill with the even-odd rule.
+
+    Measured on the data these bundles are baked from: 6,990 of 16,451 Cape Town blocks and 1,139
+    of 3,500 Nairobi blocks have interior rings, as do 3 of the 129 blocks in RegionGrow's
+    neighbourhood. Neither city has a single MultiPolygon block, which is why that case raises
+    rather than being flattened.
+    """
+    if not isinstance(geom, Polygon):
+        raise ValueError(
+            f"{what} is a {geom.geom_type}, not a Polygon -- the bundle format gives a block one "
+            f"polygon (measured: no MultiPolygon blocks in either city); report this instead of "
+            f"silently dropping geometry")
+    return [[[cm(x - ox), cm(y - oy)] for x, y in ring.coords]
+            for ring in [geom.exterior, *geom.interiors]]
