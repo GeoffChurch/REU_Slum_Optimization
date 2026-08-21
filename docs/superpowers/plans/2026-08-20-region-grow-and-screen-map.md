@@ -1982,6 +1982,23 @@ to name both new markers, as the file's own comment convention requires.
 
 Run: `pixi run python -m scripts.gen_site_pages && pixi run mkdocs build --strict && pixi run pytest tests/test_gen_site_pages.py -v`
 
+- [ ] **Step 5b: Ignore the per-worker coverage fragments**
+
+`.gitignore` has `.coverage` but not `.coverage.*`. Under `pytest-cov` with `-n auto`, each xdist
+worker writes `.coverage.<host>.pid<N>.<random>`; a completed run combines and removes them, but an
+interrupted one leaves them behind — 16 were sitting untracked in the working tree when this was
+found. Nothing has been committed (verified: `git log -- '.coverage*'` is empty and `git ls-files`
+tracks none), but any `git add -A` would sweep them into a commit.
+
+Add one line beside the existing `.coverage` entry:
+
+```
+.coverage.*
+```
+
+Verify with `git check-ignore -v .coverage.example.pid1.abc` that the pattern matches, and confirm
+`git status --porcelain` no longer lists them.
+
 - [ ] **Step 6: Update the record**
 
 * `docs/superpowers/backlog.md` — mark **D3 SHIPPED** with its spec path; strike the four D3 handoff
