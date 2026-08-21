@@ -35,6 +35,14 @@ interface ScreenState { city: "capetown" | "nairobi"; metric: MetricName; floor:
 const METRIC_NAMES: readonly MetricName[] =
   ["depth_density_proxy", "density_compactness", "density", "depth_proxy"];
 
+/** The metric every OTHER metric's own no-calibration floor default is measured against -- the
+ * design's own "shipped default" (§3.1), and, as of both committed bundles, present in
+ * `bundle.floors` for both cities (checked directly against `capetown.json`/`nairobi.json`, not
+ * assumed). Nothing STRUCTURALLY guarantees a future bake keeps shipping it -- `bundle.floors`
+ * arrives over the network like the rest of the bundle -- so `floorAtShippedPoolSize` below checks
+ * and throws rather than silently defaulting if it is ever missing. */
+const DEFAULT_METRIC: MetricName = "depth_density_proxy";
+
 /** The bbox every shipped block's rings must fit inside -- exterior AND interior rings, mirroring
  * region-grow.ts's own `hoodBbox` one level up in scale. A `Math.min(...xs)`-over-spread version
  * (fine at RegionGrow's 213 blocks) would risk "too many arguments" at Cape Town's ~200,000+
@@ -70,15 +78,32 @@ function asMetric(raw: string): MetricName {
   throw new Error(`${LABEL}: unrecognised metric "${raw}"`);
 }
 
+/** `density`/`depth_proxy` ship no calibration of their own (only `depth_density_proxy` and
+ * `density_compactness` do -- design §3.1). Defaulting them to "select everything" reported the
+ * corpus base rate as if it were a screen's own performance (16,451 of 16,451 selected, precision
+ * equal to the informal share of the whole city) and defeated `city.ts`'s O(prefix) design
+ * outright. Instead default to the score that selects exactly the SAME pool size as the shipped
+ * `DEFAULT_METRIC` floor on this bundle (1,655 for Cape Town, 169 for Nairobi): the score of the
+ * block at that rank in THIS metric's own ranking. This is exactly how `examples/screen-bakeoff/
+ * screen_comparison.csv` compares screens that ship no floor of their own -- at equal pool
+ * fractions, not at an arbitrary threshold, and it is a number this bundle already carries, not
+ * one invented here. */
+function floorAtShippedPoolSize(bundle: CityBundle, metric: MetricName, sc: Float64Array): number {
+  const shipped = bundle.floors.find((f) => f.metric === DEFAULT_METRIC);
+  if (shipped === undefined) {
+    throw new Error(`${LABEL}: bundle carries no shipped ${DEFAULT_METRIC} floor to size `
+      + `${metric}'s own default against`);
+  }
+  const order = ranking(bundle, metric);
+  return sc[order[shipped.n - 1]!]!;
+}
+
 /** The floor slider's live bounds and value for (bundle, metric). `preferred === null` means
- * "reset to this metric's own default": its shipped calibration in `bundle.floors` if it has one
- * (`depth_density_proxy`/`density_compactness` do -- design §3.1), else this metric's own minimum
- * score. `density`/`depth_proxy` ship no calibration at all, and inventing a numeric floor for
- * them would be worse than admitting none exists: every block passes at the minimum, and the
- * reader drags up from there. Otherwise `preferred` itself, clamped into the freshly computed
- * range -- the city toggle takes this path, since the whole point of an ABSOLUTE floor (design
- * §3.4) is that the same number carries over to a corpus with no calibration at all, rather than
- * being redefined on every switch the way a percentile would be. */
+ * "reset to this metric's own default": its shipped calibration in `bundle.floors` if it has one,
+ * else `floorAtShippedPoolSize`'s own non-invented fallback. Otherwise `preferred` itself, clamped
+ * into the freshly computed range -- the city toggle takes this path, since the whole point of an
+ * ABSOLUTE floor (design §3.4) is that the same number carries over to a corpus with no
+ * calibration at all, rather than being redefined on every switch the way a percentile would be. */
 function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: MetricName,
                    preferred: number | null): number {
   const sc = scores(bundle, metric);
@@ -88,11 +113,15 @@ function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: Me
     if (v > max) max = v;
   }
   const shipped = bundle.floors.find((f) => f.metric === metric)?.value ?? null;
-  const target = preferred ?? shipped ?? min;
+  const target = preferred ?? shipped ?? floorAtShippedPoolSize(bundle, metric, sc);
   const floor = Math.min(Math.max(target, min), max);
   floorSlider.min = String(min);
   floorSlider.max = String(max);
-  floorSlider.step = String((max - min) / 1000 || 1e-9);
+  // No zero-width-range fallback: verified against both committed bundles that every one of the
+  // four metrics has a strictly positive, finite score range (min < max, min 0.0005627 on
+  // Nairobi's density_compactness, the narrowest of the eight city/metric pairs) -- a `|| 1e-9`
+  // here would be a silencer for a failure that has not happened and cannot happen from this data.
+  floorSlider.step = String((max - min) / 1000);
   floorSlider.value = String(floor);
   return floor;
 }
@@ -243,7 +272,7 @@ function boot(host: HTMLElement, makeState: StateFactory, bundles: Bundles): voi
     const metricChanged = rankedFor === null || rankedFor.metric !== st.metric;
     if (force || cityChanged) {
       view = fitBbox(cityBbox(bundle), size.width, size.height, bundle.encoding.pad);
-      layer.paintBase(ctx, bundle, view, bundle.encoding, size);
+      layer.paintBase(bundle, view, bundle.encoding, size);
     }
     if (cityChanged || metricChanged) {
       s = scores(bundle, st.metric);
@@ -251,10 +280,31 @@ function boot(host: HTMLElement, makeState: StateFactory, bundles: Bundles): voi
       rankedFor = { city: st.city, metric: st.metric };
     }
     const sel = selectAt(bundle, order, s, st.floor);
-    layer.paintSelection(ctx, bundle, view, bundle.encoding, order, sel.count);
+    layer.paintFrame(ctx, bundle, view, bundle.encoding, order, sel.count, size);
     // Every number the picture shows is also present as text, computed from the same `sel` the
     // picture was drawn from -- there is no second call to `selectAt` that could disagree with it.
     readout.textContent = describeSelection(st.city, bundle, sel);
+  };
+
+  // Coalesces every state-driven redraw (a floor drag, a metric switch, a city toggle) onto the
+  // next animation frame, so a drag firing many "input" events in a row cannot queue more frames
+  // than the display can render -- each call before the frame fires just moves WHICH state the
+  // eventual `render(false)` reads (`state.get()`, inside `render` itself), it never queues a
+  // second one. `frameScheduled` is the guard that makes this coalescing rather than merely async:
+  // `requestAnimationFrame` on its own queues every call it is given (see harness.ts's own
+  // comment), so without this flag a fast drag would queue one callback per "input" event, not one
+  // per frame.
+  let frameScheduled = false;
+  const scheduleRender = (): void => {
+    if (frameScheduled) return;
+    frameScheduled = true;
+    // `runOrReport`: an animation-frame callback runs from the browser's own dispatch, exactly as
+    // far outside the fetch chain above as the ResizeObserver callback below is -- without this, a
+    // throw here is an uncaught exception with a blank figure and no message (dom/error.ts).
+    requestAnimationFrame(() => runOrReport(host, LABEL, () => {
+      frameScheduled = false;
+      render(false);
+    }));
   };
 
   // The observed element is the CANVAS ITSELF, exactly region-grow.ts's own reasoning: `width:
@@ -276,7 +326,7 @@ function boot(host: HTMLElement, makeState: StateFactory, bundles: Bundles): voi
       // here read anything that is not ready until now -- they only ever call `state.set`, which
       // is harmless before any subscriber exists. Only the SUBSCRIPTION itself is deferred, so a
       // later resize can never register a second one and double-render every state change.
-      state.subscribe(() => render(false));
+      state.subscribe(() => scheduleRender());
       // Only now: the static picture is the honest one until a real one has replaced it.
       removeFallbackImage(host);
     }

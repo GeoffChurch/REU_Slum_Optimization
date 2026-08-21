@@ -5,7 +5,9 @@ import type { CityBundle } from "../src/screen_map.js";
 import { ranking, scores, selectAt, type MetricName } from "../src/model/screen.js";
 import { localState } from "../src/state.js";
 import { fitBbox, toScreen, type Bbox, type View } from "../src/view/transform.js";
-import { canvasOf, Call, fireResize, installStubs, mountPoint } from "./harness.js";
+import {
+  canvasOf, Call, FakeElement, fireAnimationFrame, fireResize, installStubs, lastFrame, mountPoint,
+} from "./harness.js";
 import { screenMap } from "../src/widgets/screen-map.js";
 
 installStubs();
@@ -36,7 +38,12 @@ const E = ct.encoding;
  * construct a canvas or a ResizeObserver -- until that chain's `.then`s have had a turn, which
  * happens no sooner than the next macrotask REGARDLESS of how many `.then` hops are chained (the
  * microtask queue always fully drains before a `setTimeout` callback runs, whether it is one hop
- * or five). Calling `fireResize` before that drain finds no observer to fire. */
+ * or five). Calling `fireResize` before that drain finds no observer to fire.
+ *
+ * The FIRST frame is drawn synchronously from inside the resize callback (screen-map.ts's own
+ * `render(true)`, not routed through `requestAnimationFrame`), so this needs no
+ * `fireAnimationFrame()` of its own -- only STATE-driven redraws (a floor drag, a metric switch, a
+ * city toggle) are rAF-coalesced; see `setFloor`/`setMetric`/`setCity` below. */
 async function mount(width = 700): Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown }> {
   const host = mountPoint();
   host.dataset.bundleCapetown = "../examples/screen-map/capetown.json";
@@ -47,21 +54,8 @@ async function mount(width = 700): Promise<{ host: ReturnType<typeof mountPoint>
   return { host, cv: canvasOf(host) };
 }
 
-/** Every draw call recorded on `cv` so far, from index `since`. Deliberately NOT `lastFrame`
- * (harness.ts): that helper slices from the LAST `clearRect`, which is right for a widget that
- * clears and repaints its whole canvas every frame, but this one does not -- `render/city.ts`'s
- * `paintBase` clears and repaints only on the first frame and on a resize/city switch, and a
- * floor or metric change alone goes through `paintSelection` alone, with no new `clearRect`. Two
- * snapshots of `calls.length`, taken immediately before and after one specific interaction,
- * isolate exactly what that interaction added regardless of how many frames came before it. */
-function callsSince(cv: unknown, since: number): Call[] {
-  return (cv as { ctx: { calls: Call[] } }).ctx.calls.slice(since);
-}
-function callCount(cv: unknown): number {
-  return (cv as { ctx: { calls: Call[] } }).ctx.calls.length;
-}
-function fillsOf(calls: Call[], style: string): number {
-  return calls.filter((c) => c.op === "fill" && c.fillStyle === style).length;
+function callsOf(el: unknown): Call[] {
+  return (el as { ctx: { calls: Call[] } }).ctx.calls;
 }
 
 function floorSlider(host: ReturnType<typeof mountPoint>): ReturnType<typeof mountPoint> {
@@ -88,23 +82,29 @@ function readoutText(host: ReturnType<typeof mountPoint>): string {
   return live.textContent;
 }
 
-/** Drives each control the way a reader's pointer or keyboard would: set `.value`/`.checked`,
- * then dispatch the event the widget listens for -- field-boot.test.ts's and region-grow-boot.
- * test.ts's own `setSlider` shape. */
+/** Drives one control the way a reader's pointer or keyboard would (set `.value`/`.checked`, then
+ * dispatch the event the widget listens for -- field-boot.test.ts's and region-grow-boot.test.ts's
+ * own `setSlider` shape) and flushes the ONE animation frame that interaction schedules.
+ * `state.set()` itself is synchronous, but screen-map.ts's own `scheduleRender` defers the actual
+ * redraw to `requestAnimationFrame` (design item 3), so a test that inspected the canvas
+ * immediately after `dispatch` would still be looking at the PREVIOUS frame. */
 function setFloor(host: ReturnType<typeof mountPoint>, value: number): void {
   const el = floorSlider(host);
   el.value = String(value);
   el.dispatch("input");
+  fireAnimationFrame();
 }
 function setMetric(host: ReturnType<typeof mountPoint>, metric: MetricName): void {
   const el = metricSelectEl(host);
   el.value = metric;
   el.dispatch("change");
+  fireAnimationFrame();
 }
 function setCity(host: ReturnType<typeof mountPoint>, showNairobi: boolean): void {
   const el = cityToggleEl(host);
   el.checked = showNairobi;
   el.dispatch("change");
+  fireAnimationFrame();
 }
 
 /** The bbox every shipped block's rings must fit inside -- derived independently here, not
@@ -124,25 +124,49 @@ function cityBbox(bundle: CityBundle): Bbox {
 const SIZE = 700;
 const VIEW_CT = fitBbox(cityBbox(ct), SIZE, SIZE, E.pad);
 
-/** The LAST fill this widget painted at the exact screen position of `block`'s own first ring
- * vertex -- identifying ONE block's current colour in a call log that may hold several frames'
- * worth of history, without needing a full-path comparison. `render/city.ts`'s `fillBlock` always
- * opens a block's path with `moveTo` at that vertex, so scanning backwards for a fill whose FIRST
- * path op lands there finds that block's most recent paint. */
-function lastFillStyleForBlock(cv: unknown, view: View, bundle: CityBundle,
-                               blockIndex: number): string | undefined {
+/** The offscreen canvas the last frame's OWN `drawImage` call blitted, found by following the
+ * `Call.image` reference `RecordingContext.drawImage` records -- not by assuming there is only
+ * ever one other canvas anywhere, so this stays correct even if a page ever holds more than one
+ * ScreenMap. */
+function offscreenOf(cv: unknown): FakeElement {
+  const frame = lastFrame(cv as never);
+  const blit = frame.find((c) => c.op === "drawImage");
+  assert.ok(blit !== undefined, "no drawImage call in the last frame");
+  assert.ok(blit.image !== undefined, "the drawImage call recorded no source image");
+  return blit.image;
+}
+
+function firstVertexScreen(view: View, bundle: CityBundle, blockIndex: number): [number, number] {
   const [x, y] = bundle.rings[blockIndex]![0]![0]!;
-  const [sx, sy] = toScreen(view, x, y);
-  const calls = (cv as { ctx: { calls: Call[] } }).ctx.calls;
-  for (let i = calls.length - 1; i >= 0; i--) {
-    const c = calls[i]!;
+  return toScreen(view, x, y);
+}
+
+/** Whether `blockIndex` is painted `E.selected_color` in the CURRENT frame on the MAIN canvas --
+ * identified by a fill whose path opens with a `moveTo` at that block's own first vertex, the way
+ * `render/city.ts`'s `fillBlock` always starts one. A block that is NOT selected is never filled
+ * on the main canvas at all under this design (it shows through from the blitted offscreen base
+ * layer instead), so absence here means "not selected", not "selected in some other colour". */
+function isSelected(cv: unknown, view: View, bundle: CityBundle, blockIndex: number): boolean {
+  const [sx, sy] = firstVertexScreen(view, bundle, blockIndex);
+  return lastFrame(cv as never).some((c) => {
     const first = c.path[0];
-    if (c.op === "fill" && first !== undefined && first.op === "moveTo"
-        && first.args[0] === sx && first.args[1] === sy) {
-      return c.fillStyle;
-    }
-  }
-  return undefined;
+    return c.op === "fill" && c.fillStyle === E.selected_color && first !== undefined
+      && first.op === "moveTo" && first.args[0] === sx && first.args[1] === sy;
+  });
+}
+
+/** The fill colour `blockIndex` carries on the OFFSCREEN base layer -- `base_color`, or
+ * `informal_color` for a Cape Town block the City's own survey records as really informal. Same
+ * first-vertex identification as `isSelected`, applied to the offscreen canvas's own call log. */
+function baseFillColorOf(offscreen: FakeElement, view: View, bundle: CityBundle,
+                         blockIndex: number): string | undefined {
+  const [sx, sy] = firstVertexScreen(view, bundle, blockIndex);
+  const hit = offscreen.ctx.calls.find((c) => {
+    const first = c.path[0];
+    return c.op === "fill" && first !== undefined && first.op === "moveTo"
+      && first.args[0] === sx && first.args[1] === sy;
+  });
+  return hit?.fillStyle;
 }
 
 /** A block selected under `metricA` at ITS OWN shipped floor and not selected under `metricB` at
@@ -171,19 +195,26 @@ test("the number of selected blocks drawn equals what the model selects", async 
   const order = ranking(ct, "depth_density_proxy");
   const s = scores(ct, "depth_density_proxy");
   const sel = selectAt(ct, order, s, shipped.value);
-  const drawn = fillsOf(callsSince(cv, 0), E.selected_color);
-  assert.equal(drawn, sel.count);
+  const selectedFills = lastFrame(cv as never)
+    .filter((c) => c.op === "fill" && c.fillStyle === E.selected_color);
+  assert.equal(selectedFills.length, sel.count);
   // Cross-checked against the independently baked pool size too (examples/screen-bakeoff's own
   // route, read into the bundle at bake time) -- the same two-paths-agreeing guard Task 8's own
   // screen-model.test.ts relies on.
-  assert.equal(drawn, shipped.n);
+  assert.equal(selectedFills.length, shipped.n);
+  for (const c of selectedFills) {
+    // Nonzero (the fake's own default when a caller omits the argument) would fill any block that
+    // carries interior rings solid instead of cutting the holes out.
+    assert.equal(c.fillRule, "evenodd", `block filled with fillRule ${c.fillRule}, not evenodd`);
+  }
 });
 
 test("moving the floor changes the drawn selection", async () => {
   // A widget that computed the selection but drew a constant would pass a count test at one
   // floor. Assert at two floors and require the counts to differ.
   const { host, cv } = await mount();
-  const countAtDefault = fillsOf(callsSince(cv, 0), E.selected_color);
+  const countAtDefault = lastFrame(cv as never)
+    .filter((c) => c.op === "fill" && c.fillStyle === E.selected_color).length;
 
   // The single highest-scoring block's own score: raising the floor to it selects (about) one
   // block, a difference that cannot be an artefact of two nearly-identical floors.
@@ -191,9 +222,9 @@ test("moving the floor changes the drawn selection", async () => {
   let max = -Infinity;
   for (const v of s) if (v > max) max = v;
 
-  const before = callCount(cv);
   setFloor(host, max);
-  const countAtMax = fillsOf(callsSince(cv, before), E.selected_color);
+  const countAtMax = lastFrame(cv as never)
+    .filter((c) => c.op === "fill" && c.fillStyle === E.selected_color).length;
 
   assert.notEqual(countAtMax, countAtDefault,
     `floor change produced the same selected count (${countAtDefault})`);
@@ -206,12 +237,12 @@ test("switching metric re-ranks rather than re-filtering the old ranking", async
   const { host, cv } = await mount();
   const blockIndex = findFlip(ct, "depth_density_proxy", "density_compactness");
 
-  assert.equal(lastFillStyleForBlock(cv, VIEW_CT, ct, blockIndex), E.selected_color,
+  assert.ok(isSelected(cv, VIEW_CT, ct, blockIndex),
     "the chosen block should start out selected under the default metric, depth_density_proxy");
 
   setMetric(host, "density_compactness");
 
-  assert.equal(lastFillStyleForBlock(cv, VIEW_CT, ct, blockIndex), E.base_color,
+  assert.ok(!isSelected(cv, VIEW_CT, ct, blockIndex),
     "switching metric left the block selected -- did the widget re-rank, or keep filtering the "
     + "old order?");
 });
@@ -231,23 +262,116 @@ test("Nairobi shows a pool size and no precision or recall", async () => {
     `readout shows a percentage for a city with no ground-truth layer: "${text}"`);
 });
 
-test("the base layer is drawn once, not per frame", async () => {
-  // The performance claim, made checkable: count base-colour fills across two frames after a
-  // floor change and require it not to grow by 16,451.
+test("Cape Town's readout pins the actual precision and recall numbers", async () => {
+  // The reviewer deleted precision and recall from the readout entirely and all other tests
+  // stayed green -- the headline feature was unguarded. This pins it against the bundle's OWN
+  // baked figures (examples/screen-bakeoff's independent route), not a recomputed copy of the
+  // widget's own formula.
+  const { host } = await mount();
+  const text = readoutText(host);
+  const shipped = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
+  assert.ok(shipped.precision !== null && shipped.recall !== null,
+    "sanity: the shipped Cape Town floor should carry precision/recall");
+  const expectedPrecision = `${(shipped.precision! * 100).toFixed(1)}%`;
+  const expectedRecall = `${(shipped.recall! * 100).toFixed(1)}%`;
+  assert.ok(text.includes(expectedPrecision),
+    `readout is missing the precision figure ${expectedPrecision}: "${text}"`);
+  assert.ok(text.includes(expectedRecall),
+    `readout is missing the recall figure ${expectedRecall}: "${text}"`);
+});
+
+test("the base layer is drawn once, not per frame, and blitted every frame", async () => {
+  // The performance claim, made checkable the strong way: one drawImage per frame, with the
+  // offscreen canvas it names holding exactly one fill per block -- on the first frame AND after
+  // a floor change, not growing by another 16,451.
   const { host, cv } = await mount();
-  const afterMount = fillsOf(callsSince(cv, 0), E.base_color);
-  assert.equal(afterMount, ct.n_blocks,
-    "the first frame should fill every block's base colour exactly once");
+
+  const frame1 = lastFrame(cv as never);
+  assert.equal(frame1.filter((c) => c.op === "drawImage").length, 1,
+    "each frame should blit the base layer exactly once");
+  const offscreen1 = offscreenOf(cv);
+  const fills1 = offscreen1.ctx.calls.filter((c) => c.op === "fill");
+  assert.equal(fills1.length, ct.n_blocks,
+    "the offscreen canvas should hold exactly one fill per block");
+  for (const c of fills1) assert.equal(c.fillRule, "evenodd");
+
+  // block_lw consumed: every block outlined once on the offscreen layer, at the bundle's own
+  // width -- not a literal, and not a field that ships and is never read.
+  const strokes1 = offscreen1.ctx.calls.filter((c) => c.op === "stroke");
+  assert.equal(strokes1.length, ct.n_blocks, "every block should be outlined once on the base layer");
+  for (const c of strokes1) {
+    assert.equal(c.strokeStyle, E.base_color);
+    assert.equal(c.lineWidth, E.block_lw);
+  }
 
   const shipped = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
-  const before = callCount(cv);
   setFloor(host, shipped.value * 2); // a stricter floor -- the selection shrinks
-  const added = fillsOf(callsSince(cv, before), E.base_color);
 
-  // The correct design undoes exactly the PREVIOUS prefix (`shipped.n` blocks) and touches
-  // nothing else -- nowhere near the full base layer. A per-frame rebuild would instead add
-  // another `ct.n_blocks` (16,451) base-colour fills here.
-  assert.equal(added, shipped.n);
-  assert.ok(added < ct.n_blocks,
-    `a floor change repainted ${added} base-colour blocks, not far fewer than ${ct.n_blocks}`);
+  const frame2 = lastFrame(cv as never);
+  assert.equal(frame2.filter((c) => c.op === "drawImage").length, 1,
+    "a floor change should still blit exactly once");
+  const blit2 = frame2.find((c) => c.op === "drawImage")!;
+  assert.equal(blit2.image, offscreen1,
+    "the SAME offscreen canvas must be reused across a floor change, not rebuilt");
+
+  const offscreen2 = offscreenOf(cv);
+  assert.equal(offscreen2.ctx.calls.filter((c) => c.op === "fill").length, ct.n_blocks,
+    "a floor change must not repaint the offscreen base layer -- its fill count must be unchanged");
+});
+
+test("Cape Town's real informal blocks are painted informal_color on the base layer", async () => {
+  // informal_color consumed: an unguarded field is exactly the defect class this fix round is
+  // about, so it gets the same "picked one block and asserted its own colour" treatment as
+  // everything else here, not merely a shape check.
+  const { cv } = await mount();
+  const offscreen = offscreenOf(cv);
+  const informalIndex = ct.informal!.findIndex((v) => v === 1);
+  const plainIndex = ct.informal!.findIndex((v) => v === 0);
+  assert.ok(informalIndex >= 0 && plainIndex >= 0, "sanity: both kinds of block should exist");
+  assert.equal(baseFillColorOf(offscreen, VIEW_CT, ct, informalIndex), E.informal_color);
+  assert.equal(baseFillColorOf(offscreen, VIEW_CT, ct, plainIndex), E.base_color);
+});
+
+test("floor-slider redraws are requestAnimationFrame-coalesced, not synchronous", async () => {
+  const { host, cv } = await mount();
+  const before = callsOf(cv).length;
+
+  const slider = floorSlider(host);
+  slider.value = String(0.02);
+  slider.dispatch("input");
+  // No fireAnimationFrame() yet -- a widget that redrew synchronously on state.set would already
+  // show new calls here.
+  assert.equal(callsOf(cv).length, before,
+    "the canvas redrew synchronously on state.set, before any animation frame fired");
+
+  slider.value = String(0.03); // a second change before the first has ever been flushed
+  slider.dispatch("input");
+  fireAnimationFrame();
+
+  // Coalesced: exactly one new frame (one new drawImage), and it reflects the LATEST value
+  // (0.03), not two frames and not the first (stale) one.
+  const added = callsOf(cv).slice(before);
+  const blits = added.filter((c) => c.op === "drawImage");
+  assert.equal(blits.length, 1,
+    `two rapid floor changes before a flush produced ${blits.length} frames, not one`);
+  const expected = selectAt(ct, ranking(ct, "depth_density_proxy"), scores(ct, "depth_density_proxy"),
+    0.03).count;
+  const drawn = added.filter((c) => c.op === "fill" && c.fillStyle === E.selected_color).length;
+  assert.equal(drawn, expected, "the coalesced frame should reflect the LATEST floor, not the first");
+});
+
+test("an uncalibrated metric defaults to the shipped default's own pool size", async () => {
+  // `density` ships no floors[] entry of its own -- the fallback must not degenerate to "select
+  // every block" (which reports the corpus base rate as a screen's own performance and defeats
+  // city.ts's O(prefix) design outright).
+  const { host, cv } = await mount();
+  setMetric(host, "density");
+
+  const shippedDefault = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
+  const drawn = lastFrame(cv as never)
+    .filter((c) => c.op === "fill" && c.fillStyle === E.selected_color).length;
+  assert.equal(drawn, shippedDefault.n,
+    `density's own default pool should match depth_density_proxy's shipped pool size `
+    + `(${shippedDefault.n}), not select every block`);
+  assert.notEqual(drawn, ct.n_blocks);
 });

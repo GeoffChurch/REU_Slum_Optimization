@@ -28,7 +28,7 @@ export interface PathOp { op: "moveTo" | "lineTo" | "arc" | "closePath"; args: n
  * for parcels, boundary and streets, a single arc for a disk or a handle -- which is how the
  * boundary strokes stay distinguishable from the handle outlines that share their colour. */
 export interface Call {
-  op: "clearRect" | "stroke" | "fill";
+  op: "clearRect" | "stroke" | "fill" | "drawImage";
   strokeStyle: string;
   fillStyle: string;
   lineWidth: number;
@@ -39,6 +39,18 @@ export interface Call {
   lineCap: string;
   globalAlpha: number;
   path: PathOp[];
+  /** The fill rule a `fill()` call was made with -- `"nonzero"` (the real canvas default, and what
+   * every OTHER op is recorded with too, since none of them take one) unless the caller passed
+   * `"evenodd"` explicitly. Added because it used to be silently ignored: `city.ts` fills polygons
+   * that carry interior rings (holes) and MUST pass `"evenodd"`, or the holes render solid, and
+   * nothing before this field existed could tell the two apart from a recorded `Call`. */
+  fillRule: CanvasFillRule;
+  /** Set only on a `drawImage` call: the element that was blitted. In this fake it is always
+   * another `FakeElement` (created via `document.createElement("canvas")`, the way a real offscreen
+   * buffer would be too), so a test can follow this reference to that element's OWN `ctx.calls` --
+   * e.g. to confirm an offscreen base layer was painted once and merely re-blitted on every later
+   * frame, not rebuilt. */
+  image?: FakeElement;
 }
 
 /** Armed by each consumer's own `mount()` helper (via `armDrawFailure`) to make the first drawing
@@ -90,9 +102,20 @@ export class RecordingContext {
   }
   clearRect(): void { this.record("clearRect"); }
   stroke(): void { this.record("stroke"); }
-  fill(): void { this.record("fill"); }
+  /** No `Path2D` overload: nothing in this project ever passes one (checked -- `region.ts`,
+   * `city.ts` and `canvas.ts` all call `fill()` bare or `fill("evenodd")`, always against the
+   * context's OWN current path built via `beginPath`/`moveTo`/`lineTo`/`closePath`), so accepting
+   * one here would be surface area nothing in this codebase exercises. */
+  fill(fillRule?: CanvasFillRule): void { this.record("fill", fillRule); }
+  /** Minimal on purpose: only the 3-argument, unscaled form (`drawImage(image, dx, dy)`) is
+   * modelled -- the only one `city.ts` calls, blitting an offscreen canvas onto the visible one at
+   * its own natural size. `dx`/`dy` are accepted (so the real call shape type-checks against this
+   * fake the same way it does against a real `CanvasRenderingContext2D`) but not recorded: nothing
+   * here needs to assert WHERE a blit landed, only that it happened, once per frame, and which
+   * element it copied from (`Call.image`). */
+  drawImage(image: FakeElement, _dx: number, _dy: number): void { this.record("drawImage", undefined, image); }
 
-  private record(op: Call["op"]): void {
+  private record(op: Call["op"], fillRule?: CanvasFillRule, image?: FakeElement): void {
     if (this.failWith !== null) throw new Error(this.failWith);
     this.calls.push({
       op,
@@ -102,6 +125,8 @@ export class RecordingContext {
       lineCap: this.lineCap,
       globalAlpha: this.globalAlpha,
       path: [...this.path],
+      fillRule: fillRule ?? "nonzero",
+      image,
     });
     this.firstDrawAt ??= ++clock;
   }
@@ -236,17 +261,48 @@ export class FakeResizeObserver {
  * instead of each keeping its own `const DPR = 2` tied to `installStubs()` only by a comment. */
 export const DPR = 2;
 
+/** `window.requestAnimationFrame` stub: QUEUES `cb` (a real browser's rAF queues every call, it
+ * does not collapse repeated calls into one -- coalescing is a property a WIDGET implements on top
+ * of rAF, by guarding its own call to `requestAnimationFrame` behind an "already scheduled" flag,
+ * not a property rAF gives away for free) and returns an id `cancelAnimationFrame` can remove by.
+ * Nothing here fires on its own, the way a real one fires on the next display refresh -- there is
+ * no display -- so a test drives it explicitly with `fireAnimationFrame`, the same shape as
+ * `fireResize` playing layout for `ResizeObserver`. */
+let pendingFrames: [id: number, cb: FrameRequestCallback][] = [];
+let nextFrameId = 0;
+
+/** Flushes every callback currently queued, in the order they were requested -- a widget that
+ * scheduled two rAF callbacks before either fired (the coalescing bug this exists to catch) runs
+ * BOTH here, which is the point: coalescing is proved by a test asserting the WIDGET only ever
+ * queues one, not by this flush silently dropping extras for it. */
+export function fireAnimationFrame(time = 0): void {
+  const frames = pendingFrames;
+  pendingFrames = [];
+  for (const [, cb] of frames) cb(time);
+}
+
 /** Installs the fake globals every canvas widget boot test needs -- `document.createElement`,
- * `window.devicePixelRatio` and `ResizeObserver` -- in place of the three top-level assignments
- * field-boot.test.ts and perm-graph-boot.test.ts each repeated. One call, before anything that might
- * construct a widget; see this module's own docstring for why the exact position relative to a
- * consumer's own static imports does not matter. */
+ * `window.devicePixelRatio`/`requestAnimationFrame`/`cancelAnimationFrame` and `ResizeObserver` --
+ * in place of the three top-level assignments field-boot.test.ts and perm-graph-boot.test.ts each
+ * repeated. One call, before anything that might construct a widget; see this module's own
+ * docstring for why the exact position relative to a consumer's own static imports does not
+ * matter. Also resets the rAF queue, so a test file that (unusually) leaves a frame unflushed
+ * cannot leak it into a later file sharing this module in the same process. */
 export function installStubs(): void {
   (globalThis as Record<string, unknown>).document = {
     createElement: (tag: string): FakeElement => new FakeElement(tag),
   };
   (globalThis as Record<string, unknown>).window = { devicePixelRatio: DPR };
   (globalThis as Record<string, unknown>).ResizeObserver = FakeResizeObserver;
+  (globalThis as Record<string, unknown>).requestAnimationFrame = (cb: FrameRequestCallback): number => {
+    const id = ++nextFrameId;
+    pendingFrames.push([id, cb]);
+    return id;
+  };
+  (globalThis as Record<string, unknown>).cancelAnimationFrame = (id: number): void => {
+    pendingFrames = pendingFrames.filter(([pid]) => pid !== id);
+  };
+  pendingFrames = [];
 }
 
 /** Plays layout: fires the most recently constructed `ResizeObserver` at `width`x`height`, the way
