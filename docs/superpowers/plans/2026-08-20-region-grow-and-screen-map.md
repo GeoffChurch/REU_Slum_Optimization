@@ -21,7 +21,7 @@ Copied verbatim from the spec and from standing project rules. **Every task's re
 * **Never reach into a closed, known-at-authoring-time set with a runtime string, position or count.** Dynamic access must have no default, so an unknown name raises.
 * **mypy dual-list hazard:** `pyproject.toml`'s `typecheck-py` passes **explicit file arguments that override `[tool.mypy] files` entirely**. Both lists must be updated for every new script module. `tests/test_typecheck_config.py` pins them together.
 * **The simplification tolerance is 5 m for the city tier and 1 m for the region neighbourhood** (spec §1.1, §1.2).
-* **Both new bundles carry ring LISTS, not single rings**, and must not use `_bundle_io.polygon_ring`, which raises on holes. 6,990 Cape Town blocks, 1,139 Nairobi blocks, and **3 of `RegionGrow`'s 129 blocks** have interior rings (spec §3.3).
+* **Both new bundles carry ring LISTS, not single rings**, and must not use `_bundle_io.polygon_ring`, which raises on holes. 6,990 Cape Town blocks, 1,139 Nairobi blocks, and **7 of `RegionGrow`'s 213 blocks** have interior rings (spec §3.3).
 * **Any code path calling `region.build()` or `_block_adjacency` must supply projected geometry.** `STREET_TOL = 0.5` is interpreted in the frame's own units; in lon/lat that is ~55 km (spec §1.5).
 * **Test acceptance is fault injection: break the thing the test guards, observe red, restore.** An injection that will not redden is REPORTED, not tuned until it passes. See `~/wiki/pages/methodology/tests-that-cannot-fail.md` — D2 shipped nine tests that passed while guarding nothing.
 * **Tests that load city data are ONE `@pytest.mark.slow` test** carrying every assertion needing the load. `pytest-xdist` scopes `scope="module"` fixtures per worker, not per session; D2 lost 18 minutes to this. Pattern: `tests/test_frontier_bundle.py`.
@@ -444,7 +444,7 @@ Create `tests/test_bundle_io.py`:
 
 ```python
 """`_bundle_io`'s encoders. The multi-ring one exists because 6,990 Cape Town blocks, 1,139
-Nairobi blocks and 3 of RegionGrow's 129 neighbourhood blocks have interior rings -- and
+Nairobi blocks and 7 of RegionGrow's 213 neighbourhood blocks have interior rings -- and
 `polygon_ring`, which the three older bundles use, raises on every one of them."""
 from __future__ import annotations
 
@@ -510,7 +510,7 @@ def polygon_rings(geom: BaseGeometry, ox: float, oy: float, *,
     consumers fill with the even-odd rule.
 
     Measured on the data these bundles are baked from: 6,990 of 16,451 Cape Town blocks and 1,139
-    of 3,500 Nairobi blocks have interior rings, as do 3 of the 129 blocks in RegionGrow's
+    of 3,500 Nairobi blocks have interior rings, as do 7 of the 213 blocks in RegionGrow's
     neighbourhood. Neither city has a single MultiPolygon block, which is why that case raises
     rather than being flattened.
     """
@@ -717,7 +717,7 @@ export interface HoodBlock {
   n: number;
   area_m2: number;
   perimeter_m: number;
-  /** Exterior ring first, then interiors. 3 of the 129 blocks have one. Fill even-odd. */
+  /** Exterior ring first, then interiors. 7 of the 213 blocks have one. Fill even-odd. */
   rings: [number, number][][];
   /** Indices into `blocks`, not block_ids -- the greedy runs over these directly. */
   adj: number[];
@@ -764,9 +764,23 @@ what every `conf/example/*.yaml` actually sets.
    `dwithin(0.5)` mean 55 km (spec §1.5). Task 1 makes the builder itself safe, so this is
    belt-and-braces at the boundary — keep it: it documents the requirement at the call site where a
    future reader will look.
-2. **The accretion at `budget.max` is contained in the shipped neighbourhood.** The 5-hop hood is
-   129 blocks and growth at 10,000 is 54, but containment does **not** follow from those counts: a
-   54-block accretion could in principle reach 53 hops. Assert it.
+2. **The accretion at `budget.max` is contained in the shipped neighbourhood.** Containment does
+   **not** follow from the counts: a 54-block accretion could in principle reach 53 hops.
+
+   **It did not hold at the value this plan first specified.** Measured before Task 4 was
+   dispatched — the budget-10,000 accretion from the pinned seed is 54 blocks reaching a maximum
+   **7 hops**, so the hood must be 7-hop, not 5-hop:
+
+   | hops | blocks in hood | accretion blocks outside it |
+   |---|---|---|
+   | 4 | 90 | 10 |
+   | 5 | 129 | **2** |
+   | 6 | 163 | 1 |
+   | **7** | **213** | **0** |
+
+   `HOPS = 7` is therefore the shipped value, and it is exactly what containment requires — not a
+   round number with margin added, which would be an invented figure of precisely the kind this
+   project keeps catching. Keep the assertion anyway: it is what caught this.
 
 - [ ] **Step 1: Write the failing bundle test**
 
@@ -825,11 +839,14 @@ def test_every_coordinate_is_at_centimetre_precision(bundle: dict) -> None:
 
 
 def test_the_neighbourhood_carries_its_holed_blocks(bundle: dict) -> None:
-    """3 of the 129 blocks have an interior ring, measured. If this drops to 0 the bundle went
+    """7 of the 213 blocks have an interior ring, measured. If this drops to 0 the bundle went
     through `polygon_ring` (which would have raised) or a ring list got flattened -- neither of
     which changes any count the other tests check."""
     holed = [b["block_id"] for b in bundle["blocks"] if len(b["rings"]) > 1]
-    assert sorted(holed) == ["ZAF.9.3.1_1_40664", "ZAF.9.3.1_1_40963", "ZAF.9.3.1_1_41838"]
+    assert sorted(holed) == [
+        "ZAF.9.3.1_1_38616", "ZAF.9.3.1_1_38935", "ZAF.9.3.1_1_40664", "ZAF.9.3.1_1_40963",
+        "ZAF.9.3.1_1_41055", "ZAF.9.3.1_1_41838", "ZAF.9.3.1_1_41976",
+    ]
 
 
 def test_the_shipped_budget_floor_is_a_no_op_on_the_seed(bundle: dict) -> None:
@@ -915,7 +932,7 @@ OUT = Path("examples/region-grow")
 CITY = "capetown"
 SEED = "ZAF.9.3.1_1_40972"
 MIN_COUNT = 30                 # the same filter gen_screen_bakeoff.py applies
-HOPS = 5
+HOPS = 7                 # MEASURED: the budget-10,000 accretion reaches 7 hops; 5 leaves 2 blocks out
 SIMPLIFY_M = 1.0               # region scale: 5 m would be visible here (design §1.2)
 BUDGET = Budget(min=150, max=10_000, step=50, default=3000)
 REFERENCE_BUDGETS = (150, 600, 3000, 10_000)
@@ -1101,7 +1118,7 @@ test("at least one reference order differs from its own sorted order", () => {
 });
 
 test("growth reports reaching the edge of the loaded neighbourhood", () => {
-  // The production builder's own `if not frontier: break`. A budget far past what 129 blocks can
+  // The production builder's own `if not frontier: break`. A budget far past what 213 blocks can
   // supply must stop and SAY so, not silently return a short region.
   const seed = indexOf.get(bundle.seed)!;
   const huge = growth(bundle.blocks, seed, 10 ** 9);

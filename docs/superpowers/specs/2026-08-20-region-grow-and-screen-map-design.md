@@ -95,6 +95,11 @@ Its k-hop neighbourhood, geometry at 1 m through `cm`:
 The whole bundle lands well under 100 KB. Geometry ships at **1 m**, not the tier's 5 m: this widget
 is viewed at region scale where 5 m would be visible, and the difference is a few KB.
 
+> **Corrected during execution.** The table above is why the bake must ASSERT containment rather
+> than infer it. Measured afterwards: the budget-10,000 accretion is 54 blocks but reaches **7 hops**
+> from the seed, so a 5-hop hood leaves 2 of them out and a 4-hop hood leaves 10. The shipped
+> neighbourhood is **7-hop — 213 blocks**. Nothing in the block counts predicted this.
+
 ### 1.3 `max_buildings: 150` is two regimes, not a miscalibration
 
 Measured across the **1,655** Cape Town blocks above the shipped floor
@@ -229,9 +234,11 @@ vanishes from a committed artifact is a wrong picture nobody is looking for.
 
 **Neither bundle routes through that helper.** Both emit a list of rings per block — exterior first,
 interiors after — and fill with the even-odd rule. The city tier has 6,990 Cape Town holes; and
-**`RegionGrow`'s 129-block neighbourhood contains 3 holed blocks** — `ZAF.9.3.1_1_40664`,
-`ZAF.9.3.1_1_40963`, `ZAF.9.3.1_1_41838` — which an earlier draft of this spec missed by writing
+**`RegionGrow`'s 213-block neighbourhood contains 7 holed blocks** — `ZAF.9.3.1_1_38616`,
+`ZAF.9.3.1_1_38935`, `ZAF.9.3.1_1_40664`, `ZAF.9.3.1_1_40963`, `ZAF.9.3.1_1_41055`,
+`ZAF.9.3.1_1_41838`, `ZAF.9.3.1_1_41976` — which an earlier draft of this spec missed by writing
 "ring" in §5.1's schema. Had it shipped, the bake would have raised on the first of them.
+(These were 3 of 129 while the neighbourhood was 5-hop; §1.2's correction to 7 hops moved them.)
 
 Dropping them would not be invisible. A doughnut block filled solid paints over whatever sits in its
 hole, and if the enclosed block fell below `MIN_COUNT` it is not redrawn on top.
