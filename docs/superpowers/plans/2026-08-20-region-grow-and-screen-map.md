@@ -862,9 +862,14 @@ def test_reference_cases_are_prefixes_of_one_another(bundle: dict) -> None:
     """Growth is nested (design §1.4), so for one seed a bigger budget's order must EXTEND a
     smaller one's, not merely contain it. A set-containment assertion would pass against a
     reordering, and order is the whole teaching point."""
-    for seed in {c["seed"] for c in bundle["reference"]}:
+    seeds = {c["seed"] for c in bundle["reference"]}
+    assert seeds, "no reference cases at all would make every loop below iterate zero times"
+    for seed in seeds:
         cases = sorted((c for c in bundle["reference"] if c["seed"] == seed),
                        key=lambda c: c["max_buildings"])
+        # Without this, a seed carrying ONE case makes `zip(cases, cases[1:])` empty and the
+        # assertion below never runs -- the loop passes by not executing.
+        assert len(cases) >= 2, f"{seed} has {len(cases)} reference case(s); nothing to compare"
         for small, big in zip(cases, cases[1:]):
             assert big["order"][:len(small["order"])] == small["order"], (
                 seed, small["max_buildings"], big["max_buildings"])
@@ -1136,6 +1141,10 @@ test("growth is nested in the budget", () => {
   const seed = indexOf.get(bundle.seed)!;
   const small = grow(bundle.blocks, seed, 600);
   const big = grow(bundle.blocks, seed, 3000);
+  // Guard the guard: if the two budgets happened to grow the same region, `big.slice(0, n)`
+  // would equal `small` no matter what the ordering did, and this test would assert nothing.
+  assert.ok(big.length > small.length,
+    `both budgets grew ${big.length} blocks, so nesting is trivially satisfied here`);
   assert.deepEqual(big.slice(0, small.length), small);
 });
 ```
@@ -1710,6 +1719,8 @@ test("the ranking is sorted descending and is a permutation", () => {
 test("selection at each shipped floor reproduces the baked pool size and precision/recall", () => {
   // The bundle's `floors` were READ from the bake-off CSV, which computed them by a different
   // route entirely. Two independent paths agreeing is the strongest guard on this widget.
+  assert.ok(ct.floors.length >= 2,
+    `only ${ct.floors.length} floor(s) in the bundle; this loop would assert almost nothing`);
   for (const f of ct.floors) {
     const metric = f.metric as MetricName;
     const s = scores(ct, metric);
@@ -1736,11 +1747,16 @@ test("raising the floor never enlarges the selection", () => {
   const s = scores(ct, "density");
   const order = ranking(ct, "density");
   let prev = Infinity;
+  const counts: number[] = [];
   for (const floor of [0, 1e-4, 1e-3, 1e-2, 1e-1]) {
     const n = selectAt(ct, order, s, floor).count;
     assert.ok(n <= prev, `floor ${floor} selected ${n} after ${prev}`);
+    counts.push(n);
     prev = n;
   }
+  // A selection that never changes satisfies `n <= prev` at every step while testing nothing.
+  assert.ok(new Set(counts).size > 2,
+    `the floor sweep produced ${new Set(counts).size} distinct pool size(s): ${counts}`);
 });
 ```
 
