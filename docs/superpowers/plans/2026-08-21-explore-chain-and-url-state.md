@@ -866,6 +866,14 @@ Replace line 17 (`export type StateFactory = <T>(initial: T) => StateSource<T>;`
 export type StateFactory<T> = (initial: T) => StateSource<T>;
 ```
 
+**This task DISCHARGES A DEBT.** `web/src/url/store.ts`'s `arrived` comment (Task 2) justifies
+parsing the query once by pointing at `mountAll`'s URL-key collision throw — the case where two
+codecs claim one key is the only one where parse-once and re-read-per-bind differ, and that comment
+says `mountAll` forbids it. As of Task 2 it does not: `mount.ts` is still the pre-Task-3 version.
+Step 2 below is what makes that citation true. If the collision throw is dropped or weakened, go back
+and correct `store.ts`'s comment in the same commit — a comment naming a guard that is nowhere is the
+defect this branch has now caught three times.
+
 - [ ] **Step 2: Rewrite the top of `web/src/mount.ts`**
 
 Replace lines 1-44 (through the end of `showMountError`) with:
