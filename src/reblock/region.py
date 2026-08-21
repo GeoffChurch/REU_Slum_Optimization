@@ -84,8 +84,19 @@ def _shared_parts(blocks: list[Block]) -> tuple[gpd.GeoDataFrame, Polygon | Mult
     `parcel_id` assignment below numbers parcels by member order, while `block_id` and
     `source_content_hash` are both built from `sorted(...)` and would NOT change. Handed members in
     a different order, this would renumber every parcel under an identity the derivation cache
-    treats as unchanged. A no-op when it landed -- `pipeline.build_regions` already passed sorted
-    members -- and the reason builders may now return accretion order safely.
+    treats as unchanged.
+
+    Load-bearing, not inert, for the two growing builders. `pipeline.build_regions` returns each
+    region's Blocks in whichever order `RegionBuilder.build` produced -- accretion order for
+    `DenseClusterRegionBuilder` / `ShapeStandardizingRegionBuilder` -- and nothing re-sorts them
+    before `pipeline.run` passes that straight to `region_reblock(rblocks, ...)`
+    (`pipeline.py:216`), which calls `region_block(blocks)` (`region.py:154`) -> here: one hop
+    from `build_regions` to this sort. For `region_builder=dense_cluster` /
+    `shape_standardizing` (`conf/region_builder/*.yaml`, selectable today, not hypothetical) that
+    member order is genuinely unsorted, and this line is what keeps `parcel_id` numbering
+    consistent with the unchanged `block_id` / `source_content_hash`. It is inert only under the
+    default `identity` builder, whose output is already sorted. Do not delete it as dead
+    insurance.
     """
     crs = _check(blocks, "region_block")
     blocks = sorted(blocks, key=lambda b: b.block_id)

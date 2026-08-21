@@ -20,6 +20,7 @@ from reblock.region import (
     ConvexHullRegionBuilder,
     DenseClusterRegionBuilder,
     IdentityRegionBuilder,
+    RegionBuilder,
     ShapeStandardizingRegionBuilder,
     region_block,
 )
@@ -54,7 +55,9 @@ def _grid(counts: dict[tuple[int, int], float] | None = None,
     IdentityRegionBuilder(),
     ConvexHullRegionBuilder(),
 ], ids=["dense_cluster", "shape_standardizing", "identity", "convex_hull"])
-def test_geographic_frame_grows_the_same_region_as_its_projected_twin(builder: object) -> None:
+def test_geographic_frame_grows_the_same_region_as_its_projected_twin(
+    builder: RegionBuilder,
+) -> None:
     """A frame's CRS must not change which blocks a builder picks.
 
     This is the whole of the §1.5 bug: `dwithin(0.5)` in lon/lat is ~55 km, so before the fix
@@ -62,7 +65,7 @@ def test_geographic_frame_grows_the_same_region_as_its_projected_twin(builder: o
     """
     utm = _grid()
     geo = utm.to_crs("EPSG:4326")
-    assert builder.build(utm, [["1_1"]]) == builder.build(geo, [["1_1"]])   # type: ignore[attr-defined]
+    assert builder.build(utm, [["1_1"]]) == builder.build(geo, [["1_1"]])
 
 
 def test_dense_cluster_returns_accretion_order_not_sorted_order() -> None:
