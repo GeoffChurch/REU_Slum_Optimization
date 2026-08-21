@@ -1155,7 +1155,17 @@ test("the block_id tie-break decides when proxy and count both tie", () => {
   });
   // "b_lower" sorts before "c_upper"; both are identical in n, area and perimeter.
   const blocks = [seed, tie("c_upper"), tie("b_lower")];
-  assert.equal(depthProxy(50, 40000, 800), depthProxy(50, 40000, 800), "the fixture must tie");
+  // Read the FIXTURE, never restated literals. An earlier version of this guard compared
+  // `depthProxy(50, 40000, 800)` to itself -- a tautology that never touched `blocks`, so a
+  // fixture edit making one block win on SCORE instead of the tie-break left every test green
+  // while the test went on claiming to exercise the third sort key.
+  const a = blocks[1]!;
+  const b = blocks[2]!;
+  assert.equal(depthProxy(a.n, a.area_m2, a.perimeter_m),
+               depthProxy(b.n, b.area_m2, b.perimeter_m),
+               "the fixture must tie on the depth proxy, or the third sort key is never reached");
+  assert.equal(a.n, b.n,
+               "and on building_count, the second key -- otherwise the win is decided there");
   const order = grow(blocks, 0, 40).map((i) => blocks[i]!.block_id);
   assert.deepEqual(order, ["seed", "b_lower"],
     "on a full tie the LOWER block_id must win, matching region.py's third sort key");
