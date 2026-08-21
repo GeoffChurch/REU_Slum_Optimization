@@ -1137,6 +1137,30 @@ test("growth does not report the edge when the budget bound it", () => {
   assert.equal(growth(bundle.blocks, seed, bundle.budget.default).stoppedAtEdge, false);
 });
 
+test("the block_id tie-break decides when proxy and count both tie", () => {
+  // SYNTHETIC ON PURPOSE. Task 4 reported that flipping this tie-break in the Python builder
+  // reddened NOTHING: across all 12 reference cases, no accretion step ever has two frontier
+  // blocks with identical depth proxy AND identical building_count, so the third sort key is
+  // never reached on real data. The bundle fixtures therefore cannot exercise it, and a
+  // TypeScript bug in this exact comparison would ship unobserved.
+  //
+  // Real data cannot produce the tie, so the test constructs it: two neighbours identical in
+  // every quantity the first two keys read, differing only in block_id. region.py breaks such a
+  // tie by LOWER block_id (`min(..., key=lambda j: (-score, -count, ids[j]))`).
+  const seed: HoodBlock = {
+    block_id: "seed", n: 10, area_m2: 10000, perimeter_m: 400, rings: [], adj: [1, 2],
+  };
+  const tie = (id: string): HoodBlock => ({
+    block_id: id, n: 50, area_m2: 40000, perimeter_m: 800, rings: [], adj: [0],
+  });
+  // "b_lower" sorts before "c_upper"; both are identical in n, area and perimeter.
+  const blocks = [seed, tie("c_upper"), tie("b_lower")];
+  assert.equal(depthProxy(50, 40000, 800), depthProxy(50, 40000, 800), "the fixture must tie");
+  const order = grow(blocks, 0, 40).map((i) => blocks[i]!.block_id);
+  assert.deepEqual(order, ["seed", "b_lower"],
+    "on a full tie the LOWER block_id must win, matching region.py's third sort key");
+});
+
 test("growth is nested in the budget", () => {
   const seed = indexOf.get(bundle.seed)!;
   const small = grow(bundle.blocks, seed, 600);
