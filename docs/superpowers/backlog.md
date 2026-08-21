@@ -136,8 +136,10 @@ none blocks on a later one.
   `graph_current_after.png` on the Permeability page, booting at the Lens-B prefix the caption quotes
   and running past it to the full 486 m network.
 
-  **Two scope decisions worth knowing.** The city tier (16,451 blocks, ~3 MB) moved to **D**, where
-  `ScreenMap` actually consumes it. And full prefix tables for the REGION flagships were measured at
+  **Two scope decisions worth knowing.** The city tier moved to **D**, where `ScreenMap` actually
+  consumes it — 16,451 blocks, and **not** the "~3 MB" the parent design budgeted: D1 measured it at
+  **843,838 vertices**, which is **~6.4 MB** of JSON at 1 m simplification and **4.5 MB** at 3 m.
+  And full prefix tables for the REGION flagships were measured at
   **~12 hours** of solving, recurring on every examples regeneration — per-flagship numbers are in
   the spec's §1, and whoever first needs a region widget owns that decision. `clearance` on the
   pinned block is 20 segments, so C's own bake is half a second.
@@ -193,9 +195,31 @@ none blocks on a later one.
   index, plus the substrate hardening piece C left as live hazards. **D2 SHIPPED** (spec
   `specs/2026-08-19-displacement-field-widget-design.md`): `DisplacementField` on the Displacement
   page — two draggable roads over one disk per building, a width slider, a second-road toggle, and a
-  live cost readout, over a committed PNG fallback. **D3** is `RegionGrow` then `ScreenMap` last —
-  16k blocks is the only real rendering-performance problem in the design (Canvas, not SVG —
-  recolouring must not touch geometry).
+  live cost readout, over a committed PNG fallback. **D3** is `RegionGrow` then `ScreenMap` last.
+
+  **What D3 needs to know before it starts, because none of it is obvious from the widget names:**
+
+  - **`RegionGrow`'s data does not exist yet, and it is the most invasive of the four — not the
+    cheapest.** `src/reblock/region.py:353` does `result.append(sorted(ids[i] for i in cluster))`,
+    which discards the order blocks were accreted in — *the widget's entire teaching point*. Getting
+    it means changing a shipped `RegionBuilder` contract, so budget for a Python task before any
+    TypeScript. This is the single fact most likely to be discovered mid-task if it is not read first.
+  - **The city tier is ~2× its budget, measured.** 16,451 blocks / 843,838 vertices (mean 51.3 per
+    block) after the `MIN_COUNT = 30` filter: **~6.4 MB** of JSON at 1 m simplification, **4.5 MB** at
+    3 m. Not a blocker — Pages serves compressed and `examples/` is already 395 MB — but **the
+    simplification tolerance is a real design choice with visible angularity at zoom, and D3 owns it**
+    (D1's spec says "D2 owns it", written before the sequencing was settled; ignore that).
+  - **Canvas, not SVG, and recolouring must not touch geometry.** 16k blocks is the only real
+    rendering-performance problem in the whole design.
+  - **A decision D3 owns and does not know it owns:** whether the city tier ships for **Nairobi** at
+    all, and if so without the precision/recall readout, since Cape Town has ground truth and Nairobi
+    has none (`examples/screen-bakeoff/README.md` says so explicitly). Parked in
+    `specs/2026-08-13-site-redesign-design.md`'s Open Questions and marked "a piece-D decision", where
+    a reader working from this backlog would never see it.
+  - **Do not trust the piece column in D1's spec §1 table.** It assigns `ScreenMap`→D2,
+    `DisplacementField`→D3, `RegionGrow`→D4. That was a *dependency* table written before sequencing
+    was settled; D2 ruled against it (parent design §7 puts `ScreenMap` last, and it shipped
+    `DisplacementField`). The table's *measurements* are good; its piece labels are not.
 
   **What D2 closed, beyond its own widget** — five of D1's deferrals, struck in the list below:
 
