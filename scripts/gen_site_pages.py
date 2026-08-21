@@ -45,6 +45,8 @@ OUTPUTS = ROOT / "outputs"
 BAKEOFF = ROOT / "examples" / "screen-bakeoff"
 NAIROBI = ROOT / "examples" / "nairobi"
 PERMGRAPH = ROOT / "examples" / "perm-graph"
+REGIONGROW = ROOT / "examples" / "region-grow"
+SCREENMAP = ROOT / "examples" / "screen-map"
 
 
 def _load_friendly_method_name() -> Callable[[str], str]:
@@ -487,6 +489,133 @@ def _displacement_field_figure() -> str:
     return _figure(img_url,
                    f"the displacement model on block {block}: buildings as disks, shaded by the "
                    f"share of each that the road corridor takes",
+                   caption, attrs=attrs)
+
+
+def _region_grow_figure() -> str:
+    """The Screening page's figure inside *From block to region*: the pinned seed's neighbourhood,
+    with the region `dense_cluster` grows from it -- the browser replays the same greedy
+    `DenseClusterRegionBuilder` runs server-side (region.py's own depth-proxy tie-break), from the
+    raw per-block quantities the bundle ships, never a re-implementation of the rule.
+
+    The fallback PNG stays IN the figure, like every other mount point on this site: `dom/error.ts`
+    tells the reader "the static image above still applies", which is only true while the image is
+    there, so the widget removes it itself and only once it has drawn in its place.
+
+    **The load-bearing claim.** `hood.json`'s `budget.min` (the slider's floor) is not an arbitrary
+    number: on the pinned seed, growth stops there because the seed's OWN building count already
+    meets it, so the region is the seed alone. That is not a miscalibrated default --
+    `max_buildings` counts *blocks* under a data source that reports no per-block building count
+    (every block then counts as one, so the same constant reads as a generous block budget) and
+    counts *buildings* here, where per-block counts run into the hundreds. One constant, two
+    regimes -- see this branch's design spec (the `max_buildings` two-regimes section under its
+    own §1) for the full measurement: 365 of 1,655 screened Cape Town blocks already clear 150 on
+    their own. Every number quoted below is read out of `hood.json`, never typed: mirrors
+    `_displacement_field_figure`'s own decimal-literal-free discipline, which
+    `tests/test_gen_site_pages.py` checks by scanning this function's own source.
+
+    No `data-aspect`: this widget's canvas is square by construction (`region-grow.ts` sets
+    `aspectRatio: 1 / 1`), exactly `_displacement_field_figure`'s reasoning for omitting it there.
+
+    Emits nothing when the artifacts are absent, like every other figure on this site.
+    """
+    path, png = REGIONGROW / "hood.json", REGIONGROW / "hood.png"
+    # The copies ARE the existence test -- `_copy_asset` returns None for a file that is not there.
+    # No `path.exists()` pre-check: `_frontier_figure` has one, which makes its own `bundle_url is
+    # None` branch unreachable (`_displacement_field_figure`'s own reasoning, mirrored here).
+    img_url = _copy_asset(png, "region-grow")
+    bundle_url = _copy_asset(path, "region-grow")
+    if img_url is None or bundle_url is None:
+        return ""
+    bundle = json.loads(path.read_text(encoding="utf-8"))
+    blocks, seed, budget = bundle["blocks"], bundle["seed"], bundle["budget"]
+    seed_block = next(b for b in blocks if b["block_id"] == seed)
+    by_budget = {r["max_buildings"]: r for r in bundle["reference"] if r["seed"] == seed}
+    boot, floor_case = by_budget[budget["default"]], by_budget[budget["min"]]
+    floor_blocks = len(floor_case["order"])
+
+    attrs = f'data-widget="region-grow" data-bundle="{bundle_url}"'
+    caption = (
+        f"Every block in the pinned seed's {len(blocks)}-block neighbourhood, outlined; filled is "
+        f"the region <code>dense_cluster</code> grows from seed <code>{seed}</code> at the "
+        f"slider's default budget of {boot['max_buildings']:,} buildings — {len(boot['order'])} "
+        f"blocks, {boot['buildings']:,} buildings. Click any shipped block to reseed, or drag the "
+        f"budget slider down to its floor of {floor_case['max_buildings']:,} buildings, and the "
+        f"region collapses to <strong>the seed alone</strong> "
+        f"({floor_blocks} {'block' if floor_blocks == 1 else 'blocks'}) — {seed_block['n']:,} "
+        f"buildings on the seed against a {floor_case['max_buildings']:,}-building floor. This is "
+        f"not a miscalibrated default: <code>max_buildings</code> is a <em>block budget</em> "
+        f"under a data source that reports no per-block building count, and a "
+        f"<em>building budget</em> here, where per-block counts run into the hundreds — one "
+        f"constant, two regimes."
+    )
+    return _figure(img_url,
+                   f"the RegionGrow neighbourhood around seed {seed}: the region grown from it at "
+                   f"the slider's default budget",
+                   caption, attrs=attrs)
+
+
+def _screen_map_figure() -> str:
+    """The Screening page's figure after *The shipped screen*'s table: which blocks the chosen
+    metric selects, city-wide, redrawn live as the floor slider moves or the metric changes -- the
+    same arithmetic `reblock.metric` computes, replayed client-side on the raw per-block quantities
+    the bundle ships (design spec's "metrics are computed, not shipped" section, under its own
+    §3), never a copied-in table of scores.
+
+    The fallback PNG stays IN the figure, like every other mount point on this site: `dom/error.ts`
+    tells the reader "the static image above still applies", which is only true while the image is
+    there, so the widget removes it itself and only once it has drawn in its place.
+
+    Two bundles, two mount attributes -- `data-bundle-capetown` and `data-bundle-nairobi`, NOT the
+    single `data-bundle` every other widget on this site uses, because `screen-map.ts` fetches both
+    cities eagerly so its city toggle is an instant client-side swap with no second round trip.
+    `_write_page`'s rewriter has a matching `.replace()` for each of these two exact attribute
+    names, beside its pre-existing one for plain `data-bundle=` -- miss one and that city's fetch
+    404s behind an intact-looking PNG, the exact trap this task's brief is named for.
+
+    **The caption's numbers.** Pool size, precision and recall are read out of `capetown.json`'s
+    own `floors` (never typed), and Nairobi's pool size out of `nairobi.json`'s the same way.
+    Nairobi's precision/recall are never quoted, because they do not exist: no equivalent published
+    informal-structure layer was found for it (`examples/screen-bakeoff/README.md`'s own Caveats),
+    so `nairobi.json`'s floor entries carry `null` there. Stating a number for Nairobi here would
+    publish a validation that never happened.
+
+    No `data-aspect`: this widget's canvas is square by construction (`screen-map.ts` sets
+    `aspectRatio: 1 / 1`), exactly `_displacement_field_figure`'s reasoning for omitting it there.
+
+    Emits nothing when the artifacts are absent, like every other figure on this site.
+    """
+    capetown_path = SCREENMAP / "capetown.json"
+    nairobi_path = SCREENMAP / "nairobi.json"
+    png = SCREENMAP / "screen_map.png"
+    # The copies ARE the existence test -- `_copy_asset` returns None for a file that is not there.
+    # No `path.exists()` pre-check: `_frontier_figure` has one, which makes its own `bundle_url is
+    # None` branch unreachable (`_displacement_field_figure`'s own reasoning, mirrored here).
+    img_url = _copy_asset(png, "screen-map")
+    capetown_url = _copy_asset(capetown_path, "screen-map")
+    nairobi_url = _copy_asset(nairobi_path, "screen-map")
+    if img_url is None or capetown_url is None or nairobi_url is None:
+        return ""
+    capetown = json.loads(capetown_path.read_text(encoding="utf-8"))
+    nairobi = json.loads(nairobi_path.read_text(encoding="utf-8"))
+    cape_floor = next(f for f in capetown["floors"] if f["metric"] == "depth_density_proxy")
+    nai_floor = next(f for f in nairobi["floors"] if f["metric"] == "depth_density_proxy")
+
+    attrs = (f'data-widget="screen-map" data-bundle-capetown="{capetown_url}" '
+             f'data-bundle-nairobi="{nairobi_url}"')
+    caption = (
+        f"Cape Town at the shipped <code>depth_density_proxy</code> floor: gold marks real "
+        f"informal settlements from the City of Cape Town's own survey, the red outline the "
+        f"<strong>{cape_floor['n']:,}</strong> of {capetown['n_blocks']:,} blocks the screen "
+        f"selects — precision <strong>{_pct(cape_floor['precision'])}</strong>, recall "
+        f"<strong>{_pct(cape_floor['recall'])}</strong> against that survey. Switch metric, drag "
+        f"the floor, or toggle to Nairobi — {nai_floor['n']:,} of {nairobi['n_blocks']:,} blocks "
+        f"at the same absolute floor, with no equivalent informal-structure survey to check them "
+        f"against, so no precision or recall is shown for that city."
+    )
+    return _figure(img_url,
+                   "Cape Town screened at the shipped depth_density_proxy floor: gold marks real "
+                   "informal settlements, the red outline marks the blocks the screen selects",
                    caption, attrs=attrs)
 
 
@@ -1191,6 +1320,8 @@ MARKERS: dict[str, Callable[[], str]] = {
     "KEYFIGURES": _key_figures,
     "METHODCOUNT": _method_count,
     "SCREENTABLE": _screen_table,
+    "SCREENMAP": _screen_map_figure,
+    "REGIONGROW": _region_grow_figure,
     "BAKEOFFSCALE": _bakeoff_scale,
     "BAKEOFFFLOORS": _bakeoff_floors_table,
     "BAKEOFFFIGS": _bakeoff_figures,
@@ -1230,14 +1361,19 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
     page nested `depth` levels below docs/ needs ../ per level; MkDocs then rewrites the output
     URL itself.
 
-    `url_depth` -- raw HTML `src="assets/..."`, `href="assets/..."` and `data-bundle="assets/..."`
-    (the widget mount point's fetch URL -- same rule, it is raw HTML too) inside the <figure>
-    blocks. MkDocs does NOT touch raw HTML, so these must already be correct against the page's
-    SERVED url. With use_directory_urls, results/frontier.md is served at
-    <base>/results/frontier/ and methodology/methods/peel.md at
-    <base>/methodology/methods/peel/, so the served depth is not the same as the source depth --
-    results/frontier.md is depth 1 but url_depth 2. Getting this wrong 404s every figure -- or,
-    for data-bundle, silently fails the widget's fetch -- on that page."""
+    `url_depth` -- raw HTML `src="assets/..."`, `href="assets/..."` and every `data-bundle*`
+    mount-point attribute (the widget's own fetch URL -- same rule, it is raw HTML too):
+    `data-bundle` for every widget with one bundle, plus `data-bundle-capetown` and
+    `data-bundle-nairobi` for ScreenMap's two. All are inside the <figure> blocks. MkDocs does NOT
+    touch raw HTML, so these must already be correct against the page's SERVED url. With
+    use_directory_urls, results/frontier.md is served at <base>/results/frontier/ and
+    methodology/methods/peel.md at <base>/methodology/methods/peel/, so the served depth is not
+    the same as the source depth -- results/frontier.md is depth 1 but url_depth 2. Getting this
+    wrong 404s every figure -- or, for a data-bundle* attribute, silently fails the widget's fetch
+    -- on that page. Each bundle attribute name needs its OWN `.replace()` here:
+    `data-bundle="assets/` is not a substring of `data-bundle-capetown="assets/`, so the single
+    pre-existing line for plain `data-bundle=` does not also rewrite the two suffixed names --
+    ScreenMap's own trap, guarded by `tests/test_gen_site_pages.py`."""
     # YAML front matter, when given, sets the page's nav label. Without it MkDocs derives the
     # label from the FILENAME -- "clearance_looped" became "Clearance looped" in the sidebar, not
     # "Looped Tree" -- because it does not read the H1 for nav purposes. Emitting the title here
@@ -1252,6 +1388,8 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
         text = text.replace('src="assets/', f'src="{up}assets/')
         text = text.replace('href="assets/', f'href="{up}assets/')
         text = text.replace('data-bundle="assets/', f'data-bundle="{up}assets/')
+        text = text.replace('data-bundle-capetown="assets/', f'data-bundle-capetown="{up}assets/')
+        text = text.replace('data-bundle-nairobi="assets/', f'data-bundle-nairobi="{up}assets/')
     path.write_text(text, encoding="utf-8")
 
 

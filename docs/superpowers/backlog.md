@@ -190,36 +190,55 @@ none blocks on a later one.
   **One spec §8 open item now measured:** `first_upgraded_at`'s sentinel is genuinely load-bearing —
   **398 of 745** edges are never road-raised even by the full 486 m network, so the field is sparse,
   not dense.
-- **D — the remaining widgets.** Split into three specs. **D1 SHIPPED** (spec
-  `specs/2026-08-16-frontier-widget-and-substrate-hardening-design.md`): `Frontier` on the Methods
-  index, plus the substrate hardening piece C left as live hazards. **D2 SHIPPED** (spec
-  `specs/2026-08-19-displacement-field-widget-design.md`): `DisplacementField` on the Displacement
-  page — two draggable roads over one disk per building, a width slider, a second-road toggle, and a
-  live cost readout, over a committed PNG fallback. **D3** is `RegionGrow` then `ScreenMap` last.
+- **D — the remaining widgets. SHIPPED.** Split into three specs, all three now shipped. **D1
+  SHIPPED** (spec `specs/2026-08-16-frontier-widget-and-substrate-hardening-design.md`): `Frontier`
+  on the Methods index, plus the substrate hardening piece C left as live hazards. **D2 SHIPPED**
+  (spec `specs/2026-08-19-displacement-field-widget-design.md`): `DisplacementField` on the
+  Displacement page — two draggable roads over one disk per building, a width slider, a second-road
+  toggle, and a live cost readout, over a committed PNG fallback. **D3 SHIPPED** (spec
+  `specs/2026-08-20-region-grow-and-screen-map-design.md`): `RegionGrow` and `ScreenMap`, both on
+  the Screening page — a budget slider that replays production's own `DenseClusterRegionBuilder`
+  greedy live in the browser, with any shipped block clickable as a new seed; and a client-side
+  screen-metric selector over 16,451 Cape Town / 3,500 Nairobi blocks, Nairobi shipping the map and
+  pool size but no precision/recall readout (no ground-truth informal-structure layer exists for
+  it). **Piece D is now complete; piece E (the Explore chain) is next.**
 
-  **What D3 needs to know before it starts, because none of it is obvious from the widget names:**
+  **What D3 needed to know before it started — the first four are now CLOSED by D3, kept for the
+  reasoning (piece C's own hazard list above uses the same convention):**
 
-  - **`RegionGrow`'s data does not exist yet, and it is the most invasive of the four — not the
-    cheapest.** `src/reblock/region.py:353` does `result.append(sorted(ids[i] for i in cluster))`,
-    which discards the order blocks were accreted in — *the widget's entire teaching point*. Getting
-    it means changing a shipped `RegionBuilder` contract, so budget for a Python task before any
-    TypeScript. This is the single fact most likely to be discovered mid-task if it is not read first.
-  - **The city tier is ~2× its budget, measured.** 16,451 blocks / 843,838 vertices (mean 51.3 per
-    block) after the `MIN_COUNT = 30` filter: **~6.4 MB** of JSON at 1 m simplification, **4.5 MB** at
-    3 m. Not a blocker — Pages serves compressed and `examples/` is already 395 MB — but **the
-    simplification tolerance is a real design choice with visible angularity at zoom, and D3 owns it**
-    (D1's spec says "D2 owns it", written before the sequencing was settled; ignore that).
-  - **Canvas, not SVG, and recolouring must not touch geometry.** 16k blocks is the only real
-    rendering-performance problem in the whole design.
-  - **A decision D3 owns and does not know it owns:** whether the city tier ships for **Nairobi** at
-    all, and if so without the precision/recall readout, since Cape Town has ground truth and Nairobi
-    has none (`examples/screen-bakeoff/README.md` says so explicitly). Parked in
-    `specs/2026-08-13-site-redesign-design.md`'s Open Questions and marked "a piece-D decision", where
-    a reader working from this backlog would never see it.
+  - ~~**`RegionGrow`'s data does not exist yet, and it is the most invasive of the four — not the
+    cheapest.**~~ — **CLOSED by D3**: `RegionBuilder.build` now returns each group's members in
+    build order (design §4), so `examples/region-grow/hood.json`'s `reference` fixtures pin the
+    browser greedy against production's own accretion order, not a re-implementation of the rule.
+  - ~~**The city tier is ~2× its budget, measured.**~~ — **CLOSED by D3**: the "~2×" figure was an
+    uncompressed-bytes framing — the parent design's ~3 MB budget is met on the wire, 2.20 MB gz for
+    both cities combined at the 5 m simplification tolerance D3 settled on and shipped (design §1.1,
+    §8).
+  - ~~**Canvas, not SVG, and recolouring must not touch geometry.**~~ — **CLOSED by D3**: shipped as
+    Canvas2D with a `Path2D` cache built once at load (`render/city.ts`) and re-filled, never
+    rebuilt, per frame (design §3.2).
+  - ~~**A decision D3 owns and does not know it owns:** whether the city tier ships for
+    **Nairobi**~~ — **CLOSED by D3**: both cities ship; Nairobi shows the map, the floor and the
+    pool size, with no precision/recall readout (design §3.4). The parent spec's Open Question is
+    struck to match (`specs/2026-08-13-site-redesign-design.md`).
   - **Do not trust the piece column in D1's spec §1 table.** It assigns `ScreenMap`→D2,
     `DisplacementField`→D3, `RegionGrow`→D4. That was a *dependency* table written before sequencing
     was settled; D2 ruled against it (parent design §7 puts `ScreenMap` last, and it shipped
     `DisplacementField`). The table's *measurements* are good; its piece labels are not.
+
+  **Recorded so it is not "fixed" later: `max_buildings: 150` is two regimes, not a
+  miscalibration** (design §1.3). Measured across the 1,655 Cape Town blocks above the shipped
+  screening floor: 365 of them (22.1%) already carry ≥150 buildings, so `dense_cluster` at its
+  shipped default is a literal no-op on them; median seed `building_count` above the floor is 88;
+  and on the top 30 blocks by `depth_density_proxy`, budget 150 grows to exactly 1 block — all
+  thirty — where budget 3,000 (what every `conf/example/*.yaml` actually sets) grows the same seeds
+  to 2–15. The reason: `ShapefileSource.block_geometries()` (the default `phule` data source) emits
+  no `building_count`, so every block counts as one and `max_buildings: 150` reads as *up to 150
+  blocks* — sensible. The constant degenerates only on kblock sources, where counts are real and
+  run into the hundreds. Nothing to change — `RegionGrow`'s own caption on the Screening page states
+  this finding directly, with every number read from `examples/region-grow/hood.json`, never typed
+  (`scripts/gen_site_pages.py`'s `_region_grow_figure`). Whoever next touches `max_buildings`'s
+  default should re-read this before "fixing" it against only the kblock regime.
 
   **What D2 closed, beyond its own widget** — five of D1's deferrals, struck in the list below:
 
