@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { boolParam, enumParam, intParam, type UrlCodec } from "../src/url/param.js";
-import { debounce, urlStore } from "../src/url/store.js";
+import { boolParam, enumParam, intParam, stringParam, type UrlCodec } from "../src/url/param.js";
+import { browserLocation, debounce, urlStore } from "../src/url/store.js";
 import { fakeLocation, fakeTimers, writeNow } from "./harness.js";
 
 interface Demo { prefix: number; layer: "conductance" | "current"; halos: boolean }
@@ -93,4 +93,37 @@ test("a drag through the debounce writes once, not once per state change", () =>
   assert.deepEqual(loc.written, [], "not one write yet");
   timers.run();
   assert.deepEqual(loc.written, ["prefix=40"]);
+});
+
+// I3 (review round 1): `browserLocation.replace` used to compose a bare `?search` (or, with an
+// empty search, a bare pathname) with no fragment, which drops it -- silently, since `replaceState`
+// never navigates and the browser's own relative-URL resolution does not carry a fragment forward
+// the way it carries the pathname forward (confirmed against real `URL` resolution while fixing
+// this). This drives the real seam (not `fakeLocation`, which cannot reproduce a bug that is
+// specific to `history.replaceState`'s own argument), stubbing only the two globals `replace`
+// touches, and asserts the literal string `replaceState` is called with -- not the address-bar URL
+// a real browser would resolve it to, which this fake does not compute.
+test("browserLocation.replace preserves the URL fragment", () => {
+  const calls: string[] = [];
+  (globalThis as Record<string, unknown>).window = {
+    location: { pathname: "/explore/", hash: "#displacement" },
+  };
+  (globalThis as Record<string, unknown>).history = {
+    replaceState: (_state: unknown, _title: string, url: string) => { calls.push(url); },
+  };
+  browserLocation().replace("width=12");
+  assert.equal(calls.at(-1), "?width=12#displacement", "non-empty search: no pathname needed here");
+  browserLocation().replace("");
+  assert.equal(calls.at(-1), "/explore/#displacement", "empty search: the pathname branch");
+});
+
+// I4 (review round 1): `enc` had zero direct coverage -- every DEMO/OTHER param above is an
+// int/enum/bool, so no comma is ever encoded, which is exactly the case `enc`'s own docstring is
+// written to justify. `ref`'s value arrives pre-percent-encoded and is decoded by `URLSearchParams`
+// on the way in, so it round-trips back through `enc` as an unclaimed param on the way out.
+test("a comma stays literal; a separator does not", () => {
+  const loc = fakeLocation("ref=a%26b%3Dc");
+  const s = urlStore(loc, writeNow).bind({ road: stringParam("road1") }, { road: "x" });
+  s.set({ road: "132.5,3.8,40.2,113.9" });
+  assert.equal(loc.written.at(-1), "ref=a%26b%3Dc&road1=132.5,3.8,40.2,113.9");
 });

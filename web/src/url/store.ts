@@ -2,9 +2,7 @@
  *
  * `replaceState` only, never `pushState`. Back-to-undo-a-slider is not a behaviour anyone expects,
  * and skipping history entries is what lets four widgets keep their one-way "control writes state"
- * wiring instead of each growing a state-to-control write-back for `popstate` (design §2.2). It is
- * also what keeps this under Safari's `replaceState` rate limit -- roughly 100 calls per 30 s,
- * which a write per `pointermove` inside a single drag would exceed on its own.
+ * wiring instead of each growing a state-to-control write-back for `popstate` (design §2.2).
  */
 import type { StateSource } from "../state.js";
 import type { Param, UrlCodec } from "./param.js";
@@ -12,6 +10,10 @@ import type { Param, UrlCodec } from "./param.js";
 /** The `location`/`history` seam. Injected rather than reached for, so the store is testable
  * without stubbing two globals, and so exactly one place in the codebase knows the browser API. */
 export interface UrlLocation {
+  /** With or without a leading "?" -- `browserLocation`'s returns one (`window.location.search`'s
+   * own contract; "" when there is no query at all); `fakeLocation` in tests does not. Both are
+   * fine here because the only consumer, `new URLSearchParams(...)`, accepts either form; a future
+   * consumer that is not `URLSearchParams` would need to normalize first. */
   search(): string;
   /** `search` is the query WITHOUT its leading "?"; "" means "no query at all". */
   replace(search: string): void;
@@ -21,7 +23,12 @@ export function browserLocation(): UrlLocation {
   return {
     search: () => window.location.search,
     replace: (search) => {
-      history.replaceState(null, "", search === "" ? window.location.pathname : `?${search}`);
+      // The fragment is the reader's position on the page, not this store's state, and every
+      // heading on the site is an anchor (mkdocs.yml's `toc: permalink: true`). A bare `?search`
+      // or bare pathname resolves against the CURRENT url and DELETES the fragment -- silently,
+      // since `replaceState` never navigates, so there is no scroll jump to notice it by.
+      const { pathname, hash } = window.location;
+      history.replaceState(null, "", (search === "" ? pathname : `?${search}`) + hash);
     },
   };
 }
@@ -43,19 +50,14 @@ export type Scheduler = (write: () => void) => void;
 /** Trailing-edge debounce: nothing is written while changes keep arriving, and one write lands
  * `ms` after the last one. A drag therefore produces exactly one URL update, when it settles --
  * both cheaper and more correct than a leading-edge or every-Nth-frame write, which would publish
- * intermediate states nobody was ever looking at. */
+ * intermediate states nobody was ever looking at. It is also what keeps calls under Safari's
+ * `replaceState` rate limit -- roughly 100 calls per 30 s, which a write per `pointermove` inside a
+ * single drag would exceed on its own without it. */
 export function debounce(ms: number, timers: Timers): Scheduler {
   let pending: number | null = null;
-  let latest: (() => void) | null = null;
   return (write) => {
-    latest = write;
     if (pending !== null) timers.clear(pending);
-    pending = timers.set(() => {
-      pending = null;
-      const fn = latest;
-      latest = null;
-      if (fn !== null) fn();
-    }, ms);
+    pending = timers.set(() => { pending = null; write(); }, ms);
   };
 }
 
@@ -64,7 +66,7 @@ export interface UrlStore {
 }
 
 /** Percent-encoding that leaves "," alone. RFC 3986 lists "," as a sub-delim that is legal in a
- * query, and `roadsParam` puts four of them in every segment: `URLSearchParams.toString()` would
+ * query, and `roadsParam` puts three of them in every segment: `URLSearchParams.toString()` would
  * spell `road1=132.5%2C3.8%2C40.2%2C113.9`, which is correct and unreadable, in a URL whose entire
  * purpose is to be pasted into a review. */
 function enc(s: string): string {
@@ -72,9 +74,12 @@ function enc(s: string): string {
 }
 
 export function urlStore(loc: UrlLocation, schedule: Scheduler): UrlStore {
-  // Parsed ONCE, at construction. A later widget binding must see the same query the first one did,
-  // even though the store has by then rewritten `location` -- otherwise the second widget would
-  // read a URL from which the first widget's defaults had already been pruned.
+  // Parsed ONCE, at construction: one parse per PAGE rather than one per widget, and it keeps
+  // `bind` independent of write ordering -- which would matter only if two codecs on the page ever
+  // claimed the same key, a case `mountAll` throws on before the second widget's own `bind` ever
+  // runs (mount.ts). It does NOT protect a later widget from reading pruned defaults: `write()`
+  // re-emits every unclaimed key verbatim, so an earlier widget's own write can never prune what a
+  // later widget reads.
   const arrived: [string, string][] = [...new URLSearchParams(loc.search())];
   const claimed = new Set<string>();
   const contributors: (() => Record<string, string>)[] = [];
@@ -98,10 +103,21 @@ export function urlStore(loc: UrlLocation, schedule: Scheduler): UrlStore {
     bind<T>(codec: UrlCodec<T>, initial: T): StateSource<T> {
       // `Object.keys` over a DECLARED mapped type: a loop over a schema, which is the allowed form
       // of dynamic access -- not a string lookup into a closed set. TypeScript cannot express the
-      // per-key existential, so the two casts below are the standard cost of iterating a mapped
-      // type; nothing outside this loop deals in `keyof T` strings.
+      // per-key existential, so the four casts below (`codec as object`, `as (keyof T)[]`, and
+      // `as Param<T[keyof T]>` at each of the two call sites that read a field off `codec`) are the
+      // standard cost of iterating a mapped type; nothing outside `bind` deals in `keyof T` strings.
       const fields = Object.keys(codec as object) as (keyof T)[];
+      // `Map` is last-wins on a duplicate key; `URLSearchParams.get` is first-wins. A hand-edited
+      // URL with a repeated key therefore decodes differently here than the platform convention a
+      // reader might expect from `.get` -- benign, since the very next write collapses it back to
+      // the one value `current` holds.
       const present = new Map(arrived);
+      // Shallow. `current`'s nested values (e.g. `roads`) stay THE SAME OBJECTS as `initial`'s
+      // until a `.set()` replaces them wholesale, so `same()`'s diff baseline is only trustworthy
+      // if nothing ever mutates `initial` or anything reachable from it in place. Safe today
+      // (`displacement-field.ts` always rebuilds via `.map()`); a widget that instead mutated
+      // `state.get().roads[0].width_m` directly would move the baseline together with the value,
+      // and the key would silently stop being emitted.
       let current = { ...initial };
       let dropped = false;
 
@@ -113,6 +129,9 @@ export function urlStore(loc: UrlLocation, schedule: Scheduler): UrlStore {
           const v = present.get(k);
           if (v !== undefined) got[k] = v;
         }
+        // Every single-key `Param` in param.ts asserts `present[key]!` non-null rather than
+        // checking -- sound only because `decode` below is never called unless at least one of
+        // this param's own keys is present. Skip, don't call, on an empty subset.
         if (Object.keys(got).length === 0) continue;
         const decoded = p.decode(got, initial[field]);
         // No default. An unusable value falls back to the widget's own initial AND is dropped, so
