@@ -708,8 +708,16 @@ def test_the_screening_page_carries_exactly_one_of_each_widget(screening_body: s
 def test_the_region_grow_caption_states_the_two_regimes_finding(screening_body: str) -> None:
     """The finding the widget publishes (design §1.3 / §2.2): at the shipped floor, growth stops
     at the seed alone because `max_buildings` is a block budget under the default data source and
-    a building budget here. Every number is pinned to `hood.json`, never typed -- guarded the same
-    way `test_the_caption_quotes_baked_numbers_and_not_typed_ones` guards the displacement page."""
+    a building budget here. Both halves of the caption's headline numbers -- the default-budget
+    boot state (3,000 buildings / 11 blocks / 3,072 buildings) AND the floor state (150 buildings /
+    1 block / 165 buildings) -- are pinned to `hood.json`, never typed: guarded the same way
+    `test_the_caption_quotes_baked_numbers_and_not_typed_ones` guards the displacement page.
+
+    Fix round 1 (2026-08-21): this test originally asserted only the floor half. A reviewer's
+    fault injection (`boot = by_budget[budget["default"]]` -> `by_budget[600]`, a plausible
+    wrong-key bug producing "default budget of 600 buildings -- 3 blocks, 721 buildings") left it
+    green, because nothing checked that the BOOT numbers in the figure actually came from the
+    `budget["default"]` case. The three `boot`-derived assertions below close that gap."""
     import json
 
     from scripts.gen_site_pages import REGIONGROW
@@ -718,7 +726,7 @@ def test_the_region_grow_caption_states_the_two_regimes_finding(screening_body: 
     blocks, seed, budget = bundle["blocks"], bundle["seed"], bundle["budget"]
     seed_block = next(b for b in blocks if b["block_id"] == seed)
     by_budget = {r["max_buildings"]: r for r in bundle["reference"] if r["seed"] == seed}
-    floor_case = by_budget[budget["min"]]
+    boot, floor_case = by_budget[budget["default"]], by_budget[budget["min"]]
     assert len(floor_case["order"]) == 1, (
         "the pinned seed no longer collapses to itself at the shipped floor; the caption's whole "
         "claim is stale -- re-bake before rewriting this test")
@@ -733,6 +741,12 @@ def test_the_region_grow_caption_states_the_two_regimes_finding(screening_body: 
     assert "block budget" in figure
     assert "building budget" in figure
     assert "two regimes" in figure
+
+    # The boot (default-budget) half -- absent before fix round 1, which is exactly why a wrong
+    # `by_budget` key there was invisible to this test.
+    assert f"{boot['max_buildings']:,}" in figure
+    assert f"{len(boot['order']):,}" in figure
+    assert f"{boot['buildings']:,}" in figure
 
     # ...and no literal number in the PRODUCER itself -- `test_the_caption_quotes_baked_numbers_
     # and_not_typed_ones`'s own reasoning: a number typed as its current value passes every
