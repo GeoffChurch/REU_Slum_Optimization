@@ -26,7 +26,8 @@ export interface HoodEncoding {
   hood_lw: number;
   region_color: string;
   region_lw: number;
-  /** The region fill's opacity -- matches hood.png's own alpha, so JS-on and JS-off draw the same fill. */
+  /** The region fill's opacity -- matches hood.png's own alpha, so JS-on and JS-off draw
+   * the same fill. */
   region_alpha: number;
   seed_color: string;
   frontier_color: string;
