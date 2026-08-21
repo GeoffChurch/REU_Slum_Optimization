@@ -165,10 +165,17 @@ function sameCoords(a: [number, number][], b: [number, number][]): boolean {
 
 /** DisplacementField's two roads and their shared width, over three keys.
  *
- * Exactly two roads of exactly two points each is an invariant of the bundle that
- * `displacement-field.ts`'s `boot` already validates and `liveIndices` already relies on with
- * literal 0/1. This param asserts the same and returns `null` otherwise, rather than inventing a
+ * Road COUNT -- exactly two -- is an invariant of the bundle that `displacement-field.ts`'s `boot`
+ * already validates and `liveIndices` already relies on with literal 0/1; `decode` below re-checks
+ * the same thing (`initial.length !== 2`) and returns `null` otherwise, rather than inventing a
  * geometry the widget cannot draw.
+ *
+ * Points PER road is a separate invariant that this param does NOT check. That each road has
+ * exactly two points is also a property of the bundle, not of this param, and the right place to
+ * enforce a bundle invariant is the single boundary where the bundle is validated once -- `boot`,
+ * again -- not a second check re-derived per-param here. That is the answer for why `fmtSegment`
+ * below can index `r.coords[0]`/`[1]` with no length guard of its own: it is trusting the bundle
+ * boundary to have ruled out anything else, not re-deriving that guarantee at every consumer.
  *
  * One shared width, because `displacement-field.ts`'s width slider writes its value onto EVERY
  * road's `width_m` -- deliberately, so the overlap demonstration stays exact. */
