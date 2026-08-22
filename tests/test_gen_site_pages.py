@@ -652,6 +652,39 @@ def render_page(name: str) -> str:
         return out.read_text(encoding="utf-8")
 
 
+# ----------------------------------------------- the Permeability page's draw-road widget (Task 6)
+
+@pytest.fixture
+def permeability_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    """The rendered Permeability partial -- markers filled, `displacement_body`'s own fixture
+    reasoning applied to this page: `DOCS`/`ASSETS` are redirected so producers don't write into
+    the real tree or race other xdist workers, and `PARTIALS` stays bound to the real repo (bound
+    at import time)."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    return gsp._render_partial("permeability")
+
+
+def test_the_permeability_page_carries_the_draw_road_widget(permeability_body: str) -> None:
+    assert permeability_body.count('data-widget="draw-road"') == 1
+    assert 'data-bundle="assets/authoring/block.json"' in permeability_body
+    assert 'data-wheel="assets/wheels/' in permeability_body
+
+
+def test_the_draw_road_paths_are_rewritten_for_the_served_depth() -> None:
+    """permeability.md serves at <base>/methodology/permeability/ -- url_depth 2. `data-wheel` is
+    a fetch URL exactly as `data-bundle` is, so it needs its own `.replace()` in `_write_page`:
+    `data-bundle="assets/` is not a substring of `data-wheel="assets/`, which is the same trap
+    ScreenMap's two attributes sprang."""
+    page = render_page("permeability")
+    assert 'data-bundle="../../assets/authoring/block.json"' in page
+    assert 'data-wheel="../../assets/wheels/' in page
+    for attr in ("data-bundle", "data-wheel"):
+        assert f'{attr}="assets/' not in page, attr
+
+
 def test_screening_page_mounts_both_widgets() -> None:
     """Each mount point carries data-widget and data-bundle, and the bundle path is relative to
     the GENERATED page's directory (docs/methodology/), not to docs/. D2 shipped `../assets/`

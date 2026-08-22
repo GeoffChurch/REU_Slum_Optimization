@@ -48,6 +48,16 @@ jobs:
         working-directory: web
       - run: npm run build
         working-directory: web
+      # The reblock wheel `micropip` installs into the DrawRoad widget's Pyodide runtime
+      # (data-wheel, copied into docs/assets/wheels/ by gen_site_pages.py's DRAWROAD producer).
+      # `dist/` is gitignored and gen_site_pages.py raises if no wheel is there, so this has to run
+      # before it -- the same pixi task (`pixi run wheel`) and the same command
+      # web/scripts/test.sh already runs for the local suite's Pyodide parity test.
+      - uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          locked: true
+      - name: Build the reblock wheel for Pyodide
+        run: pixi run pip wheel --no-deps --wheel-dir dist .
       - run: python3 scripts/gen_site_pages.py
       # --strict promotes MkDocs' broken-link warnings to build failures (an orphan page -- one
       # outside nav -- only logs at INFO and does NOT fail the build even under --strict, verified

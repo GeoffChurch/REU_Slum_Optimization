@@ -385,6 +385,64 @@ def _perm_graph_figures() -> str:
     return f'{intro}\n\n<div class="sbu-figure-grid">\n' + "".join(figs) + "</div>\n"
 
 
+def _draw_road_figure() -> str:
+    """The Permeability page's one widget that COMPUTES rather than looks up: the reader draws a
+    road, and the browser rebuilds a real `Block` from `examples/authoring/block.json`, boots
+    Pyodide, and calls `reblock.permeability`'s own solver on it -- no baked prefix table, no
+    JS reimplementation of the metric (design §4, §7).
+
+    Two fetch URLs, not one: `data-bundle` is the block, `data-wheel` is the `reblock` wheel
+    `micropip` installs at boot. The wheel is built, never committed (`dist/` is gitignored) --
+    `pyproject.toml`'s `wheel` pixi task builds it for the local suite, and `deploy-site.yml`
+    builds it again before this script runs in CI. Locating it cannot import `reblock` (or
+    anything that would name its own version) under this file's stdlib-only contract, so it globs
+    `dist/reblock-*.whl` rather than a literal filename, and RAISES when none is found -- the same
+    shape `_assert_widget_bundle_present` raises in, naming the build command -- rather than
+    emitting a `data-wheel` that 404s behind an intact-looking page.
+
+    No PNG of its own. Design §6 says every failure mode here "lands on the committed PNG", and
+    the committed PNG is `_perm_graph_figures`'s own "current, before" panel, immediately above --
+    the block with no roads, which is exactly the picture this widget boots showing (its `picture`
+    starts as `pictureOf(BASELINE)`, current layer, no road). Reusing that already-copied asset
+    means a no-JS reader sees the identical picture a JS reader starts from, rather than a second
+    rendering of the same graph baked by a separate script.
+
+    Every number in the caption -- the block id, the parcel count -- is read from `block.json`,
+    never typed.
+    """
+    bundle_path = EXAMPLES / "authoring" / "block.json"
+    bundle_url = _copy_asset(bundle_path, "authoring")
+    img_url = _copy_asset(PERMGRAPH / "graph_current_before.png", "perm-graph")
+    if bundle_url is None or img_url is None:
+        return ""
+
+    wheels = sorted((ROOT / "dist").glob("reblock-*.whl"))
+    if not wheels:
+        raise SystemExit(
+            "no reblock-*.whl found under dist/ -- run `pixi run wheel` to build it (CI builds it "
+            "in deploy-site.yml before scripts/gen_site_pages.py)")
+    wheel_url = _copy_asset(wheels[-1], "wheels")
+    if wheel_url is None:
+        # `wheels[-1]` was just found to exist by the glob above; this is a same-process race
+        # (deleted between the glob and the copy), not a reachable "no wheel built" state -- that
+        # one already raised above. Raising here too rather than emitting a broken `data-wheel`.
+        raise SystemExit(f"{wheels[-1]} vanished between being found and being copied")
+
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    block, n_parcels = bundle["block_id"], len(bundle["parcels"])
+
+    attrs = f'data-widget="draw-road" data-bundle="{bundle_url}" data-wheel="{wheel_url}"'
+    caption = (
+        f"Draw a road on block <code>{block}</code> ({n_parcels} parcels) and this widget solves "
+        f"its real permeability rather than looking one up -- the only figure on this site that "
+        f"computes an answer instead of replaying one baked in advance. Pressing the button below "
+        f"downloads a Python runtime and installs this project's own solver into it, so every "
+        f"edit re-runs the exact metric this page describes rather than an approximation of it."
+    )
+    return _figure(img_url, f"the egress graph on block {block} with no roads, ready to draw on",
+                   caption, attrs=attrs)
+
+
 # ---------------------------------------------------------- the Frontier widget's mount point
 #
 # The widget's colours, labels, stroke widths, tick target and pad are NOT here: fix round 1 moved
@@ -1387,6 +1445,7 @@ MARKERS: dict[str, Callable[[], str]] = {
     # both go through `_perm_graph_panel`, so the two pages cannot quote perm_graph.json two
     # different ways.
     "PERMGRAPHWIDGET": _perm_graph_widget_figure,
+    "DRAWROAD": _draw_road_figure,
     "DISPFIELD": _displacement_field_figure,
     # Already called directly by `gen_benchmark_section()`; registering it here changes nothing
     # there and makes the same figure available to a partial (Explore's Methods stage).
@@ -1425,19 +1484,21 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
     page nested `depth` levels below docs/ needs ../ per level; MkDocs then rewrites the output
     URL itself.
 
-    `url_depth` -- raw HTML `src="assets/..."`, `href="assets/..."` and every `data-bundle*`
-    mount-point attribute (the widget's own fetch URL -- same rule, it is raw HTML too):
-    `data-bundle` for every widget with one bundle, plus `data-bundle-capetown` and
-    `data-bundle-nairobi` for ScreenMap's two. All are inside the <figure> blocks. MkDocs does NOT
-    touch raw HTML, so these must already be correct against the page's SERVED url. With
-    use_directory_urls, results/frontier.md is served at <base>/results/frontier/ and
-    methodology/methods/peel.md at <base>/methodology/methods/peel/, so the served depth is not
-    the same as the source depth -- results/frontier.md is depth 1 but url_depth 2. Getting this
-    wrong 404s every figure -- or, for a data-bundle* attribute, silently fails the widget's fetch
-    -- on that page. Each bundle attribute name needs its OWN `.replace()` here:
-    `data-bundle="assets/` is not a substring of `data-bundle-capetown="assets/`, so the single
-    pre-existing line for plain `data-bundle=` does not also rewrite the two suffixed names --
-    ScreenMap's own trap, guarded by `tests/test_gen_site_pages.py`."""
+    `url_depth` -- raw HTML `src="assets/..."`, `href="assets/..."` and every `data-bundle*`/
+    `data-wheel` mount-point attribute (the widget's own fetch URL -- same rule, it is raw HTML
+    too): `data-bundle` for every widget with one bundle, `data-bundle-capetown` and
+    `data-bundle-nairobi` for ScreenMap's two, and `data-wheel` for DrawRoad's wheel URL. All are
+    inside the <figure> blocks. MkDocs does NOT touch raw HTML, so these must already be correct
+    against the page's SERVED url. With use_directory_urls, results/frontier.md is served at
+    <base>/results/frontier/ and methodology/methods/peel.md at
+    <base>/methodology/methods/peel/, so the served depth is not the same as the source depth --
+    results/frontier.md is depth 1 but url_depth 2. Getting this wrong 404s every figure -- or,
+    for a data-bundle*/data-wheel attribute, silently fails the widget's fetch -- on that page.
+    Each attribute name needs its OWN `.replace()` here: `data-bundle="assets/` is not a substring
+    of `data-bundle-capetown="assets/` or of `data-wheel="assets/`, so the single pre-existing
+    line for plain `data-bundle=` does not also rewrite the suffixed names or `data-wheel` --
+    ScreenMap's own trap, sprung again by DrawRoad's `data-wheel` and guarded the same way by
+    `tests/test_gen_site_pages.py`."""
     # YAML front matter, when given, sets the page's nav label. Without it MkDocs derives the
     # label from the FILENAME -- "clearance_looped" became "Clearance looped" in the sidebar, not
     # "Looped Tree" -- because it does not read the H1 for nav purposes. Emitting the title here
@@ -1454,6 +1515,7 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
         text = text.replace('data-bundle="assets/', f'data-bundle="{up}assets/')
         text = text.replace('data-bundle-capetown="assets/', f'data-bundle-capetown="{up}assets/')
         text = text.replace('data-bundle-nairobi="assets/', f'data-bundle-nairobi="{up}assets/')
+        text = text.replace('data-wheel="assets/', f'data-wheel="{up}assets/')
     path.write_text(text, encoding="utf-8")
 
 

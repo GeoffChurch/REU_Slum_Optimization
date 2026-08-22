@@ -1,13 +1,15 @@
 <!-- Handwritten partial for docs/methodology/permeability.md. scripts/gen_site_pages.py prepends
-     the do-not-edit note and fills one marker, PERMGRAPHFIGS, which reads
+     the do-not-edit note and fills two markers: PERMGRAPHFIGS, which reads
      examples/perm-graph/perm_graph.json and copies the four committed PNGs beside it -- written by
-     scripts/gen_perm_graph.py. Edit HERE, never docs/methodology/permeability.md (it is generated
-     and gitignored). This file is committed but excluded from the built site (see exclude_docs in
-     mkdocs.yml).
+     scripts/gen_perm_graph.py -- and DRAWROAD, which copies examples/authoring/block.json and the
+     built reblock wheel and mounts the draw-your-own-road widget behind one of PERMGRAPHFIGS's own
+     pictures (no PNG of its own -- see _draw_road_figure's docstring). Edit HERE, never
+     docs/methodology/permeability.md (it is generated and gitignored). This file is committed but
+     excluded from the built site (see exclude_docs in mkdocs.yml).
 
      This page otherwise describes a MODEL, so its prose quantities are symbolic parameters
      (g_walk, P*, r_i), never measured values -- no number is typed directly into this file; every
-     figure caption's numbers arrive via the marker. -->
+     figure caption's numbers arrive via a marker. -->
 
 # Permeability
 
@@ -60,3 +62,12 @@ Nodes are parcel centroids. Two layers of edges connect them:
 ## The graph, drawn
 
 <!-- PERMGRAPHFIGS -->
+
+## Draw your own road
+
+Every figure above replays an answer computed in advance. This one does not: draw a road on the
+block and the browser recomputes its permeability from scratch, using the exact solver this page
+describes rather than a lookup table. Nothing downloads until you press the button below — doing
+so fetches a Python runtime and runs the real computation in it.
+
+<!-- DRAWROAD -->
