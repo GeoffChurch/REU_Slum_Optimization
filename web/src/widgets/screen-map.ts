@@ -5,7 +5,7 @@
 import type { Widget } from "../mount.js";
 import type { CityBundle } from "../screen_map.js";
 import type { StateFactory, StateSource } from "../state.js";
-import { enumParam, numberParam, type UrlCodec } from "../url/param.js";
+import { enumParam, nullableNumberParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
@@ -24,8 +24,21 @@ const LABEL = "ScreenMap";
  * (region-grow.ts) applied to a second axis (which city) on top of the first (which metric, at
  * what floor). Keeping all three here is what makes a metric-switch-then-drag sequence replay
  * through the same `scores`/`ranking`/`selectAt` calls every render, instead of the picture and
- * the model drifting apart across two different pieces of mutable state. */
-export interface ScreenState { city: "capetown" | "nairobi"; metric: MetricName; floor: number }
+ * the model drifting apart across two different pieces of mutable state.
+ *
+ * `floor` is `number | null`, and `null` means **this metric's own default** -- exactly what
+ * `syncFloor`'s `preferred` parameter already meant. A resolved number cannot express that: the
+ * four metrics score on unrelated scales (`model/screen.ts`'s own four formulas), so a URL
+ * supplying only `?metric=` would hand the NEW metric the PREVIOUS metric's number, which lands
+ * wherever that number happens to fall in a distribution nobody calibrated it against -- past the
+ * top of the new range at one extreme, below all of it (every block in the city selected) at the
+ * other. Keeping "unset" spellable is also what keeps `?floor=` out of the URL for a reader who
+ * only switched metric (design §1.6). */
+export interface ScreenState {
+  city: "capetown" | "nairobi";
+  metric: MetricName;
+  floor: number | null;
+}
 
 /** All four candidate screens (design §3.1), calibrated or not -- `MetricName`'s own four members,
  * spelled out rather than read off `Object.keys(METRICS)`: an object's keys are plain `string[]`,
@@ -57,7 +70,11 @@ export const SCREEN_MAP_URL: UrlCodec<ScreenState> = {
   // error at `_AllMetricsAreListed`'s declaration (above), rather than a silently short menu and a
   // silently narrower URL grammar.
   metric: enumParam("metric", METRIC_NAMES),
-  floor: numberParam("floor", 6),
+  // Nullable, because `null` is a real value of `ScreenState.floor` -- "this metric's own default"
+  // -- and `nullableNumberParam` spells it as the key's ABSENCE. A reader who only switched metric
+  // therefore publishes no `?floor=` at all, and a `?floor=` this codec refuses falls back to the
+  // initial, which is that same `null` rather than some other metric's number.
+  floor: nullableNumberParam("floor", 6),
 };
 
 /** The metric every OTHER metric's own no-calibration floor default is measured against -- the
@@ -123,12 +140,30 @@ function floorAtShippedPoolSize(bundle: CityBundle, metric: MetricName, sc: Floa
   return sc[order[shipped.n - 1]!]!;
 }
 
-/** The floor slider's live bounds and value for (bundle, metric). `preferred === null` means
- * "reset to this metric's own default": its shipped calibration in `bundle.floors` if it has one,
- * else `floorAtShippedPoolSize`'s own non-invented fallback. Otherwise `preferred` itself, clamped
- * into the freshly computed range -- the city toggle takes this path, since the whole point of an
- * ABSOLUTE floor (design §3.4) is that the same number carries over to a corpus with no
- * calibration at all, rather than being redefined on every switch the way a percentile would be. */
+/** This metric's own default floor: its shipped calibration where `bundle.floors` carries one,
+ * else `floorAtShippedPoolSize`'s own non-invented fallback.
+ *
+ * One function rather than that `??` chain written twice, because `ScreenState.floor` is `null` for
+ * "this metric's own default" and TWO callers now resolve that `null`: `syncFloor` for the SLIDER,
+ * `render` for the PICTURE. (`syncFloor` goes on to clamp what it gets into the slider's live
+ * bounds; that is its contract for an arbitrary `preferred` value, not part of what "the default"
+ * means.)
+ *
+ * Takes the already-computed `sc` rather than calling `scores` again: `render` has it cached beside
+ * `rankedFor`, and re-scoring every block per frame to answer a question already answered would be
+ * waste with no correctness gain. The uncalibrated branch still sorts, inside
+ * `floorAtShippedPoolSize` -- only the scoring is saved. */
+function defaultFloorFor(bundle: CityBundle, metric: MetricName, sc: Float64Array): number {
+  return bundle.floors.find((f) => f.metric === metric)?.value
+      ?? floorAtShippedPoolSize(bundle, metric, sc);
+}
+
+/** The floor slider's live bounds and value for (bundle, metric). `preferred === null` means "reset
+ * to this metric's own default", which `defaultFloorFor` just above resolves. Otherwise `preferred`
+ * itself -- the city toggle takes this path, since the whole point of an ABSOLUTE floor (design
+ * §3.4) is that the same number carries over to a corpus with no calibration at all, rather than
+ * being redefined on every switch the way a percentile would be. Either way the result is clamped
+ * into the range just computed, written to the slider, and returned. */
 function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: MetricName,
                    preferred: number | null): number {
   const sc = scores(bundle, metric);
@@ -137,8 +172,7 @@ function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: Me
     if (v < min) min = v;
     if (v > max) max = v;
   }
-  const shipped = bundle.floors.find((f) => f.metric === metric)?.value ?? null;
-  const target = preferred ?? shipped ?? floorAtShippedPoolSize(bundle, metric, sc);
+  const target = preferred ?? defaultFloorFor(bundle, metric, sc);
   const floor = Math.min(Math.max(target, min), max);
   floorSlider.min = String(min);
   floorSlider.max = String(max);
@@ -247,25 +281,42 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
     host.append(cv, controls);
   }
 
-  const initialCity: ScreenState["city"] = "capetown";
-  const initialMetric: MetricName = "depth_density_proxy";
-  const initialFloor = syncFloor(floorSlider, bundles[initialCity], initialMetric, null);
   const state: StateSource<ScreenState> = makeState({
-    city: initialCity, metric: initialMetric, floor: initialFloor,
+    city: "capetown", metric: "depth_density_proxy", floor: null,
   });
-  metricSelect.value = state.get().metric;
-  cityToggle.checked = state.get().city === "nairobi";
+  // A URL (piece E) may have set any of the three before this line, so all three controls are
+  // written from STATE rather than from the initials above -- and the slider's bounds and value are
+  // resolved against the state's OWN city and metric, with `state.floor` handed straight to
+  // `preferred`, since `null` there already means "this metric's own default" (design §1.6).
+  const s0 = state.get();
+  metricSelect.value = s0.metric;
+  cityToggle.checked = s0.city === "nairobi";
+  const resolved = syncFloor(floorSlider, bundles[s0.city], s0.metric, s0.floor);
+  // `?floor=` is a bare finite number; where it falls in THIS metric's score range is a property of
+  // the fetched bundle, which no codec can know (design §2.3). `syncFloor` has already pinned the
+  // slider to the nearest usable value, so writing that value back is what keeps the control and
+  // the picture on one number -- and the write it triggers rewrites `?floor=` to the clamped value.
+  // Only when the URL actually supplied one: resolving a `null` into state here would publish a
+  // `?floor=` to a reader who never set one, and pin this metric's number across the next metric
+  // switch.
+  if (s0.floor !== null && resolved !== s0.floor) state.set({ floor: resolved });
 
   floorSlider.addEventListener("input", () => state.set({ floor: Number(floorSlider.value) }));
   metricSelect.addEventListener("change", () => {
     const metric = asMetric(metricSelect.value);
-    const floor = syncFloor(floorSlider, bundles[state.get().city], metric, null);
-    state.set({ metric, floor });
+    syncFloor(floorSlider, bundles[state.get().city], metric, null);
+    // `null`, not the number `syncFloor` just wrote onto the slider: both sides resolve `null`
+    // through the same `defaultFloorFor`, and `null` additionally keeps `?floor=` out of the URL
+    // for a reader who only switched metric.
+    state.set({ metric, floor: null });
   });
   cityToggle.addEventListener("change", () => {
     const city: ScreenState["city"] = cityToggle.checked ? "nairobi" : "capetown";
     const s = state.get();
     const floor = syncFloor(floorSlider, bundles[city], s.metric, s.floor);
+    // RESOLVED, never left `null`. `syncFloor`'s own docstring argues that an ABSOLUTE floor
+    // carries across corpora rather than being redefined per city -- pinning the number here is
+    // what carries it, and saying so in the URL is honest, because the reader chose to carry it.
     state.set({ city, floor });
   });
 
@@ -304,7 +355,11 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
       order = ranking(bundle, st.metric);
       rankedFor = { city: st.city, metric: st.metric };
     }
-    const sel = selectAt(bundle, order, s, st.floor);
+    // `null` is "this metric's own default" (`ScreenState`), resolved HERE rather than carried in
+    // state -- which is what draws a `?metric=` that arrived without a `?floor=` at the new
+    // metric's own calibration instead of at the previous metric's number.
+    const floor = st.floor ?? defaultFloorFor(bundle, st.metric, s);
+    const sel = selectAt(bundle, order, s, floor);
     layer.paintFrame(ctx, bundle, view, bundle.encoding, order, sel.count, size);
     // Every number the picture shows is also present as text, computed from the same `sel` the
     // picture was drawn from -- there is no second call to `selectAt` that could disagree with it.

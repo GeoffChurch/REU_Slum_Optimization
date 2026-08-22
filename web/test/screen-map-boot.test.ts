@@ -3,13 +3,14 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { CityBundle } from "../src/screen_map.js";
 import { ranking, scores, selectAt, type MetricName } from "../src/model/screen.js";
-import { localState } from "../src/state.js";
+import type { StateSource } from "../src/state.js";
+import { urlStore } from "../src/url/store.js";
 import { fitBbox, toScreen, type Bbox, type View } from "../src/view/transform.js";
 import {
-  armDrawFailure, canvasOf, Call, DPR, FakeElement, fireAnimationFrame, fireResize, installStubs,
-  lastFrame, mountPoint,
+  armDrawFailure, canvasOf, Call, DPR, fakeLocation, FakeElement, fireAnimationFrame, fireResize,
+  installStubs, lastFrame, mountPoint, writeNow,
 } from "./harness.js";
-import { screenMap } from "../src/widgets/screen-map.js";
+import { screenMap, SCREEN_MAP_URL, type ScreenState } from "../src/widgets/screen-map.js";
 
 installStubs();
 
@@ -50,21 +51,39 @@ const E = ct.encoding;
  * creates during the awaited macrotask below -- the visible one AND `createLayer`'s offscreen one --
  * captures it as its own `RecordingContext.failWith`, region-grow-boot.test.ts's own `mount` doing
  * the same for the same timing reason. Cleared in a `finally` after `fireResize` so a later call to
- * `mount()` with no `drawFailure` is not accidentally armed by a previous test's leftover state. */
-async function mount(width = 700, drawFailure: string | null = null):
-    Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown }> {
+ * `mount()` with no `drawFailure` is not accidentally armed by a previous test's leftover state.
+ *
+ * The state store is the PRODUCTION one (`urlStore` over a `fakeLocation`), never `localState`, so
+ * the URL tests below exercise the real decode path rather than a second, test-only one --
+ * region-grow-boot.test.ts's own `mount` for the same reason. `search` defaults to "": an empty
+ * query decodes nothing, and this widget corrects nothing at boot from it either, so `loc.written`
+ * stays empty until a control is touched and every caller that passes no search gets exactly the
+ * widget's own initial state. */
+async function mount(width = 700, drawFailure: string | null = null, search = ""):
+    Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown;
+              store: StateSource<ScreenState>; loc: ReturnType<typeof fakeLocation> }> {
   const host = mountPoint();
   host.dataset.bundleCapetown = "../examples/screen-map/capetown.json";
   host.dataset.bundleNairobi = "../examples/screen-map/nairobi.json";
   armDrawFailure(drawFailure);
-  screenMap(host as never, localState);
+  const loc = fakeLocation(search);
+  const urls = urlStore(loc, writeNow);
+  let bound: StateSource<ScreenState> | null = null;
+  screenMap(host as never, (initial) => {
+    bound = urls.bind(SCREEN_MAP_URL, initial);
+    return bound;
+  });
   await new Promise((resolve) => setTimeout(resolve, 0));
   try {
     fireResize(width, width);
   } finally {
     armDrawFailure(null);
   }
-  return { host, cv: canvasOf(host) };
+  // Every mount in this file feeds `boot` the two committed bundles, and `boot` reaches `makeState`
+  // before it draws anything -- so even a `drawFailure` mount gets here with a store. A null is a
+  // widget that failed before it.
+  assert.ok(bound !== null, "the widget never asked for a state store");
+  return { host, cv: canvasOf(host), store: bound, loc };
 }
 
 function callsOf(el: unknown): Call[] {
@@ -183,6 +202,14 @@ function callsForBlock(calls: Call[], view: View, bundle: CityBundle, blockIndex
   });
 }
 
+/** Blocks the picture currently shows as SELECTED, in the CURRENT frame -- identified by the
+ * bundle's own `selected_color`, never by a path count (region-grow-boot.test.ts's own layer
+ * helpers carry the reasoning). Stroked, not filled: see `isSelected` just below. */
+function selectedPaths(cv: unknown): Call[] {
+  return lastFrame(cv as never)
+    .filter((c) => c.op === "stroke" && c.strokeStyle === E.selected_color);
+}
+
 /** Whether `blockIndex` is outlined `E.selected_color` in the CURRENT frame on the MAIN canvas.
  * A block that is NOT selected is never stroked on the main canvas at all under this design (it
  * shows through from the blitted offscreen base layer instead), so absence here means "not
@@ -245,8 +272,7 @@ test("the number of selected blocks drawn equals what the model selects", async 
   const order = ranking(ct, "depth_density_proxy");
   const s = scores(ct, "depth_density_proxy");
   const sel = selectAt(ct, order, s, shipped.value);
-  const selectedStrokes = lastFrame(cv as never)
-    .filter((c) => c.op === "stroke" && c.strokeStyle === E.selected_color);
+  const selectedStrokes = selectedPaths(cv);
   assert.equal(selectedStrokes.length, sel.count);
   // Cross-checked against the independently baked pool size too (examples/screen-bakeoff's own
   // route, read into the bundle at bake time) -- the same two-paths-agreeing guard Task 8's own
@@ -264,8 +290,7 @@ test("moving the floor changes the drawn selection", async () => {
   // A widget that computed the selection but drew a constant would pass a count test at one
   // floor. Assert at two floors and require the counts to differ.
   const { host, cv } = await mount();
-  const countAtDefault = lastFrame(cv as never)
-    .filter((c) => c.op === "stroke" && c.strokeStyle === E.selected_color).length;
+  const countAtDefault = selectedPaths(cv).length;
 
   // The single highest-scoring block's own score: raising the floor to it selects (about) one
   // block, a difference that cannot be an artefact of two nearly-identical floors.
@@ -274,8 +299,7 @@ test("moving the floor changes the drawn selection", async () => {
   for (const v of s) if (v > max) max = v;
 
   setFloor(host, max);
-  const countAtMax = lastFrame(cv as never)
-    .filter((c) => c.op === "stroke" && c.strokeStyle === E.selected_color).length;
+  const countAtMax = selectedPaths(cv).length;
 
   assert.notEqual(countAtMax, countAtDefault,
     `floor change produced the same selected count (${countAtDefault})`);
@@ -509,8 +533,7 @@ test("an uncalibrated metric defaults to the shipped default's own pool size", a
   setMetric(host, "density");
 
   const shippedDefault = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
-  const drawn = lastFrame(cv as never)
-    .filter((c) => c.op === "stroke" && c.strokeStyle === E.selected_color).length;
+  const drawn = selectedPaths(cv).length;
   assert.equal(drawn, shippedDefault.n,
     `density's own default pool should match depth_density_proxy's shipped pool size `
     + `(${shippedDefault.n}), not select every block`);
@@ -531,4 +554,95 @@ test("a throw on the first draw is reported and keeps the static image", async (
     /The static image above still applies\./);
   assert.ok(host.querySelector("img") !== null,
     "the fallback image was removed although the drawing that replaces it threw");
+});
+
+test("?metric= alone takes THAT metric's own default floor, not the previous metric's number",
+  async () => {
+    // Design §1.6's row 3, the one a plain write-back gets wrong. Both kinds of metric, because
+    // "this metric's own default" resolves two different ways: `density_compactness` ships a
+    // calibration in `ct.floors`, `depth_proxy` ships none and falls back to the shipped default's
+    // own pool size. Measured against the committed bundle, a write-back of
+    // `depth_density_proxy`'s 0.0128 would select 1 block under `density_compactness` (whose scores
+    // top out at 0.00109, so it clamps to the ceiling) and all 16,451 under `depth_proxy` (whose
+    // scores start at 0.168, so it clamps to the floor) -- neither of them this metric's own pool,
+    // from a URL that asked for nothing unusual.
+    const shippedDefault = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
+    for (const [metric, expected] of [
+      ["density_compactness", ct.floors.find((f) => f.metric === "density_compactness")!.n],
+      ["depth_proxy", shippedDefault.n],
+    ] as const) {
+      const { host, cv, store } = await mount(700, null, `metric=${metric}`);
+      assert.equal(store.get().floor, null,
+        `${metric}: null means "this metric's own default", and stays null`);
+      assert.equal(selectedPaths(cv).length, expected,
+        `${metric}: the picture should draw this metric's own default pool`);
+      const text = readoutText(host);
+      assert.ok(text.includes(`${expected} of ${ct.n_blocks} blocks selected`),
+        `${metric}: the readout should carry that same pool -- "${text}"`);
+    }
+  });
+
+test("?metric= and ?floor= together honour the explicit floor, in state AND on the slider",
+  async () => {
+    // The desync this task closes: `syncFloor` writes the slider BEFORE `makeState`, so a
+    // URL-supplied floor reached the picture and never the control. 0.0004 sits inside
+    // `density_compactness`'s own score range on this bundle (its ceiling is ~0.00109), so nothing
+    // clamps it and the number the reader typed is the number all three report.
+    const { host, cv, store } = await mount(700, null, "metric=density_compactness&floor=0.0004");
+    assert.equal(store.get().metric, "density_compactness");
+    assert.equal(store.get().floor, 0.0004);
+    assert.equal(floorSlider(host).value, "0.0004",
+      "the slider initialised from the metric's own default while the picture drew 0.0004");
+    const expected = selectAt(ct, ranking(ct, "density_compactness"),
+      scores(ct, "density_compactness"), 0.0004).count;
+    assert.equal(selectedPaths(cv).length, expected, "the canvas did not draw the URL's floor");
+  });
+
+test("switching metric drops ?floor= from the URL", async () => {
+  // A metric switch resets to the new metric's own calibration, so the number in the URL is
+  // nobody's choice any more. `floor: null` is what lets the store stop emitting the key at all,
+  // rather than publishing a number the reader never picked on a scale they never saw.
+  const { host, loc } = await mount(700, null, "floor=0.02");
+  // `loc.search()`, not `loc.written`: 0.02 is inside `depth_density_proxy`'s own range on this
+  // bundle, so boot has nothing to correct and nothing has been written yet -- the URL carrying the
+  // floor here is the one the reader arrived with.
+  assert.ok(loc.search().includes("floor="), "precondition: an explicit floor is in the URL");
+  setMetric(host, "density_compactness");
+  assert.equal(loc.written.at(-1), "metric=density_compactness",
+    "a metric switch resets to the new metric's calibration, so no floor belongs in the URL");
+});
+
+test("switching city PINS the floor, carrying the absolute number across corpora", async () => {
+  // `syncFloor`'s own docstring argues that an ABSOLUTE floor carries to a corpus with no
+  // calibration rather than being redefined per city; leaving `floor` null at the switch would
+  // redefine it on every toggle instead. So it is resolved at the switch and said out loud in the
+  // URL, because the reader chose to carry it. Both committed bundles ship 0.0128 for this metric,
+  // so the number below pins THAT the floor was resolved, not which bundle resolved it.
+  const { host, loc, store } = await mount();
+  setCity(host, true);
+  assert.equal(typeof store.get().floor, "number", "resolved at the switch, never left null");
+  const carried = nb.floors.find((f) => f.metric === "depth_density_proxy")!.value;
+  assert.equal(store.get().floor, carried);
+  assert.equal(floorSlider(host).value, String(carried), "the slider should agree with the state");
+  assert.equal(loc.written.at(-1), `city=nairobi&floor=${carried}`,
+    "the emitted query should name both the city and the floor it pinned");
+});
+
+test("an out-of-range ?floor= is clamped AND stops being emitted at that value", async () => {
+  // A codec's validation ends at "is this a finite decimal"; where 999 falls in THIS metric's score
+  // range is a property of the fetched bundle, which no codec can know (design §2.3). Unclamped it
+  // selects nothing at all -- an empty picture from a reader's typo -- while the URL keeps offering
+  // the value that produced it.
+  const { host, cv, loc, store } = await mount(700, null, "floor=999");
+  const s = scores(ct, "depth_density_proxy");
+  let max = -Infinity;
+  for (const v of s) if (v > max) max = v;
+
+  assert.equal(store.get().floor, max, "the state should land on the bundle's own ceiling");
+  assert.equal(floorSlider(host).value, String(max), "the slider should agree with it");
+  assert.equal(selectedPaths(cv).length,
+    selectAt(ct, ranking(ct, "depth_density_proxy"), s, max).count,
+    "the picture should draw the clamped floor's pool, not the empty one 999 selects");
+  assert.equal(loc.written.at(-1), `floor=${Number(max.toPrecision(6))}`,
+    "the URL should self-correct to the clamped value, at the codec's own 6 significant figures");
 });
