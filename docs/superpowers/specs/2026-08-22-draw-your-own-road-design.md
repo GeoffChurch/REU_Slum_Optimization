@@ -222,9 +222,23 @@ policy requires that; nothing else changes.
 without triggering dependency resolution. A dependency added there breaks the browser install and
 nothing in the Python test suite would notice.
 
-**How `reblock` reaches the browser.** `pixi run pip wheel --no-deps --wheel-dir dist .` produces
+**How `reblock` reaches the browser.** A declared `wheel` task —
+`python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist .` — produces
 `reblock-0.1.0-py3-none-any.whl` — **220 KB, pure Python**, measured — which `micropip` installs
-after the runtime's own packages. `--no-deps` is belt-and-braces on top of the empty
+after the runtime's own packages.
+
+*Amended in execution.* This section originally prescribed a bare `pixi run pip wheel …` invoked by
+two consumers from one build. Three things were found by running it. `pixi run pip` resolves `pip`
+off `PATH`, which on a machine with a conda base is a pip from **outside** the environment, so the
+build silently needed the network to fetch an unpinned `hatchling` into a throwaway build
+environment — on every test run and every CI gate; the command is therefore a declared task using
+`python -m pip`, with `hatchling` and `pip` in the dev feature and `--no-build-isolation`. And
+there are three consumers, not two: the local suite (`test-py` depends on the task), `npm test`
+(`web/scripts/test.sh` invokes the same task, so a bare `npm test` from `web/` stays
+self-sufficient), and the deploy — which builds with its own `setup-python` pip and a pinned
+`hatchling` rather than installing a pixi environment, because the deploy path deliberately has no
+science stack and `scripts/gen_site_pages.py` is stdlib-only precisely so it never needs one.
+Measured: the two build paths produce a **byte-identical** wheel. `--no-deps` is belt-and-braces on top of the empty
 `[project] dependencies`: the wheel must never trigger resolution, because every scientific package
 it would resolve is already provided by the distribution and a resolver would try to fetch them from
 PyPI, where no wasm wheel exists.
@@ -300,11 +314,14 @@ live `permeability` as it writes them, so a stale reference cannot survive a re-
 
 This catches, in one test, all three things a static import scan cannot:
 
-1. **A package that left the distribution.** **Measured across every release** (`pyodide-lock.json` at each pinned path): `geopandas` and
-   `pyproj` are present in 0.26.4, 0.27.0 and 0.27.7, **absent in 0.28.0**, and present again in
-   0.29.2. `shapely` is present in every one of them. So the disappearance is **two packages in one
-   release**, not three across two — and it is still the reason to pin, because the two that vanished
-   are load-bearing here.
+1. **A package that left the distribution.** **Measured at seven pinned paths** (`pyodide-lock.json`
+   at each): `geopandas` and `pyproj` are present in 0.26.4, 0.27.0 and 0.27.7, **absent from 0.28.0
+   through 0.29.1 inclusive**, and present again in 0.29.2. `shapely` is present in every one of
+   them. So the disappearance is **two packages across four releases**, not three across two — and
+   it is still the reason to pin, because the two that vanished are load-bearing here.
+   (0.29.0 and 0.29.1 were unmeasured when this section was first written, which made "absent in
+   0.28.0" narrower than the truth and an earlier "absent through 0.29.1" wider than the evidence.
+   Task 5's fix round fetched both rather than retiring the claim.)
    (An earlier draft of this section said `geopandas` was removed in 0.27 and all three were
    disabled in 0.28; Task 3 measured it and neither half was right. The claim came from the parent
    design and was repeated here without checking.)
@@ -338,7 +355,9 @@ refuse to pass silently.
 This is the result the guard exists to produce. A design that had assumed bit-identity would have
 been wrong, and a tolerance picked after seeing a failure would have hidden that.
 
-**Cost.** One Pyodide boot in CI, measured and recorded in the plan. If it exceeds the budget the
+**Cost.** Two Pyodide boots in CI — the parity boot, plus a second minimal interpreter the same
+file starts for its pandas-version assertion — measured and recorded in `web/scripts/test.sh`
+rather than in the plan, since that is where the decision they inform is taken. If it exceeds the budget the
 plan sets, it becomes a separate slower job rather than being deleted.
 
 ---
@@ -348,8 +367,12 @@ plan sets, it becomes a separate slower job rather than being deleted.
 Every one of them lands on the committed PNG, which is what the fallback exists for:
 
 * **No JS, print, a reader who never clicks** — the static egress grid, exactly today's page.
-* **The CDN is unreachable or the pin 404s** — `boot()` rejects, and the failure renders in the
-  figcaption through `dom/error.ts`'s `showWidgetError`, naming the URL that failed.
+* **The CDN is unreachable or the pin 404s** — `boot()` rejects and the failure renders in the
+  widget's own `aria-live` readout, naming what failed. *Amended in execution:* this section
+  originally routed it through `dom/error.ts`'s `showWidgetError`, which was upheld as a divergence
+  at Task 4's review and is not what ships. `showWidgetError` tells the reader "the static image
+  above still applies", and by the time a boot can fail the widget has already removed the fallback
+  image and drawn in its place — so that sentence would be false exactly when it appeared.
 * **Pyodide throws** — a Python traceback is not a reader-facing message, so the widget reports that
   the computation failed and keeps the last good picture rather than clearing to blank.
 * **A road that degenerates** (fewer than two distinct vertices, or a zero-length segment) is refused
@@ -373,32 +396,49 @@ Every one of them lands on the committed PNG, which is what the fallback exists 
 
 ## §8 File structure
 
+Reconciled against the branch after execution, so this table is what shipped rather than what was
+anticipated. Twelve files below were not in the original plan; each note says why it appeared.
+
 **New**
 
 | File | Responsibility |
 | --- | --- |
-| `scripts/gen_authoring_block.py` | bakes `examples/authoring/block.json` + `web/src/authoring.d.ts`; asserts the round trip |
+| `scripts/gen_authoring_block.py` | bakes `examples/authoring/block.json`, `README.md` and `web/src/authoring.d.ts`; asserts the round trip |
 | `examples/authoring/block.json` | the block at full float64 (committed) |
+| `examples/authoring/README.md` | generated beside the bundle, from the same baker |
 | `web/src/authoring.d.ts` | generated, never hand-edited |
 | `web/src/py/runtime.ts` | `PyRuntime`, `pyodideRuntime`, the pinned index URL |
 | `web/src/py/solve.py` | the Python the runtime runs: bundle → `Block` → `permeability` |
 | `web/src/widgets/draw-road.ts` | the widget |
+| `web/scripts/gen-solve-source.mjs` | inlines `solve.py` into the bundle at build time — the browser cannot read a `.py` off disk |
+| `web/scripts/gen-graph-encoding.mjs` | borrows the graph `Encoding` from `perm-graph/bundle.json` at build time; the authoring bundle carries none, being the input to a solve rather than a picture |
 | `web/test/draw-road-boot.test.ts` | boot tests over a fake `PyRuntime` |
 | `web/test/py-runtime.test.ts` | the seam: boot idempotence, error surfacing, road validation |
 | `web/test/pyodide-parity.test.ts` | §5's guard: pinned Pyodide under Node vs the bundle's baked reference |
 | `tests/test_authoring_bundle.py` | schema, `.d.ts` agreement, the round-trip assertion |
+| `tests/test_solve_py.py` | `solve.py` under CPython, and the baked reference answers it must reproduce exactly |
 
 **Modified**
 
 | File | Change |
 | --- | --- |
 | `docs/_partials/permeability.md` | the `<!-- DRAWROAD -->` marker and its framing prose |
-| `scripts/gen_site_pages.py` | the `DRAWROAD` producer and marker |
+| `scripts/gen_site_pages.py` | the `DRAWROAD` producer, the marker, and `_write_page`'s `data-wheel` rewrite |
+| `tests/test_gen_site_pages.py` | the producer's tests, including the stray-wheel guard |
 | `web/src/mount.ts` | `register("draw-road", drawRoad, DRAW_ROAD_URL)` |
-| `web/package.json` | the pinned `pyodide` devDependency |
+| `web/src/render/canvas.ts` | `draw`/`medianEdgeLength` widened from `Bundle` to a `Drawable` interface, so this widget's synthesised picture can use them |
+| `web/src/url/param.ts` | `polylineParam`, for the drawn road in the URL |
+| `web/test/mount.test.ts`, `web/test/url-param.test.ts` | cover the two above |
+| `web/package.json`, `web/package-lock.json` | the pinned `pyodide` devDependency |
+| `web/tsconfig.json`, `web/tsconfig.test.json` | reach the new `web/src/py/` and `web/scripts/` sources |
+| `pyproject.toml`, `pixi.lock` | the `wheel` task, `test-py`'s dependency on it, `hatchling` and `pip` in the dev feature, `solve.py` in both mypy lists |
 | `.gitignore` | `dist/` — the wheel is built, never committed |
-| `web/scripts/test.sh` | how the parity test is selected or deselected, if it needs its own job |
-| `.github/workflows/ci.yml` | the Pyodide job, if §5's measured cost demands a separate one |
+| `web/scripts/test.sh` | builds the wheel and the bundle; records why the parity test runs on the main gate rather than its own job |
+| `.github/workflows/deploy-site.yml` | builds the wheel before `gen_site_pages.py`; `src/reblock/**` and `pyproject.toml` added to the paths filter |
+| `docs/superpowers/specs/2026-08-13-site-redesign-design.md` | the parent spec's Pyodide package history, corrected at its source |
+
+`.github/workflows/ci.yml` is **not** modified: §5's measured cost (≈15 s) was far under the 90 s
+threshold at which the parity test would have earned its own job, so it runs on the existing gate.
 
 ---
 

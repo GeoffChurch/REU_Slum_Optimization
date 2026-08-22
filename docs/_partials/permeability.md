@@ -66,9 +66,10 @@ Nodes are parcel centroids. Two layers of edges connect them:
 ## Draw your own road
 
 Draw a road on the block and the browser recomputes its permeability from scratch, using the
-exact solver this page describes rather than a reimplementation of it. Other figures here already
-recompute as you drag them, but they do it in the site's own JavaScript; this one downloads a
-Python runtime, installs this project into it, and asks the real thing. That download waits until
-you ask for it, so the page costs nothing until you press the button on the figure.
+exact solver this page describes rather than a reimplementation of it. The figure above replays
+answers computed in advance; elsewhere on this site a few figures do recompute as you drag them,
+but in the site's own JavaScript. This one downloads a Python runtime, installs this project into
+it, and asks the real thing. The block's geometry arrives with the page, but the runtime is tens
+of megabytes and is fetched only when you ask for it.
 
 <!-- DRAWROAD -->

@@ -135,7 +135,16 @@ export function pyodideRuntime(
     // receives it on the Python side as an opaque `JsProxy`, not a Python list/dict -- `toPy`
     // recursively converts nested JS arrays/objects into Python lists/dicts, which is what
     // `block_from_bundle`'s dict-subscript reads (`bundle["parcel_id"]`, etc.) actually need.
-    const block = blockFromBundle(pyodide.toPy(bundle));
+    // `toPy` allocates a PyProxy on the JS side; `destroy()` releases that handle, not the Python
+    // object `block_from_bundle` built from it, so the block survives and this does not leak a
+    // handle for the lifetime of the page.
+    const bundleProxy = pyodide.toPy(bundle);
+    let block;
+    try {
+      block = blockFromBundle(bundleProxy);
+    } finally {
+      bundleProxy.destroy();
+    }
     state = { pyodide, block, solveFn };
   })());
 
@@ -146,7 +155,17 @@ export function pyodideRuntime(
         throw new Error("pyodideRuntime.solve: called before boot() resolved");
       }
       const { pyodide, block, solveFn } = state;
-      const resultProxy = solveFn(block, pyodide.toPy(road), bundle.baseline.p0);
+      // Both proxies are released here. `solve` is on the drag path -- Ruling 9 re-solves while a
+      // vertex is dragged -- so a handle leaked per call is a handle leaked per gesture, not per
+      // page. `destroy()` frees the JS-side handle only; `solve.py` has already built its shapely
+      // geometry from the converted list by the time this runs.
+      const roadProxy = pyodide.toPy(road);
+      let resultProxy;
+      try {
+        resultProxy = solveFn(block, roadProxy, bundle.baseline.p0);
+      } finally {
+        roadProxy.destroy();
+      }
       // `dict_converter: Object.fromEntries` turns the outer Python dict into a plain JS object
       // rather than the default `Map`. Its two array-valued fields need no converter of their
       // own: `solve.py`'s `PyResult.potential`/`conductance` are already plain Python lists of

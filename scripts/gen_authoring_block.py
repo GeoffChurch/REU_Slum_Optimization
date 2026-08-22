@@ -1,4 +1,4 @@
-"""Bake examples/authoring/ -- the block the draw-your-own-road widget will rebuild in the browser.
+"""Bake examples/authoring/ -- the block the draw-your-own-road widget rebuilds in the browser.
 
 Three consumers are named throughout, because they are what the bundle's shape is FOR:
 `web/src/widgets/draw-road.ts` mounts it, `web/test/pyodide-parity.test.ts` checks a browser's
@@ -7,7 +7,7 @@ reconstruction both of those run -- this baker loads `block_from_bundle` and the
 family of `TypedDict`s back from it (see `_load_solve_module` and the `TYPE_CHECKING` import
 below) rather than keeping its own copies.
 
-The widget will run `reblock.permeability` itself, under Pyodide, on a road the reader drew. So this
+The widget runs `reblock.permeability` itself, under Pyodide, on a road the reader drew. So this
 bundle is not a picture: it is the INPUT to a solve, and the browser rebuilds a real `Block` from
 it before calling the real solver. What it carries beyond the geometry is the road-INVARIANT half
 of the egress graph (design §1.6) -- parcel centroids, the footpath edge list, which parcels front
@@ -304,7 +304,7 @@ def readme_markdown(bundle: AuthoringBundle) -> str:
 
 # The authoring block
 
-The block the site's DrawRoad widget will rebuild in the browser. It carries no picture: the widget
+The block the site's DrawRoad widget rebuilds in the browser. It carries no picture: the widget
 boots Pyodide, installs the `reblock` wheel, rebuilds a real `Block` from `block.json` and calls
 `reblock.permeability`'s own solver on whatever road the reader drew. Nothing here is a
 re-implementation of the metric, which is the entire reason this stage boots a Python runtime.

@@ -467,10 +467,10 @@ def _draw_road_figure() -> str:
     attrs = f'data-widget="draw-road" data-bundle="{bundle_url}" data-wheel="{wheel_url}"'
     caption = (
         f"Block <code>{block}</code>, {n_parcels} parcels, drawn with no roads &mdash; the state "
-        f"the widget starts from. Every other live figure on this site recomputes its answer in "
-        f"TypeScript written to agree with the Python; this one installs the Python and asks it, "
-        f"so what you read here is the same solver the rest of the page describes rather than a "
-        f"second implementation of it."
+        f"the widget starts from. Other figures on this site either replay an answer baked in "
+        f"advance or recompute one in the site&rsquo;s own TypeScript; this is the only one that "
+        f"installs this project into the browser and asks it directly, so the number it gives "
+        f"back comes from the same solver the rest of this page describes."
     )
     return _figure(img_url, f"the egress graph on block {block} with no roads, ready to draw on",
                    caption, attrs=attrs)

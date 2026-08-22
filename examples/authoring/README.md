@@ -3,7 +3,7 @@
 
 # The authoring block
 
-The block the site's DrawRoad widget will rebuild in the browser. It carries no picture: the widget
+The block the site's DrawRoad widget rebuilds in the browser. It carries no picture: the widget
 boots Pyodide, installs the `reblock` wheel, rebuilds a real `Block` from `block.json` and calls
 `reblock.permeability`'s own solver on whatever road the reader drew. Nothing here is a
 re-implementation of the metric, which is the entire reason this stage boots a Python runtime.

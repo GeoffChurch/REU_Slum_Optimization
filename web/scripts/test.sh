@@ -65,16 +65,19 @@ npm run build || exit 1
 # dist/ is gitignored, so a fresh checkout has NO wheel (the test says so by name and prints this
 # command), and a checkout that already has one would otherwise have the parity test measure
 # whatever src/reblock looked like when that wheel was last built rather than what it looks like
-# now -- which is the one thing a parity guard must not do. `pixi run` rather than a bare `pip` so
-# this works from a plain shell as well as from `pixi run test`; nesting it inside an outer `pixi
-# run` was measured to work and to keep cwd. `..` is the project directory (pyproject.toml lives
-# one level up from web/). Micropip never tries to resolve the scientific stack from PyPI because
-# [project] dependencies is empty: the built wheel's METADATA carries no Requires-Dist at all
-# (unzipped and checked), so there is nothing to resolve, and --no-deps cannot change that -- a
-# flag on `pip wheel` has no way to alter metadata that pip itself already wrote from
-# `pyproject.toml`. What --no-deps actually does IS an optimisation: it stops pip from also
-# resolving and writing any dependency wheels into ../dist alongside reblock's own. Harmless
-# today (there are none to resolve), but the reason to keep the flag if dependencies ever stops
+# now -- which is the one thing a parity guard must not do.
+#
+# This invokes pyproject.toml's `wheel` task rather than repeating its command, so the flags and
+# the output directory live in exactly one place; `pixi run` (not a bare task runner) so this
+# works from a plain shell as well as from `pixi run test`, and nesting it inside an outer `pixi
+# run` was measured to work. The task writes to the project's own dist/, which is the ../dist
+# this script's WHEEL path names from web/.
+#
+# Micropip never tries to resolve the scientific stack from PyPI because [project] dependencies is
+# empty: the built wheel's METADATA carries no Requires-Dist at all (unzipped and checked), so
+# there is nothing to resolve. The task's own --no-deps does not affect that -- a flag on `pip
+# wheel` cannot alter metadata pip already wrote from pyproject.toml -- it only stops pip writing
+# dependency wheels into dist/ alongside reblock's own, which matters if dependencies ever stops
 # being empty.
 pixi run wheel || exit 1
 

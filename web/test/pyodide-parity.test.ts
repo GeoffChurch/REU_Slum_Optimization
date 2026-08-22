@@ -81,7 +81,7 @@ const PARITY_TOL = 1e-15;
  */
 const LOCAL_INDEX_URL = `${resolve("node_modules/pyodide")}/`;
 
-/** The `reblock` wheel `micropip` installs, as `pixi run pip wheel` names it.
+/** The `reblock` wheel `micropip` installs, named as pyproject.toml's `wheel` task builds it.
  *
  * `scripts/test.sh` rebuilds this immediately before running the suite, so what is installed here
  * is this checkout's `src/reblock` rather than whatever a previous build left behind. */
@@ -120,8 +120,8 @@ async function boot(): Promise<number> {
     // one. Without this, `micropip.install` fails on a missing `file://` URL from inside Python
     // and the traceback says nothing about how to fix it.
     throw new Error(
-      `${WHEEL} does not exist. Build it with \`pixi run pip wheel --no-deps --wheel-dir dist .\` `
-      + `from the repo root, or run the suite through \`npm test\`, which builds it first.`);
+      `${WHEEL} does not exist. Build it with \`pixi run wheel\` from the repo root, or run the `
+      + `suite through \`npm test\`, which builds it first.`);
   }
   const started = performance.now();
   await runtime.boot();

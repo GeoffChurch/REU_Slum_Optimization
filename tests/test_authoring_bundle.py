@@ -1,4 +1,4 @@
-"""The authoring bundle: the block Pyodide will rebuild, at full precision.
+"""The authoring bundle: the block Pyodide rebuilds, at full precision.
 
 Full float64 and not the cm-rounded form every render bundle ships. MEASURED on this bundle's own
 reference roads (`scripts/gen_authoring_block.REFERENCE_ROADS`): rounding every coordinate to
