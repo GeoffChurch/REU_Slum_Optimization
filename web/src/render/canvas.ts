@@ -14,10 +14,15 @@ import { toScreen, type View } from "../view/transform.js";
  * `prefix` carries only the two per-prefix arrays `draw` indexes; `Bundle.prefix`'s
  * `permeability`/`road_m` are the caption's numbers, never the picture's. */
 export interface Drawable {
+  /** One entry per RING, not per parcel -- `draw` strokes each entry as a closed outline and never
+   * asks which parcel it belongs to. `Bundle.parcels` happens to be one ring per parcel (its baker
+   * calls `polygon_ring`, which raises on a parcel with holes), and DrawRoad flattens the
+   * authoring bundle's per-parcel ring lists into the same flat list. Both draw identically. */
   parcels: [number, number][][];
-  /** The block's exterior ring. `draw` strokes one ring; a block boundary with interior rings
-   * (`AuthoringBlock.boundary` allows them) has them dropped, exactly as `gen_web_bundle.py`'s
-   * own `polygon_ring` drops them when it bakes this field. */
+  /** The block's exterior ring, and the only ring `draw` strokes for the boundary. Neither
+   * producer hands it a block WITH interior rings: `scripts/_bundle_io.py`'s `polygon_ring`
+   * RAISES on one rather than dropping the holes ("report this instead of silently dropping
+   * geometry"), and `draw-road.ts` refuses the same shape at boot for the same reason. */
   boundary: [number, number][];
   streets: [number, number][][];
   nodes: { cx: number[]; cy: number[]; ground_g: number[] };

@@ -21,7 +21,9 @@ import { draw, sizeCanvas, type Drawable } from "../render/canvas.js";
 import { GRAPH_ENCODING, GRAPH_ENCODING_BLOCK_ID } from "../render/graph-encoding.generated.js";
 import type { StateFactory, StateSource } from "../state.js";
 import { polylineParam, type UrlCodec } from "../url/param.js";
-import { fitBbox, toScreen, toWorld, type Bbox, type View } from "../view/transform.js";
+import {
+  fitBbox, nearest, toScreen, toWorld, type Bbox, type View,
+} from "../view/transform.js";
 
 /** The name every failure of this widget is reported under -- see region-grow.ts's own `LABEL`
  * for why one constant rather than a string repeated at each call site. */
@@ -52,7 +54,9 @@ export const DRAW_ROAD_URL: UrlCodec<DrawRoadState> = {
  * plus packages, not something this file measured. It is on the button because this widget lands
  * on a prose page a reader may reach with no intention of computing anything (design §3), so the
  * control has to read as an explicit opt-in rather than as decoration. */
-const BOOT_IDLE = "Load the Python runtime (~25-35 MB download)";
+const BOOT_LABEL = "Load the Python runtime";
+const BOOT_COST = "~25-35 MB download";
+const BOOT_IDLE = `${BOOT_LABEL} (${BOOT_COST})`;
 const BOOT_LOADING = "Loading the Python runtime...";
 const BOOT_READY = "Python runtime loaded";
 const BOOT_FAILED = "The Python runtime did not load";
@@ -70,8 +74,9 @@ const NEEDS_TWO_POINTS =
 const DRAW_A_ROAD =
   "Click points on the block to draw a road, then press Enter or double-click to solve it.";
 
-const NEEDS_RUNTIME =
-  "Press “Load the Python runtime” above to solve a road you have drawn.";
+/** Quotes `BOOT_LABEL` rather than repeating it: the readout points at a button, and a hand-typed
+ * copy of its words would go on naming a button that no longer says that. */
+const NEEDS_RUNTIME = `Press “${BOOT_LABEL}” above to solve a road you have drawn.`;
 
 /** Builds a `PyRuntime` for a fetched bundle. Injected into `drawRoadWidget` rather than reached
  * for, exactly as `StateFactory` is (state.ts): the widget cannot tell whether it holds real
@@ -82,7 +87,7 @@ export type PyRuntimeFactory = (bundle: AuthoringBlock, wheelUrl: string) => PyR
 /** At least two points, and that is the whole rule.
  *
  * One predicate with two callers -- `settle` (may this road be published to the URL?) and
- * `solveRoad` (may this road be handed to the runtime?) -- so the arity a road must have is
+ * `pumpSolve` (may this road be handed to the runtime?) -- so the arity a road must have is
  * written once rather than spelled twice and drifting. */
 function isSolvable(road: [number, number][]): boolean {
   return road.length >= 2;
@@ -150,8 +155,17 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
     throw new Error(`${LABEL}: the drawing scale was baked for block ${GRAPH_ENCODING_BLOCK_ID}, `
       + `but this bundle is block ${ab.block_id}`);
   }
+  // ONE ring, and refused otherwise rather than silently drawn as its exterior alone.
+  // `scripts/_bundle_io.py`'s `polygon_ring` -- the function that bakes this same field for every
+  // render bundle -- RAISES on a Polygon with interiors ("report this instead of silently dropping
+  // geometry"), and `draw` strokes a single ring, so this mirrors the Python instead of inventing
+  // a quieter rule. `AuthoringBlock.boundary` is typed as a ring LIST because the baker preserves
+  // whatever the source had; the pinned block has one ring, so nothing changes today.
   const boundary = ab.boundary[0];
-  if (boundary === undefined) throw new Error(`${LABEL}: the bundle carries no block boundary`);
+  if (boundary === undefined || ab.boundary.length !== 1) {
+    throw new Error(`${LABEL}: the block boundary has ${ab.boundary.length} rings, and this `
+      + `figure draws one`);
+  }
 
   const caption = host.querySelector("figcaption");
 
@@ -330,6 +344,10 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
   // fires just moves WHICH state the eventual `render` reads, it never queues a second one.
   // `frameScheduled` is the guard that makes this coalescing rather than merely async:
   // `requestAnimationFrame` on its own queues every call it is given (harness.ts's own comment).
+  //
+  // The frame drains the SOLVE queue too (design §4: "a single-frame coalesce ... is the only
+  // throttling needed"), so a drag that produces twenty pointermoves between two frames asks for
+  // one solve, not twenty.
   let frameScheduled = false;
   const scheduleRender = (): void => {
     if (frameScheduled) return;
@@ -340,10 +358,44 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
     requestAnimationFrame(() => runOrReport(host, LABEL, () => {
       frameScheduled = false;
       render();
+      pumpSolve();
     }));
   };
 
-  /** Hand one road to the runtime, or say why not.
+  /** The road waiting to be solved, and whether one is running.
+   *
+   * Latest-wins, and never two at once. A drag re-solves (design §1.3 measured one solve at 0.06 s
+   * expressly so the number could move WITH the road), and Pyodide is one interpreter on one
+   * thread: issuing a second solve before the first returns would queue work behind it and let two
+   * answers land out of order, so the picture could end up showing the older road. Holding one
+   * pending road instead means what is drawn is always the most recent one asked for. */
+  let requested: [number, number][] | null = null;
+  let solving = false;
+
+  const requestSolve = (road: [number, number][]): void => {
+    requested = road;
+    scheduleRender();
+  };
+
+  /** The runtime's two arrays against the mesh they are indexed into.
+   *
+   * `boot` checked IDENTITY (`block_id`); this is ARITY, and it is the half that fails silently. A
+   * short `potential` makes `r.potential[rows[k]]` undefined, so every current is NaN, so
+   * `rampColor` indexes the ramp with NaN and returns `undefined` -- and assigning `undefined` to
+   * `ctx.fillStyle` is IGNORED by a browser rather than raising. The reader would get a subtly
+   * wrong picture with nothing anywhere to say so. Task 5's parity test compares the runtime's
+   * NUMBERS against CPython's; it does not exercise this widget's indexing, so it cannot cover
+   * this. */
+  const checkArity = (r: PyResult): void => {
+    if (r.potential.length !== ab.nodes.cx.length
+        || r.conductance.length !== ab.edges.rows.length) {
+      throw new Error(`${LABEL}: the runtime returned ${r.potential.length} potentials and `
+        + `${r.conductance.length} conductances for a mesh of ${ab.nodes.cx.length} parcels and `
+        + `${ab.edges.rows.length} edges`);
+    }
+  };
+
+  /** Hand the pending road to the runtime, or say why not.
    *
    * The `isSolvable` refusal is the widget's half of the arity check `solve.py` also performs; the
    * point of having it here is that the reader is told what is wrong instead of being shown a
@@ -351,8 +403,12 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
    * `boot()` has already resolved and `pyodideRuntime`'s own implementation refuses a call that
    * arrives before it has (py/runtime.ts -- an `async` method, so the refusal is a rejection,
    * pinned in py-runtime.test.ts). It never boots on the caller's behalf, because a reader who
-   * does not press the button must never pay for the download. */
-  const solveRoad = (road: [number, number][]): void => {
+   * does not press the button must never pay for the download -- and drawing before booting is a
+   * thing this widget supports, so this gate is on the ordinary path, not an edge of one. */
+  function pumpSolve(): void {
+    if (requested === null || solving) return;
+    const road = requested;
+    requested = null;
     if (!isSolvable(road)) {
       readout.textContent = NEEDS_TWO_POINTS;
       return;
@@ -361,34 +417,46 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
       readout.textContent = NEEDS_RUNTIME;
       return;
     }
+    solving = true;
     void runtime.solve(road)
       .then((r) => {
+        checkArity(r);
         picture = pictureOf(r);
         readout.textContent = `${r.roadMetres.toFixed(0)} m of road · `
           + `${(r.permeability * 100).toFixed(1)}% permeability`;
-        scheduleRender();
       })
       .catch((err: unknown) => {
-        // `picture` is deliberately untouched: the last good one stays on the canvas and the
-        // reader is told what failed, rather than being left with a blank figure (design §6). A
-        // Python traceback is not a reader-facing message, so the cause is quoted inside a
+        // `picture` is deliberately untouched: the last good GRAPH stays on the canvas and the
+        // reader is told what failed, rather than being left with a blank figure (design §6). The
+        // road overlay is a different matter -- `settle` has already published the road that
+        // failed, so the stroke a reader sees is the road they drew over the graph of the last one
+        // that solved, and the sentence says exactly that rather than claiming both are old.
+        // A Python traceback is not a reader-facing message, so the cause is quoted inside a
         // sentence that says what it was doing.
         const cause = err instanceof Error ? err.message : String(err);
-        readout.textContent = `The solve failed (${cause}). The picture is the last road that `
-          + `solved.`;
+        readout.textContent = `The solve failed (${cause}). The graph above is the last road `
+          + `that solved.`;
+      })
+      // Whatever happened, the next request may run and the frame that shows the result is due.
+      // Only `scheduleRender` here: its own frame calls `pumpSolve`, so a request that arrived
+      // while this one was running is picked up there rather than down a second path.
+      .finally(() => {
+        solving = false;
+        scheduleRender();
       });
-  };
+  }
 
   const settle = (): void => {
     const road = withoutRepeats(pending);
     pending = [];
     hover = null;
-    // Published to the URL only if it is a road. A one-point "road" spelled into `?road=` would be
-    // a query `polylineParam` refuses to decode, so the reader would watch it disappear on the
-    // next load.
+    // Published to the URL only if it is a road -- a one-point "road" spelled into `?road=` is a
+    // query `polylineParam` refuses to decode, so the reader would watch it disappear on the next
+    // load. It is published BEFORE the solve rather than after, because drawing a road while the
+    // runtime is still unloaded is a supported order (the boot handler solves whatever is in hand)
+    // and deferring the write would lose the road the reader drew.
     if (isSolvable(road)) state.set({ road });
-    solveRoad(road);
-    scheduleRender();
+    requestSolve(road);
   };
 
   const clear = (): void => {
@@ -423,29 +491,91 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
           // refusal the reader did not trigger; `NEEDS_TWO_POINTS` stays a refusal.
           const road = state.get().road;
           if (road.length === 0) readout.textContent = DRAW_A_ROAD;
-          else solveRoad(road);
+          else requestSolve(road);
         },
         (err: unknown) => {
           bootButton.textContent = BOOT_FAILED;
           const cause = err instanceof Error ? err.message : String(err);
-          readout.textContent = `The Python runtime could not load (${cause}). The picture is `
-            + `this block with no new road.`;
+          readout.textContent = `The Python runtime could not load (${cause}). The graph above `
+            + `is this block with no new road.`;
         },
       );
     })();
   });
 
+  /** How near a vertex a press has to land to grab it rather than place a new one, in SCREEN
+   * pixels. Screen, not metres: the tolerance a pointer has is a property of the display, and a
+   * world-space radius would grab vertices a reader cannot even tell apart at a zoomed-out fit. */
+  const GRAB_PX = 8;
+
+  /** Index of the settled road's vertex under `(sx, sy)`, or -1 if the press is not on one.
+   *
+   * `nearest` (view/transform.ts) does the search in whatever space it is handed -- SCREEN here,
+   * exactly as Frontier's hover uses it -- and this adds the radius it deliberately does not
+   * have: without one, every press anywhere on the canvas would "hit" the closest vertex and no
+   * new vertex could ever be placed. */
+  const vertexAt = (sx: number, sy: number): number => {
+    const road = state.get().road;
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const [x, y] of road) {
+      const [px, py] = toScreen(view, x, y);
+      xs.push(px);
+      ys.push(py);
+    }
+    const i = nearest(xs, ys, sx, sy);
+    if (i < 0) return -1;
+    const dx = xs[i]! - sx;
+    const dy = ys[i]! - sy;
+    return dx * dx + dy * dy <= GRAB_PX * GRAB_PX ? i : -1;
+  };
+
   const wireDrawing = (): void => {
+    /** Which vertex of the settled road the pointer is moving, or null. */
+    let dragging: number | null = null;
     cv.addEventListener("pointerdown", (ev) => {
+      // A press ON an existing vertex moves it (design §4); a press anywhere else places a new
+      // one. The hit-test is skipped while a road is part-drawn, so placing a vertex next to one
+      // already down is never mistaken for grabbing it.
+      const hit = pending.length === 0 ? vertexAt(ev.offsetX, ev.offsetY) : -1;
+      if (hit >= 0) {
+        dragging = hit;
+        // Without capture the drag stops tracking the moment the pointer leaves the canvas and the
+        // pointerup never arrives, so the vertex stays glued to the cursor (perm-graph.ts's own
+        // reasoning for its pan).
+        cv.setPointerCapture(ev.pointerId);
+        return;
+      }
       pending.push(toWorld(view, ev.offsetX, ev.offsetY));
       hover = null;
       scheduleRender();
     });
     cv.addEventListener("pointermove", (ev) => {
+      const at = dragging;
+      if (at !== null) {
+        const road = state.get().road.map((p, i): [number, number] =>
+          (i === at ? toWorld(view, ev.offsetX, ev.offsetY) : p));
+        state.set({ road });
+        // Re-solved as it moves, not on release: §1.3 measured one solve at 0.06 s expressly to
+        // conclude "re-solve on drag, and let the number move with the road". `requestSolve` puts
+        // it on the next frame and never runs two at once.
+        requestSolve(road);
+        return;
+      }
       if (pending.length === 0) return;
       hover = toWorld(view, ev.offsetX, ev.offsetY);
       scheduleRender();
     });
+    // `pointercancel` as well as `pointerup`: a captured stream can still be cancelled (the OS
+    // takes the gesture, the element is removed), and releasing only on `pointerup` would leave
+    // the vertex following the pointer for ever after.
+    const release = (ev: PointerEvent): void => {
+      if (dragging === null) return;
+      dragging = null;
+      cv.releasePointerCapture(ev.pointerId);
+    };
+    cv.addEventListener("pointerup", release);
+    cv.addEventListener("pointercancel", release);
     cv.addEventListener("dblclick", () => settle());
     cv.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter") settle();
