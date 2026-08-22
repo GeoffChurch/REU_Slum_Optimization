@@ -73,12 +73,18 @@ export function mountAll(root: ParentNode = document, store: UrlStore = defaultS
       // misname the claimant as a widget that holds nothing (fix round 2, M2).
       //
       // `own` is what keeps that fix from also losing the OTHER collision: one codec mapping two
-      // different state fields to the same URL key, which the single check against `claimed`
-      // alone cannot see here -- `claimed` holds nothing for THIS widget until the loop below
-      // finishes, so a key repeated within `widget.keys` itself would otherwise sail through
-      // silently, and the two fields would overwrite each other's value on every write with no
-      // error anywhere (fix round 3, M-self). `own` is read during this pass but, like `claimed`,
-      // only written after the whole list has cleared -- see the commit loop below.
+      // different state fields to the same URL key (fix round 3, M-self). `own` and `claimed` are
+      // written on DELIBERATELY DIFFERENT schedules -- that asymmetry is the whole mechanism, not
+      // an inconsistency. `own` is written PROGRESSIVELY, key-by-key, right here in this same loop
+      // (`own.add(k)` below), so a key repeated within one widget's own list finds its earlier
+      // occurrence in the very same pass that is still checking it. `claimed` is written only in
+      // the separate commit loop below, after this widget's whole list has cleared -- so a
+      // mid-list throw never leaves a phantom claim under this widget's name for a later mount
+      // point to misreport. Each set does the job the other's schedule cannot; writing `own` on
+      // `claimed`'s schedule instead (i.e. only in the commit loop) would silently reintroduce the
+      // self-collision bug fix round 3 fixed, since the check pass would then have nothing of
+      // THIS widget's own keys to compare a repeat against (fix round 4 -- a prior version of this
+      // comment wrongly described `own` as following `claimed`'s schedule; it does not).
       const own = new Set<string>();
       for (const k of widget.keys) {
         const prior = claimed.get(k);
