@@ -17,6 +17,10 @@ from tests.dts_keys import json_keys, ts_field_names
 OUT = Path("examples/screen-map")
 DTS = Path("web/src/screen_map.d.ts")
 CSV_PATH = Path("examples/screen-bakeoff/screen_comparison.csv")
+# The site's spine, read rather than typed -- `scripts/gen_screen_map.py`'s own `FOLLOW_SOURCE`.
+# Naming the same artifact from both sides is what makes the guard below a comparison of two
+# independently-produced bakes rather than a comparison of one bake against a literal here.
+FOLLOW_SOURCE = Path("examples/perm-graph/bundle.json")
 
 pytestmark = pytest.mark.skipif(not (OUT / "capetown.json").exists(), reason="tier not baked")
 
@@ -86,6 +90,59 @@ def test_capetown_carries_ground_truth_and_nairobi_does_not(capetown: dict[str, 
     assert len(capetown["informal"]) == capetown["n_blocks"]
     assert set(capetown["informal"]) <= {0, 1}
     assert "informal" not in nairobi
+
+
+def _crossings(ring: list[list[float]], x: float, y: float) -> int:
+    """How many edges of one closed ring the ray from (`x`, `y`) towards +x crosses. `polygon_rings`
+    emits shapely ring coordinates, whose last point repeats the first, so `ring[:-1]` against
+    `ring[1:]` is every edge exactly once and the two are the same length."""
+    return sum(
+        1 for (x0, y0), (x1, y1) in zip(ring[:-1], ring[1:], strict=True)
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) / (y1 - y0) * (x1 - x0))
+
+
+def test_the_followed_block_is_the_one_every_later_stage_uses(capetown: dict[str, Any]) -> None:
+    """The site's spine, derived rather than typed. perm-graph, displacement-field and
+    method-comparison all pin one block and region-grow seeds from it; this asserts the city map
+    marks the SAME one, so a re-bake of any of them cannot leave the marker pointing elsewhere."""
+    want = json.loads(FOLLOW_SOURCE.read_text(encoding="utf-8"))["block_id"]
+    follow = capetown["follow"]
+    assert follow["block_id"] == want
+    assert capetown["block_id"][follow["index"]] == want
+
+
+def test_the_follow_marker_sits_inside_its_own_block(capetown: dict[str, Any]) -> None:
+    """A marker outside its polygon would draw the ring in a neighbour's block -- silently, and at
+    0.61 CSS px² per block, invisibly wrong rather than obviously wrong. Hence
+    `representative_point()` in the baker and not `centroid`: measured on this bundle, 1,491 of its
+    16,451 blocks have a centroid that falls outside their own polygon.
+
+    Two assertions, because a marker can be wrong in two unrelated ways. The bounding box pins the
+    COORDINATE FRAME -- `follow.x`/`y` are origin-relative like every ring, so a world-CRS value
+    would land ~250 km away. The even-odd crossing count pins CONTAINMENT, which the box cannot: a
+    point in a concavity or in an interior ring is inside the box and outside the block."""
+    follow = capetown["follow"]
+    rings = capetown["rings"][follow["index"]]
+    xs = [p[0] for p in rings[0]]
+    ys = [p[1] for p in rings[0]]
+    assert min(xs) <= follow["x"] <= max(xs)
+    assert min(ys) <= follow["y"] <= max(ys)
+    crossings = sum(_crossings(r, follow["x"], follow["y"]) for r in rings)
+    assert crossings % 2 == 1, f"marker is outside the block ({crossings} ray crossings)"
+
+
+def test_nairobi_has_no_follow_key_at_all(nairobi: dict[str, Any]) -> None:
+    """The followed block is in Cape Town. ABSENT, not null -- a null field is one that looks
+    answerable and is not, exactly as `informal` is handled."""
+    assert "follow" not in nairobi
+
+
+def test_both_cities_carry_the_follow_colour(capetown: dict[str, Any],
+                                             nairobi: dict[str, Any]) -> None:
+    """The ENCODING is shared even where the marker is not: the widget reads its colour from
+    whichever bundle is active, and a city switch must not leave it undefined."""
+    for b in (capetown, nairobi):
+        assert b["encoding"]["follow_color"].startswith("#")
 
 
 def test_the_interior_rings_survived(capetown: dict[str, Any], nairobi: dict[str, Any]) -> None:

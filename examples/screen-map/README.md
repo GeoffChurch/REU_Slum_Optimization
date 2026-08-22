@@ -9,7 +9,13 @@ matches the City of Cape Town's own informal-structure survey
 (682 of 16,451 blocks are really informal by that survey,
 via `reblock.data.informal`).
 
-![Cape Town at the shipped depth_density_proxy floor: gold = real informal settlement, red outline = selected](screen_map.png)
+![Cape Town at the shipped depth_density_proxy floor: gold = real informal settlement, red outline = selected, blue ring = the block the rest of the site follows](screen_map.png)
+
+The blue ring marks `ZAF.9.3.1_1_40972` (index 9,511 of the columns below)
+-- the single block every later stage of the site is about: perm-graph, displacement-field and
+method-comparison all pin it, and region-grow seeds from it. Cape Town's bundle carries it as
+`follow`; Nairobi omits the field, the same way it omits `informal`. It is a POINT, not an outline,
+because at this zoom a block covers well under one pixel.
 
 `capetown.json` and `nairobi.json` are the payloads the widget fetches: every block's
 `building_count`, area, perimeter and simplified boundary rings (fill even-odd), plus the shipped

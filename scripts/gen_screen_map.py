@@ -43,7 +43,7 @@ from matplotlib.figure import Figure
 
 from reblock.data.informal import label_blocks, settlement_extents
 from reblock.data.provision import cached_kblock_source
-from reblock.render import _CONTEXT_OUTLINE, _DISPLACED_PT, _PARCEL_LW, save_render
+from reblock.render import _CONTEXT_OUTLINE, _DISPLACED_PT, _PARCEL_LW, _ROAD_COLOR, save_render
 from scripts._bundle_io import cm, polygon_rings, sigfig
 
 log = logging.getLogger(__name__)
@@ -53,6 +53,12 @@ CITIES = {"capetown": 32734, "nairobi": 32737}
 MIN_COUNT = 30
 SIMPLIFY_M = 5.0     # design §1.1: 5.49 MB / 1.85 MB gz for Cape Town, sub-pixel at city zoom
 BAKEOFF_CSV = Path("examples/screen-bakeoff/screen_comparison.csv")
+
+# The site's spine: the one block every later stage is about. READ, never typed -- perm-graph,
+# displacement-field and method-comparison all pin it, and region-grow seeds from it, so taking it
+# from an artifact is what keeps the city map's marker and those four figures from drifting apart.
+FOLLOW_SOURCE = Path("examples/perm-graph/bundle.json")
+FOLLOW_CITY = "capetown"
 
 DTS = Path("web/src/screen_map.d.ts")
 
@@ -70,11 +76,22 @@ class CityFloor(TypedDict):
     recall: float | None
 
 
+class CityFollow(TypedDict):
+    """Where to mark the followed block -- `web/src/screen_map.d.ts`'s `CityFollow`. `index` is
+    that block's position in the column arrays, so the widget reads its row without searching
+    `block_id`; `x`/`y` are origin-relative like every ring coordinate."""
+    block_id: str
+    index: int
+    x: float
+    y: float
+
+
 class CityEncoding(TypedDict):
     """`Encoding`'s JSON shape -- `web/src/screen_map.d.ts`'s `CityEncoding`."""
     base_color: str
     selected_color: str
     informal_color: str
+    follow_color: str
     block_lw: float
     pad: float
 
@@ -86,6 +103,8 @@ class CityBundle(TypedDict):
     `rings` for why (16,451 blocks with repeated JSON keys would add megabytes of field names).
     `informal` is `NotRequired`: Cape Town carries it, Nairobi OMITS it entirely -- a missing field
     is a type the widget must handle; a null column is a field that looks answerable and is not.
+    `follow` takes the same shape for the same reason: the followed block is in Cape Town, and
+    Nairobi has no answer to give.
     """
     city: str
     crs_epsg: int
@@ -97,6 +116,7 @@ class CityBundle(TypedDict):
     perimeter_m: list[float]
     rings: list[list[list[list[float]]]]
     informal: NotRequired[list[int]]
+    follow: NotRequired[CityFollow]
     floors: list[CityFloor]
     encoding: CityEncoding
 
@@ -113,10 +133,27 @@ export interface CityFloor {
   precision: number | null;
   recall: number | null;
 }
+export interface CityFollow {
+  /** The one block the whole site follows: perm-graph, displacement-field and method-comparison
+   * pin this `block_id` and region-grow seeds from it. `index` is its position in the column
+   * arrays below, so the widget reads its row without searching `block_id`. */
+  block_id: string;
+  index: number;
+  /** Origin-relative like every ring coordinate, and a `representative_point()` -- inside the
+   * polygon even where the block is concave or holed. A POINT, not an outline: the median block is
+   * ~0.6 CSS px² at the shipped canvas size (see render/city.ts), so the marker has to be a ring
+   * of fixed SCREEN size around this rather than the block's own boundary. */
+  x: number;
+  y: number;
+}
 export interface CityEncoding {
   base_color: string;
   selected_color: string;
   informal_color: string;
+  /** The follow marker. A blue, off the grey/red/gold axis the other three encode meaning along.
+   * Carried by BOTH cities even though only Cape Town carries `follow`, so a city switch cannot
+   * leave the colour undefined. */
+  follow_color: string;
   block_lw: number;
   pad: number;
 }
@@ -136,6 +173,9 @@ export interface CityBundle {
   /** 0/1 ground truth. ABSENT for Nairobi -- see the README. Not a null column: a null column is
    * a field that looks answerable and is not. */
   informal?: number[];
+  /** ABSENT for Nairobi, like `informal` and for the same reason: the followed block is in Cape
+   * Town, and a null field is one that looks answerable and is not. */
+  follow?: CityFollow;
   floors: CityFloor[];
   encoding: CityEncoding;
 }
@@ -158,18 +198,28 @@ class Encoding:
     in this exact problem domain. `pad` matches RegionGrow's and DisplacementField's own widget-side
     framing margin; like theirs, it has no PNG equivalent, so `screen_map.png` below does not
     consume it.
+
+    `follow_color` reuses `_ROAD_COLOR`, the one blue in `render.py`'s palette. What separates it
+    here is HUE, not lightness: the three colours already in this encoding are a pale grey, a red
+    and a gold, and the palette's near-blacks (`_BOUNDARY_COLOR`, `_OWN_PT`) are legible against
+    those too but read as one more outline on a map whose outlines are all dark. A blue ring is the
+    only mark here that is off the grey/red/gold axis the rest of the figure encodes meaning along,
+    which is what a marker findable among 16,451 blocks needs.
     """
     base_color: str
     selected_color: str
     informal_color: str
+    follow_color: str
     block_lw: float
     pad: float
 
 
 ENCODING = Encoding(base_color=_CONTEXT_OUTLINE, selected_color=_DISPLACED_PT,
-                    informal_color="#d98c00", block_lw=_PARCEL_LW, pad=0.04)
+                    informal_color="#d98c00", follow_color=_ROAD_COLOR, block_lw=_PARCEL_LW,
+                    pad=0.04)
 ENCODING_DICT = CityEncoding(base_color=ENCODING.base_color, selected_color=ENCODING.selected_color,
-                             informal_color=ENCODING.informal_color, block_lw=ENCODING.block_lw,
+                             informal_color=ENCODING.informal_color,
+                             follow_color=ENCODING.follow_color, block_lw=ENCODING.block_lw,
                              pad=ENCODING.pad)
 
 # gen_screen_bakeoff.py's own METRICS display strings (screen_comparison.csv's `metric` column) ->
@@ -261,6 +311,21 @@ def build_bundle(city: str, epsg: int, blocks: gpd.GeoDataFrame, simplified: lis
     rings = [polygon_rings(g, ox, oy, what=f"{city} block {bid!r}")
             for bid, g in zip(block_ids, simplified, strict=True)]
 
+    follow: CityFollow | None = None
+    if city == FOLLOW_CITY:
+        want = json.loads(FOLLOW_SOURCE.read_text(encoding="utf-8"))["block_id"]
+        if want not in block_ids:
+            raise ValueError(
+                f"{FOLLOW_SOURCE} pins block {want!r}, which is not among {city}'s "
+                f"{len(block_ids)} blocks above MIN_COUNT={MIN_COUNT} -- the site's spine and this "
+                f"bundle disagree about which block the walkthrough follows")
+        idx = block_ids.index(want)
+        # representative_point(), not centroid: guaranteed INSIDE the polygon even where the block
+        # is concave or holed, so the marker can never be drawn over a neighbour.
+        pt = simplified[idx].representative_point()
+        follow = CityFollow(block_id=want, index=idx,
+                            x=cm(float(pt.x) - ox), y=cm(float(pt.y) - oy))
+
     n_arr = np.asarray(counts, dtype=np.float64)
     a_arr = np.asarray(areas, dtype=np.float64)
     p_arr = np.asarray(perims, dtype=np.float64)
@@ -284,16 +349,21 @@ def build_bundle(city: str, epsg: int, blocks: gpd.GeoDataFrame, simplified: lis
         extents = settlement_extents(city, epsg=epsg)
         _, label = label_blocks(blocks, extents)
         bundle["informal"] = [int(x) for x in label]
+    if follow is not None:
+        bundle["follow"] = follow
     return bundle
 
 
-def _render_screen_map(gdf: gpd.GeoDataFrame, selected_ids: set[str],
-                       informal_ids: set[str]) -> Figure:
+def _render_screen_map(gdf: gpd.GeoDataFrame, selected_ids: set[str], informal_ids: set[str],
+                       follow_xy: tuple[float, float]) -> Figure:
     """The fallback figure: Cape Town at the shipped `depth_density_proxy` floor. Every block's
     thin wireframe in `base_color`, the City's own ground truth filled in `informal_color`, and the
     floor's own selection outlined in `selected_color` on top -- so a gold fill with a red outline
     reads as a hit, a bare red outline reads as a false positive, and a gold fill with no outline
-    reads as a miss."""
+    reads as a miss.
+
+    `follow_xy` is the followed block's point in `gdf`'s own CRS -- `gdf.plot` draws in world
+    coordinates, so this is NOT the bundle's origin-relative pair."""
     fig, ax = plt.subplots(figsize=(10, 10))
     gdf.plot(ax=ax, facecolor="none", edgecolor=ENCODING.base_color, linewidth=ENCODING.block_lw,
              zorder=1)
@@ -302,6 +372,19 @@ def _render_screen_map(gdf: gpd.GeoDataFrame, selected_ids: set[str],
     selected = cast(gpd.GeoDataFrame, gdf[gdf["block_id"].isin(selected_ids)])
     selected.plot(ax=ax, facecolor="none", edgecolor=ENCODING.selected_color,
                  linewidth=ENCODING.block_lw * 2, zorder=3)
+    # The follow marker. Colour from `ENCODING`, which is also what `encoding` carries into both
+    # bundles, and centred on the same block the bundle's `follow` names -- one constant and one
+    # block feeding this fallback and the widget, so a JS-off or print reader sees the block the
+    # prose says the page follows and the two cannot drift apart independently.
+    #
+    # A fixed-size ring rather than the block's own outline, for the reason the widget has: at city
+    # zoom a block is sub-pixel (`web/src/render/city.ts` measures the median at ~0.6 CSS px² on a
+    # 700 px canvas), so an outline of it would draw nothing findable. `markersize` is a diameter
+    # in POINTS, set against the figure rather than the map's extent; 12.3 pt is a larger fraction
+    # of this figure's width than the widget's 6 CSS px radius is of its canvas, deliberately,
+    # because the README displays this PNG well below its baked pixel width.
+    ax.plot(*follow_xy, marker="o", markersize=12.3, markerfacecolor="none",
+            markeredgecolor=ENCODING.follow_color, markeredgewidth=2.0, zorder=4)
     ax.set_aspect("equal")
     ax.set_axis_off()
     ax.margins(0)
@@ -321,6 +404,8 @@ def readme_markdown(bundles: dict[str, CityBundle], sizes: dict[str, tuple[int, 
     ct_informal = ct.get("informal")
     assert ct_informal is not None, "capetown must carry ground truth"
     n_informal = sum(ct_informal)
+    ct_follow = ct.get("follow")
+    assert ct_follow is not None, "capetown must carry the followed block"
 
     def floor_row(f: CityFloor) -> str:
         prec = "—" if f["precision"] is None else f"{f['precision']:.1%}"
@@ -342,7 +427,13 @@ matches the City of Cape Town's own informal-structure survey
 via `reblock.data.informal`).
 
 ![Cape Town at the shipped depth_density_proxy floor: gold = real informal settlement, red outline \
-= selected](screen_map.png)
+= selected, blue ring = the block the rest of the site follows](screen_map.png)
+
+The blue ring marks `{ct_follow['block_id']}` (index {ct_follow['index']:,} of the columns below)
+-- the single block every later stage of the site is about: perm-graph, displacement-field and
+method-comparison all pin it, and region-grow seeds from it. Cape Town's bundle carries it as
+`follow`; Nairobi omits the field, the same way it omits `informal`. It is a POINT, not an outline,
+because at this zoom a block covers well under one pixel.
 
 `capetown.json` and `nairobi.json` are the payloads the widget fetches: every block's
 `building_count`, area, perimeter and simplified boundary rings (fill even-odd), plus the shipped
@@ -397,6 +488,7 @@ def main() -> None:
     bundles: dict[str, CityBundle] = {}
     sizes: dict[str, tuple[int, int]] = {}
     render_gdf: gpd.GeoDataFrame | None = None
+    follow_xy: tuple[float, float] | None = None
 
     for city, epsg in CITIES.items():
         blocks = load_blocks(city, epsg)
@@ -416,8 +508,17 @@ def main() -> None:
         if city == "capetown":
             render_gdf = gpd.GeoDataFrame({"block_id": bundle["block_id"]},
                                           geometry=simplified, crs=blocks.crs)
+        if city == FOLLOW_CITY:
+            follow = bundle.get("follow")
+            assert follow is not None, f"build_bundle must give {FOLLOW_CITY} a `follow`"
+            # World coordinates for the figure, taken from `simplified` at the BUNDLE's own index:
+            # the PNG's ring and the widget's ring are then the same point, converted twice, rather
+            # than two lookups that could pick different blocks.
+            world = simplified[follow["index"]].representative_point()
+            follow_xy = (float(world.x), float(world.y))
 
     assert render_gdf is not None, "capetown must be baked to render screen_map.png"
+    assert follow_xy is not None, f"FOLLOW_CITY={FOLLOW_CITY!r} must be one of CITIES"
     ct = bundles["capetown"]
     shipped = {f["metric"]: f for f in ct["floors"]}["depth_density_proxy"]
     n_arr = np.asarray(ct["n"], dtype=np.float64)
@@ -429,7 +530,7 @@ def main() -> None:
     selected_ids = {ct["block_id"][i] for i in range(ct["n_blocks"]) if selected_mask[i]}
     informal_ids = {ct["block_id"][i] for i, v in enumerate(ct_informal) if v}
 
-    fig = _render_screen_map(render_gdf, selected_ids, informal_ids)
+    fig = _render_screen_map(render_gdf, selected_ids, informal_ids, follow_xy)
     save_render(fig, OUT / "screen_map.png")
     plt.close(fig)
     log.info("wrote %s", OUT / "screen_map.png")
