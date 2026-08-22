@@ -271,14 +271,14 @@ unknown ⇒ the bundle's own seed; `Frontier.isolated` naming no method in `b.me
 
 * **Task 4** — `RegionGrow.budget` and `DisplacementField`'s road width, clamped to their own
   bundle bounds.
-* **Task 6** — `ScreenMap.floor`, resolved by `syncFloor` into the score range the SELECTED metric
+* **Task 5** — `ScreenMap.floor`, resolved by `syncFloor` into the score range the SELECTED metric
   actually spans on the SELECTED city, and written back only when the URL supplied a floor at all
   (resolving an absent one would publish a `?floor=` the reader never set).
 * **The final fix wave** — `Frontier`'s two targets, clamped to `frontier_xmax` and
   `chart.permeability_max`.
 
-(This section said three as written, five after Task 4, and never counted Task 6's; eight is the
-count including Task 6's and the final wave's. §7 item 7 carries the same list.)
+(This section said three as written, five after Task 4, and never counted Task 5's `floor` clamp at
+all; eight is the count including it and the final wave's two. §7 item 7 carries the same list.)
 
 None of the five was foreseen here, and each was ruled in for the same reason: the widget's own new
 comment asserted the property the gap violated. `?width=99999` reaches state, a real
@@ -555,7 +555,7 @@ and takes no URL key.
    `perm-graph.ts` (`prefix` past the last ⇒ clamped), `displacement-field.ts` (road width ⇒
    clamped to `b.width.floor_m`/`max_m`) and `screen-map.ts` (`floor` ⇒ resolved into the selected
    metric's own score range, and only when the URL supplied one). Three of the eight were foreseen
-   when this list was written; the other five were ruled in during Tasks 4 and 6 and the final fix
+   when this list was written; the other five were ruled in during Tasks 4 and 5 and the final fix
    wave.
 8. `web/src/widgets/screen-map.ts` — `ScreenState.floor` becomes `number | null`, `defaultFloorFor`
    is factored out of `syncFloor`, the metric handler sets `null`, the city handler resolves, and
