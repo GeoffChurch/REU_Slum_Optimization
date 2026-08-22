@@ -1,7 +1,7 @@
 /** The mount contract: a page carries a placeholder and nothing else. */
 import { showWidgetError } from "./dom/error.js";
 import type { StateFactory } from "./state.js";
-import type { Param, UrlCodec } from "./url/param.js";
+import type { UrlCodec } from "./url/param.js";
 import {
   browserLocation, debounce, systemTimers, urlStore, type UrlStore,
 } from "./url/store.js";
@@ -22,9 +22,12 @@ export function register<T>(name: string, w: Widget<T>, codec: UrlCodec<T>): voi
   // Throw rather than replace. With one widget a collision was invisible and harmless; with several
   // it silently disables whichever registered first, and the page still looks fine.
   if (REGISTRY.has(name)) throw new Error(`widget already registered: ${name}`);
-  // `Object.values` over a DECLARED mapped type -- a loop over a schema, not a string lookup into a
-  // closed set. Only `.keys` is read, so the value type is narrowed to exactly that.
-  const keys = (Object.values(codec as object) as readonly Param<unknown>[])
+  // `Object.values` over a DECLARED mapped type -- a loop over a schema, not a string lookup into
+  // a closed set. `as object` mirrors store.ts's own cast on the same generic-mapped-type call
+  // (`bind`'s comment there); the cast right after it narrows -- to `{ keys: ... }`, not the full
+  // `Param<unknown>` -- because only `.keys` is read below, and the wider cast would silently
+  // accept an unsound `p.decode(got, anything)` here if a later task ever added one.
+  const keys = (Object.values(codec as object) as readonly { keys: readonly string[] }[])
     .flatMap((p) => [...p.keys]);
   REGISTRY.set(name, {
     keys,
@@ -62,13 +65,19 @@ export function mountAll(root: ParentNode = document, store: UrlStore = defaultS
       // right here -- but an unknown one must throw rather than leave a silently empty mount point
       // that looks like a widget which merely failed to draw.
       if (widget === undefined) throw new Error(`unknown data-widget: ${name}`);
+      // Checked against the WHOLE key list before any of it is committed. Committing key-by-key
+      // would leave a phantom claim behind on a widget that never actually mounted, whenever that
+      // widget's OWN key list collides partway through: an earlier key would already be in
+      // `claimed` under this widget's name even though the throw below stops `widget.mount` from
+      // ever running for it, so a later mount point's collision message would misname the claimant
+      // as a widget that holds nothing.
       for (const k of widget.keys) {
         const prior = claimed.get(k);
         if (prior !== undefined) {
           throw new Error(`URL key "${k}" is claimed by both ${prior} and ${name} on this page`);
         }
-        claimed.set(k, name);
       }
+      for (const k of widget.keys) claimed.set(k, name);
       widget.mount(el, store);
     } catch (err) {
       showMountError(el, err);

@@ -67,11 +67,11 @@ test("register throws on a duplicate widget name", async () => {
   stubDocument();
   const { register } = await import("../src/mount.js");
 
-  // mount.ts's own top-level `register("perm-graph", permGraph, PERM_GRAPH_URL)` has already run by the time this
-  // await resolves (whether it ran on THIS import or an earlier one in the process -- see the
-  // file comment), so "perm-graph" is already taken. Re-registering it under that same name is
-  // exactly the regression this guards: with the duplicate check removed, this second call would
-  // silently replace the first widget's registration instead of throwing.
+  // mount.ts's own top-level `register("perm-graph", permGraph, PERM_GRAPH_URL)` has already run
+  // by the time this await resolves (whether it ran on THIS import or an earlier one in the
+  // process -- see the file comment), so "perm-graph" is already taken. Re-registering it under
+  // that same name is exactly the regression this guards: with the duplicate check removed, this
+  // second call would silently replace the first widget's registration instead of throwing.
   assert.throws(
     () => register("perm-graph", (() => {}) as Widget<Nothing>, NOTHING),
     /widget already registered: perm-graph/,

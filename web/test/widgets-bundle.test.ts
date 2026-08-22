@@ -67,13 +67,15 @@ test("the shipped bundle registers every widget name a generated page emits", ()
   const names = emittedWidgetNames();
   const source = readFileSync(BUNDLE_PATH, "utf8");
 
-  // No `getBoundingClientRect` and no `ResizeObserver` in this harness, deliberately: neither widget
-  // reaches layout here, and both were MEASURED not to (0 calls, 0 observers constructed). PermGraph
-  // throws at `fetch is not defined` and Frontier at `data-bundle is missing`, both synchronously,
-  // inside their own bodies -- which is the whole point of this test, since a widget that never got
-  // registered cannot throw from inside itself at all. A zero-width rect stub was standing in for a
-  // dependency that is never touched; the width-0 skip introduced in dom/resize.ts therefore changes
-  // nothing about what this test exercises.
+  // No `getBoundingClientRect` and no `ResizeObserver` in this harness, deliberately: none of the
+  // five widgets reaches layout here, and all five were MEASURED not to (0 calls, 0 observers
+  // constructed). Every widget now throws inside `requireAttr` -- "<label>: data-bundle... is
+  // missing" -- synchronously, inside its own body, before any of them reaches `fetch`, which is
+  // the whole point of this test, since a widget that never got registered cannot throw from
+  // inside itself at all. (Replaces a stale claim that PermGraph threw at "fetch is not defined":
+  // true only before PermGraph gained the `requireAttr` guard Frontier already had.) A zero-width
+  // rect stub was standing in for a dependency that is never touched; the width-0 skip introduced
+  // in dom/resize.ts therefore changes nothing about what this test exercises.
   interface FakeNode { textContent: string }
   const mounts = names.map((name) => ({
     dataset: { widget: name },
@@ -89,9 +91,14 @@ test("the shipped bundle registers every widget name a generated page emits", ()
   // drive -- builds the default `urlStore`, and that reads `window.location.search` through one
   // `new URLSearchParams(...)` while constructing. A vm realm has its own ECMAScript intrinsics but
   // no host globals at all, so neither name exists here unless it is passed in. `history` is NOT
-  // passed: the store touches it only from `write()`, which no widget here reaches (all of them
-  // throw inside their own body before their state factory is ever called), and a stub for a call
-  // that does not happen would only hide the day it starts happening.
+  // passed: the store touches it only from `write()`, which no widget here reaches -- every one of
+  // them throws inside `requireAttr`, before its state factory is ever called (see the comment
+  // above). That is the right call, but NOT because leaving it unstubbed would surface the day a
+  // widget starts reaching `write()`: this realm has no `setTimeout` either, so such a widget would
+  // throw "setTimeout is not defined" inside `schedule(write)` -- caught by mountAll's own
+  // try/catch and rendered the same way a missing `history` would be, before `write()` ever got as
+  // far as touching `history`. Catching that day needs a `history` stub AND an assertion on what it
+  // recorded, not merely the absence of one.
   let domReady: (() => void) | undefined;
   const context = vm.createContext({
     document: {

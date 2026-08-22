@@ -30,17 +30,32 @@ export interface ScreenState { city: "capetown" | "nairobi"; metric: MetricName;
 /** All four candidate screens (design §3.1), calibrated or not -- `MetricName`'s own four members,
  * spelled out rather than read off `Object.keys(METRICS)`: an object's keys are plain `string[]`,
  * which would need re-asserting back to `MetricName` anyway, and this list is what the `<select>`
- * below is built from, so a fifth metric added to the model without a line added here is a
- * compile error at THIS array instead of a silently short menu. Calibrated metrics first (the two
- * `bundle.floors` actually ships a floor for), so the shipped default is also the first option. */
-const METRIC_NAMES: readonly MetricName[] =
-  ["depth_density_proxy", "density_compactness", "density", "depth_proxy"];
+ * below is built from. Calibrated metrics first (the two `bundle.floors` actually ships a floor
+ * for), so the shipped default is also the first option. Completeness against `MetricName` is NOT
+ * this array's own doing -- see `_AllMetricsAreListed` just below, which is what actually turns a
+ * missing fifth metric into a compile error. */
+const METRIC_NAMES = [
+  "depth_density_proxy", "density_compactness", "density", "depth_proxy",
+] as const satisfies readonly MetricName[];
+
+/** Compile-time exhaustiveness over `MetricName`, because the list above is a CLOSED set whose
+ * completeness nothing else checks: a fifth metric that never reaches it ships a short <select>
+ * and a URL grammar that silently rejects the new name.
+ *
+ * `METRIC_NAMES` must NOT carry an explicit `readonly MetricName[]` annotation. That widens the
+ * literal type, `(typeof METRIC_NAMES)[number]` becomes `MetricName`, the `Exclude` below is
+ * vacuously `never`, and the check can never fail -- a guard that cannot fire, which is worse than
+ * no guard because it looks like one. `as const satisfies` keeps the literal members while still
+ * requiring each to be a real `MetricName`. */
+type AssertNever<T extends never> = T;
+type _AllMetricsAreListed = AssertNever<Exclude<MetricName, (typeof METRIC_NAMES)[number]>>;
 
 export const SCREEN_MAP_URL: UrlCodec<ScreenState> = {
   city: enumParam("city", ["capetown", "nairobi"] as const),
   // METRIC_NAMES, not Object.keys(METRICS): the same closed, spelled-out list the <select> is built
-  // from, so a fifth metric added to the model without a line there is a compile error in one place
-  // rather than a silently short menu and a silently narrower URL grammar.
+  // from, so a fifth metric added to the model without a line added to METRIC_NAMES is a compile
+  // error at `_AllMetricsAreListed`'s declaration (above), rather than a silently short menu and a
+  // silently narrower URL grammar.
   metric: enumParam("metric", METRIC_NAMES),
   floor: numberParam("floor", 6),
 };
