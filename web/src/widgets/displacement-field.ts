@@ -5,6 +5,7 @@ import type { FieldBundle, Road } from "../field.js";
 // never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory, StateSource } from "../state.js";
+import { boolParam, roadsParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
@@ -18,7 +19,12 @@ import { fitBbox, nearest, toScreen, toWorld, type Bbox, type View } from "../vi
  * road 2's geometry in state while it is off means toggling it back on returns it exactly where the
  * reader last dragged it, rather than snapping it back to the baked line and quietly undoing their
  * work. */
-interface FieldState { roads: Road[]; second: boolean }
+export interface FieldState { roads: Road[]; second: boolean }
+
+export const FIELD_URL: UrlCodec<FieldState> = {
+  roads: roadsParam("road1", "road2", "width"),
+  second: boolParam("road2on"),
+};
 
 /** The name every failure of this widget is reported under -- one constant, because it is used from
  * two unrelated places (the fetch chain and the resize callback) and two spellings of it would read
@@ -63,7 +69,7 @@ function fieldBbox(b: FieldBundle): Bbox {
   };
 }
 
-export const displacementField: Widget = (host, makeState) => {
+export const displacementField: Widget<FieldState> = (host, makeState) => {
   // Not `host.dataset.bundle!`: a missing attribute then reaches `fetch(undefined)` and surfaces as
   // "fetch undefined failed: 404", which sends the reader (and whoever wrote the page) looking for a
   // missing FILE rather than the missing ATTRIBUTE that is actually wrong.
@@ -80,7 +86,7 @@ export const displacementField: Widget = (host, makeState) => {
     .catch((err: unknown) => showWidgetError(host, LABEL, err));
 };
 
-function boot(host: HTMLElement, makeState: StateFactory, b: FieldBundle): void {
+function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBundle): void {
   const e = b.encoding;
   // The bundle is a BOUNDARY: it arrives over the network, and a page can outlive the artifact it
   // was generated beside. Two roads is not a preference here, it is what the widget IS -- the
@@ -97,11 +103,40 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FieldBundle): void 
   if (b.roads.length !== 2 || road1 === undefined || road2 === undefined) {
     throw new Error(`field.json carries ${b.roads.length} roads; this widget needs exactly two`);
   }
+  // Each road is a two-point SEGMENT. The drawing and the drag are polyline-generic (`handles`,
+  // `flatten` and `polyline` all walk `coords` to its end), so the consumer that actually needs
+  // this is piece E's URL: `roadsParam` spells a road as `x1,y1,x2,y2` and indexes
+  // `coords[0]`/`coords[1]`, so a third vertex would be TRUNCATED AWAY by one round trip through
+  // the address bar -- the reader drags a three-point road, copies the URL, and gets a two-point
+  // one back with no error anywhere. Enforced HERE, once, where the bundle crosses into the
+  // widget, rather than in the codec: this is the line the data comes through.
+  for (const [i, r] of b.roads.entries()) {
+    if (r.coords.length !== 2) {
+      throw new Error(
+        `field.json's road ${i + 1} has ${r.coords.length} points; this widget needs exactly two`);
+    }
+  }
   const width0 = b.width.default_m;
-  const state: StateSource<FieldState> = makeState<FieldState>({
+  const state: StateSource<FieldState> = makeState({
     roads: [{ ...road1, width_m: width0 }, { ...road2, width_m: width0 }],
     second: false,
   });
+  // `?width=` is any positive finite number -- `roadsParam` checks that much and no more, because
+  // this bundle's floor and ceiling are properties of the FETCHED artifact, which no codec can
+  // know. Assigning an out-of-range one to the slider below would not hold: a real
+  // `<input type="range">` pins its own value to `min`/`max`, so the control would read the bound
+  // while `render` priced and drew the corridor at what the URL said. Clamped rather than refused,
+  // so the number lands on the bound instead of on an error card; the write it triggers then
+  // rewrites `?width=` to the clamped value (and drops the key when the bound IS `default_m`, the
+  // value the store diffs against).
+  //
+  // Onto every road, matching both `roadsParam.decode` -- which reads ONE width for the pair -- and
+  // the slider's own handler below, so nothing here can leave the two roads at different widths.
+  const w = state.get().roads[0]!.width_m;
+  const bounded = Math.min(Math.max(w, b.width.floor_m), b.width.max_m);
+  if (bounded !== w) {
+    state.set({ roads: state.get().roads.map((r) => ({ ...r, width_m: bounded })) });
+  }
 
   const caption = host.querySelector("figcaption");
 
@@ -126,7 +161,11 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FieldBundle): void 
   slider.min = String(b.width.floor_m);
   slider.max = String(b.width.max_m);
   slider.step = String(b.width.step_m);
-  slider.value = String(width0);
+  // From STATE, not from `width0`: the bundle's default is what `makeState` was seeded with, but a
+  // URL (piece E) may have overridden it before this line, and the clamp above has already bounded
+  // whatever it said. Reading it here is what keeps the control and the picture on ONE number --
+  // `render` below prices and draws the corridor from these same `roads`.
+  slider.value = String(state.get().roads[0]!.width_m);
   slider.addEventListener("input", () => {
     // The width applies to EVERY live road. Width is per-road in the model (permeability.py's
     // module docstring) and the widget offers one control, so the choice is which roads it moves:

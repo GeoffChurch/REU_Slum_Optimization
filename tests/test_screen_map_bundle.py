@@ -17,6 +17,18 @@ from tests.dts_keys import json_keys, ts_field_names
 OUT = Path("examples/screen-map")
 DTS = Path("web/src/screen_map.d.ts")
 CSV_PATH = Path("examples/screen-bakeoff/screen_comparison.csv")
+# The site's spine, read rather than typed -- `scripts/gen_screen_map.py`'s own `FOLLOW_SOURCE`.
+# Naming the same artifact from both sides is what makes the guard below a comparison of two
+# independently-produced bakes rather than a comparison of one bake against a literal here.
+FOLLOW_SOURCE = Path("examples/perm-graph/bundle.json")
+# Every artifact that names the followed block, and the field it names it in. The baker reads ONLY
+# `FOLLOW_SOURCE`; the other three agree with it by hand today (`gen_region_grow.py`'s `SEED` is a
+# typed literal), so nothing but the test below stops a re-bake of one of them from moving a stage
+# off the spine while the marker keeps pointing at perm-graph's block.
+SPINE_SOURCES = {FOLLOW_SOURCE: "block_id",
+                 Path("examples/displacement-field/field.json"): "block_id",
+                 Path("examples/method-comparison/frontier.json"): "block_id",
+                 Path("examples/region-grow/hood.json"): "seed"}
 
 pytestmark = pytest.mark.skipif(not (OUT / "capetown.json").exists(), reason="tier not baked")
 
@@ -86,6 +98,76 @@ def test_capetown_carries_ground_truth_and_nairobi_does_not(capetown: dict[str, 
     assert len(capetown["informal"]) == capetown["n_blocks"]
     assert set(capetown["informal"]) <= {0, 1}
     assert "informal" not in nairobi
+
+
+def _crossings(ring: list[list[float]], x: float, y: float) -> int:
+    """How many edges of one closed ring the ray from (`x`, `y`) towards +x crosses. `polygon_rings`
+    emits shapely ring coordinates, whose last point repeats the first, so `ring[:-1]` against
+    `ring[1:]` is every edge exactly once and the two are the same length."""
+    return sum(
+        1 for (x0, y0), (x1, y1) in zip(ring[:-1], ring[1:], strict=True)
+        if (y0 > y) != (y1 > y) and x < x0 + (y - y0) / (y1 - y0) * (x1 - x0))
+
+
+def test_the_followed_block_is_the_one_every_later_stage_uses(capetown: dict[str, Any]) -> None:
+    """The site's spine, derived rather than typed -- and asserted across ALL FOUR stages, not just
+    the one the baker reads. perm-graph, displacement-field and method-comparison each pin a
+    `block_id` and region-grow carries a `seed`; the four agree only by hand, so without this a
+    re-bake of any of the other three onto a different block would move that stage off the spine
+    and leave both the marker and this file green.
+
+    It also makes `FOLLOW_SOURCE`'s identity a checked fact rather than a coincidence: because all
+    four are asserted equal, pointing the baker at any other one of them is provably the same
+    bake."""
+    pinned = {path: json.loads(path.read_text(encoding="utf-8"))[field]
+              for path, field in SPINE_SOURCES.items()}
+    assert len(set(pinned.values())) == 1, f"the site's stages pin different blocks: {pinned}"
+    want = pinned[FOLLOW_SOURCE]
+    follow = capetown["follow"]
+    assert follow["block_id"] == want
+    assert capetown["block_id"][follow["index"]] == want
+
+
+def test_the_follow_marker_sits_inside_its_own_block(capetown: dict[str, Any]) -> None:
+    """A marker outside its polygon would draw the ring in a neighbour's block -- silently, and at
+    ~0.6 CSS px² per block on the widget's own map, invisibly wrong rather than obviously wrong.
+    Hence
+    `representative_point()` in the baker and not `centroid`: measured on this bundle, 1,491 of its
+    16,451 blocks have a centroid that falls outside their own polygon.
+
+    The bounding box pins the
+    COORDINATE FRAME -- `follow.x`/`y` are origin-relative like every ring, so a world-CRS value
+    would land ~6,200 km away, which is `origin` itself: 250 km of easting and 6,192 km of northing,
+    the northing dominating by 25x.
+
+    Two assertions, and the second SUBSUMES the first -- every point outside the bounding box is
+    also outside the polygon, so the box adds no failure class of its own. It is kept for the
+    diagnostic: a frame mistake fails it with both the offending number and the ring's own range in
+    the message, where the crossing count would report only "outside". The crossing count is what
+    catches the case the box cannot -- a point in a concavity or in an interior ring is inside the
+    box and outside the block."""
+    follow = capetown["follow"]
+    rings = capetown["rings"][follow["index"]]
+    xs = [p[0] for p in rings[0]]
+    ys = [p[1] for p in rings[0]]
+    assert min(xs) <= follow["x"] <= max(xs)
+    assert min(ys) <= follow["y"] <= max(ys)
+    crossings = sum(_crossings(r, follow["x"], follow["y"]) for r in rings)
+    assert crossings % 2 == 1, f"marker is outside the block ({crossings} ray crossings)"
+
+
+def test_nairobi_has_no_follow_key_at_all(nairobi: dict[str, Any]) -> None:
+    """The followed block is in Cape Town. ABSENT, not null -- a null field is one that looks
+    answerable and is not, exactly as `informal` is handled."""
+    assert "follow" not in nairobi
+
+
+def test_both_cities_carry_the_follow_colour(capetown: dict[str, Any],
+                                             nairobi: dict[str, Any]) -> None:
+    """The ENCODING is shared even where the marker is not: the widget reads its colour from
+    whichever bundle is active, and a city switch must not leave it undefined."""
+    for b in (capetown, nairobi):
+        assert b["encoding"]["follow_color"].startswith("#")
 
 
 def test_the_interior_rings_survived(capetown: dict[str, Any], nairobi: dict[str, Any]) -> None:
@@ -183,3 +265,35 @@ def test_bundle_matches_a_fresh_reload(capetown: dict[str, Any], nairobi: dict[s
     extents = settlement_extents("capetown", epsg=CITIES["capetown"])
     _, label = label_blocks(fresh_capetown, extents)
     assert [int(x) for x in label] == capetown["informal"], "capetown: informal is stale"
+
+
+def test_the_committed_readme_is_what_the_generator_writes() -> None:
+    """The README's prose is a pure function of the two committed bundles, and this pins it there.
+
+    Same guard `tests/test_displacement_field_bundle.py` puts on that directory's README, and it is
+    what makes the followed block's on-screen size a COMPUTED number rather than a typed one: those
+    px² figures used to be three literals in the generator's f-string, so a re-bake onto another
+    block -- or onto another city extent -- would have left them standing and wrong, with nothing
+    to fail. `_follow_px2` now derives them from the bundle's own rings and extent every bake; this
+    is the line that catches the README not having been regenerated afterwards.
+
+    `sizes` is rebuilt the way `main()` builds it, from the files themselves: `main()` measures the
+    exact byte string it then writes, so each committed file's own bytes ARE that string, and
+    gzipping them at the same level reproduces the same two numbers. No bake needed, and no source
+    data -- only what is committed.
+    """
+    import gzip
+
+    from scripts.gen_screen_map import CityBundle, readme_markdown
+
+    bundles: dict[str, CityBundle] = {}
+    sizes: dict[str, tuple[int, int]] = {}
+    for city in ("capetown", "nairobi"):
+        raw = (OUT / f"{city}.json").read_bytes()
+        bundles[city] = json.loads(raw)
+        sizes[city] = (len(raw), len(gzip.compress(raw, compresslevel=9)))
+
+    readme = OUT / "README.md"
+    assert readme.read_text(encoding="utf-8") == readme_markdown(bundles, sizes), (
+        "examples/screen-map/README.md is stale or hand-edited; regenerate it: "
+        "pixi run python -m scripts.gen_screen_map")

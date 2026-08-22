@@ -632,7 +632,12 @@ def render_page(name: str) -> str:
     import scripts.gen_site_pages as gsp
 
     src = (ROOT / "scripts" / "gen_site_pages.py").read_text()
-    m = re.search(rf'_write_page\(methodology_dir / "{name}\.md",\s*'
+    # The three receivers `main()` actually passes `_render_partial` output to: `DOCS` for the two
+    # pages written straight into docs/ (reproduce.md, explore.md), `results_dir` for bakeoff.md
+    # and nairobi.md, `methodology_dir` for the rest. Named rather than matched as `[a-z_]+` so a
+    # partial written somewhere new fails the `m is not None` assertion below instead of being
+    # matched against a receiver nobody checked.
+    m = re.search(rf'_write_page\((?:DOCS|methodology_dir|results_dir) / "{name}\.md",\s*'
                   rf'_render_partial\("{name}"\),\s*depth=(\d+), url_depth=(\d+)', src)
     assert m is not None, f"could not find main()'s _write_page call for {name}.md"
     depth, url_depth = int(m.group(1)), int(m.group(2))
@@ -798,3 +803,104 @@ def test_the_screen_map_caption_quotes_the_floor_and_is_honest_about_nairobi(
     assert not typed, (
         f"decimal literals in _screen_map_figure: {typed}. Every number in that caption must be "
         f"read from capetown.json/nairobi.json.")
+
+
+def test_the_screen_map_figure_describes_all_three_of_its_encodings(screening_body: str) -> None:
+    """The PNG encodes three things -- gold ground truth, red selected outline, blue follow ring --
+    and until this test the site copy described two. Task 6 added the ring to the picture and to
+    examples/screen-map/README.md, and left the alt text and caption behind: a reader met an
+    unexplained blue circle, and a screen-reader user met nothing at all, because a canvas and a PNG
+    carry no accessible text beyond what the alt and caption say.
+
+    ALT AND CAPTION ARE CHECKED SEPARATELY, not as one blob. They are read in different situations
+    -- the alt stands in for the image, the caption sits beside it -- so a fix that named the ring
+    in only one of them would still leave one of those two readers short, and a single search over
+    the whole <figure> would call that fixed."""
+    import json
+
+    from scripts.gen_site_pages import SCREENMAP
+
+    capetown = json.loads((SCREENMAP / "capetown.json").read_text(encoding="utf-8"))
+    follow = capetown["follow"]
+
+    start = screening_body.index('<figure data-widget="screen-map"')
+    figure = screening_body[start:screening_body.index("</figure>", start) + len("</figure>")]
+    alt = re.search(r'alt="([^"]*)"', figure)
+    assert alt is not None, "the screen-map figure lost its alt text"
+
+    for encoding in ("gold", "red outline", "blue ring"):
+        assert encoding in alt.group(1), f"{encoding!r} missing from the alt text"
+    for encoding in ("gold", "red outline", "blue ring"):
+        assert encoding in figure, f"{encoding!r} missing from the caption"
+
+    # The ring's block id comes off the bundle's own `follow`, never typed -- the same rule the
+    # floor numbers above follow, and what makes a re-bake onto a different block move this caption
+    # with it. Asserted against the CAPTION specifically: the alt deliberately omits the id (the
+    # figcaption a screen reader reaches right after carries it, and repeating it would be F5).
+    assert follow["block_id"] in figure
+    assert follow["block_id"] not in alt.group(1)
+
+
+# --------------------------------------------------- the Explore page's five mount points (T8)
+
+@pytest.fixture
+def explore_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    """The rendered Explore partial -- markers filled, `screening_body`'s own fixture reasoning
+    applied to the page that carries every widget on the site: `DOCS`/`ASSETS` are redirected so
+    producers don't write into the real tree or race other xdist workers, and `PARTIALS` stays
+    bound to the real repo (bound at import time)."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    return gsp._render_partial("explore")
+
+
+def test_explore_carries_all_five_mount_points(explore_body: str) -> None:
+    """The page the whole piece exists for: one mount point per stage, in pipeline order, each
+    substituted from a marker rather than typed."""
+    order = ["screen-map", "region-grow", "perm-graph", "displacement-field", "frontier"]
+    assert re.findall(r'data-widget="([a-z-]+)"', explore_body) == order
+
+
+def test_explore_rewrites_the_screen_maps_two_bundle_urls() -> None:
+    """explore.md serves at <base>/explore/ -- url_depth 1 -- so each bundle path needs exactly one
+    `../`. ScreenMap carries TWO bundle attributes where every other widget carries one, and the
+    general `data-bundle="([^"]+)"` regex matches NEITHER of them (that literal substring never
+    occurs inside `data-bundle-capetown="`). This is the same trap the Screening page's own twin of
+    this test guards, on the page that now carries the most mount points on the site."""
+    page = render_page("explore")
+    assert 'data-bundle-capetown="../assets/screen-map/capetown.json"' in page
+    assert 'data-bundle-nairobi="../assets/screen-map/nairobi.json"' in page
+    for attr in ("data-bundle-capetown", "data-bundle-nairobi"):
+        # INSIDE the loop. Hoisted out, this runs once against whichever `attr` the loop left
+        # behind -- checking one of the two, which is the exact half-blind shape D3's own guard
+        # had and the reason this test exists.
+        assert f'{attr}="assets/' not in page, attr
+    for url in re.findall(r'data-bundle="([^"]+)"', page):
+        assert url.startswith("../assets/"), url
+
+
+def test_explore_is_generated_and_gitignored() -> None:
+    """A generated page that is committed drifts from its artifacts the moment anything re-bakes --
+    the reason docs/index.md and docs/reproduce.md are ignored too."""
+    ignored = [line.strip()
+               for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
+    assert "docs/explore.md" in ignored
+
+
+def test_the_widget_bundle_guard_can_see_the_explore_page() -> None:
+    """`_assert_widget_bundle_present` scans a HAND-WRITTEN page list. Explore carries the most
+    mount points of any page on the site; leaving it out would make the guard blind exactly where a
+    missing docs/js/widgets.js does the most damage -- five dead widgets behind five intact PNGs."""
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text(encoding="utf-8")
+    block = re.search(r"generated_pages = \(([^)]*)\)", src, flags=re.S)
+    assert block is not None, "main()'s generated_pages assignment moved; update this derivation"
+    assert '"explore.md"' in block.group(1)
+
+
+def test_explore_is_in_the_nav() -> None:
+    """An orphan page -- one outside nav -- logs at INFO under `mkdocs build --strict` and the
+    build still exits 0, so nothing else here would catch its absence."""
+    assert re.search(r"^\s+- Explore: explore\.md$",
+                     (ROOT / "mkdocs.yml").read_text(encoding="utf-8"), flags=re.M)

@@ -2,9 +2,11 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { Bundle } from "../src/bundle.js";
+import type { StateSource } from "../src/state.js";
+import type { PermGraphState } from "../src/widgets/perm-graph.js";
 import {
-  armDrawFailure, canvasOf, DPR, FakeElement, fireResize, installStubs,
-  mountPoint as mountPointBase,
+  armDrawFailure, canvasOf, DPR, fakeLocation, FakeElement, fireResize, installStubs,
+  mountPoint as mountPointBase, writeNow,
 } from "./harness.js";
 
 /** PermGraph is the widget that has been live on the public site the longest and the only one with
@@ -19,8 +21,8 @@ import {
  */
 installStubs();
 
-const { localState } = await import("../src/state.js");
-const { permGraph } = await import("../src/widgets/perm-graph.js");
+const { urlStore } = await import("../src/url/store.js");
+const { permGraph, PERM_GRAPH_URL } = await import("../src/widgets/perm-graph.js");
 
 const BUNDLE_PATH = "../examples/perm-graph/bundle.json";
 const bundle = JSON.parse(readFileSync(BUNDLE_PATH, "utf8")) as Bundle;
@@ -37,8 +39,17 @@ function mountPoint(): FakeElement {
   return figure;
 }
 
-async function mount(host: FakeElement, width: number,
-                    drawFailure: string | null = null): Promise<void> {
+/** The state store is the PRODUCTION one (`urlStore` over a `fakeLocation`), never `localState`:
+ * `search` defaults to "" -- an empty URL, so nothing is decoded and nothing is written, and a
+ * caller that passes no search gets the widget's own initial state exactly as `localState` gave
+ * it. (The store CLAIMS every key of the codec regardless of what the URL carries; what an
+ * empty query skips is the decode, not the claim.) The URL test below gets the real decode
+ * path rather than a second, test-only one. */
+async function mount(host: FakeElement, width: number, drawFailure: string | null = null,
+                     search = ""): Promise<{
+                       store: StateSource<PermGraphState>;
+                       loc: ReturnType<typeof fakeLocation>;
+                     }> {
   armDrawFailure(drawFailure);
   (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
     ok: true,
@@ -46,7 +57,13 @@ async function mount(host: FakeElement, width: number,
     statusText: "OK",
     json: (): Promise<unknown> => Promise.resolve(bundle),
   });
-  permGraph(host as unknown as HTMLElement, localState);
+  const loc = fakeLocation(search);
+  const slot = urlStore(loc, writeNow).reserve();
+  let bound: StateSource<PermGraphState> | null = null;
+  permGraph(host as unknown as HTMLElement, (initial) => {
+    bound = slot.bind(PERM_GRAPH_URL, initial);
+    return bound;
+  });
   // A macrotask, so the fetch chain has drained by the time this resolves.
   await new Promise((resolve) => setTimeout(resolve, 0));
   // The initial resize, played explicitly rather than auto-fired from inside `observe()` -- see
@@ -58,6 +75,10 @@ async function mount(host: FakeElement, width: number,
   } finally {
     armDrawFailure(null);
   }
+  // `boot`'s first statement is the `makeState` call, and every mount in this file feeds it the
+  // committed bundle, so a null here is a widget that failed before it.
+  assert.ok(bound !== null, "the widget never asked for a state store");
+  return { store: bound, loc };
 }
 
 test("the widget mounts, draws, and only then drops the fallback image and its lightbox link",
@@ -175,4 +196,16 @@ test("a throw on the FIRST draw is reported and keeps the static image", async (
   assert.equal(img.removedAt, null,
     "the fallback image was removed although the drawing that replaces it threw");
   assert.equal(host.findAll("a").length, 1, "the lightbox link went with an image that is still needed");
+});
+
+test("a prefix past the last one is clamped, not drawn out of range", async () => {
+  // `?prefix=` is a bare non-negative integer -- how many prefixes THIS block has is a property of
+  // the fetched bundle, which no codec can know. An out-of-range one must land on the last prefix
+  // rather than index past the end of `b.prefix.current`, and the URL must stop carrying it.
+  const { store, loc } = await mount(mountPoint(), 640, null, "prefix=99999");
+  assert.equal(store.get().prefix, bundle.n_prefixes - 1);
+  // The whole query, not merely the absence of `prefix=99999`: this mount point's `data-prefix` is
+  // `lens_b_index` (2), so the clamped 20 differs from the store's initial and IS emitted -- the
+  // key is REPLACED, which `!includes(...)` alone would also have accepted from `prefix=5` or "".
+  assert.equal(loc.written.at(-1), `prefix=${bundle.n_prefixes - 1}`);
 });

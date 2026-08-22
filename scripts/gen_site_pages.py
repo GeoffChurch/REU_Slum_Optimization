@@ -253,6 +253,83 @@ def _bakeoff_figures() -> str:
     return "\n\n".join(out)
 
 
+def _perm_graph_panel(layer: str, state: str, *, mounted: bool) -> str:
+    """One panel of the egress-graph grid, with its caption read off perm_graph.json.
+
+    Extracted so the Permeability section (all four panels) and Explore (the one a reader can drag)
+    cannot quote the same artifact two different ways. `mounted` decides whether this panel carries
+    the widget's mount-point attributes -- only current/after is ever passed True, because it is the
+    panel the fallback PNG and the caption already describe.
+
+    The width claim names GREY edges specifically, not "footpath-mesh": upgraded (road) edges are
+    footpath-mesh edges too (the mesh has no other kind for a road to raise -- see the grid's intro
+    sentence, which counts them among the same `n_edges`), so scoping the claim to "footpath-mesh"
+    does not exclude them, and an earlier fix that tried exactly that word left the claim still
+    false of the blue edges, which draw at a fixed width by design rather than one derived from
+    their conductance or current (`render_graph`'s docstring, src/reblock/render.py). The caption
+    says so explicitly, with the upgraded-edge count read from `n_upgraded` in the artifact rather
+    than typed.
+
+    Each caption is trimmed to what is unique to its own panel: the layer, the state, and, for the
+    "after" panels only, the road length and permeability reached. The legend and the block-level
+    facts are deliberately NOT here -- the four-panel grid states them once in its own lead
+    sentence, and Explore's stage prose does the same above its single panel, so a caption carrying
+    them too would be Finding F5 again under cover of fixing F3.
+
+    Every number is read from an artifact, never typed. The caption's come from
+    `examples/perm-graph/perm_graph.json`, written by `scripts/gen_perm_graph.py` beside the
+    images; the mounted panel's `data-prefix` comes from `lens_b_index` in
+    `examples/perm-graph/bundle.json`, the payload the widget itself fetches, written by
+    `scripts/gen_web_bundle.py`. Typing either here would reintroduce the drift class the truth
+    pass closed -- and `_intro.md`'s "seven methods" is the proof that a figure does not have to
+    look like a metric to rot.
+
+    Emits nothing when the panel's own PNG is absent, like every other figure on this site."""
+    meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
+    method = friendly_method_name(meta["method"])
+    p_after, road_m, n_upgraded = (meta["permeability_after"] * 100.0, meta["road_m"],
+                                   meta["n_upgraded"])
+    url = _copy_asset(PERMGRAPH / f"graph_{layer}_{state}.png", "perm-graph")
+    if url is None:
+        return ""
+    roads_clause = ("No new roads." if state == "before" else
+                    f"Under {method}'s roads at the matched-permeability standard: "
+                    f"{road_m:,.0f} m of road, reaching {p_after:.1f}% permeability.")
+    caption = (f"Grey edge width is {layer} on the footpath mesh; the {n_upgraded} road-raised "
+               f"edges (blue) draw at a fixed width instead. {roads_clause}")
+    attrs = ""
+    if mounted:
+        bundle_url = _copy_asset(PERMGRAPH / "bundle.json", "perm-graph")
+        if bundle_url:
+            # lens_b_index read straight from the artifact, not retyped: the mount point declares
+            # the boot prefix here, beside the caption it has to match, rather than the widget
+            # hardcoding it on every boot (fix wave, I8).
+            bundle_meta = json.loads((PERMGRAPH / "bundle.json").read_text(encoding="utf-8"))
+            # `data-layer` is THIS panel's own `layer`, not the literal "current" the pre-extraction
+            # version could safely write: there, the mount attributes were built inside an `if layer
+            # == "current"`, so the literal and the image were the same fact. Here `mounted` is the
+            # caller's decision and carries no such tie, and a mount point declaring a layer its
+            # fallback PNG does not show would boot the widget onto a different picture than the one
+            # the reader is looking at.
+            attrs = (f'data-widget="perm-graph" data-bundle="{bundle_url}" '
+                     f'data-layer="{layer}" data-prefix="{bundle_meta["lens_b_index"]}"')
+    return _figure(url, f"egress graph, {layer}, {state} roads", caption, attrs=attrs)
+
+
+def _perm_graph_widget_figure() -> str:
+    """JUST the interactive panel -- current, after -- for the Explore page.
+
+    The Permeability section wants all four because the point THERE is the before/after and
+    conductance/current comparison. Explore wants the one a reader can drag; repeating the other
+    three would add three large images to a page that already fetches every bundle on the site, for
+    no additional teaching. Both pages go through `_perm_graph_panel`, so neither can drift.
+
+    The block-level lead sentence the four-panel grid carries stays with THAT grid: on Explore the
+    same facts are in the surrounding prose and the stage heading, and repeating them under one
+    figure would be the caption-duplication finding F5 again."""
+    return _perm_graph_panel("current", "after", mounted=True)
+
+
 def _perm_graph_figures() -> str:
     """The Permeability section's figure grid: the egress graph, conductance and current, before
     and after, laid out in `.sbu-figure-grid` (docs/stylesheets/sbu.css) -- two columns, not four
@@ -263,74 +340,38 @@ def _perm_graph_figures() -> str:
     before/after-as-column (fix round 1, Finding F4 -- an earlier version of this docstring called
     the stacked output "the ... 2x2", a comment asserting something the code did not do).
 
-    Every number is read from `examples/perm-graph/perm_graph.json`, written by
-    `scripts/gen_perm_graph.py` beside the images. Typing one here would reintroduce the drift
-    class the truth pass closed -- and `_intro.md`'s "seven methods" is the proof that a figure
-    does not have to look like a metric to rot.
+    The panels themselves -- image, caption, and the mount point on one of them -- are
+    `_perm_graph_panel`'s; what belongs to THIS function is the grid and the lead sentence above
+    it. The legend (blue = a road raised this edge, the pale-blue band = the road corridor itself,
+    halo = grounded parcel) and the block-level facts (id, parcel/edge counts) are stated once in
+    that lead sentence -- repeating them per caption would just be Finding F5 again under cover of
+    fixing F3. Node colour is stated there too, as one scale shared across the panels -- not "the
+    same scale as the heatmaps above": there are no heatmaps on this page, only these four images
+    (fix round 1, Finding F1).
 
-    The legend (blue = a road raised this edge, the pale-blue band = the road corridor itself,
-    halo = grounded parcel) and the block-level facts (id, parcel/edge counts) are stated once, in
-    a lead sentence above the grid -- repeating them per caption would just be Finding F5 again
-    under cover of fixing F3. Each caption is trimmed to what is unique to its own panel: the
-    layer, the state, and, for the "after" panels only, the road length and permeability reached.
-
-    The width claim names GREY edges specifically, not "footpath-mesh": upgraded (road) edges are
-    footpath-mesh edges too (the mesh has no other kind for a road to raise -- see this file's
-    intro sentence, which counts them among the same `n_edges`), so scoping the claim to
-    "footpath-mesh" does not exclude them, and an earlier fix that tried exactly that word left the
-    claim still false of the 65 blue edges, which draw at a fixed width by design rather than one
-    derived from their conductance or current (`render_graph`'s docstring, src/reblock/render.py).
-    The caption now says so explicitly, with the upgraded-edge count read from `n_upgraded` in the
-    artifact rather than typed as `65`. Node colour is stated once, as one scale shared across the
-    panels -- not "the same scale as the heatmaps above": there are no heatmaps on this page, only
-    these four images (fix round 1, Finding F1).
-
-    The current/after figure -- and ONLY that one -- carries `data-widget="perm-graph"` mount-point
-    attributes on its own `<figure>` (Task 6; moved onto the figure itself rather than a wrapping
-    `<div>` in the fix wave, I4 -- see `_figure`'s docstring for why): a reader drags a slider along
-    the road build-out order and watches current concentrate into each new road while permeability
-    climbs, using the same bundle.json baked in Task 1. The other three panels stay plain
-    `<figure>`s; the widget adds one interactive view, not four. `data-prefix` is read straight from
-    `bundle.json`'s `lens_b_index` (fix wave, I8) so the mount point -- not the widget's boot code
-    -- declares the state it must show before the reader touches the slider, right next to the
-    caption that already claims it.
+    The current/after figure -- and ONLY that one -- is passed `mounted=True`, so it is the only
+    panel here carrying `data-widget="perm-graph"` mount-point attributes on its own `<figure>`
+    (Task 6; moved onto the figure itself rather than a wrapping `<div>` in the fix wave, I4 -- see
+    `_figure`'s docstring for why): a reader drags a slider along the road build-out order and
+    watches current concentrate into each new road while permeability climbs, using the same
+    bundle.json baked in Task 1. It is the panel the fallback PNG (graph_current_after.png) and its
+    caption already describe, so booting the widget there is fallback parity rather than a fourth
+    copy of the same widget: mounting all four would replace three distinct images with three
+    copies of the same slider. The other three stay plain `<figure>`s.
     """
     meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
-    block, method = meta["block_id"], friendly_method_name(meta["method"])
-    p_after, road_m = meta["permeability_after"] * 100.0, meta["road_m"]
-    n_parcels, n_edges, n_upgraded = meta["n_parcels"], meta["n_edges"], meta["n_upgraded"]
+    block = meta["block_id"]
+    n_parcels, n_edges = meta["n_parcels"], meta["n_edges"]
 
     figs: list[str] = []
     for layer in ("conductance", "current"):
-        for state, roads_clause in (
-            ("before", "No new roads."),
-            ("after", f"Under {method}'s roads at the matched-permeability standard: "
-                      f"{road_m:,.0f} m of road, reaching {p_after:.1f}% permeability."),
-        ):
-            url = _copy_asset(PERMGRAPH / f"graph_{layer}_{state}.png", "perm-graph")
-            if url is None:
-                continue
-            caption = (f"Grey edge width is {layer} on the footpath mesh; the {n_upgraded} "
-                      f"road-raised edges (blue) draw at a fixed width instead. {roads_clause}")
-            # Only THIS figure -- current, after -- gets the interactive mount point. It is the
-            # one the fallback PNG (graph_current_after.png) and its caption above already
-            # describe, so booting the widget here is fallback parity, not a fourth copy of the
-            # same widget: wrapping all four figures would replace three distinct images with
-            # three copies of the same slider. The mount attributes land on the <figure> ITSELF
-            # (via `_figure`'s `attrs`), not a wrapping <div> -- see `_figure`'s docstring.
-            attrs = ""
-            if layer == "current" and state == "after":
-                bundle_url = _copy_asset(PERMGRAPH / "bundle.json", "perm-graph")
-                if bundle_url:
-                    # lens_b_index read straight from the artifact, not retyped: the mount point
-                    # declares the boot prefix here, beside the caption it has to match, rather
-                    # than the widget hardcoding it on every boot (fix wave, I8).
-                    bundle_meta = json.loads(
-                        (PERMGRAPH / "bundle.json").read_text(encoding="utf-8"))
-                    attrs = (f'data-widget="perm-graph" data-bundle="{bundle_url}" '
-                            f'data-layer="current" '
-                            f'data-prefix="{bundle_meta["lens_b_index"]}"')
-            figs.append(_figure(url, f"egress graph, {layer}, {state} roads", caption, attrs=attrs))
+        for state in ("before", "after"):
+            panel = _perm_graph_panel(layer, state,
+                                      mounted=(layer == "current" and state == "after"))
+            # `_perm_graph_panel` returns "" for a panel whose PNG is absent; an empty string
+            # appended here would leave a non-empty `figs` and emit an empty grid.
+            if panel:
+                figs.append(panel)
     if not figs:
         return ""
 
@@ -573,6 +614,17 @@ def _screen_map_figure() -> str:
     names, beside its pre-existing one for plain `data-bundle=` -- miss one and that city's fetch
     404s behind an intact-looking PNG, the exact trap this task's brief is named for.
 
+    **Three encodings, all three described.** The PNG carries gold ground truth, the red selected
+    outline, and -- since Task 6 -- a blue ring on the block the rest of the site follows. Alt text
+    and caption both name all three: a marker that exists only in the pixels is one a screen-reader
+    user is never told about, and a legend that lists two of three encodings is worse than none,
+    because the third then reads as unexplained decoration. The ring's block id is read from
+    `capetown.json`'s `follow` (subscripted, not `.get`: `gen_screen_map.py` asserts the followed
+    city's bundle carries the field, so a bake that dropped it should raise here rather than quietly
+    publish a caption with a hole in it) -- so a re-bake that follows a different block moves this
+    caption with it. Nairobi omits `follow` entirely, like `informal`, and its half of the caption
+    says nothing about a ring because its map has none.
+
     **The caption's numbers.** Pool size, precision and recall are read out of `capetown.json`'s
     own `floors` (never typed), and Nairobi's pool size out of `nairobi.json`'s the same way.
     Nairobi's precision/recall are never quoted, because they do not exist: no equivalent published
@@ -600,6 +652,7 @@ def _screen_map_figure() -> str:
     nairobi = json.loads(nairobi_path.read_text(encoding="utf-8"))
     cape_floor = next(f for f in capetown["floors"] if f["metric"] == "depth_density_proxy")
     nai_floor = next(f for f in nairobi["floors"] if f["metric"] == "depth_density_proxy")
+    follow = capetown["follow"]
 
     attrs = (f'data-widget="screen-map" data-bundle-capetown="{capetown_url}" '
              f'data-bundle-nairobi="{nairobi_url}"')
@@ -608,14 +661,18 @@ def _screen_map_figure() -> str:
         f"informal settlements from the City of Cape Town's own survey, the red outline the "
         f"<strong>{cape_floor['n']:,}</strong> of {capetown['n_blocks']:,} blocks the screen "
         f"selects — precision <strong>{_pct(cape_floor['precision'])}</strong>, recall "
-        f"<strong>{_pct(cape_floor['recall'])}</strong> against that survey. Switch metric, drag "
-        f"the floor, or toggle to Nairobi — {nai_floor['n']:,} of {nairobi['n_blocks']:,} blocks "
-        f"at the same absolute floor, with no equivalent informal-structure survey to check them "
-        f"against, so no precision or recall is shown for that city."
+        f"<strong>{_pct(cape_floor['recall'])}</strong> against that survey. The blue ring marks "
+        f"<code>{follow['block_id']}</code>, the one block the rest of this site follows — a ring "
+        f"rather than an outline because a whole metro fitted into one figure leaves that block "
+        f"far too small for its own boundary to be a shape anyone could pick out. Switch metric, "
+        f"drag the floor, or toggle to Nairobi — {nai_floor['n']:,} of {nairobi['n_blocks']:,} "
+        f"blocks at the same absolute floor, with no equivalent informal-structure survey to "
+        f"check them against, so no precision or recall is shown for that city."
     )
     return _figure(img_url,
                    "Cape Town screened at the shipped depth_density_proxy floor: gold marks real "
-                   "informal settlements, the red outline marks the blocks the screen selects",
+                   "informal settlements, the red outline marks the blocks the screen selects, and "
+                   "a blue ring marks the one block the rest of the site follows",
                    caption, attrs=attrs)
 
 
@@ -1326,7 +1383,14 @@ MARKERS: dict[str, Callable[[], str]] = {
     "BAKEOFFFLOORS": _bakeoff_floors_table,
     "BAKEOFFFIGS": _bakeoff_figures,
     "PERMGRAPHFIGS": _perm_graph_figures,
+    # Explore's single draggable panel. Distinct from PERMGRAPHFIGS above, not a variant of it:
+    # both go through `_perm_graph_panel`, so the two pages cannot quote perm_graph.json two
+    # different ways.
+    "PERMGRAPHWIDGET": _perm_graph_widget_figure,
     "DISPFIELD": _displacement_field_figure,
+    # Already called directly by `gen_benchmark_section()`; registering it here changes nothing
+    # there and makes the same figure available to a partial (Explore's Methods stage).
+    "FRONTIER": _frontier_figure,
     "NAIROBITABLE": _nairobi_table,
     "REPROCOMMANDS": _repro_commands,
 }
@@ -1416,6 +1480,14 @@ def main() -> None:
     _write_page(DOCS / "reproduce.md", _render_partial("reproduce"), depth=0, url_depth=1,
                 title="Reproduce")
 
+    # docs/explore.md serves at <base>/explore/ -- source depth 0, url_depth 1, exactly like
+    # reproduce.md above, and likewise written straight into docs/ rather than into a cleared
+    # subdirectory, so ruling F4's rmtree hazard does not reach it. It carries FIVE mount points,
+    # including ScreenMap's two bundle attributes, which is why _write_page rewrites each attribute
+    # name separately.
+    _write_page(DOCS / "explore.md", _render_partial("explore"), depth=0, url_depth=1,
+                title="Explore")
+
     results_dir = DOCS / "results"
     if results_dir.exists():
         shutil.rmtree(results_dir)
@@ -1466,14 +1538,14 @@ def main() -> None:
     # file's own design spec does, as an example snippet) without a single generated page
     # actually carrying a mount point; scanning them would make the guard fire on a site that
     # built perfectly fine.
-    generated_pages = ([DOCS / "index.md", DOCS / "reproduce.md"]
+    generated_pages = ([DOCS / "index.md", DOCS / "reproduce.md", DOCS / "explore.md"]
                        + sorted(methodology_dir.rglob("*.md"))
                        + sorted(results_dir.rglob("*.md")))
     pages_with_widgets = any('data-widget="' in p.read_text(encoding="utf-8")
                              for p in generated_pages if p.exists())
     _assert_widget_bundle_present(pages_with_widgets)
 
-    print("wrote docs/index.md, docs/reproduce.md, docs/results/frontier.md, "
+    print("wrote docs/index.md, docs/reproduce.md, docs/explore.md, docs/results/*.md, "
           "docs/methodology/*.md, docs/methodology/methods/*.md")
 
 

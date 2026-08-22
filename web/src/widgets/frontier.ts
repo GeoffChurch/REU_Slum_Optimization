@@ -4,6 +4,7 @@ import type { ChartStyle, FrontierBundle, MethodCurve } from "../frontier.js";
 // evaluation (see mount.ts's registration comment) -- this file must never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory } from "../state.js";
+import { nullableStringParam, numberParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
@@ -207,8 +208,12 @@ function requirePositive(raw: string | undefined, what: string): number {
 }
 
 /** A boot target must sit ON the axis it marks -- 0 through the axis maximum inclusive. Throws
- * rather than clamping: a clamped target would silently disagree with the caption that states it,
- * which is the same contradiction the whole fix round was opened for. */
+ * rather than clamping, because this reads the PAGE AUTHOR's `data-*`: those two attributes ARE
+ * the calibrated standards the caption beside them states, so a clamped one would silently
+ * disagree with that sentence -- the same contradiction the whole fix round was opened for. A
+ * READER's `?disp=`/`?perm=` is bounded by `boot`'s own clamp instead, and lands on the axis end
+ * rather than on an error card; `region-grow.ts` splits the same two cases the same way, throwing
+ * on `hood.json`'s own bad seed and resetting a URL's. */
 function inRange(value: number, max: number, what: string): number {
   if (!(value >= 0 && value <= max)) {
     throw new Error(`frontier: ${what} (${value}) is outside its axis [0, ${max}]`);
@@ -218,14 +223,26 @@ function inRange(value: number, max: number, what: string): number {
 
 // ------------------------------------------------------------------------------------ the widget
 
-interface FrontierState { targetDisplacement: number; targetPermeability: number; isolated: string | null }
+export interface FrontierState {
+  targetDisplacement: number;
+  targetPermeability: number;
+  isolated: string | null;
+}
+
+export const FRONTIER_URL: UrlCodec<FrontierState> = {
+  // Short, readable keys, not the field names: `disp`/`perm` are what the parent design's own
+  // example URL uses, and a field rename must not break a published link.
+  targetDisplacement: numberParam("disp", 6),
+  targetPermeability: numberParam("perm", 6),
+  isolated: nullableStringParam("method"),
+};
 
 /** The name every failure of this widget is reported under -- one constant, because it is used from
  * two unrelated places (the fetch chain and the resize callback) and two spellings of it would be a
  * reader seeing two different widgets fail. */
 const LABEL = "Frontier";
 
-export const frontier: Widget = (host, makeState) => {
+export const frontier: Widget<FrontierState> = (host, makeState) => {
   const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
   // A 404, a renamed bundle field, or any throw inside boot() must be VISIBLE on the page, not an
   // unhandled rejection in the console while the PNG fallback keeps the page looking correct --
@@ -270,7 +287,7 @@ function snap(v: number, step: number): number {
   return Math.round(v / step) * step;
 }
 
-function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): void {
+function boot(host: HTMLElement, makeState: StateFactory<FrontierState>, b: FrontierBundle): void {
   const keys = Object.keys(b.methods);
   if (keys.length === 0) throw new Error("frontier: the bundle carries no methods");
   const styles = parseMethodStyles(b.methods);
@@ -305,7 +322,9 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   // M2: a target OUTSIDE its axis is finite, so `requireFinite` accepts it -- and then `drawGuide`
   // draws a line outside the plot rect, where the reader cannot see it, while the readout keeps
   // answering truthfully about a guide that is not on the chart. Both bounds are already in hand.
-  const state = makeState<FrontierState>({
+  // `inRange` covers the `data-*` half of that; the URL half is clamped below, after the store has
+  // overwritten these two fields.
+  const state = makeState({
     targetDisplacement: inRange(
       requireFinite(host.dataset.targetDisplacement, "data-target-displacement"),
       xMax, "data-target-displacement"),
@@ -314,6 +333,35 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
       yMax, "data-target-permeability"),
     isolated: null,
   });
+  // `?method=` names a curve in THIS bundle. An unknown one is not inert: the draw loop's
+  // `if (s.isolated !== null && s.isolated !== key) continue` would skip EVERY curve and render an
+  // empty chart. Reset to null, which also drops the key from the URL (design §2.3).
+  //
+  // `Object.hasOwn`, never `in`: `"toString" in b.methods` is true for every object, so an
+  // `in`-based membership test would accept a prototype key as a method name.
+  const isolated = state.get().isolated;
+  if (isolated !== null && !Object.hasOwn(b.methods, isolated)) state.set({ isolated: null });
+  // `numberParam` checks that `?disp=`/`?perm=` spell a finite decimal and stops there; WHERE that
+  // number falls is a property of this bundle's own two axis maxima, which no codec can know. The
+  // `inRange` throws above guard the mount point's `data-*` and are already behind us -- the store
+  // overwrote both fields from the URL in `makeState` itself, so an off-axis target reaches here
+  // having passed no bound at all. Unclamped it draws exactly what `inRange`'s own comment
+  // describes -- `?disp=0.5` against `frontier_xmax` 0.4 puts the vertical guide past the right
+  // edge of an 800 px SVG and `?perm=1.5` puts the horizontal one above the top -- while the
+  // readout underneath answers about the standard the reader typed, and both sliders, whose `max`
+  // is the same axis maximum, pin their thumbs to 40%/100%. That is the control-and-picture
+  // disagreement `region-grow.ts`'s `?budget=` clamp and `displacement-field.ts`'s `?width=` clamp
+  // were ruled in for, in the one widget whose targets are also draggable.
+  //
+  // Clamped, not refused: a reader's typo lands on the axis end rather than on an error card, and
+  // the write it triggers rewrites both keys to the clamped values (dropping either one whose
+  // bound IS this mount point's own `data-*` target, the value the store diffs against).
+  const typed = state.get();
+  const boundedX = clamp(typed.targetDisplacement, 0, xMax);
+  const boundedY = clamp(typed.targetPermeability, 0, yMax);
+  if (boundedX !== typed.targetDisplacement || boundedY !== typed.targetPermeability) {
+    state.set({ targetDisplacement: boundedX, targetPermeability: boundedY });
+  }
   const s0 = state.get();
 
   const caption = host.querySelector("figcaption");

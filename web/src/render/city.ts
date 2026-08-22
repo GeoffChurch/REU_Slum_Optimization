@@ -44,6 +44,21 @@ import type { CityBundle, CityEncoding } from "../screen_map.js";
 import { sizeCanvas } from "./canvas.js";
 import { toScreen, type View } from "../view/transform.js";
 
+/** The follow ring's radius and line width, in CSS pixels -- SCREEN sizes, never world ones.
+ * `view` fits a whole metro's extent into one canvas, which is what leaves a single block covering
+ * a fraction of a pixel there (this module's own docstring above carries the measured median), so
+ * the followed block's own outline would put nothing on screen. Nor can these two numbers be read
+ * as world lengths and scaled: at that fit, six metres is hundredths of a pixel. (Six HUNDRED
+ * metres would be legible -- the point is not that world units cannot work, it is that a number
+ * chosen as pixels cannot be reinterpreted as metres, which is what multiplying by `view.scaleX`
+ * would do.) `screen-map-boot.test.ts` measures the block-against-ring size relation on the
+ * committed bundle, so a re-bake that pushed the followed block above either threshold there -- or
+ * that broke the `index`/`block_id` pairing -- fails loudly instead of outdating a number written
+ * into this comment. A re-bake onto a DIFFERENT sub-pixel block is not caught, and needs no
+ * catching: nothing about it would be wrong. */
+export const FOLLOW_RADIUS_PX = 6;
+const FOLLOW_LW_PX = 2;
+
 /** One block's rings (exterior first, then any interiors), projected to screen space. */
 type ScreenRings = [number, number][][];
 
@@ -106,7 +121,12 @@ export interface CityLayer {
    * OUTLINE `order[0..k)` in `e.selected_color` at `e.block_lw * 2` directly on `ctx`, in the
    * CSS-pixel space every other draw call in this codebase uses -- never filled, so whatever
    * `paintBase` painted underneath (in particular `e.informal_color`) stays visible through the
-   * ring. */
+   * ring. Finally, where the bundle carries one, `bundle.follow` gets a `FOLLOW_RADIUS_PX` ring in
+   * `e.follow_color`, drawn last so it sits over those outlines rather than under them. That draw
+   * order is one of the two reasons it belongs on THIS layer; the other is that `paintBase` is the
+   * strictly per-block pass, one fill and one outline for each of `bundle.rings` and nothing else.
+   * Survival is NOT among the reasons: the base layer is blitted back whole on every frame, so a
+   * ring painted into it would still reach the screen after a floor change (verified). */
   paintFrame(ctx: CanvasRenderingContext2D, bundle: CityBundle, view: View, e: CityEncoding,
             order: Int32Array, k: number, size: { width: number; height: number }): void;
 }
@@ -161,6 +181,26 @@ export function createLayer(): CityLayer {
       const screen = screenRingsOf(bundle, view);
       for (let i = 0; i < k; i++) {
         strokeBlock(ctx, screen[order[i]!]!, e.selected_color, e.block_lw * 2);
+      }
+      // Drawn last, so wherever it meets a selected block's outline it sits over that outline
+      // rather than under it -- which is the first of the two reasons it is on the FRAME and not
+      // the base layer. The second: `paintBase` is the strictly per-block pass, and a marker
+      // belonging to no block has no place in a loop whose stroke count is exactly `n_blocks`
+      // (`screen-map-boot.test.ts`'s base-layer test counts it). Note which reason is NOT in that
+      // list: a ring painted into the base layer would still be VISIBLE after a floor change,
+      // because the base layer is copied back whole on every frame. What it would not be is drawn
+      // by this frame.
+      //
+      // `follow` is absent for Nairobi (screen_map.d.ts), so this branch is a real optional, not a
+      // guard: a bundle that carries no followed block draws no ring.
+      const follow = bundle.follow;
+      if (follow !== undefined) {
+        const [fx, fy] = toScreen(view, follow.x, follow.y);
+        ctx.beginPath();
+        ctx.arc(fx, fy, FOLLOW_RADIUS_PX, 0, Math.PI * 2);
+        ctx.strokeStyle = e.follow_color;
+        ctx.lineWidth = FOLLOW_LW_PX;
+        ctx.stroke();
       }
     },
   };

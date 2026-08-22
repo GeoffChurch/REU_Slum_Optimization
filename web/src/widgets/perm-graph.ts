@@ -10,8 +10,19 @@ import { draw, sizeCanvas } from "../render/canvas.js";
 import type { Widget } from "../mount.js";
 import { fitBbox, nearest, panned, toWorld, zoomed, type View } from "../view/transform.js";
 import type { StateFactory, StateSource } from "../state.js";
+import { boolParam, enumParam, intParam, type UrlCodec } from "../url/param.js";
 
-interface PermGraphState { prefix: number; layer: "conductance" | "current"; halos: boolean }
+export interface PermGraphState {
+  prefix: number;
+  layer: "conductance" | "current";
+  halos: boolean;
+}
+
+export const PERM_GRAPH_URL: UrlCodec<PermGraphState> = {
+  prefix: intParam("prefix"),
+  layer: enumParam("layer", ["conductance", "current"] as const),
+  halos: boolParam("halos"),
+};
 
 /** The name every failure of this widget is reported under -- one constant, because it is used from
  * two unrelated places (the fetch chain and the resize callback) and two spellings of it would be a
@@ -39,7 +50,7 @@ function initialState(el: HTMLElement): PermGraphState {
   return { prefix: parsePrefix(el.dataset.prefix), layer, halos: el.dataset.halos !== "false" };
 }
 
-export const permGraph: Widget = (host, makeState) => {
+export const permGraph: Widget<PermGraphState> = (host, makeState) => {
   // Not `host.dataset.bundle!`: a missing attribute then reaches `fetch(undefined)` and surfaces as
   // "fetch undefined failed: 404", which sends the reader (and whoever wrote the page) looking for a
   // missing FILE rather than the missing ATTRIBUTE that is actually wrong. This was the third call
@@ -62,8 +73,16 @@ export const permGraph: Widget = (host, makeState) => {
     .catch((err: unknown) => showWidgetError(host, LABEL, err));
 };
 
-function boot(host: HTMLElement, makeState: StateFactory, b: Bundle): void {
+function boot(host: HTMLElement, makeState: StateFactory<PermGraphState>, b: Bundle): void {
   const state: StateSource<PermGraphState> = makeState(initialState(host));
+  // `?prefix=` is a bare non-negative integer; how many prefixes THIS block has is a property of the
+  // fetched bundle, which no codec can know (design §2.3). Clamp rather than throw -- an
+  // out-of-range number must land on the last prefix, not on an error card -- and the write the
+  // clamp triggers replaces the out-of-range key with the clamped one, so the URL self-corrects in
+  // front of the reader (and drops `?prefix=` entirely when the clamp lands on this mount point's
+  // own `data-prefix`, which is the value the store diffs against).
+  const maxPrefix = b.n_prefixes - 1;
+  if (state.get().prefix > maxPrefix) state.set({ prefix: maxPrefix });
   const caption = host.querySelector("figcaption");
 
   const cv = document.createElement("canvas");

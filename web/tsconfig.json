@@ -6,7 +6,12 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
-    "lib": ["ES2022", "DOM"],
+    // "DOM" alone omits the iteration protocol for DOM-native collections (URLSearchParams,
+    // NodeList, FormData, ...) -- lib.dom.iterable.d.ts is a separate lib file that TypeScript
+    // does not fold into "DOM" once "lib" is given explicitly. store.ts's
+    // `[...new URLSearchParams(...)]` needs it: without it, TS2488 ("must have a
+    // '[Symbol.iterator]()' method") on that spread.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     // Empty on purpose: this config type-checks browser widget code only (see "include"
     // below). Leaving "types" empty keeps Node's ambient globals (process, fs, Buffer, ...)
     // out of the checked surface, so widget code that reaches for a Node API fails tsc

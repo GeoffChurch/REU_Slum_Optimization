@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import type { Scheduler, Timers, UrlLocation } from "../src/url/store.js";
 
 /** The shared fake DOM and recording 2D context every canvas widget test mounts against.
  *
@@ -358,3 +359,37 @@ export function lastFrame(cv: FakeElement): Call[] {
   assert.ok(from !== undefined, "nothing was ever drawn: no clearRect in the call log");
   return cv.ctx.calls.slice(from);
 }
+
+/** A `UrlLocation` over a plain string, plus every search string it was ever asked to write. Lives
+ * here rather than in one test file because every URL-aware boot test needs it -- the same reason
+ * `mountPoint` and `canvasOf` are here. */
+export function fakeLocation(search: string): UrlLocation & { written: string[] } {
+  const written: string[] = [];
+  let current = search;
+  return {
+    written,
+    search: () => current,
+    replace(next) { current = next; written.push(next); },
+  };
+}
+
+/** A `Timers` whose queue a test drives by hand -- nothing fires on its own, exactly as
+ * `requestAnimationFrame`'s stub above queues rather than fires. */
+export function fakeTimers(): Timers & { run(): void; pending(): number } {
+  const queue = new Map<number, () => void>();
+  let next = 0;
+  return {
+    set(fn) { queue.set(++next, fn); return next; },
+    clear(id) { queue.delete(id); },
+    pending: () => queue.size,
+    run() {
+      const fns = [...queue.values()];
+      queue.clear();
+      for (const fn of fns) fn();
+    },
+  };
+}
+
+/** Writes immediately. The debounce is tested on its own; a test that had to drive a timer queue to
+ * observe a URL write would be testing two things at once. */
+export const writeNow: Scheduler = (write) => { write(); };

@@ -10,10 +10,27 @@ export interface CityFloor {
   precision: number | null;
   recall: number | null;
 }
+export interface CityFollow {
+  /** The one block the whole site follows: perm-graph, displacement-field and method-comparison
+   * pin this `block_id` and region-grow seeds from it. `index` is its position in the column
+   * arrays below, so the widget reads its row without searching `block_id`. */
+  block_id: string;
+  index: number;
+  /** Origin-relative like every ring coordinate, and a `representative_point()` -- inside the
+   * polygon even where the block is concave or holed. A POINT, not an outline: the median block is
+   * ~0.6 CSS px² at the shipped canvas size (see render/city.ts), so the marker has to be a ring
+   * of fixed SCREEN size around this rather than the block's own boundary. */
+  x: number;
+  y: number;
+}
 export interface CityEncoding {
   base_color: string;
   selected_color: string;
   informal_color: string;
+  /** The follow marker. A blue, off the grey/red/gold axis the other three encode meaning along.
+   * Carried by BOTH cities even though only Cape Town carries `follow`, so a city switch cannot
+   * leave the colour undefined. */
+  follow_color: string;
   block_lw: number;
   pad: number;
 }
@@ -33,6 +50,9 @@ export interface CityBundle {
   /** 0/1 ground truth. ABSENT for Nairobi -- see the README. Not a null column: a null column is
    * a field that looks answerable and is not. */
   informal?: number[];
+  /** ABSENT for Nairobi, like `informal` and for the same reason: the followed block is in Cape
+   * Town, and a null field is one that looks answerable and is not. */
+  follow?: CityFollow;
   floors: CityFloor[];
   encoding: CityEncoding;
 }
