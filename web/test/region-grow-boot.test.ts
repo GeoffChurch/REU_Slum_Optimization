@@ -101,10 +101,10 @@ async function mount(width = 700, drawFailure: string | null = null, search = ""
   host.dataset.bundle = "../examples/region-grow/hood.json";
   armDrawFailure(drawFailure);
   const loc = fakeLocation(search);
-  const urls = urlStore(loc, writeNow);
+  const slot = urlStore(loc, writeNow).reserve();
   let bound: StateSource<RegionGrowState> | null = null;
   regionGrow(host as never, (initial) => {
-    bound = urls.bind(REGION_GROW_URL, initial);
+    bound = slot.bind(REGION_GROW_URL, initial);
     return bound;
   });
   // A macrotask, so the fetch chain has drained -- boot() has run and the canvas exists -- by the

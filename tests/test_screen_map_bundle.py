@@ -265,3 +265,35 @@ def test_bundle_matches_a_fresh_reload(capetown: dict[str, Any], nairobi: dict[s
     extents = settlement_extents("capetown", epsg=CITIES["capetown"])
     _, label = label_blocks(fresh_capetown, extents)
     assert [int(x) for x in label] == capetown["informal"], "capetown: informal is stale"
+
+
+def test_the_committed_readme_is_what_the_generator_writes() -> None:
+    """The README's prose is a pure function of the two committed bundles, and this pins it there.
+
+    Same guard `tests/test_displacement_field_bundle.py` puts on that directory's README, and it is
+    what makes the followed block's on-screen size a COMPUTED number rather than a typed one: those
+    px² figures used to be three literals in the generator's f-string, so a re-bake onto another
+    block -- or onto another city extent -- would have left them standing and wrong, with nothing
+    to fail. `_follow_px2` now derives them from the bundle's own rings and extent every bake; this
+    is the line that catches the README not having been regenerated afterwards.
+
+    `sizes` is rebuilt the way `main()` builds it, from the files themselves: `main()` measures the
+    exact byte string it then writes, so each committed file's own bytes ARE that string, and
+    gzipping them at the same level reproduces the same two numbers. No bake needed, and no source
+    data -- only what is committed.
+    """
+    import gzip
+
+    from scripts.gen_screen_map import CityBundle, readme_markdown
+
+    bundles: dict[str, CityBundle] = {}
+    sizes: dict[str, tuple[int, int]] = {}
+    for city in ("capetown", "nairobi"):
+        raw = (OUT / f"{city}.json").read_bytes()
+        bundles[city] = json.loads(raw)
+        sizes[city] = (len(raw), len(gzip.compress(raw, compresslevel=9)))
+
+    readme = OUT / "README.md"
+    assert readme.read_text(encoding="utf-8") == readme_markdown(bundles, sizes), (
+        "examples/screen-map/README.md is stale or hand-edited; regenerate it: "
+        "pixi run python -m scripts.gen_screen_map")

@@ -58,10 +58,10 @@ async function mount(host: FakeElement, width: number, drawFailure: string | nul
     json: (): Promise<unknown> => Promise.resolve(bundle),
   });
   const loc = fakeLocation(search);
-  const urls = urlStore(loc, writeNow);
+  const slot = urlStore(loc, writeNow).reserve();
   let bound: StateSource<PermGraphState> | null = null;
   permGraph(host as unknown as HTMLElement, (initial) => {
-    bound = urls.bind(PERM_GRAPH_URL, initial);
+    bound = slot.bind(PERM_GRAPH_URL, initial);
     return bound;
   });
   // A macrotask, so the fetch chain has drained by the time this resolves.

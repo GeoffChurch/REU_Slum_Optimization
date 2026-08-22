@@ -31,7 +31,15 @@ export function register<T>(name: string, w: Widget<T>, codec: UrlCodec<T>): voi
     .flatMap((p) => [...p.keys]);
   REGISTRY.set(name, {
     keys,
-    mount: (host, store) => { w(host, (initial) => store.bind(codec, initial)); },
+    // `reserve()` runs on THIS line -- inside `mountAll`'s DOM walk -- while `slot.bind` runs
+    // whenever the widget gets round to calling `makeState`, which every one of the five does from
+    // inside its own `fetch().then(boot)`. Splitting the two is what makes the emitted query's
+    // order the page's order instead of the network's: see `UrlSlot` (url/store.ts) for the
+    // ordering this replaced, and mount.test.ts's out-of-order test for the guard on it.
+    mount: (host, store) => {
+      const slot = store.reserve();
+      w(host, (initial) => slot.bind(codec, initial));
+    },
   });
 }
 

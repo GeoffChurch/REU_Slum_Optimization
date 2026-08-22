@@ -276,10 +276,13 @@ def _perm_graph_panel(layer: str, state: str, *, mounted: bool) -> str:
     sentence, and Explore's stage prose does the same above its single panel, so a caption carrying
     them too would be Finding F5 again under cover of fixing F3.
 
-    Every number is read from `examples/perm-graph/perm_graph.json`, written by
-    `scripts/gen_perm_graph.py` beside the images. Typing one here would reintroduce the drift class
-    the truth pass closed -- and `_intro.md`'s "seven methods" is the proof that a figure does not
-    have to look like a metric to rot.
+    Every number is read from an artifact, never typed. The caption's come from
+    `examples/perm-graph/perm_graph.json`, written by `scripts/gen_perm_graph.py` beside the
+    images; the mounted panel's `data-prefix` comes from `lens_b_index` in
+    `examples/perm-graph/bundle.json`, the payload the widget itself fetches, written by
+    `scripts/gen_web_bundle.py`. Typing either here would reintroduce the drift class the truth
+    pass closed -- and `_intro.md`'s "seven methods" is the proof that a figure does not have to
+    look like a metric to rot.
 
     Emits nothing when the panel's own PNG is absent, like every other figure on this site."""
     meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))

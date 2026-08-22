@@ -36,6 +36,20 @@ class FakeElement {
   readonly style: Record<string, string> = {};
   readonly dataset: Record<string, string> = {};
   textContent = "";
+  /** The `<input type="range">` surface the two target sliders are written through. Declared here
+   * rather than reached for with a cast at each call site, so a widget that stopped writing one of
+   * them is a compile error in this file (harness.ts's own FakeElement declares the same five --
+   * this file keeps a separate fake, for the reason the import comment at the top gives).
+   *
+   * Deliberately NOT clamped to `min`/`max` the way a real range input clamps a value assigned to
+   * it. That clamp is precisely what hides the defect the URL test below is about: a browser would
+   * show 40% on the thumb while state, guide and readout said 50%, so a fake that imitated it
+   * could not tell the two apart. Here `value` reports what the widget assigned. */
+  type = "";
+  min = "";
+  max = "";
+  step = "";
+  value = "";
   /** Creation and removal instants on one shared counter, so a test can assert the ORDER of two
    * DOM events and not merely that both happened -- which is the whole of "the fallback image goes
    * only once a chart has been drawn in its place". */
@@ -211,10 +225,10 @@ async function mount(host: FakeElement, payload: unknown = bundle, search = ""):
     json: (): Promise<unknown> => Promise.resolve(payload),
   });
   const loc = fakeLocation(search);
-  const urls = urlStore(loc, writeNow);
+  const slot = urlStore(loc, writeNow).reserve();
   let bound: StateSource<FrontierState> | null = null;
   frontier(host as unknown as HTMLElement, (initial) => {
-    bound = urls.bind(FRONTIER_URL, initial);
+    bound = slot.bind(FRONTIER_URL, initial);
     return bound;
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -483,6 +497,82 @@ test("a boot target outside its own axis is refused rather than drawn off-chart"
     /data-target-permeability \(1\.5\) is outside its axis \[0, 1\]/);
   assert.equal(host.querySelector("img")!.removedAt, null);
 });
+
+/** The two target sliders, x first, in the order the widget appends their labels -- found by
+ * `type`, never by position among every `<input>`, so this keeps naming the sliders if the widget
+ * ever grows a control of another kind. */
+function targetSliders(host: FakeElement): [FakeElement, FakeElement] {
+  const found = host.all("input").filter((i) => i.type === "range");
+  assert.equal(found.length, 2, `expected two range inputs, found ${found.length}`);
+  return [found[0]!, found[1]!];
+}
+
+/** The plot rect `drawAxes` recorded on the `<svg>` (render/svg.ts's `setPlotRect`) -- the same
+ * four numbers `drawGuide` reads back to span a guide across, so a guide's own coordinates can be
+ * compared against the drawable area rather than against a screen position recomputed here from a
+ * `View` this test would have to rebuild. */
+function plotRect(svg: FakeElement): { left: number; right: number; top: number; bottom: number } {
+  const at = (name: string): number => {
+    const raw = svg.getAttribute(name);
+    assert.ok(raw !== null, `the chart recorded no ${name}`);
+    return Number(raw);
+  };
+  return { left: at("data-plot-left"), right: at("data-plot-right"),
+           top: at("data-plot-top"), bottom: at("data-plot-bottom") };
+}
+
+test("an out-of-axis ?disp=/?perm= lands on the axis end, guide, slider and URL agreeing",
+  async () => {
+    // `numberParam` accepts any finite decimal, and the store overwrites both target fields from
+    // the URL immediately after `makeState` -- so the `inRange` throws that guard the mount point's
+    // own `data-*` never see a reader's `?disp=`. Unclamped, `?disp=0.5` against this bundle's
+    // `frontier_xmax` 0.4 put the vertical guide past the right edge of the 800 px SVG and
+    // `?perm=1.5` put the horizontal one above its top, while the summary answered confidently
+    // about a 150% standard and both sliders (whose `max` is the axis maximum) pinned their thumbs
+    // to 40%/100%. Neither guide was on the chart and nothing threw.
+    //
+    // All four halves are asserted per case, because each fails on its own: the state, the slider
+    // the reader drags, the line actually drawn, and the query a reader would copy. Both ends of
+    // both axes, since `clamp` has a floor as well as a ceiling and `?disp=-0.1` is as typeable.
+    const xMax = bundle.frontier_xmax;
+    const yMax = bundle.chart.permeability_max;
+    for (const [search, wantX, wantY, query] of [
+      ["disp=0.5&perm=1.5", xMax, yMax, "disp=0.4&perm=1"],
+      ["disp=-0.1&perm=-0.2", 0, 0, "disp=0&perm=0"],
+    ] as const) {
+      const host = mountPoint();
+      const { store, loc } = await mount(host, bundle, search);
+      assert.ok(store !== null, `${search}: the widget never asked for a state store`);
+
+      assert.equal(store.get().targetDisplacement, wantX, `${search}: the displacement state`);
+      assert.equal(store.get().targetPermeability, wantY, `${search}: the permeability state`);
+
+      const [xSlider, ySlider] = targetSliders(host);
+      assert.equal(xSlider.value, String(wantX), `${search}: the displacement slider`);
+      assert.equal(ySlider.value, String(wantY), `${search}: the permeability slider`);
+
+      // The drawn line, against the rect it is supposed to span. A guide at an axis END sits
+      // exactly on that edge of the plot rect -- `plotRect` is `toScreen` of the same tick
+      // extremes the clamp bounds to -- so this is an equality, not an inside-the-box check that
+      // 0.41 would also satisfy.
+      const svg = host.all("svg")[0]!;
+      const rect = plotRect(svg);
+      const dashed = svg.all("line").filter((l) => l.getAttribute("stroke-dasharray") !== null);
+      assert.equal(dashed.length, 2, `${search}: expected exactly two dashed target guides`);
+      const num = (l: FakeElement, a: string): number => Number(l.getAttribute(a));
+      const vertical = dashed.find((l) => num(l, "x1") === num(l, "x2"));
+      const horizontal = dashed.find((l) => num(l, "y1") === num(l, "y2"));
+      assert.ok(vertical !== undefined && horizontal !== undefined,
+        `${search}: neither guide is axis-aligned, so one of them is a diagonal`);
+      assert.equal(num(vertical, "x1"), wantX === 0 ? rect.left : rect.right,
+        `${search}: the displacement guide was drawn off the plot rect`);
+      assert.equal(num(horizontal, "y1"), wantY === 0 ? rect.bottom : rect.top,
+        `${search}: the permeability guide was drawn off the plot rect`);
+
+      // And the URL a reader would copy carries the clamped pair, not the typed one.
+      assert.equal(loc.written.at(-1), query, `${search}: the emitted query`);
+    }
+  });
 
 test("a container narrowing with the window untouched re-lays the chart out at the new width",
   async () => {

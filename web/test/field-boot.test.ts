@@ -100,10 +100,10 @@ async function mount(host: FakeElement, drawFailure: string | null = null,
     json: (): Promise<unknown> => Promise.resolve(payload),
   });
   const loc = fakeLocation(search);
-  const urls = urlStore(loc, writeNow);
+  const slot = urlStore(loc, writeNow).reserve();
   let bound: StateSource<FieldState> | null = null;
   displacementField(host as unknown as HTMLElement, (initial) => {
-    bound = urls.bind(FIELD_URL, initial);
+    bound = slot.bind(FIELD_URL, initial);
     return bound;
   });
   // A macrotask, so the fetch chain has drained by the time this resolves.

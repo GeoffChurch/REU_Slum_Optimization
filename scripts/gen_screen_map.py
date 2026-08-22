@@ -395,6 +395,69 @@ def _render_screen_map(gdf: gpd.GeoDataFrame, selected_ids: set[str], informal_i
     return fig
 
 
+# The page widths the README states the followed block's on-screen size at. Material's content
+# column measures roughly this on a desktop window, and both figures on that page are laid out to
+# it -- the PNG at `max-width: 100%` of the column, the widget's canvas at `width: 100%` with a 1:1
+# aspect ratio (web/src/widgets/screen-map.ts). These two are the INPUT to the arithmetic below,
+# not an output of it; the areas themselves are recomputed from the bundle on every bake, so a
+# re-bake onto another block cannot leave a stale number standing in generated prose. That is the
+# same discipline `web/src/render/city.ts` states for its own follow-ring constants -- keep the
+# measurement out of the text and let something compute it.
+README_PAGE_WIDTHS_PX = (700, 900)
+
+
+def _extent_m(bundle: CityBundle) -> tuple[float, float]:
+    """The city's width and height in metres, over every ring coordinate -- the extent both fits
+    below are computed against, and the same one `web/test/screen-map-boot.test.ts`'s `cityBbox`
+    walks over the same rings on the widget side."""
+    xs = [p[0] for rings in bundle["rings"] for ring in rings for p in ring]
+    ys = [p[1] for rings in bundle["rings"] for ring in rings for p in ring]
+    return max(xs) - min(xs), max(ys) - min(ys)
+
+
+def _block_area_m2(bundle: CityBundle, index: int) -> float:
+    """One block's area from its own SIMPLIFIED rings -- shoelace on the exterior, less each
+    interior. Not `area_m2`, which is the unsimplified geometry's: these rings are what both
+    figures actually draw, and are what `screen-map-boot.test.ts`'s `screenAreaPx2` measures on the
+    widget side."""
+    def ring_area(ring: list[list[float]]) -> float:
+        a = 0.0
+        for i, (x1, y1) in enumerate(ring):
+            x2, y2 = ring[(i + 1) % len(ring)]
+            a += x1 * y2 - x2 * y1
+        return abs(a) / 2.0
+
+    rings = bundle["rings"][index]
+    return ring_area(rings[0]) - sum(ring_area(hole) for hole in rings[1:])
+
+
+def _follow_px2(bundle: CityBundle, page_width_px: float) -> tuple[float, float]:
+    """The followed block's on-screen area in CSS px², in `screen_map.png` and then on the widget's
+    own map, when each is laid out `page_width_px` wide.
+
+    Two fits, because the two figures frame the city differently:
+
+    * The PNG. `_render_screen_map` sets an equal aspect and `margins(0)`, and `save_render` writes
+      it `bbox_inches="tight", pad_inches=0` -- so the saved image IS the data bbox, and the whole
+      world width lands across the image's width however tall the image turns out. Displayed at
+      `page_width_px`, that makes the scale `page_width_px / dx`.
+    * The widget. `fitBbox` (web/src/view/transform.ts) fits the same extent into a SQUARE canvas
+      with `encoding.pad` on each side, so it is bounded by the LONGER world dimension:
+      `min(w/dx, w/dy) * (1 - 2 * pad)`. Cape Town is taller than it is wide, which is most of why
+      the same block is smaller there than in the PNG.
+
+    Neither figure is what makes the ring necessary on its own -- both are, which is why both are
+    stated."""
+    dx, dy = _extent_m(bundle)
+    follow = bundle.get("follow")
+    assert follow is not None, "only a city carrying `follow` has a followed block to measure"
+    area_m2 = _block_area_m2(bundle, follow["index"])
+    png_scale = page_width_px / dx
+    pad = bundle["encoding"]["pad"]
+    map_scale = min(page_width_px / dx, page_width_px / dy) * (1.0 - 2.0 * pad)
+    return area_m2 * png_scale**2, area_m2 * map_scale**2
+
+
 def readme_markdown(bundles: dict[str, CityBundle], sizes: dict[str, tuple[int, int]]) -> str:
     """This directory's README, written from the bundles it documents -- see
     `gen_displacement_field.readme_markdown`'s docstring for why generated beats handwritten: every
@@ -410,6 +473,9 @@ def readme_markdown(bundles: dict[str, CityBundle], sizes: dict[str, tuple[int, 
     n_informal = sum(ct_informal)
     ct_follow = ct.get("follow")
     assert ct_follow is not None, "capetown must carry the followed block"
+    narrow_px, wide_px = README_PAGE_WIDTHS_PX
+    png_narrow, map_narrow = _follow_px2(ct, narrow_px)
+    png_wide, map_wide = _follow_px2(ct, wide_px)
 
     def floor_row(f: CityFloor) -> str:
         prec = "—" if f["precision"] is None else f"{f['precision']:.1%}"
@@ -437,9 +503,9 @@ The blue ring marks `{ct_follow['block_id']}` (index {ct_follow['index']:,} of t
 -- the single block every later stage of the site is about: perm-graph, displacement-field and
 method-comparison all pin it, and region-grow seeds from it. Cape Town's bundle carries it as
 `follow`; Nairobi omits the field, the same way it omits `informal`. It is a POINT, not an outline:
-a whole metro is fitted into one figure, which leaves the followed block covering about 1.0-1.7 px²
-here at a 700-900 px page width (and ~0.5 px² on the widget's own map), so its boundary is not a
-shape a reader could pick out.
+a whole metro is fitted into one figure, so at a {narrow_px}-{wide_px} px page width that block
+covers {png_narrow:.1f}-{png_wide:.1f} px² in the map above, and {map_narrow:.1f}-{map_wide:.1f} px²
+on the widget's own square map -- its boundary is not a shape a reader could pick out.
 
 `capetown.json` and `nairobi.json` are the payloads the widget fetches: every block's
 `building_count`, area, perimeter and simplified boundary rings (fill even-odd), plus the shipped

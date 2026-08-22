@@ -136,7 +136,9 @@ export function nullableStringParam(key: string): Param<string | null> {
 }
 
 /** Coordinate precision: 0.1 m. The bundle ships 2 dp; 10 cm is far below anything visible in a
- * drag, halves the URL's length, and is idempotent after one round trip. */
+ * drag, and is idempotent after one round trip. It shortens a segment by about a sixth, not by
+ * half -- one digit per coordinate is all that goes: the committed `field.json`'s two roads spell
+ * as 24 and 23 characters at 2 dp and as 20 and 19 at 1 dp. */
 const COORD_DP = 1;
 
 function segment(raw: string): [[number, number], [number, number]] | null {
@@ -166,12 +168,13 @@ function sameCoords(a: [number, number][], b: [number, number][]): boolean {
 /** DisplacementField's two roads and their shared width, over three keys.
  *
  * Two roads, of two points each. Both are invariants of the BUNDLE, and both are checked in
- * `displacement-field.ts`'s `boot` -- the count, then the points per road, on adjacent lines --
- * because that is where the data crosses in. This param is downstream of that boundary and does
- * not re-derive either one: `fmtSegment` indexes `r.coords[0]`/`[1]`, `encode` and `decode` index
- * `[0]`/`[1]` of the road list, and all of it is trusting the boundary rather than restating it at
- * every consumer. `FIELD_URL` is the only construction site; a second one would need the same
- * boundary check in front of it, since nothing in here would catch its absence.
+ * `displacement-field.ts`'s `boot` -- the count first, then the points per road in the loop right
+ * after it, with only that loop's own comment between them -- because that is where the data
+ * crosses in. This param is downstream of that boundary and does not re-derive either one:
+ * `fmtSegment` indexes `r.coords[0]`/`[1]`, `encode` and `decode` index `[0]`/`[1]` of the road
+ * list, and all of it is trusting the boundary rather than restating it at every consumer.
+ * `FIELD_URL` is the only construction site; a second one would need the same boundary check in
+ * front of it, since nothing in here would catch its absence.
  *
  * One shared width, because `displacement-field.ts`'s width slider writes its value onto EVERY
  * road's `width_m` -- deliberately, so the overlap demonstration stays exact. */

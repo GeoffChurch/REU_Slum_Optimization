@@ -68,10 +68,10 @@ async function mount(width = 700, drawFailure: string | null = null, search = ""
   host.dataset.bundleNairobi = "../examples/screen-map/nairobi.json";
   armDrawFailure(drawFailure);
   const loc = fakeLocation(search);
-  const urls = urlStore(loc, writeNow);
+  const slot = urlStore(loc, writeNow).reserve();
   let bound: StateSource<ScreenState> | null = null;
   screenMap(host as never, (initial) => {
-    bound = urls.bind(SCREEN_MAP_URL, initial);
+    bound = slot.bind(SCREEN_MAP_URL, initial);
     return bound;
   });
   await new Promise((resolve) => setTimeout(resolve, 0));

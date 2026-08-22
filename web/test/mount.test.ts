@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { Widget } from "../src/mount.js";
 import { boolParam, type UrlCodec } from "../src/url/param.js";
-import type { UrlStore } from "../src/url/store.js";
+import { urlStore, type UrlStore } from "../src/url/store.js";
+import { fakeLocation, writeNow } from "./harness.js";
 
 /** Permanent regression coverage for the two hardening fixes register()/mountAll() ship: a
  * duplicate widget name must throw at registration time, and one widget throwing during mount
@@ -55,12 +56,15 @@ const NOTHING: UrlCodec<Nothing> = { on: boolParam("nothing-on") };
  * therefore passes a store explicitly.
  *
  * `bind<T>(codec: UrlCodec<T>, initial: T): StateSource<T>` is a generic METHOD, and a non-generic
- * arrow does not satisfy it, so the stub keeps the type parameter. It hands each widget its own
- * `initial` back unchanged: these tests are about mounting, not about URL round-tripping, which
- * url-store.test.ts covers directly. */
+ * arrow does not satisfy it, so the stub keeps the type parameter. Each `reserve()` hands back a
+ * fresh slot that returns each widget its own `initial` unchanged: these tests are about mounting,
+ * not about URL round-tripping, which url-store.test.ts covers directly. The ordering test at the
+ * bottom of this file is the one that needs a REAL store, and builds its own. */
 const noStore: UrlStore = {
-  bind: <T>(_c: UrlCodec<T>, initial: T) =>
-    ({ get: () => initial, set: () => {}, subscribe: () => {} }),
+  reserve: () => ({
+    bind: <T>(_c: UrlCodec<T>, initial: T) =>
+      ({ get: () => initial, set: () => {}, subscribe: () => {} }),
+  }),
 };
 
 test("register throws on a duplicate widget name", async () => {
@@ -304,4 +308,44 @@ test("the URL key list is pinned -- a key rename breaks published links silently
     const all = [PERM_GRAPH_URL, FRONTIER_URL, FIELD_URL, REGION_GROW_URL, SCREEN_MAP_URL]
       .flatMap(keysOf);
     assert.equal(new Set(all).size, all.length, `duplicate URL key across widgets: ${all}`);
+  });
+
+test("the emitted query is in MOUNT order, whatever order the widgets get round to binding in",
+  async () => {
+    stubDocument();
+    const { register, mountAll } = await import("../src/mount.js");
+
+    // Design §2.2 rule 5 -- one view, one URL -- is the citability property this whole piece
+    // exists to deliver, and it was false on any page with more than one widget until `register`
+    // started reserving a slot at mount time: the store appended a contributor inside `bind`, and
+    // every one of the five widgets binds from inside its own `fetch().then(boot)`. On Explore
+    // that means screen-map, FIRST in the DOM, awaits both city tiers (7.33 MB) while frontier,
+    // LAST in the DOM, has 0.02 MB -- so the emitted order came out roughly reversed, and need not
+    // repeat between loads. url-store.test.ts pins the same property one layer down, on the slots
+    // themselves;
+    // what this adds is the tie from a slot's position to the DOM walk that took it.
+    //
+    // So neither widget binds while `mountAll` runs. Each stashes its `makeState` and is fired
+    // afterwards, in reverse mount order -- which is what a slower first bundle does.
+    interface One { v: boolean }
+    const pending: (() => void)[] = [];
+    const deferred: Widget<One> = (_host, makeState) => {
+      pending.push(() => { makeState({ v: false }).set({ v: true }); });
+    };
+    register("order-first-widget", deferred, { v: boolParam("order-first-on") });
+    register("order-second-widget", deferred, { v: boolParam("order-second-on") });
+
+    const loc = fakeLocation("");
+    const first = makeMountPoint("order-first-widget");
+    const second = makeMountPoint("order-second-widget");
+    const root = { querySelectorAll: () => [first, second] } as unknown as ParentNode;
+    mountAll(root, urlStore(loc, writeNow));
+
+    assert.equal(pending.length, 2,
+      `both widgets must have mounted without binding: ${pending.length} of 2 deferred`);
+    assert.deepEqual(loc.written, [], "nothing is bound yet, so nothing can have been written");
+    pending[1]!();
+    pending[0]!();
+    assert.equal(loc.written.at(-1), "order-first-on=1&order-second-on=1",
+      "the query came out in bind order (the network's) rather than mount order (the page's)");
   });

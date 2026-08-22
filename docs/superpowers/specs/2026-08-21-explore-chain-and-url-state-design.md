@@ -185,9 +185,11 @@ exactly the unreachable guard this project forbids.
 
 ### §2.1 Shape
 
-One `UrlStore` per page, constructed in `mountAll`. It owns the parsed query string, the set of
-bound widgets, and one debounced write. Each widget gets a `StateSource<T>` through
-`store.bind(codec, initial)` that is indistinguishable from `localState`'s.
+One `UrlStore` per page, constructed in `mountAll`. It owns the parsed query string, one emission
+slot per mounted widget, and one debounced write. `mountAll` takes a widget's slot as it walks the
+DOM (`store.reserve()`); the widget's own `slot.bind(codec, initial)`, whenever its bundle lands,
+fills that slot and hands back a `StateSource<T>` indistinguishable from `localState`'s. Rule 5
+below is why the two are separate calls.
 
 ```ts
 // web/src/url/param.ts
@@ -237,7 +239,14 @@ table that type-checks while silently dropping a field.
    a per-`pointermove` write would exceed inside one drag.
 5. **Deterministic emission order:** every unclaimed param first, in its original order, then every
    claimed param that differs from its initial, in mount order and then codec-declaration order.
-   Stable across writes and directly testable.
+   Mount order is not **bind** order, and the difference is the whole of this rule: every widget
+   calls `makeState` from inside its own `fetch().then(boot)`, so binds land in bundle-arrival
+   order — on Explore, screen-map is first in the DOM and awaits both city tiers (7.33 MB) while
+   frontier is last and has 0.02 MB. So `register`'s mount closure takes the slot synchronously,
+   as `mountAll` walks the DOM, and the widget's later `bind` fills it. A slot nobody has filled
+   yet emits nothing and its widget's keys ride the unclaimed pass meanwhile, so it is the SETTLED
+   page — every widget on it bound — whose URL is reproducible, not a page mid-load. Directly
+   testable, and tested with the binds deliberately out of mount order (`mount.test.ts`).
 
 ### §2.3 Static validation vs bundle validation — the division, stated once
 
@@ -255,18 +264,31 @@ A widget-side reset must never *throw*: `region-grow.ts:75-78` throws when the *
 is unknown, and that stays — a broken artifact is a real failure. A reader's typo in a query string
 is not, and must land on the default view rather than on an error card.
 
-Concretely this adds **five** boot-time resets (§7): `RegionGrow.seed` unknown ⇒ the bundle's own
-seed; `Frontier.isolated` naming no method in `b.methods` ⇒ `null` (today `frontier.ts:425` would
-filter out **every** curve and draw an empty chart); `PermGraph.prefix` past `n_prefixes` ⇒ clamped;
-and — **added during Task 4, after this section first said three** — `RegionGrow.budget` and
-`DisplacementField`'s road width clamped to their own bundle bounds.
+Concretely this adds **eight** boot-time resets (§7). Three were foreseen here: `RegionGrow.seed`
+unknown ⇒ the bundle's own seed; `Frontier.isolated` naming no method in `b.methods` ⇒ `null` (today
+`frontier.ts:425` would filter out **every** curve and draw an empty chart); `PermGraph.prefix` past
+`n_prefixes` ⇒ clamped. Five more were ruled in during execution:
 
-The last two were not foreseen here and were ruled in during execution, because the widgets' own new
-comments asserted the property the gap violated: `?width=99999` reaches state, a real
+* **Task 4** — `RegionGrow.budget` and `DisplacementField`'s road width, clamped to their own
+  bundle bounds.
+* **Task 6** — `ScreenMap.floor`, resolved by `syncFloor` into the score range the SELECTED metric
+  actually spans on the SELECTED city, and written back only when the URL supplied a floor at all
+  (resolving an absent one would publish a `?floor=` the reader never set).
+* **The final fix wave** — `Frontier`'s two targets, clamped to `frontier_xmax` and
+  `chart.permeability_max`.
+
+(This section said three as written, five after Task 4, and never counted Task 6's; eight is the
+count including Task 6's and the final wave's. §7 item 7 carries the same list.)
+
+None of the five was foreseen here, and each was ruled in for the same reason: the widget's own new
+comment asserted the property the gap violated. `?width=99999` reaches state, a real
 `<input type="range">` clamps its displayed value to the element's `max`, and the corridor is drawn
 at the unclamped metres — the slider and the picture disagreeing, which is exactly the desync
-`§1.5`'s whole argument is about. Narrowing the comment to fit the gap would have documented a bug
-as a design.
+`§1.5`'s whole argument is about. `?disp=0.5` against a `frontier_xmax` of 0.4 is the same defect
+one step further: `numberParam` accepts it, the store overwrites the field `inRange` had just
+checked, `drawGuide` puts the line off the plot rect where nobody can see it, and the readout
+answers confidently about a standard that is not on the chart. Narrowing a comment to fit the gap
+would have documented a bug as a design.
 
 **One residual is known and deliberately not fixed.** Both sliders also carry a `step` the browser
 snaps onto (`budget.step` 50, `width.step_m` 0.5) and no codec knows it, so `?budget=5001` shows
@@ -293,7 +315,8 @@ export interface Timers { set(fn: () => void, ms: number): number; clear(id: num
 export function debounce(ms: number, timers: Timers): Scheduler;
 export const systemTimers: Timers;
 
-export interface UrlStore { bind<T>(codec: UrlCodec<T>, initial: T): StateSource<T> }
+export interface UrlSlot { bind<T>(codec: UrlCodec<T>, initial: T): StateSource<T> }
+export interface UrlStore { reserve(): UrlSlot }
 export function urlStore(loc: UrlLocation, schedule: Scheduler): UrlStore;
 ```
 
@@ -330,8 +353,8 @@ interface Registration {
 export function register<T>(name: string, w: Widget<T>, codec: UrlCodec<T>): void;
 ```
 
-`register` captures `T` in a closure — `mount: (host, store) => w(host, (initial) =>
-store.bind(codec, initial))` — and stores a non-generic `Registration`. `REGISTRY` stays a plain
+`register` captures `T` in a closure — `mount: (host, store) => { const slot = store.reserve();
+w(host, (initial) => slot.bind(codec, initial)); }` — and stores a non-generic `Registration`. `REGISTRY` stays a plain
 `Map<string, Registration>`; the (widget, codec) pairing is checked at each of the five `register`
 call sites.
 
@@ -525,9 +548,15 @@ and takes no URL key.
    exported, one exported `UrlCodec` each (§3.3).
 5. `web/src/widgets/screen-map.ts` + `web/src/render/city.ts` — draw the follow ring (§6.2).
 6. `web/src/mount.ts` — `register`'s third argument, the store, the collision throw (§3).
-7. Three boot-time resets for bundle-dependent URL values (§2.3): `region-grow.ts` (unknown
-   `seed` ⇒ the bundle's own), `frontier.ts` (unknown `isolated` ⇒ `null`), `perm-graph.ts`
-   (`prefix` past the last ⇒ clamped).
+7. Eight boot-time resets for bundle-dependent URL values (§2.3), which is where the reasoning
+   for each of them lives: `region-grow.ts` (unknown `seed` ⇒ the bundle's own; `budget` ⇒ clamped
+   to `b.budget.min`/`max`), `frontier.ts` (unknown `isolated` ⇒ `null`; `targetDisplacement` ⇒
+   clamped to `frontier_xmax`; `targetPermeability` ⇒ clamped to `chart.permeability_max`),
+   `perm-graph.ts` (`prefix` past the last ⇒ clamped), `displacement-field.ts` (road width ⇒
+   clamped to `b.width.floor_m`/`max_m`) and `screen-map.ts` (`floor` ⇒ resolved into the selected
+   metric's own score range, and only when the URL supplied one). Three of the eight were foreseen
+   when this list was written; the other five were ruled in during Tasks 4 and 6 and the final fix
+   wave.
 8. `web/src/widgets/screen-map.ts` — `ScreenState.floor` becomes `number | null`, `defaultFloorFor`
    is factored out of `syncFloor`, the metric handler sets `null`, the city handler resolves, and
    `render` resolves (§1.6). This is the one non-mechanical widget change in the piece.

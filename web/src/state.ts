@@ -21,7 +21,11 @@ export interface StateSource<T> {
  * had to be a runtime string table. With `T` on the type instead, `register(name, widget, codec)`
  * type-checks the pairing at each of the five call sites, and `UrlCodec<T>`'s mapped type makes a
  * missing or renamed field a compile error. `localState` is still generic, so it satisfies this at
- * every instantiation and every existing boot test keeps working unchanged. */
+ * every instantiation -- which is what let the five boot tests keep compiling while Tasks 4, 5 and
+ * 7 rewired them one at a time onto the production `urlStore` over a fake `UrlLocation`. All five
+ * are on that store now; the one place `localState` is still passed to a widget is
+ * `field-boot.test.ts`'s missing-`data-bundle` test, which needs a factory only because the widget
+ * throws before ever calling one. */
 export type StateFactory<T> = (initial: T) => StateSource<T>;
 
 export function localState<T>(initial: T): StateSource<T> {
