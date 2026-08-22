@@ -50,9 +50,28 @@ Gzip -9, measured:
 | `method-comparison/frontier.json` | 0.02 MB | 0.01 MB |
 | **all six together** | | **2.45 MB** |
 
-The Screening page already fetches the first three (**2.33 MB gz**) today. Explore therefore costs
-**+0.14 MB** over an existing page. **No lazy-loading / IntersectionObserver machinery is in
-scope** — it would be a mechanism built for a problem the measurement says does not exist.
+The Screening page already fetches the first three (**2.33 MB gz**) today, so Explore costs
+**+0.14 MB** *in bundles*.
+
+**That number closed the wrong question, and Task 8's review caught it.** The right denominator is
+total page transfer, and the fallback PNGs — already-compressed, therefore invisible to a gzip-only
+measurement — dominate it. Measured on the built site:
+
+| | bundles (gz) | fallback PNGs | over the wire |
+| --- | --- | --- | --- |
+| Screening | 2.33 MiB | 1.65 MiB | **3.99 MiB** |
+| Explore | 2.45 MiB | **5.06 MiB** | **7.51 MiB** |
+
+Explore carries five fallback PNGs to Screening's two. The real delta is **+3.5 MiB, an 88%
+increase**, and 3.4 MiB of it is PNGs. So "no lazy-loading is in scope" **shipped on a measurement of
+one component generalised to the whole page** — the conclusion may still be defensible, but this
+section did not establish it.
+
+**Left as shipped, and re-opened as a follow-up rather than fixed here.** The cheap remedy is
+`loading="lazy"` on `_figure`'s `<img>` in `scripts/gen_site_pages.py` — four of Explore's five PNGs
+are below the fold and each is removed by its own widget after the first successful draw. It is one
+line, but it changes **every figure on every page of the site**, which is not a change to make at the
+end of a branch on the strength of one page's measurement.
 
 ### §1.3 All thirteen state fields are distinct — today
 
