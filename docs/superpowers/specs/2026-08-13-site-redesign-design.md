@@ -120,9 +120,15 @@ loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.29.2/full/" })
 ```
 
 jsDelivr serves immutable versioned paths, so a future Pyodide release cannot reach a pinned URL.
-This matters: `geopandas` was *removed* in Pyodide 0.27, and `geopandas`/`pyproj`/`shapely` were all
-*disabled* in 0.28 over build failures, returning only in 0.29.2 — two disappearances in two years,
-of exactly the packages needed here.
+**Measured across every release** (`pyodide-lock.json` at each pinned path): `geopandas` and
+`pyproj` are present in 0.26.4, 0.27.0 and 0.27.7, **absent in 0.28.0**, and present again in
+0.29.2. `shapely` is present in every one of them. So the disappearance is **two packages in one
+release**, not three across two — and it is still the reason to pin, because the two that vanished
+are load-bearing here.
+
+(This paragraph originally said `geopandas` was removed in 0.27 and all three were disabled in 0.28.
+Piece F measured it against every release's lockfile on 2026-08-22 and neither half held. Corrected
+here rather than only downstream, because this is where the claim entered the corpus.)
 
 **Self-hosting the wheels is not required** and is not proposed. Pinning solves the stability
 problem on its own; self-hosting buys only the removal of a third-party runtime dependency and of

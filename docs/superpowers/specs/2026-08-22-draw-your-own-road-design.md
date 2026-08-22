@@ -277,9 +277,14 @@ live `permeability` as it writes them, so a stale reference cannot survive a re-
 
 This catches, in one test, all three things a static import scan cannot:
 
-1. **A package that left the distribution.** `geopandas` was removed in Pyodide 0.27 and
-   `geopandas`/`pyproj`/`shapely` were all disabled in 0.28, returning only in 0.29.2 — two
-   disappearances in two years, of exactly these packages.
+1. **A package that left the distribution.** **Measured across every release** (`pyodide-lock.json` at each pinned path): `geopandas` and
+   `pyproj` are present in 0.26.4, 0.27.0 and 0.27.7, **absent in 0.28.0**, and present again in
+   0.29.2. `shapely` is present in every one of them. So the disappearance is **two packages in one
+   release**, not three across two — and it is still the reason to pin, because the two that vanished
+   are load-bearing here.
+   (An earlier draft of this section said `geopandas` was removed in 0.27 and all three were
+   disabled in 0.28; Task 3 measured it and neither half was right. The claim came from the parent
+   design and was repeated here without checking.)
 2. **The pandas major skew** (§1.1). The browser runs pandas 2.3.3; CI runs 3.0.3.
 3. **Behavioural drift at call time**, including anything reached only through a deferred import
    like `mesh.parcel_radii`'s `reblock.budget` (§1.2).
