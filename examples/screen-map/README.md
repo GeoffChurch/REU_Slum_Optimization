@@ -14,8 +14,10 @@ via `reblock.data.informal`).
 The blue ring marks `ZAF.9.3.1_1_40972` (index 9,511 of the columns below)
 -- the single block every later stage of the site is about: perm-graph, displacement-field and
 method-comparison all pin it, and region-grow seeds from it. Cape Town's bundle carries it as
-`follow`; Nairobi omits the field, the same way it omits `informal`. It is a POINT, not an outline,
-because at this zoom a block covers well under one pixel.
+`follow`; Nairobi omits the field, the same way it omits `informal`. It is a POINT, not an outline:
+a whole metro is fitted into one figure, which leaves the followed block covering about 1.0-1.7 px²
+here at a 700-900 px page width (and ~0.5 px² on the widget's own map), so its boundary is not a
+shape a reader could pick out.
 
 `capetown.json` and `nairobi.json` are the payloads the widget fetches: every block's
 `building_count`, area, perimeter and simplified boundary rings (fill even-odd), plus the shipped

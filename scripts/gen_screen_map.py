@@ -54,9 +54,10 @@ MIN_COUNT = 30
 SIMPLIFY_M = 5.0     # design §1.1: 5.49 MB / 1.85 MB gz for Cape Town, sub-pixel at city zoom
 BAKEOFF_CSV = Path("examples/screen-bakeoff/screen_comparison.csv")
 
-# The site's spine: the one block every later stage is about. READ, never typed -- perm-graph,
-# displacement-field and method-comparison all pin it, and region-grow seeds from it, so taking it
-# from an artifact is what keeps the city map's marker and those four figures from drifting apart.
+# The site's spine: the one block every later stage is about. READ from ONE artifact, never typed,
+# so the marker cannot drift from perm-graph. The other three stages (displacement-field,
+# method-comparison, region-grow's seed) name the same block by hand and nothing here reads them;
+# `tests/test_screen_map_bundle.py`'s SPINE_SOURCES is what holds all four together.
 FOLLOW_SOURCE = Path("examples/perm-graph/bundle.json")
 FOLLOW_CITY = "capetown"
 
@@ -200,11 +201,13 @@ class Encoding:
     consume it.
 
     `follow_color` reuses `_ROAD_COLOR`, the one blue in `render.py`'s palette. What separates it
-    here is HUE, not lightness: the three colours already in this encoding are a pale grey, a red
-    and a gold, and the palette's near-blacks (`_BOUNDARY_COLOR`, `_OWN_PT`) are legible against
-    those too but read as one more outline on a map whose outlines are all dark. A blue ring is the
-    only mark here that is off the grey/red/gold axis the rest of the figure encodes meaning along,
-    which is what a marker findable among 16,451 blocks needs.
+    here is HUE: `base_color` #dddddd is achromatic and `selected_color` #c0392b / `informal_color`
+    #d98c00 are two neighbouring warm hues, so a blue is the only addition to this encoding that is
+    neither. The palette's near-blacks (`_BOUNDARY_COLOR`, `_OWN_PT`) would be perfectly legible
+    against all three as well -- they lose on a preference, not on legibility: this figure's own
+    README and the widget's caption both have to NAME the marker in prose, and "the blue ring" is
+    a description a reader can act on where "the dark ring" is not, on a map drawn entirely in
+    #dddddd, #c0392b and #d98c00.
     """
     base_color: str
     selected_color: str
@@ -377,12 +380,13 @@ def _render_screen_map(gdf: gpd.GeoDataFrame, selected_ids: set[str], informal_i
     # block feeding this fallback and the widget, so a JS-off or print reader sees the block the
     # prose says the page follows and the two cannot drift apart independently.
     #
-    # A fixed-size ring rather than the block's own outline, for the reason the widget has: at city
-    # zoom a block is sub-pixel (`web/src/render/city.ts` measures the median at ~0.6 CSS px² on a
-    # 700 px canvas), so an outline of it would draw nothing findable. `markersize` is a diameter
-    # in POINTS, set against the figure rather than the map's extent; 12.3 pt is a larger fraction
-    # of this figure's width than the widget's 6 CSS px radius is of its canvas, deliberately,
-    # because the README displays this PNG well below its baked pixel width.
+    # A fixed-size ring rather than the block's own outline, for the reason `FOLLOW_RADIUS_PX` in
+    # `web/src/render/city.ts` gives on the widget side: a whole metro is fitted into one figure, so
+    # the followed block's own boundary comes out around a pixel at the widths this PNG is read at
+    # and an outline of it would put nothing findable on screen. `markersize` is a diameter in
+    # POINTS, so like that constant it is a SCREEN size, set against the figure rather than scaled
+    # with the map's extent. Its value is NOT derived from that constant and the two are not pinned
+    # together -- this figure is read at a different size than the canvas is.
     ax.plot(*follow_xy, marker="o", markersize=12.3, markerfacecolor="none",
             markeredgecolor=ENCODING.follow_color, markeredgewidth=2.0, zorder=4)
     ax.set_aspect("equal")
@@ -432,8 +436,10 @@ via `reblock.data.informal`).
 The blue ring marks `{ct_follow['block_id']}` (index {ct_follow['index']:,} of the columns below)
 -- the single block every later stage of the site is about: perm-graph, displacement-field and
 method-comparison all pin it, and region-grow seeds from it. Cape Town's bundle carries it as
-`follow`; Nairobi omits the field, the same way it omits `informal`. It is a POINT, not an outline,
-because at this zoom a block covers well under one pixel.
+`follow`; Nairobi omits the field, the same way it omits `informal`. It is a POINT, not an outline:
+a whole metro is fitted into one figure, which leaves the followed block covering about 1.0-1.7 px²
+here at a 700-900 px page width (and ~0.5 px² on the widget's own map), so its boundary is not a
+shape a reader could pick out.
 
 `capetown.json` and `nairobi.json` are the payloads the widget fetches: every block's
 `building_count`, area, perimeter and simplified boundary rings (fill even-odd), plus the shipped

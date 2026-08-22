@@ -21,6 +21,14 @@ CSV_PATH = Path("examples/screen-bakeoff/screen_comparison.csv")
 # Naming the same artifact from both sides is what makes the guard below a comparison of two
 # independently-produced bakes rather than a comparison of one bake against a literal here.
 FOLLOW_SOURCE = Path("examples/perm-graph/bundle.json")
+# Every artifact that names the followed block, and the field it names it in. The baker reads ONLY
+# `FOLLOW_SOURCE`; the other three agree with it by hand today (`gen_region_grow.py`'s `SEED` is a
+# typed literal), so nothing but the test below stops a re-bake of one of them from moving a stage
+# off the spine while the marker keeps pointing at perm-graph's block.
+SPINE_SOURCES = {FOLLOW_SOURCE: "block_id",
+                 Path("examples/displacement-field/field.json"): "block_id",
+                 Path("examples/method-comparison/frontier.json"): "block_id",
+                 Path("examples/region-grow/hood.json"): "seed"}
 
 pytestmark = pytest.mark.skipif(not (OUT / "capetown.json").exists(), reason="tier not baked")
 
@@ -102,10 +110,19 @@ def _crossings(ring: list[list[float]], x: float, y: float) -> int:
 
 
 def test_the_followed_block_is_the_one_every_later_stage_uses(capetown: dict[str, Any]) -> None:
-    """The site's spine, derived rather than typed. perm-graph, displacement-field and
-    method-comparison all pin one block and region-grow seeds from it; this asserts the city map
-    marks the SAME one, so a re-bake of any of them cannot leave the marker pointing elsewhere."""
-    want = json.loads(FOLLOW_SOURCE.read_text(encoding="utf-8"))["block_id"]
+    """The site's spine, derived rather than typed -- and asserted across ALL FOUR stages, not just
+    the one the baker reads. perm-graph, displacement-field and method-comparison each pin a
+    `block_id` and region-grow carries a `seed`; the four agree only by hand, so without this a
+    re-bake of any of the other three onto a different block would move that stage off the spine
+    and leave both the marker and this file green.
+
+    It also makes `FOLLOW_SOURCE`'s identity a checked fact rather than a coincidence: because all
+    four are asserted equal, pointing the baker at any other one of them is provably the same
+    bake."""
+    pinned = {path: json.loads(path.read_text(encoding="utf-8"))[field]
+              for path, field in SPINE_SOURCES.items()}
+    assert len(set(pinned.values())) == 1, f"the site's stages pin different blocks: {pinned}"
+    want = pinned[FOLLOW_SOURCE]
     follow = capetown["follow"]
     assert follow["block_id"] == want
     assert capetown["block_id"][follow["index"]] == want
@@ -113,14 +130,22 @@ def test_the_followed_block_is_the_one_every_later_stage_uses(capetown: dict[str
 
 def test_the_follow_marker_sits_inside_its_own_block(capetown: dict[str, Any]) -> None:
     """A marker outside its polygon would draw the ring in a neighbour's block -- silently, and at
-    0.61 CSS px² per block, invisibly wrong rather than obviously wrong. Hence
+    ~0.6 CSS px² per block on the widget's own map, invisibly wrong rather than obviously wrong.
+    Hence
     `representative_point()` in the baker and not `centroid`: measured on this bundle, 1,491 of its
     16,451 blocks have a centroid that falls outside their own polygon.
 
-    Two assertions, because a marker can be wrong in two unrelated ways. The bounding box pins the
+    The bounding box pins the
     COORDINATE FRAME -- `follow.x`/`y` are origin-relative like every ring, so a world-CRS value
-    would land ~250 km away. The even-odd crossing count pins CONTAINMENT, which the box cannot: a
-    point in a concavity or in an interior ring is inside the box and outside the block."""
+    would land ~6,200 km away, which is `origin` itself: 250 km of easting and 6,192 km of northing,
+    the northing dominating by 25x.
+
+    Two assertions, and the second SUBSUMES the first -- every point outside the bounding box is
+    also outside the polygon, so the box adds no failure class of its own. It is kept for the
+    diagnostic: a frame mistake fails it with both the offending number and the ring's own range in
+    the message, where the crossing count would report only "outside". The crossing count is what
+    catches the case the box cannot -- a point in a concavity or in an interior ring is inside the
+    box and outside the block."""
     follow = capetown["follow"]
     rings = capetown["rings"][follow["index"]]
     xs = [p[0] for p in rings[0]]
