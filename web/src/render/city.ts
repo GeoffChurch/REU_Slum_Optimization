@@ -44,6 +44,17 @@ import type { CityBundle, CityEncoding } from "../screen_map.js";
 import { sizeCanvas } from "./canvas.js";
 import { toScreen, type View } from "../view/transform.js";
 
+/** The follow ring's radius and line width, in CSS pixels -- SCREEN sizes, never world ones.
+ * `view` fits a whole metro's extent into one canvas, which is what leaves a single block covering
+ * a fraction of a pixel there (this module's own docstring above carries the measured median). So
+ * the followed block's own outline, or any marker multiplied by `view.scaleX`, would come out
+ * smaller than a pixel and put nothing on screen -- which is why neither constant below is scaled
+ * by the view. `screen-map-boot.test.ts` measures the block-against-ring size relation on the
+ * committed bundle, so a re-bake that moved the followed block is caught there rather than by a
+ * number written into this comment. */
+export const FOLLOW_RADIUS_PX = 6;
+const FOLLOW_LW_PX = 2;
+
 /** One block's rings (exterior first, then any interiors), projected to screen space. */
 type ScreenRings = [number, number][][];
 
@@ -106,7 +117,10 @@ export interface CityLayer {
    * OUTLINE `order[0..k)` in `e.selected_color` at `e.block_lw * 2` directly on `ctx`, in the
    * CSS-pixel space every other draw call in this codebase uses -- never filled, so whatever
    * `paintBase` painted underneath (in particular `e.informal_color`) stays visible through the
-   * ring. */
+   * ring. Finally, where the bundle carries one, `bundle.follow` gets a `FOLLOW_RADIUS_PX` ring in
+   * `e.follow_color`. It belongs on THIS layer rather than the base one precisely because the base
+   * layer is only repainted on a resize or a city switch: a floor or metric change re-blits it
+   * unchanged, and the ring has to be redrawn over that blit every frame. */
   paintFrame(ctx: CanvasRenderingContext2D, bundle: CityBundle, view: View, e: CityEncoding,
             order: Int32Array, k: number, size: { width: number; height: number }): void;
 }
@@ -161,6 +175,22 @@ export function createLayer(): CityLayer {
       const screen = screenRingsOf(bundle, view);
       for (let i = 0; i < k; i++) {
         strokeBlock(ctx, screen[order[i]!]!, e.selected_color, e.block_lw * 2);
+      }
+      // Painted on the FRAME, not the base layer: the base is repainted only on a resize or a city
+      // switch, and this must survive a floor or metric change, which re-blits it unchanged. Drawn
+      // last, so wherever it meets a selected block's outline it sits over that outline, not under
+      // it.
+      //
+      // `follow` is absent for Nairobi (screen_map.d.ts), so this branch is a real optional, not a
+      // guard: a bundle that carries no followed block draws no ring.
+      const follow = bundle.follow;
+      if (follow !== undefined) {
+        const [fx, fy] = toScreen(view, follow.x, follow.y);
+        ctx.beginPath();
+        ctx.arc(fx, fy, FOLLOW_RADIUS_PX, 0, Math.PI * 2);
+        ctx.strokeStyle = e.follow_color;
+        ctx.lineWidth = FOLLOW_LW_PX;
+        ctx.stroke();
       }
     },
   };

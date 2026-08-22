@@ -197,8 +197,9 @@ function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: Me
   return floor;
 }
 
-/** The aria-live text: pool size always, and -- only where the bundle carries `informal` -- the
- * precision/recall that pool scores against it. `sel.precision`/`sel.recall` are `null` together
+/** The aria-live text: pool size always; the precision/recall that pool scores against ground
+ * truth only where the bundle carries `informal`; and the followed block's id only where it carries
+ * `follow`. `sel.precision`/`sel.recall` are `null` together
  * (model/screen.ts's `selectAt`: both come from the same `informal === undefined` check), so
  * either one being absent is read as "no ground-truth layer for this city" rather than as a
  * partial result to paper over with a placeholder number.
@@ -209,13 +210,23 @@ function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: Me
  * path to a fact already known for certain. */
 function describeSelection(city: ScreenState["city"], bundle: CityBundle, sel: Selection): string {
   const pool = `${sel.count} of ${bundle.n_blocks} blocks selected.`;
+  // The ring `render/city.ts` draws around `bundle.follow`, said in text. A canvas carries no
+  // accessible text at all, so a marker that exists only in its pixels is a marker a screen-reader
+  // user is never told about -- the same gap the pool figure above closes for the picture. The id
+  // comes off the bundle, never typed here: a re-bake that follows a different block moves this
+  // line with it. Appended to whichever sentence is returned rather than folded into one of them,
+  // because `follow` and `informal` are independently optional fields (screen_map.d.ts) even though
+  // both happen to be Cape Town's today.
+  const follow = bundle.follow;
+  const followed = follow === undefined ? ""
+    : ` Block ${follow.block_id} is ringed: it is the one the rest of the site follows.`;
   if (sel.precision === null || sel.recall === null) {
     return `${pool} ${cityName(city)} has no ground-truth informal-settlement layer, `
-         + `so precision and recall cannot be shown.`;
+         + `so precision and recall cannot be shown.${followed}`;
   }
   return `${pool} Precision ${(sel.precision * 100).toFixed(1)}%, `
        + `recall ${(sel.recall * 100).toFixed(1)}%, against the City of Cape Town's own `
-       + `informal-structure survey.`;
+       + `informal-structure survey.${followed}`;
 }
 
 function fetchBundle(src: string): Promise<CityBundle> {

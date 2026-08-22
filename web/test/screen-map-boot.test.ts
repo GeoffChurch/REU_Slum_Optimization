@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { CityBundle } from "../src/screen_map.js";
 import { ranking, scores, selectAt, type MetricName } from "../src/model/screen.js";
+import { FOLLOW_RADIUS_PX } from "../src/render/city.js";
 import type { StateSource } from "../src/state.js";
 import { urlStore } from "../src/url/store.js";
 import { fitBbox, toScreen, type Bbox, type View } from "../src/view/transform.js";
@@ -695,3 +696,97 @@ test("an out-of-range ?floor= is clamped AND stops being emitted at that value",
   assert.equal(loc.written.at(-1), `floor=${Number(max.toPrecision(6))}`,
     "the URL should self-correct to the clamped value, at the codec's own 6 significant figures");
 });
+
+/** The follow ring: the one stroke whose whole path is a single arc. Every other stroke on this
+ * frame is a block outline -- a polyline of moveTo/lineTo/closePath -- so this shape test names the
+ * ring by what it IS, rather than by counting ops and hoping. */
+function followRings(cv: unknown): Call[] {
+  return lastFrame(cv as never).filter(
+    (c) => c.op === "stroke" && c.path.length === 1 && c.path[0]!.op === "arc");
+}
+
+test("the followed block is ringed, at a fixed screen radius, on the frame layer", async () => {
+  const { cv } = await mount(700, null, "");
+  const rings = followRings(cv);
+  assert.equal(rings.length, 1, "exactly one ring, on the frame -- not one per block");
+  const [x, y, r] = rings[0]!.path[0]!.args;
+  const expected = toScreen(VIEW_CT, ct.follow!.x, ct.follow!.y);
+  assert.ok(Math.abs(x! - expected[0]) < 0.5 && Math.abs(y! - expected[1]) < 0.5,
+    `the ring is centred at (${x}, ${y}), not on the followed block's own point (${expected})`);
+  assert.equal(r, FOLLOW_RADIUS_PX, "a WORLD radius would shrink to nothing at city zoom");
+  // Recorded AT the call, which is the whole point of the style snapshot: "the widget assigned
+  // follow_color at some moment" says nothing about what was stroked with it.
+  assert.equal(rings[0]!.strokeStyle, E.follow_color);
+  // A literal, not city.ts's own FOLLOW_LW_PX: a stroke width read out of the module under test
+  // agrees with itself whatever it is set to.
+  assert.equal(rings[0]!.lineWidth, 2, "the ring is not drawn at its own line width");
+});
+
+test("a bundle with no follow draws no ring", async () => {
+  const { cv } = await mount(700, null, "city=nairobi");
+  assert.equal(followRings(cv).length, 0);
+});
+
+test("the ring survives a floor change, which never repaints the base layer", async () => {
+  // A floor change goes through `render(false)`, which re-blits the offscreen base layer instead of
+  // repainting it -- pinned by the base-layer test above, which counts that canvas's own fills
+  // across a floor change like this one. So a ring painted into `paintBase` would be blitted back with
+  // whatever the base layer held at the LAST resize or city switch, and this frame would carry
+  // none of its own. 0.02 is simply a floor inside Cape Town's depth_density_proxy range and
+  // different from the shipped default, so the state change is real.
+  const { host, cv } = await mount(700, null, "");
+  setFloor(host, 0.02);
+  assert.equal(followRings(cv).length, 1);
+});
+
+/** One block's on-screen area in CSS px², exterior ring less its interiors: the shoelace formula
+ * over `toScreen`-projected vertices, which is the size a reader's eye actually gets at this fit. */
+function screenAreaPx2(view: View, bundle: CityBundle, blockIndex: number): number {
+  const areaOf = (ring: [number, number][]): number => {
+    let a = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const [x1, y1] = toScreen(view, ...ring[i]!);
+      const [x2, y2] = toScreen(view, ...ring[(i + 1) % ring.length]!);
+      a += x1 * y2 - x2 * y1;
+    }
+    return Math.abs(a) / 2;
+  };
+  const rings = bundle.rings[blockIndex]!;
+  return rings.slice(1).reduce((acc, hole) => acc - areaOf(hole), areaOf(rings[0]!));
+}
+
+test("the followed block is far smaller on screen than the ring that marks it", async () => {
+  // The premise a FIXED SCREEN radius rests on, measured here against the committed bundle rather
+  // than written as a number into render/city.ts that a re-bake could silently falsify: at the
+  // city-wide fit the followed block covers a fraction of one CSS pixel, so its own outline -- or
+  // any marker scaled by `view` -- would put nothing on screen at all. This is also what catches a
+  // FOLLOW_RADIUS_PX shrunk to a value the first ring test would still accept, since that test
+  // reads the constant rather than a literal.
+  const follow = ct.follow!;
+  assert.equal(ct.block_id[follow.index], follow.block_id,
+    "sanity: follow.index does not address follow.block_id's own row");
+  const area = screenAreaPx2(VIEW_CT, ct, follow.index);
+  assert.ok(area < 1,
+    `the followed block covers ${area.toFixed(3)} CSS px^2 -- if an outline of it were visible, `
+    + `the ring would not need to exist`);
+  assert.ok(area < Math.PI * FOLLOW_RADIUS_PX ** 2,
+    `a radius-${FOLLOW_RADIUS_PX} ring covers ${(Math.PI * FOLLOW_RADIUS_PX ** 2).toFixed(1)} CSS `
+    + `px^2, which does not stand out against the ${area.toFixed(3)} px^2 block it marks`);
+});
+
+test("the readout names the followed block, and names none where the bundle carries none",
+  async () => {
+    // The ring lives in canvas pixels, which carry no accessible text at all -- so a screen-reader
+    // user is told the pool size and never told which block the rest of the site follows unless
+    // describeSelection says so. Pinned against the bundle's OWN `follow.block_id`, which is also
+    // what makes the absence half meaningful: Nairobi carries no `follow`, so a clause built from
+    // anything other than the ACTIVE bundle (`bundles.capetown.follow`, a module constant) would
+    // announce Cape Town's block over Nairobi's map.
+    const followed = ct.follow!.block_id;
+    const capetown = await mount();
+    assert.ok(readoutText(capetown.host).includes(followed),
+      `readout does not name the followed block ${followed}: "${readoutText(capetown.host)}"`);
+    const nairobi = await mount(700, null, "city=nairobi");
+    assert.ok(!readoutText(nairobi.host).includes(followed),
+      `Nairobi's readout names Cape Town's followed block: "${readoutText(nairobi.host)}"`);
+  });
