@@ -285,6 +285,9 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
   // never handed to the runtime.
   let pending: [number, number][] = [];
   let hover: [number, number] | null = null;
+  /** Which vertex of the settled road the pointer is moving, or null. At this scope rather than
+   * inside `wireDrawing` because `clear()` has to be able to end a drag. */
+  let dragging: number | null = null;
 
   let booting: Promise<void> | null = null;
   let booted = false;
@@ -345,9 +348,9 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
   // `frameScheduled` is the guard that makes this coalescing rather than merely async:
   // `requestAnimationFrame` on its own queues every call it is given (harness.ts's own comment).
   //
-  // The frame drains the SOLVE queue too (design §4: "a single-frame coalesce ... is the only
-  // throttling needed"), so a drag that produces twenty pointermoves between two frames asks for
-  // one solve, not twenty.
+  // The frame drains the SOLVE queue too -- the first of design §4's "two throttles, not one" --
+  // so a drag that produces twenty pointermoves between two frames asks for one solve, not twenty.
+  // The second is the in-flight guard below.
   let frameScheduled = false;
   const scheduleRender = (): void => {
     if (frameScheduled) return;
@@ -362,17 +365,27 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
     }));
   };
 
-  /** The road waiting to be solved, and whether one is running.
+  /** The road waiting to be solved, whether one is running, and which generation it belongs to.
    *
-   * Latest-wins, and never two at once. A drag re-solves (design §1.3 measured one solve at 0.06 s
-   * expressly so the number could move WITH the road), and Pyodide is one interpreter on one
-   * thread: issuing a second solve before the first returns would queue work behind it and let two
-   * answers land out of order, so the picture could end up showing the older road. Holding one
-   * pending road instead means what is drawn is always the most recent one asked for. */
+   * Latest-wins, and never two at once. Both are written against `PyRuntime`, which promises no
+   * ordering at all, rather than against the one implementation that exists: `pyodideRuntime.solve`
+   * is `async` but contains no `await`, so today it blocks the main thread and CANNOT be
+   * re-entered -- single-threadedness is what makes the hazard unreachable, not what causes it. It
+   * is also exactly why the obvious next move is a worker (a sub-second blocking call on the main
+   * thread is the thing a drag cannot afford), and a worker would both let answers land out of
+   * order and let a drag pile up roughly sixty solves a second behind the frame coalesce. So the
+   * guard is here now, while the interface it defends is the thing being relied on (design §4).
+   *
+   * `epoch` is the other half, and it is the half `solving` cannot do: a solve already issued
+   * cannot be recalled, so `clear()` bumps the generation and the answer that lands afterwards is
+   * DISCARDED rather than repainting the graph a reader has just emptied. `requestSolve` bumps it
+   * too, so a superseded road's answer never paints over its replacement's. */
   let requested: [number, number][] | null = null;
   let solving = false;
+  let epoch = 0;
 
   const requestSolve = (road: [number, number][]): void => {
+    epoch += 1;
     requested = road;
     scheduleRender();
   };
@@ -409,6 +422,9 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
     if (requested === null || solving) return;
     const road = requested;
     requested = null;
+    // Captured at ISSUE time: `clear()` or a newer request moves `epoch` on, and the two handlers
+    // below compare against it before they touch the picture or the readout.
+    const issued = epoch;
     if (!isSolvable(road)) {
       readout.textContent = NEEDS_TWO_POINTS;
       return;
@@ -420,12 +436,14 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
     solving = true;
     void runtime.solve(road)
       .then((r) => {
+        if (issued !== epoch) return;
         checkArity(r);
         picture = pictureOf(r);
         readout.textContent = `${r.roadMetres.toFixed(0)} m of road · `
           + `${(r.permeability * 100).toFixed(1)}% permeability`;
       })
       .catch((err: unknown) => {
+        if (issued !== epoch) return;
         // `picture` is deliberately untouched: the last good GRAPH stays on the canvas and the
         // reader is told what failed, rather than being left with a blank figure (design §6). The
         // road overlay is a different matter -- `settle` has already published the road that
@@ -462,6 +480,14 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
   const clear = (): void => {
     pending = [];
     hover = null;
+    // A drag in progress ends with the road it was moving. Without this, the next `pointermove`
+    // would go on indexing a vertex of a road that no longer exists.
+    dragging = null;
+    // Both halves of "cancel": drop the road waiting to be solved, and move the generation on so
+    // that an answer already in flight is discarded when it lands instead of repainting the graph
+    // the reader has just emptied.
+    requested = null;
+    epoch += 1;
     picture = pictureOf(BASELINE);
     state.set({ road: [] });
     readout.textContent = booted ? DRAW_A_ROAD : NEEDS_RUNTIME;
@@ -531,8 +557,6 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
   };
 
   const wireDrawing = (): void => {
-    /** Which vertex of the settled road the pointer is moving, or null. */
-    let dragging: number | null = null;
     cv.addEventListener("pointerdown", (ev) => {
       // A press ON an existing vertex moves it (design §4); a press anywhere else places a new
       // one. The hit-test is skipped while a road is part-drawn, so placing a vertex next to one

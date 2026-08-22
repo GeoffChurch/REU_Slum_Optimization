@@ -39,19 +39,34 @@ const RAISED = block.edges.footpath_g.filter((_, k) => k % RAISE_EVERY === 0).le
  * `solve` records the road it was handed BEFORE deciding whether to fail, so `roads` says what
  * reached the runtime even on the failure path. What it returns is built to be TELLABLE APART:
  *
- * * `potential` is the baked baseline scaled by `1 / n` for the n-th solve, so no two solves --
- *   and no solve and the baseline -- ever paint the same node colours under a fixed `vmax`, while
- *   staying a uniform rescaling, which is what makes the `vmax` test able to fail (see it);
+ * * `potential` is the baked baseline under a FIXED non-uniform warp, then scaled by `1 / n` for
+ *   the n-th solve. Both halves are load-bearing and they do different jobs. The per-solve scale
+ *   makes consecutive solves uniform rescalings OF EACH OTHER, which is what a per-solve `vmax`
+ *   would divide out -- so the `vmax` assertion below can fail. The warp stops any solve being a
+ *   uniform rescaling OF THE BASELINE, which is what would otherwise make the baseline and the
+ *   first solved frame coincide under that same fault and let an earlier assertion mask the one
+ *   that names the property. Without the warp `{vmax fails} ⊂ {notDeepEqual(first, baseline)
+ *   fails}`, and the sentence naming the property guards nothing it does not already guard;
  * * `conductance` raises every `RAISE_EVERY`-th edge above `footpath_g`, so `first_upgraded_at`
  *   has a known number of raised edges for the picture tests to count.
  *
- * `truncatePotential` is a field rather than a constructor argument so a test can arm it after
- * mounting, without a second mount helper or a wider `mount` signature. */
+ * `truncatePotential` and `holdSolves` are fields rather than constructor arguments so a test can
+ * arm them after mounting, without a second mount helper or a wider `mount` signature.
+ * `holdSolves` is what makes an IN-FLIGHT solve observable at all: the widget keeps at most one
+ * outstanding, and a fake that always resolved on the spot would never have two to overlap. */
 class FakeRuntime implements PyRuntime {
   boots = 0;
   truncatePotential = false;
-  readonly roads: [number, number][][] = [];
+  holdSolves = false;
+  private readonly held: (() => void)[] = [];
   constructor(private readonly solveThrows: string | null) {}
+  readonly roads: [number, number][][] = [];
+  /** Settles every solve held so far. */
+  releaseSolves(): void {
+    const waiting = [...this.held];
+    this.held.length = 0;
+    for (const settle of waiting) settle();
+  }
   boot(): Promise<void> {
     this.boots += 1;
     return Promise.resolve();
@@ -60,13 +75,15 @@ class FakeRuntime implements PyRuntime {
     this.roads.push(road);
     if (this.solveThrows !== null) return Promise.reject(new Error(this.solveThrows));
     const scale = 1 / (this.roads.length + 1);
-    const potential = block.baseline.potential.map((v) => v * scale);
-    return Promise.resolve({
+    const potential = block.baseline.potential.map((v, i) => v * scale * (1 - (i % 7) * 0.05));
+    const result: PyResult = {
       permeability: 0.5,
       roadMetres: 123.4,
       potential: this.truncatePotential ? potential.slice(0, 3) : potential,
       conductance: block.edges.footpath_g.map((g, k) => (k % RAISE_EVERY === 0 ? g * 100 : g)),
-    });
+    };
+    if (!this.holdSolves) return Promise.resolve(result);
+    return new Promise<PyResult>((resolve) => this.held.push(() => resolve(result)));
   }
 }
 
@@ -218,6 +235,21 @@ function upgradedStrokes(cv: FakeElement): Call[] {
     && c.lineWidth === GRAPH_ENCODING.upgraded_lw);
 }
 
+/** Settles a two-point road and returns the screen point its second vertex now sits at, which is
+ * where a drag has to press to grab it. Projected from the road the WIDGET holds, not from the
+ * offsets it was drawn at, so a drag test stays a hit-test rather than a coincidence. */
+async function settledRoadVertex(host: FakeElement, runtime: FakeRuntime,
+                                 a: [number, number], b: [number, number]):
+    Promise<[number, number]> {
+  drawPolyline(host, [a, b]);
+  await flush();
+  const road = runtime.roads.at(-1);
+  assert.ok(road !== undefined, "nothing was solved to drag");
+  const grabbed = road[1];
+  assert.ok(grabbed !== undefined, "the road has no second vertex");
+  return toScreen(VIEW, grabbed[0], grabbed[1]);
+}
+
 test("nothing is solved until the reader boots the runtime", async () => {
   const { runtime } = await mount();
   assert.equal(runtime.boots, 0, "a prose page must not pay 25-35 MB for being read");
@@ -305,18 +337,11 @@ test("dragging a vertex moves the road and re-solves it", async () => {
   const { host, runtime } = await mount();
   const cv = canvasOf(host);
   await pressBoot(host);
-  drawPolyline(host, [[100, 100], [200, 200]]);
-  await flush();
+  // Press ON the second vertex -- `settledRoadVertex` projects the road the widget actually holds
+  // back to the screen rather than reusing the offsets it was drawn at, so this stays a hit-test
+  // rather than a coincidence.
+  const [gx, gy] = await settledRoadVertex(host, runtime, [100, 100], [200, 200]);
   const before = runtime.roads.length;
-
-  // Press ON the second vertex -- found by projecting the road the widget actually holds back to
-  // the screen, not by reusing the offsets it was drawn at, so this stays a hit-test rather than a
-  // coincidence.
-  const road = runtime.roads.at(-1);
-  assert.ok(road !== undefined, "nothing was solved to drag");
-  const grabbed = road[1];
-  assert.ok(grabbed !== undefined, "the road has no second vertex");
-  const [gx, gy] = toScreen(VIEW, grabbed[0], grabbed[1]);
   cv.dispatch("pointerdown", { offsetX: gx, offsetY: gy, pointerId: 1 });
   cv.dispatch("pointermove", { offsetX: 300, offsetY: 120, pointerId: 1 });
   await flush();
@@ -326,6 +351,82 @@ test("dragging a vertex moves the road and re-solves it", async () => {
   assert.ok(runtime.roads.length > before, "the drag never re-solved");
   assert.deepEqual(runtime.roads.at(-1), [world(100, 100), world(300, 120)],
     "the drag placed a new vertex instead of moving the one it grabbed");
+});
+
+test("a second solve waits for the one already running rather than racing it", async () => {
+  // `PyRuntime` promises no ordering. Today's implementation blocks the main thread and so cannot
+  // be re-entered, which makes the hazard unreachable against THAT runtime -- but a worker is the
+  // obvious remedy for a blocking sub-second solve, and it would both reorder answers and let a
+  // drag pile up roughly sixty solves a second (design §4). The guard is written against the
+  // interface, so this drives the interface: a fake that holds its answer open.
+  const { host, runtime } = await mount();
+  await pressBoot(host);
+  runtime.holdSolves = true;
+
+  drawPolyline(host, [[10, 10], [60, 60]]);
+  await flush();
+  assert.equal(runtime.roads.length, 1, "the first solve was never issued");
+
+  drawPolyline(host, [[20, 20], [70, 70]]);
+  await flush();
+  assert.equal(runtime.roads.length, 1,
+    "a second solve was issued while the first was still running");
+
+  runtime.releaseSolves();
+  await flush();
+  assert.equal(runtime.roads.length, 2, "the waiting solve never ran once the first had settled");
+  assert.deepEqual(runtime.roads.at(-1), [world(20, 20), world(70, 70)],
+    "the waiting solve ran on a road other than the newest one asked for");
+});
+
+test("Escape drops a solve that has been asked for but not yet issued", async () => {
+  // A drag asks for a solve and the FRAME issues it, so there is a window -- one frame, and up to
+  // a whole in-flight solve wide -- in which the reader can clear the road first. Nothing may be
+  // handed to the runtime for a road that no longer exists.
+  const m = await mount();
+  const cv = canvasOf(m.host);
+  await pressBoot(m.host);
+  const [gx, gy] = await settledRoadVertex(m.host, m.runtime, [100, 100], [200, 200]);
+  const issued = m.runtime.roads.length;
+
+  cv.dispatch("pointerdown", { offsetX: gx, offsetY: gy, pointerId: 1 });
+  cv.dispatch("pointermove", { offsetX: 300, offsetY: 120, pointerId: 1 });
+  // Before the frame that would issue it.
+  cv.dispatch("keydown", { key: "Escape" });
+  await flush();
+
+  assert.equal(m.runtime.roads.length, issued,
+    "a road cleared before its frame ran was handed to the runtime anyway");
+  assert.deepEqual(storeOf(m).get().road, [], "Escape left the dragged road in state");
+});
+
+test("a solve already in flight when Escape lands does not repaint the cleared graph", async () => {
+  // The half `solving` cannot do: a solve already issued cannot be recalled, so its answer has to
+  // be discarded on arrival. Without that, the reader presses Escape, watches the graph empty, and
+  // then watches the road they cleared paint itself back on.
+  const m = await mount();
+  const cv = canvasOf(m.host);
+  await pressBoot(m.host);
+  const baseline = nodeFills(cv);
+  const [gx, gy] = await settledRoadVertex(m.host, m.runtime, [100, 100], [200, 200]);
+  assert.notDeepEqual(nodeFills(cv), baseline, "the first solve was not drawn, so there is no "
+    + "repaint for Escape to have to prevent");
+
+  m.runtime.holdSolves = true;
+  cv.dispatch("pointerdown", { offsetX: gx, offsetY: gy, pointerId: 1 });
+  cv.dispatch("pointermove", { offsetX: 300, offsetY: 120, pointerId: 1 });
+  await flush();
+  assert.equal(m.runtime.roads.length, 2, "the drag never issued the solve this test holds open");
+
+  cv.dispatch("keydown", { key: "Escape" });
+  await flush();
+  assert.deepEqual(nodeFills(cv), baseline, "Escape did not return the graph to the baseline");
+
+  m.runtime.releaseSolves();
+  await flush();
+  assert.deepEqual(nodeFills(cv), baseline,
+    "a solve that landed after Escape repainted the graph the reader had just emptied");
+  assert.deepEqual(storeOf(m).get().road, [], "Escape left the dragged road in state");
 });
 
 test("the picture drawn is the SOLVE, at a colour scale fixed by the baseline", async () => {
