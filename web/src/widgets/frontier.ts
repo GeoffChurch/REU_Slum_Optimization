@@ -4,6 +4,7 @@ import type { ChartStyle, FrontierBundle, MethodCurve } from "../frontier.js";
 // evaluation (see mount.ts's registration comment) -- this file must never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory } from "../state.js";
+import { nullableStringParam, numberParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
@@ -218,14 +219,26 @@ function inRange(value: number, max: number, what: string): number {
 
 // ------------------------------------------------------------------------------------ the widget
 
-interface FrontierState { targetDisplacement: number; targetPermeability: number; isolated: string | null }
+export interface FrontierState {
+  targetDisplacement: number;
+  targetPermeability: number;
+  isolated: string | null;
+}
+
+export const FRONTIER_URL: UrlCodec<FrontierState> = {
+  // Short, readable keys, not the field names: `disp`/`perm` are what the parent design's own
+  // example URL uses, and a field rename must not break a published link.
+  targetDisplacement: numberParam("disp", 6),
+  targetPermeability: numberParam("perm", 6),
+  isolated: nullableStringParam("method"),
+};
 
 /** The name every failure of this widget is reported under -- one constant, because it is used from
  * two unrelated places (the fetch chain and the resize callback) and two spellings of it would be a
  * reader seeing two different widgets fail. */
 const LABEL = "Frontier";
 
-export const frontier: Widget = (host, makeState) => {
+export const frontier: Widget<FrontierState> = (host, makeState) => {
   const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
   // A 404, a renamed bundle field, or any throw inside boot() must be VISIBLE on the page, not an
   // unhandled rejection in the console while the PNG fallback keeps the page looking correct --
@@ -270,7 +283,7 @@ function snap(v: number, step: number): number {
   return Math.round(v / step) * step;
 }
 
-function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): void {
+function boot(host: HTMLElement, makeState: StateFactory<FrontierState>, b: FrontierBundle): void {
   const keys = Object.keys(b.methods);
   if (keys.length === 0) throw new Error("frontier: the bundle carries no methods");
   const styles = parseMethodStyles(b.methods);
@@ -305,7 +318,7 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FrontierBundle): vo
   // M2: a target OUTSIDE its axis is finite, so `requireFinite` accepts it -- and then `drawGuide`
   // draws a line outside the plot rect, where the reader cannot see it, while the readout keeps
   // answering truthfully about a guide that is not on the chart. Both bounds are already in hand.
-  const state = makeState<FrontierState>({
+  const state = makeState({
     targetDisplacement: inRange(
       requireFinite(host.dataset.targetDisplacement, "data-target-displacement"),
       xMax, "data-target-displacement"),

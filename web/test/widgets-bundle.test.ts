@@ -84,6 +84,14 @@ test("the shipped bundle registers every widget name a generated page emits", ()
     insertBefore(node: FakeNode): void { this.appended.push(node); },
   }));
 
+  // `window` and `URLSearchParams` are here because mountAll() with no arguments -- the call the
+  // bundle's own DOMContentLoaded listener makes, which is the shipped path this test exists to
+  // drive -- builds the default `urlStore`, and that reads `window.location.search` through one
+  // `new URLSearchParams(...)` while constructing. A vm realm has its own ECMAScript intrinsics but
+  // no host globals at all, so neither name exists here unless it is passed in. `history` is NOT
+  // passed: the store touches it only from `write()`, which no widget here reaches (all of them
+  // throw inside their own body before their state factory is ever called), and a stub for a call
+  // that does not happen would only hide the day it starts happening.
   let domReady: (() => void) | undefined;
   const context = vm.createContext({
     document: {
@@ -93,6 +101,8 @@ test("the shipped bundle registers every widget name a generated page emits", ()
       querySelectorAll: () => mounts,
       createElement: (): FakeNode => ({ textContent: "" }),
     },
+    window: { location: { search: "" } },
+    URLSearchParams,
   });
   vm.runInContext(source, context, { filename: BUNDLE_PATH });
   assert.ok(domReady !== undefined, "the bundle never wired its DOMContentLoaded listener");

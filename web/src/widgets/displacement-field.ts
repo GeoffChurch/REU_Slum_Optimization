@@ -5,6 +5,7 @@ import type { FieldBundle, Road } from "../field.js";
 // never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory, StateSource } from "../state.js";
+import { boolParam, roadsParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
@@ -18,7 +19,12 @@ import { fitBbox, nearest, toScreen, toWorld, type Bbox, type View } from "../vi
  * road 2's geometry in state while it is off means toggling it back on returns it exactly where the
  * reader last dragged it, rather than snapping it back to the baked line and quietly undoing their
  * work. */
-interface FieldState { roads: Road[]; second: boolean }
+export interface FieldState { roads: Road[]; second: boolean }
+
+export const FIELD_URL: UrlCodec<FieldState> = {
+  roads: roadsParam("road1", "road2", "width"),
+  second: boolParam("road2on"),
+};
 
 /** The name every failure of this widget is reported under -- one constant, because it is used from
  * two unrelated places (the fetch chain and the resize callback) and two spellings of it would read
@@ -63,7 +69,7 @@ function fieldBbox(b: FieldBundle): Bbox {
   };
 }
 
-export const displacementField: Widget = (host, makeState) => {
+export const displacementField: Widget<FieldState> = (host, makeState) => {
   // Not `host.dataset.bundle!`: a missing attribute then reaches `fetch(undefined)` and surfaces as
   // "fetch undefined failed: 404", which sends the reader (and whoever wrote the page) looking for a
   // missing FILE rather than the missing ATTRIBUTE that is actually wrong.
@@ -80,7 +86,7 @@ export const displacementField: Widget = (host, makeState) => {
     .catch((err: unknown) => showWidgetError(host, LABEL, err));
 };
 
-function boot(host: HTMLElement, makeState: StateFactory, b: FieldBundle): void {
+function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBundle): void {
   const e = b.encoding;
   // The bundle is a BOUNDARY: it arrives over the network, and a page can outlive the artifact it
   // was generated beside. Two roads is not a preference here, it is what the widget IS -- the
@@ -98,7 +104,7 @@ function boot(host: HTMLElement, makeState: StateFactory, b: FieldBundle): void 
     throw new Error(`field.json carries ${b.roads.length} roads; this widget needs exactly two`);
   }
   const width0 = b.width.default_m;
-  const state: StateSource<FieldState> = makeState<FieldState>({
+  const state: StateSource<FieldState> = makeState({
     roads: [{ ...road1, width_m: width0 }, { ...road2, width_m: width0 }],
     second: false,
   });

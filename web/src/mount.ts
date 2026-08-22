@@ -1,19 +1,50 @@
 /** The mount contract: a page carries a placeholder and nothing else. */
 import { showWidgetError } from "./dom/error.js";
-import { localState, type StateFactory } from "./state.js";
+import type { StateFactory } from "./state.js";
+import type { Param, UrlCodec } from "./url/param.js";
+import {
+  browserLocation, debounce, systemTimers, urlStore, type UrlStore,
+} from "./url/store.js";
 
-export type Widget = (host: HTMLElement, makeState: StateFactory) => void;
+export type Widget<T> = (host: HTMLElement, makeState: StateFactory<T>) => void;
 
-const REGISTRY = new Map<string, Widget>();
+/** A widget with its `T` already erased. `register` captures the generic in `mount`'s closure, so
+ * the REGISTRY stays a plain non-generic map while the (widget, codec) pairing is still checked
+ * where they are named together. */
+interface Registration {
+  readonly keys: readonly string[];
+  mount(host: HTMLElement, store: UrlStore): void;
+}
 
-export function register(name: string, w: Widget): void {
+const REGISTRY = new Map<string, Registration>();
+
+export function register<T>(name: string, w: Widget<T>, codec: UrlCodec<T>): void {
   // Throw rather than replace. With one widget a collision was invisible and harmless; with several
   // it silently disables whichever registered first, and the page still looks fine.
   if (REGISTRY.has(name)) throw new Error(`widget already registered: ${name}`);
-  REGISTRY.set(name, w);
+  // `Object.values` over a DECLARED mapped type -- a loop over a schema, not a string lookup into a
+  // closed set. Only `.keys` is read, so the value type is narrowed to exactly that.
+  const keys = (Object.values(codec as object) as readonly Param<unknown>[])
+    .flatMap((p) => [...p.keys]);
+  REGISTRY.set(name, {
+    keys,
+    mount: (host, store) => { w(host, (initial) => store.bind(codec, initial)); },
+  });
 }
 
-export function mountAll(root: ParentNode = document): void {
+/** 300 ms after the last change. Long enough that a drag writes once; short enough that a reader
+ * who stops and copies the address bar gets the view they are looking at. */
+export const URL_DEBOUNCE_MS = 300;
+
+function defaultStore(): UrlStore {
+  return urlStore(browserLocation(), debounce(URL_DEBOUNCE_MS, systemTimers));
+}
+
+export function mountAll(root: ParentNode = document, store: UrlStore = defaultStore()): void {
+  // Which widget on THIS page claimed which query key. Two mount points sharing a key would
+  // cross-talk silently through one set of values -- including two mount points of the SAME
+  // widget, which is why the check is per mount point rather than per registration.
+  const claimed = new Map<string, string>();
   for (const el of Array.from(root.querySelectorAll<HTMLElement>("[data-widget]"))) {
     // Per-widget isolation: one widget throwing must not stop the widgets after it from mounting,
     // and the failure must be visible where it happened rather than console-only.
@@ -23,6 +54,7 @@ export function mountAll(root: ParentNode = document): void {
     // the only one with no on-page message: a widget whose registration was lost -- exactly what
     // finding I2 showed nothing tested -- produced a console-only error behind an intact-looking PNG
     // fallback, which is this project's signature defect. Now it renders like any other failure.
+    // The URL-key collision below is inside it for the same reason.
     try {
       const name = el.dataset.widget!;
       const widget = REGISTRY.get(name);
@@ -30,7 +62,14 @@ export function mountAll(root: ParentNode = document): void {
       // right here -- but an unknown one must throw rather than leave a silently empty mount point
       // that looks like a widget which merely failed to draw.
       if (widget === undefined) throw new Error(`unknown data-widget: ${name}`);
-      widget(el, localState);
+      for (const k of widget.keys) {
+        const prior = claimed.get(k);
+        if (prior !== undefined) {
+          throw new Error(`URL key "${k}" is claimed by both ${prior} and ${name} on this page`);
+        }
+        claimed.set(k, name);
+      }
+      widget.mount(el, store);
     } catch (err) {
       showMountError(el, err);
     }
@@ -55,24 +94,24 @@ function showMountError(el: HTMLElement, err: unknown): void {
 // function here -- and registering it explicitly, after REGISTRY exists -- breaks the cycle:
 // perm-graph.ts now has no runtime import of this file at all (see its `import type` comment), so
 // there is nothing left to reorder. Do not move this back into the widget module.
-import { permGraph } from "./widgets/perm-graph.js";
-register("perm-graph", permGraph);
+import { permGraph, PERM_GRAPH_URL } from "./widgets/perm-graph.js";
+register("perm-graph", permGraph, PERM_GRAPH_URL);
 // Same shape, same reason -- registered HERE, after REGISTRY exists, never from inside the widget
 // module (see the paragraph above).
-import { frontier } from "./widgets/frontier.js";
-register("frontier", frontier);
+import { frontier, FRONTIER_URL } from "./widgets/frontier.js";
+register("frontier", frontier, FRONTIER_URL);
 // Third widget, same shape, same reason -- registered HERE, after REGISTRY exists, never from
 // inside the widget module (see the paragraph above).
-import { displacementField } from "./widgets/displacement-field.js";
-register("displacement-field", displacementField);
+import { displacementField, FIELD_URL } from "./widgets/displacement-field.js";
+register("displacement-field", displacementField, FIELD_URL);
 // Fourth widget, same shape, same reason -- registered HERE, after REGISTRY exists, never from
 // inside the widget module (see the paragraph above).
-import { regionGrow } from "./widgets/region-grow.js";
-register("region-grow", regionGrow);
+import { regionGrow, REGION_GROW_URL } from "./widgets/region-grow.js";
+register("region-grow", regionGrow, REGION_GROW_URL);
 // Fifth widget, same shape, same reason -- registered HERE, after REGISTRY exists, never from
 // inside the widget module (see the paragraph above).
-import { screenMap } from "./widgets/screen-map.js";
-register("screen-map", screenMap);
+import { screenMap, SCREEN_MAP_URL } from "./widgets/screen-map.js";
+register("screen-map", screenMap, SCREEN_MAP_URL);
 
 // DOMContentLoaded fires once per full page load. That is sufficient only because this project's
 // mkdocs.yml does not enable Material's navigation.instant feature (confirmed absent as of this

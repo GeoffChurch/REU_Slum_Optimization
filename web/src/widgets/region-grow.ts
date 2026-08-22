@@ -5,6 +5,7 @@ import type { HoodBlock, HoodBundle } from "../hood.js";
 // must never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory, StateSource } from "../state.js";
+import { intParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
@@ -19,7 +20,12 @@ import { fitBbox, toWorld, type Bbox, type View } from "../view/transform.js";
  * slider's own scale. Keeping them here rather than as loose widget variables is what makes a
  * click-then-slide sequence replay through the SAME `growth()` call every render, instead of the
  * picture and the model drifting apart across two different pieces of mutable state. */
-interface RegionGrowState { seed: number; budget: number }
+export interface RegionGrowState { seed: number; budget: number }
+
+export const REGION_GROW_URL: UrlCodec<RegionGrowState> = {
+  seed: intParam("seed"),
+  budget: intParam("budget"),
+};
 
 /** The name every failure of this widget is reported under -- one constant, because it is used
  * from two unrelated places (the fetch chain and the resize callback) and two spellings of it
@@ -49,7 +55,7 @@ function frontierOf(blocks: HoodBlock[], region: number[]): number[] {
   return [...frontier];
 }
 
-export const regionGrow: Widget = (host, makeState) => {
+export const regionGrow: Widget<RegionGrowState> = (host, makeState) => {
   // Not `host.dataset.bundle!`: a missing attribute then reaches `fetch(undefined)` and surfaces
   // as "fetch undefined failed: 404", which sends the reader (and whoever wrote the page) looking
   // for a missing FILE rather than the missing ATTRIBUTE that is actually wrong.
@@ -66,7 +72,7 @@ export const regionGrow: Widget = (host, makeState) => {
     .catch((err: unknown) => showWidgetError(host, LABEL, err));
 };
 
-function boot(host: HTMLElement, makeState: StateFactory, b: HoodBundle): void {
+function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: HoodBundle): void {
   const e = b.encoding;
   const blocks = b.blocks;
   // The bundle is a BOUNDARY: it arrives over the network, and a page can outlive the artifact it
@@ -76,7 +82,7 @@ function boot(host: HTMLElement, makeState: StateFactory, b: HoodBundle): void {
   if (seed0 < 0) {
     throw new Error(`hood.json's seed "${b.seed}" is not among its own ${blocks.length} blocks`);
   }
-  const state: StateSource<RegionGrowState> = makeState<RegionGrowState>({
+  const state: StateSource<RegionGrowState> = makeState({
     seed: seed0, budget: b.budget.default,
   });
 

@@ -14,7 +14,15 @@ export interface StateSource<T> {
   subscribe(fn: (s: T) => void): void;
 }
 
-export type StateFactory = <T>(initial: T) => StateSource<T>;
+/** Parameterised by the state it makes, NOT universally quantified over it.
+ *
+ * The old `<T>(initial: T) => StateSource<T>` let the WIDGET pick `T` at its own call site, which
+ * meant nothing could pair a widget with a description of its state -- any URL keying would have
+ * had to be a runtime string table. With `T` on the type instead, `register(name, widget, codec)`
+ * type-checks the pairing at each of the five call sites, and `UrlCodec<T>`'s mapped type makes a
+ * missing or renamed field a compile error. `localState` is still generic, so it satisfies this at
+ * every instantiation and every existing boot test keeps working unchanged. */
+export type StateFactory<T> = (initial: T) => StateSource<T>;
 
 export function localState<T>(initial: T): StateSource<T> {
   let current = { ...initial };

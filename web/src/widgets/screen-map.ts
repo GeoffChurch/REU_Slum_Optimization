@@ -5,6 +5,7 @@
 import type { Widget } from "../mount.js";
 import type { CityBundle } from "../screen_map.js";
 import type { StateFactory, StateSource } from "../state.js";
+import { enumParam, numberParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
@@ -24,7 +25,7 @@ const LABEL = "ScreenMap";
  * what floor). Keeping all three here is what makes a metric-switch-then-drag sequence replay
  * through the same `scores`/`ranking`/`selectAt` calls every render, instead of the picture and
  * the model drifting apart across two different pieces of mutable state. */
-interface ScreenState { city: "capetown" | "nairobi"; metric: MetricName; floor: number }
+export interface ScreenState { city: "capetown" | "nairobi"; metric: MetricName; floor: number }
 
 /** All four candidate screens (design §3.1), calibrated or not -- `MetricName`'s own four members,
  * spelled out rather than read off `Object.keys(METRICS)`: an object's keys are plain `string[]`,
@@ -34,6 +35,15 @@ interface ScreenState { city: "capetown" | "nairobi"; metric: MetricName; floor:
  * `bundle.floors` actually ships a floor for), so the shipped default is also the first option. */
 const METRIC_NAMES: readonly MetricName[] =
   ["depth_density_proxy", "density_compactness", "density", "depth_proxy"];
+
+export const SCREEN_MAP_URL: UrlCodec<ScreenState> = {
+  city: enumParam("city", ["capetown", "nairobi"] as const),
+  // METRIC_NAMES, not Object.keys(METRICS): the same closed, spelled-out list the <select> is built
+  // from, so a fifth metric added to the model without a line there is a compile error in one place
+  // rather than a silently short menu and a silently narrower URL grammar.
+  metric: enumParam("metric", METRIC_NAMES),
+  floor: numberParam("floor", 6),
+};
 
 /** The metric every OTHER metric's own no-calibration floor default is measured against -- the
  * design's own "shipped default" (§3.1), and, as of both committed bundles, present in
@@ -154,7 +164,7 @@ function fetchBundle(src: string): Promise<CityBundle> {
   });
 }
 
-export const screenMap: Widget = (host, makeState) => {
+export const screenMap: Widget<ScreenState> = (host, makeState) => {
   // Not `host.dataset.bundleCapetown!`: a missing attribute then reaches `fetch(undefined)` and
   // surfaces as "fetch undefined failed: 404", which sends the reader looking for a missing FILE
   // rather than the missing ATTRIBUTE that is actually wrong (region-grow.ts's own reasoning).
@@ -170,7 +180,7 @@ export const screenMap: Widget = (host, makeState) => {
 
 interface Bundles { capetown: CityBundle; nairobi: CityBundle }
 
-function boot(host: HTMLElement, makeState: StateFactory, bundles: Bundles): void {
+function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: Bundles): void {
   const caption = host.querySelector("figcaption");
 
   const cv = document.createElement("canvas");
@@ -225,7 +235,7 @@ function boot(host: HTMLElement, makeState: StateFactory, bundles: Bundles): voi
   const initialCity: ScreenState["city"] = "capetown";
   const initialMetric: MetricName = "depth_density_proxy";
   const initialFloor = syncFloor(floorSlider, bundles[initialCity], initialMetric, null);
-  const state: StateSource<ScreenState> = makeState<ScreenState>({
+  const state: StateSource<ScreenState> = makeState({
     city: initialCity, metric: initialMetric, floor: initialFloor,
   });
   metricSelect.value = state.get().metric;
