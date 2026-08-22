@@ -317,6 +317,18 @@ bit-for-bit, and otherwise a documented absolute tolerance with the observed dif
 beside it — never a tolerance widened until the test passes. If the two runtimes disagree beyond
 float noise, that is the finding, and it is reported rather than tuned away.
 
+**Measured, Task 5: they do not agree exactly.** `crossing` matches to the last bit; **`spur` differs
+by 2.220446e-16 — four units in the last place** (Pyodide `0.3637809513169823` against the baked
+`0.3637809513169825`), deterministic across runs. CPython on this machine reproduces both baked
+numbers exactly, so the difference is arithmetic in the WASM build rather than a stale bake. The
+shipped assertion is therefore a stated absolute **1e-13**, chosen from three anchors rather than
+from what made the test pass: ~450× the observed disagreement, ~1.7e10× **below** the 1.66e-03 that
+centimetre-rounding costs on these roads (§1.4), and strictly below the 1e-12 that the tolerance's
+own fault injection perturbs by — which still reddens, with 10× margin.
+
+This is the result the guard exists to produce. A design that had assumed bit-identity would have
+been wrong, and a tolerance picked after seeing a failure would have hidden that.
+
 **Cost.** One Pyodide boot in CI, measured and recorded in the plan. If it exceeds the budget the
 plan sets, it becomes a separate slower job rather than being deleted.
 
