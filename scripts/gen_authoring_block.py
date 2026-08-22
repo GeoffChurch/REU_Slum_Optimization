@@ -19,12 +19,12 @@ one on the site. `scripts/_bundle_io.py`'s `cm`/`sigfig`/`polygon_rings` quantis
 serve bundles that get drawn -- and here quantisation is not a rounding error, it is the answer
 changing. MEASURED on this bundle's own reference roads: rounding every coordinate to centimetres
 and re-solving (baseline included) moves `crossing` by 1.6611e-03 and `spur` by 1.9550e-03. Design
-§1.4's 4.71e-05 is the same effect measured on the clearance method's road set, so it is the
-smaller of the two figures and not the one to size a runtime-parity tolerance against.
+§1.4's 4.71e-05 is the same effect measured on the clearance method's road set -- smaller than
+either figure above, and therefore the binding anchor a runtime-parity tolerance is sized against.
 `web/test/pyodide-parity.test.ts` compares the browser's answer against `reference` below to decide
-whether the WASM runtime agrees with CPython, and a tolerance wide enough to absorb either figure
-would no longer be measuring that. It settled on 1e-13, having measured the two runtimes agreeing
-exactly on `crossing` and differing by four units in the last place (2.220446e-16) on `spur`.
+whether the WASM runtime agrees with CPython, and a tolerance wide enough to absorb 4.71e-05 would
+no longer be measuring that. It settled on 1e-15, having measured the two runtimes agreeing exactly
+on `crossing` and differing by four units in the last place (2.220446e-16) on `spur`.
 
 The block is ZAF.9.3.1_1_40972, the same one PermGraph, Frontier, DisplacementField and RegionGrow
 pin and ScreenMap follows (`gen_screen_map.py` derives its `follow` from perm-graph's bundle rather
@@ -309,8 +309,9 @@ boots Pyodide, installs the `reblock` wheel, rebuilds a real `Block` from `block
 `reblock.permeability`'s own solver on whatever road the reader drew. Nothing here is a
 re-implementation of the metric, which is the entire reason this stage boots a Python runtime.
 
-*The widget, the runtime seam and the parity test are later tasks of this piece and are not on
-disk yet; this bundle is baked first because they are all written against it.*
+`web/src/widgets/draw-road.ts` is the widget, `web/src/py/runtime.ts` is the runtime seam, and
+`web/test/pyodide-parity.test.ts` is the parity test -- all three are on disk, and all three are
+written against this bundle.
 
 **The block** is `{bundle['block_id']}` in EPSG:{bundle['crs_epsg']} -- the same block every other
 stage of the site follows. It carries {counts}.
@@ -319,9 +320,10 @@ stage of the site follows. It carries {counts}.
 origin-relative metres, which is right for drawing and wrong for solving. Measured on the reference
 roads below: rounding this block's geometry to centimetres and re-solving moves `crossing` by
 1.6611e-03 and `spur` by 1.9550e-03. (Design §1.4's 4.71e-05 is the same effect measured on the
-clearance method's road set -- a different, smaller number for a different road set.) The parity
-test will compare the browser's answer against the baked CPython answers below to decide whether
-the WASM runtime agrees with CPython, so the two sides have to be reading the same numbers.
+clearance method's road set -- smaller than either figure here, and the binding anchor
+`web/test/pyodide-parity.test.ts` sizes its tolerance against.) The parity test compares the
+browser's answer against the baked CPython answers below to decide whether the WASM runtime agrees
+with CPython, so the two sides have to be reading the same numbers.
 
 **The baked graph.** A drawn road changes per-edge conductance and per-parcel potential and nothing
 else -- the mesh takes no roads and grounding comes from the street -- so the road-invariant half is

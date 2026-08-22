@@ -14,10 +14,11 @@ import { SOLVE_PY_SOURCE } from "./solve-source.generated.js";
 
 /** jsDelivr serves immutable versioned paths: `v0.28.0/full/` and `v0.29.2/full/` carry different
  * bytes, which is the entire stability argument for pinning an exact version rather than a
- * floating `latest` or major-only tag. MEASURED (this task's report, by fetching each version's
- * own `pyodide-lock.json` directly): `geopandas` and `pyproj` both disappear from the
- * distribution starting at 0.28.0 (present through 0.27.7, absent through 0.29.1) and return only
- * at 0.29.2; `shapely` is present throughout that whole span, with no gap.
+ * floating `latest` or major-only tag. MEASURED by fetching each of v0.26.4, v0.27.0, v0.27.7,
+ * v0.28.0, v0.29.0, v0.29.1 and v0.29.2's own `pyodide-lock.json` directly (the first five in
+ * Task 3's report; v0.29.0 and v0.29.1 checked in Task 5's fix round): `geopandas` and `pyproj`
+ * are present in 0.26.4/0.27.0/0.27.7, absent from 0.28.0 through 0.29.1 inclusive, and present
+ * again at 0.29.2; `shapely` is present in every one, with no gap.
  *
  * Kept in lockstep with `web/package.json`'s pinned `pyodide` devDependency at the SAME version:
  * that package is what `web/test/pyodide-parity.test.ts` (Task 5) boots under Node to check this

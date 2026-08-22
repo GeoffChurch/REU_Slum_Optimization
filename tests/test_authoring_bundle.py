@@ -3,13 +3,14 @@
 Full float64 and not the cm-rounded form every render bundle ships. MEASURED on this bundle's own
 reference roads (`scripts/gen_authoring_block.REFERENCE_ROADS`): rounding every coordinate to
 centimetres and re-solving, baseline included, moves `crossing` by 1.6611e-03 and `spur` by
-1.9550e-03. Design §1.4's 4.71e-05 is the same effect measured on the clearance METHOD's road set,
-so it is the smallest of these figures and not the one to size a parity tolerance against.
+1.9550e-03. Design §1.4's 4.71e-05 is the same effect measured on the clearance METHOD's road set --
+smaller than either figure above, and therefore the binding anchor `web/test/pyodide-parity.test.ts`
+sizes `PARITY_TOL` against, not the two here.
 
-DEBT: `web/test/pyodide-parity.test.ts` does not exist at this commit -- Task 5 of this piece adds
-it. It will assert the browser reproduces CPython's number on the SAME bundle, and a tolerance
-widened past this bundle's own quantisation figures to accommodate rounding would be one that has
-stopped measuring the runtime. That is what these tests keep the bundle fit for.
+`web/test/pyodide-parity.test.ts` asserts the browser reproduces CPython's number on the SAME
+bundle, and a tolerance widened past 4.71e-05 -- the smallest of the effects a parity guard must
+not absorb -- would be one that has stopped measuring the runtime. That is what these tests keep
+the bundle fit for.
 """
 from __future__ import annotations
 
@@ -146,10 +147,9 @@ def test_the_baseline_is_the_no_roads_solve(bundle: dict[str, Any]) -> None:
 
 
 def test_reference_cases_are_present_and_shaped(bundle: dict[str, Any]) -> None:
-    """DEBT: what Task 5's `web/test/pyodide-parity.test.ts` will compare the browser against, so
-    that the parity test will need no Python process at test time. That file does not exist at this
-    commit; the device does -- `field.json` and `hood.json` already carry a `reference` array of
-    production's own answers for the same reason.
+    """What `web/test/pyodide-parity.test.ts` compares the browser against, so that the parity
+    test needs no Python process at test time -- the same device `field.json` and `hood.json`
+    already carry a `reference` array of production's own answers for.
 
     Shape only. The VALUES are checked where they are produced: `gen_authoring_block`'s bake-time
     round trip re-solves each road on a block rebuilt from this JSON and refuses to write on any

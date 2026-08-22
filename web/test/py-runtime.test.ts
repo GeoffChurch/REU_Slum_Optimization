@@ -8,12 +8,15 @@ import {
 
 test("the pinned index URL is an exact version, not a floating one", () => {
   // jsDelivr serves immutable versioned paths, which is the entire stability argument: geopandas
-  // and pyproj both disappeared from the distribution at Pyodide 0.28.0 (present through 0.27.7,
-  // absent through 0.29.1) and returned only at 0.29.2 -- shapely, by contrast, was present the
-  // whole span with no gap. MEASURED by fetching v0.25.1 through v0.29.2's own pyodide-lock.json
-  // directly (this task's report; the brief's claim that geopandas alone was "removed in 0.27"
-  // and all three were "disabled in 0.28" does not match: the disappearance starts at 0.28.0, not
-  // 0.27, and shapely never disappears). A `latest` or major-only URL re-opens that.
+  // and pyproj both disappear from the distribution at Pyodide 0.28.0 and return only at 0.29.2 --
+  // shapely, by contrast, is present the whole span with no gap. MEASURED by fetching each of
+  // v0.26.4, v0.27.0, v0.27.7, v0.28.0, v0.29.0, v0.29.1 and v0.29.2's own pyodide-lock.json
+  // directly (the first five in Task 3's report; v0.29.0 and v0.29.1 were untested at Task 5
+  // review and checked in Task 5's fix round): geopandas/pyproj present in 0.26.4/0.27.0/0.27.7,
+  // absent from 0.28.0 through 0.29.1 inclusive, present again at 0.29.2; shapely present in every
+  // one. (The brief's claim that geopandas alone was "removed in 0.27" and all three were
+  // "disabled in 0.28" does not match: the disappearance starts at 0.28.0, not 0.27, and shapely
+  // never disappears.) A `latest` or major-only URL re-opens that.
   assert.match(PYODIDE_INDEX_URL, /\/v\d+\.\d+\.\d+\/full\/$/);
   assert.ok(PYODIDE_INDEX_URL.includes("v0.29.2"));
 });

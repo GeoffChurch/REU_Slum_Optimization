@@ -44,21 +44,27 @@ const BUNDLE = JSON.parse(
  * numpy 2.2.5 / scipy 1.14.1 on wasm against numpy 2.5.0 / scipy 1.18.0 on x86-64, and the
  * quantity is the tail of a sparse solve.
  *
- * 1e-13 is a STATED tolerance, not one widened until the suite went green:
+ * 1e-15 is a STATED tolerance, not one widened until the suite went green:
  *
- *   * it is ~450x the largest disagreement actually observed, which is the headroom for a
- *     differently-built BLAS to accumulate a few more last bits than this one did;
- *   * it is ~1.7e10 times SMALLER than 1.66e-03, the smallest effect `authoring.d.ts` records as
- *     one a parity guard must not absorb (what rounding this bundle's geometry to centimetres
- *     does to `crossing`; `spur` moves by 1.96e-03). Design §1.4's 4.71e-05 is the same effect
- *     measured on the clearance method's road set, and is also enormous next to this;
+ *   * it is ~4.5x the largest disagreement actually observed;
+ *   * it is ~4.7e10 times SMALLER than 4.71e-05 -- the SMALLEST effect `authoring.d.ts` records as
+ *     one a runtime-parity guard must not absorb (design §1.4, measured on the clearance method's
+ *     road set). `authoring.d.ts` also records what rounding THIS bundle's own reference roads to
+ *     centimetres costs -- 1.66e-03 for `crossing`, 1.96e-03 for `spur` -- larger still, so
+ *     4.71e-05 is the binding one;
  *   * it is strictly below the 1e-12 perturbation this task's fault injection 1 applies, so that
- *     injection reddens the test with an order of magnitude to spare.
+ *     injection reddens the test with three orders of magnitude to spare.
+ *
+ * A 4.5x margin is thin against noise, but this disagreement is not noise: wasm f64 arithmetic is
+ * deterministic by specification and the Pyodide version is pinned, while the baked side is a
+ * committed artifact already held to exact CPython equality by `tests/test_solve_py.py`. Both
+ * sides are fixed, so the only thing that can move this difference is a deliberate version bump --
+ * and a version bump that moves it is exactly what this test should refuse to pass silently.
  *
  * If this ever needs raising, the difference and its magnitude are the finding -- record them the
  * way this comment does. A tolerance widened until the test passes has stopped measuring the
  * runtime, which is the only thing this test exists to measure. */
-const PARITY_TOL = 1e-13;
+const PARITY_TOL = 1e-15;
 
 /** `node_modules/pyodide/`, absolute, with the trailing slash `pyodideRuntime` concatenates
  * `pyodide.mjs` onto.
@@ -90,6 +96,20 @@ const runtime = pyodideRuntime(BUNDLE, pathToFileURL(WHEEL).href, LOCAL_INDEX_UR
 
 /** How long the first `boot()` call took. Set once, by whichever test boots first. */
 let coldBootMs = 0;
+
+/** The bound the third test below holds a memoised `boot()` to, in milliseconds. ABSOLUTE, not a
+ * fraction of `coldBootMs`: in CI the first boot pays a one-time ~48 MB jsDelivr download
+ * (`scripts/test.sh`'s own comment), so on a link slow enough to make that download dominate,
+ * `coldBootMs / 10` would exceed what a genuine re-boot costs and the guard would go green with
+ * the `??=` deleted -- in exactly the `npm ci` configuration CI runs under. 1000 ms is immune to
+ * that in both directions: a memoised call awaits an already-settled promise and MEASURED
+ * 0.41-0.73 ms across six warm runs (this fix round); a genuine re-boot rebuilds an interpreter,
+ * reloads seven packages and reinstalls the wheel, and MEASURED 8.43-9.22 s even fully cached
+ * (this fix round's own re-run of fault injection 4, plus the original report's figures) -- the
+ * memoised call sits about three orders of magnitude BELOW the bound, the genuine re-boot about
+ * one order of magnitude ABOVE it. No download speed moves that lower bound, because a re-boot is
+ * CPU/interpreter-bound work once the packages are already on disk, not network-bound. */
+const MEMOISATION_BOUND_MS = 1000;
 
 /** Awaits `runtime.boot()` and returns how long THIS call took. After the first call that is
  * `pyodideRuntime`'s memoised promise resolving, not a second load -- which is what the third test
@@ -161,12 +181,15 @@ test("a second boot() resolves the first one's promise instead of loading Pyodid
     //
     // Time is the only observable: a runtime that re-booted would return the same answers, just
     // after building a second interpreter, re-installing the wheel and re-running solve.py. The
-    // memoised call awaits an already-settled promise and returns in about a tenth of a
-    // millisecond (measured); a real second boot costs seconds even with every package already
-    // cached, so a tenth of the first boot's own cost separates them by orders of magnitude.
-    // CONFIRMED by fault injection (this task's report): deleting the `??=` reddens this.
+    // memoised call awaits an already-settled promise and returns in a fraction of a millisecond
+    // (measured); a real second boot costs seconds even with every package already cached.
+    // MEMOISATION_BOUND_MS (above) separates them by an ABSOLUTE bound, not a fraction of
+    // coldBootMs -- see that constant's own comment for why a relative threshold false-greens in
+    // CI. CONFIRMED by fault injection (this task's report and this fix round's re-run): deleting
+    // the `??=` reddens this.
     const again = await boot();
-    assert.ok(again < coldBootMs / 10,
-      `second boot() took ${again.toFixed(1)} ms against the first boot's `
-      + `${coldBootMs.toFixed(1)} ms -- it re-ran the boot sequence rather than reusing it`);
+    assert.ok(again < MEMOISATION_BOUND_MS,
+      `second boot() took ${again.toFixed(1)} ms against a ${MEMOISATION_BOUND_MS} ms bound `
+      + `(first boot: ${coldBootMs.toFixed(1)} ms) -- it re-ran the boot sequence rather than `
+      + "reusing it");
   });
