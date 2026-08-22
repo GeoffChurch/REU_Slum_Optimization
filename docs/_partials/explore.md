@@ -62,9 +62,9 @@ A block is rarely the right unit of work: the roads that would serve it run thro
 and a road that stops at a boundary serves nobody on the other side. Growth takes a seed block and
 accretes neighbours greedily until a building budget is spent. Drag the budget to watch the region
 grow, and click any block in the neighbourhood to reseed from it. The greedy runs in the browser
-rather than replaying a recording — which is what makes both of those controls live — and every step
-of it is pinned by test against the accretion the pipeline itself produced, so the rule you are
-dragging is production's.
+rather than replaying a recording — which is what makes both of those controls live — and it is
+checked block by block against the accretion runs the bundle records, so the rule you are dragging
+is production's.
 
 <!-- REGIONGROW -->
 
