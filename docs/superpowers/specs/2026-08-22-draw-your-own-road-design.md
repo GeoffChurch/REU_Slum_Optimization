@@ -82,6 +82,14 @@ CPython. WASM is slower, but a 10× penalty still leaves a solve under a second,
 **not** need a solve-on-release interaction, a spinner, or a debounce longer than one animation
 frame. Re-solve on drag, and let the number move with the road.
 
+**What this measurement does not capture, found during Task 4.** `pyodideRuntime.solve` is `async`
+but contains no `await`: the call into Pyodide runs synchronously and **blocks the main thread**. So
+for the duration of each solve the drag's own pointer events do not dispatch, and the gesture will
+feel *stepped* rather than merely slow — a quality this number cannot predict and no test in this
+repo can observe, since the harness has no real runtime and no real pointer. It is the strongest
+argument for moving the solve to a worker, which §4's in-flight guard is already written against.
+Unmeasured, and recorded as such rather than assumed away.
+
 ### §1.4 cm rounding moves the answer, so the render bundle cannot be reused
 
 The bundles piece C established ship coordinates as **cm-rounded, origin-relative** metres, which is
