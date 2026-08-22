@@ -59,6 +59,31 @@
 # widgets-bundle.test.ts would happily evaluate yesterday's successful build instead.
 npm run build || exit 1
 
+# Why build the reblock wheel here as well? test/pyodide-parity.test.ts boots the pinned Pyodide
+# for real and has micropip install ../dist/reblock-0.1.0-py3-none-any.whl into it -- the same
+# self-sufficiency argument as the esbuild bundle above, and the same staleness hazard, sharpened:
+# dist/ is gitignored, so a fresh checkout has NO wheel (the test says so by name and prints this
+# command), and a checkout that already has one would otherwise have the parity test measure
+# whatever src/reblock looked like when that wheel was last built rather than what it looks like
+# now -- which is the one thing a parity guard must not do. `pixi run` rather than a bare `pip` so
+# this works from a plain shell as well as from `pixi run test`; nesting it inside an outer `pixi
+# run` was measured to work and to keep cwd. `..` is the project directory (pyproject.toml lives
+# one level up from web/), and --no-deps is not an optimisation: [project] dependencies is empty
+# precisely so micropip never tries to resolve the scientific stack from PyPI, where no wasm wheel
+# exists, and --no-deps keeps this build from adding any.
+pixi run pip wheel --no-deps --wheel-dir ../dist .. || exit 1
+
+# Why is the Pyodide parity test on this gate rather than in a job of its own? MEASURED (this
+# task's report, Node v24.12.0, this machine): one full boot -- loadPyodide, the seven loadPackage
+# packages, micropip, the wheel install and solve.py's module body -- costs 8.7 s with the
+# distribution's wheels already cached in node_modules/pyodide/, and 11.2 s cold, when loadPackage
+# fetches ~48 MB from jsDelivr and caches them there. The whole file, which boots a second minimal
+# interpreter for its pandas-version assertion, runs in 12.1 s warm and 14.6 s cold. This piece's
+# plan set 90 s as the cost at which the test earns its own npm script and its own CI job; 15 s is
+# not close to it, so it runs here with everything else and is deselected nowhere. Two consequences
+# worth knowing rather than rediscovering: `pixi run test` reaches this through `npm ci`, which
+# DELETES node_modules -- so CI pays the cold number every run, and needs a network to do it.
+
 OUTDIR=$(mktemp -d)
 tsc -p tsconfig.test.json --outDir "$OUTDIR" --noEmit false
 mapfile -d '' -t files < <(find "$OUTDIR/test" -name '*.test.js' -print0)
