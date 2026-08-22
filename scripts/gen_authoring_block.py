@@ -1,9 +1,10 @@
 """Bake examples/authoring/ -- the block the draw-your-own-road widget will rebuild in the browser.
 
-DEBT: every consumer named in this file is later in this piece and absent at this commit -- Task 2's
-`web/src/py/solve.py`, Task 4's `web/src/widgets/draw-road.ts`, Task 5's
-`web/test/pyodide-parity.test.ts`. They are named because they are what the bundle's shape is FOR,
-and written in the future tense because none of them exists yet.
+DEBT: two consumers named in this file are later in this piece and absent at this commit -- Task 4's
+`web/src/widgets/draw-road.ts` and Task 5's `web/test/pyodide-parity.test.ts`. They are named
+because they are what the bundle's shape is FOR, and written in the future tense because neither
+exists yet. Task 2's `web/src/py/solve.py` DOES exist now, and this baker loads its
+`block_from_bundle` back (see `_load_block_from_bundle` below) rather than keeping its own copy.
 
 The widget will run `reblock.permeability` itself, under Pyodide, on a road the reader drew. So this
 bundle is not a picture: it is the INPUT to a solve, and the browser rebuilds a real `Block` from
@@ -36,15 +37,17 @@ Reproduce with `pixi run python -m scripts.gen_authoring_block`.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict
 
 import geopandas as gpd
 from geopandas import GeoDataFrame
 from pyproj import CRS
-from shapely.geometry import LineString, MultiLineString, Point, Polygon
+from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from reblock.compare import load_permeability_config
@@ -59,6 +62,7 @@ log = logging.getLogger(__name__)
 
 OUT = Path("examples/authoring")
 DTS = Path("web/src/authoring.d.ts")
+SOLVE_PY = Path("web/src/py/solve.py")
 
 # Fixed roads whose CPython answers are baked for the parity test. Two, deliberately: one crossing
 # the block and one short spur, so a runtime that agreed on a trivial case and not a real one
@@ -211,28 +215,23 @@ def _road_frame(road: list[list[float]], params: PermeabilityParams, crs: CRS) -
                             geometry="geometry", crs=crs)
 
 
-def _block_from_bundle(bundle: AuthoringBundle) -> Block:
-    """Rebuild a Block from the JSON about to be written, to prove the JSON is sufficient.
-
-    Task 2 EXTRACTS this into `web/src/py/solve.py` and this module imports it back, so the
-    browser and the baker share one reconstruction. Written here first on purpose: the baker
-    cannot depend on a module that is tested against the bundle the baker has not written yet.
+def _load_block_from_bundle() -> Callable[[AuthoringBundle], Block]:
+    """Load `block_from_bundle` from `web/src/py/solve.py` -- the browser's own reconstruction --
+    so this baker's round trip and the Pyodide runtime share ONE reconstruction rather than two
+    that could drift apart. `web/src/py/` is not an importable package (no `__init__.py`, and
+    `web/` is not on the path -- it is a directory of things that ship to a browser, not a Python
+    package), so this loads it by path, the same device `scripts/gen_site_pages.py` already uses
+    for `method_labels.py` and `tests/test_solve_py.py` uses for this same file.
     """
-    crs = CRS.from_epsg(bundle["crs_epsg"])
-    boundary_rings = bundle["boundary"]
-    parcels = gpd.GeoDataFrame(
-        {"parcel_id": bundle["parcel_id"],
-         "geometry": [Polygon(rings[0], rings[1:]) for rings in bundle["parcels"]]},
-        geometry="geometry", crs=crs)
-    streets = gpd.GeoDataFrame(
-        {"geometry": [LineString(coords) for coords in bundle["streets"]]},
-        geometry="geometry", crs=crs)
-    points = gpd.GeoDataFrame(
-        {"geometry": [Point(x, y) for x, y in bundle["building_points"]]},
-        geometry="geometry", crs=crs)
-    return Block(block_id=bundle["block_id"], crs=crs,
-                 boundary=Polygon(boundary_rings[0], boundary_rings[1:]),
-                 parcels=parcels, streets=streets, building_points=points)
+    spec = importlib.util.spec_from_file_location("solve", SOLVE_PY)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    fn: Callable[[AuthoringBundle], Block] = mod.block_from_bundle
+    return fn
+
+
+block_from_bundle = _load_block_from_bundle()
 
 
 def _short(value: object) -> str:
@@ -261,7 +260,7 @@ def _assert_round_trip(bundle: AuthoringBundle, params: PermeabilityParams) -> N
     those are derived from `block.parcels.geometry` and `block.building_points`, so handing them
     over would skip re-deriving exactly the things the JSON has to carry.
     """
-    rebuilt = _block_from_bundle(bundle)
+    rebuilt = block_from_bundle(bundle)
     rebuilt_baseline = solve_egress(rebuilt, None, params)
     mesh = rebuilt_baseline.mesh
     columns: list[tuple[str, object, object]] = [
