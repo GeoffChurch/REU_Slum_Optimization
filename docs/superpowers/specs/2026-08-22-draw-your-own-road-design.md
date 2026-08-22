@@ -214,6 +214,21 @@ policy requires that; nothing else changes.
 without triggering dependency resolution. A dependency added there breaks the browser install and
 nothing in the Python test suite would notice.
 
+**How `reblock` reaches the browser.** `pixi run pip wheel --no-deps --wheel-dir dist .` produces
+`reblock-0.1.0-py3-none-any.whl` — **220 KB, pure Python**, measured — which `micropip` installs
+after the runtime's own packages. `--no-deps` is belt-and-braces on top of the empty
+`[project] dependencies`: the wheel must never trigger resolution, because every scientific package
+it would resolve is already provided by the distribution and a resolver would try to fetch them from
+PyPI, where no wasm wheel exists.
+
+The wheel is **built, never committed** — it is a compiled artifact of `src/`, and a stale committed
+copy would let the browser run different code from CI while both looked healthy. Two consumers, one
+build:
+
+* `web/test/pyodide-parity.test.ts` loads it from `dist/` through Node's filesystem.
+* `deploy-site.yml` builds it and copies it into `docs/assets/`, and the mount point carries the
+  resulting path as `data-wheel`, rewritten by `_write_page` exactly as `data-bundle` is.
+
 **Boot is lazy and its cost is stated.** Piece F sits on the Permeability page, a prose page a reader
 may reach without ever intending to compute anything, so the button that boots Pyodide says what it
 will download. Nothing is fetched until it is pressed.
@@ -332,6 +347,7 @@ Every one of them lands on the committed PNG, which is what the fallback exists 
 | `scripts/gen_site_pages.py` | the `DRAWROAD` producer and marker |
 | `web/src/mount.ts` | `register("draw-road", drawRoad, DRAW_ROAD_URL)` |
 | `web/package.json` | the pinned `pyodide` devDependency |
+| `.gitignore` | `dist/` — the wheel is built, never committed |
 | `web/scripts/test.sh` | how the parity test is selected or deselected, if it needs its own job |
 | `.github/workflows/ci.yml` | the Pyodide job, if §5's measured cost demands a separate one |
 
