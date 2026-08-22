@@ -71,8 +71,8 @@ citable URL) and closes the hazard with a mount-time throw rather than by relyin
 ### §1.4 A city block is sub-pixel: the spine marker cannot be an outline
 
 D3 measured the median Cape Town block at **0.61 CSS px²** on the shipped canvas, with 69.6% under
-1 px². Outlining block 9511 would be invisible. The marker must be a **fixed-screen-size ring at the
-block's centroid** (§6), sized in pixels rather than in world units.
+1 px². Outlining block 9511 would be invisible. The marker must be a **fixed-screen-size ring at a
+point guaranteed inside the block** (§6), sized in pixels rather than in world units.
 
 ### §1.5 Widget control initialisation — where a cited URL would visibly desync
 
@@ -454,8 +454,11 @@ export interface CityFollow {
   block_id: string;
   /** Index into the column arrays -- so the widget needs no search. */
   index: number;
-  /** Ring centroid, in the same origin-relative encoded metres as `rings`. Baked, not derived in
-   * JS, so the canvas marker and the PNG marker cannot land in two different places. */
+  /** `representative_point()`, in the same origin-relative encoded metres as `rings`. Baked, not
+   * derived in JS, so the canvas marker and the PNG marker cannot land in two different places.
+   *
+   * NOT the centroid: measured during Task 6, **1,491 of Cape Town's 16,451** block centroids fall
+   * outside their own polygon, so a centroid marker would sometimes ring a neighbour. */
   x: number;
   y: number;
 }
@@ -466,8 +469,11 @@ column ("a null column is a field that looks answerable and is not"). The baker 
 not among a city's blocks *for the city that should have it*, rather than silently omitting.
 
 `CityEncoding` gains `follow_color`, sourced from `reblock.render._ROAD_COLOR` (`#1E90FF`): the
-site's one blue, and the only palette constant distinct from `base_color` `#dddddd`,
-`selected_color` `#c0392b` and `informal_color` `#d98c00` at a glance.
+site's one blue, separated from `base_color` `#dddddd`, `selected_color` `#c0392b` and
+`informal_color` `#d98c00` by **hue** rather than lightness. (An earlier draft called it "the only
+palette constant distinct at a glance"; that is false — `_BOUNDARY_COLOR` `#222222` and `_OWN_PT`
+`#333333` are distinct too. Hue separation is the real reason, and it is what survives against a
+map whose other marks are a pale grey and two warm tones.)
 
 ### §6.2 How it is drawn
 
@@ -475,8 +481,12 @@ site's one blue, and the only palette constant distinct from `base_color` `#dddd
 2 px in `follow_color`, centred on `follow.x/​y`, painted on the **frame** layer (above the base
 blit), so a floor or metric change never re-touches it.
 
-`gen_screen_map.py`'s `_render_screen_map` draws the same ring, in the same colour, at a matching
-size in the PNG. That is this branch's standing rule — one `encoding`, feeding the matplotlib
+`gen_screen_map.py`'s `_render_screen_map` draws the same ring, in the same colour, at a
+**deliberately larger relative size** in the PNG — measured, 2.88% of figure width against the
+widget's 1.71% of canvas. (An earlier draft said "at a matching size", derived from a figure width
+of 10 in; `save_render` uses `bbox_inches="tight"` and Cape Town is portrait under
+`set_aspect("equal")`, so the saved figure is 5.93 × 7.70 in. The value shipped is legible, which is
+what the PNG needs; the arithmetic that justified it was wrong.) That is this branch's standing rule — one `encoding`, feeding the matplotlib
 fallback and the canvas widget alike — and it is why the marker appears on the **Screening** page as
 well as Explore: one artifact, one truth, and the through-line ("this is the block the rest of the
 site follows") is worth having on both.
