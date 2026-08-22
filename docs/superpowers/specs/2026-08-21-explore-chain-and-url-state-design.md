@@ -211,9 +211,24 @@ A widget-side reset must never *throw*: `region-grow.ts:75-78` throws when the *
 is unknown, and that stays — a broken artifact is a real failure. A reader's typo in a query string
 is not, and must land on the default view rather than on an error card.
 
-Concretely this adds three boot-time resets (§7): `RegionGrow.seed` unknown ⇒ the bundle's own seed;
-`Frontier.isolated` naming no method in `b.methods` ⇒ `null` (today `frontier.ts:425` would filter
-out **every** curve and draw an empty chart); `PermGraph.prefix` past `n_prefixes` ⇒ clamped.
+Concretely this adds **five** boot-time resets (§7): `RegionGrow.seed` unknown ⇒ the bundle's own
+seed; `Frontier.isolated` naming no method in `b.methods` ⇒ `null` (today `frontier.ts:425` would
+filter out **every** curve and draw an empty chart); `PermGraph.prefix` past `n_prefixes` ⇒ clamped;
+and — **added during Task 4, after this section first said three** — `RegionGrow.budget` and
+`DisplacementField`'s road width clamped to their own bundle bounds.
+
+The last two were not foreseen here and were ruled in during execution, because the widgets' own new
+comments asserted the property the gap violated: `?width=99999` reaches state, a real
+`<input type="range">` clamps its displayed value to the element's `max`, and the corridor is drawn
+at the unclamped metres — the slider and the picture disagreeing, which is exactly the desync
+`§1.5`'s whole argument is about. Narrowing the comment to fit the gap would have documented a bug
+as a design.
+
+**One residual is known and deliberately not fixed.** Both sliders also carry a `step` the browser
+snaps onto (`budget.step` 50, `width.step_m` 0.5) and no codec knows it, so `?budget=5001` shows
+5000 on the control while the picture draws 5001. Snapping in the codec would silently rewrite a
+reader's typed value, which is worse than a sub-step disagreement; the widgets' comments therefore
+describe the **bound** only and claim nothing about the grid.
 
 **Precedence:** a URL param beats the mount point's `data-*` attribute. `PermGraph` is the only
 widget whose initial comes from `data-*` (`initialState(host)`), and the store overlays the query on
