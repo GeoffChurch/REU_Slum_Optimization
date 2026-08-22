@@ -246,18 +246,27 @@ segments `DisplacementField` drags — an arbitrary road is the entire point, an
 prefix table can answer the question.
 
 **Solving.** Every settled edit calls `runtime.solve(road)`. At §1.3's timings that is sub-second, so
-the readout and the picture both move with the road; a single-frame coalesce (the `frameScheduled`
-guard `screen-map.ts` already uses) is the only throttling needed.
+the readout and the picture both move with the road. Two throttles, not one: a single-frame coalesce
+(the `frameScheduled` guard `screen-map.ts` already uses), **and** an in-flight guard that keeps at
+most one solve outstanding and remembers only the newest road.
 
-**Reporting.** Permeability for the drawn road, its length in metres, and the egress graph
-redrawn from the returned `potential` and `conductance` through the existing `render/canvas.ts`
+(This said the coalesce "is the only throttling needed" until Task 4 shipped the drag. The coalesce
+alone is sufficient against *today's* runtime, whose `solve` blocks the main thread and therefore
+cannot be re-entered — but `PyRuntime` promises no ordering, and the obvious remedy for a blocking
+sub-second solve is to move it to a worker, which would both reorder answers and let a drag pile up
+roughly sixty solves a second behind the coalesce. The guard is written against the interface rather
+than against the one implementation that happens to exist.)
+
+**Reporting.** Permeability for the drawn road, its length in metres, and the egress graph redrawn
+from the returned `potential` and `conductance` through the existing `render/canvas.ts` — the same
+picture the Permeability page teaches, for a road the reader invented. **Pyodide returns numbers,
+never pixels.**
 
 (This said "permeability **before and after**" until Task 4's review. There is no "before" to show:
 permeability is `1 − P(roads)/P(no roads)`, so the no-road value is **definitionally zero** and
 printing it tells a reader nothing. Corrected here rather than implemented, because a spec asking
 for a constant is a spec to fix — unlike vertex dragging, also missing from the same section, which
-is a real capability this design measured for in §1.3 and which Task 4 is implementing.) — the same picture the
-Permeability page teaches, for a road the reader invented. **Pyodide returns numbers, never pixels.**
+is a real capability this design measured for in §1.3 and which Task 4 implemented.)
 
 **State.** `DrawRoadState { road: [number, number][] }`, with a `UrlCodec` under piece E's contract
 so a drawn road is citable. Coordinates at 0.1 m, matching `roadsParam`'s existing precision, and the
