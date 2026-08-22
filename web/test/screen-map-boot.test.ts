@@ -727,13 +727,16 @@ test("a bundle with no follow draws no ring", async () => {
   assert.equal(followRings(cv).length, 0);
 });
 
-test("the ring survives a floor change, which never repaints the base layer", async () => {
-  // A floor change goes through `render(false)`, which re-blits the offscreen base layer instead of
-  // repainting it -- pinned by the base-layer test above, which counts that canvas's own fills
-  // across a floor change like this one. So a ring painted into `paintBase` would be blitted back with
-  // whatever the base layer held at the LAST resize or city switch, and this frame would carry
-  // none of its own. 0.02 is simply a floor inside Cape Town's depth_density_proxy range and
-  // different from the shipped default, so the state change is real.
+test("a floor change's own frame draws the ring, rather than inheriting it from the blit",
+  async () => {
+  // What this observes is the VISIBLE canvas's own call log, not the picture. A floor change goes
+  // through `render(false)`, which re-blits the offscreen base layer rather than repainting it, so
+  // a ring painted into `paintBase` would reach the screen inside that one `drawImage` and this
+  // frame would carry no arc-stroke of its own. The picture would still SHOW a ring -- the base
+  // layer is copied back whole -- so this pins where the ring is drawn, not whether it is visible.
+  // `render/city.ts` gives the two reasons that placement matters; neither is survival. 0.02 is
+  // simply a floor inside Cape Town's depth_density_proxy range and different from the shipped
+  // default, so the state change is real.
   const { host, cv } = await mount(700, null, "");
   setFloor(host, 0.02);
   assert.equal(followRings(cv).length, 1);
@@ -759,9 +762,15 @@ test("the followed block is far smaller on screen than the ring that marks it", 
   // The premise a FIXED SCREEN radius rests on, measured here against the committed bundle rather
   // than written as a number into render/city.ts that a re-bake could silently falsify: at the
   // city-wide fit the followed block covers a fraction of one CSS pixel, so its own outline -- or
-  // any marker scaled by `view` -- would put nothing on screen at all. This is also what catches a
-  // FOLLOW_RADIUS_PX shrunk to a value the first ring test would still accept, since that test
-  // reads the constant rather than a literal.
+  // these same constants reinterpreted as world lengths and scaled by `view` -- would put nothing
+  // on screen at all.
+  //
+  // It is also the only guard on the ring's MAGNITUDE: the ring test above compares the drawn
+  // radius against FOLLOW_RADIUS_PX itself, which agrees with any value the constant takes. Know
+  // what this buys, though: the second assertion is satisfied by any radius above
+  // sqrt(area / PI) ~ 0.40 px, so it catches 0.1 and would pass a 1 px ring nobody could see. A
+  // real legibility floor needs a threshold in CSS pixels that this task has no basis to set, so
+  // this asserts the relation it can actually derive rather than a number it would be inventing.
   const follow = ct.follow!;
   assert.equal(ct.block_id[follow.index], follow.block_id,
     "sanity: follow.index does not address follow.block_id's own row");
@@ -774,19 +783,47 @@ test("the followed block is far smaller on screen than the ring that marks it", 
     + `px^2, which does not stand out against the ${area.toFixed(3)} px^2 block it marks`);
 });
 
-test("the readout names the followed block, and names none where the bundle carries none",
-  async () => {
-    // The ring lives in canvas pixels, which carry no accessible text at all -- so a screen-reader
-    // user is told the pool size and never told which block the rest of the site follows unless
-    // describeSelection says so. Pinned against the bundle's OWN `follow.block_id`, which is also
-    // what makes the absence half meaningful: Nairobi carries no `follow`, so a clause built from
-    // anything other than the ACTIVE bundle (`bundles.capetown.follow`, a module constant) would
-    // announce Cape Town's block over Nairobi's map.
-    const followed = ct.follow!.block_id;
-    const capetown = await mount();
-    assert.ok(readoutText(capetown.host).includes(followed),
-      `readout does not name the followed block ${followed}: "${readoutText(capetown.host)}"`);
-    const nairobi = await mount(700, null, "city=nairobi");
-    assert.ok(!readoutText(nairobi.host).includes(followed),
-      `Nairobi's readout names Cape Town's followed block: "${readoutText(nairobi.host)}"`);
-  });
+/** The follow ring's own description: the one paragraph in the widget that is NOT the aria-live
+ * readout. Found by the ABSENCE of that attribute rather than by position among the paragraphs, so
+ * this keeps naming the right element if the two are ever reordered -- and asserts there is exactly
+ * one, so a second static paragraph cannot be silently read instead of it. */
+function followNoteText(host: ReturnType<typeof mountPoint>): string {
+  const notes = host.findAll("p").filter((el) => el.getAttribute("aria-live") === null);
+  assert.equal(notes.length, 1, `expected exactly one non-live paragraph, found ${notes.length}`);
+  return notes[0]!.textContent;
+}
+
+test("the followed block is described in text, outside the live region", async () => {
+  // The ring lives in canvas pixels, which carry no accessible text at all -- so a screen-reader
+  // user is told the pool size and never told which block the rest of the site follows unless the
+  // widget says so somewhere.
+  //
+  // Somewhere, but NOT in the aria-live readout: that region is re-announced on every frame, and a
+  // floor drag produces many, while this sentence never changes within a city. Both halves are
+  // asserted, because putting it in the live region is the easy and wrong way to satisfy the first.
+  const followed = ct.follow!.block_id;
+  const { host } = await mount();
+  assert.ok(followNoteText(host).includes(followed),
+    `nothing names the followed block ${followed}: "${followNoteText(host)}"`);
+  assert.ok(!readoutText(host).includes(followed),
+    `the followed block is named inside the aria-live readout, which is re-announced on every `
+    + `frame of a floor drag: "${readoutText(host)}"`);
+});
+
+test("a city switch clears a description that named the other city's block", async () => {
+  // Written from the ACTIVE bundle on every render, not once at mount. Text set at mount only would
+  // still name ZAF.9.3.1_1_40972 over Nairobi's map -- a bundle that carries no `follow` at all,
+  // and whose canvas carries no ring. Both routes to Nairobi are checked: a URL that starts there,
+  // and a toggle that arrives there, since only the second can go stale.
+  const followed = ct.follow!.block_id;
+  const booted = await mount(700, null, "city=nairobi");
+  assert.equal(followNoteText(booted.host), "",
+    `Nairobi booted with a description of a block it does not carry: `
+    + `"${followNoteText(booted.host)}"`);
+  const toggled = await mount();
+  assert.ok(followNoteText(toggled.host).includes(followed), "sanity: Cape Town describes its own");
+  setCity(toggled.host, true);
+  assert.equal(followNoteText(toggled.host), "",
+    `switching to Nairobi left Cape Town's followed block described: `
+    + `"${followNoteText(toggled.host)}"`);
+});

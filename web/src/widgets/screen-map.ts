@@ -197,9 +197,11 @@ function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: Me
   return floor;
 }
 
-/** The aria-live text: pool size always; the precision/recall that pool scores against ground
- * truth only where the bundle carries `informal`; and the followed block's id only where it carries
- * `follow`. `sel.precision`/`sel.recall` are `null` together
+/** The aria-live text: pool size always, and -- only where the bundle carries `informal` -- the
+ * precision/recall that pool scores against it. NOT the follow ring: that sentence is invariant
+ * within a city, and this region is re-announced on every frame a floor drag produces, so it lives
+ * in its own static element instead (`describeFollow`, just below). `sel.precision`/`sel.recall`
+ * are `null` together
  * (model/screen.ts's `selectAt`: both come from the same `informal === undefined` check), so
  * either one being absent is read as "no ground-truth layer for this city" rather than as a
  * partial result to paper over with a placeholder number.
@@ -210,23 +212,31 @@ function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: Me
  * path to a fact already known for certain. */
 function describeSelection(city: ScreenState["city"], bundle: CityBundle, sel: Selection): string {
   const pool = `${sel.count} of ${bundle.n_blocks} blocks selected.`;
-  // The ring `render/city.ts` draws around `bundle.follow`, said in text. A canvas carries no
-  // accessible text at all, so a marker that exists only in its pixels is a marker a screen-reader
-  // user is never told about -- the same gap the pool figure above closes for the picture. The id
-  // comes off the bundle, never typed here: a re-bake that follows a different block moves this
-  // line with it. Appended to whichever sentence is returned rather than folded into one of them,
-  // because `follow` and `informal` are independently optional fields (screen_map.d.ts) even though
-  // both happen to be Cape Town's today.
-  const follow = bundle.follow;
-  const followed = follow === undefined ? ""
-    : ` Block ${follow.block_id} is ringed: it is the one the rest of the site follows.`;
   if (sel.precision === null || sel.recall === null) {
     return `${pool} ${cityName(city)} has no ground-truth informal-settlement layer, `
-         + `so precision and recall cannot be shown.${followed}`;
+         + `so precision and recall cannot be shown.`;
   }
   return `${pool} Precision ${(sel.precision * 100).toFixed(1)}%, `
        + `recall ${(sel.recall * 100).toFixed(1)}%, against the City of Cape Town's own `
-       + `informal-structure survey.${followed}`;
+       + `informal-structure survey.`;
+}
+
+/** The follow ring, in text. A canvas carries no accessible text at all, so a marker that exists
+ * only in its pixels is one a screen-reader user is never told about.
+ *
+ * Deliberately NOT part of the `aria-live` readout beside it. That region is the line that changes
+ * every frame, and a floor drag produces many; this sentence is invariant within a city, so folding
+ * it in there would make a screen-reader user re-hear an unchanging clause once per drag frame. A
+ * plain paragraph is read once, where the reader reaches it, and is silent on every later frame.
+ *
+ * Written from the ACTIVE bundle on every render rather than once at mount, which is what empties
+ * it on a switch to a city that carries no `follow` -- text set once would leave Cape Town's block
+ * named over Nairobi's map. Rewriting a NON-live element announces nothing, so per-render writing
+ * costs the reader no repeats. The id comes off the bundle, never typed here. */
+function describeFollow(bundle: CityBundle): string {
+  const follow = bundle.follow;
+  return follow === undefined ? ""
+    : `Block ${follow.block_id} is ringed on the map: it is the one the rest of the site follows.`;
 }
 
 function fetchBundle(src: string): Promise<CityBundle> {
@@ -283,6 +293,11 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   cityToggle.type = "checkbox";
   cityLabel.append(cityToggle, " Show Nairobi instead of Cape Town");
 
+  // Static, no `aria-live`: see `describeFollow`. It sits between the canvas and the controls so a
+  // screen reader meets the picture's own description where the picture is, before the controls
+  // that change it.
+  const followNote = document.createElement("p");
+
   const readout = document.createElement("p");
   // The one line that changes on every frame -- floor drag, metric switch, city toggle --
   // announced. A canvas carries no accessible text at all, so without this a screen-reader user
@@ -299,9 +314,10 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   // the static picture the error text points the reader at.
   if (caption) {
     host.insertBefore(cv, caption);
+    host.insertBefore(followNote, caption);
     host.insertBefore(controls, caption);
   } else {
-    host.append(cv, controls);
+    host.append(cv, followNote, controls);
   }
 
   const state: StateSource<ScreenState> = makeState({
@@ -394,6 +410,9 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
     // Every number the picture shows is also present as text, computed from the same `sel` the
     // picture was drawn from -- there is no second call to `selectAt` that could disagree with it.
     readout.textContent = describeSelection(st.city, bundle, sel);
+    // From the SAME `bundle` the frame above was painted from, so the sentence and the ring can
+    // never name different cities.
+    followNote.textContent = describeFollow(bundle);
   };
 
   // Coalesces every state-driven redraw (a floor drag, a metric switch, a city toggle) onto the
