@@ -480,8 +480,20 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
   const clear = (): void => {
     pending = [];
     hover = null;
-    // A drag in progress ends with the road it was moving. Without this, the next `pointermove`
-    // would go on indexing a vertex of a road that no longer exists.
+    // Ends a drag in progress, and what it protects is the readout, not an index. MEASURED by
+    // removing this line and driving pointerdown-on-vertex -> Escape -> pointermove: nothing
+    // throws and no index goes out of range -- `state.get().road.map(...)` over the now-empty road
+    // never runs its callback at all -- so an earlier version of this comment named a failure that
+    // does not exist. What actually happens is that `dragging` stays set until the pointer is
+    // lifted (`release`, below, is what would otherwise end it), and every `pointermove` in that
+    // window takes the DRAG branch instead of the hover one: it re-sets the road to the empty
+    // array it already is and calls `requestSolve([])`, which `pumpSolve` refuses -- putting
+    // `NEEDS_TWO_POINTS` in the readout over whatever was there. That is a refusal shown to a
+    // reader who settled nothing, which is exactly what `NEEDS_TWO_POINTS`'s own declaration in
+    // this file says cannot happen ("a REFUSAL and nothing else ... it appears only when a road
+    // that is not a road was settled"). The window closes at `pointerup` either way -- the hover
+    // preview comes back for the next road, also measured -- so this is a corrupted readout for
+    // the rest of one gesture, not a stuck widget.
     dragging = null;
     // Both halves of "cancel": drop the road waiting to be solved, and move the generation on so
     // that an answer already in flight is discarded when it lands instead of repainting the graph
