@@ -106,6 +106,26 @@ bundles answer different questions and should not be made to answer both.
 containment** — parcels are Voronoi cells of the building points, but *not* in index order. So the
 authoring bundle must carry the building points; the render bundle has no use for them and does not.
 
+### §1.6 The mesh is road-invariant, so most of the graph can be baked
+
+`solve_egress` (`src/reblock/permeability.py:292`) builds `footpath_mesh(block, params, ...)` — which
+takes **no `roads` argument** — and then computes `edge_conductances(..., roads, params)`. Grounding
+comes from `mesh.ground`, parcels within `STREET_TOL` of a *street*, and is likewise untouched by
+roads. So a drawn road changes exactly two arrays and nothing else:
+
+| quantity | depends on the road? | where it comes from |
+| --- | --- | --- |
+| parcel centroids, edge `rows`/`cols`, `ground`, `footpath_g` | **no** | baked once into the bundle |
+| per-edge `conductance` | **yes** | returned by the runtime |
+| per-parcel `potential` | **yes** | returned by the runtime |
+| the no-roads baseline `p0` | **no** | baked once into the bundle |
+
+Three consequences the design takes: the runtime returns two arrays rather than a mesh; the widget
+computes per-edge current as `conductance[i] * (potential[rows[i]] - potential[cols[i])`) in JS,
+exactly as `gen_web_bundle.py` already bakes it; and `permeability` need not be called at all —
+`solve_egress` returns `EgressSolution(p, potential, mesh, conductance)` in **one** solve, where
+`permeability()` would run two (it recomputes the road-invariant baseline every call).
+
 ---
 
 ## §2 The authoring bundle — `examples/authoring/block.json`
@@ -133,6 +153,16 @@ export interface AuthoringBlock {
    * time -- the same shape `field.json`'s `reference` and `hood.json`'s `reference` already use,
    * for the same reason. */
   reference: { name: string; road: [number, number][]; permeability: number }[];
+
+  /** The road-INVARIANT half of the graph (§1.6), baked once so the runtime returns two arrays
+   * rather than a mesh. Parcel centroids and the footpath edge list do not move when a road is
+   * drawn; only the conductances on those edges do. */
+  nodes: { cx: number[]; cy: number[]; ground: boolean[] };
+  edges: { rows: number[]; cols: number[]; footpath_g: number[] };
+  /** `solve_egress(block, None)`'s own answer: the no-roads baseline permeability divides against,
+   * and the potentials the "before" picture shows. Road-invariant, so computing it in the browser
+   * on every edit would be waste. */
+  baseline: { p0: number; potential: number[] };
 }
 ```
 
@@ -149,7 +179,16 @@ block equals `permeability` on the source block exactly.** That is a bake-time a
 ## §3 The runtime seam — `web/src/py/`
 
 ```ts
-export interface PyResult { permeability: number; potentials: number[]; roadMetres: number }
+export interface PyResult {
+  /** 1 - P(road)/p0, against the bundle's baked `baseline.p0` -- the same definition
+   * `permeability()` uses, computed from ONE solve rather than two (§1.6). */
+  permeability: number;
+  roadMetres: number;
+  /** Per parcel, in `nodes` order. */
+  potential: number[];
+  /** Per edge, in `edges` order. The widget derives per-edge current from this and `potential`. */
+  conductance: number[];
+}
 
 export interface PyRuntime {
   /** Idempotent. Resolves when `permeability` is callable. */
@@ -196,7 +235,7 @@ the readout and the picture both move with the road; a single-frame coalesce (th
 guard `screen-map.ts` already uses) is the only throttling needed.
 
 **Reporting.** Permeability before and after, the road's length in metres, and the egress graph
-redrawn from the returned potentials through the existing `render/canvas.ts` — the same picture the
+redrawn from the returned `potential` and `conductance` through the existing `render/canvas.ts` — the same picture the
 Permeability page teaches, for a road the reader invented. **Pyodide returns numbers, never pixels.**
 
 **State.** `DrawRoadState { road: [number, number][] }`, with a `UrlCodec` under piece E's contract
