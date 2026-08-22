@@ -197,7 +197,7 @@ export interface PyRuntime {
   solve(road: [number, number][]): Promise<PyResult>;
 }
 
-export function pyodideRuntime(bundle: AuthoringBlock, indexUrl: string): PyRuntime;
+export function pyodideRuntime(bundle: AuthoringBlock, wheelUrl: string, indexUrl?: string): PyRuntime;
 ```
 
 Built once at mount and **injected**, the way `StateFactory` is (piece C/E) — the widget never learns
