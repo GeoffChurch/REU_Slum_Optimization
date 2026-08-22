@@ -149,10 +149,19 @@ function floorAtShippedPoolSize(bundle: CityBundle, metric: MetricName, sc: Floa
  * bounds; that is its contract for an arbitrary `preferred` value, not part of what "the default"
  * means.)
  *
- * Takes the already-computed `sc` rather than calling `scores` again: `render` has it cached beside
- * `rankedFor`, and re-scoring every block per frame to answer a question already answered would be
- * waste with no correctness gain. The uncalibrated branch still sorts, inside
- * `floorAtShippedPoolSize` -- only the scoring is saved. */
+ * Takes the already-computed `sc` rather than scoring again inside -- `render` has it cached beside
+ * `rankedFor`. What that saves is bounded, and worth stating so nobody reads it as free: the
+ * calibrated branch returns out of `bundle.floors` without reading `sc` at all, while the
+ * uncalibrated one falls through to `floorAtShippedPoolSize`, whose `ranking` call scores every
+ * block again internally and then sorts -- so that path pays a full scoring pass AND a sort per
+ * resolution whatever is handed in, and `sc` merely supplies the array the chosen rank's score is
+ * finally read out of.
+ *
+ * `metric` and `sc` are two parameters whose agreement nothing declares or checks: pair one
+ * metric's name with another metric's scores and the result is a number of the right type and the
+ * wrong value, with nothing to raise. Both call sites hold it today -- `syncFloor` scores `metric`
+ * on the line above its call, and `render` recomputes `s` whenever `rankedFor` moves -- but Task 5
+ * turned that from one caller's local invariant into a shared one. */
 function defaultFloorFor(bundle: CityBundle, metric: MetricName, sc: Float64Array): number {
   return bundle.floors.find((f) => f.metric === metric)?.value
       ?? floorAtShippedPoolSize(bundle, metric, sc);
@@ -162,9 +171,10 @@ function defaultFloorFor(bundle: CityBundle, metric: MetricName, sc: Float64Arra
  * to this metric's own default", which `defaultFloorFor` just above resolves. Otherwise `preferred`
  * itself: the whole point of an ABSOLUTE floor (design §3.4) is that the same number carries over to
  * a corpus with no calibration at all, rather than being redefined on every switch the way a
- * percentile would be. The city toggle is the caller that can take either path -- `preferred` for a
- * floor the reader actually set, `null` for one they never touched, which is not an absolute floor
- * to carry but a request for whatever this metric calibrates to. Either way the result is clamped
+ * percentile would be. `boot` and the city toggle are the two callers that can take either path:
+ * `boot` for a URL-supplied `?floor=` or its absence, the toggle for a floor the reader set or one
+ * they never touched -- the latter not an absolute floor to carry, but a request for whatever this
+ * metric calibrates to. The metric handler always passes `null`. Either way the result is clamped
  * into the range just computed, written to the slider, and returned. */
 function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: MetricName,
                    preferred: number | null): number {
@@ -299,8 +309,9 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   // slider to the nearest usable value, so writing that value back is what keeps the control and
   // the picture on one number -- and the write it triggers rewrites `?floor=` to the clamped value.
   // Only when the URL actually supplied one: resolving a `null` into state here would publish a
-  // `?floor=` to a reader who never set one, and pin this metric's number across the next metric
-  // switch.
+  // `?floor=` to a reader who never set one and -- being then indistinguishable from a number they
+  // did set -- carry it across the next CITY switch and into any URL they copied. (A metric switch
+  // would still clear it: the handler below writes `floor: null` unconditionally.)
   if (s0.floor !== null && resolved !== s0.floor) state.set({ floor: resolved });
 
   floorSlider.addEventListener("input", () => state.set({ floor: Number(floorSlider.value) }));
