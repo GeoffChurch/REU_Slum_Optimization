@@ -4,12 +4,13 @@ import { test } from "node:test";
 import type { FieldBundle, ReferenceCase, Road } from "../src/field.js";
 import { contributions, corridorDistance, flatten } from "../src/model/displacement.js";
 import { handles } from "../src/render/field.js";
-import { localState } from "../src/state.js";
+import { localState, type StateSource } from "../src/state.js";
+import { urlStore } from "../src/url/store.js";
 import { fitBbox, toScreen, toWorld, type Bbox } from "../src/view/transform.js";
-import { displacementField } from "../src/widgets/displacement-field.js";
+import { displacementField, FIELD_URL, type FieldState } from "../src/widgets/displacement-field.js";
 import {
-  armDrawFailure, canvasOf, Call, DPR, FakeElement, fireResize, installStubs, lastFrame,
-  mountPoint as mountPointBase,
+  armDrawFailure, canvasOf, Call, DPR, fakeLocation, FakeElement, fireResize, installStubs,
+  lastFrame, mountPoint as mountPointBase, writeNow,
 } from "./harness.js";
 
 /** The DisplacementField widget, mounted for real against the COMMITTED `field.json`.
@@ -76,8 +77,19 @@ function mountPoint(): FakeElement {
   return figure;
 }
 
+/** The state store is the PRODUCTION one (`urlStore` over a `fakeLocation`), never `localState`:
+ * `search` defaults to "", which claims no key, decodes nothing and writes nothing, so a caller
+ * that passes no search gets the widget's own initial state exactly as `localState` gave it -- and
+ * the URL test below gets the real decode path rather than a second, test-only one.
+ *
+ * `store` is nullable because a REFUSED bundle is a case this file tests: `boot` validates the road
+ * count (and, below, the points per road) before it calls `makeState`, so a payload it rejects
+ * never asks for a store at all. Asserting non-null inside this helper would turn "the widget
+ * correctly refused a broken bundle" into a helper failure. */
 async function mount(host: FakeElement, drawFailure: string | null = null,
-                     payload: unknown = bundle): Promise<void> {
+                     payload: unknown = bundle, search = ""):
+    Promise<{ store: StateSource<FieldState> | null;
+              loc: ReturnType<typeof fakeLocation> }> {
   armDrawFailure(drawFailure);
   (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
     ok: true,
@@ -85,10 +97,17 @@ async function mount(host: FakeElement, drawFailure: string | null = null,
     statusText: "OK",
     json: (): Promise<unknown> => Promise.resolve(payload),
   });
-  displacementField(host as unknown as HTMLElement, localState);
+  const loc = fakeLocation(search);
+  const urls = urlStore(loc, writeNow);
+  let bound: StateSource<FieldState> | null = null;
+  displacementField(host as unknown as HTMLElement, (initial) => {
+    bound = urls.bind(FIELD_URL, initial);
+    return bound;
+  });
   // A macrotask, so the fetch chain has drained by the time this resolves.
   await new Promise((resolve) => setTimeout(resolve, 0));
   armDrawFailure(null);
+  return { store: bound, loc };
 }
 
 /** Exactly the state a call CONSUMES, and nothing else.
@@ -642,4 +661,38 @@ test("a mount point with no data-bundle names the ATTRIBUTE, not a missing file"
   delete host.dataset["bundle"];
   assert.throws(() => displacementField(host as unknown as HTMLElement, localState),
     /DisplacementField: data-bundle is missing/);
+});
+
+test("a URL width reaches the width SLIDER", async () => {
+  // The desync this widget's own state exists to prevent: `boot` drew the corridor from state (so
+  // `?width=` reached the canvas) while the slider was initialised from `width0`, the bundle's
+  // default -- leaving the reader a control reading 7 beside a corridor drawn at 12. Both halves
+  // are asserted, so "the corridor was drawn at 12" is observed rather than assumed.
+  const host = mountPoint();
+  await mount(host, null, bundle, "width=12");
+  fireResize(SIZE, SIZE);
+
+  const widthSlider = host.findAll("input").find((i) => i.type === "range");
+  assert.ok(widthSlider !== undefined, "there is no width slider");
+  assert.equal(widthSlider.value, "12");
+  assert.equal(layers(canvasOf(host)).corridor[0]!.lineWidth, 12 * VIEW.scaleX,
+    "the corridor was not drawn at the URL's width either");
+});
+
+test("a road that is not a two-point segment fails LOUDLY, on the page", async () => {
+  // The invariant `roadsParam` (url/param.ts) relies on rather than re-derives: it spells a road as
+  // `x1,y1,x2,y2` and indexes `coords[0]`/`coords[1]` with no length check of its own. The bundle
+  // is where that is true or false, so this is the boundary that has to say so.
+  const host = mountPoint();
+  const img = host.find("img")!;
+  const bad = {
+    ...bundle,
+    roads: [{ ...bundle.roads[0]!, coords: [[0, 0], [1, 1], [2, 2]] }, bundle.roads[1]!],
+  };
+  await mount(host, null, bad);
+
+  // The message reaches the reader where the caption was -- not the console behind an intact PNG.
+  assert.match(host.find("figcaption")!.textContent, /road 1 has 3 points/);
+  assert.equal(img.removedAt, null, "the fallback image went anyway");
+  assert.equal(host.find("canvas"), null, "a canvas was inserted for a refused bundle");
 });

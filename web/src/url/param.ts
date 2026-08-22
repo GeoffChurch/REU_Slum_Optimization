@@ -170,12 +170,14 @@ function sameCoords(a: [number, number][], b: [number, number][]): boolean {
  * the same thing (`initial.length !== 2`) and returns `null` otherwise, rather than inventing a
  * geometry the widget cannot draw.
  *
- * Points PER road is a separate invariant that this param does NOT check. That each road has
- * exactly two points is also a property of the bundle, not of this param, and the right place to
- * enforce a bundle invariant is the single boundary where the bundle is validated once -- `boot`,
- * again -- not a second check re-derived per-param here. That is the answer for why `fmtSegment`
- * below can index `r.coords[0]`/`[1]` with no length guard of its own: it is trusting the bundle
- * boundary to have ruled out anything else, not re-deriving that guarantee at every consumer.
+ * Points PER road is a separate invariant that this param does NOT check, because `boot` does:
+ * immediately after the road-count throw it rejects any road whose `coords` are not exactly two
+ * points. That is a property of the bundle, not of this param, and it belongs at the one boundary
+ * the bundle crosses. A second copy of it here could not fire either: the only `initial` this
+ * param is ever handed is the state `boot` builds AFTER that check -- `bind` is called from the
+ * widget's own `makeState` callback -- and an unfirable guard is a defect of its own. That is also
+ * why `fmtSegment` below can index `r.coords[0]`/`[1]` with no length guard: it is trusting that
+ * boundary, not re-deriving its guarantee at every consumer.
  *
  * One shared width, because `displacement-field.ts`'s width slider writes its value onto EVERY
  * road's `width_m` -- deliberately, so the overlap demonstration stays exact. */

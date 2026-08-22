@@ -327,6 +327,14 @@ function boot(host: HTMLElement, makeState: StateFactory<FrontierState>, b: Fron
       yMax, "data-target-permeability"),
     isolated: null,
   });
+  // `?method=` names a curve in THIS bundle. An unknown one is not inert: the draw loop's
+  // `if (s.isolated !== null && s.isolated !== key) continue` would skip EVERY curve and render an
+  // empty chart. Reset to null, which also drops the key from the URL (design §2.3).
+  //
+  // `Object.hasOwn`, never `in`: `"toString" in b.methods` is true for every object, so an
+  // `in`-based membership test would accept a prototype key as a method name.
+  const isolated = state.get().isolated;
+  if (isolated !== null && !Object.hasOwn(b.methods, isolated)) state.set({ isolated: null });
   const s0 = state.get();
 
   const caption = host.querySelector("figcaption");

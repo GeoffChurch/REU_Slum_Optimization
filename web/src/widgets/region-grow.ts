@@ -5,7 +5,7 @@ import type { HoodBlock, HoodBundle } from "../hood.js";
 // must never import `register`.
 import type { Widget } from "../mount.js";
 import type { StateFactory, StateSource } from "../state.js";
-import { intParam, type UrlCodec } from "../url/param.js";
+import { intParam, stringParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
@@ -15,15 +15,16 @@ import { sizeCanvas } from "../render/canvas.js";
 import { blockAt, draw } from "../render/region.js";
 import { fitBbox, toWorld, type Bbox, type View } from "../view/transform.js";
 
-/** `seed`/`budget` are both indices into the model, not display state: `seed` indexes `blocks`
- * (what `blockAt` returns and `growth` consumes directly), `budget` is a building_count on the
- * slider's own scale. Keeping them here rather than as loose widget variables is what makes a
- * click-then-slide sequence replay through the SAME `growth()` call every render, instead of the
- * picture and the model drifting apart across two different pieces of mutable state. */
-export interface RegionGrowState { seed: number; budget: number }
+/** `seed` is a **block_id**, `budget` a building_count on the slider's own scale. `seed` is an
+ * identity rather than a position deliberately: it is citable in a URL (piece E), and an array
+ * index there would point at a DIFFERENT block after any re-bake that reorders `hood.json` -- no
+ * error, right type, right shape, wrong value. Keeping both here rather than as loose widget
+ * variables is what makes a click-then-slide sequence replay through the SAME `growth()` call every
+ * render, instead of the picture and the model drifting apart across two pieces of mutable state. */
+export interface RegionGrowState { seed: string; budget: number }
 
 export const REGION_GROW_URL: UrlCodec<RegionGrowState> = {
-  seed: intParam("seed"),
+  seed: stringParam("seed"),
   budget: intParam("budget"),
 };
 
@@ -75,16 +76,23 @@ export const regionGrow: Widget<RegionGrowState> = (host, makeState) => {
 function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: HoodBundle): void {
   const e = b.encoding;
   const blocks = b.blocks;
+  // block_id -> index, built once. `growth()` and `draw()` both take a POSITION (and `hood.json`'s
+  // `reference` fixtures pin accretion by index), so the conversion lives at the two boundaries
+  // rather than in the model.
+  const indexOf = new Map(blocks.map((blk, i) => [blk.block_id, i]));
   // The bundle is a BOUNDARY: it arrives over the network, and a page can outlive the artifact it
   // was generated beside. A `seed` that no longer names one of `blocks` would otherwise reach
   // `growth()` as a negative index and fail far from here, with no message a reader could act on.
-  const seed0 = blocks.findIndex((blk) => blk.block_id === b.seed);
-  if (seed0 < 0) {
+  if (!indexOf.has(b.seed)) {
     throw new Error(`hood.json's seed "${b.seed}" is not among its own ${blocks.length} blocks`);
   }
   const state: StateSource<RegionGrowState> = makeState({
-    seed: seed0, budget: b.budget.default,
+    seed: b.seed, budget: b.budget.default,
   });
+  // A URL (piece E) may name a block this hood does not carry. That is a reader's typo, not a
+  // broken artifact, so reset rather than throw -- and because the reset makes the field equal its
+  // initial, the store stops emitting `?seed=` and the URL self-corrects (design §2.3).
+  if (!indexOf.has(state.get().seed)) state.set({ seed: b.seed });
 
   const caption = host.querySelector("figcaption");
 
@@ -105,7 +113,10 @@ function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: Ho
   slider.min = String(b.budget.min);
   slider.max = String(b.budget.max);
   slider.step = String(b.budget.step);
-  slider.value = String(b.budget.default);
+  // From STATE, not from `b.budget.default`: the bundle's default is what `makeState` was seeded
+  // with, but a URL (piece E) may have overridden it before this line, and a slider showing 3000
+  // beside a region grown to 5000 is the exact desync this widget's own state exists to prevent.
+  slider.value = String(state.get().budget);
   slider.addEventListener("input", () => state.set({ budget: Number(slider.value) }));
   budgetLabel.append("Budget ", slider);
 
@@ -141,9 +152,13 @@ function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: Ho
 
   const render = (): void => {
     const s = state.get();
-    const g = growth(blocks, s.seed, s.budget);
+    // `!` because every value `state.seed` can hold is one of `blocks`: `boot` above resets a
+    // non-member (a URL's) to `b.seed` before this ever runs, and the `pointerdown` handler below
+    // only ever writes the block_id of a block `blockAt` has just found.
+    const seed = indexOf.get(s.seed)!;
+    const g = growth(blocks, seed, s.budget);
     const frontier = frontierOf(blocks, g.order);
-    draw(ctx, blocks, e, { view, region: g.order, frontier, seed: s.seed }, size);
+    draw(ctx, blocks, e, { view, region: g.order, frontier, seed }, size);
     // Every number the picture shows is also present as text, and both come from the same `g` the
     // picture was drawn from -- there is no second call to `growth()` that could disagree with it.
     readout.textContent =
@@ -158,7 +173,7 @@ function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: Ho
       // A click that lands in no block (outside every ring) leaves the seed alone, rather than
       // clearing it to something the picture cannot draw.
       if (hit === -1) return;
-      state.set({ seed: hit });
+      state.set({ seed: blocks[hit]!.block_id });
     });
   };
 

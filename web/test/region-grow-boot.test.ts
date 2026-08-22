@@ -3,12 +3,14 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { HoodBlock, HoodBundle } from "../src/hood.js";
 import { grow, growth } from "../src/model/accretion.js";
-import { localState } from "../src/state.js";
+import type { StateSource } from "../src/state.js";
+import { urlStore } from "../src/url/store.js";
 import { fitBbox, toScreen, type Bbox } from "../src/view/transform.js";
 import {
-  armDrawFailure, canvasOf, Call, fireResize, installStubs, lastFrame, mountPoint,
+  armDrawFailure, canvasOf, Call, fakeLocation, fireResize, installStubs, lastFrame, mountPoint,
+  writeNow,
 } from "./harness.js";
-import { regionGrow } from "../src/widgets/region-grow.js";
+import { REGION_GROW_URL, regionGrow, type RegionGrowState } from "../src/widgets/region-grow.js";
 
 installStubs();
 
@@ -84,13 +86,25 @@ function readoutText(host: ReturnType<typeof mountPoint>): string {
  * creates during the awaited macrotask below captures it as its `RecordingContext.failWith` --
  * perm-graph-boot.test.ts's own `mount` does the same, for the same timing reason. Cleared in a
  * `finally` after `fireResize` so a later call to `mount()` with no `drawFailure` is not
- * accidentally armed by a previous test's leftover state. */
-async function mount(width = 700, drawFailure: string | null = null):
-    Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown }> {
+ * accidentally armed by a previous test's leftover state.
+ *
+ * The state store is the PRODUCTION one (`urlStore` over a `fakeLocation`), never `localState`:
+ * `search` defaults to "", which claims no key, decodes nothing and writes nothing, so a caller
+ * that passes no search gets the widget's own initial state exactly as `localState` gave it -- and
+ * the URL tests below get the real decode path rather than a second, test-only one. */
+async function mount(width = 700, drawFailure: string | null = null, search = ""):
+    Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown;
+              store: StateSource<RegionGrowState>; loc: ReturnType<typeof fakeLocation> }> {
   const host = mountPoint();
   host.dataset.bundle = "../examples/region-grow/hood.json";
   armDrawFailure(drawFailure);
-  regionGrow(host as never, localState);
+  const loc = fakeLocation(search);
+  const urls = urlStore(loc, writeNow);
+  let bound: StateSource<RegionGrowState> | null = null;
+  regionGrow(host as never, (initial) => {
+    bound = urls.bind(REGION_GROW_URL, initial);
+    return bound;
+  });
   // A macrotask, so the fetch chain has drained -- boot() has run and the canvas exists -- by the
   // time this resolves.
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -99,7 +113,10 @@ async function mount(width = 700, drawFailure: string | null = null):
   } finally {
     armDrawFailure(null);
   }
-  return { host, cv: canvasOf(host) };
+  // Every mount in this file feeds `boot` the committed bundle, whose own `seed` is one of its own
+  // blocks, so `boot` always reaches `makeState`. A null here is a widget that failed before it.
+  assert.ok(bound !== null, "the widget never asked for a state store");
+  return { host, cv: canvasOf(host), store: bound, loc };
 }
 
 /** Finds the `<input type="range">` the widget wrote -- the one place that lookup happens, so
@@ -311,3 +328,34 @@ test("a throw on the first draw is reported and keeps the static image", async (
   assert.ok(host.querySelector("img") !== null,
     "the fallback image was removed although the drawing that replaces it threw");
 });
+
+test("a URL budget reaches the SLIDER, not only the canvas", async () => {
+  // The desync this widget's own state exists to prevent, in the one direction nothing covered:
+  // `boot` drew from state (so the canvas honoured `?budget=`) while the slider was initialised
+  // from the bundle's default, leaving the reader a control that disagreed with the picture beside
+  // it. Both halves are asserted, so "the picture drew 5000" is observed rather than assumed.
+  const { host, cv } = await mount(700, null, "budget=5000");
+  assert.equal(budgetSlider(host).value, "5000",
+    "the slider initialised from the bundle default while the picture drew 5000");
+  const seedIndex = bundle.blocks.findIndex((b) => b.block_id === bundle.seed);
+  assert.equal(regionPaths(cv).length, grow(bundle.blocks, seedIndex, 5000).length,
+    "the canvas did not draw the URL's budget either");
+});
+
+test("the seed is a block_id, so a re-baked hood cannot silently reseed a published link",
+  async () => {
+    // An INDEX in a published URL points at a different block after any re-bake that reorders
+    // hood.json -- no error, right type, right shape, wrong value. An identity cannot do that: it
+    // either still names a block or is refused below.
+    const { store } = await mount(700, null, `seed=${bundle.blocks[2]!.block_id}`);
+    assert.equal(store.get().seed, bundle.blocks[2]!.block_id);
+  });
+
+test("a seed this hood does not carry falls back to the bundle's own AND leaves the URL",
+  async () => {
+    // A reader's typo is not a broken artifact: it must land on the default view, not an error
+    // card, and the key must disappear rather than be carried forward in a URL they might copy.
+    const { loc, store } = await mount(700, null, "seed=NOT_A_BLOCK");
+    assert.equal(store.get().seed, bundle.seed);
+    assert.equal(loc.written.at(-1), "", "the bad key is gone, not carried");
+  });

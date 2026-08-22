@@ -1,9 +1,14 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { localState } from "../src/state.js";
-import { frontier } from "../src/widgets/frontier.js";
+import type { StateSource } from "../src/state.js";
+import { urlStore } from "../src/url/store.js";
+import { frontier, FRONTIER_URL, type FrontierState } from "../src/widgets/frontier.js";
 import type { FrontierBundle } from "../src/frontier.js";
+// Only the two URL seams -- never the harness's own `FakeElement`, which this file deliberately
+// does not share (its widget draws SVG, so its fake element carries `createElementNS` and `all()`
+// rather than a recording 2D context).
+import { fakeLocation, writeNow } from "./harness.js";
 
 /** Mounts the widget for real -- against the COMMITTED bundle, not a toy one -- and asserts a chart
  * actually got drawn. Every defect this branch has produced shared one shape: the page still looked
@@ -184,16 +189,34 @@ function mountPoint(): FakeElement {
 /** Mounts the widget and waits for its fetch chain to settle. The widget's own `.catch` turns any
  * boot failure into caption text rather than an unhandled rejection, so this resolves either way --
  * which is exactly why the assertions below check what was DRAWN, never merely that nothing threw.
- */
-async function mount(host: FakeElement, payload: unknown = bundle): Promise<void> {
+ *
+ * The state store is the PRODUCTION one (`urlStore` over a `fakeLocation`), never `localState`:
+ * `search` defaults to "", which claims no key, decodes nothing and writes nothing, so a caller
+ * that passes no search gets the widget's own initial state exactly as `localState` gave it -- and
+ * the URL tests below get the real decode path rather than a second, test-only one.
+ *
+ * `store` is nullable because a REFUSED bundle is a case this file tests: every one of `boot`'s
+ * bundle and `data-*` checks runs before it calls `makeState`, so a payload it rejects never asks
+ * for a store at all. Asserting non-null in here would turn "the widget correctly refused a broken
+ * bundle" into a helper failure. */
+async function mount(host: FakeElement, payload: unknown = bundle, search = ""):
+    Promise<{ store: StateSource<FrontierState> | null;
+              loc: ReturnType<typeof fakeLocation> }> {
   (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
     ok: true,
     status: 200,
     statusText: "OK",
     json: (): Promise<unknown> => Promise.resolve(payload),
   });
-  frontier(host as unknown as HTMLElement, localState);
+  const loc = fakeLocation(search);
+  const urls = urlStore(loc, writeNow);
+  let bound: StateSource<FrontierState> | null = null;
+  frontier(host as unknown as HTMLElement, (initial) => {
+    bound = urls.bind(FRONTIER_URL, initial);
+    return bound;
+  });
   await new Promise((resolve) => setTimeout(resolve, 0));
+  return { store: bound, loc };
 }
 
 test("the widget mounts and draws one curve per method in the bundle, with no NaN coordinate",
@@ -526,3 +549,26 @@ test("a throw while re-laying out reaches the caption instead of vanishing into 
     assert.match(host.querySelector("figcaption")!.textContent,
       /The static image above still applies\./);
   });
+
+test("an unknown ?method= draws EVERY curve, not an empty chart", async () => {
+  // `?method=` names a curve in THIS bundle, which no codec can check. An unknown one is not inert:
+  // the draw loop skips every key that is not the isolated one, so an isolated name that matches
+  // nothing filters out all of them and the reader gets axes with no data on them.
+  const host = mountPoint();
+  const { store } = await mount(host, bundle, "method=not_a_method");
+  assert.ok(store !== null, "the widget never asked for a state store");
+  assert.equal(store.get().isolated, null);
+  assert.equal(host.all("polyline").length, Object.keys(bundle.methods).length,
+    "isolating a method that does not exist filtered out all of them");
+});
+
+test("a prototype key is not a method name", async () => {
+  // `"toString" in b.methods` is true for every object, so an `in`-based membership test accepts a
+  // prototype key as a method name -- and the chart then goes empty exactly as above.
+  const host = mountPoint();
+  const { store } = await mount(host, bundle, "method=toString");
+  assert.ok(store !== null, "the widget never asked for a state store");
+  assert.equal(store.get().isolated, null);
+  assert.equal(host.all("polyline").length, Object.keys(bundle.methods).length,
+    "a prototype key was accepted as a method name and the chart went empty");
+});

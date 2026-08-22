@@ -75,6 +75,14 @@ export const permGraph: Widget<PermGraphState> = (host, makeState) => {
 
 function boot(host: HTMLElement, makeState: StateFactory<PermGraphState>, b: Bundle): void {
   const state: StateSource<PermGraphState> = makeState(initialState(host));
+  // `?prefix=` is a bare non-negative integer; how many prefixes THIS block has is a property of the
+  // fetched bundle, which no codec can know (design §2.3). Clamp rather than throw -- an
+  // out-of-range number must land on the last prefix, not on an error card -- and the write the
+  // clamp triggers replaces the out-of-range key with the clamped one, so the URL self-corrects in
+  // front of the reader (and drops `?prefix=` entirely when the clamp lands on this mount point's
+  // own `data-prefix`, which is the value the store diffs against).
+  const maxPrefix = b.n_prefixes - 1;
+  if (state.get().prefix > maxPrefix) state.set({ prefix: maxPrefix });
   const caption = host.querySelector("figcaption");
 
   const cv = document.createElement("canvas");

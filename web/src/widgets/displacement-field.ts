@@ -103,6 +103,17 @@ function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBu
   if (b.roads.length !== 2 || road1 === undefined || road2 === undefined) {
     throw new Error(`field.json carries ${b.roads.length} roads; this widget needs exactly two`);
   }
+  // Each road is a two-point SEGMENT, for the same reason the count is exactly two: the drag
+  // handles, the corridor geometry, and piece E's URL spelling of a road (`x1,y1,x2,y2`, whose
+  // encoder indexes `coords[0]`/`coords[1]` directly) all assume it. Enforced HERE, once, where the
+  // bundle crosses into the widget -- a second length check inside the codec would be a guard that
+  // cannot fire, which this project treats as a defect of its own.
+  for (const [i, r] of b.roads.entries()) {
+    if (r.coords.length !== 2) {
+      throw new Error(
+        `field.json's road ${i + 1} has ${r.coords.length} points; this widget needs exactly two`);
+    }
+  }
   const width0 = b.width.default_m;
   const state: StateSource<FieldState> = makeState({
     roads: [{ ...road1, width_m: width0 }, { ...road2, width_m: width0 }],
@@ -132,7 +143,10 @@ function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBu
   slider.min = String(b.width.floor_m);
   slider.max = String(b.width.max_m);
   slider.step = String(b.width.step_m);
-  slider.value = String(width0);
+  // From STATE, not from `width0`: the bundle's default is what `makeState` was seeded with, but a
+  // URL (piece E) may have overridden it before this line, and a slider showing 7 while the
+  // corridor is drawn at 12 is the exact desync this widget's own state exists to prevent.
+  slider.value = String(state.get().roads[0]!.width_m);
   slider.addEventListener("input", () => {
     // The width applies to EVERY live road. Width is per-road in the model (permeability.py's
     // module docstring) and the widget offers one control, so the choice is which roads it moves:
