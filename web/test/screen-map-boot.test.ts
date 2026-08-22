@@ -202,6 +202,17 @@ function callsForBlock(calls: Call[], view: View, bundle: CityBundle, blockIndex
   });
 }
 
+/** The floor `density` and `depth_proxy` fall back to, neither shipping a `floors[]` entry of its
+ * own: the score of the block at the SHIPPED DEFAULT metric's own pool size, in THIS metric's own
+ * ranking (`screen-map.ts`'s `floorAtShippedPoolSize`). Spelled out here rather than imported so
+ * the tests below read without opening the widget -- being the same arithmetic, it pins WHICH
+ * BUNDLE resolved a number, not the formula. The formula is pinned by the pool-size assertions
+ * beside it, which come from the bundle's own independently baked `n`. */
+function poolSizeFloor(bundle: CityBundle, metric: MetricName): number {
+  const shipped = bundle.floors.find((f) => f.metric === "depth_density_proxy")!;
+  return scores(bundle, metric)[ranking(bundle, metric)[shipped.n - 1]!]!;
+}
+
 /** Blocks the picture currently shows as SELECTED, in the CURRENT frame -- identified by the
  * bundle's own `selected_color`, never by a path count (region-grow-boot.test.ts's own layer
  * helpers carry the reasoning). Stroked, not filled: see `isSelected` just below. */
@@ -612,20 +623,58 @@ test("switching metric drops ?floor= from the URL", async () => {
     "a metric switch resets to the new metric's calibration, so no floor belongs in the URL");
 });
 
-test("switching city PINS the floor, carrying the absolute number across corpora", async () => {
-  // `syncFloor`'s own docstring argues that an ABSOLUTE floor carries to a corpus with no
-  // calibration rather than being redefined per city; leaving `floor` null at the switch would
-  // redefine it on every toggle instead. So it is resolved at the switch and said out loud in the
-  // URL, because the reader chose to carry it. Both committed bundles ship 0.0128 for this metric,
-  // so the number below pins THAT the floor was resolved, not which bundle resolved it.
-  const { host, loc, store } = await mount();
+test("switching city carries a floor the READER set, and invents none where they set nothing",
+  async () => {
+    // `syncFloor`'s own docstring argues that an ABSOLUTE floor carries to a corpus with no
+    // calibration rather than being redefined per city -- right for a number the reader picked, and
+    // wrong for `null`, which is not an absolute floor at all but "whatever this metric calibrates
+    // to". So the switch resolves for the CONTROL either way and pins only a chosen value into
+    // STATE (design §1.6, corrected during this task).
+    const untouched = await mount();
+    setCity(untouched.host, true);
+    assert.equal(untouched.store.get().floor, null,
+      "an untouched floor is not a choice, and a city switch turned it into one");
+    assert.equal(untouched.loc.written.at(-1), "city=nairobi",
+      "a `?floor=` the reader never typed is in the URL they would copy");
+    // The slider tracks the new bundle even though nothing was pinned -- `syncFloor` is called for
+    // its side effect on the CONTROL whichever way the state goes. Nairobi's own
+    // depth_density_proxy scores top out well below Cape Town's (0.0537 against 0.158), so a
+    // handler that skipped the call would leave the control offering a range this corpus has not
+    // got.
+    let nbMax = -Infinity;
+    for (const v of scores(nb, "depth_density_proxy")) if (v > nbMax) nbMax = v;
+    assert.equal(Number(floorSlider(untouched.host).max), nbMax,
+      "the slider kept the previous city's bounds");
+
+    const chosen = await mount();
+    setFloor(chosen.host, 0.02);
+    setCity(chosen.host, true);
+    assert.equal(chosen.store.get().floor, 0.02,
+      "a floor the reader dragged to should carry to the new corpus, not be redefined by it");
+    assert.equal(chosen.loc.written.at(-1), "city=nairobi&floor=0.02",
+      "the emitted query should name both the city and the floor it carried");
+  });
+
+test("a city round trip returns an untouched floor to where it started", async () => {
+  // The concrete defect that corrected design §1.6: pinning a `null` floor at the switch invents a
+  // number, and the number belongs to the OTHER corpus. Measured on the committed bundles,
+  // `density` (which ships no calibration, so its default is the shipped default's own pool size)
+  // resolves to 0.00773 on Cape Town and 0.00625 on Nairobi -- so an unconditional pin sends a
+  // reader who only looked at Nairobi home to Nairobi's number, drawing 2,859 blocks where their
+  // own city's default draws 1,655, under a `?floor=` they never typed.
+  const { host, cv, loc, store } = await mount();
+  setMetric(host, "density");
   setCity(host, true);
-  assert.equal(typeof store.get().floor, "number", "resolved at the switch, never left null");
-  const carried = nb.floors.find((f) => f.metric === "depth_density_proxy")!.value;
-  assert.equal(store.get().floor, carried);
-  assert.equal(floorSlider(host).value, String(carried), "the slider should agree with the state");
-  assert.equal(loc.written.at(-1), `city=nairobi&floor=${carried}`,
-    "the emitted query should name both the city and the floor it pinned");
+  setCity(host, false);
+
+  assert.equal(store.get().floor, null, "the round trip pinned a floor the reader never chose");
+  assert.equal(Number(floorSlider(host).value), poolSizeFloor(ct, "density"),
+    "the slider came home to a number that is not Cape Town's own");
+  const shippedDefault = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
+  assert.equal(selectedPaths(cv).length, shippedDefault.n,
+    "the picture came home to a pool sized by the other corpus's calibration");
+  assert.equal(loc.written.at(-1), "metric=density",
+    "the URL came home carrying a floor nobody typed");
 });
 
 test("an out-of-range ?floor= is clamped AND stops being emitted at that value", async () => {

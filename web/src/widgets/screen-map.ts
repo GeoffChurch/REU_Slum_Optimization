@@ -160,9 +160,11 @@ function defaultFloorFor(bundle: CityBundle, metric: MetricName, sc: Float64Arra
 
 /** The floor slider's live bounds and value for (bundle, metric). `preferred === null` means "reset
  * to this metric's own default", which `defaultFloorFor` just above resolves. Otherwise `preferred`
- * itself -- the city toggle takes this path, since the whole point of an ABSOLUTE floor (design
- * §3.4) is that the same number carries over to a corpus with no calibration at all, rather than
- * being redefined on every switch the way a percentile would be. Either way the result is clamped
+ * itself: the whole point of an ABSOLUTE floor (design §3.4) is that the same number carries over to
+ * a corpus with no calibration at all, rather than being redefined on every switch the way a
+ * percentile would be. The city toggle is the caller that can take either path -- `preferred` for a
+ * floor the reader actually set, `null` for one they never touched, which is not an absolute floor
+ * to carry but a request for whatever this metric calibrates to. Either way the result is clamped
  * into the range just computed, written to the slider, and returned. */
 function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: MetricName,
                    preferred: number | null): number {
@@ -313,11 +315,17 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   cityToggle.addEventListener("change", () => {
     const city: ScreenState["city"] = cityToggle.checked ? "nairobi" : "capetown";
     const s = state.get();
-    const floor = syncFloor(floorSlider, bundles[city], s.metric, s.floor);
-    // RESOLVED, never left `null`. `syncFloor`'s own docstring argues that an ABSOLUTE floor
-    // carries across corpora rather than being redefined per city -- pinning the number here is
-    // what carries it, and saying so in the URL is honest, because the reader chose to carry it.
-    state.set({ city, floor });
+    // Called for its side effect on the SLIDER whichever way the state below goes: the new bundle
+    // scores on its own range, so the control's bounds and displayed value have to track it even
+    // when there is nothing to pin.
+    const resolved = syncFloor(floorSlider, bundles[city], s.metric, s.floor);
+    // Into STATE, though, only a floor the READER chose. `syncFloor`'s own docstring argues that an
+    // ABSOLUTE floor carries across corpora rather than being redefined per city, and pinning the
+    // number here is what carries it -- saying so in the URL is honest, because the reader chose to
+    // carry it. A `null` floor is not an absolute floor: it says "whatever this metric calibrates
+    // to", so pinning it would invent a choice nobody made, publish a `?floor=` nobody typed, and
+    // leave a there-and-back city switch on the OTHER corpus's number (design §1.6).
+    state.set({ city, floor: s.floor === null ? null : resolved });
   });
 
   // Assigned only from inside the first sized callback below, exactly like region-grow.ts's own
