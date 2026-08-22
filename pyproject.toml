@@ -47,6 +47,16 @@ topology = { path = "ext/topology", editable = true }
 
 # Dev-only tooling, kept out of the runtime dependency set.
 [tool.pixi.feature.dev.dependencies]
+# The PEP 517 backend the `wheel` task below builds with. Declared here, and the task passes
+# --no-build-isolation, so building the wheel resolves nothing from PyPI: `pixi run test-py`
+# depends on that task, so without this every test run -- and every CI gate -- would need the
+# network to fetch an UNPINNED hatchling into a throwaway build env. Declared here it comes from
+# the lock file like everything else, and the deploy workflow pins the same version explicitly so
+# the two build paths produce a byte-identical wheel.
+hatchling = "*"
+# `python -m pip` needs pip IN the environment. Without it the wheel task falls back to a
+# pip found on PATH -- outside this environment, blind to the hatchling above.
+pip = "*"
 mypy = "*"
 pytest = "*"
 pytest-cov = "*"
@@ -105,7 +115,10 @@ default = { features = ["dev", "research"], solve-group = "default" }
 # `web/scripts/test.sh` builds the SAME wheel again for its own leaf (`web-test`, below): the two
 # tasks give no ordering between them, so a bare `npm test` from web/ has to stay self-sufficient
 # rather than rely on `test-py` having already built it (see that script's own comment).
-wheel = "pip wheel --no-deps --wheel-dir dist ."
+# `python -m pip`, never bare `pip`: a bare `pip` resolves off PATH and on a machine with a
+# conda/venv base on it that is a pip from OUTSIDE this environment, which cannot see the
+# hatchling declared above and fails --no-build-isolation outright. `python` is the env's own.
+wheel = "python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist ."
 test-py = { cmd = "pytest", depends-on = ["wheel"] }
 web-test = { cmd = "npm ci && npm test", cwd = "web" }
 test = { depends-on = ["test-py", "web-test"] }

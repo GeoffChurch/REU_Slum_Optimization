@@ -76,7 +76,7 @@ npm run build || exit 1
 # resolving and writing any dependency wheels into ../dist alongside reblock's own. Harmless
 # today (there are none to resolve), but the reason to keep the flag if dependencies ever stops
 # being empty.
-pixi run pip wheel --no-deps --wheel-dir ../dist .. || exit 1
+pixi run wheel || exit 1
 
 # Why is the Pyodide parity test on this gate rather than in a job of its own? MEASURED (Node
 # v24.12.0, this machine, five fresh warm runs): one full boot -- loadPyodide, the seven

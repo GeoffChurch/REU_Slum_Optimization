@@ -13,6 +13,12 @@ on:
       - "outputs/**"
       - "web/**"
       - "scripts/gen_site_pages.py"
+      # The wheel this job builds is packaged FROM src/reblock and shipped to readers, and
+      # pyproject.toml declares the name and version the DRAWROAD producer constructs its filename
+      # from -- so a solver change or a version bump with no other edit must still redeploy, or
+      # the site keeps serving the previous solver with nothing to show it is stale.
+      - "src/reblock/**"
+      - "pyproject.toml"
       - "mkdocs.yml"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
@@ -57,10 +63,12 @@ jobs:
       # divergence from `pixi run wheel`: building this wheel needs nothing but hatchling reading
       # pyproject.toml, so installing a whole pixi environment -- numpy, scipy, geopandas, the
       # entire research stack -- to zip up src/reblock would be minutes of CI for no difference in
-      # output. VERIFIED: the two paths produce the same 68-entry wheel with all 65 package files
-      # byte-identical; only the dist-info generator stamp differs (hatchling's own version) and
-      # `Requires-Dist` is absent either way, which is what keeps micropip from trying to resolve
-      # the scientific stack from PyPI, where no wasm wheel exists.
+      # output. VERIFIED, with hatchling pinned here to the version pixi resolves: the two paths
+      # produce a BYTE-IDENTICAL wheel -- sha256 51e54bf0e8604659a3623af1351a3c3681b1a0da8563a63
+      # 0ec5e1802fb9a8644 from both. Unpinned they differ only in the dist-info generator stamp,
+      # which is exactly what the pin removes. `Requires-Dist` is absent either way, and that is
+      # what keeps micropip from trying to resolve the scientific stack from PyPI, where no wasm
+      # wheel exists.
       #
       # This is also why `scripts/gen_site_pages.py` is stdlib-only and this job runs it under
       # plain `python3`: the deploy path deliberately does not need the science stack, and adding

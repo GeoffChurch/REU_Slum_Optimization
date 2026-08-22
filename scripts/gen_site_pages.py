@@ -387,26 +387,41 @@ def _perm_graph_figures() -> str:
 
 
 def _draw_road_figure() -> str:
-    """The Permeability page's one widget that COMPUTES rather than looks up: the reader draws a
-    road, and the browser rebuilds a real `Block` from `examples/authoring/block.json`, boots
-    Pyodide, and calls `reblock.permeability`'s own solver on it -- no baked prefix table, no
-    JS reimplementation of the metric (design §4, §7).
+    """The Permeability page's widget that runs THIS PROJECT'S OWN SOLVER rather than a
+    reimplementation of it: the reader draws a road, and the browser rebuilds a real `Block` from
+    `examples/authoring/block.json`, boots Pyodide, and calls `reblock.permeability` itself
+    (design §4, §7).
+
+    That is the distinction, and it is narrower than "computes rather than looks up" -- three other
+    widgets on this site already compute live in the browser (`displacement-field`, `region-grow`
+    and `screen-map`, whose own header says "metrics are computed, not shipped"). What is unique
+    here is WHAT does the computing: Python from the shipped wheel, not TypeScript written to
+    agree with it.
 
     Two fetch URLs, not one: `data-bundle` is the block, `data-wheel` is the `reblock` wheel
     `micropip` installs at boot. The wheel is built, never committed (`dist/` is gitignored) --
     `pyproject.toml`'s `wheel` pixi task builds it for the local suite, and `deploy-site.yml`
-    builds it again before this script runs in CI. Locating it cannot import `reblock` (or
-    anything that would name its own version) under this file's stdlib-only contract, so it globs
-    `dist/reblock-*.whl` rather than a literal filename, and RAISES when none is found -- the same
-    shape `_assert_widget_bundle_present` raises in, naming the build command -- rather than
-    emitting a `data-wheel` that 404s behind an intact-looking page.
+    builds it before this script runs in CI. Its NAME is derived, not discovered: `pyproject.toml`
+    declares both the distribution name and the version, so the filename is constructed from them
+    and a missing wheel RAISES naming the build command -- the same shape
+    `_assert_widget_bundle_present` raises in. An earlier form globbed `dist/reblock-*.whl` and
+    took `sorted(...)[-1]`, which let any stray file sorting after the real wheel silently become
+    what the published page told every reader to install. `tomllib` is stdlib from 3.11, so
+    reading the declaration stays inside this file's stdlib-only contract.
 
     No PNG of its own. Design §6 says every failure mode here "lands on the committed PNG", and
-    the committed PNG is `_perm_graph_figures`'s own "current, before" panel, immediately above --
-    the block with no roads, which is exactly the picture this widget boots showing (its `picture`
-    starts as `pictureOf(BASELINE)`, current layer, no road). Reusing that already-copied asset
-    means a no-JS reader sees the identical picture a JS reader starts from, rather than a second
-    rendering of the same graph baked by a separate script.
+    the committed PNG is `_perm_graph_figures`'s "current, before" panel -- the third of that
+    grid's four, so it sits bottom-left in the two-column grid rather than immediately above (the
+    figure directly above this one in DOM order is *current, after*, which carries the PermGraph
+    mount). It is the block with no roads, which is exactly the picture this widget boots showing
+    (its `picture` starts as `pictureOf(BASELINE)`, current layer, no road), so a no-JS reader
+    sees the identical picture a JS reader starts from rather than a second rendering of the same
+    graph baked by a separate script.
+
+    That panel comes from `examples/perm-graph/` while every number in the caption is read from
+    `examples/authoring/block.json`, so the two artifacts are asserted to describe the SAME block
+    rather than assumed to -- the drift `draw-road.ts`'s own `GRAPH_ENCODING_BLOCK_ID` check
+    exists to catch at runtime, caught here at build time instead.
 
     Every number in the caption -- the block id, the parcel count -- is read from `block.json`,
     never typed.
@@ -417,45 +432,45 @@ def _draw_road_figure() -> str:
     if bundle_url is None or img_url is None:
         return ""
 
-    # The wheel's name is KNOWN here, not discovered: `pyproject.toml` carries the version this
-    # build produces, so the filename is derived from it rather than globbed. A glob picking
-    # `sorted(...)[-1]` is positional access to a closed set -- and `dist/` is gitignored scratch,
-    # so any stray file sorting after the real wheel (a hand-renamed copy, a wheel left behind by
-    # a previous version) would silently become what the published page tells every reader to
-    # install, with nothing raising and the page looking correct. `tomllib` is stdlib from 3.11,
-    # so this stays inside this file's stdlib-only contract.
+    # Both halves of the wheel's name are DECLARED in pyproject.toml, so the filename is
+    # constructed from the declaration rather than searched for. No `.exists()` pre-check: the one
+    # `_copy_asset` call below is the existence test, exactly as it is for the bundle and the PNG
+    # above, and it raises rather than returning "" because a missing wheel is a broken build to
+    # fix, not a partial checkout to render around.
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    version = pyproject["project"]["version"]
-    wheel = ROOT / "dist" / f"reblock-{version}-py3-none-any.whl"
-    if not wheel.exists():
+    name, version = pyproject["project"]["name"], pyproject["project"]["version"]
+    wheel = ROOT / "dist" / f"{name}-{version}-py3-none-any.whl"
+    wheel_url = _copy_asset(wheel, "wheels")
+    if wheel_url is None:
         raise SystemExit(
             f"{wheel} not found -- run `pixi run wheel` to build it (CI builds it in "
-            f"deploy-site.yml before scripts/gen_site_pages.py). pyproject.toml says the version "
-            f"is {version}; a wheel built before a version bump will not match this name.")
+            f"deploy-site.yml before scripts/gen_site_pages.py). pyproject.toml declares "
+            f"{name} {version}; a wheel built before a version bump will not match this name.")
     # A version bump changes this filename, so a previous version's wheel would otherwise sit in
     # the assets directory forever and ship alongside the current one -- every other asset on this
-    # site has a stable name and simply gets overwritten. Clear the directory's other wheels first.
-    for stale in (ASSETS / "wheels").glob("reblock-*.whl"):
+    # site has a stable name and is simply overwritten. Cleared AFTER the copy, so a failed copy
+    # never leaves the directory empty of both.
+    for stale in (ASSETS / "wheels").glob(f"{name}-*.whl"):
         if stale.name != wheel.name:
             stale.unlink()
-    wheel_url = _copy_asset(wheel, "wheels")
-
-    if wheel_url is None:
-        # `wheel.exists()` was checked above, so this is a same-process race (deleted between the
-        # check and the copy), not the "no wheel built" state -- that one already raised. Raising
-        # rather than emitting a `data-wheel` that 404s behind a page that looks intact.
-        raise SystemExit(f"{wheel} vanished between being found and being copied")
 
     bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     block, n_parcels = bundle["block_id"], len(bundle["parcels"])
+    # The picture is baked from one artifact and the caption read from another; a re-bake that
+    # moved either to a different block would otherwise caption one block with another's numbers.
+    graph = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
+    if graph["block_id"] != block:
+        raise SystemExit(
+            f"the reused panel is block {graph['block_id']} but the caption reads block {block} "
+            f"from examples/authoring/block.json -- re-bake one of them so they agree")
 
     attrs = f'data-widget="draw-road" data-bundle="{bundle_url}" data-wheel="{wheel_url}"'
     caption = (
-        f"Draw a road on block <code>{block}</code> ({n_parcels} parcels) and this widget solves "
-        f"its real permeability rather than looking one up -- the only figure on this site that "
-        f"computes an answer instead of replaying one baked in advance. Pressing the button below "
-        f"downloads a Python runtime and installs this project's own solver into it, so every "
-        f"edit re-runs the exact metric this page describes rather than an approximation of it."
+        f"Block <code>{block}</code>, {n_parcels} parcels, drawn with no roads &mdash; the state "
+        f"the widget starts from. Every other live figure on this site recomputes its answer in "
+        f"TypeScript written to agree with the Python; this one installs the Python and asks it, "
+        f"so what you read here is the same solver the rest of the page describes rather than a "
+        f"second implementation of it."
     )
     return _figure(img_url, f"the egress graph on block {block} with no roads, ready to draw on",
                    caption, attrs=attrs)

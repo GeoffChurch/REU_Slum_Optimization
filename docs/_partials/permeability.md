@@ -4,8 +4,7 @@
      scripts/gen_perm_graph.py -- and DRAWROAD, which copies examples/authoring/block.json and the
      built reblock wheel and mounts the draw-your-own-road widget, reusing one of PERMGRAPHFIGS's
      own pictures as its no-JS fallback (no PNG of its own -- see _draw_road_figure's docstring).
-     Edit HERE, never
-     docs/methodology/permeability.md (it is generated and gitignored). This file is committed but
+     Edit HERE, never docs/methodology/permeability.md (it is generated and gitignored). This file is committed but
      excluded from the built site (see exclude_docs in mkdocs.yml).
 
      This page otherwise describes a MODEL, so its prose quantities are symbolic parameters
@@ -66,9 +65,10 @@ Nodes are parcel centroids. Two layers of edges connect them:
 
 ## Draw your own road
 
-Every figure above replays an answer computed in advance. This one does not: draw a road on the
-block and the browser recomputes its permeability from scratch, using the exact solver this page
-describes rather than a lookup table. Nothing downloads until you press the button below — doing
-so fetches a Python runtime and runs the real computation in it.
+Draw a road on the block and the browser recomputes its permeability from scratch, using the
+exact solver this page describes rather than a reimplementation of it. Other figures here already
+recompute as you drag them, but they do it in the site's own JavaScript; this one downloads a
+Python runtime, installs this project into it, and asks the real thing. That download waits until
+you ask for it, so the page costs nothing until you press the button on the figure.
 
 <!-- DRAWROAD -->
