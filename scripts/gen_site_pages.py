@@ -31,6 +31,7 @@ import json
 import re
 import shutil
 import struct
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -416,17 +417,34 @@ def _draw_road_figure() -> str:
     if bundle_url is None or img_url is None:
         return ""
 
-    wheels = sorted((ROOT / "dist").glob("reblock-*.whl"))
-    if not wheels:
+    # The wheel's name is KNOWN here, not discovered: `pyproject.toml` carries the version this
+    # build produces, so the filename is derived from it rather than globbed. A glob picking
+    # `sorted(...)[-1]` is positional access to a closed set -- and `dist/` is gitignored scratch,
+    # so any stray file sorting after the real wheel (a hand-renamed copy, a wheel left behind by
+    # a previous version) would silently become what the published page tells every reader to
+    # install, with nothing raising and the page looking correct. `tomllib` is stdlib from 3.11,
+    # so this stays inside this file's stdlib-only contract.
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    version = pyproject["project"]["version"]
+    wheel = ROOT / "dist" / f"reblock-{version}-py3-none-any.whl"
+    if not wheel.exists():
         raise SystemExit(
-            "no reblock-*.whl found under dist/ -- run `pixi run wheel` to build it (CI builds it "
-            "in deploy-site.yml before scripts/gen_site_pages.py)")
-    wheel_url = _copy_asset(wheels[-1], "wheels")
+            f"{wheel} not found -- run `pixi run wheel` to build it (CI builds it in "
+            f"deploy-site.yml before scripts/gen_site_pages.py). pyproject.toml says the version "
+            f"is {version}; a wheel built before a version bump will not match this name.")
+    # A version bump changes this filename, so a previous version's wheel would otherwise sit in
+    # the assets directory forever and ship alongside the current one -- every other asset on this
+    # site has a stable name and simply gets overwritten. Clear the directory's other wheels first.
+    for stale in (ASSETS / "wheels").glob("reblock-*.whl"):
+        if stale.name != wheel.name:
+            stale.unlink()
+    wheel_url = _copy_asset(wheel, "wheels")
+
     if wheel_url is None:
-        # `wheels[-1]` was just found to exist by the glob above; this is a same-process race
-        # (deleted between the glob and the copy), not a reachable "no wheel built" state -- that
-        # one already raised above. Raising here too rather than emitting a broken `data-wheel`.
-        raise SystemExit(f"{wheels[-1]} vanished between being found and being copied")
+        # `wheel.exists()` was checked above, so this is a same-process race (deleted between the
+        # check and the copy), not the "no wheel built" state -- that one already raised. Raising
+        # rather than emitting a `data-wheel` that 404s behind a page that looks intact.
+        raise SystemExit(f"{wheel} vanished between being found and being copied")
 
     bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     block, n_parcels = bundle["block_id"], len(bundle["parcels"])

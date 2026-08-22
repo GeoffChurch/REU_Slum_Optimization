@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import re
 import tempfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -683,6 +684,23 @@ def test_the_draw_road_paths_are_rewritten_for_the_served_depth() -> None:
     assert 'data-wheel="../../assets/wheels/' in page
     for attr in ("data-bundle", "data-wheel"):
         assert f'{attr}="assets/' not in page, attr
+
+
+def test_the_wheel_url_is_derived_from_the_declared_version_not_globbed(
+        permeability_body: str) -> None:
+    """The published `data-wheel` names exactly the wheel `pyproject.toml`'s version says this
+    build produces.
+
+    `dist/` is gitignored scratch, so it can hold more than one `reblock-*.whl` -- a hand-renamed
+    copy, or one left behind by a previous version. An earlier form of `_draw_road_figure` took
+    `sorted(glob("reblock-*.whl"))[-1]`, which is positional access to a set whose one correct
+    member is knowable here: any stray name sorting after the real wheel became what the published
+    page told every reader to install, with nothing raising and the page looking entirely correct.
+    Deriving the name from the declared version instead means a stray file cannot win and a wheel
+    built before a version bump raises rather than shipping."""
+    version = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert f'data-wheel="assets/wheels/reblock-{version}-py3-none-any.whl"' in permeability_body
 
 
 def test_screening_page_mounts_both_widgets() -> None:

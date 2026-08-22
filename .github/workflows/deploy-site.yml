@@ -50,14 +50,28 @@ jobs:
         working-directory: web
       # The reblock wheel `micropip` installs into the DrawRoad widget's Pyodide runtime
       # (data-wheel, copied into docs/assets/wheels/ by gen_site_pages.py's DRAWROAD producer).
-      # `dist/` is gitignored and gen_site_pages.py raises if no wheel is there, so this has to run
-      # before it -- the same pixi task (`pixi run wheel`) and the same command
-      # web/scripts/test.sh already runs for the local suite's Pyodide parity test.
-      - uses: prefix-dev/setup-pixi@v0.8.1
-        with:
-          locked: true
+      # `dist/` is gitignored and gen_site_pages.py raises if no wheel is there, so this must run
+      # before it.
+      #
+      # Built with THIS job's own pip rather than through pixi, which is deliberate and not a
+      # divergence from `pixi run wheel`: building this wheel needs nothing but hatchling reading
+      # pyproject.toml, so installing a whole pixi environment -- numpy, scipy, geopandas, the
+      # entire research stack -- to zip up src/reblock would be minutes of CI for no difference in
+      # output. VERIFIED: the two paths produce the same 68-entry wheel with all 65 package files
+      # byte-identical; only the dist-info generator stamp differs (hatchling's own version) and
+      # `Requires-Dist` is absent either way, which is what keeps micropip from trying to resolve
+      # the scientific stack from PyPI, where no wasm wheel exists.
+      #
+      # This is also why `scripts/gen_site_pages.py` is stdlib-only and this job runs it under
+      # plain `python3`: the deploy path deliberately does not need the science stack, and adding
+      # pixi here to build one wheel would have quietly given it one.
+      #
+      # hatchling is pinned for the same reason the two mkdocs packages above are: this job
+      # renders what gets published, so a silent backend bump should be a commit, not a surprise.
+      # --no-build-isolation because it is already installed by the line above it.
+      - run: pip install hatchling==1.32.0
       - name: Build the reblock wheel for Pyodide
-        run: pixi run pip wheel --no-deps --wheel-dir dist .
+        run: pip wheel --no-deps --no-build-isolation --wheel-dir dist .
       - run: python3 scripts/gen_site_pages.py
       # --strict promotes MkDocs' broken-link warnings to build failures (an orphan page -- one
       # outside nav -- only logs at INFO and does NOT fail the build even under --strict, verified

@@ -2,8 +2,9 @@
      the do-not-edit note and fills two markers: PERMGRAPHFIGS, which reads
      examples/perm-graph/perm_graph.json and copies the four committed PNGs beside it -- written by
      scripts/gen_perm_graph.py -- and DRAWROAD, which copies examples/authoring/block.json and the
-     built reblock wheel and mounts the draw-your-own-road widget behind one of PERMGRAPHFIGS's own
-     pictures (no PNG of its own -- see _draw_road_figure's docstring). Edit HERE, never
+     built reblock wheel and mounts the draw-your-own-road widget, reusing one of PERMGRAPHFIGS's
+     own pictures as its no-JS fallback (no PNG of its own -- see _draw_road_figure's docstring).
+     Edit HERE, never
      docs/methodology/permeability.md (it is generated and gitignored). This file is committed but
      excluded from the built site (see exclude_docs in mkdocs.yml).
 
