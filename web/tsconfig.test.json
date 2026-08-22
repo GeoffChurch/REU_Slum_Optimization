@@ -3,7 +3,13 @@
   // (node:assert, node:test, ...) -- unlike tsconfig.json's browser-only "src" program.
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["node"]
+    // "types" is REPLACED wholesale by "extends", not merged with the base config's array -- so
+    // this needs "emscripten" listed again too, or a test file importing runtime.ts (which needs
+    // @types/emscripten's ambient `FS` through pyodide.d.ts) loses it here even though the base
+    // "src" program has it. Found by this task's own py-runtime.test.ts: `npm run check` passed
+    // with the base config alone, then failed on `Cannot find name 'FS'` the moment a test file
+    // importing runtime.ts existed, because this array had silently dropped it.
+    "types": ["node", "emscripten"]
   },
   // "src" is not re-listed: tsc pulls in whatever the test files import via the module
   // graph (e.g. ../src/view/transform.js), so this only needs to name its own root files.
