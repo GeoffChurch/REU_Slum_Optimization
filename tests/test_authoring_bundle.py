@@ -18,6 +18,7 @@ import pytest
 from tests.dts_keys import json_keys, ts_field_names
 
 OUT = Path("examples/authoring/block.json")
+README = Path("examples/authoring/README.md")
 DTS = Path("web/src/authoring.d.ts")
 SPINE = "ZAF.9.3.1_1_40972"
 
@@ -31,6 +32,48 @@ def bundle() -> dict[str, Any]:
 def test_dts_declares_exactly_the_keys_the_bundle_carries(bundle: dict[str, Any]) -> None:
     assert json_keys(bundle) - ts_field_names(DTS.read_text(encoding="utf-8")) == set()
     assert ts_field_names(DTS.read_text(encoding="utf-8")) - json_keys(bundle) == set()
+
+
+def test_the_committed_dts_is_what_the_generator_writes() -> None:
+    """The key-set check above compares NAMES, so it is blind to a hand edit that leaves them
+    alone -- `number[]` changed to `string[]`, a `?` made optional, a doc comment deleted. Design
+    §9 says generated files are never hand-edited; `tests/test_web_bundle.py`,
+    `tests/test_frontier_bundle.py` and `tests/test_displacement_field_bundle.py` each enforce it
+    the same way."""
+    from scripts.gen_authoring_block import DTS_TEMPLATE
+    assert DTS.read_text(encoding="utf-8") == DTS_TEMPLATE, (
+        "web/src/authoring.d.ts was hand-edited; regenerate it: "
+        "pixi run python -m scripts.gen_authoring_block")
+
+
+def test_the_committed_readme_is_what_the_generator_writes() -> None:
+    """Every number in it is read out of the bundle, so a stale README is a bundle and a
+    description of it that disagree -- the failure `examples/nairobi/README.md` already had once
+    (89 blocks claimed, 43 in every `meta.json` beside it).
+
+    Reads the committed JSON into the generator's own TypedDict rather than taking the untyped
+    `bundle` fixture, which is what `tests/test_screen_map_bundle.py` does for the same pin."""
+    from scripts.gen_authoring_block import AuthoringBundle, readme_markdown
+    typed: AuthoringBundle = json.loads(OUT.read_text(encoding="utf-8"))
+    assert README.read_text(encoding="utf-8") == readme_markdown(typed), (
+        "examples/authoring/README.md is stale or hand-edited; regenerate it: "
+        "pixi run python -m scripts.gen_authoring_block")
+
+
+def test_the_browser_gets_the_configured_params_because_they_are_the_defaults() -> None:
+    """The bundle carries no params, and the wheel `micropip` installs is built from `src/reblock`
+    alone, so `conf/` never reaches the browser and the browser's only parameter set is
+    `PermeabilityParams()`. This baker therefore bakes against the defaults -- correct only while
+    the defaults ARE what `conf/permeability.yaml` configures.
+
+    A repo invariant, so it belongs here as well as in the baker: a yaml edit with no re-bake of
+    this one bundle would otherwise leave this widget scoring roads by different parameters from
+    every other figure on the site, and nothing in CI would notice. `load_permeability_config`
+    reads five of the six fields (not `min_road_width_m`); the whole-dataclass comparison covers
+    the sixth automatically if a reader is ever added for it."""
+    from reblock.compare import load_permeability_config
+    from reblock.permeability import PermeabilityParams
+    assert load_permeability_config().params == PermeabilityParams()
 
 
 def test_it_is_the_spine_block_and_a_projected_crs(bundle: dict[str, Any]) -> None:
@@ -74,6 +117,12 @@ def test_edge_endpoints_are_valid_parcel_indices(bundle: dict[str, Any]) -> None
     n = len(bundle["parcels"])
     for key in ("rows", "cols"):
         assert all(0 <= i < n for i in bundle["edges"][key]), key
+    # `footpath_mesh` stores each undirected edge ONCE, `continue`-ing on `j <= i`, so this is the
+    # mesh's own invariant rather than an incidental property of this block. Asserted because the
+    # range check above cannot see a shifted `rows` column: `rows` maxes out at n-2, so adding 1 to
+    # every entry leaves it inside [0, n) and reddens nothing.
+    assert all(r < c for r, c in zip(bundle["edges"]["rows"], bundle["edges"]["cols"],
+                                     strict=True))
 
 
 def test_building_points_are_one_per_parcel(bundle: dict[str, Any]) -> None:
