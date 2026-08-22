@@ -147,8 +147,18 @@ Two consequences, both improvements:
   Nairobi → Cape Town on `density` leaves the reader at 0.00625 instead of 0.00773, carrying a
   `?floor=` they never typed.
 
-`render` resolves `st.floor ?? defaultFloorFor(bundle, st.metric)`, where `defaultFloorFor` is the
-`shipped ?? floorAtShippedPoolSize` half factored out of `syncFloor` so both resolve identically.
+`render` resolves `st.floor ?? defaultFloorFor(bundle, st.metric, sc)`, where `defaultFloorFor` is
+the `shipped ?? floorAtShippedPoolSize` half factored out of `syncFloor` so both resolve **the
+default** identically.
+
+Not "so both resolve identically", which is what this line said until Task 5's review: `syncFloor`
+additionally **clamps** an arbitrary `preferred` into the metric's live range, and `render` does not.
+The implementer deliberately declined to make the stronger claim in the code's own docstring, and a
+spec asserting what the code refuses to assert is the wrong way round. The two cannot diverge on
+today's data — `floorAtShippedPoolSize` returns an element of `sc` itself, and all four shipped
+calibrations sit strictly inside their own range — but that is a property of the bake, not of the
+code, and adding a clamp in `render` to pre-empt a future out-of-range `floors[].value` would be
+exactly the unreachable guard this project forbids.
 
 ---
 
