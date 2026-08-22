@@ -321,10 +321,19 @@ float noise, that is the finding, and it is reported rather than tuned away.
 by 2.220446e-16 — four units in the last place** (Pyodide `0.3637809513169823` against the baked
 `0.3637809513169825`), deterministic across runs. CPython on this machine reproduces both baked
 numbers exactly, so the difference is arithmetic in the WASM build rather than a stale bake. The
-shipped assertion is therefore a stated absolute **1e-13**, chosen from three anchors rather than
-from what made the test pass: ~450× the observed disagreement, ~1.7e10× **below** the 1.66e-03 that
-centimetre-rounding costs on these roads (§1.4), and strictly below the 1e-12 that the tolerance's
-own fault injection perturbs by — which still reddens, with 10× margin.
+shipped assertion is therefore a stated absolute **1e-15**, chosen from anchors rather than from
+what made the test pass: ~4.5× the observed disagreement, ~4.7e10× **below** 4.71e-05 — the
+*smallest* effect this design records as one a parity guard must not absorb (§1.4, measured on the
+clearance method's road set; centimetre-rounding on the bundle's own reference roads costs 1.66e-03
+and 1.96e-03, and `web/src/authoring.d.ts` carries both) — and far below the 1e-12 that the
+tolerance's own fault injection perturbs by, which reddens it by three orders of magnitude.
+
+A 4.5× margin over the observed disagreement is thin against noise and ample against a **constant**,
+which is what this is: wasm f64 arithmetic is deterministic by specification and the Pyodide version
+is pinned, while the baked side is a committed artifact already held to exact CPython equality by
+`tests/test_solve_py.py`. Both sides are fixed, so the only thing that can move this difference is a
+deliberate version bump — and a version bump that moves it is precisely what this test should
+refuse to pass silently.
 
 This is the result the guard exists to produce. A design that had assumed bit-identity would have
 been wrong, and a tolerance picked after seeing a failure would have hidden that.
