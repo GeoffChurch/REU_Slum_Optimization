@@ -249,8 +249,14 @@ prefix table can answer the question.
 the readout and the picture both move with the road; a single-frame coalesce (the `frameScheduled`
 guard `screen-map.ts` already uses) is the only throttling needed.
 
-**Reporting.** Permeability before and after, the road's length in metres, and the egress graph
-redrawn from the returned `potential` and `conductance` through the existing `render/canvas.ts` — the same picture the
+**Reporting.** Permeability for the drawn road, its length in metres, and the egress graph
+redrawn from the returned `potential` and `conductance` through the existing `render/canvas.ts`
+
+(This said "permeability **before and after**" until Task 4's review. There is no "before" to show:
+permeability is `1 − P(roads)/P(no roads)`, so the no-road value is **definitionally zero** and
+printing it tells a reader nothing. Corrected here rather than implemented, because a spec asking
+for a constant is a spec to fix — unlike vertex dragging, also missing from the same section, which
+is a real capability this design measured for in §1.3 and which Task 4 is implementing.) — the same picture the
 Permeability page teaches, for a road the reader invented. **Pyodide returns numbers, never pixels.**
 
 **State.** `DrawRoadState { road: [number, number][] }`, with a `UrlCodec` under piece E's contract
