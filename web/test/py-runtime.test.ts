@@ -1,6 +1,10 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { PYODIDE_INDEX_URL, type PyResult, type PyRuntime } from "../src/py/runtime.js";
+import type { AuthoringBlock } from "../src/authoring.js";
+import {
+  PYODIDE_INDEX_URL, pyodideRuntime, type PyResult, type PyRuntime,
+} from "../src/py/runtime.js";
 
 test("the pinned index URL is an exact version, not a floating one", () => {
   // jsDelivr serves immutable versioned paths, which is the entire stability argument: geopandas
@@ -50,3 +54,20 @@ test("a fake satisfies the contract the widget depends on", async () => {
   assert.equal(got.permeability, 0.5);
   assert.deepEqual(r.roads.at(-1), [[0, 0], [1, 1]]);
 });
+
+test("solve refuses a call made before boot, instead of reaching into a runtime that is not there",
+  async () => {
+    // Closes the debt Task 3 recorded: `pyodideRuntime.solve`'s null-`state` check shipped
+    // untested. Reaching it costs nothing -- constructing a `pyodideRuntime` does no work and
+    // starts no download (its own docstring), and the check is the first statement in `solve` --
+    // so this needs neither a network round trip nor the 25-35 MB the CDN would serve.
+    //
+    // `assert.rejects` with the MESSAGE, not merely "it rejected": with the check deleted, the
+    // destructuring on the next line rejects too, with a TypeError about destructuring `null`.
+    // Both are rejections; only one of them is the guard.
+    const block = JSON.parse(
+      readFileSync("../examples/authoring/block.json", "utf8")) as AuthoringBlock;
+    await assert.rejects(
+      () => pyodideRuntime(block, "reblock-0.1.0-py3-none-any.whl").solve([[0, 0], [1, 1]]),
+      /called before boot\(\) resolved/);
+  });

@@ -1,0 +1,485 @@
+/** Draw a road on the site's spine block and get its REAL permeability, solved in the browser.
+ *
+ * The only widget on this site that computes a number instead of looking one up, and the only one
+ * that boots a Python runtime to do it (design §4). Everything about it follows from that: the
+ * runtime is injected rather than constructed here (`drawRoadWidget` below), booting is an opt-in
+ * the reader presses and the control says what pressing it downloads, and the picture is drawn
+ * from the two arrays Pyodide hands back rather than from a baked prefix table.
+ */
+import type { AuthoringBlock } from "../authoring.js";
+import { requireAttr } from "../dom/attrs.js";
+import { runOrReport, showWidgetError } from "../dom/error.js";
+import { removeFallbackImage } from "../dom/fallback.js";
+import { observeSize } from "../dom/resize.js";
+// Type-only: erased at compile time, so this module has NO runtime import of mount.js. A runtime
+// one would recreate the import cycle that once made the whole bundle throw during module
+// evaluation while the page still looked fine (see mount.ts's registration comment). This file
+// must never import `register`.
+import type { Widget } from "../mount.js";
+import { pyodideRuntime, type PyResult, type PyRuntime } from "../py/runtime.js";
+import { draw, sizeCanvas, type Drawable } from "../render/canvas.js";
+import { GRAPH_ENCODING, GRAPH_ENCODING_BLOCK_ID } from "../render/graph-encoding.generated.js";
+import type { StateFactory, StateSource } from "../state.js";
+import { polylineParam, type UrlCodec } from "../url/param.js";
+import { fitBbox, toScreen, toWorld, type Bbox, type View } from "../view/transform.js";
+
+/** The name every failure of this widget is reported under -- see region-grow.ts's own `LABEL`
+ * for why one constant rather than a string repeated at each call site. */
+const LABEL = "DrawRoad";
+
+/** The road the reader drew, in the bundle's own projected metres (EPSG:32734 on this block), as
+ * a polyline of at least two points -- or empty, which is "no road drawn yet" and is what the
+ * widget boots at.
+ *
+ * A polyline, not `field.ts`'s two fixed two-point `Road`s: an arbitrary road is the entire point
+ * of this widget, and it is why no baked prefix table can answer the question it asks. */
+export interface DrawRoadState {
+  road: [number, number][];
+}
+
+export const DRAW_ROAD_URL: UrlCodec<DrawRoadState> = {
+  // One key, at `roadsParam`'s own 0.1 m (url/param.ts's `COORD_DP`). `polylineParam` refuses a
+  // road it cannot spell back -- odd coordinate count, non-finite value, fewer than two points --
+  // and the store then drops `?road=` and falls back to the initial, so a hand-edited URL that
+  // cannot be solved never reaches the runtime.
+  road: polylineParam("road"),
+};
+
+/** What the boot control tells the reader it will download.
+ *
+ * The figure is the parent design's (`2026-08-13-site-redesign-design.md` §2: "The ~25-35 MB is
+ * paid by the reader who opted in, never by a visitor reading prose"), and it is the distribution
+ * plus packages, not something this file measured. It is on the button because this widget lands
+ * on a prose page a reader may reach with no intention of computing anything (design §3), so the
+ * control has to read as an explicit opt-in rather than as decoration. */
+const BOOT_IDLE = "Load the Python runtime (~25-35 MB download)";
+const BOOT_LOADING = "Loading the Python runtime...";
+const BOOT_READY = "Python runtime loaded";
+const BOOT_FAILED = "The Python runtime did not load";
+
+/** The three things the readout says when there is no answer to report.
+ *
+ * `NEEDS_TWO_POINTS` is a REFUSAL and nothing else -- it appears only when a road that is not a
+ * road was settled, never as an idle prompt, so seeing it is evidence that a settle was refused.
+ * `web/src/py/solve.py` refuses the same arity on its own side ("a road needs at least two
+ * points") for callers that skip this one. */
+const NEEDS_TWO_POINTS =
+  "That is not a road yet: it needs at least two points. Click another point, then press Enter or "
+  + "double-click to solve it.";
+
+const DRAW_A_ROAD =
+  "Click points on the block to draw a road, then press Enter or double-click to solve it.";
+
+const NEEDS_RUNTIME =
+  "Press “Load the Python runtime” above to solve a road you have drawn.";
+
+/** Builds a `PyRuntime` for a fetched bundle. Injected into `drawRoadWidget` rather than reached
+ * for, exactly as `StateFactory` is (state.ts): the widget cannot tell whether it holds real
+ * Pyodide or a hand-written fake, which is what lets `web/test/draw-road-boot.test.ts` drive the
+ * whole interaction with no network and no download at all. */
+export type PyRuntimeFactory = (bundle: AuthoringBlock, wheelUrl: string) => PyRuntime;
+
+/** At least two points, and that is the whole rule.
+ *
+ * One predicate with two callers -- `settle` (may this road be published to the URL?) and
+ * `solveRoad` (may this road be handed to the runtime?) -- so the arity a road must have is
+ * written once rather than spelled twice and drifting. */
+function isSolvable(road: [number, number][]): boolean {
+  return road.length >= 2;
+}
+
+/** Consecutive duplicate vertices dropped.
+ *
+ * A double-click settles the road AND delivers its own `pointerdown` on the spot the click before
+ * it landed on, so a double-click-settled road ends with the same point twice -- a zero-length
+ * final segment, which design §6 lists among the degeneracies to refuse. Dropping the repeat
+ * settles the road the reader actually drew instead of refusing it. Exact equality, not a
+ * tolerance: both coordinates come out of `toWorld` on the same integer offsets, so the repeat is
+ * bit-identical rather than merely close. */
+function withoutRepeats(road: [number, number][]): [number, number][] {
+  return road.filter((p, i) => {
+    const prev = road[i - 1];
+    return prev === undefined || prev[0] !== p[0] || prev[1] !== p[1];
+  });
+}
+
+function bboxOf(ring: [number, number][]): Bbox {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of ring) {
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+/** The widget, over an injected runtime factory. `drawRoad` just below is this applied to the real
+ * one; the tests apply it to a fake. */
+export function drawRoadWidget(makeRuntime: PyRuntimeFactory): Widget<DrawRoadState> {
+  return (host, makeState) => {
+    // Not `host.dataset.bundle!`: a missing attribute then reaches `fetch(undefined)` and surfaces
+    // as "fetch undefined failed: 404", which sends the reader looking for a missing FILE rather
+    // than the missing ATTRIBUTE that is actually wrong (perm-graph.ts's own reasoning).
+    const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
+    // The `reblock` wheel `micropip` installs at boot. Read here, at mount, though nothing fetches
+    // it until the reader presses the button: a page that forgot the attribute should say so where
+    // every other mount failure is said, not many seconds into a download.
+    const wheelUrl = requireAttr(host.dataset.wheel, "data-wheel", LABEL);
+    void fetch(src)
+      .then((r) => {
+        if (!r.ok) throw new Error(`fetch ${src} failed: ${r.status} ${r.statusText}`);
+        return r.json() as Promise<AuthoringBlock>;
+      })
+      .then((b) => boot(host, makeState, b, makeRuntime(b, wheelUrl)))
+      .catch((err: unknown) => showWidgetError(host, LABEL, err));
+  };
+}
+
+export const drawRoad: Widget<DrawRoadState> = drawRoadWidget(pyodideRuntime);
+
+function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: AuthoringBlock,
+              runtime: PyRuntime): void {
+  // `GRAPH_ENCODING` is examples/perm-graph/bundle.json's own encoding, read at build time
+  // (web/scripts/gen-graph-encoding.mjs), and half of it -- `width_norm` -- is a property of that
+  // bundle's MESH, not a style choice: it is the scale every edge width on the picture is drawn
+  // against. Both bundles are baked from `scripts/_example_block.py`'s one pinned block, but by
+  // two scripts run by two separate commands, so re-baking and committing one without the other
+  // is the way they come apart -- and nothing in either file's type would notice.
+  if (ab.block_id !== GRAPH_ENCODING_BLOCK_ID) {
+    throw new Error(`${LABEL}: the drawing scale was baked for block ${GRAPH_ENCODING_BLOCK_ID}, `
+      + `but this bundle is block ${ab.block_id}`);
+  }
+  const boundary = ab.boundary[0];
+  if (boundary === undefined) throw new Error(`${LABEL}: the bundle carries no block boundary`);
+
+  const caption = host.querySelector("figcaption");
+
+  const cv = document.createElement("canvas");
+  // Inline styles, never presentation attributes -- Material's `.md-typeset svg{height:auto;
+  // max-width:100%}` beats a presentation attribute (region-grow.ts's own reasoning).
+  cv.style.width = "100%";
+  cv.style.aspectRatio = "1 / 1";
+  // Drawing is a pointer gesture, so without this a touch press scrolls the page and the browser
+  // CANCELS the pointer stream -- the same line perm-graph.ts carries for its pan.
+  cv.style.touchAction = "none";
+  // Enter settles the road and Escape clears it, and a canvas is not focusable by default, so
+  // neither key can reach it without this. It is also what lets a keyboard user get to the
+  // picture at all.
+  cv.tabIndex = 0;
+
+  const controls = document.createElement("div");
+  const bootButton = document.createElement("button");
+  bootButton.textContent = BOOT_IDLE;
+
+  const readout = document.createElement("p");
+  // The line that changes on every edit -- the permeability of the road just solved, the refusal
+  // of one that is not a road yet, the failure of a solve. A canvas carries no accessible text at
+  // all, so without this a screen-reader user drawing a road hears nothing about the answer
+  // (screen-map.ts's own reasoning for its readout). `polite`, not `assertive`: a fast sequence of
+  // edits must not interrupt itself.
+  readout.setAttribute("aria-live", "polite");
+  readout.textContent = NEEDS_RUNTIME;
+
+  controls.append(bootButton, readout);
+
+  // Canvas and controls go BEFORE any <figcaption>, so the mount point keeps picture-then-caption
+  // reading order. The fallback <img> is NOT removed here: it goes after the first successful
+  // draw, below, so a canvas that mounts into a zero-width container or a draw that throws leaves
+  // the static picture the error text points the reader at.
+  if (caption) {
+    host.insertBefore(cv, caption);
+    host.insertBefore(controls, caption);
+  } else {
+    host.append(cv, controls);
+  }
+
+  const state: StateSource<DrawRoadState> = makeState({ road: [] });
+
+  /** `solve_egress(block, None)`'s own answer, in the shape a solve returns -- not a placeholder.
+   *
+   * `permeability` is `1 - p0/p0`, which is 0 by construction; `roadMetres` is 0 because there is
+   * no road; `potential` is the baked baseline; and `conductance` is `footpath_g` because
+   * `edge_conductances` returns the footpath array untouched when `roads is None`
+   * (src/reblock/permeability.py). So the no-road picture comes out of the same `pictureOf` call
+   * a solved one does, and nothing below branches on whether a road has been solved yet. */
+  const BASELINE: PyResult = {
+    permeability: 0,
+    roadMetres: 0,
+    potential: ab.baseline.potential,
+    conductance: ab.edges.footpath_g,
+  };
+
+  /** Per-edge current, `conductance[k] * (potential[rows[k]] - potential[cols[k]])` -- the
+   * expression `reblock.perm_graph.permeability_graph` computes for the PNG and
+   * `gen_web_bundle.py` bakes for PermGraph. The runtime returns the two arrays it is built from
+   * rather than the product (design §1.6), so it is formed here. */
+  const currentOf = (r: PyResult): number[] =>
+    ab.edges.rows.map((row, k) =>
+      r.conductance[k]! * (r.potential[row]! - r.potential[ab.edges.cols[k]!]!));
+
+  const baselineCurrent = currentOf(BASELINE);
+  const parcelRings = ab.parcels.flat();
+  // `draw` reads `ground_g` only as `ground_g[i] > 0` (its halo test); the magnitude
+  // `permeability_graph` puts there is `params.g_street`, which nothing in `draw` looks at. The
+  // authoring bundle carries the same `mesh.ground` mask as a boolean, so 1/0 reproduces every
+  // halo the PNG draws and claims nothing about the conductance to ground.
+  const groundG = ab.nodes.ground.map((g) => (g ? 1 : 0));
+
+  /** The bundle `draw` consumes, for one solve.
+   *
+   * TWO prefixes, and the frame below always draws prefix 1. Prefix 0 is the no-road baseline and
+   * prefix 1 is `r`, which is what puts the node colour scale where `draw` expects it: it reads
+   * `vmax` off `prefix.potential[0]` on purpose ("roads only lower potentials, so this is the
+   * shared scale"), so a single-prefix bundle would rescale the ramp on every edit and two roads
+   * the reader drew could not be compared by colour.
+   *
+   * `roads` is empty and the reader's own road is stroked separately (`drawPending` below),
+   * because `draw`'s road layer is a corridor of a stated `width_m` and this file does not carry
+   * the width `solve.py` hands the solver (`PermeabilityParams().min_road_width_m`). An invented
+   * number there would be a claim about the solver that nothing here could check. */
+  const pictureOf = (r: PyResult): Drawable => ({
+    parcels: parcelRings,
+    boundary,
+    streets: ab.streets,
+    nodes: { cx: ab.nodes.cx, cy: ab.nodes.cy, ground_g: groundG },
+    edges: {
+      rows: ab.edges.rows,
+      cols: ab.edges.cols,
+      footpath_g: ab.edges.footpath_g,
+      // `conductance > footpath_g` is exactly what `permeability_graph` stores as `upgraded` for
+      // the PNG. It recomputes it here because `PyResult` carries the conductances and not the
+      // mask -- the same rule applied to the same numbers, not a second opinion about which edges
+      // a road raised. -1 is "never raised"; 1 is "raised at prefix 1", the prefix drawn.
+      first_upgraded_at: ab.edges.footpath_g.map((g, k) => (r.conductance[k]! > g ? 1 : -1)),
+    },
+    roads: [],
+    prefix: {
+      potential: [ab.baseline.potential, r.potential],
+      current: [baselineCurrent, currentOf(r)],
+    },
+    encoding: GRAPH_ENCODING,
+  });
+
+  /** The last picture that was drawn from a SUCCESSFUL solve (or the baseline, before there was
+   * one). A failed solve leaves it alone, which is what "keeps the last good picture" means in
+   * design §6: the reader keeps the answer they had rather than watching the figure blank. */
+  let picture = pictureOf(BASELINE);
+
+  // Vertices placed since the last settle, and where the pointer is now. Both are drawing state,
+  // not `DrawRoadState`: a half-drawn road is not a road, so it is never published to the URL and
+  // never handed to the runtime.
+  let pending: [number, number][] = [];
+  let hover: [number, number] | null = null;
+
+  let booting: Promise<void> | null = null;
+  let booted = false;
+
+  // Assigned only from inside the first sized callback below, exactly like screen-map.ts's own
+  // `size`/`view` -- everything that reads them (`render`, the pointer handlers) is wired from
+  // there too, so there is no ordering in which they are read before that callback has run.
+  let size: { width: number; height: number };
+  let view: View;
+  const ctx = cv.getContext("2d")!;
+
+  const strokePolyline = (pts: [number, number][]): void => {
+    if (pts.length < 2) return;
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => {
+      const [sx, sy] = toScreen(view, x, y);
+      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    });
+    ctx.stroke();
+  };
+
+  /** The reader's road on top of the graph: the settled one, or -- while they are drawing a
+   * replacement -- the pending vertices and the segment following the pointer. Only one of the two
+   * is shown, so a road being redrawn does not sit on top of the one it replaces.
+   *
+   * At a fixed screen width rather than the solver's corridor width; see `pictureOf`. The dots are
+   * what make a single placed vertex visible at all -- with none, the first click of every road
+   * draws nothing. */
+  const drawPending = (): void => {
+    const e = GRAPH_ENCODING;
+    ctx.strokeStyle = e.road_color;
+    ctx.fillStyle = e.road_color;
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    if (pending.length === 0) {
+      strokePolyline(state.get().road);
+      return;
+    }
+    strokePolyline(hover === null ? pending : [...pending, hover]);
+    for (const [x, y] of pending) {
+      const [sx, sy] = toScreen(view, x, y);
+      ctx.beginPath();
+      ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  const render = (): void => {
+    // Always prefix 1: `picture` puts the drawn solve there and the baseline at 0, so this is the
+    // solve being shown and `draw`'s `vmax` still comes off the baseline (see `pictureOf`).
+    draw(ctx, picture, { view, prefix: 1, layer: "current", halos: true }, size);
+    drawPending();
+  };
+
+  // Coalesces every redraw a gesture produces onto the next animation frame, so a pointermove
+  // stream cannot queue more frames than the display can render -- each call before the frame
+  // fires just moves WHICH state the eventual `render` reads, it never queues a second one.
+  // `frameScheduled` is the guard that makes this coalescing rather than merely async:
+  // `requestAnimationFrame` on its own queues every call it is given (harness.ts's own comment).
+  let frameScheduled = false;
+  const scheduleRender = (): void => {
+    if (frameScheduled) return;
+    frameScheduled = true;
+    // `runOrReport`: an animation-frame callback runs from the browser's own dispatch, as far
+    // outside the fetch chain above as the ResizeObserver callback below is -- without this, a
+    // throw here is an uncaught exception with a blank figure and no message (dom/error.ts).
+    requestAnimationFrame(() => runOrReport(host, LABEL, () => {
+      frameScheduled = false;
+      render();
+    }));
+  };
+
+  /** Hand one road to the runtime, or say why not.
+   *
+   * The `isSolvable` refusal is the widget's half of the arity check `solve.py` also performs; the
+   * point of having it here is that the reader is told what is wrong instead of being shown a
+   * Python traceback. The `booted` gate is not politeness either: `PyRuntime.solve` assumes
+   * `boot()` has already resolved and `pyodideRuntime`'s own implementation refuses a call that
+   * arrives before it has (py/runtime.ts -- an `async` method, so the refusal is a rejection,
+   * pinned in py-runtime.test.ts). It never boots on the caller's behalf, because a reader who
+   * does not press the button must never pay for the download. */
+  const solveRoad = (road: [number, number][]): void => {
+    if (!isSolvable(road)) {
+      readout.textContent = NEEDS_TWO_POINTS;
+      return;
+    }
+    if (!booted) {
+      readout.textContent = NEEDS_RUNTIME;
+      return;
+    }
+    void runtime.solve(road)
+      .then((r) => {
+        picture = pictureOf(r);
+        readout.textContent = `${r.roadMetres.toFixed(0)} m of road · `
+          + `${(r.permeability * 100).toFixed(1)}% permeability`;
+        scheduleRender();
+      })
+      .catch((err: unknown) => {
+        // `picture` is deliberately untouched: the last good one stays on the canvas and the
+        // reader is told what failed, rather than being left with a blank figure (design §6). A
+        // Python traceback is not a reader-facing message, so the cause is quoted inside a
+        // sentence that says what it was doing.
+        const cause = err instanceof Error ? err.message : String(err);
+        readout.textContent = `The solve failed (${cause}). The picture is the last road that `
+          + `solved.`;
+      });
+  };
+
+  const settle = (): void => {
+    const road = withoutRepeats(pending);
+    pending = [];
+    hover = null;
+    // Published to the URL only if it is a road. A one-point "road" spelled into `?road=` would be
+    // a query `polylineParam` refuses to decode, so the reader would watch it disappear on the
+    // next load.
+    if (isSolvable(road)) state.set({ road });
+    solveRoad(road);
+    scheduleRender();
+  };
+
+  const clear = (): void => {
+    pending = [];
+    hover = null;
+    picture = pictureOf(BASELINE);
+    state.set({ road: [] });
+    readout.textContent = booted ? DRAW_A_ROAD : NEEDS_RUNTIME;
+    scheduleRender();
+  };
+
+  bootButton.addEventListener("click", () => {
+    // `??=`, and everything that must happen once lives INSIDE it: a reader looking at a button
+    // that has been saying "Loading..." for twenty seconds presses it again, and without this
+    // each press would start its own follow-on chain -- another status write, another solve of
+    // the current road. `PyRuntime.boot()` memoises its own side of this (py/runtime.ts); what is
+    // memoised here is this file's own `.then`.
+    //
+    // A boot that rejects stays rejected, on both sides: `booting` is a settled promise from then
+    // on, so a later press does not retry. That matches `boot()`'s own contract -- the CDN being
+    // unreachable or the pin 404ing is not something a second press fixes -- and the label stops
+    // advertising a download that will not start.
+    booting ??= (() => {
+      bootButton.textContent = BOOT_LOADING;
+      return runtime.boot().then(
+        () => {
+          booted = true;
+          bootButton.textContent = BOOT_READY;
+          // A road may already be in hand -- `?road=` decoded at mount, or one drawn before the
+          // runtime was up -- and the press answers it immediately. With NO road there is nothing
+          // to solve and nothing to refuse, so the readout invites one instead of reporting a
+          // refusal the reader did not trigger; `NEEDS_TWO_POINTS` stays a refusal.
+          const road = state.get().road;
+          if (road.length === 0) readout.textContent = DRAW_A_ROAD;
+          else solveRoad(road);
+        },
+        (err: unknown) => {
+          bootButton.textContent = BOOT_FAILED;
+          const cause = err instanceof Error ? err.message : String(err);
+          readout.textContent = `The Python runtime could not load (${cause}). The picture is `
+            + `this block with no new road.`;
+        },
+      );
+    })();
+  });
+
+  const wireDrawing = (): void => {
+    cv.addEventListener("pointerdown", (ev) => {
+      pending.push(toWorld(view, ev.offsetX, ev.offsetY));
+      hover = null;
+      scheduleRender();
+    });
+    cv.addEventListener("pointermove", (ev) => {
+      if (pending.length === 0) return;
+      hover = toWorld(view, ev.offsetX, ev.offsetY);
+      scheduleRender();
+    });
+    cv.addEventListener("dblclick", () => settle());
+    cv.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") settle();
+      else if (ev.key === "Escape") clear();
+    });
+  };
+
+  // The observed element is the CANVAS ITSELF: `width: 100%` makes its content box track the
+  // container's width, answering "how many CSS pixels am I drawing into?" in one hop
+  // (perm-graph.ts's own reasoning).
+  //
+  // `runOrReport`: a real ResizeObserver delivers from the browser's own dispatch, OUTSIDE the
+  // fetch chain above, so that chain's `.catch` cannot see a throw in here -- it would be an
+  // uncaught exception with a blank figure and no message (dom/error.ts).
+  let firstDraw = true;
+  observeSize(cv, (measured) => runOrReport(host, LABEL, () => {
+    size = measured;
+    sizeCanvas(cv, size);
+    // The block's exterior ring. MEASURED on the committed bundle: the parcels' and the streets'
+    // own bounding boxes are identical to this one digit for digit, so nothing `draw` paints
+    // falls outside the fit. The reader's road can -- they may click anywhere on the canvas,
+    // including the padding -- and it deliberately does not move the fit, so the block does not
+    // shrink under a road drawn past its edge.
+    view = fitBbox(bboxOf(boundary), size.width, size.height);
+    render();
+    if (firstDraw) {
+      firstDraw = false;
+      // Only the SUBSCRIPTION and the pointer wiring are deferred to here, so a later resize can
+      // never register a second of either. The pointer handlers have to be: they read `view` to
+      // turn an offset into metres, and it does not exist until this callback has run.
+      state.subscribe(() => scheduleRender());
+      wireDrawing();
+      // Only now: the static picture is the honest one until a real one has replaced it.
+      removeFallbackImage(host);
+    }
+  }));
+}

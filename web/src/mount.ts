@@ -151,6 +151,10 @@ register("region-grow", regionGrow, REGION_GROW_URL);
 // inside the widget module (see the paragraph above).
 import { screenMap, SCREEN_MAP_URL } from "./widgets/screen-map.js";
 register("screen-map", screenMap, SCREEN_MAP_URL);
+// Sixth widget, same shape, same reason -- registered HERE, after REGISTRY exists, never from
+// inside the widget module (see the paragraph above).
+import { drawRoad, DRAW_ROAD_URL } from "./widgets/draw-road.js";
+register("draw-road", drawRoad, DRAW_ROAD_URL);
 
 // DOMContentLoaded fires once per full page load. That is sufficient only because this project's
 // mkdocs.yml does not enable Material's navigation.instant feature (confirmed absent as of this

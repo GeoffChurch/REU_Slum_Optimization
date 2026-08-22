@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   boolParam, enumParam, intParam, nullableNumberParam, nullableStringParam,
-  numberParam, roadsParam, stringParam,
+  numberParam, polylineParam, roadsParam, stringParam,
 } from "../src/url/param.js";
 import type { Road } from "../src/field.js";
 
@@ -102,4 +102,32 @@ test("roadsParam.same ignores object identity and sees a moved vertex", () => {
   const p = roadsParam("road1", "road2", "width");
   assert.ok(p.same(ROADS, ROADS.map((r) => ({ coords: [...r.coords], width_m: r.width_m }))));
   assert.ok(!p.same(ROADS, [{ ...ROADS[0]!, coords: [[0, 0], [1, 1]] }, ROADS[1]!]));
+});
+
+test("polylineParam round-trips an arbitrary polyline at 0.1 m, in one key", () => {
+  const p = polylineParam("road");
+  assert.deepEqual(p.keys, ["road"]);
+  // Three points, not two: the shape roadsParam cannot spell, which is why this param exists.
+  assert.deepEqual(p.encode([[1.25, 2], [3, 4.06], [-5, 6]], []),
+                   { road: "1.3,2,3,4.1,-5,6" });
+  assert.deepEqual(p.decode({ road: "1.3,2,3,4.1,-5,6" }, []), [[1.3, 2], [3, 4.1], [-5, 6]]);
+});
+
+test("polylineParam refuses an odd count, a non-finite coordinate, and anything under two points",
+  () => {
+    const p = polylineParam("road");
+    assert.equal(p.decode({ road: "1,2,3" }, []), null, "odd coordinate count");
+    assert.equal(p.decode({ road: "1,2,3,x" }, []), null, "not a number");
+    assert.equal(p.decode({ road: "1,2,3,Infinity" }, []), null, "non-finite");
+    assert.equal(p.decode({ road: "1,2,3,0x10" }, []), null, "hex is not a spelling");
+    assert.equal(p.decode({ road: "1,2" }, []), null, "one point is not a road");
+    assert.equal(p.decode({ road: "" }, []), null, "empty");
+  });
+
+test("polylineParam.same ignores array identity and sees a moved vertex", () => {
+  const p = polylineParam("road");
+  const road: [number, number][] = [[1, 2], [3, 4]];
+  assert.ok(p.same(road, road.map(([x, y]): [number, number] => [x, y])));
+  assert.ok(!p.same(road, [[1, 2], [3, 5]]));
+  assert.ok(!p.same(road, [[1, 2]]), "a shorter road is not the same road");
 });

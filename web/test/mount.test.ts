@@ -289,10 +289,10 @@ test("the URL key list is pinned -- a key rename breaks published links silently
   async () => {
     stubDocument();
     const [{ PERM_GRAPH_URL }, { FRONTIER_URL }, { FIELD_URL }, { REGION_GROW_URL },
-      { SCREEN_MAP_URL }] = await Promise.all([
+      { SCREEN_MAP_URL }, { DRAW_ROAD_URL }] = await Promise.all([
       import("../src/widgets/perm-graph.js"), import("../src/widgets/frontier.js"),
       import("../src/widgets/displacement-field.js"), import("../src/widgets/region-grow.js"),
-      import("../src/widgets/screen-map.js"),
+      import("../src/widgets/screen-map.js"), import("../src/widgets/draw-road.js"),
     ]);
     const keysOf = (codec: object): string[] =>
       (Object.values(codec) as readonly { keys: readonly string[] }[])
@@ -302,11 +302,12 @@ test("the URL key list is pinned -- a key rename breaks published links silently
     assert.deepEqual(keysOf(FIELD_URL), ["road1", "road2", "road2on", "width"]);
     assert.deepEqual(keysOf(REGION_GROW_URL), ["budget", "seed"]);
     assert.deepEqual(keysOf(SCREEN_MAP_URL), ["city", "floor", "metric"]);
+    assert.deepEqual(keysOf(DRAW_ROAD_URL), ["road"]);
 
     // And the union is collision-free ACROSS widgets, which is the property mountAll's throw
     // enforces per page and this asserts for the shipped set as a whole.
-    const all = [PERM_GRAPH_URL, FRONTIER_URL, FIELD_URL, REGION_GROW_URL, SCREEN_MAP_URL]
-      .flatMap(keysOf);
+    const all = [PERM_GRAPH_URL, FRONTIER_URL, FIELD_URL, REGION_GROW_URL, SCREEN_MAP_URL,
+      DRAW_ROAD_URL].flatMap(keysOf);
     assert.equal(new Set(all).size, all.length, `duplicate URL key across widgets: ${all}`);
   });
 

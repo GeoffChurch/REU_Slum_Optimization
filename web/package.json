@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/gen-solve-source.mjs && esbuild src/mount.ts --bundle --format=iife --minify --outfile=../docs/js/widgets.js",
-    "check": "node scripts/gen-solve-source.mjs && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "build": "node scripts/gen-solve-source.mjs && node scripts/gen-graph-encoding.mjs && esbuild src/mount.ts --bundle --format=iife --minify --outfile=../docs/js/widgets.js",
+    "check": "node scripts/gen-solve-source.mjs && node scripts/gen-graph-encoding.mjs && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "bash scripts/test.sh"
   },
   "devDependencies": {
