@@ -93,9 +93,12 @@ interface Booted {
 /** Builds one `PyRuntime` closed over `bundle` and `wheelUrl`. Neither is read until `boot()` is
  * called -- constructing this does no work and starts no download.
  *
- * `indexUrl` defaults to the pinned CDN distribution; a caller can override it (Task 5 points the
- * equivalent boot sequence at the npm package's own local files instead, to check that pin's
- * behaviour without a network round trip on every test run). */
+ * `indexUrl` defaults to the pinned CDN distribution; a caller can override it, and
+ * `web/test/pyodide-parity.test.ts` does -- it points THIS function at the `pyodide` npm package's
+ * own directory, because under Node `pyodide.mjs` resolves `indexURL` as a filesystem path
+ * whatever scheme the string carries. The package wheels that directory does not carry are still
+ * fetched from the same CDN path on a first run and cached beside it, so only later runs are
+ * network-free. */
 export function pyodideRuntime(
   bundle: AuthoringBlock, wheelUrl: string, indexUrl: string = PYODIDE_INDEX_URL,
 ): PyRuntime {

@@ -7,10 +7,11 @@ themselves -- are exactly what `reblock.permeability` already pulls in transitiv
 `reblock.contracts`, which it imports `Block` from, and which itself uses `typing`). Nothing here
 adds a package to the browser's install.
 
-DEBT: `web/test/pyodide-parity.test.ts` does not exist at this commit -- Task 5 of this piece adds
-it. It will run this same file under the Pyodide runtime and check its answers against
-`tests/test_solve_py.py`'s CPython ones, which is the only thing that could catch an import added
-here: this file has no Python test of its own install cost.
+`web/test/pyodide-parity.test.ts` runs this same file under the Pyodide runtime and checks its
+answers against the ones CPython baked into `examples/authoring/block.json`. That is the only
+thing that could catch an import added here, because this file has no Python test of its own
+install cost -- an import whose package is missing from the distribution fails that test's boot
+with a `ModuleNotFoundError` naming it (confirmed by fault injection, Task 5's report).
 
 It calls `solve_egress`, NOT `permeability`: `permeability` runs two solves because it recomputes
 the no-roads baseline every call, and that baseline is road-invariant (design §1.6) and already

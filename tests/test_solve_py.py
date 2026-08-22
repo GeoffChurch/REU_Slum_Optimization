@@ -3,9 +3,12 @@
 This module is the payload Pyodide runs, and it is plain Python -- so its logic is tested here,
 where a failure is a stack trace rather than a browser console.
 
-DEBT: `web/test/pyodide-parity.test.ts` does not exist at this commit -- Task 5 of this piece adds
-it. It will have one job only: prove the RUNTIME agrees with what this file already proves about
-the LOGIC. Splitting it that way is what will keep that expensive test cheap to interpret.
+`web/test/pyodide-parity.test.ts` has one job only: prove the RUNTIME agrees with what this file
+already proves about the LOGIC. Splitting it that way is what keeps that expensive test cheap to
+interpret. MEASURED there: on `examples/authoring/block.json`'s two reference roads the two
+runtimes agree exactly on `crossing` and differ by four units in the last place (2.220446e-16) on
+`spur`, so that test states an absolute tolerance rather than exact equality; the reasoning is in
+its own `PARITY_TOL`.
 """
 from __future__ import annotations
 

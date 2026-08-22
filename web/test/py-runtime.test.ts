@@ -28,11 +28,12 @@ test("the pinned index URL is an exact version, not a floating one", () => {
  * NOT redden this file (this task's fault injection 2; see the task report), because the real
  * runtime is never constructed here.
  *
- * DEBT: nothing in this task's own suite boots a real Pyodide, so nothing here can observe the
- * `??=` actually preventing a second load. `web/test/pyodide-parity.test.ts` (Task 5) is where a
- * real boot happens and is where that observation belongs; this test does not claim Task 5 (not
- * yet written at this commit) reuses `pyodideRuntime` itself rather than its own boot sequence --
- * only that a real boot is the only place the claim could be checked.
+ * Nothing in THIS file boots a real Pyodide, so nothing here can observe the `??=` actually
+ * preventing a second load. `web/test/pyodide-parity.test.ts` is where a real boot happens, it
+ * boots `pyodideRuntime` itself rather than a boot sequence of its own, and it holds the
+ * assertion that observes the memoisation: a second `boot()` returns in a fraction of a
+ * millisecond where a re-boot costs seconds (measured 0.4 ms against 8274 ms with the `??=`
+ * deleted, Task 5's report).
  */
 function fakeRuntime(result: PyResult): PyRuntime & { boots: number; roads: [number, number][][] } {
   const roads: [number, number][][] = [];
