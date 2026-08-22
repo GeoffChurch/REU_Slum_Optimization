@@ -216,6 +216,71 @@ test("two mount points claiming one URL key throw, with the message ON THE PAGE"
   assert.match(b.appended[0]!.textContent, /shared-key.*collide-a.*collide-b/s);
 });
 
+test("a codec that maps two state fields to the SAME URL key throws, with the message ON THE PAGE",
+  async () => {
+    stubDocument();
+    const { register, mountAll } = await import("../src/mount.js");
+
+    // One widget, one codec, two fields sharing a key -- the collision `own` (mount.ts) exists to
+    // catch. The two-pass check-then-commit split fix round 2 (M2) made to stop a phantom claim
+    // silently lost this property (fix round 3, M-self): with keys checked only against `claimed`,
+    // which holds nothing for THIS widget until its own list clears, a key repeated within one
+    // codec would sail through, and the two fields would overwrite each other's value in the URL on
+    // every write -- output of exactly the right shape, no error anywhere.
+    interface SelfCollide { v: boolean; w: boolean }
+    const SELF_COLLIDE: UrlCodec<SelfCollide> = {
+      v: boolParam("dup-key"),
+      w: boolParam("dup-key"),
+    };
+    register("self-collide", (() => {}) as Widget<SelfCollide>, SELF_COLLIDE);
+    const el = makeMountPoint("self-collide");
+    const root = { querySelectorAll: () => [el] } as unknown as ParentNode;
+    mountAll(root, noStore);
+
+    // A message distinct from the cross-widget collision above ("claimed by both X and X" would
+    // read like a typo, not a bug report) -- see mount.ts's own comment on the throw.
+    assert.equal(el.appended.length, 1);
+    assert.match(el.appended[0]!.textContent, /dup-key.*self-collide.*own codec/s);
+  });
+
+test("a widget's own key collision does not phantom-claim its OTHER keys for a later widget",
+  async () => {
+    stubDocument();
+    const { register, mountAll } = await import("../src/mount.js");
+
+    // W1 claims two keys. W2's key list is [kz, ky]: kz first (no collision), then ky, which
+    // collides with W1 -- so under key-by-key commits (the bug fix round 2, M2, removed), kz would
+    // already sit in `claimed` under W2's name by the time the throw on ky happens, even though
+    // W2's own `widget.mount` never runs. W3's only key is kz: it must mount cleanly, since nothing
+    // W2 holds is real.
+    interface Two { v: boolean; w: boolean }
+    interface One { v: boolean }
+    const W1_CODEC: UrlCodec<Two> = { v: boolParam("phantom-kx"), w: boolParam("phantom-ky") };
+    const W2_CODEC: UrlCodec<Two> = { v: boolParam("phantom-kz"), w: boolParam("phantom-ky") };
+    const W3_CODEC: UrlCodec<One> = { v: boolParam("phantom-kz") };
+
+    register("phantom-w1", (() => {}) as Widget<Two>, W1_CODEC);
+    register("phantom-w2", (() => {}) as Widget<Two>, W2_CODEC);
+    const w3: Widget<One> = (host) => {
+      (host as unknown as FakeMountPoint).append({ textContent: "w3-mounted" });
+    };
+    register("phantom-w3", w3, W3_CODEC);
+
+    const w1el = makeMountPoint("phantom-w1");
+    const w2el = makeMountPoint("phantom-w2");
+    const w3el = makeMountPoint("phantom-w3");
+    const root = { querySelectorAll: () => [w1el, w2el, w3el] } as unknown as ParentNode;
+    mountAll(root, noStore);
+
+    // W2 shows its OWN collision, against W1, on the shared key "phantom-ky" -- unchanged
+    // behaviour, asserted here so a future regression on this exact trace fails on the right line.
+    assert.match(w2el.appended[0]!.textContent, /phantom-ky.*phantom-w1.*phantom-w2/s);
+    // W3 must have mounted: "phantom-kz" was never actually claimed by W2, since W2's own
+    // `widget.mount` never ran to claim it for real.
+    assert.ok(w3el.appended.some((n) => n.textContent === "w3-mounted"),
+      `W3 was blocked by a phantom claim: ${JSON.stringify(w3el.appended)}`);
+  });
+
 test("the URL key list is pinned -- a key rename breaks published links silently otherwise",
   async () => {
     stubDocument();

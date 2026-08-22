@@ -65,17 +65,33 @@ export function mountAll(root: ParentNode = document, store: UrlStore = defaultS
       // right here -- but an unknown one must throw rather than leave a silently empty mount point
       // that looks like a widget which merely failed to draw.
       if (widget === undefined) throw new Error(`unknown data-widget: ${name}`);
-      // Checked against the WHOLE key list before any of it is committed. Committing key-by-key
-      // would leave a phantom claim behind on a widget that never actually mounted, whenever that
-      // widget's OWN key list collides partway through: an earlier key would already be in
-      // `claimed` under this widget's name even though the throw below stops `widget.mount` from
-      // ever running for it, so a later mount point's collision message would misname the claimant
-      // as a widget that holds nothing.
+      // Checked against the WHOLE key list before any of it is committed to `claimed`.
+      // Committing key-by-key would leave a phantom claim behind on a widget that never actually
+      // mounted, whenever that widget's OWN key list collides partway through: an earlier key
+      // would already be in `claimed` under this widget's name even though the throw below stops
+      // `widget.mount` from ever running for it, so a later mount point's collision message would
+      // misname the claimant as a widget that holds nothing (fix round 2, M2).
+      //
+      // `own` is what keeps that fix from also losing the OTHER collision: one codec mapping two
+      // different state fields to the same URL key, which the single check against `claimed`
+      // alone cannot see here -- `claimed` holds nothing for THIS widget until the loop below
+      // finishes, so a key repeated within `widget.keys` itself would otherwise sail through
+      // silently, and the two fields would overwrite each other's value on every write with no
+      // error anywhere (fix round 3, M-self). `own` is read during this pass but, like `claimed`,
+      // only written after the whole list has cleared -- see the commit loop below.
+      const own = new Set<string>();
       for (const k of widget.keys) {
         const prior = claimed.get(k);
         if (prior !== undefined) {
           throw new Error(`URL key "${k}" is claimed by both ${prior} and ${name} on this page`);
         }
+        if (own.has(k)) {
+          // A message distinct from the cross-widget one above: "claimed by both X and X" is
+          // technically accurate (it IS this widget's own codec colliding with itself) but reads
+          // like a typo rather than a bug report, so this names the actual problem instead.
+          throw new Error(`URL key "${k}" is claimed twice by ${name}'s own codec`);
+        }
+        own.add(k);
       }
       for (const k of widget.keys) claimed.set(k, name);
       widget.mount(el, store);
