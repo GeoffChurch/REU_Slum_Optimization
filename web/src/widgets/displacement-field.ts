@@ -103,11 +103,13 @@ function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBu
   if (b.roads.length !== 2 || road1 === undefined || road2 === undefined) {
     throw new Error(`field.json carries ${b.roads.length} roads; this widget needs exactly two`);
   }
-  // Each road is a two-point SEGMENT, for the same reason the count is exactly two: the drag
-  // handles, the corridor geometry, and piece E's URL spelling of a road (`x1,y1,x2,y2`, whose
-  // encoder indexes `coords[0]`/`coords[1]` directly) all assume it. Enforced HERE, once, where the
-  // bundle crosses into the widget -- a second length check inside the codec would be a guard that
-  // cannot fire, which this project treats as a defect of its own.
+  // Each road is a two-point SEGMENT. The drawing and the drag are polyline-generic (`handles`,
+  // `flatten` and `polyline` all walk `coords` to its end), so the consumer that actually needs
+  // this is piece E's URL: `roadsParam` spells a road as `x1,y1,x2,y2` and indexes
+  // `coords[0]`/`coords[1]`, so a third vertex would be TRUNCATED AWAY by one round trip through
+  // the address bar -- the reader drags a three-point road, copies the URL, and gets a two-point
+  // one back with no error anywhere. Enforced HERE, once, where the bundle crosses into the
+  // widget, rather than in the codec: this is the line the data comes through.
   for (const [i, r] of b.roads.entries()) {
     if (r.coords.length !== 2) {
       throw new Error(
@@ -119,6 +121,22 @@ function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBu
     roads: [{ ...road1, width_m: width0 }, { ...road2, width_m: width0 }],
     second: false,
   });
+  // `?width=` is any positive finite number -- `roadsParam` checks that much and no more, because
+  // this bundle's floor and ceiling are properties of the FETCHED artifact, which no codec can
+  // know. Assigning an out-of-range one to the slider below would not hold: a real
+  // `<input type="range">` pins its own value to `min`/`max`, so the control would read the bound
+  // while `render` priced and drew the corridor at what the URL said. Clamped rather than refused,
+  // so the number lands on the bound instead of on an error card; the write it triggers then
+  // rewrites `?width=` to the clamped value (and drops the key when the bound IS `default_m`, the
+  // value the store diffs against).
+  //
+  // Onto every road, matching both `roadsParam.decode` -- which reads ONE width for the pair -- and
+  // the slider's own handler below, so nothing here can leave the two roads at different widths.
+  const w = state.get().roads[0]!.width_m;
+  const bounded = Math.min(Math.max(w, b.width.floor_m), b.width.max_m);
+  if (bounded !== w) {
+    state.set({ roads: state.get().roads.map((r) => ({ ...r, width_m: bounded })) });
+  }
 
   const caption = host.querySelector("figcaption");
 
@@ -144,8 +162,9 @@ function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBu
   slider.max = String(b.width.max_m);
   slider.step = String(b.width.step_m);
   // From STATE, not from `width0`: the bundle's default is what `makeState` was seeded with, but a
-  // URL (piece E) may have overridden it before this line, and a slider showing 7 while the
-  // corridor is drawn at 12 is the exact desync this widget's own state exists to prevent.
+  // URL (piece E) may have overridden it before this line, and the clamp above has already bounded
+  // whatever it said. Reading it here is what keeps the control and the picture on ONE number --
+  // `render` below prices and draws the corridor from these same `roads`.
   slider.value = String(state.get().roads[0]!.width_m);
   slider.addEventListener("input", () => {
     // The width applies to EVERY live road. Width is per-road in the model (permeability.py's

@@ -78,9 +78,11 @@ function mountPoint(): FakeElement {
 }
 
 /** The state store is the PRODUCTION one (`urlStore` over a `fakeLocation`), never `localState`:
- * `search` defaults to "", which claims no key, decodes nothing and writes nothing, so a caller
- * that passes no search gets the widget's own initial state exactly as `localState` gave it -- and
- * the URL test below gets the real decode path rather than a second, test-only one.
+ * `search` defaults to "" -- an empty URL, so nothing is decoded and nothing is written, and a
+ * caller that passes no search gets the widget's own initial state exactly as `localState` gave
+ * it. (The store CLAIMS every key of the codec regardless of what the URL carries; what an
+ * empty query skips is the decode, not the claim.) The URL tests below get the real decode
+ * path rather than a second, test-only one.
  *
  * `store` is nullable because a REFUSED bundle is a case this file tests: `boot` validates the road
  * count (and, below, the points per road) before it calls `makeState`, so a payload it rejects
@@ -669,12 +671,18 @@ test("a URL width reaches the width SLIDER", async () => {
   // default -- leaving the reader a control reading 7 beside a corridor drawn at 12. Both halves
   // are asserted, so "the corridor was drawn at 12" is observed rather than assumed.
   const host = mountPoint();
-  await mount(host, null, bundle, "width=12");
+  const { store } = await mount(host, null, bundle, "width=12");
   fireResize(SIZE, SIZE);
 
   const widthSlider = host.findAll("input").find((i) => i.type === "range");
   assert.ok(widthSlider !== undefined, "there is no width slider");
   assert.equal(widthSlider.value, "12");
+  assert.ok(store !== null, "the widget never asked for a state store");
+  // The decode itself, not only what it reached: `roadsParam` writes the URL's width onto BOTH
+  // roads and leaves their geometry alone, and nothing else here would notice if it stopped.
+  assert.deepEqual(store.get().roads.map((r) => r.width_m), [12, 12]);
+  assert.deepEqual(store.get().roads.map((r) => r.coords),
+    bundle.roads.map((r) => r.coords), "the width key moved the geometry too");
   assert.equal(layers(canvasOf(host)).corridor[0]!.lineWidth, 12 * VIEW.scaleX,
     "the corridor was not drawn at the URL's width either");
 });
@@ -696,3 +704,27 @@ test("a road that is not a two-point segment fails LOUDLY, on the page", async (
   assert.equal(img.removedAt, null, "the fallback image went anyway");
   assert.equal(host.find("canvas"), null, "a canvas was inserted for a refused bundle");
 });
+
+test("an out-of-range ?width= lands on the slider's own bound, control and picture agreeing",
+  async () => {
+    // `roadsParam` checks that a width is finite and positive and stops there -- this bundle's
+    // floor and ceiling are properties of the fetched artifact. Unclamped, a real
+    // `<input type="range">` would pin its own value to `max` while the corridor was drawn at
+    // whatever the URL said, which is the disagreement the slider's own comment describes.
+    for (const [search, expected] of [
+      ["width=99999", bundle.width.max_m],
+      ["width=0.5", bundle.width.floor_m],
+    ] as const) {
+      const host = mountPoint();
+      const { store } = await mount(host, null, bundle, search);
+      fireResize(SIZE, SIZE);
+
+      assert.ok(store !== null, `${search}: the widget never asked for a state store`);
+      assert.equal(store.get().roads[0]!.width_m, expected, `${search}: the state`);
+      const slider = host.findAll("input").find((i) => i.type === "range");
+      assert.ok(slider !== undefined, `${search}: there is no width slider`);
+      assert.equal(slider.value, String(expected), `${search}: the slider`);
+      assert.equal(layers(canvasOf(host)).corridor[0]!.lineWidth, expected * VIEW.scaleX,
+        `${search}: the corridor`);
+    }
+  });

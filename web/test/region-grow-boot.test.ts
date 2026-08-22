@@ -89,9 +89,11 @@ function readoutText(host: ReturnType<typeof mountPoint>): string {
  * accidentally armed by a previous test's leftover state.
  *
  * The state store is the PRODUCTION one (`urlStore` over a `fakeLocation`), never `localState`:
- * `search` defaults to "", which claims no key, decodes nothing and writes nothing, so a caller
- * that passes no search gets the widget's own initial state exactly as `localState` gave it -- and
- * the URL tests below get the real decode path rather than a second, test-only one. */
+ * `search` defaults to "" -- an empty URL, so nothing is decoded and nothing is written, and a
+ * caller that passes no search gets the widget's own initial state exactly as `localState` gave
+ * it. (The store CLAIMS every key of the codec regardless of what the URL carries; what an
+ * empty query skips is the decode, not the claim.) The URL tests below then get the real
+ * decode path rather than a second, test-only one. */
 async function mount(width = 700, drawFailure: string | null = null, search = ""):
     Promise<{ host: ReturnType<typeof mountPoint>; cv: unknown;
               store: StateSource<RegionGrowState>; loc: ReturnType<typeof fakeLocation> }> {
@@ -347,8 +349,13 @@ test("the seed is a block_id, so a re-baked hood cannot silently reseed a publis
     // An INDEX in a published URL points at a different block after any re-bake that reorders
     // hood.json -- no error, right type, right shape, wrong value. An identity cannot do that: it
     // either still names a block or is refused below.
-    const { store } = await mount(700, null, `seed=${bundle.blocks[2]!.block_id}`);
+    const { store, cv } = await mount(700, null, `seed=${bundle.blocks[2]!.block_id}`);
     assert.equal(store.get().seed, bundle.blocks[2]!.block_id);
+    // The picture half. Without it a `render` that ignored `state.seed` would still pass here: a
+    // throw inside `render` is absorbed by `runOrReport` into a caption this test never reads, so
+    // the store assertion alone observes the codec and not the widget.
+    assert.equal(regionPaths(cv).length, grow(bundle.blocks, 2, bundle.budget.default).length,
+      "the region was not grown from the URL's seed");
   });
 
 test("a seed this hood does not carry falls back to the bundle's own AND leaves the URL",
@@ -358,4 +365,29 @@ test("a seed this hood does not carry falls back to the bundle's own AND leaves 
     const { loc, store } = await mount(700, null, "seed=NOT_A_BLOCK");
     assert.equal(store.get().seed, bundle.seed);
     assert.equal(loc.written.at(-1), "", "the bad key is gone, not carried");
+  });
+
+test("an out-of-range ?budget= lands on the slider's own bound, control and picture agreeing",
+  async () => {
+    // `intParam` checks that a budget is a non-negative integer and stops there -- this hood's own
+    // floor and ceiling are properties of the fetched artifact, so an out-of-range one reaches
+    // state and must be bounded here.
+    //
+    // The picture assertion is load-bearing on the HIGH end only, and measured: unclamped,
+    // `budget=999999` draws all 213 blocks where the clamped 10000 draws 54. On the low end the
+    // greedy stops at the seed for any budget at or below `min`, so `budget=0` and the clamped 150
+    // draw the same single block -- there the state and slider assertions above are what
+    // distinguish, which is why they come first.
+    for (const [search, expected] of [
+      ["budget=999999", bundle.budget.max],
+      ["budget=0", bundle.budget.min],
+    ] as const) {
+      const { host, cv, store } = await mount(700, null, search);
+      const seedIndex = bundle.blocks.findIndex((b) => b.block_id === bundle.seed);
+
+      assert.equal(store.get().budget, expected, `${search}: the state`);
+      assert.equal(budgetSlider(host).value, String(expected), `${search}: the slider`);
+      assert.equal(regionPaths(cv).length,
+        grow(bundle.blocks, seedIndex, expected).length, `${search}: the picture`);
+    }
   });

@@ -165,19 +165,13 @@ function sameCoords(a: [number, number][], b: [number, number][]): boolean {
 
 /** DisplacementField's two roads and their shared width, over three keys.
  *
- * Road COUNT -- exactly two -- is an invariant of the bundle that `displacement-field.ts`'s `boot`
- * already validates and `liveIndices` already relies on with literal 0/1; `decode` below re-checks
- * the same thing (`initial.length !== 2`) and returns `null` otherwise, rather than inventing a
- * geometry the widget cannot draw.
- *
- * Points PER road is a separate invariant that this param does NOT check, because `boot` does:
- * immediately after the road-count throw it rejects any road whose `coords` are not exactly two
- * points. That is a property of the bundle, not of this param, and it belongs at the one boundary
- * the bundle crosses. A second copy of it here could not fire either: the only `initial` this
- * param is ever handed is the state `boot` builds AFTER that check -- `bind` is called from the
- * widget's own `makeState` callback -- and an unfirable guard is a defect of its own. That is also
- * why `fmtSegment` below can index `r.coords[0]`/`[1]` with no length guard: it is trusting that
- * boundary, not re-deriving its guarantee at every consumer.
+ * Two roads, of two points each. Both are invariants of the BUNDLE, and both are checked in
+ * `displacement-field.ts`'s `boot` -- the count, then the points per road, on adjacent lines --
+ * because that is where the data crosses in. This param is downstream of that boundary and does
+ * not re-derive either one: `fmtSegment` indexes `r.coords[0]`/`[1]`, `encode` and `decode` index
+ * `[0]`/`[1]` of the road list, and all of it is trusting the boundary rather than restating it at
+ * every consumer. `FIELD_URL` is the only construction site; a second one would need the same
+ * boundary check in front of it, since nothing in here would catch its absence.
  *
  * One shared width, because `displacement-field.ts`'s width slider writes its value onto EVERY
  * road's `width_m` -- deliberately, so the overlap demonstration stays exact. */
@@ -196,7 +190,6 @@ export function roadsParam(k1: string, k2: string, kWidth: string): Param<Road[]
       return out;
     },
     decode(present, initial) {
-      if (initial.length !== 2) return null;
       const has1 = present[k1] !== undefined;
       const has2 = present[k2] !== undefined;
       // A half-specified pair is not a state: one road from the URL and one from the bundle is a

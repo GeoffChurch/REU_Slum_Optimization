@@ -191,9 +191,11 @@ function mountPoint(): FakeElement {
  * which is exactly why the assertions below check what was DRAWN, never merely that nothing threw.
  *
  * The state store is the PRODUCTION one (`urlStore` over a `fakeLocation`), never `localState`:
- * `search` defaults to "", which claims no key, decodes nothing and writes nothing, so a caller
- * that passes no search gets the widget's own initial state exactly as `localState` gave it -- and
- * the URL tests below get the real decode path rather than a second, test-only one.
+ * `search` defaults to "" -- an empty URL, so nothing is decoded and nothing is written, and a
+ * caller that passes no search gets the widget's own initial state exactly as `localState` gave
+ * it. (The store CLAIMS every key of the codec regardless of what the URL carries; what an
+ * empty query skips is the decode, not the claim.) The URL tests below then get the real
+ * decode path rather than a second, test-only one.
  *
  * `store` is nullable because a REFUSED bundle is a case this file tests: every one of `boot`'s
  * bundle and `data-*` checks runs before it calls `makeState`, so a payload it rejects never asks

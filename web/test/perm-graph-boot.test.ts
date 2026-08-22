@@ -40,9 +40,11 @@ function mountPoint(): FakeElement {
 }
 
 /** The state store is the PRODUCTION one (`urlStore` over a `fakeLocation`), never `localState`:
- * `search` defaults to "", which claims no key, decodes nothing and writes nothing, so a caller
- * that passes no search gets the widget's own initial state exactly as `localState` gave it -- and
- * the URL test below gets the real decode path rather than a second, test-only one. */
+ * `search` defaults to "" -- an empty URL, so nothing is decoded and nothing is written, and a
+ * caller that passes no search gets the widget's own initial state exactly as `localState` gave
+ * it. (The store CLAIMS every key of the codec regardless of what the URL carries; what an
+ * empty query skips is the decode, not the claim.) The URL test below gets the real decode
+ * path rather than a second, test-only one. */
 async function mount(host: FakeElement, width: number, drawFailure: string | null = null,
                      search = ""): Promise<{
                        store: StateSource<PermGraphState>;
@@ -202,7 +204,8 @@ test("a prefix past the last one is clamped, not drawn out of range", async () =
   // rather than index past the end of `b.prefix.current`, and the URL must stop carrying it.
   const { store, loc } = await mount(mountPoint(), 640, null, "prefix=99999");
   assert.equal(store.get().prefix, bundle.n_prefixes - 1);
-  const written = loc.written.at(-1);
-  assert.ok(written !== undefined, "the clamp never wrote a corrected URL");
-  assert.ok(!written.includes("prefix=99999"), `the out-of-range prefix survived: "${written}"`);
+  // The whole query, not merely the absence of `prefix=99999`: this mount point's `data-prefix` is
+  // `lens_b_index` (2), so the clamped 20 differs from the store's initial and IS emitted -- the
+  // key is REPLACED, which `!includes(...)` alone would also have accepted from `prefix=5` or "".
+  assert.equal(loc.written.at(-1), `prefix=${bundle.n_prefixes - 1}`);
 });

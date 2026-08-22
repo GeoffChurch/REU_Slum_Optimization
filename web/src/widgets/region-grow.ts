@@ -76,13 +76,14 @@ export const regionGrow: Widget<RegionGrowState> = (host, makeState) => {
 function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: HoodBundle): void {
   const e = b.encoding;
   const blocks = b.blocks;
-  // block_id -> index, built once. `growth()` and `draw()` both take a POSITION (and `hood.json`'s
-  // `reference` fixtures pin accretion by index), so the conversion lives at the two boundaries
-  // rather than in the model.
+  // block_id -> index, built once. `growth()` and `draw()` both take a POSITION, and the greedy
+  // walks `HoodBlock.adj`, which hood.d.ts declares as "Indices into `blocks`, not block_ids" -- so
+  // the conversion lives at the two boundaries rather than in the model.
   const indexOf = new Map(blocks.map((blk, i) => [blk.block_id, i]));
   // The bundle is a BOUNDARY: it arrives over the network, and a page can outlive the artifact it
   // was generated beside. A `seed` that no longer names one of `blocks` would otherwise reach
-  // `growth()` as a negative index and fail far from here, with no message a reader could act on.
+  // `render` as an `undefined` position and die inside `growth()` on `blocks[undefined].n`, in a
+  // resize callback far from here, under a message that names the wrong thing.
   if (!indexOf.has(b.seed)) {
     throw new Error(`hood.json's seed "${b.seed}" is not among its own ${blocks.length} blocks`);
   }
@@ -93,6 +94,16 @@ function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: Ho
   // broken artifact, so reset rather than throw -- and because the reset makes the field equal its
   // initial, the store stops emitting `?seed=` and the URL self-corrects (design §2.3).
   if (!indexOf.has(state.get().seed)) state.set({ seed: b.seed });
+  // `?budget=` is a bare non-negative integer; this hood's own floor and ceiling are properties of
+  // the fetched bundle, which no codec can know. Assigning an out-of-range one to the slider below
+  // would not hold: a real `<input type="range">` pins its own value to `min`/`max`, so the control
+  // would read the bound while the greedy kept accreting past it, up to the edge of the loaded
+  // neighbourhood. Clamped rather than refused, so the number lands on the bound instead of on an
+  // error card; the write it triggers then rewrites `?budget=` to the clamped value (and drops the
+  // key when the bound IS the bundle's default, the value the store diffs against).
+  const budget = state.get().budget;
+  const bounded = Math.min(Math.max(budget, b.budget.min), b.budget.max);
+  if (bounded !== budget) state.set({ budget: bounded });
 
   const caption = host.querySelector("figcaption");
 
@@ -114,8 +125,9 @@ function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: Ho
   slider.max = String(b.budget.max);
   slider.step = String(b.budget.step);
   // From STATE, not from `b.budget.default`: the bundle's default is what `makeState` was seeded
-  // with, but a URL (piece E) may have overridden it before this line, and a slider showing 3000
-  // beside a region grown to 5000 is the exact desync this widget's own state exists to prevent.
+  // with, but a URL (piece E) may have overridden it before this line, and the clamp above has
+  // already bounded whatever it said. Reading it here is what keeps the control and the picture on
+  // ONE number -- `render` below draws from this same `state.get().budget`.
   slider.value = String(state.get().budget);
   slider.addEventListener("input", () => state.set({ budget: Number(slider.value) }));
   budgetLabel.append("Budget ", slider);
