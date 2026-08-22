@@ -111,13 +111,24 @@ of the metric**:
 | --- | --- | --- |
 | — | `depth_density_proxy`'s 0.0128 | correct |
 | `?floor=X` | 0.0128, overridden to X | correct |
-| `?metric=density` | 0.0128, metric now `density` | **0.0128 clamped into `density`'s range** |
+| `?metric=<other>` | 0.0128, metric now `<other>` | **0.0128 carried into an unrelated scale** |
 | `?metric=density&floor=X` | X | correct |
 
-The four metrics have unrelated score scales, so row 3 clamps to `density`'s minimum and selects all
-16,451 blocks — a silently wrong picture from a URL that asked for nothing unusual. Resolving it by
-asking "did the URL set `floor`?" would put a `fromUrl(key)` member on `StateSource<T>` for one
-widget's benefit.
+The four metrics have unrelated score scales, so row 3 is wrong in a *different way per metric* —
+**measured on the committed Cape Town bundle**, carrying `depth_density_proxy`'s 0.0128 across:
+
+| target metric | what happens to 0.0128 | pool |
+| --- | --- | --- |
+| `density` | in range, **no clamp at all** | 89 of 16,451 |
+| `density_compactness` | clamps to the **ceiling** | **1** |
+| `depth_proxy` | clamps to the **minimum** | **all 16,451** |
+
+Three different silently wrong pictures, none of them the metric's own calibration, from a URL that
+asked for nothing unusual. (An earlier draft of this section named `density` and claimed it selected
+every block; that outcome belongs to `depth_proxy`, and `density` is not clamped at all. The
+argument is unchanged and in fact stronger — a write-back is not wrong in one way that could be
+special-cased, but in three.) Resolving it by asking "did the URL set `floor`?" would put a
+`fromUrl(key)` member on `StateSource<T>` for one widget's benefit.
 
 **The fix is the honest model: `floor: number | null`, where `null` means "this metric's own
 default".** That is already exactly what `syncFloor`'s `preferred` parameter means, so all four rows
@@ -127,10 +138,14 @@ Two consequences, both improvements:
 
 * The metric `<select>` handler sets `floor: null` instead of a computed number, so switching metric
   resets to the new metric's calibration **and drops `?floor=` from the URL**.
-* The city toggle must **resolve** the floor at the moment of the switch (`state.set({ city, floor:
-  resolved })`), preserving the deliberate behaviour `syncFloor`'s docstring argues for — an
-  absolute floor carries across corpora rather than being redefined. Pinning the number there is
-  also honest: the reader chose to carry it, so the URL should say so.
+* The city toggle **resolves the floor only when the reader has actually chosen one** —
+  `state.set({ city, floor: s.floor === null ? null : resolved })`. `syncFloor`'s docstring argues
+  that an *absolute floor* carries across corpora rather than being redefined, and that is right for
+  a number the reader picked. A `null` floor is not an absolute floor: it means "whatever this
+  metric calibrates to", and pinning it on a city switch invents a choice nobody made. **Corrected
+  during Task 5**, which found the unconditional form makes a city round trip lossy: Cape Town →
+  Nairobi → Cape Town on `density` leaves the reader at 0.00625 instead of 0.00773, carrying a
+  `?floor=` they never typed.
 
 `render` resolves `st.floor ?? defaultFloorFor(bundle, st.metric)`, where `defaultFloorFor` is the
 `shipped ?? floorAtShippedPoolSize` half factored out of `syncFloor` so both resolve identically.
