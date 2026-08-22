@@ -13,6 +13,7 @@ stopped measuring the runtime. That is what these tests keep the bundle fit for.
 """
 from __future__ import annotations
 
+import ast
 import json
 import math
 from pathlib import Path
@@ -25,6 +26,7 @@ from tests.dts_keys import json_keys, ts_field_names
 OUT = Path("examples/authoring/block.json")
 README = Path("examples/authoring/README.md")
 DTS = Path("web/src/authoring.d.ts")
+GEN_AUTHORING_BLOCK = Path("scripts/gen_authoring_block.py")
 SPINE = "ZAF.9.3.1_1_40972"
 
 
@@ -158,3 +160,61 @@ def test_reference_cases_are_present_and_shaped(bundle: dict[str, Any]) -> None:
         assert c["name"] and len(c["road"]) >= 2
         assert all(len(p) == 2 for p in c["road"])
         assert math.isfinite(c["permeability"])
+
+
+def _type_checking_solve_imports(tree: ast.Module) -> set[str]:
+    """Every name `scripts/gen_authoring_block.py` imports from `web.src.py.solve` inside its
+    `if TYPE_CHECKING:` block -- the STATIC half `pixi run typecheck` actually looks at."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.If) and isinstance(node.test, ast.Name)
+                and node.test.id == "TYPE_CHECKING"):
+            for stmt in node.body:
+                if isinstance(stmt, ast.ImportFrom) and stmt.module == "web.src.py.solve":
+                    names.update(alias.asname or alias.name for alias in stmt.names)
+    return names
+
+
+def _runtime_solve_bindings(tree: ast.Module) -> set[str]:
+    """Every name `scripts/gen_authoring_block.py` binds off the `importlib`-loaded module inside
+    its `if not TYPE_CHECKING:` block -- the RUNTIME half that actually executes, and that mypy
+    never looks inside (it treats `TYPE_CHECKING` as always true). `_solve_mod` itself is excluded:
+    it is the loaded module, not one of the names re-exported from it."""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.If) and isinstance(node.test, ast.UnaryOp)
+                and isinstance(node.test.op, ast.Not) and isinstance(node.test.operand, ast.Name)
+                and node.test.operand.id == "TYPE_CHECKING"):
+            for stmt in node.body:
+                if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                        and isinstance(stmt.targets[0], ast.Name)
+                        and stmt.targets[0].id != "_solve_mod"):
+                    names.add(stmt.targets[0].id)
+    return names
+
+
+def test_the_type_checking_and_runtime_solve_bindings_name_the_same_set() -> None:
+    """`scripts/gen_authoring_block.py` gets `AuthoringBundle` and its four sibling `TypedDict`s
+    plus `block_from_bundle` from `web/src/py/solve.py` through TWO independent, hand-maintained
+    lists: a `TYPE_CHECKING`-guarded static import (what mypy checks) and a parallel
+    `if not TYPE_CHECKING:` block of `NAME = _solve_mod.NAME` assignments (what actually runs at
+    import time) -- two lists because mypy treats `TYPE_CHECKING` as always true and therefore
+    never looks inside the second block at all, so nothing type-checked ever sees it.
+
+    DEMONSTRATED: deleting `ReferenceCase = _solve_mod.ReferenceCase` from the runtime block, with
+    `solve.py` and the static import both left untouched, leaves `pixi run typecheck` reporting
+    'Success: no issues found' -- mypy only ever sees the (unmodified) `TYPE_CHECKING` branch --
+    while `pixi run python -m scripts.gen_authoring_block` raises `NameError: name 'ReferenceCase'
+    is not defined`. That asymmetry (checked-but-not-run vs. run-but-not-checked) is exactly what
+    this test exists to catch statically, before either command runs.
+    """
+    tree = ast.parse(GEN_AUTHORING_BLOCK.read_text(encoding="utf-8"))
+    type_checking = _type_checking_solve_imports(tree)
+    runtime = _runtime_solve_bindings(tree)
+    # Guards the guard: an empty/empty comparison would pass vacuously if the AST shapes this
+    # walks for ever stopped matching the file (a refactor of the `if`/`import` structure, say).
+    assert type_checking, "no `if TYPE_CHECKING:` import from web.src.py.solve found at all"
+    assert type_checking == runtime, (
+        f"only under TYPE_CHECKING (checked, not run): {sorted(type_checking - runtime)}; only at "
+        f"runtime (run, not checked): {sorted(runtime - type_checking)}. A name in exactly one "
+        f"list is either type-checked without ever running, or runs without ever being checked.")

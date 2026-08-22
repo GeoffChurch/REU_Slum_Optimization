@@ -3,8 +3,9 @@
 DEBT: two consumers named in this file are later in this piece and absent at this commit -- Task 4's
 `web/src/widgets/draw-road.ts` and Task 5's `web/test/pyodide-parity.test.ts`. They are named
 because they are what the bundle's shape is FOR, and written in the future tense because neither
-exists yet. Task 2's `web/src/py/solve.py` DOES exist now, and this baker loads its
-`block_from_bundle` back (see `_load_block_from_bundle` below) rather than keeping its own copy.
+exists yet. Task 2's `web/src/py/solve.py` DOES exist now, and this baker loads `block_from_bundle`
+and the `AuthoringBundle` family of `TypedDict`s back from it (see `_load_solve_module` and the
+`TYPE_CHECKING` import below) rather than keeping its own copies.
 
 The widget will run `reblock.permeability` itself, under Pyodide, on a road the reader drew. So this
 bundle is not a picture: it is the INPUT to a solve, and the browser rebuilds a real `Block` from
