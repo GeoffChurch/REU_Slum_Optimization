@@ -354,10 +354,25 @@ tolerance's own fault injection perturbs by, which reddens it by three orders of
 
 A 4.5× margin over the observed disagreement is thin against noise and ample against a **constant**,
 which is what this is: wasm f64 arithmetic is deterministic by specification and the Pyodide version
-is pinned, while the baked side is a committed artifact already held to exact CPython equality by
-`tests/test_solve_py.py`. Both sides are fixed, so the only thing that can move this difference is a
-deliberate version bump — and a version bump that moves it is precisely what this test should
-refuse to pass silently.
+is pinned, while the baked side is a committed artifact. Both sides are fixed, so the only thing
+that can move this difference is a deliberate version bump — and a version bump that moves it is
+precisely what this test should refuse to pass silently.
+
+*Corrected after the merge.* This paragraph originally supported that argument by saying the baked
+side is "already held to exact CPython equality by `tests/test_solve_py.py`". That test asserted
+exact equality and **failed on GitHub's runner** — `crossing` came back 2.2e-16 (about two units in
+the last place) from its baked value, having passed the identical assertion on a different runner
+minutes earlier. `permeability` ends in a sparse solve, and the BLAS kernel it dispatches to depends
+on the CPU; the bundle was baked on one machine and every machine reading it back is a different
+one. So **CPython's own answer is machine-dependent**, and that test now carries its own stated
+1e-12 (~4,500× the observed spread, ~4.7e7× below the 4.71e-05 that matters).
+
+The parity tolerance survives this unchanged, because its two sides really are fixed — it compares
+wasm output against the committed artifact, never against a locally recomputed CPython number. What
+it does inherit is a re-bake: baking on a different machine would shift the reference by roughly the
+2 ULP seen here, on top of the 4 ULP the runtimes already differ by. At `spur`'s magnitude 1e-15 is
+about 18 ULP, so the worst combined case sits around 6 — still inside, with roughly 3× to spare
+rather than the 4.5× against the runtime difference alone.
 
 This is the result the guard exists to produce. A design that had assumed bit-identity would have
 been wrong, and a tolerance picked after seeing a failure would have hidden that.

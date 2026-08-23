@@ -51,13 +51,47 @@ def test_reconstruction_matches_the_source_block(block: Block) -> None:
     assert len(block.building_points) == len(BUNDLE["building_points"])
 
 
+#: How far a fresh CPython solve may sit from the baked answer. See the test below for why this
+#: is a tolerance rather than exact equality, and where the number comes from.
+BAKE_TOL = 1e-12
+
+
 def test_every_reference_case_reproduces_its_baked_answer(block: Block) -> None:
-    """Exact equality, not a tolerance: both sides are CPython on the same float64 input, so any
-    difference is a defect rather than noise. The parity test is where a tolerance belongs, and
-    only if the two RUNTIMES are shown to disagree."""
+    """A stated tolerance, because this comparison spans two MACHINES, not two runtimes.
+
+    This asserted exact equality until it failed on GitHub's runner: `crossing` came back as
+    0.699004769769015 against the baked 0.6990047697690152, a difference of 2.2e-16 -- about two
+    units in the last place at that magnitude. The same commit had passed the same assertion on a
+    different runner minutes earlier, so it is not a defect and not a stale bake: `permeability`
+    ends in a sparse solve, and the BLAS kernel that solve dispatches to depends on the CPU it
+    finds. The bundle's numbers were baked on one machine; every machine that reads them back is a
+    different one.
+
+    The old docstring here said "both sides are CPython on the same float64 input, so any
+    difference is a defect rather than noise". The input is the same; the arithmetic underneath it
+    is not.
+
+    1e-12 is stated, not discovered:
+
+    * ~4,500x the 2.2e-16 actually observed between two runners, so genuine BLAS variation has room
+      that a 4x margin would not give it -- and unlike the runtime-parity comparison, this one is a
+      distribution across machines rather than a constant between two fixed artifacts;
+    * ~4.7e7 times SMALLER than 4.71e-05, the smallest effect `web/src/authoring.d.ts` records as
+      one a guard on these numbers must not absorb. A wrong reconstruction -- a lost coordinate, a
+      changed ring winding, a dtype shift -- moves the answer by orders of magnitude more than
+      this, which is what this test exists to catch.
+
+    The runtime-parity guard keeps its own much tighter 1e-15: both of ITS sides are fixed (wasm
+    f64 is deterministic by specification, and the baked side is committed), so it compares a
+    constant, not a distribution. A re-bake on a different machine would move the baked side by
+    roughly the 2 ULP seen here, which that tolerance still absorbs with room to spare.
+    """
     for case in BUNDLE["reference"]:
         got = solve(block, case["road"], BUNDLE["baseline"]["p0"])
-        assert got["permeability"] == case["permeability"], case["name"]
+        difference = abs(got["permeability"] - case["permeability"])
+        assert difference <= BAKE_TOL, (
+            f"{case['name']}: solved {got['permeability']!r}, baked {case['permeability']!r} "
+            f"(|difference| {difference:.6e}, tolerance {BAKE_TOL:.0e})")
 
 
 def test_the_returned_arrays_are_the_shapes_the_widget_indexes(block: Block) -> None:
