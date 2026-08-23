@@ -3,13 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild src/mount.ts --bundle --format=iife --minify --outfile=../docs/js/widgets.js",
-    "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "build": "node scripts/gen-solve-source.mjs && node scripts/gen-graph-encoding.mjs && esbuild src/mount.ts --bundle --format=iife --minify --outfile=../docs/js/widgets.js",
+    "check": "node scripts/gen-solve-source.mjs && node scripts/gen-graph-encoding.mjs && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "test": "bash scripts/test.sh"
   },
   "devDependencies": {
+    "@types/emscripten": "1.41.5",
     "@types/node": "22.20.1",
     "esbuild": "0.28.2",
+    "pyodide": "0.29.2",
     "typescript": "5.9.3"
   }
 }

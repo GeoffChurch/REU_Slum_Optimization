@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import re
 import tempfile
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -650,6 +651,95 @@ def render_page(name: str) -> str:
         gsp._write_page(out, gsp._render_partial(name), depth=depth, url_depth=url_depth,
                         title=name.title())
         return out.read_text(encoding="utf-8")
+
+
+# ----------------------------------------------- the Permeability page's draw-road widget (Task 6)
+
+@pytest.fixture
+def permeability_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    """The rendered Permeability partial -- markers filled, `displacement_body`'s own fixture
+    reasoning applied to this page: `DOCS`/`ASSETS` are redirected so producers don't write into
+    the real tree or race other xdist workers, and `PARTIALS` stays bound to the real repo (bound
+    at import time)."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    return gsp._render_partial("permeability")
+
+
+def test_the_permeability_page_carries_the_draw_road_widget(permeability_body: str) -> None:
+    assert permeability_body.count('data-widget="draw-road"') == 1
+    assert 'data-bundle="assets/authoring/block.json"' in permeability_body
+    assert 'data-wheel="assets/wheels/' in permeability_body
+
+
+def test_the_draw_road_paths_are_rewritten_for_the_served_depth() -> None:
+    """permeability.md serves at <base>/methodology/permeability/ -- url_depth 2. `data-wheel` is
+    a fetch URL exactly as `data-bundle` is, so it needs its own `.replace()` in `_write_page`:
+    `data-bundle="assets/` is not a substring of `data-wheel="assets/`, which is the same trap
+    ScreenMap's two attributes sprang."""
+    page = render_page("permeability")
+    assert 'data-bundle="../../assets/authoring/block.json"' in page
+    assert 'data-wheel="../../assets/wheels/' in page
+    for attr in ("data-bundle", "data-wheel"):
+        assert f'{attr}="assets/' not in page, attr
+
+
+def test_a_stray_wheel_in_dist_cannot_become_what_the_page_publishes(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Plants the exact file the old code would have picked, and requires the page to ignore it.
+
+    A value-only assertion (`data-wheel` names the declared version) passes on any checkout with
+    one wheel in `dist/`, which is every CI run -- so it would go green against a regression to
+    `sorted(glob("reblock-*.whl"))[-1]` and pin nothing. `dist/` is gitignored scratch that can
+    hold a hand-renamed copy or a leftover from another version, and under the glob any name
+    sorting after the real wheel silently became what the published page told every reader to
+    install, with nothing raising and the page looking correct. So the stray has to actually be
+    there while the page is rendered.
+
+    `zzz-stray` sorts after `reblock-<version>-...` for any version this project will have, which
+    is what makes it the file the glob would have chosen."""
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    name, version = pyproject["project"]["name"], pyproject["project"]["version"]
+    real = ROOT / "dist" / f"{name}-{version}-py3-none-any.whl"
+    assert real.exists(), (
+        f"{real} is missing -- `pixi run wheel` builds it, and `test-py` depends on that task, so "
+        f"reaching this line without it means the dependency stopped firing")
+
+    import scripts.gen_site_pages as gsp
+
+    # Same redirection every other producer test uses: assets land in a throwaway directory rather
+    # than the real tree, so this cannot race an xdist sibling or leave a stray in docs/assets/.
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+
+    stray = ROOT / "dist" / f"{name}-zzz-stray.whl"
+    stray.write_bytes(real.read_bytes())
+    try:
+        body = gsp._render_partial("permeability")
+        assert f'data-wheel="assets/wheels/{name}-{version}-py3-none-any.whl"' in body
+        assert "zzz-stray" not in body, (
+            "a stray wheel in dist/ became the URL the page publishes -- the wheel is being "
+            "searched for rather than named from pyproject.toml's declaration")
+    finally:
+        stray.unlink()
+
+
+def test_the_draw_road_caption_types_no_numbers_of_its_own() -> None:
+    """The block id and parcel count are read from `block.json`; nothing else in the caption is a
+    number. Same scan the displacement-field caption gets, for the same reason: a typed number is
+    the drift class this site has a documented history of, and it survives review precisely
+    because it looks right on the day it is written."""
+    import inspect
+
+    from scripts.gen_site_pages import _draw_road_figure
+
+    body = inspect.getsource(_draw_road_figure)
+    body = body[body.index("caption = "):body.index("return _figure")]
+    assert not re.search(r"\d", body), (
+        f"a literal digit appears in the draw-road caption -- every number there must be read "
+        f"from examples/authoring/block.json:\n{body}")
 
 
 def test_screening_page_mounts_both_widgets() -> None:

@@ -165,6 +165,43 @@ function sameCoords(a: [number, number][], b: [number, number][]): boolean {
   return a.length === b.length && a.every((p, i) => p[0] === b[i]![0] && p[1] === b[i]![1]);
 }
 
+/** DrawRoad's arbitrary polyline, in ONE key: `x1,y1,x2,y2,...`.
+ *
+ * A different shape from `roadsParam` below, not a generalisation of it: that one owns three keys
+ * because DisplacementField's geometry is two roads of two points each PLUS a width, all three
+ * invariants of a fetched bundle. Here there is no bundle to be an invariant of -- the reader
+ * drew the road -- so there is one key, no arity to check against an initial, and no width.
+ *
+ * Coordinates go through the same `fmtCoord`/`COORD_DP` at 0.1 m, so this file carries one
+ * coordinate spelling rather than two.
+ *
+ * `decode` returns `null` -- which makes the store fall back to `initial` and DROP the key, so the
+ * reader watches their typo disappear -- on an odd coordinate count, on any coordinate `finite`
+ * refuses (the empty string, hex, NaN, Infinity), or on fewer than two points. Two is the arity
+ * `web/src/py/solve.py` itself refuses below, so a URL that could never be solved never reaches a
+ * widget.
+ *
+ * `same` is element-wise (`sameCoords`), never `===`: identity comparison on an array would make
+ * every render look like a change and rewrite the URL. */
+export function polylineParam(key: string): Param<[number, number][]> {
+  return {
+    keys: [key],
+    encode: (v) => ({ [key]: v.flat().map(fmtCoord).join(",") }),
+    decode: (present) => {
+      const parts = present[key]!.split(",");
+      // "" splits to [""], which is length 1 and odd, so the empty value is refused here rather
+      // than by `finite` -- either way it is refused, and this is the branch it takes.
+      if (parts.length % 2 !== 0) return null;
+      const n = parts.map(finite);
+      if (n.some((v) => v === null)) return null;
+      const road: [number, number][] = [];
+      for (let i = 0; i < n.length; i += 2) road.push([n[i]!, n[i + 1]!]);
+      return road.length >= 2 ? road : null;
+    },
+    same: sameCoords,
+  };
+}
+
 /** DisplacementField's two roads and their shared width, over three keys.
  *
  * Two roads, of two points each. Both are invariants of the BUNDLE, and both are checked in

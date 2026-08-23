@@ -31,6 +31,7 @@ import json
 import re
 import shutil
 import struct
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -383,6 +384,96 @@ def _perm_graph_figures() -> str:
         f"drain straight to ground."
     )
     return f'{intro}\n\n<div class="sbu-figure-grid">\n' + "".join(figs) + "</div>\n"
+
+
+def _draw_road_figure() -> str:
+    """The Permeability page's widget that runs THIS PROJECT'S OWN SOLVER rather than a
+    reimplementation of it: the reader draws a road, and the browser rebuilds a real `Block` from
+    `examples/authoring/block.json`, boots Pyodide, and calls `reblock.permeability` itself
+    (design §4, §7).
+
+    That is the distinction, and it is narrower than "computes rather than looks up" -- three other
+    widgets on this site already compute live in the browser (`displacement-field`, `region-grow`
+    and `screen-map`, whose own header says "metrics are computed, not shipped"). What is unique
+    here is WHAT does the computing: Python from the shipped wheel, not TypeScript written to
+    agree with it.
+
+    Two fetch URLs, not one: `data-bundle` is the block, `data-wheel` is the `reblock` wheel
+    `micropip` installs at boot. The wheel is built, never committed (`dist/` is gitignored) --
+    `pyproject.toml`'s `wheel` pixi task builds it for the local suite, and `deploy-site.yml`
+    builds it before this script runs in CI. Its NAME is derived, not discovered: `pyproject.toml`
+    declares both the distribution name and the version, so the filename is constructed from them
+    and a missing wheel RAISES naming the build command -- the same shape
+    `_assert_widget_bundle_present` raises in. An earlier form globbed `dist/reblock-*.whl` and
+    took `sorted(...)[-1]`, which let any stray file sorting after the real wheel silently become
+    what the published page told every reader to install. `tomllib` is stdlib from 3.11, so
+    reading the declaration stays inside this file's stdlib-only contract.
+
+    No PNG of its own. Design §6 says every failure mode here "lands on the committed PNG", and
+    the committed PNG is `_perm_graph_figures`'s "current, before" panel -- the third of that
+    grid's four, so it sits bottom-left in the two-column grid rather than immediately above (the
+    figure directly above this one in DOM order is *current, after*, which carries the PermGraph
+    mount). It is the block with no roads, which is exactly the picture this widget boots showing
+    (its `picture` starts as `pictureOf(BASELINE)`, current layer, no road), so a no-JS reader
+    sees the identical picture a JS reader starts from rather than a second rendering of the same
+    graph baked by a separate script.
+
+    That panel comes from `examples/perm-graph/` while every number in the caption is read from
+    `examples/authoring/block.json`, so the two artifacts are asserted to describe the SAME block
+    rather than assumed to -- the drift `draw-road.ts`'s own `GRAPH_ENCODING_BLOCK_ID` check
+    exists to catch at runtime, caught here at build time instead.
+
+    Every number in the caption -- the block id, the parcel count -- is read from `block.json`,
+    never typed.
+    """
+    bundle_path = EXAMPLES / "authoring" / "block.json"
+    bundle_url = _copy_asset(bundle_path, "authoring")
+    img_url = _copy_asset(PERMGRAPH / "graph_current_before.png", "perm-graph")
+    if bundle_url is None or img_url is None:
+        return ""
+
+    # Both halves of the wheel's name are DECLARED in pyproject.toml, so the filename is
+    # constructed from the declaration rather than searched for. No `.exists()` pre-check: the one
+    # `_copy_asset` call below is the existence test, exactly as it is for the bundle and the PNG
+    # above, and it raises rather than returning "" because a missing wheel is a broken build to
+    # fix, not a partial checkout to render around.
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    name, version = pyproject["project"]["name"], pyproject["project"]["version"]
+    wheel = ROOT / "dist" / f"{name}-{version}-py3-none-any.whl"
+    wheel_url = _copy_asset(wheel, "wheels")
+    if wheel_url is None:
+        raise SystemExit(
+            f"{wheel} not found -- run `pixi run wheel` to build it (CI builds it in "
+            f"deploy-site.yml before scripts/gen_site_pages.py). pyproject.toml declares "
+            f"{name} {version}; a wheel built before a version bump will not match this name.")
+    # A version bump changes this filename, so a previous version's wheel would otherwise sit in
+    # the assets directory forever and ship alongside the current one -- every other asset on this
+    # site has a stable name and is simply overwritten. Cleared AFTER the copy, so a failed copy
+    # never leaves the directory empty of both.
+    for stale in (ASSETS / "wheels").glob(f"{name}-*.whl"):
+        if stale.name != wheel.name:
+            stale.unlink()
+
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    block, n_parcels = bundle["block_id"], len(bundle["parcels"])
+    # The picture is baked from one artifact and the caption read from another; a re-bake that
+    # moved either to a different block would otherwise caption one block with another's numbers.
+    graph = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
+    if graph["block_id"] != block:
+        raise SystemExit(
+            f"the reused panel is block {graph['block_id']} but the caption reads block {block} "
+            f"from examples/authoring/block.json -- re-bake one of them so they agree")
+
+    attrs = f'data-widget="draw-road" data-bundle="{bundle_url}" data-wheel="{wheel_url}"'
+    caption = (
+        f"Block <code>{block}</code>, {n_parcels} parcels, drawn with no roads &mdash; the state "
+        f"the widget starts from. Other figures on this site either replay an answer baked in "
+        f"advance or recompute one in the site&rsquo;s own TypeScript; this is the only one that "
+        f"installs this project into the browser and asks it directly, so the number it gives "
+        f"back comes from the same solver the rest of this page describes."
+    )
+    return _figure(img_url, f"the egress graph on block {block} with no roads, ready to draw on",
+                   caption, attrs=attrs)
 
 
 # ---------------------------------------------------------- the Frontier widget's mount point
@@ -1387,6 +1478,7 @@ MARKERS: dict[str, Callable[[], str]] = {
     # both go through `_perm_graph_panel`, so the two pages cannot quote perm_graph.json two
     # different ways.
     "PERMGRAPHWIDGET": _perm_graph_widget_figure,
+    "DRAWROAD": _draw_road_figure,
     "DISPFIELD": _displacement_field_figure,
     # Already called directly by `gen_benchmark_section()`; registering it here changes nothing
     # there and makes the same figure available to a partial (Explore's Methods stage).
@@ -1425,19 +1517,21 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
     page nested `depth` levels below docs/ needs ../ per level; MkDocs then rewrites the output
     URL itself.
 
-    `url_depth` -- raw HTML `src="assets/..."`, `href="assets/..."` and every `data-bundle*`
-    mount-point attribute (the widget's own fetch URL -- same rule, it is raw HTML too):
-    `data-bundle` for every widget with one bundle, plus `data-bundle-capetown` and
-    `data-bundle-nairobi` for ScreenMap's two. All are inside the <figure> blocks. MkDocs does NOT
-    touch raw HTML, so these must already be correct against the page's SERVED url. With
-    use_directory_urls, results/frontier.md is served at <base>/results/frontier/ and
-    methodology/methods/peel.md at <base>/methodology/methods/peel/, so the served depth is not
-    the same as the source depth -- results/frontier.md is depth 1 but url_depth 2. Getting this
-    wrong 404s every figure -- or, for a data-bundle* attribute, silently fails the widget's fetch
-    -- on that page. Each bundle attribute name needs its OWN `.replace()` here:
-    `data-bundle="assets/` is not a substring of `data-bundle-capetown="assets/`, so the single
-    pre-existing line for plain `data-bundle=` does not also rewrite the two suffixed names --
-    ScreenMap's own trap, guarded by `tests/test_gen_site_pages.py`."""
+    `url_depth` -- raw HTML `src="assets/..."`, `href="assets/..."` and every `data-bundle*`/
+    `data-wheel` mount-point attribute (the widget's own fetch URL -- same rule, it is raw HTML
+    too): `data-bundle` for every widget with one bundle, `data-bundle-capetown` and
+    `data-bundle-nairobi` for ScreenMap's two, and `data-wheel` for DrawRoad's wheel URL. All are
+    inside the <figure> blocks. MkDocs does NOT touch raw HTML, so these must already be correct
+    against the page's SERVED url. With use_directory_urls, results/frontier.md is served at
+    <base>/results/frontier/ and methodology/methods/peel.md at
+    <base>/methodology/methods/peel/, so the served depth is not the same as the source depth --
+    results/frontier.md is depth 1 but url_depth 2. Getting this wrong 404s every figure -- or,
+    for a data-bundle*/data-wheel attribute, silently fails the widget's fetch -- on that page.
+    Each attribute name needs its OWN `.replace()` here: `data-bundle="assets/` is not a substring
+    of `data-bundle-capetown="assets/` or of `data-wheel="assets/`, so the single pre-existing
+    line for plain `data-bundle=` does not also rewrite the suffixed names or `data-wheel` --
+    ScreenMap's own trap, sprung again by DrawRoad's `data-wheel` and guarded the same way by
+    `tests/test_gen_site_pages.py`."""
     # YAML front matter, when given, sets the page's nav label. Without it MkDocs derives the
     # label from the FILENAME -- "clearance_looped" became "Clearance looped" in the sidebar, not
     # "Looped Tree" -- because it does not read the H1 for nav purposes. Emitting the title here
@@ -1454,6 +1548,7 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
         text = text.replace('data-bundle="assets/', f'data-bundle="{up}assets/')
         text = text.replace('data-bundle-capetown="assets/', f'data-bundle-capetown="{up}assets/')
         text = text.replace('data-bundle-nairobi="assets/', f'data-bundle-nairobi="{up}assets/')
+        text = text.replace('data-wheel="assets/', f'data-wheel="{up}assets/')
     path.write_text(text, encoding="utf-8")
 
 

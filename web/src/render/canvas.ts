@@ -1,5 +1,36 @@
-import type { Bundle } from "../bundle.js";
+import type { Encoding } from "../bundle.js";
 import { toScreen, type View } from "../view/transform.js";
+
+/** Exactly the fields `draw` reads, and nothing else.
+ *
+ * `Bundle` (bundle.d.ts, generated) satisfies this structurally, so PermGraph keeps handing `draw`
+ * its fetched bundle unchanged. The narrower type exists for DrawRoad, which has no fetched
+ * `Bundle` to hand over: it SYNTHESISES its picture from the authoring bundle's road-invariant
+ * halves plus the two arrays Pyodide returns (draw-road.ts). Against `Bundle` it would have to
+ * invent a `method` name and a `lens_b_index` for a road that belongs to no method and no prefix
+ * table -- values of the right type carrying no meaning, in a shape whose other fields are all
+ * real. Declaring what `draw` consumes is what removes them.
+ *
+ * `prefix` carries only the two per-prefix arrays `draw` indexes; `Bundle.prefix`'s
+ * `permeability`/`road_m` are the caption's numbers, never the picture's. */
+export interface Drawable {
+  /** One entry per RING, not per parcel -- `draw` strokes each entry as a closed outline and never
+   * asks which parcel it belongs to. `Bundle.parcels` happens to be one ring per parcel (its baker
+   * calls `polygon_ring`, which raises on a parcel with holes), and DrawRoad flattens the
+   * authoring bundle's per-parcel ring lists into the same flat list. Both draw identically. */
+  parcels: [number, number][][];
+  /** The block's exterior ring, and the only ring `draw` strokes for the boundary. Neither
+   * producer hands it a block WITH interior rings: `scripts/_bundle_io.py`'s `polygon_ring`
+   * RAISES on one rather than dropping the holes ("report this instead of silently dropping
+   * geometry"), and `draw-road.ts` refuses the same shape at boot for the same reason. */
+  boundary: [number, number][];
+  streets: [number, number][][];
+  nodes: { cx: number[]; cy: number[]; ground_g: number[] };
+  edges: { rows: number[]; cols: number[]; footpath_g: number[]; first_upgraded_at: number[] };
+  roads: { coords: [number, number][]; width_m: number }[];
+  prefix: { potential: number[][]; current: number[][] };
+  encoding: Encoding;
+}
 
 /** Resize the backing store for devicePixelRatio, to the CSS-pixel box the caller measured.
  *
@@ -24,7 +55,7 @@ function rampColor(ramp: string[], t: number): string {
 
 export interface Frame { view: View; prefix: number; layer: "conductance" | "current"; halos: boolean }
 
-export function draw(ctx: CanvasRenderingContext2D, b: Bundle, f: Frame,
+export function draw(ctx: CanvasRenderingContext2D, b: Drawable, f: Frame,
                      size: { width: number; height: number }): void {
   const e = b.encoding;
   ctx.clearRect(0, 0, size.width, size.height);
@@ -153,7 +184,7 @@ export function draw(ctx: CanvasRenderingContext2D, b: Bundle, f: Frame,
 /** Matches `np.median` (src/reblock/render.py:347-349): the average of the two middle values on
  * an even-length array, not just the upper-middle one -- otherwise the widget's node radius
  * quietly diverges from the PNG's whenever the edge count happens to be even. */
-function medianEdgeLength(b: Bundle): number {
+function medianEdgeLength(b: Drawable): number {
   const ds = b.edges.rows.map((ri, k) => {
     const ci = b.edges.cols[k]!;
     return Math.hypot(b.nodes.cx[ri]! - b.nodes.cx[ci]!, b.nodes.cy[ri]! - b.nodes.cy[ci]!);

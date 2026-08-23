@@ -12,12 +12,18 @@
     // `[...new URLSearchParams(...)]` needs it: without it, TS2488 ("must have a
     // '[Symbol.iterator]()' method") on that spread.
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    // Empty on purpose: this config type-checks browser widget code only (see "include"
-    // below). Leaving "types" empty keeps Node's ambient globals (process, fs, Buffer, ...)
-    // out of the checked surface, so widget code that reaches for a Node API fails tsc
-    // instead of type-checking cleanly and only failing at runtime in a browser. The test
-    // suite needs Node's globals and gets them from tsconfig.test.json instead.
-    "types": []
+    // "emscripten", not [] as this used to read: this config type-checks browser widget code
+    // only (see "include" below), and used to carry no ambient globals at all, deliberately
+    // keeping Node's (process, fs, Buffer, ...) out of the checked surface so widget code that
+    // reaches for a Node API fails tsc instead of type-checking cleanly and only failing at
+    // runtime in a browser -- the test suite gets Node's globals from tsconfig.test.json
+    // instead. Emscripten's globals are different: `pyodide`'s own pyodide.d.ts references the
+    // ambient `FS` type from `@types/emscripten` (a real dependency of the `pyodide` package,
+    // see its package.json), and Emscripten's FS API is something `web/src/py/runtime.ts`
+    // legitimately runs IN THE BROWSER through Pyodide -- unlike Node's globals, it belongs in
+    // this program. `@types/emscripten` is pinned explicitly in package.json rather than relied
+    // on as a side effect of `pyodide` merely depending on it.
+    "types": ["emscripten"]
   },
   "include": ["src"]
 }

@@ -47,6 +47,16 @@ topology = { path = "ext/topology", editable = true }
 
 # Dev-only tooling, kept out of the runtime dependency set.
 [tool.pixi.feature.dev.dependencies]
+# The PEP 517 backend the `wheel` task below builds with. Declared here, and the task passes
+# --no-build-isolation, so building the wheel resolves nothing from PyPI: `pixi run test-py`
+# depends on that task, so without this every test run -- and every CI gate -- would need the
+# network to fetch an UNPINNED hatchling into a throwaway build env. Declared here it comes from
+# the lock file like everything else, and the deploy workflow pins the same version explicitly so
+# the two build paths produce a byte-identical wheel.
+hatchling = "*"
+# `python -m pip` needs pip IN the environment. Without it the wheel task falls back to a
+# pip found on PATH -- outside this environment, blind to the hatchling above.
+pip = "*"
 mypy = "*"
 pytest = "*"
 pytest-cov = "*"
@@ -96,13 +106,26 @@ default = { features = ["dev", "research"], solve-group = "default" }
 # web/'s transform.ts unit tests otherwise run only when a human types `npm test` by hand. CI
 # (.github/workflows/ci.yml) invokes `pixi run test`, so folding web-test in here is what puts
 # those tests on the gate -- with no new CI step for a future workflow edit to forget.
-test-py = "pytest"
+# The reblock wheel `micropip` installs into DrawRoad's Pyodide runtime (web/src/widgets/
+# draw-road.ts's `data-wheel`) and the same wheel web/test/pyodide-parity.test.ts loads from
+# `dist/` under Node. `dist/` is gitignored, so a fresh checkout has none, and
+# gen_site_pages.py's DRAWROAD producer raises rather than emit a page pointing at a wheel that
+# was never built -- tests/test_gen_site_pages.py renders every partial through every producer, so
+# `test-py` would fail on any checkout that had not built the wheel without this dependency.
+# `web/scripts/test.sh` builds the SAME wheel again for its own leaf (`web-test`, below): the two
+# tasks give no ordering between them, so a bare `npm test` from web/ has to stay self-sufficient
+# rather than rely on `test-py` having already built it (see that script's own comment).
+# `python -m pip`, never bare `pip`: a bare `pip` resolves off PATH and on a machine with a
+# conda/venv base on it that is a pip from OUTSIDE this environment, which cannot see the
+# hatchling declared above and fails --no-build-isolation outright. `python` is the env's own.
+wheel = "python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist ."
+test-py = { cmd = "pytest", depends-on = ["wheel"] }
 web-test = { cmd = "npm ci && npm test", cwd = "web" }
 test = { depends-on = ["test-py", "web-test"] }
 # NOTE: these explicit file arguments OVERRIDE `[tool.mypy] files` entirely -- a module
 # listed there and not here is NOT checked by the gate. tests/test_typecheck_config.py
 # pins the two lists together.
-typecheck-py = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py scripts/_default_road.py scripts/_bundle_io.py scripts/gen_displacement_field.py scripts/gen_web_bundle.py scripts/gen_frontier_bundle.py scripts/gen_region_grow.py scripts/gen_screen_map.py"
+typecheck-py = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py scripts/_default_road.py scripts/_bundle_io.py scripts/gen_displacement_field.py scripts/gen_web_bundle.py scripts/gen_frontier_bundle.py scripts/gen_region_grow.py scripts/gen_screen_map.py scripts/gen_authoring_block.py web/src/py/solve.py"
 web = { cmd = "npm ci && npm run build", cwd = "web" }
 web-check = { cmd = "npm ci && npm run check", cwd = "web" }
 typecheck = { depends-on = ["typecheck-py", "web-check"] }
@@ -132,7 +155,7 @@ files = ["src", "tests", "scripts/crossblock_probe.py", "scripts/calibrate_perme
          "scripts/perf/records.py", "scripts/perf/region_cap_report.py", "scripts/_default_road.py",
          "scripts/gen_web_bundle.py", "scripts/gen_frontier_bundle.py",
          "scripts/_bundle_io.py", "scripts/gen_displacement_field.py", "scripts/gen_region_grow.py",
-         "scripts/gen_screen_map.py"]
+         "scripts/gen_screen_map.py", "scripts/gen_authoring_block.py", "web/src/py/solve.py"]
 # topology is installed via a PEP 660 "strict" editable install, whose .pth
 # registers a sys.meta_path finder at runtime rather than a plain sys.path
 # entry — mypy's static .pth scan can't see through that, so point it at the

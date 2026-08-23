@@ -59,6 +59,59 @@
 # widgets-bundle.test.ts would happily evaluate yesterday's successful build instead.
 npm run build || exit 1
 
+# Why build the reblock wheel here as well? test/pyodide-parity.test.ts boots the pinned Pyodide
+# for real and has micropip install ../dist/reblock-0.1.0-py3-none-any.whl into it -- the same
+# self-sufficiency argument as the esbuild bundle above, and the same staleness hazard, sharpened:
+# dist/ is gitignored, so a fresh checkout has NO wheel (the test says so by name and prints this
+# command), and a checkout that already has one would otherwise have the parity test measure
+# whatever src/reblock looked like when that wheel was last built rather than what it looks like
+# now -- which is the one thing a parity guard must not do.
+#
+# This invokes pyproject.toml's `wheel` task rather than repeating its command, so the flags and
+# the output directory live in exactly one place; `pixi run` (not a bare task runner) so this
+# works from a plain shell as well as from `pixi run test`, and nesting it inside an outer `pixi
+# run` was measured to work. The task writes to the project's own dist/, which is what
+# pyodide-parity.test.ts's own WHEEL constant resolves to as ../dist from web/.
+#
+# Micropip never tries to resolve the scientific stack from PyPI because [project] dependencies is
+# empty: the built wheel's METADATA carries no Requires-Dist at all (unzipped and checked), so
+# there is nothing to resolve. The task's own --no-deps does not affect that -- a flag on `pip
+# wheel` cannot alter metadata pip already wrote from pyproject.toml -- it only stops pip writing
+# dependency wheels into dist/ alongside reblock's own, which matters if dependencies ever stops
+# being empty.
+pixi run wheel || exit 1
+
+# Why is the Pyodide parity test on this gate rather than in a job of its own? MEASURED (Node
+# v24.12.0, this machine, five fresh warm runs): one full boot -- loadPyodide, the seven
+# loadPackage packages, micropip, the wheel install and solve.py's module body -- costs 8.9-9.3 s
+# with the distribution's wheels already cached in node_modules/pyodide/; a single cold run, when
+# loadPackage fetches ~48 MB from jsDelivr and caches them there, cost 11.2 s. The whole file,
+# which boots a second minimal interpreter for its pandas-version assertion, runs in 12.2-12.5 s
+# warm (six runs) and cost 14.6 s cold (single run). These are single-machine figures, not a
+# calibrated benchmark -- read them as an order of magnitude, not to the tenth of a second. This
+# piece's plan set 90 s as the cost at which the test earns its own npm script and its own CI job;
+# 15 s is not close to it even at the high end of the spread, so it runs here with everything else
+# and is deselected nowhere. Two consequences worth knowing rather than rediscovering:
+#
+#  1. `pixi run test` reaches this through `npm ci`, which DELETES node_modules -- so CI pays the
+#     cold number every run, and needs a network to do it. That network dependency is on
+#     jsDelivr's AVAILABILITY, not its integrity: every package entry in the version-locked
+#     `pyodide-lock.json` carries its own sha256 (checked: it matches the cached wheel's bytes on
+#     disk). Pyodide's BROWSER loader enforces that hash through `fetch`'s native `integrity`
+#     option (read directly out of `node_modules/pyodide/pyodide.mjs`) -- so for what actually
+#     ships to a reader, a compromised or drifted CDN cannot silently substitute bytes. That
+#     protection does NOT reach this test, though: Node's own binary-fetch path in the same loader
+#     takes the hash as an argument and never reads it. CONFIRMED by corrupting a cached wheel on
+#     disk and loading it anyway -- `loadPackage` accepted it, and the only failure was Python's
+#     zipfile hitting the corrupted bytes later, not a hash mismatch. So a compromised CDN could
+#     substitute bytes into THIS suite's run without either Pyodide or this test noticing; it is
+#     only the shipped browser build the sha256 protects.
+#  2. The wheels `loadPackage` fetches come from exactly `https://cdn.jsdelivr.net/pyodide/
+#     v0.29.2/full/` -- the same path `PYODIDE_INDEX_URL` names, hardcoded in the loader off its
+#     own version constant rather than read from the lockfile (also read directly out of
+#     `pyodide.mjs`). So this test and a real browser install byte-identical package wheels; only
+#     the interpreter core comes from the npm devDependency rather than the CDN.
+
 OUTDIR=$(mktemp -d)
 tsc -p tsconfig.test.json --outDir "$OUTDIR" --noEmit false
 mapfile -d '' -t files < <(find "$OUTDIR/test" -name '*.test.js' -print0)
