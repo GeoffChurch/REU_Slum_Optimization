@@ -577,16 +577,34 @@ none blocks on a later one.
 `displacement_curve`'s 20-point sweep) per block per method — R permeability solves each. Wall-clock,
 not effort; start it before C needs it.
 
-- **`examples/nairobi/README.md` has drifted from its artifacts.** It claims **89 blocks** for
-  `multiblock_density_compactness` (lines 13 and 19); every live `meta.json` says
-  `region_members: 43` (the other two variants are 1 and 7). Almost certainly the regeneration at
-  raised budgets (df83408) against a hand-written table nobody updated — the same
-  typed-number-drifts-from-artifact defect the site truth pass just fixed, one directory over. The
-  surrounding narrative ("tiny blocks take 89 to fill it") needs rewording, not a numeral swap, and
-  the file has not been audited for other stale figures. **Better fix than a correction:** generate
-  it, the way `scripts/gen_example_readme.py` already generates the `multiblock_*` variant READMEs —
-  that closes the drift class instead of one instance. `examples/screen-bakeoff/README.md` is
-  hand-written for the same reason and has the same exposure.
+- **`examples/nairobi/README.md` had drifted from its artifacts. RESOLVED 2026-08-23** — by
+  deleting the claims rather than generating them. It said **89 blocks** for
+  `multiblock_density_compactness` where every live `meta.json` says `region_members: 43`, and the
+  root `README.md` and `examples/README.md` both said **142 bldg/ha** against a live 145.7.
+
+  The first plan here was to generate both index READMEs the way `gen_example_readme.py` generates
+  the per-variant ones. That was the wrong fix, and the owner said so: the site already carries all
+  of it — `results/frontier.md`, `results/bakeoff.md` and `results/nairobi.md` build their tables
+  from these same artifacts, and their partials forbid a typed count outright. Generating a second,
+  worse copy would have bought machinery to keep a duplicate honest.
+
+  So the three hand-written showcases were cut to navigation and reproduction — what a directory
+  holds, how to regenerate it, and a link to the page that states the results. **The drift-prone
+  numbers stopped existing rather than being machine-maintained.** The per-variant
+  `multiblock_*/README.md` files are untouched: already generated, already drift-free, and useful
+  in place because they document their own run.
+
+  The general lesson, worth applying before writing another generator: when a number drifts, ask
+  whether the file should be asserting it at all. A repo directory listing and a rendered exposé
+  are different jobs, and only one of them needs the number.
+
+- **`examples/screen-bakeoff/README.md` still has the same exposure** — hand-written, and it quotes
+  precision figures out of `screen_comparison.csv` (checked 2026-08-23: 81.7% and 62.8% both still
+  match the CSV, so it is correct today, not drifted). Unlike the two index READMEs it is a genuine
+  write-up rather than a directory listing, so the fix is not the same: either let
+  `results/bakeoff.md` be the write-up and cut this to a stub, or generate it. Decide which before
+  the numbers move; a hand-written file quoting four figures from a CSV is drift waiting for a
+  re-bake.
 
 ## Retrieval may be the wrong problem: donor QUALITY is predictable, MATCHING is not (2026-08-02)
 
