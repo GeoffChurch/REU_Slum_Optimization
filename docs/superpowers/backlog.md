@@ -528,10 +528,50 @@ none blocks on a later one.
     by every canvas boot test. E's store gets tested through it, not through a new fake.
     `FakeResizeObserver.observe()` is a no-op; tests drive the first observation with an explicit
     `fireResize()` after `mount()`'s await resolves.
-- **F — draw-your-own-road.** Pinned Pyodide (`indexURL` with an explicit version — `geopandas`,
-  `pyproj` and `shapely` have twice fallen out of the distribution), lazy-booted on click. Add the CI
-  guard the spec specifies: assert `reblock.permeability`'s import closure stays inside the
-  Pyodide-available set, or the explorer dies silently while every test still passes.
+- **F — draw-your-own-road. SHIPPED** (PRs #64/#65, merged 2026-08-23; spec
+  `specs/2026-08-22-draw-your-own-road-design.md`). Pinned Pyodide v0.29.2, lazy-booted on click; the
+  reader draws a road and the browser rebuilds a real `Block` and calls `reblock.permeability` itself.
+  Live at `/methodology/permeability/`.
+
+  *This bullet used to say `geopandas`, `pyproj` and `shapely` "have twice fallen out of the
+  distribution".* Measured against seven releases' lockfiles: `geopandas` and `pyproj` are absent at
+  0.28.0, 0.29.0 and 0.29.1 and present either side; **`shapely` never disappears**. One span, two
+  packages — not two spans, three packages. Both specs were corrected during the piece and this copy
+  was missed, which is the whole reason the claim needed measuring rather than repeating.
+
+  The guard shipped as something stronger than the specified import-closure scan: `web/test/
+  pyodide-parity.test.ts` boots the real pinned runtime under Node, installs the real wheel, and
+  checks its answers against CPython's — catching the two things a static scan cannot (a transitive
+  import arriving via pandas, and a deferred import inside a function).
+
+  **It found a real disagreement on its first run:** `crossing` matches CPython to the last bit,
+  `spur` differs by 2.220446e-16 — four units in the last place. Deterministic, and it reproduced
+  identically on GitHub's runner, so the tolerance is a stated 1e-15.
+
+  **And the fix for THAT taught the sharper lesson:** `tests/test_solve_py.py` asserted *exact*
+  equality between a fresh CPython solve and the baked reference. It passed on one GitHub runner and
+  failed on another minutes later (2.2e-16 on `crossing`) — `permeability` ends in a sparse solve and
+  the BLAS kernel depends on the CPU. **CPython's own answer is machine-dependent.** That test now
+  carries a stated 1e-12. Anything comparing a freshly computed float against a committed one is
+  comparing across machines, and exact equality there is a latent red build, not a strict guard.
+
+  Three findings were adjudicated as not worth fixing during the piece and are parked here:
+
+  - **The wheel version `0.1.0` is a typed literal at three sites in `web/`**, while the Python side
+    derives it from `pyproject.toml` (a stray file in gitignored `dist/` had silently become the
+    wheel URL the published page served). Kept as typed because the failure modes differ: the Python
+    site substituted quietly, every `web/` site fails loudly on a missing file the moment the suite
+    runs. Worth closing when `web/` next needs a build-time read of `pyproject.toml` for another
+    reason; not worth a bespoke generator alone.
+  - **Ruling 5's parameter guard cannot see `min_road_width_m`** — the one field `solve.py` builds
+    the reader's road from — because `load_permeability_config` never reads it, and
+    `conf/permeability.yaml`'s value is read by nothing repo-wide. Pre-existing, disclosed in both
+    the baker and its test. Fixing it means deciding whether that key should exist at all, which is a
+    question about the config surface rather than about this widget.
+  - **Design §6's "a zero-length segment is refused before it reaches the runtime"** holds in
+    `settle()` but the drag path bypasses `withoutRepeats`. Verified harmless — shapely and
+    `edge_conductances` both tolerate a repeated vertex — so the code is right and only the sentence
+    is over-general.
 
 **Long pole, independent of A:** the bundle needs a *full* prefix table (every `m`, not
 `displacement_curve`'s 20-point sweep) per block per method — R permeability solves each. Wall-clock,
