@@ -70,8 +70,8 @@ npm run build || exit 1
 # This invokes pyproject.toml's `wheel` task rather than repeating its command, so the flags and
 # the output directory live in exactly one place; `pixi run` (not a bare task runner) so this
 # works from a plain shell as well as from `pixi run test`, and nesting it inside an outer `pixi
-# run` was measured to work. The task writes to the project's own dist/, which is the ../dist
-# this script's WHEEL path names from web/.
+# run` was measured to work. The task writes to the project's own dist/, which is what
+# pyodide-parity.test.ts's own WHEEL constant resolves to as ../dist from web/.
 #
 # Micropip never tries to resolve the scientific stack from PyPI because [project] dependencies is
 # empty: the built wheel's METADATA carries no Requires-Dist at all (unzipped and checked), so

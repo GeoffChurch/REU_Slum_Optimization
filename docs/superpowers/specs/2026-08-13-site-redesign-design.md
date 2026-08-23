@@ -120,11 +120,13 @@ loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.29.2/full/" })
 ```
 
 jsDelivr serves immutable versioned paths, so a future Pyodide release cannot reach a pinned URL.
-**Measured across every release** (`pyodide-lock.json` at each pinned path): `geopandas` and
-`pyproj` are present in 0.26.4, 0.27.0 and 0.27.7, **absent in 0.28.0**, and present again in
-0.29.2. `shapely` is present in every one of them. So the disappearance is **two packages in one
-release**, not three across two — and it is still the reason to pin, because the two that vanished
-are load-bearing here.
+**Measured at seven pinned paths** (`pyodide-lock.json` at each): `geopandas` and `pyproj` are
+present in 0.26.4, 0.27.0 and 0.27.7, **absent in 0.28.0, 0.29.0 and 0.29.1**, and present again in
+0.29.2. `shapely` is present in every one of them. So the disappearance is **two packages, absent at
+three of the seven paths measured**, not three packages across two releases — and it is still the
+reason to pin, because the two that vanished are load-bearing here. Whether a release between 0.28.0
+and 0.29.1 that was not fetched also lacks them is unmeasured; the seven above are what was
+checked.
 
 (This paragraph originally said `geopandas` was removed in 0.27 and all three were disabled in 0.28.
 Piece F measured it against every release's lockfile on 2026-08-22 and neither half held. Corrected
