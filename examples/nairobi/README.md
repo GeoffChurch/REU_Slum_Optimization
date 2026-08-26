@@ -1,26 +1,26 @@
 # Nairobi examples
 
-The same screen → grow region → **frontier** pipeline as the [Cape Town multiblock
-examples](../README.md), run on **central Nairobi** — the country-wide Kenya kblock data clipped to
-the Nairobi metro bbox + Open Buildings (`data=nairobi_full`, ~16,200 blocks, auto-downloaded to
-`~/.cache/reblock`). Each variant is driven end to end by one composable `BlockMetric`; regenerate
-with `pixi run python -m scripts.gen_example <variant> nairobi`.
+Run outputs only. Each subdirectory holds one variant's figures, lens CSVs, `run.log`, and a
+generated `README.md` describing that run — written from its own `meta.json`, so its numbers cannot
+drift from the data they describe.
 
-| variant | metric | region | osm baseline |
-|---|---|---|---|
-| [multiblock_depth](multiblock_depth/) | `depth` | **1 block** — a single giant deep block (~4.6 km²) | yes (76 mapped ways) |
-| [multiblock_depth_density](multiblock_depth_density/) | `depth × density` | 7 blocks | yes (94 ways) |
-| [multiblock_density_compactness](multiblock_density_compactness/) | `density × compactness = n/P²` | **89 blocks** — tiny dense blocks | — (OSM has ~no footpaths mapped there) |
+**What these show, written up properly:**
+[Second city: Nairobi](https://geoffchurch.github.io/REU_Slum_Optimization/results/nairobi/).
+That page builds its variant table from these directories' own artifacts and explains what carries
+over from Cape Town and what does not. It is the exposé; this file is the map.
 
-**Nairobi is messier than Cape Town — shipped as-is.** Two things don't transfer from Cape Town:
+**Regenerate a variant:**
 
-- **Region sizes.** Nairobi's blocks are bimodal (giant + tiny), so the Cape-Town-tuned 3000-building
-  region budget yields wildly different regions: the `depth` seed is one giant block that alone
-  exceeds the budget (a 1-block "multiblock"), while `density_compactness`'s tiny blocks take 89 to
-  fill it (a few are skipped for invalid cadastral geometry). No single budget fixes both.
-- **OSM coverage.** The `depth`/`depth_density` regions have usable mapped footpaths, but the
-  `density_compactness` region has essentially none, so its frontier grades only the
-  synthesized methods (no as-built `osm_footpaths` line).
+```bash
+pixi run python -m scripts.gen_example <variant> nairobi
+```
 
-The screens and metric behaviour carry over cleanly; the region-growth tuning and OSM coverage are
-what differ. Building points and dimmed surrounding blocks are overlaid on every heatmap.
+where `<variant>` is the metric name — the subdirectory names below are `multiblock_<variant>`. Each
+variant's own `meta.json` records the exact command that produced it.
+
+- [`multiblock_depth/`](multiblock_depth/)
+- [`multiblock_depth_density/`](multiblock_depth_density/)
+- [`multiblock_density_compactness/`](multiblock_density_compactness/)
+
+Source data is Kenya kblock clipped to the Nairobi metro bounding box plus Open Buildings
+(`data=nairobi_full`), auto-downloaded to `~/.cache/reblock` on first use.

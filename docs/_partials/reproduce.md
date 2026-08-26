@@ -7,15 +7,17 @@
      from README.md's own Setup and Quickstart sections, not from a run artifact, so there is
      nothing on disk for a producer to read. They are commands, not prose claims of quantity, so
      ruling F15 (no number-words asserting a list length) does not bind them -- but they must still
-     be checked against the CURRENT CLI, not copied blindly. As of this writing, README.md's own
-     quickstart commands still type `method=dijkstra`; `dijkstra` was deleted 2026-07-22
+     be checked against the CURRENT CLI, not copied blindly. `dijkstra` was deleted 2026-07-22
      (docs/superpowers/plans/2026-07-22-remove-dijkstra-and-mesh.md, commit 770f650) and
-     conf/config.yaml's default method is now `clearance` -- confirmed live: `method=dijkstra`
-     errors "Could not find 'method/dijkstra'" against today's conf/method/. The commands below use
-     `method=clearance` instead, verified by running the single-block command end to end and by
-     composing the whole-city one with `--cfg job`. README.md itself was intentionally NOT touched
-     here (out of this task's file list) -- flagged to the owner instead, the same way T10 flagged
-     examples/nairobi/README.md's stale block count rather than half-fixing an unaudited file.
+     conf/config.yaml's default method is now `clearance`, so the commands below use
+     `method=clearance`, verified by running the single-block command end to end and by composing
+     the whole-city one with `--cfg job`.
+
+     This comment used to add that README.md's own quickstart "still types method=dijkstra", and
+     that examples/nairobi/README.md carried a stale block count. Both were true when written and
+     neither is now: README.md types no dijkstra anywhere, and the two hand-written index READMEs
+     were cut down to navigation and reproduction, with the results they used to restate left to
+     the site pages that generate them from the artifacts.
 
      No typed counts, percentages, or thresholds anywhere in the rendered prose below -- digit or
      spelled-out word -- except inside the commands themselves, which ruling F15 exempts. -->

@@ -528,25 +528,83 @@ none blocks on a later one.
     by every canvas boot test. E's store gets tested through it, not through a new fake.
     `FakeResizeObserver.observe()` is a no-op; tests drive the first observation with an explicit
     `fireResize()` after `mount()`'s await resolves.
-- **F — draw-your-own-road.** Pinned Pyodide (`indexURL` with an explicit version — `geopandas`,
-  `pyproj` and `shapely` have twice fallen out of the distribution), lazy-booted on click. Add the CI
-  guard the spec specifies: assert `reblock.permeability`'s import closure stays inside the
-  Pyodide-available set, or the explorer dies silently while every test still passes.
+- **F — draw-your-own-road. SHIPPED** (PRs #64/#65, merged 2026-08-23; spec
+  `specs/2026-08-22-draw-your-own-road-design.md`). Pinned Pyodide v0.29.2, lazy-booted on click; the
+  reader draws a road and the browser rebuilds a real `Block` and calls `reblock.permeability` itself.
+  Live at `/methodology/permeability/`.
+
+  *This bullet used to say `geopandas`, `pyproj` and `shapely` "have twice fallen out of the
+  distribution".* Measured against seven releases' lockfiles: `geopandas` and `pyproj` are absent at
+  0.28.0, 0.29.0 and 0.29.1 and present either side; **`shapely` never disappears**. One span, two
+  packages — not two spans, three packages. Both specs were corrected during the piece and this copy
+  was missed, which is the whole reason the claim needed measuring rather than repeating.
+
+  The guard shipped as something stronger than the specified import-closure scan: `web/test/
+  pyodide-parity.test.ts` boots the real pinned runtime under Node, installs the real wheel, and
+  checks its answers against CPython's — catching the two things a static scan cannot (a transitive
+  import arriving via pandas, and a deferred import inside a function).
+
+  **It found a real disagreement on its first run:** `crossing` matches CPython to the last bit,
+  `spur` differs by 2.220446e-16 — four units in the last place. Deterministic, and it reproduced
+  identically on GitHub's runner, so the tolerance is a stated 1e-15.
+
+  **And the fix for THAT taught the sharper lesson:** `tests/test_solve_py.py` asserted *exact*
+  equality between a fresh CPython solve and the baked reference. It passed on one GitHub runner and
+  failed on another minutes later (2.2e-16 on `crossing`) — `permeability` ends in a sparse solve and
+  the BLAS kernel depends on the CPU. **CPython's own answer is machine-dependent.** That test now
+  carries a stated 1e-12. Anything comparing a freshly computed float against a committed one is
+  comparing across machines, and exact equality there is a latent red build, not a strict guard.
+
+  Three findings were adjudicated as not worth fixing during the piece and are parked here:
+
+  - **The wheel version `0.1.0` is a typed literal at three sites in `web/`**, while the Python side
+    derives it from `pyproject.toml` (a stray file in gitignored `dist/` had silently become the
+    wheel URL the published page served). Kept as typed because the failure modes differ: the Python
+    site substituted quietly, every `web/` site fails loudly on a missing file the moment the suite
+    runs. Worth closing when `web/` next needs a build-time read of `pyproject.toml` for another
+    reason; not worth a bespoke generator alone.
+  - **Ruling 5's parameter guard cannot see `min_road_width_m`** — the one field `solve.py` builds
+    the reader's road from — because `load_permeability_config` never reads it, and
+    `conf/permeability.yaml`'s value is read by nothing repo-wide. Pre-existing, disclosed in both
+    the baker and its test. Fixing it means deciding whether that key should exist at all, which is a
+    question about the config surface rather than about this widget.
+  - **Design §6's "a zero-length segment is refused before it reaches the runtime"** holds in
+    `settle()` but the drag path bypasses `withoutRepeats`. Verified harmless — shapely and
+    `edge_conductances` both tolerate a repeated vertex — so the code is right and only the sentence
+    is over-general.
 
 **Long pole, independent of A:** the bundle needs a *full* prefix table (every `m`, not
 `displacement_curve`'s 20-point sweep) per block per method — R permeability solves each. Wall-clock,
 not effort; start it before C needs it.
 
-- **`examples/nairobi/README.md` has drifted from its artifacts.** It claims **89 blocks** for
-  `multiblock_density_compactness` (lines 13 and 19); every live `meta.json` says
-  `region_members: 43` (the other two variants are 1 and 7). Almost certainly the regeneration at
-  raised budgets (df83408) against a hand-written table nobody updated — the same
-  typed-number-drifts-from-artifact defect the site truth pass just fixed, one directory over. The
-  surrounding narrative ("tiny blocks take 89 to fill it") needs rewording, not a numeral swap, and
-  the file has not been audited for other stale figures. **Better fix than a correction:** generate
-  it, the way `scripts/gen_example_readme.py` already generates the `multiblock_*` variant READMEs —
-  that closes the drift class instead of one instance. `examples/screen-bakeoff/README.md` is
-  hand-written for the same reason and has the same exposure.
+- **`examples/nairobi/README.md` had drifted from its artifacts. RESOLVED 2026-08-23** — by
+  deleting the claims rather than generating them. It said **89 blocks** for
+  `multiblock_density_compactness` where every live `meta.json` says `region_members: 43`, and the
+  root `README.md` and `examples/README.md` both said **142 bldg/ha** against a live 145.7.
+
+  The first plan here was to generate both index READMEs the way `gen_example_readme.py` generates
+  the per-variant ones. That was the wrong fix, and the owner said so: the site already carries all
+  of it — `results/frontier.md`, `results/bakeoff.md` and `results/nairobi.md` build their tables
+  from these same artifacts, and their partials forbid a typed count outright. Generating a second,
+  worse copy would have bought machinery to keep a duplicate honest.
+
+  So the three hand-written showcases were cut to navigation and reproduction — what a directory
+  holds, how to regenerate it, and a link to the page that states the results. **The drift-prone
+  numbers stopped existing rather than being machine-maintained.** The per-variant
+  `multiblock_*/README.md` files are untouched: already generated, already drift-free, and useful
+  in place because they document their own run.
+
+  The general lesson, worth applying before writing another generator: when a number drifts, ask
+  whether the file should be asserting it at all. A repo directory listing and a rendered exposé
+  are different jobs, and only one of them needs the number.
+
+- **`examples/screen-bakeoff/README.md` still has the same exposure** — hand-written, and it quotes
+  precision figures out of `screen_comparison.csv` (checked 2026-08-23: 81.7% and 62.8% both still
+  match the CSV, so it is correct today, not drifted). Unlike the two index READMEs it is a genuine
+  write-up rather than a directory listing, so the fix is not the same: either let
+  `results/bakeoff.md` be the write-up and cut this to a stub, or generate it. Decide which before
+  the numbers move; a hand-written file quoting four figures from a CSV is drift waiting for a
+  re-bake.
 
 ## Retrieval may be the wrong problem: donor QUALITY is predictable, MATCHING is not (2026-08-02)
 
