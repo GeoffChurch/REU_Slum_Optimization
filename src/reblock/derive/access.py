@@ -22,14 +22,42 @@ from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from reblock.contracts import Block
 from reblock.derive.adjacency import parcel_adjacency
 
-# The `Block.streets` seam tolerance. `to_parcel_graph`'s
-# `clean_up_geometry(0.5, byblock=False)` step merges parcel vertices within
-# this many units, so anything gating that seam -- the peel's parcel-adjacency
-# and street-seeding here, and `TopologyMethod`'s street-edge matching (which
-# imports this same constant) -- must tolerate the same drift, or noisy real
-# boundary geometry silently under-matches. One constant so the two never
-# disagree.
-STREET_TOL = 0.5
+# The `Block.streets` seam tolerance: half a metre, plus one absolute epsilon for the float64 the
+# comparison is made in. `to_parcel_graph`'s `clean_up_geometry(0.5, byblock=False)` step merges
+# parcel vertices within half a unit, so anything gating that seam -- the peel's parcel-adjacency
+# and street-seeding here, and `TopologyMethod`'s street-edge matching (which imports this same
+# constant) -- must tolerate the same drift, or noisy real boundary geometry silently
+# under-matches. One constant so they never disagree. Being an epsilon MORE tolerant than the merge
+# step is harmless; being less would not be.
+#
+# ## Why the epsilon, and why absolute
+#
+# A distance is a difference of coordinates, so its error floor is set by COORDINATE magnitude, not
+# by the tolerance being tested. UTM tops out at the 1e7 m false northing and float64 carries
+# ~2.2e-16 relative precision, so a coordinate anywhere in any UTM zone arrives with ~2.2e-9 m of
+# representational noise before a single geometry operation runs. Measured on Cape Town's
+# EPSG:32734: max |coordinate| 6,237,723 m, one ULP 9.3e-10 m, and observed deviations at this very
+# threshold of 5.0e-10 m -- sub-ULP debris of the coordinate system, not a flaw in any calculation.
+#
+# A RELATIVE tolerance is the wrong instrument here and dangerously so: 1e-9 relative to 0.5 m is
+# 5e-10 m, which IS the observed noise, so the parameterisation invites a number that looks
+# conservative and does not cover the case. Anything tighter covers none of it.
+#
+# 1e-8 m is 4.5x the 2.2e-9 m bound and 7.7 orders of magnitude below the half metre it guards: it
+# cannot change a decision anyone means to make, only the ones nobody meant to make.
+#
+# ## Why it lives in the constant rather than at each comparison
+#
+# Several consumers hand `tol` straight to GEOS -- `STRtree.query(predicate="dwithin",
+# distance=tol)`, `snap(a, b, tol)` -- where there is no comparison of ours to intervene in. One
+# value that already carries the epsilon is the only form every consumer can honour, and it leaves
+# no second almost-identical constant for a call site to pick wrongly.
+#
+# This was not hypothetical: `euclidean_grid` trims to `street_buffer: 0.5`, exactly this
+# tolerance, so it parked every grid road on the knife edge and `_road_net` and
+# `street_connectivity` disagreed about three of nine of them.
+# See notes/2026-09-14-road-net-is-not-planarized.md.
+STREET_TOL = 0.5 + 1e-8
 
 
 class StreetConnectivity(NamedTuple):

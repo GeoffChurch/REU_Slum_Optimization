@@ -140,3 +140,42 @@ def test_disconnected_parcel_gets_layer_past_deepest() -> None:
     layers = parcel_access_layers(block, None)
     assert layers.loc[0] == 1
     assert layers.loc[1] == 2
+
+
+def test_street_adjacency_is_not_decided_by_sub_nanometre_noise() -> None:
+    """A road placed at exactly `STREET_TOL` must be street-connected, and stay that way under
+    perturbations far below any physical scale.
+
+    Distances are differences of coordinates, so the error floor is set by COORDINATE magnitude,
+    not by the tolerance. At a UTM northing of ~6.24e6 m one float64 ULP is 9.3e-10 m, so a
+    geometry pipeline delivers a nominal 0.5 m gap as 0.5 +/- ~1e-9 -- and a bare `d <= 0.5` then
+    decides street-adjacency on the 16th significant digit. `euclidean_grid` trims to
+    `street_buffer: 0.5`, exactly `STREET_TOL`, so it parks every grid road on that knife edge.
+
+    The property is STABILITY, not acceptance: whatever the answer is, moving a road by a
+    nanometre must not change it. A road genuinely past the tolerance is still refused, so this
+    cannot be satisfied by accepting everything.
+
+    FAULT INJECTION: dropping the absolute epsilon from `STREET_TOL` (i.e. `= 0.5`) makes the
+    verdicts differ across the perturbations and this fails with both True and False observed.
+    """
+    import math
+
+    from reblock.derive.access import STREET_TOL, street_connectivity
+
+    base_y = 6_237_723.123456789                      # a real Cape Town UTM 34S northing
+    assert math.ulp(base_y) > 1e-10, "fixture is vacuous: pick coordinates where an ULP is coarse"
+    street = gpd.GeoDataFrame(
+        geometry=[LineString([(260_000.0, base_y), (260_100.0, base_y)])], crs=UTM)
+
+    def connected(gap: float) -> bool:
+        y = base_y + gap
+        road = gpd.GeoDataFrame(
+            geometry=[LineString([(260_010.0, y), (260_090.0, y)])], crs=UTM)
+        return street_connectivity(street, road, STREET_TOL).connected_frac == 1.0
+
+    nominal = 0.5
+    verdicts = {connected(nominal + d) for d in (-1e-9, -5e-10, 0.0, 5e-10, 1e-9)}
+    assert verdicts == {True}, (
+        f"street-adjacency at the tolerance flipped under nanometre perturbation: {verdicts}")
+    assert not connected(0.6), "a road genuinely past the tolerance must still be refused"
