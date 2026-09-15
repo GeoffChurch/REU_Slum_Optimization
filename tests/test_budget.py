@@ -3,7 +3,6 @@ from typing import cast
 import geopandas as gpd
 import networkx as nx
 import pandas as pd
-import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, MultiLineString, Point, Polygon
 from shapely.ops import unary_union
