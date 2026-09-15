@@ -80,8 +80,9 @@ def test_version_bump_forces_a_miss(monkeypatch: pytest.MonkeyPatch) -> None:
     fn = _count(box)
     a = _Datum("a")
     dg.derive(fn, a)
-    # simulate a derivation-logic / lib change: version() returns a new tag
-    monkeypatch.setattr(dg, "version", lambda: ("CHANGED", "g", "p"))
+    # simulate a native-library change: env_version() returns a new tag. (A derivation-LOGIC
+    # change is no longer global -- see tests/test_code_closure.py.)
+    monkeypatch.setattr(dg, "env_version", lambda: ("CHANGED", "p"))
     dg.clear_l1()
     dg.derive(fn, a)                 # new version -> new key -> recompute
     assert box["n"] == 2
@@ -106,7 +107,7 @@ def test_source_hash_covers_all_paths_order_independent(tmp_path: Path) -> None:
     assert dg.source_hash(a, b) != dg.source_hash(a)
 
 
-def test_every_method_module_is_hashed_into_the_cache_key() -> None:
+def test_every_method_module_can_be_reached_by_a_cache_key() -> None:
     """`derivations.propose` caches ANY method, so every method module must be in the key.
 
     This used to be a hand-maintained list and it went stale silently: it named exactly the methods
@@ -115,15 +116,24 @@ def test_every_method_module_is_hashed_into_the_cache_key() -> None:
     nothing through the cache -- a full examples regeneration wrote 0 new entries and republished
     pre-fix results without a word.
 
-    FAULT INJECTION: drop the `methods/*.py` glob back to a hand-list and this fails, naming every
-    module the list forgot.
+    FAULT INJECTION: a `_closure_paths` that returns only its entry module makes this fail,
+    naming every method module nothing else imports.
     """
+    import re
     from pathlib import Path
 
-    from reblock.derive_graph import _DERIVATION_MODULES
+    from reblock.derive_graph import _closure_paths
 
-    methods_dir = Path(__file__).resolve().parents[1] / "src" / "reblock" / "methods"
-    on_disk = {p.name for p in methods_dir.glob("*.py")}
-    hashed = {p.name for p in _DERIVATION_MODULES}
-    missing = sorted(on_disk - hashed)
-    assert not missing, f"method modules absent from the cache key: {missing}"
+    root = Path(__file__).resolve().parents[1]
+    configured = {m.rsplit(".", 1)[0]
+                  for y in (root / "conf").rglob("*.yaml")
+                  for m in re.findall(r"_target_:\s*([A-Za-z_][\w.]*)", y.read_text())
+                  if m.startswith("reblock.methods.")}
+    # A Method reaches `derive` as a top-level input, so `_code_version` hashes over its own
+    # closure. Every method module on disk must therefore sit inside SOME configured method's
+    # closure, or nothing that runs can invalidate it.
+    reachable = {f for m in configured for f in _closure_paths(m)}
+    on_disk = set((root / "src" / "reblock" / "methods").glob("*.py")) - {
+        (root / "src" / "reblock" / "methods" / "__init__.py")}
+    missing = sorted(p.name for p in on_disk - reachable)
+    assert not missing, f"method modules no cache key can reach: {missing}"

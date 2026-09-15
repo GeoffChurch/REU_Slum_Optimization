@@ -546,4 +546,4 @@ def test_loop_closure_refiner_identity_changes_with_params() -> None:
 def test_loop_closure_registered_in_derivation_modules() -> None:
     import reblock.methods.loop_closure as lc
     expected = Path(lc.__file__).resolve()
-    assert any(Path(p).resolve() == expected for p in derive_graph._DERIVATION_MODULES)
+    assert expected in derive_graph._closure_paths(LoopClosureRefiner.__module__)

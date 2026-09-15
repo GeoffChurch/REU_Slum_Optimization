@@ -289,11 +289,13 @@ def test_propose_achieves_target_on_real_block() -> None:
     assert int(after.max()) <= 2  # invariant holds whether or not roads were needed
 
 
-def test_clearance_module_is_in_derivation_modules() -> None:
-    # so a change to the algorithm busts the memoized propose() cache (like arterial/peel/topology)
-    from reblock.derive_graph import _DERIVATION_MODULES
-    assert any(p.name == "clearance.py" and p.parent.name == "methods"
-               for p in _DERIVATION_MODULES)
+def test_clearance_module_is_in_its_own_cache_key() -> None:
+    # so a change to the algorithm busts the memoized propose() cache (like arterial/peel/topology).
+    # A Method reaches `derive` as a top-level input, so `_code_version` hashes over exactly this.
+    from reblock.derive_graph import _closure_paths
+    from reblock.methods.clearance import ClearanceReblocker
+    paths = _closure_paths(ClearanceReblocker.__module__)
+    assert any(p.name == "clearance.py" and p.parent.name == "methods" for p in paths)
 
 
 def test_clearance_method_yaml_instantiates_with_defaults() -> None:
