@@ -41,11 +41,19 @@ precision at the very top of it, and each screen's shipped absolute floor where 
 
 <!-- SCREENTABLE -->
 
-AUC scores a ranking end to end, weighting agreement across the whole sweep from top to bottom
-equally. A deployed screen never reads that whole sweep, though — only the slice above its gate
-ever decides which blocks get reblocked, and everything below the cutoff is discarded unread. That
-is why the shipped default is the screen it is even where a competitor's AUC looks stronger: what
-matters is which screen separates cleanly at the top of the ranking, not across all of it.
+The AUC column is the area under the **ROC** curve — the share of informal-versus-formal block
+pairs the screen ranks the right way round, ties counted as half. It scores a ranking end to end,
+weighting agreement across the whole sweep from top to bottom equally. A deployed screen never
+reads that whole sweep, though — only the slice above its gate ever decides which blocks get
+reblocked, and everything below the cutoff is discarded unread. That is why the shipped default is
+the screen it is even where a competitor's AUC looks stronger: what matters is which screen
+separates cleanly at the top of the ranking, not across all of it.
+
+Note that the figure further down plots **precision against recall**, which is a different curve
+from the one that area is under. The ROC area answers "how good is the ordering overall"; the
+precision–recall curve answers "what do you get for a given cutoff", which is the question a
+deployed screen actually faces. They are reported together because they disagree about which
+screen looks best, and that disagreement is the point rather than an inconsistency.
 
 ## Head to head, at the shipped floor
 
@@ -60,6 +68,14 @@ Even the better screen is right about roughly one block in four it selects — m
 is not, in fact, informal settlement. The screen it replaced did worse: about three
 non-settlement blocks selected for every settlement block it correctly caught. Screening a whole
 metro this cheaply is hard, and that is the headline this page leads with, not the one it buries.
+
+Read that against the **best possible** column above, though, because it is not a failure of
+ranking alone. Each floor admits a pool substantially larger than the number of blocks that are
+informal at all, and precision cannot exceed the share of the pool that could be right — so even a
+perfect ordering, one that put every informal block above every formal one, would still be wrong
+about most of what it selected at these pool sizes. The gap between the achieved precision and that
+ceiling is what the ranking is responsible for; the ceiling itself is a property of where the floor
+is set. Lowering the pool size would raise both, at the cost of recall.
 
 ## In pictures
 
