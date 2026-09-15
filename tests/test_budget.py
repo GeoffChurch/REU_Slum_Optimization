@@ -666,6 +666,49 @@ def test_road_drainage_routes_through_an_unnoded_crossing() -> None:
         f"every parcel should route crossbar -> crossing -> stem -> street, got {drain}")
 
 
+def test_network_efficiency_ignores_whether_a_crossing_is_drawn_as_a_vertex() -> None:
+    """Two roads crossing in an X are one network, however the geometry happens to be vertexed.
+
+    The same X is built twice -- once as two bare 2-point lines that cross at (50, 50), once with
+    that point spelled as an explicit vertex of each. The geometry is identical; only the
+    coordinate lists differ. `_build_csr` explodes roads to `_rnd`-snapped endpoint pairs and never
+    splits at crossings, so the bare version routes as two disconnected arms and understates
+    door-to-door travel between them.
+
+    Same defect as `test_road_drainage_routes_through_an_unnoded_crossing`, in the other graph
+    builder (`_explode_segments` -> `_build_csr`), reached through `network_efficiency`.
+
+    FAULT INJECTION: dropping the crossing vertex from `noded` below makes the two arms equal by
+    construction and the test passes vacuously -- so the assertion that they DIFFER today is what
+    proves the fixture bites.
+    """
+    from reblock.budget import network_efficiency
+
+    polys = [Polygon([(x, y), (x + 20, y), (x + 20, y + 20), (x, y + 20)])
+             for x, y in [(0, 40), (80, 40), (40, 0), (40, 80)]]   # one parcel at each arm tip
+    parcels = gpd.GeoDataFrame({"parcel_id": [str(k) for k in range(4)]}, geometry=polys, crs=UTM)
+    block = Block(
+        block_id="x", crs=UTM,
+        boundary=Polygon([(0, 0), (100, 0), (100, 100), (0, 100)]),
+        parcels=parcels,
+        streets=gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (100.0, 0.0)])], crs=UTM),
+        building_points=gpd.GeoDataFrame(
+            geometry=[Point(10, 50), Point(90, 50), Point(50, 10), Point(50, 90)], crs=UTM))
+
+    bare = _roads([LineString([(0.0, 50.0), (100.0, 50.0)]),
+                   LineString([(50.0, 0.0), (50.0, 100.0)])])
+    noded = _roads([LineString([(0.0, 50.0), (50.0, 50.0), (100.0, 50.0)]),
+                    LineString([(50.0, 0.0), (50.0, 50.0), (50.0, 100.0)])])
+    assert bare.geometry[0].equals(noded.geometry[0]), "the two spellings must be the same geometry"
+    assert bare.geometry[1].equals(noded.geometry[1]), "the two spellings must be the same geometry"
+
+    e_bare, d_bare = network_efficiency(block, bare)
+    e_noded, d_noded = network_efficiency(block, noded)
+    assert (e_bare, d_bare) == pytest.approx((e_noded, d_noded)), (
+        f"the crossing is a junction either way: bare {e_bare:.6f}/{d_bare:.6f} vs "
+        f"noded {e_noded:.6f}/{d_noded:.6f}")
+
+
 def test_every_prefix_is_connected_by_the_same_test_the_peel_uses() -> None:
     """`street_first_ordered` and `street_connectivity` must agree on what reaches the street.
 

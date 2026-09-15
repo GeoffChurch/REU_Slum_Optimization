@@ -5,16 +5,16 @@
     "nparcels": 3
   },
   "sparse_chord": {
-    "E": 0.3106689342403628,
-    "directness": 0.6275059431649734,
+    "E": 0.34599395313681025,
+    "directness": 0.7331470041013803,
     "wkt": [
       "LINESTRING (1.5 0, 1.5 7)"
     ],
     "nparcels": 21
   },
   "deep_region_least_cost": {
-    "E": 0.09990957520515002,
-    "directness": 0.1981134659584359,
+    "E": 0.1213246299245786,
+    "directness": 0.25473131597364673,
     "wkt": [
       "LINESTRING (3 0, 3 1)",
       "LINESTRING (2 6, 3 6)",

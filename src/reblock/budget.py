@@ -397,6 +397,56 @@ def _explode_segments(geoms: Iterable[BaseGeometry]) -> list[_Pair]:
     return out
 
 
+def _node_pairs(road_segs: list[_Pair], street_segs: list[_Pair]
+                ) -> tuple[list[_Pair], list[_Pair]]:
+    """`road_segs` and `street_segs`, every segment split at its INTERIOR crossings with any other
+    segment in either list.
+
+    A crossing is a junction whether or not either line carries a vertex there -- the same
+    correction `_road_net` carries for the drainage graph. Without it two lines that cross
+    mid-segment route as separate components, so door-to-door travel between them is overstated and
+    `efficiency`/`directness` read low.
+
+    Both lists are split against the COMBINED set, not each against itself. Measured over both
+    example scales on 2026-09-14, road-to-STREET crossings dominate and hit every method (0
+    road x road but 33 road x street for the arterial on the pinned block; 0 vs 91 at region scale),
+    so splitting each list alone would miss the majority case entirely.
+
+    Endpoint contact yields a cut at 0 or at the segment's own length, which is filtered out -- so
+    lines meeting at a shared vertex cost nothing, and consecutive segments of one polyline are
+    unaffected. Collinear overlap yields a LineString intersection and contributes no cut, matching
+    `_road_net`.
+    """
+    lines = [LineString([a, b]) for a, b in [*road_segs, *street_segs]]
+    if not lines:
+        return road_segs, street_segs
+    tree = STRtree(lines)
+    out: list[list[_Pair]] = [[], []]
+    seen: list[set[frozenset[_Node]]] = [set(), set()]
+    for k, ln in enumerate(lines):
+        side = 0 if k < len(road_segs) else 1
+        cuts: list[float] = []
+        for j in tree.query(ln, predicate="intersects"):
+            if int(j) == k:
+                continue
+            hit = ln.intersection(lines[int(j)])
+            pts = [hit] if isinstance(hit, Point) else list(getattr(hit, "geoms", []))
+            cuts += [ln.project(pt) for pt in pts if isinstance(pt, Point)]
+        nodes = [_rnd(ln.coords[0])]
+        for m in sorted({c for c in cuts if 0.0 < c < ln.length}):
+            cut = ln.interpolate(m)
+            nodes.append(_rnd((cut.x, cut.y)))
+        nodes.append(_rnd(ln.coords[-1]))
+        for na, nb in zip(nodes, nodes[1:], strict=False):
+            if na == nb:
+                continue
+            key = frozenset((na, nb))
+            if key not in seen[side]:
+                seen[side].add(key)
+                out[side].append((na, nb))
+    return out[0], out[1]
+
+
 def _edges_in_nx_order(road_segs: list[_Pair], street_segs: list[_Pair]) -> list[_Pair]:
     """The combined road+street edge set in the exact order `networkx.Graph.edges()` yields it for
     a graph built roads-first-then-streets (as the old nx graph builder did): nodes ordered by
@@ -551,7 +601,8 @@ class _BlockScoringContext:
         frozen prefix sweep) need only the pair, not the full edge list."""
         road_segs = (_explode_segments(roads.geometry)
                      if roads is not None and len(roads) else [])
-        edge_pairs = _edges_in_nx_order(road_segs, self.street_segs)
+        road_segs, street_segs = _node_pairs(road_segs, self.street_segs)
+        edge_pairs = _edges_in_nx_order(road_segs, street_segs)
         if not edge_pairs:
             return [None] * self.n, {}, edge_pairs
         edge_lines = [LineString([a, b]) for a, b in edge_pairs]
@@ -609,7 +660,12 @@ class _StepContext:
         # The planarized committed union, re-noded against `real` per candidate.
         self.base_merged: BaseGeometry | None = unary_union(lines) if lines else None
         committed_segs = _explode_segments(lines)
-        step_pairs: list[_Pair] = [*committed_segs, *ctx.street_segs]
+        # Noded exactly as `score_candidate` nodes its own full set, so the frozen base and the
+        # per-candidate full set agree about every edge `real` did not itself create. Leaving the
+        # base un-noded would still be CORRECT (a split-away step edge is recovered from
+        # `delta_pairs`) but would push every split street sub-segment through the delta path.
+        committed_segs, street_segs = _node_pairs(committed_segs, ctx.street_segs)
+        step_pairs: list[_Pair] = [*committed_segs, *street_segs]
         self.step_set: set[frozenset[_Node]] = {frozenset(p) for p in step_pairs}
         # Per parcel: ALL streets∪committed edges within `tol`, each as
         # (edge pair, parcel->edge distance, projection-along-edge, entry node). Freezing EVERY near
@@ -646,7 +702,8 @@ class _StepContext:
                   else unary_union([real]))
         road_parts = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
         road_segs = _explode_segments(road_parts)
-        full_pairs = _edges_in_nx_order(road_segs, ctx.street_segs)
+        road_segs, street_segs = _node_pairs(road_segs, ctx.street_segs)
+        full_pairs = _edges_in_nx_order(road_segs, street_segs)
         if not full_pairs:
             return 0.0, 0.0
         idx = {frozenset(p): i for i, p in enumerate(full_pairs)}
