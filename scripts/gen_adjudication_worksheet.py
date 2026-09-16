@@ -38,6 +38,7 @@ import numpy as np
 from pyproj import Transformer
 from shapely import STRtree
 
+from reblock.data.counts import BuildingCount, KblockCount, OpenBuildingsCount, resolved
 from scripts.gen_screen_bakeoff import METRICS, load
 
 OUT = Path("data/adjudication")
@@ -67,13 +68,33 @@ def place_name(lat: float, lon: float) -> str:
 def main() -> int:
     k = int(sys.argv[1]) if len(sys.argv) > 1 else 15
     b, _ = load()
+    b = b.rename(columns={"a_m2": "block_area_m2"})
     lab, cover = b["informal"].to_numpy(), b["cover"].to_numpy()
     short = {col: name.split("   ")[0] for col, name, _ in METRICS}
+    pts = str(Path.home() / ".cache/reblock/buildings_capetown_full.parquet")
+
+    # BOTH count sources. Switching the default to Open Buildings changes WHICH blocks the screens
+    # select, and the blocks it adds are exactly the ones in dispute -- a worksheet built on one
+    # source would spend an afternoon at the wrong 41 blocks.
+    sources: dict[str, BuildingCount] = {"kb": KblockCount(), "ob": OpenBuildingsCount()}
+    counts: dict[str, np.ndarray] = {}
     ranks: dict[str, dict[int, int]] = {}
-    for col, _, _ in METRICS:
-        ranks[col] = {int(i): r for r, i in enumerate(np.argsort(-b[col].to_numpy())[:k], 1)}
+    for tag, counter in sources.items():
+        r = resolved(b, pts, counter)
+        n = r["building_count"].to_numpy(dtype=float)
+        counts[tag] = n
+        a = r["block_area_m2"].to_numpy(dtype=float)
+        per = r.geometry.length.to_numpy()
+        for col, _, _ in METRICS:
+            sc = {"depth_density proxy": np.sqrt(n * a) / per * (n / a), "density": n / a,
+                  "density_compactness": n / per ** 2,
+                  "depth proxy": np.sqrt(n * a) / per}[short[col]]
+            ranks[f"{tag}:{col}"] = {int(i): rr for rr, i in enumerate(np.argsort(-sc)[:k], 1)}
     union = sorted(set().union(*(set(r) for r in ranks.values())))
-    print(f"k={k}: {len(union)} blocks to adjudicate, from {k * len(METRICS)} screen-slots")
+    in_kb = {i for key, r in ranks.items() if key.startswith("kb") for i in r}
+    in_ob = {i for key, r in ranks.items() if key.startswith("ob") for i in r}
+    print(f"k={k}: {len(union)} blocks to adjudicate "
+          f"(kblock-union {len(in_kb)}, OB-union {len(in_ob)}, shared {len(in_kb & in_ob)})")
 
     ob_med: dict[int, tuple[int, float]] = {}
     if OB.exists():
@@ -92,14 +113,17 @@ def main() -> int:
         c = b.geometry.iloc[i].centroid
         lon, latd = wgs.transform(c.x, c.y)
         n_ob, med = ob_med.get(i, (0, float("nan")))
-        area_ha = float(b["a_m2"].iloc[i]) / 1e4
+        area_ha = float(b["block_area_m2"].iloc[i]) / 1e4
         rows.append({
             "block_id": b["block_id"].iloc[i],
-            **{f"rank_{short[col]}": ranks[col].get(i, "") for col, _, _ in METRICS},
-            "n_screens": sum(1 for col, _, _ in METRICS if i in ranks[col]),
-            "buildings": int(b["building_count"].iloc[i]),
+            "disputed": "yes" if (i in in_ob) != (i in in_kb) else "",
+            **{f"{tag}_{short[col]}": ranks[f"{tag}:{col}"].get(i, "")
+               for tag in sources for col, _, _ in METRICS},
+            "n_screens": sum(1 for key in ranks if i in ranks[key]),
+            "kb_count": int(counts["kb"][i]), "ob_count": int(counts["ob"][i]),
+            "ob_over_kb": round(counts["ob"][i] / max(counts["kb"][i], 1.0), 2),
             "area_ha": round(area_ha, 2),
-            "per_km2": round(int(b["building_count"].iloc[i]) / max(area_ha, 1e-9) * 100),
+            "per_km2": round(counts["ob"][i] / max(area_ha, 1e-9) * 100),
             "ob_n": n_ob, "ob_median_m2": "" if np.isnan(med) else round(med, 1),
             "survey_cover": round(float(cover[i]), 3),
             "survey_label": "informal" if lab[i] else "formal",
@@ -113,9 +137,12 @@ def main() -> int:
         r["place"] = place_name(float(lat), float(lon))
         time.sleep(1.1)
 
-    rows.sort(key=lambda r: (-int(r["n_screens"]),
-                             min((int(v) for kk, v in r.items()
-                                  if kk.startswith("rank_") and v != ""), default=99)))
+    # Disputed first, then best rank anywhere: if the afternoon runs short, the blocks that decide
+    # whether the Open Buildings switch is right have already been looked at.
+    rank_keys = [f"{tag}_{short[col]}" for tag in sources for col, _, _ in METRICS]
+    rows.sort(key=lambda r: (r["disputed"] != "yes",
+                             min((int(r[kk]) for kk in rank_keys if r[kk] != ""), default=99),
+                             -int(r["n_screens"])))
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"screen_top{k}_worksheet.csv"
     with path.open("w", newline="") as f:
