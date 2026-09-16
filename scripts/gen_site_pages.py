@@ -227,14 +227,24 @@ def _screen_table() -> str:
 
 
 def _bakeoff_floors_table() -> str:
-    """Both shipped screens at their absolute floors: pool size, precision, recall. Empty when
-    the artifact is absent, per the dir-reader contract."""
+    """Both shipped screens at their absolute floors: pool size, precision, recall, and the best
+    precision any ranking could reach at that pool size. Empty when the artifact is absent, per the
+    dir-reader contract.
+
+    The ceiling needs no new column: precision is TP/selected and recall is TP/positives, so
+    `precision / recall` is positives/selected -- exactly the share of the pool that COULD be
+    informal. A floor admitting more blocks than there are informal ones caps precision below 100%
+    however good the ranking, and reporting precision without it invites reading an instrument
+    limit as a screen failure."""
     rows = [r for r in _read_csv(BAKEOFF / "screen_comparison.csv") if r.get("floor")]
     if not rows:
         return ""
-    body = [[r["metric"], _num(float(r["floor_n"])), _pct(float(r["floor_prec"])),
-             _pct(float(r["floor_recall"]))] for r in rows]
-    return _table(["screen at its floor", "blocks", "precision", "recall"], body)
+    body = []
+    for r in rows:
+        prec, recall = float(r["floor_prec"]), float(r["floor_recall"])
+        ceiling = _pct(min(1.0, prec / recall)) if recall > 0 else "—"
+        body.append([r["metric"], _num(float(r["floor_n"])), _pct(prec), _pct(recall), ceiling])
+    return _table(["screen at its floor", "blocks", "precision", "recall", "best possible"], body)
 
 
 def _bakeoff_figures() -> str:
