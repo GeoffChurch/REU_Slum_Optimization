@@ -11,6 +11,7 @@ from shapely.geometry import Polygon
 from reblock.contracts import Block, Eval, Result
 from reblock.data.kblock import KblockSource
 from reblock.data.shapefile import ShapefileSource
+from reblock.derive.access import STREET_TOL
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
 from reblock.methods.topology import TopologyMethod
 from reblock.pipeline import PipelineSpec, run
@@ -153,7 +154,8 @@ def test_hydra_compose_wires_peel_method() -> None:
         results = run(spec_from_cfg(cfg)).results
     assert len(results) == 1
     r = results[0]
-    assert r.proposal.method == "peel" and r.proposal.proposal_id == "peel_tol0.5"
+    # Bound to the constant rather than a typed literal -- see test_peel.py's note.
+    assert r.proposal.method == "peel" and r.proposal.proposal_id == f"peel_tol{STREET_TOL}"
     assert r.metric("kcomplexity", "k_after") <= r.metric("kcomplexity", "k_before")
 
 

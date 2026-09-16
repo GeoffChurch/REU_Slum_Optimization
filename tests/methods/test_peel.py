@@ -26,7 +26,10 @@ def test_spine_reaches_k1_and_is_street_connected() -> None:
     assert parcel_access_layers(block, proposal.roads).max() == 1          # full access
     sc = street_connectivity(block.streets, proposal.roads, STREET_TOL)
     assert sc.connected_frac == 1.0                            # every corridor reaches street
-    assert proposal.proposal_id == "peel_tol0.5" and proposal.method == "peel"
+    # Bound to the constant, not to a typed literal: the id records WHICH tolerance was used, and
+    # `str(float)` is the shortest round-tripping repr, so two tolerances can never collide in it.
+    # Pinning the number here duplicated `STREET_TOL` and broke when it gained its float epsilon.
+    assert proposal.proposal_id == f"peel_tol{STREET_TOL}" and proposal.method == "peel"
     assert proposal.edges is None
 
 
