@@ -39,6 +39,7 @@ from pyproj import Transformer
 from shapely import STRtree
 
 from reblock.data.counts import BuildingCount, KblockCount, OpenBuildingsCount, resolved
+from reblock.screen.dense_compact import _chunk_depths
 from scripts.gen_screen_bakeoff import METRICS, load
 
 OUT = Path("data/adjudication")
@@ -107,6 +108,16 @@ def main() -> int:
             hit = tree.query(b.geometry.iloc[i], predicate="contains")
             ob_med[i] = (len(hit), float(np.median(areas[hit])) if len(hit) else float("nan"))
 
+    # The FINE metric -- real Voronoi tessellation + BFS peel -- on exactly these blocks. The
+    # bake-off is proxy-only by design ("no Voronoi, no peel"), which is how `ZAF.9.3.1_1_5810`
+    # sat at 8,887th by proxy while being first by true depth. ~3 s/block, so affordable here and
+    # nowhere near affordable over a metro, which is the whole reason proxies exist.
+    print(f"fine pass (Voronoi + peel) on {len(union)} blocks...", flush=True)
+    cache = Path.home() / ".cache/reblock"
+    fine = dict(_chunk_depths((str(cache / "blocks_capetown_full.parquet"),
+                               str(cache / "buildings_capetown_full.parquet"), 10,
+                               [str(b["block_id"].iloc[i]) for i in union])))
+
     wgs = Transformer.from_crs(b.crs, "EPSG:4326", always_xy=True)
     rows = []
     for i in union:
@@ -125,6 +136,8 @@ def main() -> int:
             "area_ha": round(area_ha, 2),
             "per_km2": round(counts["ob"][i] / max(area_ha, 1e-9) * 100),
             "ob_n": n_ob, "ob_median_m2": "" if np.isnan(med) else round(med, 1),
+            "fine_depth": fine.get(str(b["block_id"].iloc[i]), ""),
+            "fine_depth_density": "",      # filled below, once every block's fine depth is known
             "survey_cover": round(float(cover[i]), 3),
             "survey_label": "informal" if lab[i] else "formal",
             "place": "", "maps": f"https://www.google.com/maps/@{latd:.5f},{lon:.5f},17z",
@@ -137,12 +150,25 @@ def main() -> int:
         r["place"] = place_name(float(lat), float(lon))
         time.sleep(1.1)
 
-    # Disputed first, then best rank anywhere: if the afternoon runs short, the blocks that decide
-    # whether the Open Buildings switch is right have already been looked at.
-    rank_keys = [f"{tag}_{short[col]}" for tag in sources for col, _, _ in METRICS]
-    rows.sort(key=lambda r: (r["disputed"] != "yes",
-                             min((int(r[kk]) for kk in rank_keys if r[kk] != ""), default=99),
-                             -int(r["n_screens"])))
+    # `fine_depth_density` = the shipped screen's own FINE form, depth x density, on Open
+    # Buildings counts. Closer to "is this an informal settlement" than depth alone, which
+    # measures nesting: a gated estate of cul-de-sacs is deep and is not a settlement.
+    for r in rows:
+        d = float(r["fine_depth"]) if r["fine_depth"] != "" else 0.0
+        r["fine_depth_density"] = round(d * float(r["per_km2"]) / 1e4, 3)
+
+    # `disagreement` = how far the best automated signal is from the survey's verdict, in
+    # percentile terms: a formal-labelled block scoring HIGH disagrees, an informal-labelled
+    # block scoring LOW disagrees. It orders the adjudication; it does not decide anything.
+    fdd = np.array([float(r["fine_depth_density"]) for r in rows])
+    pct = fdd.argsort().argsort() / max(len(fdd) - 1, 1)
+    for r, q in zip(rows, pct, strict=True):
+        r["disagreement"] = round(q if r["survey_label"] == "formal" else 1.0 - q, 3)
+
+    # Disputed first -- those decide whether the Open Buildings switch is right, which is what is
+    # blocked on this pass -- then by disagreement, so within the critical path the blocks where
+    # the fine metric and the survey conflict most come first.
+    rows.sort(key=lambda r: (r["disputed"] != "yes", -float(r["disagreement"])))
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"screen_top{k}_worksheet.csv"
     with path.open("w", newline="") as f:
