@@ -4,6 +4,11 @@
 roof material, construction uniformity, vehicles, road surfacing, vegetation. This is the LESS
 circular input, and the one to prefer when the two disagree.
 
+Note the two degrade differently with block size. The schematic is VECTOR, so it stays sharp
+for a 31 km2 block as readily as for a 0.3 ha one; the satellite tile is raster and capped by
+the export endpoint, so past roughly 150 ha a shack is smaller than a pixel. The image says
+which regime it is in, and the honest verdict on a coarse one is "unclear".
+
 `schematic` -- building footprints, the official street network, and empty space. Deliberately
 the CIRCULAR input: it shows a judge essentially what the screens themselves compute (footprint
 size, density, block geometry), so verdicts from it should correlate with the metrics being
@@ -33,6 +38,7 @@ the adjudicator should say so rather than guess.
 from __future__ import annotations
 
 import csv
+import math
 import sys
 import urllib.parse
 import urllib.request
@@ -56,18 +62,51 @@ UA = "reblock-research/0.1 (https://github.com/GeoffChurch/REU_Slum_Optimization
 MARGIN = 0.25          # of the block's own extent, so the surrounding fabric is visible too
 
 
-def fetch(bbox: tuple[float, float, float, float], px: int = 900) -> Path:
-    """One imagery tile for a WGS84 bbox, cached on disk by bbox so a re-run is free."""
+TARGET_MPP = 0.35      # a shack is ~4 m across; at 0.35 m/px that is ~11 px, judgeable
+MAX_PX = 2048          # 4096 returns HTTP 504 from this endpoint; 2048 is served reliably
+
+
+def tile_px(span_m: float) -> int:
+    """Pixels to request so the tile lands near `TARGET_MPP`, capped at the endpoint's limit.
+
+    A fixed size was the bug this replaces: at 900 px a 0.3 ha block rendered at 0.10 m/px and a
+    31 km2 one at 11.1 m/px, where a shack is a fifth of a pixel. Sixteen of sixty-eight blocks
+    were too coarse to adjudicate and nothing on the image said so.
+    """
+    return max(600, min(MAX_PX, int(span_m / TARGET_MPP)))
+
+
+def fetch(bbox: tuple[float, float, float, float], px: int, block_id: str) -> Path:
+    """One imagery tile, cached on disk.
+
+    The cache key carries the BBOX, not just the block id: bbox is what determines the content,
+    and a block-keyed cache would hand back a stale tile the moment geometry, margin or pixel
+    size changed. The block id is in the name too, purely so a human can tell what a cache file
+    is -- which is how the resolution bug above got noticed.
+    """
     OUT.mkdir(parents=True, exist_ok=True)
     tag = "_".join(f"{v:.5f}" for v in bbox)
-    path = OUT / f".tile_{tag}.png"
+    path = OUT / f".tile_{block_id}_{tag}_{px}.png"
     if path.exists():
         return path
     q = urllib.parse.urlencode({"bbox": ",".join(f"{v:.6f}" for v in bbox), "bboxSR": "4326",
                                 "size": f"{px},{px}", "format": "png", "f": "image"})
-    req = urllib.request.Request(f"{EXPORT}?{q}", headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=60) as r:      # noqa: S310 (fixed https host)
-        path.write_bytes(r.read())
+    # A 4096 px export is tens of megabytes and routinely exceeds a 60 s socket timeout, which
+    # is how the first full run died partway. Retry rather than abandon a run that has already
+    # paid for most of its tiles.
+    size = px
+    for attempt in range(4):
+        try:
+            q2 = q.replace(f"size={px}%2C{px}", f"size={size}%2C{size}")
+            req2 = urllib.request.Request(f"{EXPORT}?{q2}", headers={"User-Agent": UA})
+            with urllib.request.urlopen(req2, timeout=300) as r:  # noqa: S310 (fixed https host)
+                path.write_bytes(r.read())
+            return path
+        except (TimeoutError, OSError) as exc:
+            if attempt == 3:
+                raise
+            size = max(600, size // 2)      # step down: a coarse tile beats no tile
+            print(f"    {type(exc).__name__}; retrying at {size}px", flush=True)
     return path
 
 
@@ -102,12 +141,15 @@ def main() -> int:
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         bbox = (cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2)
         box = shapely_box(*bbox)
+        span_m = side * 111_320 * math.cos(math.radians(cy))
+        mpp = span_m / tile_px(span_m)
         for mode in modes:
             d = OUT / mode
             d.mkdir(parents=True, exist_ok=True)
             fig, ax = plt.subplots(figsize=(9, 9), dpi=110)
             if mode == "satellite":
-                ax.imshow(imread(fetch(bbox)), extent=(bbox[0], bbox[2], bbox[1], bbox[3]))
+                ax.imshow(imread(fetch(bbox, tile_px(span_m), r["block_id"])),
+                          extent=(bbox[0], bbox[2], bbox[1], bbox[3]))
                 edge, credit, cc = "#ff2d55", "Imagery: Esri World Imagery", "white"
             else:
                 ax.set_facecolor("#f2f0eb")                       # empty space
@@ -125,7 +167,13 @@ def main() -> int:
             ax.set_ylim(bbox[1], bbox[3])
             ax.set_xticks([])
             ax.set_yticks([])
-            ax.set_title(f"{r['block_id']}  ·  {r['place']}", fontsize=11)
+            # The resolution is stated because it decides whether the picture can answer the
+            # question at all: a shack is ~4 m, so past ~1 m/px it is a smudge and the honest
+            # verdict is "unclear", not a guess.
+            warn = "   ⚠ TOO COARSE FOR SHACKS" if mode == "satellite" and mpp > 1.0 else ""
+            res = f"   {mpp:.2f} m/px{warn}" if mode == "satellite" else ""
+            ax.set_title(f"{r['block_id']}  ·  {r['place']}  ·  {r['area_ha']} ha{res}",
+                         fontsize=11)
             # Below the axes, not inside them: in the schematic the bottom-left corner is data.
             ax.set_xlabel(credit, fontsize=6, color=cc, loc="left")
             fig.savefig(d / f"{r['block_id']}.png", bbox_inches="tight")
