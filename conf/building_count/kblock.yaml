@@ -1,0 +1,8 @@
+# kblock's shipped `building_count` column (Ecopia), the basis of every published screen number
+# before 2026-09-16.
+#
+# Kept because a like-for-like comparison against the Mansueto figures needs it, and because a
+# reader reproducing an older result needs to be able to ask for the older count -- not as a
+# fallback for missing data. It is stale on settlements newer than its imagery; see
+# reblock.data.counts for the measurement.
+_target_: reblock.data.counts.KblockCount

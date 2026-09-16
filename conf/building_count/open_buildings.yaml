@@ -1,0 +1,9 @@
+# Count the building POINTS this project already tessellates into parcels.
+#
+# THE DEFAULT since 2026-09-16. kblock's own `building_count` is Ecopia-derived and, measured
+# across 16,451 Cape Town blocks, agrees with Open Buildings to a median 1.10x -- except on new
+# informal settlements, where it undercounts by 5-20x. The discriminator is not the footprint
+# gradient (both explanations predict that) but the asymmetry: blocks the City's 2018 survey
+# confirms as informal are shack-scale too and Ecopia counts them fine (1.20x), so Ecopia can see
+# shacks; it cannot see shacks that were not there yet. See reblock.data.counts.
+_target_: reblock.data.counts.OpenBuildingsCount

@@ -15,6 +15,7 @@ import pandas as pd
 from shapely.geometry import Point, Polygon
 
 from reblock.contracts import Block, Method, Proposal
+from reblock.data.counts import BuildingCount
 from reblock.derive.access import parcel_access_layers
 from reblock.derive.geometric_access import geometric_access_distances
 from reblock.derive_graph import derive
@@ -88,6 +89,7 @@ class ScreenSelectionIdentity:
     source_hash: str
     metric: Hashable               # BlockMetric.identity
     gate: Hashable                 # Gate.identity
+    counts: Hashable               # BuildingCount.identity -- WHICH count the metric ranked on
     proxy_keep_pct: float
     min_buildings: int
 
@@ -106,6 +108,7 @@ class ScreenSelectionInput:
     buildings_path: str
     metric: BlockMetric             # the scorer (carried for _compute_selection; identity below)
     gate: Gate                      # the selection gate
+    counts: BuildingCount           # where `building_count` comes from (resolved before scoring)
     proxy_keep_pct: float          # cheap recall pre-filter: keep top-% by proxy (peel metrics)
     min_buildings: int
 
@@ -113,7 +116,8 @@ class ScreenSelectionInput:
     def identity(self) -> ScreenSelectionIdentity | None:
         return (ScreenSelectionIdentity(
                     source_hash=self.source_hash, metric=self.metric.identity,
-                    gate=self.gate.identity, proxy_keep_pct=self.proxy_keep_pct,
+                    gate=self.gate.identity, counts=self.counts.identity,
+                    proxy_keep_pct=self.proxy_keep_pct,
                     min_buildings=self.min_buildings)
                 if self.source_hash else None)
 
