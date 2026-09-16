@@ -1,4 +1,20 @@
-"""Aerial imagery per worksheet block, with the block outlined, for adjudication by eye.
+"""Two independent renderings of each worksheet block, for adjudication by eye or by agent.
+
+`satellite` -- Esri World Imagery with the block outlined. Carries information no screen has:
+roof material, construction uniformity, vehicles, road surfacing, vegetation. This is the LESS
+circular input, and the one to prefer when the two disagree.
+
+`schematic` -- building footprints, the official street network, and empty space. Deliberately
+the CIRCULAR input: it shows a judge essentially what the screens themselves compute (footprint
+size, density, block geometry), so verdicts from it should correlate with the metrics being
+graded whether or not they are correct. Rendered so that circularity can be MEASURED -- if the
+two modes agree, it did not bite; if they diverge, the satellite reading is the evidence and
+the schematic reading is the artifact. Never the other way round.
+
+A kblock block IS a street-bounded face, so every block boundary in view is an official street.
+That is what the schematic draws as roads, and it is also why interior linear features in the
+satellite view are footpaths rather than streets -- the distinction a judge most easily gets
+wrong.
 
 The maps links in the worksheet open at a fixed zoom, which is wrong at both ends: a 0.3 ha
 block fills a pixel and a 58 ha block overflows the viewport. These images are framed to the
@@ -28,6 +44,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.image import imread  # noqa: E402
+from shapely import STRtree  # noqa: E402
+from shapely.geometry import box as shapely_box  # noqa: E402
 
 from scripts.gen_screen_bakeoff import load  # noqa: E402
 
@@ -56,6 +74,8 @@ def fetch(bbox: tuple[float, float, float, float], px: int = 900) -> Path:
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     every = "--all" in sys.argv
+    modes = ([m for m in ("satellite", "schematic") if f"--{m}" in sys.argv]
+             or ["satellite", "schematic"])
     limit = int(args[0]) if args else None
 
     rows = list(csv.DictReader(WORKSHEET.open()))
@@ -67,6 +87,13 @@ def main() -> int:
     by_id = {str(v): i for i, v in enumerate(b["block_id"])}
     OUT.mkdir(parents=True, exist_ok=True)
 
+    foot = block_tree = None
+    if "schematic" in modes:
+        foot = gpd.read_parquet(
+            Path.home() / ".cache/reblock/buildings_capetown_polygons.parquet").to_crs("EPSG:4326")
+        foot_tree = STRtree(list(foot.geometry))
+        block_tree = STRtree(list(wgs.geometry))
+
     for n, r in enumerate(todo, 1):
         geom = wgs.geometry.iloc[by_id[r["block_id"]]]
         x0, y0, x1, y1 = geom.bounds
@@ -74,26 +101,36 @@ def main() -> int:
         side = max((x1 - x0) + 2 * mx, (y1 - y0) + 2 * my)   # square: the export is square
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         bbox = (cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2)
-        tile = fetch(bbox)
-
-        fig, ax = plt.subplots(figsize=(9, 9), dpi=110)
-        ax.imshow(imread(tile), extent=(bbox[0], bbox[2], bbox[1], bbox[3]))
-        gpd.GeoSeries([geom], crs="EPSG:4326").boundary.plot(
-            ax=ax, color="#ff2d55", linewidth=2.2)
-        ax.set_xlim(bbox[0], bbox[2])
-        ax.set_ylim(bbox[1], bbox[3])
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_title(f"{r['block_id']}  ·  {r['place']}\n"
-                     f"survey={r['survey_label']}  cover={r['survey_cover']}  "
-                     f"OB={r['ob_count']} bldgs  median {r['ob_median_m2']} m²  "
-                     f"fine depth={r['fine_depth']}", fontsize=10)
-        ax.text(0.005, 0.005, "Imagery: Esri World Imagery", transform=ax.transAxes,
-                fontsize=6, color="white", ha="left", va="bottom")
-        out = OUT / f"{r['block_id']}.png"
-        fig.savefig(out, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  [{n}/{len(todo)}] {out}")
+        box = shapely_box(*bbox)
+        for mode in modes:
+            d = OUT / mode
+            d.mkdir(parents=True, exist_ok=True)
+            fig, ax = plt.subplots(figsize=(9, 9), dpi=110)
+            if mode == "satellite":
+                ax.imshow(imread(fetch(bbox)), extent=(bbox[0], bbox[2], bbox[1], bbox[3]))
+                edge, credit, cc = "#ff2d55", "Imagery: Esri World Imagery", "white"
+            else:
+                ax.set_facecolor("#f2f0eb")                       # empty space
+                assert foot is not None and block_tree is not None
+                near = foot.geometry.iloc[foot_tree.query(box, predicate="intersects")]
+                gpd.GeoSeries(near, crs="EPSG:4326").plot(ax=ax, color="#2b2b2b", linewidth=0)
+                streets = wgs.geometry.iloc[block_tree.query(box, predicate="intersects")]
+                gpd.GeoSeries(streets, crs="EPSG:4326").boundary.plot(
+                    ax=ax, color="#4a90d9", linewidth=1.4)
+                credit = "dark = buildings · blue = official streets · pale = open ground"
+                edge, cc = "#ff2d55", "#444"
+            gpd.GeoSeries([geom], crs="EPSG:4326").boundary.plot(
+                ax=ax, color=edge, linewidth=2.4)
+            ax.set_xlim(bbox[0], bbox[2])
+            ax.set_ylim(bbox[1], bbox[3])
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_title(f"{r['block_id']}  ·  {r['place']}", fontsize=11)
+            # Below the axes, not inside them: in the schematic the bottom-left corner is data.
+            ax.set_xlabel(credit, fontsize=6, color=cc, loc="left")
+            fig.savefig(d / f"{r['block_id']}.png", bbox_inches="tight")
+            plt.close(fig)
+        print(f"  [{n}/{len(todo)}] {r['block_id']}  ({', '.join(modes)})")
     return 0
 
 
