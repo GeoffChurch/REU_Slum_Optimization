@@ -86,3 +86,34 @@ The cheap decisive test is manual: adjudicate the top *k* blocks of each screen 
 photography, or a neighbourhood name where one exists — and record a second label alongside the
 survey's. At k = 5–10 per screen that is tens of blocks, an afternoon, and it would convert every
 claim above from inference to measurement.
+
+## The worksheet says the gap is wider than two blocks (2026-09-16, observation not verdict)
+
+`pixi run python -m scripts.gen_adjudication_worksheet 15` builds the minimal set a human must
+look at to ORDER the screens: `union(top-15) - intersection(top-15)`, which is **41 blocks** of 60
+screen-slots. The shared core is EMPTY at k <= 15 -- the screens disagree that strongly at the top
+-- so no cancellation is available and the union is the work.
+
+Of those 41, **26 are labelled informal and 15 formal. Fourteen of the fifteen have shack-scale
+footprints** (< 40 m² median, against a city-wide formal median of 61.1). Their OSM place names:
+
+    Philippi                   5    informal settlements that grew substantially after 2018
+    Cape Town Ward 34          3
+    Cape Town Ward 33          2
+    Endlovini                  1
+    Siyanyanzela               1    the name OF an informal settlement
+    Klipfontein                1
+    Sabata Dalindyebo Square   1
+
+Two of these are hard to explain as anything but ground-truth recall:
+
+* **Siyanyanzela** is an informal settlement by name, and its block is labelled formal.
+* **Endlovini contradicts itself.** Blocks `ZAF.9.3.1_1_22633` and `_22659` there are labelled
+  INFORMAL; `_22640` -- same named settlement, 1,965 buildings, 23.3 m² median footprint -- is
+  labelled FORMAL. One survey, one settlement, both labels.
+
+**This is an observation, not the verdict.** Place names are approximate, footprint scale is
+evidence rather than proof, and nothing here has been checked against imagery -- which is exactly
+what the worksheet exists for. But it moves the working estimate of the ground truth's miss rate
+from "two blocks at the top" to "roughly a third of the top-15 union", and it makes the hand pass
+worth doing rather than merely tidy.
