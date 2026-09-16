@@ -4,4 +4,4 @@ euclidean_grid,2138.3,0.0224,0.659042,0.712312,True
 resistance_lp,1728.2,0.0101,0.600301,0.705415,True
 cycle_native,1642.9,0.0130,0.610243,0.701466,True
 greedy_arterial_access_displacement,3125.2,0.0168,0.604207,0.848939,True
-osm_footpaths,7694.4,0.0422,0.218789,0.0267336,False
+osm_footpaths,7694.9,0.0422,0.218789,0.026772,False

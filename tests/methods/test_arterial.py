@@ -1,9 +1,11 @@
 from typing import cast
 
 import geopandas as gpd
+import networkx as nx
 import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
+from shapely.ops import unary_union
 
 from reblock.budget import building_radii, displacement
 from reblock.contracts import Block
@@ -284,7 +286,21 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
         realizer=SnapToBoundary(), objective="directness", max_roads=3,
                               n_anchors=12)
     assert len(roads) >= 1
-    assert roads.geometry.length.max() >= 6.0                        # a real lengthwise arterial
+    # The property is a SPANNING arterial, and the network is what has to span -- not any single
+    # emitted row. Max-row-length was a valid proxy only while rows were never split; since
+    # `_node_pairs` (2026-09-14) a feeder joining the spine mid-way splits it into two rows, so the
+    # proxy reads 4.0 for a network that spans 7.0. Measured directly instead: one connected
+    # component, and a lengthwise span of at least 6.
+    u = unary_union(list(roads.geometry))
+    g: nx.Graph = nx.Graph()
+    for ln in (list(u.geoms) if hasattr(u, "geoms") else [u]):
+        cs = list(ln.coords)
+        for a, b in zip(cs, cs[1:], strict=False):
+            g.add_edge(a, b)
+    comps = list(nx.connected_components(g))
+    assert len(comps) == 1, f"the arterial must be one network, got {len(comps)} components"
+    span = max(n[1] for n in comps[0]) - min(n[1] for n in comps[0])
+    assert span >= 6.0, f"a real lengthwise arterial must span the block, spanned {span}"
     conn = street_connectivity(block.streets, roads, STREET_TOL)
     assert conn.connected_frac == 1.0                                # buildable + street-connected
 

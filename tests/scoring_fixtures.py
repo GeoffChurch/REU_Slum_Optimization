@@ -6,8 +6,16 @@ and reused by later perf-refactor tasks. Reloads the 1808 sample block + its roa
 Also builds the three fixture families the design's "Correctness strategy" requires beyond 1808
 (a coincident-entry case, a sparse straight chord, and the deep 2-block region), pinned in
 `tests/data/scoring/ref_values_extra.json`. Values in both JSON files were captured from the
-CURRENT (pre-refactor, verified-correct) `network_efficiency` -- that output IS the ground truth
-this harness protects."""
+then-current, verified-correct `network_efficiency` -- that output IS the ground truth this harness
+protects.
+
+RE-PINNED 2026-09-14, two of seven fixtures, when `_node_pairs` made the scoring graph split
+segments at their crossings (previously two lines crossing mid-segment routed as separate
+components, overstating door-to-door travel). Re-pinning a golden harness because it failed is the
+pattern to be suspicious of, so it was gated on a direction invariant rather than on judgement:
+noding only ever ADDS a route, so E and directness can only RISE. Measured -- five fixtures
+bit-identical, `sparse_chord` +11.4% E / +16.8% directness, `deep_region_least_cost` +21.4% /
++28.6%, and nothing dropped. A fixture that fell would have been a bug, not a re-pin."""
 import json
 from pathlib import Path
 from typing import Any, cast
