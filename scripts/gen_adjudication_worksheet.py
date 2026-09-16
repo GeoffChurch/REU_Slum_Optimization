@@ -38,11 +38,34 @@ import numpy as np
 from pyproj import Transformer
 from shapely import STRtree
 
+from reblock.data.counts import BuildingCount, KblockCount, OpenBuildingsCount, resolved
+from reblock.screen.dense_compact import _chunk_depths
 from scripts.gen_screen_bakeoff import METRICS, load
 
 OUT = Path("data/adjudication")
 UA = "reblock-research/0.1 (https://github.com/GeoffChurch/REU_Slum_Optimization)"
 OB = Path.home() / ".cache/reblock/buildings_capetown_polygons.parquet"
+
+
+
+def _maps_url(geom: object, lat: float, lon: float, viewport_px: int = 900) -> str:
+    """A satellite link ZOOMED TO THE BLOCK, not to a fixed level.
+
+    A fixed zoom is wrong at both ends of this worksheet: `ZAF.9.3.1_1_44685` is 0.3 ha and
+    `_5810` is 58 ha, and 17z shows one as a speck and crops the other. Web Mercator gives
+    metres-per-pixel as `156543.03392 * cos(lat) / 2^z`, so the zoom that fits an extent of
+    `E` metres across `viewport_px` is `log2(156543.03392 * cos(lat) * viewport_px / E)`.
+
+    `/data=!3m1!1e3` opens in satellite rather than the road map -- what the judgement is
+    actually made on.
+    """
+    import math
+
+    x0, y0, x1, y1 = geom.bounds                          # type: ignore[attr-defined]
+    span_m = max((x1 - x0) * 111_320 * math.cos(math.radians(lat)), (y1 - y0) * 110_540)
+    z = math.log2(156543.03392 * math.cos(math.radians(lat)) * viewport_px / max(span_m, 1.0))
+    return (f"https://www.google.com/maps/@{lat:.5f},{lon:.5f},"
+            f"{max(14.0, min(19.5, z)):.1f}z/data=!3m1!1e3")
 
 
 def place_name(lat: float, lon: float) -> str:
@@ -67,13 +90,33 @@ def place_name(lat: float, lon: float) -> str:
 def main() -> int:
     k = int(sys.argv[1]) if len(sys.argv) > 1 else 15
     b, _ = load()
+    b = b.rename(columns={"a_m2": "block_area_m2"})
     lab, cover = b["informal"].to_numpy(), b["cover"].to_numpy()
     short = {col: name.split("   ")[0] for col, name, _ in METRICS}
+    pts = str(Path.home() / ".cache/reblock/buildings_capetown_full.parquet")
+
+    # BOTH count sources. Switching the default to Open Buildings changes WHICH blocks the screens
+    # select, and the blocks it adds are exactly the ones in dispute -- a worksheet built on one
+    # source would spend an afternoon at the wrong 41 blocks.
+    sources: dict[str, BuildingCount] = {"kb": KblockCount(), "ob": OpenBuildingsCount()}
+    counts: dict[str, np.ndarray] = {}
     ranks: dict[str, dict[int, int]] = {}
-    for col, _, _ in METRICS:
-        ranks[col] = {int(i): r for r, i in enumerate(np.argsort(-b[col].to_numpy())[:k], 1)}
+    for tag, counter in sources.items():
+        r = resolved(b, pts, counter)
+        n = r["building_count"].to_numpy(dtype=float)
+        counts[tag] = n
+        a = r["block_area_m2"].to_numpy(dtype=float)
+        per = r.geometry.length.to_numpy()
+        for col, _, _ in METRICS:
+            sc = {"depth_density proxy": np.sqrt(n * a) / per * (n / a), "density": n / a,
+                  "density_compactness": n / per ** 2,
+                  "depth proxy": np.sqrt(n * a) / per}[short[col]]
+            ranks[f"{tag}:{col}"] = {int(i): rr for rr, i in enumerate(np.argsort(-sc)[:k], 1)}
     union = sorted(set().union(*(set(r) for r in ranks.values())))
-    print(f"k={k}: {len(union)} blocks to adjudicate, from {k * len(METRICS)} screen-slots")
+    in_kb = {i for key, r in ranks.items() if key.startswith("kb") for i in r}
+    in_ob = {i for key, r in ranks.items() if key.startswith("ob") for i in r}
+    print(f"k={k}: {len(union)} blocks to adjudicate "
+          f"(kblock-union {len(in_kb)}, OB-union {len(in_ob)}, shared {len(in_kb & in_ob)})")
 
     ob_med: dict[int, tuple[int, float]] = {}
     if OB.exists():
@@ -86,24 +129,41 @@ def main() -> int:
             hit = tree.query(b.geometry.iloc[i], predicate="contains")
             ob_med[i] = (len(hit), float(np.median(areas[hit])) if len(hit) else float("nan"))
 
+    # The FINE metric -- real Voronoi tessellation + BFS peel -- on exactly these blocks. The
+    # bake-off is proxy-only by design ("no Voronoi, no peel"), which is how `ZAF.9.3.1_1_5810`
+    # sat at 8,887th by proxy while being first by true depth. ~3 s/block, so affordable here and
+    # nowhere near affordable over a metro, which is the whole reason proxies exist.
+    print(f"fine pass (Voronoi + peel) on {len(union)} blocks...", flush=True)
+    cache = Path.home() / ".cache/reblock"
+    fine = dict(_chunk_depths((str(cache / "blocks_capetown_full.parquet"),
+                               str(cache / "buildings_capetown_full.parquet"), 10,
+                               [str(b["block_id"].iloc[i]) for i in union])))
+
     wgs = Transformer.from_crs(b.crs, "EPSG:4326", always_xy=True)
+    wgs_geoms = b.to_crs("EPSG:4326").geometry
     rows = []
     for i in union:
         c = b.geometry.iloc[i].centroid
         lon, latd = wgs.transform(c.x, c.y)
+        geom_wgs = wgs_geoms.iloc[i]
         n_ob, med = ob_med.get(i, (0, float("nan")))
-        area_ha = float(b["a_m2"].iloc[i]) / 1e4
+        area_ha = float(b["block_area_m2"].iloc[i]) / 1e4
         rows.append({
             "block_id": b["block_id"].iloc[i],
-            **{f"rank_{short[col]}": ranks[col].get(i, "") for col, _, _ in METRICS},
-            "n_screens": sum(1 for col, _, _ in METRICS if i in ranks[col]),
-            "buildings": int(b["building_count"].iloc[i]),
+            "disputed": "yes" if (i in in_ob) != (i in in_kb) else "",
+            **{f"{tag}_{short[col]}": ranks[f"{tag}:{col}"].get(i, "")
+               for tag in sources for col, _, _ in METRICS},
+            "n_screens": sum(1 for key in ranks if i in ranks[key]),
+            "kb_count": int(counts["kb"][i]), "ob_count": int(counts["ob"][i]),
+            "ob_over_kb": round(counts["ob"][i] / max(counts["kb"][i], 1.0), 2),
             "area_ha": round(area_ha, 2),
-            "per_km2": round(int(b["building_count"].iloc[i]) / max(area_ha, 1e-9) * 100),
+            "per_km2": round(counts["ob"][i] / max(area_ha, 1e-9) * 100),
             "ob_n": n_ob, "ob_median_m2": "" if np.isnan(med) else round(med, 1),
+            "fine_depth": fine.get(str(b["block_id"].iloc[i]), ""),
+            "fine_depth_density": "",      # filled below, once every block's fine depth is known
             "survey_cover": round(float(cover[i]), 3),
             "survey_label": "informal" if lab[i] else "formal",
-            "place": "", "maps": f"https://www.google.com/maps/@{latd:.5f},{lon:.5f},17z",
+            "place": "", "maps": _maps_url(geom_wgs, latd, lon),
             "verdict": "", "notes": "",
         })
 
@@ -113,11 +173,45 @@ def main() -> int:
         r["place"] = place_name(float(lat), float(lon))
         time.sleep(1.1)
 
-    rows.sort(key=lambda r: (-int(r["n_screens"]),
-                             min((int(v) for kk, v in r.items()
-                                  if kk.startswith("rank_") and v != ""), default=99)))
+    # `fine_depth_density` = the shipped screen's own FINE form, depth x density, on Open
+    # Buildings counts. Closer to "is this an informal settlement" than depth alone, which
+    # measures nesting: a gated estate of cul-de-sacs is deep and is not a settlement.
+    for r in rows:
+        d = float(r["fine_depth"]) if r["fine_depth"] != "" else 0.0
+        r["fine_depth_density"] = round(d * float(r["per_km2"]) / 1e4, 3)
+
+    # `disagreement` = how far the best automated signal is from the survey's verdict, in
+    # percentile terms: a formal-labelled block scoring HIGH disagrees, an informal-labelled
+    # block scoring LOW disagrees. It orders the adjudication; it does not decide anything.
+    fdd = np.array([float(r["fine_depth_density"]) for r in rows])
+    pct = fdd.argsort().argsort() / max(len(fdd) - 1, 1)
+    for r, q in zip(rows, pct, strict=True):
+        r["disagreement"] = round(q if r["survey_label"] == "formal" else 1.0 - q, 3)
+
+    # Disputed first -- those decide whether the Open Buildings switch is right, which is what is
+    # blocked on this pass -- then by disagreement, so within the critical path the blocks where
+    # the fine metric and the survey conflict most come first.
+    rows.sort(key=lambda r: (r["disputed"] != "yes", -float(r["disagreement"])))
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"screen_top{k}_worksheet.csv"
+
+    # Carry forward any adjudication already done. Regenerating is routine -- a changed k, a new
+    # count source, a better link -- and a regeneration that silently discarded an afternoon of
+    # verdicts would be the worst possible failure of this file. Keyed on block_id, so rows that
+    # move or leave the top-k keep their verdict if they come back.
+    if path.exists():
+        prior = {r["block_id"]: (r.get("verdict", ""), r.get("notes", ""))
+                 for r in csv.DictReader(path.open()) if r.get("verdict", "").strip()}
+        carried = 0
+        for r in rows:
+            if r["block_id"] in prior:
+                r["verdict"], r["notes"] = prior[r["block_id"]]
+                carried += 1
+        if prior:
+            print(f"carried forward {carried}/{len(prior)} existing verdict(s)"
+                  + (f"; {len(prior) - carried} no longer in the top-{k} union"
+                     if carried < len(prior) else ""))
+
     with path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()

@@ -26,6 +26,7 @@ import numpy as np
 from pyproj import CRS
 
 from reblock.contracts import Source
+from reblock.data.counts import BuildingCount, OpenBuildingsCount, resolved
 from reblock.data.kblock import KblockSource
 from reblock.derivations import ScreenSelectionInput, access_before, screen_selection
 from reblock.derive_graph import source_hash
@@ -82,6 +83,10 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
     blocks = gpd.read_parquet(
         inp.blocks_path,
         columns=["block_id", "building_count", "block_area_m2", "geometry"])
+    # Resolve WHICH count before anything scores: `resolved` overwrites `building_count`, so the
+    # metric, the gate and the pre-filter below all read one number and none of them asks where it
+    # came from. See `reblock.data.counts` for why the default is Open Buildings.
+    blocks = resolved(blocks, inp.buildings_path, inp.counts)
     bid = blocks["block_id"].astype(str).to_numpy()
     count = blocks["building_count"].to_numpy(dtype=float)
     crs = blocks.crs
@@ -117,11 +122,16 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
 
 class DenseCompactScreen:
     def __init__(self, metric: BlockMetric, gate: Gate, *, proxy_keep_pct: float = 30.0,
-                 min_buildings: int = 10) -> None:
+                 min_buildings: int = 10,
+                 counts: BuildingCount | None = None) -> None:
         self.metric = metric
         self.gate = gate
         self.proxy_keep_pct = proxy_keep_pct
         self.min_buildings = min_buildings
+        # Injected once, here, where config is read; `None` takes the shipped default rather
+        # than leaving callers to spell it. See `reblock.data.counts` for why that is Open
+        # Buildings and not the `building_count` column kblock ships.
+        self.counts: BuildingCount = counts if counts is not None else OpenBuildingsCount()
 
     def _selection_input(self, source: Source) -> ScreenSelectionInput:
         if not isinstance(source, KblockSource):
@@ -131,8 +141,8 @@ class DenseCompactScreen:
         return ScreenSelectionInput(
             source_hash=source_hash(source.blocks_path, source.buildings_path),
             blocks_path=str(source.blocks_path), buildings_path=str(source.buildings_path),
-            metric=self.metric, gate=self.gate, proxy_keep_pct=self.proxy_keep_pct,
-            min_buildings=self.min_buildings)
+            metric=self.metric, gate=self.gate, counts=self.counts,
+            proxy_keep_pct=self.proxy_keep_pct, min_buildings=self.min_buildings)
 
     def select(self, source: Source) -> list[str]:
         return [bid for bid, _ in screen_selection(self._selection_input(source))]

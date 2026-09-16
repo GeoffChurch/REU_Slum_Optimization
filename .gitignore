@@ -83,3 +83,8 @@ web/src/render/graph-encoding.generated.ts
 # Hydra scratch dir left behind by in-place regeneration of examples/method-comparison
 examples/method-comparison/.hydra/
 site/
+
+# Aerial imagery for block adjudication: derived from an external service, ~500 KB/block,
+# and regenerable with `pixi run python -m scripts.fetch_block_imagery`. The VERDICTS it informs
+# are committed (data/adjudication/*.csv); the pictures are not.
+/data/adjudication/imagery/
