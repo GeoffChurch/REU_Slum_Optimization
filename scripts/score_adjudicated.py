@@ -13,8 +13,14 @@ Reports three things, in order of what they settle:
 3. **Pairwise margins in blocks**, because "0.80 vs 0.73" at k=15 is one block and should not
    be read as a separation.
 
-`verdict` values: `informal`, `formal`, `unclear`. Anything else is reported and refused --
-a typo silently scored as "not informal" would bias every number here toward the survey.
+`verdict` values are the four in `data/adjudication/RULE.md`: `all-dense-informal`,
+`some-dense-informal`, `no-dense-informal`, `unclear`. Anything else is reported and REFUSED --
+a typo silently scored as "not informal" would bias every number here toward the survey, which
+is the failure under investigation.
+
+`all-` and `some-` collapse to one class here, by the rule's own instruction: the question is
+whether the block contains fabric reblocking would serve, and a block that is half township and
+half shacks has it. The split is descriptive and nothing below depends on it.
 
     pixi run python -m scripts.score_adjudicated [worksheet.csv]
 """
@@ -27,7 +33,9 @@ from collections import Counter
 from pathlib import Path
 
 DEFAULT = Path("data/adjudication/screen_top15_worksheet.csv")
-VALID = {"informal", "formal", "unclear"}
+VALID = {"all-dense-informal", "some-dense-informal", "no-dense-informal", "unclear"}
+POSITIVE = {"all-dense-informal", "some-dense-informal"}    # collapse, per RULE.md
+DECIDED = VALID - {"unclear"}
 
 
 def main() -> int:
@@ -45,7 +53,10 @@ def main() -> int:
         print("A typo scored as 'not informal' would bias every number below toward the survey.")
         return 1
 
-    agree = Counter((r["survey_label"], r["verdict"].strip()) for r in filled)
+    def collapsed(v: str) -> str:
+        return "informal" if v in POSITIVE else "formal" if v != "unclear" else "unclear"
+
+    agree = Counter((r["survey_label"], collapsed(r["verdict"].strip())) for r in filled)
     print("\n1. survey vs adjudicator")
     for (surv, hand), n in sorted(agree.items()):
         flag = "" if surv == hand else "   <- DISAGREE"
@@ -54,10 +65,13 @@ def main() -> int:
     over = agree[("informal", "formal")]
     print(f"   survey MISSED {missed} settlement(s); over-called {over}. "
           f"{'Recall-limited, as predicted.' if missed > over else ''}")
+    split = Counter(r["verdict"].strip() for r in filled)
+    print("   raw verdicts: " + ", ".join(f"{k}={v}" for k, v in sorted(split.items()))
+          + "   (all-/some- collapse; the split is descriptive, not calibrated)")
 
     rank_cols = [c for c in rows[0] if c.startswith(("kb_", "ob_")) and c not in
                  ("kb_count", "ob_count", "ob_over_kb", "ob_n", "ob_median_m2")]
-    hand = {r["block_id"]: r["verdict"].strip() for r in filled}
+    hand = {r["block_id"]: collapsed(r["verdict"].strip()) for r in filled}
     surv = {r["block_id"]: r["survey_label"] for r in rows}
 
     print("\n2. precision@k per screen (unclear verdicts excluded from both numerator and k)")
