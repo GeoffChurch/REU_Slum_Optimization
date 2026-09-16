@@ -93,9 +93,15 @@ disagreement is sharpest. Green is gained by the shipped default; red is dropped
   settlement extent before the block counts as informal is a judgment call, not a measured fact —
   but the screens' relative ranking was checked and holds across a wide range of alternative
   choices, not only the one used to produce the numbers above.
-- **Ground truth is older than the blocks it is checked against.** The survey structures date to
-  2018; the blocks they are matched against are built from more recent OSM and Open Buildings
-  data. Some drift between the two is unavoidable.
+- **Ground truth is older than the blocks it is checked against, and the drift runs one way.**
+  The survey structures date to 2018; the blocks they are matched against are built from more
+  recent OSM and Open Buildings data. A settlement that grew after the survey is invisible to it,
+  while the reverse cannot happen — so a block can be wrongly counted as a false positive, but
+  never wrongly counted as a true one. **Every precision figure on this page is therefore a lower
+  bound.** This is not only a theoretical worry: among the very highest-scoring blocks of the two
+  weaker screens are a pair that the survey places outside every settlement, yet whose buildings
+  are smaller than those in blocks the survey does mark as informal. Whether they grew after 2018
+  or are genuinely formal has not been checked against imagery.
 - **A more expensive feature wins outright.** A single Google Open Buildings feature —
   90th-percentile building-footprint area — scores higher than every screen benchmarked here. It
   is not shipped because computing it needs a building-footprint polygon download none of these
