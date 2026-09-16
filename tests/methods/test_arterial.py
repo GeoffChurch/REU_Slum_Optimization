@@ -416,11 +416,13 @@ def test_config_and_derivation_wiring() -> None:
     from hydra import compose, initialize_config_dir
     from hydra.utils import instantiate
 
-    from reblock.derive_graph import _DERIVATION_MODULES
+    from reblock.derive_graph import _closure_paths
     # arterial.py became a package (task 1 of the arterial-engine-productionization refactor); the
     # public method now lives in reblocker.py, so that's the file this wiring check looks for. The
-    # glob itself is recursive (see derive_graph.py), so every module under arterial/ is hashed.
-    assert any(p.name == "reblocker.py" for p in _DERIVATION_MODULES)
+    # closure is walked from the class's own module, so every module under arterial/ that the
+    # method actually reaches is hashed -- a package needs no special case.
+    assert any(p.name == "reblocker.py"
+               for p in _closure_paths(GreedyArterialReblocker.__module__))
     conf_dir = str(Path("conf").resolve())
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config",
