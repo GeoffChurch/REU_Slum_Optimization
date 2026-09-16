@@ -47,6 +47,27 @@ UA = "reblock-research/0.1 (https://github.com/GeoffChurch/REU_Slum_Optimization
 OB = Path.home() / ".cache/reblock/buildings_capetown_polygons.parquet"
 
 
+
+def _maps_url(geom: object, lat: float, lon: float, viewport_px: int = 900) -> str:
+    """A satellite link ZOOMED TO THE BLOCK, not to a fixed level.
+
+    A fixed zoom is wrong at both ends of this worksheet: `ZAF.9.3.1_1_44685` is 0.3 ha and
+    `_5810` is 58 ha, and 17z shows one as a speck and crops the other. Web Mercator gives
+    metres-per-pixel as `156543.03392 * cos(lat) / 2^z`, so the zoom that fits an extent of
+    `E` metres across `viewport_px` is `log2(156543.03392 * cos(lat) * viewport_px / E)`.
+
+    `/data=!3m1!1e3` opens in satellite rather than the road map -- what the judgement is
+    actually made on.
+    """
+    import math
+
+    x0, y0, x1, y1 = geom.bounds                          # type: ignore[attr-defined]
+    span_m = max((x1 - x0) * 111_320 * math.cos(math.radians(lat)), (y1 - y0) * 110_540)
+    z = math.log2(156543.03392 * math.cos(math.radians(lat)) * viewport_px / max(span_m, 1.0))
+    return (f"https://www.google.com/maps/@{lat:.5f},{lon:.5f},"
+            f"{max(14.0, min(19.5, z)):.1f}z/data=!3m1!1e3")
+
+
 def place_name(lat: float, lon: float) -> str:
     """Most specific OSM place name at this point, or "" -- a starting point for the human,
     not an authority. Nominatim asks for <= 1 request/second and a real User-Agent; both are
@@ -119,10 +140,12 @@ def main() -> int:
                                [str(b["block_id"].iloc[i]) for i in union])))
 
     wgs = Transformer.from_crs(b.crs, "EPSG:4326", always_xy=True)
+    wgs_geoms = b.to_crs("EPSG:4326").geometry
     rows = []
     for i in union:
         c = b.geometry.iloc[i].centroid
         lon, latd = wgs.transform(c.x, c.y)
+        geom_wgs = wgs_geoms.iloc[i]
         n_ob, med = ob_med.get(i, (0, float("nan")))
         area_ha = float(b["block_area_m2"].iloc[i]) / 1e4
         rows.append({
@@ -140,7 +163,7 @@ def main() -> int:
             "fine_depth_density": "",      # filled below, once every block's fine depth is known
             "survey_cover": round(float(cover[i]), 3),
             "survey_label": "informal" if lab[i] else "formal",
-            "place": "", "maps": f"https://www.google.com/maps/@{latd:.5f},{lon:.5f},17z",
+            "place": "", "maps": _maps_url(geom_wgs, latd, lon),
             "verdict": "", "notes": "",
         })
 
@@ -171,6 +194,24 @@ def main() -> int:
     rows.sort(key=lambda r: (r["disputed"] != "yes", -float(r["disagreement"])))
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / f"screen_top{k}_worksheet.csv"
+
+    # Carry forward any adjudication already done. Regenerating is routine -- a changed k, a new
+    # count source, a better link -- and a regeneration that silently discarded an afternoon of
+    # verdicts would be the worst possible failure of this file. Keyed on block_id, so rows that
+    # move or leave the top-k keep their verdict if they come back.
+    if path.exists():
+        prior = {r["block_id"]: (r.get("verdict", ""), r.get("notes", ""))
+                 for r in csv.DictReader(path.open()) if r.get("verdict", "").strip()}
+        carried = 0
+        for r in rows:
+            if r["block_id"] in prior:
+                r["verdict"], r["notes"] = prior[r["block_id"]]
+                carried += 1
+        if prior:
+            print(f"carried forward {carried}/{len(prior)} existing verdict(s)"
+                  + (f"; {len(prior) - carried} no longer in the top-{k} union"
+                     if carried < len(prior) else ""))
+
     with path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
