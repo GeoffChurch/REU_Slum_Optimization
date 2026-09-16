@@ -8,6 +8,7 @@ from shapely.geometry import LineString, MultiLineString, Point, Polygon
 from shapely.ops import unary_union
 
 from reblock.budget import (
+    _rnd,
     access_burden,
     road_drainage,
     street_first_ordered,
@@ -617,3 +618,101 @@ def test_drainage_counts_parcels_not_segment_traversals() -> None:
     assert d_plain == [1], f"one parcel on one road must read 1, got {d_plain}"
     assert d_sub == d_plain, (
         f"subdividing a road changed drainage {d_plain} -> {d_sub}: counting segments, not parcels")
+
+
+def _crossing_block() -> tuple[Block, gpd.GeoDataFrame]:
+    """A stem up from the street, crossed mid-segment by a crossbar every parcel fronts.
+
+    The crossing at (50, 40) is a vertex of NEITHER road, which is the whole point: it is a real
+    junction that a graph keyed on segment endpoints cannot see.
+    """
+    xs = [20.0, 35.0, 65.0, 80.0]          # 50.0 deliberately absent -- no vertex at the crossing
+    stem = LineString([(50.0, 0.0), (50.0, 80.0)])
+    crossbar = LineString([(10.0, 40.0), *[(x, 40.0) for x in xs], (90.0, 40.0)])
+    # Parcels sit ON the crossbar and nowhere near the stem or the street; `road_drainage` attaches
+    # them to graph NODES, hence the per-parcel vertices above.
+    parcels = gpd.GeoDataFrame(
+        {"parcel_id": [str(k) for k in range(len(xs))]},
+        geometry=[Polygon([(x - 5, 40), (x + 5, 40), (x + 5, 50), (x - 5, 50)]) for x in xs],
+        crs=UTM)
+    block = Block(
+        block_id="cross", crs=UTM,
+        boundary=Polygon([(0, 0), (100, 0), (100, 80), (0, 80)]),
+        parcels=parcels,
+        streets=gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (100.0, 0.0)])], crs=UTM),
+        building_points=gpd.GeoDataFrame(geometry=[Point(x, 45) for x in xs], crs=UTM))
+    return block, _roads([stem, crossbar])
+
+
+def test_road_drainage_routes_through_an_unnoded_crossing() -> None:
+    """A crossing is a junction even when neither road carries a vertex there.
+
+    Two roads crossing mid-segment share no coordinate, so a graph keyed on raw segment endpoints
+    puts them in separate components. The crossbar -- which every parcel actually walks out along --
+    then reads as floating and scores 0, and the prefix order drainage drives is ranking roads by an
+    artifact rather than by traffic.
+
+    FAULT INJECTION: keying nodes on raw segment endpoints without splitting at crossings (the
+    pre-2026-09-14 `_road_net`) leaves the crossbar street-disconnected and this reads [0, 0].
+    """
+    block, roads = _crossing_block()
+    stem, crossbar = roads.geometry
+    assert not {(50.0, 40.0)} & set(stem.coords) | {(50.0, 40.0)} & set(crossbar.coords), (
+        "fixture is vacuous: the crossing must not be a vertex of either road")
+
+    drain = road_drainage(block, roads)
+    assert drain == [4, 4], (
+        f"every parcel should route crossbar -> crossing -> stem -> street, got {drain}")
+
+
+def test_every_prefix_is_connected_by_the_same_test_the_peel_uses() -> None:
+    """`street_first_ordered` and `street_connectivity` must agree on what reaches the street.
+
+    `_road_net` decided street-adjacency on `_rnd`-ROUNDED nodes while `street_connectivity` -- the
+    predicate the peel, access depth and burden actually use -- decides on RAW segments. A road
+    sitting within a rounding step of `STREET_TOL` is accepted by one and refused by the other, so
+    the ordering leads with a road the peel scores as floating: a prefix that grants no access while
+    the lens reports it as buildable.
+
+    Not hypothetical. `euclidean_grid` trims to `street_buffer: 0.5`, exactly `STREET_TOL`, so on
+    the pinned block six of nine grid roads land within 5e-10 m of the boundary and the two
+    predicates disagree on three of them.
+
+    The fixture reproduces that deliberately: `false_front` lies at y = 0.504, which `_rnd` snaps to
+    0.500 (accepted, 0.500 <= 0.500) while its true distance 0.504 is refused. `real_front` is
+    unambiguously connected at y = 0.2, and the two cross so the ordering CAN reach the first
+    through the second.
+
+    FAULT INJECTION: restoring the rounded-node predicate makes `false_front` a street node, so it
+    leads the order and prefix[:1] reads connected_frac 0.000.
+    """
+    from reblock.derive.access import street_connectivity
+
+    xs = [20.0, 35.0, 65.0, 80.0]
+    false_front = LineString([(10.0, 0.504), *[(x, 0.504) for x in xs], (90.0, 0.504)])
+    real_front = LineString([(50.0, 0.2), (50.0, 40.0)])
+    parcels = gpd.GeoDataFrame(
+        {"parcel_id": [str(k) for k in range(len(xs))]},
+        geometry=[Polygon([(x - 5, 0.6), (x + 5, 0.6), (x + 5, 10), (x - 5, 10)]) for x in xs],
+        crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (100.0, 0.0)])], crs=UTM)
+    block = Block(
+        block_id="knife", crs=UTM,
+        boundary=Polygon([(0, 0), (100, 0), (100, 40), (0, 40)]),
+        parcels=parcels, streets=streets,
+        building_points=gpd.GeoDataFrame(geometry=[Point(x, 5) for x in xs], crs=UTM))
+
+    street_geom = unary_union(list(streets.geometry))
+    raw = false_front.distance(street_geom)
+    rounded = Point(_rnd((10.0, 0.504))).distance(street_geom)
+    assert raw > STREET_TOL >= rounded, (
+        f"fixture is vacuous: it must straddle the tolerance, got raw {raw} vs rounded {rounded}")
+
+    roads = _roads([false_front, real_front])
+    ordered = street_first_ordered(block, roads, STREET_TOL)
+    for k in range(1, len(ordered) + 1):
+        prefix = cast(gpd.GeoDataFrame, ordered.iloc[:k])
+        frac = street_connectivity(block.streets, prefix, STREET_TOL).connected_frac
+        assert frac == 1.0, (
+            f"prefix[:{k}] ({prefix.geometry.length.sum():.1f} m) is {frac:.3f} street-connected "
+            f"by the peel's own test -- the lens would score road nobody could build")

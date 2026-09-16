@@ -152,11 +152,22 @@ def access_burden(depths: pd.Series) -> float:
 
 @dataclass(frozen=True)
 class _RoadNet:
-    """The snap-planarized road graph, with each road's own nodes and its distance to the street.
+    """The planarized road graph, with each road's own nodes and its distance to the street.
 
     Shared by `road_drainage` and `street_first_ordered` so the two can never disagree about what
-    the road network is. Nodes are `_rnd`-snapped segment endpoints -- deliberately NOT
-    `unary_union`-noded, because that re-nodes geometry into vertices no `_rnd` key matches.
+    the road network is. Nodes are `_rnd`-snapped: every segment endpoint, plus every point where a
+    segment crosses a segment of a DIFFERENT road -- because a crossing is a junction whether or not
+    either road happens to carry a vertex there.
+
+    `street_nodes` is decided on each node's RAW position, never its `_rnd`-snapped one. Snapping
+    moves a point by up to ~0.7 cm, which is enough to flip a `<= tol` test for a road lying on the
+    tolerance boundary -- and `derive.access.street_connectivity`, the predicate the peel and access
+    depth use, tests raw geometry. When the two disagreed, `street_first_ordered` led with a road
+    the peel scored as floating, so the lens reported a prefix that granted no access at all.
+
+    This does not `unary_union` the roads, which would re-node the geometry into vertices no `_rnd`
+    key matches and would lose the row attribution `edge_row` needs. Splitting each segment in place
+    keeps both.
     """
 
     graph: nx.Graph
@@ -173,23 +184,71 @@ class _RoadNet:
 
 
 def _road_net(block: Block, roads: GeoDataFrame, tol: float) -> _RoadNet:
-    g: nx.Graph = nx.Graph()
-    edge_row: dict[frozenset[_Node], int] = {}
-    road_nodes: list[list[_Node]] = []
+    """Build the planarized graph. See `_RoadNet` for what it is and why the two consumers share it.
+
+    Each segment is split at its crossings with segments of OTHER roads before it is added, so a
+    mid-segment junction becomes a shared node. Same-road pairs are skipped: consecutive segments of
+    one road already share an `_rnd` endpoint, and a road crossing itself is not a junction between
+    two roads. A collinear overlap yields a LineString intersection rather than a Point and so
+    contributes no cut -- two roads running along each other meet at their endpoints or not at all,
+    which is the pre-existing behaviour.
+
+    Cost is one STRtree over the segments plus one query each, and the split is skipped outright for
+    every segment nothing crosses -- which is most of them on any method that is not a grid.
+    """
+    segs: list[LineString] = []
+    seg_row: list[int] = []
     for i, geom in enumerate(roads.geometry):
         parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]   # explode Multi*
-        mine: list[_Node] = []
         for part in parts:
             cs = list(part.coords)
             for a, b in zip(cs, cs[1:], strict=False):
-                na, nb = _rnd(a), _rnd(b)
-                if na != nb:
-                    g.add_edge(na, nb, weight=Point(na).distance(Point(nb)))
-                    edge_row[frozenset((na, nb))] = i
-                    mine += [na, nb]
-        road_nodes.append(mine)
+                if _rnd(a) != _rnd(b):
+                    segs.append(LineString([a, b]))
+                    seg_row.append(i)
+
     street = unary_union(list(block.streets.geometry))
-    snodes = [node for node in g.nodes if Point(node).distance(street) <= tol]
+    g: nx.Graph = nx.Graph()
+    edge_row: dict[frozenset[_Node], int] = {}
+    road_nodes: list[list[_Node]] = [[] for _ in range(len(roads))]
+    node_dist: dict[_Node, float] = {}
+
+    def node_of(xy: tuple[float, ...]) -> _Node:
+        """The `_rnd` key for a raw coordinate, remembering how close the RAW point came to the
+        street. Several raw points can snap to one node; the nearest one decides, so the answer
+        does not depend on which segment happened to create the node first."""
+        nd = _rnd(xy)
+        d = Point(xy).distance(street)
+        if d < node_dist.get(nd, float("inf")):
+            node_dist[nd] = d
+        return nd
+
+    def add(i: int, na: _Node, nb: _Node) -> None:
+        if na == nb:
+            return
+        g.add_edge(na, nb, weight=Point(na).distance(Point(nb)))
+        edge_row[frozenset((na, nb))] = i
+        road_nodes[i] += [na, nb]
+
+    tree = STRtree(segs)
+    for k, ln in enumerate(segs):
+        i = seg_row[k]
+        cuts: list[float] = []
+        for j in tree.query(ln, predicate="intersects"):
+            if seg_row[j] == i:
+                continue
+            hit = ln.intersection(segs[j])
+            pts = [hit] if isinstance(hit, Point) else list(getattr(hit, "geoms", []))
+            cuts += [ln.project(pt) for pt in pts if isinstance(pt, Point)]
+        nodes = [node_of(ln.coords[0])]
+        for m in sorted({c for c in cuts if 0.0 < c < ln.length}):
+            cut = ln.interpolate(m)
+            nodes.append(node_of((cut.x, cut.y)))
+        nodes.append(node_of(ln.coords[-1]))
+        for na, nb in zip(nodes, nodes[1:], strict=False):
+            add(i, na, nb)
+
+    snodes = [node for node, d in node_dist.items() if d <= tol and node in g]
     return _RoadNet(graph=g, edge_row=edge_row, road_nodes=road_nodes, street_nodes=snodes)
 
 

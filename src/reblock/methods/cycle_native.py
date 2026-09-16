@@ -25,6 +25,14 @@ retrace; without it the "cycle" is a there-and-back spur and the method degenera
     resistance_lp       5.4716   0.3536  0.7982  0.0431      242
     cycle_native        5.0323   0.0000  0.7464  0.0625      193
 
+**The `bridges` column is INSTRUMENT-AFFECTED** (2026-09-14): `orient.bridge_fraction` read the
+road graph from `budget._road_net`, which does not node road-road crossings, so a method whose roads
+cross mid-segment reads as more bridged than it is. Re-measured with the graph planarized,
+`resistance_lp` is 0.83 rather than 1.00 and `euclidean_grid` 0.39 rather than 1.00. This method's
+own claim survives -- it is still the lowest by a wide margin -- but the CLAIM BELOW that
+`resistance_lp` has the highest bridge fraction does not.
+See `notes/2026-09-14-road-net-is-not-planarized.md`.
+
 Beats the flagship on BOTH lenses -- permeability at matched displacement 13/22 (+0.0198), and
 displacement to reach P* 16/20 (-0.0442) -- and is the only method with ZERO bridges, so it is the
 only one every road of which can be made one-way with no repair pass.

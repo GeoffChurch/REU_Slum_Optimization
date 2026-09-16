@@ -1304,6 +1304,36 @@ different about `d_s` above is that it is not one eigenvalue but the slope of th
 over the whole low-frequency tail — a far more robust statistic than `lambda_2`. That distinction is
 the only reason item 2 is listed at all.
 
+## `euclidean_grid` trims to exactly `STREET_TOL`, so its connectivity is a coin flip (2026-09-14)
+
+`conf`'s `euclidean_grid` sets `street_buffer: 0.5`; `derive.access.STREET_TOL` is `0.5`. A grid road
+is therefore trimmed to sit at exactly the distance that decides whether it reaches the street, and
+`<=` breaks the tie on float noise. Measured on the pinned block: six of nine grid roads land within
+**5e-10 m** of the boundary, three of them on the far side.
+
+The *inconsistency* this exposed is fixed — `_road_net` and `street_connectivity` now use the same
+raw-geometry predicate, so `street_first_ordered`'s prefix guarantee holds again
+([notes/2026-09-14-road-net-is-not-planarized.md](notes/2026-09-14-road-net-is-not-planarized.md)).
+The *landmine* is not: both tests now agree about a tie broken in the 16th significant digit, so an
+irrelevant change to grid geometry, a different UTM zone, or a shapely version can still flip which
+grid roads count as street-fronting, and with them the Grid's whole reported curve.
+
+**Not fixed here because it changes a published method's emitted geometry**, which is a different
+kind of change from fixing an inconsistency — owner's call, taken as consistency-only on the day.
+
+Two candidate resolutions, neither measured:
+
+- **Move the buffer off the boundary** (`street_buffer` strictly below `STREET_TOL`, e.g. 0.25).
+  Smallest blast radius: only the Grid's geometry moves. Wants a check that a narrower clearance
+  does not make grid roads overlap the existing street in the displacement corridor.
+- **Give the trim its own constant tied to the tolerance** (`street_buffer = STREET_TOL / 2`), so the
+  invariant "a trimmed grid road is unambiguously connected" is expressed in code rather than left
+  to two independently-chosen numbers happening not to collide.
+
+Whichever, the acceptance test is the one that already exists —
+`test_every_prefix_is_connected_by_the_same_test_the_peel_uses` — extended to the real grid block,
+plus a check that perturbing every coordinate by 1e-9 does not change which roads are street-fronting.
+
 ## Lens prefix selection — the cheapest connected subnetwork (2026-07-29)
 
 Both lenses truncate a method's roads to a PREFIX of one canonical order (`budget.street_first_ordered`)
@@ -1340,6 +1370,17 @@ on both axes to a Pareto trade. Nothing about the roads changed.
 - **It is deliberately not a Hydra Strategy.** Two of three candidates are wrong rather than
   different, so a plug-in point would ship one implementation and a menu nobody selects (the
   no-dead-options rule). A real optimizer WOULD earn one — see below.
+- **The graph the order is derived FROM is wrong** (2026-09-14). `budget._road_net` does not node
+  road-road crossings, so `road_drainage` runs on a graph missing every mid-segment junction. On the
+  pinned block that splits `euclidean_grid` into 8 components with 4 roads unreachable from the
+  street, collapsing total drainage 44 → 6 and costing it 2.1× the road to reach P\*. On
+  `density_compactness` it moves the Grid's published rows in BOTH committed lens tables (and the
+  Loop Network's Lens A road by 41 m); four methods are bit-identical. **The sign is not
+  consistent** — planarizing improves the Grid's Lens A and worsens its Lens B, because drainage
+  counts traffic while the lens prices permeability per home, so correcting the heuristic's INPUT
+  can still move a reported cost the wrong way. That is a second, independent argument for the
+  optimizer below, and it is prior to it rather than a substitute —
+  [notes/2026-09-14-road-net-is-not-planarized.md](notes/2026-09-14-road-net-is-not-planarized.md).
 - **`road_drainage` semantics were fixed alongside** (it counted segment traversals, not parcels, so
   vertex-dense roads got inflated drainage — a subdivided road scored 4 against an identical plain
   road's 1). Any future ordering work inherits the corrected key.
@@ -1803,6 +1844,10 @@ different orientations.
 
 **What survives.** `orient.bridge_fraction` is deterministic, cheap, and directly measures whether a
 network can circulate at all (`cycle_native` 0.000 / `clearance_looped` 0.577 / `resistance_lp` 1.000).
+**Those numbers are instrument-affected** (2026-09-14): the graph came from `budget._road_net`, which
+does not node road-road crossings, so `resistance_lp` reads 0.83 and `euclidean_grid` 0.39 once
+planarized. Any revival of this as a third axis needs the noding fix first --
+[notes/2026-09-14-road-net-is-not-planarized.md](notes/2026-09-14-road-net-is-not-planarized.md).
 If circulation is ever worth a third reported axis, that is the candidate -- but it must first face
 the attack that retired cycle density: is it gameable? It is length-weighted, so a token loop should
 not move it much, but that is an argument, not a measurement.

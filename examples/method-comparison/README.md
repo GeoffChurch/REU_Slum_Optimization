@@ -33,7 +33,7 @@ Every method truncated where permeability first reaches the standard target, so 
 | Looped Tree | 83 m | 7.2% | 61.9% |  |
 | Least-Cost Tree | 89 m | 7.9% | 62.5% |  |
 | Loop Network | 93 m | 4.4% | 64.3% |  |
-| Grid | 270 m | 14.8% | 70.7% |  |
+| Grid | 147 m | 12.7% | 60.5% |  |
 | Frontage (street-priced) | 170 m | 3.6% | 64.2% |  |
 | OSM Footpaths | 174 m | 7.8% | 73.8% |  |
 | Direct Objective (LP) | 147 m | 4.8% | 62.1% |  |
@@ -62,10 +62,10 @@ Every method truncated to the same displacement %, so this compares the **permea
 | Least-Cost Tree | 143 m | 12.2% | 69.1% |  |
 | Looped Tree | 110 m | 10.1% | 66.4% |  |
 | Loop Network | 243 m | 11.3% | 77.0% |  |
-| Grid | 270 m | 14.8% | 70.7% |  |
+| Grid | 147 m | 12.7% | 60.5% |  |
 | Frontage (street-priced) | 339 m | 14.4% | 81.5% |  |
 | OSM Footpaths | 215 m | 10.7% | 81.5% |  |
-| Direct Objective (LP) | 401 m | 10.7% | 88.8% |  |
+| Direct Objective (LP) | 407 m | 10.7% | 88.8% |  |
 | Topology | 142 m | 10.6% | 67.2% |  |
 
 > **On the access-objective arterial row.** This example scores ONE pinned block, and `objective=access` maximises a sum of squared *integer* depths — so different networks routinely tie exactly, and the greedy picks between them arbitrarily. Perturbing the gains by 1e-10 moves this method's burden reduction by up to 15% on a third of blocks. Its number here is one draw, not a stable estimate; the medians over many blocks reported in the notes are the trustworthy form. No other method in this table has that sensitivity.
@@ -92,11 +92,3 @@ pixi run python -m scripts.gen_example method_comparison
 ```
 The full run log is in [`run.log`](run.log).
 
-This directory also carries `frontier.json`, the data for the interactive Frontier widget on the
-Methods index page — every method's full drainage-ordered prefix table (road length, displacement,
-permeability) on this same pinned block, baked by a separate script because it is a different page's
-data and shares none of the run above's maps or curves:
-
-```bash
-pixi run python -m scripts.gen_frontier_bundle
-```
