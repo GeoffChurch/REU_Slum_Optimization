@@ -34,6 +34,7 @@ the adjudicator should say so rather than guess.
     pixi run python -m scripts.fetch_block_imagery              # every un-adjudicated block
     pixi run python -m scripts.fetch_block_imagery 12           # the first 12 of them
     pixi run python -m scripts.fetch_block_imagery --all        # including adjudicated ones
+    pixi run python -m scripts.fetch_block_imagery --control     # the random control sample
 """
 from __future__ import annotations
 
@@ -53,11 +54,16 @@ from matplotlib.image import imread  # noqa: E402
 from shapely import STRtree  # noqa: E402
 from shapely.geometry import box as shapely_box  # noqa: E402
 
-from reblock.data.counts import KblockCount  # noqa: E402
+from reblock.data.counts import COUNTERS  # noqa: E402
 from scripts.gen_screen_bakeoff import load  # noqa: E402
 
 WORKSHEET = Path("data/adjudication/screen_top15_worksheet.csv")
-OUT = Path("data/adjudication/imagery")
+CONTROL = Path("data/adjudication/control_sample.csv")
+# Which count source defines the POOL each sheet's blocks were drawn from. They differ, and a
+# mismatch is not a slow path but a KeyError: the worksheet was built on the Ecopia-eligible pool
+# (16,451 blocks) and the control sample on the Open Buildings one (18,309), and 1,858 blocks are
+# in the second and not the first.
+POOL_OF = {WORKSHEET: "kblock", CONTROL: "open_buildings"}
 EXPORT = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export"
 UA = "reblock-research/0.1 (https://github.com/GeoffChurch/REU_Slum_Optimization)"
 MARGIN = 0.25          # of the block's own extent, so the surrounding fabric is visible too
@@ -117,16 +123,20 @@ def main() -> int:
     modes = ([m for m in ("satellite", "schematic") if f"--{m}" in sys.argv]
              or ["satellite", "schematic"])
     limit = int(args[0]) if args else None
+    sheet = CONTROL if "--control" in sys.argv else WORKSHEET
+    # Per-sheet output root, so the top-k set and the random control set never mix on disk. They
+    # answer different questions and one is the other's negatives.
+    global OUT
+    OUT = Path(f"data/adjudication/{'control_' if sheet is CONTROL else ''}imagery")
 
-    rows = list(csv.DictReader(WORKSHEET.open()))
+    rows = list(csv.DictReader(sheet.open()))
     todo = [r for r in rows if every or not r["verdict"].strip()][: limit or None]
     print(f"{len(todo)} block(s) to render")
 
-    # KblockCount, deliberately: this script only needs each block's GEOMETRY to frame a picture,
-    # and it looks blocks up by the id the worksheet already lists -- so it wants the pool the
-    # worksheet was built on, and a corpus-wide point-in-polygon count it never reads buys
-    # nothing.
-    b, _ = load(KblockCount())
+    # The counter is chosen to reproduce the POOL the sheet was drawn from, not because this
+    # script reads a count -- it only needs geometry. Get it wrong and the block_id lookup below
+    # raises KeyError on whichever blocks the other pool does not contain.
+    b, _ = load(COUNTERS[POOL_OF[sheet]])
     wgs = b.to_crs("EPSG:4326")
     by_id = {str(v): i for i, v in enumerate(b["block_id"])}
     OUT.mkdir(parents=True, exist_ok=True)

@@ -62,6 +62,13 @@ def _maps_url(geom: object, lat: float, lon: float, viewport_px: int = 900) -> s
     import math
 
     x0, y0, x1, y1 = geom.bounds                          # type: ignore[attr-defined]
+    # `geom` must be in DEGREES: the span below multiplies by 111_320 m/degree. Handing this a
+    # projected geometry does not raise -- it inflates the span ~111_320x, drives the zoom
+    # negative, and the clamp below quietly returns 14.0z for every block. Caught 2026-09-17 when
+    # a whole control sample came out at the clamp floor, which is the only reason it was visible.
+    if not (-180 <= x0 <= 180 and -90 <= y0 <= 90 and -180 <= x1 <= 180 and -90 <= y1 <= 90):
+        raise ValueError(
+            f"_maps_url needs a WGS84 geometry, got bounds {(x0, y0, x1, y1)} -- reproject first")
     span_m = max((x1 - x0) * 111_320 * math.cos(math.radians(lat)), (y1 - y0) * 110_540)
     z = math.log2(156543.03392 * math.cos(math.radians(lat)) * viewport_px / max(span_m, 1.0))
     return (f"https://www.google.com/maps/@{lat:.5f},{lon:.5f},"
