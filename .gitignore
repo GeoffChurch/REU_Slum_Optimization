@@ -87,4 +87,9 @@ site/
 # Aerial imagery for block adjudication: derived from an external service, ~500 KB/block,
 # and regenerable with `pixi run python -m scripts.fetch_block_imagery`. The VERDICTS it informs
 # are committed (data/adjudication/*.csv); the pictures are not.
-/data/adjudication/imagery/
+#
+# One line per sheet, and the glob is deliberate rather than two literals: `control_imagery/` was
+# added on 2026-09-17 and did NOT match the single literal path that was here, so 280 PNGs sat
+# untracked -- not ignored, not committed, and therefore absent from every other machine while
+# looking present on the one that made them.
+/data/adjudication/*imagery/

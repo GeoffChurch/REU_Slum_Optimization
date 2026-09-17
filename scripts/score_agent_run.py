@@ -39,6 +39,7 @@ from pathlib import Path
 RUNS = Path("data/adjudication/runs")
 WORKSHEET = Path("data/adjudication/screen_top15_worksheet.csv")
 CONTROL = Path("data/adjudication/control_sample.csv")
+QUEUE = Path("data/adjudication/QUEUE.md")
 
 # RULE.md teaches by worked example, and it names these two blocks together with their labels.
 # Every judge is told to read it, so for an AGENT run these two are lookups rather than judgements
@@ -133,6 +134,51 @@ def score(path: Path) -> None:
             print(f"    {w:>7.1f}  {b:<24} {stratum:<10} agent={lab}")
         if len(queue) > 20:
             print(f"    ... and {len(queue) - 20} more")
+        write_queue(path, queue, rows)
+
+
+def write_queue(run: Path, queue: list[tuple[float, str, str, str]],
+                rows: dict[str, dict[str, str]]) -> None:
+    """The queue as a findable worklist, because a terminal printout is not an artifact.
+
+    MARKDOWN, not CSV, and deliberately: verdicts belong in `control_sample.csv`'s own `verdict`
+    column, and a second CSV with a verdict-shaped column is an invitation to fill in the wrong
+    file and split one label set across two. This is a worklist with links; the answer sheet is
+    elsewhere and says so at the top.
+
+    The image paths are stated in full because the control sample has its OWN image directory --
+    `control_imagery/`, not the worksheet's `imagery/` -- and looking for a control block in the
+    worksheet's directory finds nothing, which is exactly what happened on 2026-09-17.
+    """
+    out = QUEUE
+    lines = [
+        f"# Adjudication queue - {run.name}",
+        "",
+        f"{len(queue)} blocks where the agent and the February 2018 survey disagree, highest",
+        "leverage first. `weight` is N_stratum / n_sampled: judging one block moves the",
+        "Horvitz-Thompson population estimate by that many blocks.",
+        "",
+        "**Record verdicts in `data/adjudication/control_sample.csv`'s `verdict` column**, using",
+        "the four labels in `RULE.md`. Not here, and never in a `runs/*.csv` -- those are",
+        "standalone agent output and stay that way.",
+        "",
+        "Images are under `control_imagery/`, which is this sheet's own directory and is NOT the",
+        "worksheet's `imagery/`. Both are gitignored and regenerable:",
+        "`pixi run python -m scripts.fetch_block_imagery --control`",
+        "",
+        "| weight | block | agent says | survey says | ha | place | satellite |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for w, b, _stratum, lab in queue:
+        r = rows[b]
+        lines.append(
+            f"| {w:.1f} | `{b}` | {lab} | {r['survey_label']} | {r['area_ha']} | "
+            f"{r['place']} | [maps]({r['maps']}) |")
+    lines += ["", "Image paths:", "```"]
+    lines += [f"data/adjudication/control_imagery/satellite/{b}.png" for _, b, _, _ in queue]
+    lines += ["```", ""]
+    out.write_text("\n".join(lines), encoding="utf-8")
+    print(f"\n  wrote {out}")
 
 
 def main() -> int:
