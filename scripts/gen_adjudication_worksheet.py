@@ -89,7 +89,12 @@ def place_name(lat: float, lon: float) -> str:
 
 def main() -> int:
     k = int(sys.argv[1]) if len(sys.argv) > 1 else 15
-    b, _ = load()
+    # KblockCount fixes the POOL (blocks with >= MIN_COUNT Ecopia buildings); the two counters
+    # below then re-rank within it. That is what the committed verdicts were adjudicated against,
+    # so changing it would silently re-base 35 hand labels. It does mean a block Ecopia counts
+    # under MIN_COUNT cannot reach this worksheet even if Open Buildings would rank it top-15 --
+    # see the pool note in gen_screen_bakeoff.load.
+    b, _ = load(KblockCount())
     b = b.rename(columns={"a_m2": "block_area_m2"})
     lab, cover = b["informal"].to_numpy(), b["cover"].to_numpy()
     short = {col: name.split("   ")[0] for col, name, _ in METRICS}

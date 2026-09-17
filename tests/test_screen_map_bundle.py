@@ -171,10 +171,16 @@ def test_both_cities_carry_the_follow_colour(capetown: dict[str, Any],
 
 
 def test_the_interior_rings_survived(capetown: dict[str, Any], nairobi: dict[str, Any]) -> None:
-    """Measured: 6,990 Cape Town and 1,139 Nairobi blocks have a hole. Losing them changes no
-    count any other test here checks."""
-    assert sum(len(r) - 1 for r in capetown["rings"]) == 6990
-    assert sum(len(r) - 1 for r in nairobi["rings"]) == 1139
+    """Measured: 7,044 Cape Town and 1,128 Nairobi blocks have a hole. Losing them changes no
+    count any other test here checks.
+
+    These literals moved on 2026-09-17 when the bundle switched to Open Buildings counts (6,990 and
+    1,139 before). That is the eligible POOL changing, not geometry: `MIN_COUNT` thresholds the
+    count itself, so a different count admits a different set of blocks -- 18,309 Cape Town blocks
+    against 16,451, and 3,839 Nairobi against 3,500. Re-measure and update rather than loosen; the
+    whole point of an exact literal here is that a silent geometry-encoding regression moves it."""
+    assert sum(len(r) - 1 for r in capetown["rings"]) == 7044
+    assert sum(len(r) - 1 for r in nairobi["rings"]) == 1128
 
 
 def test_precision_and_recall_at_the_shipped_floor_match_the_bakeoff(
@@ -241,15 +247,16 @@ def test_bundle_matches_a_fresh_reload(capetown: dict[str, Any], nairobi: dict[s
         pytest.skip("needs the capetown_full and nairobi_full caches; run "
                     "`pixi run python -m scripts.gen_screen_map`")
 
+    from reblock.data.counts import COUNTERS
     from scripts.gen_screen_map import CITIES, load_blocks
 
-    fresh_capetown = load_blocks("capetown", CITIES["capetown"])
+    fresh_capetown = load_blocks("capetown", CITIES["capetown"], COUNTERS["open_buildings"])
     assert [str(x) for x in fresh_capetown["block_id"]] == capetown["block_id"], (
         "capetown: block_id is stale")
     assert [int(x) for x in fresh_capetown["building_count"]] == capetown["n"], (
         "capetown: n is stale")
 
-    fresh_nairobi = load_blocks("nairobi", CITIES["nairobi"])
+    fresh_nairobi = load_blocks("nairobi", CITIES["nairobi"], COUNTERS["open_buildings"])
     assert [str(x) for x in fresh_nairobi["block_id"]] == nairobi["block_id"], (
         "nairobi: block_id is stale")
     assert [int(x) for x in fresh_nairobi["building_count"]] == nairobi["n"], (

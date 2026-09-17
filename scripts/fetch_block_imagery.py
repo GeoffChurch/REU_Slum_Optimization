@@ -53,6 +53,7 @@ from matplotlib.image import imread  # noqa: E402
 from shapely import STRtree  # noqa: E402
 from shapely.geometry import box as shapely_box  # noqa: E402
 
+from reblock.data.counts import KblockCount  # noqa: E402
 from scripts.gen_screen_bakeoff import load  # noqa: E402
 
 WORKSHEET = Path("data/adjudication/screen_top15_worksheet.csv")
@@ -121,7 +122,11 @@ def main() -> int:
     todo = [r for r in rows if every or not r["verdict"].strip()][: limit or None]
     print(f"{len(todo)} block(s) to render")
 
-    b, _ = load()
+    # KblockCount, deliberately: this script only needs each block's GEOMETRY to frame a picture,
+    # and it looks blocks up by the id the worksheet already lists -- so it wants the pool the
+    # worksheet was built on, and a corpus-wide point-in-polygon count it never reads buys
+    # nothing.
+    b, _ = load(KblockCount())
     wgs = b.to_crs("EPSG:4326")
     by_id = {str(v): i for i, v in enumerate(b["block_id"])}
     OUT.mkdir(parents=True, exist_ok=True)

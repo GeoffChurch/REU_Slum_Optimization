@@ -110,6 +110,16 @@ class OpenBuildingsCount:
         return pd.Series(np.bincount(hit, minlength=len(blocks)).astype(float))
 
 
+# The closed set of count sources, by name. Hydra has its own copy of this choice in
+# `conf/building_count/`; this is the equivalent for the argparse scripts that bake examples, and
+# it exists so the name -> instance conversion happens in ONE place rather than once per script.
+# Consumers take a `BuildingCount`; only a CLI boundary is allowed to hold the string.
+COUNTERS: dict[str, BuildingCount] = {
+    "open_buildings": OpenBuildingsCount(),
+    "kblock": KblockCount(),
+}
+
+
 def resolved(blocks: GeoDataFrame, buildings_path: str | Path,
              counter: BuildingCount) -> GeoDataFrame:
     """`blocks` with `building_count` replaced by `counter`'s answer.
