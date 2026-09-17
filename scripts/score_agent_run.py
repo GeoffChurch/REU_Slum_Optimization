@@ -40,6 +40,15 @@ RUNS = Path("data/adjudication/runs")
 WORKSHEET = Path("data/adjudication/screen_top15_worksheet.csv")
 CONTROL = Path("data/adjudication/control_sample.csv")
 
+# RULE.md teaches by worked example, and it names these two blocks together with their labels.
+# Every judge is told to read it, so for an AGENT run these two are lookups rather than judgements
+# and are excluded from agent scoring. They stay in the rule because a human adjudicator needs the
+# worked examples and because one rule read by both judge kinds is the point of the file -- the
+# contamination is a property of the scoring, not of the document. It mattered: `_63818` is the
+# only human-NEGATIVE among the 35 adjudicated blocks, so leaving it in reported a specificity of
+# 1/1 that was really a successful grep.
+LEAKED_BY_RULE = {"ZAF.9.3.1_1_63818", "ZAF.9.3.1_1_38988"}
+
 VALID = {"all-dense-informal", "some-dense-informal", "no-dense-informal", "unclear"}
 POSITIVE = {"all-dense-informal", "some-dense-informal"}      # collapse, per RULE.md
 DECIDED = VALID - {"unclear"}
@@ -75,6 +84,11 @@ def score(path: Path) -> None:
         print(f"  !! {len(labels) - len(covered)} labelled block(s) are not on {sheet.name}")
 
     if sheet is WORKSHEET:
+        leaked = sorted(set(covered) & LEAKED_BY_RULE)
+        if leaked:
+            print(f"  excluding {len(leaked)} block(s) named with their labels in RULE.md: "
+                  f"{', '.join(leaked)}")
+        covered = [b for b in covered if b not in LEAKED_BY_RULE]
         pairs = [(positive(labels[b]), positive(rows[b]["verdict"].strip()))
                  for b in covered if rows[b]["verdict"].strip()]
         pairs = [(a, h) for a, h in pairs if a is not None and h is not None]
