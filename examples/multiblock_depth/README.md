@@ -6,18 +6,18 @@
 
 ## 1. Screen the metro
 
-`depth` flagged **13,793 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_5810` (peel depth 24).
+`depth` flagged **14,360 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_5810` (peel depth 24).
 
 ![screen](screen.png)
 
-**Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-33.84562,18.74451,15z).
+**Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-33.84562,18.74439,15z).
 
 
-<a href="https://www.google.com/maps/@-33.84562,18.74451,15z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
+<a href="https://www.google.com/maps/@-33.84562,18.74439,15z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
 
 ## 2. Grow the region
 
-The metric grows a **12-block** region (**11,006 parcels**), mean depth 6.4 rings, mean density 99 bldg/ha.
+The metric grows a **15-block** region (**12,622 parcels**), mean depth 6.7 rings, mean density 100 bldg/ha.
 
 ![region](region.png)
 
@@ -47,12 +47,12 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 2,635 m | 2.9% | 63.2% |  |
-| Loop Network | 1,643 m | 1.3% | 61.0% |  |
-| Grid | 2,138 m | 2.2% | 65.9% |  |
-| Frontage (street-priced) | 3,125 m | 1.7% | 60.4% |  |
-| OSM Footpaths | 7,695 m | 4.2% | 21.9% | unreached |
-| Direct Objective (LP) | 1,728 m | 1.0% | 60.0% |  |
+| Looped Tree | 2,471 m | 2.4% | 63.4% |  |
+| Loop Network | 1,643 m | 1.1% | 60.3% |  |
+| Grid | 2,138 m | 1.9% | 65.1% |  |
+| Frontage (street-priced) | 3,428 m | 1.5% | 62.6% |  |
+| OSM Footpaths | 9,203 m | 3.8% | 21.6% | unreached |
+| Direct Objective (LP) | 2,018 m | 0.9% | 60.4% |  |
 
 
 Access-depth coloring:
@@ -73,12 +73,12 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 8,673 m | 10.1% | 80.1% |  |
-| Loop Network | 10,935 m | 10.0% | 90.9% |  |
-| Grid | 10,316 m | 10.1% | 89.7% |  |
-| Frontage (street-priced) | 10,547 m | 5.4% | 78.7% | converged below budget |
-| OSM Footpaths | 7,695 m | 4.2% | 21.9% | converged below budget |
-| Direct Objective (LP) | 20,654 m | 10.0% | 93.8% |  |
+| Looped Tree | 9,707 m | 10.0% | 82.6% |  |
+| Loop Network | 12,852 m | 10.0% | 91.1% |  |
+| Grid | 11,897 m | 10.0% | 90.1% |  |
+| Frontage (street-priced) | 12,049 m | 4.4% | 77.9% | converged below budget |
+| OSM Footpaths | 9,203 m | 3.8% | 21.6% | converged below budget |
+| Direct Objective (LP) | 22,509 m | 10.0% | 94.2% |  |
 
 
 Access-depth coloring:

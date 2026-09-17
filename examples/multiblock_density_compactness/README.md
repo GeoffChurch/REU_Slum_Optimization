@@ -6,18 +6,18 @@
 
 ## 1. Screen the metro
 
-`density_compactness` flagged **2,865 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_44531` (peel depth 4).
+`density_compactness` flagged **4,591 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_46229` (peel depth 3).
 
 ![screen](screen.png)
 
-**Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-34.01690,18.58833,16z).
+**Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-33.94907,18.53153,15z).
 
 
-<a href="https://www.google.com/maps/@-34.01690,18.58833,16z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
+<a href="https://www.google.com/maps/@-33.94907,18.53153,15z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
 
 ## 2. Grow the region
 
-The metric grows a **18-block** region (**4,615 parcels**), mean depth 5.1 rings, mean density 146 bldg/ha.
+The metric grows a **29-block** region (**4,416 parcels**), mean depth 4.2 rings, mean density 132 bldg/ha.
 
 ![region](region.png)
 
@@ -26,6 +26,8 @@ The metric grows a **18-block** region (**4,615 parcels**), mean depth 5.1 rings
 The frontier is the whole trade-off: **permeability** (benefit — the only benefit axis) on the y-axis against **displacement** (cost — the only cost axis) on the x-axis, one line per method. Pareto-dominance — which method buys more permeability for less displacement — reads straight off it (raw per-method samples are in `frontier_permeability.csv`, this dir):
 
 ![permeability vs displacement](frontier_ZAF.9.3.1_1_44531.png)
+
+![permeability vs displacement](frontier_ZAF.9.3.1_1_46229.png)
 
 **Before any road is added**, the same region in both colorings: access-depth (blue = at a street, red = deep interior) vs permeability potential (dark = hard to escape, light = easy):
 
@@ -37,9 +39,9 @@ The frontier is the whole trade-off: **permeability** (benefit — the only bene
 
 **Watch each method reblock** — roads added busiest-first, each preceded by whatever it needs to reach the street, so every frame is a network you could actually build. Every animation stops where its network first reaches the matched-permeability standard, so they end at the same benefit and you can read the disruption each one spent getting there; a method that never reaches it runs to its own full network. The deep interior drains as the network reaches in:
 
-| Looped Tree | Loop Network | Grid | Frontage (street-priced) | OSM Footpaths | Direct Objective (LP) |
-|---|---|---|---|---|---|
-| ![Looped Tree](reblock_clearance_looped.gif) | ![Loop Network](reblock_cycle_native.gif) | ![Grid](reblock_euclidean_grid.gif) | ![Frontage (street-priced)](reblock_greedy_arterial_access_displacement.gif) | ![OSM Footpaths](reblock_osm_footpaths.gif) | ![Direct Objective (LP)](reblock_resistance_lp.gif) |
+| Looped Tree | Loop Network | Grid | Frontage (street-priced) | Direct Objective (LP) |
+|---|---|---|---|---|
+| ![Looped Tree](reblock_clearance_looped.gif) | ![Loop Network](reblock_cycle_native.gif) | ![Grid](reblock_euclidean_grid.gif) | ![Frontage (street-priced)](reblock_greedy_arterial_access_displacement.gif) | ![Direct Objective (LP)](reblock_resistance_lp.gif) |
 
 ### Matched permeability (primary)
 
@@ -47,25 +49,24 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 1,301 m | 5.7% | 60.3% |  |
-| Loop Network | 1,547 m | 5.9% | 61.2% |  |
-| Grid | 3,057 m | 9.3% | 60.2% |  |
-| Frontage (street-priced) | 2,651 m | 5.7% | 60.1% |  |
-| OSM Footpaths | 2,344 m | 8.5% | 60.5% |  |
-| Direct Objective (LP) | 2,026 m | 4.9% | 60.1% |  |
+| Looped Tree | 1,376 m | 6.0% | 60.2% |  |
+| Loop Network | 2,482 m | 7.2% | 60.2% |  |
+| Grid | 5,888 m | 12.8% | 51.2% | unreached |
+| Frontage (street-priced) | 4,628 m | 5.0% | 60.4% |  |
+| Direct Objective (LP) | 2,090 m | 4.0% | 60.4% |  |
 
 
 Access-depth coloring:
 
-| Looped Tree | Loop Network | Grid | Frontage (street-priced) | OSM Footpaths | Direct Objective (LP) |
-|---|---|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_perm_depth.png) | ![Loop Network](after_cycle_native_perm_depth.png) | ![Grid](after_euclidean_grid_perm_depth.png) | ![Frontage (street-priced)](after_greedy_arterial_access_displacement_perm_depth.png) | ![OSM Footpaths](after_osm_footpaths_perm_depth.png) | ![Direct Objective (LP)](after_resistance_lp_perm_depth.png) |
+| Looped Tree | Loop Network | Grid | Frontage (street-priced) | Direct Objective (LP) |
+|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_perm_depth.png) | ![Loop Network](after_cycle_native_perm_depth.png) | ![Grid](after_euclidean_grid_perm_depth.png) | ![Frontage (street-priced)](after_greedy_arterial_access_displacement_perm_depth.png) | ![Direct Objective (LP)](after_resistance_lp_perm_depth.png) |
 
 Permeability-potential coloring:
 
-| Looped Tree | Loop Network | Grid | Frontage (street-priced) | OSM Footpaths | Direct Objective (LP) |
-|---|---|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_perm_perm.png) | ![Loop Network](after_cycle_native_perm_perm.png) | ![Grid](after_euclidean_grid_perm_perm.png) | ![Frontage (street-priced)](after_greedy_arterial_access_displacement_perm_perm.png) | ![OSM Footpaths](after_osm_footpaths_perm_perm.png) | ![Direct Objective (LP)](after_resistance_lp_perm_perm.png) |
+| Looped Tree | Loop Network | Grid | Frontage (street-priced) | Direct Objective (LP) |
+|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_perm_perm.png) | ![Loop Network](after_cycle_native_perm_perm.png) | ![Grid](after_euclidean_grid_perm_perm.png) | ![Frontage (street-priced)](after_greedy_arterial_access_displacement_perm_perm.png) | ![Direct Objective (LP)](after_resistance_lp_perm_perm.png) |
 
 ### Matched displacement (secondary)
 
@@ -73,25 +74,24 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 2,284 m | 10.1% | 74.1% |  |
-| Loop Network | 2,887 m | 10.1% | 72.8% |  |
-| Grid | 3,262 m | 10.0% | 61.9% |  |
-| Frontage (street-priced) | 5,895 m | 9.5% | 74.7% | converged below budget |
-| OSM Footpaths | 2,861 m | 10.2% | 63.8% |  |
-| Direct Objective (LP) | 4,454 m | 10.0% | 80.7% |  |
+| Looped Tree | 2,376 m | 10.1% | 72.2% |  |
+| Loop Network | 3,513 m | 10.0% | 67.9% |  |
+| Grid | 4,688 m | 10.1% | 39.2% |  |
+| Frontage (street-priced) | 8,533 m | 6.9% | 72.6% | converged below budget |
+| Direct Objective (LP) | 6,356 m | 10.0% | 83.5% |  |
 
 
 Access-depth coloring:
 
-| Looped Tree | Loop Network | Grid | Frontage (street-priced) | OSM Footpaths | Direct Objective (LP) |
-|---|---|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_disp_depth.png) | ![Loop Network](after_cycle_native_disp_depth.png) | ![Grid](after_euclidean_grid_disp_depth.png) | ![Frontage (street-priced)](after_greedy_arterial_access_displacement_disp_depth.png) | ![OSM Footpaths](after_osm_footpaths_disp_depth.png) | ![Direct Objective (LP)](after_resistance_lp_disp_depth.png) |
+| Looped Tree | Loop Network | Grid | Frontage (street-priced) | Direct Objective (LP) |
+|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_disp_depth.png) | ![Loop Network](after_cycle_native_disp_depth.png) | ![Grid](after_euclidean_grid_disp_depth.png) | ![Frontage (street-priced)](after_greedy_arterial_access_displacement_disp_depth.png) | ![Direct Objective (LP)](after_resistance_lp_disp_depth.png) |
 
 Permeability-potential coloring:
 
-| Looped Tree | Loop Network | Grid | Frontage (street-priced) | OSM Footpaths | Direct Objective (LP) |
-|---|---|---|---|---|---|
-| ![Looped Tree](after_clearance_looped_disp_perm.png) | ![Loop Network](after_cycle_native_disp_perm.png) | ![Grid](after_euclidean_grid_disp_perm.png) | ![Frontage (street-priced)](after_greedy_arterial_access_displacement_disp_perm.png) | ![OSM Footpaths](after_osm_footpaths_disp_perm.png) | ![Direct Objective (LP)](after_resistance_lp_disp_perm.png) |
+| Looped Tree | Loop Network | Grid | Frontage (street-priced) | Direct Objective (LP) |
+|---|---|---|---|---|
+| ![Looped Tree](after_clearance_looped_disp_perm.png) | ![Loop Network](after_cycle_native_disp_perm.png) | ![Grid](after_euclidean_grid_disp_perm.png) | ![Frontage (street-priced)](after_greedy_arterial_access_displacement_disp_perm.png) | ![Direct Objective (LP)](after_resistance_lp_disp_perm.png) |
 
 
 ## How this was generated
