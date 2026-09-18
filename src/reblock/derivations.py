@@ -90,7 +90,7 @@ class ScreenSelectionIdentity:
     metric: Hashable               # BlockMetric.identity
     gate: Hashable                 # Gate.identity
     counts: Hashable               # BuildingCount.identity -- WHICH count the metric ranked on
-    proxy_keep_pct: float
+    proxy_keep_n: int
     min_buildings: int
 
 
@@ -109,7 +109,7 @@ class ScreenSelectionInput:
     metric: BlockMetric             # the scorer (carried for _compute_selection; identity below)
     gate: Gate                      # the selection gate
     counts: BuildingCount           # where `building_count` comes from (resolved before scoring)
-    proxy_keep_pct: float          # cheap recall pre-filter: keep top-% by proxy (peel metrics)
+    proxy_keep_n: int              # cheap recall pre-filter: keep top-N by proxy (peel metrics)
     min_buildings: int
 
     @property
@@ -117,7 +117,7 @@ class ScreenSelectionInput:
         return (ScreenSelectionIdentity(
                     source_hash=self.source_hash, metric=self.metric.identity,
                     gate=self.gate.identity, counts=self.counts.identity,
-                    proxy_keep_pct=self.proxy_keep_pct,
+                    proxy_keep_n=self.proxy_keep_n,
                     min_buildings=self.min_buildings)
                 if self.source_hash else None)
 

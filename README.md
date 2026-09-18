@@ -60,7 +60,7 @@ Each stage is a swappable Hydra config group; a run composes them left to right:
   blocks). What it scores on is the top-level **`metric`** group: the default `depth_density_proxy`
   is `√(n·A)/P · n/A` — the depth proxy times density — computed from building count, area and
   perimeter alone, so it sweeps a whole metro in one pass. `metric=depth` and `metric=depth_density`
-  instead peel a proxy-pre-filtered top slice (`proxy_keep_pct`); `metric_gate` sets the absolute
+  instead peel a proxy-pre-filtered top slice (`proxy_keep_n`); `metric_gate` sets the absolute
   floor. Validated against ground truth in the
   [screen bake-off](https://geoffchurch.github.io/REU_Slum_Optimization/results/bakeoff/).
 - **`region_builder`** — `identity`, `convex_hull` (bridge disjoint seed blocks), `dense_cluster`

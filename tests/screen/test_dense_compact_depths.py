@@ -15,7 +15,7 @@ def _src() -> KblockSource:
 def test_depth_metric_selects_and_scores_by_true_depth() -> None:
     # metric=Depth with a permissive absolute gate: select() returns ids, selection_scores maps them
     # to the fine score (true max peel depth for Depth), and they agree on membership.
-    screen = DenseCompactScreen(Depth(), AbsoluteGate(1.0), proxy_keep_pct=100.0,
+    screen = DenseCompactScreen(Depth(), AbsoluteGate(1.0), proxy_keep_n=1000,
                                 min_buildings=1)
     ids = screen.select(_src())
     scores = screen.selection_scores(_src())
