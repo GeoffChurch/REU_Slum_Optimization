@@ -4,4 +4,4 @@
 metric:
   _target_: reblock.metric.Depth
   _convert_: all
-metric_gate: {_target_: reblock.metric.Gate, kind: absolute, value: 2.0}
+metric_gate: {_target_: reblock.metric.AbsoluteGate, value: 2.0}

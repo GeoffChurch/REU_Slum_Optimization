@@ -10,12 +10,13 @@ from shapely.geometry import Polygon, box
 from reblock.metric import (
     DENSITY_COMPACTNESS_FLOOR,
     DEPTH_DENSITY_PROXY_FLOOR,
+    AbsoluteGate,
     Compactness,
     Count,
     Density,
     Depth,
     DepthProxy,
-    Gate,
+    PercentileGate,
     Power,
     Product,
 )
@@ -79,9 +80,9 @@ def test_identity_distinguishes_expressions() -> None:
 
 def test_gate_absolute_and_percentile() -> None:
     scores = {"a": 10.0, "b": 5.0, "c": 1.0, "d": 0.5}
-    assert Gate("absolute", 5.0).keep(scores) == {"a", "b"}         # >= 5
-    assert Gate("percentile", 50.0).keep(scores) == {"a", "b"}      # top 50%
-    assert Gate("percentile", 25.0).keep(scores) == {"a"}           # top 25%
+    assert AbsoluteGate(5.0).keep(scores) == {"a", "b"}         # >= 5
+    assert PercentileGate(50.0).keep(scores) == {"a", "b"}      # top 50%
+    assert PercentileGate(25.0).keep(scores) == {"a"}           # top 25%
 
 
 def test_config_floor_matches_python_definition() -> None:
@@ -97,7 +98,7 @@ def test_config_floor_matches_python_definition() -> None:
     conf = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / "conf/metric/density_compactness.yaml").read_text())
     gate = conf["metric_gate"]
-    assert gate["kind"] == "absolute"
+    assert gate["_target_"] == "reblock.metric.AbsoluteGate"
     assert float(gate["value"]) == DENSITY_COMPACTNESS_FLOOR
 
 
@@ -115,7 +116,7 @@ def test_depth_density_proxy_floor_matches_python_definition() -> None:
     conf = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / "conf/metric/depth_density_proxy.yaml").read_text())
     gate = conf["metric_gate"]
-    assert gate["kind"] == "absolute"
+    assert gate["_target_"] == "reblock.metric.AbsoluteGate"
     assert float(gate["value"]) == DEPTH_DENSITY_PROXY_FLOOR
 
     targets = [t["_target_"] for t in conf["metric"]["terms"]]

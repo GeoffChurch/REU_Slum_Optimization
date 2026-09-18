@@ -10,4 +10,4 @@ metric:
     - {_target_: reblock.metric.Depth}
     - {_target_: reblock.metric.Density}
   _convert_: all
-metric_gate: {_target_: reblock.metric.Gate, kind: percentile, value: 100.0}
+metric_gate: {_target_: reblock.metric.PercentileGate, value: 100.0}
