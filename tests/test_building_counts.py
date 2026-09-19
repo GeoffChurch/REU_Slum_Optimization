@@ -24,7 +24,7 @@ Fixture: TypeAlias = tuple[gpd.GeoDataFrame, Path]
 def block_and_points(tmp_path: Path) -> Fixture:
     """One block whose shipped count (2) disagrees with the points inside it (5)."""
     poly = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
-    blocks = gpd.GeoDataFrame({"block_id": ["b1"], "building_count": [2]},
+    blocks = gpd.GeoDataFrame({"block_id": ["b1"], "building_count_raw": [2]},
                               geometry=[poly], crs=UTM)
     pts = gpd.GeoDataFrame(
         geometry=[Point(x, 50) for x in (10, 20, 30, 40, 50)]
@@ -61,7 +61,10 @@ def test_resolved_overwrites_the_column_so_metrics_never_choose(block_and_points
     blocks, path = block_and_points
     assert resolved(blocks, path, OpenBuildingsCount())["building_count"].tolist() == [5.0]
     assert resolved(blocks, path, KblockCount())["building_count"].tolist() == [2.0]
-    assert blocks["building_count"].tolist() == [2], "must not mutate the caller's frame"
+    assert blocks["building_count_raw"].tolist() == [2], "must not mutate the caller's frame"
+    # And the vendor column is GONE from the result, so nothing downstream can read
+    # around the resolved one -- the guarantee that makes a bypass a KeyError.
+    assert "building_count_raw" not in resolved(blocks, path, KblockCount()).columns
 
 
 def test_the_two_strategies_have_different_identities() -> None:

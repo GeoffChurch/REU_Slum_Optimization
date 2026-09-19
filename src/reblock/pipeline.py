@@ -17,7 +17,16 @@ from itertools import islice
 import pandas as pd
 from pyproj import CRS
 
-from reblock.contracts import Block, Eval, Method, Result, Screen, Source
+from reblock.contracts import (
+    Block,
+    CountingScreen,
+    Eval,
+    Method,
+    Result,
+    Screen,
+    Source,
+)
+from reblock.data.counts import resolved
 from reblock.derivations import propose
 from reblock.region import (
     IdentityRegionBuilder,
@@ -86,30 +95,50 @@ def _seed_groups(
 
 def _reachable_blocks(block_geoms: pd.DataFrame, groups: list[list[str]],
                       bound_buildings: float) -> list[str]:
-    """The seed groups' blocks plus their adjacency neighbourhood, BFS-expanded (accumulating
-    `building_count`) until the cumulative count reaches `bound_buildings` -- a generous superset of
-    everything the greedy DenseCluster growth can reach from the seed, so ALL of its candidates land
-    in one batched peel. `bound_buildings` is a multiple of the growth budget; a candidate beyond it
-    is simply un-peeled (the caller defaults it to 0.0 = shallow, which a non-survivor essentially
-    always is, and survivors that matter are near the seed)."""
+    """The seed groups' blocks plus their adjacency neighbourhood, BFS-expanded PER GROUP
+    (accumulating `building_count`) until that group's expansion reaches `bound_buildings` -- a
+    generous superset of everything the greedy DenseCluster growth can reach from the seed, so ALL
+    of its candidates land in one batched peel. `bound_buildings` is a multiple of the growth
+    budget; a candidate beyond it is simply un-peeled (the caller defaults it to 0.0 = shallow,
+    which a non-survivor essentially always is, and survivors that matter are near the seed).
+
+    Two corrections, 2026-09-19, after this function was found to expand by ZERO blocks in
+    production:
+
+    PER GROUP is the 2026-09-19 correction. `groups` is one singleton per selected block, so a
+    single BFS over their union compared the bound against the WHOLE screen selection's count --
+    ~413,806 buildings against a bound of 9,000 in the Cape Town run. The loop body never
+    executed and this returned exactly the seed set, leaving every growth candidate outside the
+    selection with no metric score, to be ranked by the cheap geometric proxy instead of its true
+    peel depth.
+
+    A seed block's own count still counts toward its group's bound, which is deliberate and is
+    what `test_reachable_blocks_bfs_bounds_by_building_count` pins: the bound is a budget for the
+    peel, and the seed is part of what gets peeled.
+    """
     ids = [str(b) for b in block_geoms["block_id"]]
     idx = {b: i for i, b in enumerate(ids)}
     has_count = "building_count" in block_geoms.columns
     counts = ([0.0 if pd.isna(c) else float(c) for c in block_geoms["building_count"]] if has_count
               else [1.0] * len(ids))
     adj = _block_adjacency(list(block_geoms.geometry))
-    seed = {idx[b] for group in groups for b in group if b in idx}
-    seen = set(seed)
-    total = sum(counts[i] for i in seed)
-    frontier = deque(seed)
-    while frontier and total < bound_buildings:
-        i = frontier.popleft()
-        for j in adj[i]:
-            if j not in seen:
-                seen.add(j)
-                total += counts[j]
-                frontier.append(j)
-    return [ids[i] for i in seen]
+    reached: set[int] = set()
+    for group in groups:
+        seed = {idx[b] for b in group if b in idx}
+        if not seed:
+            continue
+        seen = set(seed)
+        total = sum(counts[i] for i in seed)
+        frontier = deque(seed)
+        while frontier and total < bound_buildings:
+            i = frontier.popleft()
+            for j in adj[i]:
+                if j not in seen:
+                    seen.add(j)
+                    total += counts[j]
+                    frontier.append(j)
+        reached |= seen
+    return [ids[i] for i in reached]
 
 
 def _region_score_map(source: Source, screen: Screen, block_geoms: pd.DataFrame,
@@ -158,13 +187,36 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
         blocks = list(islice(source.region().blocks, max_blocks))
         return [[b] for b in blocks]
 
+    # Truncate HERE, not after the builder runs. `_seed_groups` wraps the whole screen selection
+    # as one singleton group per flagged block, and the `[:max_blocks]` below used to be the only
+    # limit -- so the scoring pass and the growth both ran over every flagged block and threw away
+    # all but the first `max_blocks` results. That is wasted work, and it is also what made
+    # `_reachable_blocks` degenerate: its bound was measured against a seed set of thousands.
+    # Moving the cut up leaves the returned regions identical (the builder preserves group order)
+    # and lets the neighbourhood scoring below behave as designed.
+    groups = groups[:max_blocks]
+
     source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
     block_geoms = source.block_geometries()
+    # Region growth budgets and ranks on the building count, so it must be the SAME count the
+    # screen ranked on. Until 2026-09-19 this read the source's vendor column directly, so growth
+    # budgeted in Ecopia buildings while the screen ranked on Open Buildings -- which is how a
+    # `max_buildings: 3000` budget produced an 11,577-parcel region. `isinstance`, not `getattr`
+    # with a default: a builder that needs counts and cannot get them must say so, not silently
+    # treat every block as one building.
+    counter = screen.counts if isinstance(screen, CountingScreen) else None
+    if counter is not None:
+        block_geoms = resolved(block_geoms, source.buildings_path, counter)  # type: ignore[attr-defined]
     # Only a growing builder (DenseCluster: has a `max_buildings` budget) ranks candidates by the
     # configured metric's score; precompute it in ONE batched pass (peeling only if the metric
     # needs depth) of the seed's reachable neighbourhood (bound ~3x the growth budget). Non-growing
     # builders (identity/convex_hull) ignore depth_fn -> skip this precompute.
     mb = getattr(region_builder, "max_buildings", None)
+    if mb is not None and counter is None:
+        raise TypeError(
+            f"{type(region_builder).__name__} budgets region growth on building counts, but "
+            f"{type(screen).__name__} carries no BuildingCount to resolve them with. Inject one "
+            f"(conf/building_count/) rather than letting growth fall back to one-per-block.")
     score_map = (_region_score_map(source, screen, block_geoms, groups, 3.0 * mb)
                 if isinstance(mb, int) and mb > 0 else {})
     depth_fn: Callable[[str], float] | None = (

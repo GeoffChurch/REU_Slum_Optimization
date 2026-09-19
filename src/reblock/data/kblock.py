@@ -20,6 +20,7 @@ from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import BBox, Block, Region
 from reblock.data._util import _window
+from reblock.data.counts import RAW_COUNT
 from reblock.derivations import VoronoiInput, voronoi
 from reblock.derive_graph import source_hash
 
@@ -79,12 +80,15 @@ class KblockSource:
         the result via `.cx`; `bbox=None` returns everything."""
         blocks = gpd.read_parquet(
             self.blocks_path, columns=["block_id", "building_count", "geometry"])
+        # Renamed at the boundary: this is the VENDOR count, and only `counts.resolved()` may turn
+        # it into the `building_count` every metric and region builder reads.
+        blocks = blocks.rename(columns={"building_count": RAW_COUNT})
         blocks["block_id"] = blocks["block_id"].astype(str)
         if self.block_ids is not None:
             wanted = {str(b) for b in self.block_ids}
             blocks = cast(gpd.GeoDataFrame, blocks[blocks["block_id"].isin(wanted)])
         out = cast(gpd.GeoDataFrame, blocks.to_crs(self._target_utm())[
-            ["block_id", "building_count", "geometry"]])
+            ["block_id", RAW_COUNT, "geometry"]])
         return _window(out, bbox)
 
     def building_points(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:

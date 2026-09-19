@@ -55,6 +55,20 @@ import pandas as pd
 from geopandas import GeoDataFrame
 from shapely import STRtree
 
+# The two column names, kept apart on purpose.
+#
+# A source exposes its own vendor count as RAW_COUNT; only `resolved()` produces COUNT, and it
+# drops RAW_COUNT on the way out. So a consumer that reads COUNT from an unresolved frame raises
+# KeyError instead of silently scoring on whichever count the file happened to ship.
+#
+# This is not defensive styling. Four consumers reached straight for the vendor column and every
+# one was found by accident: `gen_screen_bakeoff` (a regeneration that produced no diff),
+# `gen_screen_map` (a cross-artifact test), `pipeline`'s region growth (an unexplained region
+# shift), and `emit`'s fallback scores (found while writing this comment). All four looked right
+# and produced output of the correct shape.
+RAW_COUNT = "building_count_raw"
+COUNT = "building_count"
+
 
 @runtime_checkable
 class BuildingCount(Protocol):
@@ -65,6 +79,18 @@ class BuildingCount(Protocol):
     def identity(self) -> Hashable: ...
 
     def counts(self, blocks: GeoDataFrame, buildings_path: str | Path) -> pd.Series: ...
+
+    # OPEN DESIGN ISSUE (2026-09-19). `buildings_path` is passed in per call, so every consumer
+    # of a counter must also carry a path -- and `Source` does not declare `buildings_path`, only
+    # `KblockSource` has it. `emit.region_map` therefore reaches through the protocol for it and
+    # needs a `type: ignore`, which is precisely the "access a closed set as if it were open"
+    # shape this module exists to remove.
+    #
+    # The fix is for an implementation to close over its own data at construction --
+    # `OpenBuildingsCount(buildings_path)` holding the path, `counts(blocks)` taking only blocks,
+    # `resolved(blocks, counter)` dropping the argument. `KblockCount` needs no state at all.
+    # It touches `conf/building_count/` (the path becomes config) and every call site, which is
+    # why it is recorded here rather than done in passing.
 
 
 @dataclass(frozen=True)
@@ -82,7 +108,7 @@ class KblockCount:
 
     def counts(self, blocks: GeoDataFrame, buildings_path: str | Path) -> pd.Series:
         del buildings_path
-        return blocks["building_count"].astype(float).reset_index(drop=True)
+        return blocks[RAW_COUNT].astype(float).reset_index(drop=True)
 
 
 @dataclass(frozen=True)
@@ -124,10 +150,12 @@ def resolved(blocks: GeoDataFrame, buildings_path: str | Path,
              counter: BuildingCount) -> GeoDataFrame:
     """`blocks` with `building_count` replaced by `counter`'s answer.
 
-    Overwriting the column rather than adding one is what keeps the choice UPSTREAM: every
-    metric, gate and region builder reads `building_count` and none of them has to know, or
-    ask, which source produced it.
+    Replacing the column rather than adding one is what keeps the choice UPSTREAM: every
+    metric, gate and region builder reads `COUNT` and none of them has to know, or ask, which
+    source produced it -- and `RAW_COUNT` is gone, so none of them can read around it.
     """
     out = blocks.copy()
-    out["building_count"] = counter.counts(blocks, buildings_path).to_numpy()
-    return out
+    out[COUNT] = counter.counts(blocks, buildings_path).to_numpy()
+    # Drop the vendor column: after resolution there is exactly ONE count in the frame, so a
+    # downstream reader cannot pick the wrong one even deliberately.
+    return out.drop(columns=[RAW_COUNT], errors="ignore")

@@ -14,7 +14,7 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from reblock.contracts import Eval, Method, Screen, Source
+from reblock.contracts import CountingScreen, Eval, Method, Screen, Source
 from reblock.emit import flagged_map, region_map, render_results
 from reblock.pipeline import PipelineSpec, run
 from reblock.region import RegionBuilder
@@ -78,7 +78,8 @@ def main(cfg: DictConfig) -> None:
         m = getattr(spec.screen, "metric", None)
         region_map(spec.source, output.regions, output.seed_groups, out_dir,
                    selection=output.selection, depths=scores,
-                   metric_name=m.name if m is not None else "score", metric=m)
+                   metric_name=m.name if m is not None else "score", metric=m,
+                   counts=spec.screen.counts if isinstance(spec.screen, CountingScreen) else None)
 
 
 if __name__ == "__main__":

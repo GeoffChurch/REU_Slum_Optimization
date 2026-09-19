@@ -11,6 +11,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.contracts import BBox, Block, Metrics, Proposal, Region, Result
+from reblock.data.counts import KblockCount
 from reblock.emit import (
     RenderConfig,
     _displaced_points,
@@ -60,6 +61,14 @@ class _FakeSource:
     def __init__(self, blocks: gpd.GeoDataFrame, points: gpd.GeoDataFrame) -> None:
         self._blocks = blocks
         self._points = points
+        # `region_map` resolves the building count before scoring, and `resolved` is handed a
+        # buildings path. KNOWN WART: `Source` does not declare `buildings_path` -- only
+        # KblockSource has it -- so emit reaches through the protocol for it and needs a
+        # `type: ignore`. The real fix is for a `BuildingCount` to close over its own data at
+        # construction (`OpenBuildingsCount(path)`), after which no consumer passes a path at
+        # all; see the note in `reblock.data.counts`. Unused here because these tests resolve
+        # with KblockCount, which reads a column and ignores the path.
+        self.buildings_path = "unused-by-KblockCount"
 
     def region(self) -> Region:
         raise NotImplementedError("not used by render_results/region_map")
@@ -269,12 +278,14 @@ def test_method_colors_hues_are_evenly_spaced_from_zero() -> None:
 def test_region_map_draws_member_and_context_points(tmp_path: Path) -> None:
     # region_map now takes the typed Source (no pre-read GeoDataFrame): it reads all
     # candidate outlines itself and windows the building-points query to the region's frame.
-    out = region_map(_source_with_neighbour_and_points(), [["g"]], [["g"]], tmp_path)
+    out = region_map(_source_with_neighbour_and_points(), [["g"]], [["g"]], tmp_path,
+                     counts=KblockCount())
     assert out is not None and out.exists() and out.stat().st_size > 0
 
 
 def test_region_map_guards_empty_building_points(tmp_path: Path) -> None:
-    out = region_map(_empty_points_source(), [["g"]], [["g"]], tmp_path)
+    out = region_map(_empty_points_source(), [["g"]], [["g"]], tmp_path,
+                     counts=KblockCount())
     assert out is not None and out.exists() and out.stat().st_size > 0
 
 
@@ -289,7 +300,8 @@ def test_region_map_colors_by_depth_and_blanks_deselected(tmp_path: Path) -> Non
     # depth; the deselected block ("neighbour") is blanked. Written without error.
     src = _source_with_neighbour_and_points()
     out = region_map(src, [["g"]], [["g"]], tmp_path,
-                     selection=["g"], depths={"g": 7.0})
+                     selection=["g"], depths={"g": 7.0},
+                     counts=KblockCount())
     assert out is not None and out.exists()
     assert (tmp_path / "screen.png").stat().st_size > 0
 
@@ -312,7 +324,8 @@ def test_region_map_screen_has_no_colorbar_title_or_member_outline(
 
     monkeypatch.setattr(emit, "save_render", spy)
     region_map(_source_with_neighbour_and_points(), [["g"]], [["g"]], tmp_path,
-              selection=["g"], depths={"g": 7.0})
+              selection=["g"], depths={"g": 7.0},
+                     counts=KblockCount())
 
     ax_s = captured["screen.png"].axes[0]
     assert ax_s.get_title() == ""
@@ -328,7 +341,8 @@ def test_region_map_screen_has_no_colorbar_title_or_member_outline(
 
 def test_region_map_without_depths_still_writes(tmp_path: Path) -> None:
     # depths=None (a non-DenseCompact screen) falls back to a flat located map -- no proxy coloring.
-    out = region_map(_source_with_neighbour_and_points(), [["g"]], [["g"]], tmp_path)
+    out = region_map(_source_with_neighbour_and_points(), [["g"]], [["g"]], tmp_path,
+                     counts=KblockCount())
     assert out is not None and out.exists()
 
 
@@ -348,12 +362,14 @@ def test_region_map_scores_unflagged_members_by_metric_not_depth(
 
     monkeypatch.setattr(region_mod, "block_depths", spy)
     blocks = gpd.GeoDataFrame(
-        {"block_id": ["g", "neighbour"], "building_count": [5.0, 9.0]},
+        # the VENDOR column, because this stands in for what `block_geometries()` returns
+        {"block_id": ["g", "neighbour"], "building_count_raw": [5.0, 9.0]},
         geometry=[Polygon([(0, 0), (3, 0), (3, 3), (0, 3)]),
                   Polygon([(4, 0), (6, 0), (6, 3), (4, 3)])], crs=UTM)
     points = gpd.GeoDataFrame(geometry=[Point(1, 1), Point(5, 1.5)], crs=UTM)
     out = region_map(_FakeSource(blocks, points), [["g", "neighbour"]], [["g"]], tmp_path,
-                     selection=["g"], depths={"g": 0.5}, metric=Compactness())
+                     selection=["g"], depths={"g": 0.5}, metric=Compactness(),
+                     counts=KblockCount())
     assert out is not None and out.exists()
     assert calls["n"] == 0     # geometry-only metric -> no depth peel for the unflagged member
 

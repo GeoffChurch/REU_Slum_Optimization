@@ -15,10 +15,12 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import shapely
+from geopandas import GeoDataFrame
 from matplotlib.ticker import PercentFormatter
 from numpy.typing import NDArray
 
 from reblock.contracts import Block, Metrics, Proposal, Result, Source
+from reblock.data.counts import COUNT, BuildingCount, resolved
 from reblock.method_labels import friendly_method_name
 from reblock.render import (
     _CONTEXT_PT,
@@ -158,7 +160,8 @@ def region_map(source: Source, regions: list[list[str]],
                selection: list[str] | None = None,
                depths: dict[str, float] | None = None,
                metric_name: str = "score",
-               metric: BlockMetric | None = None) -> Path | None:
+               metric: BlockMetric | None = None,
+               counts: BuildingCount | None) -> Path | None:
     """Two maps for a region build. `screen.png`: the metro coloured by the configured metric's
     fine score (`depths`, from the screen's fine pass) on the absolute 0..max scale -- a
     continuous ramp, no bucketing -- with screen-DESELECTED blocks blanked, and the whole expanded
@@ -231,9 +234,26 @@ def region_map(source: Source, regions: list[list[str]],
     if missing and metric is not None:
         mg = geoms[geoms["block_id"].isin(missing)]
         md = block_depths(source, missing) if metric.needs_peel else {}
+        # Resolve HERE, not at load: this is the only branch that reads a count, and a
+        # ShapefileSource-shaped source has no count column at all -- resolving eagerly would
+        # impose the requirement on callers that never score anything. `metric.fine` must see the
+        # count the screen ranked on, or this map grades blocks on a different number than the
+        # pipeline did; that was live until 2026-09-19 and nothing failed, because the vendor
+        # column was there and plausible.
+        if counts is None:
+            raise TypeError(
+                "region_map scores unflagged members with `metric`, which needs a resolved "
+                "building count, but `counts=None` was passed. Nullable because a screen without "
+                "one (IdentityScreen) never reaches this branch -- but reaching it without a "
+                "counter would score on the source's vendor column, which is the bug this "
+                "parameter exists to prevent.")
+        # `geoms[...]` narrows to DataFrame in mypy's eyes; `resolved` takes and returns a
+        # GeoDataFrame, and `mg` is one at runtime (it is a row-filter of `block_geometries()`).
+        scored = resolved(cast(GeoDataFrame, mg), source.buildings_path,  # type: ignore[attr-defined]
+                          counts)
         fallback = {str(bid): metric.fine(md.get(str(bid), 0.0), float(cnt),
                                           float(g.area), float(g.length))
-                    for bid, cnt, g in zip(mg["block_id"], mg["building_count"], mg.geometry,
+                    for bid, cnt, g in zip(scored["block_id"], scored[COUNT], scored.geometry,
                                            strict=True)}
     elif missing:
         fallback = block_depths(source, missing)

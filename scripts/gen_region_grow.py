@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.figure import Figure
 
+from reblock.data.counts import COUNTERS, resolved
 from reblock.data.provision import cached_kblock_source
 from reblock.region import DenseClusterRegionBuilder, _block_adjacency, _projected
 from reblock.render import (
@@ -241,7 +242,11 @@ def load_blocks(city: str) -> gpd.GeoDataFrame:
     defensively; this projects at the boundary so the requirement is visible at the call site.
     """
     src = cached_kblock_source(city, min_buildings=MIN_COUNT)
-    geoms = _projected(src.block_geometries())
+    # Resolve BEFORE the MIN_COUNT filter: the threshold is on the count itself, so filtering on
+    # the source's vendor column and scoring on another selects a different pool than the screen
+    # does. Same correction as `gen_screen_bakeoff.load`.
+    geoms = _projected(resolved(src.block_geometries(), src.buildings_path,
+                                COUNTERS["open_buildings"]))
     above = cast(gpd.GeoDataFrame, geoms[geoms["building_count"] >= MIN_COUNT])
     return above.reset_index(drop=True)
 

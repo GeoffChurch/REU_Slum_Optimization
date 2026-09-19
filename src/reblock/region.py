@@ -317,8 +317,20 @@ def block_depths(source: Source, block_ids: list[str]) -> dict[str, float]:
 @dataclass
 class DenseClusterRegionBuilder:
     """Grows each seed group into ONE contiguous region by block adjacency, up to a buildings
-    budget (a parcel proxy) -- turns "plump a single block (or a screen's flagged block) into a
-    right-sized region" into a one-knob operation, no hand-listing neighbors.
+    budget -- turns "plump a single block (or a screen's flagged block) into a right-sized
+    region" into a one-knob operation, no hand-listing neighbors.
+
+    `max_buildings` used to be described as "a parcel proxy", which it was while growth budgeted
+    on kblock's Ecopia count and the pipeline tessellated Open Buildings points: 3,000 Ecopia
+    buildings bought regions of ~10,000 parcels. Since 2026-09-19 growth budgets on the SAME
+    resolved count the screen ranks on, so for the shipped Open Buildings default the budget is
+    no longer a proxy for parcels -- it is approximately a parcel count. 3,000 was kept and the
+    regions got about 3x smaller, deliberately: the number now means what it says.
+
+    One consequence worth knowing before reading an example: a seed block denser than the budget
+    is "always included, even alone over budget", so a dense enough seed yields a ONE-BLOCK
+    region. `ZAF.9.3.1_1_5810` has 6,619 Open Buildings footprints against a 3,000 budget, which
+    is why `multiblock_depth_density` is now a single block.
 
     Per group: `cluster` starts as the seed group's own block(s) -- always included, even alone
     over budget (no growth, and never dropped). It then grows greedily, one block at a time:
