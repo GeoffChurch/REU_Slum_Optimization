@@ -129,33 +129,42 @@ of the tally as `k` passes their deepest parcel.
 above is offset by one. The linear-versus-geometric conclusion does not depend on the offset; the
 absolute first-ring count does.
 
+## The ring constant: a latitude bug, not geometry
+
+Measured against true peel depth, `max depth / d` was 1.98 in Nairobi — the predicted 2.00 — but
+1.56 in Cape Town. Four explanations were proposed and eliminated (elongation, aspect ratio,
+boundary digitisation detail, parcel-size heterogeneity — the last one's within-city correlation
+runs the *wrong way*, +0.34). The cause turned out to be neither geometry nor the model:
+
+| | `block_area_m2` ÷ true geometry area |
+|---|---|
+| Cape Town | **1.4491** (IQR 1.4466–1.4518) |
+| Nairobi | 0.9999 |
+
+The `block_area_m2` column shipped with the block data is 45% too large for Cape Town. The factor
+is not arbitrary: \(1/\cos^{2}(33.9^\circ) = 1.452\). The column was computed from WGS84 degrees
+without the `cos(latitude)` correction, so it is inflated by \(1/\cos^{2}\phi\) — which at
+Nairobi's latitude of 1.3° is 1.0005 and invisible. **The same defect is in both files; only Cape
+Town is far enough from the equator to show it.**
+
+`reblock.metric._cols` prefers that column over the geometry, so Cape Town's `A` enters every
+metric inflated by 1.449, and `d = √(nA)/P` by `√1.449 = 1.204`. Substituting the true area:
+
+| | with the column | with true geometry area |
+|---|---|---|
+| Cape Town | 0.782 | **0.942** |
+| Nairobi | 0.988 | 0.987 |
+
+which closes the gap and leaves a residual comfortably inside what a square-based approximation
+should be expected to give.
+
+**What this does and does not affect.** Rankings *within* Cape Town are unharmed: the inflation is
+very nearly constant (IQR 1.4466–1.4518), and a constant factor cannot reorder blocks. Everything
+absolute is affected — the `0.0128` floor, the "100 buildings per hectare" threshold above, and any
+comparison *between* cities, since one city's areas are right and the other's are not. Densities
+quoted for Cape Town from this column are understated by the same 1.449.
+
 ## What is not settled
-
-The ring-count constant is not stable across cities. Measured against true peel depth, `max depth /
-d` is 1.98 in Nairobi — essentially the predicted 2.00 — but 1.56 in Cape Town.
-
-Three explanations have been proposed and eliminated.
-
-**Elongation.** `2A/P` is the inradius only for a square, so elongated blocks should deviate. But
-the shape index \(c = P^{2}/16A\) is 0.88 in Cape Town and 1.32 in Nairobi — the city that
-deviates more is the *rounder* one — and an elongation-aware ring count derived from the rectangle
-inradius, \(K = \tfrac{\sqrt n}{2}(\sqrt c - \sqrt{c-1})\), scores *worse* on rank correlation
-in every shape band of both cities.
-
-**Aspect ratio.** Measured directly from each block's minimum rotated rectangle, the two cities are
-indistinguishable: median aspect 2.36 against 2.34, median bounding-box fill 0.78 against 0.77.
-
-**Boundary detail.** A more finely digitised outline would inflate `P` without changing the shape.
-It does not: median vertices per 100 m are 4.17 and 4.60, and simplifying at 5 m removes 0.3% of
-the perimeter in both.
-
-What remains untested: parcel-size heterogeneity — a peel over unequal Voronoi cells does not
-advance a uniform `s` per ring — interior open space, and disagreement between the building count
-and the parcel count after clipping.
-
-Rank correlation is unaffected by a constant factor, which is why the estimator transfers while its
-calibration does not. Absolute counts from this formula should be read as order-of-magnitude until
-that constant is understood.
 
 The thresholds are a separate and weaker matter. "Two houses' walk" and "100 buildings per hectare"
 are stated in physical units, but they were chosen against Cape Town: only three Nairobi blocks
