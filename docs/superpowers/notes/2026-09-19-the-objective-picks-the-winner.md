@@ -75,9 +75,46 @@ Racing Park cluster, which is survey-formal throughout -- so it penalises `count
 finding what the ground truth does not know about. The truth is bracketed, not resolved. 48 hand
 labels cannot break the tie.
 
+## CORRECTION 2026-09-19: the capture tables above are block-matched, and that is unfair
+
+Every capture number above selects the **top 1% of BLOCKS**. The families select blocks of wildly
+different sizes -- the unnormalised members prefer 400-hectare blocks -- so a fixed block count
+hands them far more ground and therefore more of everything. The like-for-like comparison is a
+matched PARCEL budget, the same "at equal pool size" discipline the bake-off already applies to
+the floors.
+
+Redone at 100,000 parcels:
+
+    metric                     blocks   parcels    dwell    deep  deep+inf
+    unnorm m=1  n*d                48   100,353    23.1%   19.6%     26.3%
+    unnorm m=2  n*d^2              56   100,486    22.5%   20.4%     27.0%
+    NORM  m=1  dd_proxy           212   100,151    36.0%   18.6%     55.4%
+    NORM  m=2  (n/P)^2            150   100,150    33.4%   20.0%     52.8%
+    NORM  m=0  density            642   100,026    29.3%   12.2%     40.1%
+
+**The ordering reverses.** Normalised beats unnormalised on dwellings 36.0% against 23.1%, and on
+deep-and-informal 55.4% against 26.3%. Only the label-free deep-parcel column is a tie. The
+unnormalised family's big blocks are largely RURAL -- lots of area, few slum dwellings per parcel
+-- which the block-matched view concealed.
+
+Two claims made here and elsewhere are withdrawn:
+
+* "for counting people at global scale use `n`, or `sqrt(nA)/P` where blocks are reliable" -- at a
+  matched parcel budget, which is what a survey budget actually looks like, `dd_proxy` captures
+  half again as many dwellings. Use the shipped metric.
+* "`(n/P)^2` beats `dd_proxy` on deep-and-informal, 57.3% to 53.2%" -- block-matched. At matched
+  parcels it is 52.8% against 55.4%, the other way round.
+
+The shipped `depth_density` proxy is the best of all six on both people-weighted measures once the
+comparison is like-for-like.
+
 ## For global scale, without footprints
 
 *Recommendation, with its caveats attached rather than filed elsewhere.*
+
+**Superseded by the correction above -- read it first.** The recommendations below were derived
+block-matched and the ordering does not survive a matched parcel budget. Kept because the
+DATA-AVAILABILITY argument (what needs a perimeter, what needs a street network) is unaffected.
 
 * **`count n` if you cannot build reliable blocks.** It needs no perimeter, therefore no
   street-bounded faces, therefore no dependence on OSM road coverage -- the weakest link outside
