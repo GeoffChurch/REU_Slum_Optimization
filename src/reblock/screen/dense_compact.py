@@ -81,7 +81,7 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
     metric, gate = inp.metric, inp.gate
     blocks = gpd.read_parquet(
         inp.blocks_path,
-        columns=["block_id", "building_count", "block_area_m2", "geometry"])
+        columns=["block_id", "building_count", "geometry"])
     # Resolve WHICH count before anything scores: `resolved` overwrites `building_count`, so the
     # metric, the gate and the pre-filter below all read one number and none of them asks where it
     # came from. See `reblock.data.counts` for why the default is Open Buildings.
@@ -91,8 +91,9 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
     crs = blocks.crs
     already_projected = crs is not None and CRS.from_user_input(crs).is_projected
     utm = blocks if already_projected else blocks.to_crs(blocks.estimate_utm_crs())
-    area = (blocks["block_area_m2"].to_numpy(dtype=float) if "block_area_m2" in blocks.columns
-            else utm.geometry.area.to_numpy())
+    # From the geometry, never `block_area_m2`: that column is inflated by 1/cos^2(latitude)
+    # (1.449x in Cape Town, 1.0x in Nairobi). See `reblock.metric._cols`.
+    area = utm.geometry.area.to_numpy()
     perim = utm.geometry.length.to_numpy()
     eligible = count >= inp.min_buildings
     proxy = metric.proxy(blocks).to_numpy()

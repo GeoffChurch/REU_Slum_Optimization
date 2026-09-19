@@ -20,6 +20,7 @@ from reblock.metric import (
     PercentileGate,
     Power,
     Product,
+    _cols,
 )
 
 _UTM = CRS.from_epsg(32643)
@@ -168,3 +169,25 @@ def test_each_floor_still_selects_the_pool_it_was_calibrated_for() -> None:
     by_floor = {float(r["floor"]): int(float(r["floor_n"])) for r in rows.values()}
     assert by_floor[DEPTH_DENSITY_PROXY_FLOOR] == 3169
     assert by_floor[DENSITY_COMPACTNESS_FLOOR] == 3049
+
+
+def test_cols_takes_area_from_geometry_not_the_shipped_column() -> None:
+    """`block_area_m2` as shipped is inflated by 1/cos^2(latitude) -- measured 1.4491x in Cape
+    Town against 0.9999x in Nairobi, and 1/cos^2(33.9 deg) = 1.452. It was computed from WGS84
+    degrees without the cos(latitude) correction, so the error is invisible at the equator and
+    grows with distance from it. `_cols` must therefore measure area on the reprojected geometry,
+    the same frame it already uses for the perimeter.
+
+    The frame here carries a `block_area_m2` that is deliberately absurd. A `_cols` that reads the
+    column returns it; one that measures the geometry ignores it.
+
+    FAULT INJECTION: restoring `area = blocks["block_area_m2"] if present else utm.geometry.area`
+    makes this fail with 999999.0 against the true 10000.0.
+    """
+    square = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])       # 100 m x 100 m = 10,000 m^2
+    blocks = gpd.GeoDataFrame(
+        {"block_id": ["a"], "building_count": [50.0], "block_area_m2": [999999.0]},
+        geometry=[square], crs=CRS.from_epsg(32734))                  # already projected
+    _count, area, perim = _cols(blocks)
+    assert area.iloc[0] == pytest.approx(10_000.0), "area must come from the geometry"
+    assert perim.iloc[0] == pytest.approx(400.0)

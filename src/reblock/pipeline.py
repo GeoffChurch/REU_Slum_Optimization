@@ -163,8 +163,9 @@ def _reach_cols(block_geoms: pd.DataFrame, ids: list[str]
     crs = sub.crs
     already_projected = crs is not None and CRS.from_user_input(crs).is_projected
     utm = sub if already_projected else sub.to_crs(sub.estimate_utm_crs())
-    area = (sub["block_area_m2"].astype(float) if "block_area_m2" in sub.columns
-            else utm.geometry.area)
+    # From the geometry, never `block_area_m2` -- inflated by 1/cos^2(latitude). See
+    # `reblock.metric._cols`.
+    area = utm.geometry.area
     return [(str(b), float(c), float(ar), float(pe)) for b, c, ar, pe in
             zip(sub["block_id"], sub["building_count"], area, utm.geometry.length, strict=True)]
 

@@ -40,17 +40,27 @@ DENSITY_COMPACTNESS_FLOOR = 3.55e-4
 
 
 def _cols(blocks: GeoDataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
-    """(count, area, perim) Series from the free kblock columns -- perimeter in a metric CRS so it's
-    comparable across blocks; area from `block_area_m2` when present else the reprojected geometry
-    area. Blocks already in a projected (metric) CRS are used as-is: re-estimating and reprojecting
-    an already-metric CRS can land in the wrong UTM zone near zone/false-easting boundaries and
-    distort lengths and areas."""
+    """(count, area, perim) Series -- BOTH area and perimeter measured on the reprojected geometry,
+    so they are in the same units and comparable across blocks. Blocks already in a projected
+    (metric) CRS are used as-is: re-estimating and reprojecting an already-metric CRS can land in
+    the wrong UTM zone near zone/false-easting boundaries and distort lengths and areas.
+
+    This used to prefer the `block_area_m2` column shipped with the block data. IT IS WRONG, by a
+    factor that depends on LATITUDE. Measured 2026-09-19, `block_area_m2 / true geometry area` is
+    1.4491 in Cape Town (IQR 1.4466-1.4518) and 0.9999 in Nairobi -- and 1/cos^2(33.9 deg) = 1.452.
+    The column was computed from WGS84 degrees without the cos(latitude) correction, so it is
+    inflated by 1/cos^2(phi); at Nairobi's 1.3 degrees that is 1.0005 and invisible. The same
+    defect is in both files and only Cape Town is far enough from the equator to show it.
+
+    Reading it cost nothing and bought nothing: this function already reprojects for the perimeter,
+    so taking the area from the same frame is free and correct. The column is left in the cached
+    parquet because provisioning scripts filter on it coarsely, but nothing that computes a metric
+    may read it."""
     crs = blocks.crs
     already_projected = crs is not None and CRS.from_user_input(crs).is_projected
     utm = blocks if already_projected else blocks.to_crs(blocks.estimate_utm_crs())
     count = blocks["building_count"].astype(float)
-    area = (blocks["block_area_m2"].astype(float) if "block_area_m2" in blocks.columns
-            else utm.geometry.area)
+    area = utm.geometry.area
     perim = utm.geometry.length
     return count.reset_index(drop=True), area.reset_index(drop=True), perim.reset_index(drop=True)
 
