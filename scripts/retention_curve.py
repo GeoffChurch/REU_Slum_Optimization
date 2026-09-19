@@ -117,7 +117,8 @@ def main() -> int:
     print("  (a 'cut' is a closed prefix: the direct-sum decomposition points of the permutation)")
 
     if args.png:
-        _plot(series, args.png)
+        _plot(series, args.png, ratio=False)
+        _plot(series, args.png.replace(".png", "_ratio.png"), ratio=True)
     return 0
 
 
@@ -130,61 +131,84 @@ _MATCHED = {"depth": "depth_proxy", "depth_density": "dd_proxy"}
 SHIPPED_N = 1000        # conf/config.yaml: proxy_keep_n
 
 
-def _plot(series: dict[str, NDArray[np.int64]], path: str) -> None:
+def _plot(series: dict[str, NDArray[np.int64]], path: str, *, ratio: bool) -> None:
     """One panel per (city, fine metric), because curves for DIFFERENT fine metrics are not
     comparable -- they measure retention of different target rankings, and sharing an axis invites
-    a false read. Only proxies, which do share a target, are overlaid."""
+    a false read. Only proxies, which do share a target, are overlaid.
+
+    `ratio=True` plots f(k)/k instead of f(k). That view is worth having because f is a RUNNING
+    MAXIMUM, so a flat stretch is ambiguous -- it means either "this proxy ranks these blocks
+    well" or "this proxy is already so high that nothing new exceeds it", and only the LEVEL tells
+    them apart. Every curve goes flat late in the panel from pure saturation. Dividing by k
+    removes that: f(k)/k is the multiplicative overpayment, 1.0 is a perfect proxy, and a curve
+    tracking the fine metric trends DOWN rather than flattening.
+    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import FixedLocator, NullFormatter
     panels: dict[str, dict[str, NDArray[np.int64]]] = {}
     for key, f in series.items():
         city, variant, proxy = key.split(":")
         panels.setdefault(f"{city}:{variant}", {})[proxy] = f
     ncol = 2
     nrow = (len(panels) + ncol - 1) // ncol
-    fig, axes = plt.subplots(nrow, ncol, figsize=(11, 4.4 * nrow), dpi=130,
-                             squeeze=False)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(11, 4.4 * nrow), dpi=130, squeeze=False)
     for ax, (name, group) in zip(axes.ravel(), panels.items(), strict=False):
         variant = name.split(":")[1]
         lim = max(len(f) for f in group.values())
-        ax.plot([1, lim], [1, lim], color="#999", ls="--", lw=0.9, zorder=1)
-        ax.text(lim, lim, " f(k)=k", color="#999", fontsize=7, va="top", ha="right")
-        # No envelope shading: the lower boundary of the plotted curves IS the envelope, so a
-        # fill only adds ink. The operational line does earn its place -- where a curve crosses
-        # `proxy_keep_n`, that is the largest k this proxy still retains.
-        ax.axhline(SHIPPED_N, color="#444", lw=0.9, ls=":", zorder=1)
-        ax.text(1.1, SHIPPED_N, f" proxy_keep_n = {SHIPPED_N:,}", fontsize=7, color="#444",
-                va="bottom")
+        if ratio:
+            ax.axhline(1.0, color="#999", ls="--", lw=0.9, zorder=1)
+            ax.text(lim, 1.0, " f(k)/k = 1 (perfect) ", color="#999", fontsize=7, va="bottom",
+                    ha="right")
+        else:
+            ax.plot([1, lim], [1, lim], color="#999", ls="--", lw=0.9, zorder=1)
+            ax.text(lim, lim, " f(k)=k", color="#999", fontsize=7, va="top", ha="right")
+            ax.axhline(SHIPPED_N, color="#444", lw=0.9, ls=":", zorder=1)
+            ax.text(1.1, SHIPPED_N, f" proxy_keep_n = {SHIPPED_N:,}", fontsize=7, color="#444",
+                    va="bottom")
         for proxy, f in group.items():
             matched = proxy == _MATCHED.get(variant)
-            ax.plot(np.arange(1, len(f) + 1), f, color=_COLOR[proxy],
-                    lw=2.0 if matched else 1.0, alpha=1.0 if matched else 0.75,
-                    label=proxy, zorder=3 if matched else 2)
-            if matched:
+            k = np.arange(1, len(f) + 1)
+            y = f / k if ratio else f
+            ax.plot(k, y, color=_COLOR[proxy], lw=2.0 if matched else 1.0,
+                    alpha=1.0 if matched else 0.75, label=proxy, zorder=3 if matched else 2)
+            if matched and ratio:
+                a = int(np.argmax(f / k))
+                ax.annotate(f"worst {f[a] / (a + 1):,.0f}x at k={a + 1:,}",
+                            xy=(a + 1, f[a] / (a + 1)), xytext=(6, 6),
+                            textcoords="offset points", fontsize=7, color=_COLOR[proxy],
+                            fontweight="bold")
+            elif matched:
                 kmax = int(np.searchsorted(f, SHIPPED_N, side="right"))
                 ax.annotate(f"retains top-{kmax:,}", xy=(max(kmax, 1), SHIPPED_N),
                             xytext=(4, -14), textcoords="offset points", fontsize=7,
                             color=_COLOR[proxy], fontweight="bold")
         ax.set_xscale("log")
         ax.set_yscale("log")
+        # Integer minor ticks out to k=30: the log decade 1-10 is where every operating point
+        # lives (top-1, top-5, top-15) and a bare log axis makes those indistinguishable.
+        ax.xaxis.set_minor_locator(FixedLocator(list(range(1, 31))))
+        ax.xaxis.set_minor_formatter(NullFormatter())
+        ax.tick_params(axis="x", which="minor", length=3.5, color="#555", width=0.8)
         ax.set_title(name, fontsize=10)
         ax.set_xlabel("k")
-        ax.set_ylabel("f(k) = prefix needed")
+        ax.set_ylabel("f(k)/k = overpayment" if ratio else "f(k) = prefix needed")
         ax.grid(alpha=0.15, lw=0.5)
     for ax in axes.ravel()[len(panels):]:
         ax.set_visible(False)
     handles, labels = axes.ravel()[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=8,
-               frameon=False, bbox_to_anchor=(0.5, 0.005))
-    fig.suptitle("Retention: smallest proxy prefix that keeps the fine metric's top-k\n"
-                 "bold = the metric's own matched proxy; panels are not comparable across metrics",
-                 fontsize=11)
+    fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=8, frameon=False,
+               bbox_to_anchor=(0.5, 0.005))
+    head = ("Overpayment: f(k)/k, the scale-free view -- 1.0 is a perfect proxy\n"
+            "no saturation artifact here: a flat f(k) can just mean 'already high'"
+            if ratio else
+            "Retention: smallest proxy prefix that keeps the fine metric's top-k\n"
+            "bold = the metric's own matched proxy; panels are not comparable across metrics")
+    fig.suptitle(head, fontsize=11)
     fig.tight_layout(rect=(0, 0.045, 1, 0.93))
     fig.savefig(path)
     print(f"  wrote {path}")
-
-    return 0
 
 
 if __name__ == "__main__":
