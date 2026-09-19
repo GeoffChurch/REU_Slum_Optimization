@@ -116,6 +116,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Background: background.md
+  - The arithmetic of access: access-arithmetic.md
   - Explore: explore.md
   - Methodology:
       - methodology/index.md

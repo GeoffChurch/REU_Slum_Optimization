@@ -85,11 +85,31 @@ Everything rests on `max depth ~= 2 * depth_proxy`. Measured against true peel d
     capetown   27,821 blocks   median ratio 1.56   IQR 1.36-1.82
     nairobi     6,634 blocks   median ratio 1.98   IQR 1.74-2.27
 
-`2A/P` is the inradius only for a SQUARE. For an elongated `w x L` block, `2A/P ~= w` while the
-inradius is `w/2`, so the constant falls toward 1. Nairobi's blocks are square-ish (1.98); Cape
-Town's are elongated (1.56), which is the same shape effect that makes its calibration 1.29x
-against Nairobi's 1.08x. Rank correlation survives because it is invariant to a constant factor;
-absolute counts do not, and a shape-aware constant would be a real refinement rather than a fit.
+`2A/P` is the inradius only for a SQUARE: for an elongated `w x L` block it is `w` against a true
+inradius of `w/2`, so the constant should fall toward 1 as blocks elongate.
+
+**THAT EXPLANATION IS WRONG, AND THE CORRECTION BUILT ON IT DOES NOT WORK.** It was asserted
+before being checked. The elongation index `c = P^2/(16A)` (1 for a square) has median **1.00 in
+Cape Town** and **1.32 in Nairobi** -- so the city with the LOWER ratio is the LESS elongated one,
+the opposite of what the story requires.
+
+The correction is derivable rather than fitted -- `w` and `L` are the roots of
+`x^2 - (P/2)x + A = 0`, giving an inradius `r = (sqrt(A)/2)(sqrt(c) - sqrt(c-1))` and a ring count
+`K = (sqrt(n)/2)(sqrt(c) - sqrt(c-1))`, which interpolates exactly from `2*depth_proxy` at `c=1`
+to `depth_proxy` for large `c`. Measured, it is a net loss:
+
+                  median c   2*depth_proxy ratio/spearman   K ratio/spearman
+    capetown          1.00        0.78 / 0.742                  0.94 / 0.589
+    nairobi           1.32        0.99 / 0.822                  1.43 / 0.741
+
+It improves Cape Town's calibration and wrecks Nairobi's, and costs rank correlation in both.
+
+So: the constant differs between cities (1.56 vs 1.98 against a square's 2.00) and the cause is
+NOT elongation and is currently **unknown**. Candidates not yet tested: parcel-size heterogeneity
+(a peel over unequal Voronoi cells does not advance a uniform `s` per ring), interior open space,
+and disagreement between `n` and the actual parcel count after clipping. Rank correlation is
+invariant to a constant factor, which is why the estimator survives not knowing this; absolute
+counts are not, so the 1.29x / 1.08x calibration gap stands unexplained.
 
 ## At depth EXACTLY k, and weighted sums
 
