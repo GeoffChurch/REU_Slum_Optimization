@@ -1245,8 +1245,12 @@ def gen_benchmark_section() -> str:
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
     if meta:
         parts.append("## Settlement scale: the `multiblock_depth` region\n")
-        parts.append(f"The `depth` metric screened **{_num(meta['flagged'])} of "
-                     f"{_num(meta['total_blocks'])}** Cape Town blocks and grew the top-scoring "
+        # "screened N of M" read as a finding about how many Cape Town blocks are informal. It
+        # is not: `flagged` is the pre-filter budget (`proxy_keep_n`), because the `depth`
+        # variant's gate keeps every survivor. Say what it is.
+        parts.append(f"The `depth` metric tessellated and peeled the top "
+                     f"**{_num(meta['flagged'])}** blocks of {_num(meta['total_blocks'])} by the "
+                     f"cheap proxy, then grew the top-scoring "
                      f"block (`{meta['deepest_block']}`, peel depth "
                      f"{meta['deepest_depth']:.0f}) into a **{meta['region_members']}-block "
                      f"region of {_num(meta['region_parcels'])} parcels** — mean depth "
@@ -1255,9 +1259,11 @@ def gen_benchmark_section() -> str:
         if meta.get("maps_url"):
             parts.append(f"[See the region on Google Maps]({meta['maps_url']})\n")
         scene_captions = {
-            "screen.png": (f"The `depth` screen across the Cape Town metro: "
-                           f"{_num(meta['flagged'])} of {_num(meta['total_blocks'])} blocks "
-                           f"flagged."),
+            "screen.png": (f"The `depth` screen across the Cape Town metro: the "
+                           f"{_num(meta['flagged'])} blocks the fine pass scored, of "
+                           f"{_num(meta['total_blocks'])}, coloured by true peel depth. The count "
+                           f"is the pre-filter budget, not an estimate of how many blocks are "
+                           f"informal."),
             "region.png": (f"The region grown from the top-scoring block: "
                            f"{meta['region_members']} blocks, "
                            f"{_num(meta['region_parcels'])} parcels."),
@@ -1433,10 +1439,12 @@ def _key_figures() -> str:
     if meta.get("region_parcels") and meta.get("region_members"):
         items.append((_num(meta["region_parcels"]),
                       f"parcels across the {meta['region_members']}-block benchmark region"))
-    if meta.get("flagged") and meta.get("total_blocks"):
-        items.append((_num(meta["flagged"]),
-                      f"of {_num(meta['total_blocks'])} Cape Town blocks flagged by the depth "
-                      f"screen"))
+    # DELIBERATELY NOT a "blocks flagged" key figure. `meta["flagged"]` is the size of the
+    # PRE-FILTER, not a finding: the `depth` variant's gate keeps every survivor, so the number
+    # has only ever reported `proxy_keep_n`. It read as "13,793 of 83,192 Cape Town blocks are
+    # informal" when it meant "we peeled 50% of the eligible corpus", and after the 2026-09-19
+    # switch to a count it would have rendered as a round 1,000 -- the same artifact, merely
+    # obvious. There is no honest version of this statistic, so it is gone rather than restated.
 
     disp = _read_csv(MB / "lens_displacement.csv")
     if disp:
