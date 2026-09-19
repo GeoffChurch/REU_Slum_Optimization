@@ -65,6 +65,60 @@ not measured optima. The estimator is an estimator: spearman 0.782 means blocks 
 are misranked, and the 1.0-vs-1.2 constant trades recall (97.4%) against precision (98.9%) --
 neither is "right" and the choice belongs to whoever is paying for the false positives.
 
-*Falsification:* peel a second city and refit nothing. If the same constant reproduces the true
-gate at comparable precision/recall on Nairobi, the derivation is transferable; if the constant has
-to move, it is a Cape Town shape statistic wearing a geometric argument.
+## Falsification: run, and PASSED for the formula, FAILED for the thresholds
+
+Nairobi, refitting nothing -- same formula, same constants:
+
+                  spearman   est/true    gate precision / recall
+    Cape Town        0.782      1.29x        90.7%  /  97.4%
+    Nairobi          0.897      1.08x        75.0%  / 100.0%   (3 true blocks -- underpowered)
+
+The estimator transfers and is BETTER in the second city. The GATE does not: only 3 Nairobi blocks
+reach ">= 50 deep dwellings and >= 100/ha" despite the city holding 137,570 deep parcels, because
+its dense blocks are smaller. Physical units bought transferability for the estimator and not for
+the cut-points, which remain Cape Town numbers wearing physical clothing.
+
+## Why the constant is 2, and when it is not
+
+Everything rests on `max depth ~= 2 * depth_proxy`. Measured against true peel depth:
+
+    capetown   27,821 blocks   median ratio 1.56   IQR 1.36-1.82
+    nairobi     6,634 blocks   median ratio 1.98   IQR 1.74-2.27
+
+`2A/P` is the inradius only for a SQUARE. For an elongated `w x L` block, `2A/P ~= w` while the
+inradius is `w/2`, so the constant falls toward 1. Nairobi's blocks are square-ish (1.98); Cape
+Town's are elongated (1.56), which is the same shape effect that makes its calibration 1.29x
+against Nairobi's 1.08x. Rank correlation survives because it is invariant to a constant factor;
+absolute counts do not, and a shape-aware constant would be a real refinement rather than a fit.
+
+## At depth EXACTLY k, and weighted sums
+
+The difference `D(>k-1) - D(>k)` is LINEAR in k -- simpler than the quadratic it came from:
+
+    N(k)  =  P*sqrt(n/A)  -  (2k-1) * P^2/(4A)
+
+An arithmetic progression: first ring `P*sqrt(n/A) - P^2/(4A)`, each subsequent ring losing
+`P^2/(2A)`. The corner term checks out -- for a square `P^2/4A = 4`, exactly the four corners the
+first ring does not get.
+
+Because `N` is linear, every polynomial weight collapses. With `d = depth_proxy`:
+
+    sum_k  k^m * N(k)   =   n * 2^(m+1) * d^m / ((m+1)(m+2))
+
+    m=0:  n                 all parcels
+    m=1:  (2/3) * n * d     TOTAL ACCESS BURDEN (sum of every parcel's depth)
+    m=2:  (2/3) * n * d^2
+    m=3:  (4/5) * n * d^3
+
+so any polynomial weight gives `n` times a power of `depth_proxy`, and the m=1 case has a
+punchline. Divide the total burden by area:
+
+    (2/3) * n * d / A  =  (2/3) * n^1.5 / (P * sqrt(A))  =  (2/3) * dd_proxy
+
+**The shipped `dd_proxy` IS the total access burden per unit area**, up to the constant 2/3. It
+was derived as depth x density and turns out to be burden DENSITY -- which is exactly why it is
+right for ranking blocks and wrong for counting people. A count wants the unnormalised burden
+`n * depth_proxy`, i.e. `dd_proxy * A`.
+
+Corollaries, all consistent with the linear ring decay: `mean depth ~= (2/3) * depth_proxy`, and
+`mean = max/3`.
