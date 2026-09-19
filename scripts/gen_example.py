@@ -155,12 +155,17 @@ def main() -> None:
 
         t0 = time.perf_counter()
         groups = None if pinned is None else [list(g) for g in pinned]
-        region = build_regions(source, screen, region_builder, groups, int(cfg.max_blocks))[0]
+        # `seed_rank` picks WHICH of the screen's ranked blocks seeds this example, so two
+        # variants can share one screen instead of needing one screen each. build_regions returns
+        # one region per seed group in rank order, so it must be asked for at least rank+1 of them.
+        seed_rank = int(cfg.get("seed_rank", 0))
+        region = build_regions(source, screen, region_builder, groups,
+                               max(int(cfg.max_blocks), seed_rank + 1))[seed_rank]
         members = [b.block_id for b in region]
         region_parcels = sum(len(b.parcels) for b in region)
         log.info("region built: %d blocks / %d parcels (%.1fs)", len(members), region_parcels,
                  time.perf_counter() - t0)
-        seed = selection[0] if selection else members[0]
+        seed = selection[seed_rank] if len(selection) > seed_rank else members[0]
         # build_regions narrowed source.block_ids to the members; clear it again (like run.py)
         # so the screen map spans the whole metro, not just the region neighbourhood.
         source.block_ids = None                                              # type: ignore[attr-defined]

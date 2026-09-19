@@ -41,7 +41,11 @@ ASSETS = DOCS / "assets"
 BRAND = DOCS / "brand"      # committed institutional marks, unlike the gitignored assets/
 EXAMPLES = ROOT / "examples"
 MC = ROOT / "examples" / "method-comparison"
-MB = ROOT / "examples" / "multiblock_depth"
+# The flagship region the site shows. `multiblock_depth_density`, not `multiblock_depth`, since
+# 2026-09-19: the `depth` example variant was dropped (the screen comparison it appeared to
+# provide is made better and far cheaper by gen_screen_bakeoff), so pointing at it would serve a
+# frozen directory that no longer regenerates -- stale numbers presented as current.
+MB = ROOT / "examples" / "multiblock_depth_density"
 OUTPUTS = ROOT / "outputs"
 BAKEOFF = ROOT / "examples" / "screen-bakeoff"
 NAIROBI = ROOT / "examples" / "nairobi"
@@ -1120,15 +1124,21 @@ def _mc_section(m: M) -> list[str]:
 
 def _mb_section(m: M) -> list[str]:
     parts: list[str] = []
-    matched = _copy_asset(MB / f"after_{m.mb_key}_matched.png", "multiblock_depth")
-    ext70 = _copy_asset(MB / f"after_{m.mb_key}_ext70.png", "multiblock_depth")
-    gif = _copy_asset(MB / f"reblock_{m.mb_key}.gif", "multiblock_depth")
+    matched = _copy_asset(MB / f"after_{m.mb_key}_matched.png", "multiblock_depth_density")
+    ext70 = _copy_asset(MB / f"after_{m.mb_key}_ext70.png", "multiblock_depth_density")
+    gif = _copy_asset(MB / f"reblock_{m.mb_key}.gif", "multiblock_depth_density")
     disp_row, perm_row = _mb_lens_rows(m.mb_key or "")
     if not (matched or ext70 or gif or disp_row or perm_row):
         return parts
     parts.append("## On the settlement-scale benchmark\n")
-    parts.append("From the [Cape Town benchmark](../../results/frontier.md) — the 12-block, "
-                 "11,006-parcel `multiblock_depth` region.\n")
+    # Read from meta, never typed: "12-block, 11,006-parcel" was already wrong before this
+    # sentence was touched -- the region had been 15 and then 13 blocks while the text said 12.
+    _mbpath = MB / "meta.json"
+    _mbmeta = json.loads(_mbpath.read_text(encoding="utf-8")) if _mbpath.exists() else {}
+    _desc = (f"the {_mbmeta['region_members']}-block, {_num(_mbmeta['region_parcels'])}-parcel"
+             if _mbmeta.get("region_members") else "the")
+    parts.append(f"From the [Cape Town benchmark](../../results/frontier.md) — {_desc} "
+                 f"`multiblock_depth_density` region.\n")
     if gif:
         parts.append(f"Roads added busiest-first, each preceded by whatever it needs to reach the "
                      f"street, so every frame is a network you could actually build. The animation "
@@ -1244,7 +1254,7 @@ def gen_benchmark_section() -> str:
     meta_path = MB / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
     if meta:
-        parts.append("## Settlement scale: the `multiblock_depth` region\n")
+        parts.append("## Settlement scale: the `multiblock_depth_density` region\n")
         # "screened N of M" read as a finding about how many Cape Town blocks are informal. It
         # is not: `flagged` is the pre-filter budget (`proxy_keep_n`), because the `depth`
         # variant's gate keeps every survivor. Say what it is.
@@ -1269,14 +1279,14 @@ def gen_benchmark_section() -> str:
                            f"{_num(meta['region_parcels'])} parcels."),
         }
         for name in ("screen.png", "region.png"):
-            url = _copy_asset(MB / name, "multiblock_depth")
+            url = _copy_asset(MB / name, "multiblock_depth_density")
             if url:
                 parts.append(_figure(url, name.removesuffix(".png"), scene_captions[name]))
         frontier_imgs: list[str] = []
         for pat in ("depth_vs_road_*.png", "curve_external_connectivity_*.png",
                     "curve_internal_connectivity_*.png", "displacement_*.png"):
             for p in sorted(MB.glob(pat)):
-                url = _copy_asset(p, "multiblock_depth")
+                url = _copy_asset(p, "multiblock_depth_density")
                 if url:
                     frontier_imgs.append(_figure(url, p.stem, _curve_caption(p.stem)))
         if frontier_imgs:
@@ -1315,7 +1325,7 @@ def gen_benchmark_section() -> str:
                              ("Matched external-connectivity target (0.70)", ext70)):
             items = []
             for p in files:
-                url = _copy_asset(p, "multiblock_depth")
+                url = _copy_asset(p, "multiblock_depth_density")
                 if url:
                     key = p.name[len("after_"):-len(".png")].rpartition("_")[0]
                     items.append((friendly_method_name(key), url))

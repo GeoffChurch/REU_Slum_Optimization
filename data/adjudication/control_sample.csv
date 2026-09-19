@@ -111,8 +111,8 @@ ZAF.9.3.1_1_42863,10to30pct,5152,3662,25,146.48,0.00968369,56,1.01,0.000,formal,
 ZAF.9.3.1_1_22028,10to30pct,5242,3662,25,146.48,0.00955757,55,0.82,0.000,formal,Khaya,"https://www.google.com/maps/@-34.04208,18.66215,19.2z/data=!3m1!1e3",,
 ZAF.9.3.1_1_35343,10to30pct,5248,3662,25,146.48,0.00955111,82,1.58,0.000,formal,Windermere,"https://www.google.com/maps/@-33.90960,18.52083,19.1z/data=!3m1!1e3",,
 ZAF.9.3.1_1_20842,10to30pct,5301,3662,25,146.48,0.0094759,45,0.62,0.000,formal,Kuyasa,"https://www.google.com/maps/@-34.04794,18.68454,19.4z/data=!3m1!1e3",,
-ZAF.9.3.1_1_14552,rest,6000,12817,28,457.75,0.00859587,60,1.02,0.000,formal,Macassar Village Estate,"https://www.google.com/maps/@-34.05743,18.75119,19.2z/data=!3m1!1e3",,
-ZAF.9.3.1_1_15703,rest,6575,12817,28,457.75,0.00801933,72,1.94,0.000,formal,Highbury,"https://www.google.com/maps/@-33.95013,18.68032,19.2z/data=!3m1!1e3",,
+ZAF.9.3.1_1_14552,rest,6000,12817,28,457.75,0.00859587,60,1.02,0.000,formal,Macassar Village Estate,"https://www.google.com/maps/@-34.05743,18.75119,19.2z/data=!3m1!1e3",no-dense-informal,"adjudicator: correct, not informal. 1.02 ha, 60 bldg, rank 6,000. 'rest' stratum, weight 457.8."
+ZAF.9.3.1_1_15703,rest,6575,12817,28,457.75,0.00801933,72,1.94,0.000,formal,Highbury,"https://www.google.com/maps/@-33.95013,18.68032,19.2z/data=!3m1!1e3",no-dense-informal,"adjudicator: 0% informal, swimming pools visible. 1.94 ha, 72 bldg, rank 6,575."
 ZAF.9.3.1_1_53959,rest,6789,12817,28,457.75,0.00777953,156,5.75,0.000,formal,Cape Town Ward 65,"https://www.google.com/maps/@-34.04066,18.49959,18.2z/data=!3m1!1e3",,
 ZAF.9.3.1_1_19138,rest,6862,12817,28,457.75,0.00772123,39,0.70,0.000,formal,Voorbrug,"https://www.google.com/maps/@-33.98410,18.64886,19.5z/data=!3m1!1e3",,
 ZAF.9.3.1_1_44517,rest,7711,12817,28,457.75,0.00698827,56,1.16,0.000,formal,Cape Town Ward 43,"https://www.google.com/maps/@-34.07199,18.59118,19.2z/data=!3m1!1e3",,
