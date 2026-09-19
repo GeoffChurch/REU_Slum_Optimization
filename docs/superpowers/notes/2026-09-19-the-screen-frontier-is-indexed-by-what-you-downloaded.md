@@ -114,6 +114,49 @@ metric-native run gave 92 for `ca:depth` against 75 here. The comparison ACROSS 
 unaffected (all computed identically), but the calibrated figure behind `proxy_keep_n: 1000` is
 the metric-native 106, not 75.
 
+## Both shipped proxies are one family, and both sit at its optimum
+
+`depth_proxy` and `dd_proxy` look like two separately-derived formulas. They are the same
+expression at two exponents:
+
+    f_alpha = density^alpha * (A/P) = n^alpha * A^(1-alpha) / P
+
+    alpha 0.0   A/P             pure scale, no density
+    alpha 0.5   sqrt(nA)/P      depth_proxy    <- shipped for `depth`
+    alpha 1.0   n/P             frontage crowding
+    alpha 1.5   n^1.5/(P sqrt A) dd_proxy      <- shipped for `depth_density`
+
+Sweeping alpha against retention (worst proxy rank of the fine top-15):
+
+    alpha             0.0    0.25     0.5    0.75     1.0    1.25     1.5    1.75     2.0
+    ca:depth        4,040     666      75     656   5,556  13,523  18,003  20,522  21,968
+    na:depth          569     231     106     311   2,435   5,271   6,178   6,479   6,629
+    ca:depth_density 18,165  3,655     338     127      74      54      57      63      74
+    na:depth_density  2,509  1,153     310      80      30      18      19      19      21
+
+* **The shipped exponents are optimal, and this is the first check of that.** 0.5 is exactly the
+  minimum for `depth` in both cities; 1.5 is within noise of the 1.25-1.75 minimum for
+  `depth_density` (57 against 54). Two independently derived formulas land on the minima of one
+  continuous family.
+* **The matched-proxy result is a curve, not a coincidence.** The two fine metrics minimise at
+  genuinely different alpha, so "use the matched proxy" is one family with two operating points.
+* **The wells have very different widths.** `depth` falls from 4,040 to 75 and back to 5,556
+  across +/-0.5 in alpha; `depth_density` runs 74 / 54 / 57 / 63 over the same span. `depth`'s
+  proxy is delicately tuned and `depth_density`'s is robust -- which is exactly why mismatching
+  costs `depth` 18,003 and `depth_density` only 338.
+
+*Hypothesis that failed:* alpha=1 is `n/P`, buildings per metre of block perimeter -- frontage
+crowding, a real urban quantity sitting exactly between the two shipped proxies, and untried. It
+is not special: 5,556 for `depth` (wrong side of the well) and 74 for `depth_density` against 54
+at 1.25. The gap in the family was real; the guess about what filled it was wrong.
+
+**On pruning the dominated series:** do not. This sweep consists ENTIRELY of points that are never
+on the frontier, and its shape is the finding -- a sharp well against a flat one, centred in two
+different places. Keeping only frontier members would leave two dots and no way to see that one of
+them is precarious. The same argument covers `density` (the naive choice a reader proposes) and
+`density_compactness` (the previous default): their distance from the frontier is the argument for
+what replaced them.
+
 ## What would have to be true to ship it
 
 Not yet, on three grounds, and the third is cheap to fix:
