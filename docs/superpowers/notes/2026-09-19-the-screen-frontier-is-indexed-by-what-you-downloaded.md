@@ -5,17 +5,29 @@ wins now that the pool, the count source and the labels have all changed.
 
 ## The frontier, indexed by input
 
-A screen is not one question. It is one question per information budget, and the right way to hold
-the answer is a tier list: the best metric GIVEN what you are willing to download.
+A screen is not one question. It is one question per INFORMATION SET, and the right way to hold the
+answer is a tier list: the best metric given what you know about each block.
+
+Download size and storage are the least interesting reading of that. The tiers are of independent
+interest as a statement about **where the discriminative information lives** -- block geometry
+alone, versus geometry plus a count, versus counts plus the size distribution of the structures,
+versus their full shapes. Each row is a claim about what can be known from a signal, and it stays
+true if the data becomes free. The megabytes are noted only because they happen to decide what is
+already on disk.
 
 | tier | inputs | extra download | best measured | AUC | prec@1% | prec@5% |
 |---|---|---|---|---|---|---|
-| T0 | kblock columns: Ecopia `n`, `A`, `P` | none | `n^1.5/(P*sqrt(A))` | 0.921 | 0.812 | 0.416 |
+| T0 | kblock columns: Ecopia `n`, `A`, `P` | none | `n^1.5/(P*sqrt(A))` | 0.921 | 0.812* | 0.416* |
 | T1 | + Open Buildings POINTS (`n` recounted) | 49 MB, already paid | same formula | 0.919 | 0.645 | 0.403 |
 | T2 | + `area_in_meters` (same file) | **none** | `n^1.5/(P*sqrt(A)) / p90` | **0.941** | **0.656** | **0.427** |
 | T3 | + polygon geometry | 174 MB | nothing beats T2 | 0.941 | 0.656 | 0.427 |
 
-T0 and T1 are NOT comparable on these numbers and the table should not be read as a regression:
+\* **T0's precision columns are not comparable with the rest and must not be read as the maximum.**
+They are scored over a different population, and putting them in the same column invites exactly
+that misreading -- it did. Within the comparable rows, prec@1% is maximised by `dd_proxy/sqrt(p90)`
+at 0.672, then `dd_proxy/p90` at 0.656, then the shipped `dd_proxy` at 0.645.
+
+T0 and T1 are NOT comparable and the table should not be read as a regression:
 they are scored over different populations. `MIN_COUNT = 30` is a threshold on the count itself, so
 Ecopia admits 16,451 Cape Town blocks and Open Buildings 18,309, and the 1,858 added are mostly
 blocks Ecopia could not see. Rows T1-T3 share a population and ARE comparable.
@@ -63,6 +75,44 @@ As a DIVISOR it is a different proposition, dominating the shipped screen on eve
     depth_density proxy (shipped)     0.919   0.645   0.403
     dd_proxy / p90                    0.941   0.656   0.427
     dd_proxy / sqrt(p90)              0.935   0.672   0.423
+
+## Three objectives, three different winners
+
+AUC and precision are not the only things a metric here is asked to do, and the third objective has
+a different answer from both. `proxy_keep_n` pre-filters by a CHEAP proxy before the expensive
+Voronoi peel, so its only requirement is RETENTION: no block the fine metric would rank in its
+top-k may fall outside the kept prefix. Scored as the worst proxy rank among the fine top-15,
+lower being better:
+
+    proxy                          ca:depth  ca:depth_density  na:depth  na:depth_density
+    depth_proxy  sqrt(nA)/P              75               338       106               310
+    dd_proxy  n^1.5/(P sqrt A)       18,003                57     6,178                19
+    dd_proxy / sqrt(p90)             17,279                67     6,047                19
+    dd_proxy / p90                   16,708                75     5,955                36
+    A/P (hydraulic radius)            4,040            18,165       569             2,509
+    density  n/A                     26,173               997     6,893             1,090
+    dens_compact  n/P^2              27,369            23,019     6,911             5,330
+
+**Each fine metric is best retained by its own MATCHED proxy**, and by a wide margin: `depth` wants
+`sqrt(nA)/P` (75) where `dd_proxy` needs 18,003, and `depth_density` wants `dd_proxy` (57) where
+`depth_proxy` needs 338. `metric.proxy()` already returns the matched one, so the shipped pipeline
+is correct -- but nothing had measured WHY, and collapsing the two onto one shared proxy, which
+looks like a tidy simplification, would silently cost ~250x in retention.
+
+Note also that the footprint term HURTS here while helping above: 57 -> 75 on `ca:depth_density`.
+More information improved the head of the ranking and degraded the pre-filter's recall, because
+the two are scored on different things.
+
+    objective     what it asks                    best
+    AUC           rank the whole corpus           dd_proxy / p90        (0.941)
+    prec@1%       rank the head                   dd_proxy / sqrt(p90)  (0.672)
+    retention     do not lose the fine top-15     the matched proxy, per metric
+
+*Caveat on the absolute ranks:* these seven were computed by hand from `block_area_m2` and
+`geometry.length`, where `metric.proxy()` goes through `_cols()`, which may reproject -- a
+metric-native run gave 92 for `ca:depth` against 75 here. The comparison ACROSS proxies is
+unaffected (all computed identically), but the calibrated figure behind `proxy_keep_n: 1000` is
+the metric-native 106, not 75.
 
 ## What would have to be true to ship it
 
