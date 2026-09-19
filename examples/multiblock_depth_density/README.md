@@ -6,7 +6,7 @@
 
 ## 1. Screen the metro
 
-`depth_density` flagged **14,361 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_5810` (peel depth 24).
+`depth_density` flagged **1,000 of 83,192** blocks. Top-scoring: `ZAF.9.3.1_1_5810` (peel depth 24).
 
 ![screen](screen.png)
 
@@ -17,7 +17,7 @@
 
 ## 2. Grow the region
 
-The metric grows a **37-block** region (**10,148 parcels**), mean depth 4.0 rings, mean density 137 bldg/ha.
+The metric grows a **37-block** region (**10,142 parcels**), mean depth 4.0 rings, mean density 137 bldg/ha.
 
 ![region](region.png)
 
@@ -51,9 +51,9 @@ Every method truncated where permeability first reaches the standard target, so 
 |---|---|---|---|---|
 | Looped Tree | 2,149 m | 2.6% | 60.6% |  |
 | Loop Network | 1,601 m | 1.3% | 61.0% |  |
-| Grid | 2,134 m | 2.6% | 66.9% |  |
-| Frontage (street-priced) | 2,896 m | 1.5% | 62.1% |  |
-| Direct Objective (LP) | 1,870 m | 1.0% | 60.1% |  |
+| Grid | 2,113 m | 2.6% | 65.5% |  |
+| Frontage (street-priced) | 3,144 m | 1.3% | 60.3% |  |
+| Direct Objective (LP) | 1,951 m | 1.1% | 60.2% |  |
 
 
 Access-depth coloring:
@@ -76,9 +76,9 @@ Every method truncated to the same displacement %, so this compares the **permea
 |---|---|---|---|---|
 | Looped Tree | 8,425 m | 10.1% | 78.3% |  |
 | Loop Network | 10,606 m | 10.1% | 91.7% |  |
-| Grid | 8,509 m | 10.1% | 88.3% |  |
-| Frontage (street-priced) | 9,342 m | 5.1% | 80.2% | converged below budget |
-| Direct Objective (LP) | 18,203 m | 10.0% | 93.9% |  |
+| Grid | 8,475 m | 10.0% | 88.6% |  |
+| Frontage (street-priced) | 9,934 m | 5.6% | 81.5% | converged below budget |
+| Direct Objective (LP) | 17,962 m | 10.0% | 93.9% |  |
 
 
 Access-depth coloring:
