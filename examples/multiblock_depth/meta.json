@@ -2,13 +2,13 @@
   "metric": "depth",
   "deepest_block": "ZAF.9.3.1_1_5810",
   "deepest_depth": 24.0,
-  "region_parcels": 11006,
-  "region_mean_depth": 6.416666666666667,
-  "region_mean_density_per_ha": 99.05410999609732,
-  "maps_url": "https://www.google.com/maps/@-33.84562,18.74451,15z",
+  "region_parcels": 11577,
+  "region_mean_depth": 6.384615384615385,
+  "region_mean_density_per_ha": 100.62296240453685,
+  "maps_url": "https://www.google.com/maps/@-33.84793,18.74451,15z",
   "command": "pixi run python -m scripts.gen_example depth",
   "maps_qr": "maps_qr.png",
-  "flagged": 13793,
+  "flagged": 1000,
   "total_blocks": 83192,
-  "region_members": 12
+  "region_members": 13
 }

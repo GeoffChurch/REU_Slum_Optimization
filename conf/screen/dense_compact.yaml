@@ -4,5 +4,5 @@
 _target_: reblock.screen.dense_compact.DenseCompactScreen
 metric: ${metric}
 gate: ${metric_gate}
-proxy_keep_pct: ${proxy_keep_pct}
+proxy_keep_n: ${proxy_keep_n}
 min_buildings: 10

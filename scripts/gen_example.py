@@ -42,7 +42,7 @@ from omegaconf import open_dict
 from shapely.ops import unary_union
 
 from reblock.compare import load_permeability_config
-from reblock.contracts import Method, Screen, Source
+from reblock.contracts import CountingScreen, Method, Source
 from reblock.emit import region_map
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, block_depths
@@ -129,7 +129,10 @@ def main() -> None:
     pinned = cfg.block_ids                # None -> grow a region; a list -> pin these
     with _tee_to_file(out / "run.log"):
         source = cast(Source, instantiate(cfg.data))
-        screen = cast(Screen, instantiate(cfg.screen))
+        # CountingScreen, not Screen: `region_map` and region growth both need the
+        # counter this screen resolved, and the cast is where that requirement is
+        # stated once instead of at each use.
+        screen = cast(CountingScreen, instantiate(cfg.screen))
         region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
 
         # The ONE branch the two region modes force. A pinned variant has no screen selection to
@@ -167,7 +170,10 @@ def main() -> None:
         if pinned is None:
             region_map(source, [members], [[seed]], out,
                        selection=selection, depths=scores, metric_name=metric_name,
-                       metric=getattr(screen, "metric", None))
+                       metric=getattr(screen, "metric", None),
+                       # The SAME counter the screen ranked on, so the map grades blocks on the
+                       # number the pipeline used rather than the source's vendor column.
+                       counts=screen.counts)
             # region_map already writes screen.png/region.png (transparent, via save_render) at
             # the example naming -- no JPG flatten step needed.
 
@@ -190,6 +196,10 @@ def main() -> None:
             "metric": metric_name,
             "deepest_block": seed, "deepest_depth": depths.get(seed, 0.0),
             "region_parcels": region_parcels,
+            # The ids, not just the count: `scripts/preflight_regen.py` diffs this to say whether
+            # a regeneration would re-run the methods (hours) or only re-render (minutes), and a
+            # count alone cannot distinguish a changed region from a same-size different one.
+            "region_member_ids": [str(b) for b in members],
             "region_mean_depth": sum(depths.values()) / max(len(depths), 1),
             "region_mean_density_per_ha": sum(dens.values()) / max(len(dens), 1),
             "maps_url": maps_url,

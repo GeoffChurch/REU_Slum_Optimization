@@ -139,7 +139,7 @@ block_ids: null
 
 # Screen selection gate (applied to the metric's fine score) + the cheap recall pre-filter
 # (keep top-% by proxy before the peel). Calibrated for the default `depth` metric.
-proxy_keep_pct: 50.0
+proxy_keep_n: 1000
 
 hydra:
   job:

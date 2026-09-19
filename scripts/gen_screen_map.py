@@ -23,6 +23,7 @@ Reproduce with `pixi run python -m scripts.gen_screen_map`.
 """
 from __future__ import annotations
 
+import argparse
 import csv
 import gzip
 import json
@@ -41,6 +42,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
+from reblock.data.counts import COUNTERS, BuildingCount, resolved
 from reblock.data.informal import label_blocks, settlement_extents
 from reblock.data.provision import cached_kblock_source
 from reblock.render import _CONTEXT_OUTLINE, _DISPLACED_PT, _PARCEL_LW, _ROAD_COLOR, save_render
@@ -284,8 +286,8 @@ def _score(name: str, n: NDArray[np.float64], a: NDArray[np.float64],
     raise ValueError(name)
 
 
-def load_blocks(city: str, epsg: int) -> gpd.GeoDataFrame:
-    """MIN_COUNT-filtered blocks, reprojected to `epsg` -- the same filter and CRS
+def load_blocks(city: str, epsg: int, counter: BuildingCount) -> gpd.GeoDataFrame:
+    """MIN_COUNT-filtered blocks, reprojected to `epsg` -- the same filter, CRS and count source
     `gen_screen_bakeoff.py`'s own `load()` uses for Cape Town, generalised to both cities. The
     zero-area/zero-perimeter guard is defensive (measured empirically: no block above MIN_COUNT is
     degenerate on either cached parquet, so it never fires today) and mirrors that script's own."""
@@ -293,6 +295,13 @@ def load_blocks(city: str, epsg: int) -> gpd.GeoDataFrame:
     raw = gpd.read_parquet(src.blocks_path, columns=["block_id", "building_count", "geometry"])
     raw["block_id"] = raw["block_id"].astype(str)
     b = raw.to_crs(epsg)
+    # Before the mask, not after: MIN_COUNT thresholds the count itself, so resolving afterwards
+    # would select on one source and report another. `counter` is required because this bundle's
+    # `n` column and the bake-off CSV's floors are cross-checked by tests/test_screen_map_bundle.py
+    # -- a bundle built on a different count than the bake-off is a silent disagreement between two
+    # published artifacts, and that test is what caught this function still reading the raw kblock
+    # column on 2026-09-17.
+    b = resolved(b, src.buildings_path, counter)
     area = b.geometry.area.to_numpy()
     perim = b.geometry.length.to_numpy()
     count = b["building_count"].to_numpy()
@@ -551,6 +560,14 @@ Regenerate: `pixi run python -m scripts.gen_screen_map`
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    # Must match whatever produced BAKEOFF_CSV below: this bundle's `n` and that CSV's floors are
+    # cross-checked by tests/test_screen_map_bundle.py, so mixing sources fails the suite rather
+    # than shipping two artifacts that quietly disagree.
+    parser.add_argument("--counts", choices=sorted(COUNTERS), default="open_buildings",
+                        help="building count source; must match `gen_screen_bakeoff --counts`")
+    counter = COUNTERS[parser.parse_args().counts]
+
     logging.basicConfig(level=logging.INFO)
     OUT.mkdir(parents=True, exist_ok=True)
 
@@ -563,7 +580,7 @@ def main() -> None:
     follow_xy: tuple[float, float] | None = None
 
     for city, epsg in CITIES.items():
-        blocks = load_blocks(city, epsg)
+        blocks = load_blocks(city, epsg, counter)
         log.info("%s: %d blocks above MIN_COUNT=%d", city, len(blocks), MIN_COUNT)
 
         simplified = list(blocks.geometry.simplify(SIMPLIFY_M))

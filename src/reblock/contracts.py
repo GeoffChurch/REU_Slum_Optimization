@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Hashable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import geopandas as gpd
 from geopandas import GeoDataFrame
@@ -12,6 +12,8 @@ from shapely.geometry import MultiPolygon, Polygon
 
 if TYPE_CHECKING:
     import pandas as pd
+
+    from reblock.data.counts import BuildingCount
 
 
 def _empty_points() -> GeoDataFrame:
@@ -127,3 +129,22 @@ class Eval(Protocol):
 
 class Screen(Protocol):
     def select(self, source: Source) -> list[str] | None: ...   # selected block_ids, or None => all
+
+
+@runtime_checkable
+class CountingScreen(Protocol):
+    """A `Screen` that resolved a `BuildingCount` upstream and can hand it downstream.
+
+    Region growth and the region map both score on building counts, and both must use the SAME
+    count the screen ranked on -- until 2026-09-19 neither did, and nothing failed, because each
+    read the source's vendor column and got a plausible number.
+
+    A Protocol tested with `isinstance`, not `getattr(screen, "counts", None)`: whether a screen
+    HAS this capability is a type question, and making it one means mypy flags a call site that
+    cannot supply a counter rather than a default quietly substituting the wrong column.
+    """
+
+    def select(self, source: Source) -> list[str] | None: ...
+
+    @property
+    def counts(self) -> BuildingCount: ...

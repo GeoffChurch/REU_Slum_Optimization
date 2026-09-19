@@ -34,6 +34,7 @@ the adjudicator should say so rather than guess.
     pixi run python -m scripts.fetch_block_imagery              # every un-adjudicated block
     pixi run python -m scripts.fetch_block_imagery 12           # the first 12 of them
     pixi run python -m scripts.fetch_block_imagery --all        # including adjudicated ones
+    pixi run python -m scripts.fetch_block_imagery --control     # the random control sample
 """
 from __future__ import annotations
 
@@ -53,10 +54,16 @@ from matplotlib.image import imread  # noqa: E402
 from shapely import STRtree  # noqa: E402
 from shapely.geometry import box as shapely_box  # noqa: E402
 
+from reblock.data.counts import COUNTERS  # noqa: E402
 from scripts.gen_screen_bakeoff import load  # noqa: E402
 
 WORKSHEET = Path("data/adjudication/screen_top15_worksheet.csv")
-OUT = Path("data/adjudication/imagery")
+CONTROL = Path("data/adjudication/control_sample.csv")
+# Which count source defines the POOL each sheet's blocks were drawn from. They differ, and a
+# mismatch is not a slow path but a KeyError: the worksheet was built on the Ecopia-eligible pool
+# (16,451 blocks) and the control sample on the Open Buildings one (18,309), and 1,858 blocks are
+# in the second and not the first.
+POOL_OF = {WORKSHEET: "kblock", CONTROL: "open_buildings"}
 EXPORT = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export"
 UA = "reblock-research/0.1 (https://github.com/GeoffChurch/REU_Slum_Optimization)"
 MARGIN = 0.25          # of the block's own extent, so the surrounding fabric is visible too
@@ -113,15 +120,23 @@ def fetch(bbox: tuple[float, float, float, float], px: int, block_id: str) -> Pa
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     every = "--all" in sys.argv
-    modes = ([m for m in ("satellite", "schematic") if f"--{m}" in sys.argv]
+    modes = ([m for m in ("satellite", "schematic", "masked") if f"--{m}" in sys.argv]
              or ["satellite", "schematic"])
     limit = int(args[0]) if args else None
+    sheet = CONTROL if "--control" in sys.argv else WORKSHEET
+    # Per-sheet output root, so the top-k set and the random control set never mix on disk. They
+    # answer different questions and one is the other's negatives.
+    global OUT
+    OUT = Path(f"data/adjudication/{'control_' if sheet is CONTROL else ''}imagery")
 
-    rows = list(csv.DictReader(WORKSHEET.open()))
+    rows = list(csv.DictReader(sheet.open()))
     todo = [r for r in rows if every or not r["verdict"].strip()][: limit or None]
     print(f"{len(todo)} block(s) to render")
 
-    b, _ = load()
+    # The counter is chosen to reproduce the POOL the sheet was drawn from, not because this
+    # script reads a count -- it only needs geometry. Get it wrong and the block_id lookup below
+    # raises KeyError on whichever blocks the other pool does not contain.
+    b, _ = load(COUNTERS[POOL_OF[sheet]])
     wgs = b.to_crs("EPSG:4326")
     by_id = {str(v): i for i, v in enumerate(b["block_id"])}
     OUT.mkdir(parents=True, exist_ok=True)
@@ -147,10 +162,26 @@ def main() -> int:
             d = OUT / mode
             d.mkdir(parents=True, exist_ok=True)
             fig, ax = plt.subplots(figsize=(9, 9), dpi=110)
-            if mode == "satellite":
+            if mode in ("satellite", "masked"):
                 ax.imshow(imread(fetch(bbox, tile_px(span_m), r["block_id"])),
                           extent=(bbox[0], bbox[2], bbox[1], bbox[3]))
                 edge, credit, cc = "#ff2d55", "Imagery: Esri World Imagery", "white"
+                if mode == "masked":
+                    # Everything outside the block is painted out. This exists to TEST a specific
+                    # confound: a judge shown a block inside a settlement sees informal fabric
+                    # filling the frame and may label the neighbourhood rather than the block.
+                    # Whether that happens is measurable -- re-judge the same blocks with the
+                    # context removed and see whether verdicts move. The unmasked view stays the
+                    # default, because context is genuinely informative (it is how a judge tells
+                    # an upgraded row from a formal one); this is the control, not a replacement.
+                    # The hole is cut in SHAPELY, not by a matplotlib compound path. The first
+                    # attempt built one path from the bbox ring plus a reversed block ring and
+                    # relied on the fill rule to leave a hole; it painted over the block as well,
+                    # so every masked image was a blank rectangle. A geometric difference cannot
+                    # get the winding wrong.
+                    gpd.GeoSeries([box.difference(geom)], crs="EPSG:4326").plot(
+                        ax=ax, color="#efeae1", linewidth=0, zorder=5)
+                    credit = "context masked - judge ONLY the exposed fabric"
             else:
                 ax.set_facecolor("#f2f0eb")                       # empty space
                 assert foot is not None and block_tree is not None
@@ -162,7 +193,7 @@ def main() -> int:
                 credit = "dark = buildings · blue = official streets · pale = open ground"
                 edge, cc = "#ff2d55", "#444"
             gpd.GeoSeries([geom], crs="EPSG:4326").boundary.plot(
-                ax=ax, color=edge, linewidth=2.4)
+                ax=ax, color=edge, linewidth=2.4, zorder=6)
             ax.set_xlim(bbox[0], bbox[2])
             ax.set_ylim(bbox[1], bbox[3])
             ax.set_xticks([])
@@ -170,8 +201,9 @@ def main() -> int:
             # The resolution is stated because it decides whether the picture can answer the
             # question at all: a shack is ~4 m, so past ~1 m/px it is a smudge and the honest
             # verdict is "unclear", not a guess.
-            warn = "   ⚠ TOO COARSE FOR SHACKS" if mode == "satellite" and mpp > 1.0 else ""
-            res = f"   {mpp:.2f} m/px{warn}" if mode == "satellite" else ""
+            raster = mode in ("satellite", "masked")
+            warn = "   ⚠ TOO COARSE FOR SHACKS" if raster and mpp > 1.0 else ""
+            res = f"   {mpp:.2f} m/px{warn}" if raster else ""
             ax.set_title(f"{r['block_id']}  ·  {r['place']}  ·  {r['area_ha']} ha{res}",
                          fontsize=11)
             # Below the axes, not inside them: in the schematic the bottom-left corner is data.

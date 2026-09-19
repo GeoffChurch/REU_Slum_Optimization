@@ -1,3 +1,4 @@
+import csv
 from pathlib import Path
 
 import geopandas as gpd
@@ -10,12 +11,13 @@ from shapely.geometry import Polygon, box
 from reblock.metric import (
     DENSITY_COMPACTNESS_FLOOR,
     DEPTH_DENSITY_PROXY_FLOOR,
+    AbsoluteGate,
     Compactness,
     Count,
     Density,
     Depth,
     DepthProxy,
-    Gate,
+    PercentileGate,
     Power,
     Product,
 )
@@ -79,9 +81,9 @@ def test_identity_distinguishes_expressions() -> None:
 
 def test_gate_absolute_and_percentile() -> None:
     scores = {"a": 10.0, "b": 5.0, "c": 1.0, "d": 0.5}
-    assert Gate("absolute", 5.0).keep(scores) == {"a", "b"}         # >= 5
-    assert Gate("percentile", 50.0).keep(scores) == {"a", "b"}      # top 50%
-    assert Gate("percentile", 25.0).keep(scores) == {"a"}           # top 25%
+    assert AbsoluteGate(5.0).keep(scores) == {"a", "b"}         # >= 5
+    assert PercentileGate(50.0).keep(scores) == {"a", "b"}      # top 50%
+    assert PercentileGate(25.0).keep(scores) == {"a"}           # top 25%
 
 
 def test_config_floor_matches_python_definition() -> None:
@@ -97,7 +99,7 @@ def test_config_floor_matches_python_definition() -> None:
     conf = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / "conf/metric/density_compactness.yaml").read_text())
     gate = conf["metric_gate"]
-    assert gate["kind"] == "absolute"
+    assert gate["_target_"] == "reblock.metric.AbsoluteGate"
     assert float(gate["value"]) == DENSITY_COMPACTNESS_FLOOR
 
 
@@ -115,7 +117,7 @@ def test_depth_density_proxy_floor_matches_python_definition() -> None:
     conf = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / "conf/metric/depth_density_proxy.yaml").read_text())
     gate = conf["metric_gate"]
-    assert gate["kind"] == "absolute"
+    assert gate["_target_"] == "reblock.metric.AbsoluteGate"
     assert float(gate["value"]) == DEPTH_DENSITY_PROXY_FLOOR
 
     targets = [t["_target_"] for t in conf["metric"]["terms"]]
@@ -140,3 +142,29 @@ def test_depth_proxy_fine_equals_its_own_proxy() -> None:
             ((40.0, 4000.0, blocks.geometry.iloc[0].length),
              (120.0, 9000.0, blocks.geometry.iloc[1].length))):
         assert m.fine(0.0, count, area, perim) == pytest.approx(vec[i])
+
+
+def test_each_floor_still_selects_the_pool_it_was_calibrated_for() -> None:
+    """The floors are ABSOLUTE thresholds on a score that is degree 1.5 in the building count, so
+    changing the count SOURCE rescales every score and silently moves what the same number selects.
+
+    That is not hypothetical. On 2026-09-16 the pipeline switched from kblock's Ecopia count to
+    Open Buildings and `DEPTH_DENSITY_PROXY_FLOOR` went from selecting 1,655 blocks to 3,169 --
+    a 91% larger population, at 0.200 precision instead of 0.275 -- with nobody choosing that and
+    nothing failing. The floor's own docstring still described a pool size that no longer existed.
+
+    So the pool SIZE is pinned here, as a mirror of the committed bake-off, exactly as the floor
+    VALUES are mirrored against `conf/metric/`. A count-source change, a metric change, or a
+    re-calibration all move these numbers, and all of them SHOULD: the point is that moving them
+    requires editing this file, which is a decision, rather than happening in a regeneration that
+    reports no diff.
+
+    FAULT INJECTION: re-running `gen_screen_bakeoff --counts kblock` rewrites floor_n to 1655/1644
+    and fails both assertions.
+    """
+    csv_path = Path(__file__).resolve().parents[1] / "examples/screen-bakeoff/screen_comparison.csv"
+    rows = {r["metric"]: r for r in csv.DictReader(csv_path.open(encoding="utf-8"))
+            if r.get("floor")}
+    by_floor = {float(r["floor"]): int(float(r["floor_n"])) for r in rows.values()}
+    assert by_floor[DEPTH_DENSITY_PROXY_FLOOR] == 3169
+    assert by_floor[DENSITY_COMPACTNESS_FLOOR] == 3049

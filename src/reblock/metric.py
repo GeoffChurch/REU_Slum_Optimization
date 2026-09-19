@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal, Protocol, cast, runtime_checkable
+from typing import Protocol, cast, runtime_checkable
 
 import numpy as np
 import pandas as pd
@@ -247,22 +247,58 @@ class Product:
         return ("product", tuple(t.identity for t in self.terms))
 
 
+@runtime_checkable
+class Gate(Protocol):
+    """Which scored blocks the screen keeps.
+
+    A Protocol with one implementation per rule, rather than one class switching on a `kind`
+    string. The two rules answer different questions and neither dominates: `AbsoluteGate`
+    encodes a PHYSICAL claim ("this density is slum-like" -- `DEPTH_DENSITY_PROXY_FLOOR` is
+    sanity-checked as 4,500-5,700 buildings/km2) and so transfers a statement across cities,
+    measurably shrinking 2.0x from Cape Town to Nairobi; `PercentileGate` pins the POOL SIZE and
+    is invariant to rescaling the score, which an absolute threshold is not -- switching the
+    building count from Ecopia to Open Buildings moved the same floor from 1,655 blocks to 3,169
+    without anyone choosing that.
+
+    Both stay selectable from `conf/metric/`. The choice is resolved once, where config is read,
+    and `_compute_selection` calls `gate.keep` without asking which one it has.
+    """
+
+    def keep(self, scores: Mapping[str, float]) -> set[str]: ...
+
+    @property
+    def identity(self) -> _Identity: ...
+
+
 @dataclass(frozen=True)
-class Gate:
-    kind: Literal["absolute", "percentile"]
+class AbsoluteGate:
+    """Keep every block scoring >= `value`. Scale-DEPENDENT by construction: that is the point
+    when the value means something physical, and the hazard when the score's scale can move."""
+
     value: float
 
     def keep(self, scores: Mapping[str, float]) -> set[str]:
-        """The selected block_ids. `absolute` keeps score >= value; `percentile` keeps the top
-        `value`% by score (ties included at the cutoff score)."""
+        return {b for b, s in scores.items() if s >= self.value}
+
+    @property
+    def identity(self) -> _Identity:
+        return ("gate", "absolute", self.value)
+
+
+@dataclass(frozen=True)
+class PercentileGate:
+    """Keep the top `value`% by score, ties included at the cutoff. Scale-free: any monotone
+    rescaling of the score leaves the selection identical."""
+
+    value: float
+
+    def keep(self, scores: Mapping[str, float]) -> set[str]:
         if not scores:
             return set()
-        if self.kind == "absolute":
-            return {b for b, s in scores.items() if s >= self.value}
         k = max(1, math.ceil(len(scores) * self.value / 100.0))
         cutoff = sorted(scores.values(), reverse=True)[k - 1]
         return {b for b, s in scores.items() if s >= cutoff}
 
     @property
     def identity(self) -> _Identity:
-        return ("gate", self.kind, self.value)
+        return ("gate", "percentile", self.value)

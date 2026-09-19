@@ -1,5 +1,5 @@
 """DenseCompactScreen: flag blocks by a configured BlockMetric. Cheap pass = the metric's
-vectorized `proxy` over free kblock columns, pre-filtering to the top `proxy_keep_pct`% by proxy
+vectorized `proxy` over free kblock columns, pre-filtering to the top `proxy_keep_n` by proxy
 (peel metrics only); fine pass = build only survivors (reusing the source's KblockSource paths),
 score them with the metric's `fine` (using the real peel depth when `needs_peel`), and keep those
 the `gate` selects. The fine-pass depth goes through reblock.derivations.access_before (a
@@ -16,7 +16,6 @@ blocks.
 from __future__ import annotations
 
 import logging
-import math
 import multiprocessing
 import os
 from concurrent.futures import ProcessPoolExecutor
@@ -102,9 +101,24 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
         scores = {str(bid[i]): metric.fine(0.0, count[i], area[i], perim[i])
                   for i in range(len(bid)) if eligible[i] and np.isfinite(proxy[i])}
     else:
-        # recall pre-filter: keep the top proxy_keep_pct% by proxy among eligible blocks, then peel.
+        # Recall pre-filter: keep the top `proxy_keep_n` by proxy among eligible blocks, then
+        # peel those. A COUNT and not a percentage, because the requirement it has to meet is a
+        # RANK -- "do not lose the blocks that finish in the final top-k" -- and a percentage makes
+        # the safety margin shrink with the corpus exactly where the risk is highest. Measured
+        # 2026-09-18 by running the fine pass over the whole corpus and asking where the true
+        # top-k sat in the PROXY ranking:
+        #
+        #     city      metric          eligible   worst proxy rank of the true top-k
+        #     capetown  depth             28,722   top1=2   top5=58   top15=92
+        #     capetown  depth_density     28,722   top1=2   top5=10   top15=67
+        #     nairobi   depth              6,965   top1=66  top5=66   top15=106
+        #     nairobi   depth_density      6,965   top1=1   top5=6    top15=19
+        #
+        # Nairobi's true #1 by fine depth sits at proxy rank 66, which is why a 1% cut (70 blocks)
+        # came one rank from losing it. 106 is the worst case observed; the shipped 1000 is ~9x
+        # that, and still 14x cheaper than the 50% it replaces.
         order = [i for i in np.argsort(proxy)[::-1] if eligible[i] and np.isfinite(proxy[i])]
-        k = max(1, math.ceil(len(order) * inp.proxy_keep_pct / 100.0))
+        k = min(len(order), inp.proxy_keep_n)
         survivors = [str(bid[i]) for i in order[:k]]
         idx = {b: i for i, b in enumerate(bid)}
         depth_by = {b: mx for b, mx in                                      # {bid: max_depth}
@@ -121,12 +135,12 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
 
 
 class DenseCompactScreen:
-    def __init__(self, metric: BlockMetric, gate: Gate, *, proxy_keep_pct: float = 30.0,
+    def __init__(self, metric: BlockMetric, gate: Gate, *, proxy_keep_n: int = 1000,
                  min_buildings: int = 10,
                  counts: BuildingCount | None = None) -> None:
         self.metric = metric
         self.gate = gate
-        self.proxy_keep_pct = proxy_keep_pct
+        self.proxy_keep_n = proxy_keep_n
         self.min_buildings = min_buildings
         # Injected once, here, where config is read; `None` takes the shipped default rather
         # than leaving callers to spell it. See `reblock.data.counts` for why that is Open
@@ -142,7 +156,7 @@ class DenseCompactScreen:
             source_hash=source_hash(source.blocks_path, source.buildings_path),
             blocks_path=str(source.blocks_path), buildings_path=str(source.buildings_path),
             metric=self.metric, gate=self.gate, counts=self.counts,
-            proxy_keep_pct=self.proxy_keep_pct, min_buildings=self.min_buildings)
+            proxy_keep_n=self.proxy_keep_n, min_buildings=self.min_buildings)
 
     def select(self, source: Source) -> list[str]:
         return [bid for bid, _ in screen_selection(self._selection_input(source))]

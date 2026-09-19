@@ -6,24 +6,26 @@
 
 ## 1. Screen the metro
 
-`density_compactness` flagged **257 of 16,200** blocks. Top-scoring: `KEN.30.9_1_3515` (peel depth 2).
+`density_compactness` flagged **537 of 16,200** blocks. Top-scoring: `KEN.30.4_1_1329` (peel depth 2).
 
 ![screen](screen.png)
 
-**Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-1.24628,36.90350,15z).
+**Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-1.29819,36.89714,15z).
 
 
-<a href="https://www.google.com/maps/@-1.24628,36.90350,15z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
+<a href="https://www.google.com/maps/@-1.29819,36.89714,15z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
 
 ## 2. Grow the region
 
-The metric grows a **43-block** region (**3,547 parcels**), mean depth 2.4 rings, mean density 67 bldg/ha.
+The metric grows a **6-block** region (**5,098 parcels**), mean depth 5.5 rings, mean density 73 bldg/ha.
 
 ![region](region.png)
 
 ## 3. The permeability frontier (benefit vs added road)
 
 The frontier is the whole trade-off: **permeability** (benefit — the only benefit axis) on the y-axis against **displacement** (cost — the only cost axis) on the x-axis, one line per method. Pareto-dominance — which method buys more permeability for less displacement — reads straight off it (raw per-method samples are in `frontier_permeability.csv`, this dir):
+
+![permeability vs displacement](frontier_KEN.30.4_1_1329.png)
 
 ![permeability vs displacement](frontier_KEN.30.9_1_3515.png)
 
@@ -47,11 +49,11 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 942 m | 2.5% | 60.1% |  |
-| Loop Network | 1,165 m | 2.0% | 61.0% |  |
-| Grid | 4,564 m | 4.3% | 65.9% |  |
-| Frontage (street-priced) | 2,534 m | 1.8% | 63.0% |  |
-| Direct Objective (LP) | 1,644 m | 1.2% | 60.5% |  |
+| Looped Tree | 3,999 m | 3.4% | 60.6% |  |
+| Loop Network | 3,991 m | 2.6% | 60.4% |  |
+| Grid | 6,528 m | 5.2% | 61.1% |  |
+| Frontage (street-priced) | 8,516 m | 1.0% | 60.8% |  |
+| Direct Objective (LP) | 5,087 m | 0.9% | 60.1% |  |
 
 
 Access-depth coloring:
@@ -72,11 +74,11 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 3,729 m | 10.0% | 81.6% |  |
-| Loop Network | 6,746 m | 10.1% | 86.8% |  |
-| Grid | 9,078 m | 10.0% | 79.6% |  |
-| Frontage (street-priced) | 13,346 m | 4.7% | 81.7% | converged below budget |
-| Direct Objective (LP) | 12,761 m | 10.0% | 93.8% |  |
+| Looped Tree | 11,454 m | 10.0% | 78.8% |  |
+| Loop Network | 16,782 m | 10.0% | 86.2% |  |
+| Grid | 15,200 m | 10.2% | 77.9% |  |
+| Frontage (street-priced) | 16,755 m | 1.5% | 74.9% | converged below budget |
+| Direct Objective (LP) | 41,982 m | 10.0% | 95.7% |  |
 
 
 Access-depth coloring:
