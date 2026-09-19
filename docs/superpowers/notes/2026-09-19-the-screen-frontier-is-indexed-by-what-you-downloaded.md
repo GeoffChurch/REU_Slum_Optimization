@@ -202,16 +202,36 @@ Not yet, on three grounds, and the third is cheap to fix:
    hand adjudications. An improvement of that size against a label set biased against whichever
    screen finds NEW settlements is not a result, it is a hint.
 2. **One city.** Nairobi has no ground truth, so this is Cape Town or nothing.
-3. **The hand labels do not separate the two yet.** Shipped is 11/11 informal on the adjudicated
-   part of its top-15; `dd_proxy/p90` is 8/8. Both perfect, neither distinguishing, because the
-   blocks where they DISAGREE are unadjudicated: `_30677 _30665 _5833 _23714 _41782 _30700
-   _21934`. Seven judgements settle it, and `_30677` is already in `control_sample.csv` with
-   imagery rendered.
+3. **SETTLED 2026-09-19: the hand labels do not separate them, and that is the answer.** All
+   seven outstanding blocks were adjudicated (`data/adjudication/adhoc_verdicts.csv`); every one
+   is `all-dense-informal`. Both top-15s are now fully labelled:
+
+       screen              hand labels    survey
+       shipped dd_proxy      15/15          8/15
+       dd_proxy / p90        15/15          4/15
+
+   A tie at ceiling. The AUC and prec@1% advantage does not produce a better top-15 on truth, so
+   there is nothing to buy: `dd_proxy/p90` costs an extra column read and a p90 per block, it is
+   WORSE on retention (f(15) 67 -> 88), and it is not better where a screen is used. **Not
+   shipped, and the reason is measured rather than cautious.**
+
+   The survey's apparent preference for the shipped screen -- 8 against 4 -- is backwards. It
+   measures which screen re-finds settlements the 2018 file already knows about, not which finds
+   real ones. On truth the two tie, and the whole four-block gap is survey recall failure.
 
 *Untested:* T3. Polygon geometry gives shape, orientation and inter-building adjacency, none of
 which reduce to area, and none of which have been tried. The claim here is only that polygons buy
 nothing **for this feature** -- the area column reproduces them exactly.
 
-*Falsification:* adjudicate the seven. If `dd_proxy/p90`'s top-15 comes back materially worse than
-the shipped screen's 11/11 on hand labels, the AUC gain is a survey artifact and T2 collapses back
-into T1.
+*Falsification protocol, and its result:* the test was to adjudicate the seven and see whether
+`dd_proxy/p90`'s top-15 came back worse than the shipped screen's on hand labels. It came back
+EQUAL (15/15 against 15/15), which is the third possible outcome and the informative one: the AUC
+gain is real against the survey and worth nothing against truth. T2 does not collapse into T1 --
+footprint size genuinely carries information, and it is free -- but at the operating point this
+project uses, that information is redundant with what `n`, `A` and `P` already say.
+
+**The other number this produced belongs in the bake-off, not here.** With both top-15s fully
+hand-labelled, the February 2018 survey is wrong about **7 of the shipped screen's top 15** and 11
+of `dd_proxy/p90`'s. Earlier adjudication found 9 misses across 35 top-k blocks; this says the
+miss rate at the very HEAD of the ranking is around half. Every precision figure the bake-off
+publishes is a lower bound, and the bound is looser than "9 misses" suggested.

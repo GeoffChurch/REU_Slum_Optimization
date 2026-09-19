@@ -128,6 +128,10 @@ def main() -> int:
 _COLOR = {"dd_proxy": "#d1495b", "depth_proxy": "#00798c", "density": "#edae49",
           "dd/p90": "#66a182"}
 _MATCHED = {"depth": "depth_proxy", "depth_density": "dd_proxy"}
+# Plotted series only. `density` stays in the printed TABLE -- its distance from the frontier is
+# the argument for what replaced it -- but it is 1-3 orders above everything else at small k and
+# on a shared log axis that costs every other curve most of its vertical resolution.
+_PLOT_SKIP = {"density"}
 SHIPPED_N = 1000        # conf/config.yaml: proxy_keep_n
 
 
@@ -150,6 +154,8 @@ def _plot(series: dict[str, NDArray[np.int64]], path: str, *, ratio: bool) -> No
     panels: dict[str, dict[str, NDArray[np.int64]]] = {}
     for key, f in series.items():
         city, variant, proxy = key.split(":")
+        if proxy in _PLOT_SKIP:
+            continue
         panels.setdefault(f"{city}:{variant}", {})[proxy] = f
     ncol = 2
     nrow = (len(panels) + ncol - 1) // ncol

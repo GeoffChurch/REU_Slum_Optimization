@@ -123,6 +123,9 @@ def main() -> int:
     modes = ([m for m in ("satellite", "schematic", "masked") if f"--{m}" in sys.argv]
              or ["satellite", "schematic"])
     limit = int(args[0]) if args else None
+    # `--block ID`: render one arbitrary block, for adjudicating a candidate that is on neither
+    # sheet. Drawn from the Open Buildings pool, which is the one every current ranking uses.
+    adhoc = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--block=")), "")
     sheet = CONTROL if "--control" in sys.argv else WORKSHEET
     # Per-sheet output root, so the top-k set and the random control set never mix on disk. They
     # answer different questions and one is the other's negatives.
@@ -131,12 +134,19 @@ def main() -> int:
 
     rows = list(csv.DictReader(sheet.open()))
     todo = [r for r in rows if every or not r["verdict"].strip()][: limit or None]
+    if adhoc:
+        OUT = Path("data/adjudication/adhoc_imagery")
+        todo = [{"block_id": adhoc, "place": "", "area_ha": ""}]
     print(f"{len(todo)} block(s) to render")
 
     # The counter is chosen to reproduce the POOL the sheet was drawn from, not because this
     # script reads a count -- it only needs geometry. Get it wrong and the block_id lookup below
     # raises KeyError on whichever blocks the other pool does not contain.
-    b, _ = load(COUNTERS[POOL_OF[sheet]])
+    b, _ = load(COUNTERS["open_buildings" if adhoc else POOL_OF[sheet]])
+    if adhoc:
+        import numpy as np
+        i = int(np.where(b["block_id"].astype(str).to_numpy() == adhoc)[0][0])
+        todo[0]["area_ha"] = f"{b['a_m2'].iloc[i] / 1e4:.2f}"
     wgs = b.to_crs("EPSG:4326")
     by_id = {str(v): i for i, v in enumerate(b["block_id"])}
     OUT.mkdir(parents=True, exist_ok=True)
