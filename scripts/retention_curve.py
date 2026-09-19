@@ -42,6 +42,7 @@ from numpy.typing import NDArray
 from shapely import STRtree
 
 from reblock.data.counts import resolved
+from reblock.metric import _cols
 
 KS = (1, 5, 15, 50, 100, 500, 1000, 5000)
 VARIANTS = ("depth", "depth_density")
@@ -88,9 +89,15 @@ def main() -> int:
                                            "geometry"])
             bl = resolved(bl, source.buildings_path, screen.counts)
             bid = bl["block_id"].astype(str).to_numpy()
-            n = bl["building_count"].to_numpy(dtype=float)
-            a = bl["block_area_m2"].to_numpy(dtype=float)
-            p = bl.geometry.length.to_numpy()
+            # `_cols`, not `bl.geometry.length`: the blocks parquet is in a GEOGRAPHIC CRS, so a
+            # raw `.length` is in DEGREES while `block_area_m2` is metres^2. Mixing them silently
+            # produced perimeters ~1e-5 of the truth and an A/P "hydraulic radius" in the millions
+            # of metres. `_cols` reprojects to UTM first, and using it here is also what keeps
+            # this measurement identical to what `metric.proxy()` scores in production.
+            n_s, a_s, p_s = _cols(bl)
+            n = n_s.to_numpy(dtype=float)
+            a = a_s.to_numpy(dtype=float)
+            p = p_s.to_numpy(dtype=float)
             p90 = _p90(bl, str(source.buildings_path))
             elig = n >= screen.min_buildings
             for nm, sc in {"dd_proxy": n**1.5 / (p * np.sqrt(a)),

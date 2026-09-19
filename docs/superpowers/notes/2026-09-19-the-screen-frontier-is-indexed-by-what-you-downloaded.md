@@ -108,11 +108,47 @@ the two are scored on different things.
     prec@1%       rank the head                   dd_proxy / sqrt(p90)  (0.672)
     retention     do not lose the fine top-15     the matched proxy, per metric
 
-*Caveat on the absolute ranks:* these seven were computed by hand from `block_area_m2` and
-`geometry.length`, where `metric.proxy()` goes through `_cols()`, which may reproject -- a
-metric-native run gave 92 for `ca:depth` against 75 here. The comparison ACROSS proxies is
-unaffected (all computed identically), but the calibrated figure behind `proxy_keep_n: 1000` is
-the metric-native 106, not 75.
+**Corrected 2026-09-19.** The first version of these tables computed proxies by hand from
+`block_area_m2` (metres^2) and `blocks.geometry.length` -- but the blocks parquet is in a
+GEOGRAPHIC CRS, so that length is in DEGREES. Perimeters came out ~1e-5 of the truth and the
+`A/P` "hydraulic radius" read in the millions of metres. `metric._cols()` reprojects to UTM
+first, which is why a metric-native run gave 92 for `ca:depth` where the hand version said 75;
+that unexplained gap WAS the bug. `scripts/retention_curve.py` now calls `_cols` itself, so the
+measurement cannot drift from what `metric.proxy()` scores in production.
+
+Every number in this note is the corrected one. The conclusions were unaffected -- the shift is
+10-20% in places and zero in others (`na:depth` 106 and `na:depth_density` 19 are unchanged) --
+because a near-uniform scale error on P barely reorders blocks within one city. It would NOT have
+been harmless across cities at different latitudes, and it was pure luck that it was not load-
+bearing here.
+
+### The worst relative overpayment
+
+`argmax_i [log f(i) - log i]` -- equivalently `argmax f(i)/i` -- is the scale-free version of
+"how steep", and a better single-number summary of a proxy than `f(15)`:
+
+    series                        argmax i     f(i)   f(i)/i
+    ca:depth         depth_proxy       443   27,759       63     <- matched
+    ca:depth         dd_proxy            4   17,892    4,473
+    ca:depth_density dd_proxy           26      262       10     <- matched
+    ca:depth_density depth_proxy        26    6,071      234
+    na:depth         depth_proxy         1       66       66     <- matched
+    na:depth_density dd_proxy           17      194       11     <- matched
+    na:depth_density depth_proxy        56    1,738       31
+
+Matched proxies cost 10-66x at their worst; mismatched ones 234-4,473x. That ratio separates them
+an order of magnitude more cleanly than `f(15)` does.
+
+**Two proxies sharing an argmax is not a coincidence -- it means they fail on the same block for
+the same reason.** `ca:depth_density` has BOTH `dd_proxy` and `depth_proxy` peaking at i=26, and
+they are `density^1.5 * (A/P)` and `density^0.5 * (A/P)`: they share the `A/P` factor.
+`ZAF.9.3.1_1_43705` is 484 buildings on 3.21 ha -- 151/ha against a corpus median of 23 -- but its
+A/P is 16.7 m against a median of 35.1, an abnormally thin block. The shared factor buries it
+(262 and 6,071) while `density`, which has no `A/P`, ranks it 63.
+
+`na:depth_density` is the mirror image at i=17: `KEN.30.6_1_80` is large (114.79 ha) and only
+median-dense (38/ha), so the DENSITY factor is what fails -- `depth_proxy` (density^0.5) places it
+66th and `density` alone 2,950th.
 
 ## Both shipped proxies are one family, and both sit at its optimum
 
@@ -129,25 +165,25 @@ expression at two exponents:
 Sweeping alpha against retention (worst proxy rank of the fine top-15):
 
     alpha             0.0    0.25     0.5    0.75     1.0    1.25     1.5    1.75     2.0
-    ca:depth        4,040     666      75     656   5,556  13,523  18,003  20,522  21,968
-    na:depth          569     231     106     311   2,435   5,271   6,178   6,479   6,629
-    ca:depth_density 18,165  3,655     338     127      74      54      57      63      74
-    na:depth_density  2,509  1,153     310      80      30      18      19      19      21
+    ca:depth        4,486     748      92     635   5,424  13,381  17,892  20,444  21,940
+    na:depth          569     230     106     311   2,435   5,271   6,177   6,478   6,629
+    ca:depth_density 17,975  3,513     320     128      70      66      67      79      79
+    na:depth_density  2,503  1,150     306      79      30      18      19      19      21
 
 * **The shipped exponents are optimal, and this is the first check of that.** 0.5 is exactly the
   minimum for `depth` in both cities; 1.5 is within noise of the 1.25-1.75 minimum for
-  `depth_density` (57 against 54). Two independently derived formulas land on the minima of one
+  `depth_density` (67 against 66). Two independently derived formulas land on the minima of one
   continuous family.
 * **The matched-proxy result is a curve, not a coincidence.** The two fine metrics minimise at
   genuinely different alpha, so "use the matched proxy" is one family with two operating points.
-* **The wells have very different widths.** `depth` falls from 4,040 to 75 and back to 5,556
-  across +/-0.5 in alpha; `depth_density` runs 74 / 54 / 57 / 63 over the same span. `depth`'s
+* **The wells have very different widths.** `depth` falls from 4,486 to 92 and back to 5,424
+  across +/-0.5 in alpha; `depth_density` runs 70 / 66 / 67 / 79 over the same span. `depth`'s
   proxy is delicately tuned and `depth_density`'s is robust -- which is exactly why mismatching
-  costs `depth` 18,003 and `depth_density` only 338.
+  costs `depth` 17,892 and `depth_density` only 320.
 
 *Hypothesis that failed:* alpha=1 is `n/P`, buildings per metre of block perimeter -- frontage
 crowding, a real urban quantity sitting exactly between the two shipped proxies, and untried. It
-is not special: 5,556 for `depth` (wrong side of the well) and 74 for `depth_density` against 54
+is not special: 5,424 for `depth` (wrong side of the well) and 70 for `depth_density` against 66
 at 1.25. The gap in the family was real; the guess about what filled it was wrong.
 
 **On pruning the dominated series:** do not. This sweep consists ENTIRELY of points that are never
