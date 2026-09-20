@@ -50,6 +50,29 @@ QUANTITIES = ["density_ha", "true_depth", "dd_proxy"]
 # `RULE.md` teaches by worked example and names these two with their labels, so for a judge told
 # to read it they are lookups rather than judgements. Same exclusion as `score_agent_run.py`.
 LEAKED_BY_RULE = {"ZAF.9.3.1_1_63818", "ZAF.9.3.1_1_38988"}
+
+# A channel nobody enumerated until a judge disclosed it. An agent's environment carries the
+# repo's recent commit SUBJECTS, and on the day this ran the last four subjects were
+# "defer 40094...", "defer 39399...", "defer 40760..." -- naming three of the 23 blocks and
+# saying, of each, that a human had found it too ambiguous to label. That is not the answer, but
+# it is information about the answer, and a judge that reads it is no longer judging blind.
+#
+# The combined judge reported the contamination itself, on item 19, unprompted. Treat that as the
+# only reason we know: the density judge ran in the same environment and did not mention it, which
+# is evidence about disclosure, not about exposure.
+#
+# Not a static property of the corpus -- it is a fact about WHEN a run executed, so it lives with
+# the experiment rather than in `score_agent_run.py`. Re-running after these commits age out of
+# the window needs this set re-derived, not reused.
+LEAKED_BY_GIT = {"ZAF.9.3.1_1_39399", "ZAF.9.3.1_1_40760", "ZAF.9.3.1_1_40094"}
+# Blocks whose computed density is an average over land uses that should not be averaged: a shack
+# strip and a playing field, houses and a water-treatment plant. For these the TRUTH value is the
+# defective number, so judge-truth agreement measures nothing -- `39399`'s block mean is 50.9/ha
+# against 86/ha in its edge strip and 21/ha in its interior. Identified independently by the
+# density judge as its three hardest items, and by hand before the run; the two lists agree.
+MIXED_LAND_USE = {"ZAF.9.3.1_1_39399", "ZAF.9.3.1_1_53959", "ZAF.9.3.1_1_21708",
+                  "ZAF.9.3.1_1_34552"}
+
 ORDINAL = {"no-dense-informal": 0, "some-dense-informal": 1, "all-dense-informal": 2}
 
 
@@ -75,11 +98,20 @@ def main() -> int:
         print(f"no runs in {RUNS}", file=sys.stderr)
         return 1
 
+    for scope, drop in (("all blocks", LEAKED_BY_RULE),
+                        ("git-leak excluded", LEAKED_BY_RULE | LEAKED_BY_GIT),
+                        ("homogeneous only", LEAKED_BY_RULE | LEAKED_BY_GIT | MIXED_LAND_USE)):
+        print(f"\n== {scope} ==")
+        report(found, truth, drop)
+    return 0
+
+
+def report(found: dict, truth: pd.DataFrame, drop: set[str]) -> None:
     print(f"{'judge':10s} {'n':>3s} {'abst':>5s}  " + "".join(f"{q:>13s}" for q in QUANTITIES))
     matrix = {}
     for judge, (fname, col, own) in found.items():
         run = pd.read_csv(RUNS / fname)
-        run = run[~run.block_id.isin(LEAKED_BY_RULE)]
+        run = run[~run.block_id.isin(drop)]
         d = run.merge(truth, on="block_id", how="inner")
         vals = numeric(d[col], col)
         keep = vals.notna()
@@ -103,7 +135,6 @@ def main() -> int:
         a, b = matrix[judge][own], matrix[judge][other]
         verdict = "SEPARATES" if a > b else "DOES NOT SEPARATE"
         print(f"  {judge:8s} own {own:11s} {a:+.3f}   vs other {other:11s} {b:+.3f}   -> {verdict}")
-    return 0
 
 
 if __name__ == "__main__":
