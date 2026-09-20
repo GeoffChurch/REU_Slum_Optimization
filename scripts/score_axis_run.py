@@ -40,10 +40,18 @@ TRUTH = Path("data/adjudication/axis_truth.csv")
 
 # What each judge was asked, and the computed quantity it is meant to track. The third entry is
 # the fused question against the fused metric -- the baseline the split has to beat.
+# judge -> (run file, its column, the quantity it was ASKED about, the quantity it must NOT
+# track more than). The `@` suffix is the rendering's measured resolution, median over the 23
+# blocks, as drawn -- not as fetched. Both resolutions are kept because the pair IS the
+# ablation: `masked_mpp035/` preserves the images the first three judges saw, and `masked/`
+# holds the same blocks re-rendered after the caption was found to be reporting the tile's
+# resolution rather than the picture's.
 JUDGES = {
-    "density": ("control_masked_density.csv", "packing", "density_ha"),
-    "depth": ("control_masked_depth.csv", "burial", "true_depth"),
-    "both": ("control_masked_both.csv", "label", "dd_proxy"),
+    "density@0.46": ("control_masked_density.csv", "packing", "density_ha", "true_depth"),
+    "depth@0.46": ("control_masked_depth.csv", "burial", "true_depth", "density_ha"),
+    "both@0.46": ("control_masked_both.csv", "label", "dd_proxy", "true_depth"),
+    "density@0.22": ("control_masked_density_hires.csv", "packing", "density_ha", "true_depth"),
+    "depth@0.22": ("control_masked_depth_hires.csv", "burial", "true_depth", "density_ha"),
 }
 QUANTITIES = ["density_ha", "true_depth", "dd_proxy"]
 
@@ -107,9 +115,9 @@ def main() -> int:
 
 
 def report(found: dict, truth: pd.DataFrame, drop: set[str]) -> None:
-    print(f"{'judge':10s} {'n':>3s} {'abst':>5s}  " + "".join(f"{q:>13s}" for q in QUANTITIES))
+    print(f"{'judge':13s} {'n':>3s} {'abst':>5s}  " + "".join(f"{q:>13s}" for q in QUANTITIES))
     matrix = {}
-    for judge, (fname, col, own) in found.items():
+    for judge, (fname, col, own, _other) in found.items():
         run = pd.read_csv(RUNS / fname)
         run = run[~run.block_id.isin(drop)]
         d = run.merge(truth, on="block_id", how="inner")
@@ -122,19 +130,20 @@ def report(found: dict, truth: pd.DataFrame, drop: set[str]) -> None:
             row.append(rho)
         matrix[judge] = dict(zip(QUANTITIES, row, strict=True))
         star = ["*" if q == own else " " for q in QUANTITIES]
-        print(f"{judge:10s} {keep.sum():3d} {(~keep).sum():5d}  "
+        print(f"{judge:13s} {keep.sum():3d} {(~keep).sum():5d}  "
               + "".join(f"{v:>12.3f}{s}" for v, s in zip(row, star, strict=True)))
     print("  * = the quantity that judge was asked about")
 
     print("\ndiscriminant validity -- does each judge track its OWN quantity"
           " more than the other's?")
-    for judge, other in (("density", "true_depth"), ("depth", "density_ha")):
-        if judge not in matrix:
-            continue
-        own = JUDGES[judge][2]
+    for judge in matrix:
+        _f, _c, own, other = JUDGES[judge]
+        if own == "dd_proxy":
+            continue          # the fused judge has no "other axis" to separate from
         a, b = matrix[judge][own], matrix[judge][other]
         verdict = "SEPARATES" if a > b else "DOES NOT SEPARATE"
-        print(f"  {judge:8s} own {own:11s} {a:+.3f}   vs other {other:11s} {b:+.3f}   -> {verdict}")
+        print(f"  {judge:13s} own {own:11s} {a:+.3f}   vs other {other:11s} {b:+.3f}"
+              f"   -> {verdict}")
 
 
 if __name__ == "__main__":
