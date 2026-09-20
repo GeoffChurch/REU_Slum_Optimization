@@ -1,0 +1,47 @@
+# @package _global_
+# One example variant, entirely in config. `scripts/gen_example.py` is the single entry point for
+# every example; a variant differs ONLY in this file -- which region it grades (a metric-grown one
+# or a pinned block list) and which methods it runs.
+defaults:
+  - override /metric: depth_density
+  - override /screen: dense_compact
+  - override /region_builder: dense_cluster
+
+example:
+  slug: multiblock_depth_density_2
+  formula: "depth × density  —  deep AND crowded (second-ranked seed)"
+  blurb: >-
+    The same screen as `multiblock_depth_density`, seeded from its SECOND-ranked block. The top
+    seed is one very deep block that exceeds the growth budget on its own; this one grows into a
+    fifteen-block settlement, so the pair shows both regimes from a single metric.
+
+# null -> grow a region with the screen + region_builder above. A list pins exact blocks instead.
+block_ids: null
+
+  # greedy_arterial_access_displacement joined this lineup 2026-08-12. It used to be DELIBERATELY
+  # ABSENT here (present only in method_comparison): measured 2026-08-10, this variant took 1,115 s
+  # without it and had not finished after 11.6 h WITH it, on an 11,006-parcel region -- the
+  # objective is global (a full BFS peel over every parcel) while ExactEngine scores every
+  # candidate exactly. ShortlistEngine (tier 2) is what makes region-scale access finish at all
+  # (~80 min uncapped); max_anchors: 128 stacks a further 7.6x median (2.5-12.2x, 6/6 regions, no
+  # detectable quality difference at matched displacement) -- ~330x combined, ~10 min now. See
+  # notes/2026-08-11-max-anchors-is-a-region-scale-win.md and compare_config.yaml's own comment.
+methods: [clearance_looped, euclidean_grid, resistance_lp, cycle_native, greedy_arterial_access_displacement]
+max_blocks: 2
+# Which block of the screen's ranking seeds the region. 0 = the top-scoring block.
+# `depth_density_2` is the same variant at rank 1, so the site shows two regions from ONE screen
+# rather than one region from each of several screens -- the screens are compared in the bake-off,
+# which grades all four over the whole corpus and runs no methods at all.
+seed_rank: 1
+# 5,000 Open Buildings footprints, not 3,000. Region growth budgets on the SAME count the screen
+# ranks on since 2026-09-19, and the rank-0 seed `ZAF.9.3.1_1_5810` alone holds 6,619 -- so any
+# budget below that yields a one-block region. 5,000 keeps rank 0 as a single very deep block and
+# lets rank 1 (`_41785`, 638 footprints) grow into a 15-block settlement, which is a more
+# informative pair than forcing both to the same size.
+region_builder: {max_buildings: 5000}
+all_methods:
+  clearance_looped:
+    base: {depth_target: 3, max_roads: 3000}
+    budget_frac: 0.30
+    search_radius_m: 60
+  euclidean_grid: {spacing: 250}   # coarser grid -> budget in the pack

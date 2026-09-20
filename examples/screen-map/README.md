@@ -6,17 +6,17 @@
 The figure set for the site's ScreenMap widget: pick one of four cheap screening metrics, see which
 blocks it selects at its shipped absolute floor, and -- for Cape Town -- how well that selection
 matches the City of Cape Town's own informal-structure survey
-(682 of 16,451 blocks are really informal by that survey,
+(775 of 18,309 blocks are really informal by that survey,
 via `reblock.data.informal`).
 
 ![Cape Town at the shipped depth_density_proxy floor: gold = real informal settlement, red outline = selected, blue ring = the block the rest of the site follows](screen_map.png)
 
-The blue ring marks `ZAF.9.3.1_1_40972` (index 9,511 of the columns below)
+The blue ring marks `ZAF.9.3.1_1_40972` (index 10,771 of the columns below)
 -- the single block every later stage of the site is about: perm-graph, displacement-field and
 method-comparison all pin it, and region-grow seeds from it. Cape Town's bundle carries it as
 `follow`; Nairobi omits the field, the same way it omits `informal`. It is a POINT, not an outline:
 a whole metro is fitted into one figure, so at a 700-900 px page width that block
-covers 1.0-1.7 px² in the map above, and 0.5-0.8 px²
+covers 1.6-2.6 px² in the map above, and 0.5-0.8 px²
 on the widget's own square map -- its boundary is not a shape a reader could pick out.
 
 `capetown.json` and `nairobi.json` are the payloads the widget fetches: every block's
@@ -29,8 +29,8 @@ field a TypeScript error rather than a blank map.
 
 | city | blocks | interior rings | JSON (5 m simplify, compact) | gzip |
 |---|---|---|---|---|
-| Cape Town | 16,451 | 6,990 | 6.17 MB | 2.03 MB |
-| Nairobi | 3,500 | 1,139 | 1.17 MB | 0.39 MB |
+| Cape Town | 18,309 | 7,044 | 6.46 MB | 2.10 MB |
+| Nairobi | 3,839 | 1,128 | 1.21 MB | 0.40 MB |
 
 **Shipped floors.** `n` is each floor's pool size on THAT city's own blocks -- for Nairobi this is
 recomputed directly (there is no bake-off row to read it from), not copied from Cape Town's. Cape
@@ -42,15 +42,15 @@ Cape Town:
 
 | metric | floor | pool | precision | recall |
 |---|---|---|---|---|
-| `depth_density_proxy` | 0.0128 | 1,655 | 27.5% | 66.7% |
-| `density_compactness` | 0.000355 | 1,644 | 24.5% | 58.9% |
+| `depth_density_proxy` | 0.0128 | 3,169 | 20.0% | 81.9% |
+| `density_compactness` | 0.000355 | 3,049 | 17.5% | 68.8% |
 
 Nairobi -- same floors, same formulas, **no ground truth to check them against**:
 
 | metric | floor | pool | precision | recall |
 |---|---|---|---|---|
-| `depth_density_proxy` | 0.0128 | 169 | — | — |
-| `density_compactness` | 0.000355 | 79 | — | — |
+| `depth_density_proxy` | 0.0128 | 334 | — | — |
+| `density_compactness` | 0.000355 | 224 | — | — |
 
 **Nairobi omits `informal` rather than shipping nulls.** No equivalent published informal-settlement
 layer was found for Nairobi -- searched and documented in `reblock.data.informal` (also recorded in

@@ -1,0 +1,8 @@
+block_id,verdict,survey_label,source,notes
+ZAF.9.3.1_1_30665,all-dense-informal,formal,"dd_proxy/p90 top-15, not on either sheet","adjudicator: 100% dense informal. 4.34 ha, 765 OB footprints, 176/ha. Sits in a contiguous >=100/ha cluster of 55 blocks / 100.8 ha / 14,108 buildings of which the survey calls 42 formal. Unnamed: the 2018 survey has no name field and cover=0.000 here; OSM reverse-geocodes the surrounding industrial suburb (Racing Park), not the settlement."
+ZAF.9.3.1_1_5833,all-dense-informal,formal,"dd_proxy/p90 top-15, not on either sheet","adjudicator: 100% dense informal. 4.11 ha, 649 OB footprints, 158/ha, Kraaifontein East. Independent of the _30665 cluster."
+ZAF.9.3.1_1_30677,all-dense-informal,formal,"dd_proxy/p90 top-15, not on either sheet","adjudicator: 100% dense informal. 3.44 ha, 683 bldg, 199/ha, Racing Park; in the _30665 cluster"
+ZAF.9.3.1_1_30700,all-dense-informal,formal,"dd_proxy/p90 top-15, not on either sheet","adjudicator: 100% dense informal. 3.43 ha, 601 bldg, 175/ha, Racing Park; in the _30665 cluster"
+ZAF.9.3.1_1_41782,all-dense-informal,formal,"dd_proxy/p90 top-15, not on either sheet","adjudicator: 100% dense informal. 0.83 ha, 200 bldg, 241/ha, Philippi"
+ZAF.9.3.1_1_21934,all-dense-informal,formal,"dd_proxy/p90 top-15, not on either sheet","adjudicator: 100% dense informal. 2.64 ha, 387 bldg, 146/ha, Harare"
+ZAF.9.3.1_1_23714,all-dense-informal,informal,"dd_proxy/p90 top-15, not on either sheet","adjudicator: 100% dense informal. 1.36 ha, 334 bldg, 245/ha, Nomzamo; the only one the survey already calls informal"

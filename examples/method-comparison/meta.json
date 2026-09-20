@@ -3,6 +3,9 @@
   "deepest_block": "ZAF.9.3.1_1_40972",
   "deepest_depth": 7.0,
   "region_parcels": 263,
+  "region_member_ids": [
+    "ZAF.9.3.1_1_40972"
+  ],
   "region_mean_depth": 7.0,
   "region_mean_density_per_ha": 174.71086096426063,
   "maps_url": "https://www.google.com/maps/@-33.97795,18.58064,18z",

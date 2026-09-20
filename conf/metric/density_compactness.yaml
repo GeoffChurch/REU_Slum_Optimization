@@ -19,4 +19,4 @@ metric:
     - {_target_: reblock.metric.Density}
     - {_target_: reblock.metric.Compactness}
   _convert_: all
-metric_gate: {_target_: reblock.metric.Gate, kind: absolute, value: 3.55e-4}
+metric_gate: {_target_: reblock.metric.AbsoluteGate, value: 3.55e-4}

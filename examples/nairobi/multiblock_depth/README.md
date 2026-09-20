@@ -6,7 +6,7 @@
 
 ## 1. Screen the metro
 
-`depth` flagged **3,313 of 16,200** blocks. Top-scoring: `KEN.30.6_1_80` (peel depth 15).
+`depth` flagged **1,000 of 16,200** blocks. Top-scoring: `KEN.30.6_1_80` (peel depth 15).
 
 ![screen](screen.png)
 

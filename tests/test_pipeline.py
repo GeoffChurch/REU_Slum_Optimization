@@ -99,3 +99,34 @@ def test_region_score_map_uses_metric_fine_and_skips_peel_when_geometry_only() -
         assert calls["n"] == 1        # depth: one batched block_depths call
     finally:
         pl.block_depths = real        # type: ignore
+
+
+def test_reachable_blocks_expands_per_group_and_bounds_only_the_expansion() -> None:
+    """`_reachable_blocks` must return a STRICT superset of its seeds. The neighbourhood is the
+    whole point: `_region_score_map` peels exactly what this returns, and every growth candidate
+    outside it is ranked by the cheap geometric proxy instead of its true peel depth.
+
+    On the s-a-b-c chain (10 buildings each):
+
+    `_seed_groups` wraps a screen selection as one singleton group per flagged block, so this is
+    called with many groups. Seeding ONE BFS from their union meant the bound was compared against
+    the whole selection's count -- ~413,806 buildings against 9,000 in the Cape Town run -- so the
+    loop body never executed and this returned exactly the seed set.
+
+    A seed's own count still counts toward its group's bound; that is deliberate and is pinned by
+    `test_reachable_blocks_bfs_bounds_by_building_count` above, which is what caught an attempt to
+    change it here.
+
+    FAULT INJECTION: folding the per-group loop back into one pass over the union makes the two
+    seeds (20 buildings) exceed the bound of 15 immediately, collapsing reach to {s, c}.
+    """
+    gdf = _chain_gdf()                       # s-a-b-c, adjacent left-to-right, 10 buildings each
+
+    # Two groups at opposite ends. Their counts (20) already exceed the bound (15), which is
+    # exactly the production shape -- and under the old arithmetic that alone killed expansion.
+    reach = set(_reachable_blocks(gdf, [["s"], ["c"]], bound_buildings=15.0))
+    assert reach > {"s", "c"}, "each group must expand from its own seed"
+    assert reach == {"s", "a", "b", "c"}, reach
+
+    # One group, same bound: s (10) is under 15, a (20) crosses it, so expansion stops at `a`.
+    assert set(_reachable_blocks(gdf, [["s"]], bound_buildings=15.0)) == {"s", "a"}

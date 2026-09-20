@@ -85,6 +85,11 @@ extra_css:
 
 extra_javascript:
   - js/widgets.js
+  # MathJax, for the derivations on "The arithmetic of access" and whatever follows it. Loaded
+  # from a CDN rather than vendored: the site already fetches nothing else at runtime, so this is
+  # the one external dependency -- worth noting if the site ever needs to build offline.
+  - js/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
 plugins:
   - search
@@ -110,12 +115,17 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - def_list      # the Home page key-figures row is a definition list
+  # `generic: true` emits \(..\) / \[..\] wrappers that any MathJax v3 build renders, rather
+  # than MathJax-v2-specific script tags. Paired with js/mathjax.js below.
+  - pymdownx.arithmatex:
+      generic: true
   - toc:
       permalink: true
 
 nav:
   - Home: index.md
   - Background: background.md
+  - The arithmetic of access: access-arithmetic.md
   - Explore: explore.md
   - Methodology:
       - methodology/index.md

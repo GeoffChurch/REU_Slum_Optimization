@@ -9,6 +9,7 @@ from pyproj import CRS
 from shapely.geometry import Polygon
 
 from reblock.contracts import Block, Eval, Result
+from reblock.data.counts import KblockCount
 from reblock.data.kblock import KblockSource
 from reblock.data.shapefile import ShapefileSource
 from reblock.derive.access import STREET_TOL
@@ -337,13 +338,13 @@ def test_two_adjacent_block_region_reblocks_jointly() -> None:
 def test_region_map_writes_png(tmp_path: Path) -> None:
     from reblock.emit import region_map
     out = region_map(_dji_source(), [["DJI.3_1_1808", "DJI.3_1_1809"]],
-                      [["DJI.3_1_1808"]], tmp_path)
+                      [["DJI.3_1_1808"]], tmp_path, counts=KblockCount())
     assert out is not None and out.exists() and out.stat().st_size > 0
 
 
 def test_region_map_none_when_no_regions(tmp_path: Path) -> None:
     from reblock.emit import region_map
-    assert region_map(_dji_source(), [], [], tmp_path) is None
+    assert region_map(_dji_source(), [], [], tmp_path, counts=KblockCount()) is None
 
 
 def test_cli_region_path_writes_region_map(tmp_path: Path) -> None:

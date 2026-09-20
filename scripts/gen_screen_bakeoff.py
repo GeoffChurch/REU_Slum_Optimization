@@ -37,6 +37,7 @@ from matplotlib.lines import Line2D
 from pyproj import CRS
 from scipy.stats import rankdata
 
+from reblock.data.counts import COUNTERS, BuildingCount, resolved
 from reblock.data.informal import ensure_informal_structures, label_blocks, settlement_extents
 from reblock.data.provision import cached_kblock_source
 from reblock.metric import DENSITY_COMPACTNESS_FLOOR, DEPTH_DENSITY_PROXY_FLOOR
@@ -66,13 +67,28 @@ def auc(score: np.ndarray, label: np.ndarray) -> float:
     return float((r[label.astype(bool)].sum() - n1 * (n1 + 1) / 2) / (n1 * n0))
 
 
-def load() -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+def load(counter: BuildingCount) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """The scored, labelled Cape Town block frame, ranked on `counter`'s building count.
+
+    `counter` is REQUIRED and has no default. This script bakes the numbers that decide which
+    screen ships, so grading a count source other than the one the pipeline runs on is a silent
+    wrong answer, not a fallback -- and that is exactly the bug this parameter fixes. Until
+    2026-09-17 `load` read `building_count` straight from the kblock parquet and never called
+    `reblock.data.counts.resolved`, so after the pipeline switched to Open Buildings the bake-off
+    went on grading Ecopia-ranked screens and republished its old table byte-identical.
+    """
     ext = settlement_extents(epsg=UTM)
     src = cached_kblock_source("capetown", min_buildings=MIN_COUNT)
     raw = gpd.read_parquet(src.blocks_path, columns=["block_id", "building_count", "geometry"])
     raw["block_id"] = raw["block_id"].astype(str)
     projected = raw.crs is not None and CRS.from_user_input(raw.crs).is_projected
     b = raw if projected else raw.to_crs(UTM)
+    # Resolve WHICH count BEFORE the eligibility filter. MIN_COUNT is a threshold on the count
+    # itself, so filtering on the shipped column and then overwriting it would grade the new count
+    # over the OLD count's pool. It is not a rounding difference: Open Buildings makes 18,309
+    # blocks eligible against Ecopia's 16,451, and the 1,858 it adds are blocks Ecopia could not
+    # see -- the newest settlements, which is the population this whole comparison is about.
+    b = resolved(b, src.buildings_path, counter)
     # bracket notation throughout: `gdf.area` is geopandas' geometry property, shadowing a column
     b = b.assign(a_m2=b.geometry.area.to_numpy(), p_m=b.geometry.length.to_numpy())
     b = b[(b["building_count"] >= MIN_COUNT) & (b["p_m"] > 0) & (b["a_m2"] > 0)].reset_index(
@@ -292,11 +308,19 @@ def main() -> None:
     parser.add_argument("--top-settlement", action="store_true",
                         help="also print which settlement holds the highest-scoring block(s), "
                              "per metric -- the measurement behind background.md's peak claim")
+    parser.add_argument("--counts", choices=sorted(COUNTERS), default="open_buildings",
+                        help="which building count the screens rank on; must match what the "
+                             "pipeline ships (conf/building_count/) or this grades a screen "
+                             "nobody runs")
     args = parser.parse_args()
+    # The one place a count NAME exists here. Argparse validates it against the closed set and this
+    # line converts it to an instance; everything downstream takes a BuildingCount.
+    counter = COUNTERS[args.counts]
 
     OUT.mkdir(parents=True, exist_ok=True)
-    print("loading blocks + settlement extents (downloads ~18 MB once)", flush=True)
-    b, ext = load()
+    print(f"loading blocks + settlement extents (downloads ~18 MB once), counts={args.counts}",
+          flush=True)
+    b, ext = load(counter)
     lab = b["informal"].to_numpy()
     print(f"  {len(b):,} blocks, {int(lab.sum()):,} informal ({lab.mean():.2%}), "
           f"{len(ext)} settlement extents", flush=True)

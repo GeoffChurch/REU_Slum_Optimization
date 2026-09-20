@@ -11,6 +11,7 @@ from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
 from reblock.contracts import Block, Result
+from reblock.data.counts import KblockCount, resolved
 from reblock.data.kblock import KblockSource
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.methods.clearance import ClearanceReblocker
@@ -292,7 +293,11 @@ def test_dense_cluster_grows_seed_to_buildings_budget() -> None:
     # DJI.3_1_3240 (66); at max_buildings=150 growth pulls in neighbor(s) ranked by depth proxy
     # until the total reaches the budget window. Grew past the seed; total either hits the budget
     # window or, on a smaller/sparser component, exhausts everything reachable.
-    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
+    # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
+    # this test's expectations (53 / 107 / 66) were written against.
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]])
 
     assert len(out) == 1
@@ -305,7 +310,11 @@ def test_dense_cluster_grows_seed_to_buildings_budget() -> None:
 def test_dense_cluster_small_budget_returns_seed_only() -> None:
     # max_buildings (40) below the seed's own building_count (53) -- seeds are always included,
     # but the while-loop's `size < max_buildings` guard is already false, so no growth happens.
-    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
+    # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
+    # this test's expectations (53 / 107 / 66) were written against.
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     out = DenseClusterRegionBuilder(max_buildings=40).build(bg, [["DJI.3_1_3238"]])
     assert out == [["DJI.3_1_3238"]]
 
@@ -313,7 +322,11 @@ def test_dense_cluster_small_budget_returns_seed_only() -> None:
 def test_dense_cluster_region_is_contiguous() -> None:
     # The grown region (seed + its densest neighbor) must be one touch-adjacent component --
     # dense_cluster grows strictly by adjacency, so it can never emit a disjoint region.
-    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
+    # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
+    # this test's expectations (53 / 107 / 66) were written against.
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]])
     by_id = dict(zip(bg["block_id"], bg.geometry, strict=True))
     assert _touch_adjacent([by_id[b] for b in out[0]])
@@ -322,7 +335,11 @@ def test_dense_cluster_region_is_contiguous() -> None:
 def test_dense_cluster_deterministic() -> None:
     # Same inputs, two separate build() calls -- growth order is fully tie-broken (depth proxy,
     # then building_count, then block_id), so the output is byte-stable.
-    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
+    # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
+    # this test's expectations (53 / 107 / 66) were written against.
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     builder = DenseClusterRegionBuilder(max_buildings=150)
     assert builder.build(bg, [["DJI.3_1_3238"]]) == builder.build(bg, [["DJI.3_1_3238"]])
 
@@ -348,7 +365,11 @@ def test_dense_cluster_falls_back_to_block_count_without_building_count() -> Non
     # Drop building_count entirely (a non-kblock source) -- the budget must fall back to a
     # block-count budget and growth must still be contiguous. The seed has exactly two
     # neighbors, so a budget of 3 blocks pulls in both.
-    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
+    # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
+    # this test's expectations (53 / 107 / 66) were written against.
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     bg = bg.drop(columns=["building_count"])
 
     out = DenseClusterRegionBuilder(max_buildings=3).build(bg, [["DJI.3_1_3238"]])
@@ -361,7 +382,11 @@ def test_dense_cluster_falls_back_to_block_count_without_building_count() -> Non
 
 
 def test_dense_cluster_empty_groups_returns_empty_list() -> None:
-    bg = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").block_geometries()
+    # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
+    # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
+    # this test's expectations (53 / 107 / 66) were written against.
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     assert DenseClusterRegionBuilder().build(bg, []) == []
 
 

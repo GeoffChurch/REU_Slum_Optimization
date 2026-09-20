@@ -42,7 +42,7 @@ from omegaconf import open_dict
 from shapely.ops import unary_union
 
 from reblock.compare import load_permeability_config
-from reblock.contracts import Method, Screen, Source
+from reblock.contracts import CountingScreen, Method, Source
 from reblock.emit import region_map
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, block_depths
@@ -129,7 +129,10 @@ def main() -> None:
     pinned = cfg.block_ids                # None -> grow a region; a list -> pin these
     with _tee_to_file(out / "run.log"):
         source = cast(Source, instantiate(cfg.data))
-        screen = cast(Screen, instantiate(cfg.screen))
+        # CountingScreen, not Screen: `region_map` and region growth both need the
+        # counter this screen resolved, and the cast is where that requirement is
+        # stated once instead of at each use.
+        screen = cast(CountingScreen, instantiate(cfg.screen))
         region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
 
         # The ONE branch the two region modes force. A pinned variant has no screen selection to
@@ -152,12 +155,17 @@ def main() -> None:
 
         t0 = time.perf_counter()
         groups = None if pinned is None else [list(g) for g in pinned]
-        region = build_regions(source, screen, region_builder, groups, int(cfg.max_blocks))[0]
+        # `seed_rank` picks WHICH of the screen's ranked blocks seeds this example, so two
+        # variants can share one screen instead of needing one screen each. build_regions returns
+        # one region per seed group in rank order, so it must be asked for at least rank+1 of them.
+        seed_rank = int(cfg.get("seed_rank", 0))
+        region = build_regions(source, screen, region_builder, groups,
+                               max(int(cfg.max_blocks), seed_rank + 1))[seed_rank]
         members = [b.block_id for b in region]
         region_parcels = sum(len(b.parcels) for b in region)
         log.info("region built: %d blocks / %d parcels (%.1fs)", len(members), region_parcels,
                  time.perf_counter() - t0)
-        seed = selection[0] if selection else members[0]
+        seed = selection[seed_rank] if len(selection) > seed_rank else members[0]
         # build_regions narrowed source.block_ids to the members; clear it again (like run.py)
         # so the screen map spans the whole metro, not just the region neighbourhood.
         source.block_ids = None                                              # type: ignore[attr-defined]
@@ -167,7 +175,10 @@ def main() -> None:
         if pinned is None:
             region_map(source, [members], [[seed]], out,
                        selection=selection, depths=scores, metric_name=metric_name,
-                       metric=getattr(screen, "metric", None))
+                       metric=getattr(screen, "metric", None),
+                       # The SAME counter the screen ranked on, so the map grades blocks on the
+                       # number the pipeline used rather than the source's vendor column.
+                       counts=screen.counts)
             # region_map already writes screen.png/region.png (transparent, via save_render) at
             # the example naming -- no JPG flatten step needed.
 
@@ -190,6 +201,10 @@ def main() -> None:
             "metric": metric_name,
             "deepest_block": seed, "deepest_depth": depths.get(seed, 0.0),
             "region_parcels": region_parcels,
+            # The ids, not just the count: `scripts/preflight_regen.py` diffs this to say whether
+            # a regeneration would re-run the methods (hours) or only re-render (minutes), and a
+            # count alone cannot distinguish a changed region from a same-size different one.
+            "region_member_ids": [str(b) for b in members],
             "region_mean_depth": sum(depths.values()) / max(len(depths), 1),
             "region_mean_density_per_ha": sum(dens.values()) / max(len(dens), 1),
             "maps_url": maps_url,

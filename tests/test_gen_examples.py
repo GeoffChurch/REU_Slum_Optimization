@@ -63,6 +63,9 @@ def test_example_command_other_city_appends_it():
         "pixi run python -m scripts.gen_example depth_density nairobi"
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def test_regenerate_dry_run_lists_all(tmp_path):
     env = {**os.environ}
     r = subprocess.run(["bash", "scripts/regenerate_examples.sh", "--dry-run"],
@@ -70,11 +73,20 @@ def test_regenerate_dry_run_lists_all(tmp_path):
     assert r.returncode == 0, r.stderr
     out = r.stdout
     # ONE entry point for every variant -- a variant differs only in its conf/example/<name>.yaml
-    for v in ("depth", "depth_density", "density_compactness"):
-        assert f"gen_example {v}" in out            # capetown
-        assert f"gen_example {v} nairobi" in out    # nairobi
-    assert "gen_example method_comparison" in out   # the pinned single-block flagship
+    assert "gen_example depth_density" in out               # capetown
+    assert "gen_example depth_density nairobi" in out       # nairobi
+    assert "gen_example depth_density_2" in out             # capetown, rank-1 seed
+    assert "gen_example method_comparison" in out           # the pinned single-block flagship
     assert "gen_method_comparison" not in out, "the second entry point must be gone"
+
+    # `depth` and `density_compactness` were dropped from the default regeneration on 2026-09-19:
+    # each cost hours of cycle_native and arterial to show the same method set on another region,
+    # and the SCREEN comparison they looked like they provided is made better and far cheaper by
+    # gen_screen_bakeoff, which grades all four over the whole corpus and runs no methods.
+    for v in ("depth", "density_compactness"):
+        assert f"gen_example {v} " not in out, f"{v} should not be in the default regeneration"
+        # ...but they stay SELECTABLE, so `pixi run python -m scripts.gen_example depth` works.
+        assert (ROOT / "conf" / "example" / f"{v}.yaml").exists(), f"conf/example/{v}.yaml removed"
 
 
 def test_every_example_method_has_a_friendly_name() -> None:

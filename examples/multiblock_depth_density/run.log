@@ -1,12 +1,9 @@
-[reblock.screen.dense_compact][INFO] fine pass: 13822 survivors across 16 fork workers
-[reblock.screen.dense_compact][INFO] screen: 13822/83192 blocks selected by metric=depth_density (needs_peel=True)
-[__main__][INFO] screen: flagged 13822/83192 blocks (10.9s)
-[__main__][INFO] region built: 3 blocks / 2690 parcels (60.7s)
-[scripts.compare_budgets][INFO] reblocked clearance_looped: 126 segments, 5114 m (8.0s)
-[scripts.compare_budgets][INFO] reblocked euclidean_grid: 14 segments, 3334 m (0.1s)
-[scripts.compare_budgets][INFO] reblocked resistance_lp: 2620 segments, 14002 m (35.9s)
-[scripts.compare_budgets][INFO] reblocked cycle_native: 160 segments, 8408 m (181.9s)
-[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 224 segments, 6871 m (758.9s)
-[scripts.compare_budgets][INFO] reblocked osm_footpaths: 87 segments, 6515 m (0.0s)
-[scripts.compare_budgets][INFO] lens/frontier curves computed for 6 methods (36.4s)
-wrote examples/multiblock_depth_density: 3 blocks / 2690 parcels; flagged 13822/83192; 6 methods; README + maps + lens CSVs
+[__main__][INFO] screen: flagged 1000/83192 blocks (0.9s)
+[__main__][INFO] region built: 1 blocks / 6619 parcels (18.7s)
+[scripts.compare_budgets][INFO] reblocked clearance_looped: 319 segments, 14708 m (21.5s)
+[scripts.compare_budgets][INFO] reblocked euclidean_grid: 24 segments, 7330 m (0.3s)
+[scripts.compare_budgets][INFO] reblocked resistance_lp: 5617 segments, 35044 m (233.8s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 264 segments, 16118 m (849.3s)
+[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 163 segments, 9713 m (2011.7s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 5 methods (94.7s)
+wrote examples/multiblock_depth_density: 1 blocks / 6619 parcels; flagged 1000/83192; 5 methods; README + maps + lens CSVs

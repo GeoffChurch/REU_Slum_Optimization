@@ -39,7 +39,12 @@ run() { echo "+ $*"; [[ $DRY -eq 1 ]] || "$@"; }
 
 # One entry point for every example. A variant IS a config file (conf/example/<name>.yaml); the
 # multiblock ones run per city, method-comparison pins a single block so it is capetown-only.
-VARIANTS=(depth depth_density density_compactness)
+# `depth` and `density_compactness` were dropped 2026-09-19. They cost hours of cycle_native and
+# arterial each to show the same method set on a different region, and the SCREEN comparison they
+# appear to provide is made better and far cheaper by `gen_screen_bakeoff`, which grades all four
+# screens over the whole 18,309-block corpus and runs no methods. What the example variants add is
+# a second REGION, and `depth_density_2` supplies that from the best-measured screen.
+VARIANTS=(depth_density)
 CITIES=(capetown nairobi)
 
 gen() {  # <variant> <city>
@@ -68,6 +73,10 @@ if [[ $# -gt 0 ]]; then
   while [[ $# -gt 0 ]]; do gen "$1" "$2"; shift 2; done
 else
   for v in "${VARIANTS[@]}"; do for c in "${CITIES[@]}"; do gen "$v" "$c"; done; done
+  # Rank-1 is Cape Town only. Nairobi's top-ranked seed is already under the growth budget and
+  # grows into a multi-block region on its own, so a second Nairobi region would cost a full
+  # method run to show the same regime twice.
+  gen depth_density_2 capetown
   gen method_comparison capetown
   # The screen bake-off is not a gen_example variant: it grades SCREENS against ground truth rather
   # than methods against a region, so it has its own entry point. Cape Town only -- the ground truth

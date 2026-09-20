@@ -23,4 +23,4 @@ metric:
   _convert_: all
 # Absolute, not percentile: a percentile re-defines the population every time the corpus changes.
 # Value mirrors reblock.metric.DEPTH_DENSITY_PROXY_FLOOR; tests/test_metric.py fails if they drift.
-metric_gate: {_target_: reblock.metric.Gate, kind: absolute, value: 0.0128}
+metric_gate: {_target_: reblock.metric.AbsoluteGate, value: 0.0128}
