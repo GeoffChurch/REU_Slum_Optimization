@@ -97,3 +97,34 @@ Hence `random`: it makes every stopping point valid rather than only the last.
 `dd_proxy/p90 top-15` sheet and six of seven were picked for being survey-`formal`; three of them
 are control-sample `top1pct` blocks, so merging looks free and would push that stratum toward
 100%. They are real verdicts about real blocks and they stay where they are.
+
+## Deferral: examined, but not labelled
+
+A row with no `verdict` and a note beginning `DEFERRED` was **looked at and deliberately not
+labelled**, because the label set did not fit what was there. It is not `unclear` — that is for
+imagery too poor to support a call, and it is a statement about the *rendering*. Deferral is a
+statement about the *labels*.
+
+**A deferred note must carry the measurements**, so the block can be relabelled from the record
+when the label set changes rather than re-adjudicated: counts, density, the footprint size
+quantiles, built fraction, and the peel's ring histogram. The verdict is the perishable part; the
+observations are not.
+
+**Deferred rows are informative non-response, not missing data.** They were drawn at random and
+deferred *because of what was seen*, so dropping them from the denominator biases the survey-miss
+rate — the same warning 19138's note carries. Count them explicitly, with a bound.
+
+### Why the labels do not fit: they collapse two axes into one
+
+The rule names the defining features as **density** and **access deprivation**, and then offers
+four labels that vary only in extent. Three blocks separate the two features:
+
+| block | dense? | access-deprived? | what it is |
+|---|---|---|---|
+| `ZAF.9.3.1_1_19138` | yes (56/ha) | no (depth 2, 0% past ring 2) | dense informal fabric, every home two houses from a street |
+| `ZAF.9.3.1_1_20856` | no (21/ha) | spuriously (depth 6, but 467 m² parcels) | scattered shacks; the rings are tessellation, not footpaths |
+| `ZAF.9.3.1_1_40760` | partly (59/ha) | no (depth 3) | formal row housing densified with backyard infill |
+
+A label set indexed on both axes fits all three; the current one forces each into a box that
+loses the distinction the screen is actually ranking on. Recorded here as the concrete motivation
+for a refinement, not as a proposal — no label set is being changed yet.
