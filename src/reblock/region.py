@@ -308,8 +308,12 @@ def block_depths(source: Source, block_ids: list[str]) -> dict[str, float]:
     from reblock.derivations import access_before
     if not isinstance(source, KblockSource) or not block_ids:
         return {}
+    # `source.min_buildings`, not `getattr(..., 10)`: the isinstance above has already made
+    # this a KblockSource, whose __init__ assigns the field unconditionally, so the default
+    # could never be taken. An unreachable default is not defensive -- it is a silencer that
+    # would swallow a rename here while every direct-access site broke loudly.
     sub = KblockSource(source.blocks_path, source.buildings_path, "depth",
-                       min_buildings=getattr(source, "min_buildings", 10),
+                       min_buildings=source.min_buildings,
                        block_ids=list(block_ids))
     return {str(b.block_id): float(access_before(b).max()) for b in sub.region().blocks}
 
