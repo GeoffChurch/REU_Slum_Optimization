@@ -69,3 +69,31 @@ Two renderings, and they fail differently.
 A kblock block **is** a street-bounded face, so every boundary drawn in blue is an official
 street. Interior linear features are footpaths, not roads — the distinction most easily got
 wrong, and the reason the schematic draws streets at all.
+
+## Provenance: the `selection` column
+
+`control_sample.csv` carries a `selection` column on every adjudicated row, recording **how the
+block was chosen for adjudication** — not how it entered the sample. The sample itself is a
+stratified random draw; this column is about what happened *after* that.
+
+| value | meaning | usable for a population estimate? |
+|---|---|---|
+| `random` | drawn uniformly at random from the stratum's unadjudicated rows | **yes** |
+| `queue` | chosen because it was interesting — agent/survey disagreement, high leverage | **no** |
+| `dd_proxy_prefix` | the stratum's highest-`dd_proxy` unadjudicated row, taken repeatedly | **no** |
+
+**Only `random` rows may enter a Horvitz–Thompson estimate of the survey-miss rate.** The other
+two are selected on something correlated with the outcome, so their rate is not the stratum's
+rate. `queue` selects *for* disagreement, which is why `10to30pct`'s six queue rows are 5/6
+positive — that is the selection rule reporting itself, not a measurement. `dd_proxy_prefix`
+selects for the screen's own suspicion, which biases the other way.
+
+**A fully-adjudicated stratum is exempt.** If every sampled row in a stratum has a verdict, the
+order they were done in cannot matter, and all of them count. The bias exists only while a
+stratum is partially done — which is every intermediate state, and we stop at every one of them.
+Hence `random`: it makes every stopping point valid rather than only the last.
+
+**`adhoc_verdicts.csv` is never merged into `control_sample.csv`.** All of its rows came from a
+`dd_proxy/p90 top-15` sheet and six of seven were picked for being survey-`formal`; three of them
+are control-sample `top1pct` blocks, so merging looks free and would push that stratum toward
+100%. They are real verdicts about real blocks and they stay where they are.
