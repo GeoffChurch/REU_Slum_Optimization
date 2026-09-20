@@ -126,5 +126,37 @@ four labels that vary only in extent. Three blocks separate the two features:
 | `ZAF.9.3.1_1_40760` | partly (59/ha) | no (depth 3) | formal row housing densified with backyard infill |
 
 A label set indexed on both axes fits all three; the current one forces each into a box that
-loses the distinction the screen is actually ranking on. Recorded here as the concrete motivation
-for a refinement, not as a proposal — no label set is being changed yet.
+loses the distinction the screen is actually ranking on.
+
+### And a third axis: tenure, which nothing we feed the screen can see
+
+`ZAF.9.3.1_1_39399` added one more. **Street-view observation** (adjudicator, ground): surveyed
+plot boundaries with painted masonry walls and steel gates, corrugated-iron dwellings behind each.
+Formal **cadastre**, informal **dwellings** — the same morphology as `40760`, reached by a
+different modality.
+
+It is invisible to every input the screen has. A walled plot full of shacks photographs from above
+as *shacks*; the wall does not appear. The peel tessellates building points and sees neither the
+wall nor the plot line. Only the street carries it.
+
+Density and depth say **whether there is a problem**. Tenure says **whether this tool fixes it** —
+a road cannot be threaded through titled, walled plots the way it can through unplanned fabric,
+however deprived the household behind the wall. That makes tenure orthogonal to the other two and
+load-bearing for what a flagged block is *for*.
+
+**Falsifiable, untested:** if this morphology is common in `10to30pct`, the survey's partial-cover
+figures may be tracking it — a surveyor records the shacks they can see, on plots the cadastre
+calls formal. Prediction: within that stratum `survey_cover` tracks shack fraction (a footprint
+statistic) rather than peel depth. Checkable from data already on disk, with no new labelling.
+
+Recorded here as the concrete motivation for a refinement, not as a proposal — no label set is
+being changed yet.
+
+### Street view is a third rendering, and we do not generate it
+
+The two renderings above are what the *pipeline* produces. The adjudicator also has Google Street
+View, and on `39399` it was decisive where both generated views were not. Note the asymmetry: an
+agent judge sees only `satellite/` and `schematic/`, so a human verdict resting on street view is
+**not** a verdict an agent could have reached. When comparing human and agent accuracy, a block
+adjudicated from the ground is not a fair item — record in the note when street view carried the
+call, as `39399` does.
