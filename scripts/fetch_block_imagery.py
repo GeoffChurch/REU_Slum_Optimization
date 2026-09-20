@@ -71,6 +71,7 @@ MARGIN = 0.25          # of the block's own extent, so the surrounding fabric is
 
 SOURCE_MPP = 0.10      # what the imagery itself resolves; measured, see `tile_px`
 MAX_PX = 2048          # 4096 returns HTTP 504 from this endpoint; 2048 is served reliably
+FIG_IN = 9.0           # figure side, inches; `dpi` is derived so the axes can carry the tile
 
 
 def tile_px(span_m: float) -> int:
@@ -180,13 +181,22 @@ def main() -> int:
         bbox = (cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2)
         box = shapely_box(*bbox)
         span_m = side * 111_320 * math.cos(math.radians(cy))
-        mpp = span_m / tile_px(span_m)
+        # The tile's resolution is NOT the saved image's resolution. The figure is what the
+        # judge sees, so the dpi must be able to carry the tile: at figsize 9in and dpi 110 the
+        # axes lands near 655 px, which threw away a 2048 px tile entirely -- measured, the
+        # high-frequency energy of a 2048-tile render and a 661-tile render were 6.70% and
+        # 6.71%, i.e. identical. Worse, `mpp` was computed from the TILE, so raising the fetch
+        # resolution made every image CLAIM 0.10 m/px while still being ~0.35. RULE.md tells a
+        # judge to abstain on the stated resolution, so a caption that overstates it is the one
+        # kind of error that cannot be caught downstream.
+        px = tile_px(span_m)
+        dpi = max(110, math.ceil(px / FIG_IN))
         for mode in modes:
             d = OUT / mode
             d.mkdir(parents=True, exist_ok=True)
-            fig, ax = plt.subplots(figsize=(9, 9), dpi=110)
+            fig, ax = plt.subplots(figsize=(FIG_IN, FIG_IN), dpi=dpi)
             if mode in ("satellite", "masked"):
-                ax.imshow(imread(fetch(bbox, tile_px(span_m), r["block_id"])),
+                ax.imshow(imread(fetch(bbox, px, r["block_id"])),
                           extent=(bbox[0], bbox[2], bbox[1], bbox[3]))
                 edge, credit, cc = "#ff2d55", "Imagery: Esri World Imagery", "white"
                 if mode == "masked":
@@ -225,6 +235,14 @@ def main() -> int:
             # question at all: a shack is ~4 m, so past ~1 m/px it is a smudge and the honest
             # verdict is "unclear", not a guess.
             raster = mode in ("satellite", "masked")
+            # Measured off the DRAWN axes, not the tile and not the figure: the title, the
+            # credit line and `bbox_inches="tight"` all mean the axes is smaller than
+            # `FIG_IN * dpi`, so a 2048 px tile lands in ~1358 px of image. Reporting the tile's
+            # resolution overstates by that ratio, and overstating is the one direction that
+            # matters -- RULE.md has a judge abstain on the stated number, so a caption claiming
+            # more than the pixels deliver defeats the abstention.
+            fig.canvas.draw()
+            mpp = span_m / ax.get_window_extent().width
             warn = "   ⚠ TOO COARSE FOR SHACKS" if raster and mpp > 1.0 else ""
             res = f"   {mpp:.2f} m/px{warn}" if raster else ""
             ax.set_title(f"{r['block_id']}  ·  {r['place']}  ·  {r['area_ha']} ha{res}",
