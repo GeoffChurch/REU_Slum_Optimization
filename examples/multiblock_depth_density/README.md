@@ -10,14 +10,14 @@
 
 ![screen](screen.png)
 
-**Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-33.84091,18.74439,15z).
+**Location:** [see the grown region on Google Maps](https://www.google.com/maps/@-33.84091,18.74436,15z).
 
 
-<a href="https://www.google.com/maps/@-33.84091,18.74439,15z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
+<a href="https://www.google.com/maps/@-33.84091,18.74436,15z"><img src="maps_qr.png" alt="Google Maps QR" width="120"></a>
 
 ## 2. Grow the region
 
-The metric grows a **37-block** region (**10,142 parcels**), mean depth 4.0 rings, mean density 137 bldg/ha.
+The metric grows a **1-block** region (**6,619 parcels**), mean depth 24.0 rings, mean density 115 bldg/ha.
 
 ![region](region.png)
 
@@ -49,11 +49,11 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 2,149 m | 2.6% | 60.6% |  |
-| Loop Network | 1,601 m | 1.3% | 61.0% |  |
-| Grid | 2,113 m | 2.6% | 65.5% |  |
-| Frontage (street-priced) | 3,144 m | 1.3% | 60.3% |  |
-| Direct Objective (LP) | 1,951 m | 1.1% | 60.2% |  |
+| Looped Tree | 2,297 m | 4.2% | 60.3% |  |
+| Loop Network | 1,605 m | 1.8% | 61.4% |  |
+| Grid | 2,113 m | 4.1% | 66.4% |  |
+| Frontage (street-priced) | 3,631 m | 2.6% | 60.7% |  |
+| Direct Objective (LP) | 1,866 m | 1.6% | 60.1% |  |
 
 
 Access-depth coloring:
@@ -74,11 +74,11 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 8,425 m | 10.1% | 78.3% |  |
-| Loop Network | 10,606 m | 10.1% | 91.7% |  |
-| Grid | 8,475 m | 10.0% | 88.6% |  |
-| Frontage (street-priced) | 9,934 m | 5.6% | 81.5% | converged below budget |
-| Direct Objective (LP) | 17,962 m | 10.0% | 93.9% |  |
+| Looped Tree | 5,377 m | 10.0% | 74.2% |  |
+| Loop Network | 7,279 m | 10.1% | 89.3% |  |
+| Grid | 5,544 m | 10.3% | 87.4% |  |
+| Frontage (street-priced) | 9,713 m | 7.0% | 80.2% | converged below budget |
+| Direct Objective (LP) | 11,928 m | 10.0% | 90.3% |  |
 
 
 Access-depth coloring:

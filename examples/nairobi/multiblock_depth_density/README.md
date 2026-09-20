@@ -17,7 +17,7 @@
 
 ## 2. Grow the region
 
-The metric grows a **7-block** region (**5,095 parcels**), mean depth 7.3 rings, mean density 68 bldg/ha.
+The metric grows a **7-block** region (**5,107 parcels**), mean depth 7.6 rings, mean density 67 bldg/ha.
 
 ![region](region.png)
 
@@ -47,12 +47,12 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 1,803 m | 3.3% | 60.7% |  |
-| Loop Network | 2,087 m | 2.8% | 60.2% |  |
-| Grid | 2,177 m | 3.2% | 60.9% |  |
-| Frontage (street-priced) | 4,726 m | 2.5% | 61.0% |  |
-| OSM Footpaths | 2,438 m | 1.5% | 31.2% | unreached |
-| Direct Objective (LP) | 2,169 m | 1.3% | 60.0% |  |
+| Looped Tree | 1,801 m | 3.6% | 60.9% |  |
+| Loop Network | 2,118 m | 2.9% | 60.0% |  |
+| Grid | 2,282 m | 3.7% | 60.8% |  |
+| Frontage (street-priced) | 5,371 m | 2.5% | 61.5% |  |
+| OSM Footpaths | 2,443 m | 1.5% | 31.0% | unreached |
+| Direct Objective (LP) | 2,198 m | 1.4% | 60.3% |  |
 
 
 Access-depth coloring:
@@ -73,12 +73,12 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 5,986 m | 10.0% | 81.5% |  |
-| Loop Network | 7,314 m | 10.0% | 83.4% |  |
-| Grid | 8,747 m | 10.2% | 79.3% |  |
-| Frontage (street-priced) | 15,243 m | 5.2% | 76.5% | converged below budget |
-| OSM Footpaths | 2,438 m | 1.5% | 31.2% | converged below budget |
-| Direct Objective (LP) | 17,451 m | 10.0% | 92.1% |  |
+| Looped Tree | 5,989 m | 10.0% | 81.4% |  |
+| Loop Network | 7,567 m | 10.1% | 83.4% |  |
+| Grid | 8,615 m | 10.1% | 78.2% |  |
+| Frontage (street-priced) | 16,696 m | 5.1% | 76.5% | converged below budget |
+| OSM Footpaths | 2,443 m | 1.5% | 31.0% | converged below budget |
+| Direct Objective (LP) | 17,768 m | 10.0% | 92.3% |  |
 
 
 Access-depth coloring:
