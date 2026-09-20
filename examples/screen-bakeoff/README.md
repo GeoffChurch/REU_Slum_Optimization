@@ -112,5 +112,15 @@ compactness term alone scores AUC 0.530, barely above chance, and multiplying de
   blocks Ecopia could not see — which is why the count is resolved *before* the filter, not after.
 - Ground-truth structures are from 2018, against blocks built from later OSM and Open Buildings.
   Quantified above rather than waved at: 9 confirmed misses in 35 hand adjudications.
-- A single Google Open Buildings feature, 90th-percentile footprint area, scores **AUC 0.943** and
-  beats every metric here — at the cost of a polygon download this screen does not need. Backlogged.
+- **Footprint size is free and does not help at the head.** `area_in_meters` is a column on the
+  49 MB points file the pipeline already reads — the 174 MB polygon download this was once said to
+  require buys nothing, agreeing to a median relative difference of 0.013% and rank correlation
+  1.00000. Measured on this pool, p90 footprint area **alone** scores the best AUC of any single
+  feature, **0.937**, and is a **bad screen: prec@1% 0.169** against the shipped screen's 0.645 —
+  it has no scale term, so it finds small blocks of small structures. As a *divisor*,
+  `dd_proxy/p90` does beat the shipped screen on both AUC (0.941) and prec@1% (0.656), and is
+  still not shipped: on hand labels the two top-15s **tie at ceiling, 15/15 against 15/15**, and it
+  is worse on pre-filter retention (f(15) 67 → 88). The AUC gain is real against the survey and
+  worth nothing against truth. Full derivation, including the alpha sweep showing both shipped
+  proxies sit at the optimum of one family:
+  `docs/superpowers/notes/2026-09-19-the-screen-frontier-is-indexed-by-what-you-downloaded.md`.

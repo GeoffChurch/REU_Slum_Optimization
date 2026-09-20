@@ -46,6 +46,10 @@ MC = ROOT / "examples" / "method-comparison"
 # provide is made better and far cheaper by gen_screen_bakeoff), so pointing at it would serve a
 # frozen directory that no longer regenerates -- stale numbers presented as current.
 MB = ROOT / "examples" / "multiblock_depth_density"
+# The SECOND region from the SAME screen (`seed_rank: 1`). Shown because the shipped metric
+# is a product of depth and density, and a single region cannot exhibit a trade-off between
+# two factors -- see `_region_section`.
+MB2 = ROOT / "examples" / "multiblock_depth_density_2"
 OUTPUTS = ROOT / "outputs"
 BAKEOFF = ROOT / "examples" / "screen-bakeoff"
 NAIROBI = ROOT / "examples" / "nairobi"
@@ -781,6 +785,132 @@ def _screen_map_figure() -> str:
                    caption, attrs=attrs)
 
 
+
+def _region_section(root: Path, asset_dir: str, heading: str, *,
+                    seed_rank: int, show_screen: bool) -> str:
+    """One settlement-scale region: its numbers, figures, lenses and per-method renders.
+
+    Parameterised over the region directory because the site shows TWO regions from ONE
+    screen -- `depth_density` at `seed_rank` 0 and 1 -- and that pair is the point. Rank 0
+    is a single block 24 rings deep at 115 buildings/ha; rank 1 is a fifteen-block
+    settlement a third as deep at 159/ha. The shipped metric is a PRODUCT of depth and
+    density, and one region cannot exhibit a trade-off between two factors, so a reader
+    shown only the first has no way to see what the second factor buys.
+
+    `show_screen` is False for the second region. The screen figure is a property of the
+    SCREEN, which both regions share; rendering it twice would assert two screens where
+    there is one. Everything else is per-region and is rendered for both.
+    """
+    parts: list[str] = []
+    meta_path = root / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+    if meta:
+        # The metric NAME comes from `meta`, never a literal. Both of these sentences said
+        # "the `depth` metric" until 2026-09-19, months after `depth` stopped being what the
+        # page renders -- and the `depth` variant was then deleted outright, so the page was
+        # naming a variant that no longer exists while showing `depth_density`'s numbers.
+        parts.append(heading)
+        # "screened N of M" read as a finding about how many Cape Town blocks are informal. It
+        # is not: `flagged` is the pre-filter budget (`proxy_keep_n`), because the `depth`
+        # variant's gate keeps every survivor. Say what it is.
+        # `meta['metric']` is the VARIANT name, not the metric: `gen_example` falls back to
+        # the variant when a config sets no `metric_name`, so the rank-1 variant reports
+        # "depth_density_2" -- which is not a metric. Both regions are ranked by the SAME
+        # `depth_density`. Only rank 0 names it; rank 1 says "the same screen", which is both
+        # true and the thing the pair exists to show.
+        grown = (f"into a **{meta['region_members']}-block region of "
+                 f"{_num(meta['region_parcels'])} parcels** — mean depth "
+                 f"{meta['region_mean_depth']:.1f} rings, mean density "
+                 f"{meta['region_mean_density_per_ha']:.0f} buildings/ha.\n")
+        if seed_rank == 0:
+            parts.append(f"The `{meta['metric']}` metric tessellated and peeled the top "
+                         f"**{_num(meta['flagged'])}** blocks of "
+                         f"{_num(meta['total_blocks'])} by the cheap proxy, then grew the "
+                         f"top-scoring block (`{meta['deepest_block']}`, peel depth "
+                         f"{meta['deepest_depth']:.0f}) " + grown)
+        else:
+            parts.append(f"The same screen over the same "
+                         f"**{_num(meta['flagged'])}** peeled blocks, one rank down: its "
+                         f"**rank-{seed_rank}** block (`{meta['deepest_block']}`, peel depth "
+                         f"{meta['deepest_depth']:.0f}) grown " + grown)
+        if meta.get("maps_url"):
+            parts.append(f"[See the region on Google Maps]({meta['maps_url']})\n")
+        scene_captions = {
+            "screen.png": (f"The `{meta['metric']}` screen across the Cape Town metro: the "
+                           f"{_num(meta['flagged'])} blocks the fine pass scored, of "
+                           f"{_num(meta['total_blocks'])}, coloured by true peel depth. The count "
+                           f"is the pre-filter budget, not an estimate of how many blocks are "
+                           f"informal."),
+            "region.png": (f"The region grown from the top-scoring block: "
+                           f"{meta['region_members']} blocks, "
+                           f"{_num(meta['region_parcels'])} parcels."),
+        }
+        scenes = ("screen.png", "region.png") if show_screen else ("region.png",)
+        for name in scenes:
+            url = _copy_asset(root / name, asset_dir)
+            if url:
+                parts.append(_figure(url, name.removesuffix(".png"), scene_captions[name]))
+        # Same retired-naming bug as the method pages: these four patterns matched nothing.
+        # `frontier_<block_id>.png` is what the generator writes.
+        frontier_imgs: list[str] = []
+        for pat in ("frontier_*.png",):
+            for p in sorted(root.glob(pat)):
+                url = _copy_asset(p, asset_dir)
+                if url:
+                    frontier_imgs.append(_figure(url, p.stem, _curve_caption(p.stem)))
+        if frontier_imgs:
+            parts.append("### The permeability-vs-displacement frontier\n")
+            parts.append("Each method's permeability (a flow measure of how easily every parcel "
+                         "reaches a street) as cumulative road grows, against the displacement it "
+                         "costs:\n")
+            parts.extend(frontier_imgs)
+        disp_lens = _read_csv(root / "lens_displacement.csv")
+        if disp_lens:
+            parts.append("### Lens A — matched displacement: permeability bought at an equal "
+                         "home-cost\n")
+            parts.append(_table(
+                ["method", "road (m)", "homes displaced", "permeability", "note"],
+                [[friendly_method_name(r["method"]), _num(float(r["road_m"])),
+                  _pct(float(r["displacement"])), _pct(float(r["permeability"])),
+                  "" if r["at_budget"] == "True" else "converged below budget"]
+                 for r in disp_lens]))
+        perm_lens = _read_csv(root / "lens_permeability.csv")
+        if perm_lens:
+            parts.append("### Lens B — matched permeability: homes displaced to reach the "
+                         "standard\n")
+            parts.append(_table(
+                ["method", "road (m)", "homes displaced", "permeability", "note"],
+                [[friendly_method_name(r["method"]), _num(float(r["road_m"])),
+                  _pct(float(r["displacement"])), _pct(float(r["permeability"])),
+                  "" if r["reached"] == "True" else "**target unreached**"]
+                 for r in perm_lens]))
+        matched = sorted(root.glob("after_*_disp_depth.png"))
+        ext70 = sorted(root.glob("after_*_perm_depth.png"))
+        if matched or ext70:
+            parts.append("### Each method on the ground\n")
+            parts.append("Same region, same access-depth colour scale (blue = at a street, red = "
+                         "deep), displaced buildings marked.\n")
+        for title, files in (("Lens A — matched displacement", matched),
+                             ("Lens B — matched permeability", ext70)):
+            items = []
+            for p in files:
+                url = _copy_asset(p, asset_dir)
+                if url:
+                    # `after_<method>_<lens>_<colour>.png`: strip TWO trailing fields, not
+                    # one, or `friendly_method_name` is handed `clearance_looped_disp`.
+                    key = p.name[len("after_"):-len(".png")].rsplit("_", 2)[0]
+                    items.append((friendly_method_name(key), url))
+            if items:
+                parts.append(f"**{title}:**\n")
+                for i in range(0, len(items), 2):
+                    parts.append(_img_row(items[i:i + 2]))
+        cmd = meta.get("command")
+        if cmd:
+            parts.append("### Reproduce\n")
+            parts.append("The whole benchmark — data, maps, curves, tables — regenerates from one "
+                         f"self-logging command:\n\n```bash\n{cmd}\n```\n")
+    return "\n".join(parts)
+
 def _bakeoff_scale() -> str:
     """Survey scale, read from the ground-truth artifact rather than typed into prose -- and a
     COMPLETE SENTENCE, never a noun phrase (ruling F5). The generator's dir-reader contract lets
@@ -1124,11 +1254,16 @@ def _mc_section(m: M) -> list[str]:
 
 def _mb_section(m: M) -> list[str]:
     parts: list[str] = []
-    matched = _copy_asset(MB / f"after_{m.mb_key}_matched.png", "multiblock_depth_density")
-    ext70 = _copy_asset(MB / f"after_{m.mb_key}_ext70.png", "multiblock_depth_density")
+    # `after_<method>_matched.png` / `_ext70.png` have not existed since permeability replaced
+    # external+internal connectivity (2026-07-22). Both `_copy_asset` calls returned "" for a
+    # year, so EVERY method page rendered with no figures at all and nothing said so -- the
+    # `if not (...)` guard below simply skipped the section. The renders are per-LENS now, which
+    # is better: they pair with the two lens tables this page already prints.
+    disp = _copy_asset(MB / f"after_{m.mb_key}_disp_depth.png", "multiblock_depth_density")
+    perm = _copy_asset(MB / f"after_{m.mb_key}_perm_depth.png", "multiblock_depth_density")
     gif = _copy_asset(MB / f"reblock_{m.mb_key}.gif", "multiblock_depth_density")
     disp_row, perm_row = _mb_lens_rows(m.mb_key or "")
-    if not (matched or ext70 or gif or disp_row or perm_row):
+    if not (disp or perm or gif or disp_row or perm_row):
         return parts
     parts.append("## On the settlement-scale benchmark\n")
     # Read from meta, never typed: "12-block, 11,006-parcel" was already wrong before this
@@ -1146,11 +1281,12 @@ def _mb_section(m: M) -> list[str]:
                      f"every method's GIF ends at the same benefit, so what differs is the "
                      f"disruption spent getting there. The deep interior drains as the network "
                      f"reaches in:\n\n![reblock animation]({gif})\n")
-    imgs = [(lbl, u) for lbl, u in (("matched road budget", matched),
-                                    ("external connectivity 0.70", ext70)) if u]
+    imgs = [(lbl, u) for lbl, u in (("matched displacement", disp),
+                                    ("matched permeability", perm)) if u]
     if imgs:
-        parts.append("Truncated to the same road budget as every other method (left) and to the "
-                     "road needed to reach external connectivity 0.70 (right):\n")
+        parts.append("The same region under the two lenses — truncated to the shared "
+                     "displacement budget (left) and run until it reaches the shared "
+                     "permeability standard (right), coloured by access depth:\n")
         parts.append(_img_row(imgs))
     if disp_row:
         note = ("" if disp_row["at_budget"] == "True"
@@ -1250,94 +1386,17 @@ def gen_benchmark_section() -> str:
             if url:
                 parts.append(_figure(url, curve.stem, _curve_caption(curve.stem)))
 
-    # ---- part 2: settlement scale -----------------------------------------------------------
-    meta_path = MB / "meta.json"
-    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
-    if meta:
-        parts.append("## Settlement scale: the `multiblock_depth_density` region\n")
-        # "screened N of M" read as a finding about how many Cape Town blocks are informal. It
-        # is not: `flagged` is the pre-filter budget (`proxy_keep_n`), because the `depth`
-        # variant's gate keeps every survivor. Say what it is.
-        parts.append(f"The `depth` metric tessellated and peeled the top "
-                     f"**{_num(meta['flagged'])}** blocks of {_num(meta['total_blocks'])} by the "
-                     f"cheap proxy, then grew the top-scoring "
-                     f"block (`{meta['deepest_block']}`, peel depth "
-                     f"{meta['deepest_depth']:.0f}) into a **{meta['region_members']}-block "
-                     f"region of {_num(meta['region_parcels'])} parcels** — mean depth "
-                     f"{meta['region_mean_depth']:.1f} rings, mean density "
-                     f"{meta['region_mean_density_per_ha']:.0f} buildings/ha.\n")
-        if meta.get("maps_url"):
-            parts.append(f"[See the region on Google Maps]({meta['maps_url']})\n")
-        scene_captions = {
-            "screen.png": (f"The `depth` screen across the Cape Town metro: the "
-                           f"{_num(meta['flagged'])} blocks the fine pass scored, of "
-                           f"{_num(meta['total_blocks'])}, coloured by true peel depth. The count "
-                           f"is the pre-filter budget, not an estimate of how many blocks are "
-                           f"informal."),
-            "region.png": (f"The region grown from the top-scoring block: "
-                           f"{meta['region_members']} blocks, "
-                           f"{_num(meta['region_parcels'])} parcels."),
-        }
-        for name in ("screen.png", "region.png"):
-            url = _copy_asset(MB / name, "multiblock_depth_density")
-            if url:
-                parts.append(_figure(url, name.removesuffix(".png"), scene_captions[name]))
-        frontier_imgs: list[str] = []
-        for pat in ("depth_vs_road_*.png", "curve_external_connectivity_*.png",
-                    "curve_internal_connectivity_*.png", "displacement_*.png"):
-            for p in sorted(MB.glob(pat)):
-                url = _copy_asset(p, "multiblock_depth_density")
-                if url:
-                    frontier_imgs.append(_figure(url, p.stem, _curve_caption(p.stem)))
-        if frontier_imgs:
-            parts.append("### The permeability-vs-displacement frontier\n")
-            parts.append("Each method's permeability (a flow measure of how easily every parcel "
-                         "reaches a street) as cumulative road grows, against the displacement it "
-                         "costs:\n")
-            parts.extend(frontier_imgs)
-        disp_lens = _read_csv(MB / "lens_displacement.csv")
-        if disp_lens:
-            parts.append("### Lens A — matched displacement: permeability bought at an equal "
-                         "home-cost\n")
-            parts.append(_table(
-                ["method", "road (m)", "homes displaced", "permeability", "note"],
-                [[friendly_method_name(r["method"]), _num(float(r["road_m"])),
-                  _pct(float(r["displacement"])), _pct(float(r["permeability"])),
-                  "" if r["at_budget"] == "True" else "converged below budget"]
-                 for r in disp_lens]))
-        perm_lens = _read_csv(MB / "lens_permeability.csv")
-        if perm_lens:
-            parts.append("### Lens B — matched permeability: homes displaced to reach the "
-                         "standard\n")
-            parts.append(_table(
-                ["method", "road (m)", "homes displaced", "permeability", "note"],
-                [[friendly_method_name(r["method"]), _num(float(r["road_m"])),
-                  _pct(float(r["displacement"])), _pct(float(r["permeability"])),
-                  "" if r["reached"] == "True" else "**target unreached**"]
-                 for r in perm_lens]))
-        matched = sorted(MB.glob("after_*_matched.png"))
-        ext70 = sorted(MB.glob("after_*_ext*.png"))
-        if matched or ext70:
-            parts.append("### Each method on the ground\n")
-            parts.append("Same region, same access-depth colour scale (blue = at a street, red = "
-                         "deep), displaced buildings marked.\n")
-        for title, files in (("Matched road budget", matched),
-                             ("Matched external-connectivity target (0.70)", ext70)):
-            items = []
-            for p in files:
-                url = _copy_asset(p, "multiblock_depth_density")
-                if url:
-                    key = p.name[len("after_"):-len(".png")].rpartition("_")[0]
-                    items.append((friendly_method_name(key), url))
-            if items:
-                parts.append(f"**{title}:**\n")
-                for i in range(0, len(items), 2):
-                    parts.append(_img_row(items[i:i + 2]))
-        cmd = meta.get("command")
-        if cmd:
-            parts.append("### Reproduce\n")
-            parts.append("The whole benchmark — data, maps, curves, tables — regenerates from one "
-                         f"self-logging command:\n\n```bash\n{cmd}\n```\n")
+    # ---- part 2: settlement scale -------------------------------------------------------
+    # One screen, two regions; `_region_section` explains why only the first draws the
+    # screen figure.
+    parts.append(_region_section(
+        MB, "multiblock_depth_density",
+        "## Settlement scale: the `multiblock_depth_density` region\n",
+        seed_rank=0, show_screen=True))
+    parts.append(_region_section(
+        MB2, "multiblock_depth_density_2",
+        "## The same screen, one rank down: the `multiblock_depth_density_2` region\n",
+        seed_rank=1, show_screen=False))
     return "\n".join(parts)
 
 

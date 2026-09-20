@@ -102,7 +102,19 @@ disagreement is sharpest. Green is gained by the shipped default; red is dropped
   weaker screens are a pair that the survey places outside every settlement, yet whose buildings
   are smaller than those in blocks the survey does mark as informal. Whether they grew after 2018
   or are genuinely formal has not been checked against imagery.
-- **A more expensive feature wins outright.** A single Google Open Buildings feature —
-  90th-percentile building-footprint area — scores higher than every screen benchmarked here. It
-  is not shipped because computing it needs a building-footprint polygon download none of these
-  screens require, not because it performs worse.
+- **A feature that wins on AUC and loses where it matters.** A single Google Open Buildings
+  feature — 90th-percentile building-footprint area — scores the best AUC on this page, 0.937.
+  It is a bad screen: **16.9% precision in the top 1%**, against the shipped screen's 64.5%.
+  Footprint size carries no scale term, so it finds small blocks of small structures — outbuildings,
+  garages, tight formal rows. This is the same trap as `density` and `depth_density` tying on AUC
+  while one is far better at the head, and it is why this page reports both columns.
+
+  Used instead as a *divisor*, `depth_density ÷ p90` does beat the shipped screen on both AUC
+  (0.941) and precision@1% (0.656). It is still not shipped, and the reason is measured rather
+  than cautious: with both top-15s fully hand-adjudicated the two **tie at ceiling, 15 of 15
+  each**, and the divisor is worse at pre-filter retention. The AUC advantage is real against the
+  survey and worth nothing against ground truth.
+
+  It was once recorded here as unshipped for needing a polygon download. That was wrong twice
+  over: `area_in_meters` is a column of the points file the pipeline already reads, so the
+  feature is free — and free was never the obstacle.
