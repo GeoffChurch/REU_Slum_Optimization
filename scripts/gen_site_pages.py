@@ -41,10 +41,10 @@ ASSETS = DOCS / "assets"
 BRAND = DOCS / "brand"      # committed institutional marks, unlike the gitignored assets/
 EXAMPLES = ROOT / "examples"
 MC = ROOT / "examples" / "method-comparison"
-# The flagship region the site shows. `multiblock_depth_density`, not `multiblock_depth`, since
-# 2026-09-19: the `depth` example variant was dropped (the screen comparison it appeared to
-# provide is made better and far cheaper by gen_screen_bakeoff), so pointing at it would serve a
-# frozen directory that no longer regenerates -- stale numbers presented as current.
+# The flagship region the site shows. `multiblock_depth_density`, not `multiblock_depth`: the
+# `depth` example variant was dropped 2026-09-19 (the screen comparison it appeared to provide is
+# made better and far cheaper by gen_screen_bakeoff) and its frozen directory was DELETED
+# 2026-09-20, so this is no longer a choice between two paths -- the other one is gone.
 MB = ROOT / "examples" / "multiblock_depth_density"
 # The SECOND region from the SAME screen (`seed_rank: 1`). Shown because the shipped metric
 # is a product of depth and density, and a single region cannot exhibit a trade-off between

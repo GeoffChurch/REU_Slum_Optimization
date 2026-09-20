@@ -28,9 +28,15 @@ Flagships, reproducing from the full Cape Town metro (`capetown_full`, auto-down
 
 - [`method-comparison/`](method-comparison/) — the reblockers on one deep block, small enough that
   single-block-only `topology` runs alongside the scalable methods.
-- [`multiblock_depth/`](multiblock_depth/), [`multiblock_depth_density/`](multiblock_depth_density/),
-  [`multiblock_density_compactness/`](multiblock_density_compactness/) — the same pipeline driven by
-  each composable `BlockMetric`, which re-aims the screen, region growth, and colouring together.
+- [`multiblock_depth_density/`](multiblock_depth_density/) and
+  [`multiblock_depth_density_2/`](multiblock_depth_density_2/) — ONE screen, its top two blocks.
+  Rank 0 is a single block 24 rings deep at 115 buildings/ha; rank 1 is a fifteen-block settlement
+  a third as deep at 159/ha. The shipped metric is a product of depth and density, and one region
+  cannot show a trade-off between two factors.
+  The `depth` and `density_compactness` variants were deleted on 2026-09-20: they were dropped
+  from the regeneration path, so their directories had frozen, and the screen comparison they
+  appeared to offer is made better and far cheaper by `screen-bakeoff/`. Regenerate either from
+  `conf/example/depth.yaml` or `conf/example/density_compactness.yaml` if you want them back.
 - [`screen-bakeoff/`](screen-bakeoff/) — grades the screen rather than the reblocker.
 - [`nairobi/`](nairobi/) — the same metric variants on a second city.
 
