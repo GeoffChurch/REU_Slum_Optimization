@@ -69,18 +69,31 @@ UA = "reblock-research/0.1 (https://github.com/GeoffChurch/REU_Slum_Optimization
 MARGIN = 0.25          # of the block's own extent, so the surrounding fabric is visible too
 
 
-TARGET_MPP = 0.35      # a shack is ~4 m across; at 0.35 m/px that is ~11 px, judgeable
+SOURCE_MPP = 0.10      # what the imagery itself resolves; measured, see `tile_px`
 MAX_PX = 2048          # 4096 returns HTTP 504 from this endpoint; 2048 is served reliably
 
 
 def tile_px(span_m: float) -> int:
-    """Pixels to request so the tile lands near `TARGET_MPP`, capped at the endpoint's limit.
+    """Pixels to request: as fine as the SOURCE resolves, capped at the endpoint's limit.
 
-    A fixed size was the bug this replaces: at 900 px a 0.3 ha block rendered at 0.10 m/px and a
-    31 km2 one at 11.1 m/px, where a shack is a fifth of a pixel. Sixteen of sixty-eight blocks
-    were too coarse to adjudicate and nothing on the image said so.
+    Two bugs in opposite directions, both fixed here.
+
+    A fixed 900 px size was the first: a 0.3 ha block rendered at 0.10 m/px and a 31 km2 one at
+    11.1 m/px, where a shack is a fifth of a pixel. Sixteen of sixty-eight blocks were too coarse
+    to adjudicate and nothing on the image said so.
+
+    Targeting a constant 0.35 m/px fixed that and introduced the second: it pinned EVERY block to
+    0.35, including the ones the endpoint would have served finer for nothing. `ZAF.9.3.1_1_42863`
+    requested 661 px against a 2048 cap; refetching its identical bbox at 2048 px (0.113 m/px)
+    carried 6.6x the spectral energy above the 661 px Nyquist that bicubic upsampling of the
+    coarse tile produces -- real source detail, not interpolation. Only 8 of 140 control tiles
+    ever reached the cap, so this was costing resolution on essentially every block.
+
+    So ask for what the source has and let MAX_PX bind, which it now does for most blocks. That is
+    not a return to a fixed size: the achieved mpp is computed, printed on the image, and flagged
+    past 1.0 m/px, so a tile too coarse to answer the question still says so.
     """
-    return max(600, min(MAX_PX, int(span_m / TARGET_MPP)))
+    return max(600, min(MAX_PX, int(span_m / SOURCE_MPP)))
 
 
 def fetch(bbox: tuple[float, float, float, float], px: int, block_id: str) -> Path:
