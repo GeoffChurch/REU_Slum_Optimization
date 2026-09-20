@@ -1492,7 +1492,14 @@ def _key_result() -> str:
     lead = (f"At a matched road budget, <strong>{friendly_method_name(best['method'])}</strong> "
             f"reaches <strong>{_pct(float(best['permeability']))} permeability</strong>")
     if osm is None:
-        return f"{lead} across the 12-block benchmark region."
+        # Block count from `meta`, never a literal. This said "12-block" while the key figures
+        # two elements below said "1-block", both on the hero -- the same stale-literal failure
+        # the comment at `_mb_section` records for "12-block, 11,006-parcel".
+        meta_path = MB / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+        where = (f"the {meta['region_members']}-block benchmark region"
+                 if "region_members" in meta else "the benchmark region")
+        return f"{lead} across {where}."
     return (f"{lead} — against <strong>{_pct(float(osm['permeability']))}</strong> for the "
             f"footpath network residents have already worn into the same settlement.")
 

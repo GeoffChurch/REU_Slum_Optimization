@@ -833,3 +833,40 @@ body,
 .md-typeset figure[data-widget] > * {
   text-align: left;
 }
+
+/* The one call to action on the home page. The interactive page is what most readers actually
+   want, and it sat seventh in a card grid; this puts it directly under the thesis. A tinted
+   panel with a left rule rather than a button: the whole heading is the link, so the target is
+   the full line rather than a word inside a sentence, and it stays a heading in the outline for
+   anyone navigating by structure. Colour is never the only signal -- the rule, the fill and the
+   arrow all carry it, so it survives a monochrome print and a colour-blind reader. */
+.md-typeset .sbu-cta {
+  background: var(--sbu-surface);
+  border-left: 3px solid var(--sbu-red);
+  border-radius: 0 4px 4px 0;
+  padding: 1.15rem 1.35rem 0.9rem;
+  margin: 1.8rem 0 2.2rem;
+}
+
+.md-typeset .sbu-cta h2 {
+  margin: 0 0 0.55rem;
+  font-size: var(--sbu-step-1);
+  border-bottom: none;      /* the panel is the boundary; a second rule reads as a section break */
+}
+
+.md-typeset .sbu-cta h2 a {
+  color: var(--sbu-red-ink);
+  text-decoration: none;
+}
+
+.md-typeset .sbu-cta h2 a:hover,
+.md-typeset .sbu-cta h2 a:focus-visible {
+  color: var(--sbu-red-deep);
+  text-decoration: underline;
+}
+
+.md-typeset .sbu-cta p {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--sbu-ink);
+}
