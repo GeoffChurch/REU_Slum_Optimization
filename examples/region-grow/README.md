@@ -19,7 +19,7 @@ TypeScript error rather than a blank panel.
 
 **Provenance.** Block `ZAF.9.3.1_1_40972`, the same block PermGraph, Frontier and DisplacementField
 pin. The shipped neighbourhood is every block within 7 block-adjacency hops of the seed --
-213 blocks, of which 7 carry an interior ring. 7 hops is not a
+226 blocks, of which 7 carry an interior ring. 7 hops is not a
 round number with margin added: it is the smallest radius that contains the seed's own accretion at
 the slider's maximum budget, so the widget can never grow a region with a hole in it where shipped
 data runs out.
@@ -36,17 +36,17 @@ budget's order always extends a smaller one's for the same seed.
 
 | seed | max_buildings | blocks | buildings |
 |---|---|---|---|
-| `ZAF.9.3.1_1_40972` | 150 | 1 | 165 |
-| `ZAF.9.3.1_1_40972` | 600 | 3 | 721 |
-| `ZAF.9.3.1_1_40972` | 3,000 | 11 | 3,072 |
-| `ZAF.9.3.1_1_40972` | 10,000 | 54 | 10,011 |
-| `ZAF.9.3.1_1_40973` | 150 | 2 | 399 |
-| `ZAF.9.3.1_1_40973` | 600 | 4 | 794 |
-| `ZAF.9.3.1_1_40973` | 3,000 | 12 | 3,145 |
-| `ZAF.9.3.1_1_40973` | 10,000 | 55 | 10,084 |
-| `ZAF.9.3.1_1_40144` | 150 | 1 | 765 |
-| `ZAF.9.3.1_1_40144` | 600 | 1 | 765 |
-| `ZAF.9.3.1_1_40144` | 3,000 | 11 | 3,072 |
-| `ZAF.9.3.1_1_40144` | 10,000 | 54 | 10,011 |
+| `ZAF.9.3.1_1_40972` | 150 | 1 | 263 |
+| `ZAF.9.3.1_1_40972` | 600 | 2 | 716 |
+| `ZAF.9.3.1_1_40972` | 3,000 | 6 | 3,113 |
+| `ZAF.9.3.1_1_40972` | 10,000 | 38 | 10,065 |
+| `ZAF.9.3.1_1_40973` | 150 | 2 | 356 |
+| `ZAF.9.3.1_1_40973` | 600 | 3 | 809 |
+| `ZAF.9.3.1_1_40973` | 3,000 | 7 | 3,206 |
+| `ZAF.9.3.1_1_40973` | 10,000 | 38 | 10,054 |
+| `ZAF.9.3.1_1_40144` | 150 | 1 | 1,083 |
+| `ZAF.9.3.1_1_40144` | 600 | 1 | 1,083 |
+| `ZAF.9.3.1_1_40144` | 3,000 | 6 | 3,113 |
+| `ZAF.9.3.1_1_40144` | 10,000 | 38 | 10,065 |
 
 Regenerate: `pixi run python -m scripts.gen_region_grow`
