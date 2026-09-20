@@ -114,6 +114,31 @@ observations are not.
 deferred *because of what was seen*, so dropping them from the denominator biases the survey-miss
 rate — the same warning 19138's note carries. Count them explicitly, with a bound.
 
+**One marker, not two.** `19138` originally said `SKIPPED`; it was migrated to `DEFERRED`, which
+is the same judgement. `unclear` already covers "the rendering cannot support a call", so a second
+word for "the labels do not fit" bought nothing and cost a reader one more thing to know.
+
+### The deferral rate says the label set fails where the estimate needs it
+
+| stratum | selection | n | labelled | deferred |
+|---|---|---|---|---|
+| `10to30pct` | `queue` | 6 | 6 | **0%** |
+| `10to30pct` | `random` | 5 | 2 | **60%** |
+| `rest` | `dd_proxy_prefix` | 9 | 8 | 11% |
+
+This is structural, not sampling noise, and the mechanism is visible in the table. `queue` picked
+blocks where an agent and the survey **disagreed**, which are blocks with enough character for
+both to have formed an opinion — so of course they label cleanly. `rest` is mostly unambiguous
+formal suburb. **Random draws from `10to30pct` land in the middle of the distribution, which is
+exactly where fabric is mixed and the four labels fail** — and exactly where the survey-miss
+estimate lives.
+
+The consequence is worth stating plainly: **at a 60% deferral rate the miss-rate estimate cannot
+be completed with this label set.** Adjudicating all 25 sampled `10to30pct` rows would yield ~10
+usable labels and ~15 informative non-responses, which cannot be dropped. Refining the labels is
+not a tidy-up, it is the blocking step. Every deferred note carries its measurements precisely so
+that the refinement can relabel them without re-adjudicating.
+
 ### Why the labels do not fit: they collapse two axes into one
 
 The rule names the defining features as **density** and **access deprivation**, and then offers
