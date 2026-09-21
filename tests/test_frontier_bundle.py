@@ -20,8 +20,20 @@ DTS = Path("web/src/frontier.d.ts")
 # same methods that variant already grows, so it deliberately bakes no second copy of the renders
 # or the lenses (see `gen_site_pages.EXPLORE`). Checked, not assumed -- the two method sets are
 # asserted equal below before anything is compared.
+FIXTURE = Path("examples/explore-small/frontier.json")
 LENS = Path("examples/multiblock_depth_density/lens_permeability.csv")
 RUN_LOG = Path("examples/multiblock_depth_density/run.log")
+
+
+@pytest.fixture(scope="module")
+def small_bundle() -> dict[str, Any]:
+    """The 263-parcel parity fixture, baked by `gen_frontier_bundle --fixture`.
+
+    Separate from `bundle` because the two answer different questions. `bundle` is the SHIPPED
+    artifact and the cheap checks below hold it against the example's own lens CSV and run log.
+    This one is what the re-derivation test rebuilds from scratch -- the same staleness guard, on
+    a block where it costs ~115 s instead of 2,882 s."""
+    return cast(dict[str, Any], json.loads(FIXTURE.read_text(encoding="utf-8")))
 
 
 @pytest.fixture(scope="module")
@@ -157,14 +169,35 @@ def test_curve_length_matches_the_run_log_segment_count(bundle: dict[str, Any]) 
 
 
 @pytest.mark.slow
-def test_permeability_matches_the_solver_at_every_prefix(bundle: dict[str, Any]) -> None:
-    """THE parity test. Developer-local by design: it needs ~/.cache/reblock's city data, and CI
-    must stay hermetic (tests/conftest.py:19-20). Mirrors tests/data/test_osm_extract.py's
-    convention."""
+def test_permeability_matches_the_solver_at_every_prefix(
+        small_bundle: dict[str, Any]) -> None:
+    """THE parity test: a committed bundle must equal what the Python twin produces.
+
+    It re-derives the 263-parcel FIXTURE, not the shipped 6,619-parcel bundle. MEASURED
+    2026-09-21, the shipped block costs 2,882 s of a 2,895 s test -- and none of that is the
+    comparison. `tests/conftest.py` points `REBLOCK_CACHE_DIR` at a fresh temp dir every session
+    (deliberately: a hermetic suite must never read a developer's warm cache), so every method is
+    re-proposed from cold, and `greedy_arterial` alone is 2,011 s on that block against 98 s here.
+
+    What it still catches is exactly what it always caught: a curve-math change that is not
+    re-baked makes the COMMITTED fixture stop matching. What it stops catching is the shipped
+    bundle going stale on its own, and that is covered -- cheaply and only partly -- by
+    `test_terminals_agree_with_the_committed_lens_csv` and
+    `test_curve_length_matches_the_run_log_segment_count`, which hold the shipped file against the
+    example it was baked beside. A code change re-baked into the fixture but NOT into the shipped
+    bundle is the gap, and `regenerate_examples.sh` is what closes it. That is a process guard, not
+    a test guard, and saying so is better than implying otherwise.
+
+    EVERY prefix, not a sample. A stride was tried while this ran on the shipped block and bought
+    7% -- the sweep was never the cost. Here the full sweep is ~8 s of a ~115 s test, so the
+    stronger check is also the affordable one.
+
+    Developer-local by design: it needs ~/.cache/reblock's city data and CI must stay hermetic
+    (tests/conftest.py:19-20)."""
     blocks = Path.home() / ".cache" / "reblock" / "blocks_capetown_full.parquet"
     if not blocks.exists():
         pytest.skip("needs the capetown_full cache; run "
-                     "`pixi run python -m scripts.gen_frontier_bundle`")
+                    "`pixi run python -m scripts.gen_frontier_bundle --fixture`")
 
     from geopandas import GeoDataFrame
 
@@ -173,9 +206,11 @@ def test_permeability_matches_the_solver_at_every_prefix(bundle: dict[str, Any])
     from reblock.derive.access import STREET_TOL
     from reblock.derive.adjacency import parcel_adjacency
     from reblock.permeability import egress_power, permeability
-    from scripts._example_block import load_example_block
+    from scripts._example_block import TEST_VARIANT, load_example_block
 
-    block, roads_by_method = load_example_block()
+    block, roads_by_method = load_example_block(variant=TEST_VARIANT)
+    assert block.block_id == small_bundle["block_id"], (
+        "the fixture was baked from a different block than TEST_VARIANT pins today")
     params = load_permeability_config().params
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     p0, _ = egress_power(block, None, params, adj=adj)
@@ -183,7 +218,7 @@ def test_permeability_matches_the_solver_at_every_prefix(bundle: dict[str, Any])
         ordered = street_first_ordered(block, roads, STREET_TOL)
         got = [permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0, adj=adj)
                for m in range(len(ordered) + 1)]
-        np.testing.assert_allclose(bundle["methods"][name]["permeability"], got, rtol=1e-5,
+        np.testing.assert_allclose(small_bundle["methods"][name]["permeability"], got, rtol=1e-5,
                                    atol=1e-9, err_msg=name)
 
 

@@ -41,11 +41,19 @@ PINNED_VARIANT = "explore"
 # against the loop-closing refinement that supersedes it.
 PINNED_METHOD = "clearance_looped"
 
+# The TEST fixture: the same pipeline on a 263-parcel block. Parity tests pass this rather than
+# re-deriving the shipped 6,619-parcel artifact, which MEASURED at 2,882 s of a 2,895 s test --
+# `tests/conftest.py` gives every session a cold `REBLOCK_CACHE_DIR` by design, so nothing is
+# cached across runs and every method is re-proposed. Same five methods, same order, ~105 s.
+# See `conf/example/explore_small.yaml` for the measurements and for why it is not
+# `method_comparison` (topology, 377 s on this block, which `explore` does not run).
+TEST_VARIANT = "explore_small"
 
-def _compose_pinned_config() -> DictConfig:
+
+def _compose_pinned_config(variant: str = PINNED_VARIANT) -> DictConfig:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         return compose(config_name="compare_config",
-                       overrides=[f"+example={PINNED_VARIANT}", "data=capetown_full"])
+                       overrides=[f"+example={variant}", "data=capetown_full"])
 
 
 def _snapshot_path(cfg: DictConfig, block_id: str) -> Path:
@@ -55,14 +63,14 @@ def _snapshot_path(cfg: DictConfig, block_id: str) -> Path:
     return Path(f"examples/{cfg.example.slug}") / f"desire_lines_{block_id}.geojson"
 
 
-def example_method_names() -> list[str]:
+def example_method_names(variant: str = PINNED_VARIANT) -> list[str]:
     """The methods the pinned example runs, resolved WITHOUT proposing any of them.
 
     Separated from `load_example_block` because selection is a config list plus a
     snapshot-existence check, while loading is minutes of solving -- so the selection logic can be
     tested for the cost of reading a yaml.
     """
-    cfg = _compose_pinned_config()
+    cfg = _compose_pinned_config(variant)
     names = list(cfg.methods)
     block_id = str(cfg.block_ids[0][0])   # the pinned variant pins ONE block by design
     if _snapshot_path(cfg, block_id).exists():
@@ -70,7 +78,28 @@ def example_method_names() -> list[str]:
     return names
 
 
-def load_example_block(method: str | None = None) -> tuple[Block, dict[str, GeoDataFrame]]:
+def load_example_region(variant: str = PINNED_VARIANT) -> Block:
+    """The pinned block ALONE -- built, never reblocked.
+
+    `load_example_block` proposes, and proposing is the entire cost: on the spine block
+    `greedy_arterial` is 2,011 s and `cycle_native` 849 s, and `tests/conftest.py` gives every
+    test session a cold `REBLOCK_CACHE_DIR` so none of it is ever cached between runs. A caller
+    that only needs geometry -- the displacement bundle's parity check compares parcels, boundary
+    and streets against the live block and never looks at a road -- was paying all of it to read
+    `block.parcels`. Region build alone is 18.6 s.
+    """
+    cfg = _compose_pinned_config(variant)
+    source = cast(Source, instantiate(cfg.data))
+    screen = cast(Screen, instantiate(cfg.screen))
+    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
+    groups = [list(g) for g in cfg.block_ids]
+    region = build_regions(source, screen, region_builder, groups, int(cfg.max_blocks))[0]
+    assert len(region) == 1, f"{variant} pins a single block by design"
+    return region[0]
+
+
+def load_example_block(method: str | None = None,
+                       variant: str = PINNED_VARIANT) -> tuple[Block, dict[str, GeoDataFrame]]:
     """The pinned block plus roads per method name. `method=None` runs all eight:
     `example_method_names()` -- the seven conf/example/method_comparison.yaml declares, plus
     `osm_footpaths` -- the real as-built informal network, the reference the whole comparison is
@@ -84,7 +113,7 @@ def load_example_block(method: str | None = None) -> tuple[Block, dict[str, GeoD
     The variant pins one block rather than growing a region so that all five Explore bundles
     describe the same thing -- see conf/example/explore.yaml.
     """
-    cfg = _compose_pinned_config()
+    cfg = _compose_pinned_config(variant)
     source = cast(Source, instantiate(cfg.data))
     screen = cast(Screen, instantiate(cfg.screen))
     region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
@@ -93,7 +122,7 @@ def load_example_block(method: str | None = None) -> tuple[Block, dict[str, GeoD
     assert len(region) == 1, f"{PINNED_VARIANT} pins a single block by design"
     block = region[0]
 
-    names = [method] if method is not None else example_method_names()
+    names = [method] if method is not None else example_method_names(variant)
 
     snapshot = _snapshot_path(cfg, block.block_id)
     if "osm_footpaths" in names and snapshot.exists():
