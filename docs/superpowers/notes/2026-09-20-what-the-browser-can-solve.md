@@ -5,23 +5,35 @@ block (`ZAF.9.3.1_1_5810`) instead of the 263-parcel one it pins (`ZAF.9.3.1_1_4
 
 ## The numbers
 
+**Superseded 2026-09-20, same day.** The table below was an extrapolation and it was wrong in the
+way that mattered: it predicted ~1.4 s for the 6,619-parcel solve, and the real answer was that the
+solve *did not complete at all*. What it actually did, under Pyodide, was kill the interpreter --
+`NoGilError: Attempted to use PyProxy when Python GIL not held`, raised from inside shapely's
+`intersection`, down `solve_egress -> footpath_mesh -> parcel_adjacency`.
+
 | | 263 parcels | 6,619 parcels |
 |---|---|---|
-| native `solve_egress(block, road, params)` | 22.1 ms | **590 ms** |
-| Pyodide `runtime.solve(road)` | **52 ms** (median of 5) | ~1.4 s *(extrapolated)* |
-| authoring bundle on disk | 132 KB | ~3.3 MB *(extrapolated)* |
+| native `solve_egress`, adjacency recomputed | 22.1 ms | 593.9 ms |
+| native `solve_egress`, adjacency **passed** | — | **192.9 ms** |
+| Pyodide `runtime.solve` | 52 ms (measured) | measured only as a **fatal error**, since fixed |
+| authoring bundle on disk | 132 KB | 3.2 MB (predicted 3.3) |
 | cold Pyodide boot | 10.9 s | unchanged — boot is parcel-independent |
 
-**Pyodide costs 2.35× native** on this workload (52 ms against 22.1 ms, same call, same block).
-The solve is near-linear in parcels: 25× the parcels for 26.7× the time, which is what a sparse
-egress solve should do. Both extrapolations apply those two measured factors; neither is measured
-at 6,619 directly, and baking an authoring bundle for that block is what would remove the
-assumption.
+The cause was not scale. `block_from_bundle` rebuilt the `Block` from geometry alone and `solve()`
+called `solve_egress` without `adj`, so every solve recomputed the parcel adjacency -- an STRtree
+query plus a shapely `snap().intersection()` per candidate pair -- while the bundle had been
+carrying that exact adjacency all along, baked so the browser would not have to. 19,443 edges in
+the bundle; 19,443 from `parcel_adjacency`. Nothing read them.
 
-**Read these as an order of magnitude.** One machine, Node rather than a browser, and the
-2.35× factor was measured only at 263 parcels — WASM memory pressure could move it at 26× the
-working set. The decision does not hinge on the precision: even at double the estimate, ~2.8 s is
-usable for an action the reader deliberately triggers.
+Passing it is **68% of the solve** on this block and a 3x speedup on the small one too. The bundle
+size prediction was the one thing the extrapolation got right.
+
+**What to take from this:** the bundle-size column extrapolated cleanly because bytes scale with
+parcels. The timing column did not, because it was extrapolating a code path that should never
+have run, on a runtime whose failure mode at scale is a crash rather than a slowdown. A ratio
+measured at one size predicts the next size only if the algorithm is the same at both, and
+"recompute the adjacency every call" stops being an algorithm and starts being a bug somewhere
+between 263 and 6,619.
 
 ## Why the first measurement was wrong, which is the reusable part
 
