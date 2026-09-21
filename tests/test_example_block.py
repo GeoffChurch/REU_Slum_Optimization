@@ -71,6 +71,6 @@ def test_example_method_names_includes_osm_footpaths() -> None:
 
     names = example_method_names()
     assert set(names) == {
-        "clearance_looped", "cycle_native", "resistance_lp", "euclidean_grid",
+        "clearance_looped", "euclidean_grid", "cycle_native",
         "greedy_arterial_access_displacement", "osm_footpaths",
     }
