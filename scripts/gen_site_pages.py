@@ -41,10 +41,17 @@ ASSETS = DOCS / "assets"
 BRAND = DOCS / "brand"      # committed institutional marks, unlike the gitignored assets/
 EXAMPLES = ROOT / "examples"
 MC = ROOT / "examples" / "method-comparison"
-# The flagship region the site shows. `multiblock_depth_density`, not `multiblock_depth`, since
-# 2026-09-19: the `depth` example variant was dropped (the screen comparison it appeared to
-# provide is made better and far cheaper by gen_screen_bakeoff), so pointing at it would serve a
-# frozen directory that no longer regenerates -- stale numbers presented as current.
+# The Explore page's own directory. It holds only what is SPECIFIC to that page --
+# `frontier.json` and the OSM desire-line snapshot -- because the `explore` variant pins
+# the same block, with the same methods, that `multiblock_depth_density` already grows.
+# Its renders (the frontier PNG, the per-method GIFs) are therefore MB's, and baking a
+# second copy of them under this directory would be 40 MB of duplicate pictures whose
+# only distinguishing feature would be which of the two went stale first.
+EXPLORE = ROOT / "examples" / "explore"
+# The flagship region the site shows. `multiblock_depth_density`, not `multiblock_depth`: the
+# `depth` example variant was dropped 2026-09-19 (the screen comparison it appeared to provide is
+# made better and far cheaper by gen_screen_bakeoff) and its frozen directory was DELETED
+# 2026-09-20, so this is no longer a choice between two paths -- the other one is gone.
 MB = ROOT / "examples" / "multiblock_depth_density"
 # The SECOND region from the SAME screen (`seed_rank: 1`). Shown because the shipped metric
 # is a product of depth and density, and a single region cannot exhibit a trade-off between
@@ -272,13 +279,12 @@ def _bakeoff_figures() -> str:
     return "\n\n".join(out)
 
 
-def _perm_graph_panel(layer: str, state: str, *, mounted: bool) -> str:
+def _perm_graph_panel(layer: str, state: str) -> str:
     """One panel of the egress-graph grid, with its caption read off perm_graph.json.
 
-    Extracted so the Permeability section (all four panels) and Explore (the one a reader can drag)
-    cannot quote the same artifact two different ways. `mounted` decides whether this panel carries
-    the widget's mount-point attributes -- only current/after is ever passed True, because it is the
-    panel the fallback PNG and the caption already describe.
+    Extracted so the Permeability section's four panels cannot quote the same artifact two
+    different ways. It took a `mounted` flag until 2026-09-20, deciding whether the panel carried
+    the perm-graph widget's mount-point attributes; that widget is gone and the flag with it.
 
     The width claim names GREY edges specifically, not "footpath-mesh": upgraded (road) edges are
     footpath-mesh edges too (the mesh has no other kind for a road to raise -- see the grid's intro
@@ -316,37 +322,47 @@ def _perm_graph_panel(layer: str, state: str, *, mounted: bool) -> str:
                     f"{road_m:,.0f} m of road, reaching {p_after:.1f}% permeability.")
     caption = (f"Grey edge width is {layer} on the footpath mesh; the {n_upgraded} road-raised "
                f"edges (blue) draw at a fixed width instead. {roads_clause}")
-    attrs = ""
-    if mounted:
-        bundle_url = _copy_asset(PERMGRAPH / "bundle.json", "perm-graph")
-        if bundle_url:
-            # lens_b_index read straight from the artifact, not retyped: the mount point declares
-            # the boot prefix here, beside the caption it has to match, rather than the widget
-            # hardcoding it on every boot (fix wave, I8).
-            bundle_meta = json.loads((PERMGRAPH / "bundle.json").read_text(encoding="utf-8"))
-            # `data-layer` is THIS panel's own `layer`, not the literal "current" the pre-extraction
-            # version could safely write: there, the mount attributes were built inside an `if layer
-            # == "current"`, so the literal and the image were the same fact. Here `mounted` is the
-            # caller's decision and carries no such tie, and a mount point declaring a layer its
-            # fallback PNG does not show would boot the widget onto a different picture than the one
-            # the reader is looking at.
-            attrs = (f'data-widget="perm-graph" data-bundle="{bundle_url}" '
-                     f'data-layer="{layer}" data-prefix="{bundle_meta["lens_b_index"]}"')
-    return _figure(url, f"egress graph, {layer}, {state} roads", caption, attrs=attrs)
+    # No mount point. This panel carried `data-widget="perm-graph"` until 2026-09-20, booting a
+    # slider over 320 baked potential/current fields -- an 83 MB bundle on the spine block, 98.1%
+    # of it that one field table. The build-order animation it existed for is `_build_order_gif`
+    # below, which `gen_example` already bakes for every method.
+    return _figure(url, f"egress graph, {layer}, {state} roads", caption)
 
 
-def _perm_graph_widget_figure() -> str:
-    """JUST the interactive panel -- current, after -- for the Explore page.
+def _build_order_gif() -> str:
+    """The Explore page's Permeability stage: the pinned method's roads appearing in build order.
 
-    The Permeability section wants all four because the point THERE is the before/after and
-    conductance/current comparison. Explore wants the one a reader can drag; repeating the other
-    three would add three large images to a page that already fetches every bundle on the site, for
-    no additional teaching. Both pages go through `_perm_graph_panel`, so neither can drift.
+    A GIF, not a widget. This was an interactive slider over `examples/perm-graph/bundle.json`'s
+    per-prefix potential and current fields -- one full field per road. On the 263-parcel block it
+    was written for that was 21 frames x 1,008 values, 278 KB; on the spine block it became 320 x
+    26,062 and an 83 MB page asset, of which the field table was 98.1%.
 
-    The block-level lead sentence the four-panel grid carries stays with THAT grid: on Explore the
-    same facts are in the surrounding prose and the stage heading, and repeating them under one
-    figure would be the caption-duplication finding F5 again."""
-    return _perm_graph_panel("current", "after", mounted=True)
+    `gen_example` already bakes exactly this animation for every method it runs, stopping where the
+    network first reaches the matched-permeability standard -- the same prefix the slider used to
+    boot at. So the whole figure is a committed 850 KB GIF, and the bundle it replaced shrank to
+    1.5 MB carrying only the mesh and the drawing encoding DrawRoad reads.
+
+    What is lost, stated rather than glossed: the layer toggle (conductance/current) and the
+    hover-to-read-node-potential. Both survive on the methodology page's four-panel grid, which is
+    static and was never the thing costing 83 MB.
+
+    Emits nothing when the GIF is absent, like every other figure on this site."""
+    meta_path = PERMGRAPH / "perm_graph.json"
+    if not meta_path.exists():
+        return ""
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    method_key = meta["method"]
+    gif = MB / f"reblock_{method_key}.gif"
+    url = _copy_asset(gif, "multiblock_depth_density")
+    if url is None:
+        return ""
+    method = friendly_method_name(method_key)
+    return _figure(
+        url, f"{method}'s roads appearing in build order",
+        f"{method}'s roads, added busiest-first -- each preceded by whatever it needs to reach "
+        f"the street, so every frame is a network you could actually build. It stops where the "
+        f"network first reaches the matched-permeability standard: "
+        f"{meta['road_m']:,.0f} m of road, {meta['permeability_after'] * 100.0:.1f}% permeability.")
 
 
 def _perm_graph_figures() -> str:
@@ -368,15 +384,10 @@ def _perm_graph_figures() -> str:
     same scale as the heatmaps above": there are no heatmaps on this page, only these four images
     (fix round 1, Finding F1).
 
-    The current/after figure -- and ONLY that one -- is passed `mounted=True`, so it is the only
-    panel here carrying `data-widget="perm-graph"` mount-point attributes on its own `<figure>`
-    (Task 6; moved onto the figure itself rather than a wrapping `<div>` in the fix wave, I4 -- see
-    `_figure`'s docstring for why): a reader drags a slider along the road build-out order and
-    watches current concentrate into each new road while permeability climbs, using the same
-    bundle.json baked in Task 1. It is the panel the fallback PNG (graph_current_after.png) and its
-    caption already describe, so booting the widget there is fallback parity rather than a fourth
-    copy of the same widget: mounting all four would replace three distinct images with three
-    copies of the same slider. The other three stay plain `<figure>`s.
+    All four are plain `<figure>`s. The current/after panel used to carry the perm-graph widget's
+    mount point, so a reader could drag a slider along the build-out order; that widget was removed
+    on 2026-09-20 (its per-prefix field bundle cost 83 MB on the spine block) and the animation it
+    provided is now Explore's committed GIF -- see `_build_order_gif`.
     """
     meta = json.loads((PERMGRAPH / "perm_graph.json").read_text(encoding="utf-8"))
     block = meta["block_id"]
@@ -385,8 +396,7 @@ def _perm_graph_figures() -> str:
     figs: list[str] = []
     for layer in ("conductance", "current"):
         for state in ("before", "after"):
-            panel = _perm_graph_panel(layer, state,
-                                      mounted=(layer == "current" and state == "after"))
+            panel = _perm_graph_panel(layer, state)
             # `_perm_graph_panel` returns "" for a panel whose PNG is absent; an empty string
             # appended here would leave a non-empty `figs` and emit an empty grid.
             if panel:
@@ -544,14 +554,17 @@ def _frontier_figure() -> str:
     as dashed guides and the caption below states, so the widget cannot boot contradicting either.
     Emits nothing when the artifacts are absent, like every other figure on this site.
     """
-    path = MC / "frontier.json"
+    path = EXPLORE / "frontier.json"
     if not path.exists():
         return ""
     bundle = json.loads(path.read_text(encoding="utf-8"))
     block = bundle["block_id"]
-    png = MC / f"frontier_{block}.png"
-    img_url = _copy_asset(png, "method-comparison")
-    bundle_url = _copy_asset(path, "method-comparison")
+    # The BUNDLE is the Explore page's own; the fallback PNG is MB's, because the two describe the
+    # same block and MB is where `gen_example` renders it. Keyed on `block` rather than assumed, so
+    # a repin that moved them apart would fail to find the PNG instead of shipping the wrong one.
+    png = MB / f"frontier_{block}.png"
+    img_url = _copy_asset(png, "multiblock_depth_density")
+    bundle_url = _copy_asset(path, "explore")
     if img_url is None or bundle_url is None:
         return ""
 
@@ -1492,7 +1505,14 @@ def _key_result() -> str:
     lead = (f"At a matched road budget, <strong>{friendly_method_name(best['method'])}</strong> "
             f"reaches <strong>{_pct(float(best['permeability']))} permeability</strong>")
     if osm is None:
-        return f"{lead} across the 12-block benchmark region."
+        # Block count from `meta`, never a literal. This said "12-block" while the key figures
+        # two elements below said "1-block", both on the hero -- the same stale-literal failure
+        # the comment at `_mb_section` records for "12-block, 11,006-parcel".
+        meta_path = MB / "meta.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
+        where = (f"the {meta['region_members']}-block benchmark region"
+                 if "region_members" in meta else "the benchmark region")
+        return f"{lead} across {where}."
     return (f"{lead} — against <strong>{_pct(float(osm['permeability']))}</strong> for the "
             f"footpath network residents have already worn into the same settlement.")
 
@@ -1564,7 +1584,7 @@ MARKERS: dict[str, Callable[[], str]] = {
     # Explore's single draggable panel. Distinct from PERMGRAPHFIGS above, not a variant of it:
     # both go through `_perm_graph_panel`, so the two pages cannot quote perm_graph.json two
     # different ways.
-    "PERMGRAPHWIDGET": _perm_graph_widget_figure,
+    "PERMGRAPHWIDGET": _build_order_gif,
     "DRAWROAD": _draw_road_figure,
     "DISPFIELD": _displacement_field_figure,
     # Already called directly by `gen_benchmark_section()`; registering it here changes nothing

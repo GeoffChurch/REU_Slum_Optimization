@@ -16,7 +16,7 @@ parcels, boundary, streets and two default roads, plus the drawing encoding, so 
 PNG above are one picture and not two. The bake also writes `web/src/field.d.ts`, which is what
 makes a renamed field a TypeScript error rather than a blank panel.
 
-**Provenance.** Block `ZAF.9.3.1_1_40972`, 263 buildings — the block
+**Provenance.** Block `ZAF.9.3.1_1_5810`, 6,619 buildings — the block
 `conf/example/method_comparison.yaml` pins, so this is the same block every method page's
 before/after uses, and the same one [`../perm-graph/`](../perm-graph/) draws. The two roads are
 derived from the block by rule (`default_roads`), not taken from any method's output. Corridor
@@ -30,13 +30,13 @@ Python, and where the site caption's numbers come from. Each moves exactly one v
 `road1` baseline — `_cases` in `scripts/gen_displacement_field.py` says which, and why no two of
 them could pass for the same reason.
 
-| case | roads | width | Σcᵢ | of 263 buildings |
+| case | roads | width | Σcᵢ | of 6,619 buildings |
 |---|---|---|---|---|
-| `road1` | 1 | 7 m | 32.026 | 12.2% |
-| `apart` | 2 | 7 m, 7 m | 47.8436 | 18.2% |
-| `coincident` | 2 | 7 m, 7 m | 32.026 | 12.2% |
-| `widest` | 1 | 20 m | 68.1452 | 25.9% |
-| `in_a_gap` | 1 | 7 m | 21.8509 | 8.3% |
+| `road1` | 1 | 7 m | 126.376 | 1.9% |
+| `apart` | 2 | 7 m, 7 m | 254.589 | 3.8% |
+| `coincident` | 2 | 7 m, 7 m | 126.376 | 1.9% |
+| `widest` | 1 | 20 m | 313.164 | 4.7% |
+| `in_a_gap` | 1 | 7 m | 56.6331 | 0.9% |
 | `outside` | 1 | 7 m | 0 | 0.0% |
 
 Not one of the flagships in [`../README.md`](../README.md): those are walkthroughs that reproduce a

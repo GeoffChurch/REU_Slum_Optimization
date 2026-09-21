@@ -337,15 +337,15 @@ def test_methods_index_carries_one_frontier_mount_point_over_its_own_png_fallbac
     rewriter does not recognise."""
     import json
 
-    from scripts.gen_site_pages import MC, gen_methods_overview
+    from scripts.gen_site_pages import EXPLORE, gen_methods_overview
 
-    bundle = json.loads((MC / "frontier.json").read_text(encoding="utf-8"))
+    bundle = json.loads((EXPLORE / "frontier.json").read_text(encoding="utf-8"))
     markup = gen_methods_overview()
 
     assert markup.count('data-widget="frontier"') == 1
     # The fallback image, and the bundle URL in the exact `assets/...` form _write_page rewrites.
-    assert f'<img src="assets/method-comparison/frontier_{bundle["block_id"]}.png"' in markup
-    assert 'data-bundle="assets/method-comparison/frontier.json"' in markup
+    assert f'<img src="assets/multiblock_depth_density/frontier_{bundle["block_id"]}.png"' in markup
+    assert 'data-bundle="assets/explore/frontier.json"' in markup
     # The mount point sits on the <figure> itself, never on a wrapping <div>: `.sbu-figure-grid >
     # figure` resets margin and min-width on DIRECT children only (see _figure's docstring).
     assert '<div data-widget="frontier"' not in markup
@@ -376,9 +376,9 @@ def test_frontier_mount_point_states_the_bundles_own_targets() -> None:
     hand-typed target here would contradict the dashed guides on the image directly above it."""
     import json
 
-    from scripts.gen_site_pages import MC
+    from scripts.gen_site_pages import EXPLORE
 
-    bundle = json.loads((MC / "frontier.json").read_text(encoding="utf-8"))
+    bundle = json.loads((EXPLORE / "frontier.json").read_text(encoding="utf-8"))
     attrs = _frontier_mount_attrs()
 
     assert float(attrs["data-target-displacement"]) == bundle["matched_displacement"]
@@ -410,7 +410,7 @@ def test_the_page_ships_the_bundle_it_points_at_with_everything_the_widget_needs
     import json
 
     import scripts.gen_site_pages as gsp
-    from scripts.gen_site_pages import MC, gen_methods_overview
+    from scripts.gen_site_pages import EXPLORE, gen_methods_overview
 
     monkeypatch.setattr(gsp, "DOCS", tmp_path)
     monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
@@ -418,7 +418,7 @@ def test_the_page_ships_the_bundle_it_points_at_with_everything_the_widget_needs
     url = _frontier_mount_attrs()["data-bundle"]
     shipped = tmp_path / url
     assert shipped.exists(), f"the page points at {url}, which was never copied into docs/"
-    assert shipped.read_bytes() == (MC / "frontier.json").read_bytes()
+    assert shipped.read_bytes() == (EXPLORE / "frontier.json").read_bytes()
 
     bundle = json.loads(shipped.read_text(encoding="utf-8"))
     chart = bundle["chart"]
@@ -445,9 +445,9 @@ def test_methods_index_rewrites_the_frontier_bundle_url_for_its_served_depth(
     out = tmp_path / "index.md"
     _write_page(out, gen_methods_overview(), depth=2, url_depth=2, title="The methods")
     text = out.read_text(encoding="utf-8")
-    assert 'data-bundle="../../assets/method-comparison/frontier.json"' in text
+    assert 'data-bundle="../../assets/explore/frontier.json"' in text
     assert 'data-bundle="assets/' not in text
-    assert 'src="../../assets/method-comparison/frontier_' in text
+    assert 'src="../../assets/multiblock_depth_density/frontier_' in text
 
 
 def test_methods_index_is_written_at_the_url_depth_its_widget_needs() -> None:
@@ -946,11 +946,28 @@ def explore_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
     return gsp._render_partial("explore")
 
 
-def test_explore_carries_all_five_mount_points(explore_body: str) -> None:
-    """The page the whole piece exists for: one mount point per stage, in pipeline order, each
-    substituted from a marker rather than typed."""
-    order = ["screen-map", "region-grow", "perm-graph", "displacement-field", "frontier"]
+def test_explore_carries_a_mount_point_for_every_interactive_stage(explore_body: str) -> None:
+    """The page the whole piece exists for: one mount point per INTERACTIVE stage, in pipeline
+    order, each substituted from a marker rather than typed.
+
+    Four, not five. The Permeability stage was a `perm-graph` mount point until 2026-09-20 and is
+    now a committed GIF: the widget it booted was a slider over a per-prefix potential/current
+    table, which cost 83 MB on the spine block, and `gen_example` already bakes exactly that
+    build-order animation at 850 KB. So the stage is still there and still third -- it just is not
+    a widget any more, which is what the separate assertion below pins."""
+    order = ["screen-map", "region-grow", "displacement-field", "frontier"]
     assert re.findall(r'data-widget="([a-z-]+)"', explore_body) == order
+
+
+def test_the_permeability_stage_is_the_build_order_gif(explore_body: str) -> None:
+    """The stage between Growth and Displacement shows the animation, not a slider.
+
+    Asserted positively AND negatively: that the GIF is there, and that no `perm-graph` mount
+    point came back with it. Only the second catches a re-added widget sitting beside the GIF,
+    which is what a partial revert would leave and what would quietly restore the 83 MB fetch."""
+    assert "perm-graph" not in explore_body, "the perm-graph widget is gone; see gen_web_bundle"
+    assert re.search(r'<img src="[^"]*reblock_[a-z_]+\.gif"', explore_body), \
+        "the Permeability stage should carry gen_example's committed build-order GIF"
 
 
 def test_explore_rewrites_the_screen_maps_two_bundle_urls() -> None:

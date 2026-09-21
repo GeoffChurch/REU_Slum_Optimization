@@ -18,9 +18,11 @@ pixi run python -m scripts.gen_example <variant> nairobi
 where `<variant>` is the metric name — the subdirectory names below are `multiblock_<variant>`. Each
 variant's own `meta.json` records the exact command that produced it.
 
-- [`multiblock_depth/`](multiblock_depth/)
 - [`multiblock_depth_density/`](multiblock_depth_density/)
-- [`multiblock_density_compactness/`](multiblock_density_compactness/)
+
+`multiblock_depth/` and `multiblock_density_compactness/` were deleted on 2026-09-20 — dropped
+from the regeneration path, so the directories had frozen. Regenerate from
+`conf/example/depth.yaml` or `conf/example/density_compactness.yaml` if you need them.
 
 Source data is Kenya kblock clipped to the Nairobi metro bounding box plus Open Buildings
 (`data=nairobi_full`), auto-downloaded to `~/.cache/reblock` on first use.

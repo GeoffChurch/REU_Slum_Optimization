@@ -52,14 +52,19 @@ def test_every_coordinate_is_at_centimetre_precision(bundle: dict[str, Any]) -> 
 
 
 def test_the_neighbourhood_carries_its_holed_blocks(bundle: dict[str, Any]) -> None:
-    """7 of the 213 blocks have an interior ring, measured. If this drops to 0 the bundle went
+    """46 of the 534 blocks have an interior ring, measured. If this drops to 0 the bundle went
     through `polygon_ring` (which would have raised) or a ring list got flattened -- neither of
-    which changes any count the other tests check."""
+    which changes any count the other tests check.
+
+    A COUNT and the seed, not the 46 ids. This pinned all 7 ids when the neighbourhood was 213
+    blocks around a 263-parcel seed; at 534 an id list is a page of literals that any re-bake
+    rewrites wholesale, which makes a real flattening indistinguishable from a re-seed in the
+    diff. The seed is named because it is the one block whose rings are load-bearing elsewhere:
+    `ZAF.9.3.1_1_5810` is the Explore spine, its boundary HAS an interior ring, and `draw-road.ts`
+    threw on exactly that shape until 2026-09-20."""
     holed = [b["block_id"] for b in bundle["blocks"] if len(b["rings"]) > 1]
-    assert sorted(holed) == [
-        "ZAF.9.3.1_1_38616", "ZAF.9.3.1_1_38935", "ZAF.9.3.1_1_40664", "ZAF.9.3.1_1_40963",
-        "ZAF.9.3.1_1_41055", "ZAF.9.3.1_1_41838", "ZAF.9.3.1_1_41976",
-    ]
+    assert len(holed) == 46, f"{len(holed)} holed blocks; 0 means rings were flattened"
+    assert bundle["seed"] in holed, "the spine block's own boundary has an interior ring"
 
 
 def test_the_shipped_budget_floor_is_a_no_op_on_the_seed(bundle: dict[str, Any]) -> None:

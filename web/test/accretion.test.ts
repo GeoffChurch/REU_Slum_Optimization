@@ -87,8 +87,11 @@ test("the block_id tie-break decides when proxy and count both tie", () => {
 
 test("growth is nested in the budget", () => {
   const seed = indexOf.get(bundle.seed)!;
-  const small = grow(bundle.blocks, seed, 600);
-  const big = grow(bundle.blocks, seed, 3000);
+  // 7,500 and 12,000, not 600 and 3,000. The seed is 6,619 parcels on its own since the
+  // 2026-09-20 re-seed, so both old budgets grew exactly one block and `big.slice(0, n) ==
+  // small` held vacuously -- which the guard below caught and named.
+  const small = grow(bundle.blocks, seed, 7_500);
+  const big = grow(bundle.blocks, seed, 12_000);
   // Guard the guard: if the two budgets happened to grow the same region, `big.slice(0, n)`
   // would equal `small` no matter what the ordering did, and this test would assert nothing.
   assert.ok(big.length > small.length,

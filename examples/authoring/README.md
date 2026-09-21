@@ -12,8 +12,8 @@ re-implementation of the metric, which is the entire reason this stage boots a P
 `web/test/pyodide-parity.test.ts` is the parity test -- all three are on disk, and all three are
 written against this bundle.
 
-**The block** is `ZAF.9.3.1_1_40972` in EPSG:32734 -- the same block every other
-stage of the site follows. It carries 263 parcels, 1 street line and 263 building points.
+**The block** is `ZAF.9.3.1_1_5810` in EPSG:32734 -- the same block every other
+stage of the site follows. It carries 6,619 parcels, 2 street lines and 6,619 building points.
 
 **Full float64, absolute coordinates.** Every other committed bundle here ships cm-rounded,
 origin-relative metres, which is right for drawing and wrong for solving. Measured on the reference
@@ -26,9 +26,9 @@ with CPython, so the two sides have to be reading the same numbers.
 
 **The baked graph.** A drawn road changes per-edge conductance and per-parcel potential and nothing
 else -- the mesh takes no roads and grounding comes from the street -- so the road-invariant half is
-baked once rather than recomputed on every edit: 263 parcel centroids, 44 of them street-fronting,
-745 footpath edges, and a no-roads baseline of
-p0 = 93672.125206.
+baked once rather than recomputed on every edit: 6,619 parcel centroids, 452 of them street-fronting,
+19,443 footpath edges, and a no-roads baseline of
+p0 = 54124005.147296.
 
 **Reference roads.** Fixed polylines with `solve_egress`' own `1 - p/p0` for each. Before writing
 anything the baker rebuilds the block from the JSON it is about to write, checks every baked column
@@ -37,7 +37,7 @@ roads -- so a bundle that has lost precision never reaches the disk.
 
 | road | vertices | permeability |
 |---|---|---|
-| `crossing` | 3 | 0.6990047698 |
-| `spur` | 2 | 0.3637809513 |
+| `crossing` | 3 | 0.0000000000 |
+| `spur` | 2 | 0.0000000000 |
 
 Regenerate: `pixi run python -m scripts.gen_authoring_block`

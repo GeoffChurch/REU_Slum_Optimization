@@ -26,7 +26,24 @@ block_ids: null
   # (~80 min uncapped); max_anchors: 128 stacks a further 7.6x median (2.5-12.2x, 6/6 regions, no
   # detectable quality difference at matched displacement) -- ~330x combined, ~10 min now. See
   # notes/2026-08-11-max-anchors-is-a-region-scale-win.md and compare_config.yaml's own comment.
-methods: [clearance_looped, euclidean_grid, resistance_lp, cycle_native, greedy_arterial_access_displacement]
+# `resistance_lp` is DELIBERATELY ABSENT, and runs only in `method_comparison`.
+#
+# It wins on the reported axes and the win is an artifact of what they charge. MEASURED on
+# `ZAF.9.3.1_1_5810` at matched displacement (~10% for both), it reaches 0.903 permeability
+# against `cycle_native`'s 0.893 -- by laying 11,928 m of road where `clearance_looped` lays
+# 5,377. Its full set is 5,617 segments over 35,044 m: a 6.2 m MEAN SEGMENT. That is not a road
+# network, it is a mesh threaded through the gaps between buildings, and it scores well precisely
+# because permeability and displacement charge HOMES, not metres and not fragmentation. A method
+# that fragments is rewarded by the two axes this project reports.
+#
+# It stays in `method_comparison` because that page exists to show every family head-to-head,
+# including the ones whose output does not survive inspection -- deleting it there would hide the
+# finding rather than record it.
+#
+# The second reason is cost, and it is not small: the frontier bundle solves permeability once per
+# SEGMENT, so 5,617 segments is ~5,618 solves at ~590 ms = ~55 min, against ~7 min for every other
+# method combined. It was 89% of a 62-minute bake.
+methods: [clearance_looped, euclidean_grid, cycle_native, greedy_arterial_access_displacement]
 max_blocks: 2
 # Which block of the screen's ranking seeds the region. 0 = the top-scoring block.
 # `depth_density_2` is the same variant at rank 1, so the site shows two regions from ONE screen

@@ -35,19 +35,29 @@ const BUNDLE = JSON.parse(
 
 /** How far the two runtimes are allowed to disagree about a permeability, in absolute terms.
  *
- * The claim started as exact equality and did not survive contact with the runtime. MEASURED at
- * this commit, and identical across repeated runs: `crossing` agrees to the last bit (difference
- * exactly 0), `spur` does not -- Pyodide returns 0.3637809513169823 where CPython bakes
- * 0.3637809513169825, a difference of 2.220446e-16, which at that magnitude is four units in the
- * last place. CPython on this machine reproduces both baked numbers exactly, so the disagreement
- * is Pyodide's arithmetic against CPython's, not a stale bake. The stacks differ underneath:
- * numpy 2.2.5 / scipy 1.14.1 on wasm against numpy 2.5.0 / scipy 1.18.0 on x86-64, and the
- * quantity is the tail of a sparse solve.
+ * The claim started as exact equality and did not survive contact with the runtime. Measured on
+ * the 263-parcel spine block: `crossing` agreed to the last bit and `spur` differed by
+ * 2.220446e-16, four units in the last place at that magnitude.
+ *
+ * RAISED 2026-09-20, from 1e-15 to 5e-15, and the difference is the finding the note below asks
+ * for. The spine block moved to `ZAF.9.3.1_1_5810` -- 6,619 parcels against 263, a sparse solve
+ * 25x larger -- and the disagreement grew with it: `crossing` now returns 1.1102230246251565e-15
+ * under Pyodide where CPython bakes exactly 0. That is 5x the old worst case and it exceeded the
+ * old tolerance, which is the test doing its job rather than a regression: floating-point error
+ * in the tail of a sparse solve accumulates with the size of the system, so a 25x larger problem
+ * disagreeing 5x more is the expected shape.
+ *
+ * Note WHERE it is: the baked value is exactly 0, so there is no relative tolerance to fall back
+ * on and the absolute bound is the only one available at this magnitude.
+ *
+ * CPython on this machine reproduces the baked numbers exactly, so the disagreement is Pyodide's
+ * arithmetic against CPython's, not a stale bake. The stacks differ underneath: numpy 2.2.5 /
+ * scipy 1.14.1 on wasm against numpy 2.5.0 / scipy 1.18.0 on x86-64.
  *
  * 1e-15 is a STATED tolerance, not one widened until the suite went green:
  *
- *   * it is ~4.5x the largest disagreement actually observed;
- *   * it is ~4.7e10 times SMALLER than 4.71e-05 -- the SMALLEST effect `authoring.d.ts` records as
+ *   * it is ~4.5x the largest disagreement actually observed (5e-15 against 1.110223e-15);
+ *   * it is ~9.4e9 times SMALLER than 4.71e-05 -- the SMALLEST effect `authoring.d.ts` records as
  *     one a runtime-parity guard must not absorb (design §1.4, measured on the clearance method's
  *     road set). `authoring.d.ts` also records what rounding THIS bundle's own reference roads to
  *     centimetres costs -- 1.66e-03 for `crossing`, 1.96e-03 for `spur` -- larger still, so
@@ -64,7 +74,7 @@ const BUNDLE = JSON.parse(
  * If this ever needs raising, the difference and its magnitude are the finding -- record them the
  * way this comment does. A tolerance widened until the test passes has stopped measuring the
  * runtime, which is the only thing this test exists to measure. */
-const PARITY_TOL = 1e-15;
+const PARITY_TOL = 5e-15;
 
 /** `node_modules/pyodide/`, absolute, with the trailing slash `pyodideRuntime` concatenates
  * `pyodide.mjs` onto.

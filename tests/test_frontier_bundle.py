@@ -9,10 +9,19 @@ from typing import Any, cast
 import numpy as np
 import pytest
 
-BUNDLE = Path("examples/method-comparison/frontier.json")
+BUNDLE = Path("examples/explore/frontier.json")
 DTS = Path("web/src/frontier.d.ts")
-LENS = Path("examples/method-comparison/lens_permeability.csv")
-RUN_LOG = Path("examples/method-comparison/run.log")
+# The lens CSV and run log for the block the bundle is BAKED FROM. These named
+# `examples/method-comparison/` until 2026-09-20, when `_example_block.py`'s pin moved to the
+# `explore` variant and the bundle became block ZAF.9.3.1_1_5810 -- against artifacts still
+# describing ZAF.9.3.1_1_40972, which is a comparison that can never agree.
+#
+# `multiblock_depth_density/`, not `explore/`: the `explore` variant pins the same block with the
+# same methods that variant already grows, so it deliberately bakes no second copy of the renders
+# or the lenses (see `gen_site_pages.EXPLORE`). Checked, not assumed -- the two method sets are
+# asserted equal below before anything is compared.
+LENS = Path("examples/multiblock_depth_density/lens_permeability.csv")
+RUN_LOG = Path("examples/multiblock_depth_density/run.log")
 
 
 @pytest.fixture(scope="module")
@@ -22,7 +31,12 @@ def bundle() -> dict[str, Any]:
 
 
 def test_every_curve_is_internally_consistent(bundle: dict[str, Any]) -> None:
-    assert len(bundle["methods"]) == 8
+    # 5, not 8: the bundle is baked from `_example_block.py`'s pin, which moved to the `explore`
+    # variant on 2026-09-20. That variant runs four methods plus the `osm_footpaths` reference;
+    # the 8 was `method_comparison`'s seven-plus-reference, and `method_comparison` keeps the two
+    # this block cannot run -- `topology` (NodeNotFound at 6,619 parcels) and `resistance_lp`
+    # (dropped for a 6.2 m mean segment; see conf/example/explore.yaml).
+    assert len(bundle["methods"]) == 5
     for name, c in bundle["methods"].items():
         n = len(c["road_m"])
         assert len(c["displacement"]) == len(c["permeability"]) == n, name

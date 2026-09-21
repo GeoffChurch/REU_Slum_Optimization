@@ -1,10 +1,9 @@
 [__main__][INFO] screen: flagged 1000/16200 blocks (0.2s)
 [__main__][INFO] region built: 7 blocks / 5107 parcels (4.1s)
-[scripts.compare_budgets][INFO] reblocked clearance_looped: 187 segments, 9166 m (14.4s)
-[scripts.compare_budgets][INFO] reblocked euclidean_grid: 88 segments, 11767 m (0.2s)
-[scripts.compare_budgets][INFO] reblocked resistance_lp: 6295 segments, 38935 m (40.5s)
-[scripts.compare_budgets][INFO] reblocked cycle_native: 506 segments, 25268 m (1313.6s)
-[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 351 segments, 16696 m (2056.8s)
-[scripts.compare_budgets][INFO] reblocked osm_footpaths: 30 segments, 2443 m (0.1s)
-[scripts.compare_budgets][INFO] lens/frontier curves computed for 6 methods (79.0s)
-wrote examples/nairobi/multiblock_depth_density: 7 blocks / 5107 parcels; flagged 1000/16200; 6 methods; README + maps + lens CSVs
+[scripts.compare_budgets][INFO] reblocked clearance_looped: 187 segments, 9166 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked euclidean_grid: 88 segments, 11767 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked cycle_native: 506 segments, 25268 m (1304.6s)
+[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 351 segments, 16696 m (0.0s)
+[scripts.compare_budgets][INFO] reblocked osm_footpaths: 30 segments, 2443 m (0.0s)
+[scripts.compare_budgets][INFO] lens/frontier curves computed for 5 methods (48.7s)
+wrote examples/nairobi/multiblock_depth_density: 7 blocks / 5107 parcels; flagged 1000/16200; 5 methods; README + maps + lens CSVs

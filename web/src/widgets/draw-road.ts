@@ -155,17 +155,19 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
     throw new Error(`${LABEL}: the drawing scale was baked for block ${GRAPH_ENCODING_BLOCK_ID}, `
       + `but this bundle is block ${ab.block_id}`);
   }
-  // ONE ring, and refused otherwise rather than silently drawn as its exterior alone.
-  // `scripts/_bundle_io.py`'s `polygon_ring` -- the function that bakes this same field for every
-  // render bundle -- RAISES on a Polygon with interiors ("report this instead of silently dropping
-  // geometry"), and `draw` strokes a single ring, so this mirrors the Python instead of inventing
-  // a quieter rule. `AuthoringBlock.boundary` is typed as a ring LIST because the baker preserves
-  // whatever the source had; the pinned block has one ring, so nothing changes today.
-  const boundary = ab.boundary[0];
-  if (boundary === undefined || ab.boundary.length !== 1) {
-    throw new Error(`${LABEL}: the block boundary has ${ab.boundary.length} rings, and this `
-      + `figure draws one`);
+  // EVERY ring, passed through. This used to take `ab.boundary[0]` and throw on anything else,
+  // mirroring `polygon_ring`'s own refusal to drop a hole silently -- correct while `draw` stroked
+  // a single ring, which it no longer does (`Drawable.boundary` is a ring list as of 2026-09-20,
+  // and every render bundle now bakes one). The refusal was not hypothetical: the block this
+  // widget was repinned to, `ZAF.9.3.1_1_5810`, HAS an interior ring, so it would have thrown at
+  // boot. What replaces it is not a quieter rule but a stricter one -- the hole is now drawn.
+  //
+  // An EMPTY list is still refused. A block with no exterior is not a block, and the flat-list
+  // rendering below would silently draw nothing at all for it.
+  if (ab.boundary.length === 0) {
+    throw new Error(`${LABEL}: the block boundary has no rings`);
   }
+  const boundary = ab.boundary;
 
   const caption = host.querySelector("figcaption");
 
@@ -630,12 +632,17 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
   observeSize(cv, (measured) => runOrReport(host, LABEL, () => {
     size = measured;
     sizeCanvas(cv, size);
-    // The block's exterior ring. MEASURED on the committed bundle: the parcels' and the streets'
-    // own bounding boxes are identical to this one digit for digit, so nothing `draw` paints
-    // falls outside the fit. The reader's road can -- they may click anywhere on the canvas,
-    // including the padding -- and it deliberately does not move the fit, so the block does not
-    // shrink under a road drawn past its edge.
-    view = fitBbox(bboxOf(boundary), size.width, size.height);
+    // The block's EXTERIOR ring specifically, `boundary[0]`, not every ring: an interior ring
+    // lies inside the exterior by definition, so it cannot widen the box, and fitting the union
+    // would only invite a reader to wonder whether it could. Non-null because the boot check
+    // above refuses an empty ring list.
+    //
+    // MEASURED on the committed bundle: the parcels' and the streets' own bounding boxes are
+    // identical to this one digit for digit, so nothing `draw` paints falls outside the fit. The
+    // reader's road can -- they may click anywhere on the canvas, including the padding -- and it
+    // deliberately does not move the fit, so the block does not shrink under a road drawn past
+    // its edge.
+    view = fitBbox(bboxOf(boundary[0]!), size.width, size.height);
     render();
     if (firstDraw) {
       firstDraw = false;

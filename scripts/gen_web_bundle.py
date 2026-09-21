@@ -38,7 +38,7 @@ from reblock.render import (
     _ROAD_COLOR,
     _UPGRADED_LW,
 )
-from scripts._bundle_io import cm, line_coords, polygon_ring, sigfig
+from scripts._bundle_io import cm, line_coords, polygon_rings, sigfig
 from scripts._example_block import PINNED_METHOD, load_example_block
 
 log = logging.getLogger(__name__)
@@ -83,26 +83,21 @@ export interface Encoding {
 export interface Bundle {
   block_id: string;
   method: string;
-  lens_b_index: number;
-  n_prefixes: number;
   /** UTM easting/northing subtracted from every coordinate below; all geometry is local metres. */
   origin: [number, number];
   parcels: [number, number][][];
-  /** Block exterior ring, relative to `origin` -- fallback-parity background layer; see
+  /** The block's rings, EXTERIOR FIRST -- relative to `origin`. Rings, not a ring: a block
+   * boundary can have interior rings and `ZAF.9.3.1_1_5810`'s does, so an exterior-only field
+   * would draw an outline with a hole missing from it. Each is stroked closed and none is
+   * filled, so there is no even-odd rule to get right. Fallback-parity background layer; see
    * `_draw_boundary_and_streets` in render.py, which draws this under the graph on every PNG. */
-  boundary: [number, number][];
+  boundary: [number, number][][];
   /** Existing street network, relative to `origin`; one entry per disjoint line (a block's
    * streets are not always a single connected LineString). Fallback-parity, same as `boundary`. */
   streets: [number, number][][];
   nodes: { cx: number[]; cy: number[]; ground_g: number[] };
-  edges: { rows: number[]; cols: number[]; footpath_g: number[]; first_upgraded_at: number[] };
+  edges: { rows: number[]; cols: number[]; footpath_g: number[] };
   roads: { coords: [number, number][]; width_m: number }[];
-  prefix: {
-    potential: number[][];
-    current: number[][];
-    permeability: number[];
-    road_m: number[];
-  };
   encoding: Encoding;
 }
 '''
@@ -126,16 +121,23 @@ def main() -> None:
     # boot here or the caption below it describes a different picture.
     lens_b_index = len(prefix)
 
+    # TWO prefixes, not all of them. This used to solve every prefix m in 0..len(ordered) and bake
+    # a full potential field (one value per parcel) and current field (one per edge) for each, so
+    # the reader could scrub road-by-road. That was 21 frames x 1,008 values on the 263-parcel
+    # block this was written for; on `ZAF.9.3.1_1_5810` it became 320 x 26,062 -- an 83 MB bundle,
+    # of which `prefix` was 98.1%, for a page asset. The build-order animation it fed is now the
+    # committed `reblock_<method>.gif`, which `gen_example` already bakes for every method and
+    # which already stops at the matched-permeability standard -- 850 KB against 80 MB, and no
+    # solver in the browser to feed it.
+    #
+    # What still needs a solve is `width_norm`: the drawing scale DrawRoad reads out of this
+    # bundle's `encoding`. m=0 and the Lens-B index are exactly the two `gen_perm_graph.py` pools
+    # its PNG norm over, and this file's own note already recorded that pooling every prefix
+    # reproduces that two-prefix number precisely (the per-prefix mesh p99 falls monotonically,
+    # so the maximum lands at m=0). So this is the same number by a cheaper route, not a weaker one.
     figs = [permeability_graph(block, cast(GeoDataFrame, ordered.iloc[:m]), params)
-            for m in range(len(ordered) + 1)]
+            for m in (0, lens_b_index)]
     base = figs[0]
-
-    # `upgraded` is monotone in the road set (conductance enters only through max(footpath, road)),
-    # so store the first m at which each edge is raised instead of 21 x 745 booleans. -1 = never.
-    first_upgraded_at = np.full(len(base.rows), -1, dtype=int)
-    for m, f in enumerate(figs):
-        newly = f.upgraded & (first_upgraded_at < 0)
-        first_upgraded_at[newly] = m
 
     # Mesh-only width norms (fix wave, C2): for each layer, the TRUE MAXIMUM over every prefix m of
     # that layer's p99, restricted to prefix m's OWN mesh (edges not yet upgraded at m -- the same
@@ -161,8 +163,17 @@ def main() -> None:
     # and never learns the CRS; `width_m` is a length, so translation leaves it alone.
     ox, oy = float(base.cx.min()), float(base.cy.min())
 
-    parcel_coords = [polygon_ring(g, ox, oy, what=f"block {block.block_id!r}'s parcel")
-                     for g in block.parcels.geometry]
+    # EVERY ring, flattened: `Drawable.parcels` is one entry per RING, not per parcel -- `draw`
+    # strokes each as a closed outline and never asks which parcel it belongs to, which is also
+    # how DrawRoad consumes the authoring bundle's per-parcel ring lists. So a hole costs one more
+    # entry and nothing else; there is no fill and therefore no even-odd question here.
+    # `polygon_ring` used to be called instead, and RAISED on a parcel with holes -- which is how
+    # `ZAF.9.3.1_1_5810` was found to have exactly 1 holed parcel of 6,619 when the Explore page
+    # was repinned to it. Dropping the hole was never an option: it would have inflated that
+    # parcel's area and changed the permeability the widget solves.
+    parcel_coords = [ring for g in block.parcels.geometry
+                     for ring in polygon_rings(g, ox, oy,
+                                               what=f"block {block.block_id!r}'s parcel")]
 
     # Fallback parity: _draw_boundary_and_streets (render.py) draws the block outline and the
     # EXISTING street network under every graph PNG, including graph_current_after.png -- the
@@ -170,11 +181,11 @@ def main() -> None:
     # geometry, so bake it here rather than let the interactive version silently omit context the
     # static fallback always shows.
     #
-    # `polygon_ring` raises on a MultiPolygon boundary: `load_block_and_roads` asserts this figure
-    # set is single-block, so the gappy-region case _draw_boundary_and_streets skips should not
-    # arise here, and if it ever does it is worth reporting rather than dropping.
-    boundary_coords = polygon_ring(block.boundary, ox, oy,
-                                   what=f"block {block.block_id!r}'s boundary")
+    # Rings, not a ring: `ZAF.9.3.1_1_5810`'s own boundary has an interior ring, so the exterior
+    # alone would draw a block outline with a hole missing from it. `polygon_rings` still raises
+    # on a MultiPolygon, which `load_block_and_roads` asserts cannot arise for this figure set.
+    boundary_coords = polygon_rings(block.boundary, ox, oy,
+                                    what=f"block {block.block_id!r}'s boundary")
 
     street_coords: list[list[list[float]]] = []
     for g in block.streets.geometry:
@@ -183,8 +194,6 @@ def main() -> None:
     bundle = {
         "block_id": block.block_id,
         "method": PINNED_METHOD,
-        "lens_b_index": lens_b_index,
-        "n_prefixes": len(figs),
         "origin": [ox, oy],
         "parcels": parcel_coords,
         "boundary": boundary_coords,
@@ -192,23 +201,10 @@ def main() -> None:
         "nodes": {"cx": [cm(v - ox) for v in base.cx], "cy": [cm(v - oy) for v in base.cy],
                   "ground_g": [sigfig(v) for v in base.ground_g]},
         "edges": {"rows": base.rows.tolist(), "cols": base.cols.tolist(),
-                  "footpath_g": [sigfig(v) for v in base.footpath_g],
-                  "first_upgraded_at": first_upgraded_at.tolist()},
+                  "footpath_g": [sigfig(v) for v in base.footpath_g]},
         "roads": [{"coords": [[cm(x - ox), cm(y - oy)] for x, y in g.coords],
                    "width_m": float(w)}
                   for g, w in zip(ordered.geometry, ordered["width_m"], strict=True)],
-        "prefix": {
-            "potential": [[sigfig(v) for v in f.potential] for f in figs],
-            "current": [[sigfig(v) for v in f.current] for f in figs],
-            "permeability": [sigfig(1.0 - f.p / base.p) for f in figs],
-            # `ordered.geometry.iloc[:m]` types (wrongly) as a scalar BaseGeometry -- the same
-            # geopandas-stub slice-collapse the `cast`s elsewhere on this page work around --
-            # which then makes `.length` resolve to a single float instead of a Series. Slicing
-            # the frame (not the geometry column) before reading `.length` sidesteps it and is
-            # the same value: selecting first-m-then-geometry equals geometry-then-first-m.
-            "road_m": [sigfig(float(cast(GeoDataFrame, ordered.iloc[:m]).length.sum()))
-                       for m in range(len(figs))],
-        },
         "encoding": {
             "width_norm": width_norm,
             "edge_lw_min": _EDGE_LW_MIN, "edge_lw_max": _EDGE_LW_MAX,

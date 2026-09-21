@@ -253,7 +253,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     from geopandas import GeoDataFrame, points_from_xy
 
     from reblock.budget import building_radii, displacement, displacement_from_distance
-    from scripts._bundle_io import line_coords, polygon_ring, sigfig
+    from scripts._bundle_io import line_coords, polygon_rings, sigfig
     from scripts._default_road import closed_form_distance, default_roads, segments
     from scripts._example_block import load_example_block
     from scripts.gen_displacement_field import (
@@ -284,9 +284,12 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     assert bundle["n_buildings"] == len(block.building_points)
     field = quantised_field(block, radii, ox, oy)
     assert bundle["buildings"] == field.stored
-    assert bundle["parcels"] == [polygon_ring(g, ox, oy, what="parcel")
-                                 for g in block.parcels.geometry]
-    assert bundle["boundary"] == polygon_ring(block.boundary, ox, oy, what="boundary")
+    # `polygon_rings`, not `polygon_ring`: both fields carry EVERY ring since 2026-09-20. The
+    # single-ring version raises on a hole rather than dropping one, which is how the spine block's
+    # 1 holed parcel (of 6,619) and its holed BOUNDARY were found when the pin moved there.
+    assert bundle["parcels"] == [ring for g in block.parcels.geometry
+                                 for ring in polygon_rings(g, ox, oy, what="parcel")]
+    assert bundle["boundary"] == polygon_rings(block.boundary, ox, oy, what="boundary")
     assert bundle["streets"] == [line for g in block.streets.geometry
                                  for line in line_coords(g, ox, oy)]
     default = default_roads(block, WIDTH_FLOOR_M)
@@ -324,11 +327,12 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
             f"{case['name']}: the committed bundle says {case['sum_c']}, the code now computes "
             f"{recomputed}; regenerate: pixi run python -m scripts.gen_displacement_field")
 
-    # Job 2: the closed form against shapely on the eight methods' REAL road sets, at raw
-    # precision -- nothing here is quantised, because this is about the formula.
+    # Job 2: the closed form against shapely on every method's REAL road sets, at raw precision --
+    # nothing here is quantised, because this is about the formula. Five since the spine repin of
+    # 2026-09-20, where it was eight; `tests/test_frontier_bundle.py` says which two went.
     raw_x = block.building_points.geometry.x.to_numpy(dtype=float)
     raw_y = block.building_points.geometry.y.to_numpy(dtype=float)
-    assert len(roads_by_method) == 8, sorted(roads_by_method)
+    assert len(roads_by_method) == 5, sorted(roads_by_method)
     for name, roads in sorted(roads_by_method.items()):
         truth = displacement(block.building_points, radii, roads)
         closed = displacement_from_distance(
@@ -352,7 +356,9 @@ def _coordinates(b: dict[str, Any]) -> list[tuple[str, float]]:
     out += [("buildings.x", v) for v in b["buildings"]["x"]]
     out += [("buildings.y", v) for v in b["buildings"]["y"]]
     out += [("parcels", v) for ring in b["parcels"] for xy in ring for v in xy]
-    out += [("boundary", v) for xy in b["boundary"] for v in xy]
+    # One level deeper than it used to be: `boundary` is a ring LIST now, so walking it as a
+    # single ring hands `abs()` a coordinate pair and raises rather than checking anything.
+    out += [("boundary", v) for ring in b["boundary"] for xy in ring for v in xy]
     out += [("streets", v) for line in b["streets"] for xy in line for v in xy]
     out += [("roads[].coords", v) for r in b["roads"] for xy in r["coords"] for v in xy]
     out += [(f"reference[{c['name']}].roads[].coords", v)

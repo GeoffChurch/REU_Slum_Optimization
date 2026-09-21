@@ -14,19 +14,25 @@ git clone --recurse-submodules <repo-url>
 
 # Install pixi: https://pixi.sh/latest/#installation
 pixi install
+pixi run hooks       # once per clone: points core.hooksPath at .githooks/
 ```
 
 ## Common tasks
 
 ```bash
-pixi run test        # pytest + coverage, then the web/ node suite (~22 min with the city cache
-                     #   warm: two developer-local parity tests, one re-solving permeability at all
-                     #   784 baked prefixes. `pixi run pytest -m "not slow"` skips both, ~1.5 min.)
+pixi run test        # pytest + coverage, then the web/ node suite (~55 min with the city cache
+                     #   warm: the developer-local parity tests re-solve permeability on the
+                     #   6,619-parcel spine block. `pixi run pytest -m "not slow"` skips them.)
 pixi run typecheck   # mypy --strict + tsc --noEmit (web/)
-pixi run lint        # ruff check
-pixi run fmt         # ruff format
+pixi run lint        # ruff check -- the formatting gate, in the hook and in CI
+pixi run hooks       # install the pre-commit hook (once per clone)
 pixi run check       # lint + typecheck + test
 ```
+
+There is no `fmt` task, deliberately. `ruff format` reformats 200 of this repo's 215 files, leaves
+12 lines over the `E501` limit it cannot split, and moves a `# type: ignore` off the line it
+suppresses — measured, and argued in full at `.githooks/pre-commit`. `ruff check` is the gate
+instead, and it already owns line length (`E501`) and import order (`I`).
 
 ## Quickstart
 

@@ -51,9 +51,24 @@ street — bought against **displacement**, the homes a road set grazes. Both ar
 way for every method, including the footpath network residents built themselves, so the comparison
 is like-for-like rather than a scoreboard of incompatible scores.
 
+<div class="sbu-cta" markdown>
+
+## [Explore it yourself →](explore.md)
+
+Five stages on one Cape Town block, each one live: drag the screening floor across a whole metro,
+grow a region block by block, **draw your own road and get its real permeability** — solved in your
+browser by the same code that produced every number on this site, not a recording of it. Every
+control writes to the address bar, so a view you find is a link you can send.
+
+</div>
+
 ## Start here
 
 <div class="grid cards" markdown>
+
+-   **[Explore](explore.md)**
+
+    The pipeline, interactive — screen, grow, solve, and draw a road of your own.
 
 -   **[Background](background.md)**
 

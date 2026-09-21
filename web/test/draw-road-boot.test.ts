@@ -479,19 +479,30 @@ test("a bundle that is not the block the drawing scale was baked for is refused,
     assert.equal(host.find("img")!.removedAt, null, "the fallback image went anyway");
   });
 
-test("a block boundary with more than one ring is refused, not drawn as its exterior", async () => {
-  // `scripts/_bundle_io.py`'s `polygon_ring` raises on interiors rather than dropping them
-  // ("report this instead of silently dropping geometry"), and `draw` strokes one ring, so a
-  // block with holes must stop here rather than be drawn as a solid outline it does not have.
-  // The pinned bundle has exactly one ring, so the payload is the one place this shape exists.
+test("a block boundary with more than one ring is DRAWN, every ring of it", async () => {
+  // Inverted on 2026-09-20. This used to assert a refusal: `polygon_ring` raised on interiors
+  // rather than dropping them, `draw` stroked a single ring, and this file refused the shape to
+  // match. The spine block moved to ZAF.9.3.1_1_5810, whose boundary HAS an interior ring, so the
+  // refusal would have rejected the very block the widget exists to show -- at boot, with a
+  // caption about ring counts and no canvas.
+  //
+  // What replaced it is stricter, not looser: every ring is stroked, so the hole is drawn instead
+  // of silently vanishing. An EMPTY ring list is still refused, which the test below pins.
   const two = [EXTERIOR, EXTERIOR];
   const { host, store } = await mount(MOUNT_PX, null, "", { ...block, boundary: two });
-  assert.equal(store, null, "a refused bundle asked for a state store anyway");
-  assert.match(host.find("figcaption")!.textContent,
-    /DrawRoad could not load interactively .*boundary has 2 rings/,
-    "a multi-ring boundary was accepted, or reported without saying what was wrong");
-  assert.equal(host.find("canvas"), null, "a canvas was inserted for a refused bundle");
+  assert.notEqual(store, null, "a multi-ring boundary was refused a state store");
+  assert.notEqual(host.find("canvas"), null, "no canvas was inserted for a multi-ring boundary");
 });
+
+test("a block boundary with NO rings is refused -- a block without an exterior is not a block",
+  async () => {
+    // The one refusal that survives the inversion above, and it is not decorative: `draw`
+    // iterates the ring list, so an empty one strokes nothing at all and the reader gets a
+    // canvas with no block on it rather than an error saying why.
+    const { host, store } = await mount(MOUNT_PX, null, "", { ...block, boundary: [] });
+    assert.equal(store, null, "a refused bundle asked for a state store anyway");
+    assert.equal(host.find("canvas"), null, "a canvas was inserted for a refused bundle");
+  });
 
 test("a runtime whose arrays do not fit the mesh is reported, not drawn", async () => {
   // The silent half of the Pyodide boundary: a short `potential` makes every current NaN, which
@@ -504,7 +515,11 @@ test("a runtime whose arrays do not fit the mesh is reported, not drawn", async 
   runtime.truncatePotential = true;
   drawPolyline(host, [[10, 10], [60, 60]]);
   await flush();
-  assert.match(readoutText(host), /3 potentials .*263 parcels/,
+  // The parcel count is the BUNDLE's, not a literal: it was 263 until the spine block moved to
+  // ZAF.9.3.1_1_5810 on 2026-09-20 and became 6,619. What this test is about is the mismatch
+  // being REPORTED, so the number it reports has no business being pinned here.
+  assert.match(readoutText(host),
+    new RegExp(`3 potentials .*${block.parcel_id.length} parcels`),
     "a mis-sized result was accepted");
   assert.deepEqual(nodeFills(cv), baseline,
     "a mis-sized result was drawn instead of leaving the last good picture up");

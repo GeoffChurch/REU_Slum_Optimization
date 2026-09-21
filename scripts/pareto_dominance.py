@@ -38,13 +38,21 @@ from pathlib import Path
 from reblock.method_labels import friendly_method_name
 
 ROOT = Path(__file__).resolve().parent.parent
+# Only regions that REGENERATE. This was seven until 2026-09-20: `depth` and
+# `density_compactness` were dropped as example variants in c6ffab0, after which their four
+# directories were frozen artifacts that no `pixi run regen-examples` would ever refresh, and
+# none had been rebuilt since the `block_area_m2` latitude fix. A dominance tally computed over
+# a mix of current and superseded regions is worse than one over fewer current ones.
+#
+# The cost is real and is not hidden: `OSM Footpaths` appeared in four of the seven and two are
+# gone, so its evidence here is now two regions. The seven-region tally is preserved verbatim in
+# `docs/superpowers/notes/2026-09-20-the-seven-region-dominance-tally.md`, and the breadth is
+# recoverable by regenerating from `conf/example/depth.yaml` and
+# `conf/example/density_compactness.yaml`, which were kept for that purpose.
 REGIONS = [
-    ("capetown/depth", "examples/multiblock_depth"),
     ("capetown/depth_density", "examples/multiblock_depth_density"),
-    ("capetown/density_compactness", "examples/multiblock_density_compactness"),
-    ("nairobi/depth", "examples/nairobi/multiblock_depth"),
+    ("capetown/depth_density_2", "examples/multiblock_depth_density_2"),
     ("nairobi/depth_density", "examples/nairobi/multiblock_depth_density"),
-    ("nairobi/density_compactness", "examples/nairobi/multiblock_density_compactness"),
     ("one-block", "examples/method-comparison"),
 ]
 MIN_PTS = 4       # below this the "comparison" is a couple of points and says nothing

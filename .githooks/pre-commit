@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Runs the repo's lint gate before a commit lands. Install it once, per clone:
+#
+#     pixi run hooks
+#
+# WHY `ruff check` AND NOT `ruff format`. The obvious answer to "enforce formatting" is a
+# formatter, and this repo deliberately does not have one. MEASURED on 2026-09-20, running
+# `ruff format .` over this tree:
+#
+#   * 200 of 215 files change -- the repo is hand-wrapped and ruff-format wraps differently;
+#   * it leaves 12 lines LONGER than the 100-char limit `E501` enforces, because it re-indents
+#     implicit string concatenations and will not split a string literal. The formatter and the
+#     linter disagree and neither can yield, so adopting it means giving up line-length
+#     enforcement entirely -- the opposite of what a formatting gate is for;
+#   * worst, it MOVED a `# type: ignore[union-attr]` off the line it suppresses
+#     (`src/reblock/derive_graph.py`), wrapping a ternary and leaving the comment on the closing
+#     paren. `mypy --strict` then reports both the un-suppressed error and an unused ignore. A
+#     formatter that relocates type suppressions changes what the type checker verifies, which is
+#     not a cosmetic act, and it is why the mass-reformat commit could not have been treated as
+#     formatting-only for `.git-blame-ignore-revs`.
+#
+# So the gate is `ruff check`, which already owns most of what "formatting" means here: `E501`
+# (line length), `I` (import order, what isort does), plus `E`/`F`/`UP`/`B`. CI runs the same
+# command, so this hook and the PR gate cannot disagree.
+#
+# `--no-verify` still bypasses this, by design: a hook is a convenience for the author, and CI is
+# the gate that actually decides.
+set -euo pipefail
+
+if ! command -v pixi >/dev/null 2>&1; then
+  echo "pre-commit: pixi not on PATH; skipping lint (CI still runs it)" >&2
+  exit 0
+fi
+
+echo "pre-commit: ruff check ."
+pixi run lint

@@ -97,4 +97,12 @@ else
   # PNG (deliberately not shared with the perm-graph bundle -- see gen_displacement_field's module
   # docstring). Both are committed, so the same I7 reasoning applies: on this path, not off it.
   run pixi run python -m scripts.gen_displacement_field
+  # The region-grow neighbourhood bundle. It was OFF this path and it drifted: baked before the
+  # 2026-09-17 switch to Open Buildings counts, it went stale the moment `load_blocks` started
+  # resolving a different count, and its own parity test did not catch it because that test SKIPS
+  # when `~/.cache/reblock/blocks_capetown_full.parquet` is absent -- which is every CI runner, by
+  # design, so the parquet is not downloaded per run. A guard that only fires on a warm developer
+  # cache is a guard that does not fire. The neighbourhood had gone 213 -> 226 blocks unnoticed.
+  # Same I7 reasoning as the three bundles above: committed artifact, therefore on this path.
+  run pixi run python -m scripts.gen_region_grow
 fi

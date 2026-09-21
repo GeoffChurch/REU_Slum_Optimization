@@ -130,7 +130,12 @@ web = { cmd = "npm ci && npm run build", cwd = "web" }
 web-check = { cmd = "npm ci && npm run check", cwd = "web" }
 typecheck = { depends-on = ["typecheck-py", "web-check"] }
 lint = "ruff check ."
-fmt = "ruff format ."
+# `fmt = "ruff format ."` was HERE and is deliberately gone. It reformatted 200 of 215 files, left
+# 12 lines over the `E501` limit it cannot split, and moved a `# type: ignore` off the line it
+# suppresses -- all measured 2026-09-20, all argued at `.githooks/pre-commit`. A task nobody can
+# safely run is worse than no task: it was fired by accident once in this repo's history and cost
+# a scoped revert to unpick.
+hooks = "git config core.hooksPath .githooks"
 check = { depends-on = ["lint", "typecheck", "test"] }
 run = "python -m reblock.run"
 compare = "python -m reblock.compare"

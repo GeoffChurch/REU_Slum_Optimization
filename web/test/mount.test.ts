@@ -71,14 +71,19 @@ test("register throws on a duplicate widget name", async () => {
   stubDocument();
   const { register } = await import("../src/mount.js");
 
-  // mount.ts's own top-level `register("perm-graph", permGraph, PERM_GRAPH_URL)` has already run
-  // by the time this await resolves (whether it ran on THIS import or an earlier one in the
-  // process -- see the file comment), so "perm-graph" is already taken. Re-registering it under
-  // that same name is exactly the regression this guards: with the duplicate check removed, this
-  // second call would silently replace the first widget's registration instead of throwing.
+  // mount.ts's own top-level `register("frontier", frontier, FRONTIER_URL)` has already run by the
+  // time this await resolves (whether it ran on THIS import or an earlier one in the process --
+  // see the file comment), so "frontier" is already taken. Re-registering it under that same name
+  // is exactly the regression this guards: with the duplicate check removed, this second call
+  // would silently replace the first widget's registration instead of throwing.
+  //
+  // It named "perm-graph" until 2026-09-20. That widget was deleted, so the name stopped being
+  // taken and the throw stopped happening -- "Missing expected exception", from a guard that has
+  // nothing to do with perm-graph. Any REGISTERED name works here; `frontier` is picked because
+  // it is the widget least likely to move, being the only one on two pages.
   assert.throws(
-    () => register("perm-graph", (() => {}) as Widget<Nothing>, NOTHING),
-    /widget already registered: perm-graph/,
+    () => register("frontier", (() => {}) as Widget<Nothing>, NOTHING),
+    /widget already registered: frontier/,
   );
 });
 
@@ -157,7 +162,14 @@ test("every widget name a generated page can emit is registered under exactly th
     // promises "every widget name a generated page can emit" and a hardcoded pair would not keep that
     // promise for a third widget (final review, I4). Same derivation as widgets-bundle.test.ts, which
     // pins the same property against the shipped artifact rather than the source modules.
-    const generator = readFileSync("../scripts/gen_site_pages.py", "utf8");
+    // COMMENT LINES STRIPPED, for the same reason `widgets-bundle.test.ts` strips them: the regex
+    // cannot tell an emitted attribute from one quoted in prose, and the generator's comments
+    // quote it -- once explaining why the page scan skips `docs/superpowers/`, once naming the
+    // widget a panel stopped carrying. Harmless while every quoted name was also registered; it
+    // failed the moment `perm-graph` was deleted on 2026-09-20, claiming a page emits a widget
+    // nothing registers when no page emits it. Two copies of this scan exist and BOTH needed it.
+    const generator = readFileSync("../scripts/gen_site_pages.py", "utf8")
+      .split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
     const emitted = [...new Set([...generator.matchAll(/data-widget="([a-z-]+)"/g)]
       .map((m) => m[1]!))].sort();
     assert.ok(emitted.length >= 2, `generator emits too few widget names: ${JSON.stringify(emitted)}`);
@@ -288,16 +300,19 @@ test("a widget's own key collision does not phantom-claim its OTHER keys for a l
 test("the URL key list is pinned -- a key rename breaks published links silently otherwise",
   async () => {
     stubDocument();
-    const [{ PERM_GRAPH_URL }, { FRONTIER_URL }, { FIELD_URL }, { REGION_GROW_URL },
+    // `perm-graph` was here until 2026-09-20; the widget is gone (see mount.ts) and so are its
+    // three URL keys, which is a published-link break by construction -- an `?prefix=` in someone
+    // saved link now names no widget. That is the cost of removing a figure, recorded rather than
+    // smoothed over: nothing can honour a key whose widget no longer exists.
+    const [{ FRONTIER_URL }, { FIELD_URL }, { REGION_GROW_URL },
       { SCREEN_MAP_URL }, { DRAW_ROAD_URL }] = await Promise.all([
-      import("../src/widgets/perm-graph.js"), import("../src/widgets/frontier.js"),
+      import("../src/widgets/frontier.js"),
       import("../src/widgets/displacement-field.js"), import("../src/widgets/region-grow.js"),
       import("../src/widgets/screen-map.js"), import("../src/widgets/draw-road.js"),
     ]);
     const keysOf = (codec: object): string[] =>
       (Object.values(codec) as readonly { keys: readonly string[] }[])
         .flatMap((p) => [...p.keys]).sort();
-    assert.deepEqual(keysOf(PERM_GRAPH_URL), ["halos", "layer", "prefix"]);
     assert.deepEqual(keysOf(FRONTIER_URL), ["disp", "method", "perm"]);
     assert.deepEqual(keysOf(FIELD_URL), ["road1", "road2", "road2on", "width"]);
     assert.deepEqual(keysOf(REGION_GROW_URL), ["budget", "seed"]);
@@ -306,7 +321,7 @@ test("the URL key list is pinned -- a key rename breaks published links silently
 
     // And the union is collision-free ACROSS widgets, which is the property mountAll's throw
     // enforces per page and this asserts for the shipped set as a whole.
-    const all = [PERM_GRAPH_URL, FRONTIER_URL, FIELD_URL, REGION_GROW_URL, SCREEN_MAP_URL,
+    const all = [FRONTIER_URL, FIELD_URL, REGION_GROW_URL, SCREEN_MAP_URL,
       DRAW_ROAD_URL].flatMap(keysOf);
     assert.equal(new Set(all).size, all.length, `duplicate URL key across widgets: ${all}`);
   });

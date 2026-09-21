@@ -6,7 +6,8 @@ adjacency list -- rather than a baked animation. What it also ships is `referenc
 `DenseClusterRegionBuilder` itself produces for several seeds and budgets, which is what pins the
 TypeScript to this code instead of to a re-implementation of it.
 
-The seed is ZAF.9.3.1_1_40972, the same block PermGraph, Frontier and DisplacementField pin.
+The seed is ZAF.9.3.1_1_5810, the same block PermGraph, WebBundle, Frontier,
+DisplacementField and AuthoringBlock pin -- the Explore page's spine.
 
 Outputs, into examples/region-grow/:
 
@@ -156,20 +157,39 @@ class HoodBundle(TypedDict):
 
 
 CITY = "capetown"
-SEED = "ZAF.9.3.1_1_40972"
+# The Explore page's spine block, shared with PermGraph, WebBundle, Frontier, DisplacementField
+# and AuthoringBlock -- `tests/test_screen_map_bundle.py`'s SPINE_SOURCES is what holds the five
+# together, and it is the page's own "five stages, one block" claim as an assertion.
+SEED = "ZAF.9.3.1_1_5810"
 MIN_COUNT = 30            # the same filter gen_screen_bakeoff.py applies
 HOPS = 7                  # MEASURED: the budget-10,000 accretion reaches 7 hops; 5 leaves 2 out
 SIMPLIFY_M = 1.0          # region scale: 5 m would be visible here (design §1.2)
 
-BUDGET = Budget(min=150, max=10_000, step=50, default=3000)
-REFERENCE_BUDGETS = (150, 600, 3000, 10_000)
-# SEED plus two neighbours whose accretion order differs from sorted order (measured, Step 4 of
-# the task brief): both must give an order at least 4 blocks long that is NOT already sorted, or a
-# downstream test comparing accretion order to `sorted()` cannot tell the two apart and guards
-# nothing (D2's defect #7 -- a fixture satisfied by its own twin). MEASURED by growing every one of
-# SEED's 12 nearest neighbours (hops=2) at budget=3000: all 12 qualified (orders 9-12 blocks long,
-# all != sorted), so no need to widen the scan -- see task-4-report.md for the full scan.
-REFERENCE_SEEDS = (SEED, "ZAF.9.3.1_1_40973", "ZAF.9.3.1_1_40144")
+# RE-RANGED for this seed, which is 6,619 parcels on its own -- the old 150..10,000 was chosen for
+# a 263-parcel seed and would have left the slider inert across most of its travel, loading a
+# single static block at its 3,000 default. MEASURED, growing this seed at each budget:
+#
+#     6,500 ->  1 block (the seed alone)     12,000 -> 23 blocks
+#     7,500 ->  3 blocks                     15,000 -> 40 blocks
+#     9,000 ->  9 blocks                     20,000 -> 51 blocks
+#
+# So `min` sits just under the seed's own size, keeping the documented floor semantics (at `min`
+# the region IS the seed -- `test_the_shipped_budget_floor_is_a_no_op_on_the_seed`) while spending
+# no travel on budgets that cannot change the picture. `default` loads 3 blocks, so a reader sees
+# accretion rather than a still, and `max` reaches 40.
+BUDGET = Budget(min=6_500, max=15_000, step=100, default=7_500)
+REFERENCE_BUDGETS = (6_500, 7_500, 9_000, 15_000)
+# SEED plus two neighbours whose accretion order differs from sorted order: both must give an
+# order at least 4 blocks long that is NOT already sorted, or a downstream test comparing
+# accretion order to `sorted()` cannot tell the two apart and guards nothing (D2's defect #7 -- a
+# fixture satisfied by its own twin).
+#
+# RE-MEASURED for the 2026-09-20 re-seed, growing each of SEED's nearest neighbours (hops=2) at
+# budget=12,000: every one gave a 23-block order and none was already sorted, so the first two
+# qualify and no wider scan was needed. The previous pair were neighbours of ZAF.9.3.1_1_40972 and
+# are not in this neighbourhood at all -- `web/test/accretion.test.ts` said so directly,
+# "reference seed ZAF.9.3.1_1_40973 is not in the bundle".
+REFERENCE_SEEDS = (SEED, "ZAF.9.3.1_1_5378", "ZAF.9.3.1_1_5379")
 
 # hood/region reuse render.py's own named roles; frontier has no analogue there (see Encoding's
 # docstring). `pad` matches DisplacementField's ENCODING.pad -- the same widget-side breathing room

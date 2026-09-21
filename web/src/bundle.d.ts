@@ -16,25 +16,20 @@ export interface Encoding {
 export interface Bundle {
   block_id: string;
   method: string;
-  lens_b_index: number;
-  n_prefixes: number;
   /** UTM easting/northing subtracted from every coordinate below; all geometry is local metres. */
   origin: [number, number];
   parcels: [number, number][][];
-  /** Block exterior ring, relative to `origin` -- fallback-parity background layer; see
+  /** The block's rings, EXTERIOR FIRST -- relative to `origin`. Rings, not a ring: a block
+   * boundary can have interior rings and `ZAF.9.3.1_1_5810`'s does, so an exterior-only field
+   * would draw an outline with a hole missing from it. Each is stroked closed and none is
+   * filled, so there is no even-odd rule to get right. Fallback-parity background layer; see
    * `_draw_boundary_and_streets` in render.py, which draws this under the graph on every PNG. */
-  boundary: [number, number][];
+  boundary: [number, number][][];
   /** Existing street network, relative to `origin`; one entry per disjoint line (a block's
    * streets are not always a single connected LineString). Fallback-parity, same as `boundary`. */
   streets: [number, number][][];
   nodes: { cx: number[]; cy: number[]; ground_g: number[] };
-  edges: { rows: number[]; cols: number[]; footpath_g: number[]; first_upgraded_at: number[] };
+  edges: { rows: number[]; cols: number[]; footpath_g: number[] };
   roads: { coords: [number, number][]; width_m: number }[];
-  prefix: {
-    potential: number[][];
-    current: number[][];
-    permeability: number[];
-    road_m: number[];
-  };
   encoding: Encoding;
 }

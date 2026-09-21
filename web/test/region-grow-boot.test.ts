@@ -336,11 +336,13 @@ test("a URL budget reaches the SLIDER, not only the canvas", async () => {
   // `boot` drew from state (so the canvas honoured `?budget=`) while the slider was initialised
   // from the bundle's default, leaving the reader a control that disagreed with the picture beside
   // it. Both halves are asserted, so "the picture drew 5000" is observed rather than assumed.
-  const { host, cv } = await mount(700, null, "budget=5000");
-  assert.equal(budgetSlider(host).value, "5000",
-    "the slider initialised from the bundle default while the picture drew 5000");
+  // 9,000, not 5,000: the slider's floor is 6,500 since the re-seed (the seed alone is
+  // 6,619 parcels), so 5,000 is out of range and the slider clamps rather than honouring it.
+  const { host, cv } = await mount(700, null, "budget=9000");
+  assert.equal(budgetSlider(host).value, "9000",
+    "the slider initialised from the bundle default while the picture drew 9000");
   const seedIndex = bundle.blocks.findIndex((b) => b.block_id === bundle.seed);
-  assert.equal(regionPaths(cv).length, grow(bundle.blocks, seedIndex, 5000).length,
+  assert.equal(regionPaths(cv).length, grow(bundle.blocks, seedIndex, 9000).length,
     "the canvas did not draw the URL's budget either");
 });
 

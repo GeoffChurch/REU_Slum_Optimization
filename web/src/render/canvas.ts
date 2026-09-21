@@ -15,15 +15,15 @@ import { toScreen, type View } from "../view/transform.js";
  * `permeability`/`road_m` are the caption's numbers, never the picture's. */
 export interface Drawable {
   /** One entry per RING, not per parcel -- `draw` strokes each entry as a closed outline and never
-   * asks which parcel it belongs to. `Bundle.parcels` happens to be one ring per parcel (its baker
-   * calls `polygon_ring`, which raises on a parcel with holes), and DrawRoad flattens the
-   * authoring bundle's per-parcel ring lists into the same flat list. Both draw identically. */
+   * asks which parcel it belongs to. Every producer flattens per-parcel ring lists into this same
+   * flat list, so a holed parcel is one extra entry and draws identically. (Until 2026-09-20 the
+   * bakers called `polygon_ring`, which RAISED on a holed parcel rather than dropping it -- which
+   * is how `ZAF.9.3.1_1_5810` was found to have exactly one, of 6,619, on being repinned here.) */
   parcels: [number, number][][];
-  /** The block's exterior ring, and the only ring `draw` strokes for the boundary. Neither
-   * producer hands it a block WITH interior rings: `scripts/_bundle_io.py`'s `polygon_ring`
-   * RAISES on one rather than dropping the holes ("report this instead of silently dropping
-   * geometry"), and `draw-road.ts` refuses the same shape at boot for the same reason. */
-  boundary: [number, number][];
+  /** The block's rings, exterior first. RINGS, not a ring: a block boundary can have interior
+   * rings and this one's does. `draw` strokes each and fills none, so there is no even-odd rule
+   * to get right. */
+  boundary: [number, number][][];
   streets: [number, number][][];
   nodes: { cx: number[]; cy: number[]; ground_g: number[] };
   edges: { rows: number[]; cols: number[]; footpath_g: number[]; first_upgraded_at: number[] };
@@ -112,10 +112,13 @@ export function draw(ctx: CanvasRenderingContext2D, b: Drawable, f: Frame,
   ctx.strokeStyle = e.boundary_color;
   ctx.lineWidth = 1.3;
   ctx.beginPath();
-  b.boundary.forEach(([x, y], i) => {
-    const [sx, sy] = toScreen(f.view, x, y);
-    if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
-  });
+  for (const ring of b.boundary) {
+    ring.forEach(([x, y], i) => {
+      const [sx, sy] = toScreen(f.view, x, y);
+      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    });
+    ctx.closePath();
+  }
   ctx.stroke();
   for (const line of b.streets) {
     ctx.beginPath();

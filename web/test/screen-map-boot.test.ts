@@ -775,7 +775,16 @@ test("the followed block is far smaller on screen than the ring that marks it", 
   assert.equal(ct.block_id[follow.index], follow.block_id,
     "sanity: follow.index does not address follow.block_id's own row");
   const area = screenAreaPx2(VIEW_CT, ct, follow.index);
-  assert.ok(area < 1,
+  // 40 px^2, not 1. The `< 1` was a fact MEASURED on the 263-parcel spine block ("a fraction of
+  // one CSS pixel") written as a premise; the spine moved to ZAF.9.3.1_1_5810 on 2026-09-20 and
+  // the same measurement is 19.6 px^2 -- about 4.4 px across at the city-wide fit, which is still
+  // not an outline anyone can pick out of a metro but is no longer sub-pixel.
+  //
+  // The bound is loose and labelled as such, because this file already concedes below that a real
+  // legibility floor is "a number it would be inventing". What it catches is the case that would
+  // actually invalidate the ring: a followed block that grew big enough to outline. The assertion
+  // that carries the argument is the next one, which is derived rather than chosen.
+  assert.ok(area < 40,
     `the followed block covers ${area.toFixed(3)} CSS px^2 -- if an outline of it were visible, `
     + `the ring would not need to exist`);
   assert.ok(area < Math.PI * FOLLOW_RADIUS_PX ** 2,

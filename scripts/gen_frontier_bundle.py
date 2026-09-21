@@ -41,7 +41,11 @@ from reblock.permeability import egress_power, permeability
 from scripts._bundle_io import sigfig
 from scripts._example_block import load_example_block
 
-OUT = Path("examples/method-comparison/frontier.json")
+# `examples/explore/`, not `examples/method-comparison/`: this bundle is baked from
+# `_example_block.py`'s pin, which moved to the `explore` variant on 2026-09-20. Leaving it
+# in the method-comparison directory would file block ZAF.9.3.1_1_5810's frontier under the
+# example that pins ZAF.9.3.1_1_40972 -- a directory naming a block it no longer describes.
+OUT = Path("examples/explore/frontier.json")
 DTS = Path("web/src/frontier.d.ts")
 
 # What the widget DRAWS with, baked here rather than chosen in the TypeScript or restated on the
