@@ -255,7 +255,11 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     from reblock.budget import building_radii, displacement, displacement_from_distance
     from scripts._bundle_io import line_coords, polygon_rings, sigfig
     from scripts._default_road import closed_form_distance, default_roads, segments
-    from scripts._example_block import load_example_block
+    from scripts._example_block import (
+        TEST_VARIANT,
+        load_example_block,
+        load_example_region,
+    )
     from scripts.gen_displacement_field import (
         WIDTH_FLOOR_M,
         fixture_roads,
@@ -264,7 +268,14 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
         roads_from_case,
     )
 
-    block, roads_by_method = load_example_block(None)
+    # Job 1a needs the SHIPPED block's geometry and never touches a road, so it builds the
+    # region without proposing: 18.6 s instead of ~2,900. Job 2 needs REAL road sets and does not
+    # care whose -- its point is multi-part geometry that synthetic fixtures do not produce -- so
+    # it takes the 263-parcel fixture variant, where the same five methods cost ~105 s against
+    # 2,861 on the spine block. Neither number is cacheable between runs: `tests/conftest.py`
+    # gives every session a cold REBLOCK_CACHE_DIR by design.
+    block = load_example_region()
+    _, roads_by_method = load_example_block(None, variant=TEST_VARIANT)
     radii = building_radii(block.building_points)
     ox, oy = float(bundle["origin"][0]), float(bundle["origin"][1])
 
@@ -330,11 +341,16 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     # Job 2: the closed form against shapely on every method's REAL road sets, at raw precision --
     # nothing here is quantised, because this is about the formula. Five since the spine repin of
     # 2026-09-20, where it was eight; `tests/test_frontier_bundle.py` says which two went.
-    raw_x = block.building_points.geometry.x.to_numpy(dtype=float)
-    raw_y = block.building_points.geometry.y.to_numpy(dtype=float)
+    # Job 2's coordinates and radii come from the SAME block its roads do -- the fixture one.
+    # Pairing the shipped block's buildings with the fixture's roads would compare a closed form
+    # against shapely on geometry that never coexisted, and both sides would agree on nonsense.
+    small = load_example_region(TEST_VARIANT)
+    radii = building_radii(small.building_points)
+    raw_x = small.building_points.geometry.x.to_numpy(dtype=float)
+    raw_y = small.building_points.geometry.y.to_numpy(dtype=float)
     assert len(roads_by_method) == 5, sorted(roads_by_method)
     for name, roads in sorted(roads_by_method.items()):
-        truth = displacement(block.building_points, radii, roads)
+        truth = displacement(small.building_points, radii, roads)
         closed = displacement_from_distance(
             radii, closed_form_distance(raw_x, raw_y, segments(roads)))
         assert closed == pytest.approx(truth, rel=1e-3), name

@@ -78,6 +78,26 @@ def example_method_names(variant: str = PINNED_VARIANT) -> list[str]:
     return names
 
 
+def load_example_region(variant: str = PINNED_VARIANT) -> Block:
+    """The pinned block ALONE -- built, never reblocked.
+
+    `load_example_block` proposes, and proposing is the entire cost: on the spine block
+    `greedy_arterial` is 2,011 s and `cycle_native` 849 s, and `tests/conftest.py` gives every
+    test session a cold `REBLOCK_CACHE_DIR` so none of it is ever cached between runs. A caller
+    that only needs geometry -- the displacement bundle's parity check compares parcels, boundary
+    and streets against the live block and never looks at a road -- was paying all of it to read
+    `block.parcels`. Region build alone is 18.6 s.
+    """
+    cfg = _compose_pinned_config(variant)
+    source = cast(Source, instantiate(cfg.data))
+    screen = cast(Screen, instantiate(cfg.screen))
+    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
+    groups = [list(g) for g in cfg.block_ids]
+    region = build_regions(source, screen, region_builder, groups, int(cfg.max_blocks))[0]
+    assert len(region) == 1, f"{variant} pins a single block by design"
+    return region[0]
+
+
 def load_example_block(method: str | None = None,
                        variant: str = PINNED_VARIANT) -> tuple[Block, dict[str, GeoDataFrame]]:
     """The pinned block plus roads per method name. `method=None` runs all eight:
