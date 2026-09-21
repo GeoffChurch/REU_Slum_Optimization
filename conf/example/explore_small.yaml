@@ -1,0 +1,46 @@
+# @package _global_
+# The TEST fixture variant: `explore`'s pipeline on a small block.
+#
+# It exists because a parity test has two jobs that want different data. "The baker is correct"
+# -- curves match the solver -- needs a real block exercised end to end, and any real block will
+# do. "The shipped bundle is fresh" needs the actual 6,619-parcel artifact. Bundling both into one
+# test meant re-deriving the shipped artifact to check the baker, and MEASURED on 2026-09-21 that
+# cost 2,882 s of a 2,895 s test: `tests/conftest.py` points `REBLOCK_CACHE_DIR` at a fresh temp
+# directory every session (deliberately -- a hermetic suite must never read a developer's warm
+# cache), so every run re-proposed every method from cold.
+#
+# So the parity tests run HERE, and the shipped bundle keeps its cheap freshness checks -- block
+# id, method set, and per-method segment counts against the example's own run.log.
+#
+# Same block as `method_comparison` (263 parcels), and NOT that variant itself: it runs `topology`
+# at 377 s and `resistance_lp`, neither of which `explore` has, and topology alone would cost more
+# than everything this fixture does. MEASURED on this block, for exactly `explore`'s five:
+#
+#     region built 3.4 s | clearance_looped 1.1 | euclidean_grid 0.0 | cycle_native 2.0
+#     greedy_arterial_access_displacement 98.0 | osm_footpaths 0.0     => ~105 s
+#
+# against 2,861 s for the same five on the spine block. `greedy_arterial` is 93% of what remains
+# and is kept deliberately: dropping it would buy ~7 s and stop testing the slowest method's
+# proposal path, which is the one most likely to regress unnoticed.
+defaults:
+  - override /metric: depth_density
+  - override /screen: identity
+  - override /region_builder: identity
+
+example:
+  # Its OWN slug, not `method-comparison`'s, even though it borrows that block. `_snapshot_path`
+  # resolves `examples/<slug>/desire_lines_<block>.geojson`, so sharing a slug would make a stray
+  # `gen_example explore_small` overwrite a shipped example's directory.
+  slug: explore-small
+  formula: "depth × density — the test fixture"
+  blurb: >-
+    `explore`'s pipeline on a 263-parcel block. A fixture for the bundle parity tests, not a
+    published example: it is never baked to the site and nothing links it.
+
+block_ids: [["ZAF.9.3.1_1_40972"]]
+
+# Exactly `explore.yaml`'s list and order. The point of this fixture is that it differs from the
+# shipped variant ONLY in which block it pins, so a parity test passing here means the baker is
+# right about the pipeline rather than about one block's data.
+methods: [clearance_looped, euclidean_grid, cycle_native, greedy_arterial_access_displacement]
+max_blocks: 1

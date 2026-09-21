@@ -18,6 +18,7 @@ Run:  pixi run python -m scripts.gen_frontier_bundle
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -39,13 +40,16 @@ from reblock.emit import (
 from reblock.method_labels import friendly_method_name
 from reblock.permeability import egress_power, permeability
 from scripts._bundle_io import sigfig
-from scripts._example_block import load_example_block
+from scripts._example_block import PINNED_VARIANT, TEST_VARIANT, load_example_block
 
 # `examples/explore/`, not `examples/method-comparison/`: this bundle is baked from
 # `_example_block.py`'s pin, which moved to the `explore` variant on 2026-09-20. Leaving it
 # in the method-comparison directory would file block ZAF.9.3.1_1_5810's frontier under the
 # example that pins ZAF.9.3.1_1_40972 -- a directory naming a block it no longer describes.
 OUT = Path("examples/explore/frontier.json")
+# The parity fixture: the same bundle on a 263-parcel block. Committed, tiny, and the
+# only thing `tests/test_frontier_bundle.py` re-derives -- see `main`.
+FIXTURE_OUT = Path("examples/explore-small/frontier.json")
 DTS = Path("web/src/frontier.d.ts")
 
 # What the widget DRAWS with, baked here rather than chosen in the TypeScript or restated on the
@@ -102,7 +106,24 @@ CHART = {
 
 
 def main() -> None:
-    block, roads_by_method = load_example_block()
+    """Bakes the shipped bundle, or the small test fixture with `--fixture`.
+
+    ONE baker, two blocks. `tests/test_frontier_bundle.py` verifies a COMMITTED fixture against a
+    fresh derivation, which is the same staleness guard it always ran -- a curve-math change makes
+    the committed file stop matching -- but on a 263-parcel block instead of the shipped
+    6,619-parcel one. MEASURED 2026-09-21: the shipped block costs 2,882 s of a 2,895 s test,
+    because `tests/conftest.py` gives every session a cold `REBLOCK_CACHE_DIR` (deliberately, so
+    the suite can never read a developer's warm cache) and every method is re-proposed from
+    scratch. The fixture costs ~105 s.
+
+    The fixture is baked by the SAME function as the shipped bundle, never by a second
+    implementation in the test -- a test that re-implements the baker checks that two copies agree,
+    not that the baker is right.
+    """
+    fixture = "--fixture" in sys.argv
+    variant = TEST_VARIANT if fixture else PINNED_VARIANT
+    out = FIXTURE_OUT if fixture else OUT
+    block, roads_by_method = load_example_block(variant=variant)
     pcfg = load_permeability_config()
     params = pcfg.params
 
@@ -156,7 +177,7 @@ def main() -> None:
         "chart": CHART,
         "methods": methods,
     }
-    OUT.write_text(json.dumps(bundle) + "\n", encoding="utf-8")
+    out.write_text(json.dumps(bundle) + "\n", encoding="utf-8")
     DTS.write_text(DTS_TEMPLATE, encoding="utf-8")
 
 
