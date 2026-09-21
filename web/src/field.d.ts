@@ -42,8 +42,10 @@ export interface FieldBundle {
   /** Disk centres (relative to `origin`) and radii, in metres, in building order. */
   buildings: { x: number[]; y: number[]; r: number[] };
   parcels: [number, number][][];
-  /** Block exterior ring, relative to `origin` -- the ring the fallback PNG draws. */
-  boundary: [number, number][];
+  /** The block's rings, EXTERIOR FIRST, relative to `origin` -- the rings the fallback PNG
+   * draws. Rings, not a ring: see `bundle.d.ts`'s own note. Each is stroked closed and none is
+   * filled, so there is no even-odd rule to get right. */
+  boundary: [number, number][][];
   /** Existing street network, relative to `origin`; one entry per disjoint line (a block's
    * streets are not always a single connected LineString). Fallback-parity, same as `boundary`. */
   streets: [number, number][][];

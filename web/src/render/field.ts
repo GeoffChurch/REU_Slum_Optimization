@@ -123,7 +123,10 @@ export function drawField(ctx: CanvasRenderingContext2D, b: FieldBundle, f: Fiel
   ctx.strokeStyle = e.boundary_color;
   ctx.lineWidth = e.boundary_lw;
   ctx.beginPath();
-  polyline(ctx, f.view, b.boundary);
+  for (const ring of b.boundary) {
+    polyline(ctx, f.view, ring);
+    ctx.closePath();
+  }
   ctx.stroke();
   ctx.lineWidth = e.street_lw;
   for (const line of b.streets) {

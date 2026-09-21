@@ -1,0 +1,85 @@
+# @package _global_
+# The block the EXPLORE page's five live stages follow. Same pipeline and same entry point as
+# every other variant; it differs only in which block it pins and which methods it runs.
+#
+# Why a variant of its own rather than reusing `method_comparison`'s pin: that variant exists to
+# host `topology`, the single-block-only prior art, and topology cannot run here. MEASURED on
+# 2026-09-20 against this very block -- `NodeNotFound: Source (305620.00,8022470.00) is not in G`
+# after 454 s. That is the same disconnected-source failure its own comment attributes to
+# MULTI-block regions, so being a single block is necessary and not sufficient: at 6,619 parcels
+# this block's street seam disconnects it too. Repinning `method_comparison` here would therefore
+# have deleted the one method it exists for, and cost 7.5 minutes per attempt to discover it.
+#
+# So topology keeps the method-comparison page and this variant runs the five methods that DO
+# scale -- exactly `depth_density`'s list, which is why every one of them is already cached on
+# this block from that variant's own regeneration. `clearance` is omitted despite running here
+# fine (2.8 s, 400 roads): `clearance_looped` is its loop-closing refinement and supersedes it on
+# the reported axes, and the flagship page is where the plain version is shown against it.
+defaults:
+  - override /metric: depth_density
+  - override /screen: identity
+  - override /region_builder: identity
+
+example:
+  slug: explore
+  formula: "depth × density — the screen's own top-ranked block"
+  blurb: >-
+    The block the city-wide screen ranks first, at settlement scale: 6,619 parcels in one
+    street-bounded face, 24 parcel rings deep at its most buried point. Every live stage on the
+    Explore page solves against this block, in the reader's browser, with the same code that
+    produced the numbers on the rest of the site.
+
+# The screen's rank-0 block, pinned by id rather than re-derived: the Explore page's widgets must
+# agree with each other across five separately baked bundles, and a pin is the only way that
+# survives a screen change. `multiblock_depth_density`'s own meta.json records it as
+# `deepest_block` at peel depth 24.
+block_ids: [["ZAF.9.3.1_1_5810"]]
+
+# `resistance_lp` is DELIBERATELY ABSENT, and runs only in `method_comparison`.
+#
+# It wins on the reported axes and the win is an artifact of what they charge. MEASURED on
+# `ZAF.9.3.1_1_5810` at matched displacement (~10% for both), it reaches 0.903 permeability
+# against `cycle_native`'s 0.893 -- by laying 11,928 m of road where `clearance_looped` lays
+# 5,377. Its full set is 5,617 segments over 35,044 m: a 6.2 m MEAN SEGMENT. That is not a road
+# network, it is a mesh threaded through the gaps between buildings, and it scores well precisely
+# because permeability and displacement charge HOMES, not metres and not fragmentation. A method
+# that fragments is rewarded by the two axes this project reports.
+#
+# It stays in `method_comparison` because that page exists to show every family head-to-head,
+# including the ones whose output does not survive inspection -- deleting it there would hide the
+# finding rather than record it.
+#
+# The second reason is cost, and it is not small: the frontier bundle solves permeability once per
+# SEGMENT, so 5,617 segments is ~5,618 solves at ~590 ms = ~55 min, against ~7 min for every other
+# method combined. It was 89% of a 62-minute bake.
+# ORDER matters and matches `depth_density.yaml`'s exactly. The frontier bundle emits methods
+# in `list(cfg.methods)` order and `tests/test_frontier_bundle.py` compares that order against
+# the run log of the example baked from the SAME block -- which is depth_density's, since this
+# variant deliberately bakes no second copy. Re-ordering here alone re-colours every curve in
+# the figure while leaving both method SETS identical, which is the exact drift that test
+# exists to catch, and it caught it.
+methods: [clearance_looped, euclidean_grid, cycle_native, greedy_arterial_access_displacement]
+max_blocks: 1
+
+# The REGION-SCALE method tuning, copied from `depth_density.yaml` because this is the same block
+# that variant grows and these values are what make region-scale geometry tractable on it.
+#
+# Omitting them was measured, not theorised: `gen_frontier_bundle` ran 2h07m at 100% CPU with no
+# output before being killed, against the ~55 min the same five methods took inside
+# `gen_example depth_density` on this very block. Two separate costs, and the second is the one
+# that is easy to miss:
+#
+#   * defaults are tuned for a 263-parcel block, and this one is 6,619;
+#   * `propose` keys its cache on the METHOD's identity as well as the block's, so
+#     `clearance_looped` at default parameters is a DIFFERENT derivation from `clearance_looped`
+#     at these -- every cached proposal from the regeneration missed, and all five recomputed
+#     from cold. Matching the parameters is what makes them hits.
+#
+# So these are not a performance knob here, they are the thing that makes this variant share
+# `depth_density`'s cached work instead of duplicating it.
+all_methods:
+  clearance_looped:
+    base: {depth_target: 3, max_roads: 3000}
+    budget_frac: 0.30
+    search_radius_m: 60
+  euclidean_grid: {spacing: 250}   # coarser grid -> budget in the pack

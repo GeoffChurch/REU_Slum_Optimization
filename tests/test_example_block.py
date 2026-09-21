@@ -43,8 +43,8 @@ def test_pin_is_declared_once() -> None:
     """No baker may re-declare the variant or method; they import them."""
     from scripts._example_block import PINNED_METHOD, PINNED_VARIANT
 
-    assert PINNED_VARIANT == "method_comparison"
-    assert PINNED_METHOD == "clearance"
+    assert PINNED_VARIANT == "explore"
+    assert PINNED_METHOD == "clearance_looped"
     for src in _bakers():
         bound = _module_level_names(src.read_text(encoding="utf-8"))
         assert "VARIANT" not in bound, f"{src.name} still declares its own VARIANT"
@@ -52,11 +52,17 @@ def test_pin_is_declared_once() -> None:
 
 
 def test_example_method_names_includes_osm_footpaths() -> None:
-    """`conf/example/method_comparison.yaml:31` declares seven methods; `osm_footpaths` -- the
-    real as-built informal network, injected from a committed OSM snapshot exactly as
-    scripts/gen_example.py:175-182 injects it -- is the eighth, and the reference the whole
+    """`conf/example/explore.yaml` declares five methods; `osm_footpaths` -- the real as-built
+    informal network, injected from a committed OSM snapshot exactly as
+    scripts/gen_example.py:175-182 injects it -- is the sixth, and the reference the whole
     comparison is measured against, not a competitor. A loader that only reads the declared list
-    silently returns seven; this is the guard against exactly that.
+    silently returns five; this is the guard against exactly that.
+
+    It is not hypothetical, and the failure is silent in the direction that matters. The snapshot
+    is named for the BLOCK, so when `multiblock_depth_density`'s seed moved to
+    `ZAF.9.3.1_1_5810` its committed `desire_lines_ZAF.9.3.1_1_38528.geojson` stopped matching and
+    that example quietly dropped from six methods to five -- visible only as a count in a
+    regeneration log, against Nairobi's six on the same line.
 
     Cheap by construction, unlike `load_example_block`: `example_method_names` reads a yaml and
     stats one file, it does not propose (solve) anything, so this needs no cache and no `slow`
@@ -65,6 +71,6 @@ def test_example_method_names_includes_osm_footpaths() -> None:
 
     names = example_method_names()
     assert set(names) == {
-        "topology", "clearance", "clearance_looped", "cycle_native", "resistance_lp",
-        "euclidean_grid", "greedy_arterial_access_displacement", "osm_footpaths",
+        "clearance_looped", "cycle_native", "resistance_lp", "euclidean_grid",
+        "greedy_arterial_access_displacement", "osm_footpaths",
     }

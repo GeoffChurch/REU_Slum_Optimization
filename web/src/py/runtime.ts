@@ -88,7 +88,12 @@ type PyProxy = import("pyodide/ffi").PyProxy;
 interface Booted {
   readonly pyodide: Pyodide;
   readonly block: PyProxy;
-  readonly solveFn: (block: PyProxy, road: PyProxy, p0: number) => PyProxy;
+  /** The bundle's own parcel adjacency, built ONCE at boot. `solve_egress` recomputes it from
+   * geometry when it is not given one -- an STRtree query plus a shapely intersection per
+   * candidate pair, 68% of the solve on a settlement block and a FATAL Pyodide error there, not
+   * a slow one. The bundle has carried these edges all along; nothing was reading them. */
+  readonly adj: PyProxy;
+  readonly solveFn: (block: PyProxy, road: PyProxy, p0: number, adj: PyProxy) => PyProxy;
 }
 
 /** Builds one `PyRuntime` closed over `bundle` and `wheelUrl`. Neither is read until `boot()` is
@@ -128,8 +133,10 @@ export function pyodideRuntime(
     // web/src/py/solve.py` after the packages above were on the path.
     pyodide.runPython(SOLVE_PY_SOURCE);
     const blockFromBundle: (b: PyProxy) => PyProxy = pyodide.globals.get("block_from_bundle");
-    const solveFn: (block: PyProxy, road: PyProxy, p0: number) => PyProxy =
+    const solveFn: (block: PyProxy, road: PyProxy, p0: number, adj: PyProxy) => PyProxy =
       pyodide.globals.get("solve");
+    const adjacencyFromBundle: (b: PyProxy) => PyProxy =
+      pyodide.globals.get("adjacency_from_bundle");
     // `toPy`, not a raw JS object handed straight to the call: measured directly (see this task's
     // report) that a Pyodide `PyProxy` function called with an un-converted JS array/object
     // receives it on the Python side as an opaque `JsProxy`, not a Python list/dict -- `toPy`
@@ -140,12 +147,17 @@ export function pyodideRuntime(
     // handle for the lifetime of the page.
     const bundleProxy = pyodide.toPy(bundle);
     let block;
+    let adj;
     try {
       block = blockFromBundle(bundleProxy);
+      // Same bundle, same conversion, one more read -- and the reason `boot()` is where this
+      // belongs: the adjacency is road-INVARIANT, so building it per solve would repeat on every
+      // drag exactly the work the bundle exists to have done once, at bake time.
+      adj = adjacencyFromBundle(bundleProxy);
     } finally {
       bundleProxy.destroy();
     }
-    state = { pyodide, block, solveFn };
+    state = { pyodide, block, adj, solveFn };
   })());
 
   return {
@@ -154,7 +166,7 @@ export function pyodideRuntime(
       if (state === null) {
         throw new Error("pyodideRuntime.solve: called before boot() resolved");
       }
-      const { pyodide, block, solveFn } = state;
+      const { pyodide, block, adj, solveFn } = state;
       // Both proxies are released here. `solve` is on the drag path -- Ruling 9 re-solves while a
       // vertex is dragged -- so a handle leaked per call is a handle leaked per gesture, not per
       // page. `destroy()` frees the JS-side handle only; `solve.py` has already built its shapely
@@ -162,7 +174,7 @@ export function pyodideRuntime(
       const roadProxy = pyodide.toPy(road);
       let resultProxy;
       try {
-        resultProxy = solveFn(block, roadProxy, bundle.baseline.p0);
+        resultProxy = solveFn(block, roadProxy, bundle.baseline.p0, adj);
       } finally {
         roadProxy.destroy();
       }

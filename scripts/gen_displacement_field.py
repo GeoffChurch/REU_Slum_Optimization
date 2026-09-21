@@ -39,7 +39,7 @@ from reblock.render import (
     render_field,
     save_render,
 )
-from scripts._bundle_io import cm, line_coords, polygon_ring, sigfig
+from scripts._bundle_io import cm, line_coords, polygon_rings, sigfig
 from scripts._default_road import chord, default_roads
 from scripts._example_block import PINNED_METHOD, load_example_block
 
@@ -173,7 +173,9 @@ class FieldBundle(TypedDict):
     origin: list[float]
     buildings: Buildings
     parcels: list[list[list[float]]]
-    boundary: list[list[float]]
+    # RINGS, exterior first -- the same shape `parcels` has, and the same shape `field.d.ts`
+    # declares. A single ring here would drop the spine block's own boundary hole.
+    boundary: list[list[list[float]]]
     streets: list[list[list[float]]]
     roads: list[RoadSpec]
     width: Width
@@ -425,8 +427,10 @@ export interface FieldBundle {
   /** Disk centres (relative to `origin`) and radii, in metres, in building order. */
   buildings: { x: number[]; y: number[]; r: number[] };
   parcels: [number, number][][];
-  /** Block exterior ring, relative to `origin` -- the ring the fallback PNG draws. */
-  boundary: [number, number][];
+  /** The block's rings, EXTERIOR FIRST, relative to `origin` -- the rings the fallback PNG
+   * draws. Rings, not a ring: see `bundle.d.ts`'s own note. Each is stroked closed and none is
+   * filled, so there is no even-odd rule to get right. */
+  boundary: [number, number][][];
   /** Existing street network, relative to `origin`; one entry per disjoint line (a block's
    * streets are not always a single connected LineString). Fallback-parity, same as `boundary`. */
   streets: [number, number][][];
@@ -542,12 +546,16 @@ def main() -> None:
         n_buildings=len(block.building_points),
         origin=[ox, oy],
         buildings=field.stored,
-        parcels=[polygon_ring(g, ox, oy, what=f"block {block.block_id!r}'s parcel")
-                 for g in block.parcels.geometry],
+        # One entry per RING -- see gen_web_bundle's own note; `render/field.ts` strokes each and
+        # never fills, so a hole is one more outline and nothing else.
+        parcels=[ring for g in block.parcels.geometry
+                 for ring in polygon_rings(g, ox, oy,
+                                           what=f"block {block.block_id!r}'s parcel")],
         # `block.boundary`, not the parcel union: this layer exists for fallback parity, and
         # `_draw_boundary_and_streets` (render.py) is what the committed PNG draws it with.
-        boundary=polygon_ring(block.boundary, ox, oy,
-                              what=f"block {block.block_id!r}'s boundary"),
+        # RINGS, not a ring: this block's boundary has an interior ring of its own.
+        boundary=polygon_rings(block.boundary, ox, oy,
+                               what=f"block {block.block_id!r}'s boundary"),
         streets=street_coords,
         roads=road_specs(roads, ox, oy),
         width=Width(floor_m=WIDTH_FLOOR_M, max_m=WIDTH_MAX_M, step_m=WIDTH_STEP_M,

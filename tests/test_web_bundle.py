@@ -23,22 +23,38 @@ def test_shapes_are_internally_consistent(bundle: dict[str, Any]) -> None:
     n_nodes, n_edges = len(bundle["nodes"]["cx"]), len(bundle["edges"]["rows"])
     assert len(bundle["nodes"]["cy"]) == len(bundle["nodes"]["ground_g"]) == n_nodes
     assert len(bundle["edges"]["cols"]) == len(bundle["edges"]["footpath_g"]) == n_edges
-    assert len(bundle["edges"]["first_upgraded_at"]) == n_edges
-    assert bundle["n_prefixes"] == len(bundle["roads"]) + 1
-    for key in ("potential", "current", "permeability", "road_m"):
-        assert len(bundle["prefix"][key]) == bundle["n_prefixes"]
-    assert all(len(p) == n_nodes for p in bundle["prefix"]["potential"])
-    assert all(len(c) == n_edges for c in bundle["prefix"]["current"])
-    assert 0 < bundle["lens_b_index"] < bundle["n_prefixes"]
 
 
-def test_first_upgraded_at_is_monotone_and_in_range(bundle: dict[str, Any]) -> None:
-    """-1 means never raised. Any other value must be a real prefix index -- an off-by-one here
-    would silently paint the wrong edges blue at every slider position."""
-    n = bundle["n_prefixes"]
-    fu = np.asarray(bundle["edges"]["first_upgraded_at"])
-    assert ((fu == -1) | ((fu >= 0) & (fu < n))).all()
-    assert (fu != 0).all(), "no edge can be road-raised at prefix 0: there are no roads"
+def test_the_per_prefix_field_table_is_gone(bundle: dict[str, Any]) -> None:
+    """The bundle carries the MESH and the drawing encoding, never a field per road.
+
+    It used to carry `prefix.potential` (one value per parcel) and `prefix.current` (one per edge)
+    for every prefix m, plus `n_prefixes`, `lens_b_index` and `edges.first_upgraded_at` to index
+    them -- everything the perm-graph slider needed. On the 263-parcel block that was 21 frames x
+    1,008 values, 278 KB. On the spine block it became 320 x 26,062 and an 83 MB page asset, 98.1%
+    of it that one table.
+
+    This asserts the absence rather than trusting it, because the failure mode is a committed
+    artifact that merely gets large: nothing crashes, no type complains (the `.d.ts` this script
+    generates would simply grow a field back), and the only symptom is a reader waiting on a
+    download. The build-order animation those fields fed is `gen_example`'s committed
+    `reblock_<method>.gif`, which is 850 KB and which the Explore page now shows directly."""
+    for dead in ("prefix", "n_prefixes", "lens_b_index"):
+        assert dead not in bundle, f"{dead} is back: the 83 MB field table has returned"
+    assert "first_upgraded_at" not in bundle["edges"], \
+        "first_upgraded_at indexed the prefix table and has no other reader"
+
+
+def test_the_bundle_stays_small_enough_to_be_a_page_asset(bundle: dict[str, Any]) -> None:
+    """A size ceiling, because this bundle is fetched by a reader's browser.
+
+    Not a tidiness bound: at 83 MB the page was unusable and nothing in the suite noticed, because
+    every other assertion here is about shape and a field table of the wrong size has exactly the
+    right shape. 8 MB is ~5x the 1.5 MB the spine block currently bakes -- loose enough that a
+    bigger block or a finer mesh does not trip it, tight enough that re-adding a per-prefix table
+    cannot pass."""
+    size_mb = BUNDLE.stat().st_size / 1e6
+    assert size_mb < 8.0, f"bundle is {size_mb:.1f} MB -- see this test's docstring"
 
 
 def test_coordinates_are_local_metres_at_centimetre_precision(bundle: dict[str, Any]) -> None:
@@ -61,13 +77,6 @@ def test_coordinates_are_local_metres_at_centimetre_precision(bundle: dict[str, 
     assert len(set(xs)) > (max(xs) - min(xs)) / 10 * 3, "x coordinate resolution looks too coarse"
     assert len(set(ys)) > (max(ys) - min(ys)) / 10 * 3, "y coordinate resolution looks too coarse"
     assert bundle["origin"][1] > 1_000_000, "origin should carry the real UTM northing"
-
-
-def test_permeability_is_zero_at_prefix_zero_and_monotone(bundle: dict[str, Any]) -> None:
-    perm = bundle["prefix"]["permeability"]
-    assert perm[0] == 0.0
-    assert all(b >= a - 1e-9
-               for a, b in zip(perm, perm[1:], strict=False)), "permeability must not fall"
 
 
 def test_the_committed_dts_is_what_the_generator_writes() -> None:
@@ -148,11 +157,14 @@ def test_bundle_matches_perm_graph_json_at_the_caption_precision(bundle: dict[st
     decimal of percent), not exact float equality, which is stricter than what a reader can see."""
     meta = json.loads(
         Path("examples/perm-graph/perm_graph.json").read_text(encoding="utf-8"))
-    i = bundle["lens_b_index"]
+    # BLOCK and METHOD only. This also compared `road_m` and `permeability` at the Lens-B index,
+    # read out of the bundle's per-prefix table; that table is gone (see
+    # `test_the_per_prefix_field_table_is_gone`) and those two numbers now live in exactly one
+    # place, `perm_graph.json`, which is where the caption already reads them. The I7 guard this
+    # test exists for is untouched: it is the two artifacts naming the same block, and a re-pin of
+    # one baker but not the other still fails here.
     assert bundle["block_id"] == meta["block_id"]
-    assert round(bundle["prefix"]["road_m"][i]) == round(meta["road_m"])
-    assert round(bundle["prefix"]["permeability"][i] * 100, 1) == round(
-        meta["permeability_after"] * 100, 1)
+    assert bundle["method"] == meta["method"]
 
 
 @pytest.mark.slow
@@ -190,8 +202,14 @@ def test_bundle_matches_permeability_graph_at_every_prefix(bundle: dict[str, Any
     params = load_permeability_config().params
     ordered = street_first_ordered(block, roads, STREET_TOL)
 
-    for m in range(bundle["n_prefixes"]):
-        fig = permeability_graph(block, cast(GeoDataFrame, ordered.iloc[:m]), params)
-        np.testing.assert_allclose(bundle["prefix"]["potential"][m], fig.potential, rtol=1e-5)
-        np.testing.assert_allclose(bundle["prefix"]["current"][m], fig.current, rtol=1e-5,
-                                   atol=1e-9)
+    # Parity on the MESH, which is what the bundle still carries. It used to sweep every prefix
+    # and compare a full potential and current field per road; those fields are gone (see
+    # `test_the_per_prefix_field_table_is_gone`), and the no-roads graph is what the baker emits
+    # as `base`. The guard is unchanged in kind -- the committed artifact must equal what the
+    # Python twin produces at the 6 significant digits the baker writes -- and it is now one solve
+    # rather than 320.
+    base = permeability_graph(block, cast(GeoDataFrame, ordered.iloc[:0]), params)
+    np.testing.assert_array_equal(bundle["edges"]["rows"], base.rows)
+    np.testing.assert_array_equal(bundle["edges"]["cols"], base.cols)
+    np.testing.assert_allclose(bundle["edges"]["footpath_g"], base.footpath_g, rtol=1e-5)
+    np.testing.assert_allclose(bundle["nodes"]["ground_g"], base.ground_g, rtol=1e-5)

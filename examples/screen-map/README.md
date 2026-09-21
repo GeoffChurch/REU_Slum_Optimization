@@ -11,12 +11,12 @@ via `reblock.data.informal`).
 
 ![Cape Town at the shipped depth_density_proxy floor: gold = real informal settlement, red outline = selected, blue ring = the block the rest of the site follows](screen_map.png)
 
-The blue ring marks `ZAF.9.3.1_1_40972` (index 10,771 of the columns below)
+The blue ring marks `ZAF.9.3.1_1_5810` (index 15,849 of the columns below)
 -- the single block every later stage of the site is about: perm-graph, displacement-field and
 method-comparison all pin it, and region-grow seeds from it. Cape Town's bundle carries it as
 `follow`; Nairobi omits the field, the same way it omits `informal`. It is a POINT, not an outline:
 a whole metro is fitted into one figure, so at a 700-900 px page width that block
-covers 1.6-2.6 px² in the map above, and 0.5-0.8 px²
+covers 60.4-99.9 px² in the map above, and 19.6-32.5 px²
 on the widget's own square map -- its boundary is not a shape a reader could pick out.
 
 `capetown.json` and `nairobi.json` are the payloads the widget fetches: every block's

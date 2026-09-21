@@ -28,7 +28,11 @@ OUT = Path("examples/authoring/block.json")
 README = Path("examples/authoring/README.md")
 DTS = Path("web/src/authoring.d.ts")
 GEN_AUTHORING_BLOCK = Path("scripts/gen_authoring_block.py")
-SPINE = "ZAF.9.3.1_1_40972"
+# The Explore page's spine block. Moved from ZAF.9.3.1_1_40972 (263 parcels) on
+# 2026-09-20 -- see `scripts/_example_block.py`. `tests/test_screen_map_bundle.py`'s
+# SPINE_SOURCES is what keeps the five bundles agreeing on it; this constant is one
+# baker's end of that.
+SPINE = "ZAF.9.3.1_1_5810"
 
 
 @pytest.fixture(scope="session")

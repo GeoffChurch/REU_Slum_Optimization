@@ -363,20 +363,27 @@ test("the view fits the parcels too, not just the buildings", async () => {
     assert.ok(v >= 0 && v <= SIZE, `a parcel vertex landed at ${v}, outside a ${SIZE} px canvas`);
   }
 
-  // ...and the assertion above is not vacuous: under the fit PermGraph uses -- the BUILDING
-  // centroids alone, with parcels drawn anyway -- a ring vertex leaves the canvas. Measured on this
-  // block at this pad: the scale inflates 9.8 % and exactly 1 parcel vertex of 1850 lands 9.3 px
-  // past the max-x edge of a 700 px canvas (the same vertex is on the boundary ring, which spans
-  // the parcel bbox exactly). Small, real, and enough to make this assertion discriminate -- which
-  // is all it is here to do.
-  const buildingsOnly = fitBbox({
-    minX: Math.min(...bundle.buildings.x), minY: Math.min(...bundle.buildings.y),
-    maxX: Math.max(...bundle.buildings.x), maxY: Math.max(...bundle.buildings.y),
-  }, SIZE, SIZE, E.pad);
-  const escaped = bundle.parcels.flatMap((ring) => ring.map((p) => toScreen(buildingsOnly, p[0], p[1])))
-    .filter(([sx, sy]) => sx < 0 || sx > SIZE || sy < 0 || sy > SIZE);
-  assert.ok(escaped.length > 0,
-    "a buildings-only fit would contain the parcels here, so the containment above proves nothing");
+  // ...and the assertion above is not vacuous: the parcels WIDEN the fit, so a buildings-only fit
+  // is a different fit and the containment is a fact about this one.
+  //
+  // This used to prove that by pushing parcel vertices off a buildings-only canvas, and the
+  // margin was always thin -- its own note recorded "exactly 1 parcel vertex of 1850 lands 9.3 px
+  // past the max-x edge". On the spine block of 2026-09-20 the pad absorbs the difference
+  // entirely, 0 vertices escape, and that phrasing reported the guard as failing when nothing was
+  // wrong: buildings are spread across a 6,619-parcel block, so their bbox nearly IS the block's.
+  //
+  // The bbox comparison is the property itself rather than a visible consequence of it, so no pad
+  // can hide it. MEASURED on this bundle: buildings span x 24.6..1547.5, buildings-plus-parcels
+  // span x 0.0..1556.5.
+  const bbox = (xs: number[], ys: number[]) => ({
+    minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys),
+  });
+  const buildingsOnly = bbox(bundle.buildings.x, bundle.buildings.y);
+  const withParcels = bbox(
+    [...bundle.buildings.x, ...bundle.parcels.flatMap((r) => r.map((p) => p[0]))],
+    [...bundle.buildings.y, ...bundle.parcels.flatMap((r) => r.map((p) => p[1]))]);
+  assert.notDeepEqual(withParcels, buildingsOnly,
+    "the parcels do not widen the fit here, so the containment above proves nothing");
 });
 
 test("the fallback image and its glightbox anchor go only after a successful draw", async () => {

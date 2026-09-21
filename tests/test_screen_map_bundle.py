@@ -27,7 +27,7 @@ FOLLOW_SOURCE = Path("examples/perm-graph/bundle.json")
 # off the spine while the marker keeps pointing at perm-graph's block.
 SPINE_SOURCES = {FOLLOW_SOURCE: "block_id",
                  Path("examples/displacement-field/field.json"): "block_id",
-                 Path("examples/method-comparison/frontier.json"): "block_id",
+                 Path("examples/explore/frontier.json"): "block_id",
                  Path("examples/region-grow/hood.json"): "seed"}
 
 pytestmark = pytest.mark.skipif(not (OUT / "capetown.json").exists(), reason="tier not baked")

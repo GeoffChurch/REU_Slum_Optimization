@@ -121,22 +121,22 @@ function showMountError(el: HTMLElement, err: unknown): void {
   showWidgetError(el, "This figure", err);
 }
 
-// Registration lives HERE, not inside the widget module, and that is deliberate: importing the
-// widget was previously done for its `register("perm-graph", permGraph)` side effect at the
-// widget's own top level, and that widget module imported `register` back from this file to do
-// it. ES module evaluation fully resolves a module's imports -- running the imported module's own
-// top-level body -- before executing the importing module's body, so with that shape the widget's
-// top-level `register(...)` call ran BEFORE this file reached its own `const REGISTRY = new
-// Map()` above, throwing `TypeError: Cannot read properties of undefined (reading 'set')` on
-// every page load, before the DOMContentLoaded listener below was ever wired up (silent, because
-// the PNG fallback stayed visible and the page looked fine). Importing only the plain `permGraph`
-// function here -- and registering it explicitly, after REGISTRY exists -- breaks the cycle:
-// perm-graph.ts now has no runtime import of this file at all (see its `import type` comment), so
-// there is nothing left to reorder. Do not move this back into the widget module.
-import { permGraph, PERM_GRAPH_URL } from "./widgets/perm-graph.js";
-register("perm-graph", permGraph, PERM_GRAPH_URL);
-// Same shape, same reason -- registered HERE, after REGISTRY exists, never from inside the widget
-// module (see the paragraph above).
+// Registration lives HERE, not inside the widget module, and that is deliberate. Importing a
+// widget for its `register(...)` side effect at the widget's own top level, with that widget
+// importing `register` back from this file, is a cycle: ES module evaluation fully resolves a
+// module's imports -- running the imported module's own top-level body -- before executing the
+// importing module's body, so the widget's top-level `register(...)` ran BEFORE this file reached
+// its own `const REGISTRY = new Map()` above. That threw `TypeError: Cannot read properties of
+// undefined (reading 'set')` on every page load, before the DOMContentLoaded listener below was
+// ever wired up -- silently, because the PNG fallback stayed visible and the page looked fine.
+// Importing the plain function here and registering it explicitly, after REGISTRY exists, breaks
+// the cycle. Do not move any of these back into their widget modules.
+//
+// `perm-graph` was registered here until 2026-09-20 and is gone: the figure it drew was a slider
+// over 320 baked potential/current fields, which cost an 83 MB bundle on the spine block. The
+// build-order animation it existed for is now the committed `reblock_<method>.gif`, which
+// `gen_example` already bakes and which already stops at the matched-permeability standard --
+// 850 KB against 80 MB, and no solver in the browser to feed it.
 import { frontier, FRONTIER_URL } from "./widgets/frontier.js";
 register("frontier", frontier, FRONTIER_URL);
 // Third widget, same shape, same reason -- registered HERE, after REGISTRY exists, never from

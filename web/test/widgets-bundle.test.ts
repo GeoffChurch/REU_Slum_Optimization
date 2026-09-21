@@ -23,10 +23,25 @@ const BUNDLE_PATH = "../docs/js/widgets.js";
  * the point, which is the pattern this branch has been punishing all along (final review, I4). */
 function emittedWidgetNames(): string[] {
   const generator = readFileSync("../scripts/gen_site_pages.py", "utf8");
-  const names = [...generator.matchAll(/data-widget="([a-z-]+)"/g)].map((m) => m[1]!);
+  // COMMENT LINES STRIPPED FIRST. The regex cannot tell an emitted attribute from one quoted in
+  // prose, and the generator's own comments quote it: `gen_site_pages.py` explains there why the
+  // page scan skips `docs/superpowers/`, using `data-widget="..."` as the example, and the panel
+  // that stopped carrying a mount point says which name it used to carry. Neither is an emission.
+  //
+  // It went unnoticed while every quoted name was also a registered widget. It stopped being
+  // harmless the moment one was removed: on 2026-09-20 `perm-graph` was deleted and this test
+  // failed claiming the shipped bundle had lost a widget a generated page still emits -- when no
+  // generated page emitted it and the bundle was correct. A guard that reads a comment as code
+  // fails on the one change it should have stayed quiet for.
+  //
+  // `#` lines only, which is what both offenders are. A name quoted inside a DOCSTRING would still
+  // fool this; the honest bound is that prose in this file should not reproduce the attribute
+  // verbatim, and stripping comments removes the cases that actually occur.
+  const code = generator.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+  const names = [...code.matchAll(/data-widget="([a-z-]+)"/g)].map((m) => m[1]!);
   const unique = [...new Set(names)].sort();
   assert.ok(unique.length >= 2,
-    `expected at least perm-graph and frontier in the generator, found ${JSON.stringify(unique)}`);
+    `expected at least frontier and screen-map in the generator, found ${JSON.stringify(unique)}`);
   return unique;
 }
 
