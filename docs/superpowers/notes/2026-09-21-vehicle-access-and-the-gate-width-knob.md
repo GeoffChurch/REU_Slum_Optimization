@@ -155,21 +155,43 @@ reaching D = 0.070) and `osm_footpaths` reaches 0.025. Among the three comparabl
 on the small block with the old measure, had Looped Tree last. The ranking is block-dependent; the
 small block is not a matched comparison at all (achieved D ranges 0.101-0.171 there).
 
-### The objective says BUILD NOTHING, and that is the answer to probabilistic displacement
+### The objective prefers do-nothing -- and the D-sweep turns that into an exact condition
 
-On raw OBJ, which prices displacement: do-nothing 6022.4 > osm 5905.6 > arterial 5822.0 >
-clearance 5706.8 > cycle 5644.2 > euclidean 5630.0. Monotone decreasing in achieved D, on BOTH
-blocks. Laying 5,377 m moves mass down 10% and access per unit up 5.3%, so it loses.
+`dsweep.py`, `clearance_looped` on the spine block, sweeping the Lens A target:
 
-This IS the "displaced with probability p means zero reachability" idea, and the answer is: it does
-not blow up via singularity, it simply prices the 10% target and finds it **unjustified by vehicle
-access alone**. Under a utilitarian sum where a demolished home contributes 0, reblocking pays only
-where access gained across everyone else exceeds the value destroyed.
+    target D   got D   road_m    p50   >=3.5m       OBJ  per-unit    vs D=0
+       0.000   0.000        0   4.00    0.638    6022.4     0.910      +0.0
+       0.005   0.008      587   4.25    0.685    6001.5     0.914     -20.8
+       0.010   0.010      683   4.25    0.688    5992.1     0.915     -30.2
+       0.030   0.031     1655   4.50    0.712    5916.9     0.922    -105.4
+       0.050   0.051     2931   5.00    0.747    5864.7     0.933    -157.6
+       0.100   0.100     5377   5.75    0.848    5706.8     0.958    -315.6
+       0.150   0.150     7928   6.25    0.896    5444.2     0.968    -578.2
 
-Scope the claim carefully: **none of these five methods beats do-nothing, at any displacement any of
-them achieves.** That is not a proof that no method could -- none of them OPTIMIZES this objective.
-The test is a method that maximises `sum_i (1 - c_i) f(w_i)` directly, and a sweep over D rather
-than a pinned 0.100, since the optimum over the tested points sits at D = 0.
+Monotone decline from the first 587 m. **No interior optimum**, so pricing displacement does not by
+itself tune the road budget. But the sweep gives far more than that. Write `OBJ(D) = n(1-D) u(D)`
+with `u` the per-unit access (`OBJ / sum_i (1 - c_i)`):
+
+* **A hard bound, independent of method.** `f = min(w/3.5, 1) <= 1` gives `OBJ(D) <= n(1-D)`, so
+  beating do-nothing REQUIRES `D < 1 - u(0)`. That is **9.0% on the spine block** and **7.2% on the
+  small block** (`u(0)` = 0.910 and 0.928). No plan by any method can justify more displacement than
+  the do-nothing access DEFICIT. **Lens A's pinned 0.100 is already above the bound on both
+  blocks**, so at Lens A the comparison against do-nothing is settled before a method is chosen.
+  This is a property of a SATURATING benefit (`f <= 1`); an unbounded benefit has no such bound.
+* **A marginal condition, which is a target.** `dOBJ/dD` at 0 is `n[u'(0) - u(0)]`, positive iff
+  `u'(0) > u(0)`. Measured `u'(0) ~ (0.914 - 0.910)/0.008 = 0.50` against a required 0.91 -- short
+  by a factor of ~1.8, not by orders of magnitude. **A method that roughly DOUBLES the access opened
+  per home destroyed would show a genuine interior optimum.**
+
+This is the answer to "displaced with probability p means zero reachability": no singularity, it
+simply prices the target and finds 10% unjustified by vehicle access alone -- and it says by how
+much, and what would have to change.
+
+Scope it carefully. The sweep walks a drainage-ordered PREFIX of a plan designed for D = 0.10, so a
+small-D point is the first few segments of that plan, not the best plan at small D. **An interior
+optimum found this way would be real; a declining curve is weaker evidence**, because none of these
+five methods optimizes the objective it is being scored on. The open test is a method that maximises
+`sum_i (1 - c_i) f(w_i)` directly, and it now has a number to beat: `u'(0) > u(0) ~ 0.91`.
 
 ### Not the disc model -- hypothesis formed and killed
 
@@ -214,11 +236,14 @@ still near-monotone in road length. `OBJ` weights by `(1 - c_i)` and avoids the 
 * **Report achieved D beside every Lens A comparison**, and treat a method that cannot reach the
   target as absent from that comparison rather than as a competitor. `greedy_arterial` cannot spend
   10% even with 9,713 m; `osm_footpaths` reaches 0.025.
-* **The objective prefers do-nothing on both blocks**, monotonically in D. That is the answer to
-  "displaced with probability p means zero reachability": no singularity, it just prices the 10%
-  target and finds it unjustified by vehicle access alone. The open test is a method that OPTIMIZES
-  `sum_i (1 - c_i) f(w_i)` directly, plus a sweep over D instead of a pinned 0.100 -- none of the
-  five methods here optimizes it, so "none of these beats do-nothing" is not "nothing could".
+* **A saturating benefit bounds the justifiable displacement at `1 - u(0)`** -- 9.0% on the spine
+  block, 7.2% on the small one -- for ANY method. Lens A's pinned 0.100 exceeds both, so that
+  comparison is decided before a method is chosen. Pick the displacement target against this bound,
+  not by convention.
+* **The margin is a target, not a dead end.** Reblocking pays at D -> 0 iff `u'(0) > u(0)`;
+  measured 0.50 against 0.91, short by ~1.8x. A method that doubles access opened per home
+  destroyed gets an interior optimum. None of these five optimizes the objective it is scored on,
+  so "none of them beats do-nothing" is not "nothing could".
 * Do not sample a channel width along a line (Result 3). Both reductions are wrong and they
   disagree. The widest-path sweep is the replacement and it is cheap: one pass gives every `w_i`
   and the whole `W`-sweep.
