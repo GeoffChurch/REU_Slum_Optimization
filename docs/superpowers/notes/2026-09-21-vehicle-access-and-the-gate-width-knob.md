@@ -415,6 +415,37 @@ configured tier the data cannot supply raises there, loudly, never degrading sil
 Side benefit: it makes the NN/2 wart VISIBLE as a named strategy someone opts into, rather than the
 invisible default that cannot tell dense-small from sparse-large.
 
+## Result 9: cycle_native's "double roads" are waste on the block where they matter
+
+Rendered, `cycle_native` shows many near-parallel road pairs a few metres apart -- two roads where
+one wider road would seem to do. Displacement charges per BUILDING, not per land taken, so the
+sliver between the two is free and nothing pushes the method to merge them.
+
+`double_roads.py` finds near-parallel pairs (within 14 m, within 20 degrees), merges each into ONE
+road carrying the pair's combined width, then re-tunes that extra width by bisection until
+displacement MATCHES the original exactly, with every road held at the 7 m two-way floor that
+`buildable_widths` enforces. Two earlier attempts were confounded: conserving WIDTH inflated
+land take (corridor 1607 -> 2174 m^2), and conserving analytic `length x width` did not conserve
+the buffered polygon either, because end caps grow with width and the pair's buffers overlapped.
+
+    block                  pairs  share of road   D (both)   perm orig -> merged   road
+    ZAF.9.3.1_1_40972          2           69%     0.1126     0.7697 -> 0.7580    -31%
+    ZAF.9.3.1_1_5810          18           61%     0.1008     0.8933 -> 0.9124    -30%
+
+**On the spine block merging is a Pareto improvement on every axis** -- +2.1% permeability, 30% less
+road, identical displacement, land take within 1.2%. On the small block it costs 1.5%. Weight the
+spine: 9x the pairs, the realistic scale, and there the doubling is 61% of the whole network. The
+sign is NOT universal, so do not claim it is.
+
+**The non-planarization artifact is not what sustains it.** Hypothesis was that `_road_net` never
+noding road-road crossings (`2026-09-14-road-net-is-not-planarized.md`) lets the solver credit two
+parallel roads as independent routes. If so, merging would LOSE permeability. On the spine it
+GAINS. Only 9 of 18 pairs have both members touching the street, so half are not even real cycles.
+
+**The cause is the cost model**: nothing prices road length or land take. The cheap fix is a
+post-pass merging near-parallel pairs on the `Method.prior` refiner seam -- free on the spine block,
+but one block is thin evidence for shipping a method change.
+
 ## What to take from this
 
 * **Compute clearance ANALYTICALLY** (`min_i(|p - c_i| - r_i)`, `vehicle_access.py`), never as a
