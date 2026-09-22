@@ -168,8 +168,38 @@ small block is not a matched comparison at all (achieved D ranges 0.101-0.171 th
        0.100   0.100     5377   5.75    0.848    5706.8     0.958    -315.6
        0.150   0.150     7928   6.25    0.896    5444.2     0.968    -578.2
 
-Monotone decline from the first 587 m. **No interior optimum**, so pricing displacement does not by
-itself tune the road budget. But the sweep gives far more than that. Write `OBJ(D) = n(1-D) u(D)`
+Monotone decline from the first 587 m -- **for this method**. Sweeping all five (`msweep.py`,
+`verify.py`) shows that conclusion does NOT generalise: `cycle_native` HAS an interior optimum.
+
+    method                     D  road_m  gone  near       OBJ   vs D=0  u_prime
+    cycle_native          0.0037     177    25     1    6031.6     +9.2    1.291
+    cycle_native          0.0066     318    46     5    6029.9     +7.6    1.090
+    cycle_native          0.0107     623    73    11    6032.9    +10.6    1.071
+    cycle_native          0.0118     809    77    13    6025.9     +3.5    0.966
+    cycle_native          0.0145    1230    96    14    6010.4    -12.0    0.797
+    cycle_native          0.0207    1802   137    17    5971.3    -51.1    0.549
+    clearance_looped      0.0035     214    23     3    6002.4    -19.9    0.046
+    clearance_looped      0.0216    1189   146    22    5949.6    -72.8    0.410
+    euclidean_grid        0.0127     748     -     -    5960.8    -61.6    0.182
+    greedy_arterial       0.0063     993     -     -    5994.6    -27.8    0.242
+    osm_footpaths         0.0058    1254     -     -    5984.7    -37.6   -0.065
+
+**So pricing displacement DOES tune the road budget** -- to 177-623 m on a 57.7 ha block, not the
+5,377 m Lens A buys. The most efficient point is the smallest (177 m, `u' = 1.291`).
+
+Checked for the obvious artefact and it is not one. `widths()` deletes a building from the OBSTACLE
+field on a hard `c > 0.5` while OBJ weights by the SOFT `c`, so a method that concentrates
+displacement just over the threshold could buy corridor cheaply. `near` (buildings with
+`c` in (0.4, 0.6)) is **1** at the +9.2 point -- a single boundary building cannot make that swing --
+and `clearance_looped` carries equal or larger `near` counts (3, 12, 13, 16, 22) while staying
+negative throughout. The win does not track the threshold population.
+
+**The criterion predicts the sign in 14 of 14 rows.** Exactly, `OBJ - OBJ_0 = n D (u' - u(D))`, so
+the sign is `u'` against `u(D)`: every `cycle_native` row above ~0.91 is positive INCLUDING the
+marginal 0.966 (+3.5), every row below is negative, and all seven `clearance_looped` rows sit at
+`u' <= 0.53` and are negative. The analysis is predictive, not a post-hoc description.
+
+The sweep gives more still. Write `OBJ(D) = n(1-D) u(D)`
 with `u` the per-unit access (`OBJ / sum_i (1 - c_i)`):
 
 * **A hard bound, independent of method.** `f = min(w/3.5, 1) <= 1` gives `OBJ(D) <= n(1-D)`, so
@@ -275,10 +305,12 @@ a constant you tune.
   block, 7.2% on the small one -- for ANY method. Lens A's pinned 0.100 exceeds both, so that
   comparison is decided before a method is chosen. Pick the displacement target against this bound,
   not by convention.
-* **The margin is a target, not a dead end.** Reblocking pays at D -> 0 iff `u'(0) > u(0)`;
-  measured 0.50 against 0.91, short by ~1.8x. A method that doubles access opened per home
-  destroyed gets an interior optimum. None of these five optimizes the objective it is scored on,
-  so "none of them beats do-nothing" is not "nothing could".
+* **The margin criterion is predictive.** `OBJ - OBJ_0 = n D (u' - u(D))` called the sign in 14/14
+  measured rows. Use it to screen a method cheaply before scoring it: `u' > u(0)` or it loses.
+* **`cycle_native` HAS an interior optimum** at D = 0.4-1.1% (177-623 m on 57.7 ha, +9 to +11),
+  verified not to be the hard/soft displacement-threshold artefact. So pricing displacement does
+  tune the road budget -- to a tiny intervention at W = 3.5, and to full plans at W >= 5 (Result 6).
+  Do not repeat "the objective says build nothing"; it was measured on `clearance_looped` alone.
 * Do not sample a channel width along a line (Result 3). Both reductions are wrong and they
   disagree. The widest-path sweep is the replacement and it is cheap: one pass gives every `w_i`
   and the whole `W`-sweep.
