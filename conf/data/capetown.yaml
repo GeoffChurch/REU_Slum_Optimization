@@ -2,3 +2,5 @@ _target_: reblock.data.kblock.KblockSource
 blocks_path: tests/data/kblock/blocks_capetown_sample.parquet
 buildings_path: tests/data/kblock/buildings_capetown_sample.parquet
 region_id: capetown
+# The building-geometry tier, chosen by the `buildings` config group.
+building_tier: ${buildings}

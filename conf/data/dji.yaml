@@ -2,3 +2,5 @@ _target_: reblock.data.kblock.KblockSource
 blocks_path: tests/data/kblock/blocks_dji_sample.parquet
 buildings_path: tests/data/kblock/buildings_dji_sample.parquet
 region_id: dji
+# The building-geometry tier, chosen by the `buildings` config group.
+building_tier: ${buildings}

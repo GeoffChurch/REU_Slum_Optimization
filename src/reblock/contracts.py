@@ -11,7 +11,7 @@ from geopandas import GeoDataFrame
 from pyproj import CRS
 from shapely.geometry import MultiPolygon, Polygon
 
-from reblock.buildings import Extents, SpacingDiscs
+from reblock.buildings import Extents, SpacingDiscs, tier_identity
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -79,11 +79,15 @@ class Block:
         _require_columns(self.streets, {"geometry"}, "Block.streets")
 
     @property
-    def identity(self) -> tuple[str, str] | None:
+    def identity(self) -> tuple[str, str, str] | None:
         """Content-address for the derivation cache: (source hash, block_id), or
         None when the source hash is unknown (synthetic/test blocks -> uncacheable,
         so they never key-collide). See reblock.derive_graph.derive."""
-        return (self.source_content_hash, self.block_id) if self.source_content_hash else None
+        # The TIER is part of what a block IS to a derivation: methods read `self.buildings`, so
+        # the same block at two tiers gives two answers. Without it here, switching tiers would
+        # hit the cache and return the OTHER tier's result -- no error, plausible numbers.
+        return ((self.source_content_hash, self.block_id, tier_identity(self.building_tier))
+                if self.source_content_hash else None)
 
 
 @dataclass(frozen=True)

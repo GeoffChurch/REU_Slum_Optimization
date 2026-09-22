@@ -4,11 +4,13 @@ Plain file cache (check-if-exists), not joblib. The large data is never committe
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
 
+from reblock.buildings import Extents, SpacingDiscs
 from reblock.data.kblock import KblockSource
 from scripts.fetch_kblock_fixtures import (
     CT_BBOX,
@@ -44,10 +46,13 @@ def ensure_city_data(city: str, *, cache_dir: Path = DEFAULT_CACHE) -> tuple[Pat
 
 
 def cached_kblock_source(city: str, *, block_ids: list[str] | None = None,
-                         min_buildings: int = 10, cache_dir: Path = DEFAULT_CACHE) -> KblockSource:
+                         min_buildings: int = 10, cache_dir: Path = DEFAULT_CACHE,
+                         building_tier: Callable[[gpd.GeoDataFrame], Extents] = SpacingDiscs,
+                         ) -> KblockSource:
     blocks_path, buildings_path = ensure_city_data(city, cache_dir=cache_dir)
     return KblockSource(blocks_path, buildings_path, region_id=city,
-                        min_buildings=min_buildings, block_ids=block_ids)
+                        min_buildings=min_buildings, block_ids=block_ids,
+                        building_tier=building_tier)
 
 
 def tiles_for(shortlist: gpd.GeoDataFrame, tiles: gpd.GeoDataFrame) -> list[str]:

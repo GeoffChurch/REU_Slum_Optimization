@@ -24,7 +24,7 @@ slightly exceeds the disc area (15.0 m^2). See
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cached_property, partial
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -40,6 +40,23 @@ DEFAULT_BUILDING_RADIUS_M = 3.0   # unchanged from budget.py -- this is a migrat
 # Nearest CENTRES considered per query point. Radii vary, so nearest-centre is not nearest-SURFACE
 # and a few neighbours must be checked; 12 is `vehicle_access.py`'s vetted value.
 _K = 12
+
+
+def tier_identity(tier: object) -> str:
+    """Stable name of a building tier FACTORY, for the derivation cache key.
+
+    Methods read `block.buildings`, so their output depends on the tier -- and a cache keyed only on
+    `(source_content_hash, block_id)` would hand back results computed under a DIFFERENT tier, with
+    no error and numbers that look right. Unwraps `functools.partial`, which is what a Hydra
+    `_partial_: true` config produces.
+    """
+    # A CLOSED set -- a tier class, or the partial Hydra's `_partial_: true` wraps it in -- so
+    # discriminate with isinstance, not `getattr(tier, "func", tier)`: a defaulted getattr cannot
+    # fail, so it would silently name the wrong thing if a third kind ever turned up.
+    fn = tier.func if isinstance(tier, partial) else tier
+    if not isinstance(fn, type):
+        raise TypeError(f"a building tier must be a class, or a partial of one; got {fn!r}")
+    return f"{fn.__module__}.{fn.__qualname__}"
 
 
 @runtime_checkable
@@ -191,6 +208,15 @@ class Footprints:
     """
 
     footprints: GeoDataFrame
+
+    def __post_init__(self) -> None:
+        kinds = set(self.footprints.geometry.geom_type.dropna().unique())
+        bad = kinds - {"Polygon", "MultiPolygon"}
+        if bad:
+            raise ValueError(
+                f"Footprints needs polygon outlines; got {sorted(bad)}. A POINT has zero area, so "
+                "every radius would be 0 and every displacement nonsense -- silently. Point data "
+                "is the SpacingDiscs/AreaDiscs tier; fetch the polygon tiles for this one.")
 
     def __len__(self) -> int:
         return len(self.footprints)

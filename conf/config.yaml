@@ -5,6 +5,7 @@ defaults:
   - method: clearance
   - eval: kcomplexity
   - substrate: chord_diag
+  - buildings: spacing
   - desire_source: osm
   - metric: depth_density_proxy
   - _self_

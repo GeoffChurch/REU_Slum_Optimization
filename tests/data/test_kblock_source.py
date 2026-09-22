@@ -131,3 +131,53 @@ def test_kblock_blocks_carry_source_content_hash() -> None:
     assert blocks, "expected at least one built block"
     h = blocks[0].source_content_hash
     assert h and all(b.source_content_hash == h for b in blocks)  # same hash for all blocks
+
+
+# --- building tiers ---------------------------------------------------------------------------
+# The committed Cape Town fixture carries ONLY `geometry` (no `area_in_meters`), which makes it the
+# real-data case for the load-time guard rather than a synthetic stand-in.
+
+_CT_BLOCKS = "tests/data/kblock/blocks_capetown_sample.parquet"
+_CT_BUILDINGS = "tests/data/kblock/buildings_capetown_sample.parquet"
+
+
+def test_area_tier_on_data_without_area_raises_at_load() -> None:
+    """AreaDiscs on area-less data must fail when the data LOADS, naming the file -- not on the
+    first lazy `block.buildings` access deep inside a run. Watched failing: with the validation
+    removed from `KblockSource.region`, loading succeeds and the error surfaces only later."""
+    import pytest
+
+    from reblock.buildings import AreaDiscs
+    from reblock.data.kblock import KblockSource
+    with pytest.raises(ValueError, match="buildings_capetown_sample.parquet"):
+        KblockSource(_CT_BLOCKS, _CT_BUILDINGS, building_tier=AreaDiscs).region()
+
+
+def test_footprint_tier_on_point_data_raises_at_load() -> None:
+    """Footprints on POINTS would read every area as 0, every radius as 0, and every displacement
+    as nonsense -- silently. It must refuse at load instead."""
+    import pytest
+
+    from reblock.buildings import Footprints
+    from reblock.data.kblock import KblockSource
+    with pytest.raises(ValueError, match="polygon"):
+        KblockSource(_CT_BLOCKS, _CT_BUILDINGS, building_tier=Footprints).region()
+
+
+def test_parcels_are_identical_across_tiers(tmp_path: Path) -> None:
+    """The tier changes the building MODEL, never the parcel structure: assignment and Voronoi run
+    on centroids whatever the geometry. So the same data at two tiers must give identical parcels,
+    and only `block.buildings` may differ."""
+    import geopandas as gpd
+    import numpy as np
+
+    from reblock.buildings import AreaDiscs, SpacingDiscs
+    from reblock.data.kblock import KblockSource
+    bld = gpd.read_parquet(_CT_BUILDINGS)
+    with_area = tmp_path / "buildings_with_area.parquet"
+    bld.assign(area_in_meters=np.linspace(8.0, 40.0, len(bld))).to_parquet(with_area)
+    a = next(iter(KblockSource(_CT_BLOCKS, with_area, building_tier=SpacingDiscs).region().blocks))
+    b = next(iter(KblockSource(_CT_BLOCKS, with_area, building_tier=AreaDiscs).region().blocks))
+    assert a.block_id == b.block_id
+    assert a.parcels.geometry.equals(b.parcels.geometry)
+    assert not np.allclose(a.buildings.radii, b.buildings.radii)   # the model DID change

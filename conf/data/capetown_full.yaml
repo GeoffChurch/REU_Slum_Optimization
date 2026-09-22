@@ -1,3 +1,5 @@
 # Real full Cape Town data: downloaded on demand, cached under ~/.cache/reblock (never committed).
 _target_: reblock.data.provision.cached_kblock_source
 city: capetown
+# The building-geometry tier, chosen by the `buildings` config group.
+building_tier: ${buildings}

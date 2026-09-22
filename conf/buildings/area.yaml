@@ -1,0 +1,4 @@
+# Tier 2 from positions + measured area: radius = sqrt(area_in_meters / pi). Free -- the point
+# parquets already carry the column. Raises at LOAD on data without it. See reblock.buildings.AreaDiscs.
+_target_: reblock.buildings.AreaDiscs
+_partial_: true

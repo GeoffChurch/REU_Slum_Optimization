@@ -1,0 +1,5 @@
+# Tier 3: real Open Buildings outlines. Exact clearance, and displacement as the true overlap
+# fraction. Needs POLYGON data -- raises at LOAD on points rather than silently reading every radius
+# as 0. Measured: discs over-read served-at-3.5m by 34% against these. See reblock.buildings.Footprints.
+_target_: reblock.buildings.Footprints
+_partial_: true

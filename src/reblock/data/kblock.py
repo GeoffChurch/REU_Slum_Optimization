@@ -8,16 +8,19 @@ the building source (reads whatever points GeoParquet fixture-prep produced).
 from __future__ import annotations
 
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
+import numpy as np
+from numpy.typing import NDArray
 from pyproj import CRS
 from shapely import make_valid, voronoi_polygons
 from shapely.geometry import GeometryCollection, MultiPoint, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
+from reblock.buildings import Extents, SpacingDiscs
 from reblock.contracts import BBox, Block, Region
 from reblock.data._util import _window
 from reblock.data.counts import RAW_COUNT
@@ -54,12 +57,14 @@ def _voronoi_parcels(poly: Polygon, points: list[Point], crs: CRS) -> gpd.GeoDat
 class KblockSource:
     def __init__(self, blocks_path: str | Path, buildings_path: str | Path,
                  region_id: str = "kblock", *, min_buildings: int = 10,
-                 block_ids: list[str] | None = None) -> None:
+                 block_ids: list[str] | None = None,
+                 building_tier: Callable[[gpd.GeoDataFrame], Extents] = SpacingDiscs) -> None:
         self.blocks_path = Path(blocks_path)
         self.buildings_path = Path(buildings_path)
         self.region_id = region_id
         self.min_buildings = min_buildings
         self.block_ids = list(block_ids) if block_ids is not None else None
+        self.building_tier = building_tier
         self._utm: CRS | None = None
 
     def _target_utm(self) -> CRS:
@@ -92,11 +97,11 @@ class KblockSource:
         return _window(out, bbox)
 
     def building_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
-        """The buildings parquet's points, reprojected to the same UTM as `block_geometries()`/
-        `region()` so overlays align. `bbox` (in the target UTM) windows via `.cx`."""
-        pts = gpd.read_parquet(self.buildings_path, columns=["geometry"]).to_crs(
-            self._target_utm())
-        return _window(pts, bbox)
+        """The buildings parquet -- points or polygons, with every column it carries (notably
+        `area_in_meters`) -- reprojected to the same UTM as `block_geometries()`/`region()` so
+        overlays align. `bbox` (in the target UTM) windows via `.cx`."""
+        bld = gpd.read_parquet(self.buildings_path).to_crs(self._target_utm())
+        return _window(bld, bbox)
 
     def region(self) -> Region:
         blocks = gpd.read_parquet(
@@ -110,7 +115,19 @@ class KblockSource:
                 raise ValueError(
                     f"{self.region_id}: block_ids not found in source: {sorted(missing)}")
             blocks = cast(gpd.GeoDataFrame, blocks[blocks["block_id"].isin(wanted)])
-        bld = gpd.read_parquet(self.buildings_path, columns=["geometry"])
+        # Every column, not just geometry: `columns=["geometry"]` is what dropped area_in_meters.
+        bld = gpd.read_parquet(self.buildings_path)
+        # Fail at LOAD, not deep inside a run: build the tier on the rows just read, so AreaDiscs
+        # on a parquet without `area_in_meters`, or Footprints on point geometry, raises HERE --
+        # naming the file -- before any block is yielded or any method runs, rather than on the
+        # first lazy `block.buildings` access hours later. Not in __init__: the class is
+        # deliberately I/O-free at construction (see the lazy `_target_utm`), and tests build it
+        # on placeholder paths.
+        try:
+            self.building_tier(bld.head(32))
+        except ValueError as e:
+            raise ValueError(f"{self.region_id}: {self.buildings_path} cannot supply the "
+                             f"configured building tier: {e}") from e
         sch = source_hash(self.blocks_path, self.buildings_path)
         return Region(region_id=self.region_id, crs=utm,
                       blocks=self._blocks_from(blocks.to_crs(utm), bld.to_crs(utm), sch))
@@ -120,13 +137,18 @@ class KblockSource:
         utm = blocks.crs
         if utm is None:
             raise ValueError(f"{self.region_id}: blocks GeoDataFrame has no CRS")
-        joined = gpd.sjoin(bld, blocks, predicate="within", how="inner")
-        pts_by_block: dict[object, list[Point]] = {
-            bid: cast(list[Point], list(grp["geometry"]))
+        # Assign and tessellate on CENTROIDS, whatever the geometry: that keeps parcels IDENTICAL
+        # across tiers (a polygon straddling a block edge would fail `within` and vanish), and the
+        # point tier's centroids are its points, so nothing moves. Only the building MODEL changes.
+        anchor = bld.assign(_row=np.arange(len(bld))).set_geometry(bld.geometry.centroid)
+        joined = gpd.sjoin(anchor, blocks, predicate="within", how="inner")
+        by_block: dict[object, tuple[list[Point], NDArray[np.int64]]] = {
+            bid: (cast(list[Point], list(grp.geometry)), grp["_row"].to_numpy(dtype=np.int64))
             for bid, grp in joined.groupby("block_id")
         }
+        empty: tuple[list[Point], NDArray[np.int64]] = ([], np.empty(0, dtype=np.int64))
         for _, row in blocks.sort_values("block_id").iterrows():
-            pts = pts_by_block.get(row["block_id"], [])
+            pts, rows = by_block.get(row["block_id"], empty)
             if len(pts) < self.min_buildings:
                 continue
             poly = make_valid(row["geometry"])
@@ -145,4 +167,6 @@ class KblockSource:
                         parcels=parcels, streets=streets,
                         source_content_hash=source_content_hash,
                         attrs={"kblock_k": float(row["k_complexity"])},
-                        building_geometries=gpd.GeoDataFrame(geometry=list(pts), crs=utm))
+                        building_geometries=cast(
+                            gpd.GeoDataFrame, bld.iloc[rows].reset_index(drop=True)),
+                        building_tier=self.building_tier)
