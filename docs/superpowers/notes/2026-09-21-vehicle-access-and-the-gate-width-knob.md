@@ -224,6 +224,41 @@ served, which makes demolition look free. `vehicle_access.py` returns `np.mean(s
 block -- dividing out the demolished gives 0.792/0.809/0.848/0.829/0.899 against 0.741 for no roads,
 still near-monotone in road length. `OBJ` weights by `(1 - c_i)` and avoids the trap; prefer it.
 
+## Result 6: "reblocking does not pay" was a statement about W = 3.5, and the ranking ROTATES with W
+
+`w_i` does not depend on the standard, so one widest-path pass per method scores every `W` for free
+(`wscore.py`). Lens A D = 0.100, spine block, OBJ relative to do-nothing:
+
+    OBJ vs do-nothing            D  road_m    W=3.0   W=3.5   W=4.0   W=4.5   W=5.0   W=6.0   W=8.0
+    (no roads) ABSOLUTE      0.000       0   6277.4  6022.4  5729.6  5425.9  5129.6  4599.1  3745.3
+    clearance_looped         0.100    5377   -463.1  -315.6  -155.0    -4.0  +132.1  +325.2  +408.2
+    euclidean_grid           0.103    5544   -521.3  -392.3  -241.8   -89.8   +51.1  +272.6  +442.6
+    cycle_native             0.101    7279   -511.3  -378.2  -221.8   -61.8   +91.4  +325.7  +427.6
+    greedy_arterial          0.070    9713   -327.0  -200.4   -64.9   +60.4  +168.6  +303.2  +290.8
+    osm_footpaths            0.025    3094   -132.8  -116.7   -96.6   -83.1   -72.1   -54.8   -25.4
+
+**The sign flips at W ~ 4.5 m.** Below it do-nothing wins; above it reblocking pays, and by 6 m the
+full plans are +300 or better. Result 5's "the objective prefers do-nothing" is therefore NOT a fact
+about reblocking -- it is a fact about pinning the standard at 3.5 m, where this fabric is already
+64% compliant. The crossover is the reportable quantity: **4.5 m is the access standard at which
+reblocking begins to pay on this block.** It follows directly from the bound `D < 1 - u(0)`, which
+widens from 5.2% at W = 3.0 to 9.0% at 3.5, 13.4% at 4.0, 22.5% at 5.0 and 30.5% at 6.0 -- the
+do-nothing access DEFICIT is what there is to buy, and at 3.5 m there is almost nothing to buy.
+
+**The ranking ROTATES with W, so nothing here is dominated:**
+
+* `greedy_arterial` first at W = 4.5-5.0 (+60.4, +168.6), helped by spending only D = 0.070.
+* `cycle_native` (+325.7) and `clearance_looped` (+325.2) tied at W = 6.0 -- on 7,279 m against
+  5,377 m, so Looped Tree reaches the same place on 26% less road.
+* `euclidean_grid` first at W = 8.0 (+442.6); the grid's regularity pays once the standard is wide.
+* `osm_footpaths` NEGATIVE at every W. Existing footpaths never repay their displacement under a
+  vehicle objective, which is what paths not built for vehicles should do.
+
+This is the frontier case from the working rules, not a dominance case: each of four methods is best
+at some standard a user could reasonably pick, so `W` is an operating point to ship presets for, and
+none of them should be deleted. It also vindicates Result 1 -- `W` is a policy input you sweep, not
+a constant you tune.
+
 ## What to take from this
 
 * **Compute clearance ANALYTICALLY** (`min_i(|p - c_i| - r_i)`, `vehicle_access.py`), never as a
