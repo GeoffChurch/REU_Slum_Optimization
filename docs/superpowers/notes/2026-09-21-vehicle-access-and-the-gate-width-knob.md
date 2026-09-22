@@ -354,6 +354,67 @@ far the incumbents sit from that bound. They are NOT evidence it is a better reb
 16 roads chosen purely for vehicle width and ignores network structure entirely, so expect it to
 score badly on permeability. Score it there before calling it a method.
 
+## Result 8: we never had footprints, and the disc model OVER-READS access by 34% at W = 3.5
+
+`scripts/fetch_kblock_fixtures.py` resolves the Open Buildings tile manifest -- whose `tile_url` is
+ALREADY the polygon URL -- and then rewrites it to points:
+
+    return str(feat["properties"]["tile_url"]).replace(OB_POLYGON_PREFIX, OB_POINT_PREFIX)
+
+So real footprints were one `.replace` away the whole time. Fetched (320 MB against the point
+tile's 83 MB) and measured on `ZAF.9.3.1_1_40972`. **263/263 footprints match the pipeline's
+building points within 3 m, median 0.00 m** -- the "building points" ARE the footprint centroids, so
+the tiers line up one-to-one and the comparison is exact. Clearance is exact in both arms
+(`STRtree` distance to the true polygon vs `min_i(|p - c_i| - r_i)`), so the ONLY difference is the
+building model.
+
+                    p10     p25     p50     p75
+    FOOTPRINT      1.55    2.75    3.75    6.25
+    disc           2.50    3.25    4.25    8.00
+
+        W   footprint     disc   disc over-read
+      3.0       0.631    0.802           +0.171
+      3.5       0.548    0.734           +0.186
+      4.0       0.460    0.517           +0.057
+      5.0       0.395    0.437           +0.042
+      6.0       0.300    0.346           +0.046
+
+**Served at 3.5 m is 0.734 on discs against 0.548 on footprints -- a 34% relative over-read.** The
+error is strongly WIDTH-DEPENDENT, large at 3.0-3.5 m and small at 5-6 m, which pins the mechanism:
+a narrow channel squeezes through the corner gap between two circles inscribed in abutting
+rectangles, and that gap does not physically exist. At 5-6 m the channel is too wide for corner
+gaps to matter either way. Note it is NOT an area effect -- true median footprint area (16.9 m^2)
+slightly EXCEEDS the disc area (15.0 m^2). It is shape.
+
+**What this invalidates.** Everything at W = 3.5 is materially affected: `u(0)` falls, so there is
+MORE headroom, the bound `D < 1 - u(0)` widens, and **the W ~ 4.5 crossover moves DOWN** -- reblocking
+pays at a lower standard than Result 6 concluded. Same direction as the raster fix in Result 5:
+every correction so far has found the fabric LESS passable than we thought. The W = 6 results
+(Result 7's +383.7 vs +325.7) survive better at +0.046 but still need recomputing.
+
+**A fifth plausible-looking degenerate table**, same family as Result 5's four. `STRtree.query`
+returns `(INPUT indices, TREE indices)`; naming them the other way round wrote cell ids into
+polygon-id slots, every building fell through to a centroid fallback, and since a centroid sits
+INSIDE its own building that test is unsatisfiable -- so every `w_i` read exactly 0.00. The tell was
+the same as before: a column of identical values is a bug, not a measurement.
+
+### The tier design
+
+Three tiers now exist -- points, points+area, polygons -- and the machinery should span all three
+with unsupported combinations rejected by the CHECKER, not at runtime. A subtyping ladder of
+capability Protocols does that:
+
+    Positions  (xy)  <-  Extents  (radii, clearance)  <-  Shapes  (polygons)
+
+with three concrete `Extents`: `SpacingDiscs` (today's NN/2), `AreaDiscs` (`r = sqrt(area/pi)`,
+free -- `area_in_meters` is already in the parquet and dropped at the reader) and `Footprints`.
+A function needing extent takes `Extents` and CANNOT be passed points; one needing true outlines
+takes `Shapes` and rejects discs -- a type error at every site rather than a crash. The tier is
+resolved ONCE where config and data are read, injected downstream, and validated at LOAD: a
+configured tier the data cannot supply raises there, loudly, never degrading silently to discs.
+Side benefit: it makes the NN/2 wart VISIBLE as a named strategy someone opts into, rather than the
+invisible default that cannot tell dense-small from sparse-large.
+
 ## What to take from this
 
 * **Compute clearance ANALYTICALLY** (`min_i(|p - c_i| - r_i)`, `vehicle_access.py`), never as a
