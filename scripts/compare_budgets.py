@@ -67,7 +67,6 @@ from reblock.budget import (
     prefix_to_displacement,
     prefix_to_permeability,
 )
-from reblock.buildings import SpacingDiscs
 from reblock.compare import MethodCurve, PermeabilityConfig, load_permeability_config
 from reblock.contracts import Block, Method, Proposal, Screen, Source
 from reblock.derivations import propose
@@ -162,7 +161,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                  float(roads.geometry.length.sum()), time.perf_counter() - t0)
     assert block is not None
 
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
     n_buildings = len(block.building_geometries)
 
     def _disp_frac(prefix: GeoDataFrame) -> float:

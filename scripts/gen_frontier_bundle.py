@@ -26,7 +26,6 @@ from geopandas import GeoDataFrame
 from matplotlib.colors import to_hex
 
 from reblock.budget import displacement, street_first_ordered
-from reblock.buildings import SpacingDiscs
 from reblock.compare import load_permeability_config
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
@@ -131,7 +130,7 @@ def main() -> None:
     # Both frozen once and threaded through every solve: functions of block geometry alone.
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     p0, _ = egress_power(block, None, params, adj=adj)
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
     n_buildings = len(block.building_geometries)
 
     # Curve colours keyed exactly as the fallback PNG keys them: `method_colors` over the SAME

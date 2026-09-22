@@ -22,7 +22,6 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.budget import displacement
-from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.permeability import WIDTH_COL, PermeabilityParams, permeability
 
@@ -81,5 +80,5 @@ def test_method_emits_scorable_roads(name: str) -> None:
     # (flow_paths reads -1.1e-13). That is the metric's floating-point zero, not a monotonicity
     # violation, and this test is not the place to audit any method's efficacy on a toy fixture.
     assert -1e-9 <= float(permeability(block, roads, PARAMS)) <= 1.0
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
     assert displacement(block.building_geometries, radii, roads) >= 0.0

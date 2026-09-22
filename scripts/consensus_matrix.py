@@ -40,7 +40,6 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 
-from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.data.settlements import exclusion_holdout
 from reblock.eval.agreement import buffered_iou, directional_chamfer
@@ -97,7 +96,7 @@ def _bc() -> SimpleNamespace:
 
 
 def _perm_disp(block: Block, roads: gpd.GeoDataFrame) -> tuple[float, float]:
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
     del radii
     return (float(permeability(block, roads)), displacement_fraction(block, roads))
 

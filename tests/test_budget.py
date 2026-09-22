@@ -396,7 +396,7 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
 def test_displacement_curve_is_home_fraction() -> None:
     from reblock.budget import displacement, displacement_curve
     block, roads = _straight_block_with_two_roads()   # existing helper with building_geometries
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
     curve = displacement_curve(block, roads, radii)
     n = len(block.building_geometries)
     assert all(0.0 <= b <= 1.0 for b in curve.benefit)          # fraction, not a count
@@ -466,7 +466,7 @@ def test_permeability_and_displacement_curves_share_cost_samples():
     from reblock.budget import displacement_curve
     from reblock.permeability import PermeabilityParams, permeability_curve
     block, roads = _straight_block_with_two_roads()
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
     perm = permeability_curve(block, roads, PermeabilityParams())
     disp = displacement_curve(block, roads, radii)
     assert list(perm.cost) == list(disp.cost)

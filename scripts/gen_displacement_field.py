@@ -25,7 +25,6 @@ from shapely.affinity import translate
 from shapely.geometry import LineString
 
 from reblock.budget import displacement
-from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
 from reblock.render import (
@@ -518,7 +517,7 @@ def main() -> None:
     # only because the loader has no block-only mode, and solving one method is minutes cheaper
     # than solving all eight for a block we then use on its own.
     block, _ = load_example_block(PINNED_METHOD)
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
     roads = default_roads(block, WIDTH_FLOOR_M)
 
     # Everything geometric is emitted RELATIVE to this, in metres. PARCEL bounds, not the building

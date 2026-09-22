@@ -39,7 +39,6 @@ import numpy as np
 
 import reblock.methods.arterial.engines as art
 from reblock.budget import prefix_to_displacement
-from reblock.buildings import SpacingDiscs
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
@@ -89,7 +88,7 @@ def main() -> None:
     for i in evenly_spaced(sorted(sel), counts, N_BLOCKS):
         b = blocks[i]
         adj = parcel_adjacency(list(b.parcels.geometry), STREET_TOL)
-        radii = SpacingDiscs(b.building_geometries).radii
+        radii = b.buildings.radii
         n = len(b.parcels)
         b0 = burden(parcel_access_layers(b, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
         rec: dict[str, list[float]] = {"burden_red": [], "perm": [], "road_m": [], "n_roads": []}

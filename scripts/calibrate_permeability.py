@@ -79,7 +79,6 @@ from hydra.utils import instantiate
 from omegaconf import open_dict
 
 from reblock.budget import Curve, displacement_curve
-from reblock.buildings import SpacingDiscs
 from reblock.compare import load_permeability_config
 from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
@@ -263,7 +262,7 @@ def _method_frontier(block: Block, method: Method, params: PermeabilityParams, *
     roads = prop.roads
     if roads is None or roads.empty:
         return None
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
 
     def _report(i: int, total: int) -> None:
         _log(f"    {label}: solve {i}/{total}")

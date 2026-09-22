@@ -15,7 +15,6 @@ from typing import Any
 
 import pytest
 
-from reblock.buildings import SpacingDiscs
 from tests.dts_keys import json_keys, ts_field_names
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -277,7 +276,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     # gives every session a cold REBLOCK_CACHE_DIR by design.
     block = load_example_region()
     _, roads_by_method = load_example_block(None, variant=TEST_VARIANT)
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
     ox, oy = float(bundle["origin"][0]), float(bundle["origin"][1])
 
     # Job 1a: EVERY layer the bundle carries, re-derived from the live block through the
@@ -346,7 +345,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     # Pairing the shipped block's buildings with the fixture's roads would compare a closed form
     # against shapely on geometry that never coexisted, and both sides would agree on nonsense.
     small = load_example_region(TEST_VARIANT)
-    radii = SpacingDiscs(small.building_geometries).radii
+    radii = small.buildings.radii
     raw_x = small.building_geometries.geometry.x.to_numpy(dtype=float)
     raw_y = small.building_geometries.geometry.y.to_numpy(dtype=float)
     assert len(roads_by_method) == 5, sorted(roads_by_method)

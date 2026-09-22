@@ -26,7 +26,6 @@ import geopandas as gpd
 from shapely import wkt
 
 from reblock.budget import displacement, prefix_to_displacement
-from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
@@ -62,7 +61,7 @@ def main() -> int:
         block = pool[int(ri)]
         n = len(block.parcels)
         adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-        radii = SpacingDiscs(block.building_geometries).radii
+        radii = block.buildings.radii
         nb = len(block.building_geometries)
         b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj,
                                          unreached_depth=n + 1))

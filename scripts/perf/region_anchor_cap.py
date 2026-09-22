@@ -34,7 +34,6 @@ import time
 from pathlib import Path
 
 from reblock.budget import prefix_to_displacement
-from reblock.buildings import SpacingDiscs
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
@@ -61,7 +60,7 @@ def main() -> None:
           flush=True)
 
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    radii = SpacingDiscs(block.building_geometries).radii
+    radii = block.buildings.radii
     b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
     print(f"  baseline burden {b0:.4f}\n", flush=True)
 
