@@ -555,11 +555,11 @@ def test_cost_displacement_in_identity() -> None:
         max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
 
 
-def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 10) -> Block:
+def _two_arm_block(building_geometries: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 10) -> Block:
     # Two disjoint 1-wide x h-tall columns ("arms"), each with its own street frontage at its
     # bottom edge, separated by an empty gap -- two independent deep pockets, mirror images of
     # each other (translated by `gap_x1` in x), so a straight arterial spanning either arm's full
-    # height has IDENTICAL objective benefit and length. building_points lets the two arms'
+    # height has IDENTICAL objective benefit and length. building_geometries lets the two arms'
     # corridors differ in displacement while their raw benefit stays tied.
     polys = [Polygon([(0, j), (1, j), (1, j + 1), (0, j + 1)]) for j in range(h)]
     polys += [Polygon([(gap_x1, j), (gap_x1 + 1, j), (gap_x1 + 1, j + 1), (gap_x1, j + 1)])
@@ -572,7 +572,7 @@ def _two_arm_block(building_points: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 
         LineString([(float(gap_x1), 0.0), (float(gap_x1 + 1), 0.0)]),
     ], crs=UTM)
     return Block(block_id="two_arm", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
-                building_points=building_points)
+                building_geometries=building_geometries)
 
 
 def test_cost_displacement_avoids_the_denser_corridor() -> None:
@@ -610,7 +610,7 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
     assert d_disp == 1.0    # right arm's single (large-radius) point, fully inside its corridor
 
 
-def _grid_block_with_points(building_points: gpd.GeoDataFrame, w: int = 8, h: int = 3) -> Block:
+def _grid_block_with_points(building_geometries: gpd.GeoDataFrame, w: int = 8, h: int = 3) -> Block:
     # A w x h unit-parcel grid with bottom-edge street frontage -- a shallow block whose only
     # deep parcels are the top row, so straight arterials from the bottom compete on reaching them.
     polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
@@ -619,7 +619,7 @@ def _grid_block_with_points(building_points: gpd.GeoDataFrame, w: int = 8, h: in
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (float(w), 0.0)])], crs=UTM)
     return Block(block_id="grid", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
-                building_points=building_points)
+                building_geometries=building_geometries)
 
 
 def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None:
@@ -664,13 +664,14 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
     # A beneficial straight road whose corridor holds no building sites must still be committed
     # -- the zero-marginal-displacement candidate ranks as infinite gain (strictly above any
     # positive-denominator candidate), not skipped by an attempted division by zero. The
-    # building_points are real (non-empty) but sited far outside the block, so disk `displacement`
+    # building_geometries are real (non-empty) but sited far outside the block, so disk
+    # `displacement`
     # exercises its actual buffer/union/distance path (not the empty-input short circuit) and still
     # returns 0 for every candidate here.
     plain = _deep_block()
     far_points = gpd.GeoDataFrame(geometry=[Point(1000.0, 1000.0)], crs=UTM)
     block = Block(block_id=plain.block_id, crs=plain.crs, boundary=plain.boundary,
-                 parcels=plain.parcels, streets=plain.streets, building_points=far_points)
+                 parcels=plain.parcels, streets=plain.streets, building_geometries=far_points)
     roads = _greedy_arterials(block, realizer=IdealChord(), objective="access", cost="displacement",
                               max_roads=1, n_anchors=12, half_width_m=1.0)
     assert len(roads) == 1
@@ -739,7 +740,7 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     pts = gpd.GeoDataFrame(geometry=[Point(i + 0.5, j + 0.5) for i in range(3) for j in range(9)],
                            crs=UTM)
     block = Block(block_id="deep_pts", crs=UTM, boundary=boundary, parcels=parcels,
-                  streets=streets, building_points=pts)
+                  streets=streets, building_geometries=pts)
 
     from reblock.derive.access import parcel_access_layers
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)

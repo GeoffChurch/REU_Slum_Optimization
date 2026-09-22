@@ -67,7 +67,7 @@ def parcel_radii(block: Block, params: PermeabilityParams) -> NDArray[np.float64
 
     n = len(block.parcels)
     out = np.zeros(n, dtype=np.float64)
-    pts = block.building_points
+    pts = block.building_geometries
     if n == 0 or len(pts) < 2:
         return out
     radii = block.buildings.radii

@@ -107,7 +107,7 @@ def _synthetic_block(n: int = 4, cell: float = 25.0) -> Block:
     boundary = cast("Polygon | MultiPolygon", parcels.geometry.union_all())
     return Block(block_id="s", crs=UTM, boundary=boundary, parcels=parcels,
                  streets=GeoDataFrame(geometry=[boundary.boundary], crs=UTM),
-                 building_points=GeoDataFrame(geometry=pts, crs=UTM))
+                 building_geometries=GeoDataFrame(geometry=pts, crs=UTM))
 
 
 def test_default_roads_are_stateless_disjoint_and_inside_the_block() -> None:

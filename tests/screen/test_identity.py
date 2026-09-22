@@ -12,7 +12,7 @@ class _StubSource:
     def block_geometries(self, bbox: BBox | None = None) -> GeoDataFrame:
         raise NotImplementedError
 
-    def building_points(self, bbox: BBox | None = None) -> GeoDataFrame:
+    def building_geometries(self, bbox: BBox | None = None) -> GeoDataFrame:
         raise NotImplementedError
 
 

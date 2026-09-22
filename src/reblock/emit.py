@@ -56,10 +56,10 @@ def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
 
 
 def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
-    """`block.building_points` with a per-point displacement fraction `c` = max(0, 1 - d/r)
+    """`block.building_geometries` with a per-point displacement fraction `c` = max(0, 1 - d/r)
     (r = NN/2, see budget) and its disk `radius`, for the render to shade. Empty when there are no
     points or no proposed roads."""
-    pts = block.building_points
+    pts = block.building_geometries
     if pts.empty or proposal.roads is None or proposal.roads.empty:
         return cast(gpd.GeoDataFrame, pts.iloc[:0])
     radii = block.buildings.radii
@@ -86,14 +86,14 @@ def pct_paved(roads: gpd.GeoDataFrame | None, block_area: float) -> float:
     return float(_corridor(roads).area / block_area)
 
 
-def pct_displaced(roads: gpd.GeoDataFrame | None, building_points: gpd.GeoDataFrame,
+def pct_displaced(roads: gpd.GeoDataFrame | None, building_geometries: gpd.GeoDataFrame,
                   radii: NDArray[np.float64]) -> float:
     """Fraction of buildings-equivalent displaced: Σcᵢ / n_buildings (see budget.displacement)."""
     from reblock.budget import displacement
-    n = len(building_points)
+    n = len(building_geometries)
     if roads is None or len(roads) == 0 or n == 0:
         return 0.0
-    return displacement(building_points, radii, roads) / n
+    return displacement(building_geometries, radii, roads) / n
 
 
 def _member_ids(block_id: str) -> list[str]:
@@ -272,7 +272,7 @@ def region_map(source: Source, regions: list[list[str]],
     if frame is not None:
         ax_r.set_xlim(frame[0], frame[2])
         ax_r.set_ylim(frame[1], frame[3])
-        pts = source.building_points(frame)
+        pts = source.building_geometries(frame)
         if not pts.empty:
             members_union = members.geometry.union_all()
             own_pts = cast(gpd.GeoDataFrame, pts[pts.within(members_union)])
@@ -440,7 +440,7 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
     frame = frame_bbox(block.parcels)
     outlines = source.block_geometries(frame)
     outlines["block_id"] = outlines["block_id"].astype(str)
-    pts = source.building_points(frame)
+    pts = source.building_geometries(frame)
     # Split the selection's own member block(s) from the surrounding context by block_id -- robust
     # where a geometric `within(block.boundary)` is not: `block.boundary` is the union of Voronoi
     # PARCELS (which can poke outside the raw block polygon) or, for a disjoint convex_hull region,

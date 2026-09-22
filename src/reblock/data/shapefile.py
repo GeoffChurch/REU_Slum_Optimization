@@ -95,7 +95,7 @@ class ShapefileSource:
 
     def block_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
         """block_id + dissolved connected-component geometry (it genuinely has block
-        polygons, unlike `building_points`), windowed to `bbox` (in `utm`)."""
+        polygons, unlike `building_geometries`), windowed to `bbox` (in `utm`)."""
         raw, utm = self._prepared()
         ids: list[str] = []
         polys: list[Polygon] = []
@@ -107,7 +107,7 @@ class ShapefileSource:
         out = gpd.GeoDataFrame({"block_id": ids}, geometry=polys, crs=utm)
         return _window(out, bbox)
 
-    def building_points(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
+    def building_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
         """A parcel shapefile has no building-point cloud, so this is honestly empty --
         a correct total implementation, not a throwing stub. `bbox` is accepted for
         protocol conformance; there is nothing to window against."""

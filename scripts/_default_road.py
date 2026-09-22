@@ -41,7 +41,7 @@ def default_roads(block: Block, width_m: float) -> GeoDataFrame:
     the same road for fallback parity to mean anything, and the caption's numbers have to be
     measurements of it.
     """
-    pts = block.building_points
+    pts = block.building_geometries
     xy = np.column_stack([pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy()])
     centre = xy.mean(axis=0)
     # First principal component. `np.linalg.svd` on the centred cloud; the SIGN of a singular

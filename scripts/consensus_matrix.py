@@ -97,7 +97,7 @@ def _bc() -> SimpleNamespace:
 
 
 def _perm_disp(block: Block, roads: gpd.GeoDataFrame) -> tuple[float, float]:
-    radii = SpacingDiscs(block.building_points).radii
+    radii = SpacingDiscs(block.building_geometries).radii
     del radii
     return (float(permeability(block, roads)), displacement_fraction(block, roads))
 

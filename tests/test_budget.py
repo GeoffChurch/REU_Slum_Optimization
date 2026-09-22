@@ -243,7 +243,7 @@ def _straight_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (20, 0)])], crs=UTM)
     points = _points([(5.0, 5.0), (15.0, 5.0)])
     block = Block(block_id="two_roads", crs=UTM, boundary=boundary, parcels=parcels,
-                 streets=streets, building_points=points)
+                 streets=streets, building_geometries=points)
     roads = _roads([LineString([(5, 0), (5, 10)]), LineString([(15, 0), (15, 10)])])
     return block, roads
 
@@ -378,13 +378,13 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
 
     from reblock.budget import displacement, displacement_curve
     block, roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_points), 3.0)
+    radii = np.full(len(block.building_geometries), 3.0)
     curve = displacement_curve(block, roads, radii)
-    n = len(block.building_points)
+    n = len(block.building_geometries)
     assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
     assert curve.benefit == sorted(curve.benefit)     # non-decreasing displacement
     assert abs(curve.benefit[-1]
-               - displacement(block.building_points, radii, roads) / n) < 1e-6
+               - displacement(block.building_geometries, radii, roads) / n) < 1e-6
     # cost axis = cumulative added road length in METRES, non-decreasing, ending at the full
     # road length -- a `_sweep` property formerly pinned only by the retired
     # test_cost_axis_is_cumulative_road_length_metres (via cost_benefit_curve); migrated here
@@ -395,14 +395,14 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
 
 def test_displacement_curve_is_home_fraction() -> None:
     from reblock.budget import displacement, displacement_curve
-    block, roads = _straight_block_with_two_roads()   # existing helper with building_points
-    radii = SpacingDiscs(block.building_points).radii
+    block, roads = _straight_block_with_two_roads()   # existing helper with building_geometries
+    radii = SpacingDiscs(block.building_geometries).radii
     curve = displacement_curve(block, roads, radii)
-    n = len(block.building_points)
+    n = len(block.building_geometries)
     assert all(0.0 <= b <= 1.0 for b in curve.benefit)          # fraction, not a count
     # terminal fraction == displacement(full roads)/n_buildings
     assert abs(curve.benefit[-1]
-               - displacement(block.building_points, radii, roads) / n) < 1e-9
+               - displacement(block.building_geometries, radii, roads) / n) < 1e-9
 
 
 def test_prefix_to_displacement_returns_minimal_prefix_that_reaches_fraction() -> None:
@@ -410,11 +410,11 @@ def test_prefix_to_displacement_returns_minimal_prefix_that_reaches_fraction() -
 
     from reblock.budget import displacement, prefix_to_displacement
     block, roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_points), 3.0)
-    n = len(block.building_points)
-    frac1 = displacement(block.building_points, radii,
+    radii = np.full(len(block.building_geometries), 3.0)
+    n = len(block.building_geometries)
+    frac1 = displacement(block.building_geometries, radii,
                          cast(gpd.GeoDataFrame, roads.iloc[:1])) / n
-    frac2 = displacement(block.building_points, radii, roads) / n
+    frac2 = displacement(block.building_geometries, radii, roads) / n
     assert 0.0 < frac1 < frac2                  # road 0 alone displaces only its own building
     prefix = prefix_to_displacement(block, roads, radii, frac1)
     assert len(prefix) == 1                     # the MINIMAL prefix, not both roads
@@ -426,11 +426,11 @@ def test_prefix_to_displacement_needs_all_roads_for_a_higher_fraction() -> None:
 
     from reblock.budget import displacement, prefix_to_displacement
     block, roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_points), 3.0)
-    n = len(block.building_points)
-    frac1 = displacement(block.building_points, radii,
+    radii = np.full(len(block.building_geometries), 3.0)
+    n = len(block.building_geometries)
+    frac1 = displacement(block.building_geometries, radii,
                          cast(gpd.GeoDataFrame, roads.iloc[:1])) / n
-    frac2 = displacement(block.building_points, radii, roads) / n
+    frac2 = displacement(block.building_geometries, radii, roads) / n
     target = (frac1 + frac2) / 2.0              # strictly between: needs both roads
     prefix = prefix_to_displacement(block, roads, radii, target)
     assert len(prefix) == 2
@@ -441,7 +441,7 @@ def test_prefix_to_displacement_returns_all_roads_when_fraction_unreachable() ->
 
     from reblock.budget import prefix_to_displacement
     block, roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_points), 3.0)
+    radii = np.full(len(block.building_geometries), 3.0)
     prefix = prefix_to_displacement(block, roads, radii, 1.5)   # > 1.0, impossible
     assert len(prefix) == len(roads)            # best effort = all roads in drainage order
 
@@ -451,7 +451,7 @@ def test_prefix_to_displacement_empty_roads_returns_empty() -> None:
 
     from reblock.budget import prefix_to_displacement
     block, _roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_points), 3.0)
+    radii = np.full(len(block.building_geometries), 3.0)
     empty_roads = gpd.GeoDataFrame(geometry=[], crs=UTM)
     prefix = prefix_to_displacement(block, empty_roads, radii, 0.5)
     assert len(prefix) == 0
@@ -466,7 +466,7 @@ def test_permeability_and_displacement_curves_share_cost_samples():
     from reblock.budget import displacement_curve
     from reblock.permeability import PermeabilityParams, permeability_curve
     block, roads = _straight_block_with_two_roads()
-    radii = SpacingDiscs(block.building_points).radii
+    radii = SpacingDiscs(block.building_geometries).radii
     perm = permeability_curve(block, roads, PermeabilityParams())
     disp = displacement_curve(block, roads, radii)
     assert list(perm.cost) == list(disp.cost)
@@ -510,7 +510,7 @@ def test_every_scored_prefix_reaches_the_street() -> None:
         boundary=Polygon([(0, 0), (100, 0), (100, 40), (0, 40)]),
         parcels=parcels,
         streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
-        building_points=gpd.GeoDataFrame(
+        building_geometries=gpd.GeoDataFrame(
             geometry=[Point(x, 25) for x in xs], crs=UTM))
 
     drain = road_drainage(block, roads)
@@ -570,7 +570,7 @@ def test_ordering_reduces_to_plain_drainage_when_that_is_already_buildable() -> 
         boundary=Polygon([(0, 0), (100, 0), (100, 45), (0, 45)]),
         parcels=parcels,
         streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
-        building_points=gpd.GeoDataFrame(
+        building_geometries=gpd.GeoDataFrame(
             geometry=[Point(25, 25), Point(85, 25), Point(75, 25)], crs=UTM))
 
     drain = road_drainage(block, roads)
@@ -609,7 +609,7 @@ def test_drainage_counts_parcels_not_segment_traversals() -> None:
                 geometry=[Polygon([(x, y), (x + 10, y), (x + 10, y + 10), (x, y + 10)])],
                 crs=UTM),
             streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
-            building_points=gpd.GeoDataFrame(geometry=[Point(x + 5, y + 5)], crs=UTM))
+            building_geometries=gpd.GeoDataFrame(geometry=[Point(x + 5, y + 5)], crs=UTM))
 
     plain = LineString([(20.0, 0.0), (20.0, 40.0)])
     subdivided = LineString([(20.0, 0.0), (20.0, 10.0), (20.0, 20.0), (20.0, 30.0), (20.0, 40.0)])
@@ -642,7 +642,7 @@ def _crossing_block() -> tuple[Block, gpd.GeoDataFrame]:
         boundary=Polygon([(0, 0), (100, 0), (100, 80), (0, 80)]),
         parcels=parcels,
         streets=gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (100.0, 0.0)])], crs=UTM),
-        building_points=gpd.GeoDataFrame(geometry=[Point(x, 45) for x in xs], crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=[Point(x, 45) for x in xs], crs=UTM))
     return block, _roads([stem, crossbar])
 
 
@@ -693,7 +693,7 @@ def test_network_efficiency_ignores_whether_a_crossing_is_drawn_as_a_vertex() ->
         boundary=Polygon([(0, 0), (100, 0), (100, 100), (0, 100)]),
         parcels=parcels,
         streets=gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (100.0, 0.0)])], crs=UTM),
-        building_points=gpd.GeoDataFrame(
+        building_geometries=gpd.GeoDataFrame(
             geometry=[Point(10, 50), Point(90, 50), Point(50, 10), Point(50, 90)], crs=UTM))
 
     bare = _roads([LineString([(0.0, 50.0), (100.0, 50.0)]),
@@ -745,7 +745,7 @@ def test_every_prefix_is_connected_by_the_same_test_the_peel_uses() -> None:
         block_id="knife", crs=UTM,
         boundary=Polygon([(0, 0), (100, 0), (100, 40), (0, 40)]),
         parcels=parcels, streets=streets,
-        building_points=gpd.GeoDataFrame(geometry=[Point(x, 5) for x in xs], crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=[Point(x, 5) for x in xs], crs=UTM))
 
     street_geom = unary_union(list(streets.geometry))
     raw = false_front.distance(street_geom)

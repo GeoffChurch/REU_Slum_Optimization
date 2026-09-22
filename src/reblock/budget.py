@@ -42,7 +42,7 @@ def _rnd(c: tuple[float, ...]) -> tuple[float, float]:
 
 
 
-def displacement(building_points: GeoDataFrame, radii: NDArray[np.float64],
+def displacement(building_geometries: GeoDataFrame, radii: NDArray[np.float64],
                  roads: GeoDataFrame) -> float:
     """Extent-aware expected homes displaced: each building is a disk (radius `radii[i]`); its
     contribution is the probability the road corridor grazes it under a uniform size prior,
@@ -55,13 +55,14 @@ def displacement(building_points: GeoDataFrame, radii: NDArray[np.float64],
     charged once, while separating them widens the union and costs more. No separate gap rule is
     needed, and none exists.
     """
-    n = len(building_points)
+    n = len(building_geometries)
     if n == 0 or roads is None or len(roads) == 0:
         return 0.0
-    return displacement_from_distance(radii, corridor_distance(building_points, roads))
+    return displacement_from_distance(radii, corridor_distance(building_geometries, roads))
 
 
-def corridor_distance(building_points: GeoDataFrame, roads: GeoDataFrame) -> NDArray[np.float64]:
+def corridor_distance(building_geometries: GeoDataFrame,
+                      roads: GeoDataFrame) -> NDArray[np.float64]:
     """Per-building distance to the unioned, per-road-width-buffered corridor.
 
     Split out of `displacement` so a caller scoring many candidates against a FIXED committed set
@@ -76,7 +77,7 @@ def corridor_distance(building_points: GeoDataFrame, roads: GeoDataFrame) -> NDA
             "roads must carry a 'width_m' column: road width is mandatory since the global "
             "corridor width was removed. Methods set it on the roads they emit.")
     corridor = roads.geometry.buffer(roads["width_m"].to_numpy(dtype=float) / 2.0).union_all()
-    return cast(NDArray[np.float64], building_points.geometry.distance(corridor).to_numpy())
+    return cast(NDArray[np.float64], building_geometries.geometry.distance(corridor).to_numpy())
 
 
 def displacement_contributions(radii: NDArray[np.float64],
@@ -99,7 +100,7 @@ def displacement_from_distance(radii: NDArray[np.float64],
     return float(displacement_contributions(radii, d).sum())
 
 
-def repulsion(building_points: GeoDataFrame, radii: NDArray[np.float64],
+def repulsion(building_geometries: GeoDataFrame, radii: NDArray[np.float64],
               geom: BaseGeometry) -> float:
     """Soft per-road intrusion cost: a road's OWN proximity to the building field, summed over
     building points as the quadratic-tail kernel r^2/(r^2 + d^2) (d = point-to-road distance,
@@ -112,10 +113,10 @@ def repulsion(building_points: GeoDataFrame, radii: NDArray[np.float64],
     (coincident points): 1.0 if the road touches the point (d<=0) else 0.0, matching
     displacement's r==0 handling.
     0.0 with no building points."""
-    n = len(building_points)
+    n = len(building_geometries)
     if n == 0:
         return 0.0
-    d = building_points.geometry.distance(geom).to_numpy()
+    d = building_geometries.geometry.distance(geom).to_numpy()
     r = np.asarray(radii, dtype=np.float64)
     r2 = r * r
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -902,7 +903,7 @@ def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.
                            d_frac: float, *,
                            tol: float = STREET_TOL) -> GeoDataFrame:
     """The minimal drainage-ordered prefix of `roads` whose displacement FRACTION
-    (`displacement(block.building_points, radii, prefix) / n_buildings`) is
+    (`displacement(block.building_geometries, radii, prefix) / n_buildings`) is
     >= `d_frac`. Displacement is monotone non-decreasing as drainage-ordered roads are added (a
     growing prefix's buffered corridor union only grows, so every building's distance to it is
     non-increasing, hence each cᵢ is non-decreasing), so a binary search over the prefix length
@@ -911,7 +912,7 @@ def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.
     `displacement_curve`'s `_disp`), so a positive `d_frac` is then unreachable. If even all
     `roads` cannot reach `d_frac`, returns all roads in canonical order. Empty `roads` returns
     empty."""
-    n = len(block.building_points)
+    n = len(block.building_geometries)
     if len(roads) == 0:
         return cast(GeoDataFrame, roads.iloc[:0])
     ordered = street_first_ordered(block, roads, tol)
@@ -919,7 +920,7 @@ def prefix_to_displacement(block: Block, roads: GeoDataFrame, radii: NDArray[np.
     def frac_at(m: int) -> float:
         if n == 0:
             return 0.0
-        return displacement(block.building_points, radii,
+        return displacement(block.building_geometries, radii,
                             cast(GeoDataFrame, ordered.iloc[:m])) / n
 
     total = len(ordered)
@@ -984,13 +985,13 @@ def displacement_curve(block: Block, roads: GeoDataFrame, radii: NDArray[np.floa
                        tol: float = STREET_TOL) -> Curve:
     """A Curve whose x is cumulative added road length (m) and whose y is the FRACTION of homes
     displaced, Σcᵢ / n_buildings (a rising COST in [0, 1]). Reuses the drainage-ordered _sweep.
-    n_buildings = len(block.building_points) (buildings, not parcels)."""
-    n = len(block.building_points)
+    n_buildings = len(block.building_geometries) (buildings, not parcels)."""
+    n = len(block.building_geometries)
 
     def _disp(prefix: GeoDataFrame | None) -> float:
         if prefix is None or len(prefix) == 0 or n == 0:
             return 0.0
-        return displacement(block.building_points, radii, prefix) / n
+        return displacement(block.building_geometries, radii, prefix) / n
 
     costs, vals = _sweep(block, roads, _disp, n_points, tol)
     return Curve(costs, vals)

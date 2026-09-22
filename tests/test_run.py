@@ -370,7 +370,7 @@ def test_cli_region_path_writes_region_map(tmp_path: Path) -> None:
 
 def test_run_module_never_references_hasattr() -> None:
     # region_map/render_results now take the typed Source directly (contracts.Source
-    # guarantees block_geometries/building_points on every implementation), so run.py's old
+    # guarantees block_geometries/building_geometries on every implementation), so run.py's old
     # `hasattr(spec.source, "block_geometries")` capability guard is gone for good.
     import reblock.run
     src = Path(reblock.run.__file__).read_text()

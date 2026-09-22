@@ -57,10 +57,11 @@ def main() -> None:
     block = region_block_cached()
     n = len(block.parcels)
     half_w = DEFAULT_ROAD_WIDTH_M / 2.0
-    print(f"\nregion block: {n:,} parcels, {len(block.building_points):,} buildings\n", flush=True)
+    print(f"\nregion block: {n:,} parcels, {len(block.building_geometries):,} buildings\n",
+          flush=True)
 
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    radii = SpacingDiscs(block.building_points).radii
+    radii = SpacingDiscs(block.building_geometries).radii
     b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
     print(f"  baseline burden {b0:.4f}\n", flush=True)
 

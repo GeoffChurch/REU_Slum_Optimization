@@ -74,7 +74,7 @@ def _column_block_with_buildings(h: int) -> Block:
     pts = [g.representative_point() for g in parcels.geometry]
     bp = gpd.GeoDataFrame(geometry=pts, crs=UTM)
     return Block(block_id="colb", crs=UTM, boundary=boundary, parcels=parcels,
-                 streets=streets, building_points=bp)
+                 streets=streets, building_geometries=bp)
 
 
 def test_chord_substrate_builds_connected_graph_and_hits_target() -> None:
@@ -85,7 +85,7 @@ def test_chord_substrate_builds_connected_graph_and_hits_target() -> None:
                   for a, b in zip(graph.rows, graph.cols, strict=True)}
     assert len(undirected) * 2 == len(graph.rows)          # symmetric
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
-                                    radii=np.zeros(len(block.building_points)))
+                                    radii=np.zeros(len(block.building_geometries)))
     after = parcel_access_layers(block, roads).to_numpy()
     assert int(after.max()) <= 2 and params["grid_unreachable"] == 0
     assert ChordSubstrate().identity == ("chord_diag",) and ChordSubstrate().tag == "chord_diag"
@@ -103,7 +103,7 @@ def test_extra_substrates_build_and_hit_target(sub: Substrate, tag: str, ident: 
                   for a, b in zip(graph.rows, graph.cols, strict=True)}
     assert len(undirected) * 2 == len(graph.rows)
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
-                                    radii=np.zeros(len(block.building_points)))
+                                    radii=np.zeros(len(block.building_geometries)))
     after = parcel_access_layers(block, roads).to_numpy()
     assert int(after.max()) <= 2 and params["grid_unreachable"] == 0
     assert sub.tag == tag and sub.identity == ident

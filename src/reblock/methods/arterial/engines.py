@@ -67,7 +67,8 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
     road that is actually scored and committed (see `ChordRealizer`).
     `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/expected buildings
     newly displaced within `half_width_m` of any committed road, via the extent-aware disk
-    `budget.displacement` over `block.building_points` -- see `buildings.SpacingDiscs`), "repulsion"
+    `budget.displacement` over `block.building_geometries` -- see `buildings.SpacingDiscs`),
+    "repulsion"
     (Delta-benefit per the road's OWN quadratic-tail proximity to the building field via
     `budget.repulsion` -- a constant-per-candidate, never-zero soft cost, so CELF-safe and never
     degenerate)}. A
@@ -97,7 +98,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
     # ONE scoring context per block (frozen reps/sources/src_euclid/street geometry), shared by
     # every candidate score below -- only built for the metric objectives that use it.
     ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
-    # Constant across every step (depends only on block.building_points), so computed ONCE here
+    # Constant across every step (depends only on block.building_geometries), so computed ONCE here
     # rather than per-step.
     radii = block.buildings.radii
 
@@ -112,9 +113,10 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
         targets = _deep_targets(block, curr_roads, top_k, adj)
         committed_dist = building_xy = None
         if cost == "displacement_fast":
-            building_xy = np.asarray(list(block.building_points.geometry), dtype=object)
-            committed_dist = corridor_distance(block.building_points, base) if len(base) else None
-        committed_disp = (displacement(block.building_points, radii, base)
+            building_xy = np.asarray(list(block.building_geometries.geometry), dtype=object)
+            committed_dist = (corridor_distance(block.building_geometries, base)
+                              if len(base) else None)
+        committed_disp = (displacement(block.building_geometries, radii, base)
                           if cost == "displacement" else 0.0)
         # Route per-candidate scoring by realizer. BUILDABLE trials are boundary-snapped (they join
         # the committed/street network at shared graph vertices), so the incremental
@@ -221,7 +223,7 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: 
     streets = list(block.streets.geometry)
     ctx = _BlockScoringContext(block) if objective in ("efficiency", "directness") else None
     policy = policy_spec.build(block, streets, n_anchors, top_k, adj, max_anchors)
-    # Constant across every step (depends only on block.building_points), so computed ONCE here
+    # Constant across every step (depends only on block.building_geometries), so computed ONCE here
     # rather than per-step.
     radii = block.buildings.radii
 
@@ -248,10 +250,11 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: 
         committed_disp = 0.0
         committed_dist = building_xy = None
         if cost in ("displacement", "displacement_fast"):
-            committed_disp = displacement(block.building_points, radii, base)
+            committed_disp = displacement(block.building_geometries, radii, base)
         if cost == "displacement_fast":
-            building_xy = np.asarray(list(block.building_points.geometry), dtype=object)
-            committed_dist = corridor_distance(block.building_points, base) if len(base) else None
+            building_xy = np.asarray(list(block.building_geometries.geometry), dtype=object)
+            committed_dist = (corridor_distance(block.building_geometries, base)
+                              if len(base) else None)
         stepctx = ctx.step(base) if (ctx is not None and realizer.snaps) else None
         assert scoring._STEP_STATE is None, (
             "eval_candidate's per-step state holder is not reentrant")
@@ -344,7 +347,7 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: str,
     radii = block.buildings.radii
     # The two trees the ranking queries against -- built once per block, like `_snap_graph` above.
     parcel_tree = STRtree(list(block.parcels.geometry))
-    building_tree = STRtree(list(block.building_points.geometry))
+    building_tree = STRtree(list(block.building_geometries.geometry))
     ids = block.parcels["parcel_id"]
 
     committed: list[LineString] = []
@@ -358,9 +361,10 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: str,
         targets = _deep_targets(block, curr_roads, top_k, adj)
         committed_dist = building_xy = None
         if cost == "displacement_fast":
-            building_xy = np.asarray(list(block.building_points.geometry), dtype=object)
-            committed_dist = corridor_distance(block.building_points, base) if len(base) else None
-        committed_disp = (displacement(block.building_points, radii, base)
+            building_xy = np.asarray(list(block.building_geometries.geometry), dtype=object)
+            committed_dist = (corridor_distance(block.building_geometries, base)
+                              if len(base) else None)
+        committed_disp = (displacement(block.building_geometries, radii, base)
                           if cost == "displacement" else 0.0)
         step = ctx.step(base) if (ctx is not None and realizer.snaps) else None
 

@@ -35,7 +35,7 @@ def _block(nx_: int = 7, ny: int = 7, step: float = 10.0) -> Block:
                                  geometry=polys, crs=UTM),
         streets=gpd.GeoDataFrame(
             geometry=[LineString([(-step, 0.0), (nx_ * step + step, 0.0)])], crs=UTM),
-        building_points=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
 
 
 def _road_graph(block: Block, roads: gpd.GeoDataFrame) -> nx.Graph:
@@ -95,8 +95,8 @@ def test_respects_its_displacement_budget(cap: float) -> None:
     assert roads is not None
     if not len(roads):
         return
-    radii = SpacingDiscs(block.building_points).radii
-    got = displacement(block.building_points, radii, roads) / len(block.building_points)
+    radii = SpacingDiscs(block.building_geometries).radii
+    got = displacement(block.building_geometries, radii, roads) / len(block.building_geometries)
     assert got <= cap + 1e-9, f"displacement {got:.4f} exceeds its own cap {cap}"
 
 

@@ -91,7 +91,7 @@ class KblockSource:
             ["block_id", RAW_COUNT, "geometry"]])
         return _window(out, bbox)
 
-    def building_points(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
+    def building_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
         """The buildings parquet's points, reprojected to the same UTM as `block_geometries()`/
         `region()` so overlays align. `bbox` (in the target UTM) windows via `.cx`."""
         pts = gpd.read_parquet(self.buildings_path, columns=["geometry"]).to_crs(
@@ -145,4 +145,4 @@ class KblockSource:
                         parcels=parcels, streets=streets,
                         source_content_hash=source_content_hash,
                         attrs={"kblock_k": float(row["k_complexity"])},
-                        building_points=gpd.GeoDataFrame(geometry=list(pts), crs=utm))
+                        building_geometries=gpd.GeoDataFrame(geometry=list(pts), crs=utm))

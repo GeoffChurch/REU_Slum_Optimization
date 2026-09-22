@@ -69,7 +69,7 @@ def main() -> None:
     for i in evenly_spaced(sorted(sel), counts, N_BLOCKS):
         b = blocks[i]
         adj = parcel_adjacency(list(b.parcels.geometry), STREET_TOL)
-        radii = SpacingDiscs(b.building_points).radii
+        radii = SpacingDiscs(b.building_geometries).radii
         n = len(b.parcels)
         b0 = burden(parcel_access_layers(b, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
         rec: dict[str, dict[str, float | list[int]]] = {}

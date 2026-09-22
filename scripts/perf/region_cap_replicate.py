@@ -90,10 +90,10 @@ def main() -> None:
             continue
         block = pool[ri]
         n = len(block.parcels)
-        print(f"\n=== region {ri}: {n:,} parcels, {len(block.building_points):,} buildings ===",
+        print(f"\n=== region {ri}: {n:,} parcels, {len(block.building_geometries):,} buildings ===",
               flush=True)
         adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-        radii = SpacingDiscs(block.building_points).radii
+        radii = SpacingDiscs(block.building_geometries).radii
         b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj,
                                          unreached_depth=n + 1))
         arms: dict[str, dict[str, object]] = {}
@@ -125,8 +125,8 @@ def main() -> None:
             # Whole-network figures only. Matching happens in region_cap_matched.py, which can see
             # every arm's reachable displacement and pick a budget that actually binds; an absolute
             # budget chosen here would silently degrade to "all roads" and fake a matched result.
-            nb = len(block.building_points)
-            reach = displacement(block.building_points, radii, roads) / nb if nb else 0.0
+            nb = len(block.building_geometries)
+            reach = displacement(block.building_geometries, radii, roads) / nb if nb else 0.0
             b1 = burden(parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj,
                                              unreached_depth=n + 1))
             at = {"all": {"burden_red": (1.0 - b1 / b0) if b0 > 0 else 0.0,

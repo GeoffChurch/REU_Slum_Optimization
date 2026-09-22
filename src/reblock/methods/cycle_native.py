@@ -124,7 +124,7 @@ class CycleNativeReblocker:
         adj = parcel_adjacency(geoms, STREET_TOL)
         pradii = parcel_radii(block, self.params)
         radii = block.buildings.radii
-        n_b = max(len(block.building_points), 1)
+        n_b = max(len(block.building_geometries), 1)
         street = unary_union(list(block.streets.geometry))
         seeds = np.flatnonzero(
             shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol)).tolist()
@@ -142,7 +142,7 @@ class CycleNativeReblocker:
         roads: list[LineString] = []
         cur_p = float(permeability(block, empty, self.params, adj=adj, radii=pradii))
         for _ in range(self.max_cycles):
-            spent = displacement(block.building_points, radii,
+            spent = displacement(block.building_geometries, radii,
                                  with_width(gpd.GeoDataFrame(geometry=roads, crs=crs),
                                             self.road_width_m)) / n_b \
                 if roads else 0.0
@@ -183,7 +183,7 @@ class CycleNativeReblocker:
                 cand = [out_geom] + ([back] if back is not None else [])
                 trial = with_width(gpd.GeoDataFrame(geometry=[*roads, *cand], crs=crs),
                                    self.road_width_m)
-                d = displacement(block.building_points, radii, trial) / n_b
+                d = displacement(block.building_geometries, radii, trial) / n_b
                 if d > self.max_displacement:
                     continue
                 gain = float(permeability(block, trial, self.params, adj=adj, radii=pradii)) - cur_p

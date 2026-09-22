@@ -271,7 +271,7 @@ class ResistanceLPReblocker:
         if not net0:
             return self._proposal(block, empty, {"roads": 0, "stopped": "no street frontage"})
 
-        pts = block.building_points
+        pts = block.building_geometries
         n_b = len(pts)
         radii = block.buildings.radii
         disp_cap = self.max_displacement * n_b

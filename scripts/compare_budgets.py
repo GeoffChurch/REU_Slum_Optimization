@@ -162,13 +162,13 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                  float(roads.geometry.length.sum()), time.perf_counter() - t0)
     assert block is not None
 
-    radii = SpacingDiscs(block.building_points).radii
-    n_buildings = len(block.building_points)
+    radii = SpacingDiscs(block.building_geometries).radii
+    n_buildings = len(block.building_geometries)
 
     def _disp_frac(prefix: GeoDataFrame) -> float:
         if n_buildings == 0:
             return 0.0
-        return displacement(block.building_points, radii, prefix) / n_buildings
+        return displacement(block.building_geometries, radii, prefix) / n_buildings
 
     # Frontier: permeability + displacement curves per method, from the SAME reblock above -- no
     # second propose. `compare_report` writes frontier_permeability.csv + frontier_<label>.png.

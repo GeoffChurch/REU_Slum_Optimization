@@ -62,12 +62,12 @@ def main() -> int:
         block = pool[int(ri)]
         n = len(block.parcels)
         adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-        radii = SpacingDiscs(block.building_points).radii
-        nb = len(block.building_points)
+        radii = SpacingDiscs(block.building_geometries).radii
+        nb = len(block.building_geometries)
         b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj,
                                          unreached_depth=n + 1))
         roads = {a: _gdf(arms[a]["roads_wkt"], block) for a in ARMS}
-        reach = {a: displacement(block.building_points, radii, roads[a]) / nb for a in ARMS}
+        reach = {a: displacement(block.building_geometries, radii, roads[a]) / nb for a in ARMS}
         dmax = min(reach.values())
         print(f"\n  region {ri}: {n:,} parcels; arm displacement reach "
               + ", ".join(f"{a}={reach[a]:.4f}" for a in ARMS)

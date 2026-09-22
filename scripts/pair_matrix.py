@@ -200,11 +200,12 @@ def zone_source(epsg: int, *, min_buildings: int = 30) -> KblockSource:
 def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
     """Expected homes displaced as a fraction of the block's buildings.
 
-    `budget.displacement` takes `(building_points, radii, roads, corridor_m)` and returns a COUNT,
+    `budget.displacement` takes `(building_geometries, radii, roads, corridor_m)` and returns a
+    COUNT,
     not a fraction and not a Block -- this mirrors the normalization in `emit.py:92`
     (`pct_displaced`).
     """
-    pts = block.building_points
+    pts = block.building_geometries
     n = len(pts)
     if n == 0:
         return 0.0

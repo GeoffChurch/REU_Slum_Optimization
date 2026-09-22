@@ -153,7 +153,7 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
             block_area = float(block.parcels.geometry.union_all().area)
             radii = block.buildings.radii
             pp = pct_paved(roads, block_area)
-            pd_ = pct_displaced(roads, block.building_points, radii)
+            pd_ = pct_displaced(roads, block.building_geometries, radii)
             perm = permeability_curve(block, roads, params)
             disp = displacement_curve(block, roads, radii)
             raw.append((name, label, "permeability", perm, pp, pd_))

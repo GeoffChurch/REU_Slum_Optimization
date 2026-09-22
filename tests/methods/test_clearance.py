@@ -189,7 +189,7 @@ def _column_block_with_buildings(h: int) -> Block:
     pts = [g.representative_point() for g in block.parcels.geometry]
     block_bp = gpd.GeoDataFrame(geometry=pts, crs=UTM)
     return Block(block_id="colb", crs=UTM, boundary=block.boundary, parcels=block.parcels,
-                 streets=block.streets, building_points=block_bp)
+                 streets=block.streets, building_geometries=block_bp)
 
 
 def test_default_substrate_is_chord_diag() -> None:
@@ -206,7 +206,7 @@ def test_greedy_reblock_achieves_depth_target() -> None:
     block = _column_block_with_buildings(8)  # depth 1..8
     graph = GridSubstrate(res=0.5).build(block)
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
-                                    radii=np.zeros(len(block.building_points)))
+                                    radii=np.zeros(len(block.building_geometries)))
     assert len(roads) > 0
     after = parcel_access_layers(block, roads).to_numpy()
     assert int(after.max()) <= 2
@@ -217,7 +217,7 @@ def test_greedy_reblock_returns_empty_when_already_shallow() -> None:
     block = _column_block_with_buildings(2)  # depth 1..2, target 2 -> nothing to do
     graph = GridSubstrate(res=0.5).build(block)
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
-                                    radii=np.zeros(len(block.building_points)))
+                                    radii=np.zeros(len(block.building_geometries)))
     assert len(roads) == 0
     assert params["roads"] == 0
 

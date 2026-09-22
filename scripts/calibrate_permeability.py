@@ -263,7 +263,7 @@ def _method_frontier(block: Block, method: Method, params: PermeabilityParams, *
     roads = prop.roads
     if roads is None or roads.empty:
         return None
-    radii = SpacingDiscs(block.building_points).radii
+    radii = SpacingDiscs(block.building_geometries).radii
 
     def _report(i: int, total: int) -> None:
         _log(f"    {label}: solve {i}/{total}")

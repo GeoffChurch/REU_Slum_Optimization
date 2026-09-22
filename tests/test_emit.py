@@ -52,11 +52,11 @@ def _kc(block: Block) -> Metrics:
 
 
 class _FakeSource:
-    """A minimal `Source` for emit tests: fixed `block_geometries`/`building_points` GeoData-
+    """A minimal `Source` for emit tests: fixed `block_geometries`/`building_geometries` GeoData-
     Frames, ignoring `bbox`. Windowing itself is a Source-implementation behaviour already
     covered by KblockSource/ShapefileSource's own tests; these tests exercise only how the
     emitters (region_map, render_results) consume the two accessors -- context-outline
-    dropping, own/context point splitting, and the empty-building_points guard path."""
+    dropping, own/context point splitting, and the empty-building_geometries guard path."""
 
     def __init__(self, blocks: gpd.GeoDataFrame, points: gpd.GeoDataFrame) -> None:
         self._blocks = blocks
@@ -76,7 +76,7 @@ class _FakeSource:
     def block_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
         return self._blocks
 
-    def building_points(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
+    def building_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
         return self._points
 
 
@@ -158,7 +158,7 @@ def test_render_results_draws_context_outlines_and_points(tmp_path: Path) -> Non
 
 
 def test_render_results_guards_empty_building_points(tmp_path: Path) -> None:
-    # A source whose building_points is empty (e.g. ShapefileSource) must still render --
+    # A source whose building_geometries is empty (e.g. ShapefileSource) must still render --
     # the guard-empty path, exercised end to end through the emitter.
     block = _grid_block(3)
     result = Result(block=block, proposal=Proposal(block_id="g", crs=UTM), metrics=(_kc(block),))
@@ -173,7 +173,7 @@ def test_displaced_points_only_keeps_sites_with_positive_displacement_fraction()
     # _displaced_points no longer gates on proposal.params["cost"] (Task 5 replaced the binary
     # within-corridor mark with a continuous disk-shading fraction, for every method).
     block = replace(_grid_block(3),
-                    building_points=gpd.GeoDataFrame(
+                    building_geometries=gpd.GeoDataFrame(
                         geometry=[Point(1.0, 0.5), Point(2.9, 2.9)], crs=UTM))
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM), 1.0)
@@ -191,7 +191,7 @@ def test_displaced_points_takes_its_corridor_from_the_roads_own_width() -> None:
     # 1.5m from the road at x=1, inside a default 6m road's 3m half-width -- a
     # single point, so its radius falls back to DEFAULT_BUILDING_RADIUS_M (SpacingDiscs, n < 2).
     block = replace(_grid_block(3),
-                    building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 2.5)], crs=UTM))
+                    building_geometries=gpd.GeoDataFrame(geometry=[Point(1.0, 2.5)], crs=UTM))
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)
@@ -205,22 +205,22 @@ def test_displaced_points_takes_its_corridor_from_the_roads_own_width() -> None:
 
 
 def test_displaced_points_empty_without_building_points_or_roads() -> None:
-    block = _grid_block(3)   # building_points defaults to empty
+    block = _grid_block(3)   # building_geometries defaults to empty
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)
     assert _displaced_points(block, Proposal(block_id="g", crs=UTM, roads=roads)).empty
 
-    pts_block = replace(block, building_points=gpd.GeoDataFrame(
+    pts_block = replace(block, building_geometries=gpd.GeoDataFrame(
         geometry=[Point(1.0, 0.5)], crs=UTM))
     assert _displaced_points(pts_block, Proposal(block_id="g", crs=UTM, roads=None)).empty
 
 
 def test_render_results_marks_displaced_points(tmp_path: Path) -> None:
-    # End-to-end: a block with real building_points + a proposal whose roads corridor covers
+    # End-to-end: a block with real building_geometries + a proposal whose roads corridor covers
     # one of them must still render the after-heatmap without error.
     block = replace(_grid_block(3),
-                    building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM))
+                    building_geometries=gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM))
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM), 1.0)
     proposal = Proposal(block_id="g", crs=UTM, roads=roads)

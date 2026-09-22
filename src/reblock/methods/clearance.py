@@ -148,8 +148,8 @@ def _greedy_reblock(
 ) -> tuple[gpd.GeoDataFrame, dict[str, object]]:
     """`greedy_drainage` under the clearance repulsion cost field."""
     building_pts = (
-        shapely.get_coordinates(block.building_points.geometry.to_numpy())
-        if not block.building_points.empty else np.empty((0, 2), dtype=np.float64)
+        shapely.get_coordinates(block.building_geometries.geometry.to_numpy())
+        if not block.building_geometries.empty else np.empty((0, 2), dtype=np.float64)
     )
     if len(graph.pts) == 0:
         raise ValueError("substrate yields no nodes for this block")
@@ -274,7 +274,7 @@ class ClearanceReblocker:
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; the routing is block-only
         t = _sigmoid(self.repulsion)
-        n_b = 0 if block.building_points.empty else len(block.building_points)
+        n_b = 0 if block.building_geometries.empty else len(block.building_geometries)
         radii = np.zeros(n_b, dtype=np.float64)   # plain clearance; weighted footprints are future
         graph = self.substrate.build(block)
         roads, params = _greedy_reblock(

@@ -47,7 +47,7 @@ def _block(k: int = 8, cell: float = 10.0) -> Block:
         boundary=Polygon([(0, 0), (k * cell, 0), (k * cell, k * cell), (0, k * cell)]),
         parcels=gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM),
         streets=gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k * cell, 0)])], crs=UTM),
-        building_points=gpd.GeoDataFrame(geometry=[p.centroid for p in polys], crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=[p.centroid for p in polys], crs=UTM))
 
 
 def _configured_methods() -> list[str]:
@@ -81,5 +81,5 @@ def test_method_emits_scorable_roads(name: str) -> None:
     # (flow_paths reads -1.1e-13). That is the metric's floating-point zero, not a monotonicity
     # violation, and this test is not the place to audit any method's efficacy on a toy fixture.
     assert -1e-9 <= float(permeability(block, roads, PARAMS)) <= 1.0
-    radii = SpacingDiscs(block.building_points).radii
-    assert displacement(block.building_points, radii, roads) >= 0.0
+    radii = SpacingDiscs(block.building_geometries).radii
+    assert displacement(block.building_geometries, radii, roads) >= 0.0

@@ -117,7 +117,7 @@ def block_from_bundle(bundle: AuthoringBundle) -> Block:
         geometry="geometry", crs=crs)
     return Block(block_id=bundle["block_id"], crs=crs,
                  boundary=Polygon(boundary_rings[0], boundary_rings[1:]),
-                 parcels=parcels, streets=streets, building_points=points)
+                 parcels=parcels, streets=streets, building_geometries=points)
 
 
 def adjacency_from_bundle(bundle: AuthoringBundle) -> list[set[int]]:

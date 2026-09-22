@@ -77,7 +77,7 @@ def _eval_hook(chord: LineString) -> tuple[float, BaseGeometry | None]:
     trial = _explode(_union_with(st.base_merged, real), st.crs, 2.0 * st.half_width_m)
     raw = scoring._score(
         st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
-    denom = float(displacement(st.block.building_points, st.radii, trial) - st.committed_disp)
+    denom = float(displacement(st.block.building_geometries, st.radii, trial) - st.committed_disp)
     _EXACT.append((raw, denom, float(real.length)))
     return gain, real
 
@@ -181,7 +181,7 @@ def main() -> None:
         _BLOCK = b
         _ADJ = parcel_adjacency(list(b.parcels.geometry), STREET_TOL)
         _TREE = STRtree(list(b.parcels.geometry))
-        _BTREE = STRtree(list(b.building_points.geometry))
+        _BTREE = STRtree(list(b.building_geometries.geometry))
         print(f"  {b.block_id}  ({len(b.parcels)} parcels)", flush=True)
         # workers=1 -> the serial path, so `_eval_hook`'s stash survives (a fork pool would
         # compute it in children and discard it)

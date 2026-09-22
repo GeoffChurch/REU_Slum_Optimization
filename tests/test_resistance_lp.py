@@ -41,7 +41,7 @@ def _grid_block(nx_: int = 6, ny: int = 6, step: float = 10.0) -> Block:
                  boundary=Polygon([(0, 0), (nx_ * step, 0), (nx_ * step, ny * step),
                                    (0, ny * step)]),
                  parcels=parcels, streets=streets,
-                 building_points=gpd.GeoDataFrame(geometry=pts, crs=CRS.from_epsg(32734)))
+                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=CRS.from_epsg(32734)))
 
 
 @pytest.mark.parametrize("cap", [0.05, 0.15])
@@ -59,9 +59,9 @@ def test_displacement_budget_is_respected(cap: float) -> None:
     block = _grid_block()
     roads = ResistanceLPReblocker(max_displacement=cap).propose(block).roads
     assert roads is not None and len(roads) > 0, "no roads: the cap is vacuous"
-    radii = SpacingDiscs(block.building_points).radii
-    got = displacement(block.building_points, radii, roads) / len(
-        block.building_points)
+    radii = SpacingDiscs(block.building_geometries).radii
+    got = displacement(block.building_geometries, radii, roads) / len(
+        block.building_geometries)
     assert got <= cap + 1e-9, f"displacement {got:.4f} exceeds cap {cap}"
 
 

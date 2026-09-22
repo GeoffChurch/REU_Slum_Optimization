@@ -89,7 +89,7 @@ def frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.3) -
     """A padded square bbox centred on `geoms`' total_bounds -- the render view, and the bbox
     the context query is windowed to. Square + padded so the selection dominates with a context
     margin. Public (not `_`-prefixed): the caller (emit.py) computes this ONCE per render and
-    uses it both to window the context query (`source.block_geometries`/`building_points`) and
+    uses it both to window the context query (`source.block_geometries`/`building_geometries`) and
     to set the axes view (`frame=` below), so the two never drift apart.
     """
     minx, miny, maxx, maxy = geoms.total_bounds
@@ -392,9 +392,10 @@ def render_graph(
     return fig
 
 
-def field_contributions(building_points: gpd.GeoDataFrame, roads: gpd.GeoDataFrame | None,
+def field_contributions(building_geometries: gpd.GeoDataFrame, roads: gpd.GeoDataFrame | None,
                         radii: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Per-building displacement contribution `c_i = clip(1 - d_i/r_i, 0, 1)`, in `building_points`
+    """Per-building displacement contribution `c_i = clip(1 - d_i/r_i, 0, 1)`, in
+    `building_geometries`
     order. Delegates to `budget.displacement_contributions` for the formula itself (including the
     `r == 0` convention) so it is written in exactly one place --
     `budget.displacement_from_distance` sums the same array.
@@ -403,10 +404,10 @@ def field_contributions(building_points: gpd.GeoDataFrame, roads: gpd.GeoDataFra
     without reading pixels. NOT baked into the widget's bundle: the widget derives `c` itself from
     the road position, which is what makes the road draggable at all.
     """
-    n = len(building_points)
+    n = len(building_geometries)
     if n == 0 or roads is None or roads.empty:
         return np.zeros(n, dtype=np.float64)
-    d = corridor_distance(building_points, roads)
+    d = corridor_distance(building_geometries, roads)
     return displacement_contributions(radii, d)
 
 
@@ -449,9 +450,9 @@ def render_field(
     # render_after's inline `(1.0, 0.0, 0.0, c)` -- a named constant is a thing the bake can put in
     # the widget's bundle, where a literal in a function body would have to be retyped in
     # TypeScript and could then drift.
-    c = field_contributions(block.building_points, roads, radii)
+    c = field_contributions(block.building_geometries, roads, radii)
     disks = gpd.GeoDataFrame(
-        geometry=block.building_points.geometry.buffer(np.asarray(radii, dtype=np.float64)),
+        geometry=block.building_geometries.geometry.buffer(np.asarray(radii, dtype=np.float64)),
         crs=block.crs)
     grazed = c > 0.0
     if (~grazed).any():

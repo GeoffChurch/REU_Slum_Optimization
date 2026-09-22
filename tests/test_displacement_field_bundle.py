@@ -277,7 +277,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     # gives every session a cold REBLOCK_CACHE_DIR by design.
     block = load_example_region()
     _, roads_by_method = load_example_block(None, variant=TEST_VARIANT)
-    radii = SpacingDiscs(block.building_points).radii
+    radii = SpacingDiscs(block.building_geometries).radii
     ox, oy = float(bundle["origin"][0]), float(bundle["origin"][1])
 
     # Job 1a: EVERY layer the bundle carries, re-derived from the live block through the
@@ -293,7 +293,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     assert bundle["origin"] == [float(block.parcels.total_bounds[0]),
                                 float(block.parcels.total_bounds[1])]
     assert bundle["block_id"] == block.block_id
-    assert bundle["n_buildings"] == len(block.building_points)
+    assert bundle["n_buildings"] == len(block.building_geometries)
     field = quantised_field(block, radii, ox, oy)
     assert bundle["buildings"] == field.stored
     # `polygon_rings`, not `polygon_ring`: both fields carry EVERY ring since 2026-09-20. The
@@ -346,12 +346,12 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     # Pairing the shipped block's buildings with the fixture's roads would compare a closed form
     # against shapely on geometry that never coexisted, and both sides would agree on nonsense.
     small = load_example_region(TEST_VARIANT)
-    radii = SpacingDiscs(small.building_points).radii
-    raw_x = small.building_points.geometry.x.to_numpy(dtype=float)
-    raw_y = small.building_points.geometry.y.to_numpy(dtype=float)
+    radii = SpacingDiscs(small.building_geometries).radii
+    raw_x = small.building_geometries.geometry.x.to_numpy(dtype=float)
+    raw_y = small.building_geometries.geometry.y.to_numpy(dtype=float)
     assert len(roads_by_method) == 5, sorted(roads_by_method)
     for name, roads in sorted(roads_by_method.items()):
-        truth = displacement(small.building_points, radii, roads)
+        truth = displacement(small.building_geometries, radii, roads)
         closed = displacement_from_distance(
             radii, closed_form_distance(raw_x, raw_y, segments(roads)))
         assert closed == pytest.approx(truth, rel=1e-3), name

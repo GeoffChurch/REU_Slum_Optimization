@@ -62,11 +62,11 @@ def main() -> int:
     block = region_block_cached()
     n = len(block.parcels)
     half_w = DEFAULT_ROAD_WIDTH_M / 2.0
-    print(f"\nregion block: {n:,} parcels, {len(block.building_points):,} buildings\n")
+    print(f"\nregion block: {n:,} parcels, {len(block.building_geometries):,} buildings\n")
 
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     ptree = STRtree(list(block.parcels.geometry))
-    btree = STRtree(list(block.building_points.geometry))
+    btree = STRtree(list(block.building_geometries.geometry))
     depths = parcel_access_layers(block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1)
     weights = depths.loc[block.parcels["parcel_id"]].to_numpy(dtype=float) ** 2 - 1.0
     anchors = _anchor_points(list(block.streets.geometry), 32, 0)

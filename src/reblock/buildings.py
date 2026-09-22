@@ -156,7 +156,7 @@ class AreaDiscs:
         if AREA_COL not in self.points:
             raise ValueError(
                 f"AreaDiscs needs the {AREA_COL!r} column; got {list(self.points.columns)}. "
-                "KBlockSource.building_points must read it (it long read columns=['geometry'] "
+                "KBlockSource.building_geometries must read it (it long read columns=['geometry'] "
                 "and dropped it).")
 
     def __len__(self) -> int:

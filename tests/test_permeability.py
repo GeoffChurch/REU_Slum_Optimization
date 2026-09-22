@@ -98,7 +98,7 @@ def test_loop_beats_spur_at_equal_length():
     # road length) that empirically FLIPS at the new production default g_walk=0.1/g_road_per_m=8 (a
     # 200x ratio makes REACH dominate REDUNDANCY on this single-arm grid -- verified directly, not
     # assumed). That is not a regression in the r0-corridor formula itself: this fixture has no
-    # `building_points`, so r0=0 and `_footpath_conductance` reduces exactly to the pre-change
+    # `building_geometries`, so r0=0 and `_footpath_conductance` reduces exactly to the pre-change
     # g_walk/dist baseline (see `_adaptive_r0`'s docstring) -- it is the production g_walk LEVEL
     # this task lowers, independent of the r0-corridor change, that this particular topological
     # demonstration is sensitive to. Pin the level explicitly so this test keeps demonstrating the
@@ -193,7 +193,7 @@ def test_footpath_conductance_empty_dist_returns_empty():
     assert _footpath_conductance(np.zeros(0), np.zeros(0), g_walk=0.1).shape == (0,)
 
 def _points_block(n_points: int, spacing: float) -> Block:
-    # A trivial valid Block whose PARCEL geometry is irrelevant -- only `building_points` (a row
+    # A trivial valid Block whose PARCEL geometry is irrelevant -- only `building_geometries` (a row
     # of `n_points` points `spacing` apart, so every point's nearest-neighbour distance is exactly
     # `spacing`, including the two endpoints) matters for the radii.
     boundary = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
@@ -202,7 +202,7 @@ def _points_block(n_points: int, spacing: float) -> Block:
     pts = gpd.GeoDataFrame(geometry=[Point(float(i) * spacing, 0.0) for i in range(n_points)],
                            crs=UTM)
     block = Block(block_id="pts", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
-    return replace(block, building_points=pts)
+    return replace(block, building_geometries=pts)
 
 def test_parcel_radii_are_PER_PARCEL_and_scale_with_local_spacing():
     """The point of the change: each parcel gets its OWN footprint radius, not a block median.
@@ -236,7 +236,7 @@ def test_footpath_clearance_is_LOCAL_not_a_block_median():
 
 def test_parcel_radii_fall_back_to_zero_without_enough_building_points():
     params = PermeabilityParams()
-    b = _grid_block()   # building_points defaults to empty
+    b = _grid_block()   # building_geometries defaults to empty
     assert not parcel_radii(b, params).any()
 
 def test_a_road_upgrade_never_lowers_an_edges_conductance():

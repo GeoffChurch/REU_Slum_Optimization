@@ -42,7 +42,7 @@ def _block(n: int = 6, step: float = 10.0) -> Block:
                                  geometry=polys, crs=UTM),
         streets=gpd.GeoDataFrame(
             geometry=[LineString([(-step, 0.0), (n * step + step, 0.0)])], crs=UTM),
-        building_points=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
 
 
 def _roads() -> gpd.GeoDataFrame:

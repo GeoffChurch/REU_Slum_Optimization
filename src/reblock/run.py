@@ -52,7 +52,7 @@ def main(cfg: DictConfig) -> None:
     # build_regions narrows source.block_ids to the selected members; clear it once here, before
     # ANY emitter, so the context layers (render_results' surrounding outlines + region_map's
     # whole-metro outlines) query ALL candidate blocks, not just the selection. Order-independent:
-    # nothing below reblocks, and building_points ignores block_ids anyway.
+    # nothing below reblocks, and building_geometries ignores block_ids anyway.
     spec.source.block_ids = None   # type: ignore[attr-defined]
     for r in output.results:
         log.info("%s %s", r.block.block_id, {m.eval: dict(m.values) for m in r.metrics})

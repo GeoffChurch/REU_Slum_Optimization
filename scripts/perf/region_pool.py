@@ -63,7 +63,7 @@ def main() -> None:
     pool = blocks(6)
     print(f"\n  {'idx':>4}{'blocks':>9}{'parcels':>10}{'buildings':>12}{'street_rows':>13}")
     for i, b in enumerate(pool):
-        print(f"  {i:>4}{'-':>9}{len(b.parcels):>10,}{len(b.building_points):>12,}"
+        print(f"  {i:>4}{'-':>9}{len(b.parcels):>10,}{len(b.building_geometries):>12,}"
               f"{len(b.streets):>13,}")
     print("\n  index 0 is the block every earlier region-scale result used.")
 

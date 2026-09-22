@@ -48,7 +48,7 @@ def block():
 def test_reconstruction_matches_the_source_block(block: Block) -> None:
     assert block.block_id == BUNDLE["block_id"]
     assert len(block.parcels) == len(BUNDLE["parcels"])
-    assert len(block.building_points) == len(BUNDLE["building_points"])
+    assert len(block.building_geometries) == len(BUNDLE["building_points"])
 
 
 #: How far a fresh CPython solve may sit from the baked answer. See the test below for why this

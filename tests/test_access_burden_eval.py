@@ -26,7 +26,7 @@ def _strip(n: int = 6, step: float = 10.0) -> Block:
         parcels=gpd.GeoDataFrame({"parcel_id": [str(k) for k in range(n)]},
                                  geometry=polys, crs=UTM),
         streets=gpd.GeoDataFrame(geometry=[LineString([(-step, 0.0), (step * 2, 0.0)])], crs=UTM),
-        building_points=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
 
 
 def test_burden_is_zero_exactly_at_universal_street_access() -> None:

@@ -253,7 +253,7 @@ def _assert_round_trip(bundle: AuthoringBundle, params: PermeabilityParams) -> N
     changed ring winding or a dtype shift caused it.
 
     Deliberately NOT threaded with the source block's `adj`/`radii` the way `main` threads them:
-    those are derived from `block.parcels.geometry` and `block.building_points`, so handing them
+    those are derived from `block.parcels.geometry` and `block.building_geometries`, so handing them
     over would skip re-deriving exactly the things the JSON has to carry.
     """
     rebuilt = block_from_bundle(bundle)
@@ -370,7 +370,7 @@ def main() -> None:
     if epsg is None:
         raise SystemExit(f"{block.crs} has no EPSG code -- the browser rebuilds the CRS from one")
     log.info("loaded %s: %d parcels, %d streets, %d building points", block.block_id,
-             len(block.parcels), len(block.streets), len(block.building_points))
+             len(block.parcels), len(block.streets), len(block.building_geometries))
 
     # Parcel adjacency and the per-parcel footprint radii are functions of `block` alone and do
     # not move when a road is added, so they are built ONCE and threaded through every solve on
@@ -386,7 +386,7 @@ def main() -> None:
     log.info("mesh: %d nodes, %d edges, %d grounded; p0 = %r", mesh.n, len(mesh.rows),
              int(mesh.ground.sum()), baseline.p)
 
-    points = block.building_points.geometry
+    points = block.building_geometries.geometry
 
     reference: list[ReferenceCase] = []
     for name, road in REFERENCE_ROADS.items():

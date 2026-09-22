@@ -30,7 +30,7 @@ def _slab(w: int, h: int) -> Block:
     return Block(block_id="slab", crs=UTM, boundary=cast(Polygon, unary_union(polys)),
                  parcels=parcels,
                  streets=gpd.GeoDataFrame(geometry=[LineString([(0, 0), (w, 0)])], crs=UTM),
-                 building_points=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
 
 
 def test_flow_concentrates_more_sharply_as_the_block_grows() -> None:

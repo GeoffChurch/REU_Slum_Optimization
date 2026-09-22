@@ -72,7 +72,7 @@ def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str = "all",
     full block-perimeter frontage (as if every existing road around the block is already
     street); a side name ("bottom"/"top"/"left"/"right") gives frontage on only that outer
     edge, for building a deep block/region. `points`, if given, becomes the block's
-    `building_points` (default: the empty default -- most fixtures don't need real sites)."""
+    `building_geometries` (default: the empty default -- most fixtures don't need real sites)."""
     polys, ids = [], []
     for i in range(w):
         for j in range(h):
@@ -88,7 +88,7 @@ def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str = "all",
         return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels,
                     streets=streets)
     return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
-                building_points=points)
+                building_geometries=points)
 
 
 def test_region_block_streets_are_the_full_existing_network() -> None:
@@ -135,7 +135,7 @@ def test_region_block_identity_folds_the_existing_egress_model_tag() -> None:
 
 
 def test_region_block_unions_member_building_points() -> None:
-    # Two blocks with explicit building_points -- region_block.building_points is their union
+    # Two blocks with explicit building_geometries -- region_block's is their union
     # (concatenated, not deduped: overlapping points from different sources are both real sites).
     a_pts = gpd.GeoDataFrame(geometry=[Point(0.5, 0.5), Point(1.5, 1.5)], crs=UTM)
     b_pts = gpd.GeoDataFrame(geometry=[Point(3.5, 0.5)], crs=UTM)
@@ -143,9 +143,9 @@ def test_region_block_unions_member_building_points() -> None:
     b = _grid_block(3, 0, 3, 3, block_id="b", points=b_pts)
     rb = region_block([a, b])
 
-    assert len(rb.building_points) == len(a_pts) + len(b_pts)
-    assert rb.building_points.crs == UTM
-    assert (rb.building_points.geometry.geom_type == "Point").all()
+    assert len(rb.building_geometries) == len(a_pts) + len(b_pts)
+    assert rb.building_geometries.crs == UTM
+    assert (rb.building_geometries.geometry.geom_type == "Point").all()
 
 
 def test_region_block_rejects_empty_list() -> None:
@@ -256,26 +256,26 @@ def test_kblock_source_block_geometries_is_cheap_and_wellformed() -> None:
 
 def test_kblock_building_points_are_points_in_region_utm() -> None:
     src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
-    pts = src.building_points()
+    pts = src.building_geometries()
     assert not pts.empty and (pts.geometry.geom_type == "Point").all()
     assert pts.crs == src.block_geometries().crs                 # same UTM -> overlays align
 
 
 def test_kblock_building_points_bbox_windows() -> None:
     src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
-    allpts = src.building_points()
+    allpts = src.building_geometries()
     minx, miny, maxx, maxy = allpts.total_bounds
     # Bottom-left quadrant of the extent -- a strict, non-empty subset (the DJI points
     # cluster near the extent, so the geometric *middle* is empty; a corner has ~100).
     sub = (minx, miny, (minx + maxx) / 2, (miny + maxy) / 2)
-    assert 0 < len(src.building_points(sub)) < len(allpts)
+    assert 0 < len(src.building_geometries(sub)) < len(allpts)
 
 
 def test_kblock_block_carries_building_points() -> None:
     block = next(iter(KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").region().blocks))
-    assert not block.building_points.empty
-    assert (block.building_points.geometry.geom_type == "Point").all()
-    assert block.building_points.crs == block.crs
+    assert not block.building_geometries.empty
+    assert (block.building_geometries.geometry.geom_type == "Point").all()
+    assert block.building_geometries.crs == block.crs
 
 
 def test_kblock_block_geometries_bbox_windows() -> None:
@@ -464,7 +464,7 @@ def test_block_depths_empty_for_non_peelable_or_empty() -> None:
     class _Bare:
         def region(self): raise NotImplementedError
         def block_geometries(self, bbox=None): raise NotImplementedError
-        def building_points(self, bbox=None): raise NotImplementedError
+        def building_geometries(self, bbox=None): raise NotImplementedError
 
     assert block_depths(_Bare(), ["anything"]) == {}
     root = Path(__file__).resolve().parent

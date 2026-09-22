@@ -52,7 +52,8 @@ class Block:
     streets: GeoDataFrame
     source_content_hash: str = ""   # content hash of the Source's file(s); "" => uncacheable
     attrs: Mapping[str, object] = field(default_factory=dict)
-    building_points: GeoDataFrame = field(default_factory=_empty_points)  # real sites; may be empty
+    # real sites; may be empty. Named for GEOMETRY, not points: at tier 3 it holds polygons.
+    building_geometries: GeoDataFrame = field(default_factory=_empty_points)
     # The injected building-geometry TIER (reblock.buildings), as the STRATEGY rather than a bound
     # instance: SpacingDiscs | AreaDiscs | Footprints. Resolved once where config and data are
     # read, passed down, and applied to this block's own points by `buildings` below -- so no call
@@ -60,14 +61,15 @@ class Block:
     #
     # It is a factory and NOT a prebuilt `Extents` for a reason worth keeping: `dataclasses.replace`
     # copies every field it is not given, so a stored instance survives
-    # `replace(block, building_points=...)` and silently describes the OLD points. That desync is
+    # `replace(block, building_geometries=...)` and silently describes the OLD points. That
+    # desync is
     # unrepresentable here, because the tier is a function OF the data instead of a copy of it.
     building_tier: Callable[[GeoDataFrame], Extents] = SpacingDiscs
 
     @cached_property
     def buildings(self) -> Extents:
-        """This block's buildings at the configured tier. Never desyncs from `building_points`."""
-        return self.building_tier(self.building_points)
+        """This block's buildings at the configured tier; never desyncs from the frame."""
+        return self.building_tier(self.building_geometries)
 
     def __post_init__(self) -> None:
         _require_projected(self.crs, "Block.crs")
@@ -132,7 +134,7 @@ class Source(Protocol):
     # block_id + geometry (+ building_count when the source has it -- optional column):
     def block_geometries(self, bbox: BBox | None = None) -> GeoDataFrame: ...
     # points; may be empty:
-    def building_points(self, bbox: BBox | None = None) -> GeoDataFrame: ...
+    def building_geometries(self, bbox: BBox | None = None) -> GeoDataFrame: ...
 
 
 class Method(Protocol):

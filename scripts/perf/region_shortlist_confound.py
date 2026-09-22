@@ -69,11 +69,11 @@ def main() -> None:
     block = region_pool.blocks(REGION + 1)[REGION]
     n = len(block.parcels)
     half_w = DEFAULT_ROAD_WIDTH_M / 2.0
-    print(f"\nregion {REGION}: {n:,} parcels, {len(block.building_points):,} buildings\n",
+    print(f"\nregion {REGION}: {n:,} parcels, {len(block.building_geometries):,} buildings\n",
           flush=True)
 
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    radii = SpacingDiscs(block.building_points).radii
+    radii = SpacingDiscs(block.building_geometries).radii
     b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
 
     out: dict[str, dict[str, object]] = {}

@@ -64,7 +64,7 @@ def _sparse_stub_block() -> tuple[Block, gpd.GeoDataFrame]:
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k * cell, 0)])], crs=UTM)
     points = gpd.GeoDataFrame(geometry=[p.centroid for p in polys], crs=UTM)
     block = Block(block_id="sparse_stub", crs=UTM, boundary=boundary, parcels=parcels,
-                 streets=streets, building_points=points)
+                 streets=streets, building_geometries=points)
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(5.0, 0.0), (5.0, 5.0)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)

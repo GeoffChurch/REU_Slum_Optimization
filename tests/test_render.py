@@ -73,7 +73,7 @@ def _field_block(n: int = 3, cell: float = 20.0) -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     return Block(block_id="f", crs=UTM, boundary=boundary, parcels=parcels,
                  streets=gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM),
-                 building_points=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
 
 
 def _mid_road(block: Block) -> gpd.GeoDataFrame:
@@ -368,7 +368,7 @@ def test_displaced_points_carry_fraction_and_radius(tmp_path):
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (20, 0)])], crs=crs)
     pts = gpd.GeoDataFrame(geometry=[Point(10, 10), Point(10, 12)], crs=crs)
     block = Block(block_id="b", crs=crs, boundary=boundary, parcels=parcels,
-                  streets=streets, building_points=pts)
+                  streets=streets, building_geometries=pts)
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(0, 10), (20, 10)])], crs=crs),
         DEFAULT_ROAD_WIDTH_M)
@@ -476,9 +476,9 @@ def test_render_field_draws_every_building_not_only_the_displaced_ones() -> None
     """The point of the figure: a reader must be able to see that a road THREADED a gap, which means
     seeing the disks it missed. `render_after` draws only the displaced ones."""
     block = _field_block()
-    radii = SpacingDiscs(block.building_points).radii
+    radii = SpacingDiscs(block.building_geometries).radii
     fig = render_field(block, _mid_road(block), radii)
-    n = len(block.building_points)
+    n = len(block.building_geometries)
     drawn = _disk_paths(fig.axes[0])
     assert drawn == n, (
         f"{drawn} disks drawn for {n} buildings -- one of the two disk layers is missing, so a "
@@ -513,8 +513,8 @@ def test_render_field_shades_grazed_disks_by_their_own_c() -> None:
     """
     block = _field_block()
     roads = _mid_road(block)
-    radii = SpacingDiscs(block.building_points).radii
-    c = field_contributions(block.building_points, roads, radii)
+    radii = SpacingDiscs(block.building_geometries).radii
+    c = field_contributions(block.building_geometries, roads, radii)
     fig = render_field(block, roads, radii)
     alphas = sorted(round(float(row[3]), 6)
                     for row in np.atleast_2d(np.asarray(
@@ -551,7 +551,7 @@ def test_render_field_never_fills_parcels() -> None:
     paths and a count would mistake it for the wireframe.
     """
     block = _field_block()
-    fig = render_field(block, _mid_road(block), SpacingDiscs(block.building_points).radii)
+    fig = render_field(block, _mid_road(block), SpacingDiscs(block.building_geometries).radii)
     face = np.atleast_2d(np.asarray(
         _wireframe_collection(fig.axes[0]).get_facecolor(), dtype=float))
     assert face.size == 0 or float(face[0][3]) == 0.0, "parcels are filled"

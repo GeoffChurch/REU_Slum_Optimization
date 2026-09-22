@@ -143,10 +143,10 @@ def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
             # step -> buildable
             trial = _explode(_union_with(st.base_merged, real), st.crs,
                              2.0 * st.half_width_m)
-        denom = float(displacement(st.block.building_points, st.radii, trial)
+        denom = float(displacement(st.block.building_geometries, st.radii, trial)
                      - st.committed_disp)
     elif st.cost == "repulsion":
-        denom = repulsion(st.block.building_points, st.radii, real)
+        denom = repulsion(st.block.building_geometries, st.radii, real)
     else:
         denom = real.length
     gain = float("inf") if (denom <= 0 and raw > 0) else (raw / denom if denom > 0 else 0.0)

@@ -262,7 +262,7 @@ def quantised_field(block: Block, radii: NDArray[np.float64], ox: float,
     the raw geometry would spend the parity budget on the quantiser and leave the formula
     unchecked.
     """
-    pts = block.building_points
+    pts = block.building_geometries
     stored = Buildings(x=[cm(v - ox) for v in pts.geometry.x],
                        y=[cm(v - oy) for v in pts.geometry.y],
                        r=[sigfig(v) for v in radii])
@@ -518,7 +518,7 @@ def main() -> None:
     # only because the loader has no block-only mode, and solving one method is minutes cheaper
     # than solving all eight for a block we then use on its own.
     block, _ = load_example_block(PINNED_METHOD)
-    radii = SpacingDiscs(block.building_points).radii
+    radii = SpacingDiscs(block.building_geometries).radii
     roads = default_roads(block, WIDTH_FLOOR_M)
 
     # Everything geometric is emitted RELATIVE to this, in metres. PARCEL bounds, not the building
@@ -544,7 +544,7 @@ def main() -> None:
 
     bundle = FieldBundle(
         block_id=block.block_id,
-        n_buildings=len(block.building_points),
+        n_buildings=len(block.building_geometries),
         origin=[ox, oy],
         buildings=field.stored,
         # One entry per RING -- see gen_web_bundle's own note; `render/field.ts` strokes each and

@@ -95,14 +95,14 @@ def test_shapefile_blocks_carry_source_content_hash() -> None:
 def test_shapefile_building_points_empty_and_block_geometries_present() -> None:
     # Phule Nagar has no .prj sidecar (see test_missing_crs_without_assumed_crs_raises).
     src = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857)
-    assert src.building_points().empty          # no point cloud -- honest, not a stub
+    assert src.building_geometries().empty          # no point cloud -- honest, not a stub
     bg = src.block_geometries()
     assert not bg.empty and set(bg.columns) >= {"block_id", "geometry"}
     assert (bg.geometry.geom_type == "Polygon").all()
 
 
 def test_shapefile_block_has_empty_building_points() -> None:
-    # A parcel shapefile has no point cloud -- Block.building_points is honestly empty (the
+    # A parcel shapefile has no point cloud -- Block.building_geometries is honestly empty (the
     # dataclass default), not a stub or a throwing accessor.
     block = next(iter(ShapefileSource(PHULE, region_id="phule", assumed_crs=3857).region().blocks))
-    assert block.building_points.empty
+    assert block.building_geometries.empty
