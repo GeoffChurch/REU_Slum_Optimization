@@ -51,7 +51,7 @@ def source_hash(*paths: Path) -> str:
 # republished pre-fix results. The retreat was to hash EVERY derivation module together, which
 # cannot go stale but invalidates everything: measured on the `depth` region, `cycle_native`
 # (74 min) and the arterial (64 min) are 93% of that variant's proposal time, and a change to the
-# scoring half of `budget.py` cannot affect `cycle_native` -- which takes only `building_radii` and
+# scoring half of `budget.py` cannot affect `cycle_native` -- which takes only `buildings.radii` and
 # `displacement` from it -- yet invalidated it anyway.
 #
 # A walked closure is neither: automatic, so there is no list to maintain, and per-derivation, so

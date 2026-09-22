@@ -53,7 +53,7 @@ def parcel_radii(block: Block, params: PermeabilityParams) -> NDArray[np.float64
 
     Replaces a block-median corridor half-width (`r0 = r0_frac * median NN distance`). That was one
     number for the whole block, so a mixed-density block got the same assumed gap in its packed core
-    and at its sparse edge; this uses each building's own radius, which `budget.building_radii`
+    and at its sparse edge; this uses each building's own radius, which `buildings.SpacingDiscs`
     already computes as half its nearest-neighbour distance.
 
     Parcels are Voronoi cells of the building points, so the correspondence is exactly one point per
@@ -64,14 +64,13 @@ def parcel_radii(block: Block, params: PermeabilityParams) -> NDArray[np.float64
     its edges read as fully open rather than fully blocked -- the same direction the old code failed
     in when a block had too few points to define a neighbour.
     """
-    from reblock.budget import building_radii  # deferred: avoids the budget<->permeability cycle
 
     n = len(block.parcels)
     out = np.zeros(n, dtype=np.float64)
     pts = block.building_points
     if n == 0 or len(pts) < 2:
         return out
-    radii = building_radii(pts)
+    radii = block.buildings.radii
     xy = np.column_stack([pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy()])
     hit = STRtree(shapely.points(xy)).query(
         np.asarray(list(block.parcels.geometry), dtype=object), predicate="contains")

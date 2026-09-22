@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+from reblock.buildings import SpacingDiscs
 from tests.dts_keys import json_keys, ts_field_names
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -252,7 +253,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     import numpy as np
     from geopandas import GeoDataFrame, points_from_xy
 
-    from reblock.budget import building_radii, displacement, displacement_from_distance
+    from reblock.budget import displacement, displacement_from_distance
     from scripts._bundle_io import line_coords, polygon_rings, sigfig
     from scripts._default_road import closed_form_distance, default_roads, segments
     from scripts._example_block import (
@@ -276,7 +277,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     # gives every session a cold REBLOCK_CACHE_DIR by design.
     block = load_example_region()
     _, roads_by_method = load_example_block(None, variant=TEST_VARIANT)
-    radii = building_radii(block.building_points)
+    radii = SpacingDiscs(block.building_points).radii
     ox, oy = float(bundle["origin"][0]), float(bundle["origin"][1])
 
     # Job 1a: EVERY layer the bundle carries, re-derived from the live block through the
@@ -345,7 +346,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     # Pairing the shipped block's buildings with the fixture's roads would compare a closed form
     # against shapely on geometry that never coexisted, and both sides would agree on nonsense.
     small = load_example_region(TEST_VARIANT)
-    radii = building_radii(small.building_points)
+    radii = SpacingDiscs(small.building_points).radii
     raw_x = small.building_points.geometry.x.to_numpy(dtype=float)
     raw_y = small.building_points.geometry.y.to_numpy(dtype=float)
     assert len(roads_by_method) == 5, sorted(roads_by_method)

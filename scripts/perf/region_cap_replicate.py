@@ -41,7 +41,8 @@ import json
 import time
 from pathlib import Path
 
-from reblock.budget import building_radii, displacement
+from reblock.budget import displacement
+from reblock.buildings import SpacingDiscs
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
@@ -92,7 +93,7 @@ def main() -> None:
         print(f"\n=== region {ri}: {n:,} parcels, {len(block.building_points):,} buildings ===",
               flush=True)
         adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-        radii = building_radii(block.building_points)
+        radii = SpacingDiscs(block.building_points).radii
         b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj,
                                          unreached_depth=n + 1))
         arms: dict[str, dict[str, object]] = {}

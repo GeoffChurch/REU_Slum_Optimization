@@ -124,7 +124,7 @@ class PermeabilityParams:
     # what moved is the COST side only -- the same function, honestly priced.
     min_road_width_m: float = 7.0
     # Scales the per-parcel footprint radii the footpath clearance is measured against. 1.0 uses
-    # `budget.building_radii` as-is (half the nearest-neighbour distance), which is a geometric
+    # `buildings.SpacingDiscs` as-is (half the nearest-neighbour distance), which is a geometric
     # fact rather than a tuned constant -- unlike the r0_frac=0.55 this replaces, which existed to
     # size a single block-median corridor. Kept as a knob because a metric change of this kind has
     # to be recalibratable, not because a value other than 1.0 is known to be better.

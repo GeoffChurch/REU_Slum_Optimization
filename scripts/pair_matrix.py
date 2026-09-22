@@ -55,7 +55,8 @@ import pandas as pd
 from scipy import stats
 from shapely.ops import unary_union
 
-from reblock.budget import building_radii, displacement
+from reblock.budget import displacement
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.data.kblock import KblockSource
 from reblock.data.osm_extract import (
@@ -207,7 +208,7 @@ def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
     n = len(pts)
     if n == 0:
         return 0.0
-    radii = building_radii(pts)
+    radii = SpacingDiscs(pts).radii
     return float(displacement(pts, radii, roads) / n)
 
 

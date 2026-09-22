@@ -114,7 +114,7 @@ def _point_disks(points: gpd.GeoDataFrame, radius_m: float | None = None) -> gpd
     """Points as geographic-size disks, so markers scale with the map extent -- a dense region no
     longer collapses into a screen-size (matplotlib `markersize`) thicket the way fixed-point
     markers do. If a `radius` column is present, each disk uses it verbatim (the per-building
-    footprint disks, radius = NN/2 -- see budget.building_radii); elif a `weight` column is
+    footprint disks, radius = NN/2 -- see buildings.SpacingDiscs); elif a `weight` column is
     present, each disk's radius is `radius_m` scaled by sqrt(weight) so its AREA is proportional to
     the weight; else all disks share `radius_m`."""
     if "radius" in points.columns:

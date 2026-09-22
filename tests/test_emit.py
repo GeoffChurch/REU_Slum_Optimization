@@ -189,7 +189,7 @@ def test_displaced_points_only_keeps_sites_with_positive_displacement_fraction()
 
 def test_displaced_points_takes_its_corridor_from_the_roads_own_width() -> None:
     # 1.5m from the road at x=1, inside a default 6m road's 3m half-width -- a
-    # single point, so its radius falls back to DEFAULT_BUILDING_RADIUS_M (building_radii, n < 2).
+    # single point, so its radius falls back to DEFAULT_BUILDING_RADIUS_M (SpacingDiscs, n < 2).
     block = replace(_grid_block(3),
                     building_points=gpd.GeoDataFrame(geometry=[Point(1.0, 2.5)], crs=UTM))
     roads = with_width(

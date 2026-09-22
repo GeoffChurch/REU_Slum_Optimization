@@ -15,7 +15,7 @@ from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
-from reblock.budget import building_radii
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Metrics, Proposal
 from reblock.derive.access import parcel_access_layers
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
@@ -476,7 +476,7 @@ def test_render_field_draws_every_building_not_only_the_displaced_ones() -> None
     """The point of the figure: a reader must be able to see that a road THREADED a gap, which means
     seeing the disks it missed. `render_after` draws only the displaced ones."""
     block = _field_block()
-    radii = building_radii(block.building_points)
+    radii = SpacingDiscs(block.building_points).radii
     fig = render_field(block, _mid_road(block), radii)
     n = len(block.building_points)
     drawn = _disk_paths(fig.axes[0])
@@ -513,7 +513,7 @@ def test_render_field_shades_grazed_disks_by_their_own_c() -> None:
     """
     block = _field_block()
     roads = _mid_road(block)
-    radii = building_radii(block.building_points)
+    radii = SpacingDiscs(block.building_points).radii
     c = field_contributions(block.building_points, roads, radii)
     fig = render_field(block, roads, radii)
     alphas = sorted(round(float(row[3]), 6)
@@ -551,7 +551,7 @@ def test_render_field_never_fills_parcels() -> None:
     paths and a count would mistake it for the wireframe.
     """
     block = _field_block()
-    fig = render_field(block, _mid_road(block), building_radii(block.building_points))
+    fig = render_field(block, _mid_road(block), SpacingDiscs(block.building_points).radii)
     face = np.atleast_2d(np.asarray(
         _wireframe_collection(fig.axes[0]).get_facecolor(), dtype=float))
     assert face.size == 0 or float(face[0][3]) == 0.0, "parcels are filled"

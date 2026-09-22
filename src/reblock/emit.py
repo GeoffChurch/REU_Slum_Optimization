@@ -59,11 +59,10 @@ def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
     """`block.building_points` with a per-point displacement fraction `c` = max(0, 1 - d/r)
     (r = NN/2, see budget) and its disk `radius`, for the render to shade. Empty when there are no
     points or no proposed roads."""
-    from reblock.budget import building_radii
     pts = block.building_points
     if pts.empty or proposal.roads is None or proposal.roads.empty:
         return cast(gpd.GeoDataFrame, pts.iloc[:0])
-    radii = building_radii(pts)
+    radii = block.buildings.radii
     corridor = _corridor(proposal.roads)
     d = pts.geometry.distance(corridor).to_numpy()
     with np.errstate(divide="ignore", invalid="ignore"):

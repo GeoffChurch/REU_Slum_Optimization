@@ -14,6 +14,7 @@ from reblock.budget import (
     road_drainage,
     street_first_ordered,
 )
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
 from reblock.methods.clearance import ClearanceReblocker
@@ -115,24 +116,24 @@ def test_directness_is_a_bounded_circuity_ratio() -> None:
     assert 0.0 <= d_chord <= 1.0
 
 
-def test_building_radii_are_half_nearest_neighbor():
+def test_spacing_discs_are_half_nearest_neighbor():
     import geopandas as gpd
     from shapely.geometry import Point
 
-    from reblock.budget import building_radii
+
     # three collinear points 10 m apart -> NN dist 10 for the ends, 10 for the middle -> r = 5
     pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(10, 0), Point(30, 0)], crs="EPSG:32734")
-    r = building_radii(pts)
+    r = SpacingDiscs(pts).radii
     assert list(r) == [5.0, 5.0, 10.0]      # 3rd point's NN is the 2nd, 20 m away -> r = 10
 
 
-def test_building_radii_fallback_when_fewer_than_two_points():
+def test_spacing_discs_fallback_when_fewer_than_two_points():
     import geopandas as gpd
     from shapely.geometry import Point
 
-    from reblock.budget import building_radii
+
     pts = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs="EPSG:32734")
-    assert list(building_radii(pts)) == [3.0]     # fallback = corridor_m
+    assert list(SpacingDiscs(pts).radii) == [3.0]     # fallback = corridor_m
 
 
 def test_displacement_is_linear_ramp_in_distance_to_corridor():
@@ -172,7 +173,7 @@ def test_displacement_counts_a_shared_site_once_under_overlapping_corridors():
     # once per overlapping road -- guaranteed by `displacement`'s design (one `union_all` corridor,
     # one `distance` per building), but worth a direct regression test since this exact scenario
     # used to be covered by the now-deleted `displacement_count` overlap test.
-    from reblock.budget import building_radii, displacement
+    from reblock.budget import displacement
     crs = "EPSG:32734"
     road_a = LineString([(0.0, 0.0), (5.0, 0.0)])
     road_b = LineString([(4.0, 0.0), (10.0, 0.0)])          # overlaps road_a's corridor near x=4-5
@@ -180,7 +181,7 @@ def test_displacement_counts_a_shared_site_once_under_overlapping_corridors():
     pts = gpd.GeoDataFrame(geometry=[Point(1.0, 0.5), Point(9.0, 0.5), Point(4.5, 0.5)], crs=crs)
     # the 3rd point sits in BOTH corridors; all 3 are >=1.75 m from every other point (r >= 1.75)
     # and sit right on the (y=0) road line (d=0) -- each c_i = 1.0, so the sum must be exactly 3.0.
-    radii = building_radii(pts)
+    radii = SpacingDiscs(pts).radii
     assert displacement(pts, radii, roads) == 3.0
 
 
@@ -203,11 +204,11 @@ def test_displacement_contributions_pins_the_r_equals_zero_convention() -> None:
 def test_repulsion_is_positive_even_far_from_all_buildings():
     from shapely.geometry import LineString, Point
 
-    from reblock.budget import building_radii, displacement, repulsion
+    from reblock.budget import displacement, repulsion
     crs = "EPSG:32734"
     # three buildings clustered near the origin
     pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(0, 5), Point(5, 0)], crs=crs)
-    radii = building_radii(pts)
+    radii = SpacingDiscs(pts).radii
     far_road = LineString([(1000.0, 1000.0), (1000.0, 1010.0)])   # nowhere near any building
     # the quadratic tail r^2/(r^2+d^2) never reaches zero -> repulsion stays strictly positive even
     # for a road far from every building (the key non-degeneracy property)...
@@ -221,10 +222,10 @@ def test_repulsion_is_positive_even_far_from_all_buildings():
 def test_repulsion_higher_for_a_road_closer_to_buildings():
     from shapely.geometry import LineString, Point
 
-    from reblock.budget import building_radii, repulsion
+    from reblock.budget import repulsion
     crs = "EPSG:32734"
     pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(0, 10), Point(0, 20)], crs=crs)
-    radii = building_radii(pts)
+    radii = SpacingDiscs(pts).radii
     near = LineString([(2.0, 0.0), (2.0, 20.0)])      # 2 m from the building column
     far = LineString([(50.0, 0.0), (50.0, 20.0)])     # 50 m away
     r_near, r_far = repulsion(pts, radii, near), repulsion(pts, radii, far)
@@ -393,9 +394,9 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
 
 
 def test_displacement_curve_is_home_fraction() -> None:
-    from reblock.budget import building_radii, displacement, displacement_curve
+    from reblock.budget import displacement, displacement_curve
     block, roads = _straight_block_with_two_roads()   # existing helper with building_points
-    radii = building_radii(block.building_points)
+    radii = SpacingDiscs(block.building_points).radii
     curve = displacement_curve(block, roads, radii)
     n = len(block.building_points)
     assert all(0.0 <= b <= 1.0 for b in curve.benefit)          # fraction, not a count
@@ -462,10 +463,10 @@ def test_permeability_and_displacement_curves_share_cost_samples():
     # n_points=20, over the same roads, so their `.cost` samples (cumulative added road length, m,
     # for both) land at identical budgets. A future change making _sweep's sampling
     # value-dependent would silently misalign every plot.
-    from reblock.budget import building_radii, displacement_curve
+    from reblock.budget import displacement_curve
     from reblock.permeability import PermeabilityParams, permeability_curve
     block, roads = _straight_block_with_two_roads()
-    radii = building_radii(block.building_points)
+    radii = SpacingDiscs(block.building_points).radii
     perm = permeability_curve(block, roads, PermeabilityParams())
     disp = displacement_curve(block, roads, radii)
     assert list(perm.cost) == list(disp.cost)

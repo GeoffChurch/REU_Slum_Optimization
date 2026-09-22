@@ -7,7 +7,8 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
-from reblock.budget import building_radii, displacement
+from reblock.budget import displacement
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
@@ -602,7 +603,7 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
     # the cost switch changed WHICH road is proposed:
     assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt
     # ... to one that displaces fewer buildings (disk measure) than the length-optimal pick:
-    radii = building_radii(pts)
+    radii = SpacingDiscs(pts).radii
     d_length = displacement(pts, radii, roads_length)
     d_disp = displacement(pts, radii, roads_disp)
     assert d_disp < d_length
@@ -638,7 +639,7 @@ def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None
                                      n_anchors=10, top_k=4, half_width_m=1.0, cost="length")
     roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective="access", max_roads=1,
                                    n_anchors=10, top_k=4, half_width_m=1.0, cost="displacement")
-    radii = building_radii(pts)
+    radii = SpacingDiscs(pts).radii
     d_length = displacement(pts, radii, roads_length)
     d_disp = displacement(pts, radii, roads_disp)
 
@@ -674,7 +675,7 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
                               max_roads=1, n_anchors=12, half_width_m=1.0)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 1.0                 # a real, non-degenerate candidate
-    far_radii = building_radii(far_points)
+    far_radii = SpacingDiscs(far_points).radii
     assert displacement(far_points, far_radii, roads) == 0.0
 
 
@@ -693,7 +694,7 @@ def test_displacement_objective_is_extent_aware_unlike_the_old_centroid_rule() -
     # corridor edge (y=1.5 -> d=0.5 < r=1.0 -> its disk grazes the corridor); point B is out of
     # disk range entirely (y=3.5 -> d=2.5 > r=1.0 -> contributes 0 either way).
     pts = gpd.GeoDataFrame(geometry=[Point(5.0, 1.5), Point(5.0, 3.5)], crs=UTM)
-    radii = building_radii(pts)
+    radii = SpacingDiscs(pts).radii
 
     corridor = road.geometry.buffer(1.0).union_all()
     assert not pts.geometry.within(corridor).any()          # OLD centroid rule: nobody displaced
@@ -757,6 +758,6 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     assert depth_with_roads < base_depth                      # access strictly improves
     # (ii) the committed roads' total displacement is finite and non-trivial (a real corridor
     # through the building field), not degenerate.
-    radii = building_radii(pts)
+    radii = SpacingDiscs(pts).radii
     disp = displacement(pts, radii, roads)
     assert 0.0 < disp < float("inf")

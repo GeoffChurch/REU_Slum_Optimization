@@ -57,7 +57,6 @@ from shapely import STRtree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
-from reblock.budget import building_radii
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
@@ -274,7 +273,7 @@ class ResistanceLPReblocker:
 
         pts = block.building_points
         n_b = len(pts)
-        radii = building_radii(pts)
+        radii = block.buildings.radii
         disp_cap = self.max_displacement * n_b
 
         pt_tree = cKDTree(graph.pts)

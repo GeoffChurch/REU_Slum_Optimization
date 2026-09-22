@@ -62,12 +62,12 @@ from hydra.utils import instantiate
 
 from reblock.animate import reblock_gif
 from reblock.budget import (
-    building_radii,
     displacement,
     displacement_curve,
     prefix_to_displacement,
     prefix_to_permeability,
 )
+from reblock.buildings import SpacingDiscs
 from reblock.compare import MethodCurve, PermeabilityConfig, load_permeability_config
 from reblock.contracts import Block, Method, Proposal, Screen, Source
 from reblock.derivations import propose
@@ -162,7 +162,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                  float(roads.geometry.length.sum()), time.perf_counter() - t0)
     assert block is not None
 
-    radii = building_radii(block.building_points)
+    radii = SpacingDiscs(block.building_points).radii
     n_buildings = len(block.building_points)
 
     def _disp_frac(prefix: GeoDataFrame) -> float:

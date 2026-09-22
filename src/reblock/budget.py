@@ -4,7 +4,7 @@ to the street bought first -- and samples a value at each budget, yielding a `Cu
 vs cost (cumulative added road length, m); `displacement_curve` and (in `permeability.py`)
 `permeability_curve` ride it, and the matched-displacement / matched-permeability lens
 truncations read the resulting index-aligned curves. Also holds the retained road/parcel scoring
-primitives (`road_drainage`, `building_radii`, `displacement`, `repulsion`, `access_burden`,
+primitives (`road_drainage`, `displacement`, `repulsion`, `access_burden`,
 `network_efficiency` + `_BlockScoringContext`).
 """
 from __future__ import annotations
@@ -22,7 +22,6 @@ from geopandas import GeoDataFrame
 from numpy.typing import NDArray
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
-from scipy.spatial import cKDTree
 from shapely import STRtree
 from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
@@ -41,28 +40,6 @@ def _rnd(c: tuple[float, ...]) -> tuple[float, float]:
     return (round(c[0], 2), round(c[1], 2))
 
 
-DEFAULT_BUILDING_RADIUS_M = 3.0
-
-
-def building_radii(building_points: GeoDataFrame) -> NDArray[np.float64]:
-    """Per-building disk radius = HALF the nearest-neighbor distance among the building points (the
-    fair, non-overlapping 'as big as possible' footprint bound). Fewer than 2 points -> no neighbor,
-    so fall back to `DEFAULT_BUILDING_RADIUS_M`. Coincident points get radius 0 (handled by
-    `displacement`).
-
-    The fallback used to be the global road corridor half-width, which conflated two unrelated
-    quantities: how wide a ROAD is, and how big a BUILDING is when we cannot measure it. Removing
-    the global corridor exposed that; they are separate constants now.
-    """
-    n = len(building_points)
-    if n == 0:
-        return np.zeros(0, dtype=np.float64)
-    if n < 2:
-        return np.full(n, DEFAULT_BUILDING_RADIUS_M, dtype=np.float64)
-    xy = np.column_stack([building_points.geometry.x.to_numpy(),
-                          building_points.geometry.y.to_numpy()])
-    dist, _ = cKDTree(xy).query(xy, k=2)     # k=2: self (0) + nearest other
-    return (dist[:, 1] * 0.5).astype(np.float64)
 
 
 def displacement(building_points: GeoDataFrame, radii: NDArray[np.float64],
@@ -126,7 +103,8 @@ def repulsion(building_points: GeoDataFrame, radii: NDArray[np.float64],
               geom: BaseGeometry) -> float:
     """Soft per-road intrusion cost: a road's OWN proximity to the building field, summed over
     building points as the quadratic-tail kernel r^2/(r^2 + d^2) (d = point-to-road distance,
-    r = the building's disk radius from `building_radii`). > 0 whenever any building has r>0
+    r = the building's disk radius from the injected `buildings` tier). > 0 whenever any
+    building has r>0
     (the tail never reaches zero) so no road is 'free' -- unlike `displacement`, whose hard
     0-beyond-r cutoff makes gap-hugging roads free and degenerate. Depends ONLY on `geom` and
     the fixed building field (not on other committed roads), so it is CONSTANT per candidate ->

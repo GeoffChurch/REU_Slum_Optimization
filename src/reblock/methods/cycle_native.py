@@ -58,7 +58,7 @@ from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
-from reblock.budget import building_radii, displacement
+from reblock.budget import displacement
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
@@ -123,7 +123,7 @@ class CycleNativeReblocker:
 
         adj = parcel_adjacency(geoms, STREET_TOL)
         pradii = parcel_radii(block, self.params)
-        radii = building_radii(block.building_points)
+        radii = block.buildings.radii
         n_b = max(len(block.building_points), 1)
         street = unary_union(list(block.streets.geometry))
         seeds = np.flatnonzero(

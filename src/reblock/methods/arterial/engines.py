@@ -23,7 +23,6 @@ from shapely.geometry.base import BaseGeometry
 from reblock.budget import (
     _BlockScoringContext,
     access_burden,
-    building_radii,
     corridor_distance,
     displacement,
     road_drainage,
@@ -68,7 +67,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
     road that is actually scored and committed (see `ChordRealizer`).
     `cost` in {"length" (Delta-benefit/metre), "displacement" (Delta-benefit/expected buildings
     newly displaced within `half_width_m` of any committed road, via the extent-aware disk
-    `budget.displacement` over `block.building_points` -- see `budget.building_radii`), "repulsion"
+    `budget.displacement` over `block.building_points` -- see `buildings.SpacingDiscs`), "repulsion"
     (Delta-benefit per the road's OWN quadratic-tail proximity to the building field via
     `budget.repulsion` -- a constant-per-candidate, never-zero soft cost, so CELF-safe and never
     degenerate)}. A
@@ -100,7 +99,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
     ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
     # Constant across every step (depends only on block.building_points), so computed ONCE here
     # rather than per-step.
-    radii = building_radii(block.building_points)
+    radii = block.buildings.radii
 
     committed: list[LineString] = []                        # realized geometry, in commit order
     while len(committed) < max_roads:
@@ -224,7 +223,7 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: 
     policy = policy_spec.build(block, streets, n_anchors, top_k, adj, max_anchors)
     # Constant across every step (depends only on block.building_points), so computed ONCE here
     # rather than per-step.
-    radii = building_radii(block.building_points)
+    radii = block.buildings.radii
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
@@ -342,7 +341,7 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: str,
     # _anchor_points explodes Multi* internally.
     streets: list[BaseGeometry] = list(block.streets.geometry)
     ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
-    radii = building_radii(block.building_points)
+    radii = block.buildings.radii
     # The two trees the ranking queries against -- built once per block, like `_snap_graph` above.
     parcel_tree = STRtree(list(block.parcels.geometry))
     building_tree = STRtree(list(block.building_points.geometry))

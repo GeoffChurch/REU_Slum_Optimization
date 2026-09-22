@@ -1,14 +1,17 @@
 """Canonical typed contracts — the waist every layer adapts to."""
 from __future__ import annotations
 
-from collections.abc import Hashable, Iterable, Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import geopandas as gpd
 from geopandas import GeoDataFrame
 from pyproj import CRS
 from shapely.geometry import MultiPolygon, Polygon
+
+from reblock.buildings import Extents, SpacingDiscs
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -50,6 +53,21 @@ class Block:
     source_content_hash: str = ""   # content hash of the Source's file(s); "" => uncacheable
     attrs: Mapping[str, object] = field(default_factory=dict)
     building_points: GeoDataFrame = field(default_factory=_empty_points)  # real sites; may be empty
+    # The injected building-geometry TIER (reblock.buildings), as the STRATEGY rather than a bound
+    # instance: SpacingDiscs | AreaDiscs | Footprints. Resolved once where config and data are
+    # read, passed down, and applied to this block's own points by `buildings` below -- so no call
+    # site re-derives a radius or asks which tier it has.
+    #
+    # It is a factory and NOT a prebuilt `Extents` for a reason worth keeping: `dataclasses.replace`
+    # copies every field it is not given, so a stored instance survives
+    # `replace(block, building_points=...)` and silently describes the OLD points. That desync is
+    # unrepresentable here, because the tier is a function OF the data instead of a copy of it.
+    building_tier: Callable[[GeoDataFrame], Extents] = SpacingDiscs
+
+    @cached_property
+    def buildings(self) -> Extents:
+        """This block's buildings at the configured tier. Never desyncs from `building_points`."""
+        return self.building_tier(self.building_points)
 
     def __post_init__(self) -> None:
         _require_projected(self.crs, "Block.crs")

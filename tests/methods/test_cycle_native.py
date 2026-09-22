@@ -12,6 +12,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.budget import _rnd
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.cycle_native import CycleNativeReblocker
 
@@ -87,14 +88,14 @@ def test_respects_its_displacement_budget(cap: float) -> None:
     FAULT INJECTION: removing the `if d > self.max_displacement: continue` candidate rejection lets
     it run to 0.30+ displacement against a 0.05 cap, failing here.
     """
-    from reblock.budget import building_radii, displacement
+    from reblock.budget import displacement
 
     block = _block()
     roads = CycleNativeReblocker(max_displacement=cap).propose(block).roads
     assert roads is not None
     if not len(roads):
         return
-    radii = building_radii(block.building_points)
+    radii = SpacingDiscs(block.building_points).radii
     got = displacement(block.building_points, radii, roads) / len(block.building_points)
     assert got <= cap + 1e-9, f"displacement {got:.4f} exceeds its own cap {cap}"
 

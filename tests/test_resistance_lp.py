@@ -12,7 +12,8 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
-from reblock.budget import _noded_graph, building_radii, displacement
+from reblock.budget import _noded_graph, displacement
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.resistance_lp import ResistanceLPReblocker, solve_coverage_lp
 
@@ -58,7 +59,7 @@ def test_displacement_budget_is_respected(cap: float) -> None:
     block = _grid_block()
     roads = ResistanceLPReblocker(max_displacement=cap).propose(block).roads
     assert roads is not None and len(roads) > 0, "no roads: the cap is vacuous"
-    radii = building_radii(block.building_points)
+    radii = SpacingDiscs(block.building_points).radii
     got = displacement(block.building_points, radii, roads) / len(
         block.building_points)
     assert got <= cap + 1e-9, f"displacement {got:.4f} exceeds cap {cap}"

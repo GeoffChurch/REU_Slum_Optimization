@@ -16,7 +16,7 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf, open_dict
 from shapely.ops import unary_union
 
-from reblock.budget import Curve, building_radii, displacement_curve
+from reblock.budget import Curve, displacement_curve
 from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
 from reblock.emit import compare_report as compare_report
@@ -151,7 +151,7 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
                 block = result.block
                 roads = cast(GeoDataFrame, result.proposal.roads)
             block_area = float(block.parcels.geometry.union_all().area)
-            radii = building_radii(block.building_points)
+            radii = block.buildings.radii
             pp = pct_paved(roads, block_area)
             pd_ = pct_displaced(roads, block.building_points, radii)
             perm = permeability_curve(block, roads, params)
