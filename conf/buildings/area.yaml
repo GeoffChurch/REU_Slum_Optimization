@@ -1,4 +1,7 @@
-# Tier 2 from positions + measured area: radius = sqrt(area_in_meters / pi). Free -- the point
-# parquets already carry the column. Raises at LOAD on data without it. See reblock.buildings.AreaDiscs.
-_target_: reblock.buildings.AreaDiscs
-_partial_: true
+# Tier 2 from positions + measured area: radius = sqrt(area_in_meters / pi). Free -- the provisioned
+# point parquets already carry the column (the committed test fixture does not, and is refused at
+# load). Member buildings come from the same point parquet the screen reads.
+tier:
+  _target_: reblock.buildings.AreaDiscs
+  _partial_: true
+member_buildings: null

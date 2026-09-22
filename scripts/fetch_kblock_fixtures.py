@@ -34,7 +34,7 @@ import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import pandas as pd
@@ -68,6 +68,13 @@ OB_POINT_PREFIX = "points_s2_level_4_gzip"
 
 CT_BBOX = (18.3, -34.4, 19.0, -33.5)  # lon_min, lat_min, lon_max, lat_max
 OB_MIN_CONFIDENCE = 0.7
+# The CSV float parser EVERY Open Buildings read must use -- the point tier here and the polygon
+# tier in `reblock.data.footprints`. Parcels are identical across tiers only because both tiers
+# parse the SAME lat/lon strings through the SAME parser, and pandas' default C parser is NOT
+# round-trip exact: measured, 9 of 40 coordinates land 1 ULP (~4e-10 m) away from their repr.
+# Changing it in ONE reader -- `"round_trip"` looks like an obvious fix -- would silently move
+# every footprint-tier anchor off its point-tier twin and re-number parcels. Change both or neither.
+OB_FLOAT_PRECISION: Literal["high", "legacy", "round_trip"] | None = None
 
 # Pinned validation blocks (Task 4 will pin exact peel-k / geometric-access values on
 # these): a dense *interior* DJI block (verified this session -- see PROVENANCE.md for
@@ -242,6 +249,7 @@ def download_capetown_buildings(
         for chunk in pd.read_csv(
             gz_path,
             usecols=["latitude", "longitude", "area_in_meters", "confidence"],
+            float_precision=OB_FLOAT_PRECISION,
             chunksize=500_000,
         ):
             mask = (

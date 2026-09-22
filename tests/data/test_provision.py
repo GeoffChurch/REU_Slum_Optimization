@@ -6,11 +6,11 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import Point, box
 
+from reblock.data.footprints import tiles_for
 from reblock.data.provision import (
     cached_kblock_source,
     ensure_city_data,
     filter_to_shortlist,
-    tiles_for,
 )
 
 ROOT = Path(__file__).resolve().parents[1]

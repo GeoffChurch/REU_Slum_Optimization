@@ -24,6 +24,7 @@ from reblock.buildings import Extents, SpacingDiscs
 from reblock.contracts import BBox, Block, Region
 from reblock.data._util import _window
 from reblock.data.counts import RAW_COUNT
+from reblock.data.footprints import BuildingSource, ParquetBuildings
 from reblock.derivations import VoronoiInput, voronoi
 from reblock.derive_graph import source_hash
 
@@ -58,13 +59,22 @@ class KblockSource:
     def __init__(self, blocks_path: str | Path, buildings_path: str | Path,
                  region_id: str = "kblock", *, min_buildings: int = 10,
                  block_ids: list[str] | None = None,
-                 building_tier: Callable[[gpd.GeoDataFrame], Extents] = SpacingDiscs) -> None:
+                 building_tier: Callable[[gpd.GeoDataFrame], Extents] = SpacingDiscs,
+                 member_buildings: BuildingSource | None = None) -> None:
         self.blocks_path = Path(blocks_path)
         self.buildings_path = Path(buildings_path)
         self.region_id = region_id
         self.min_buildings = min_buildings
         self.block_ids = list(block_ids) if block_ids is not None else None
         self.building_tier = building_tier
+        # Where the MEMBER blocks' buildings come from. Screening, counts and growth depth keep
+        # reading `buildings_path` over the whole corpus; this feeds only `region()`, which the
+        # pipeline calls after narrowing `block_ids` to the chosen members. None means "the same
+        # parquet the screen reads" -- a real choice, not a fallback: at the point and area tiers
+        # that file already holds everything the model needs.
+        self.member_buildings: BuildingSource = (
+            member_buildings if member_buildings is not None
+            else ParquetBuildings(self.buildings_path))
         self._utm: CRS | None = None
 
     def _target_utm(self) -> CRS:
@@ -116,7 +126,8 @@ class KblockSource:
                     f"{self.region_id}: block_ids not found in source: {sorted(missing)}")
             blocks = cast(gpd.GeoDataFrame, blocks[blocks["block_id"].isin(wanted)])
         # Every column, not just geometry: `columns=["geometry"]` is what dropped area_in_meters.
-        bld = gpd.read_parquet(self.buildings_path)
+        frame = self.member_buildings.for_blocks(blocks)
+        bld = frame.buildings
         # Fail at LOAD, not deep inside a run: build the tier on the rows just read, so AreaDiscs
         # on a parquet without `area_in_meters`, or Footprints on point geometry, raises HERE --
         # naming the file -- before any block is yielded or any method runs, rather than on the
@@ -128,19 +139,26 @@ class KblockSource:
         except ValueError as e:
             raise ValueError(f"{self.region_id}: {self.buildings_path} cannot supply the "
                              f"configured building tier: {e}") from e
-        sch = source_hash(self.blocks_path, self.buildings_path)
+        # Hash the files the buildings actually CAME from, not `buildings_path`: under
+        # FootprintTiles those are the polygon tiles, and a key over the points file would never
+        # notice a tile changing. For ParquetBuildings `read_from == [buildings_path]`, so this is
+        # byte-identical to the key it replaces.
+        sch = source_hash(self.blocks_path, *frame.read_from)
         return Region(region_id=self.region_id, crs=utm,
-                      blocks=self._blocks_from(blocks.to_crs(utm), bld.to_crs(utm), sch))
+                      blocks=self._blocks_from(blocks.to_crs(utm), bld.to_crs(utm), sch,
+                                               frame.anchors.to_crs(utm)))
 
     def _blocks_from(self, blocks: gpd.GeoDataFrame, bld: gpd.GeoDataFrame,
-                     source_content_hash: str) -> Iterator[Block]:
+                     source_content_hash: str, anchors: gpd.GeoSeries) -> Iterator[Block]:
         utm = blocks.crs
         if utm is None:
             raise ValueError(f"{self.region_id}: blocks GeoDataFrame has no CRS")
-        # Assign and tessellate on CENTROIDS, whatever the geometry: that keeps parcels IDENTICAL
-        # across tiers (a polygon straddling a block edge would fail `within` and vanish), and the
-        # point tier's centroids are its points, so nothing moves. Only the building MODEL changes.
-        anchor = bld.assign(_row=np.arange(len(bld))).set_geometry(bld.geometry.centroid)
+        # Assign and tessellate on the published ANCHOR points, whatever the geometry: a polygon
+        # straddling a block edge would otherwise fail `within` and vanish, and anchoring on a
+        # centroid computed here instead moved the Voronoi by enough to change every parcel (see
+        # `BuildingSource.for_blocks`). Only the building MODEL varies by tier; parcels do not.
+        anchor = bld.assign(_row=np.arange(len(bld))).set_geometry(
+            gpd.GeoSeries(anchors.to_numpy(), crs=anchors.crs, index=bld.index))
         joined = gpd.sjoin(anchor, blocks, predicate="within", how="inner")
         by_block: dict[object, tuple[list[Point], NDArray[np.int64]]] = {
             bid: (cast(list[Point], list(grp.geometry)), grp["_row"].to_numpy(dtype=np.int64))

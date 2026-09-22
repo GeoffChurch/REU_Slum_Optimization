@@ -11,6 +11,7 @@ from typing import cast
 import geopandas as gpd
 
 from reblock.buildings import Extents, SpacingDiscs
+from reblock.data.footprints import BuildingSource
 from reblock.data.kblock import KblockSource
 from scripts.fetch_kblock_fixtures import (
     CT_BBOX,
@@ -48,23 +49,12 @@ def ensure_city_data(city: str, *, cache_dir: Path = DEFAULT_CACHE) -> tuple[Pat
 def cached_kblock_source(city: str, *, block_ids: list[str] | None = None,
                          min_buildings: int = 10, cache_dir: Path = DEFAULT_CACHE,
                          building_tier: Callable[[gpd.GeoDataFrame], Extents] = SpacingDiscs,
+                         member_buildings: BuildingSource | None = None,
                          ) -> KblockSource:
     blocks_path, buildings_path = ensure_city_data(city, cache_dir=cache_dir)
     return KblockSource(blocks_path, buildings_path, region_id=city,
                         min_buildings=min_buildings, block_ids=block_ids,
-                        building_tier=building_tier)
-
-
-def tiles_for(shortlist: gpd.GeoDataFrame, tiles: gpd.GeoDataFrame) -> list[str]:
-    """Open Buildings point-tile URLs whose S2 cell intersects any shortlist block.
-
-    Measured: tiles.geojson has 333 features, 20 of which cover ZAF+KEN (3.78 GB gzipped as
-    points; the polygon variants are 14.09 GB). The existing single-centroid-tile lookup is
-    correct only for a bbox smaller than one cell.
-    """
-    joined = gpd.sjoin(tiles.to_crs(shortlist.crs or "EPSG:4326"), shortlist,
-                       how="inner", predicate="intersects")
-    return sorted(set(joined["tile_url"]))
+                        building_tier=building_tier, member_buildings=member_buildings)
 
 
 def filter_to_shortlist(

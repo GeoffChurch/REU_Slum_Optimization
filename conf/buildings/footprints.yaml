@@ -1,5 +1,9 @@
-# Tier 3: real Open Buildings outlines. Exact clearance, and displacement as the true overlap
-# fraction. Needs POLYGON data -- raises at LOAD on points rather than silently reading every radius
-# as 0. Measured: discs over-read served-at-3.5m by 34% against these. See reblock.buildings.Footprints.
-_target_: reblock.buildings.Footprints
-_partial_: true
+# Tier 3: real Open Buildings OUTLINES for the blocks a run proposes on. The screen, the counts and
+# growth depth still run on points over the whole corpus; only the chosen members' polygon TILES are
+# fetched (one ~320 MB tile per S2 cell, cached as parquet, so a region usually costs one tile).
+# Measured: discs over-read served-at-3.5 m by 34% against these outlines.
+tier:
+  _target_: reblock.buildings.Footprints
+  _partial_: true
+member_buildings:
+  _target_: reblock.data.footprints.FootprintTiles

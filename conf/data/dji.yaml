@@ -2,5 +2,7 @@ _target_: reblock.data.kblock.KblockSource
 blocks_path: tests/data/kblock/blocks_dji_sample.parquet
 buildings_path: tests/data/kblock/buildings_dji_sample.parquet
 region_id: dji
-# The building-geometry tier, chosen by the `buildings` config group.
-building_tier: ${buildings}
+# The building-geometry tier and the data feeding it, chosen together by the `buildings`
+# config group so a tier can never be paired with data that cannot supply it.
+building_tier: ${buildings.tier}
+member_buildings: ${buildings.member_buildings}

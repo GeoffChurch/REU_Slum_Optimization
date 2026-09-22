@@ -42,7 +42,8 @@ import pandas as pd
 import pyarrow.parquet as pq
 import shapely
 
-from reblock.data.provision import filter_to_shortlist, tiles_for
+from reblock.data.footprints import tiles_for
+from reblock.data.provision import filter_to_shortlist
 from scripts.fetch_kblock_fixtures import (
     OB_MIN_CONFIDENCE,
     OB_POINT_PREFIX,

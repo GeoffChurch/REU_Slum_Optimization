@@ -1,5 +1,7 @@
 # Tier 2 from positions ALONE: radius = half the nearest-neighbour distance. The historical default
 # -- and it encodes SPACING, not size, so it cannot tell dense-small from sparse-large fabric.
-# See reblock.buildings.SpacingDiscs.
-_target_: reblock.buildings.SpacingDiscs
-_partial_: true
+# Member buildings come from the same point parquet the screen reads.
+tier:
+  _target_: reblock.buildings.SpacingDiscs
+  _partial_: true
+member_buildings: null
