@@ -289,6 +289,71 @@ at some standard a user could reasonably pick, so `W` is an operating point to s
 none of them should be deleted. It also vindicates Result 1 -- `W` is a policy input you sweep, not
 a constant you tune.
 
+## Result 7: a method that OPTIMIZES the objective, and the min-cut dual that aims it
+
+Every method in Results 1-6 optimizes something else -- depth, cycles, resistance, directness --
+and is then scored on `OBJ`. `direct.py` optimizes it: greedy over least-cost paths plus
+street-to-street through-roads, each candidate scored by a FULL Delta-OBJ recompute, stopping when
+nothing gains. The road budget is an OUTPUT -- no `depth_target`, no `max_roads`, no pinned Lens A.
+
+### The min-cut dual (`dual.py`): use it to AIM, not to measure
+
+    w_i = max over paths of (min clearance)  =  min over encircling chains of (max gap)
+
+the max-min/min-max form of max-flow/min-cut. Buildings are sources, the block boundary is the
+sink, and the cut is a CHAIN OF GAPS. Delaunay on the surviving centres, each edge a gate of width
+`dist - r_a - r_b`; the dual has triangles as nodes joined by their shared gate; every triangle the
+boundary passes through -- or outside the hull, where by definition there are no buildings -- is
+grounded. Sweeping w downward is one union-find pass in DESCENDING gap order, so every `w_i` falls
+out of a single O(E log E) sweep.
+
+**As the METRIC it is NOT adopted.** It over-reads against the validated raster: p50 4.62 vs 4.25,
+`r = 0.917`, and 0.730 vs 0.513 served at W = 4.0. Cause: Delaunay-on-centres is exact only for
+EQUAL radii, and `building_radii` is NN/2 and varies widely, so the true blocking pair is often not
+a Delaunay edge of the centres and the dual misses blocking gates. The fix is an additively-weighted
+(Apollonius) diagram -- NOT a power-diagram lifting, which takes subtractive `r^2` -- and that is
+real work. `clearance.py` already flags the same approximation in `_node_clearance`.
+
+**As the CANDIDATE GENERATOR it is a clear win**, and approximation error is FREE there: the dual
+only ranks, and every candidate is still scored by the exact raster. The min-cut NAMES the cut --
+123 gates cap 225 of 263 buildings, so the binding constraints are a small enumerable set.
+
+### Measured
+
+    small block, W = 6.0       roads  road_m       D  OBJ gain   1st-road u'
+    gate-targeted (min-cut)        4     176   0.076     +11.2         2.035
+    building-targeted              4     212   0.115      +9.6         1.138
+    osm_footpaths (best incumbent) -     215   0.107      +4.3             -
+
+    spine block, W = 6.0       roads  road_m       D  OBJ gain
+    gate-targeted (min-cut)       16   4,949   0.051    +383.7
+    cycle_native                   -   7,279   0.101    +325.7
+    clearance_looped               -   5,377   0.100    +325.2
+    building-targeted              3   1,631   0.018    +165.2
+
+**A Pareto win on all three axes: +18% access, 32% less road, HALF the displacement.** And the
+mechanism is legible: gate-targeting's first road is WORSE (+129.5 vs +160.3) yet the trajectory
+climbs monotonically to +383.7 instead of stalling at +165. The greedier opening move is what
+trapped the building-targeted run. **The candidate family was never the ceiling -- the aiming was.**
+
+### Three things this settles
+
+* **Non-submodularity is real.** Building-targeted at W = 6: road 2 LOSES 0.3 and road 3 then gains
+  5.1. A strict `Delta-OBJ > 0` stop leaves value on the table; gate-targeting mostly sidesteps this
+  by not walking into the trap in the first place.
+* **The stub pathology is a LOW-W symptom, not the objective's.** At W = 3.5 the optimizer emits
+  5-25 m stubs; at W = 6 road 1 is 1,294-1,527 m. Stubs appear only once the worthwhile roads are
+  taken. A road-length cost is still the direct fix, but the objective is not inherently stub-loving.
+* **At W = 3.5 on the spine block it beats the best incumbent 2x** -- 273 m / D = 0.0041 / +21.7
+  against `cycle_native`'s 623 m / D = 0.0107 / +10.6 -- on 44% of the road and 38% of the
+  displacement.
+
+**CAVEAT, and it is not small: this is an ORACLE comparison.** The optimizer maximises exactly what
+it is then scored on, so these numbers BOUND what is achievable on this objective and measure how
+far the incumbents sit from that bound. They are NOT evidence it is a better reblocker. It targets
+16 roads chosen purely for vehicle width and ignores network structure entirely, so expect it to
+score badly on permeability. Score it there before calling it a method.
+
 ## What to take from this
 
 * **Compute clearance ANALYTICALLY** (`min_i(|p - c_i| - r_i)`, `vehicle_access.py`), never as a
