@@ -589,7 +589,7 @@ class _StepContext:
     `unary_union(committed + [real])` (the incremental-planarize noding diverges within `_rnd`
     rounding -- design "Bug 2"), so the greedy routes aspirational candidates through the full
     `ctx.score(_planarize(committed + [real]))` reference path instead (see
-    `arterial._greedy_arterials`); `score_candidate` is used only for buildable.
+    `arterial.objectives._MetricBlock.at_step`); `score_candidate` is used only for buildable.
 
     The step's per-parcel base freezes, for each parcel, ALL streets∪committed edges within `tol`,
     each as `(edge pair, parcel->edge distance, projection-along-edge, entry node)`. The final entry
