@@ -97,17 +97,17 @@ def tile_px(span_m: float) -> int:
     return max(600, min(MAX_PX, int(span_m / SOURCE_MPP)))
 
 
-def fetch(bbox: tuple[float, float, float, float], px: int, block_id: str) -> Path:
-    """One imagery tile, cached on disk.
+def fetch(bbox: tuple[float, float, float, float], px: int, block_id: str, out: Path) -> Path:
+    """One imagery tile, cached on disk under `out`.
 
     The cache key carries the BBOX, not just the block id: bbox is what determines the content,
     and a block-keyed cache would hand back a stale tile the moment geometry, margin or pixel
     size changed. The block id is in the name too, purely so a human can tell what a cache file
     is -- which is how the resolution bug above got noticed.
     """
-    OUT.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
     tag = "_".join(f"{v:.5f}" for v in bbox)
-    path = OUT / f".tile_{block_id}_{tag}_{px}.png"
+    path = out / f".tile_{block_id}_{tag}_{px}.png"
     if path.exists():
         return path
     q = urllib.parse.urlencode({"bbox": ",".join(f"{v:.6f}" for v in bbox), "bboxSR": "4326",
@@ -143,13 +143,12 @@ def main() -> int:
     sheet = CONTROL if "--control" in sys.argv else WORKSHEET
     # Per-sheet output root, so the top-k set and the random control set never mix on disk. They
     # answer different questions and one is the other's negatives.
-    global OUT
-    OUT = Path(f"data/adjudication/{'control_' if sheet is CONTROL else ''}imagery")
+    out = Path(f"data/adjudication/{'control_' if sheet is CONTROL else ''}imagery")
 
     rows = list(csv.DictReader(sheet.open()))
     todo = [r for r in rows if every or not r["verdict"].strip()][: limit or None]
     if adhoc:
-        OUT = Path("data/adjudication/adhoc_imagery")
+        out = Path("data/adjudication/adhoc_imagery")
         todo = [{"block_id": adhoc, "place": "", "area_ha": ""}]
     print(f"{len(todo)} block(s) to render")
 
@@ -163,7 +162,7 @@ def main() -> int:
         todo[0]["area_ha"] = f"{b['a_m2'].iloc[i] / 1e4:.2f}"
     wgs = b.to_crs("EPSG:4326")
     by_id = {str(v): i for i, v in enumerate(b["block_id"])}
-    OUT.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
 
     foot = block_tree = None
     if "schematic" in modes:
@@ -192,11 +191,11 @@ def main() -> int:
         px = tile_px(span_m)
         dpi = max(110, math.ceil(px / FIG_IN))
         for mode in modes:
-            d = OUT / mode
+            d = out / mode
             d.mkdir(parents=True, exist_ok=True)
             fig, ax = plt.subplots(figsize=(FIG_IN, FIG_IN), dpi=dpi)
             if mode in ("satellite", "masked"):
-                ax.imshow(imread(fetch(bbox, px, r["block_id"])),
+                ax.imshow(imread(fetch(bbox, px, r["block_id"], out)),
                           extent=(bbox[0], bbox[2], bbox[1], bbox[3]))
                 edge, credit, cc = "#ff2d55", "Imagery: Esri World Imagery", "white"
                 if mode == "masked":

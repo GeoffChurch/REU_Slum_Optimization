@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
+from typing import cast
 
 import geopandas as gpd
 import numpy as np
@@ -94,8 +94,9 @@ def load(counter: BuildingCount) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     b = resolved(b, src.buildings_path, counter)
     # bracket notation throughout: `gdf.area` is geopandas' geometry property, shadowing a column
     b = b.assign(a_m2=b.geometry.area.to_numpy(), p_m=b.geometry.length.to_numpy())
-    b = b[(b["building_count"] >= MIN_COUNT) & (b["p_m"] > 0) & (b["a_m2"] > 0)].reset_index(
-        drop=True)
+    b = cast(gpd.GeoDataFrame,
+             b[(b["building_count"] >= MIN_COUNT) & (b["p_m"] > 0) & (b["a_m2"] > 0)]
+             ).reset_index(drop=True)
     b["density"] = b["building_count"] / b["a_m2"]
     b["compact"] = b["a_m2"] / b["p_m"] ** 2
     b["dens_compact"] = b["density"] * b["compact"]
@@ -343,9 +344,9 @@ def main() -> None:
                      ("city_map.png", lambda x, p: plot_city(x, ext, p)),
                      ("settlements.png", lambda x, p: plot_settlements(x, ext, p))):
         print(f"  writing {name}", flush=True)
-        fn(b, OUT / name)                                          # type: ignore[operator]
+        fn(b, OUT / name)
     print(f"\nwrote {OUT}")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

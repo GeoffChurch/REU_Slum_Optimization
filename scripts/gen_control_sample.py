@@ -43,6 +43,7 @@ import argparse
 import csv
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from pyproj import Transformer
@@ -66,6 +67,13 @@ STRATA: tuple[tuple[str, float, float], ...] = (
 )
 
 
+class Drawn(NamedTuple):
+    """One sampled block: its position in the pool frame, and its CSV row in column order."""
+
+    idx: int
+    row: dict[str, object]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -83,7 +91,7 @@ def main() -> int:
     print(f"pool: {n_pool:,} eligible blocks, {int(b['informal'].sum()):,} survey-informal")
 
     rng = np.random.default_rng(args.seed)
-    rows: list[dict[str, object]] = []
+    drawn: list[Drawn] = []
     lo_frac = 0.0
     for name, hi_frac, share in STRATA:
         lo, hi = int(lo_frac * n_pool), int(hi_frac * n_pool)
@@ -93,29 +101,30 @@ def main() -> int:
         weight = len(members) / take
         print(f"  {name:<10} N={len(members):>6}  n={take:>3}  weight={weight:>7.1f}")
         for i in picked:
-            rows.append({"block_id": str(b['block_id'].iloc[i]), "stratum": name,
-                         "screen_rank": int(rank_of[i]) + 1, "n_stratum": len(members),
-                         "n_sampled": take, "weight": round(weight, 4),
-                         "dd_proxy": f"{score[i]:.6g}",
-                         "ob_count": int(b['building_count'].iloc[i]),
-                         "area_ha": f"{b['a_m2'].iloc[i] / 1e4:.2f}",
-                         "survey_cover": f"{b['cover'].iloc[i]:.3f}",
-                         "survey_label": "informal" if b['informal'].iloc[i] else "formal",
-                         "_idx": int(i)})
+            drawn.append(Drawn(int(i), {
+                "block_id": str(b['block_id'].iloc[i]), "stratum": name,
+                "screen_rank": int(rank_of[i]) + 1, "n_stratum": len(members),
+                "n_sampled": take, "weight": round(weight, 4),
+                "dd_proxy": f"{score[i]:.6g}",
+                "ob_count": int(b['building_count'].iloc[i]),
+                "area_ha": f"{b['a_m2'].iloc[i] / 1e4:.2f}",
+                "survey_cover": f"{b['cover'].iloc[i]:.3f}",
+                "survey_label": "informal" if b['informal'].iloc[i] else "formal"}))
         lo_frac = hi_frac
 
-    rows.sort(key=lambda r: int(r["screen_rank"]))          # highest-scoring first
+    drawn.sort(key=lambda d: int(rank_of[d.idx]))            # highest-scoring first
+    rows = [d.row for d in drawn]
     to_wgs = Transformer.from_crs(b.crs, "EPSG:4326", always_xy=True)
     # `b` is projected (UTM 34S); `_maps_url` computes a zoom from a span in DEGREES, so the
     # geometry has to be reprojected and not merely its centroid. Reprojecting the whole frame
     # once beats a per-row transform of the ring coordinates.
     wgs = b.geometry.to_crs("EPSG:4326")
-    for n, r in enumerate(rows, 1):
-        idx = int(r.pop("_idx"))                            # type: ignore[call-overload]
-        pt = b.geometry.iloc[idx].representative_point()
+    for n, d in enumerate(drawn, 1):
+        r = d.row
+        pt = b.geometry.iloc[d.idx].representative_point()
         lon, lat = to_wgs.transform(pt.x, pt.y)
         r["place"] = "" if args.no_place else place_name(lat, lon)
-        r["maps"] = _maps_url(wgs.iloc[idx].envelope, lat, lon)
+        r["maps"] = _maps_url(wgs.iloc[d.idx].envelope, lat, lon)
         r["verdict"] = ""
         r["notes"] = ""
         if not args.no_place:

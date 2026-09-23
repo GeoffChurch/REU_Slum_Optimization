@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 from scipy.stats import spearmanr
@@ -92,7 +93,7 @@ def numeric(col: pd.Series, name: str) -> pd.Series:
     """
     if name == "label":
         return col.map(ORDINAL)
-    return pd.to_numeric(col.where(col != "unclear"), errors="coerce")
+    return cast(pd.Series, pd.to_numeric(col.where(col != "unclear"), errors="coerce"))
 
 
 def main() -> int:
@@ -114,12 +115,13 @@ def main() -> int:
     return 0
 
 
-def report(found: dict, truth: pd.DataFrame, drop: set[str]) -> None:
+def report(found: dict[str, tuple[str, str, str, str]], truth: pd.DataFrame,
+           drop: set[str]) -> None:
     print(f"{'judge':13s} {'n':>3s} {'abst':>5s}  " + "".join(f"{q:>13s}" for q in QUANTITIES))
     matrix = {}
     for judge, (fname, col, own, _other) in found.items():
         run = pd.read_csv(RUNS / fname)
-        run = run[~run.block_id.isin(drop)]
+        run = cast(pd.DataFrame, run[~run.block_id.isin(drop)])
         d = run.merge(truth, on="block_id", how="inner")
         vals = numeric(d[col], col)
         keep = vals.notna()
