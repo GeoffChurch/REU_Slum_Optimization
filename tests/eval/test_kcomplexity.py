@@ -4,9 +4,11 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon, box
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
 from reblock.methods.topology import TopologyMethod
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -18,7 +20,9 @@ def _grid_block(n: int, ox: float = 0.0, oy: float = 0.0) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _grid5() -> Block:
@@ -26,7 +30,9 @@ def _grid5() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(25))}, geometry=polys, crs=UTM)
     b = cast(Polygon, parcels.geometry.union_all())
     return Block(block_id="g5", crs=UTM, boundary=b, parcels=parcels,
-                 streets=gpd.GeoDataFrame(geometry=[b.exterior], crs=UTM))
+                 streets=gpd.GeoDataFrame(geometry=[b.exterior], crs=UTM),
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_delta_k_from_interior_connector() -> None:

@@ -10,6 +10,7 @@ from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import BBox, Block, Metrics, Proposal, Region, Result
 from reblock.data.counts import KblockCount
 from reblock.emit import (
@@ -22,6 +23,7 @@ from reblock.emit import (
 )
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 from reblock.render import save_render as _real_save_render
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -32,7 +34,9 @@ def _grid_block(n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_member_ids_parses_region_id_and_passes_through_plain_id() -> None:

@@ -13,7 +13,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.budget import _noded_graph, displacement
-from reblock.buildings import Discs
+from reblock.buildings import Discs, SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.resistance_lp import ResistanceLPReblocker, solve_coverage_lp
 
@@ -41,7 +41,8 @@ def _grid_block(nx_: int = 6, ny: int = 6, step: float = 10.0) -> Block:
                  boundary=Polygon([(0, 0), (nx_ * step, 0), (nx_ * step, ny * step),
                                    (0, ny * step)]),
                  parcels=parcels, streets=streets,
-                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=CRS.from_epsg(32734)))
+                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=CRS.from_epsg(32734)),
+                 source_content_hash=None, building_tier=SpacingDiscs)
 
 
 @pytest.mark.parametrize("cap", [0.05, 0.15])

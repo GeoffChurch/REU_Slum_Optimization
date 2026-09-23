@@ -4,8 +4,10 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.geometric_access import geometric_access_distances
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -17,7 +19,9 @@ def _strip(n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(n))}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     return Block(block_id="s", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
-                 parcels=parcels, streets=streets)
+                 parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_distance_grows_down_the_strip() -> None:

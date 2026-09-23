@@ -26,9 +26,11 @@ from shapely import wkt
 from shapely.geometry import LineString, Polygon
 from shapely.ops import unary_union
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.data.kblock import KblockSource
 from reblock.region import region_block
+from tests.block_fixtures import no_buildings
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _REF: dict[str, dict[str, Any]] = json.loads(
@@ -71,7 +73,9 @@ def _block_coincident() -> Block:
     boundary = cast(Polygon, unary_union([poly_a, poly_b, poly_c]))
     streets = gpd.GeoDataFrame(geometry=[street], crs=UTM)
     return Block(block_id="coincident", crs=UTM, boundary=boundary, parcels=parcels,
-                streets=streets)
+                streets=streets,
+                source_content_hash=None, building_geometries=no_buildings(UTM),
+                building_tier=SpacingDiscs)
 
 
 def _block_sparse_chord() -> Block:
@@ -85,7 +89,9 @@ def _block_sparse_chord() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, unary_union(polys))
     streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (3.0, 0.0)])], crs=UTM)
-    return Block(block_id="deep", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="deep", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str, block_id: str) -> Block:
@@ -105,7 +111,9 @@ def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str, block_id: s
     sides = {"bottom": LineString([(x0, y0), (x0 + w, y0)]),
             "top": LineString([(x0, y0 + h), (x0 + w, y0 + h)])}
     streets = gpd.GeoDataFrame(geometry=[sides[streets_side]], crs=UTM)
-    return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _region_deep() -> Block:

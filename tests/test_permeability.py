@@ -7,6 +7,7 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
@@ -21,6 +22,7 @@ from reblock.permeability import (
     solve_egress,
     with_width,
 )
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
 
@@ -39,7 +41,9 @@ def _grid_block(k=4, cell=1.0):
     parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k*cell, 0)])], crs=UTM)
     boundary = Polygon([(0, 0), (k*cell, 0), (k*cell, k*cell), (0, k*cell)])
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 def _roads(lines): return with_width(gpd.GeoDataFrame(geometry=lines, crs=UTM),
                                      DEFAULT_ROAD_WIDTH_M)
@@ -201,7 +205,9 @@ def _points_block(n_points: int, spacing: float) -> Block:
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (10, 0)])], crs=UTM)
     pts = gpd.GeoDataFrame(geometry=[Point(float(i) * spacing, 0.0) for i in range(n_points)],
                            crs=UTM)
-    block = Block(block_id="pts", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    block = Block(block_id="pts", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     return replace(block, building_geometries=pts)
 
 def test_parcel_radii_are_PER_PARCEL_and_scale_with_local_spacing():

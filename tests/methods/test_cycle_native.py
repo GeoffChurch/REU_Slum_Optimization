@@ -12,6 +12,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.budget import _rnd
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.cycle_native import CycleNativeReblocker
 
@@ -34,7 +35,8 @@ def _block(nx_: int = 7, ny: int = 7, step: float = 10.0) -> Block:
                                  geometry=polys, crs=UTM),
         streets=gpd.GeoDataFrame(
             geometry=[LineString([(-step, 0.0), (nx_ * step + step, 0.0)])], crs=UTM),
-        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def _road_graph(block: Block, roads: gpd.GeoDataFrame) -> nx.Graph:

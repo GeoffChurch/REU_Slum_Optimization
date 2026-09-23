@@ -10,6 +10,7 @@ from shapely.geometry import LineString, Polygon
 
 from reblock import derive_graph
 from reblock.budget import _noded_graph
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.methods.loop_closure import (
     LoopClosureIdentity,
@@ -20,6 +21,7 @@ from reblock.methods.loop_closure import (
     greedy_close_loops,
     loop_candidates,
 )
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
 
@@ -165,7 +167,9 @@ def _gap_block() -> Block:
     parcels = _gap_parcels()
     boundary = cast(Polygon, parcels.geometry.union_all())
     return Block(block_id="gap", crs=UTM, boundary=boundary, parcels=parcels,
-                streets=_gap_streets())
+                streets=_gap_streets(),
+                source_content_hash=None, building_geometries=no_buildings(UTM),
+                building_tier=SpacingDiscs)
 
 
 def _gap_roads() -> gpd.GeoDataFrame:
@@ -343,7 +347,9 @@ def _ratio_block() -> Block:
     parcels = _ratio_parcels()
     boundary = cast(Polygon, parcels.geometry.union_all())
     return Block(block_id="ratio-gap", crs=UTM, boundary=boundary, parcels=parcels,
-                streets=_ratio_streets())
+                streets=_ratio_streets(),
+                source_content_hash=None, building_geometries=no_buildings(UTM),
+                building_tier=SpacingDiscs)
 
 
 def _ratio_base_roads() -> gpd.GeoDataFrame:

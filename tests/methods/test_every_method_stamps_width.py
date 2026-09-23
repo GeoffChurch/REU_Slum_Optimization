@@ -29,7 +29,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.budget import displacement
-from reblock.buildings import ANCHOR_COL, Footprints
+from reblock.buildings import ANCHOR_COL, Footprints, SpacingDiscs
 from reblock.contracts import Block
 from reblock.permeability import WIDTH_COL, PermeabilityParams, permeability
 
@@ -54,7 +54,8 @@ def _block(k: int = 8, cell: float = 10.0) -> Block:
         boundary=Polygon([(0, 0), (k * cell, 0), (k * cell, k * cell), (0, k * cell)]),
         parcels=gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM),
         streets=gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k * cell, 0)])], crs=UTM),
-        building_geometries=gpd.GeoDataFrame(geometry=[p.centroid for p in polys], crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=[p.centroid for p in polys], crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def _footprint_block() -> Block:

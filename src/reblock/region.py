@@ -74,12 +74,14 @@ def _union_streets(blocks: list[Block]) -> BaseGeometry:
     return unary_union([g for b in blocks for g in b.streets.geometry])
 
 
-def _shared_parts(blocks: list[Block]) -> tuple[gpd.GeoDataFrame, Polygon | MultiPolygon, CRS, str]:
+def _shared_parts(
+    blocks: list[Block],
+) -> tuple[gpd.GeoDataFrame, Polygon | MultiPolygon, CRS, str | None]:
     """Common region pieces every builder needs: parcels (unioned + re-parcel_id'ed), boundary
     (the true union of member boundaries -- a MultiPolygon when members are separated by street
     gaps, NOT a convex hull, which would enclose the empty gaps and inflate the area), crs
     (asserted shared), and source_content_hash (a deterministic hash of the sorted constituent
-    identities, or "" if any is uncacheable).
+    identities, or None if any is uncacheable).
 
     MEMBERS ARE SORTED BY block_id FIRST, and that is load-bearing rather than tidiness: the
     `parcel_id` assignment below numbers parcels by member order, while `block_id` and
@@ -110,7 +112,7 @@ def _shared_parts(blocks: list[Block]) -> tuple[gpd.GeoDataFrame, Polygon | Mult
 
     hashes = sorted(f"{b.source_content_hash}:{b.block_id}" for b in blocks)
     source_content_hash = (
-        "" if any(b.source_content_hash == "" for b in blocks)
+        None if any(b.source_content_hash is None for b in blocks)
         else hashlib.sha256("|".join(hashes).encode()).hexdigest()
     )
     return parcels, boundary, crs, source_content_hash
@@ -157,7 +159,7 @@ def region_block(blocks: list[Block]) -> Block:
     # existing-egress, superseding the old perimeter-egress eval-swap that scored a
     # perimeter-streets block under this same identity -- must yield a FRESH key, not a stale hit.
     source_content_hash = (
-        "" if member_hash == ""
+        None if member_hash is None
         else hashlib.sha256(("region-existing-egress|" + member_hash).encode()).hexdigest()
     )
     block_id = "region:" + "+".join(sorted(b.block_id for b in blocks))

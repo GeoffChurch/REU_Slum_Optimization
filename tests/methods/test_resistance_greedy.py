@@ -12,6 +12,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.resistance_greedy import ResistanceGreedyReblocker
@@ -28,7 +29,8 @@ def _slab(w: int, h: int) -> Block:
     return Block(block_id="slab", crs=UTM, boundary=cast(Polygon, unary_union(polys)),
                  parcels=parcels,
                  streets=gpd.GeoDataFrame(geometry=[LineString([(0, 0), (w, 0)])], crs=UTM),
-                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM),
+                 source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def test_the_first_road_is_the_ARGMAX_over_candidates_by_gain_per_metre() -> None:
@@ -114,6 +116,7 @@ def test_a_block_with_no_street_frontage_is_reported_not_crashed() -> None:
                      parcels=block.parcels,
                      streets=gpd.GeoDataFrame(geometry=[LineString([(99, 99), (100, 100)])],
                                               crs=block.crs),
-                     building_geometries=block.building_geometries)
+                     building_geometries=block.building_geometries,
+                     source_content_hash=None, building_tier=SpacingDiscs)
     proposal = ResistanceGreedyReblocker(max_roads=4, shortlist=4).propose(floating)
     assert proposal.params["stopped"] == "no street frontage"

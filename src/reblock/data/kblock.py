@@ -153,7 +153,7 @@ class KblockSource:
                       blocks=self._blocks_from(blocks.to_crs(utm), bld, sch))
 
     def _blocks_from(self, blocks: gpd.GeoDataFrame, bld: gpd.GeoDataFrame,
-                     source_content_hash: str) -> Iterator[Block]:
+                     source_content_hash: str | None) -> Iterator[Block]:
         utm = blocks.crs
         if utm is None:
             raise ValueError(f"{self.region_id}: blocks GeoDataFrame has no CRS")

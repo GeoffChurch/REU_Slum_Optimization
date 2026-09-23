@@ -17,6 +17,7 @@ from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
@@ -35,6 +36,7 @@ from reblock.methods.substrates import (
     RoutingGraph,
     _build_grid,
 )
+from tests.block_fixtures import no_buildings
 
 
 def test_sigmoid_is_bounded_and_symmetric() -> None:
@@ -130,7 +132,9 @@ def _column_block(h: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(h))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, unary_union(polys))
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (1, 0)])], crs=UTM)
-    return Block(block_id="col", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="col", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_relax_depth_matches_full_recompute() -> None:
@@ -164,7 +168,9 @@ def test_relax_depth_matches_recompute_on_disconnected_component() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, unary_union(polys))
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (3, 0)])], crs=UTM)
-    block = Block(block_id="disc", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    block = Block(block_id="disc", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     adj = parcel_adjacency(cast(list[BaseGeometry], polys), STREET_TOL)
     n = len(polys)
 
@@ -189,7 +195,8 @@ def _column_block_with_buildings(h: int) -> Block:
     pts = [g.representative_point() for g in block.parcels.geometry]
     block_bp = gpd.GeoDataFrame(geometry=pts, crs=UTM)
     return Block(block_id="colb", crs=UTM, boundary=block.boundary, parcels=block.parcels,
-                 streets=block.streets, building_geometries=block_bp)
+                 streets=block.streets, building_geometries=block_bp,
+                 source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def test_default_substrate_is_chord_diag() -> None:

@@ -9,9 +9,11 @@ from shapely.geometry import LineString, Polygon
 from topology import graphFromMyFaces
 from topology.graph.my_graph_helpers import graphFromShapes
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.data.shapefile import ShapefileSource
 from reblock.derive.parcel_graph import _myfaces_from_parcels, parcel_origin, to_parcel_graph
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -25,7 +27,9 @@ def _two_parcels() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     return Block(block_id="t", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
-                 parcels=parcels, streets=streets)
+                 parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_derivation_builds_planar_graph() -> None:
@@ -41,7 +45,9 @@ def _grid_3x3() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(9))}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     return Block(block_id="grid", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
-                 parcels=parcels, streets=streets)
+                 parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_inner_facelist_count_equals_parcel_count_for_space_filling_grid() -> None:
@@ -80,7 +86,9 @@ def test_clean_up_geometry_fixes_near_duplicate_shared_vertex_pinch_point() -> N
     parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     block = Block(block_id="phule_9", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
-                  parcels=parcels, streets=streets)
+                  parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
 
     origin = parcel_origin(block.parcels)
     raw = graphFromMyFaces(_myfaces_from_parcels(block.parcels, origin))

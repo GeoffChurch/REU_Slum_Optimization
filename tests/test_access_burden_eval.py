@@ -8,6 +8,7 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.eval.access_burden import AccessBurdenEval, burden
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
@@ -26,7 +27,8 @@ def _strip(n: int = 6, step: float = 10.0) -> Block:
         parcels=gpd.GeoDataFrame({"parcel_id": [str(k) for k in range(n)]},
                                  geometry=polys, crs=UTM),
         streets=gpd.GeoDataFrame(geometry=[LineString([(-step, 0.0), (step * 2, 0.0)])], crs=UTM),
-        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def test_burden_is_zero_exactly_at_universal_street_access() -> None:

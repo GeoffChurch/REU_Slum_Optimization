@@ -9,10 +9,12 @@ from hydra.utils import instantiate
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.methods.osm_footpaths import OsmFootpathsReblocker, interior_desire_lines
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
 Bbox = tuple[float, float, float, float]
@@ -23,7 +25,9 @@ def _block() -> Block:
     boundary = Polygon([(0, 0), (100, 0), (100, 100), (0, 100)])
     parcels = gpd.GeoDataFrame({"parcel_id": [0]}, geometry=[boundary], crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (100, 0)])], crs=UTM)
-    return Block(block_id="b", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="b", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _cacheable_block() -> Block:
@@ -33,7 +37,8 @@ def _cacheable_block() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": [0]}, geometry=[boundary], crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (100, 0)])], crs=UTM)
     return Block(block_id="b", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
-                 source_content_hash="h")
+                 source_content_hash="h",
+                 building_geometries=no_buildings(UTM), building_tier=SpacingDiscs)
 
 
 class _StubSource:

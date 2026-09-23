@@ -7,6 +7,7 @@ from pyproj import CRS
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import parcel_access_layers
 from reblock.methods.clearance import _greedy_reblock
@@ -20,6 +21,7 @@ from reblock.methods.substrates import (
     Substrate,
     _pack_edges,
 )
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -33,7 +35,9 @@ def _grid_block(n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="grid", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="grid", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_pack_edges_is_symmetric_and_sorted() -> None:
@@ -74,7 +78,8 @@ def _column_block_with_buildings(h: int) -> Block:
     pts = [g.representative_point() for g in parcels.geometry]
     bp = gpd.GeoDataFrame(geometry=pts, crs=UTM)
     return Block(block_id="colb", crs=UTM, boundary=boundary, parcels=parcels,
-                 streets=streets, building_geometries=bp)
+                 streets=streets, building_geometries=bp,
+                 source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def test_chord_substrate_builds_connected_graph_and_hits_target() -> None:

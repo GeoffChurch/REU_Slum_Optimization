@@ -2,6 +2,7 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, MultiLineString
 
+from reblock.buildings import SpacingDiscs
 from reblock.derive.network_metrics import (
     boundary_redundant_road_fraction,
     circuity,
@@ -12,6 +13,7 @@ from reblock.derive.network_metrics import (
     n_cross_block_streets,
     node_network,
 )
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
 
@@ -86,7 +88,9 @@ def test_circuity_straight_is_one_detour_is_more() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(5))}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     block = Block(block_id="s", crs=UTM, boundary=Polygon([(0, 0), (5, 0), (5, 1), (0, 1)]),
-                  parcels=parcels, streets=streets)
+                  parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     c = circuity(block, None)
     assert c >= 1.0 and c < 1.5
 
@@ -107,7 +111,9 @@ def test_throughput_bottleneck_single_vs_branched() -> None:
         geometry=[box(7, 1, 8, 2), box(7, 2, 8, 3), box(6, 1.5, 7, 2.5)], crs=UTM)
     boundary = Polygon([(0, 0), (10, 0), (10, 4), (0, 4)])
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 4)])], crs=UTM)
-    block = Block(block_id="s", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    block = Block(block_id="s", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
 
     single = _lines([(7, 2), (0, 2)])                        # one corridor to the perimeter
     branched = _lines([(7, 2), (0, 1)], [(7, 2), (0, 3)])    # two edge-disjoint corridors

@@ -5,9 +5,11 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon, box
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers, street_connectivity
 from reblock.methods.peel import PeelReblocker
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -17,7 +19,9 @@ def _grid5() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(25))}, geometry=polys, crs=UTM)
     b = cast(Polygon, parcels.geometry.union_all())
     return Block(block_id="g5", crs=UTM, boundary=b, parcels=parcels,
-                 streets=gpd.GeoDataFrame(geometry=[b.exterior], crs=UTM))
+                 streets=gpd.GeoDataFrame(geometry=[b.exterior], crs=UTM),
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_spine_reaches_k1_and_is_street_connected() -> None:
@@ -39,7 +43,9 @@ def test_deterministic_under_row_shuffle() -> None:
     block = _grid5()
     shuffled = block.parcels.sample(frac=1, random_state=3).reset_index(drop=True)
     block2 = Block(block_id="g5", crs=block.crs, boundary=block.boundary,
-                   parcels=shuffled, streets=block.streets)
+                   parcels=shuffled, streets=block.streets,
+                   source_content_hash=None, building_geometries=no_buildings(block.crs),
+                   building_tier=SpacingDiscs)
     roads1 = PeelReblocker().propose(block).roads
     roads2 = PeelReblocker().propose(block2).roads
     assert roads1 is not None and roads2 is not None
@@ -69,7 +75,9 @@ def test_unreachable_island_is_skipped_and_counted() -> None:
     from shapely.geometry import LineString
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     hull = cast(Polygon, parcels.geometry.union_all().convex_hull)
-    block = Block(block_id="d", crs=UTM, boundary=hull, parcels=parcels, streets=streets)
+    block = Block(block_id="d", crs=UTM, boundary=hull, parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     proposal = PeelReblocker().propose(block)
     assert proposal.params["unreachable"] == 1
 
@@ -93,7 +101,9 @@ def test_spine_serves_non_convex_reflex_parcel() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[q, p], crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(-2, 2), (-2, 8)])], crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all().convex_hull)
-    block = Block(block_id="reflex", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    block = Block(block_id="reflex", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
 
     assert parcel_access_layers(block, None).loc[1] == 2  # p starts at depth 2, via q
 
@@ -106,7 +116,9 @@ def test_duplicate_parcel_id_raises() -> None:
     dup = block.parcels.copy()
     dup["parcel_id"] = 0  # collapse every id to the same value
     bad = Block(block_id="dup", crs=block.crs, boundary=block.boundary,
-                parcels=dup, streets=block.streets)
+                parcels=dup, streets=block.streets,
+                source_content_hash=None, building_geometries=no_buildings(block.crs),
+                building_tier=SpacingDiscs)
     with pytest.raises(ValueError, match="parcel_id"):
         PeelReblocker().propose(bad)
 
@@ -114,6 +126,8 @@ def test_duplicate_parcel_id_raises() -> None:
 def test_empty_streets_raises() -> None:
     block = _grid5()
     bad = Block(block_id="nostreet", crs=block.crs, boundary=block.boundary,
-                parcels=block.parcels, streets=gpd.GeoDataFrame(geometry=[], crs=block.crs))
+                parcels=block.parcels, streets=gpd.GeoDataFrame(geometry=[], crs=block.crs),
+                source_content_hash=None, building_geometries=no_buildings(block.crs),
+                building_tier=SpacingDiscs)
     with pytest.raises(ValueError, match="streets"):
         PeelReblocker().propose(bad)

@@ -10,6 +10,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Result
 from reblock.data.counts import KblockCount, resolved
 from reblock.data.kblock import KblockSource
@@ -23,6 +24,7 @@ from reblock.region import (
     region_block,
     region_reblock,
 )
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 DJI_BLOCKS = Path(__file__).resolve().parent / "data" / "kblock" / "blocks_dji_sample.parquet"
@@ -67,12 +69,12 @@ _SIDES = {
 
 
 def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str = "all",
-                block_id: str = "grid", points: gpd.GeoDataFrame | None = None) -> Block:
+                block_id: str = "grid", *, points: gpd.GeoDataFrame) -> Block:
     """A w x h grid of unit parcels at (x0, y0). `streets_side="all"` (the default) gives the
     full block-perimeter frontage (as if every existing road around the block is already
     street); a side name ("bottom"/"top"/"left"/"right") gives frontage on only that outer
-    edge, for building a deep block/region. `points`, if given, becomes the block's
-    `building_geometries` (default: the empty default -- most fixtures don't need real sites)."""
+    edge, for building a deep block/region. `points` becomes the block's
+    `building_geometries` (`no_buildings(UTM)` for the fixtures that need no real sites)."""
     polys, ids = [], []
     for i in range(w):
         for j in range(h):
@@ -84,11 +86,8 @@ def _grid_block(x0: int, y0: int, w: int, h: int, streets_side: str = "all",
     boundary = cast(Polygon, unary_union(polys))
     line = boundary.boundary if streets_side == "all" else _SIDES[streets_side](x0, y0, w, h)
     streets = gpd.GeoDataFrame(geometry=[line], crs=UTM)
-    if points is None:
-        return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels,
-                    streets=streets)
     return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
-                building_geometries=points)
+                 source_content_hash=None, building_geometries=points, building_tier=SpacingDiscs)
 
 
 def test_region_block_streets_are_the_full_existing_network() -> None:
@@ -96,8 +95,8 @@ def test_region_block_streets_are_the_full_existing_network() -> None:
     # inter-block), so the interior shared edge -- present in both a's and b's own streets --
     # is INCLUDED. This full existing network is what a method routes on and what the evals
     # score the method's added roads against.
-    a = _grid_block(0, 0, 3, 3, block_id="a")
-    b = _grid_block(3, 0, 3, 3, block_id="b")
+    a = _grid_block(0, 0, 3, 3, block_id="a", points=no_buildings(UTM))
+    b = _grid_block(3, 0, 3, 3, block_id="b", points=no_buildings(UTM))
     rb = region_block([a, b])
 
     assert len(rb.parcels) == 18
@@ -116,10 +115,12 @@ def test_region_block_identity_folds_the_existing_egress_model_tag() -> None:
     # which EXCLUDES streets, so region_block folds a model-version tag into source_content_hash --
     # otherwise a region scored under a different streets/egress model collides on the same key
     # (the bug: the old perimeter-egress eval-swap's cached access reused under the new model).
-    # Needs CACHEABLE members (non-empty source_content_hash) so the tagged branch runs; the
-    # _grid_block fixtures elsewhere have "" hashes and take the uncacheable "" branch.
-    a = replace(_grid_block(0, 0, 3, 3, block_id="a"), source_content_hash="srcA")
-    b = replace(_grid_block(3, 0, 3, 3, block_id="b"), source_content_hash="srcB")
+    # Needs CACHEABLE members (a source_content_hash) so the tagged branch runs; the
+    # _grid_block fixtures elsewhere have None hashes and take the uncacheable None branch.
+    a = replace(_grid_block(0, 0, 3, 3, block_id="a", points=no_buildings(UTM)),
+                source_content_hash="srcA")
+    b = replace(_grid_block(3, 0, 3, 3, block_id="b", points=no_buildings(UTM)),
+                source_content_hash="srcB")
     rb = region_block([a, b])
 
     assert rb.identity is not None                       # cacheable: the tagged else-branch ran
@@ -163,10 +164,10 @@ def test_region_block_keeps_its_members_footprint_tier() -> None:
         return gpd.GeoDataFrame({ANCHOR_COL: pts},
                                 geometry=[p.buffer(0.3, cap_style="square") for p in pts], crs=UTM)
 
-    a = replace(_grid_block(0, 0, 3, 3, block_id="a"),
+    a = replace(_grid_block(0, 0, 3, 3, block_id="a", points=no_buildings(UTM)),
                 building_geometries=footprints([Point(0.5, 0.5), Point(1.5, 1.5)]),
                 building_tier=Footprints)
-    b = replace(_grid_block(3, 0, 3, 3, block_id="b"),
+    b = replace(_grid_block(3, 0, 3, 3, block_id="b", points=no_buildings(UTM)),
                 building_geometries=footprints([Point(3.5, 0.5)]), building_tier=Footprints)
     rb = region_block([a, b])
 
@@ -178,8 +179,9 @@ def test_region_block_keeps_its_members_footprint_tier() -> None:
 
 def test_region_block_refuses_members_on_different_tiers() -> None:
     from reblock.buildings import AreaDiscs
-    a = _grid_block(0, 0, 3, 3, block_id="a")
-    b = replace(_grid_block(3, 0, 3, 3, block_id="b"), building_tier=AreaDiscs)
+    a = _grid_block(0, 0, 3, 3, block_id="a", points=no_buildings(UTM))
+    b = replace(_grid_block(3, 0, 3, 3, block_id="b", points=no_buildings(UTM)),
+                building_tier=AreaDiscs)
     with pytest.raises(ValueError, match="different building tiers"):
         region_block([a, b])
 
@@ -190,11 +192,13 @@ def test_region_block_rejects_empty_list() -> None:
 
 
 def test_region_block_rejects_crs_mismatch() -> None:
-    a = _grid_block(0, 0, 3, 3, block_id="a")
+    a = _grid_block(0, 0, 3, 3, block_id="a", points=no_buildings(UTM))
     other_crs = CRS.from_epsg(32644)
     b = Block(block_id="b", crs=other_crs, boundary=a.boundary,
               parcels=a.parcels.set_crs(other_crs, allow_override=True),
-              streets=a.streets.set_crs(other_crs, allow_override=True))
+              streets=a.streets.set_crs(other_crs, allow_override=True),
+              source_content_hash=None, building_geometries=no_buildings(other_crs),
+              building_tier=SpacingDiscs)
     with pytest.raises(ValueError):
         region_block([a, b])
 
@@ -205,8 +209,8 @@ def test_region_reblock_reblocks_the_region_block_against_its_existing_network()
     # Block directly: the Result's block IS the region-block (streets = full existing network,
     # incl. the shared edge), the proposal is exactly the method's added roads (nothing is
     # pre-added), and it is deterministic.
-    a = _grid_block(0, 0, 3, 3, block_id="a")
-    b = _grid_block(3, 0, 3, 3, block_id="b")
+    a = _grid_block(0, 0, 3, 3, block_id="a", points=no_buildings(UTM))
+    b = _grid_block(3, 0, 3, 3, block_id="b", points=no_buildings(UTM))
     rb = region_block([a, b])
 
     # depth_target=1: the lone center parcel of a 3x3 all-perimeter-frontage grid is already at

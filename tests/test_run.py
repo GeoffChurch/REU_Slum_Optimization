@@ -8,6 +8,7 @@ from hydra import compose, initialize
 from pyproj import CRS
 from shapely.geometry import Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Eval, Result
 from reblock.data.counts import KblockCount
 from reblock.data.kblock import KblockSource
@@ -18,6 +19,7 @@ from reblock.methods.topology import TopologyMethod
 from reblock.pipeline import PipelineSpec, run
 from reblock.run import spec_from_cfg
 from reblock.screen.identity import IdentityScreen
+from tests.block_fixtures import no_buildings
 
 PHULE = str(Path(__file__).resolve().parents[1] / "ext" / "topology" / "examples"
             / "data" / "phule_nagar_v6.shp")
@@ -40,7 +42,9 @@ def _grid_block(n: int) -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
     return Block(block_id="synthetic_3x3", crs=UTM, boundary=boundary,
-                 parcels=parcels, streets=streets)
+                 parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _phule_spec(evals: list[Eval], max_blocks: int = 1) -> PipelineSpec:

@@ -3,8 +3,10 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import MultiLineString, Point, Polygon, box
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Region
 from reblock.derive.cluster import merge_cluster
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
 
@@ -17,7 +19,9 @@ def _block(bid: str, poly: Polygon, n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(n))}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[poly.boundary], crs=UTM)
     return Block(block_id=bid, crs=UTM, boundary=poly, parcels=parcels, streets=streets,
-                 attrs={"kblock_k": 3.0})
+                 attrs={"kblock_k": 3.0},
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _region(*blocks: Block) -> Region:

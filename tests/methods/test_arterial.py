@@ -32,6 +32,7 @@ from reblock.methods.arterial.realize import IdealChord, SnapToBoundary, _snap
 from reblock.methods.arterial.scoring import _best_candidate
 from reblock.methods.boundary_graph import _boundary_graph
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -45,7 +46,9 @@ def _grid_block(n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="grid", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="grid", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_anchor_points_sample_the_network_and_include_vertices() -> None:
@@ -281,7 +284,9 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (0.0, 9.0)])], crs=UTM)
-    block = Block(block_id="long", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    block = Block(block_id="long", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(), objective="directness", max_roads=3,
@@ -517,7 +522,9 @@ def _deep_block() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (0.0, 9.0)])], crs=UTM)
-    return Block(block_id="deep", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="deep", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _holed_block() -> Block:
@@ -533,7 +540,9 @@ def _holed_block() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="holed", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="holed", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_greedy_handles_multilinestring_streets() -> None:
@@ -572,7 +581,8 @@ def _two_arm_block(building_geometries: gpd.GeoDataFrame, h: int = 9, gap_x1: in
         LineString([(float(gap_x1), 0.0), (float(gap_x1 + 1), 0.0)]),
     ], crs=UTM)
     return Block(block_id="two_arm", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
-                building_geometries=building_geometries)
+                building_geometries=building_geometries,
+                source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def test_cost_displacement_avoids_the_denser_corridor() -> None:
@@ -624,7 +634,8 @@ def _grid_block_with_points(building_geometries: gpd.GeoDataFrame, w: int = 8, h
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (float(w), 0.0)])], crs=UTM)
     return Block(block_id="grid", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
-                building_geometries=building_geometries)
+                building_geometries=building_geometries,
+                source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None:
@@ -676,7 +687,8 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
     plain = _deep_block()
     far_points = gpd.GeoDataFrame(geometry=[Point(1000.0, 1000.0)], crs=UTM)
     block = Block(block_id=plain.block_id, crs=plain.crs, boundary=plain.boundary,
-                 parcels=plain.parcels, streets=plain.streets, building_geometries=far_points)
+                 parcels=plain.parcels, streets=plain.streets, building_geometries=far_points,
+                 source_content_hash=None, building_tier=SpacingDiscs)
     roads = _greedy_arterials(block, realizer=IdealChord(), objective="access", cost="displacement",
                               max_roads=1, n_anchors=12, half_width_m=1.0)
     assert len(roads) == 1
@@ -745,7 +757,8 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     pts = gpd.GeoDataFrame(geometry=[Point(i + 0.5, j + 0.5) for i in range(3) for j in range(9)],
                            crs=UTM)
     block = Block(block_id="deep_pts", crs=UTM, boundary=boundary, parcels=parcels,
-                  streets=streets, building_geometries=pts)
+                  streets=streets, building_geometries=pts,
+                  source_content_hash=None, building_tier=SpacingDiscs)
 
     from reblock.derive.access import parcel_access_layers
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
