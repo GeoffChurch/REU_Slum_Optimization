@@ -34,8 +34,9 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.figure import Figure
 
+from reblock.buildings import SpacingDiscs
 from reblock.data.counts import COUNTERS, resolved
-from reblock.data.provision import cached_kblock_source
+from reblock.data.provision import DEFAULT_CACHE, cached_kblock_source
 from reblock.region import DenseClusterRegionBuilder, _block_adjacency, _projected
 from reblock.render import (
     _BOUNDARY_COLOR,
@@ -261,7 +262,9 @@ def load_blocks(city: str) -> gpd.GeoDataFrame:
     every block in the metro reads as adjacent to every other. Task 1 made the builders project
     defensively; this projects at the boundary so the requirement is visible at the call site.
     """
-    src = cached_kblock_source(city, min_buildings=MIN_COUNT)
+    src = cached_kblock_source(city, min_buildings=MIN_COUNT, block_ids=None,
+                               cache_dir=DEFAULT_CACHE, building_tier=SpacingDiscs,
+                               member_buildings=None)
     # Resolve BEFORE the MIN_COUNT filter: the threshold is on the count itself, so filtering on
     # the source's vendor column and scoring on another selects a different pool than the screen
     # does. Same correction as `gen_screen_bakeoff.load`.

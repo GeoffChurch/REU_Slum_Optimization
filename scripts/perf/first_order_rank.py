@@ -54,8 +54,15 @@ from shapely.geometry.base import BaseGeometry
 import reblock.methods.arterial.engines as engines
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import Access, Displacement, GreedyArterialReblocker, SnapToBoundary
+from reblock.methods.arterial import (
+    Access,
+    Displacement,
+    ExactEngine,
+    GreedyArterialReblocker,
+    SnapToBoundary,
+)
 from reblock.methods.arterial.primitives import _planarize
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from scripts.pair_matrix import evenly_spaced, load_pools
 
 N_BLOCKS = 10
@@ -175,8 +182,11 @@ def main() -> None:
         _ADJ = parcel_adjacency(list(b.parcels.geometry), STREET_TOL)
         _TREE = STRtree(list(b.parcels.geometry))
         print(f"  {b.block_id}  ({len(b.parcels)} parcels)", flush=True)
-        GreedyArterialReblocker(realizer=SnapToBoundary(), objective=Access(), cost=Displacement(),
-                                workers=8, max_roads=MAX_ROADS).propose(b)
+        GreedyArterialReblocker(realizer=SnapToBoundary(lam=2.0), objective=Access(),
+                                cost=Displacement(), workers=8, max_roads=MAX_ROADS, n_anchors=32,
+                                top_k=8,
+                                road_width_m=DEFAULT_ROAD_WIDTH_M, engine=ExactEngine(),
+                                max_anchors=0).propose(b)
         by_block[b.block_id] = list(_ROWS)
     OUT.write_text(json.dumps(by_block, indent=1))
 

@@ -16,8 +16,8 @@ import hashlib
 import logging
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Protocol, cast, runtime_checkable
+from dataclasses import dataclass
+from typing import ClassVar, Protocol, cast, runtime_checkable
 
 import geopandas as gpd
 import networkx as nx
@@ -28,7 +28,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from reblock.buildings import Extents
+from reblock.buildings import Extents, SpacingDiscs
 from reblock.contracts import Block, Eval, Method, Result, Source
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
@@ -354,9 +354,12 @@ def block_depths(source: Source, block_ids: list[str]) -> dict[str, float]:
     # this a KblockSource, whose __init__ assigns the field unconditionally, so the default
     # could never be taken. An unreachable default is not defensive -- it is a silencer that
     # would swallow a rename here while every direct-access site broke loudly.
+    # The point tier over the points parquet, whatever the source proposes on: depth comes from
+    # parcels, which are the Voronoi of the published points at every tier.
     sub = KblockSource(source.blocks_path, source.buildings_path, "depth",
                        min_buildings=source.min_buildings,
-                       block_ids=list(block_ids))
+                       block_ids=list(block_ids), building_tier=SpacingDiscs,
+                       member_buildings=None)
     return {str(b.block_id): float(access_before(b).max()) for b in sub.region().blocks}
 
 
@@ -408,7 +411,7 @@ class DenseClusterRegionBuilder:
     seeds still runs.
     """
 
-    max_buildings: int = 150
+    max_buildings: int
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
               depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
@@ -474,8 +477,8 @@ class ShapeObjective(Protocol):
     objective that grows with area would just pick the biggest block every time.
     """
 
-    # read-only: the implementations are frozen dataclasses, and a plain `name: str` in a Protocol
-    # demands a SETTABLE attribute, which a frozen field is not
+    # read-only: the implementations are class constants, and a plain `name: str` in a Protocol
+    # demands a SETTABLE attribute, which a class constant is not
     @property
     def name(self) -> str: ...
 
@@ -491,7 +494,7 @@ class Isoperimetric:
     regions be maximally circular. It is here as a baseline to beat, not as the default answer.
     """
 
-    name: str = "isoperimetric"
+    name: ClassVar[str] = "isoperimetric"
 
     def score(self, union: BaseGeometry) -> float:
         p = float(union.length)
@@ -506,7 +509,7 @@ class Rectangularity:
     orientation the fabric has rather than discarding it toward a circle.
     """
 
-    name: str = "rectangularity"
+    name: ClassVar[str] = "rectangularity"
 
     def score(self, union: BaseGeometry) -> float:
         mrr = union.minimum_rotated_rectangle
@@ -523,7 +526,7 @@ class Squareness:
     rectangle is rotated, not axis-aligned.
     """
 
-    name: str = "squareness"
+    name: ClassVar[str] = "squareness"
 
     def score(self, union: BaseGeometry) -> float:
         mrr = union.minimum_rotated_rectangle
@@ -551,7 +554,7 @@ class ShapeStandardizingRegionBuilder:
 
     Here the frontier block chosen is the one maximizing `objective.score(union u candidate)`.
 
-    ## The objective is deliberately pluggable, and deliberately not defaulted to compactness
+    ## The objective is deliberately pluggable, and deliberately not configured as compactness
 
     The originally-specified builder was never built and a substitute shipped in its place. The spec
     is explicit that the objective is open -- isoperimetric compactness is "only the obvious first
@@ -559,8 +562,8 @@ class ShapeStandardizingRegionBuilder:
     empirically against the outline's share of inter-region GW distance variance rather than by
     assuming the familiar quotient is right. So this takes a `ShapeObjective`.
 
-    `Squareness` is the default, and NOT by assumption -- `Isoperimetric` is disqualified on a
-    necessary condition before the GW criterion is even reached. Polyomino perimeters tie
+    `Squareness` is the shipped objective, and NOT by assumption -- `Isoperimetric` is disqualified
+    on a necessary condition before the GW criterion is even reached. Polyomino perimeters tie
     constantly (a 1x3 strip and an L-tromino both have area 3 and perimeter 8, so identical
     quotient), so on grid-like fabric the greedy cannot discriminate, falls back to the `block_id`
     tie-break, and walks into shapes from which the compact option is unreachable. Growing a
@@ -581,8 +584,8 @@ class ShapeStandardizingRegionBuilder:
     locally with a warning rather than bridging.
     """
 
-    objective: ShapeObjective = field(default_factory=lambda: Squareness())
-    max_buildings: int = 150
+    objective: ShapeObjective
+    max_buildings: int
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
               depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:

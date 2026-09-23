@@ -48,7 +48,7 @@ onto a finished tree. Choosing cycles from the start finds loops that also serve
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import geopandas as gpd
 import numpy as np
@@ -64,9 +64,8 @@ from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.derive_graph import config_identity
-from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
+from reblock.methods.substrates import RoutingGraph, Substrate
 from reblock.permeability import (
-    DEFAULT_ROAD_WIDTH_M,
     PermeabilityParams,
     parcel_radii,
     permeability,
@@ -96,8 +95,8 @@ def _geom(graph: RoutingGraph, nodes: list[int],
 class CycleNativeReblocker:
     """Greedy over CYCLES: each move is a loop from the street back to the street."""
 
-    substrate: Substrate = field(default_factory=ChordSubstrate)
-    max_displacement: float = 0.10
+    substrate: Substrate
+    max_displacement: float
     # Safety valve on the greedy, NOT the intended stopping rule -- `max_displacement` is. This was
     # a bare `range(60)` in the loop below: unconfigurable, undocumented, untested, and it BOUND in
     # every settlement region measured (each emitted exactly 120 segments = 60 cycles x 2 legs) at
@@ -106,12 +105,12 @@ class CycleNativeReblocker:
     # generated docs read it as "converges below the shared budget", which is not what happened.
     # Every other method in the lineup already has its budget as a field (`max_roads`,
     # `depth_target`, `max_displacement`, `spacing`); this one did not.
-    max_cycles: int = 400
-    shortlist: int = 8
-    params: PermeabilityParams = field(default_factory=PermeabilityParams)
+    max_cycles: int
+    shortlist: int
+    params: PermeabilityParams
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:

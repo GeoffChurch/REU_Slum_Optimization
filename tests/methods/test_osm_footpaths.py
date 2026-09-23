@@ -62,7 +62,8 @@ def test_propose_keeps_interior_paths_and_drops_those_on_the_street() -> None:
     interior = LineString([(50, 20), (50, 80)])          # a vertical interior path
     on_street = LineString([(10, 0), (90, 0)])           # runs along the south-edge street
     outside = LineString([(150, 150), (160, 160)])       # outside the boundary
-    method = OsmFootpathsReblocker(source=_StubSource([interior, on_street, outside]))
+    method = OsmFootpathsReblocker(source=_StubSource([interior, on_street, outside]),
+                                   road_width_m=DEFAULT_ROAD_WIDTH_M)
     prop = method.propose(_block())
     assert isinstance(prop, Proposal) and prop.roads is not None
     lengths = sorted(round(g.length) for g in prop.roads.geometry)
@@ -70,14 +71,15 @@ def test_propose_keeps_interior_paths_and_drops_those_on_the_street() -> None:
 
 
 def test_propose_empty_coverage_returns_empty_roads_without_crashing() -> None:
-    method = OsmFootpathsReblocker(source=_StubSource([]))
+    method = OsmFootpathsReblocker(source=_StubSource([]), road_width_m=DEFAULT_ROAD_WIDTH_M)
     prop = method.propose(_block())
     assert prop.roads is not None and prop.roads.empty
 
 
 def test_identity_propagates_none_from_uncacheable_source() -> None:
     # A live (snapshot-less) source reports identity None; the method must propagate it.
-    method = OsmFootpathsReblocker(source=_StubSource([], ident=None))
+    method = OsmFootpathsReblocker(source=_StubSource([], ident=None),
+                                   road_width_m=DEFAULT_ROAD_WIDTH_M)
     assert method.identity is None
 
 
@@ -104,7 +106,8 @@ def test_live_source_makes_proposal_uncacheable_even_on_a_real_block() -> None:
     # Proposal.identity must be None even when block.identity is a real tuple.
     block = _cacheable_block()
     assert block.identity is not None
-    method = OsmFootpathsReblocker(source=_StubSource([], ident=None))
+    method = OsmFootpathsReblocker(source=_StubSource([], ident=None),
+                                   road_width_m=DEFAULT_ROAD_WIDTH_M)
     prop = method.propose(block)
     assert prop.identity is None
 

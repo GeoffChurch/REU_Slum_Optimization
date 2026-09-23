@@ -18,7 +18,14 @@ from pathlib import Path
 
 from hydra import compose, initialize_config_dir
 
-from reblock.methods.arterial import Access, Displacement, GreedyArterialReblocker, SnapToBoundary
+from reblock.methods.arterial import (
+    Access,
+    Displacement,
+    ExactEngine,
+    GreedyArterialReblocker,
+    SnapToBoundary,
+)
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.pipeline import build_regions
 from reblock.presets import load_stages
 from reblock.region import region_block
@@ -36,8 +43,10 @@ def main() -> None:
     print(f"region: {len(region)} blocks, {len(blk.parcels):,} parcels\n", flush=True)
     print(f"  {'max_anchors':>12}{'seconds':>10}{'roads':>7}{'total_m':>10}")
     for ma in (24, 48, 96):
-        m = GreedyArterialReblocker(realizer=SnapToBoundary(), objective=Access(),
-                                    cost=Displacement(), workers=16, max_anchors=ma)
+        m = GreedyArterialReblocker(realizer=SnapToBoundary(lam=2.0), objective=Access(),
+                                    cost=Displacement(), workers=16, max_anchors=ma, n_anchors=32,
+                                    top_k=8, max_roads=15, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                    engine=ExactEngine())
         t = time.monotonic()
         r = m.propose(blk).roads
         el = time.monotonic() - t

@@ -23,6 +23,7 @@ from reblock.region import (
     IdentityRegionBuilder,
     RegionBuilder,
     ShapeStandardizingRegionBuilder,
+    Squareness,
     region_block,
 )
 from tests.block_fixtures import no_buildings
@@ -53,7 +54,7 @@ def _grid(counts: dict[tuple[int, int], float] | None = None,
 
 @pytest.mark.parametrize("builder", [
     DenseClusterRegionBuilder(max_buildings=40),
-    ShapeStandardizingRegionBuilder(max_buildings=40),
+    ShapeStandardizingRegionBuilder(max_buildings=40, objective=Squareness()),
     IdentityRegionBuilder(),
     ConvexHullRegionBuilder(),
 ], ids=["dense_cluster", "shape_standardizing", "identity", "convex_hull"])
@@ -94,7 +95,8 @@ def test_dense_cluster_returns_accretion_order_not_sorted_order() -> None:
 def test_shape_standardizing_returns_accretion_order() -> None:
     """Same contract, the other growing builder."""
     grid = _grid(gap=0.3)
-    got = ShapeStandardizingRegionBuilder(max_buildings=40).build(grid, [["1_1"]])[0]
+    got = ShapeStandardizingRegionBuilder(max_buildings=40,
+                                          objective=Squareness()).build(grid, [["1_1"]])[0]
     assert got[0] == "1_1", "the seed comes first"
     assert len(got) == len(set(got)), "no block appears twice"
 

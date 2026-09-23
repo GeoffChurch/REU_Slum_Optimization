@@ -32,7 +32,6 @@ import shapely
 
 from scripts.fetch_kblock_fixtures import (
     OB_FLOAT_PRECISION,
-    OB_MIN_CONFIDENCE,
     OPEN_BUILDINGS_TILES_URL,
     _download_to,
     _request,
@@ -119,9 +118,9 @@ class FootprintTiles:
     it is downloaded once and cached beside the tiles.
     """
 
-    cache_dir: Path = DEFAULT_FOOTPRINT_CACHE
-    min_confidence: float = OB_MIN_CONFIDENCE
-    fetch: Callable[[str, Path], None] = fetch_tile
+    cache_dir: Path
+    min_confidence: float
+    fetch: Callable[[str, Path], None]
 
     def for_blocks(self, blocks: gpd.GeoDataFrame) -> BuildingFrame:
         wgs = blocks.to_crs(4326)

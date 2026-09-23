@@ -55,7 +55,7 @@ from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.derive_graph import config_identity
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.permeability import with_width
 
 # `follow_parcels` density raster cell size, as a multiple of the block's own parcel-spacing scale
 # (median parcel nearest-neighbour distance): a few parcel-spacings wide, so a cell in a dense
@@ -373,52 +373,52 @@ def _grid_lines(
 class EuclideanGridReblocker:
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
-    spacing: float = 60.0
-    angle: float = 0.0
-    min_seg_len: float = 1.0
-    street_buffer: float = 0.5
-    seek_density: bool = True
-    # Default-on: the primary behaviour is the density-concentrated grid -- a coarse grid
+    road_width_m: float
+    spacing: float
+    angle: float
+    min_seg_len: float
+    street_buffer: float
+    seek_density: bool
+    # On as shipped: the primary behaviour is the density-concentrated grid -- a coarse grid
     # everywhere, subdivided to `fine_spacing` over the densest parcel clusters -- combined with the
     # always-on parcel-hugging trim and bridge-gap stitching below. Set False for a uniform grid.
-    adaptive: bool = True
+    adaptive: bool
     # None => spacing / 2, i.e. one extra line between every pair of coarse ones (a quadtree
-    # split); it cannot be a plain default because it depends on another field.
-    fine_spacing: float | None = None
-    density_threshold_percentile: float = 75.0   # infill the top 25% densest cells
+    # split); it cannot be a plain value because it depends on another field.
+    fine_spacing: float | None
+    density_threshold_percentile: float   # 75.0 infills the top 25% densest cells
     # None => derived per block: `_HUG_NN_FACTOR` x the block's median parcel nearest-neighbour
     # distance. After a candidate line is clipped to the block's extent it is trimmed to just the
     # sub-portion within this distance of an actual parcel, so lines hug the parcel geometry rather
-    # than running edge-to-edge across empty gaps. Always on. The default derives from the block's
+    # than running edge-to-edge across empty gaps. Always on. None derives it from the block's
     # own parcel scale (not `spacing` or a fixed metre value) so it adapts to dense vs sparse
-    # blocks; it cannot be a plain default because it depends on the block being processed.
-    parcel_hug_buffer: float | None = None
+    # blocks; it cannot be a plain value because it depends on the block being processed.
+    parcel_hug_buffer: float | None
     # None => derived per block: `_BRIDGE_NN_FACTOR` x the same parcel scale. The largest empty gap
     # the hugging trim will span (keep a line whole across) rather than sever; bigger gaps still
-    # split the line. Also block-derived, so likewise a per-call None default.
-    parcel_bridge_gap: float | None = None
+    # split the line. Also block-derived, so likewise None per call.
+    parcel_bridge_gap: float | None
     # follow_parcels: carve roads out of the parcel fabric (shared boundary edges selected by local
-    # density) instead of overlaying a grid. When False (default) every field above behaves exactly
+    # density) instead of overlaying a grid. When False (shipped) every field above behaves exactly
     # as before and the three params below are inert. Coverage is the fraction of candidate edges
     # selected: `follow_min_coverage` in the sparsest area, `follow_max_coverage` in the densest,
     # interpolated continuously by the (raster) density score raised to `follow_density_gamma`
-    # (>1 pushes selection harder toward the densest areas, <1 spreads it out). The defaults are
+    # (>1 pushes selection harder toward the densest areas, <1 spreads it out). Its settings are
     # deliberately sparse -- a near-empty floor, a sharp gamma, and a capped ceiling below 1.0 --
     # so only genuinely dense areas approach high coverage and the result is a legible network
     # concentrated in the settlement's core rather than a mesh blanketing the whole block. The
     # connectivity stitch (step 4 in `_propose_follow_parcels`) still wires the sparse remainder
     # to the street, so a low floor thins the mesh without stranding parcels.
-    follow_parcels: bool = False
-    follow_min_coverage: float = 0.03
-    follow_max_coverage: float = 0.45
-    follow_density_gamma: float = 3.0
+    follow_parcels: bool
+    follow_min_coverage: float
+    follow_max_coverage: float
+    follow_density_gamma: float
     # Smallest selected-edge cluster (total boundary length) kept and wired to the street; smaller
     # ones are dropped as noise so the network stays sparse (see `_connect_to_street`). None =>
     # derived per block as `_FOLLOW_MIN_COMPONENT_FACTOR` x the parcel scale, so like the hug/bridge
     # distances it adapts to the block and is encoded "auto" in `identity`. Set 0.0 to keep every
     # cluster (pure connectivity, no noise-dropping).
-    follow_min_component: float | None = None
+    follow_min_component: float | None
 
     @property
     def effective_fine_spacing(self) -> float:

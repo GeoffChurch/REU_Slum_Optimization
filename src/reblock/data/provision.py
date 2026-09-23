@@ -10,7 +10,7 @@ from typing import cast
 
 import geopandas as gpd
 
-from reblock.buildings import Extents, SpacingDiscs
+from reblock.buildings import Extents
 from reblock.data.footprints import BuildingSource
 from reblock.data.kblock import KblockSource
 from scripts.fetch_kblock_fixtures import (
@@ -46,11 +46,9 @@ def ensure_city_data(city: str, *, cache_dir: Path = DEFAULT_CACHE) -> tuple[Pat
     return blocks_path, buildings_path
 
 
-def cached_kblock_source(city: str, *, block_ids: list[str] | None = None,
-                         min_buildings: int = 10, cache_dir: Path = DEFAULT_CACHE,
-                         building_tier: Callable[[gpd.GeoDataFrame], Extents] = SpacingDiscs,
-                         member_buildings: BuildingSource | None = None,
-                         ) -> KblockSource:
+def cached_kblock_source(city: str, *, block_ids: list[str] | None, min_buildings: int,
+                         cache_dir: Path, building_tier: Callable[[gpd.GeoDataFrame], Extents],
+                         member_buildings: BuildingSource | None) -> KblockSource:
     blocks_path, buildings_path = ensure_city_data(city, cache_dir=cache_dir)
     return KblockSource(blocks_path, buildings_path, region_id=city,
                         min_buildings=min_buildings, block_ids=block_ids,

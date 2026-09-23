@@ -101,7 +101,7 @@ class GridSubstrate:
     """8-connected regular grid at resolution `res` (m). Faithful cost-field sampler, but node
     count scales with block AREA (∝ area/res²) and paths staircase at 45°."""
 
-    res: float = 1.5
+    res: float
 
     @property
     def identity(self) -> Hashable:
@@ -173,7 +173,7 @@ class SpannerSubstrate:
     edge spanner with bounded stretch. Sparsest of the tessellation substrates. `net_tol =
     STREET_TOL`."""
 
-    cones: int = 6
+    cones: int
 
     @property
     def identity(self) -> Hashable:

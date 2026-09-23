@@ -36,6 +36,8 @@ from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.flow_paths import FlowPathsReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
 from reblock.methods.osm_footpaths import interior_desire_lines
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from scripts.pair_matrix import (
     DEFAULT_CACHE,
     PBF_BY_ISO,
@@ -84,13 +86,38 @@ def main() -> None:
     print(f"  scoring {len(chosen)} blocks against real footpaths and real streets", flush=True)
 
     methods: dict[str, Method] = {
-        "flow_paths": FlowPathsReblocker(),
-        "flow_paths_noreinforce": FlowPathsReblocker(iterations=1, reinforcement=0.0),
-        "flow_paths_gateway": FlowPathsReblocker(destination="gateway"),
-        "flow_paths_q99": FlowPathsReblocker(flow_quantile=0.99),
-        "clearance": ClearanceReblocker(depth_target=1),
-        "clearance_looped": LoopClosureRefiner(base=ClearanceReblocker(depth_target=1)),
-        "demand_greedy_uniform": DemandGreedyReblocker(desire_source=None, depth_target=1),
+        "flow_paths": FlowPathsReblocker(substrate=ChordSubstrate(), destination="all_pairs",
+                                         iterations=3, reinforcement=0.5, flow_quantile=0.90,
+                                         max_sources=400, seed=0,
+                                         road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "flow_paths_noreinforce": FlowPathsReblocker(iterations=1, reinforcement=0.0,
+                                                     substrate=ChordSubstrate(),
+                                                     destination="all_pairs", flow_quantile=0.90,
+                                                     max_sources=400, seed=0,
+                                                     road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "flow_paths_gateway": FlowPathsReblocker(destination="gateway", substrate=ChordSubstrate(),
+                                                 iterations=3, reinforcement=0.5,
+                                                 flow_quantile=0.90, max_sources=400, seed=0,
+                                                 road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "flow_paths_q99": FlowPathsReblocker(flow_quantile=0.99, substrate=ChordSubstrate(),
+                                             destination="all_pairs", iterations=3,
+                                             reinforcement=0.5, max_sources=400, seed=0,
+                                             road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "clearance": ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                                        max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "clearance_looped": LoopClosureRefiner(base=ClearanceReblocker(depth_target=1,
+                                                                       substrate=ChordSubstrate(),
+                                                                       repulsion=0.0, max_roads=400,
+                                                                       road_width_m=DEFAULT_ROAD_WIDTH_M),
+                                               budget_frac=0.12, min_bridges_per_m=0.01,
+                                               max_loops=400, min_loop_len_m=40.0,
+                                               search_radius_m=45.0, snap_lam=2.0,
+                                               max_candidates=1500,
+                                               road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "demand_greedy_uniform": DemandGreedyReblocker(desire_source=None, depth_target=1,
+                                                       substrate=ChordSubstrate(), buffer_m=3.0,
+                                                       eps=0.1, gamma=1.0, max_roads=400,
+                                                       road_width_m=DEFAULT_ROAD_WIDTH_M),
     }
 
     rows: list[dict[str, object]] = []

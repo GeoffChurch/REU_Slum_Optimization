@@ -27,7 +27,7 @@ from reblock.derive_graph import config_identity
 from reblock.methods.arterial.primitives import _snap_graph
 from reblock.methods.arterial.realize import _snap
 from reblock.methods.boundary_graph import _boundary_graph
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.permeability import with_width
 
 Node = tuple[float, float]
 
@@ -221,35 +221,35 @@ class LoopClosureRefiner:
     would auto-generate a `__hash__` over it -- mirrors the sibling `ClearanceReblocker`."""
 
     base: Method
-    budget_frac: float = 0.12
+    budget_frac: float
     # Loops may add up to this FRACTION of the base proposal's total road length, region-adaptive
     # in place of a fixed absolute budget_m: on an 11k-parcel region a 200 m absolute budget was
     # ~1% of the base road and added negligible redundancy (commute_ratio 0.009). Calibrated on a
     # 1724-parcel block (base road 8622 m): 0.05 -> ρ 0.31, 0.10 -> 0.375, 0.12 -> ~0.39, 0.15 ->
     # 0.40 (diminishing returns past ~0.12 -- the knee), all with external held ~0.949 and
     # ~8-11 s runtime.
-    min_bridges_per_m: float = 0.01
+    min_bridges_per_m: float
     # Early-stop threshold on the greedy ranking objective (bridges removed per metre): once the
     # best remaining candidate's efficiency falls below this, stop adding loops even if budget
     # remains -- a diminishing-returns guard so a large budget_frac doesn't get spent on
     # increasingly marginal connectors. 0.01 = 1 bridge per 100 m.
-    max_loops: int = 400
+    max_loops: int
     # A high safety cap, not the real bound -- budget_frac (via the resolved budget_m) and
     # min_bridges_per_m now do the real work of stopping the greedy loop.
-    min_loop_len_m: float = 40.0
+    min_loop_len_m: float
     # 45 m: sufficient for block-scale bases with the uniform `max_candidates` cap, which bounds the
     # expensive per-pair snap volume regardless of mesh density (see `_subsample_pairs`).
-    search_radius_m: float = 45.0
-    snap_lam: float = 2.0
+    search_radius_m: float
+    snap_lam: float
     # A second, independent bound on top of `search_radius_m`: even a modest radius can still
     # explode on a denser-than-tested mesh (finer substrate, bigger region), since pair count grows
     # with LOCAL node density, not just radius. `max_candidates` caps `loop_candidates`' pair volume
     # via `_subsample_pairs` regardless of density -- a belt-and-suspenders guard, not the primary
     # lever (search_radius_m's cut is what keeps the common case fast).
-    max_candidates: int | None = 1500
+    max_candidates: int | None
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
     # Uniform-subsample cap on `loop_candidates`' pair volume (see `_subsample_pairs`): bounds the
     # per-pair `_snap` cost regardless of mesh density. 1500 is the commute_ratio PLATEAU -- caps
     # 1500/2500/4000 all reach ~the same ρ on an 11k-parcel region (budget-bound past ~1300 valid

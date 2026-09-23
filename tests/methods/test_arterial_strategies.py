@@ -1,5 +1,6 @@
 """The arterial's objective and cost are injected strategies, not strings the engines switch on."""
 import dataclasses
+from dataclasses import replace
 from itertools import product
 from pathlib import Path
 
@@ -27,7 +28,7 @@ from reblock.methods.arterial.primitives import _snap_graph
 from reblock.methods.arterial.scoring import step_state
 from reblock.methods.boundary_graph import _boundary_graph
 from reblock.presets import load_method, load_methods
-from tests.methods.test_arterial import UTM, _grid_block, _grid_block_with_points
+from tests.methods.test_arterial import ARTERIAL, UTM, _grid_block, _grid_block_with_points
 
 OBJECTIVES: tuple[ArterialObjective, ...] = (Access(), Efficiency(), Directness())
 COSTS: tuple[ArterialCost, ...] = (Length(), Displacement(), Repulsion())
@@ -43,7 +44,7 @@ def test_objectives_and_costs_satisfy_their_protocols() -> None:
 def test_every_objective_and_cost_pair_has_its_own_cache_key() -> None:
     """Nine configurations, nine identities and nine proposal ids. A strategy that answered with
     another's identity would share that one's cached proposal and eval depths."""
-    methods = [GreedyArterialReblocker(objective=o, cost=c, n_anchors=4, max_roads=1)
+    methods = [replace(ARTERIAL, objective=o, cost=c, n_anchors=4, max_roads=1)
                for o, c in product(OBJECTIVES, COSTS)]
     assert len({m.identity for m in methods}) == 9
     block = dataclasses.replace(_grid_block(3), source_content_hash="nine-keys")
@@ -103,7 +104,7 @@ def test_step_state_is_frozen() -> None:
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     net = engines._step_network([], block, 1.0)
     st = step_state(block, sg=_snap_graph(_boundary_graph(block.parcels)),
-                    realizer=SnapToBoundary(), objective=Directness().for_block(block, adj),
+                    realizer=SnapToBoundary(lam=2.0), objective=Directness().for_block(block, adj),
                     cost=Length(), committed=net)
     with pytest.raises(dataclasses.FrozenInstanceError):
         st.cost = Repulsion().at_step(block, net)    # type: ignore[misc]

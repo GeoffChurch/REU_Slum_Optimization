@@ -7,7 +7,7 @@ from reblock.contracts import Source
 
 
 class IdentityScreen:
-    def __init__(self, block_ids: list[str] | None = None) -> None:
+    def __init__(self, block_ids: list[str] | None) -> None:
         self.block_ids = list(block_ids) if block_ids is not None else None
 
     def select(self, source: Source) -> list[str] | None:

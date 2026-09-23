@@ -14,6 +14,7 @@ import geopandas as gpd
 import pandas as pd
 from shapely import STRtree, make_valid
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal, Region
 from reblock.data.kblock import KblockSource
 from reblock.derive.cluster import merge_cluster
@@ -52,7 +53,8 @@ def _score(merged: Block, proposal: Proposal, prefix: str) -> dict[str, float]:
 
 def probe_cluster(
     block_ids: list[str], blocks_path: str, buildings_path: str) -> dict[str, float | str]:
-    src = KblockSource(blocks_path, buildings_path, region_id="capetown", block_ids=block_ids)
+    src = KblockSource(blocks_path, buildings_path, region_id="capetown", block_ids=block_ids,
+                       min_buildings=10, building_tier=SpacingDiscs, member_buildings=None)
     region = src.region()
     region = Region(region_id=region.region_id, crs=region.crs,
                      blocks=list(region.blocks), roads=region.roads, attrs=region.attrs)

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from reblock.buildings import SpacingDiscs
+from reblock.data.counts import OpenBuildingsCount
 from reblock.data.kblock import KblockSource
 from reblock.metric import AbsoluteGate, Compactness, Density, Depth, PercentileGate, Product
 from reblock.screen.dense_compact import DenseCompactScreen
@@ -9,14 +11,15 @@ _ROOT = Path(__file__).resolve().parent.parent
 
 def _src() -> KblockSource:
     return KblockSource(_ROOT / "data/kblock/blocks_dji_sample.parquet",
-                        _ROOT / "data/kblock/buildings_dji_sample.parquet", "dji")
+                        _ROOT / "data/kblock/buildings_dji_sample.parquet", "dji", min_buildings=10,
+                        block_ids=None, building_tier=SpacingDiscs, member_buildings=None)
 
 
 def test_depth_metric_selects_and_scores_by_true_depth() -> None:
     # metric=Depth with a permissive absolute gate: select() returns ids, selection_scores maps them
     # to the fine score (true max peel depth for Depth), and they agree on membership.
     screen = DenseCompactScreen(Depth(), AbsoluteGate(1.0), proxy_keep_n=1000,
-                                min_buildings=1)
+                                min_buildings=1, counts=OpenBuildingsCount())
     ids = screen.select(_src())
     scores = screen.selection_scores(_src())
     assert ids and set(scores) == set(ids)
@@ -40,7 +43,8 @@ def test_a_survivor_the_fine_pass_cannot_build_is_never_flagged() -> None:
 
     dc._survivor_depths = spy
     try:
-        screen = DenseCompactScreen(Depth(), PercentileGate(100.0), min_buildings=1)
+        screen = DenseCompactScreen(Depth(), PercentileGate(100.0), min_buildings=1,
+                                    proxy_keep_n=1000, counts=OpenBuildingsCount())
         ranked = dc._compute_selection(screen._selection_input(_src()))
     finally:
         dc._survivor_depths = real
@@ -60,8 +64,9 @@ def test_density_compactness_metric_skips_the_peel() -> None:
 
     dc._survivor_depths = spy
     try:
-        screen = DenseCompactScreen(Product([Density(), Compactness()]),
-                                    PercentileGate(20.0), min_buildings=1)
+        screen = DenseCompactScreen(Product([Density(), Compactness()], name="product"),
+                                    PercentileGate(20.0), min_buildings=1, proxy_keep_n=1000,
+                                    counts=OpenBuildingsCount())
         ids = screen.select(_src())
     finally:
         dc._survivor_depths = real

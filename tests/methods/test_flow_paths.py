@@ -19,6 +19,7 @@ from reblock.contracts import Block
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.flow_paths import FlowPathsReblocker, accumulate_flow
 from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 
 UTM = CRS.from_epsg(32734)
 
@@ -56,8 +57,13 @@ def test_it_is_sparser_than_a_drainage_tree_and_leaves_parcels_unserved() -> Non
     """Real footpaths do not reach every parcel; a drainage tree does, by construction. Keeping
     only the busiest edges is what buys the sparsity, and it is the point of the method."""
     block = _slab(6, 6)
-    flow_roads = FlowPathsReblocker(flow_quantile=0.90).propose(block).roads
-    tree_roads = ClearanceReblocker(depth_target=1).propose(block).roads
+    flow_roads = FlowPathsReblocker(flow_quantile=0.90, substrate=ChordSubstrate(),
+                                    destination="all_pairs", iterations=3, reinforcement=0.5,
+                                    max_sources=400, seed=0,
+                                    road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
+    tree_roads = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                                    max_roads=400,
+                                    road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
 
     assert flow_roads is not None and tree_roads is not None
     assert len(flow_roads) > 0, "produced nothing at all"
@@ -72,7 +78,10 @@ def test_a_higher_quantile_keeps_strictly_less() -> None:
     block = _slab(6, 6)
     lens = []
     for q in (0.50, 0.90, 0.99):
-        roads = FlowPathsReblocker(flow_quantile=q).propose(block).roads
+        roads = FlowPathsReblocker(flow_quantile=q, substrate=ChordSubstrate(),
+                                   destination="all_pairs", iterations=3, reinforcement=0.5,
+                                   max_sources=400, seed=0,
+                                   road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
         assert roads is not None
         lens.append(float(roads.geometry.length.sum()))
     assert lens[0] >= lens[1] >= lens[2], f"not monotone in the cut: {lens}"

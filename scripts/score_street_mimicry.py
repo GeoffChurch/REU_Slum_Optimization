@@ -35,6 +35,8 @@ from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.flow_paths import FlowPathsReblocker
 from reblock.methods.osm_footpaths import interior_desire_lines
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.pipeline import build_regions
 from reblock.presets import load_screen, load_source
 from reblock.region import DenseClusterRegionBuilder, region_block
@@ -78,13 +80,28 @@ def main() -> None:
     street_src = PbfDesireLines(pbf_path=DEFAULT_CACHE / "osm_pbf" / PBF_BY_ISO["ZAF"],
                                 tags=NEAR_MISS_TAGS)
     methods: dict[str, Method] = {
-        "flow_paths_q90": FlowPathsReblocker(flow_quantile=0.90),
-        "flow_paths_q97": FlowPathsReblocker(flow_quantile=0.97),
-        "flow_paths_q99": FlowPathsReblocker(flow_quantile=0.99),
-        "flow_paths_gateway_q97": FlowPathsReblocker(destination="gateway", flow_quantile=0.97),
-        "clearance": ClearanceReblocker(depth_target=1, max_roads=3000),
+        "flow_paths_q90": FlowPathsReblocker(flow_quantile=0.90, substrate=ChordSubstrate(),
+                                             destination="all_pairs", iterations=3,
+                                             reinforcement=0.5, max_sources=400, seed=0,
+                                             road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "flow_paths_q97": FlowPathsReblocker(flow_quantile=0.97, substrate=ChordSubstrate(),
+                                             destination="all_pairs", iterations=3,
+                                             reinforcement=0.5, max_sources=400, seed=0,
+                                             road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "flow_paths_q99": FlowPathsReblocker(flow_quantile=0.99, substrate=ChordSubstrate(),
+                                             destination="all_pairs", iterations=3,
+                                             reinforcement=0.5, max_sources=400, seed=0,
+                                             road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "flow_paths_gateway_q97": FlowPathsReblocker(destination="gateway", flow_quantile=0.97,
+                                                     substrate=ChordSubstrate(), iterations=3,
+                                                     reinforcement=0.5, max_sources=400, seed=0,
+                                                     road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "clearance": ClearanceReblocker(depth_target=1, max_roads=3000, substrate=ChordSubstrate(),
+                                        repulsion=0.0, road_width_m=DEFAULT_ROAD_WIDTH_M),
         "demand_greedy_uniform": DemandGreedyReblocker(desire_source=None, depth_target=1,
-                                                       max_roads=3000),
+                                                       max_roads=3000, substrate=ChordSubstrate(),
+                                                       buffer_m=3.0, eps=0.1, gamma=1.0,
+                                                       road_width_m=DEFAULT_ROAD_WIDTH_M),
     }
 
     rows: list[dict[str, object]] = []

@@ -44,7 +44,8 @@ UTM = CRS.from_epsg(32643)
 def _block_1808() -> Block:
     src = KblockSource(_REPO_ROOT / "tests/data/kblock/blocks_dji_sample.parquet",
                        _REPO_ROOT / "tests/data/kblock/buildings_dji_sample.parquet", "dji",
-                       block_ids=["DJI.3_1_1808"])
+                       block_ids=["DJI.3_1_1808"], min_buildings=10, building_tier=SpacingDiscs,
+                       member_buildings=None)
     return next(iter(src.region().blocks))
 
 

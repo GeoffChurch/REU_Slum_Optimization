@@ -27,7 +27,7 @@ from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import scoring
 from reblock.methods.arterial.costs import ArterialCost
 from reblock.methods.arterial.objectives import ArterialObjective, CommittedNetwork
-from reblock.methods.arterial.policies import CandidatePolicySpec, Grow
+from reblock.methods.arterial.policies import CandidatePolicySpec
 from reblock.methods.arterial.primitives import (
     _anchor_points,
     _candidate_chords,
@@ -390,8 +390,8 @@ class LazyEngine:
     and SLOWER in 4 of 6 -- an approximation for no speed. Use ShortlistEngine for access.
     """
 
-    policy: CandidatePolicySpec = Grow()
-    rescore_every: int = 0          # 0 = pure lazy; N = full re-score every N commits
+    policy: CandidatePolicySpec
+    rescore_every: int              # 0 = pure lazy; N = full re-score every N commits
 
     @property
     def identity(self) -> EngineIdentity:
@@ -426,8 +426,8 @@ class ShortlistEngine:
     no-op by construction: a few thousand candidates is one chunk.
     """
 
-    k: int = 512
-    threads: int = 8
+    k: int
+    threads: int
 
     @property
     def identity(self) -> EngineIdentity:

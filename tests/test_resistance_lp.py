@@ -16,6 +16,8 @@ from reblock.budget import _noded_graph, displacement
 from reblock.buildings import Discs, SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.resistance_lp import ResistanceLPReblocker, solve_coverage_lp
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
 
 CORRIDOR_M = 3.0
 
@@ -62,7 +64,9 @@ def test_displacement_budget_is_respected(cap: float) -> None:
     `test_lp_respects_displacement_budget` guards that row separately.
     """
     block = _grid_block()
-    roads = ResistanceLPReblocker(max_displacement=cap).propose(block).roads
+    roads = ResistanceLPReblocker(max_displacement=cap, substrate=ChordSubstrate(), max_road_m=1e6,
+                                  chunks=8, params=PermeabilityParams(),
+                                  road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None and len(roads) > 0, "no roads: the cap is vacuous"
     got = displacement(block.buildings, roads) / len(
         block.building_geometries)
@@ -82,7 +86,9 @@ def test_every_road_reaches_the_street() -> None:
     street, a suffix does not.
     """
     block = _grid_block()
-    roads = ResistanceLPReblocker(max_displacement=0.15).propose(block).roads
+    roads = ResistanceLPReblocker(max_displacement=0.15, substrate=ChordSubstrate(), max_road_m=1e6,
+                                  chunks=8, params=PermeabilityParams(),
+                                  road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None and len(roads) > 0
 
     graph = _noded_graph(roads, block.streets)

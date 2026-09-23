@@ -20,8 +20,8 @@ def test_identity_passthrough_returns_configured_block_ids() -> None:
     assert IdentityScreen(["a", "b"]).select(_StubSource()) == ["a", "b"]
 
 
-def test_identity_default_is_none_meaning_all() -> None:
-    assert IdentityScreen().select(_StubSource()) is None
+def test_identity_none_means_all() -> None:
+    assert IdentityScreen(block_ids=None).select(_StubSource()) is None
 
 
 def test_identity_copies_the_list_defensively() -> None:

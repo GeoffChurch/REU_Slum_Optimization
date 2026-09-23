@@ -97,7 +97,7 @@ def test_chord_substrate_builds_connected_graph_and_hits_target() -> None:
 
 
 @pytest.mark.parametrize("sub,tag,ident", [
-    (SpannerSubstrate(), "theta_spanner", ("theta_spanner", 6)),
+    (SpannerSubstrate(cones=6), "theta_spanner", ("theta_spanner", 6)),
     (CdtSubstrate(), "cdt_gap", ("cdt_gap",)),
 ])
 def test_extra_substrates_build_and_hit_target(sub: Substrate, tag: str, ident: object) -> None:

@@ -15,6 +15,7 @@ from shapely.geometry import Polygon, box
 
 from reblock.data.footprints import FootprintTiles, ParquetBuildings
 from reblock.derive_graph import source_hash
+from scripts.fetch_kblock_fixtures import OB_MIN_CONFIDENCE
 
 # Two adjacent S2-ish tiles; the blocks sit wholly inside the WEST one.
 _WEST = box(18.0, -34.5, 18.5, -33.5)
@@ -61,23 +62,27 @@ def test_fetches_only_the_tiles_covering_the_blocks(tmp_path: Path) -> None:
     """The whole point: a block costs the tile it sits in, not the corpus."""
     _manifest(tmp_path)
     fetch = _Fetch()
-    FootprintTiles(cache_dir=tmp_path, fetch=fetch).for_blocks(_blocks())
+    FootprintTiles(cache_dir=tmp_path, fetch=fetch,
+                   min_confidence=OB_MIN_CONFIDENCE).for_blocks(_blocks())
     assert fetch.urls == [_URL.format("w1")]
 
 
 def test_a_cached_tile_is_never_fetched_again(tmp_path: Path) -> None:
     _manifest(tmp_path)
-    FootprintTiles(cache_dir=tmp_path, fetch=_Fetch()).for_blocks(_blocks())
+    FootprintTiles(cache_dir=tmp_path, fetch=_Fetch(),
+                   min_confidence=OB_MIN_CONFIDENCE).for_blocks(_blocks())
 
     def forbidden(url: str, dest: Path) -> None:
         raise AssertionError(f"re-fetched a cached tile: {url}")
-    got = FootprintTiles(cache_dir=tmp_path, fetch=forbidden).for_blocks(_blocks())
+    got = FootprintTiles(cache_dir=tmp_path, fetch=forbidden,
+                         min_confidence=OB_MIN_CONFIDENCE).for_blocks(_blocks())
     assert len(got.buildings) == 5
 
 
 def test_returns_polygons_above_the_confidence_floor_with_their_area(tmp_path: Path) -> None:
     _manifest(tmp_path)
-    bld = FootprintTiles(cache_dir=tmp_path, fetch=_Fetch()).for_blocks(_blocks()).buildings
+    bld = FootprintTiles(cache_dir=tmp_path, fetch=_Fetch(),
+                         min_confidence=OB_MIN_CONFIDENCE).for_blocks(_blocks()).buildings
     assert set(bld.geometry.geom_type) == {"Polygon"}
     assert len(bld) == 5                                  # the 0.1-confidence row is dropped
     assert "area_in_meters" in bld.columns
@@ -87,7 +92,8 @@ def test_hands_back_the_source_sidecar_for_the_content_hash(tmp_path: Path) -> N
     """The caller hashes these; they must identify the SOURCE download, and be small -- hashing
     the parquet parts instead would re-read hundreds of MB per region() just to build a key."""
     _manifest(tmp_path)
-    used = FootprintTiles(cache_dir=tmp_path, fetch=_Fetch()).for_blocks(_blocks()).read_from
+    used = FootprintTiles(cache_dir=tmp_path, fetch=_Fetch(),
+                          min_confidence=OB_MIN_CONFIDENCE).for_blocks(_blocks()).read_from
     assert [p.name for p in used] == ["SOURCE_SHA256"]
     assert len(used[0].read_text()) == 64
 
@@ -100,10 +106,12 @@ def test_a_crash_mid_parse_never_leaves_a_tile_that_looks_cached(tmp_path: Path)
     def dies(url: str, dest: Path) -> None:
         raise RuntimeError("network died")
     with pytest.raises(RuntimeError):
-        FootprintTiles(cache_dir=tmp_path, fetch=dies).for_blocks(_blocks())
+        FootprintTiles(cache_dir=tmp_path, fetch=dies,
+                       min_confidence=OB_MIN_CONFIDENCE).for_blocks(_blocks())
     assert not any(tmp_path.glob("v*/w1"))
     fetch = _Fetch()                                      # and the next call really fetches
-    FootprintTiles(cache_dir=tmp_path, fetch=fetch).for_blocks(_blocks())
+    FootprintTiles(cache_dir=tmp_path, fetch=fetch,
+                   min_confidence=OB_MIN_CONFIDENCE).for_blocks(_blocks())
     assert fetch.urls == [_URL.format("w1")]
 
 
@@ -165,9 +173,12 @@ def test_footprint_parcels_are_identical_to_point_parcels(tmp_path: Path) -> Non
                      crs=4326).to_parquet(points_p)
 
     pts = next(iter(KblockSource(blocks_p, points_p, building_tier=SpacingDiscs,
-                                 min_buildings=4).region().blocks))
+                                 min_buildings=4, region_id="kblock", block_ids=None,
+                                 member_buildings=None).region().blocks))
     fp = next(iter(KblockSource(blocks_p, points_p, building_tier=Footprints, min_buildings=4,
-                                member_buildings=FootprintTiles(cache_dir=cache, fetch=fetch)
+                                member_buildings=FootprintTiles(cache_dir=cache, fetch=fetch,
+                                                                min_confidence=OB_MIN_CONFIDENCE),
+                                region_id="kblock", block_ids=None
                                 ).region().blocks))
     assert list(fp.parcels["parcel_id"]) == list(pts.parcels["parcel_id"])
     assert fp.parcels.geometry.equals(pts.parcels.geometry)
@@ -202,7 +213,8 @@ def test_building_rows_align_with_the_point_tier(tmp_path: Path) -> None:
             fh.write(csv)
 
     _manifest(tmp_path)
-    got = FootprintTiles(cache_dir=tmp_path, fetch=fetch).for_blocks(_blocks()).buildings
+    got = FootprintTiles(cache_dir=tmp_path, fetch=fetch,
+                         min_confidence=OB_MIN_CONFIDENCE).for_blocks(_blocks()).buildings
     ref = pd.read_csv(io.StringIO(csv), float_precision=OB_FLOAT_PRECISION)
     assert np.array_equal(got["longitude"].to_numpy(), ref["longitude"].to_numpy())
     assert np.array_equal(got["latitude"].to_numpy(), ref["latitude"].to_numpy())

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import geopandas as gpd
@@ -5,6 +6,7 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString
 
+from reblock.data.osm_extract import FOOTPATH_TAGS
 from reblock.methods.desire_lines import OSMDesireLines, _overpass_query, _parse_overpass_geom
 
 UTM = CRS.from_epsg(32734)   # a South-Africa UTM zone (projected), for reprojection assertions
@@ -52,6 +54,11 @@ def test_parse_overpass_geom_rejects_a_failed_query() -> None:
 
 _BBOX = (18.735, -33.849, 18.755, -33.834)
 
+# A live source, every setting spelled once at the values `conf/desire_source/osm.yaml` ships; each
+# test points it at a snapshot or a cache with `replace`.
+OSM = OSMDesireLines(tags=FOOTPATH_TAGS, endpoint="https://overpass-api.de/api/interpreter",
+                     cache_dir=None, snapshot=None, timeout_s=60.0)
+
 
 def _write_geojson(path: Path, lines_lonlat: list[list[tuple[float, float]]]) -> None:
     gdf = gpd.GeoDataFrame(geometry=[LineString(c) for c in lines_lonlat],
@@ -62,14 +69,14 @@ def _write_geojson(path: Path, lines_lonlat: list[list[tuple[float, float]]]) ->
 def test_osm_snapshot_is_loaded_without_fetching(tmp_path: Path) -> None:
     snap = tmp_path / "snap.geojson"
     _write_geojson(snap, [[(18.74, -33.84), (18.741, -33.841)]])
-    src = OSMDesireLines(snapshot=str(snap))
+    src = replace(OSM, snapshot=str(snap))
     src._fetch = lambda query: pytest.fail("must not fetch when a snapshot is present")  # type: ignore[method-assign]
     gdf = src.desire_lines(_BBOX, UTM)
     assert len(gdf) == 1 and gdf.crs == UTM
 
 
 def test_osm_cache_hit_is_loaded_without_fetching(tmp_path: Path) -> None:
-    src = OSMDesireLines(cache_dir=str(tmp_path))
+    src = replace(OSM, cache_dir=str(tmp_path))
     # Pre-seed the cache at the exact key path the source will look for.
     cache_path = src._cache_path(_BBOX)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,7 +90,7 @@ def test_osm_fetch_writes_cache_then_reuses_it(tmp_path: Path) -> None:
     calls = {"n": 0}
     payload = {"elements": [{"type": "way", "id": 1, "geometry": [
         {"lat": -33.84, "lon": 18.74}, {"lat": -33.841, "lon": 18.741}]}]}
-    src = OSMDesireLines(cache_dir=str(tmp_path))
+    src = replace(OSM, cache_dir=str(tmp_path))
     src._fetch = lambda query: (calls.__setitem__("n", calls["n"] + 1), payload)[1]  # type: ignore[method-assign, func-returns-value]
     a = src.desire_lines(_BBOX, UTM)
     b = src.desire_lines(_BBOX, UTM)          # second call: cache hit, no second fetch
@@ -93,7 +100,7 @@ def test_osm_fetch_writes_cache_then_reuses_it(tmp_path: Path) -> None:
 def test_osm_failed_query_is_never_cached(tmp_path: Path) -> None:
     """A failed query must fail the fetch. Parsed as an empty footpath set it was written to the
     disk cache, which then served "no footpaths" for that bbox forever after."""
-    src = OSMDesireLines(cache_dir=str(tmp_path))
+    src = replace(OSM, cache_dir=str(tmp_path))
     src._fetch = lambda query: _TIMED_OUT  # type: ignore[method-assign]
     with pytest.raises(RuntimeError):
         src.desire_lines(_BBOX, UTM)
@@ -101,8 +108,8 @@ def test_osm_failed_query_is_never_cached(tmp_path: Path) -> None:
 
 
 def test_osm_identity_none_when_live_stable_with_snapshot(tmp_path: Path) -> None:
-    assert OSMDesireLines().identity is None                       # live -> uncacheable
+    assert OSM.identity is None                       # live -> uncacheable
     snap = tmp_path / "snap.geojson"
     _write_geojson(snap, [[(18.74, -33.84), (18.741, -33.841)]])
-    ident = OSMDesireLines(snapshot=str(snap)).identity
+    ident = replace(OSM, snapshot=str(snap)).identity
     assert ident is not None and isinstance(ident, tuple) and ident[0] == "osm"  # stable identity

@@ -88,7 +88,7 @@ def main() -> None:
                   f"(total {(now - start) / 60:5.1f} min)", flush=True)
             m[0] = now
 
-        roads = _greedy_shortlist(block, realizer=SnapToBoundary(), objective=Access(),
+        roads = _greedy_shortlist(block, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=half_w, workers=WORKERS, max_roads=MAX_ROADS,
                                   max_anchors=cap, selector=FirstOrder(short, threads=THREADS),

@@ -17,18 +17,18 @@ from shapely.geometry import LineString
 from shapely.ops import nearest_points
 
 from reblock.contracts import Block, Proposal
-from reblock.derive.access import STREET_TOL, parcel_access_layers
+from reblock.derive.access import parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.derive_graph import config_identity
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.permeability import with_width
 
 
 @dataclass
 class PeelReblocker:
-    tol: float = STREET_TOL
+    tol: float
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:

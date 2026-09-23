@@ -74,7 +74,7 @@ def main() -> None:
         rec: dict[str, dict[str, float]] = {}
         for name, selector in arms:
             t0 = time.perf_counter()
-            r = _greedy_shortlist(b, realizer=SnapToBoundary(), objective=Access(),
+            r = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
                                   max_roads=MAX_ROADS, selector=selector)

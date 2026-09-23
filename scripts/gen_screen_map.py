@@ -42,9 +42,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
+from reblock.buildings import SpacingDiscs
 from reblock.data.counts import COUNTERS, BuildingCount, resolved
 from reblock.data.informal import label_blocks, settlement_extents
-from reblock.data.provision import cached_kblock_source
+from reblock.data.provision import DEFAULT_CACHE, cached_kblock_source
 from reblock.render import _CONTEXT_OUTLINE, _DISPLACED_PT, _PARCEL_LW, _ROAD_COLOR, save_render
 from scripts._bundle_io import cm, polygon_rings, sigfig
 
@@ -291,7 +292,9 @@ def load_blocks(city: str, epsg: int, counter: BuildingCount) -> gpd.GeoDataFram
     `gen_screen_bakeoff.py`'s own `load()` uses for Cape Town, generalised to both cities. The
     zero-area/zero-perimeter guard is defensive (measured empirically: no block above MIN_COUNT is
     degenerate on either cached parquet, so it never fires today) and mirrors that script's own."""
-    src = cached_kblock_source(city, min_buildings=MIN_COUNT)
+    src = cached_kblock_source(city, min_buildings=MIN_COUNT, block_ids=None,
+                               cache_dir=DEFAULT_CACHE, building_tier=SpacingDiscs,
+                               member_buildings=None)
     raw = gpd.read_parquet(src.blocks_path, columns=["block_id", "building_count", "geometry"])
     raw["block_id"] = raw["block_id"].astype(str)
     b = raw.to_crs(epsg)

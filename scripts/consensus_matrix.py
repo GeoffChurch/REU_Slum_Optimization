@@ -45,7 +45,7 @@ from reblock.data.settlements import exclusion_holdout
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.substrates import ChordSubstrate
-from reblock.permeability import permeability
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
 from scripts.pair_matrix import (
     _ot,
     desire_source,
@@ -172,7 +172,9 @@ def score_recipient(
         recipient, own_roads, donor_blocks, donor_roads, quality)
     cons = bc.length_matched_prefix(recipient, consensus, target) if len(consensus) else consensus
     sing = bc.length_matched_prefix(recipient, single, target) if len(single) else single
-    direct_full = ClearanceReblocker().propose(recipient).roads
+    direct_full = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
+                                     max_roads=400,
+                                     road_width_m=DEFAULT_ROAD_WIDTH_M).propose(recipient).roads
     cum = direct_full.geometry.length.cumsum()
     direct = direct_full[cum <= target] if target > 0 else direct_full.iloc[:0]
 

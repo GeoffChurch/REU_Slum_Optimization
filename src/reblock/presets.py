@@ -5,6 +5,9 @@ function here, which builds it and checks it against the protocol its caller is 
 so the `Any` stops in this module, and a preset that builds the wrong kind of thing fails at load,
 naming its `_target_`, rather than at first use hours into a run.
 
+The classes the presets name declare no field defaults, so a preset that omits, misspells or
+renames a field is a `TypeError` from its constructor -- also here, also at load.
+
 Loading is EAGER: an entry point builds everything it is configured with before it does any work,
 so a broken `all_methods` entry fails in the first second instead of after the screen has run. That
 makes every constructor part of startup, which is why none of them may touch the network (a

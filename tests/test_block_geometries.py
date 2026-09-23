@@ -5,6 +5,7 @@ proxy). See docs/superpowers/specs/2026-07-11-dense-cluster-region-builder-desig
 """
 from pathlib import Path
 
+from reblock.buildings import SpacingDiscs
 from reblock.data.kblock import KblockSource
 
 DJI_BLOCKS = Path(__file__).resolve().parent / "data" / "kblock" / "blocks_dji_sample.parquet"
@@ -12,7 +13,8 @@ DJI_BLD = Path(__file__).resolve().parent / "data" / "kblock" / "buildings_dji_s
 
 
 def test_block_geometries_includes_building_count() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     bg = src.block_geometries()
     assert "building_count_raw" in bg.columns
     assert "block_id" in bg.columns and "geometry" in bg.columns
@@ -21,14 +23,16 @@ def test_block_geometries_includes_building_count() -> None:
 
 
 def test_block_geometries_building_count_survives_block_ids_filter() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", block_ids=["DJI.3_1_3238"])
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", block_ids=["DJI.3_1_3238"],
+                       min_buildings=10, building_tier=SpacingDiscs, member_buildings=None)
     bg = src.block_geometries()
     assert list(bg["block_id"]) == ["DJI.3_1_3238"]
     assert int(bg.iloc[0]["building_count_raw"]) == 53
 
 
 def test_block_geometries_building_count_survives_bbox_window() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     allg = src.block_geometries()
     minx, miny, maxx, maxy = allg.total_bounds
     sub = (minx, miny, (minx + maxx) / 2, (miny + maxy) / 2)

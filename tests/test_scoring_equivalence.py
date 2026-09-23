@@ -166,7 +166,7 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     calls["n"] = 0
     _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(), objective=Directness(), cost=Length(), max_roads=2,
+        realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=2,
                                workers=1)
     assert calls["n"] > 0, "buildable must score candidates through the incremental scorer"
 

@@ -42,8 +42,14 @@ from reblock.budget import prefix_to_displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
-from reblock.methods.arterial import Access, Displacement, GreedyArterialReblocker, SnapToBoundary
-from reblock.permeability import permeability
+from reblock.methods.arterial import (
+    Access,
+    Displacement,
+    ExactEngine,
+    GreedyArterialReblocker,
+    SnapToBoundary,
+)
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
 from scripts.pair_matrix import evenly_spaced, load_pools
 
 SEEDS = [None, 1, 2, 3, 4, 5]      # None = unperturbed (the shipped answer)
@@ -93,8 +99,10 @@ def main() -> None:
         rec: dict[str, list[float]] = {"burden_red": [], "perm": [], "road_m": [], "n_roads": []}
         for seed in SEEDS:
             _patch(seed)
-            m = GreedyArterialReblocker(realizer=SnapToBoundary(), objective=Access(),
-                                        cost=Displacement(), workers=8, max_roads=8)
+            m = GreedyArterialReblocker(realizer=SnapToBoundary(lam=2.0), objective=Access(),
+                                        cost=Displacement(), workers=8, max_roads=8, n_anchors=32,
+                                        top_k=8, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                        engine=ExactEngine(), max_anchors=0)
             r = m.propose(b).roads
             if r is None or len(r) == 0:
                 continue
