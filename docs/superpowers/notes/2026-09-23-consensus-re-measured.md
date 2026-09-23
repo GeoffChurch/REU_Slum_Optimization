@@ -77,3 +77,10 @@ Medians per arm:
 - **The single-donor transplant is dominated by clearance on every measured axis.**
 - **Untested:** consensus with donors drawn from other cities or wider pools. The pool here is
   Cape Town's 2,500 donors, and the no-distance-effect result makes wider pools unpromising.
+
+## Decision
+Both donor methods (`method=consensus`, `method=donor_transplant`) are KEPT as research methods
+(owner, 2026-09-23), even though the single-donor transplant is dominated on every measured axis.
+They stay off every published example lineup and out of `compare_config`'s `all_methods`, so they
+cost the site nothing and are available if the donor line is reopened.
+
