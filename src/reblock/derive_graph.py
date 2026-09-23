@@ -16,7 +16,7 @@ import os
 from collections.abc import Callable, Hashable
 from functools import cache
 from pathlib import Path
-from typing import Any, Protocol, TypeVar, cast
+from typing import Protocol, TypeVar, cast
 
 import joblib
 import pyproj
@@ -28,7 +28,7 @@ _CACHE_DIR = Path(os.environ.get(
     "REBLOCK_CACHE_DIR", str(Path.home() / ".cache" / "reblock" / "derivations")))
 memory = joblib.Memory(location=str(_CACHE_DIR), verbose=0)
 
-_L1: dict[tuple[Any, ...], Any] = {}
+_L1: dict[tuple[object, ...], object] = {}
 
 def source_hash(*paths: Path) -> str:
     """sha256 over the sorted paths' names + bytes. Stable, content-sensitive,
@@ -95,8 +95,8 @@ def _imports_of(path: Path, module: str) -> set[str]:
     """
     out: set[str] = set()
     tree = ast.parse(path.read_text(), filename=str(path))
-    pkg = module.rsplit(".", 1)[0] if _module_file(module) and \
-        _module_file(module).name != "__init__.py" else module  # type: ignore[union-attr]
+    own = _module_file(module)
+    pkg = module.rsplit(".", 1)[0] if own is not None and own.name != "__init__.py" else module
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             out.update(a.name for a in node.names)
@@ -162,7 +162,7 @@ def _code_version_of(modules: frozenset[str]) -> str:
     return source_hash(*sorted(paths))
 
 
-def _code_version(fn: Callable[..., Any], inputs: tuple[object, ...]) -> str:
+def _code_version(fn: Callable[..., object], inputs: tuple[object, ...]) -> str:
     """The code a derivation actually runs, as a hash.
 
     The UNION of two things, because neither covers the other:
@@ -186,12 +186,13 @@ def clear_l1() -> None:
     _L1.clear()
 
 
-def _fn_identity(fn: Callable[..., Any],
+def _fn_identity(fn: Callable[..., object],
                  inputs: tuple[object, ...]) -> tuple[str, str, tuple[str, str]]:
     return (f"{fn.__module__}.{fn.__qualname__}", _code_version(fn, inputs), env_version())
 
 
-def _l2_impl(key: tuple[Any, ...], fn: Callable[..., Any], inputs: tuple[Any, ...]) -> Any:
+def _l2_impl(key: tuple[object, ...], fn: Callable[..., object],
+             inputs: tuple[object, ...]) -> object:
     return fn(*inputs)
 
 

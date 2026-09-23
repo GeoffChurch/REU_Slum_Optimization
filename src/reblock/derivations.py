@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pandas as pd
+from geopandas import GeoDataFrame
+from pyproj import CRS
 from shapely.geometry import Point, Polygon
 
 from reblock.contracts import Block, Method, Proposal
@@ -64,19 +66,19 @@ class VoronoiInput:
     block_id: str
     poly: Polygon
     points: list[Point]
-    crs: Any
+    crs: CRS
 
     @property
     def identity(self) -> tuple[str, str, str] | None:
         return ("voronoi", self.source_id, self.block_id) if self.source_id else None
 
 
-def _voronoi_impl(vin: VoronoiInput) -> Any:
+def _voronoi_impl(vin: VoronoiInput) -> GeoDataFrame | None:
     from reblock.data.kblock import _voronoi_parcels  # local import avoids a cycle
     return _voronoi_parcels(vin.poly, vin.points, vin.crs)
 
 
-def voronoi(vin: VoronoiInput) -> Any:
+def voronoi(vin: VoronoiInput) -> GeoDataFrame | None:
     return derive(_voronoi_impl, vin)
 
 
