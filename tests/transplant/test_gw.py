@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.special import logsumexp
 
 from reblock.transplant.gw import (
     GWParams,
@@ -18,7 +19,7 @@ from reblock.transplant.gw import (
     entropic_gw_unbalanced,
     gw_cost,
     gw_gradient,
-    sinkhorn_unbalanced_log,
+    sinkhorn_unbalanced,
 )
 from reblock.transplant.transport import normalized_dist_matrix
 
@@ -66,10 +67,10 @@ def test_large_tau_binds_the_marginals_and_small_tau_releases_them() -> None:
     cheap cells instead. Both directions, so neither can pass by the solver doing nothing."""
     cost = np.random.default_rng(4).uniform(size=(8, 6))
     p, q = np.full(8, 1 / 8), np.full(6, 1 / 6)
-    tight = sinkhorn_unbalanced_log(cost, p, q, eps=0.05, tau=1e6, n_iter=2000)
+    tight = sinkhorn_unbalanced(cost, p, q, eps=0.05, tau=1e6, n_iter=2000)
     np.testing.assert_allclose(tight.sum(axis=1), p, atol=1e-5)
     np.testing.assert_allclose(tight.sum(axis=0), q, atol=1e-5)
-    loose = sinkhorn_unbalanced_log(cost, p, q, eps=0.05, tau=0.05, n_iter=2000)
+    loose = sinkhorn_unbalanced(cost, p, q, eps=0.05, tau=0.05, n_iter=2000)
     assert np.abs(loose.sum(axis=1) - p).max() > 1e-3
 
 
@@ -95,3 +96,44 @@ def test_a_row_with_no_mass_projects_to_the_recipient_centroid() -> None:
     out = barycentric_projection(pi, y)
     np.testing.assert_allclose(out[0], [10.0 * 0.1 / 0.3, 0.0])
     np.testing.assert_allclose(out[1], y.mean(axis=0))
+
+
+def _log_domain_reference(cost: np.ndarray, p: np.ndarray, q: np.ndarray, *, eps: float,
+                          tau: float, n_iter: int) -> np.ndarray:
+    """The plain log-domain update, written out: what `sinkhorn_unbalanced` must reproduce."""
+    fw = tau / (tau + eps)
+    f, g = np.zeros(len(p)), np.zeros(len(q))
+    for _ in range(n_iter):
+        f = fw * eps * (np.log(p) - logsumexp((g[None, :] - cost) / eps, axis=1))
+        g = fw * eps * (np.log(q) - logsumexp((f[:, None] - cost) / eps, axis=0))
+    return np.exp((f[:, None] + g[None, :] - cost) / eps)
+
+
+@pytest.mark.parametrize("absorb_log", [100.0, 1e-9])   # the shipped threshold; absorb every step
+@pytest.mark.parametrize("n_iter", [1, 2, 100])
+def test_scaling_iterates_are_the_log_domain_iterates(
+        monkeypatch: pytest.MonkeyPatch, n_iter: int, absorb_log: float) -> None:
+    """The scaling-domain solver is a faster way to compute the SAME iterates, not a different
+    solver: the GW fits, and everything measured from them, rest on that. Holds with absorption
+    off and forced on every step, and at an eps small enough that an unabsorbed kernel would
+    underflow (cost/eps reaches 900 here, past exp's ~745 floor).
+
+    FAULT INJECTION: dropping the `+ fa / eps` term from the u update fails every case that
+    reaches the scaling loop (n_iter > 1); rebuilding the absorbed kernel without `ga` fails every
+    case that absorbs (the forced-absorption ones)."""
+    import reblock.transplant.gw as gw_mod
+    monkeypatch.setattr(gw_mod, "_ABSORB_LOG", absorb_log)
+    rng = np.random.default_rng(7)
+    for eps in (0.01, 0.001):
+        cost = rng.uniform(0.0, 0.9, size=(23, 31))
+        p, q = rng.dirichlet(np.ones(23)), rng.dirichlet(np.ones(31))
+        want = _log_domain_reference(cost, p, q, eps=eps, tau=1.0, n_iter=n_iter)
+        got = sinkhorn_unbalanced(cost, p, q, eps=eps, tau=1.0, n_iter=n_iter)
+        assert np.all(np.isfinite(got))
+        np.testing.assert_allclose(got, want, rtol=1e-9, atol=1e-300)
+
+
+def test_sinkhorn_needs_an_iteration() -> None:
+    with pytest.raises(ValueError, match="n_iter"):
+        sinkhorn_unbalanced(np.zeros((2, 2)), np.full(2, 0.5), np.full(2, 0.5), eps=0.01,
+                            tau=1.0, n_iter=0)
