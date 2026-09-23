@@ -15,5 +15,5 @@ reproduce and extend those results:
 - `operating_points` the named parameter sets every published result was measured at
 
 No derivation or method module imports this package, so nothing here is in any derivation's code
-closure and editing it never invalidates the cache.
+closure and editing it never invalidates the cache (`tests/transplant/test_isolation.py`).
 """

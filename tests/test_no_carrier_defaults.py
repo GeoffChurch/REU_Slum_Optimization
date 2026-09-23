@@ -17,6 +17,7 @@ import pytest
 
 from reblock.compare import MethodCurve
 from reblock.contracts import Block, Metrics, Proposal, Region, Result
+from reblock.data.pools import Pools, PoolSpec
 from reblock.pipeline import PipelineSpec, RunOutput
 from reblock.transplant.consensus import ConsensusField, ConsensusParams, DonorFit
 from reblock.transplant.gw import GWParams
@@ -25,8 +26,8 @@ from reblock.transplant.transport import Transport, TransportParams
 
 CARRIERS: list[type[Any]] = [
     Block, Proposal, Region, Metrics, Result, MethodCurve, RunOutput, PipelineSpec,
-    GWParams, TransportParams, Transport, SignatureParams, ConsensusParams, DonorFit,
-    ConsensusField]
+    PoolSpec, Pools, GWParams, TransportParams, Transport, SignatureParams, ConsensusParams,
+    DonorFit, ConsensusField]
 
 # `attrs` is an open bag of per-source extras (`kblock_k`, a probe's `interior_boundaries`) that
 # most constructions have nothing to put in, where an empty mapping is what "no extras" means. It
