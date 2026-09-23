@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import TypedDict
 
 from reblock.budget import prefix_to_displacement
 from reblock.derive.access import (
@@ -73,6 +74,26 @@ ARMS = (
 OUT = Path("scripts/perf/region_shortlist_confound.json")
 
 
+class BudgetMetrics(TypedDict):
+    """What an arm's road prefix scores at one displacement budget."""
+
+    burden_red: float
+    perm: float
+    road_m: float
+    n_roads: float
+
+
+class ArmRecord(TypedDict):
+    """One arm, exactly as written to `OUT`: keyed by label there, and by budget within `at`."""
+
+    max_anchors: int
+    shortlist: int
+    secs: float
+    cand: list[int]
+    at: dict[str, BudgetMetrics]
+    roads_wkt: list[str]
+
+
 def main() -> None:
     block = region_pool.blocks(REGION + 1)[REGION]
     n = len(block.parcels)
@@ -84,7 +105,7 @@ def main() -> None:
     ctx = EgressContext(adjacency, PermeabilityParams())
     b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
 
-    out: dict[str, dict[str, object]] = {}
+    out: dict[str, ArmRecord] = {}
     for label, cap, short in ARMS:
         per_step: list[int] = []
         t0 = time.perf_counter()
@@ -108,7 +129,7 @@ def main() -> None:
             print(f"    [{label}] no roads -- skipped", flush=True)
             continue
 
-        at: dict[str, dict[str, float]] = {}
+        at: dict[str, BudgetMetrics] = {}
         for d in BUDGETS:
             pre = prefix_to_displacement(block, roads, d)
             if len(pre) == 0:
@@ -131,28 +152,25 @@ def main() -> None:
     _report(out)
 
 
-def _report(out: dict[str, dict[str, object]]) -> None:
+def _report(out: dict[str, ArmRecord]) -> None:
     print(f"\n{'=' * 104}\nSHORTLIST CONFOUND -- region {REGION}, max_roads={MAX_ROADS}\n")
     print(f"  {'arm':<17}{'anchors':>9}{'shortlist':>11}{'cand(last)':>12}{'scored%':>9}"
           f"{'min':>7}" + "".join(f"{f'perm d={d:.2f}':>14}" for d in BUDGETS))
     for label, v in out.items():
         cand = v["cand"]
-        assert isinstance(cand, list)
         last = cand[-1] if cand else 0
-        short = int(v["shortlist"])  # type: ignore[arg-type]
+        short = v["shortlist"]
         at = v["at"]
-        assert isinstance(at, dict)
         cells = "".join(f"{at[f'{d:.2f}']['perm']:>14.4f}" if f"{d:.2f}" in at else f"{'--':>14}"
                         for d in BUDGETS)
-        anch = "uncapped" if int(v["max_anchors"]) == 0 else str(v["max_anchors"])  # type: ignore[arg-type]
+        anch = "uncapped" if v["max_anchors"] == 0 else str(v["max_anchors"])
         print(f"  {label:<17}{anch:>9}{short:>11}{last:>12,}{short / max(last, 1):>8.2%}"
-              f"{float(v['secs']) / 60:>7.1f}" + cells)  # type: ignore[arg-type]
+              f"{v['secs'] / 60:>7.1f}" + cells)
 
-    ladder = [(k, v) for k, v in out.items() if int(v["max_anchors"]) == 0]  # type: ignore[arg-type]
+    ladder = [(k, v) for k, v in out.items() if v["max_anchors"] == 0]
     target = out.get("cap128-s512")
     if len(ladder) >= 2 and target is not None:
         tat = target["at"]
-        assert isinstance(tat, dict)
         print("\n  DOES THE LADDER CLOSE THE GAP? uncapped perm minus cap=128 perm, per budget.\n"
               "  Climbing toward 0 as shortlist rises => the win is sampling DENSITY and the\n"
               "  honest lever is the shortlist, not the cap. Flat => the win is anchor SPREAD\n"
@@ -160,11 +178,10 @@ def _report(out: dict[str, dict[str, object]]) -> None:
         print(f"    {'shortlist':>10}" + "".join(f"{f'd={d:.2f}':>11}" for d in BUDGETS))
         for _, v in ladder:
             at = v["at"]
-            assert isinstance(at, dict)
             cells = "".join(
                 f"{at[f'{d:.2f}']['perm'] - tat[f'{d:.2f}']['perm']:>+11.4f}"
                 if f"{d:.2f}" in at and f"{d:.2f}" in tat else f"{'--':>11}" for d in BUDGETS)
-            print(f"    {int(v['shortlist']):>10}" + cells)  # type: ignore[arg-type]
+            print(f"    {v['shortlist']:>10}" + cells)
         print("\n  Matching cap=128's sampled fraction needs a shortlist near 20,000, which is\n"
               "  not affordable -- so read the SHAPE, not the endpoint. A gap that barely moves\n"
               "  across a 4-8x rise will not be closed by the remaining 40x.")

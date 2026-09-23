@@ -25,6 +25,7 @@ import time
 
 import numpy as np
 from shapely import STRtree
+from shapely.geometry import LineString
 
 from reblock.derive.access import (
     STREET_TOL,
@@ -39,7 +40,7 @@ CHUNK = 20_000          # chords per bulk query -- bounds the pair array, not th
 HALF_W = 3.0
 
 
-def ranked_gain(chords: list, weights: np.ndarray, tree: STRtree, radius: float
+def ranked_gain(chords: list[LineString], weights: np.ndarray, tree: STRtree, radius: float
                 ) -> tuple[np.ndarray, int]:
     """First-order gain per chord, chunked. Returns (gain, total hit pairs)."""
     out = np.zeros(len(chords))

@@ -50,6 +50,7 @@ def main() -> None:
         t = time.monotonic()
         r = m.propose(blk).roads
         el = time.monotonic() - t
+        assert r is not None, "the arterial reblocker always proposes a road frame"
         print(f"  {ma:>12}{el:>10.1f}{len(r):>7}{r.geometry.length.sum():>10.0f}", flush=True)
 
 if __name__ == "__main__":

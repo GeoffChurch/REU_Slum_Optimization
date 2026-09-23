@@ -32,10 +32,11 @@ attributable to near-ties in the argmax and nothing else.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
+from shapely.geometry import LineString
+from shapely.geometry.base import BaseGeometry
 
 import reblock.methods.arterial.engines as art
 from reblock.budget import prefix_to_displacement
@@ -76,13 +77,13 @@ _JITTER_SEED: int | None = None
 _ORIG_EVAL = art.eval_candidate
 
 
-def _jittered(chord: object) -> tuple[float, object]:
-    gain, real = _ORIG_EVAL(chord)                                  # type: ignore[arg-type]
+def _jittered(chord: LineString) -> tuple[float, BaseGeometry | None]:
+    gain, real = _ORIG_EVAL(chord)
     if _JITTER_SEED is None or not np.isfinite(gain) or gain == 0.0:
         return gain, real
     # deterministic per (seed, candidate), so a rerun with the same seed reproduces exactly
-    h = abs(hash((_JITTER_SEED, round(float(chord.length), 9),      # type: ignore[attr-defined]
-                  round(float(chord.centroid.x), 6))))              # type: ignore[attr-defined]
+    h = abs(hash((_JITTER_SEED, round(float(chord.length), 9),
+                  round(float(chord.centroid.x), 6))))
     u = (np.random.default_rng(h % (2**32)).random() - 0.5) * 2.0
     return gain * (1.0 + EPS * u), real
 
@@ -91,7 +92,7 @@ def _patch(seed: int | None) -> None:
     """Perturb each candidate's GAIN by a relative `EPS`; None restores the shipped scorer."""
     global _JITTER_SEED
     _JITTER_SEED = seed
-    art.eval_candidate = _ORIG_EVAL if seed is None else _jittered   # type: ignore[assignment]
+    art.eval_candidate = _ORIG_EVAL if seed is None else _jittered
 
 
 def main() -> None:
@@ -146,8 +147,7 @@ def main() -> None:
     identical = sum(1 for v in rows.values() if len(set(np.round(v["burden_red"], 12))) == 1)
     print(f"\n  blocks where every perturbation gave the SAME burden reduction: "
           f"{identical}/{len(rows)}")
-    return None
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

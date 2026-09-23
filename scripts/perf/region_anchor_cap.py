@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import TypedDict
 
 from reblock.budget import prefix_to_displacement
 from reblock.derive.access import (
@@ -61,6 +62,18 @@ CAPS = (128, 256, 0)   # cheapest first; 0 == uncapped == the shipped default, ~
 OUT = Path("scripts/perf/region_anchor_cap.json")
 
 
+class CapArm(TypedDict):
+    """One `max_anchors` arm, exactly as written to `OUT` under its label."""
+
+    burden_red: float
+    perm: float
+    secs: float
+    road_m: float
+    n_roads: int
+    cand: list[int]
+    roads_wkt: list[str]
+
+
 def main() -> None:
     block = region_block_cached()
     n = len(block.parcels)
@@ -73,7 +86,7 @@ def main() -> None:
     b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
     print(f"  baseline burden {b0:.4f}\n", flush=True)
 
-    out: dict[str, dict[str, object]] = {}
+    out: dict[str, CapArm] = {}
     for cap in CAPS:
         label = "uncapped" if cap == 0 else str(cap)
         print(f"  --- max_anchors={label} ---", flush=True)
@@ -125,10 +138,9 @@ def main() -> None:
           f"{'cand step1':>13}{'last':>11}{'growth':>9}")
     for label, v in out.items():
         cand = v["cand"]
-        assert isinstance(cand, list)
         f, ln = (cand[0], cand[-1]) if cand else (0, 0)
-        print(f"  {label:<14}{float(v['burden_red']):>12.4f}{float(v['perm']):>10.4f}"  # type: ignore[arg-type]
-              f"{float(v['road_m']):>10.0f}{float(v['secs']) / 60:>8.1f}"  # type: ignore[arg-type]
+        print(f"  {label:<14}{v['burden_red']:>12.4f}{v['perm']:>10.4f}"
+              f"{v['road_m']:>10.0f}{v['secs'] / 60:>8.1f}"
               f"{f:>13,}{ln:>11,}{ln / max(f, 1):>8.2f}x")
 
     if "uncapped" in out:
@@ -137,9 +149,9 @@ def main() -> None:
         for label, v in out.items():
             if label == "uncapped":
                 continue
-            db = float(v["burden_red"]) - float(ref["burden_red"])  # type: ignore[arg-type]
-            dp = float(v["perm"]) - float(ref["perm"])              # type: ignore[arg-type]
-            sp = float(ref["secs"]) / float(v["secs"])              # type: ignore[arg-type]
+            db = v["burden_red"] - ref["burden_red"]
+            dp = v["perm"] - ref["perm"]
+            sp = ref["secs"] / v["secs"]
             print(f"    {label:<8} burden {db:+.4f}   perm {dp:+.4f}   {sp:.1f}x faster")
         print("\n  n=1 block, so these are differences, not intervals. Block scale put the paired\n"
               "  noise band at roughly +-0.03-0.09 burden; a region delta inside that is not a\n"
