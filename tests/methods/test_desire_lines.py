@@ -71,7 +71,7 @@ def test_osm_snapshot_is_loaded_without_fetching(tmp_path: Path) -> None:
     _write_geojson(snap, [[(18.74, -33.84), (18.741, -33.841)]])
     src = replace(OSM, snapshot=str(snap))
     src._fetch = lambda query: pytest.fail("must not fetch when a snapshot is present")  # type: ignore[method-assign]
-    gdf = src.desire_lines(_BBOX, UTM)
+    gdf = src.footpaths(_BBOX, UTM)
     assert len(gdf) == 1 and gdf.crs == UTM
 
 
@@ -82,7 +82,7 @@ def test_osm_cache_hit_is_loaded_without_fetching(tmp_path: Path) -> None:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     _write_geojson(cache_path, [[(18.74, -33.84), (18.741, -33.841)]])
     src._fetch = lambda query: pytest.fail("must not fetch on a cache hit")  # type: ignore[method-assign]
-    gdf = src.desire_lines(_BBOX, UTM)
+    gdf = src.footpaths(_BBOX, UTM)
     assert len(gdf) == 1
 
 
@@ -92,8 +92,8 @@ def test_osm_fetch_writes_cache_then_reuses_it(tmp_path: Path) -> None:
         {"lat": -33.84, "lon": 18.74}, {"lat": -33.841, "lon": 18.741}]}]}
     src = replace(OSM, cache_dir=str(tmp_path))
     src._fetch = lambda query: (calls.__setitem__("n", calls["n"] + 1), payload)[1]  # type: ignore[method-assign, func-returns-value]
-    a = src.desire_lines(_BBOX, UTM)
-    b = src.desire_lines(_BBOX, UTM)          # second call: cache hit, no second fetch
+    a = src.footpaths(_BBOX, UTM)
+    b = src.footpaths(_BBOX, UTM)          # second call: cache hit, no second fetch
     assert len(a) == 1 and len(b) == 1 and calls["n"] == 1
 
 
@@ -103,7 +103,7 @@ def test_osm_failed_query_is_never_cached(tmp_path: Path) -> None:
     src = replace(OSM, cache_dir=str(tmp_path))
     src._fetch = lambda query: _TIMED_OUT  # type: ignore[method-assign]
     with pytest.raises(RuntimeError):
-        src.desire_lines(_BBOX, UTM)
+        src.footpaths(_BBOX, UTM)
     assert not src._cache_path(_BBOX).exists()
 
 

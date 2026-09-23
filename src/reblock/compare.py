@@ -15,7 +15,12 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf, open_dict
 from shapely.ops import unary_union
 
-from reblock.budget import Curve, displacement_curve
+from reblock.budget import (
+    Curve,
+    displacement_curve,
+    prefix_to_displacement,
+    prefix_to_permeability,
+)
 from reblock.contracts import Block, Method
 from reblock.derivations import propose
 from reblock.emit import compare_report as compare_report
@@ -62,6 +67,28 @@ def load_permeability_config(config_dir: Path = Path("conf")) -> PermeabilityCon
         matched_displacement=float(raw.matched_displacement),
         matched_permeability=float(raw.matched_permeability),
         frontier_xmax=float(raw.frontier_xmax))
+
+
+@dataclass(frozen=True, eq=False)
+class LensPrefixes:
+    """One method's roads truncated by both lenses: the matched-budget comparison every method is
+    reported at. Both are prefixes in `budget.street_first_ordered` order, so each is a connected
+    network reaching the street."""
+
+    displacement: GeoDataFrame    # Lens A: the first prefix displacing >= matched_displacement
+    permeability: GeoDataFrame    # Lens B: the first prefix reaching >= matched_permeability
+    reached: bool                 # Lens B: False when the whole network falls short of P*
+
+
+def lens_prefixes(ctx: EgressContext, roads: GeoDataFrame,
+                  pcfg: PermeabilityConfig) -> LensPrefixes:
+    """THE truncation: what `scripts/compare_budgets` reports every method at, and what every arm
+    of a study scored at matched budget must go through. A network that cannot reach a lens's
+    target comes back whole, in canonical order (`prefix_to_*`'s best effort)."""
+    permeability_prefix, reached = prefix_to_permeability(ctx, roads, pcfg.matched_permeability)
+    return LensPrefixes(
+        displacement=prefix_to_displacement(ctx.block, roads, pcfg.matched_displacement),
+        permeability=permeability_prefix, reached=reached)
 
 
 @dataclass(frozen=True)

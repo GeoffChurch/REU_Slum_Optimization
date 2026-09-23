@@ -19,7 +19,9 @@ from shapely.errors import GEOSException
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from reblock.methods.osm_footpaths import interior_desire_lines
+from reblock.contracts import Block
+from reblock.methods.desire_lines import DesireField, mapped_field
+from reblock.methods.osm_footpaths import block_footpaths, interior_desire_lines
 
 # The shipped osm_footpaths tag set, imported by conf/desire_source/_footpath_tags.yaml so the
 # census and the method can never disagree about what a footpath is.
@@ -85,7 +87,7 @@ def read_pbf_lines(pbf_path: Path, tags: Sequence[str] = FOOTPATH_TAGS) -> gpd.G
     GDAL OSM driver building its multi-GB temp SQLite database, which happens regardless.
 
     The census must call this ONCE per UTM batch and query an STRtree per block -- not once per
-    block. `DesireLineSource.desire_lines` is a per-bbox API and there are 1.81M blocks.
+    block. `FootpathSource.footpaths` is a per-bbox API and there are 1.81M blocks.
     """
     if isinstance(tags, str):
         # A bare str IS a Sequence[str], so `tags="path"` typechecks but iterates
@@ -107,7 +109,7 @@ def read_pbf_lines(pbf_path: Path, tags: Sequence[str] = FOOTPATH_TAGS) -> gpd.G
 
 @dataclass
 class PbfDesireLines:
-    """A DesireLineSource backed by a local Geofabrik .osm.pbf extract.
+    """A FootpathSource and DesireLineSource backed by a local Geofabrik .osm.pbf extract.
 
     A second implementation alongside OSMDesireLines, not a replacement: the operating ranges are
     disjoint (a PBF covers its extract; Overpass covers any bbox). At 1.81M blocks a bulk extract
@@ -133,7 +135,10 @@ class PbfDesireLines:
     _digest_cache: tuple[tuple[int, int], str] | None = field(
         default=None, init=False, repr=False, compare=False)
 
-    def desire_lines(
+    def desire_field(self, block: Block) -> DesireField:
+        return mapped_field(block_footpaths(self, block))
+
+    def footpaths(
         self, bbox_wgs84: tuple[float, float, float, float], crs: CRS
     ) -> gpd.GeoDataFrame:
         if self._cache is None:

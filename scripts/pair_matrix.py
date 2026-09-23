@@ -51,20 +51,17 @@ from reblock.compare import load_permeability_config
 from reblock.contracts import Block, Method
 from reblock.data.pools import (
     DonorSkip,
-    capetown_pool,
     evenly_spaced,
     fetch_donor_lines,
     iso_of,
-    load_pools,
     overpass_footpaths,
     pbf_footpaths,
-    zone_pool,
 )
 from reblock.data.settlements import exclusion_holdout
 from reblock.derivations import access_before
 from reblock.emit import pct_displaced
 from reblock.methods.clearance import ClearanceReblocker
-from reblock.methods.desire_lines import DesireLineSource
+from reblock.methods.osm_footpaths import FootpathSource
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
@@ -83,6 +80,7 @@ from reblock.transplant.transport import (
     parcel_xy,
     transport_lines,
 )
+from scripts._donor_pool import donor_pool
 
 CONF = Path("conf")
 
@@ -615,7 +613,9 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="  %(message)s")
     print("loading pools...")
     t_load = time.time()
-    pools = load_pools(zone_pool(CONF, args.utm_zone) if args.utm_zone else capetown_pool(CONF))
+    pools = donor_pool(*(
+        ["donor_pool=shortlist_zone", f"donor_pool.spec.stages.source.epsg={args.utm_zone}"]
+        if args.utm_zone else ["donor_pool=capetown"])).pools()
     blocks, blocks_gdf = pools.blocks, pools.blocks_gdf
     # The cheap proxy, once for the whole pool: it only stratifies donor candidates by
     # similarity before a real GW fit is paid for, and is never written in place of it.
@@ -640,8 +640,8 @@ def main() -> None:
     recipient_idx = evenly_spaced(pools.recipients, parcel_counts, n_recipients)
     donor_set = set(pools.donors)
 
-    source: DesireLineSource = (pbf_footpaths(iso_of(blocks)) if args.desire_source == "pbf"
-                                else overpass_footpaths())
+    source: FootpathSource = (pbf_footpaths(iso_of(blocks)) if args.desire_source == "pbf"
+                              else overpass_footpaths())
     scorer = pair_scorer()
     donor_cache: dict[str, gpd.GeoDataFrame | DonorSkip] = {}
 

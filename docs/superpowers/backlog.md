@@ -1880,7 +1880,7 @@ not move it much, but that is an argument, not a measurement.
 ## Presets spell every field -- what still has a default (2026-09-23)
 
 Every class conf/ instantiates declares its fields without defaults, so a preset that omits one is
-a `TypeError` at load, and `tests/test_presets.py` loads them all. Three copies of a shipped value
+a `TypeError` at load, and `tests/test_presets.py` loads them all. Two copies of a shipped value
 survive outside the presets:
 
 - **`PermeabilityParams` keeps its defaults.** The in-browser solver (`web/src/py/solve.py`) builds
@@ -1890,9 +1890,6 @@ survive outside the presets:
   `compare.load_permeability_config` reads the same numbers from `conf/permeability.yaml`. Equal
   today only because neither has been tuned alone. Needs the authoring bundle to carry the params
   (a bake); then the defaults go and both readers take `conf/permeability.yaml`.
-- **`demand_edge_weights` defaults `buffer_m`/`eps`/`gamma`** to the module constants the
-  `demand_greedy` preset now spells, for its one remaining direct caller that omits them (a test;
-  `scripts/consensus_matrix` now extracts through `reblock.transplant.consensus`).
 - **`OSMDesireLines.cache_dir: null` means `~/.cache/reblock/osm`**, resolved inside the class; the
   footprint and full-city caches name their directory in the preset instead.
 

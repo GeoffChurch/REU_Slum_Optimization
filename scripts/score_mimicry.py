@@ -29,26 +29,20 @@ from typing import cast
 import geopandas as gpd
 import pandas as pd
 
-from reblock.contracts import Block, Method
+from reblock.contracts import Method
 from reblock.data.osm_extract import FOOTPATH_TAGS, NEAR_MISS_TAGS, PbfDesireLines
-from reblock.data.pools import capetown_pool, evenly_spaced, iso_of, load_pools, pbf_path
+from reblock.data.pools import evenly_spaced, iso_of, pbf_path
 from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
+from reblock.methods.desire_lines import NoDesire
 from reblock.methods.flow_paths import FlowPathsReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
-from reblock.methods.osm_footpaths import interior_desire_lines
+from reblock.methods.osm_footpaths import block_footpaths
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
-
-
-def _reference(block: Block, source: PbfDesireLines) -> gpd.GeoDataFrame:
-    b = gpd.GeoSeries([block.boundary], crs=block.crs).to_crs(4326).total_bounds
-    lines = source.desire_lines((float(b[0]), float(b[1]), float(b[2]), float(b[3])), block.crs)
-    from shapely.ops import unary_union
-    streets = unary_union(list(block.streets.geometry))
-    return interior_desire_lines(lines, block.boundary, streets, block.crs)
+from scripts._donor_pool import donor_pool
 
 
 def agreement(proposal: gpd.GeoDataFrame, reference: gpd.GeoDataFrame) -> dict[str, float]:
@@ -68,7 +62,7 @@ def main() -> None:
                     default=Path("data/benchmarks/mimicry_scores.parquet"))
     args = ap.parse_args()
 
-    pools = load_pools(capetown_pool(Path("conf")))
+    pools = donor_pool("donor_pool=capetown").pools()
     blocks = pools.blocks
     pbf = pbf_path(iso_of(blocks))
     foot_src = PbfDesireLines(pbf_path=pbf, tags=FOOTPATH_TAGS)
@@ -108,7 +102,7 @@ def main() -> None:
                                                search_radius_m=45.0, snap_lam=2.0,
                                                max_candidates=1500,
                                                road_width_m=DEFAULT_ROAD_WIDTH_M),
-        "demand_greedy_uniform": DemandGreedyReblocker(desire_source=None, depth_target=1,
+        "demand_greedy_uniform": DemandGreedyReblocker(desire_source=NoDesire(), depth_target=1,
                                                        substrate=ChordSubstrate(), buffer_m=3.0,
                                                        eps=0.1, gamma=1.0, max_roads=400,
                                                        road_width_m=DEFAULT_ROAD_WIDTH_M),
@@ -117,8 +111,8 @@ def main() -> None:
     rows: list[dict[str, object]] = []
     for n, i in enumerate(chosen, 1):
         block = blocks[i]
-        foot = _reference(block, foot_src)
-        street = _reference(block, street_src)
+        foot = block_footpaths(foot_src, block)
+        street = block_footpaths(street_src, block)
         if foot.empty:
             continue
         target_len = float(foot.geometry.length.sum())

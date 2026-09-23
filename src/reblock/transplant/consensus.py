@@ -1,16 +1,17 @@
 """Barycenter consensus: route the recipient's own substrate toward where several donors agree.
 
-Each donor's network is transported onto the recipient (`transport`), buffered into a corridor,
-and the corridors are summed under per-donor weights into one demand field on [0, 1]. The network
-is then extracted by `clearance.greedy_drainage` on the recipient's substrate -- the same
-worst-served-parcel-first drainage tree every shipped greedy method builds -- with each edge
-costing `length / (eps + demand)^gamma`. Every road is a substrate edge, so none crosses a
-building, and the tree still serves every parcel wherever the donors are silent.
+`ConsensusDesireSource` is a `DesireLineSource`. For a recipient it fits its donors (`donors`),
+and returns each one's transported footpaths as one group of a desire field, weighted
+`quality_i * exp(-gw_i / tau)` and normalized to sum 1, so demand lies in [0, 1]. The network is
+then extracted by `demand_greedy.DemandGreedyReblocker` like any other field: worst-served parcel
+first on the recipient's substrate, each edge costing `length / (eps + demand)^gamma`. Every road is
+a substrate edge, so none crosses a building, and the tree still serves every parcel wherever the
+donors are silent. `conf/method/consensus.yaml` is the operating point every published consensus
+result was measured at; `conf/donors/` holds its held-out and leaky donor draws.
 
-This is `methods.demand_greedy` with a WEIGHTED field. `demand_greedy.demand_edge_weights` reads a
-single set of lines as a binary corridor and so cannot carry per-donor weights; with one donor the
-two are the same function (`tests/transplant/test_consensus.py` pins that). Generalizing it in
-place would move the demand_greedy derivation's code hash, so the weighted form lives here.
+It reaches `demand_greedy` only by configuration, never by import, so this package stays out of
+every shipped module's code closure (`tests/transplant/test_isolation.py`). What keeps a cached
+consensus proposal honest instead is `identity`, which carries this module's own closure hash.
 
 What the k-sweep found this buys (docs/superpowers/notes/2026-07-28-consensus-k-sweep-and-
 displacement.md): at k=1 the extraction beats gap-snapping the same donor by +0.303 permeability
@@ -18,63 +19,18 @@ in 95% of blocks, and k=30 adds nothing over k=1. The gain is the extraction, no
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import cast
 
 import geopandas as gpd
 import numpy as np
-import shapely
-from shapely.geometry import Polygon
-from shapely.geometry.base import BaseGeometry
-from shapely.ops import unary_union
 
-from reblock.budget import street_first_ordered
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL
-from reblock.methods.clearance import greedy_drainage
-from reblock.methods.substrates import RoutingGraph, Substrate
-from reblock.permeability import with_width
-from reblock.transplant.gw import Arr
-from reblock.transplant.transport import TransportParams, fit_transport, parcel_xy, transport_lines
-
-
-@dataclass(frozen=True)
-class ConsensusParams:
-    substrate: Substrate    # the recipient graph the consensus is routed on
-    buffer_m: float         # corridor radius around each transported network
-    eps: float              # demand floor: an edge no corridor reaches costs length / eps^gamma
-    gamma: float            # demand exponent
-    depth_target: int       # stop once every parcel is within this many parcels of a road
-    max_roads: int
-    road_width_m: float     # stamped on every extracted road
-
-
-@dataclass(frozen=True, eq=False)
-class DonorFit:
-    """One donor's network carried into the recipient's frame (pre-snap), and how far apart the
-    two blocks' shapes are."""
-
-    block_id: str
-    transported: gpd.GeoDataFrame
-    gw_dist: float
-
-
-def fit_donors(recipient: Block, donors: Sequence[Block],
-               networks: Mapping[str, gpd.GeoDataFrame],
-               params: TransportParams) -> list[DonorFit]:
-    """One GW fit per donor, in `donors` order -- the expensive half. Kept apart from extraction
-    so a k-sweep fits once at the largest k and reuses the first k at every smaller one, which
-    also nests the rungs: k=3's donors are a subset of k=15's."""
-    r_xy = parcel_xy(recipient)
-    fits: list[DonorFit] = []
-    for donor in donors:
-        fit = fit_transport(parcel_xy(donor), r_xy, params)
-        fits.append(DonorFit(
-            block_id=donor.block_id,
-            transported=transport_lines(networks[donor.block_id], fit, crs=recipient.crs),
-            gw_dist=fit.gw_dist))
-    return fits
+from reblock.derive_graph import closure_hash, config_identity, derive
+from reblock.emit import pct_displaced
+from reblock.methods.desire_lines import DesireField, WeightedLines
+from reblock.permeability import EgressContext, PermeabilityParams, permeability, with_width
+from reblock.transplant.donors import DonorFit, Donors
 
 
 def consensus_weights(fits: Sequence[DonorFit], quality: Mapping[str, float]) -> list[float]:
@@ -85,84 +41,69 @@ def consensus_weights(fits: Sequence[DonorFit], quality: Mapping[str, float]) ->
         raise ValueError(f"median donor GW distance is {tau}; closeness exp(-gw/tau) needs tau > 0")
     weights: list[float] = []
     for f in fits:
-        q = quality[f.block_id]
+        q = quality[f.donor.block_id]
         if not np.isfinite(q):
-            raise ValueError(f"donor {f.block_id} has non-finite quality {q}")
+            raise ValueError(f"donor {f.donor.block_id} has non-finite quality {q}")
         weights.append(q * float(np.exp(-f.gw_dist / tau)))
     return weights
 
 
+def normalized(weights: Sequence[float]) -> tuple[float, ...]:
+    """Weights over their sum. If every one is zero -- no donor's own network is worth anything --
+    they fall to uniform, which leaves the plain union of corridors."""
+    total = sum(weights)
+    return (tuple(w / total for w in weights) if total > 0
+            else tuple(1.0 / len(weights) for _ in weights))
+
+
 @dataclass(frozen=True, eq=False)
-class ConsensusField:
-    """Weighted corridors: the demand at a point is the total weight of the corridors holding it.
-    Weights sum to 1, so demand lies in [0, 1]."""
+class _QualityInput:
+    """Identified carrier: how good one donor's own network is on its own block."""
 
-    corridors: tuple[BaseGeometry, ...]
-    weights: tuple[float, ...]
+    donor: Block
+    footpaths: gpd.GeoDataFrame
+    footpaths_identity: Hashable | None
+    params: PermeabilityParams
+    road_width_m: float
 
-    @classmethod
-    def of(cls, networks: Sequence[gpd.GeoDataFrame], weights: Sequence[float],
-           buffer_m: float) -> ConsensusField:
-        """Each network buffered by `buffer_m`, an empty one to an empty corridor. Weights are
-        normalized to sum 1; if every weight is zero -- no donor's own network is worth anything
-        -- they fall to uniform, which leaves the plain union of corridors."""
-        corridors = tuple(unary_union(list(n.geometry)).buffer(buffer_m) if len(n) else Polygon()
-                          for n in networks)
-        total = sum(weights)
-        norm = (tuple(w / total for w in weights) if total > 0
-                else tuple(1.0 / len(weights) for _ in weights))
-        return cls(corridors=corridors, weights=norm)
-
-    def sample(self, pts: Arr) -> Arr:
-        out = np.zeros(len(pts), dtype=np.float64)
-        for corridor, w in zip(self.corridors, self.weights, strict=True):
-            if w <= 0.0 or corridor.is_empty:
-                continue
-            out[shapely.contains_xy(corridor, pts[:, 0], pts[:, 1])] += w
-        return out
+    @property
+    def identity(self) -> Hashable | None:
+        params = config_identity(self.params)
+        if self.footpaths_identity is None or params is None:
+            return None
+        return ("donor_quality", self.footpaths_identity, params, self.road_width_m)
 
 
-def consensus_edge_weights(graph: RoutingGraph, field: ConsensusField, *, eps: float,
-                           gamma: float) -> Arr:
-    """`length / (eps + demand)^gamma` per edge, in the graph's symmetric COO order, with demand
-    the mean of the field at both endpoints and the midpoint -- `demand_edge_weights`' three-point
-    convention, so an edge whose middle leaves every corridor does not read as cheap."""
-    pts, rows, cols, edist = graph.pts, graph.rows, graph.cols, graph.edist
-    n = len(pts)
-    mask = rows < cols                                  # one direction per undirected edge
-    ui, uj, ulen = rows[mask], cols[mask], edist[mask]
-    e = len(ui)
-    if e == 0:
-        return np.zeros(0, dtype=np.float64)
-    dem = field.sample(np.vstack([pts[ui], pts[uj], (pts[ui] + pts[uj]) / 2.0]))
-    mean_dem = (dem[:e] + dem[e:2 * e] + dem[2 * e:]) / 3.0
-    uw = ulen / (eps + mean_dem) ** gamma
-    key = np.minimum(rows, cols).astype(np.int64) * n + np.maximum(rows, cols).astype(np.int64)
-    ukey = ui.astype(np.int64) * n + uj.astype(np.int64)
-    order = np.argsort(ukey)
-    return uw[order][np.searchsorted(ukey[order], key)]
+def _quality_impl(inp: _QualityInput) -> float:
+    """`own_perm * (1 - own_disp)`, the donor's footpaths scored as the streets `osm_footpaths`
+    would build on them. A donor with an excellent network is worth more in the consensus than a
+    close-but-poorly-served one, which is why weight is quality x proximity, not proximity alone."""
+    roads = with_width(inp.footpaths, inp.road_width_m)
+    perm = permeability(EgressContext.of(inp.donor, inp.params), roads)
+    return float(perm * (1.0 - pct_displaced(roads, inp.donor.buildings)))
 
 
-def extract_consensus(recipient: Block, fits: Sequence[DonorFit], quality: Mapping[str, float],
-                      params: ConsensusParams) -> gpd.GeoDataFrame:
-    """The consensus network over `fits`, in greedy construction order, widths stamped."""
-    field = ConsensusField.of([f.transported for f in fits], consensus_weights(fits, quality),
-                              params.buffer_m)
-    graph = params.substrate.build(recipient)
-    roads, _ = greedy_drainage(
-        recipient, graph, consensus_edge_weights(graph, field, eps=params.eps, gamma=params.gamma),
-        depth_target=params.depth_target, max_roads=params.max_roads)
-    return with_width(roads, params.road_width_m)
+@dataclass(frozen=True)
+class ConsensusDesireSource:
+    """A recipient's desire field: its donors' transported footpaths, one weighted group each."""
 
+    donors: Donors
+    permeability: PermeabilityParams    # the metric a donor's own network is judged by
+    road_width_m: float                 # the street a donor's footpath is judged as
 
-def length_matched_prefix(block: Block, roads: gpd.GeoDataFrame,
-                          target_m: float) -> gpd.GeoDataFrame:
-    """The shortest street-first prefix (`budget.street_first_ordered`, the canonical order every
-    lens truncates in) whose length reaches `target_m`, so it overshoots by at most one road; all
-    of `roads` if even that falls short."""
-    if len(roads) == 0:
-        return roads
-    ordered = street_first_ordered(block, roads, STREET_TOL)
-    cum = ordered.geometry.length.to_numpy().cumsum()
-    m = min(int(np.searchsorted(cum, target_m)) + 1, len(ordered))
-    return cast(gpd.GeoDataFrame, ordered.iloc[:m].reset_index(drop=True))
+    @property
+    def identity(self) -> Hashable | None:
+        config = config_identity(self)
+        return None if config is None else (closure_hash(__name__), config)
+
+    def quality(self, fit: DonorFit) -> float:
+        return derive(_quality_impl, _QualityInput(
+            donor=fit.donor, footpaths=fit.footpaths, footpaths_identity=fit.footpaths_identity,
+            params=self.permeability, road_width_m=self.road_width_m))
+
+    def desire_field(self, block: Block) -> DesireField:
+        fits = self.donors.fits(block)
+        quality = {f.donor.block_id: self.quality(f) for f in fits}
+        weights = normalized(consensus_weights(fits, quality))
+        return DesireField(groups=tuple(WeightedLines(lines=f.transported, weight=w)
+                                        for f, w in zip(fits, weights, strict=True)))

@@ -8,7 +8,7 @@ consecutive repeats. They differ only in how consecutive nodes are then joined:
 - `NearestNodeSnap` joins them with a straight segment, which crosses whatever lies between two
   nodes that are not substrate-adjacent. It is the pair matrix's transplant.
 - `RoutedSnap` joins them by the shortest substrate path, so every hop is a real gap edge. It is
-  the consensus benchmark's single-donor arm.
+  the single-donor transplant's (`donor_transplant.DonorTransplantReblocker`).
 
 On the one pair both were scored on, routing came out slightly worse (0.666 vs 0.682 permeability
 at 46.9% displacement either way, docs/superpowers/notes/2026-07-23-ot-road-transplant.md §3).
@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import geopandas as gpd
 import networkx as nx
@@ -38,6 +38,7 @@ from reblock.transplant.transport import line_parts
 log = logging.getLogger(__name__)
 
 
+@runtime_checkable
 class GapSnap(Protocol):
     def snap(self, lines: gpd.GeoDataFrame, block: Block) -> gpd.GeoDataFrame:
         """`lines` (in `block`'s CRS) moved onto `block`'s substrate; a line left with fewer

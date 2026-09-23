@@ -1,0 +1,16 @@
+# The Cape Town pool's screen and bounds over ONE UTM zone of the provisioned ZAF+KEN shortlist:
+# each zone is a different metro, so a zone run is a replication. See
+# reblock.data.pools.zone_source.
+#   donor_pool=shortlist_zone donor_pool.spec.stages.source.epsg=32735
+defaults:
+  - _screened
+  - _self_
+
+spec:
+  stages:
+    source:
+      _target_: reblock.data.pools.zone_source
+      epsg: ???
+      cache_dir: {_target_: hydra.utils.get_object, path: reblock.data.provision.DEFAULT_CACHE}
+      min_buildings: 30
+      building_tier: {_target_: reblock.buildings.SpacingDiscs, _partial_: true}

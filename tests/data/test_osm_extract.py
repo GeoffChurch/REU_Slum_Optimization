@@ -198,15 +198,17 @@ def test_read_pbf_lines_escapes_embedded_quotes(monkeypatch: pytest.MonkeyPatch)
     assert captured["where"] == "highway IN ('o''brien''s path')"
 
 
-def test_pbf_conforms_to_desire_line_source_protocol() -> None:
-    """Structural conformance is enforced STATICALLY by this annotated binding -- mypy --strict
-    fails if PbfDesireLines does not satisfy the Protocol. Do NOT rewrite this as
-    `isinstance(..., DesireLineSource)`: DesireLineSource is a bare Protocol, not
-    @runtime_checkable, so isinstance raises TypeError rather than returning False."""
+def test_pbf_conforms_to_both_source_protocols() -> None:
+    """Structural conformance is enforced STATICALLY by these annotated bindings -- mypy --strict
+    fails if PbfDesireLines does not satisfy either Protocol. A PBF is the mapped network itself
+    (`osm_footpaths` proposes it) and a one-group demand field (`demand_greedy` routes toward it),
+    and the `desire_source` config group feeds both methods the same object."""
     from reblock.methods.desire_lines import DesireLineSource
+    from reblock.methods.osm_footpaths import FootpathSource
 
-    source: DesireLineSource = PbfDesireLines(Path("nonexistent.osm.pbf"), tags=FOOTPATH_TAGS)
-    assert callable(source.desire_lines)
+    field: DesireLineSource = PbfDesireLines(Path("nonexistent.osm.pbf"), tags=FOOTPATH_TAGS)
+    mapped: FootpathSource = PbfDesireLines(Path("nonexistent.osm.pbf"), tags=FOOTPATH_TAGS)
+    assert callable(field.desire_field) and callable(mapped.footpaths)
 
 
 def test_utm_zone_epsg_picks_hemisphere_and_zone() -> None:
@@ -309,10 +311,10 @@ def test_pbf_and_overpass_agree_on_a_pinned_bbox() -> None:
 
     bbox = (18.55, -33.99, 18.58, -33.96)   # a Cape Flats window with dense footpath mapping
     crs = CRS.from_epsg(32734)
-    a = PbfDesireLines(pbf, tags=FOOTPATH_TAGS).desire_lines(bbox, crs)
+    a = PbfDesireLines(pbf, tags=FOOTPATH_TAGS).footpaths(bbox, crs)
     b = OSMDesireLines(timeout_s=180.0, tags=FOOTPATH_TAGS,
                        endpoint="https://overpass-api.de/api/interpreter", cache_dir=None,
-                       snapshot=None).desire_lines(bbox, crs)
+                       snapshot=None).footpaths(bbox, crs)
     assert a.geometry.length.sum() == pytest.approx(b.geometry.length.sum(), rel=0.25)
 
 

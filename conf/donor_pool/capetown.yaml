@@ -1,0 +1,21 @@
+# The corpus donor-driven methods draw donors from, and the consensus study its recipients: Cape
+# Town's full-city blocks at spacing discs, recipients the density_compactness screen flags, donors
+# the OSM census says carry >= 100 m of interior footpath, both within 60-300 buildings. The pool
+# every committed pair-matrix and consensus result was drawn from.
+#
+# Built like every other strategy, by the enclosing config's own `instantiate`; materialized on
+# first use, once per process (reblock.data.pools.ScreenedPool).
+defaults:
+  - _screened
+  - _self_
+
+spec:
+  stages:
+    source:
+      _target_: reblock.data.provision.cached_kblock_source
+      city: capetown
+      min_buildings: 30
+      block_ids: null
+      cache_dir: {_target_: hydra.utils.get_object, path: reblock.data.provision.DEFAULT_CACHE}
+      building_tier: {_target_: reblock.buildings.SpacingDiscs, _partial_: true}
+      member_buildings: null

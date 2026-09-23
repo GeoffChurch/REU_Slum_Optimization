@@ -39,12 +39,14 @@ import tempfile
 os.environ["REBLOCK_CACHE_DIR"] = tempfile.mkdtemp(prefix="reblock-test-cache-")
 
 from collections.abc import Iterator  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 import geopandas as gpd  # noqa: E402
 import pytest  # noqa: E402
 from pyproj import CRS  # noqa: E402
 from shapely.geometry import LineString, Polygon  # noqa: E402
 
+import reblock.data.provision  # noqa: E402
 import reblock.derive_graph as _dg  # noqa: E402
 from reblock.buildings import SpacingDiscs  # noqa: E402
 from reblock.contracts import Block  # noqa: E402
@@ -58,6 +60,19 @@ def _clear_l1() -> Iterator[None]:
     _dg.clear_l1()
     yield
     _dg.clear_l1()
+
+
+@pytest.fixture
+def offline_city_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An empty data cache holding every file a preset's data source checks for, so the full-city
+    and shortlist presets BUILD offline -- `cached_kblock_source` and `pools.zone_source` provision
+    when called, and download on a cold cache -- and read nothing, being lazy past the check."""
+    for name in ("blocks_capetown_full", "buildings_capetown_full", "blocks_nairobi_full",
+                 "buildings_nairobi_full", "blocks_shortlist", "buildings_shortlist",
+                 "blocks_shortlist_z32735"):
+        (tmp_path / f"{name}.parquet").touch()
+    monkeypatch.setattr(reblock.data.provision, "DEFAULT_CACHE", tmp_path)
+    return tmp_path
 
 
 @pytest.fixture

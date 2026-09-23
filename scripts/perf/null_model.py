@@ -29,7 +29,7 @@ import numpy as np
 
 from reblock.budget import prefix_to_displacement
 from reblock.compare import load_permeability_config
-from reblock.data.pools import capetown_pool, evenly_spaced, load_pools
+from reblock.data.pools import evenly_spaced
 from reblock.derive.access import (
     STREET_TOL,
     ParcelAdjacency,
@@ -45,6 +45,7 @@ from reblock.permeability import (
     EgressContext,
     permeability,
 )
+from scripts._donor_pool import donor_pool
 from scripts.perf.selectors import RandomSample, ScoreAll
 
 KS = (128, 32)
@@ -63,7 +64,7 @@ def arms() -> list[tuple[str, CandidateSelector]]:
 
 
 def main() -> None:
-    pools = load_pools(capetown_pool(Path("conf")))
+    pools = donor_pool("donor_pool=capetown").pools()
     blocks = pools.blocks
     counts = [float(len(b.parcels)) for b in blocks]
     sel = [i for i in pools.recipients if len(blocks[i].parcels) <= 110]

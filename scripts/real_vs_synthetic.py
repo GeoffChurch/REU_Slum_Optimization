@@ -35,6 +35,7 @@ and only the within-block contrast is meaningful.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 from pathlib import Path
 
 import geopandas as gpd
@@ -45,14 +46,13 @@ from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseMultipartGeometry
 from shapely.ops import unary_union
 
-from reblock.contracts import Block
+from reblock.budget import prefix_to_displacement
+from reblock.contracts import Block, Method
 from reblock.data.pools import (
     DonorSkip,
-    capetown_pool,
     evenly_spaced,
     fetch_donor_lines,
     iso_of,
-    load_pools,
     pbf_footpaths,
 )
 from reblock.derive.access import STREET_TOL
@@ -64,7 +64,7 @@ from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
-from scripts.consensus_sweep import displacement_matched_prefix
+from scripts._donor_pool import donor_pool
 
 SNAP_TOL = 0.5      # metres; endpoints closer than this are the same node
 
@@ -173,13 +173,29 @@ def metrics_for(block: Block, roads: gpd.GeoDataFrame) -> dict[str, float]:
     }
 
 
+def score_block(block: Block, real: gpd.GeoDataFrame,
+                synthetic: Mapping[str, gpd.GeoDataFrame]) -> list[dict[str, object]]:
+    """Every network's statistics on one block, all at ONE budget: the first street-first prefix
+    displacing at least what the real network does -- `budget.prefix_to_displacement`, the function
+    the lenses truncate with, applied to the real network too.
+
+    Matched on DISPLACEMENT, not length: it is the cost actually paid in homes, and a length prefix
+    once cut loop_closure's connectors off entirely, so looped_tree and clearance came out identical
+    on every statistic.
+    """
+    target = pct_displaced(real, block.buildings)
+    return [{"block": block.block_id, "network": name,
+             **metrics_for(block, prefix_to_displacement(block, roads, target))}
+            for name, roads in {"real": real, **synthetic}.items()]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--recipients", type=int, default=25)
     ap.add_argument("--out", type=Path, default=Path("scratchpad/ot/real_vs_synthetic.parquet"))
     args = ap.parse_args()
 
-    pools = load_pools(capetown_pool(Path("conf")))
+    pools = donor_pool("donor_pool=capetown").pools()
     blocks = pools.blocks
     source = pbf_footpaths(iso_of(blocks))
     usable = sorted(set(pools.recipients) & set(pools.donors))
@@ -187,44 +203,33 @@ def main() -> None:
     chosen = evenly_spaced(usable, counts, args.recipients)
     print(f"  scoring {len(chosen)} blocks with a known real network", flush=True)
 
+    methods: dict[str, Method] = {
+        "clearance": ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                                        max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "looped_tree": LoopClosureRefiner(
+            base=ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                                    max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
+            budget_frac=0.12, min_bridges_per_m=0.01, max_loops=400, min_loop_len_m=40.0,
+            search_radius_m=45.0, snap_lam=2.0, max_candidates=1500,
+            road_width_m=DEFAULT_ROAD_WIDTH_M),
+        "demand_greedy": DemandGreedyReblocker(
+            desire_source=source, depth_target=1, substrate=ChordSubstrate(), buffer_m=3.0,
+            eps=0.1, gamma=1.0, max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
+    }
+
     rows: list[dict[str, object]] = []
     for n, i in enumerate(chosen, 1):
         block = blocks[i]
         fetched = fetch_donor_lines(source, block)
         if isinstance(fetched, DonorSkip):
             continue
-        # The real network scored as what `osm_footpaths` proposes: a street built on each path.
-        own = with_width(fetched, DEFAULT_ROAD_WIDTH_M)
-        # Matched on DISPLACEMENT, not length. A length prefix cuts loop_closure's connectors --
-        # which are appended AFTER its base tree -- off entirely, so looped_tree and clearance
-        # came out identical on every statistic in the first run. Displacement is also the fairer
-        # budget: it is the cost that is actually paid in homes.
-        target_disp = pct_displaced(own, block.buildings)
-
-        def matched(roads: gpd.GeoDataFrame | None, blk: Block = block,
-                    t: float = target_disp) -> gpd.GeoDataFrame:
+        synthetic: dict[str, gpd.GeoDataFrame] = {}
+        for name, method in methods.items():
+            roads = method.propose(block).roads
             assert roads is not None, "every method compared here proposes a road frame"
-            return displacement_matched_prefix(blk, roads, t)
-
-        nets = {"real": own}
-        nets["clearance"] = matched(
-            ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
-                               max_roads=400,
-                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads)
-        nets["looped_tree"] = matched(
-            LoopClosureRefiner(base=ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(),
-                                                       repulsion=0.0, max_roads=400,
-                                                       road_width_m=DEFAULT_ROAD_WIDTH_M),
-                               budget_frac=0.12, min_bridges_per_m=0.01, max_loops=400,
-                               min_loop_len_m=40.0, search_radius_m=45.0, snap_lam=2.0,
-                               max_candidates=1500,
-                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads)
-        nets["demand_greedy"] = matched(
-            DemandGreedyReblocker(desire_source=source, depth_target=1, substrate=ChordSubstrate(),
-                                  buffer_m=3.0, eps=0.1, gamma=1.0, max_roads=400,
-                                  road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads)
-        for name, roads in nets.items():
-            rows.append({"block": block.block_id, "network": name, **metrics_for(block, roads)})
+            synthetic[name] = roads
+        # The real network scored as what `osm_footpaths` proposes: a street built on each path.
+        rows += score_block(block, with_width(fetched, DEFAULT_ROAD_WIDTH_M), synthetic)
         print(f"  [{n}/{len(chosen)}] {block.block_id}", flush=True)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows).to_parquet(args.out)
@@ -236,11 +241,10 @@ def main() -> None:
     stat_cols = ["walk_mean_m", "walk_p95_m", "walk_max_m", "walk_gini", "cycle_ratio",
                  "meshedness", "road_per_parcel_m", "frontage_frac", "displacement"]
     real = df[df.network == "real"].set_index("block")
-    print(f"{'statistic':>18} {'real':>8} | " +
-          " | ".join(f"{n:>22}" for n in ("clearance", "looped_tree", "demand_greedy")))
+    print(f"{'statistic':>18} {'real':>8} | " + " | ".join(f"{n:>22}" for n in methods))
     for c in stat_cols:
         cells = []
-        for name in ("clearance", "looped_tree", "demand_greedy"):
+        for name in methods:
             syn = df[df.network == name].set_index("block")
             common = real.index.intersection(syn.index)
             a, b = real.loc[common, c].astype(float), syn.loc[common, c].astype(float)

@@ -11,7 +11,7 @@ renames a field is a `TypeError` from its constructor -- also here, also at load
 Loading is EAGER: an entry point builds everything it is configured with before it does any work,
 so a broken `all_methods` entry fails in the first second instead of after the screen has run. That
 makes every constructor part of startup, which is why none of them may touch the network (a
-desire-line source fetches on `desire_lines`, footprint tiles on `for_blocks`;
+desire-line source fetches on `desire_field`, footprint tiles on `for_blocks`;
 `data/provision.cached_kblock_source` alone provisions when called, and it is the data source, which
 every entry point built first already).
 
@@ -22,16 +22,20 @@ time" in CI.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeVar
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig, ListConfig
 
 from reblock.contracts import Eval, Method, Screen, Source
 from reblock.methods.desire_lines import DesireLineSource
+from reblock.methods.osm_footpaths import FootpathSource
 from reblock.methods.substrates import Substrate
 from reblock.metric import BlockMetric, Gate
 from reblock.permeability import PermeabilityParams
 from reblock.region import RegionBuilder
+
+T = TypeVar("T")
 
 
 def _mismatch(node: DictConfig, built: object, kind: str) -> TypeError:
@@ -95,6 +99,13 @@ def load_desire_source(node: DictConfig) -> DesireLineSource:
     return built
 
 
+def load_footpath_source(node: DictConfig) -> FootpathSource:
+    built = instantiate(node)
+    if not isinstance(built, FootpathSource):
+        raise _mismatch(node, built, "FootpathSource")
+    return built
+
+
 def load_substrate(node: DictConfig) -> Substrate:
     built = instantiate(node)
     if not isinstance(built, Substrate):
@@ -120,6 +131,22 @@ def load_gate(node: DictConfig) -> Gate:
     built = instantiate(node)
     if not isinstance(built, Gate):
         raise _mismatch(node, built, "Gate")
+    return built
+
+
+def load_research(node: DictConfig, kind: type[T]) -> T:
+    """A research object -- `reblock.transplant`, `reblock.data.pools` -- checked against the class
+    its caller names.
+
+    Generic where every loader above is not, because this module must not import the research
+    code: it is in shipped modules' import closures, and a GW constant would then sit in their
+    code hashes (`tests/transplant/test_isolation.py`). So it cannot name the kind; the caller,
+    which may import it, does. A research object reaches a shipped Method only as a configured
+    field, and carries its own code in its `identity`.
+    """
+    built = instantiate(node)
+    if not isinstance(built, kind):
+        raise _mismatch(node, built, kind.__qualname__)
     return built
 
 

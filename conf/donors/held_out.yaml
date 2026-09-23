@@ -1,0 +1,10 @@
+# Donors must lie more than 2 km from the recipient: the arm that can be believed. A median 26.7%
+# of a recipient's nearest 15 donors sit inside 2 km, and for 24.5% of recipients all 15 do
+# (`scripts/donor_availability.py`), so without it a "prediction" can be the neighbourhood's own
+# network. `leaky` is the same draw without the radius; the gap between them is the leakage.
+defaults:
+  - _selection
+  - _self_
+
+_target_: reblock.transplant.donors.Donors
+exclusion_radius_m: 2000.0

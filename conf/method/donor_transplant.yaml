@@ -1,0 +1,10 @@
+# The single-donor transplant: of the recipient's donors (the `donors` group), the closest by GW
+# distance, its real footpaths carried onto the recipient and routed along its own substrate gaps.
+# The consensus benchmark's single-donor arm. See
+# reblock.transplant.donor_transplant.DonorTransplantReblocker.
+_target_: reblock.transplant.donor_transplant.DonorTransplantReblocker
+donors: ${donors}
+snap:
+  _target_: reblock.transplant.snap.RoutedSnap
+  substrate: {_target_: reblock.methods.substrates.ChordSubstrate}
+road_width_m: 7.0

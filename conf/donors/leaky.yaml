@@ -1,0 +1,9 @@
+# `held_out` without the exclusion radius: the nearest donors by shape, wherever they are (a
+# neighbour touching the recipient is still excluded -- a donor must lie strictly beyond 0 m). Run
+# as held_out's pair: the gap between the two is the leakage estimate.
+defaults:
+  - _selection
+  - _self_
+
+_target_: reblock.transplant.donors.Donors
+exclusion_radius_m: 0.0

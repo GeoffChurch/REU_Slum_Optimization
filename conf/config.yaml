@@ -7,6 +7,8 @@ defaults:
   - substrate: chord_diag
   - buildings: spacing
   - desire_source: osm
+  - donor_pool: capetown      # read only by the donor-driven methods (method=consensus, ...)
+  - donors: held_out
   - metric: depth_density_proxy
   - building_count: open_buildings
   - permeability
