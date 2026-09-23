@@ -73,7 +73,8 @@ def test_before_and_after_use_distinct_keys(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(D, "parcel_access_layers", spy)
 
     block = _grid_block("deadbeef")
-    prop = Proposal(block_id="g", crs=UTM, block_identity=block.identity, proposal_id="peel")
+    prop = Proposal(block_id="g", crs=UTM, roads=None, edges=None, proposal_id="peel",
+                    method="peel", params={}, block_identity=block.identity)
     D.access_before(block)
     D.access_after(block, prop)                   # distinct fn.identity -> distinct key
     assert box["n"] == 2

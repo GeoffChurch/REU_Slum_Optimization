@@ -60,10 +60,11 @@ def test_block_identity_is_hashable() -> None:
 
 
 def test_proposal_identity_from_block_identity_and_proposal_id() -> None:
-    p = Proposal(block_id="b", crs=UTM, block_identity=("deadbeef", "b"),
-                 proposal_id="topology_a2.0_s0")
+    p = Proposal(block_id="b", crs=UTM, roads=None, edges=None, proposal_id="topology_a2.0_s0",
+                 method="topology", params={}, block_identity=("deadbeef", "b"))
     assert p.identity == (("deadbeef", "b"), "topology_a2.0_s0")
 
 
 def test_proposal_identity_is_none_without_block_identity() -> None:
-    assert Proposal(block_id="b", crs=UTM, proposal_id="peel").identity is None
+    assert Proposal(block_id="b", crs=UTM, roads=None, edges=None, proposal_id="peel",
+                    method="peel", params={}, block_identity=None).identity is None

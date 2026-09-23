@@ -52,7 +52,7 @@ def test_spine_merge_adds_a_crossing_trunk() -> None:
     # two boundary-parallel spines flanking x=4, no crossing yet
     base = Proposal(block_id="a+b", crs=UTM, method="peel", roads=gpd.GeoDataFrame(
         geometry=[LineString([(3.0, 0.5), (3.0, 2.5)]), LineString([(5.0, 0.5), (5.0, 2.5)])],
-        crs=UTM))
+        crs=UTM), edges=None, proposal_id="peel", params={}, block_identity=None)
     assert n_cross_block_streets(base.roads, interior) == 0
     ref = spine_merge_reference(merged, base)
     # a through-trunk now crosses x=4

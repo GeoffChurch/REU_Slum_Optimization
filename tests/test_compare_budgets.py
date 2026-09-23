@@ -90,7 +90,9 @@ class _FixedRoadMethod:
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
-        return Proposal(block_id=block.block_id, crs=block.crs, roads=self._roads)
+        return Proposal(block_id=block.block_id, crs=block.crs, roads=self._roads,
+                        edges=None, proposal_id="fixed_road_test", method="fixed_road_test",
+                        params={}, block_identity=None)
 
 
 def test_load_permeability_config_reads_the_committed_yaml() -> None:

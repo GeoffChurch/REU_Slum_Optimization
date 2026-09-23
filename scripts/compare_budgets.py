@@ -202,7 +202,9 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     # Before images (both colorings), once per region, on a frame + vmax shared with every after.
     kc_eval = KComplexityEval()
     frame = frame_bbox(block.parcels)
-    no_roads = Proposal(block_id=block.block_id, crs=block.crs, roads=None)
+    no_roads = Proposal(block_id=block.block_id, crs=block.crs, roads=None, edges=None,
+                        proposal_id="no_roads", method="no_roads", params={},
+                        block_identity=None)
     kc0 = kc_eval.score(block, no_roads)
     depth_vmax = int(kc0.fields["access_before"].max())
     fig = render_before(block, kc0.fields["access_before"], vmax=depth_vmax, field="depth",

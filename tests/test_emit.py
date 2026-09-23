@@ -39,6 +39,12 @@ def _grid_block(n: int) -> Block:
                  building_tier=SpacingDiscs)
 
 
+def _proposal(roads: gpd.GeoDataFrame | None) -> Proposal:
+    """A proposal of `roads` on `_grid_block`'s block "g"; uncached, as nothing here derives."""
+    return Proposal(block_id="g", crs=UTM, roads=roads, edges=None, proposal_id="test",
+                    method="test", params={}, block_identity=None)
+
+
 def test_member_ids_parses_region_id_and_passes_through_plain_id() -> None:
     # The own/context split keys on this: a region block_id is "region:" + "+"-joined sorted
     # members (region.region_block); a plain block is itself. A regression here would mis-split
@@ -113,27 +119,27 @@ def _empty_points_source() -> _FakeSource:
     return _FakeSource(blocks, points)
 
 
-def test_render_results_after_filenames_unique_for_empty_proposal_ids(tmp_path: Path) -> None:
-    # Two proposals for one block that both leave proposal_id="" must not collide
-    # onto one filename -- the emitter falls back to a per-proposal index.
+def test_render_results_names_each_after_by_its_proposal_id(tmp_path: Path) -> None:
+    # Two proposals for one block write two afters, each named for the proposal that drew it.
     block = _grid_block(3)
     results = [
-        Result(block=block, proposal=Proposal(block_id="g", crs=UTM, proposal_id=""),
-               metrics=(_kc(block),)),
-        Result(block=block, proposal=Proposal(block_id="g", crs=UTM, proposal_id=""),
-               metrics=(_kc(block),)),
+        Result(block=block, proposal=Proposal(block_id="g", crs=UTM, roads=None, edges=None,
+                                              proposal_id=pid, method="peel", params={},
+                                              block_identity=None),
+               metrics=(_kc(block),))
+        for pid in ("peel_tol0.5", "peel_tol1.0")
     ]
     render_results(results, tmp_path, RenderConfig(enabled=True),
                    _source_with_neighbour_and_points())
     afters = sorted(p.name for p in tmp_path.glob("*_after.png"))
-    assert afters == ["g_proposal0_after.png", "g_proposal1_after.png"]
+    assert afters == ["g_peel_tol0.5_after.png", "g_peel_tol1.0_after.png"]
     assert (tmp_path / "g_before.png").exists()
 
 
 def test_render_results_skips_block_without_kcomplexity(tmp_path: Path) -> None:
     block = _grid_block(3)
     other = Metrics(block_id="g", method="x", eval="weakdual_k", values={"k": 1.0})
-    result = Result(block=block, proposal=Proposal(block_id="g", crs=UTM), metrics=(other,))
+    result = Result(block=block, proposal=_proposal(None), metrics=(other,))
     render_results([result], tmp_path, RenderConfig(enabled=True),
                    _source_with_neighbour_and_points())
     assert list(tmp_path.glob("*.png")) == []
@@ -150,7 +156,7 @@ def test_render_results_draws_context_outlines_and_points(tmp_path: Path) -> Non
     # boundary exercises the full context wiring -- windowed query, own-block-outline drop,
     # own/context point split -- end to end, without erroring, and still writes both PNGs.
     block = _grid_block(3)
-    result = Result(block=block, proposal=Proposal(block_id="g", crs=UTM), metrics=(_kc(block),))
+    result = Result(block=block, proposal=_proposal(None), metrics=(_kc(block),))
 
     render_results([result], tmp_path, RenderConfig(enabled=True),
                    _source_with_neighbour_and_points())
@@ -165,7 +171,7 @@ def test_render_results_guards_empty_building_points(tmp_path: Path) -> None:
     # A source whose building_geometries is empty (e.g. ShapefileSource) must still render --
     # the guard-empty path, exercised end to end through the emitter.
     block = _grid_block(3)
-    result = Result(block=block, proposal=Proposal(block_id="g", crs=UTM), metrics=(_kc(block),))
+    result = Result(block=block, proposal=_proposal(None), metrics=(_kc(block),))
 
     render_results([result], tmp_path, RenderConfig(enabled=True), _empty_points_source())
 
@@ -181,7 +187,7 @@ def test_displaced_buildings_only_keeps_sites_with_positive_displacement_fractio
                         geometry=[Point(1.0, 0.5), Point(2.9, 2.9)], crs=UTM))
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM), 1.0)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads)
+    proposal = _proposal(roads)
 
     displaced = _displaced_buildings(block, proposal)
 
@@ -206,7 +212,7 @@ def test_displaced_buildings_takes_its_corridor_from_the_roads_own_width() -> No
 
     for width_m in (DEFAULT_ROAD_WIDTH_M / 2.0, DEFAULT_ROAD_WIDTH_M):
         roads = with_width(gpd.GeoDataFrame(geometry=[line], crs=UTM), width_m)
-        displaced = _displaced_buildings(block, Proposal(block_id="g", crs=UTM, roads=roads))
+        displaced = _displaced_buildings(block, _proposal(roads))
         assert len(displaced) == 1
         assert displaced["c"].iloc[0] == pytest.approx(share(width_m), abs=1e-12)
     assert 0.0 < share(DEFAULT_ROAD_WIDTH_M / 2.0) < share(DEFAULT_ROAD_WIDTH_M) < 1.0
@@ -217,11 +223,11 @@ def test_displaced_buildings_empty_without_building_points_or_roads() -> None:
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)
-    assert _displaced_buildings(block, Proposal(block_id="g", crs=UTM, roads=roads)).empty
+    assert _displaced_buildings(block, _proposal(roads)).empty
 
     pts_block = replace(block, building_geometries=gpd.GeoDataFrame(
         geometry=[Point(1.0, 0.5)], crs=UTM))
-    assert _displaced_buildings(pts_block, Proposal(block_id="g", crs=UTM, roads=None)).empty
+    assert _displaced_buildings(pts_block, _proposal(None)).empty
 
 
 def test_render_results_marks_displaced_buildings(tmp_path: Path) -> None:
@@ -231,7 +237,7 @@ def test_render_results_marks_displaced_buildings(tmp_path: Path) -> None:
                     building_geometries=gpd.GeoDataFrame(geometry=[Point(1.0, 0.5)], crs=UTM))
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM), 1.0)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads)
+    proposal = _proposal(roads)
     result = Result(block=block, proposal=proposal, metrics=(_kc(block),))
 
     render_results([result], tmp_path, RenderConfig(enabled=True),

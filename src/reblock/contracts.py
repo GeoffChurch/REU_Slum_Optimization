@@ -91,12 +91,18 @@ class Block:
 class Proposal:
     block_id: str
     crs: CRS
-    roads: GeoDataFrame | None = None
-    edges: GeoDataFrame | None = None
-    proposal_id: str = ""
-    method: str = ""
-    params: Mapping[str, object] = field(default_factory=dict)
-    block_identity: Hashable | None = None
+    roads: GeoDataFrame | None
+    edges: GeoDataFrame | None
+    proposal_id: str
+    method: str
+    params: Mapping[str, object]
+    block_identity: Hashable | None
+
+    def __post_init__(self) -> None:
+        # It keys the derivation cache beside `block_identity` and names the rendered file, so an
+        # empty one would collide with every other empty one in both places.
+        if not self.proposal_id:
+            raise ValueError("Proposal.proposal_id must be non-empty")
 
     @property
     def identity(self) -> tuple[Hashable, str] | None:

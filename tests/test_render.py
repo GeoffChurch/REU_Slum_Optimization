@@ -54,7 +54,8 @@ def _connector_proposal(block: Block) -> Proposal:
     # tests/eval/test_kcomplexity.py's fixture).
     connector = with_width(gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM),
                            DEFAULT_ROAD_WIDTH_M)
-    return Proposal(block_id=block.block_id, crs=UTM, roads=connector, method="topology")
+    return Proposal(block_id=block.block_id, crs=UTM, roads=connector, method="topology",
+                    edges=None, proposal_id="topology", params={}, block_identity=None)
 
 
 def _field_block(n: int = 3, cell: float = 20.0) -> Block:
@@ -129,7 +130,8 @@ def test_render_after_with_no_roads_adds_no_extra_artist() -> None:
     # Contract: a proposal with roads=None must not blow up, and (since
     # there's nothing new to draw) shouldn't add a roads collection either.
     block = _grid_block(3)
-    proposal = Proposal(block_id=block.block_id, crs=UTM, roads=None, method="topology")
+    proposal = Proposal(block_id=block.block_id, crs=UTM, roads=None, method="topology",
+                        edges=None, proposal_id="topology", params={}, block_identity=None)
     layers = parcel_access_layers(block, None)
 
     fig_before = render_before(block, layers, vmax=2)
