@@ -16,7 +16,7 @@ from geopandas import GeoDataFrame
 from pyproj import CRS
 from shapely import STRtree
 from shapely.geometry import LineString, Point
-from shapely.geometry.base import BaseGeometry
+from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block
@@ -35,7 +35,7 @@ def _merged_lines(network: Sequence[BaseGeometry]) -> tuple[list[BaseGeometry], 
     """The network as a flat line list plus its total length. `unary_union` explodes any Multi*
     input, so streets given as a MultiLineString (a block with a hole/courtyard) are handled."""
     merged = unary_union(network)
-    lines = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
+    lines = list(merged.geoms) if isinstance(merged, BaseMultipartGeometry) else [merged]
     return lines, sum(ln.length for ln in lines)
 
 
@@ -156,7 +156,7 @@ def _explode(merged: BaseGeometry | None, crs: CRS, width_m: float) -> GeoDataFr
     frames are scored by `displacement` exactly like an emitted proposal's."""
     parts: list[BaseGeometry] = (
         [] if merged is None
-        else (list(merged.geoms) if hasattr(merged, "geoms") else [merged]))
+        else (list(merged.geoms) if isinstance(merged, BaseMultipartGeometry) else [merged]))
     rows = [ln for ln in parts if "LineString" in ln.geom_type and ln.length > 0]
     return with_width(gpd.GeoDataFrame({"geometry": rows}, geometry="geometry", crs=crs),
                       width_m)

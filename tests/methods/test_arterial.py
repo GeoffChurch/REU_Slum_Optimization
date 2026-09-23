@@ -6,6 +6,7 @@ import networkx as nx
 import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry.base import BaseMultipartGeometry
 from shapely.ops import unary_union
 
 from reblock.budget import displacement, road_corridor
@@ -304,7 +305,7 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
     # component, and a lengthwise span of at least 6.
     u = unary_union(list(roads.geometry))
     g: nx.Graph = nx.Graph()
-    for ln in (list(u.geoms) if hasattr(u, "geoms") else [u]):
+    for ln in (list(u.geoms) if isinstance(u, BaseMultipartGeometry) else [u]):
         cs = list(ln.coords)
         for a, b in zip(cs, cs[1:], strict=False):
             g.add_edge(a, b)
