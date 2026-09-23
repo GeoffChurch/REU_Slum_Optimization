@@ -276,7 +276,7 @@ class LoopClosureRefiner:
         # An uncacheable base (identity None) makes the whole refiner uncacheable -- propagate the
         # None up so derive() bypasses the memoized propose, matching ClearanceReblocker's
         # uncacheable-substrate handling.
-        bid = getattr(self.base, "identity", None)
+        bid = self.base.identity
         if bid is None:
             return None
         return LoopClosureIdentity(

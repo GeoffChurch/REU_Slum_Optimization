@@ -4,7 +4,10 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import Polygon
 
-from reblock.contracts import Source
+from reblock.contracts import ScoringScreen, Source
+from reblock.data.counts import BuildingCount, KblockCount
+from reblock.data.kblock import KblockSource
+from reblock.metric import BlockMetric
 from reblock.pipeline import RunOutput, _reachable_blocks, _region_score_map
 
 _UTM = CRS.from_epsg(32643)
@@ -39,13 +42,46 @@ def test_reachable_blocks_covers_whole_component_with_generous_bound() -> None:
 
 
 class _MetricScreen:
-    """A minimal Screen stand-in that just carries a metric, mirrors DenseCompactScreen."""
+    """A minimal `ScoringScreen` stand-in, mirroring DenseCompactScreen: it carries a metric."""
 
-    def __init__(self, m):
+    def __init__(self, m: BlockMetric) -> None:
         self.metric = m
+        self.counts: BuildingCount = KblockCount()
 
-    def select(self, s):
+    def select(self, s: Source) -> list[str]:
         return []
+
+    def selection_scores(self, s: Source) -> dict[str, float]:
+        return {}
+
+
+def _peelable() -> Source:
+    # I/O-free at construction, so placeholder paths are fine: nothing here reads them.
+    return KblockSource("blocks.parquet", "buildings.parquet")
+
+
+def test_capabilities_are_answered_by_the_shipped_types() -> None:
+    """The pipeline asks a screen whether it scores, and a region builder whether it grows, with
+    `isinstance` against a Protocol -- which is structural, so renaming `metric` on
+    DenseCompactScreen or `max_buildings` on a growing builder would quietly flip the answer to
+    "no" (growth ranked by the proxy, no region-map colours) with nothing else failing."""
+    from reblock.metric import AbsoluteGate, Depth
+    from reblock.region import (
+        ConvexHullRegionBuilder,
+        DenseClusterRegionBuilder,
+        GrowingRegionBuilder,
+        IdentityRegionBuilder,
+        ShapeStandardizingRegionBuilder,
+    )
+    from reblock.screen.dense_compact import DenseCompactScreen
+    from reblock.screen.identity import IdentityScreen
+    assert isinstance(DenseCompactScreen(Depth(), AbsoluteGate(2.0)), ScoringScreen)
+    assert isinstance(_MetricScreen(Depth()), ScoringScreen)
+    assert not isinstance(IdentityScreen(), ScoringScreen)
+    assert isinstance(DenseClusterRegionBuilder(), GrowingRegionBuilder)
+    assert isinstance(ShapeStandardizingRegionBuilder(), GrowingRegionBuilder)
+    assert not isinstance(IdentityRegionBuilder(), GrowingRegionBuilder)
+    assert not isinstance(ConvexHullRegionBuilder(), GrowingRegionBuilder)
 
 
 def test_region_score_map_empty_for_non_peelable_source() -> None:
@@ -62,14 +98,11 @@ def test_region_score_map_empty_for_non_peelable_source() -> None:
 def test_region_score_map_empty_when_screen_has_no_metric() -> None:
     # IdentityScreen (no `.metric`) -> {} (the builder falls back to its proxy), even for a
     # peel-capable source.
-    class _Src:
-        blocks_path = "x"
-
     class _NoMetricScreen:
         def select(self, s):
             return []
 
-    assert _region_score_map(cast(Source, _Src()), _NoMetricScreen(), _chain_gdf(),
+    assert _region_score_map(_peelable(), _NoMetricScreen(), _chain_gdf(),
                              [["s"]], 100.0) == {}
 
 
@@ -80,22 +113,15 @@ def test_region_score_map_uses_metric_fine_and_skips_peel_when_geometry_only() -
     import reblock.pipeline as pl
     from reblock.metric import Compactness, Density, Depth, Product
 
-    class _Screen:            # carries the metric, mirrors DenseCompactScreen
-        def __init__(self, m): self.metric = m
-        def select(self, s): return []
-
-    class _Src:
-        blocks_path = "x"
-
     calls = {"n": 0}
     real = pl.block_depths  # type: ignore[attr-defined]
     pl.block_depths = lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1) or {})  # type: ignore
     try:
         gdf = _chain_gdf()
-        pl._region_score_map(cast(Source, _Src()), _Screen(Product([Density(), Compactness()])),
+        pl._region_score_map(_peelable(), _MetricScreen(Product([Density(), Compactness()])),
                              gdf, [["s"]], 100.0)
         assert calls["n"] == 0        # geometry-only: no peel
-        pl._region_score_map(cast(Source, _Src()), _Screen(Depth()), gdf, [["s"]], 100.0)
+        pl._region_score_map(_peelable(), _MetricScreen(Depth()), gdf, [["s"]], 100.0)
         assert calls["n"] == 1        # depth: one batched block_depths call
     finally:
         pl.block_depths = real        # type: ignore

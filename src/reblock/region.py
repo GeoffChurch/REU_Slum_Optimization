@@ -17,7 +17,7 @@ import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 
 import geopandas as gpd
 import networkx as nx
@@ -192,6 +192,18 @@ class RegionBuilder(Protocol):
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
               depth_fn: Callable[[str], float] | None = None) -> list[list[str]]: ...
+
+
+@runtime_checkable
+class GrowingRegionBuilder(RegionBuilder, Protocol):
+    """A `RegionBuilder` that grows each seed group up to a building-count budget
+    (`DenseClusterRegionBuilder`, `ShapeStandardizingRegionBuilder`). The pipeline asks with
+    `isinstance`: growth budgets on building counts, so a growing builder needs the screen's
+    resolved counter, and one that cannot get it must say so rather than fall back to counting
+    every block as one building."""
+
+    @property
+    def max_buildings(self) -> int: ...
 
 
 def _validate_group_ids(block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> None:

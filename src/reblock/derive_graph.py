@@ -2,8 +2,8 @@
 
 `derive(fn, *inputs)` computes `fn(*inputs)` with L1 (in-process) + L2 (joblib
 disk) caching, keyed on `(fn.identity, tuple(input identities))` -- heavy inputs
-are never hashed (passed via joblib `ignore=`). A missing input identity bypasses
-both layers. `fn.identity = (qualified-name, version)` where `version` is a
+are never hashed (passed via joblib `ignore=`). An input whose identity is None
+bypasses both layers. `fn.identity = (qualified-name, version)` where `version` is a
 content hash of the derivation modules + GEOS + PROJ, so any derivation-logic
 edit (or native-lib upgrade) is a clean miss. See
 docs/superpowers/specs/2026-07-08-content-addressed-dataflow-redesign.md.
@@ -16,7 +16,7 @@ import os
 from collections.abc import Callable, Hashable
 from functools import cache
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Any, Protocol, TypeVar, cast
 
 import joblib
 import pyproj
@@ -198,12 +198,22 @@ def _l2_impl(key: tuple[Any, ...], fn: Callable[..., Any], inputs: tuple[Any, ..
 _l2 = memory.cache(_l2_impl, ignore=["fn", "inputs"])
 
 
-def derive(fn: Callable[..., T], *inputs: object) -> T:
+class Identified(Protocol):
+    """An input `derive` can key on. Every input declares its `identity`; None is the explicit
+    answer of one that has no content address -- a synthetic block, a live data source, an ad-hoc
+    routing graph -- and makes the derivation uncacheable, so two such inputs can never share a
+    key."""
+
+    @property
+    def identity(self) -> Hashable | None: ...
+
+
+def derive(fn: Callable[..., T], *inputs: Identified) -> T:
     """Memoized compute of `fn(*inputs)`, keyed on (fn.identity, input identities).
-    Bypasses (computes directly) if any input lacks a usable `.identity`."""
+    Bypasses (computes directly) if any input's `identity` is None."""
     ids: list[Hashable] = []
     for i in inputs:
-        ident = getattr(i, "identity", None)
+        ident = i.identity
         if ident is None:
             return fn(*inputs)          # bypass: uncacheable input
         ids.append(ident)

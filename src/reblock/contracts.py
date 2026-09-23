@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
     from reblock.data.counts import BuildingCount
+    from reblock.metric import BlockMetric
 
 
 def _empty_points() -> GeoDataFrame:
@@ -143,7 +144,7 @@ class Source(Protocol):
 
 class Method(Protocol):
     @property
-    def identity(self) -> object: ...
+    def identity(self) -> Hashable | None: ...   # None: uncacheable (see `derive_graph.derive`)
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal: ...
 
 
@@ -172,3 +173,20 @@ class CountingScreen(Protocol):
 
     @property
     def counts(self) -> BuildingCount: ...
+
+
+@runtime_checkable
+class ScoringScreen(CountingScreen, Protocol):
+    """A `CountingScreen` that ranks blocks by a `BlockMetric` and hands back each flagged block's
+    score.
+
+    Region growth ranks its candidates by the SAME metric the screen flagged on, and the region map
+    colours by it. Both ask with `isinstance`, not `getattr(screen, "metric", None)`: a screen that
+    does not score is a type question, and a missing metric was a default that quietly substituted
+    "no metric" for whichever screen was passed.
+    """
+
+    @property
+    def metric(self) -> BlockMetric: ...
+
+    def selection_scores(self, source: Source) -> dict[str, float]: ...
