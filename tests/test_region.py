@@ -148,6 +148,42 @@ def test_region_block_unions_member_building_points() -> None:
     assert (rb.building_geometries.geometry.geom_type == "Point").all()
 
 
+def test_region_block_keeps_its_members_footprint_tier() -> None:
+    """The merged block must model its buildings as its members did. It once fell back to
+    `Block`'s default `SpacingDiscs` over the members' POLYGON rows, and the Nairobi example crashed
+    at the first `.xy` -- only multi-block regions merge, so every single-block run passed.
+    Watched failing with `building_tier=tier` removed from `region_block`."""
+    import numpy as np
+
+    from reblock.budget import displacement
+    from reblock.buildings import ANCHOR_COL, Footprints
+    from reblock.permeability import with_width
+
+    def footprints(pts: list[Point]) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame({ANCHOR_COL: pts},
+                                geometry=[p.buffer(0.3, cap_style="square") for p in pts], crs=UTM)
+
+    a = replace(_grid_block(0, 0, 3, 3, block_id="a"),
+                building_geometries=footprints([Point(0.5, 0.5), Point(1.5, 1.5)]),
+                building_tier=Footprints)
+    b = replace(_grid_block(3, 0, 3, 3, block_id="b"),
+                building_geometries=footprints([Point(3.5, 0.5)]), building_tier=Footprints)
+    rb = region_block([a, b])
+
+    assert isinstance(rb.buildings, Footprints)
+    assert np.array_equal(rb.buildings.xy, [[0.5, 0.5], [1.5, 1.5], [3.5, 0.5]])
+    road = with_width(gpd.GeoDataFrame(geometry=[LineString([(0, 0.5), (6, 0.5)])], crs=UTM), 1.0)
+    assert displacement(rb.buildings, road) == pytest.approx(2.0)   # both squares on y = 0.5
+
+
+def test_region_block_refuses_members_on_different_tiers() -> None:
+    from reblock.buildings import AreaDiscs
+    a = _grid_block(0, 0, 3, 3, block_id="a")
+    b = replace(_grid_block(3, 0, 3, 3, block_id="b"), building_tier=AreaDiscs)
+    with pytest.raises(ValueError, match="different building tiers"):
+        region_block([a, b])
+
+
 def test_region_block_rejects_empty_list() -> None:
     with pytest.raises(ValueError):
         region_block([])

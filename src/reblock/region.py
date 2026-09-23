@@ -124,6 +124,17 @@ def region_block(blocks: list[Block]) -> Block:
 
     streets = gpd.GeoDataFrame(geometry=[_union_streets(blocks)], crs=crs)
 
+    # The members' building TIER, carried over -- not left to `Block`'s default. Dropping it once
+    # rebuilt a footprint region as `SpacingDiscs` over polygon rows (a crash at the first `.xy`);
+    # a region of `AreaDiscs` members would have been silently re-modelled instead. Members from
+    # one source share one tier; any that do not have no single merged model, so refuse.
+    tiers = {b.building_tier for b in blocks}
+    if len(tiers) != 1:
+        raise ValueError(
+            f"region members are on different building tiers {sorted(map(str, tiers))}; a "
+            f"region's buildings need ONE model")
+    (tier,) = tiers
+
     member_pts = [b.building_geometries for b in blocks if not b.building_geometries.empty]
     building_geometries = (
         gpd.GeoDataFrame(pd.concat(member_pts, ignore_index=True), crs=crs) if member_pts
@@ -142,7 +153,7 @@ def region_block(blocks: list[Block]) -> Block:
     block_id = "region:" + "+".join(sorted(b.block_id for b in blocks))
     return Block(block_id=block_id, crs=crs, boundary=boundary, parcels=parcels,
                 streets=streets, source_content_hash=source_content_hash,
-                building_geometries=building_geometries)
+                building_geometries=building_geometries, building_tier=tier)
 
 
 def region_reblock(blocks: list[Block], method: Method, evals: list[Eval]) -> Result:

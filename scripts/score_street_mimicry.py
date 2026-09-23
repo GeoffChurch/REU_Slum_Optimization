@@ -53,7 +53,8 @@ def stripped_region(blocks: list[Block]) -> Block:
     outer = gpd.GeoDataFrame(geometry=[fused.boundary.boundary], crs=fused.crs)
     return Block(block_id=fused.block_id + ":stripped", crs=fused.crs, boundary=fused.boundary,
                  parcels=fused.parcels, streets=outer,
-                 building_geometries=fused.building_geometries)
+                 building_geometries=fused.building_geometries,
+                 building_tier=fused.building_tier)
 
 
 def main() -> None:
