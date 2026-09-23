@@ -30,6 +30,11 @@ k_sweep:
   arms: []
   ks: []
 
+# Recipients run at once, each in its own forked process; 1 runs them in this one instead. Every
+# process runs BLAS and OpenMP on one thread either way (scripts/consensus_matrix.py `Serial`,
+# `Forked`). This machine's cores, resolved when the config is read.
+workers: ${cpu_count:}
+
 # Where the rows go (the skipped arms beside them, as <out>.skips.json). No default: the committed
 # data/benchmarks/consensus_matrix.parquet predates this study's truncations.
 out: ???

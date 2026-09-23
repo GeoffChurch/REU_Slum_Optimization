@@ -324,6 +324,11 @@ class DonorPool(ABC):
         Which recipients the screen flags is not part of it -- no donor-driven method reads
         them."""
 
+    @abstractmethod
+    def load(self) -> None:
+        """Materialize now rather than on first use, footpaths included: what a process pool forks
+        after, so every worker shares one copy instead of each reading its own."""
+
 
 @dataclass(frozen=True, eq=False)
 class _Materialized:
@@ -382,6 +387,11 @@ class ScreenedPool(DonorPool):
     @property
     def identity(self) -> Hashable | None:
         return self._materialized.identity
+
+    def load(self) -> None:
+        # The extract is read on first use otherwise, and it is the one read worth sharing: a
+        # country's PBF is ~10 s and ~1 GB of GDAL scratch per process that reads it.
+        self._materialized.footpaths.lines()
 
 
 @dataclass(frozen=True)

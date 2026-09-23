@@ -97,6 +97,9 @@ pot = "*"
 statsmodels = "*"
 # Masked normalized cross-correlation (Padfield 2012) for the Phase 2 retrieval index.
 scikit-image = "*"
+# Pins BLAS and OpenMP to one thread in scripts/consensus_matrix.py's processes, forked workers
+# included, where an environment variable set after numpy has loaded would do nothing.
+threadpoolctl = "*"
 
 [tool.pixi.environments]
 default = { features = ["dev", "research"], solve-group = "default" }
@@ -210,6 +213,12 @@ ignore_missing_imports = true
 # install instead — so this is a plain ignore_missing_imports shim, not a
 # preference over real stubs.
 module = "joblib.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# threadpoolctl (scripts/consensus_matrix.py's BLAS/OpenMP pin) is one module with no py.typed
+# marker and no stub package anywhere; same shim as joblib above.
+module = "threadpoolctl"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

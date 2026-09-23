@@ -138,13 +138,17 @@ class PbfDesireLines:
     def desire_field(self, block: Block) -> DesireField:
         return mapped_field(block_footpaths(self, block))
 
+    def lines(self) -> gpd.GeoDataFrame:
+        """Every footpath in the extract, in EPSG:4326: read on first call, then held."""
+        if self._cache is None:
+            self._cache = read_pbf_lines(self.pbf_path, self.tags)
+        return self._cache
+
     def footpaths(
         self, bbox_wgs84: tuple[float, float, float, float], crs: CRS
     ) -> gpd.GeoDataFrame:
-        if self._cache is None:
-            self._cache = read_pbf_lines(self.pbf_path, self.tags)
         minx, miny, maxx, maxy = bbox_wgs84
-        window = self._cache.cx[minx:maxx, miny:maxy]
+        window = self.lines().cx[minx:maxx, miny:maxy]
         return window.to_crs(crs)
 
     @property
