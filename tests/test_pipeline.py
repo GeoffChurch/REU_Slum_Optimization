@@ -1,6 +1,7 @@
 from typing import cast
 
 import geopandas as gpd
+import pytest
 from pyproj import CRS
 from shapely.geometry import Polygon
 
@@ -125,6 +126,18 @@ def test_region_score_map_uses_metric_fine_and_skips_peel_when_geometry_only() -
         assert calls["n"] == 1        # depth: one batched block_depths call
     finally:
         pl.block_depths = real        # type: ignore
+
+
+def test_region_score_map_leaves_out_a_block_the_peel_could_not_build(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """`block_depths` omits a block it cannot build. That block has no depth, so it gets no score
+    -- not `fine(0.0, ...)`, a depth nobody measured. Growth then ranks it with every other
+    unscored candidate."""
+    import reblock.pipeline as pl
+    from reblock.metric import Depth
+    monkeypatch.setattr(pl, "block_depths", lambda source, ids: {"s": 3.0, "a": 2.0})
+    scores = _region_score_map(_peelable(), _MetricScreen(Depth()), _chain_gdf(), [["s"]], 1e4)
+    assert scores == {"s": 3.0, "a": 2.0}
 
 
 def test_reachable_blocks_expands_per_group_and_bounds_only_the_expansion() -> None:

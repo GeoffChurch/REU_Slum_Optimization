@@ -35,6 +35,21 @@ def test_parse_overpass_geom_builds_linestrings_drops_short_and_reprojects() -> 
     assert gdf.geometry.iloc[0].geom_type == "LineString"
 
 
+_TIMED_OUT = {"elements": [], "remark": 'runtime error: Query timed out in "query" at line 1 '
+                                        'after 61 seconds.'}
+
+
+def test_parse_overpass_geom_rejects_a_payload_with_no_elements() -> None:
+    with pytest.raises(KeyError, match="elements"):
+        _parse_overpass_geom({"version": 0.6}, UTM)
+
+
+def test_parse_overpass_geom_rejects_a_failed_query() -> None:
+    # A timeout is an ordinary-looking response with an error remark -- not "no footpaths".
+    with pytest.raises(RuntimeError, match="timed out"):
+        _parse_overpass_geom(_TIMED_OUT, UTM)
+
+
 _BBOX = (18.735, -33.849, 18.755, -33.834)
 
 
@@ -73,6 +88,16 @@ def test_osm_fetch_writes_cache_then_reuses_it(tmp_path: Path) -> None:
     a = src.desire_lines(_BBOX, UTM)
     b = src.desire_lines(_BBOX, UTM)          # second call: cache hit, no second fetch
     assert len(a) == 1 and len(b) == 1 and calls["n"] == 1
+
+
+def test_osm_failed_query_is_never_cached(tmp_path: Path) -> None:
+    """A failed query must fail the fetch. Parsed as an empty footpath set it was written to the
+    disk cache, which then served "no footpaths" for that bbox forever after."""
+    src = OSMDesireLines(cache_dir=str(tmp_path))
+    src._fetch = lambda query: _TIMED_OUT  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError):
+        src.desire_lines(_BBOX, UTM)
+    assert not src._cache_path(_BBOX).exists()
 
 
 def test_osm_identity_none_when_live_stable_with_snapshot(tmp_path: Path) -> None:

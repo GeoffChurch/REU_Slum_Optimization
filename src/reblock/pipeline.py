@@ -155,8 +155,12 @@ def _region_score_map(source: Source, screen: Screen, block_geoms: pd.DataFrame,
     metric = screen.metric
     reach = _reachable_blocks(block_geoms, groups, bound_buildings)
     cols = {str(b): (c, a, p) for b, c, a, p in _reach_cols(block_geoms, reach)}
-    depths = block_depths(source, reach) if metric.needs_peel else {}
-    return {b: metric.fine(depths.get(b, 0.0), *cols[b]) for b in reach if b in cols}
+    if not metric.needs_peel:
+        return {b: metric.fine(0.0, *cols[b]) for b in reach}   # `fine` never reads depth
+    # A reach block the peel could not build has no depth, hence no score -- `depth_fn` then ranks
+    # it with every other unscored candidate.
+    depths = block_depths(source, reach)
+    return {b: metric.fine(depths[b], *cols[b]) for b in reach if b in depths}
 
 
 def _reach_cols(block_geoms: pd.DataFrame, ids: list[str]
@@ -225,6 +229,8 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
     score_map = (_region_score_map(source, screen, block_geoms, groups,
                                    3.0 * growing.max_buildings)
                  if growing is not None and growing.max_buildings > 0 else {})
+    # An unscored candidate -- beyond the peeled reach, or one the peel could not build -- ranks as
+    # shallow (0.0), below every scored block; see `_reachable_blocks`.
     depth_fn: Callable[[str], float] | None = (
         (lambda bid: score_map.get(bid, 0.0)) if score_map else None)
     regions = region_builder.build(block_geoms, groups, depth_fn)[:max_blocks]

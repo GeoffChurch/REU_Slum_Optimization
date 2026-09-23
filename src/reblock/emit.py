@@ -222,7 +222,8 @@ def region_map(source: Source, regions: list[list[str]],
     fallback: dict[str, float] = {}
     if missing and metric is not None:
         mg = geoms[geoms["block_id"].isin(missing)]
-        md = block_depths(source, missing) if metric.needs_peel else {}
+        md = (block_depths(source, missing) if metric.needs_peel
+              else dict.fromkeys(missing, 0.0))      # a geometry-only `fine` never reads depth
         # Resolve HERE, not at load: this is the only branch that reads a count, and a
         # ShapefileSource-shaped source has no count column at all -- resolving eagerly would
         # impose the requirement on callers that never score anything. `metric.fine` must see the
@@ -240,13 +241,20 @@ def region_map(source: Source, regions: list[list[str]],
         # GeoDataFrame, and `mg` is one at runtime (it is a row-filter of `block_geometries()`).
         scored = resolved(cast(GeoDataFrame, mg), source.buildings_path,  # type: ignore[attr-defined]
                           counts)
-        fallback = {str(bid): metric.fine(md.get(str(bid), 0.0), float(cnt),
+        # A member the peel could not rebuild has no depth, hence no score: it is left out below
+        # rather than coloured as depth 0.
+        fallback = {str(bid): metric.fine(md[str(bid)], float(cnt),
                                           float(g.area), float(g.length))
                     for bid, cnt, g in zip(scored["block_id"], scored[COUNT], scored.geometry,
-                                           strict=True)}
+                                           strict=True)
+                    if str(bid) in md}
     elif missing:
         fallback = block_depths(source, missing)
-    member_score = {b: score_map.get(b, fallback.get(b, 0.0)) for b in all_member_ids}
+    # A member with no score from either (a source that cannot be peeled, and no screen score) is
+    # left out, so a map with no scores at all takes the flat located fill below -- the documented
+    # fallback -- instead of a ramp pinned at a fabricated 0.
+    known = {**fallback, **score_map}
+    member_score = {b: known[b] for b in all_member_ids if b in known}
     m_vmax = float(max([v for v in member_score.values() if v] or [1.0]))
     members = members.copy()
     members["score"] = members["block_id"].map(member_score)
@@ -353,27 +361,29 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     frontier also draws the two calibrated lens cutoffs from `conf/permeability.yaml` (the same
     thresholds `scripts.compare_budgets`'s two-lens driver grades methods against) as thin dashed
     guide lines: `matched_displacement` (Lens A, vertical) and `matched_permeability` (Lens B,
-    horizontal). A `results` with no "permeability" rows writes nothing (no benefit metric to
-    plot)."""
+    horizontal). An empty `results` (nothing was graded) writes nothing. Every permeability curve
+    must come with its displacement twin -- both callers emit the two together -- because the x-axis
+    is that twin; one without it raises rather than plotting road METRES on an axis labelled
+    displacement."""
     import csv
     out_dir.mkdir(parents=True, exist_ok=True)
+    if not results:
+        return
     by_metric: dict[str, list[MethodCurve]] = {}
     for r in results:
         by_metric.setdefault(r.metric, []).append(r)
-    perm_results = by_metric.get("permeability", [])
-    if not perm_results:
-        return
+    perm_results = by_metric["permeability"]
     colors = method_colors(method_order)   # one stable name->colour map for every plot
     # permeability is plotted against cumulative DISPLACEMENT (fraction of homes displaced), not
     # road length: the displacement curve is index-aligned, so its per-prefix Σcᵢ/n_buildings is
     # the x-axis.
     disp_x: dict[tuple[str, str], list[float]] = {
-        (r.block_id, r.method): list(r.curve.benefit) for r in by_metric.get("displacement", [])}
+        (r.block_id, r.method): list(r.curve.benefit) for r in by_metric["displacement"]}
     with (out_dir / "frontier_permeability.csv").open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["method", "block", "displacement", "permeability"])
         for r in perm_results:
-            xs = disp_x.get((r.block_id, r.method), r.curve.cost)
+            xs = disp_x[(r.block_id, r.method)]
             for x, y in zip(xs, r.curve.benefit, strict=True):
                 w.writerow([r.method, r.block_id, f"{x:.4f}", f"{y:.6g}"])
     by_block: dict[str, list[MethodCurve]] = {}
@@ -382,7 +392,7 @@ def compare_report(results: list[MethodCurve], out_dir: Path,
     for block_id, curves in by_block.items():
         fig, ax = plt.subplots(figsize=(12, 9))
         for mc in curves:
-            xs = disp_x.get((block_id, mc.method), mc.curve.cost)
+            xs = disp_x[(block_id, mc.method)]
             ax.plot(xs, mc.curve.benefit, marker="o", ms=9, lw=FRONTIER_LW,
                     label=friendly_method_name(mc.method), color=colors[mc.method])
         # The two calibrated lens cutoffs (conf/permeability.yaml) as thin dashed guides, drawn
