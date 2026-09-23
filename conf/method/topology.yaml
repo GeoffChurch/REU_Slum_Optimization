@@ -3,3 +3,4 @@
 _target_: reblock.methods.topology.TopologyMethod
 alpha: ${alpha}
 seed: ${seed}
+road_width_m: 7.0

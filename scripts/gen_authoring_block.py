@@ -54,10 +54,7 @@ from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from reblock.compare import load_permeability_config
-from reblock.derive.access import STREET_TOL
-from reblock.derive.adjacency import parcel_adjacency
-from reblock.mesh import parcel_radii
-from reblock.permeability import WIDTH_COL, PermeabilityParams, solve_egress
+from reblock.permeability import WIDTH_COL, EgressContext, PermeabilityParams, solve_egress
 from scripts._example_block import load_example_region
 
 if TYPE_CHECKING:
@@ -155,7 +152,7 @@ export interface AuthoringBlock {
    * road is drawn; only the conductances on those edges do. */
   nodes: { cx: number[]; cy: number[]; ground: boolean[] };
   edges: { rows: number[]; cols: number[]; footpath_g: number[] };
-  /** `solve_egress(block, None)`'s own answer: the no-roads baseline permeability divides
+  /** `solve_egress(ctx, None)`'s own answer: the no-roads baseline permeability divides
    * against, and the potentials the "before" picture shows. Road-invariant, so computing it in
    * the browser on every edit would be waste. */
   baseline: { p0: number; potential: number[] };
@@ -265,12 +262,14 @@ def _assert_round_trip(bundle: AuthoringBundle, params: PermeabilityParams) -> N
     which is what this distinguishes, and no more: it cannot say WHICH of a lost coordinate, a
     changed ring winding or a dtype shift caused it.
 
-    Deliberately NOT threaded with the source block's `adj`/`radii` the way `main` threads them:
-    those are derived from `block.parcels.geometry` and `block.building_geometries`, so handing them
-    over would skip re-deriving exactly the things the JSON has to carry.
+    Deliberately a FRESH context on the rebuilt block, not `main`'s: the adjacency and radii a
+    context holds are derived from `block.parcels.geometry` and `block.building_geometries`, so
+    reusing the source block's would skip re-deriving exactly the things the JSON has to carry. For
+    the same reason it is not `solve.py`'s `context_from_bundle`, which reads the adjacency back
+    out of the very `edges` columns this checks.
     """
-    rebuilt = block_from_bundle(bundle)
-    rebuilt_baseline = solve_egress(rebuilt, None, params)
+    rebuilt = EgressContext.of(block_from_bundle(bundle), params)
+    rebuilt_baseline = rebuilt.baseline
     mesh = rebuilt_baseline.mesh
     columns: list[tuple[str, object, object]] = [
         ("nodes.cx", bundle["nodes"]["cx"], mesh.cx.tolist()),
@@ -291,7 +290,7 @@ def _assert_round_trip(bundle: AuthoringBundle, params: PermeabilityParams) -> N
 
     p0 = bundle["baseline"]["p0"]
     for case in bundle["reference"]:
-        sol = solve_egress(rebuilt, _road_frame(case["road"], params, rebuilt.crs), params)
+        sol = solve_egress(rebuilt, _road_frame(case["road"], params, rebuilt.block.crs))
         got_p = 1.0 - sol.p / p0
         if got_p != case["permeability"]:
             raise SystemExit(
@@ -385,16 +384,15 @@ def main() -> None:
     log.info("loaded %s: %d parcels, %d streets, %d buildings", block.block_id,
              len(block.parcels), len(block.streets), len(block.buildings))
 
-    # Parcel adjacency and the per-parcel footprint radii are functions of `block` alone and do
-    # not move when a road is added, so they are built ONCE and threaded through every solve on
-    # this block -- which is what `solve_egress`' `adj`/`radii` parameters exist for.
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    radii = parcel_radii(block, params)
+    # Parcel adjacency, the per-parcel footprint radii and the mesh built from them are functions
+    # of `block` alone and do not move when a road is added, so ONE context holds them for every
+    # solve on this block.
+    ctx = EgressContext.of(block, params)
 
     # One baseline solve, and the mesh it was ASSEMBLED FROM. `EgressSolution` carries that
     # assembly precisely so nothing has to build a second `footpath_mesh` beside it that would be
     # free to disagree (see its docstring); every road-invariant column below reads off this one.
-    baseline = solve_egress(block, None, params, adj=adj, radii=radii)
+    baseline = ctx.baseline
     mesh = baseline.mesh
     log.info("mesh: %d nodes, %d edges, %d grounded; p0 = %r", mesh.n, len(mesh.rows),
              int(mesh.ground.sum()), baseline.p)
@@ -406,8 +404,7 @@ def main() -> None:
     reference: list[ReferenceCase] = []
     for name, road in REFERENCE_ROADS.items():
         coords = [[x, y] for x, y in road]
-        sol = solve_egress(block, _road_frame(coords, params, block.crs), params,
-                           adj=adj, radii=radii)
+        sol = solve_egress(ctx, _road_frame(coords, params, block.crs))
         reference.append(ReferenceCase(name=name, road=coords,
                                        permeability=1.0 - sol.p / baseline.p))
         log.info("reference %s: permeability %r", name, reference[-1]["permeability"])

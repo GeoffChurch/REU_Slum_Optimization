@@ -13,7 +13,14 @@ import reblock.derivations as D
 import reblock.derive_graph as dg
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
-from reblock.derive.access import parcel_access_layers
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    UnreachedDepth,
+    one_past_deepest,
+    parcel_access_layers,
+)
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
@@ -50,9 +57,10 @@ def test_access_before_matches_direct_and_caches(monkeypatch: pytest.MonkeyPatch
     box = {"n": 0}
     real = parcel_access_layers
 
-    def spy(block: Block, roads: gpd.GeoDataFrame | None = None, **kw: object) -> pd.Series:
+    def spy(adjacency: ParcelAdjacency, roads: gpd.GeoDataFrame | None,
+            *, unreached: UnreachedDepth) -> pd.Series:
         box["n"] += 1
-        return real(block, roads)
+        return real(adjacency, roads, unreached=unreached)
     monkeypatch.setattr(D, "parcel_access_layers", spy)
 
     block = _grid_block("deadbeef")
@@ -60,16 +68,18 @@ def test_access_before_matches_direct_and_caches(monkeypatch: pytest.MonkeyPatch
     out2 = D.access_before(block)                 # cache hit
     assert box["n"] == 1
     assert out1.equals(out2)
-    assert out1.equals(real(block, None))         # value identical to direct call
+    direct = real(ParcelAdjacency.of(block, STREET_TOL), None, unreached=one_past_deepest)
+    assert out1.equals(direct)                    # value identical to direct call
 
 
 def test_before_and_after_use_distinct_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     box = {"n": 0}
     real = parcel_access_layers
 
-    def spy(block: Block, roads: gpd.GeoDataFrame | None = None, **kw: object) -> pd.Series:
+    def spy(adjacency: ParcelAdjacency, roads: gpd.GeoDataFrame | None,
+            *, unreached: UnreachedDepth) -> pd.Series:
         box["n"] += 1
-        return real(block, roads)
+        return real(adjacency, roads, unreached=unreached)
     monkeypatch.setattr(D, "parcel_access_layers", spy)
 
     block = _grid_block("deadbeef")
@@ -90,7 +100,7 @@ def test_propose_matches_direct_and_caches(monkeypatch: pytest.MonkeyPatch) -> N
     from reblock.methods.peel import PeelReblocker
 
     box = {"n": 0}
-    method = PeelReblocker()
+    method = PeelReblocker(tol=STREET_TOL, road_width_m=DEFAULT_ROAD_WIDTH_M)
     real_propose = method.propose
 
     def spy(block: Block, prior: Proposal | None = None) -> Proposal:
@@ -132,7 +142,7 @@ def test_region_reblock_routes_through_the_propose_cache(monkeypatch: pytest.Mon
     from reblock.region import region_reblock
 
     box = {"n": 0}
-    method = PeelReblocker()
+    method = PeelReblocker(tol=STREET_TOL, road_width_m=DEFAULT_ROAD_WIDTH_M)
     real_propose = method.propose
 
     def spy(block: Block, prior: Proposal | None = None) -> Proposal:

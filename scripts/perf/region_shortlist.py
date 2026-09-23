@@ -23,8 +23,12 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from shapely import STRtree
 
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.methods.arterial import Access, Displacement, SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords, _deep_targets
@@ -64,13 +68,13 @@ def main() -> int:
     half_w = DEFAULT_ROAD_WIDTH_M / 2.0
     print(f"\nregion block: {n:,} parcels, {len(block.building_geometries):,} buildings\n")
 
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
     ptree = STRtree(list(block.parcels.geometry))
     btree = STRtree(list(block.building_geometries.geometry))
-    depths = parcel_access_layers(block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1)
+    depths = parcel_access_layers(adjacency, None, unreached=past_every_parcel)
     weights = depths.loc[block.parcels["parcel_id"]].to_numpy(dtype=float) ** 2 - 1.0
     anchors = _anchor_points(list(block.streets.geometry), 32, 0)
-    targets = _deep_targets(block, None, 8, adj)
+    targets = _deep_targets(adjacency, None, 8)
     chords = _candidate_chords(anchors, targets)
     print(f"  step-0 candidates: {len(chords):,}\n")
 
@@ -97,7 +101,7 @@ def main() -> int:
               f"(total {(now - t0) / 60:5.1f} min, {n_roads} roads)", flush=True)
         last[0] = now
 
-    roads = _greedy_shortlist(block, realizer=SnapToBoundary(), objective=Access(),
+    roads = _greedy_shortlist(block, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                               cost=Displacement(),
                               half_width_m=half_w, workers=16, max_roads=MAX_ROADS,
                               selector=FirstOrder(SHORTLIST, threads=THREADS), on_step=tick)

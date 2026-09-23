@@ -19,8 +19,7 @@ from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.ops import unary_union
 
-from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers
+from reblock.derive.access import ParcelAdjacency, one_past_deepest, parcel_access_layers
 from reblock.methods.boundary_graph import _rnd
 from reblock.permeability import with_width
 
@@ -85,10 +84,11 @@ def _anchor_points(network: Sequence[BaseGeometry], n: int,
     return sampled if len(sampled) < len(full) else full
 
 
-def _deep_targets(block: Block, roads: GeoDataFrame | None, k: int,
-                   adj: list[set[int]]) -> list[tuple[float, float]]:
+def _deep_targets(adjacency: ParcelAdjacency, roads: GeoDataFrame | None,
+                  k: int) -> list[tuple[float, float]]:
     """Representative points of the k deepest-access parcels (spur targets), _rnd-snapped."""
-    depths = parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj)
+    block = adjacency.block
+    depths = parcel_access_layers(adjacency, roads, unreached=one_past_deepest)
     order = depths.sort_values(ascending=False, kind="stable")
     id_to_pos = {pid: i for i, pid in enumerate(block.parcels["parcel_id"])}
     geoms = list(block.parcels.geometry)

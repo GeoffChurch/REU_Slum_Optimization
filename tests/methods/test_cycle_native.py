@@ -5,6 +5,8 @@ code restored. A guard nobody has broken on purpose guards nothing.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import geopandas as gpd
 import networkx as nx
 import pytest
@@ -16,8 +18,16 @@ from reblock.budget import _rnd
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.cycle_native import CycleNativeReblocker
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
 
 UTM = CRS.from_epsg(32734)
+
+# Every setting spelled once, at the values `conf/method/cycle_native.yaml` ships; each test varies
+# what it is about with `replace`.
+CYCLE = CycleNativeReblocker(substrate=ChordSubstrate(), max_displacement=0.20, max_cycles=400,
+                             shortlist=8, params=PermeabilityParams(),
+                             road_width_m=DEFAULT_ROAD_WIDTH_M)
 
 
 def _block(nx_: int = 7, ny: int = 7, step: float = 10.0) -> Block:
@@ -68,7 +78,7 @@ def test_output_is_bridgeless() -> None:
     that assertion is here and not merely defensive.
     """
     block = _block()
-    roads = CycleNativeReblocker(max_displacement=0.20).propose(block).roads
+    roads = replace(CYCLE, max_displacement=0.20).propose(block).roads
     assert roads is not None and len(roads) > 0, "no roads: bridgelessness is vacuous"
 
     g = _road_graph(block, roads)
@@ -93,7 +103,7 @@ def test_respects_its_displacement_budget(cap: float) -> None:
     from reblock.budget import displacement
 
     block = _block()
-    roads = CycleNativeReblocker(max_displacement=cap).propose(block).roads
+    roads = replace(CYCLE, max_displacement=cap).propose(block).roads
     assert roads is not None
     if not len(roads):
         return
@@ -112,7 +122,7 @@ def test_max_cycles_caps_the_greedy(cap: int) -> None:
     FAULT INJECTION: restoring the literal `range(60)` makes cap=1 emit 20+ roads against the 2
     asserted here, failing this test.
     """
-    roads = CycleNativeReblocker(max_displacement=0.9, max_cycles=cap).propose(_block()).roads
+    roads = replace(CYCLE, max_displacement=0.9, max_cycles=cap).propose(_block()).roads
     assert roads is not None
     # Each accepted move appends its outbound leg plus, when a bridgeless return exists, the return
     # leg -- so at most two roads per cycle.
@@ -124,7 +134,7 @@ def test_max_cycles_is_what_binds_not_an_earlier_stop() -> None:
     would defend the bug rather than catch it. Raising the cap on the same block must buy more road
     -- proving the cap is the live constraint and the assertion above is load-bearing."""
     block = _block()
-    small = CycleNativeReblocker(max_displacement=0.9, max_cycles=2).propose(block).roads
-    large = CycleNativeReblocker(max_displacement=0.9, max_cycles=8).propose(block).roads
+    small = replace(CYCLE, max_displacement=0.9, max_cycles=2).propose(block).roads
+    large = replace(CYCLE, max_displacement=0.9, max_cycles=8).propose(block).roads
     assert small is not None and large is not None
     assert len(large) > len(small), f"cap 8 gave {len(large)} roads, cap 2 gave {len(small)}"

@@ -7,6 +7,7 @@ three earlier mesh redesigns broke by letting an access edge MOVE when roads wer
 (`3a8dd25`, permeability falling ~9%).
 
 Splitting this out means a whole prefix sweep builds it ONCE: it cannot change as roads are added.
+`permeability.EgressContext.mesh` is where that once lives.
 """
 from __future__ import annotations
 
@@ -22,10 +23,9 @@ from shapely.ops import unary_union
 
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
-from reblock.derive.adjacency import parcel_adjacency
 
 if TYPE_CHECKING:
-    from reblock.permeability import PermeabilityParams
+    from reblock.permeability import EgressContext, PermeabilityParams
 
 FOOTPATH_EPS = 0.02   # floor on the clearance fraction (an edge never hits 0
                        # conductance, so the mesh graph's topological connectivity to ground
@@ -36,7 +36,12 @@ FOOTPATH_EPS = 0.02   # floor on the clearance fraction (an edge never hits 0
 class Mesh:
     """The road-independent parcel graph: nodes, undirected edges (`rows[k] < cols[k]`, each
     stored once), the footpath conductance and centroid-to-centroid segment of every edge, and
-    which parcels are grounded (street-fronting)."""
+    which parcels are grounded (street-fronting).
+
+    Every array is READ-ONLY. One mesh serves every solve and every figure on its block
+    (`EgressContext.mesh`), and `GraphFigure` hands these same arrays on to renderers and bakers --
+    so an in-place edit anywhere downstream would silently move every later solve on the block.
+    Read-only turns that into an error at the edit."""
     cx: NDArray[np.float64]
     cy: NDArray[np.float64]
     rows: NDArray[np.int64]
@@ -46,6 +51,11 @@ class Mesh:
     ground: NDArray[np.bool_]
     segments: NDArray[np.object_]   # centroid-to-centroid LineStrings, one per edge
     n: int
+
+    def __post_init__(self) -> None:
+        for a in (self.cx, self.cy, self.rows, self.cols, self.dist, self.footpath_g,
+                  self.ground, self.segments):
+            a.flags.writeable = False
 
 
 def parcel_radii(block: Block, params: PermeabilityParams) -> NDArray[np.float64]:
@@ -105,24 +115,18 @@ def _footpath_conductance(dist: NDArray[np.float64], r_sum: NDArray[np.float64],
     return (target_median / shape_median) * shape
 
 
-def footpath_mesh(
-    block: Block,
-    params: PermeabilityParams,
-    *,
-    adj: list[set[int]] | None = None,
-    radii: NDArray[np.float64] | None = None,
-) -> Mesh:
-    """Build the road-independent mesh: nodes are parcel centroids, edges are parcel adjacency
-    (`parcel_adjacency`, one entry per undirected pair, `i < j`, `dist > 0`), each edge's footpath
-    conductance is `_footpath_conductance` over the per-parcel radii (`parcel_radii`), and `ground`
-    flags parcels within `STREET_TOL` of the (unioned) street geometry. `dist`/`footpath_g` cover
-    the WHOLE mesh regardless of any later road coverage -- `_footpath_conductance`'s
-    fair-normalization needs the full distribution (see its docstring).
+def footpath_mesh(ctx: EgressContext) -> Mesh:
+    """Build the road-independent mesh for `ctx.block` under `ctx.params`: nodes are parcel
+    centroids, edges are the context's parcel adjacency (one entry per undirected pair, `i < j`,
+    `dist > 0`), each edge's footpath conductance is `_footpath_conductance` over the context's
+    per-parcel radii (`parcel_radii`), and `ground` flags parcels within `STREET_TOL` of the
+    (unioned) street geometry. `dist`/`footpath_g` cover the WHOLE mesh regardless of any later road
+    coverage -- `_footpath_conductance`'s fair-normalization needs the full distribution (see its
+    docstring).
 
-    `adj` and `radii` let a caller freeze parcel adjacency and per-parcel footprint radii across
-    repeated calls on the same block (both are functions of `block` alone, invariant across road
-    prefixes); computed internally when omitted.
+    What `EgressContext.mesh` caches; read that rather than calling this, which builds a new one.
     """
+    block, params = ctx.block, ctx.params
     parcels = block.parcels
     n = len(parcels)
     geoms = list(parcels.geometry)
@@ -130,8 +134,8 @@ def footpath_mesh(
     cx = np.array([c.x for c in centroids], dtype=np.float64)
     cy = np.array([c.y for c in centroids], dtype=np.float64)
 
-    adj = adj if adj is not None else parcel_adjacency(geoms, STREET_TOL)
-    radii = radii if radii is not None else parcel_radii(block, params)
+    adj = ctx.adjacency.neighbours
+    radii = ctx.radii
 
     # --- ground membership: parcel polygon within STREET_TOL of the (unioned) street geometry
     street_union = unary_union(list(block.streets.geometry)) if len(block.streets) else None

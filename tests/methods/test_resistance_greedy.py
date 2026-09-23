@@ -5,6 +5,7 @@ every parcel is served regardless of what the metric says.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import cast
 
 import geopandas as gpd
@@ -16,9 +17,23 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.resistance_greedy import ResistanceGreedyReblocker
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability, with_width
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+    with_width,
+)
 
 UTM = CRS.from_epsg(32734)
+
+# Every setting spelled once, at the values `conf/method/resistance_greedy.yaml` ships; each test
+# varies what it is about with `replace`.
+GREEDY = ResistanceGreedyReblocker(substrate=ChordSubstrate(), max_roads=400, shortlist=6,
+                                   loop_radius_m=0.0, min_loop_len_m=40.0,
+                                   max_loop_candidates=400, min_gain_per_m=1e-6, seed=0,
+                                   params=PermeabilityParams(), road_width_m=DEFAULT_ROAD_WIDTH_M)
 
 
 def _slab(w: int, h: int) -> Block:
@@ -54,7 +69,8 @@ def test_the_first_road_is_the_ARGMAX_over_candidates_by_gain_per_metre() -> Non
 
     block = _slab(6, 6)
     empty = gpd.GeoDataFrame(geometry=[], crs=block.crs)
-    base = permeability(block, empty)
+    ctx = EgressContext.of(block, PermeabilityParams())
+    base = permeability(ctx, empty)
 
     graph = ChordSubstrate().build(block)
     street = unary_union(list(block.streets.geometry))
@@ -76,13 +92,13 @@ def test_the_first_road_is_the_ARGMAX_over_candidates_by_gain_per_metre() -> Non
         road = _path_road(graph, pred, int(starts[i]), reps[i], street)
         if road is None or road.length <= 0:
             continue
-        rate = (permeability(block, with_width(
+        rate = (permeability(ctx, with_width(
             gpd.GeoDataFrame(geometry=[road], crs=block.crs), DEFAULT_ROAD_WIDTH_M)) - base)
         best_rate = max(best_rate, rate / road.length)
 
-    chosen = ResistanceGreedyReblocker(max_roads=1, shortlist=999).propose(block).roads
+    chosen = replace(GREEDY, max_roads=1, shortlist=999).propose(block).roads
     assert chosen is not None and len(chosen) == 1
-    got = (permeability(block, chosen) - base) / float(chosen.geometry.length.sum())
+    got = (permeability(ctx, chosen) - base) / float(chosen.geometry.length.sum())
     assert got >= best_rate - 1e-12, f"not the argmax: chose {got}, best available {best_rate}"
 
 
@@ -90,7 +106,7 @@ def test_it_stops_when_the_gain_stops_paying() -> None:
     """Unlike a drainage tree, which runs until every parcel is served, this has a floor: a high
     min_gain_per_m must stop it early and say so."""
     block = _slab(6, 6)
-    greedy = ResistanceGreedyReblocker(max_roads=400, shortlist=8, min_gain_per_m=1e9)
+    greedy = replace(GREEDY, max_roads=400, shortlist=8, min_gain_per_m=1e9)
     proposal = greedy.propose(block)
 
     assert proposal.params["stopped"] == "gain below floor"
@@ -101,8 +117,10 @@ def test_it_selects_differently_from_clearance() -> None:
     """Same substrate, same candidate generation, different choice rule -- so the networks must
     differ. If they matched, the objective would be doing nothing."""
     block = _slab(6, 6)
-    theirs = ClearanceReblocker(depth_target=1).propose(block).roads
-    ours = ResistanceGreedyReblocker(max_roads=30, shortlist=10).propose(block).roads
+    theirs = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                                max_roads=400,
+                                road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
+    ours = replace(GREEDY, max_roads=30, shortlist=10).propose(block).roads
     assert theirs is not None and ours is not None
 
     assert list(ours.geometry.astype(str)) != list(theirs.geometry.astype(str))
@@ -118,5 +136,5 @@ def test_a_block_with_no_street_frontage_is_reported_not_crashed() -> None:
                                               crs=block.crs),
                      building_geometries=block.building_geometries,
                      source_content_hash=None, building_tier=SpacingDiscs)
-    proposal = ResistanceGreedyReblocker(max_roads=4, shortlist=4).propose(floating)
+    proposal = replace(GREEDY, max_roads=4, shortlist=4).propose(floating)
     assert proposal.params["stopped"] == "no street frontage"

@@ -28,7 +28,6 @@ from matplotlib.colors import to_hex
 from reblock.budget import displacement, street_first_ordered
 from reblock.compare import load_permeability_config
 from reblock.derive.access import STREET_TOL
-from reblock.derive.adjacency import parcel_adjacency
 from reblock.emit import (
     FRONTIER_GUIDE_COLOR,
     FRONTIER_GUIDE_LW,
@@ -38,7 +37,7 @@ from reblock.emit import (
     method_colors,
 )
 from reblock.method_labels import friendly_method_name
-from reblock.permeability import egress_power, permeability
+from reblock.permeability import EgressContext, permeability
 from scripts._bundle_io import sigfig
 from scripts._example_block import PINNED_VARIANT, TEST_VARIANT, load_example_block
 
@@ -127,9 +126,9 @@ def main() -> None:
     pcfg = load_permeability_config()
     params = pcfg.params
 
-    # Both frozen once and threaded through every solve: functions of block geometry alone.
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    p0, _ = egress_power(block, None, params, adj=adj)
+    # Built once and shared by every solve: the mesh and the baseline are functions of block
+    # geometry alone.
+    ctx = EgressContext.of(block, params)
     n_buildings = len(block.building_geometries)
 
     # Curve colours keyed exactly as the fallback PNG keys them: `method_colors` over the SAME
@@ -156,7 +155,7 @@ def main() -> None:
             road_m.append(sigfig(float(prefix.geometry.length.sum())))
             disp.append(sigfig(displacement(block.buildings, prefix) / n_buildings
                                if n_buildings else 0.0))
-            perm.append(sigfig(permeability(block, prefix, params, p0=p0, adj=adj)))
+            perm.append(sigfig(permeability(ctx, prefix)))
         methods[name] = {
             "road_m": road_m, "displacement": disp, "permeability": perm,
             # The legend name and the curve colour travel WITH the curve: the widget iterates the

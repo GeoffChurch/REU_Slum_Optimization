@@ -52,6 +52,8 @@ from reblock.derive.network_metrics import meshedness, node_network
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from scripts.consensus_sweep import displacement_matched_prefix
 from scripts.pair_matrix import (
     desire_source,
@@ -200,11 +202,22 @@ def main() -> None:
             return displacement_matched_prefix(blk, roads, t)
 
         nets = {"real": own}
-        nets["clearance"] = matched(ClearanceReblocker(depth_target=1).propose(block).roads)
+        nets["clearance"] = matched(
+            ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                               max_roads=400,
+                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads)
         nets["looped_tree"] = matched(
-            LoopClosureRefiner(base=ClearanceReblocker(depth_target=1)).propose(block).roads)
+            LoopClosureRefiner(base=ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(),
+                                                       repulsion=0.0, max_roads=400,
+                                                       road_width_m=DEFAULT_ROAD_WIDTH_M),
+                               budget_frac=0.12, min_bridges_per_m=0.01, max_loops=400,
+                               min_loop_len_m=40.0, search_radius_m=45.0, snap_lam=2.0,
+                               max_candidates=1500,
+                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads)
         nets["demand_greedy"] = matched(
-            DemandGreedyReblocker(desire_source=source, depth_target=1).propose(block).roads)
+            DemandGreedyReblocker(desire_source=source, depth_target=1, substrate=ChordSubstrate(),
+                                  buffer_m=3.0, eps=0.1, gamma=1.0, max_roads=400,
+                                  road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads)
         for name, roads in nets.items():
             rows.append({"block": block.block_id, "network": name, **metrics_for(block, roads)})
         print(f"  [{n}/{len(chosen)}] {block.block_id}", flush=True)

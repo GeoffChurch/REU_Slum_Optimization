@@ -38,7 +38,7 @@ from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive_graph import config_identity
 from reblock.methods.desire_lines import DesireLineSource
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.permeability import with_width
 
 
 def _reach_street(line: LineString, streets: BaseGeometry, reach: float) -> LineString:
@@ -129,7 +129,7 @@ def interior_desire_lines(
 class OsmFootpathsReblocker:
     source: DesireLineSource
     # Total width of the corridor each imported footpath is treated as.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:

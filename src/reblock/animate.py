@@ -22,7 +22,12 @@ from PIL import Image
 
 from reblock.budget import street_first_ordered
 from reblock.contracts import Block, Proposal
-from reblock.derive.access import STREET_TOL, parcel_access_layers
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+)
 from reblock.emit import _displaced_buildings
 from reblock.render import render_after
 
@@ -59,13 +64,14 @@ def _frame_png(task: tuple[int, float]) -> tuple[int, bytes]:
     import matplotlib.pyplot as plt
     idx, cutoff = task
     k, prefix = _prefix_at(cutoff)
-    block: Block = _CTX["block"]
+    adjacency: ParcelAdjacency = _CTX["adjacency"]
+    block = adjacency.block
     # A render-only prefix of some method's roads: never scored, so never cached.
     proposal = Proposal(block_id=block.block_id, crs=block.crs, roads=prefix, edges=None,
                         proposal_id=f"street_first_prefix:{cutoff:g}",
                         method="street_first_prefix", params={"cutoff_m": cutoff},
                         block_identity=None)
-    layers = parcel_access_layers(block, prefix if k else None)
+    layers = parcel_access_layers(adjacency, prefix if k else None, unreached=one_past_deepest)
     fig = render_after(block, proposal, layers, vmax=_CTX["vmax"], frame=_CTX["frame"],
                        displaced_buildings=_displaced_buildings(block, proposal) if k else None)
     buf = io.BytesIO()
@@ -83,7 +89,10 @@ def reblock_gif(block: Block, roads: GeoDataFrame, out_path: Path, *, vmax: int,
     if roads is None or len(roads) == 0:
         return
     ordered, cumlen, cutoffs = _prefixes(block, roads, frames, tol)
-    _CTX.update(block=block, ordered=ordered, cumlen=cumlen, vmax=vmax, frame=frame, dpi=dpi)
+    # The peel reads the block's adjacency at STREET_TOL whatever `tol` orders the roads -- built
+    # once here and fork-inherited, rather than rebuilt by every frame.
+    _CTX.update(adjacency=ParcelAdjacency.of(block, STREET_TOL), ordered=ordered, cumlen=cumlen,
+                vmax=vmax, frame=frame, dpi=dpi)
     rendered = _run_parallel(_frame_png, list(enumerate(cutoffs)))
     imgs = [Image.open(io.BytesIO(png)).convert("P", palette=Image.Palette.ADAPTIVE)
             for _, png in sorted(rendered)]

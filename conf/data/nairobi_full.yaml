@@ -2,6 +2,11 @@
 # Open Buildings, downloaded on demand and cached under ~/.cache/reblock (never committed).
 _target_: reblock.data.provision.cached_kblock_source
 city: nairobi
+min_buildings: 10
+# The source's own flat load filter, which build_regions narrows to a region's members -- NOT the
+# top-level `block_ids`, which are the region seed groups.
+block_ids: null
+cache_dir: {_target_: hydra.utils.get_object, path: reblock.data.provision.DEFAULT_CACHE}
 # The building-geometry tier and the data feeding it, chosen together by the `buildings`
 # config group so a tier can never be paired with data that cannot supply it.
 building_tier: ${buildings.tier}

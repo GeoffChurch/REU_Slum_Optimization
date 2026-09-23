@@ -12,18 +12,18 @@ from typing import cast
 import hydra
 from geopandas import GeoDataFrame
 from hydra.core.hydra_config import HydraConfig
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf, open_dict
 from shapely.ops import unary_union
 
 from reblock.budget import Curve, displacement_curve
-from reblock.contracts import Block, Method, Screen, Source
+from reblock.contracts import Block, Method
 from reblock.derivations import propose
 from reblock.emit import compare_report as compare_report
 from reblock.emit import pct_displaced, pct_paved
-from reblock.permeability import PermeabilityParams, permeability_curve
+from reblock.permeability import EgressContext, PermeabilityParams, permeability_curve
 from reblock.pipeline import build_regions
-from reblock.region import RegionBuilder, region_reblock
+from reblock.presets import load_method, load_methods, load_stages
+from reblock.region import region_reblock
 from reblock.render import google_maps_url, short_label
 
 log = logging.getLogger(__name__)
@@ -107,21 +107,23 @@ def _expand_method_sweep(cfg: DictConfig, names: list[str], methods: list[Method
             cfg.all_methods[vname] = OmegaConf.merge(cfg.all_methods[base_key], {})
             OmegaConf.update(cfg.all_methods[vname], param, v)
             names.append(vname)
-            methods.append(cast(Method, instantiate(cfg.all_methods[vname])))
+            methods.append(load_method(cfg.all_methods[vname]))
 
 
 def compare(cfg: DictConfig) -> list[MethodCurve]:
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
+    stages = load_stages(cfg)
+    # Every registered method, not just the selected ones: a broken entry fails here, before the
+    # screen runs, rather than in whichever later run first selects it.
+    registry = load_methods(cfg.all_methods)
     block_groups = (
         [[str(b) for b in group] for group in cfg.block_ids]
         if cfg.block_ids is not None else None
     )
     names = list(cfg.methods)   # config keys -> the AUC-table labels (not method.identity)
-    methods = [cast(Method, instantiate(cfg.all_methods[name])) for name in names]
+    methods = [registry[name] for name in names]
     _expand_method_sweep(cfg, names, methods)   # optional: sweep one base method over a param
-    regions = build_regions(source, screen, region_builder, block_groups, cfg.max_blocks)
+    regions = build_regions(stages.source, stages.screen, stages.region_builder, block_groups,
+                            cfg.max_blocks)
     params = load_permeability_config().params
 
     # one curve per (region, method, metric); the stored Curve.cost is always cumulative added
@@ -153,7 +155,7 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
             block_area = float(block.parcels.geometry.union_all().area)
             pp = pct_paved(roads, block_area)
             pd_ = pct_displaced(roads, block.buildings)
-            perm = permeability_curve(block, roads, params)
+            perm = permeability_curve(EgressContext.of(block, params), roads)
             disp = displacement_curve(block, roads)
             raw.append((name, label, "permeability", perm, pp, pd_))
             raw.append((name, label, "displacement", disp, pp, pd_))

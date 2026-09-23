@@ -5,15 +5,16 @@ from pathlib import Path
 import geopandas as gpd
 import pytest
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, street_connectivity
+from reblock.methods.desire_lines import OSMDesireLines
 from reblock.methods.osm_footpaths import OsmFootpathsReblocker, interior_desire_lines
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.presets import load_method
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
@@ -61,7 +62,8 @@ def test_propose_keeps_interior_paths_and_drops_those_on_the_street() -> None:
     interior = LineString([(50, 20), (50, 80)])          # a vertical interior path
     on_street = LineString([(10, 0), (90, 0)])           # runs along the south-edge street
     outside = LineString([(150, 150), (160, 160)])       # outside the boundary
-    method = OsmFootpathsReblocker(source=_StubSource([interior, on_street, outside]))
+    method = OsmFootpathsReblocker(source=_StubSource([interior, on_street, outside]),
+                                   road_width_m=DEFAULT_ROAD_WIDTH_M)
     prop = method.propose(_block())
     assert isinstance(prop, Proposal) and prop.roads is not None
     lengths = sorted(round(g.length) for g in prop.roads.geometry)
@@ -69,14 +71,15 @@ def test_propose_keeps_interior_paths_and_drops_those_on_the_street() -> None:
 
 
 def test_propose_empty_coverage_returns_empty_roads_without_crashing() -> None:
-    method = OsmFootpathsReblocker(source=_StubSource([]))
+    method = OsmFootpathsReblocker(source=_StubSource([]), road_width_m=DEFAULT_ROAD_WIDTH_M)
     prop = method.propose(_block())
     assert prop.roads is not None and prop.roads.empty
 
 
 def test_identity_propagates_none_from_uncacheable_source() -> None:
     # A live (snapshot-less) source reports identity None; the method must propagate it.
-    method = OsmFootpathsReblocker(source=_StubSource([], ident=None))
+    method = OsmFootpathsReblocker(source=_StubSource([], ident=None),
+                                   road_width_m=DEFAULT_ROAD_WIDTH_M)
     assert method.identity is None
 
 
@@ -103,7 +106,8 @@ def test_live_source_makes_proposal_uncacheable_even_on_a_real_block() -> None:
     # Proposal.identity must be None even when block.identity is a real tuple.
     block = _cacheable_block()
     assert block.identity is not None
-    method = OsmFootpathsReblocker(source=_StubSource([], ident=None))
+    method = OsmFootpathsReblocker(source=_StubSource([], ident=None),
+                                   road_width_m=DEFAULT_ROAD_WIDTH_M)
     prop = method.propose(block)
     assert prop.identity is None
 
@@ -113,9 +117,9 @@ def test_osm_footpaths_instantiates_from_compare_config() -> None:
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config",
                       overrides=["shapefile=x", "methods=[osm_footpaths]"])
-    method = instantiate(cfg.all_methods["osm_footpaths"])
-    assert type(method).__name__ == "OsmFootpathsReblocker"
-    assert type(method.source).__name__ == "OSMDesireLines"
+    method = load_method(cfg.all_methods["osm_footpaths"])
+    assert isinstance(method, OsmFootpathsReblocker)
+    assert isinstance(method.source, OSMDesireLines)
     assert list(method.source.tags) == ["path", "footway", "track", "steps",
                                          "pedestrian", "living_street"]
     assert method.identity is None                        # live source (no snapshot) -> uncacheable
@@ -126,7 +130,7 @@ def test_osm_footpaths_instantiates_from_method_group() -> None:
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="config",
                       overrides=["shapefile=x", "method=osm_footpaths"])
-    assert type(instantiate(cfg.method)).__name__ == "OsmFootpathsReblocker"
+    assert isinstance(load_method(cfg.method), OsmFootpathsReblocker)
 
 
 def test_interior_desire_lines_needs_no_block() -> None:

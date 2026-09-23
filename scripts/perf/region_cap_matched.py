@@ -27,10 +27,19 @@ from shapely import wkt
 
 from reblock.budget import displacement, prefix_to_displacement
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.eval.access_burden import burden
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+)
 from scripts.perf import region_pool
 
 SRC = Path("scripts/perf/region_cap_replicate.json")
@@ -60,10 +69,10 @@ def main() -> int:
             continue
         block = pool[int(ri)]
         n = len(block.parcels)
-        adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+        adjacency = ParcelAdjacency.of(block, STREET_TOL)
+        ctx = EgressContext(adjacency, PermeabilityParams())
         nb = len(block.building_geometries)
-        b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj,
-                                         unreached_depth=n + 1))
+        b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
         roads = {a: _gdf(arms[a]["roads_wkt"], block) for a in ARMS}
         reach = {a: displacement(block.buildings, roads[a]) / nb for a in ARMS}
         dmax = min(reach.values())
@@ -80,10 +89,9 @@ def main() -> int:
                 pre = prefix_to_displacement(block, roads[a], d)
                 if len(pre) == 0:
                     continue
-                b1 = burden(parcel_access_layers(block, pre, tol=STREET_TOL, adj=adj,
-                                                 unreached_depth=n + 1))
+                b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))
                 row[a] = {"burden_red": (1.0 - b1 / b0) if b0 > 0 else 0.0,
-                          "perm": float(permeability(block, pre)),
+                          "perm": float(permeability(ctx, pre)),
                           "road_m": float(pre.geometry.length.sum()),
                           "n_roads": float(len(pre))}
             at[f"{f:.2f}"] = row

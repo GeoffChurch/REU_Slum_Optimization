@@ -24,8 +24,9 @@ import geopandas as gpd
 import numpy as np
 from pyproj import CRS
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Source
-from reblock.data.counts import BuildingCount, OpenBuildingsCount, resolved
+from reblock.data.counts import BuildingCount, resolved
 from reblock.data.kblock import KblockSource
 from reblock.derivations import ScreenSelectionInput, access_before, screen_selection
 from reblock.derive_graph import source_hash
@@ -44,8 +45,11 @@ def _chunk_depths(
     whole chunk (`block_ids` windows the read), amortizing per-block I/O; each block's Voronoi
     tessellation is local, so a chunked build is identical to building all at once."""
     blocks_path, buildings_path, min_buildings, block_ids = args
+    # Points and the point tier: depth comes from parcels, which are the Voronoi of the published
+    # points at every tier, so the screen never needs the members' outlines.
     src = KblockSource(blocks_path, buildings_path, region_id="screen",
-                       min_buildings=min_buildings, block_ids=block_ids)
+                       min_buildings=min_buildings, block_ids=block_ids,
+                       building_tier=SpacingDiscs, member_buildings=None)
     out: list[tuple[str, float]] = []
     for blk in src.region().blocks:
         d = access_before(blk)
@@ -140,17 +144,15 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
 
 
 class DenseCompactScreen:
-    def __init__(self, metric: BlockMetric, gate: Gate, *, proxy_keep_n: int = 1000,
-                 min_buildings: int = 10,
-                 counts: BuildingCount | None = None) -> None:
+    def __init__(self, metric: BlockMetric, gate: Gate, *, proxy_keep_n: int,
+                 min_buildings: int, counts: BuildingCount) -> None:
         self.metric = metric
         self.gate = gate
         self.proxy_keep_n = proxy_keep_n
         self.min_buildings = min_buildings
-        # Injected once, here, where config is read; `None` takes the shipped default rather
-        # than leaving callers to spell it. See `reblock.data.counts` for why that is Open
-        # Buildings and not the `building_count` column kblock ships.
-        self.counts: BuildingCount = counts if counts is not None else OpenBuildingsCount()
+        # Injected once, where config is read (`conf/building_count/`). See `reblock.data.counts`
+        # for why the shipped choice is Open Buildings and not the column kblock ships.
+        self.counts = counts
 
     def _selection_input(self, source: Source) -> ScreenSelectionInput:
         if not isinstance(source, KblockSource):

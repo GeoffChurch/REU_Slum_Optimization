@@ -23,7 +23,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Protocol
+from typing import NamedTuple, Protocol, runtime_checkable
 
 import geopandas as gpd
 import numpy as np
@@ -32,7 +32,6 @@ import shapely
 
 from scripts.fetch_kblock_fixtures import (
     OB_FLOAT_PRECISION,
-    OB_MIN_CONFIDENCE,
     OPEN_BUILDINGS_TILES_URL,
     _download_to,
     _request,
@@ -74,6 +73,7 @@ class BuildingFrame(NamedTuple):
     read_from: list[Path]           # the files it came from, folded into the block content hash
 
 
+@runtime_checkable
 class BuildingSource(Protocol):
     def for_blocks(self, blocks: gpd.GeoDataFrame) -> BuildingFrame:
         """Buildings covering these block polygons, their anchor points, and the files read.
@@ -106,7 +106,7 @@ class ParquetBuildings:
         return BuildingFrame(bld, bld.geometry, [self.path])    # a point IS its published anchor
 
 
-def _fetch(url: str, dest: Path) -> None:
+def fetch_tile(url: str, dest: Path) -> None:
     _download_to(url, dest, timeout=1800)
 
 
@@ -118,9 +118,9 @@ class FootprintTiles:
     it is downloaded once and cached beside the tiles.
     """
 
-    cache_dir: Path = DEFAULT_FOOTPRINT_CACHE
-    min_confidence: float = OB_MIN_CONFIDENCE
-    fetch: Callable[[str, Path], None] = _fetch
+    cache_dir: Path
+    min_confidence: float
+    fetch: Callable[[str, Path], None]
 
     def for_blocks(self, blocks: gpd.GeoDataFrame) -> BuildingFrame:
         wgs = blocks.to_crs(4326)

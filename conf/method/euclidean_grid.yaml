@@ -2,8 +2,19 @@
 # the block's densest parcel cluster by default. See
 # reblock.methods.euclidean_grid.EuclideanGridReblocker.
 _target_: reblock.methods.euclidean_grid.EuclideanGridReblocker
+road_width_m: 7.0
 spacing: 60.0
 angle: 0.0
 min_seg_len: 1.0
 street_buffer: 0.5
 seek_density: true
+adaptive: true
+fine_spacing: null                  # null -> spacing / 2
+density_threshold_percentile: 75.0
+parcel_hug_buffer: null             # null -> derived per block from its parcel scale
+parcel_bridge_gap: null             # null -> derived per block from its parcel scale
+follow_parcels: false
+follow_min_coverage: 0.03
+follow_max_coverage: 0.45
+follow_density_gamma: 3.0
+follow_min_component: null          # null -> derived per block from its parcel scale

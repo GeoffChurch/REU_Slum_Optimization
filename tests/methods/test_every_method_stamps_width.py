@@ -23,7 +23,6 @@ from pathlib import Path
 import geopandas as gpd
 import pytest
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
@@ -31,7 +30,8 @@ from shapely.geometry import LineString, Polygon
 from reblock.budget import displacement
 from reblock.buildings import ANCHOR_COL, Footprints, SpacingDiscs
 from reblock.contracts import Block
-from reblock.permeability import WIDTH_COL, PermeabilityParams, permeability
+from reblock.permeability import WIDTH_COL, EgressContext, PermeabilityParams, permeability
+from reblock.presets import load_method
 
 UTM = CRS.from_epsg(32734)
 PARAMS = PermeabilityParams()
@@ -80,7 +80,7 @@ def _configured_methods() -> list[str]:
 def test_method_emits_scorable_roads(name: str, make_block: Callable[[], Block]) -> None:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
-    method = instantiate(cfg.all_methods[name])
+    method = load_method(cfg.all_methods[name])
 
     block = make_block()
     roads = method.propose(block).roads
@@ -99,5 +99,5 @@ def test_method_emits_scorable_roads(name: str, make_block: Callable[[], Block])
     # happen to buy nothing on this uniform synthetic grid lands on zero plus sparse-solve rounding
     # (flow_paths reads -1.1e-13). That is the metric's floating-point zero, not a monotonicity
     # violation, and this test is not the place to audit any method's efficacy on a toy fixture.
-    assert -1e-9 <= float(permeability(block, roads, PARAMS)) <= 1.0
+    assert -1e-9 <= float(permeability(EgressContext.of(block, PARAMS), roads)) <= 1.0
     assert displacement(block.buildings, roads) >= 0.0

@@ -14,3 +14,4 @@ eps: 0.1
 gamma: 1.0
 depth_target: 2
 max_roads: 400
+road_width_m: 7.0

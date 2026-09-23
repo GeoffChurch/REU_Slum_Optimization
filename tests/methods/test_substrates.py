@@ -2,6 +2,7 @@ from typing import cast
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 from pyproj import CRS
 from shapely.geometry import Polygon
@@ -9,7 +10,12 @@ from shapely.ops import unary_union
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import parcel_access_layers
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+)
 from reblock.methods.clearance import _greedy_reblock
 from reblock.methods.substrates import (
     CdtSubstrate,
@@ -24,6 +30,13 @@ from reblock.methods.substrates import (
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
+
+
+def _layers(block: Block, roads: gpd.GeoDataFrame | None) -> pd.Series:
+    """The peel as a reader is shown it: adjacency at `STREET_TOL`, an unreachable parcel one
+    layer past the deepest reached."""
+    return parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
+                                unreached=one_past_deepest)
 
 
 def _grid_block(n: int) -> Block:
@@ -91,13 +104,13 @@ def test_chord_substrate_builds_connected_graph_and_hits_target() -> None:
     assert len(undirected) * 2 == len(graph.rows)          # symmetric
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
                                     radii=np.zeros(len(block.building_geometries)))
-    after = parcel_access_layers(block, roads).to_numpy()
+    after = _layers(block, roads).to_numpy()
     assert int(after.max()) <= 2 and params["grid_unreachable"] == 0
     assert ChordSubstrate().identity == ("chord_diag",) and ChordSubstrate().tag == "chord_diag"
 
 
 @pytest.mark.parametrize("sub,tag,ident", [
-    (SpannerSubstrate(), "theta_spanner", ("theta_spanner", 6)),
+    (SpannerSubstrate(cones=6), "theta_spanner", ("theta_spanner", 6)),
     (CdtSubstrate(), "cdt_gap", ("cdt_gap",)),
 ])
 def test_extra_substrates_build_and_hit_target(sub: Substrate, tag: str, ident: object) -> None:
@@ -109,6 +122,6 @@ def test_extra_substrates_build_and_hit_target(sub: Substrate, tag: str, ident: 
     assert len(undirected) * 2 == len(graph.rows)
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
                                     radii=np.zeros(len(block.building_geometries)))
-    after = parcel_access_layers(block, roads).to_numpy()
+    after = _layers(block, roads).to_numpy()
     assert int(after.max()) <= 2 and params["grid_unreachable"] == 0
     assert sub.tag == tag and sub.identity == ident

@@ -45,7 +45,7 @@ between them: K=1 is the pure one-shot LP, large K approaches the greedy.
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import geopandas as gpd
 import numpy as np
@@ -60,17 +60,14 @@ from shapely.ops import nearest_points, unary_union
 
 from reblock.buildings import Extents, IncrementalOverlap
 from reblock.contracts import Block, Proposal
-from reblock.derive.access import STREET_TOL
-from reblock.derive.adjacency import parcel_adjacency
 from reblock.derive_graph import config_identity
 from reblock.methods.resistance_greedy import _mesh, linearized_gain
-from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
+from reblock.methods.substrates import RoutingGraph, Substrate
 from reblock.permeability import (
-    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
     PermeabilityParams,
     _road_corridor,
     egress_power,
-    parcel_radii,
     permeability,
     with_width,
 )
@@ -203,21 +200,21 @@ def solve_coverage_lp(
 class ResistanceLPReblocker:
     """Choose the road set by LP against a displacement budget, re-linearizing between chunks."""
 
-    substrate: Substrate = field(default_factory=ChordSubstrate)
-    max_displacement: float = 0.10
-    # A HARD metre cap, off by default. An in-objective length PRICE was built here and deleted:
-    # normalized per instance it was a pure loss at block scale (displacement 0.0271 -> 0.0354 with
-    # no metre saving) and far too weak where it was meant to help -- on the sparse `depth` region,
-    # price 16 still drew 33,623 m against clearance_looped's 18,061 m while displacing 2.2x more.
-    # The web there is not the method over-building (its block-scale network is the SHORTEST of any
-    # method); it is that a 10%-displacement budget on sparse fabric permits enormous length. That
-    # is a gap in lens A, not something a method-side knob patches.
-    max_road_m: float = 1e6
-    chunks: int = 8
-    params: PermeabilityParams = field(default_factory=PermeabilityParams)
+    substrate: Substrate
+    max_displacement: float
+    # A HARD metre cap, off as shipped (1e6). An in-objective length PRICE was built here and
+    # deleted: normalized per instance it was a pure loss at block scale (displacement 0.0271 ->
+    # 0.0354 with no metre saving) and far too weak where it was meant to help -- on the sparse
+    # `depth` region, price 16 still drew 33,623 m against clearance_looped's 18,061 m while
+    # displacing 2.2x more. The web there is not the method over-building (its block-scale network
+    # is the SHORTEST of any method); it is that a 10%-displacement budget on sparse fabric permits
+    # enormous length. That is a gap in lens A, not something a method-side knob patches.
+    max_road_m: float
+    chunks: int
+    params: PermeabilityParams
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:
@@ -232,12 +229,9 @@ class ResistanceLPReblocker:
         if len(geoms) == 0 or len(graph.pts) == 0:
             return self._proposal(block, empty, {"roads": 0, "stopped": "empty"})
 
-        # STREET_TOL, matching `egress_power`'s own default -- NOT the road half-width. Building the
-        # mesh at the road half-width (3.0 vs 0.5) gave a 6x looser adjacency than the evaluator
-        # scores, so this method optimized a different Laplacian than the one it is graded
-        # on -- exactly what `_mesh`'s docstring says must not happen.
-        adj = parcel_adjacency(geoms, STREET_TOL)
-        pradii = parcel_radii(block, self.params)
+        # The evaluator's own context, so the LP linearizes exactly the Laplacian it is graded on
+        # -- an adjacency built here at the road half-width once gave it a 6x looser mesh.
+        ctx = EgressContext.of(block, self.params)
         street = unary_union(list(block.streets.geometry))
         net0 = np.flatnonzero(
             shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol)).tolist()
@@ -256,17 +250,17 @@ class ResistanceLPReblocker:
             (w, (np.concatenate([graph.rows, graph.cols]),
                  np.concatenate([graph.cols, graph.rows]))),
             shape=(len(graph.pts), len(graph.pts)))
-        ri, ci, dg, segs = _mesh(block, self.params, adj, pradii, self.road_width_m)
+        ri, ci, dg, segs = _mesh(ctx, self.road_width_m)
         seg_tree = STRtree(list(segs)) if len(segs) else None
 
         best: list[LineString] = []
-        best_perm = permeability(block, empty, self.params, adj=adj, radii=pradii)
+        best_perm = permeability(ctx, empty)
         base_c = np.zeros(n_b)
         k = max(self.chunks, 1)
         for t in range(k):
             built = with_width(gpd.GeoDataFrame(geometry=best, crs=crs) if best else empty,
                     self.road_width_m)
-            _p, v = egress_power(block, built, self.params, adj=adj, radii=pradii)
+            _p, v = egress_power(ctx, built)
             corridor = _road_corridor(built, self.road_width_m / 2.0)
             # One indexed query instead of a shapely call per mesh edge -- the same hot spot
             # `permeability._covered_edges` fixes, and this runs once per greedy round.
@@ -319,7 +313,7 @@ class ResistanceLPReblocker:
                 continue
             trial = with_width(gpd.GeoDataFrame(geometry=[*best, *roads], crs=crs),
                     self.road_width_m)
-            perm = permeability(block, trial, self.params, adj=adj, radii=pradii)
+            perm = permeability(ctx, trial)
             if perm <= best_perm:
                 continue
             best, best_perm, base_c = [*best, *roads], perm, base_c2

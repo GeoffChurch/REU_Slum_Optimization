@@ -1,12 +1,20 @@
 from typing import cast
 
 import geopandas as gpd
+import pandas as pd
+import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import parcel_access_layers
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
@@ -26,12 +34,19 @@ def _grid_block(n: int, x0: float = 0.0) -> Block:
                  building_tier=SpacingDiscs)
 
 
+def _layers(block: Block, roads: gpd.GeoDataFrame | None) -> pd.Series:
+    """The peel as a reader is shown it: adjacency at `STREET_TOL`, an unreachable parcel one
+    layer past the deepest reached."""
+    return parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
+                                unreached=one_past_deepest)
+
+
 def test_2x2_all_on_street() -> None:
-    assert parcel_access_layers(_grid_block(2), None).max() == 1
+    assert _layers(_grid_block(2), None).max() == 1
 
 
 def test_3x3_centre_is_layer_2() -> None:
-    layers = parcel_access_layers(_grid_block(3), None)
+    layers = _layers(_grid_block(3), None)
     assert layers.max() == 2
     assert (layers == 2).sum() == 1        # exactly the centre parcel (id 4)
     assert layers.loc[4] == 2
@@ -46,7 +61,7 @@ def test_strip_is_honest_not_degenerate() -> None:
                   parcels=parcels, streets=streets,
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
-    assert parcel_access_layers(block, None).max() == 5     # weak-dual wrongly gives 1
+    assert _layers(block, None).max() == 5     # weak-dual wrongly gives 1
 
 
 def test_indexed_by_parcel_id_survives_reorder() -> None:
@@ -62,7 +77,7 @@ def test_indexed_by_parcel_id_survives_reorder() -> None:
                   parcels=reordered, streets=base.streets,
                   source_content_hash=None, building_geometries=no_buildings(base.crs),
                   building_tier=SpacingDiscs)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
     assert layers.index.name == "parcel_id"
     # original centre id 4 -> now 1004; still the sole layer-2 parcel, by id
     assert layers.loc[1004] == 2
@@ -70,13 +85,13 @@ def test_indexed_by_parcel_id_survives_reorder() -> None:
 
 
 def test_nonzero_origin() -> None:
-    assert parcel_access_layers(_grid_block(3, x0=1000.0), None).max() == 2
+    assert _layers(_grid_block(3, x0=1000.0), None).max() == 2
 
 
 def test_added_road_reduces_depth() -> None:
     block = _grid_block(3)
     connector = gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM)
-    assert parcel_access_layers(block, connector).max() == 1   # centre now reached
+    assert _layers(block, connector).max() == 1   # centre now reached
 
 
 def test_diagonal_touch_is_not_adjacency() -> None:
@@ -96,7 +111,7 @@ def test_diagonal_touch_is_not_adjacency() -> None:
                   parcels=parcels, streets=streets,
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
     assert layers.loc[0] == 1
     assert layers.loc[1] == 2
     assert layers.loc[2] == 3        # 3 via the edge chain; would be 2 if corners counted
@@ -106,8 +121,8 @@ def test_diagonal_touch_is_not_adjacency() -> None:
 def test_access_before_unchanged_by_connectivity_change() -> None:
     # roads=None: seed_geom is exactly the streets, so before-layers are identical
     # to the pre-change behaviour (2x2 -> all layer 1, 3x3 -> centre layer 2).
-    assert parcel_access_layers(_grid_block(2), None).max() == 1
-    assert parcel_access_layers(_grid_block(3), None).max() == 2
+    assert _layers(_grid_block(2), None).max() == 1
+    assert _layers(_grid_block(3), None).max() == 2
 
 
 def test_disconnected_road_gives_no_credit() -> None:
@@ -122,8 +137,8 @@ def test_disconnected_road_gives_no_credit() -> None:
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
     floating = gpd.GeoDataFrame(geometry=[LineString([(3, 0.5), (4, 0.5)])], crs=UTM)  # interior
-    assert parcel_access_layers(block, floating).max() == 5          # no unearned credit
-    assert parcel_access_layers(block, None).max() == 5
+    assert _layers(block, floating).max() == 5          # no unearned credit
+    assert _layers(block, None).max() == 5
 
 
 def test_connected_road_reduces_depth() -> None:
@@ -137,7 +152,7 @@ def test_connected_road_reduces_depth() -> None:
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
     connected = gpd.GeoDataFrame(geometry=[LineString([(0, 0.5), (4, 0.5)])], crs=UTM)  # touches
-    assert parcel_access_layers(block, connected).max() == 1
+    assert _layers(block, connected).max() == 1
 
 
 def test_disconnected_parcel_gets_layer_past_deepest() -> None:
@@ -153,7 +168,7 @@ def test_disconnected_parcel_gets_layer_past_deepest() -> None:
     block = Block(block_id="d", crs=UTM, boundary=hull, parcels=parcels, streets=streets,
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
     assert layers.loc[0] == 1
     assert layers.loc[1] == 2
 
@@ -195,3 +210,64 @@ def test_street_adjacency_is_not_decided_by_sub_nanometre_noise() -> None:
     assert verdicts == {True}, (
         f"street-adjacency at the tolerance flipped under nanometre perturbation: {verdicts}")
     assert not connected(0.6), "a road genuinely past the tolerance must still be refused"
+
+
+def _island_block() -> Block:
+    """Two parcels: one on the street, one 100 m away and adjacent to nothing."""
+    near = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    far = Polygon([(100, 100), (101, 100), (101, 101), (100, 101)])
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[near, far], crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
+    hull = cast(Polygon, parcels.geometry.union_all().convex_hull)
+    return Block(block_id="d", crs=UTM, boundary=hull, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
+
+
+def test_past_every_parcel_places_an_unreachable_parcel_deeper_than_any_real_depth() -> None:
+    """The prefix-stable depth: `n_parcels + 1` whatever the reached layers are, so an access
+    burden compared across road prefixes charges a stranded parcel the same at every prefix.
+
+    FAULT INJECTION: returning `deepest + 1` from `past_every_parcel` gives 2 here, not 3.
+    """
+    layers = parcel_access_layers(ParcelAdjacency.of(_island_block(), STREET_TOL), None,
+                                  unreached=past_every_parcel)
+    assert layers.loc[0] == 1
+    assert layers.loc[1] == 3
+
+
+def test_an_adjacency_built_for_another_block_is_refused() -> None:
+    """The adjacency travels WITH its block, and a caller that supplies neighbour sets itself (the
+    browser does, from its baked bundle) cannot pair them with a block they were not built for.
+
+    FAULT INJECTION: deleting the length check in `ParcelAdjacency.__post_init__` lets the 2x2
+    grid carry the 3x3 grid's nine neighbour sets, and this does not raise.
+    """
+    small, large = _grid_block(2), _grid_block(3)
+    with pytest.raises(ValueError, match="different block"):
+        ParcelAdjacency(small, STREET_TOL, ParcelAdjacency.of(large, STREET_TOL).neighbours)
+
+
+def test_the_peel_seeds_at_the_adjacencys_own_tolerance() -> None:
+    """One tolerance governs both the neighbour sets and which parcels touch the street, read
+    from the adjacency -- there is no second `tol` argument for a caller to set differently.
+
+    A parcel 0.7 m from the street is not seeded at `STREET_TOL` (it reaches layer 2 through its
+    street-fronting neighbour) and is seeded at 1.0 m.
+
+    FAULT INJECTION: seeding at `STREET_TOL` instead of `adjacency.tol` leaves the 1.0 m peel at
+    layer 2 for the set-back parcel.
+    """
+    front = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    set_back = Polygon([(1, 0.7), (2, 0.7), (2, 1.7), (1, 1.7)])   # 0.7 m above the street
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[front, set_back], crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (2, 0)])], crs=UTM)
+    block = Block(block_id="s", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
+                  parcels=parcels, streets=streets, source_content_hash=None,
+                  building_geometries=no_buildings(UTM), building_tier=SpacingDiscs)
+    tight = parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), None,
+                                 unreached=one_past_deepest)
+    loose = parcel_access_layers(ParcelAdjacency.of(block, 1.0), None,
+                                 unreached=one_past_deepest)
+    assert list(tight) == [1, 2]
+    assert list(loose) == [1, 1]

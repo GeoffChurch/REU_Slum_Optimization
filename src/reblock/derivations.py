@@ -18,7 +18,12 @@ from shapely.geometry import Point, Polygon
 
 from reblock.contracts import Block, Method, Proposal
 from reblock.data.counts import BuildingCount
-from reblock.derive.access import parcel_access_layers
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+)
 from reblock.derive.geometric_access import geometric_access_distances
 from reblock.derive_graph import derive
 
@@ -27,7 +32,8 @@ if TYPE_CHECKING:
 
 
 def _access_before_impl(block: Block) -> pd.Series:
-    return parcel_access_layers(block, None)
+    return parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), None,
+                                unreached=one_past_deepest)
 
 
 def access_before(block: Block) -> pd.Series:
@@ -35,7 +41,8 @@ def access_before(block: Block) -> pd.Series:
 
 
 def _access_after_impl(block: Block, proposal: Proposal) -> pd.Series:
-    return parcel_access_layers(block, proposal.roads)
+    return parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), proposal.roads,
+                                unreached=one_past_deepest)
 
 
 def access_after(block: Block, proposal: Proposal) -> pd.Series:

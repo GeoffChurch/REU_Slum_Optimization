@@ -212,7 +212,7 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
 
   const state: StateSource<DrawRoadState> = makeState({ road: [] });
 
-  /** `solve_egress(block, None)`'s own answer, in the shape a solve returns -- not a placeholder.
+  /** `solve_egress(ctx, None)`'s own answer, in the shape a solve returns -- not a placeholder.
    *
    * `permeability` is `1 - p0/p0`, which is 0 by construction; `roadMetres` is 0 because there is
    * no road; `potential` is the baked baseline; and `conductance` is `footpath_g` because

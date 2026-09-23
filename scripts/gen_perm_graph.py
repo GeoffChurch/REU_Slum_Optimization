@@ -24,7 +24,7 @@ import numpy as np
 from reblock.budget import prefix_to_permeability
 from reblock.compare import load_permeability_config
 from reblock.perm_graph import GRAPH_LAYERS, permeability_graph
-from reblock.permeability import permeability
+from reblock.permeability import EgressContext, permeability
 from reblock.render import frame_bbox, render_graph, save_render
 from scripts._example_block import PINNED_METHOD, load_example_block
 
@@ -41,7 +41,8 @@ def main() -> None:
 
     block, roads_by_method = load_example_block(PINNED_METHOD)
     roads = roads_by_method[PINNED_METHOD]
-    prefix, reached = prefix_to_permeability(block, roads, pcfg.matched_permeability, params)
+    ctx = EgressContext.of(block, params)
+    prefix, reached = prefix_to_permeability(ctx, roads, pcfg.matched_permeability)
     if not reached:
         raise SystemExit(
             f"{PINNED_METHOD} never reached P*={pcfg.matched_permeability} on {block.block_id}; "
@@ -49,8 +50,8 @@ def main() -> None:
     log.info("block %s: %d parcels, %s prefix %.0f m", block.block_id, len(block.parcels),
              PINNED_METHOD, float(prefix.geometry.length.sum()))
 
-    before = permeability_graph(block, None, params)
-    after = permeability_graph(block, prefix, params)
+    before = permeability_graph(ctx, None)
+    after = permeability_graph(ctx, prefix)
 
     # Shared scales. Both figures are derived FIRST so every image can be put on one scale per
     # quantity -- the same discipline compare_budgets applies to vmax and frame. Without it the
@@ -82,7 +83,7 @@ def main() -> None:
         "method": PINNED_METHOD,
         "p_star": pcfg.matched_permeability,
         "permeability_before": 0.0,      # by definition: 1 - P(no roads)/P(no roads)
-        "permeability_after": permeability(block, prefix, params),
+        "permeability_after": permeability(ctx, prefix),
         "road_m": float(prefix.geometry.length.sum()),
         "n_parcels": int(before.n),
         "n_edges": int(len(before.rows)),

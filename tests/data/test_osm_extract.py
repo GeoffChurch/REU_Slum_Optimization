@@ -107,14 +107,14 @@ def test_pbf_identity_is_stable_and_keys_on_content_and_tags(tmp_path: Path) -> 
     """
     pbf = tmp_path / "x.osm.pbf"
     pbf.write_bytes(b"not-a-real-pbf-but-hashable")
-    a = PbfDesireLines(pbf)
-    b = PbfDesireLines(pbf)
+    a = PbfDesireLines(pbf, tags=FOOTPATH_TAGS)
+    b = PbfDesireLines(pbf, tags=FOOTPATH_TAGS)
     assert a.identity == b.identity
     assert a.identity is not None
 
     pbf2 = tmp_path / "y.osm.pbf"
     pbf2.write_bytes(b"different-content")
-    assert PbfDesireLines(pbf2).identity != a.identity
+    assert PbfDesireLines(pbf2, tags=FOOTPATH_TAGS).identity != a.identity
     assert PbfDesireLines(pbf, tags=("footway",)).identity != a.identity
 
 
@@ -126,8 +126,8 @@ def test_pbf_desire_lines_equality_ignores_populated_caches(tmp_path: Path) -> N
     value -- `ValueError: The truth value of a DataFrame is ambiguous`."""
     pbf = tmp_path / "x.osm.pbf"
     pbf.write_bytes(b"not-a-real-pbf-but-hashable")
-    a = PbfDesireLines(pbf)
-    b = PbfDesireLines(pbf)
+    a = PbfDesireLines(pbf, tags=FOOTPATH_TAGS)
+    b = PbfDesireLines(pbf, tags=FOOTPATH_TAGS)
     a._cache = gpd.GeoDataFrame({"v": [1]}, geometry=[Point(0, 0)], crs=4326)
     b._cache = gpd.GeoDataFrame({"v": [2, 3]}, geometry=[Point(1, 1), Point(2, 2)], crs=4326)
     assert a == b  # equally configured (same path/tags) despite different populated caches
@@ -152,7 +152,7 @@ def test_pbf_identity_memoizes_digest_and_invalidates_on_content_change(
 
     monkeypatch.setattr(osm_extract, "_file_sha256", counting_sha256)
 
-    src = PbfDesireLines(pbf)
+    src = PbfDesireLines(pbf, tags=FOOTPATH_TAGS)
     first = src.identity
     second = src.identity
     assert first == second
@@ -205,7 +205,7 @@ def test_pbf_conforms_to_desire_line_source_protocol() -> None:
     @runtime_checkable, so isinstance raises TypeError rather than returning False."""
     from reblock.methods.desire_lines import DesireLineSource
 
-    source: DesireLineSource = PbfDesireLines(Path("nonexistent.osm.pbf"))
+    source: DesireLineSource = PbfDesireLines(Path("nonexistent.osm.pbf"), tags=FOOTPATH_TAGS)
     assert callable(source.desire_lines)
 
 
@@ -309,8 +309,10 @@ def test_pbf_and_overpass_agree_on_a_pinned_bbox() -> None:
 
     bbox = (18.55, -33.99, 18.58, -33.96)   # a Cape Flats window with dense footpath mapping
     crs = CRS.from_epsg(32734)
-    a = PbfDesireLines(pbf).desire_lines(bbox, crs)
-    b = OSMDesireLines(timeout_s=180.0).desire_lines(bbox, crs)
+    a = PbfDesireLines(pbf, tags=FOOTPATH_TAGS).desire_lines(bbox, crs)
+    b = OSMDesireLines(timeout_s=180.0, tags=FOOTPATH_TAGS,
+                       endpoint="https://overpass-api.de/api/interpreter", cache_dir=None,
+                       snapshot=None).desire_lines(bbox, crs)
     assert a.geometry.length.sum() == pytest.approx(b.geometry.length.sum(), rel=0.25)
 
 

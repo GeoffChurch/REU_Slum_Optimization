@@ -7,3 +7,8 @@ tier:
   _partial_: true
 member_buildings:
   _target_: reblock.data.footprints.FootprintTiles
+  cache_dir: {_target_: hydra.utils.get_object, path: reblock.data.footprints.DEFAULT_FOOTPRINT_CACHE}
+  # The SAME threshold the points were provisioned at: parcels grow from the published points, so
+  # a different cut here would tessellate a different set of buildings at this tier.
+  min_confidence: {_target_: hydra.utils.get_object, path: scripts.fetch_kblock_fixtures.OB_MIN_CONFIDENCE}
+  fetch: {_target_: hydra.utils.get_method, path: reblock.data.footprints.fetch_tile}

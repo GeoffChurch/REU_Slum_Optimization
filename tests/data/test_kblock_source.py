@@ -2,15 +2,21 @@ from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
+import pandas as pd
 import pytest
 from pyproj import CRS
 from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
 
-from reblock.buildings import ANCHOR_COL
+from reblock.buildings import ANCHOR_COL, SpacingDiscs
 from reblock.contracts import Block
 from reblock.data.kblock import KblockSource
-from reblock.derive.access import parcel_access_layers
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+)
 from reblock.derive.geometric_access import geometric_access_distances
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -20,8 +26,17 @@ CT_BLOCKS = str(ROOT / "data" / "kblock" / "blocks_capetown_sample.parquet")
 CT_BLD = str(ROOT / "data" / "kblock" / "buildings_capetown_sample.parquet")
 
 
+def _layers(block: Block, roads: gpd.GeoDataFrame | None) -> pd.Series:
+    """The peel as a reader is shown it: adjacency at `STREET_TOL`, an unreachable parcel one
+    layer past the deepest reached."""
+    return parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
+                                unreached=one_past_deepest)
+
+
 def test_yields_wellformed_blocks_from_fixture() -> None:
-    blocks = list(KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").region().blocks)
+    blocks = list(KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10,
+                               block_ids=None, building_tier=SpacingDiscs,
+                               member_buildings=None).region().blocks)
     assert len(blocks) >= 5
     b = blocks[0]
     assert isinstance(b, Block) and isinstance(b.boundary, Polygon) and b.crs.is_projected
@@ -43,11 +58,12 @@ def test_voronoi_parcels_tile_a_synthetic_block() -> None:
     pts = [Point(5 + 10 * i, 5 + 10 * j) for i in range(3) for j in range(3)]
     blocks = gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm)
     bld = gpd.GeoDataFrame(geometry=pts, crs=utm)
-    src = KblockSource("unused", "unused", region_id="t", min_buildings=4)
+    src = KblockSource("unused", "unused", region_id="t", min_buildings=4, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     # test helper: (blocks_gdf, bld_gdf) -> Iterator[Block]
     block = next(src._blocks_from(blocks, _anchored(bld), source_content_hash=None))
     assert len(block.parcels) == 9
-    assert parcel_access_layers(block, None).max() == 2
+    assert _layers(block, None).max() == 2
 
 
 def test_all_parcels_single_polygon_on_concave_block() -> None:
@@ -62,7 +78,8 @@ def test_all_parcels_single_polygon_on_concave_block() -> None:
     poly = cast(Polygon, unary_union([box(10, 0, 20, 30), box(0, 10, 30, 20)]))
     # all points inside the "+"
     pts = [Point(15, 5), Point(15, 15), Point(15, 25), Point(5, 15), Point(25, 15)]
-    block = next(KblockSource("u", "u", region_id="t", min_buildings=4)._blocks_from(
+    block = next(KblockSource("u", "u", region_id="t", min_buildings=4, block_ids=None,
+                              building_tier=SpacingDiscs, member_buildings=None)._blocks_from(
         gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm),
         _anchored(gpd.GeoDataFrame(geometry=pts, crs=utm)), source_content_hash=None))
     assert all(g.geom_type == "Polygon" for g in block.parcels.geometry)
@@ -81,7 +98,8 @@ def test_streets_are_full_boundary_including_holes() -> None:
     pts = [Point(2, 2), Point(28, 2), Point(2, 28), Point(28, 28)]
     blocks = gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm)
     bld = gpd.GeoDataFrame(geometry=pts, crs=utm)
-    src = KblockSource("unused", "unused", region_id="t", min_buildings=4)
+    src = KblockSource("unused", "unused", region_id="t", min_buildings=4, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     block = next(src._blocks_from(blocks, _anchored(bld), source_content_hash=None))
     streets_len = float(block.streets.geometry.length.sum())
     assert abs(streets_len - poly.boundary.length) < 1e-6
@@ -92,9 +110,10 @@ def test_pinned_capetown_block_morphology() -> None:
     # A deep, dense CapeTown block (force-included in the fixture) with real peel signal --
     # pins exact morphology values read off the committed fixture (stable: the fixture's
     # building set is fixed), replacing a vacuous "peel-k >= 2" assertion.
-    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", min_buildings=10)
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     block = next(b for b in src.region().blocks if b.block_id == "ZAF.9.3.1_1_44882")
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
     geo = geometric_access_distances(block, None)
     # Pinned by running this test once against the committed fixture and reading the
     # values off the (deterministic) assertion failure -- not invented.
@@ -105,23 +124,26 @@ def test_pinned_capetown_block_morphology() -> None:
 
 def test_block_ids_filters_to_requested_block() -> None:
     src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown",
-                       block_ids=["ZAF.9.3.1_1_44882"])
+                       block_ids=["ZAF.9.3.1_1_44882"], min_buildings=10,
+                       building_tier=SpacingDiscs, member_buildings=None)
     blocks = list(src.region().blocks)
     assert [b.block_id for b in blocks] == ["ZAF.9.3.1_1_44882"]
     # UTM is estimated from the full frame, so filtering to one block can't shift the
     # CRS: the block reproduces its full-region morphology (pinned peel-k == 7).
-    assert int(parcel_access_layers(blocks[0], None).max()) == 7
+    assert int(_layers(blocks[0], None).max()) == 7
 
 
 def test_block_ids_selects_exactly_the_listed_blocks() -> None:
     ids = ["ZAF.9.3.1_1_44882", "ZAF.9.3.1_1_44571"]
-    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=ids)
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=ids, min_buildings=10,
+                       building_tier=SpacingDiscs, member_buildings=None)
     got = [b.block_id for b in src.region().blocks]
     assert got == sorted(ids)   # _blocks_from yields in sorted block_id order
 
 
 def test_block_ids_unknown_raises() -> None:
-    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=["NOPE"])
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=["NOPE"],
+                       min_buildings=10, building_tier=SpacingDiscs, member_buildings=None)
     with pytest.raises(ValueError, match="NOPE"):
         src.region()
 
@@ -133,7 +155,8 @@ def test_capetown_fixture_has_density_columns() -> None:
 
 
 def test_kblock_blocks_carry_source_content_hash() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     blocks = list(src.region().blocks)
     assert blocks, "expected at least one built block"
     h = blocks[0].source_content_hash
@@ -157,7 +180,8 @@ def test_area_tier_on_data_without_area_raises_at_load() -> None:
     from reblock.buildings import AreaDiscs
     from reblock.data.kblock import KblockSource
     with pytest.raises(ValueError, match="buildings_capetown_sample.parquet"):
-        KblockSource(_CT_BLOCKS, _CT_BUILDINGS, building_tier=AreaDiscs).region()
+        KblockSource(_CT_BLOCKS, _CT_BUILDINGS, building_tier=AreaDiscs, region_id="kblock",
+                     min_buildings=10, block_ids=None, member_buildings=None).region()
 
 
 def test_footprint_tier_on_point_data_raises_at_load() -> None:
@@ -168,7 +192,8 @@ def test_footprint_tier_on_point_data_raises_at_load() -> None:
     from reblock.buildings import Footprints
     from reblock.data.kblock import KblockSource
     with pytest.raises(ValueError, match="polygon"):
-        KblockSource(_CT_BLOCKS, _CT_BUILDINGS, building_tier=Footprints).region()
+        KblockSource(_CT_BLOCKS, _CT_BUILDINGS, building_tier=Footprints, region_id="kblock",
+                     min_buildings=10, block_ids=None, member_buildings=None).region()
 
 
 def test_parcels_are_identical_across_tiers(tmp_path: Path) -> None:
@@ -183,8 +208,12 @@ def test_parcels_are_identical_across_tiers(tmp_path: Path) -> None:
     bld = gpd.read_parquet(_CT_BUILDINGS)
     with_area = tmp_path / "buildings_with_area.parquet"
     bld.assign(area_in_meters=np.linspace(8.0, 40.0, len(bld))).to_parquet(with_area)
-    a = next(iter(KblockSource(_CT_BLOCKS, with_area, building_tier=SpacingDiscs).region().blocks))
-    b = next(iter(KblockSource(_CT_BLOCKS, with_area, building_tier=AreaDiscs).region().blocks))
+    a = next(iter(KblockSource(_CT_BLOCKS, with_area, building_tier=SpacingDiscs,
+                               region_id="kblock", min_buildings=10, block_ids=None,
+                               member_buildings=None).region().blocks))
+    b = next(iter(KblockSource(_CT_BLOCKS, with_area, building_tier=AreaDiscs, region_id="kblock",
+                               min_buildings=10, block_ids=None,
+                               member_buildings=None).region().blocks))
     assert a.block_id == b.block_id
     assert a.parcels.geometry.equals(b.parcels.geometry)
     assert not np.allclose(a.buildings.radii, b.buildings.radii)   # the model DID change

@@ -8,10 +8,13 @@ import time
 from pathlib import Path
 
 from reblock import derive_graph
+from reblock.buildings import SpacingDiscs
 from reblock.data.kblock import KblockSource
 from reblock.data.provision import ensure_city_data
+from reblock.derive.access import STREET_TOL
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.methods.peel import PeelReblocker
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.pipeline import PipelineSpec, run
 from reblock.region import IdentityRegionBuilder
 from reblock.screen.identity import IdentityScreen
@@ -26,9 +29,10 @@ def _dir_bytes(p: Path) -> int:
 def _timed_run(blocks_path: Path, buildings_path: Path) -> float:
     spec = PipelineSpec(
         source=KblockSource(str(blocks_path), str(buildings_path),
-                            region_id="capetown", block_ids=BLOCK_IDS),
+                            region_id="capetown", block_ids=BLOCK_IDS, min_buildings=10,
+                            building_tier=SpacingDiscs, member_buildings=None),
         screen=IdentityScreen(BLOCK_IDS),
-        method=PeelReblocker(),
+        method=PeelReblocker(tol=STREET_TOL, road_width_m=DEFAULT_ROAD_WIDTH_M),
         evals=[KComplexityEval()],
         max_blocks=len(BLOCK_IDS),
         region_builder=IdentityRegionBuilder(),

@@ -27,6 +27,7 @@ from reblock.compare import load_permeability_config
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
 from reblock.perm_graph import GRAPH_LAYERS, permeability_graph
+from reblock.permeability import EgressContext
 from reblock.render import (
     _BOUNDARY_COLOR,
     _CONTEXT_OUTLINE,
@@ -112,7 +113,8 @@ def main() -> None:
     block, roads = load_block_and_roads()
 
     ordered = street_first_ordered(block, roads, STREET_TOL)
-    prefix, reached = prefix_to_permeability(block, roads, pcfg.matched_permeability, params,
+    ctx = EgressContext.of(block, params)
+    prefix, reached = prefix_to_permeability(ctx, roads, pcfg.matched_permeability,
                                             tol=STREET_TOL)
     if not reached:
         raise SystemExit(f"{PINNED_METHOD} never reached P*={pcfg.matched_permeability}")
@@ -135,7 +137,7 @@ def main() -> None:
     # its PNG norm over, and this file's own note already recorded that pooling every prefix
     # reproduces that two-prefix number precisely (the per-prefix mesh p99 falls monotonically,
     # so the maximum lands at m=0). So this is the same number by a cheaper route, not a weaker one.
-    figs = [permeability_graph(block, cast(GeoDataFrame, ordered.iloc[:m]), params)
+    figs = [permeability_graph(ctx, cast(GeoDataFrame, ordered.iloc[:m]))
             for m in (0, lens_b_index)]
     base = figs[0]
 

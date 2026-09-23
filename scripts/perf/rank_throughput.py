@@ -26,8 +26,12 @@ import time
 import numpy as np
 from shapely import STRtree
 
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords, _deep_targets
 from scripts.perf.snap_vs_peel import region_block_cached
 
@@ -51,8 +55,8 @@ def ranked_gain(chords: list, weights: np.ndarray, tree: STRtree, radius: float
 def main() -> None:
     block = region_block_cached()
     n = len(block.parcels)
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    depths = parcel_access_layers(block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1)
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
+    depths = parcel_access_layers(adjacency, None, unreached=past_every_parcel)
     order = depths.loc[block.parcels["parcel_id"]].to_numpy(dtype=float)
     weights = order ** 2 - 1.0
     tree = STRtree(list(block.parcels.geometry))
@@ -61,7 +65,7 @@ def main() -> None:
 
     t0 = time.perf_counter()
     anchors = _anchor_points(list(block.streets.geometry), 32, 0)
-    targets = _deep_targets(block, None, 8, adj)
+    targets = _deep_targets(adjacency, None, 8)
     chords = _candidate_chords(anchors, targets)
     t_enum = time.perf_counter() - t0
     print(f"  enumerate {len(chords):,} chords from {len(anchors):,} anchors: {t_enum:6.1f} s")

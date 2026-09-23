@@ -5,11 +5,13 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import ScoringScreen, Source
-from reblock.data.counts import BuildingCount, KblockCount
+from reblock.data.counts import BuildingCount, KblockCount, OpenBuildingsCount
 from reblock.data.kblock import KblockSource
 from reblock.metric import BlockMetric
 from reblock.pipeline import RunOutput, _reachable_blocks, _region_score_map
+from reblock.region import Squareness
 
 _UTM = CRS.from_epsg(32643)
 
@@ -58,7 +60,8 @@ class _MetricScreen:
 
 def _peelable() -> Source:
     # I/O-free at construction, so placeholder paths are fine: nothing here reads them.
-    return KblockSource("blocks.parquet", "buildings.parquet")
+    return KblockSource("blocks.parquet", "buildings.parquet", region_id="kblock", min_buildings=10,
+                        block_ids=None, building_tier=SpacingDiscs, member_buildings=None)
 
 
 def test_capabilities_are_answered_by_the_shipped_types() -> None:
@@ -76,11 +79,14 @@ def test_capabilities_are_answered_by_the_shipped_types() -> None:
     )
     from reblock.screen.dense_compact import DenseCompactScreen
     from reblock.screen.identity import IdentityScreen
-    assert isinstance(DenseCompactScreen(Depth(), AbsoluteGate(2.0)), ScoringScreen)
+    assert isinstance(DenseCompactScreen(Depth(), AbsoluteGate(2.0), proxy_keep_n=1000,
+                                         min_buildings=10,
+                                         counts=OpenBuildingsCount()), ScoringScreen)
     assert isinstance(_MetricScreen(Depth()), ScoringScreen)
-    assert not isinstance(IdentityScreen(), ScoringScreen)
-    assert isinstance(DenseClusterRegionBuilder(), GrowingRegionBuilder)
-    assert isinstance(ShapeStandardizingRegionBuilder(), GrowingRegionBuilder)
+    assert not isinstance(IdentityScreen(block_ids=None), ScoringScreen)
+    assert isinstance(DenseClusterRegionBuilder(max_buildings=150), GrowingRegionBuilder)
+    assert isinstance(ShapeStandardizingRegionBuilder(objective=Squareness(),
+                                                      max_buildings=150), GrowingRegionBuilder)
     assert not isinstance(IdentityRegionBuilder(), GrowingRegionBuilder)
     assert not isinstance(ConvexHullRegionBuilder(), GrowingRegionBuilder)
 
@@ -119,7 +125,8 @@ def test_region_score_map_uses_metric_fine_and_skips_peel_when_geometry_only() -
     pl.block_depths = lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1) or {})  # type: ignore
     try:
         gdf = _chain_gdf()
-        pl._region_score_map(_peelable(), _MetricScreen(Product([Density(), Compactness()])),
+        pl._region_score_map(_peelable(), _MetricScreen(Product([Density(), Compactness()],
+                                                                name="product")),
                              gdf, [["s"]], 100.0)
         assert calls["n"] == 0        # geometry-only: no peel
         pl._region_score_map(_peelable(), _MetricScreen(Depth()), gdf, [["s"]], 100.0)

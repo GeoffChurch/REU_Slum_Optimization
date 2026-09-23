@@ -52,6 +52,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
@@ -66,8 +67,7 @@ from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import STREET_TOL, ParcelAdjacency
 from reblock.mesh import Mesh, footpath_mesh
 from reblock.mesh import _footpath_conductance as _footpath_conductance
 from reblock.mesh import parcel_radii as parcel_radii
@@ -290,14 +290,65 @@ class EgressSolution:
     conductance: NDArray[np.float64]
 
 
-def solve_egress(
-    block: Block,
-    roads: GeoDataFrame | None,
-    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
-    *,
-    adj: list[set[int]] | None = None,
-    radii: NDArray[np.float64] | None = None,
-) -> EgressSolution:
+@dataclass(frozen=True, eq=False)
+class EgressContext:
+    """Everything a permeability solve on ONE block reads that no road can change, built once from
+    the block and the params and shared by every solve, curve, lens and figure on that block.
+
+    Roads only raise the conductance of mesh edges that already exist (module docstring), so the
+    parcel adjacency, the per-parcel footprint radii, the footpath mesh assembled from them and the
+    no-roads baseline solve are all functions of `(block, params)` alone. They are properties of
+    one object that carries its own block and params, so every value a solve reads was derived
+    from the same pair: no caller can hand one block's radii to another block's solve, or divide
+    by a baseline solved under different params.
+
+    `radii`, `mesh` and `baseline` are computed on first access and cached on the instance: a
+    caller that only ever solves with roads (the browser, which is handed its `p0` baked) never
+    pays for the baseline. `adjacency` is a field so that a caller holding it from elsewhere can
+    supply it (see `ParcelAdjacency`), but it must be at `STREET_TOL`: that is the tolerance the
+    mesh is defined at, and an adjacency built for a peel at any other tolerance would silently
+    change the Laplacian.
+
+    Frozen and compared by identity. Nothing hashes one, and none crosses into a cached derivation:
+    every `derive()` input is still a `Block`/`Proposal`, and a context is built inside the
+    derivation from those. It pickles with whatever it has cached so far.
+    """
+    adjacency: ParcelAdjacency
+    params: PermeabilityParams
+
+    def __post_init__(self) -> None:
+        if self.adjacency.tol != STREET_TOL:
+            raise ValueError(
+                f"the permeability mesh is defined on parcel adjacency at STREET_TOL "
+                f"({STREET_TOL!r}), not {self.adjacency.tol!r}")
+
+    @classmethod
+    def of(cls, block: Block, params: PermeabilityParams) -> EgressContext:
+        """The context for `block` under `params`, with its adjacency built here."""
+        return cls(ParcelAdjacency.of(block, STREET_TOL), params)
+
+    @property
+    def block(self) -> Block:
+        return self.adjacency.block
+
+    @cached_property
+    def radii(self) -> NDArray[np.float64]:
+        """Per-parcel footprint radii (`parcel_radii`), in parcel order."""
+        return parcel_radii(self.block, self.params)
+
+    @cached_property
+    def mesh(self) -> Mesh:
+        """The road-independent footpath mesh (`footpath_mesh`). One object serves every solve on
+        the block, so its arrays are read-only (`Mesh.__post_init__`)."""
+        return footpath_mesh(self)
+
+    @cached_property
+    def baseline(self) -> EgressSolution:
+        """The no-roads solve: `baseline.p` is the P(no_roads) `permeability` divides by."""
+        return solve_egress(self, None)
+
+
+def solve_egress(ctx: EgressContext, roads: GeoDataFrame | None) -> EgressSolution:
     """The one grounded-Laplacian assembly and sparse solve. See `egress_power` for the model, and
     `EgressSolution` for why the intermediate quantities are returned rather than discarded.
 
@@ -311,9 +362,10 @@ def solve_egress(
     the ground check. Unreachable in production -- callers only ever pair a block with a road set
     they built themselves -- and arguably the better behaviour anyway, so this is noted rather than
     restructured."""
-    n = len(block.parcels)
+    params = ctx.params
+    n = len(ctx.block.parcels)
 
-    mesh = footpath_mesh(block, params, adj=adj, radii=radii)
+    mesh = ctx.mesh
     rows_arr, cols_arr, dist_arr = mesh.rows, mesh.cols, mesh.dist
     conds_arr = edge_conductances(mesh.segments, dist_arr, mesh.footpath_g, roads, params)
     zeros = np.zeros(n, dtype=np.float64)
@@ -343,56 +395,35 @@ def solve_egress(
     return EgressSolution(float(b @ v), cast(NDArray[np.float64], v), mesh, conds_arr)
 
 
-def egress_power(
-    block: Block,
-    roads: GeoDataFrame | None,
-    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
-    *,
-    adj: list[set[int]] | None = None,
-    radii: NDArray[np.float64] | None = None,
-) -> tuple[float, NDArray[np.float64]]:
+def egress_power(ctx: EgressContext,
+                 roads: GeoDataFrame | None) -> tuple[float, NDArray[np.float64]]:
     """P = b^T L^-1 b for the grounded parcel-centroid Laplacian described in the module
     docstring; b = ones(n) (every parcel injects 1 unit of escape current). Also returns the
     per-parcel potentials v (for the heatmap). (+inf, zeros(n)) if no parcel is
     street-fronting (no path to ground at all -- an ungrounded network has no well-defined
-    dissipated power for a nonzero current injection). `radii` lets a caller freeze the per-parcel
-    footprint radii (`parcel_radii`) across repeated calls on the same block (mirrors `adj`);
-    computed internally when omitted."""
-    sol = solve_egress(block, roads, params, adj=adj, radii=radii)
+    dissipated power for a nonzero current injection)."""
+    sol = solve_egress(ctx, roads)
     return sol.p, sol.potential
 
 
-def permeability(
-    block: Block,
-    roads: GeoDataFrame | None,
-    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
-    *,
-    p0: float | None = None,
-    adj: list[set[int]] | None = None,
-    radii: NDArray[np.float64] | None = None,
-) -> float:
-    """1 - P(roads)/P(no_roads); p0 lets a caller freeze the no-roads baseline (avoids
-    recomputing it inside a sweep). `radii` likewise lets a caller freeze the per-parcel
-    half-width (mirrors `adj`); computed internally when omitted. Guards: no-roads baseline that
-    is non-finite or <= 0 (ungrounded block) -> nan; a roaded network that comes out
+def permeability(ctx: EgressContext, roads: GeoDataFrame | None) -> float:
+    """1 - P(roads)/P(no_roads), against the context's own no-roads baseline (`ctx.baseline`,
+    solved once per block however many road sets are scored). Guards: a baseline that is
+    non-finite or <= 0 (ungrounded block) -> nan; a roaded network that comes out
     ungrounded/non-finite is not reachable in practice (roads only add ground/conductance) but is
     guarded defensively via the same non-finite check on p1."""
-    if radii is None:
-        radii = parcel_radii(block, params)
-    if p0 is None:
-        p0, _ = egress_power(block, None, params, adj=adj, radii=radii)
+    p0 = ctx.baseline.p
     if not np.isfinite(p0) or p0 <= 0.0:
         return float("nan")
-    p1, _ = egress_power(block, roads, params, adj=adj, radii=radii)
+    p1, _ = egress_power(ctx, roads)
     if not np.isfinite(p1):
         return float("-inf")
     return 1.0 - p1 / p0
 
 
 def permeability_curve(
-    block: Block,
+    ctx: EgressContext,
     roads: GeoDataFrame,
-    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
     *,
     n_points: int = 20,
     tol: float = STREET_TOL,
@@ -402,16 +433,10 @@ def permeability_curve(
     drainage-ordered prefix (monotone non-decreasing; see the module docstring -- roads only add
     conductance, so P is monotone non-increasing under Rayleigh monotonicity and permeability
     monotone non-decreasing). Mirrors `budget.displacement_curve`'s structure: reuses the
-    drainage-ordered `_sweep`. The no-roads baseline p0 is computed ONCE via
-    `egress_power(block, None, params)` and frozen across every sample (rather than recomputed
-    per prefix inside `permeability`). `adj` (parcel_adjacency, an STRtree spatial join -- costly
-    at region scale) is likewise built ONCE here and threaded through every `egress_power`/
-    `permeability` call: adjacency is a function of `block.parcels` geometry alone, invariant
-    across road prefixes, exactly the precomputed-adj pattern `prefix_to_depth` already uses. The
-    adaptive corridor half-width r0 (`_adaptive_r0`) is likewise a function of `block` alone
-    (independent of road prefix), so it is also computed ONCE here and threaded through.
-    Deferred import of `reblock.budget` avoids a module-level import cycle (budget.py
-    imports `permeability`/`PermeabilityParams` from this module).
+    drainage-ordered `_sweep`. Every sample is scored against the one `ctx`, so the adjacency, the
+    mesh and the no-roads baseline are built once for the whole sweep, not per prefix. Deferred
+    import of `reblock.budget` avoids a module-level import cycle (budget.py imports
+    `permeability`/`EgressContext` from this module).
 
     `progress`, if given, is called `progress(call_index, total_calls)` (1-indexed) after each
     per-prefix `permeability` solve -- `total_calls = n_points + 1` (the no-roads baseline plus
@@ -422,29 +447,22 @@ def permeability_curve(
     (the default) adds no overhead."""
     from reblock.budget import Curve, _sweep  # deferred: breaks the budget<->permeability cycle
 
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    radii = parcel_radii(block, params)
-    p0, _ = egress_power(block, None, params, adj=adj, radii=radii)
     calls = 0
 
     def f(prefix: GeoDataFrame | None) -> float:
         nonlocal calls
         calls += 1
-        value = permeability(block, prefix, params, p0=p0, adj=adj, radii=radii)
+        value = permeability(ctx, prefix)
         if progress is not None:
             progress(calls, n_points + 1)
         return value
 
-    costs, vals = _sweep(block, roads, f, n_points, tol)
+    costs, vals = _sweep(ctx.block, roads, f, n_points, tol)
     return Curve(costs, vals)
 
 
-def parcel_potentials(
-    block: Block,
-    roads: GeoDataFrame | None,
-    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
-) -> pd.Series:
+def parcel_potentials(ctx: EgressContext, roads: GeoDataFrame | None) -> pd.Series:
     """Per-parcel potentials v (grounded egress-flow solve under `roads`), indexed by
     `parcel_id` -- feeds the `_perm` heatmap coloring."""
-    _, v = egress_power(block, roads, params)
-    return pd.Series(v, index=pd.Index(block.parcels["parcel_id"], name="parcel_id"))
+    _, v = egress_power(ctx, roads)
+    return pd.Series(v, index=pd.Index(ctx.block.parcels["parcel_id"], name="parcel_id"))

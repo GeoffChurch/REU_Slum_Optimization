@@ -7,41 +7,37 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import cast
 
 import hydra
 from hydra.core.hydra_config import HydraConfig
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from reblock.contracts import CountingScreen, Eval, Method, ScoringScreen, Screen, Source
+from reblock.contracts import CountingScreen, ScoringScreen
 from reblock.data.kblock import KblockSource
 from reblock.emit import flagged_map, region_map, render_results
 from reblock.pipeline import PipelineSpec, run
-from reblock.region import RegionBuilder
+from reblock.presets import load_evals, load_method, load_stages
 from reblock.render import google_maps_url
 
 log = logging.getLogger(__name__)
 
 
 def spec_from_cfg(cfg: DictConfig) -> PipelineSpec:
-    """Adapt a composed Hydra config into a typed PipelineSpec (the config edge).
-    Per-element instantiate for the eval LIST: instantiate(cfg.eval) whole would
-    short-circuit a ListConfig of @dataclass _target_s to schema-validated
-    DictConfig nodes instead of constructing them; cfg.data/screen/method are
-    single _target_ dicts, so instantiate(...) on each is safe. `block_ids` is the
-    region grouping (a list of seed groups); it threads through as block_groups."""
+    """Adapt a composed Hydra config into a typed PipelineSpec (the config edge). Every stage is
+    built through `reblock.presets`, the one typed loading boundary. `block_ids` is the region
+    grouping (a list of seed groups); it threads through as block_groups."""
     block_groups = (
         [[str(b) for b in group] for group in cfg.block_ids]
         if cfg.block_ids is not None else None
     )
+    stages = load_stages(cfg)
     return PipelineSpec(
-        source=cast(Source, instantiate(cfg.data)),
-        screen=cast(Screen, instantiate(cfg.screen)),
-        method=cast(Method, instantiate(cfg.method)),
-        evals=cast("list[Eval]", [instantiate(e) for e in cfg.eval]),
+        source=stages.source,
+        screen=stages.screen,
+        method=load_method(cfg.method),
+        evals=load_evals(cfg.eval),
         max_blocks=cfg.max_blocks,
-        region_builder=cast(RegionBuilder, instantiate(cfg.region_builder)),
+        region_builder=stages.region_builder,
         block_groups=block_groups,
     )
 

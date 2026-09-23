@@ -24,8 +24,7 @@ import numpy as np
 from geopandas import GeoDataFrame
 from numpy.typing import NDArray
 
-from reblock.contracts import Block
-from reblock.permeability import PermeabilityParams, solve_egress
+from reblock.permeability import EgressContext, solve_egress
 
 
 @dataclass(frozen=True)
@@ -63,19 +62,11 @@ class GraphFigure:
     p: float
 
 
-def permeability_graph(
-    block: Block,
-    roads: GeoDataFrame | None,
-    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
-    *,
-    adj: list[set[int]] | None = None,
-    radii: NDArray[np.float64] | None = None,
-) -> GraphFigure:
-    """The drawable form of `block`'s egress graph under `roads`.
+def permeability_graph(ctx: EgressContext, roads: GeoDataFrame | None) -> GraphFigure:
+    """The drawable form of `ctx.block`'s egress graph under `roads`.
 
-    One solve (`solve_egress`), then two derived quantities: `upgraded` and `current`. `adj` and
-    `radii` are threaded exactly as `egress_power`/`permeability` accept them, so a region-scale
-    caller does not rebuild `parcel_adjacency` per figure.
+    One solve (`solve_egress`), then two derived quantities: `upgraded` and `current`. Figures of
+    several road sets on one block share its context, so none of them rebuilds the mesh.
 
     Raises `ValueError` for an ungrounded block. `solve_egress` reports those as `p = inf` with zero
     potentials, because a network with no path to ground has no well-defined dissipated power; a
@@ -83,13 +74,14 @@ def permeability_graph(
     cannot see. This is a figure generator, not a batch metric -- there is no aggregate for it to
     keep marching through.
     """
-    sol = solve_egress(block, roads, params, adj=adj, radii=radii)
+    sol = solve_egress(ctx, roads)
     if not np.isfinite(sol.p):
         raise ValueError(
-            f"block {block.block_id!r} is ungrounded (no parcel within STREET_TOL of a street), so "
-            f"its egress power is infinite and every potential is zero -- there is no flow to draw")
+            f"block {ctx.block.block_id!r} is ungrounded (no parcel within STREET_TOL of a "
+            f"street), so its egress power is infinite and every potential is zero -- there is no "
+            f"flow to draw")
     mesh = sol.mesh
-    ground_g = np.where(mesh.ground, params.g_street, 0.0)
+    ground_g = np.where(mesh.ground, ctx.params.g_street, 0.0)
     current = sol.conductance * (sol.potential[mesh.rows] - sol.potential[mesh.cols])
     return GraphFigure(
         cx=mesh.cx, cy=mesh.cy, potential=sol.potential, ground_g=ground_g,

@@ -137,6 +137,7 @@ class Result:
 BBox = tuple[float, float, float, float]   # (minx, miny, maxx, maxy), source CRS-agnostic input
 
 
+@runtime_checkable
 class Source(Protocol):
     def region(self) -> Region: ...
     # block_id + geometry (+ building_count when the source has it -- optional column):
@@ -145,16 +146,19 @@ class Source(Protocol):
     def building_geometries(self, bbox: BBox | None = None) -> GeoDataFrame: ...
 
 
+@runtime_checkable
 class Method(Protocol):
     @property
     def identity(self) -> Hashable | None: ...   # None: uncacheable (see `derive_graph.derive`)
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal: ...
 
 
+@runtime_checkable
 class Eval(Protocol):
     def score(self, block: Block, proposal: Proposal) -> Metrics: ...
 
 
+@runtime_checkable
 class Screen(Protocol):
     def select(self, source: Source) -> list[str] | None: ...   # selected block_ids, or None => all
 

@@ -16,3 +16,8 @@ max_roads: 400
 shortlist: 6
 loop_radius_m: 0.0   # measured never-selected; see the class docstring
 min_loop_len_m: 40.0
+max_loop_candidates: 400
+min_gain_per_m: 1.0e-06
+seed: 0
+params: {_target_: reblock.permeability.PermeabilityParams}
+road_width_m: 7.0

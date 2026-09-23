@@ -1,17 +1,33 @@
 from typing import cast
 
 import geopandas as gpd
+import pandas as pd
 import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon, box
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers, street_connectivity
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+    street_connectivity,
+)
 from reblock.methods.peel import PeelReblocker
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
+PEEL = PeelReblocker(tol=STREET_TOL, road_width_m=DEFAULT_ROAD_WIDTH_M)
+
+
+def _layers(block: Block, roads: gpd.GeoDataFrame | None) -> pd.Series:
+    """The peel as a reader is shown it: adjacency at `STREET_TOL`, an unreachable parcel one
+    layer past the deepest reached."""
+    return parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
+                                unreached=one_past_deepest)
 
 
 def _grid5() -> Block:
@@ -26,8 +42,8 @@ def _grid5() -> Block:
 
 def test_spine_reaches_k1_and_is_street_connected() -> None:
     block = _grid5()
-    proposal = PeelReblocker().propose(block)
-    assert parcel_access_layers(block, proposal.roads).max() == 1          # full access
+    proposal = PEEL.propose(block)
+    assert _layers(block, proposal.roads).max() == 1          # full access
     sc = street_connectivity(block.streets, proposal.roads, STREET_TOL)
     assert sc.connected_frac == 1.0                            # every corridor reaches street
     # Bound to the constant, not to a typed literal: the id records WHICH tolerance was used, and
@@ -46,8 +62,8 @@ def test_deterministic_under_row_shuffle() -> None:
                    parcels=shuffled, streets=block.streets,
                    source_content_hash=None, building_geometries=no_buildings(block.crs),
                    building_tier=SpacingDiscs)
-    roads1 = PeelReblocker().propose(block).roads
-    roads2 = PeelReblocker().propose(block2).roads
+    roads1 = PEEL.propose(block).roads
+    roads2 = PEEL.propose(block2).roads
     assert roads1 is not None and roads2 is not None
     r1 = sorted(g.wkt for g in roads1.geometry)
     r2 = sorted(g.wkt for g in roads2.geometry)
@@ -58,8 +74,9 @@ def test_head_to_head_both_reach_k1_peel_connected() -> None:
     from reblock.eval.kcomplexity import KComplexityEval
     from reblock.methods.topology import TopologyMethod
     block = _grid5()
-    topo = KComplexityEval().score(block, TopologyMethod(alpha=2.0, seed=0).propose(block)).values
-    peel = KComplexityEval().score(block, PeelReblocker().propose(block)).values
+    topology = TopologyMethod(alpha=2.0, seed=0, road_width_m=DEFAULT_ROAD_WIDTH_M)
+    topo = KComplexityEval().score(block, topology.propose(block)).values
+    peel = KComplexityEval().score(block, PEEL.propose(block)).values
     assert topo["k_after"] == 1.0 and peel["k_after"] == 1.0  # both fully reblock
     assert peel["connected_road_frac"] == 1.0                 # peel network reaches the street
     assert peel["added_road_length_m"] > 0                    # it actually laid roads
@@ -78,7 +95,7 @@ def test_unreachable_island_is_skipped_and_counted() -> None:
     block = Block(block_id="d", crs=UTM, boundary=hull, parcels=parcels, streets=streets,
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
-    proposal = PeelReblocker().propose(block)
+    proposal = PEEL.propose(block)
     assert proposal.params["unreachable"] == 1
 
 
@@ -105,10 +122,10 @@ def test_spine_serves_non_convex_reflex_parcel() -> None:
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
 
-    assert parcel_access_layers(block, None).loc[1] == 2  # p starts at depth 2, via q
+    assert _layers(block, None).loc[1] == 2  # p starts at depth 2, via q
 
-    proposal = PeelReblocker().propose(block)
-    assert parcel_access_layers(block, proposal.roads).max() == 1  # p is served (depth 1)
+    proposal = PEEL.propose(block)
+    assert _layers(block, proposal.roads).max() == 1  # p is served (depth 1)
 
 
 def test_duplicate_parcel_id_raises() -> None:
@@ -120,7 +137,7 @@ def test_duplicate_parcel_id_raises() -> None:
                 source_content_hash=None, building_geometries=no_buildings(block.crs),
                 building_tier=SpacingDiscs)
     with pytest.raises(ValueError, match="parcel_id"):
-        PeelReblocker().propose(bad)
+        PEEL.propose(bad)
 
 
 def test_empty_streets_raises() -> None:
@@ -130,4 +147,4 @@ def test_empty_streets_raises() -> None:
                 source_content_hash=None, building_geometries=no_buildings(block.crs),
                 building_tier=SpacingDiscs)
     with pytest.raises(ValueError, match="streets"):
-        PeelReblocker().propose(bad)
+        PEEL.propose(bad)

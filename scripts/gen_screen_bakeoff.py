@@ -37,9 +37,10 @@ from matplotlib.lines import Line2D
 from pyproj import CRS
 from scipy.stats import rankdata
 
+from reblock.buildings import SpacingDiscs
 from reblock.data.counts import COUNTERS, BuildingCount, resolved
 from reblock.data.informal import ensure_informal_structures, label_blocks, settlement_extents
-from reblock.data.provision import cached_kblock_source
+from reblock.data.provision import DEFAULT_CACHE, cached_kblock_source
 from reblock.metric import DENSITY_COMPACTNESS_FLOOR, DEPTH_DENSITY_PROXY_FLOOR
 
 OUT = Path("examples/screen-bakeoff")
@@ -78,7 +79,9 @@ def load(counter: BuildingCount) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     went on grading Ecopia-ranked screens and republished its old table byte-identical.
     """
     ext = settlement_extents(epsg=UTM)
-    src = cached_kblock_source("capetown", min_buildings=MIN_COUNT)
+    src = cached_kblock_source("capetown", min_buildings=MIN_COUNT, block_ids=None,
+                               cache_dir=DEFAULT_CACHE, building_tier=SpacingDiscs,
+                               member_buildings=None)
     raw = gpd.read_parquet(src.blocks_path, columns=["block_id", "building_count", "geometry"])
     raw["block_id"] = raw["block_id"].astype(str)
     projected = raw.crs is not None and CRS.from_user_input(raw.crs).is_projected

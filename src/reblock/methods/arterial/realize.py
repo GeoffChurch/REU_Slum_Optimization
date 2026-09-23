@@ -82,7 +82,7 @@ class SnapToBoundary:
     it was silently dead for aspirational runs -- and dead in the cache key too.
     """
 
-    lam: float = 2.0
+    lam: float
 
     @property
     def snaps(self) -> bool:

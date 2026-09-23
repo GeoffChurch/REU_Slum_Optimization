@@ -36,10 +36,21 @@ from shapely.geometry.base import BaseGeometry
 
 import reblock.methods.arterial.engines as engines
 import reblock.methods.arterial.scoring as scoring
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import Access, Displacement, GreedyArterialReblocker, SnapToBoundary
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
+from reblock.methods.arterial import (
+    Access,
+    Displacement,
+    ExactEngine,
+    GreedyArterialReblocker,
+    SnapToBoundary,
+)
 from reblock.methods.arterial.primitives import _planarize
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from scripts.pair_matrix import evenly_spaced, load_pools
 from scripts.perf.first_order_rank import first_order_gain
 
@@ -56,7 +67,7 @@ _ORIG_BEST = engines._best_candidate
 _ORIG_EVAL = engines.eval_candidate
 
 _BLOCK: object = None
-_ADJ: list[set[int]] = []
+_ADJACENCY: ParcelAdjacency | None = None
 _TREE: STRtree | None = None
 _BTREE: STRtree | None = None
 _COMMITTED: list[BaseGeometry] = []
@@ -98,13 +109,15 @@ def _best_hook(results: object) -> tuple[float, BaseGeometry | None]:
     res = list(results)                              # type: ignore[call-overload]
     gain, real = _ORIG_BEST(res)
     blk = _BLOCK
-    if real is None or blk is None or _TREE is None or len(_EXACT) != len(_CHORDS):
+    if (real is None or blk is None or _TREE is None or _ADJACENCY is None
+            or len(_EXACT) != len(_CHORDS)):
         return gain, real
 
     base = _planarize(list(_COMMITTED), blk.crs, 2.0 * _HALF_W)          # type: ignore[attr-defined]
-    depths = parcel_access_layers(blk, base if len(base) else None,      # type: ignore[arg-type]
-                                  tol=STREET_TOL, adj=_ADJ,
-                                  unreached_depth=len(blk.parcels) + 1)   # type: ignore[attr-defined]
+    # The adjacency set beside `_BLOCK`, for the same block -- both are written together
+    # below, and the adjacency carries its block, so the peel cannot read another one's.
+    depths = parcel_access_layers(_ADJACENCY, base if len(base) else None,  # type: ignore[arg-type]
+                                  unreached=past_every_parcel)
     order = depths.loc[blk.parcels["parcel_id"]].to_numpy(dtype=float)    # type: ignore[attr-defined]
     weights = order ** 2 - 1.0
 
@@ -169,21 +182,24 @@ def main() -> None:
     counts = [float(len(b.parcels)) for b in blocks]
     sel = [i for i in pools.recipients if len(blocks[i].parcels) <= 90]
 
-    global _BLOCK, _ADJ, _TREE, _BTREE
+    global _BLOCK, _ADJACENCY, _TREE, _BTREE
     by_block: dict[str, list[dict[str, float]]] = {}
     for i in evenly_spaced(sorted(sel), counts, N_BLOCKS):
         b = blocks[i]
         _ROWS.clear()
         _COMMITTED.clear()
         _BLOCK = b
-        _ADJ = parcel_adjacency(list(b.parcels.geometry), STREET_TOL)
+        _ADJACENCY = ParcelAdjacency.of(b, STREET_TOL)
         _TREE = STRtree(list(b.parcels.geometry))
         _BTREE = STRtree(list(b.building_geometries.geometry))
         print(f"  {b.block_id}  ({len(b.parcels)} parcels)", flush=True)
         # workers=1 -> the serial path, so `_eval_hook`'s stash survives (a fork pool would
         # compute it in children and discard it)
-        GreedyArterialReblocker(realizer=SnapToBoundary(), objective=Access(), cost=Displacement(),
-                                workers=1, max_roads=MAX_ROADS).propose(b)
+        GreedyArterialReblocker(realizer=SnapToBoundary(lam=2.0), objective=Access(),
+                                cost=Displacement(), workers=1, max_roads=MAX_ROADS, n_anchors=32,
+                                top_k=8,
+                                road_width_m=DEFAULT_ROAD_WIDTH_M, engine=ExactEngine(),
+                                max_anchors=0).propose(b)
         by_block[b.block_id] = list(_ROWS)
     OUT.write_text(json.dumps(by_block, indent=1))
 

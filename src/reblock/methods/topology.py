@@ -16,7 +16,7 @@ from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.parcel_graph import to_parcel_graph
 from reblock.derive_graph import config_identity
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.permeability import with_width
 
 # The street-seam tolerance is shared with the BFS peel: both gate the same
 # `Block.streets` seam and must agree, so the value lives in one place (see
@@ -66,11 +66,11 @@ def _mark_streets_as_roads(graph: MyGraph, streets: gpd.GeoDataFrame,
 
 @dataclass
 class TopologyMethod:
-    alpha: float = 2.0
-    seed: int = 0
+    alpha: float
+    seed: int
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:

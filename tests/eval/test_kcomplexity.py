@@ -8,6 +8,7 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
 from reblock.methods.topology import TopologyMethod
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
@@ -92,7 +93,7 @@ def test_topology_roads_are_street_connected_and_unchanged() -> None:
     # Gate: topology's interior roads reach block.streets, so the connectivity-
     # aware metric neither drops its access (k stays 1) nor flags disconnection.
     block = _grid5()
-    proposal = TopologyMethod(alpha=2.0, seed=0).propose(block)
+    proposal = TopologyMethod(alpha=2.0, seed=0, road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block)
     m = KComplexityEval().score(block, proposal)
     assert m.values["k_after"] == 1.0
     assert m.values["connected_road_frac"] == 1.0

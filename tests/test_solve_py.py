@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from reblock.contracts import Block
+from reblock.permeability import EgressContext
 
 
 # `web/src/py/` is not an importable package -- no `__init__.py`, and `web/` is not on the path
@@ -35,6 +36,7 @@ def _load_solve():
 
 _solve_mod = _load_solve()
 block_from_bundle = _solve_mod.block_from_bundle
+context_from_bundle = _solve_mod.context_from_bundle
 solve = _solve_mod.solve
 
 BUNDLE = json.loads(Path("examples/authoring/block.json").read_text(encoding="utf-8"))
@@ -43,6 +45,12 @@ BUNDLE = json.loads(Path("examples/authoring/block.json").read_text(encoding="ut
 @pytest.fixture(scope="session")
 def block():
     return block_from_bundle(BUNDLE)
+
+
+@pytest.fixture(scope="session")
+def ctx():
+    """What the widget boots: the rebuilt block, its baked adjacency, the default params."""
+    return context_from_bundle(BUNDLE)
 
 
 def test_reconstruction_matches_the_source_block(block: Block) -> None:
@@ -56,7 +64,7 @@ def test_reconstruction_matches_the_source_block(block: Block) -> None:
 BAKE_TOL = 1e-12
 
 
-def test_every_reference_case_reproduces_its_baked_answer(block: Block) -> None:
+def test_every_reference_case_reproduces_its_baked_answer(ctx: EgressContext) -> None:
     """A stated tolerance, because this comparison spans two MACHINES, not two runtimes.
 
     This asserted exact equality until it failed on GitHub's runner: `crossing` came back as
@@ -87,29 +95,29 @@ def test_every_reference_case_reproduces_its_baked_answer(block: Block) -> None:
     roughly the 2 ULP seen here, which that tolerance still absorbs with room to spare.
     """
     for case in BUNDLE["reference"]:
-        got = solve(block, case["road"], BUNDLE["baseline"]["p0"])
+        got = solve(ctx, case["road"], BUNDLE["baseline"]["p0"])
         difference = abs(got["permeability"] - case["permeability"])
         assert difference <= BAKE_TOL, (
             f"{case['name']}: solved {got['permeability']!r}, baked {case['permeability']!r} "
             f"(|difference| {difference:.6e}, tolerance {BAKE_TOL:.0e})")
 
 
-def test_the_returned_arrays_are_the_shapes_the_widget_indexes(block: Block) -> None:
+def test_the_returned_arrays_are_the_shapes_the_widget_indexes(ctx: EgressContext) -> None:
     """The widget's own per-edge current calculation is `conductance[i] * (potential[rows[i]] -
     potential[cols[i]])` (design §1.6), so a short array would read `undefined` there, become
     NaN, and draw nothing -- indistinguishable from an empty graph."""
-    got = solve(block, BUNDLE["reference"][0]["road"], BUNDLE["baseline"]["p0"])
+    got = solve(ctx, BUNDLE["reference"][0]["road"], BUNDLE["baseline"]["p0"])
     assert len(got["potential"]) == len(BUNDLE["parcels"])
     assert len(got["conductance"]) == len(BUNDLE["edges"]["rows"])
 
 
-def test_road_length_is_the_polyline_length(block: Block) -> None:
+def test_road_length_is_the_polyline_length(ctx: EgressContext) -> None:
     road = [[0.0, 0.0], [3.0, 4.0], [3.0, 14.0]]
-    got = solve(block, road, BUNDLE["baseline"]["p0"])
+    got = solve(ctx, road, BUNDLE["baseline"]["p0"])
     assert math.isclose(got["roadMetres"], 15.0, rel_tol=1e-12)
 
 
-def test_a_road_that_is_a_single_point_is_refused(block: Block) -> None:
+def test_a_road_that_is_a_single_point_is_refused(ctx: EgressContext) -> None:
     """Refused HERE as well as in the widget: the widget's check is for the reader, this one is
     the contract. Without this guard, a one-point 'polyline' would reach shapely's `LineString`
     constructor and raise `GEOSException: IllegalArgumentException: point array must contain 0
@@ -117,4 +125,4 @@ def test_a_road_that_is_a_single_point_is_refused(block: Block) -> None:
     fault injection: deleting the guard above reddens this test with that GEOSException
     uncaught, not with `pytest.raises` reporting a mismatch."""
     with pytest.raises(ValueError, match="at least two"):
-        solve(block, [[0.0, 0.0]], BUNDLE["baseline"]["p0"])
+        solve(ctx, [[0.0, 0.0]], BUNDLE["baseline"]["p0"])

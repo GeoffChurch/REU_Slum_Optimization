@@ -16,9 +16,16 @@ from reblock.budget import (
 )
 from reblock.buildings import ANCHOR_COL, SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL
+from reblock.derive.access import STREET_TOL, ParcelAdjacency
 from reblock.methods.clearance import ClearanceReblocker
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+    with_width,
+)
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
@@ -53,7 +60,9 @@ def test_road_drainage_trunks_exceed_leaves() -> None:
     # cell, so the default target is satisfied by ONE road (no trunk/leaf branching to measure);
     # depth_target=1 forces every parcel to the street, producing a genuine branching tree.
     block = _grid_block(5)
-    roads = ClearanceReblocker(depth_target=1).propose(block).roads
+    roads = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                               max_roads=400,
+                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None
     drain = road_drainage(block, roads)
     assert len(drain) == len(roads) and max(drain) > min(drain) and max(drain) >= 2
@@ -72,7 +81,9 @@ def test_road_drainage_floating_roads_get_zero() -> None:
 def test_efficiency_and_directness_rise_with_roads() -> None:
     from reblock.budget import network_efficiency
     block = _grid_block(5)
-    roads = ClearanceReblocker().propose(block).roads
+    roads = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
+                               max_roads=400,
+                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None
     e_none, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, roads.iloc[:0]))   # no roads
     e_full, d_full = network_efficiency(block, roads)
@@ -111,7 +122,9 @@ def test_directness_is_a_bounded_circuity_ratio() -> None:
 
     from reblock.budget import network_efficiency
     block = _grid_block(5)
-    roads = ClearanceReblocker().propose(block).roads
+    roads = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
+                               max_roads=400,
+                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None
     _, d_roads = network_efficiency(block, roads)
     chord = with_width(gpd.GeoDataFrame(geometry=[LineString([(2.5, 0.0), (2.5, 5.0)])], crs=UTM),
@@ -360,14 +373,15 @@ def _permeability_grid_block_and_roads() -> tuple[Block, gpd.GeoDataFrame]:
 def test_max_access_depth_matches_the_peel() -> None:
     from reblock.budget import max_access_depth
     block, roads = _deep_column_block_with_two_roads()
-    assert max_access_depth(block, gpd.GeoDataFrame(geometry=[], crs=UTM)) == 4   # no roads
-    assert max_access_depth(block, roads) == 1                                     # both roads
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
+    assert max_access_depth(adjacency, gpd.GeoDataFrame(geometry=[], crs=UTM)) == 4   # no roads
+    assert max_access_depth(adjacency, roads) == 1                                     # both roads
 
 
 def test_prefix_to_depth_returns_minimal_prefix_that_reaches_target() -> None:
     from reblock.budget import prefix_to_depth
     block, roads = _deep_column_block_with_two_roads()
-    prefix, reached = prefix_to_depth(block, roads, 2)
+    prefix, reached = prefix_to_depth(ParcelAdjacency.of(block, STREET_TOL), roads, 2)
     assert reached == 2                        # road A alone brings max depth to 2
     assert len(prefix) == 1                    # the MINIMAL prefix, not both roads
     assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])   # road A (the drainage trunk)
@@ -376,7 +390,7 @@ def test_prefix_to_depth_returns_minimal_prefix_that_reaches_target() -> None:
 def test_prefix_to_depth_reaches_a_deeper_target_only_with_all_roads() -> None:
     from reblock.budget import prefix_to_depth
     block, roads = _deep_column_block_with_two_roads()
-    prefix, reached = prefix_to_depth(block, roads, 1)
+    prefix, reached = prefix_to_depth(ParcelAdjacency.of(block, STREET_TOL), roads, 1)
     assert reached == 1
     assert len(prefix) == 2                    # needs both roads to reach depth 1
 
@@ -384,19 +398,20 @@ def test_prefix_to_depth_reaches_a_deeper_target_only_with_all_roads() -> None:
 def test_prefix_to_depth_reports_floor_when_target_unreachable() -> None:
     from reblock.budget import prefix_to_depth
     block, roads = _deep_column_block_with_two_roads()
-    prefix, reached = prefix_to_depth(block, roads, 0)   # depth 0 is impossible (min is 1)
+    # depth 0 is impossible (min is 1)
+    prefix, reached = prefix_to_depth(ParcelAdjacency.of(block, STREET_TOL), roads, 0)
     assert reached == 1                        # the floor depth (> target), reported honestly
     assert len(prefix) == len(roads)           # best effort = all roads in drainage order
 
 
 def test_prefix_to_permeability_returns_minimal_prefix_that_reaches_target() -> None:
     from reblock.budget import prefix_to_permeability
-    from reblock.permeability import permeability
     block, roads = _permeability_grid_block_and_roads()
-    p1 = permeability(block, cast(gpd.GeoDataFrame, roads.iloc[:1]))
-    p2 = permeability(block, roads)
+    ctx = EgressContext.of(block, PermeabilityParams())
+    p1 = permeability(ctx, cast(gpd.GeoDataFrame, roads.iloc[:1]))
+    p2 = permeability(ctx, roads)
     assert 0.0 < p1 < p2                       # spur alone helps but the pair does strictly more
-    prefix, reached = prefix_to_permeability(block, roads, p1)
+    prefix, reached = prefix_to_permeability(ctx, roads, p1)
     assert reached
     assert len(prefix) == 1                    # the MINIMAL prefix, not both roads
     assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])   # the spur (the drainage trunk)
@@ -404,12 +419,12 @@ def test_prefix_to_permeability_returns_minimal_prefix_that_reaches_target() -> 
 
 def test_prefix_to_permeability_reaches_a_higher_target_only_with_all_roads() -> None:
     from reblock.budget import prefix_to_permeability
-    from reblock.permeability import permeability
     block, roads = _permeability_grid_block_and_roads()
-    p1 = permeability(block, cast(gpd.GeoDataFrame, roads.iloc[:1]))
-    p2 = permeability(block, roads)
+    ctx = EgressContext.of(block, PermeabilityParams())
+    p1 = permeability(ctx, cast(gpd.GeoDataFrame, roads.iloc[:1]))
+    p2 = permeability(ctx, roads)
     target = (p1 + p2) / 2.0                   # strictly between: needs both roads
-    prefix, reached = prefix_to_permeability(block, roads, target)
+    prefix, reached = prefix_to_permeability(ctx, roads, target)
     assert reached
     assert len(prefix) == 2
 
@@ -417,7 +432,8 @@ def test_prefix_to_permeability_reaches_a_higher_target_only_with_all_roads() ->
 def test_prefix_to_permeability_reports_unreached_when_target_unreachable() -> None:
     from reblock.budget import prefix_to_permeability
     block, roads = _permeability_grid_block_and_roads()
-    prefix, reached = prefix_to_permeability(block, roads, 1.5)   # 1.5 exceeds max (permeability<1)
+    ctx = EgressContext.of(block, PermeabilityParams())
+    prefix, reached = prefix_to_permeability(ctx, roads, 1.5)   # 1.5 exceeds max (permeability<1)
     assert not reached
     assert len(prefix) == len(roads)           # best effort = all roads in drainage order
     assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])
@@ -428,7 +444,8 @@ def test_prefix_to_permeability_empty_roads_returns_empty_unreached() -> None:
     from reblock.budget import prefix_to_permeability
     block, _roads = _permeability_grid_block_and_roads()
     empty_roads = gpd.GeoDataFrame(geometry=[], crs=UTM)
-    prefix, reached = prefix_to_permeability(block, empty_roads, 0.1)
+    prefix, reached = prefix_to_permeability(EgressContext.of(block, PermeabilityParams()),
+                                             empty_roads, 0.1)
     assert len(prefix) == 0
     assert not reached
 
@@ -511,9 +528,9 @@ def test_permeability_and_displacement_curves_share_cost_samples():
     # for both) land at identical budgets. A future change making _sweep's sampling
     # value-dependent would silently misalign every plot.
     from reblock.budget import displacement_curve
-    from reblock.permeability import PermeabilityParams, permeability_curve
+    from reblock.permeability import permeability_curve
     block, roads = _straight_block_with_two_roads()
-    perm = permeability_curve(block, roads, PermeabilityParams())
+    perm = permeability_curve(EgressContext.of(block, PermeabilityParams()), roads)
     disp = displacement_curve(block, roads)
     assert list(perm.cost) == list(disp.cost)
 

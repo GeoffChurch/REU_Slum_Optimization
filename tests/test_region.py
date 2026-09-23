@@ -16,6 +16,8 @@ from reblock.data.counts import KblockCount, resolved
 from reblock.data.kblock import KblockSource
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.methods.clearance import ClearanceReblocker
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.region import (
     ConvexHullRegionBuilder,
     DenseClusterRegionBuilder,
@@ -57,7 +59,8 @@ def _all_reachable(bg: gpd.GeoDataFrame, region: list[str]) -> bool:
     a block already touch-adjacent to the cluster), so a cluster grown with an effectively
     unbounded budget is exactly the seed's connected component under block adjacency, and which
     member seeds it doesn't matter -- they're already mutually reachable."""
-    unbounded = DenseClusterRegionBuilder(max_buildings=10**9).build(bg, [[region[0]]])[0]
+    unbounded = DenseClusterRegionBuilder(max_buildings=10**9).build(bg, [[region[0]]],
+                                                                     depth_fn=None)[0]
     return set(unbounded) == set(region)
 
 _SIDES = {
@@ -226,9 +229,10 @@ def test_region_reblock_reblocks_the_region_block_against_its_existing_network()
     rb = region_block([a, b])
 
     # depth_target=1: the lone center parcel of a 3x3 all-perimeter-frontage grid is already at
-    # depth 2 (the default target), which would let ClearanceReblocker propose zero roads -- too
+    # depth 2 (the shipped target), which would let ClearanceReblocker propose zero roads -- too
     # trivial to prove the region_reblock == propose(region-block) plumbing invariant below.
-    method = ClearanceReblocker(depth_target=1)
+    method = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                                max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
     result = region_reblock([a, b], method, [KComplexityEval()])
 
     assert isinstance(result, Result)
@@ -244,7 +248,7 @@ def test_region_reblock_reblocks_the_region_block_against_its_existing_network()
 
 def test_identity_region_builder_sorts_each_group_for_determinism() -> None:
     geoms = _block_geoms(("B", 1, 0), ("A", 0, 0))   # touching squares, input order B, A
-    assert IdentityRegionBuilder().build(geoms, [["B", "A"]]) == [["A", "B"]]
+    assert IdentityRegionBuilder().build(geoms, [["B", "A"]], depth_fn=None) == [["A", "B"]]
 
 
 def test_identity_region_builder_no_warning_for_a_touch_adjacent_group(
@@ -252,7 +256,7 @@ def test_identity_region_builder_no_warning_for_a_touch_adjacent_group(
 ) -> None:
     geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))   # touching squares
     with caplog.at_level(logging.WARNING, logger="reblock.region"):
-        result = IdentityRegionBuilder().build(geoms, [["A", "B"]])
+        result = IdentityRegionBuilder().build(geoms, [["A", "B"]], depth_fn=None)
     assert result == [["A", "B"]]
     assert caplog.records == []
 
@@ -262,7 +266,7 @@ def test_identity_region_builder_warns_for_a_disjoint_group(
 ) -> None:
     geoms = _block_geoms(("A", 0, 0), ("C", 5, 0))   # far apart -- gap 4 >> STREET_TOL
     with caplog.at_level(logging.WARNING, logger="reblock.region"):
-        result = IdentityRegionBuilder().build(geoms, [["A", "C"]])
+        result = IdentityRegionBuilder().build(geoms, [["A", "C"]], depth_fn=None)
     assert result == [["A", "C"]]                     # still passed through unchanged
     assert any("convex_hull" in r.message for r in caplog.records)
 
@@ -274,7 +278,7 @@ def test_convex_hull_region_builder_fills_gaps_respects_singletons_and_allows_ov
         ("G", 200.5, 0.5), ("H", 201.5, 0.5),              # overlap-test pair 2 (overlaps E/F)
     )
     result = ConvexHullRegionBuilder().build(
-        geoms, [["A", "C"], ["B"], ["E", "F"], ["G", "H"]])
+        geoms, [["A", "C"], ["B"], ["E", "F"], ["G", "H"]], depth_fn=None)
 
     assert result[0] == ["A", "B", "C"]   # B sits inside hull(A, C) -- the gap is filled
     assert result[1] == ["B"]             # a singleton's hull is its own shape -- just itself
@@ -288,17 +292,18 @@ def test_convex_hull_region_builder_fills_gaps_respects_singletons_and_allows_ov
 def test_identity_region_builder_raises_clear_error_for_unknown_block_id() -> None:
     geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))
     with pytest.raises(ValueError, match="ZZZ"):
-        IdentityRegionBuilder().build(geoms, [["A", "ZZZ"]])
+        IdentityRegionBuilder().build(geoms, [["A", "ZZZ"]], depth_fn=None)
 
 
 def test_convex_hull_region_builder_raises_clear_error_for_unknown_block_id() -> None:
     geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))
     with pytest.raises(ValueError, match="ZZZ"):
-        ConvexHullRegionBuilder().build(geoms, [["A", "ZZZ"]])
+        ConvexHullRegionBuilder().build(geoms, [["A", "ZZZ"]], depth_fn=None)
 
 
 def test_kblock_source_block_geometries_is_cheap_and_wellformed() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     geoms = src.block_geometries()
 
     assert not geoms.empty
@@ -307,14 +312,16 @@ def test_kblock_source_block_geometries_is_cheap_and_wellformed() -> None:
 
 
 def test_kblock_building_points_are_points_in_region_utm() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     pts = src.building_geometries()
     assert not pts.empty and (pts.geometry.geom_type == "Point").all()
     assert pts.crs == src.block_geometries().crs                 # same UTM -> overlays align
 
 
 def test_kblock_building_points_bbox_windows() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     allpts = src.building_geometries()
     minx, miny, maxx, maxy = allpts.total_bounds
     # Bottom-left quadrant of the extent -- a strict, non-empty subset (the DJI points
@@ -324,14 +331,17 @@ def test_kblock_building_points_bbox_windows() -> None:
 
 
 def test_kblock_block_carries_building_points() -> None:
-    block = next(iter(KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji").region().blocks))
+    block = next(iter(KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10,
+                                   block_ids=None, building_tier=SpacingDiscs,
+                                   member_buildings=None).region().blocks))
     assert not block.building_geometries.empty
     assert (block.building_geometries.geometry.geom_type == "Point").all()
     assert block.building_geometries.crs == block.crs
 
 
 def test_kblock_block_geometries_bbox_windows() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     allg = src.block_geometries()
     minx, miny, maxx, maxy = allg.total_bounds
     sub = (minx, miny, (minx + maxx) / 2, (miny + maxy) / 2)
@@ -348,9 +358,10 @@ def test_dense_cluster_grows_seed_to_buildings_budget() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
-    out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]])
+    out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]], depth_fn=None)
 
     assert len(out) == 1
     region = out[0]
@@ -365,9 +376,10 @@ def test_dense_cluster_small_budget_returns_seed_only() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
-    out = DenseClusterRegionBuilder(max_buildings=40).build(bg, [["DJI.3_1_3238"]])
+    out = DenseClusterRegionBuilder(max_buildings=40).build(bg, [["DJI.3_1_3238"]], depth_fn=None)
     assert out == [["DJI.3_1_3238"]]
 
 
@@ -377,9 +389,10 @@ def test_dense_cluster_region_is_contiguous() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
-    out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]])
+    out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]], depth_fn=None)
     by_id = dict(zip(bg["block_id"], bg.geometry, strict=True))
     assert _touch_adjacent([by_id[b] for b in out[0]])
 
@@ -390,10 +403,12 @@ def test_dense_cluster_deterministic() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     builder = DenseClusterRegionBuilder(max_buildings=150)
-    assert builder.build(bg, [["DJI.3_1_3238"]]) == builder.build(bg, [["DJI.3_1_3238"]])
+    seed = [["DJI.3_1_3238"]]
+    assert builder.build(bg, seed, depth_fn=None) == builder.build(bg, seed, depth_fn=None)
 
 
 def test_dense_cluster_deepest_neighbor_first() -> None:
@@ -408,7 +423,7 @@ def test_dense_cluster_deepest_neighbor_first() -> None:
     geoms = _dense_cluster_geoms(
         ("seed", 10.0, seed), ("deep", 5.0, deep), ("shallow", 5.0, shallow))
 
-    out = DenseClusterRegionBuilder(max_buildings=15).build(geoms, [["seed"]])
+    out = DenseClusterRegionBuilder(max_buildings=15).build(geoms, [["seed"]], depth_fn=None)
     # membership, not build order: this test is about WHICH neighbor wins, not accretion order.
     assert [sorted(g) for g in out] == [["deep", "seed"]]
 
@@ -420,11 +435,12 @@ def test_dense_cluster_falls_back_to_block_count_without_building_count() -> Non
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     bg = bg.drop(columns=["building_count"])
 
-    out = DenseClusterRegionBuilder(max_buildings=3).build(bg, [["DJI.3_1_3238"]])
+    out = DenseClusterRegionBuilder(max_buildings=3).build(bg, [["DJI.3_1_3238"]], depth_fn=None)
     assert len(out) == 1
     region = out[0]
     assert "DJI.3_1_3238" in region and len(region) == 3
@@ -437,15 +453,16 @@ def test_dense_cluster_empty_groups_returns_empty_list() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji")
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
-    assert DenseClusterRegionBuilder().build(bg, []) == []
+    assert DenseClusterRegionBuilder(max_buildings=150).build(bg, [], depth_fn=None) == []
 
 
 def test_dense_cluster_raises_clear_error_for_unknown_block_id() -> None:
     geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))
     with pytest.raises(ValueError, match="ZZZ"):
-        DenseClusterRegionBuilder().build(geoms, [["A", "ZZZ"]])
+        DenseClusterRegionBuilder(max_buildings=150).build(geoms, [["A", "ZZZ"]], depth_fn=None)
 
 
 def test_dense_cluster_warns_for_a_non_adjacent_seed_group(
@@ -459,7 +476,8 @@ def test_dense_cluster_warns_for_a_non_adjacent_seed_group(
     # don't error, still grow).
     geoms = _block_geoms(("A", 0, 0), ("C", 5, 0))
     with caplog.at_level(logging.WARNING, logger="reblock.region"):
-        result = DenseClusterRegionBuilder().build(geoms, [["A", "C"]])
+        result = DenseClusterRegionBuilder(max_buildings=150).build(geoms, [["A", "C"]],
+                                                                    depth_fn=None)
     assert result == [["A", "C"]]                      # still grown/passed through, just disjoint
     assert any("dense_cluster" in r.message for r in caplog.records)
     assert any("convex_hull" in r.message for r in caplog.records)
@@ -470,7 +488,7 @@ def test_dense_cluster_no_warning_for_a_touch_adjacent_seed_group(
 ) -> None:
     geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))      # touching squares
     with caplog.at_level(logging.WARNING, logger="reblock.region"):
-        DenseClusterRegionBuilder(max_buildings=1).build(geoms, [["A", "B"]])
+        DenseClusterRegionBuilder(max_buildings=1).build(geoms, [["A", "B"]], depth_fn=None)
     assert caplog.records == []
 
 
@@ -486,7 +504,7 @@ def test_dense_cluster_guards_zero_area_and_nan_building_count() -> None:
         ("seed", 10.0, seed), ("zero_area", 5.0, zero_area),
         ("nan_neighbor", float("nan"), nan_neighbor))
 
-    out = DenseClusterRegionBuilder(max_buildings=100).build(geoms, [["seed"]])
+    out = DenseClusterRegionBuilder(max_buildings=100).build(geoms, [["seed"]], depth_fn=None)
 
     assert len(out) == 1
     assert set(out[0]) == {"seed", "zero_area", "nan_neighbor"}  # both absorbed, no crash
@@ -501,7 +519,8 @@ def test_block_depths_matches_access_before_peel() -> None:
     root = Path(__file__).resolve().parent
     src = KblockSource(root / "data/kblock/blocks_dji_sample.parquet",
                        root / "data/kblock/buildings_dji_sample.parquet", "dji",
-                       block_ids=["DJI.3_1_1808"])
+                       block_ids=["DJI.3_1_1808"], min_buildings=10, building_tier=SpacingDiscs,
+                       member_buildings=None)
     block = next(iter(src.region().blocks))
     expected = float(access_before(block).max())
     assert block_depths(src, ["DJI.3_1_1808"]) == {"DJI.3_1_1808": expected}
@@ -521,7 +540,8 @@ def test_block_depths_empty_for_non_peelable_or_empty() -> None:
     assert block_depths(_Bare(), ["anything"]) == {}
     root = Path(__file__).resolve().parent
     src = KblockSource(root / "data/kblock/blocks_dji_sample.parquet",
-                       root / "data/kblock/buildings_dji_sample.parquet", "dji")
+                       root / "data/kblock/buildings_dji_sample.parquet", "dji", min_buildings=10,
+                       block_ids=None, building_tier=SpacingDiscs, member_buildings=None)
     assert block_depths(src, []) == {}
 
 
@@ -550,12 +570,5 @@ def test_dense_cluster_grows_by_depth_fn_not_proxy() -> None:
     # membership, not build order: seed is always first, so this checks WHICH neighbor joined it.
     assert [sorted(g) for g in builder.build(gdf, [["s"]], depth_fn=lambda bid: depth[bid])] == [
         ["b", "s"]]
-    assert [sorted(g) for g in builder.build(gdf, [["s"]])] == [["a", "s"]]  # proxy tie -> "a"
-
-
-def test_dense_cluster_depth_fn_none_is_proxy_behaviour() -> None:
-    # depth_fn=None must be byte-identical to omitting it (both the proxy path).
-    from reblock.region import DenseClusterRegionBuilder
-    gdf = _fork_gdf()
-    builder = DenseClusterRegionBuilder(max_buildings=15)
-    assert builder.build(gdf, [["s"]], depth_fn=None) == builder.build(gdf, [["s"]])
+    proxy = builder.build(gdf, [["s"]], depth_fn=None)
+    assert [sorted(g) for g in proxy] == [["a", "s"]]  # proxy tie -> "a"

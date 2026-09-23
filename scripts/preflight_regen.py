@@ -26,10 +26,10 @@ import json
 from pathlib import Path
 
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 
 from reblock.pipeline import build_regions
+from reblock.presets import load_stages
 
 VARIANTS = ("depth", "depth_density", "density_compactness")
 CITIES = ("capetown", "nairobi")
@@ -61,9 +61,8 @@ def rebuilt(variant: str, city: str) -> dict[str, object]:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config",
                       overrides=[f"+example={variant}", f"data={city}_full"])
-    source = instantiate(cfg.data)
-    screen = instantiate(cfg.screen)
-    region_builder = instantiate(cfg.region_builder)
+    stages = load_stages(cfg)
+    source, screen, region_builder = stages.source, stages.screen, stages.region_builder
     pinned = cfg.block_ids
     groups = None if pinned is None else [list(g) for g in pinned]
     region = build_regions(source, screen, region_builder, groups, int(cfg.max_blocks))[0]

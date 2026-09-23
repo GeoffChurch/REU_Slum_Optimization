@@ -1,16 +1,15 @@
 """The arterial's objective and cost are injected strategies, not strings the engines switch on."""
 import dataclasses
+from dataclasses import replace
 from itertools import product
 from pathlib import Path
 
 import geopandas as gpd
 import pytest
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from shapely.geometry import LineString, Point
 
-from reblock.derive.access import STREET_TOL
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import STREET_TOL, ParcelAdjacency
 from reblock.methods.arterial import (
     Access,
     ArterialCost,
@@ -27,7 +26,8 @@ from reblock.methods.arterial import (
 from reblock.methods.arterial.primitives import _snap_graph
 from reblock.methods.arterial.scoring import step_state
 from reblock.methods.boundary_graph import _boundary_graph
-from tests.methods.test_arterial import UTM, _grid_block, _grid_block_with_points
+from reblock.presets import load_method, load_methods
+from tests.methods.test_arterial import ARTERIAL, UTM, _grid_block, _grid_block_with_points
 
 OBJECTIVES: tuple[ArterialObjective, ...] = (Access(), Efficiency(), Directness())
 COSTS: tuple[ArterialCost, ...] = (Length(), Displacement(), Repulsion())
@@ -43,7 +43,7 @@ def test_objectives_and_costs_satisfy_their_protocols() -> None:
 def test_every_objective_and_cost_pair_has_its_own_cache_key() -> None:
     """Nine configurations, nine identities and nine proposal ids. A strategy that answered with
     another's identity would share that one's cached proposal and eval depths."""
-    methods = [GreedyArterialReblocker(objective=o, cost=c, n_anchors=4, max_roads=1)
+    methods = [replace(ARTERIAL, objective=o, cost=c, n_anchors=4, max_roads=1)
                for o, c in product(OBJECTIVES, COSTS)]
     assert len({m.identity for m in methods}) == 9
     block = dataclasses.replace(_grid_block(3), source_content_hash="nine-keys")
@@ -54,13 +54,15 @@ def _configured_arterials() -> dict[str, GreedyArterialReblocker]:
     conf_dir = str(Path("conf").resolve())
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
-        out = {name: instantiate(entry) for name, entry in cfg.all_methods.items()
-               if entry["_target_"] == "reblock.methods.arterial.GreedyArterialReblocker"}
+        out = {name: m for name, m in load_methods(cfg.all_methods).items()
+               if isinstance(m, GreedyArterialReblocker)}
         for name in ("greedy_arterial", "greedy_arterial_repulsion",
                      "greedy_arterial_displacement"):
             method_cfg = compose(config_name="config",
                                  overrides=["shapefile=x", f"method={name}"])
-            out[f"method={name}"] = instantiate(method_cfg.method)
+            m = load_method(method_cfg.method)
+            assert isinstance(m, GreedyArterialReblocker), name
+            out[f"method={name}"] = m
     return out
 
 
@@ -98,10 +100,10 @@ def test_step_state_is_frozen() -> None:
     """Forked workers inherit `_STEP_STATE` copy-on-write and only ever read it; frozen makes that
     real rather than a convention."""
     block = _grid_block(3)
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     net = engines._step_network([], block, 1.0)
     st = step_state(block, sg=_snap_graph(_boundary_graph(block.parcels)),
-                    realizer=SnapToBoundary(), objective=Directness().for_block(block, adj),
+                    realizer=SnapToBoundary(lam=2.0),
+                    objective=Directness().for_block(ParcelAdjacency.of(block, STREET_TOL)),
                     cost=Length(), committed=net)
     with pytest.raises(dataclasses.FrozenInstanceError):
         st.cost = Repulsion().at_step(block, net)    # type: ignore[misc]

@@ -44,8 +44,8 @@ def _components(gdf: gpd.GeoDataFrame) -> list[list[int]]:
 
 
 class ShapefileSource:
-    def __init__(self, path: str | Path, region_id: str = "region", *,
-                 assumed_crs: CRS | int | None = None) -> None:
+    def __init__(self, path: str | Path, region_id: str, *,
+                 assumed_crs: CRS | int | None) -> None:
         self.path = Path(path)
         self.region_id = region_id
         self.assumed_crs = assumed_crs

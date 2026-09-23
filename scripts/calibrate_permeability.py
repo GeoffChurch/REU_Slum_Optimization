@@ -75,16 +75,16 @@ from pathlib import Path
 from typing import Any, cast
 
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from omegaconf import open_dict
 
 from reblock.budget import Curve, displacement_curve
 from reblock.compare import load_permeability_config
-from reblock.contracts import Block, Method, Screen, Source
+from reblock.contracts import Block, Method
 from reblock.derivations import propose
-from reblock.permeability import PermeabilityParams, permeability_curve
+from reblock.permeability import EgressContext, PermeabilityParams, permeability_curve
 from reblock.pipeline import build_regions
-from reblock.region import RegionBuilder, region_block
+from reblock.presets import load_method, load_methods, load_stages
+from reblock.region import region_block
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT / "conf"
@@ -160,15 +160,15 @@ def _load_pinned_block() -> tuple[Block, dict[str, Method]]:
             "data=capetown_full", f"block_ids=[[{PINNED_BLOCK_ID}]]", "max_blocks=1",
             "all_methods.greedy_arterial_repulsion.max_roads=8",
             f"desire_source.snapshot={PINNED_SNAPSHOT}"])
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
-    region = build_regions(source, screen, region_builder, [[PINNED_BLOCK_ID]], 1)[0]
+    stages = load_stages(cfg)
+    registry = load_methods(cfg.all_methods)
+    region = build_regions(stages.source, stages.screen, stages.region_builder,
+                           [[PINNED_BLOCK_ID]], 1)[0]
     block = region_block(region)
-    methods = {n: cast(Method, instantiate(cfg.all_methods[n])) for n in SYNTH_METHODS}
+    methods = {n: registry[n] for n in SYNTH_METHODS}
     # The pinned flagship's OSM snapshot is committed (this is why it's pinned) -- unlike the
     # multiblock regions below, no existence guard is needed; mirrors scripts/gen_example.py.
-    methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
+    methods["osm_footpaths"] = registry["osm_footpaths"]
     return block, methods
 
 
@@ -185,15 +185,15 @@ def _load_multiblock_region(metric: str, city: str) -> tuple[Block, dict[str, Me
             "region_builder=dense_cluster", "region_builder.max_buildings=3000", "max_blocks=1",
             "all_methods.greedy_arterial_repulsion.engine.policy._target_="
             "reblock.methods.arterial.Fixed",
-            "+all_methods.greedy_arterial_repulsion.max_anchors=64",
+            "all_methods.greedy_arterial_repulsion.max_anchors=64",
             "all_methods.clearance_looped.base.depth_target=3",
             "all_methods.clearance_looped.base.max_roads=3000",
             "all_methods.clearance_looped.budget_frac=0.30",
             "all_methods.clearance_looped.search_radius_m=60",
             "all_methods.euclidean_grid.spacing=250"])
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
+    stages = load_stages(cfg)
+    source, screen, region_builder = stages.source, stages.screen, stages.region_builder
+    registry = load_methods(cfg.all_methods)
 
     selection = screen.select(source) or []
     if not selection:
@@ -204,7 +204,7 @@ def _load_multiblock_region(metric: str, city: str) -> tuple[Block, dict[str, Me
     region = build_regions(source, screen, region_builder, None, 1)[0]
 
     block = region_block(region)
-    methods = {n: cast(Method, instantiate(cfg.all_methods[n])) for n in SYNTH_METHODS}
+    methods = {n: registry[n] for n in SYNTH_METHODS}
 
     out_dir = (ROOT / f"examples/multiblock_{metric}" if city == "capetown"
               else ROOT / f"examples/{city}/multiblock_{metric}")
@@ -212,7 +212,7 @@ def _load_multiblock_region(metric: str, city: str) -> tuple[Block, dict[str, Me
     if snapshot.exists():
         with open_dict(cfg):
             cfg.desire_source.snapshot = str(snapshot)
-        methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
+        methods["osm_footpaths"] = load_method(cfg.all_methods.osm_footpaths)
     return block, methods
 
 
@@ -266,7 +266,8 @@ def _method_frontier(block: Block, method: Method, params: PermeabilityParams, *
     def _report(i: int, total: int) -> None:
         _log(f"    {label}: solve {i}/{total}")
 
-    perm_curve = permeability_curve(block, roads, params, n_points=20, progress=_report)
+    perm_curve = permeability_curve(EgressContext.of(block, params), roads, n_points=20,
+                                    progress=_report)
     disp_curve = displacement_curve(block, roads, n_points=20)
     return MethodFrontier(
         n_roads=int(len(roads)),

@@ -39,11 +39,26 @@ import numpy as np
 
 import reblock.methods.arterial.engines as art
 from reblock.budget import prefix_to_displacement
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.eval.access_burden import burden
-from reblock.methods.arterial import Access, Displacement, GreedyArterialReblocker, SnapToBoundary
-from reblock.permeability import permeability
+from reblock.methods.arterial import (
+    Access,
+    Displacement,
+    ExactEngine,
+    GreedyArterialReblocker,
+    SnapToBoundary,
+)
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+)
 from scripts.pair_matrix import evenly_spaced, load_pools
 
 SEEDS = [None, 1, 2, 3, 4, 5]      # None = unperturbed (the shipped answer)
@@ -87,24 +102,25 @@ def main() -> None:
     rows: dict[str, dict[str, list[float]]] = {}
     for i in evenly_spaced(sorted(sel), counts, N_BLOCKS):
         b = blocks[i]
-        adj = parcel_adjacency(list(b.parcels.geometry), STREET_TOL)
-        n = len(b.parcels)
-        b0 = burden(parcel_access_layers(b, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
+        adjacency = ParcelAdjacency.of(b, STREET_TOL)
+        ctx = EgressContext(adjacency, PermeabilityParams())
+        b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
         rec: dict[str, list[float]] = {"burden_red": [], "perm": [], "road_m": [], "n_roads": []}
         for seed in SEEDS:
             _patch(seed)
-            m = GreedyArterialReblocker(realizer=SnapToBoundary(), objective=Access(),
-                                        cost=Displacement(), workers=8, max_roads=8)
+            m = GreedyArterialReblocker(realizer=SnapToBoundary(lam=2.0), objective=Access(),
+                                        cost=Displacement(), workers=8, max_roads=8, n_anchors=32,
+                                        top_k=8, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                        engine=ExactEngine(), max_anchors=0)
             r = m.propose(b).roads
             if r is None or len(r) == 0:
                 continue
             pre = prefix_to_displacement(b, r, 0.10)
             if len(pre) == 0:
                 continue
-            b1 = burden(parcel_access_layers(b, pre, tol=STREET_TOL, adj=adj,
-                                             unreached_depth=n + 1))
+            b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))
             rec["burden_red"].append((1.0 - b1 / b0) if b0 > 0 else 0.0)
-            rec["perm"].append(float(permeability(b, pre)))
+            rec["perm"].append(float(permeability(ctx, pre)))
             rec["road_m"].append(float(pre.geometry.length.sum()))
             rec["n_roads"].append(float(len(r)))
         _patch(None)

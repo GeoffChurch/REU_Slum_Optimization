@@ -26,13 +26,12 @@ from typing import cast
 
 from geopandas import GeoDataFrame
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from omegaconf import DictConfig, open_dict
 
-from reblock.contracts import Block, Method, Screen, Source
+from reblock.contracts import Block
 from reblock.derivations import propose
 from reblock.pipeline import build_regions
-from reblock.region import RegionBuilder
+from reblock.presets import load_methods, load_stages
 
 PINNED_VARIANT = "explore"
 # One of the five `explore.yaml` runs, so the roads the web bundle draws are a method
@@ -89,11 +88,10 @@ def load_example_region(variant: str = PINNED_VARIANT) -> Block:
     `block.parcels`. Region build alone is 18.6 s.
     """
     cfg = _compose_pinned_config(variant)
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
+    stages = load_stages(cfg)
     groups = [list(g) for g in cfg.block_ids]
-    region = build_regions(source, screen, region_builder, groups, int(cfg.max_blocks))[0]
+    region = build_regions(stages.source, stages.screen, stages.region_builder, groups,
+                           int(cfg.max_blocks))[0]
     assert len(region) == 1, f"{variant} pins a single block by design"
     return region[0]
 
@@ -114,23 +112,23 @@ def load_example_block(method: str | None = None,
     describe the same thing -- see conf/example/explore.yaml.
     """
     cfg = _compose_pinned_config(variant)
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
-    groups = [list(g) for g in cfg.block_ids]
-    region = build_regions(source, screen, region_builder, groups, int(cfg.max_blocks))[0]
-    assert len(region) == 1, f"{PINNED_VARIANT} pins a single block by design"
-    block = region[0]
-
     names = [method] if method is not None else example_method_names(variant)
-
-    snapshot = _snapshot_path(cfg, block.block_id)
+    # The pinned block's id is known before it is built, so the snapshot -- and with it every
+    # method -- is configured up front, and a broken preset fails before the block build.
+    snapshot = _snapshot_path(cfg, str(cfg.block_ids[0][0]))
     if "osm_footpaths" in names and snapshot.exists():
         with open_dict(cfg):
             cfg.desire_source.snapshot = str(snapshot)
+    stages = load_stages(cfg)
+    registry = load_methods(cfg.all_methods)
+
+    groups = [list(g) for g in cfg.block_ids]
+    region = build_regions(stages.source, stages.screen, stages.region_builder, groups,
+                           int(cfg.max_blocks))[0]
+    assert len(region) == 1, f"{PINNED_VARIANT} pins a single block by design"
+    block = region[0]
 
     roads: dict[str, GeoDataFrame] = {}
     for name in names:
-        m = cast(Method, instantiate(cfg.all_methods[name]))
-        roads[name] = cast(GeoDataFrame, propose(m, block).roads)
+        roads[name] = cast(GeoDataFrame, propose(registry[name], block).roads)
     return block, roads
