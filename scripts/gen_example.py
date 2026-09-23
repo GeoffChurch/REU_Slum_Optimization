@@ -154,7 +154,6 @@ def main() -> None:
             total = len(source.block_geometries())
             log.info("screen: flagged %d/%d blocks (%.1fs)", len(selection), total,
                      time.perf_counter() - t0)
-            source.block_ids = None                                          # type: ignore[attr-defined]
 
         t0 = time.perf_counter()
         groups = None if pinned is None else [list(g) for g in pinned]
@@ -169,9 +168,6 @@ def main() -> None:
         log.info("region built: %d blocks / %d parcels (%.1fs)", len(members), region_parcels,
                  time.perf_counter() - t0)
         seed = selection[seed_rank] if len(selection) > seed_rank else members[0]
-        # build_regions narrowed source.block_ids to the members; clear it again (like run.py)
-        # so the screen map spans the whole metro, not just the region neighbourhood.
-        source.block_ids = None                                              # type: ignore[attr-defined]
         maps_url = google_maps_url(unary_union([b.boundary for b in region]), region[0].crs)
         write_maps_qr(maps_url, out / "maps_qr.png")
 

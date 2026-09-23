@@ -58,7 +58,7 @@ OUT = Path("scripts/perf/null_model.json")
 def arms() -> list[tuple[str, CandidateSelector]]:
     out: list[tuple[str, CandidateSelector]] = [("exact", ScoreAll())]
     for k in KS:
-        out.append((f"fo-{k}", FirstOrder(k)))
+        out.append((f"fo-{k}", FirstOrder(k, threads=1)))
         out += [(f"rand-{k}-s{s}", RandomSample(k, s)) for s in SEEDS]
     return out
 

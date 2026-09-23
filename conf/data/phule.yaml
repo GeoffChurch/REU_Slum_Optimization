@@ -2,3 +2,6 @@ _target_: reblock.data.shapefile.ShapefileSource
 path: ${shapefile}
 region_id: ${region_id}
 assumed_crs: ${assumed_crs}
+# The source's own flat load filter over its component ids -- NOT the top-level `block_ids`, which
+# are the region seed groups. A region's members are built from a `restricted` copy.
+block_ids: null

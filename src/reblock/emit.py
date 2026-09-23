@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import colorsys
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -18,7 +17,7 @@ from matplotlib.ticker import PercentFormatter
 
 from reblock.budget import displacement, road_corridor
 from reblock.buildings import Extents
-from reblock.contracts import Block, Metrics, Proposal, Result, Source
+from reblock.contracts import Block, CountableSource, Metrics, Proposal, Result, Source
 from reblock.data.counts import COUNT, BuildingCount, resolved
 from reblock.method_labels import friendly_method_name
 from reblock.render import (
@@ -38,13 +37,6 @@ if TYPE_CHECKING:
     from reblock.metric import BlockMetric
 
 _KCOMPLEXITY = "kcomplexity"
-
-
-@dataclass
-class RenderConfig:
-    enabled: bool = False
-    format: str = "png"       # only "png" is implemented
-    layout: str = "separate"  # only "separate" is implemented
 
 
 def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
@@ -93,8 +85,7 @@ def _member_ids(block_id: str) -> list[str]:
     return block_id[len("region:"):].split("+") if block_id.startswith("region:") else [block_id]
 
 
-def render_results(results: list[Result], out_dir: Path, cfg: RenderConfig,
-                   source: Source) -> None:
+def render_results(results: list[Result], out_dir: Path, source: Source) -> None:
     """Per block: a shared-`vmax` `{block_id}_before.png` + one
     `{block_id}_{proposal}_after.png` per Result. Reads the kcomplexity
     access-depth arrays from `Result.metrics` (render never recomputes the
@@ -102,10 +93,6 @@ def render_results(results: list[Result], out_dir: Path, cfg: RenderConfig,
     surrounding context (neighbouring block outlines + building points): each block's
     render frame windows the query, so the dimmed context is only ever what's actually
     visible in that frame."""
-    if cfg.format != "png" or cfg.layout != "separate":
-        raise NotImplementedError(
-            f"render supports format=png/layout=separate only; "
-            f"got format={cfg.format!r} layout={cfg.layout!r}")
     out_dir.mkdir(parents=True, exist_ok=True)
     by_block: dict[str, list[Result]] = {}
     for r in results:
@@ -237,10 +224,13 @@ def region_map(source: Source, regions: list[list[str]],
                 "one (IdentityScreen) never reaches this branch -- but reaching it without a "
                 "counter would score on the source's vendor column, which is the bug this "
                 "parameter exists to prevent.")
+        if not isinstance(source, CountableSource):
+            raise TypeError(
+                f"region_map scores unflagged members on a building count, but "
+                f"{type(source).__name__} has no building-point file to count them in")
         # `geoms[...]` narrows to DataFrame in mypy's eyes; `resolved` takes and returns a
         # GeoDataFrame, and `mg` is one at runtime (it is a row-filter of `block_geometries()`).
-        scored = resolved(cast(GeoDataFrame, mg), source.buildings_path,  # type: ignore[attr-defined]
-                          counts)
+        scored = resolved(cast(GeoDataFrame, mg), source.buildings_path, counts)
         # A member the peel could not rebuild has no depth, hence no score: it is left out below
         # rather than coloured as depth 0.
         fallback = {str(bid): metric.fine(md[str(bid)], float(cnt),

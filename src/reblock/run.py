@@ -46,11 +46,6 @@ def spec_from_cfg(cfg: DictConfig) -> PipelineSpec:
 def main(cfg: DictConfig) -> None:
     spec = spec_from_cfg(cfg)
     output = run(spec)
-    # build_regions narrows source.block_ids to the selected members; clear it once here, before
-    # ANY emitter, so the context layers (render_results' surrounding outlines + region_map's
-    # whole-metro outlines) query ALL candidate blocks, not just the selection. Order-independent:
-    # nothing below reblocks, and building_geometries ignores block_ids anyway.
-    spec.source.block_ids = None   # type: ignore[attr-defined]
     for r in output.results:
         log.info("%s %s", r.block.block_id, {m.eval: dict(m.values) for m in r.metrics})
         log.info("  map: %s", google_maps_url(r.block.boundary, r.block.crs))
@@ -61,7 +56,7 @@ def main(cfg: DictConfig) -> None:
         flagged_path.write_text("".join(f"{b}\n" for b in output.selection))
         log.info("%d blocks flagged -> %s", len(output.selection), flagged_path)
     if cfg.render.enabled:
-        render_results(output.results, out_dir, cfg.render, spec.source)
+        render_results(output.results, out_dir, spec.source)
     if cfg.flagged_map.enabled:
         if isinstance(spec.source, KblockSource):
             flagged_map(str(spec.source.blocks_path), output.selection or [], out_dir)

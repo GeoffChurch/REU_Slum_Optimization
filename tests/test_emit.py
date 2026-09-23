@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import colorsys
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -14,7 +17,6 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import BBox, Block, Metrics, Proposal, Region, Result
 from reblock.data.counts import KblockCount
 from reblock.emit import (
-    RenderConfig,
     _displaced_buildings,
     _member_ids,
     method_colors,
@@ -71,16 +73,14 @@ class _FakeSource:
     def __init__(self, blocks: gpd.GeoDataFrame, points: gpd.GeoDataFrame) -> None:
         self._blocks = blocks
         self._points = points
-        # `region_map` resolves the building count before scoring, and `resolved` is handed a
-        # buildings path. KNOWN WART: `Source` does not declare `buildings_path` -- only
-        # KblockSource has it -- so emit reaches through the protocol for it and needs a
-        # `type: ignore`. The real fix is for a `BuildingCount` to close over its own data at
-        # construction (`OpenBuildingsCount(path)`), after which no consumer passes a path at
-        # all; see the note in `reblock.data.counts`. Unused here because these tests resolve
-        # with KblockCount, which reads a column and ignores the path.
-        self.buildings_path = "unused-by-KblockCount"
+        # A `CountableSource`: `region_map` resolves the building count before scoring. Never
+        # read here, because these tests resolve with KblockCount, which reads a column.
+        self.buildings_path = Path("unused-by-KblockCount")
 
     def region(self) -> Region:
+        raise NotImplementedError("not used by render_results/region_map")
+
+    def restricted(self, block_ids: Sequence[str]) -> _FakeSource:
         raise NotImplementedError("not used by render_results/region_map")
 
     def block_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
@@ -129,8 +129,7 @@ def test_render_results_names_each_after_by_its_proposal_id(tmp_path: Path) -> N
                metrics=(_kc(block),))
         for pid in ("peel_tol0.5", "peel_tol1.0")
     ]
-    render_results(results, tmp_path, RenderConfig(enabled=True),
-                   _source_with_neighbour_and_points())
+    render_results(results, tmp_path, _source_with_neighbour_and_points())
     afters = sorted(p.name for p in tmp_path.glob("*_after.png"))
     assert afters == ["g_peel_tol0.5_after.png", "g_peel_tol1.0_after.png"]
     assert (tmp_path / "g_before.png").exists()
@@ -140,15 +139,8 @@ def test_render_results_skips_block_without_kcomplexity(tmp_path: Path) -> None:
     block = _grid_block(3)
     other = Metrics(block_id="g", method="x", eval="weakdual_k", values={"k": 1.0}, fields={})
     result = Result(block=block, proposal=_proposal(None), metrics=(other,))
-    render_results([result], tmp_path, RenderConfig(enabled=True),
-                   _source_with_neighbour_and_points())
+    render_results([result], tmp_path, _source_with_neighbour_and_points())
     assert list(tmp_path.glob("*.png")) == []
-
-
-def test_render_results_rejects_unsupported_format(tmp_path: Path) -> None:
-    with pytest.raises(NotImplementedError):
-        render_results([], tmp_path, RenderConfig(enabled=True, format="webpage"),
-                       _source_with_neighbour_and_points())
 
 
 def test_render_results_draws_context_outlines_and_points(tmp_path: Path) -> None:
@@ -158,8 +150,7 @@ def test_render_results_draws_context_outlines_and_points(tmp_path: Path) -> Non
     block = _grid_block(3)
     result = Result(block=block, proposal=_proposal(None), metrics=(_kc(block),))
 
-    render_results([result], tmp_path, RenderConfig(enabled=True),
-                   _source_with_neighbour_and_points())
+    render_results([result], tmp_path, _source_with_neighbour_and_points())
 
     before = tmp_path / "g_before.png"
     assert before.exists() and before.stat().st_size > 0
@@ -173,7 +164,7 @@ def test_render_results_guards_empty_building_points(tmp_path: Path) -> None:
     block = _grid_block(3)
     result = Result(block=block, proposal=_proposal(None), metrics=(_kc(block),))
 
-    render_results([result], tmp_path, RenderConfig(enabled=True), _empty_points_source())
+    render_results([result], tmp_path, _empty_points_source())
 
     assert (tmp_path / "g_before.png").stat().st_size > 0
 
@@ -240,8 +231,7 @@ def test_render_results_marks_displaced_buildings(tmp_path: Path) -> None:
     proposal = _proposal(roads)
     result = Result(block=block, proposal=proposal, metrics=(_kc(block),))
 
-    render_results([result], tmp_path, RenderConfig(enabled=True),
-                   _source_with_neighbour_and_points())
+    render_results([result], tmp_path, _source_with_neighbour_and_points())
 
     afters = list(tmp_path.glob("g_*_after.png"))
     assert len(afters) == 1 and afters[0].stat().st_size > 0
@@ -409,6 +399,39 @@ def test_region_map_scores_unflagged_members_by_metric_not_depth(
                      counts=KblockCount())
     assert out is not None and out.exists()
     assert calls["n"] == 0     # geometry-only metric -> no depth peel for the unflagged member
+
+
+class _ParcelsOnlySource:
+    """A `Source` with no building-point file -- a parcel shapefile's shape."""
+
+    def __init__(self, blocks: gpd.GeoDataFrame) -> None:
+        self._blocks = blocks
+
+    def region(self) -> Region:
+        raise NotImplementedError
+
+    def block_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
+        return self._blocks
+
+    def building_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame(geometry=[], crs=UTM)
+
+    def restricted(self, block_ids: Sequence[str]) -> _ParcelsOnlySource:
+        raise NotImplementedError
+
+
+def test_region_map_refuses_to_count_on_a_source_with_no_building_file(tmp_path: Path) -> None:
+    # Scoring an unflagged member resolves its building count, which needs the file a count reads.
+    # A source without one fails by name, not on a missing attribute or a path it made up.
+    from reblock.metric import Compactness
+    blocks = gpd.GeoDataFrame(
+        {"block_id": ["g", "neighbour"], "building_count_raw": [5.0, 9.0]},
+        geometry=[Polygon([(0, 0), (3, 0), (3, 3), (0, 3)]),
+                  Polygon([(4, 0), (6, 0), (6, 3), (4, 3)])], crs=UTM)
+    with pytest.raises(TypeError, match="_ParcelsOnlySource has no building-point file"):
+        region_map(_ParcelsOnlySource(blocks), [["g", "neighbour"]], [["g"]], tmp_path,
+                   selection=["g"], depths={"g": 0.5}, metric=Compactness(),
+                   counts=KblockCount())
 
 
 def _permeability_and_displacement_curves():

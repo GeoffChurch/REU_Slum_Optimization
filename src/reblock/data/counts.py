@@ -78,19 +78,12 @@ class BuildingCount(Protocol):
     @property
     def identity(self) -> Hashable: ...
 
+    # `buildings_path` per call, from the source: a consumer resolving a count asks for a
+    # `contracts.CountableSource`, which declares it. Closing a counter over its path instead was
+    # considered and rejected: the path is not config for a provisioned city (the download
+    # computes it), and a path in the counter would have to enter its `identity`, moving every
+    # screen-selection cache key for no change in any count.
     def counts(self, blocks: GeoDataFrame, buildings_path: str | Path) -> pd.Series: ...
-
-    # OPEN DESIGN ISSUE (2026-09-19). `buildings_path` is passed in per call, so every consumer
-    # of a counter must also carry a path -- and `Source` does not declare `buildings_path`, only
-    # `KblockSource` has it. `emit.region_map` therefore reaches through the protocol for it and
-    # needs a `type: ignore`, which is precisely the "access a closed set as if it were open"
-    # shape this module exists to remove.
-    #
-    # The fix is for an implementation to close over its own data at construction --
-    # `OpenBuildingsCount(buildings_path)` holding the path, `counts(blocks)` taking only blocks,
-    # `resolved(blocks, counter)` dropping the argument. `KblockCount` needs no state at all.
-    # It touches `conf/building_count/` (the path becomes config) and every call site, which is
-    # why it is recorded here rather than done in passing.
 
 
 @dataclass(frozen=True)

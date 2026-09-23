@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
@@ -113,7 +114,8 @@ def test_region_score_map_empty_when_screen_has_no_metric() -> None:
                              [["s"]], 100.0) == {}
 
 
-def test_region_score_map_uses_metric_fine_and_skips_peel_when_geometry_only() -> None:
+def test_region_score_map_uses_metric_fine_and_skips_peel_when_geometry_only(
+        monkeypatch: pytest.MonkeyPatch) -> None:
     # A density_compactness metric (needs_peel=False) -> _region_score_map must NOT call
     # block_depths; scores come from columns. A depth metric (needs_peel=True) -> block_depths
     # supplies the depth.
@@ -121,18 +123,19 @@ def test_region_score_map_uses_metric_fine_and_skips_peel_when_geometry_only() -
     from reblock.metric import Compactness, Density, Depth, Product
 
     calls = {"n": 0}
-    real = pl.block_depths  # type: ignore[attr-defined]
-    pl.block_depths = lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1) or {})  # type: ignore
-    try:
-        gdf = _chain_gdf()
-        pl._region_score_map(_peelable(), _MetricScreen(Product([Density(), Compactness()],
-                                                                name="product")),
-                             gdf, [["s"]], 100.0)
-        assert calls["n"] == 0        # geometry-only: no peel
-        pl._region_score_map(_peelable(), _MetricScreen(Depth()), gdf, [["s"]], 100.0)
-        assert calls["n"] == 1        # depth: one batched block_depths call
-    finally:
-        pl.block_depths = real        # type: ignore
+
+    def counting(source: Source, block_ids: list[str]) -> dict[str, float]:
+        calls["n"] += 1
+        return {}
+
+    monkeypatch.setattr(pl, "block_depths", counting)
+    gdf = _chain_gdf()
+    pl._region_score_map(_peelable(), _MetricScreen(Product([Density(), Compactness()],
+                                                            name="product")),
+                         gdf, [["s"]], 100.0)
+    assert calls["n"] == 0        # geometry-only: no peel
+    pl._region_score_map(_peelable(), _MetricScreen(Depth()), gdf, [["s"]], 100.0)
+    assert calls["n"] == 1        # depth: one batched block_depths call
 
 
 def test_region_score_map_leaves_out_a_block_the_peel_could_not_build(
@@ -176,3 +179,40 @@ def test_reachable_blocks_expands_per_group_and_bounds_only_the_expansion() -> N
 
     # One group, same bound: s (10) is under 15, a (20) crosses it, so expansion stops at `a`.
     assert set(_reachable_blocks(gdf, [["s"]], bound_buildings=15.0)) == {"s", "a"}
+
+
+_DJI_BLOCKS = str(Path(__file__).resolve().parent / "data/kblock/blocks_dji_sample.parquet")
+_DJI_BLD = str(Path(__file__).resolve().parent / "data/kblock/buildings_dji_sample.parquet")
+
+
+def test_build_regions_leaves_the_configured_source_whole() -> None:
+    """Members are built from a `restricted` copy. The source a run was configured with is read
+    next by every emitter, and each needs the whole metro: building regions by narrowing it in
+    place meant every entry point had to remember to widen it again.
+
+    FAULT INJECTION: building the members from `source` narrowed in place fails the last line."""
+    from reblock.pipeline import build_regions
+    from reblock.region import IdentityRegionBuilder
+    from reblock.screen.identity import IdentityScreen
+    src = KblockSource(_DJI_BLOCKS, _DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
+    before = sorted(src.block_geometries()["block_id"])
+    regions = build_regions(src, IdentityScreen(block_ids=None), IdentityRegionBuilder(),
+                            [["DJI.3_1_1808"]], 1)
+    assert [[b.block_id for b in r] for r in regions] == [["DJI.3_1_1808"]]
+    assert sorted(src.block_geometries()["block_id"]) == before and len(before) > 1
+
+
+def test_a_counting_screen_over_a_source_with_nothing_to_count_fails_by_name() -> None:
+    """Region growth resolves building counts from the source's building-point file. Explicit
+    seed groups skip the screen's own source check, so this is where a source without one --
+    a parcel shapefile -- must be refused."""
+    from reblock.data.shapefile import ShapefileSource
+    from reblock.metric import Depth
+    from reblock.pipeline import build_regions
+    from reblock.region import IdentityRegionBuilder
+    phule = (Path(__file__).resolve().parents[1] / "ext" / "topology" / "examples" / "data"
+             / "phule_nagar_v6.shp")
+    src = ShapefileSource(phule, region_id="phule", assumed_crs=3857, block_ids=None)
+    with pytest.raises(TypeError, match="ShapefileSource has no building-point file"):
+        build_regions(src, _MetricScreen(Depth()), IdentityRegionBuilder(), [["phule_0"]], 1)

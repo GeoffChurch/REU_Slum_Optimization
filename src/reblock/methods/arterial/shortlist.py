@@ -96,7 +96,7 @@ def first_order_score(chords: list[LineString], ctx: RankContext,
 @dataclass(frozen=True)
 class FirstOrder:
     k: int
-    threads: int = 1          # >1 only matters at region scale; see `first_order_score`
+    threads: int              # >1 only matters at region scale; see `first_order_score`
 
     def select(self, chords: list[LineString], ctx: RankContext) -> list[LineString]:
         if self.k <= 0 or len(chords) <= self.k:

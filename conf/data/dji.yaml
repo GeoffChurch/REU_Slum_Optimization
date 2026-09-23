@@ -3,8 +3,8 @@ blocks_path: tests/data/kblock/blocks_dji_sample.parquet
 buildings_path: tests/data/kblock/buildings_dji_sample.parquet
 region_id: dji
 min_buildings: 10
-# The source's own flat load filter, which build_regions narrows to a region's members -- NOT the
-# top-level `block_ids`, which are the region seed groups.
+# The source's own flat load filter -- NOT the top-level `block_ids`, which are the region seed
+# groups. A region's members are built from a `restricted` copy; this one is never narrowed.
 block_ids: null
 # The building-geometry tier and the data feeding it, chosen together by the `buildings`
 # config group so a tier can never be paired with data that cannot supply it.

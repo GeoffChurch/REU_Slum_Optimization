@@ -71,7 +71,8 @@ def main() -> None:
     counts = [float(len(b.parcels)) for b in blocks]
     sel = [i for i in pools_.recipients if len(blocks[i].parcels) <= 110]
 
-    arms: list[tuple[str, CandidateSelector]] = [("exact", ScoreAll()), (f"fo-{K}", FirstOrder(K))]
+    arms: list[tuple[str, CandidateSelector]] = [("exact", ScoreAll()),
+                                                 (f"fo-{K}", FirstOrder(K, threads=1))]
     for pool in POOLS:
         arms += [(f"sfo-{pool}-r{r}", StochasticFirstOrder(K, pool, r)) for r in range(R)]
 

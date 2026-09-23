@@ -223,12 +223,8 @@ def _select(spec: PoolSpec, source: KblockSource, selected: list[str] | None) ->
 
 def build_pool(source: KblockSource, ids: PoolIds, min_parcels: int) -> Pools:
     """Build every member block (a Voronoi each) and keep those with at least `min_parcels`."""
-    # The source narrowed to the members, keeping its own tier and member buildings.
-    narrowed = KblockSource(source.blocks_path, source.buildings_path,
-                            region_id=source.region_id, min_buildings=source.min_buildings,
-                            block_ids=list(ids.members), building_tier=source.building_tier,
-                            member_buildings=source.member_buildings)
-    blocks = sorted((b for b in narrowed.region().blocks if len(b.parcels) >= min_parcels),
+    blocks = sorted((b for b in source.restricted(ids.members).region().blocks
+                     if len(b.parcels) >= min_parcels),
                     key=lambda b: b.block_id)
     if not blocks:
         raise ValueError(f"{source.region_id}: no pool block survived construction")
@@ -347,7 +343,7 @@ _MATERIALIZED: dict[Hashable, _Materialized] = {}
 def _source_key(source: KblockSource) -> Hashable:
     """Everything `build_pool` reads off the source, by value."""
     return (source.blocks_path, source.buildings_path, source.region_id, source.min_buildings,
-            None if source.block_ids is None else tuple(source.block_ids),
+            source.block_ids,
             tier_identity(source.building_tier), source.member_buildings)
 
 

@@ -1,9 +1,10 @@
 """Canonical typed contracts — the waist every layer adapts to."""
 from __future__ import annotations
 
-from collections.abc import Callable, Hashable, Iterable, Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from geopandas import GeoDataFrame
@@ -144,6 +145,27 @@ class Source(Protocol):
     def block_geometries(self, bbox: BBox | None = None) -> GeoDataFrame: ...
     # points; may be empty:
     def building_geometries(self, bbox: BBox | None = None) -> GeoDataFrame: ...
+
+    def restricted(self, block_ids: Sequence[str]) -> Source:
+        """This source yielding only `block_ids`: how a caller builds a subset's Blocks.
+
+        A new source, never a narrowing of this one. The configured source is shared by every
+        stage and emitter of a run, and narrowing it in place was a side channel: region building
+        set the filter to the members, and each entry point had to remember to clear it again
+        before an emitter read the whole metro. An id the source does not have raises when the
+        restricted source is read."""
+        ...
+
+
+@runtime_checkable
+class CountableSource(Source, Protocol):
+    """A `Source` backed by one building-point file over its whole corpus: the file a
+    `BuildingCount` counts. Asked for with `isinstance` where a count is resolved, so a source
+    with no such file (a parcel shapefile) fails there by name instead of on a missing
+    attribute."""
+
+    @property
+    def buildings_path(self) -> Path: ...
 
 
 @runtime_checkable

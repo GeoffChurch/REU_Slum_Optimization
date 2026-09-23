@@ -19,6 +19,7 @@ from pyproj import CRS
 
 from reblock.contracts import (
     Block,
+    CountableSource,
     CountingScreen,
     Eval,
     Method,
@@ -204,7 +205,6 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
     # and lets the neighbourhood scoring below behave as designed.
     groups = groups[:max_blocks]
 
-    source.block_ids = None                     # type: ignore[attr-defined]  # ALL candidates
     block_geoms = source.block_geometries()
     # Region growth budgets and ranks on the building count, so it must be the SAME count the
     # screen ranked on. Until 2026-09-19 this read the source's vendor column directly, so growth
@@ -214,7 +214,11 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
     # treat every block as one building.
     counter = screen.counts if isinstance(screen, CountingScreen) else None
     if counter is not None:
-        block_geoms = resolved(block_geoms, source.buildings_path, counter)  # type: ignore[attr-defined]
+        if not isinstance(source, CountableSource):
+            raise TypeError(
+                f"{type(screen).__name__} counts buildings, but {type(source).__name__} has no "
+                f"building-point file to count them in")
+        block_geoms = resolved(block_geoms, source.buildings_path, counter)
     # Only a growing builder (one with a `max_buildings` budget) ranks candidates by the configured
     # metric's score; precompute it in ONE batched pass (peeling only if the metric needs depth) of
     # the seed's reachable neighbourhood (bound ~3x the growth budget). Non-growing builders
@@ -234,8 +238,7 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
         (lambda bid: score_map.get(bid, 0.0)) if score_map else None)
     regions = region_builder.build(block_geoms, groups, depth_fn)[:max_blocks]
     members = sorted({b for region in regions for b in region})
-    source.block_ids = members                  # type: ignore[attr-defined]  # members only
-    built = {b.block_id: b for b in source.region().blocks}
+    built = {b.block_id: b for b in source.restricted(members).region().blocks}
     result: list[list[Block]] = []
     for region in regions:
         region_blocks = [built[b] for b in region if b in built]

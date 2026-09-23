@@ -536,6 +536,7 @@ def test_block_depths_empty_for_non_peelable_or_empty() -> None:
         def region(self): raise NotImplementedError
         def block_geometries(self, bbox=None): raise NotImplementedError
         def building_geometries(self, bbox=None): raise NotImplementedError
+        def restricted(self, block_ids): raise NotImplementedError
 
     assert block_depths(_Bare(), ["anything"]) == {}
     root = Path(__file__).resolve().parent
