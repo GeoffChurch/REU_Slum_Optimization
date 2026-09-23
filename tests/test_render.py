@@ -21,6 +21,7 @@ from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 from reblock.render import (
     _CONTEXT_OUTLINE,
     _DISPLACED_PT,
+    _point_disks,
     field_contributions,
     frame_bbox,
     render_after,
@@ -82,6 +83,15 @@ def _mid_road(block: Block) -> gpd.GeoDataFrame:
     x = float(x0 + (x1 - x0) / 3.0)
     return with_width(gpd.GeoDataFrame(
         geometry=[LineString([(x, y0), (x, y1)])], crs=UTM), DEFAULT_ROAD_WIDTH_M)
+
+
+def test_point_disks_are_the_radius_asked_for_whatever_columns_ride_along() -> None:
+    """Every marker is `radius_m`. The disks used to be rescaled by a `weight` column whenever the
+    frame happened to carry one -- nothing produced it, so any buildings file with such a column
+    would have resized every marker in silence -- and a missing radius drew invisible dots."""
+    pts = gpd.GeoDataFrame({"weight": [4.0, 9.0]}, geometry=[Point(0, 0), Point(10, 0)], crs=UTM)
+    disks = _point_disks(pts, 2.0)
+    assert disks.geometry.area.to_numpy() == pytest.approx(np.pi * 4.0, rel=0.02)
 
 
 def test_render_before_returns_figure_with_axes() -> None:
