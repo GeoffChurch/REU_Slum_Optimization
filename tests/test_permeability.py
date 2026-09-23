@@ -9,6 +9,7 @@ from shapely.geometry import LineString, Point, Polygon
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
+from reblock.derive.access import ParcelAdjacency
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
@@ -286,3 +287,67 @@ def test_a_road_upgrade_never_lowers_an_edges_conductance():
     # does, so a `max` that silently took the road would drop that edge from 0.02485 to 0.02.
     assert g[:2] == pytest.approx(road[:2]) and g[2] == pytest.approx(fp[2])
     assert fp[2] > road[2]
+
+
+def test_the_baseline_is_solved_once_per_context(monkeypatch):
+    """Scoring N road sets on one block costs N + 1 solves, not 2N: the no-roads baseline is a
+    property of the context, solved on first use and then reused -- not re-solved inside every
+    `permeability` call, which for `cycle_native` meant once per candidate cycle.
+
+    FAULT INJECTION: turning `EgressContext.baseline` into a plain `@property` makes this 4, not 3.
+    """
+    from scipy.sparse.linalg import spsolve as real
+
+    import reblock.permeability as perm_mod
+    calls = []
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(perm_mod, "spsolve", counting)
+
+    ctx = EgressContext.of(_grid_block(15, cell=10.0), PARAMS)
+    permeability(ctx, _roads([LineString([(15, 0), (15, 135)])]))
+    permeability(ctx, _roads([LineString([(55, 0), (55, 135)])]))
+    assert len(calls) == 3
+
+
+def test_the_mesh_is_built_once_and_cannot_be_edited_in_place():
+    """One mesh serves every solve on its block, so it is built once and is read-only: a figure
+    or baker that edited `fig.cx` in place would otherwise move every later solve on the block.
+
+    FAULT INJECTION: deleting `Mesh.__post_init__` lets the write through, and turning
+    `EgressContext.mesh` into a plain `@property` breaks the identity assertions.
+    """
+    ctx = EgressContext.of(_grid_block(), PARAMS)
+    sol = solve_egress(ctx, _roads([LineString([(2, 0), (2, 4)])]))
+    assert sol.mesh is ctx.mesh is ctx.baseline.mesh
+    with pytest.raises(ValueError, match="read-only"):
+        ctx.mesh.cx[0] = 1e9
+
+
+def test_the_mesh_is_built_under_the_contexts_own_params():
+    """The footpath conductance is linear in `g_walk` (its median is pinned to g_walk times the
+    median of 1/dist), so doubling `g_walk` doubles every mesh edge -- which holds only if the mesh
+    reads the context's params rather than some other set.
+
+    FAULT INJECTION: building the mesh under `PermeabilityParams()` instead of `ctx.params` makes
+    the ratio 1.
+    """
+    block = _grid_block()
+    base = EgressContext.of(block, PermeabilityParams(g_walk=0.1)).mesh.footpath_g
+    doubled = EgressContext.of(block, PermeabilityParams(g_walk=0.2)).mesh.footpath_g
+    assert len(base) > 0
+    np.testing.assert_allclose(doubled / base, 2.0, rtol=1e-12)
+
+
+def test_a_context_refuses_an_adjacency_at_another_tolerance():
+    """The mesh is DEFINED on parcel adjacency at `STREET_TOL`. A peel's adjacency at another
+    tolerance is a legitimate `ParcelAdjacency`, and handing it to a permeability context would
+    silently solve a different Laplacian.
+
+    FAULT INJECTION: deleting the tolerance check in `EgressContext.__post_init__` lets this build.
+    """
+    b = _grid_block()
+    with pytest.raises(ValueError, match="STREET_TOL"):
+        EgressContext(ParcelAdjacency.of(b, 1.0), PARAMS)

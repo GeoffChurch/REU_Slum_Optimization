@@ -2,6 +2,7 @@ from typing import cast
 
 import geopandas as gpd
 import pandas as pd
+import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
@@ -12,6 +13,7 @@ from reblock.derive.access import (
     ParcelAdjacency,
     one_past_deepest,
     parcel_access_layers,
+    past_every_parcel,
 )
 from tests.block_fixtures import no_buildings
 
@@ -208,3 +210,64 @@ def test_street_adjacency_is_not_decided_by_sub_nanometre_noise() -> None:
     assert verdicts == {True}, (
         f"street-adjacency at the tolerance flipped under nanometre perturbation: {verdicts}")
     assert not connected(0.6), "a road genuinely past the tolerance must still be refused"
+
+
+def _island_block() -> Block:
+    """Two parcels: one on the street, one 100 m away and adjacent to nothing."""
+    near = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    far = Polygon([(100, 100), (101, 100), (101, 101), (100, 101)])
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[near, far], crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
+    hull = cast(Polygon, parcels.geometry.union_all().convex_hull)
+    return Block(block_id="d", crs=UTM, boundary=hull, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
+
+
+def test_past_every_parcel_places_an_unreachable_parcel_deeper_than_any_real_depth() -> None:
+    """The prefix-stable depth: `n_parcels + 1` whatever the reached layers are, so an access
+    burden compared across road prefixes charges a stranded parcel the same at every prefix.
+
+    FAULT INJECTION: returning `deepest + 1` from `past_every_parcel` gives 2 here, not 3.
+    """
+    layers = parcel_access_layers(ParcelAdjacency.of(_island_block(), STREET_TOL), None,
+                                  unreached=past_every_parcel)
+    assert layers.loc[0] == 1
+    assert layers.loc[1] == 3
+
+
+def test_an_adjacency_built_for_another_block_is_refused() -> None:
+    """The adjacency travels WITH its block, and a caller that supplies neighbour sets itself (the
+    browser does, from its baked bundle) cannot pair them with a block they were not built for.
+
+    FAULT INJECTION: deleting the length check in `ParcelAdjacency.__post_init__` lets the 2x2
+    grid carry the 3x3 grid's nine neighbour sets, and this does not raise.
+    """
+    small, large = _grid_block(2), _grid_block(3)
+    with pytest.raises(ValueError, match="different block"):
+        ParcelAdjacency(small, STREET_TOL, ParcelAdjacency.of(large, STREET_TOL).neighbours)
+
+
+def test_the_peel_seeds_at_the_adjacencys_own_tolerance() -> None:
+    """One tolerance governs both the neighbour sets and which parcels touch the street, read
+    from the adjacency -- there is no second `tol` argument for a caller to set differently.
+
+    A parcel 0.7 m from the street is not seeded at `STREET_TOL` (it reaches layer 2 through its
+    street-fronting neighbour) and is seeded at 1.0 m.
+
+    FAULT INJECTION: seeding at `STREET_TOL` instead of `adjacency.tol` leaves the 1.0 m peel at
+    layer 2 for the set-back parcel.
+    """
+    front = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    set_back = Polygon([(1, 0.7), (2, 0.7), (2, 1.7), (1, 1.7)])   # 0.7 m above the street
+    parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[front, set_back], crs=UTM)
+    streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (2, 0)])], crs=UTM)
+    block = Block(block_id="s", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
+                  parcels=parcels, streets=streets, source_content_hash=None,
+                  building_geometries=no_buildings(UTM), building_tier=SpacingDiscs)
+    tight = parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), None,
+                                 unreached=one_past_deepest)
+    loose = parcel_access_layers(ParcelAdjacency.of(block, 1.0), None,
+                                 unreached=one_past_deepest)
+    assert list(tight) == [1, 2]
+    assert list(loose) == [1, 1]
