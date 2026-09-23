@@ -2,6 +2,7 @@
 how donor material is fetched and classified."""
 from __future__ import annotations
 
+import ast
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,8 @@ from typing import cast
 import geopandas as gpd
 import pandas as pd
 import pytest
+from hydra import compose, initialize_config_dir
+from omegaconf import DictConfig
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
@@ -21,14 +24,15 @@ from reblock.data.pools import (
     PBF_BY_ISO,
     DonorSkip,
     PoolSpec,
-    capetown_config,
+    ScreenedPool,
+    _source_key,
     evenly_spaced,
     fetch_donor_lines,
     iso_of,
     load_pools,
 )
 from reblock.metric import DENSITY_COMPACTNESS_FLOOR, AbsoluteGate
-from reblock.presets import Stages, load_region_builder, load_screen
+from reblock.presets import Stages, load_research, load_stages
 from reblock.region import IdentityRegionBuilder
 from reblock.screen.dense_compact import DenseCompactScreen
 from reblock.screen.identity import IdentityScreen
@@ -98,22 +102,79 @@ def test_a_screen_that_selects_nothing_of_its_own_flags_everything(tmp_path: Pat
     assert DONOR_ONLY in {pools.blocks[i].block_id for i in pools.recipients}
 
 
-def test_the_capetown_pool_is_the_shipped_density_compactness_screen() -> None:
-    """The pool is selected through the shipped stages, so they are what this pins -- composed
-    from conf/, never built by hand. A hand-built `Gate(kind="absolute", ...)` is how the pool
-    broke silently once `Gate` became a Protocol: excluded from the type gate, nothing flagged it.
+def _compose(config_name: str, overrides: list[str]) -> DictConfig:
+    with initialize_config_dir(version_base=None, config_dir=str(ROOT / "conf")):
+        return compose(config_name=config_name, overrides=overrides)
 
-    FAULT INJECTION: `metric=depth` in the pool's overrides fails the metric assertion.
+
+def _pool(*overrides: str) -> ScreenedPool:
+    return load_research(_compose("config", list(overrides)).donor_pool, ScreenedPool)
+
+
+def test_the_capetown_pool_is_the_shipped_density_compactness_screen(
+        offline_city_cache: Path) -> None:
+    """The pool's stages are spelled in conf/donor_pool/, because the pool composes nothing; they
+    must be exactly what the shipped groups build -- the stages this pool was once composed from,
+    `compare_config` under these overrides. A hand-built `Gate(kind="absolute", ...)` is how the
+    pool broke silently once, when `Gate` became a Protocol.
+
+    FAULT INJECTION: `min_buildings: 10` in the pool's screen (conf/donor_pool/_screened.yaml), or
+    `min_buildings: 10` in its source (capetown.yaml), each fails the comparison below.
     """
-    cfg = capetown_config(ROOT / "conf")
-    screen = load_screen(cfg.screen)
-    assert isinstance(screen, DenseCompactScreen)
-    assert screen.metric.name == "density_compactness"
-    assert screen.gate == AbsoluteGate(value=DENSITY_COMPACTNESS_FLOOR)
-    assert screen.min_buildings == 30
-    assert isinstance(screen.counts, OpenBuildingsCount)
-    assert isinstance(load_region_builder(cfg.region_builder), IdentityRegionBuilder)
-    assert (cfg.data.city, cfg.data.min_buildings) == ("capetown", 30)
+    spec = _pool("donor_pool=capetown").spec
+    shipped = load_stages(_compose("compare_config", [
+        "data=capetown_full", "data.min_buildings=30", "buildings=spacing",
+        "screen=dense_compact", "screen.min_buildings=30", "metric=density_compactness",
+        "building_count=open_buildings", "proxy_keep_n=1000", "region_builder=identity"]))
+    screen, want = spec.stages.screen, shipped.screen
+    assert isinstance(screen, DenseCompactScreen) and isinstance(want, DenseCompactScreen)
+    assert screen.metric == want.metric and screen.metric.name == "density_compactness"
+    assert screen.gate == want.gate == AbsoluteGate(value=DENSITY_COMPACTNESS_FLOOR)
+    assert (screen.proxy_keep_n, screen.min_buildings) == (
+        want.proxy_keep_n, want.min_buildings) == (1000, 30)
+    assert screen.counts == want.counts and isinstance(screen.counts, OpenBuildingsCount)
+    assert spec.stages.region_builder == shipped.region_builder == IdentityRegionBuilder()
+    source, want_source = spec.stages.source, shipped.source
+    assert isinstance(source, KblockSource) and isinstance(want_source, KblockSource)
+    assert _source_key(source) == _source_key(want_source)
+    assert (source.region_id, source.min_buildings) == ("capetown", 30)
+    assert (spec.census_dir, spec.min_building_count, spec.max_building_count, spec.min_parcels,
+            spec.min_interior_m) == (offline_city_cache, 60, 300, 50, 100.0)
+
+
+def test_the_zone_pool_is_the_capetown_screen_over_one_shortlist_zone(
+        offline_city_cache: Path) -> None:
+    """Same screen, region builder, census and bounds; only the source differs."""
+    zone = _pool("donor_pool=shortlist_zone", "donor_pool.spec.stages.source.epsg=32735").spec
+    capetown = _pool("donor_pool=capetown").spec
+    zs, cs = zone.stages.screen, capetown.stages.screen
+    assert isinstance(zs, DenseCompactScreen) and isinstance(cs, DenseCompactScreen)
+    assert (zs.metric, zs.gate, zs.proxy_keep_n, zs.min_buildings, zs.counts) == (
+        cs.metric, cs.gate, cs.proxy_keep_n, cs.min_buildings, cs.counts)
+    assert replace(zone, stages=capetown.stages) == capetown
+    source = zone.stages.source
+    assert isinstance(source, KblockSource)
+    assert source.blocks_path == offline_city_cache / "blocks_shortlist_z32735.parquet"
+    assert (source.region_id, source.min_buildings) == ("shortlist-z32735", 30)
+
+
+def test_a_pool_composes_no_config() -> None:
+    """A pool is handed built stages. Composing inside it is what broke every donor-driven method
+    under `@hydra.main` ("GlobalHydra is already initialized"), so the research modules may not
+    import Hydra's composition at all.
+
+    FAULT INJECTION: re-adding `from hydra import compose, initialize_config_dir` to
+    `reblock/data/pools.py` fails this.
+    """
+    research = [ROOT / "src" / "reblock" / "data" / "pools.py",
+                *(ROOT / "src" / "reblock" / "transplant").glob("*.py")]
+    composing = []
+    for path in research:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.ImportFrom) and node.module in ("hydra", "hydra.initialize",
+                                                                   "hydra.compose"):
+                composing.append(path.name)
+    assert composing == []
 
 
 def test_evenly_spaced_keeps_both_extremes() -> None:

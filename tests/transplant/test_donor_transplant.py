@@ -49,7 +49,7 @@ def test_two_donor_draws_on_one_block_do_not_share_a_proposal_id() -> None:
     assert a.identity is not None and a.proposal_id != b.proposal_id
 
 
-def test_the_preset_is_the_benchmarks_single_donor_arm() -> None:
+def test_the_preset_is_the_benchmarks_single_donor_arm(offline_city_cache: Path) -> None:
     """Routed along the recipient's own gaps (not straight between snapped nodes), as streets."""
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="config", overrides=["method=donor_transplant"])

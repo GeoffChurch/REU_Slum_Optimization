@@ -1,0 +1,38 @@
+# What every screened pool shares: the screen recipients are flagged by, how seed groups grow, the
+# census donors are read from, and the bounds both are drawn within. Each pool adds its own
+# `spec.stages.source`. See reblock.data.pools.ScreenedPool.
+#
+# Spelled here rather than interpolated from the run's own `screen`/`metric` groups: the pool is a
+# fixed corpus, and a run selecting `metric=depth` for its OWN blocks must not re-screen the donors.
+# tests/data/test_pools.py pins these stages to the ones those groups build.
+_target_: reblock.data.pools.ScreenedPool
+spec:
+  _target_: reblock.data.pools.PoolSpec
+  stages:
+    _target_: reblock.presets.Stages
+    # conf/screen/dense_compact.yaml under conf/metric/density_compactness.yaml, counting Open
+    # Buildings points (conf/building_count/open_buildings.yaml): n/P^2 at its ABSOLUTE floor, so
+    # the population does not move when the corpus does.
+    screen:
+      _target_: reblock.screen.dense_compact.DenseCompactScreen
+      metric:
+        _target_: reblock.metric.Product
+        name: density_compactness
+        terms:
+          - {_target_: reblock.metric.Density}
+          - {_target_: reblock.metric.Compactness}
+        _convert_: all
+      gate: {_target_: reblock.metric.AbsoluteGate, value: 3.55e-4}
+      proxy_keep_n: 1000
+      min_buildings: 30
+      counts: {_target_: reblock.data.counts.OpenBuildingsCount}
+    region_builder: {_target_: reblock.region.IdentityRegionBuilder}
+  # Holds osm_coverage_{ISO}.parquet, the donor-eligibility census.
+  census_dir: {_target_: hydra.utils.get_object, path: reblock.data.provision.DEFAULT_CACHE}
+  # COMPUTE bounds on the stored building count -- what a GW fit can afford, being quadratic in
+  # parcels -- not a quality judgement; the parcel floor is on the real point join, and a donor's
+  # signature subsamples 50 parcels.
+  min_building_count: 60
+  max_building_count: 300
+  min_parcels: 50
+  min_interior_m: 100.0     # interior footpath a donor must carry, per the census

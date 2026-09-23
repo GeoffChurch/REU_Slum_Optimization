@@ -25,8 +25,8 @@ import pytest
 from hydra import compose, initialize_config_dir
 from omegaconf import DictConfig
 
-import reblock.data.provision
 from reblock.contracts import Method
+from reblock.data.pools import ScreenedPool
 from reblock.presets import (
     load_desire_source,
     load_evals,
@@ -56,7 +56,7 @@ CONF = Path("conf").resolve()
 ROOT = Path(__file__).resolve().parents[1]
 # Keys a preset leaves `???` for the run to supply, and the value supplied here.
 REQUIRED = {"desire_source=pbf": ["desire_source.pbf_path._args_=[/nonexistent/x.osm.pbf]"],
-            "donor_pool=shortlist_zone": ["donor_pool.epsg=32735"]}
+            "donor_pool=shortlist_zone": ["donor_pool.spec.stages.source.epsg=32735"]}
 
 
 def _compose(config_name: str, overrides: list[str]) -> DictConfig:
@@ -65,13 +65,9 @@ def _compose(config_name: str, overrides: list[str]) -> DictConfig:
 
 
 @pytest.fixture(autouse=True)
-def _full_city_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`cached_kblock_source` provisions when called -- downloads on a cold cache. Seed an empty one
-    with the two files it checks for, so the full-city presets load offline and read nothing."""
-    for city in ("capetown", "nairobi"):
-        (tmp_path / f"blocks_{city}_full.parquet").touch()
-        (tmp_path / f"buildings_{city}_full.parquet").touch()
-    monkeypatch.setattr(reblock.data.provision, "DEFAULT_CACHE", tmp_path)
+def _offline(offline_city_cache: Path) -> None:
+    """Every preset here is built, and the data sources provision when built."""
+    del offline_city_cache
 
 
 # ------------------------------------------------------------------------------------------------
@@ -180,8 +176,7 @@ GROUP_LOADERS: dict[str, tuple[list[str], Callable[[DictConfig], list[object]]]]
     "desire_source": ([], lambda cfg: [load_desire_source(cfg.desire_source),
                                         load_footpath_source(cfg.desire_source)]),
     "metric": ([], _load_metric),
-    # A pool is only ever built as a donor draw's; the draw's shallow check covers the pool's own.
-    "donor_pool": ([], lambda cfg: [load_research(cfg.donors, Donors)]),
+    "donor_pool": ([], lambda cfg: [load_research(cfg.donor_pool, ScreenedPool)]),
     "donors": ([], lambda cfg: [load_research(cfg.donors, Donors)]),
     "buildings": (["data=capetown"], _load_data),
     "building_count": (["screen=dense_compact"], _load_screen),

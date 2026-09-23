@@ -49,11 +49,9 @@ from shapely.ops import unary_union
 from reblock.contracts import Block
 from reblock.data.pools import (
     DonorSkip,
-    capetown_pool,
     evenly_spaced,
     fetch_donor_lines,
     iso_of,
-    load_pools,
     pbf_footpaths,
 )
 from reblock.derive.access import STREET_TOL
@@ -65,6 +63,7 @@ from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from scripts._donor_pool import donor_pool
 
 SNAP_TOL = 0.5      # metres; endpoints closer than this are the same node
 
@@ -205,7 +204,7 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path("scratchpad/ot/real_vs_synthetic.parquet"))
     args = ap.parse_args()
 
-    pools = load_pools(capetown_pool(Path("conf")))
+    pools = donor_pool("donor_pool=capetown").pools()
     blocks = pools.blocks
     source = pbf_footpaths(iso_of(blocks))
     usable = sorted(set(pools.recipients) & set(pools.donors))

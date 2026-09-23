@@ -68,13 +68,13 @@ from reblock.compare import (
     load_permeability_config,
 )
 from reblock.contracts import Block, Method
-from reblock.data.pools import DonorPool, evenly_spaced
+from reblock.data.pools import DonorPool, ScreenedPool, evenly_spaced
 from reblock.derivations import propose
 from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.permeability import EgressContext, permeability
 from reblock.presets import load_method, load_research
-from reblock.transplant.donors import Donors, TooFewDonors
+from reblock.transplant.donors import TooFewDonors
 
 CONF = Path("conf")
 
@@ -199,8 +199,9 @@ def load_study(cfg: DictConfig) -> Study:
     if cfg.reference not in cfg.run:
         raise ValueError(f"reference arm {cfg.reference!r} must be run: every prediction is "
                          f"scored against its network")
-    # The pool as the donor arms draw it: `common` selects it for every arm alike.
-    pool = load_research(_run_config([str(o) for o in cfg.common]).donors, Donors).pool
+    # The pool as the donor arms draw it: `common` selects it for every arm alike, and arms
+    # built from an equal pool share its one materialization.
+    pool = load_research(_run_config([str(o) for o in cfg.common]).donor_pool, ScreenedPool)
     arms = {name: load_method(_run_config(o).method) for name, o in arm_overrides(cfg).items()}
     return Study(pool=pool, arms=arms, reference=str(cfg.reference),
                  recipients=int(cfg.recipients), out=Path(str(cfg.out)))

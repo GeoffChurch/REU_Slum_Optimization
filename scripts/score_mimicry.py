@@ -31,7 +31,7 @@ import pandas as pd
 
 from reblock.contracts import Method
 from reblock.data.osm_extract import FOOTPATH_TAGS, NEAR_MISS_TAGS, PbfDesireLines
-from reblock.data.pools import capetown_pool, evenly_spaced, iso_of, load_pools, pbf_path
+from reblock.data.pools import evenly_spaced, iso_of, pbf_path
 from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
@@ -42,6 +42,7 @@ from reblock.methods.loop_closure import LoopClosureRefiner
 from reblock.methods.osm_footpaths import block_footpaths
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from scripts._donor_pool import donor_pool
 
 
 def agreement(proposal: gpd.GeoDataFrame, reference: gpd.GeoDataFrame) -> dict[str, float]:
@@ -61,7 +62,7 @@ def main() -> None:
                     default=Path("data/benchmarks/mimicry_scores.parquet"))
     args = ap.parse_args()
 
-    pools = load_pools(capetown_pool(Path("conf")))
+    pools = donor_pool("donor_pool=capetown").pools()
     blocks = pools.blocks
     pbf = pbf_path(iso_of(blocks))
     foot_src = PbfDesireLines(pbf_path=pbf, tags=FOOTPATH_TAGS)

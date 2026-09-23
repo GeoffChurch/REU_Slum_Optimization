@@ -42,8 +42,7 @@ def test_analyze_does_no_pool_work(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     def refuse(*_: object) -> None:
         raise AssertionError("--analyze built a pool")
 
-    monkeypatch.setattr(pair_matrix, "capetown_pool", refuse)
-    monkeypatch.setattr(pair_matrix, "load_pools", refuse)
+    monkeypatch.setattr(pair_matrix, "donor_pool", refuse)
     out = tmp_path / "matrix.parquet"
     _synthetic_matrix().to_parquet(out)
     monkeypatch.setattr(sys, "argv", ["pair_matrix", "--analyze", "--out", str(out)])

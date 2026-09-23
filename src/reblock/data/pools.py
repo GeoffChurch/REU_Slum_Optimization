@@ -7,6 +7,11 @@ RegionBuilder` stages, built from conf/ by `reblock.presets`, not a private band
 `building_count in [60,300] AND k_complexity >= 4` band came first and made none of the OT numbers
 comparable to any shipped method's (docs/superpowers/notes/2026-07-28-slope-is-pool-dependent.md).
 
+A pool is CONFIGURED (`conf/donor_pool/`): Hydra builds its stages like any other strategy's, and
+the pool only ever consumes them -- it composes no config itself, so a donor-driven method is as
+ordinary inside a `@hydra.main` app as anywhere else. Scripts that are not Hydra apps compose the
+preset at their own top level (`scripts/_donor_pool.py`).
+
 The screen is `density_compactness` (n/P^2) at its calibrated ABSOLUTE floor, not a percentile: a
 percentile re-defines the population whenever the corpus changes, and the pool is meant to scale
 from Cape Town to the ZAF+KEN shortlist, where the same percentile is a four-times different cut.
@@ -20,10 +25,10 @@ import hashlib
 import logging
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Hashable, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Hashable, Sequence
+from dataclasses import dataclass
 from enum import StrEnum
-from functools import cache
+from functools import cached_property
 from pathlib import Path
 from typing import cast
 from urllib.error import URLError
@@ -31,10 +36,9 @@ from urllib.error import URLError
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from hydra import compose, initialize_config_dir
-from omegaconf import DictConfig
 from pyproj import CRS
 
+from reblock.buildings import Extents, tier_identity
 from reblock.contracts import Block
 from reblock.data.counts import RAW_COUNT
 from reblock.data.kblock import KblockSource
@@ -48,20 +52,9 @@ from reblock.methods.osm_footpaths import (
     block_footpaths,
     interior_footpaths,
 )
-from reblock.presets import Stages, load_stages
+from reblock.presets import Stages
 
 log = logging.getLogger(__name__)
-
-# compare_config under these overrides is the pool's three stages: Cape Town's full-city parquets
-# at spacing discs, the density_compactness screen at its absolute floor counting Open Buildings
-# points, and singleton regions. Every group is spelled, defaults included, so a change to
-# compare_config's defaults cannot move the pool unannounced.
-_CAPETOWN = ("data=capetown_full", "data.min_buildings=30", "buildings=spacing",
-             "screen=dense_compact", "screen.min_buildings=30", "metric=density_compactness",
-             "building_count=open_buildings", "proxy_keep_n=1000", "region_builder=identity")
-
-SHORTLIST_BLOCKS = DEFAULT_CACHE / "blocks_shortlist.parquet"
-SHORTLIST_BUILDINGS = DEFAULT_CACHE / "buildings_shortlist.parquet"
 
 PBF_BY_ISO = {"ZAF": "south-africa-latest.osm.pbf", "KEN": "kenya-latest.osm.pbf"}
 
@@ -81,23 +74,10 @@ class PoolSpec:
     min_interior_m: float       # interior footpath a donor must carry, per the census
 
 
-def capetown_config(config_dir: Path) -> DictConfig:
-    """`compare_config` composed into the Cape Town pool's stages. Building them provisions the
-    city data; composing does not."""
-    with initialize_config_dir(version_base=None, config_dir=str(config_dir.resolve())):
-        return compose(config_name="compare_config", overrides=list(_CAPETOWN))
-
-
-def capetown_pool(config_dir: Path) -> PoolSpec:
-    """The pool every committed pair-matrix, consensus and perf result was drawn from."""
-    return PoolSpec(stages=load_stages(capetown_config(config_dir)), census_dir=DEFAULT_CACHE,
-                    min_building_count=60, max_building_count=300, min_parcels=50,
-                    min_interior_m=100.0)
-
-
-def zone_source(epsg: int, like: KblockSource) -> KblockSource:
-    """A `KblockSource` over the provisioned ZAF+KEN shortlist, restricted to ONE UTM zone, with
-    `like`'s building floor and tier.
+def zone_source(epsg: int, *, cache_dir: Path, min_buildings: int,
+                building_tier: Callable[[gpd.GeoDataFrame], Extents]) -> KblockSource:
+    """A `KblockSource` over the provisioned ZAF+KEN shortlist in `cache_dir`, restricted to ONE
+    UTM zone (`conf/donor_pool/shortlist_zone.yaml`).
 
     The restriction is not optional. `KblockSource.region()` calls `estimate_utm_crs()` on the
     WHOLE blocks frame -- deliberately, so the CRS stays stable under `block_ids` filtering -- so
@@ -110,13 +90,15 @@ def zone_source(epsg: int, like: KblockSource) -> KblockSource:
     uninformative about GW distance, so that is a real loss, but each zone is a different metro,
     which makes zone-wise runs a replication rather than merely a smaller sample.
     """
-    for path in (SHORTLIST_BLOCKS, SHORTLIST_BUILDINGS):
+    shortlist_blocks = cache_dir / "blocks_shortlist.parquet"
+    shortlist_buildings = cache_dir / "buildings_shortlist.parquet"
+    for path in (shortlist_blocks, shortlist_buildings):
         if not path.exists():
             raise FileNotFoundError(
                 f"missing {path} -- run `python -m scripts.provision_shortlist` first")
-    zone_path = SHORTLIST_BLOCKS.with_name(f"blocks_shortlist_z{epsg}.parquet")
+    zone_path = cache_dir / f"blocks_shortlist_z{epsg}.parquet"
     if not zone_path.exists():
-        frame = gpd.read_parquet(SHORTLIST_BLOCKS)
+        frame = gpd.read_parquet(shortlist_blocks)
         rep = frame.geometry.representative_point()
         keep = np.array([utm_zone_epsg(x, y) == epsg
                          for x, y in zip(rep.x, rep.y, strict=True)])
@@ -125,16 +107,9 @@ def zone_source(epsg: int, like: KblockSource) -> KblockSource:
             raise ValueError(f"no shortlist blocks in UTM zone {epsg}")
         subset.to_parquet(zone_path)
         log.info("materialized %s: %d blocks", zone_path.name, len(subset))
-    return KblockSource(zone_path, SHORTLIST_BUILDINGS, region_id=f"shortlist-z{epsg}",
-                        min_buildings=like.min_buildings, block_ids=None,
-                        building_tier=like.building_tier, member_buildings=None)
-
-
-def zone_pool(config_dir: Path, epsg: int) -> PoolSpec:
-    """`capetown_pool`'s screen and bounds over one UTM zone of the ZAF+KEN shortlist."""
-    base = capetown_pool(config_dir)
-    return replace(base, stages=replace(base.stages,
-                                        source=zone_source(epsg, _kblock(base.stages))))
+    return KblockSource(zone_path, shortlist_buildings, region_id=f"shortlist-z{epsg}",
+                        min_buildings=min_buildings, block_ids=None,
+                        building_tier=building_tier, member_buildings=None)
 
 
 @dataclass(frozen=True)
@@ -181,8 +156,18 @@ def donatable_ids(census_dir: Path, iso: str, min_interior_m: float) -> set[str]
     return {str(b) for b in cen["block_id"][ok]}
 
 
-def load_pools(spec: PoolSpec) -> Pools:
-    """Screen, bound, grow and build the pool.
+@dataclass(frozen=True)
+class PoolIds:
+    """Which blocks a pool holds, by id: everything its screen, census and bounds decide, and
+    nothing that needs a Block."""
+
+    recipients: tuple[str, ...]     # screened, in the building band
+    donors: tuple[str, ...]         # donatable per the census, in the band
+    members: tuple[str, ...]        # every block to build: the grown recipient groups and donors
+
+
+def select_pool(spec: PoolSpec) -> PoolIds:
+    """Screen, bound and grow the pool -- everything but building it.
 
     Recipients are what the screen flags inside the compute band; donors are what the census says
     is donatable inside it. The region builder grows the recipients' singleton seed groups -- a
@@ -211,18 +196,23 @@ def load_pools(spec: PoolSpec) -> Pools:
     groups = spec.stages.region_builder.build(
         cast(gpd.GeoDataFrame, frame[frame["block_id"].isin(recipient_ids)]),
         [[b] for b in recipient_ids], depth_fn=None)
-    ids = sorted({b for group in groups for b in group} | set(donor_ids))
+    members = sorted({b for group in groups for b in group} | set(donor_ids))
+    return PoolIds(recipients=tuple(recipient_ids), donors=tuple(donor_ids),
+                   members=tuple(members))
 
-    # The source narrowed to `ids`, keeping its own tier and member buildings.
+
+def build_pool(source: KblockSource, ids: PoolIds, min_parcels: int) -> Pools:
+    """Build every member block (a Voronoi each) and keep those with at least `min_parcels`."""
+    # The source narrowed to the members, keeping its own tier and member buildings.
     narrowed = KblockSource(source.blocks_path, source.buildings_path,
                             region_id=source.region_id, min_buildings=source.min_buildings,
-                            block_ids=ids, building_tier=source.building_tier,
+                            block_ids=list(ids.members), building_tier=source.building_tier,
                             member_buildings=source.member_buildings)
-    blocks = sorted((b for b in narrowed.region().blocks if len(b.parcels) >= spec.min_parcels),
+    blocks = sorted((b for b in narrowed.region().blocks if len(b.parcels) >= min_parcels),
                     key=lambda b: b.block_id)
     if not blocks:
         raise ValueError(f"{source.region_id}: no pool block survived construction")
-    r_set, d_set = set(recipient_ids), set(donor_ids)
+    r_set, d_set = set(ids.recipients), set(ids.donors)
     pools = Pools(
         blocks=blocks,
         blocks_gdf=gpd.GeoDataFrame({"block_id": [b.block_id for b in blocks]},
@@ -232,6 +222,11 @@ def load_pools(spec: PoolSpec) -> Pools:
     log.info("materialized %d blocks: %d usable recipients, %d usable donors",
              len(blocks), len(pools.recipients), len(pools.donors))
     return pools
+
+
+def load_pools(spec: PoolSpec) -> Pools:
+    """Select and build the pool `spec` describes."""
+    return build_pool(_kblock(spec.stages), select_pool(spec), spec.min_parcels)
 
 
 def evenly_spaced(idx: Sequence[int], key: Sequence[float], n: int) -> list[int]:
@@ -289,9 +284,9 @@ class DonorPool(ABC):
     """A materialized pool as configuration: what a donor-driven method draws its donors from, and
     what a study draws its recipients from.
 
-    Materialized on first use, never at construction. A pool is built by `reblock.presets` with
-    everything else an entry point is configured with, and materializing one is a census read, a
-    screen and a Voronoi per block.
+    Materialized on first use, never at construction: materializing is a census read, a screen and
+    a Voronoi per block, and a preset is built with everything else an entry point is configured
+    with, whether or not the run ever proposes with it.
     """
 
     @abstractmethod
@@ -317,57 +312,56 @@ class _Materialized:
     identity: Hashable | None
 
 
-class SpecPool(DonorPool):
-    """A pool `load_pools` draws from a `PoolSpec`, with footpaths from its own country's PBF
-    (`iso_of`). Materialized once per process however many methods are configured with an equal
-    pool -- four study arms share one."""
+# One materialization per distinct pool per process. Every method is built by its own `instantiate`
+# call, so four study arms configured with one preset hold four equal-but-distinct stage objects;
+# keyed on what the build reads, they share one pool (measured: a second Cape Town pool is +0.7 GB
+# and 12 s, and one PBF read each). Like `derive_graph`'s L1, never persisted.
+_MATERIALIZED: dict[Hashable, _Materialized] = {}
 
-    @abstractmethod
-    def spec(self) -> PoolSpec: ...
+
+def _source_key(source: KblockSource) -> Hashable:
+    """Everything `build_pool` reads off the source, by value."""
+    return (source.blocks_path, source.buildings_path, source.region_id, source.min_buildings,
+            None if source.block_ids is None else tuple(source.block_ids),
+            tier_identity(source.building_tier), source.member_buildings)
+
+
+def _materialize(spec: PoolSpec) -> _Materialized:
+    source = _kblock(spec.stages)
+    ids = select_pool(spec)     # cheap once the screen's own derivation is cached
+    key = (_source_key(source), ids, spec.min_parcels)
+    if key not in _MATERIALIZED:
+        pools = build_pool(source, ids, spec.min_parcels)
+        footpaths = pbf_footpaths(iso_of(pools.blocks))
+        donors = [pools.blocks[j].identity for j in pools.donors]
+        identity = (None if any(d is None for d in donors) else
+                    ("donor_pool", hashlib.sha256(repr(donors).encode()).hexdigest(),
+                     footpaths.identity))
+        _MATERIALIZED[key] = _Materialized(pools=pools, footpaths=footpaths, identity=identity)
+    return _MATERIALIZED[key]
+
+
+@dataclass(frozen=True)
+class ScreenedPool(DonorPool):
+    """The pool `load_pools` draws through a `PoolSpec`'s built stages, with footpaths from its own
+    country's PBF (`iso_of`). The spec arrives built -- `conf/donor_pool/` -- and this only ever
+    consumes it."""
+
+    spec: PoolSpec
+
+    @cached_property
+    def _materialized(self) -> _Materialized:
+        return _materialize(self.spec)
 
     def pools(self) -> Pools:
-        return _materialize(self).pools
+        return self._materialized.pools
 
     def footpaths(self) -> PbfDesireLines:
-        return _materialize(self).footpaths
+        return self._materialized.footpaths
 
     @property
     def identity(self) -> Hashable | None:
-        return _materialize(self).identity
-
-
-@cache
-def _materialize(pool: SpecPool) -> _Materialized:
-    pools = load_pools(pool.spec())
-    footpaths = pbf_footpaths(iso_of(pools.blocks))
-    donors = [pools.blocks[j].identity for j in pools.donors]
-    if any(d is None for d in donors):
-        return _Materialized(pools=pools, footpaths=footpaths, identity=None)
-    digest = hashlib.sha256(repr(donors).encode()).hexdigest()
-    return _Materialized(pools=pools, footpaths=footpaths,
-                         identity=("donor_pool", digest, footpaths.identity))
-
-
-@dataclass(frozen=True)
-class CapetownPool(SpecPool):
-    """`capetown_pool`: the pool every committed pair-matrix and consensus result was drawn from."""
-
-    config_dir: Path
-
-    def spec(self) -> PoolSpec:
-        return capetown_pool(self.config_dir)
-
-
-@dataclass(frozen=True)
-class ShortlistZonePool(SpecPool):
-    """`zone_pool`: the Cape Town pool's screen and bounds over one UTM zone of the ZAF+KEN
-    shortlist."""
-
-    config_dir: Path
-    epsg: int
-
-    def spec(self) -> PoolSpec:
-        return zone_pool(self.config_dir, self.epsg)
+        return self._materialized.identity
 
 
 @dataclass(frozen=True)

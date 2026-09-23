@@ -54,7 +54,7 @@ from shapely.geometry.base import BaseGeometry
 
 import reblock.methods.arterial.engines as engines
 from reblock.contracts import Block
-from reblock.data.pools import capetown_pool, evenly_spaced, load_pools
+from reblock.data.pools import evenly_spaced
 from reblock.derive.access import (
     STREET_TOL,
     ParcelAdjacency,
@@ -71,6 +71,7 @@ from reblock.methods.arterial import (
 from reblock.methods.arterial.primitives import _candidate_chords, _planarize
 from reblock.methods.arterial.scoring import _best_candidate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from scripts._donor_pool import donor_pool
 
 N_BLOCKS = 10
 MAX_ROADS = 8
@@ -178,7 +179,7 @@ def main() -> None:
     # re-exporting them, which is all the ignores concede.
     engines._candidate_chords = _chords_hook          # type: ignore[attr-defined]
     engines._best_candidate = _best_hook              # type: ignore[attr-defined]
-    pools = load_pools(capetown_pool(Path("conf")))
+    pools = donor_pool("donor_pool=capetown").pools()
     blocks = pools.blocks
     counts = [float(len(b.parcels)) for b in blocks]
     sel = [i for i in pools.recipients if len(blocks[i].parcels) <= 110]

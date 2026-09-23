@@ -18,7 +18,7 @@ from reblock.budget import prefix_to_displacement
 from reblock.buildings import SpacingDiscs
 from reblock.compare import LensPrefixes, lens_prefixes, load_permeability_config
 from reblock.contracts import Block
-from reblock.data.pools import CapetownPool, PoolFootpaths
+from reblock.data.pools import PoolFootpaths, ScreenedPool
 from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
@@ -170,10 +170,10 @@ def test_the_pairing_and_the_sweep_are_configuration() -> None:
     assert {"consensus_held_out_k1", "consensus_held_out_k8", "single_held_out_k1"} <= set(arms)
 
 
-def test_every_arm_loads_as_a_configured_method() -> None:
+def test_every_arm_loads_as_a_configured_method(offline_city_cache: Path) -> None:
     """Built through the presets, lazily: nothing here materializes the pool."""
     loaded = study.load_study(_study(["k_sweep.arms=[consensus_held_out]", "k_sweep.ks=[3]"]))
-    assert loaded.pool == CapetownPool(config_dir=Path("conf"))
+    assert isinstance(loaded.pool, ScreenedPool)
     assert loaded.reference == "own"
     consensus = loaded.arms["consensus_held_out_k3"]
     assert isinstance(consensus, DemandGreedyReblocker)
@@ -184,15 +184,17 @@ def test_every_arm_loads_as_a_configured_method() -> None:
     assert isinstance(loaded.arms["clearance"], ClearanceReblocker)
     own = loaded.arms["own"]
     assert isinstance(own, OsmFootpathsReblocker) and isinstance(own.source, PoolFootpaths)
-    assert own.source.pool == loaded.pool
+    assert isinstance(own.source.pool, ScreenedPool)
+    assert own.source.pool.spec.census_dir == loaded.pool.spec.census_dir == offline_city_cache
 
 
-def test_the_reference_must_be_run() -> None:
+def test_the_reference_must_be_run(offline_city_cache: Path) -> None:
     with pytest.raises(ValueError, match="must be run"):
         study.load_study(_study(["run=[clearance]"]))
 
 
-def test_the_consensus_preset_is_the_published_operating_point() -> None:
+def test_the_consensus_preset_is_the_published_operating_point(
+        offline_city_cache: Path) -> None:
     """eps 0.05, depth 1: the consensus benchmarks' extraction, not demand_greedy's own preset."""
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="config", overrides=["method=consensus"])

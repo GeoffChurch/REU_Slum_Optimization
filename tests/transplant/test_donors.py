@@ -12,7 +12,8 @@ from pyproj import CRS
 
 import reblock.transplant.donors as donors_module
 from reblock.contracts import Block
-from reblock.data.pools import CapetownPool
+from reblock.data.kblock import KblockSource
+from reblock.data.pools import ScreenedPool
 from reblock.presets import load_research
 from reblock.transplant.donors import Donors, TooFewDonors
 from reblock.transplant.gw import Arr
@@ -105,7 +106,8 @@ def test_a_recipient_in_another_crs_is_refused() -> None:
         _donors(0.0, 15).eligible(elsewhere)
 
 
-def test_the_donor_presets_run_at_the_published_operating_point() -> None:
+def test_the_donor_presets_run_at_the_published_operating_point(
+        offline_city_cache: Path) -> None:
     """`conf/donors/` spells the transport and signature `scripts/pair_matrix.py` reads from
     `operating_points`; the held-out and leaky draws differ in their radius and nothing else."""
     built = {}
@@ -117,5 +119,8 @@ def test_the_donor_presets_run_at_the_published_operating_point() -> None:
     assert held_out.transport == PUBLISHED_TRANSPORT
     assert held_out.signature == PUBLISHED_SIGNATURE
     assert (held_out.exclusion_radius_m, leaky.exclusion_radius_m) == (2000.0, 0.0)
-    assert replace(leaky, exclusion_radius_m=2000.0) == held_out
-    assert held_out.pool == CapetownPool(config_dir=Path("conf"))
+    assert (held_out.k, held_out.min_donors) == (leaky.k, leaky.min_donors) == (15, 3)
+    assert isinstance(held_out.pool, ScreenedPool)
+    source = held_out.pool.spec.stages.source
+    assert isinstance(source, KblockSource)
+    assert source.blocks_path == offline_city_cache / "blocks_capetown_full.parquet"
