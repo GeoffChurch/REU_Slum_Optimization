@@ -1,24 +1,29 @@
-"""Tests for scripts/pair_matrix.py's import-gating: `--analyze` must be reachable from a
-checkout that lacks `scratchpad/ot/` (gitignored, never repo content), since it only reads an
-already-scored parquet plus numpy/pandas/scipy -- no GW/OSM/clearance/pool work at all.
-"""
+"""scripts/pair_matrix.py: `--analyze` reads only the parquet, and a matrix row is computed the way
+the committed matrix's rows were."""
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
 
+import geopandas as gpd
 import pandas as pd
 import pytest
+from pyproj import CRS
+from shapely.geometry import LineString, Point, Polygon
+from shapely.ops import unary_union
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
+from reblock.transplant.transport import fit_transport, parcel_xy
 from scripts import pair_matrix
+
+UTM = CRS.from_epsg(32734)
 
 
 def _synthetic_matrix() -> pd.DataFrame:
     # 2 recipients x 3 donors each -- small, but enough to exercise every column
-    # `analyze_fidelity_vs_distance` touches without needing the real 100-row matrix.
+    # `analyze_fidelity_vs_distance` touches without needing the real matrix.
     return pd.DataFrame(
         {
             "recipient": ["r0", "r0", "r0", "r1", "r1", "r1"],
@@ -31,63 +36,51 @@ def _synthetic_matrix() -> pd.DataFrame:
     )
 
 
-def test_analyze_runs_without_scratchpad_ot(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The core regression: `--analyze` must not require `scratchpad/ot/` at all. Point `_OT_DIR`
-    at a path that does not exist, then confirm `main() --analyze` still succeeds -- proving the
-    OT loader (`_ot()`) is never invoked on this path -- and that `_ot_ns` stays unset."""
-    monkeypatch.setattr(pair_matrix, "_OT_DIR", tmp_path / "does-not-exist")
-    assert pair_matrix._ot_ns is None
+def test_analyze_does_no_pool_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--analyze` re-derives the committed headline from the parquet alone: no pool, no GW, no
+    OSM. Building a pool raises here, so reaching one fails the test."""
+    def refuse(*_: object) -> None:
+        raise AssertionError("--analyze built a pool")
 
+    monkeypatch.setattr(pair_matrix, "capetown_pool", refuse)
+    monkeypatch.setattr(pair_matrix, "load_pools", refuse)
     out = tmp_path / "matrix.parquet"
     _synthetic_matrix().to_parquet(out)
     monkeypatch.setattr(sys, "argv", ["pair_matrix", "--analyze", "--out", str(out)])
-
-    pair_matrix.main()  # must not raise SystemExit -- would if _ot() were reached
-
-    assert pair_matrix._ot_ns is None  # confirms _ot() really was never called
+    pair_matrix.main()
 
 
-def test_analyze_matches_direct_call_to_analyze_fidelity_vs_distance(tmp_path: Path) -> None:
-    """`--analyze`'s printed numbers come from `analyze_fidelity_vs_distance` on the same
-    DataFrame read straight from the parquet -- a basic sanity check that the CLI path and the
-    underlying pure function agree, independent of the import-gating fix above."""
-    df = _synthetic_matrix()
-    result = pair_matrix.analyze_fidelity_vs_distance(df)
-    assert result["n"] == 6
-    assert result["n_recipients"] == 2
-    within = result["within_recipient"]
-    assert isinstance(within, dict)
-    assert within["dof"] == 6 - 2 - 1
+def test_analyze_matches_direct_call_to_analyze_fidelity_vs_distance() -> None:
+    result = pair_matrix.analyze_fidelity_vs_distance(_synthetic_matrix())
+    assert result.n == 6
+    assert result.n_recipients == 2
+    assert result.within_recipient.dof == 6 - 2 - 1
 
 
-def test_ot_loader_still_raises_systemexit_when_scratchpad_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The guard itself must still fire -- just deferred to the pair-scoring path, not removed."""
-    monkeypatch.setattr(pair_matrix, "_OT_DIR", tmp_path / "does-not-exist")
-    monkeypatch.setattr(pair_matrix, "_ot_ns", None)
-    with pytest.raises(SystemExit, match="scratchpad/ot/ is missing"):
-        pair_matrix._ot()
+def _slab(w: int, h: int, block_id: str) -> Block:
+    """`w` x `h` 10 m parcels, one building each, street frontage along the bottom edge only."""
+    polys = [Polygon([(10 * i, 10 * j), (10 * i + 10, 10 * j), (10 * i + 10, 10 * j + 10),
+                      (10 * i, 10 * j + 10)]) for j in range(h) for i in range(w)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
+    return Block(block_id=block_id, crs=UTM, boundary=cast(Polygon, unary_union(polys)),
+                 parcels=parcels,
+                 streets=gpd.GeoDataFrame(geometry=[LineString([(0, 0), (10 * w, 0)])], crs=UTM),
+                 building_geometries=gpd.GeoDataFrame(
+                     geometry=[Point(p.centroid.x, p.centroid.y) for p in polys], crs=UTM),
+                 source_content_hash=None, building_tier=SpacingDiscs)
 
 
-def _ids(*block_ids: str) -> list[Block]:
-    """Block stand-ins carrying only what `iso_of` reads."""
-    return cast("list[Block]", [SimpleNamespace(block_id=b) for b in block_ids])
-
-
-def test_iso_of_picks_the_extract_from_the_block_ids() -> None:
-    """A PBF covers exactly its own extract, so a Kenyan pool pointed at the South Africa file
-    does not error -- every donor comes back with no interior footpaths. The first Nairobi run
-    reported `empty_interior: 90` and zero pairs, which reads as a fact about Nairobi and is
-    contradicted by the census (56 of those blocks carry >=100 m each). Re-run against the Kenya
-    extract it produced 500 pairs and 7 skips. Derive the extract from the data, never by hand."""
-    assert pair_matrix.iso_of(_ids("ZAF.9.3.1_1_44882", "ZAF.9.1_1_1")) == "ZAF"
-    assert pair_matrix.iso_of(_ids("KEN.1.1_1_100")) == "KEN"
-    assert pair_matrix.PBF_BY_ISO["KEN"] != pair_matrix.PBF_BY_ISO["ZAF"]
-
-    with pytest.raises(SystemExit, match="spans multiple countries"):
-        pair_matrix.iso_of(_ids("ZAF.9.3.1_1_44882", "KEN.1.1_1_100"))
-    with pytest.raises(SystemExit, match="no Geofabrik extract"):
-        pair_matrix.iso_of(_ids("BRA.1_1_1"))
+def test_a_row_carries_the_fits_own_distance_and_a_consistent_gap() -> None:
+    recipient, donor = _slab(8, 7, "r"), _slab(7, 8, "d")        # 56 parcels: signable
+    lines = gpd.GeoDataFrame(geometry=[LineString([(30, 0), (30, 55), (5, 55)])], crs=UTM)
+    scorer = pair_matrix.pair_scorer()
+    timings = pair_matrix.StageTimings(osm_fetch=0.0, gw=0.0, transplant=0.0, clearance=0.0,
+                                       permeability=0.0)
+    row = scorer.score(recipient, donor, lines, timings)
+    assert set(row) == set(pair_matrix.PairRow.__annotations__)
+    assert (row["recipient"], row["donor"]) == ("r", "d")
+    assert row["real_gw_dist"] == fit_transport(parcel_xy(donor), parcel_xy(recipient),
+                                                scorer.transport).gw_dist
+    assert row["road_len_m"] > 0
+    assert row["perm_gap"] == row["perm_proposal"] - row["perm_direct"]
+    assert timings.gw > 0 and timings.permeability > 0

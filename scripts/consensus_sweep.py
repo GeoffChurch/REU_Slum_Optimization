@@ -14,41 +14,63 @@ length-matched comparison could not: at the SAME cost in homes, which network mo
 Permeability and displacement are the repo's paired primary metrics, so a claim resting on one
 while the other drifts is only half a result.
 
+Scored with `scripts/consensus_matrix`'s scorer, so the same caveat holds: the 2026-07-28 numbers
+in notes/2026-07-28-consensus-k-sweep-and-displacement.md predate the recalibrated metric, the
+footprint-overlap displacement and the Open Buildings screen, and a re-run will not reproduce them.
+
     pixi run python -m scripts.consensus_sweep --recipients 20
 """
 from __future__ import annotations
 
 import argparse
+import logging
 import time
 from pathlib import Path
-from typing import cast
+from typing import TypedDict, cast
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 
 from reblock.contracts import Block
+from reblock.data.pools import capetown_pool, evenly_spaced, iso_of, load_pools, pbf_footpaths
 from reblock.data.settlements import exclusion_holdout
+from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou
-from reblock.methods.clearance import ClearanceReblocker
-from reblock.methods.substrates import ChordSubstrate
-from reblock.permeability import (
-    DEFAULT_ROAD_WIDTH_M,
-    EgressContext,
-    PermeabilityParams,
-    permeability,
-)
-from scripts.consensus_matrix import _bc, donor_quality, extract_consensus, fit_donors
-from scripts.pair_matrix import (
-    desire_source,
-    displacement_fraction,
-    evenly_spaced,
-    fetch_donor_lines,
-    iso_of,
-    load_pools,
+from reblock.permeability import EgressContext, permeability
+from reblock.transplant.consensus import extract_consensus, fit_donors, length_matched_prefix
+from reblock.transplant.operating_points import SIGNATURE
+from reblock.transplant.signature import signature
+from reblock.transplant.transport import parcel_xy
+from scripts.consensus_matrix import (
+    CONF,
+    Material,
+    consensus_scorer,
+    nearest_donors,
+    within_length,
 )
 
 K_LADDER = (1, 2, 3, 5, 8, 12, 20, 30)
+
+
+class SweepRow(TypedDict):
+    """One (recipient, k) rung, exactly as written to the parquet."""
+
+    recipient: str
+    k: int
+    perm_own: float
+    disp_own: float
+    perm_consensus_lenmatch: float
+    disp_consensus_lenmatch: float
+    perm_direct_lenmatch: float
+    disp_direct_lenmatch: float
+    perm_consensus_dispmatch: float
+    perm_direct_dispmatch: float
+    len_consensus_dispmatch: float
+    len_direct_dispmatch: float
+    perm_single: float
+    iou_10m: float
+    mean_gw_dist: float
 
 
 def displacement_matched_prefix(
@@ -67,11 +89,16 @@ def displacement_matched_prefix(
     lo, hi = 0, len(roads)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if displacement_fraction(block, cast(gpd.GeoDataFrame, roads.iloc[:mid])) <= target_disp:
+        prefix = cast(gpd.GeoDataFrame, roads.iloc[:mid])
+        if pct_displaced(prefix, block.buildings) <= target_disp:
             lo = mid
         else:
             hi = mid - 1
     return cast(gpd.GeoDataFrame, roads.iloc[:lo])
+
+
+def _length(roads: gpd.GeoDataFrame) -> float:
+    return float(roads.geometry.length.sum()) if len(roads) else 0.0
 
 
 def main() -> None:
@@ -81,10 +108,12 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path("scratchpad/ot/consensus_sweep.parquet"))
     args = ap.parse_args()
 
-    pools = load_pools()
+    logging.basicConfig(level=logging.INFO, format="  %(message)s")
+    pools = load_pools(capetown_pool(CONF))
     blocks, gdf = pools.blocks, pools.blocks_gdf
-    source = desire_source("pbf", iso_of(blocks))
-    bc = _bc()
+    signatures = {b.block_id: signature(parcel_xy(b), SIGNATURE) for b in blocks}
+    scorer = consensus_scorer()
+    material = Material(pbf_footpaths(iso_of(blocks)), scorer)
 
     usable = sorted(set(pools.recipients) & set(pools.donors))
     counts = [float(len(b.parcels)) for b in blocks]
@@ -94,61 +123,36 @@ def main() -> None:
     print(f"  {len(usable):,} recipients with own OSM; running {len(chosen)} at k<={k_max}",
           flush=True)
 
-    roads_cache: dict[str, gpd.GeoDataFrame] = {}
-    quality: dict[str, float] = {}
-
-    def material(b: Block) -> gpd.GeoDataFrame | None:
-        if b.block_id not in roads_cache:
-            status, lines = fetch_donor_lines(source, b)
-            if status != "ok" or lines is None:
-                return None
-            roads_cache[b.block_id] = lines
-            quality[b.block_id] = donor_quality(b, lines)
-        return roads_cache[b.block_id]
-
-    rows: list[dict[str, object]] = []
+    rows: list[SweepRow] = []
     done: set[tuple[str, int]] = set()
     if args.out.exists():
-        prior = pd.read_parquet(args.out)
-        # This script's own output, so its column labels are the `str` keys `rows.append` wrote.
-        rows = cast(list[dict[str, object]], prior.to_dict("records"))
-        done = {(str(rec), int(k)) for rec, k in zip(prior["recipient"], prior["k"], strict=True)}
+        # This script's own output, so its records are the `SweepRow`s it wrote.
+        rows = cast(list[SweepRow], pd.read_parquet(args.out).to_dict("records"))
+        done = {(r["recipient"], int(r["k"])) for r in rows}
         print(f"resuming from {args.out}: {len(rows)} rows", flush=True)
 
     for n, i in enumerate(chosen, 1):
         recipient = blocks[i]
-        own = material(recipient)
+        own = material.of(recipient)
         if own is None:
             continue
         eligible = [j for j in exclusion_holdout(gdf, i, radius_m=args.exclusion_radius_m)
                     if j in donor_set]
-        ranked = sorted(eligible, key=lambda j: float(np.linalg.norm(
-            pools.signatures[blocks[j].block_id] - pools.signatures[recipient.block_id])))
-        picked: list[Block] = []
-        for j in ranked:
-            if len(picked) >= k_max:
-                break
-            if material(blocks[j]) is not None:
-                picked.append(blocks[j])
+        picked = nearest_donors(recipient, eligible, blocks, signatures, material.of, k_max)
         if len(picked) < 3:
             continue
         if all((recipient.block_id, k) in done for k in K_LADDER if k <= len(picked)):
             continue
 
         t0 = time.time()
-        transported, dists = fit_donors(recipient, picked, roads_cache)
-        target_len = float(own.geometry.length.sum())
-        disp_own = displacement_fraction(recipient, own)
-        ctx = EgressContext.of(recipient, PermeabilityParams())
-        perm_own = float(permeability(ctx, own))
+        fits = fit_donors(recipient, picked, material.roads, scorer.transport)
+        target_len = _length(own)
+        disp_own = pct_displaced(own, recipient.buildings)
+        ctx = EgressContext.of(recipient, scorer.permeability)
+        perm_own = permeability(ctx, own)
 
-        direct_full = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                                         max_roads=400,
-                                         road_width_m=DEFAULT_ROAD_WIDTH_M).propose(recipient).roads
-        assert direct_full is not None, "ClearanceReblocker always proposes a road frame"
-        cum = direct_full.geometry.length.cumsum()
-        direct_len = cast(gpd.GeoDataFrame, direct_full[cum <= target_len] if target_len > 0
-                          else direct_full.iloc[:0])
+        direct_full = scorer.direct_roads(recipient)
+        direct_len = within_length(direct_full, target_len)
         # Matched on DISPLACEMENT to the block's own network: same cost in homes, so the
         # permeability comparison is finally like-for-like on the metric pair.
         direct_disp = displacement_matched_prefix(recipient, direct_full, disp_own)
@@ -156,30 +160,27 @@ def main() -> None:
         for k in K_LADDER:
             if k > len(picked) or (recipient.block_id, k) in done:
                 continue
-            cons_full, single = extract_consensus(
-                recipient, picked[:k], transported[:k], dists[:k], quality)
-            cons_len = (bc.length_matched_prefix(recipient, cons_full, target_len)
-                        if len(cons_full) else cons_full)
+            cons_full = extract_consensus(recipient, fits[:k], material.quality,
+                                          scorer.consensus)
+            cons_len = length_matched_prefix(recipient, cons_full, target_len)
             cons_disp = displacement_matched_prefix(recipient, cons_full, disp_own)
-            rows.append({
-                "recipient": recipient.block_id, "k": k,
-                "perm_own": perm_own, "disp_own": disp_own,
+            rows.append(SweepRow(
+                recipient=recipient.block_id, k=k,
+                perm_own=perm_own, disp_own=disp_own,
                 # length-matched (comparable to the n=20 benchmark)
-                "perm_consensus_lenmatch": float(permeability(ctx, cons_len)),
-                "disp_consensus_lenmatch": displacement_fraction(recipient, cons_len),
-                "perm_direct_lenmatch": float(permeability(ctx, direct_len)),
-                "disp_direct_lenmatch": displacement_fraction(recipient, direct_len),
+                perm_consensus_lenmatch=permeability(ctx, cons_len),
+                disp_consensus_lenmatch=pct_displaced(cons_len, recipient.buildings),
+                perm_direct_lenmatch=permeability(ctx, direct_len),
+                disp_direct_lenmatch=pct_displaced(direct_len, recipient.buildings),
                 # displacement-matched to the block's own network
-                "perm_consensus_dispmatch": float(permeability(ctx, cons_disp)),
-                "perm_direct_dispmatch": float(permeability(ctx, direct_disp)),
-                "len_consensus_dispmatch": (float(cons_disp.geometry.length.sum())
-                                            if len(cons_disp) else 0.0),
-                "len_direct_dispmatch": (float(direct_disp.geometry.length.sum())
-                                         if len(direct_disp) else 0.0),
-                "perm_single": float(permeability(ctx, single)),
-                "iou_10m": buffered_iou(cons_len, own, r=10.0) if len(cons_len) else 0.0,
-                "mean_gw_dist": float(np.mean(dists[:k])),
-            })
+                perm_consensus_dispmatch=permeability(ctx, cons_disp),
+                perm_direct_dispmatch=permeability(ctx, direct_disp),
+                len_consensus_dispmatch=_length(cons_disp),
+                len_direct_dispmatch=_length(direct_disp),
+                perm_single=permeability(ctx, scorer.single_donor(recipient, fits[:k])),
+                iou_10m=buffered_iou(cons_len, own, r=10.0) if len(cons_len) else 0.0,
+                mean_gw_dist=float(np.mean([f.gw_dist for f in fits[:k]])),
+            ))
         args.out.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows).to_parquet(args.out)
         print(f"  [{n}/{len(chosen)}] {recipient.block_id}: {len(picked)} donors, "

@@ -31,6 +31,8 @@ from shapely.ops import unary_union
 
 from reblock.contracts import Block, Method
 from reblock.data.osm_extract import NEAR_MISS_TAGS, PbfDesireLines
+from reblock.data.pools import pbf_path
+from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
@@ -41,7 +43,6 @@ from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.pipeline import build_regions
 from reblock.presets import load_screen, load_source
 from reblock.region import DenseClusterRegionBuilder, region_block
-from scripts.pair_matrix import DEFAULT_CACHE, PBF_BY_ISO, displacement_fraction
 
 
 def stripped_region(blocks: list[Block]) -> Block:
@@ -78,7 +79,7 @@ def main() -> None:
     regions = build_regions(source, screen, builder, None, args.regions)
     print(f"  {len(regions)} regions", flush=True)
 
-    street_src = PbfDesireLines(pbf_path=DEFAULT_CACHE / "osm_pbf" / PBF_BY_ISO["ZAF"],
+    street_src = PbfDesireLines(pbf_path=pbf_path("ZAF"),
                                 tags=NEAR_MISS_TAGS)
     methods: dict[str, Method] = {
         "flow_paths_q90": FlowPathsReblocker(flow_quantile=0.90, substrate=ChordSubstrate(),
@@ -133,7 +134,7 @@ def main() -> None:
                 "iou_10m": buffered_iou(roads, ref, r=10.0),
                 "iou_20m": buffered_iou(roads, ref, r=20.0),
                 "chamfer_precision_m": prec, "chamfer_recall_m": rec,
-                "displacement": displacement_fraction(blk, roads),
+                "displacement": pct_displaced(roads, blk.buildings),
             })
         args.out.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows).to_parquet(args.out)

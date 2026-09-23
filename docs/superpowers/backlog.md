@@ -292,7 +292,7 @@ none blocks on a later one.
     `gen_screen_map.py` reach the same corpus by two different routes (`block_geometries()` versus
     a raw `read_parquet`). (c) `scripts/_bundle_io.py`'s module docstring still says "all three
     bakers"; there are five.
-  - **`scripts/pair_matrix.py:485` divides 0/0 into a silent NaN, surfaced as a `RuntimeWarning`
+  - **`scripts/pair_matrix.py` divides 0/0 into a silent NaN, surfaced as a `RuntimeWarning`
     by the full test suite.** `within_recipient_regression`'s `beta = float(np.sum(dx * dy) / sxx)`
     (`sxx = float(np.sum(dx * dx))`, both from `_demean_by_group`) is unguarded against `sxx == 0`
     — every within-group value demeaning to exactly zero, e.g. a group of size 1, or a group whose
@@ -1891,7 +1891,8 @@ survive outside the presets:
   today only because neither has been tuned alone. Needs the authoring bundle to carry the params
   (a bake); then the defaults go and both readers take `conf/permeability.yaml`.
 - **`demand_edge_weights` defaults `buffer_m`/`eps`/`gamma`** to the module constants the
-  `demand_greedy` preset now spells, for its two direct callers (a test, `scripts/consensus_matrix`).
+  `demand_greedy` preset now spells, for its one remaining direct caller that omits them (a test;
+  `scripts/consensus_matrix` now extracts through `reblock.transplant.consensus`).
 - **`OSMDesireLines.cache_dir: null` means `~/.cache/reblock/osm`**, resolved inside the class; the
   footprint and full-city caches name their directory in the preset instead.
 

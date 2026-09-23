@@ -42,6 +42,7 @@ from typing import Literal, TypedDict
 import numpy as np
 
 from reblock.budget import prefix_to_displacement
+from reblock.data.pools import capetown_pool, evenly_spaced, load_pools
 from reblock.derive.access import (
     STREET_TOL,
     ParcelAdjacency,
@@ -58,7 +59,6 @@ from reblock.permeability import (
     PermeabilityParams,
     permeability,
 )
-from scripts.pair_matrix import evenly_spaced, load_pools
 
 K = 128                       # tier-2 shortlist, held fixed across arms
 CAPS = (0, 32, 64, 128, 256)  # 0 == uncapped == the shipped default
@@ -80,7 +80,7 @@ class CapResult(TypedDict):
 
 
 def main() -> None:
-    pools_ = load_pools()
+    pools_ = load_pools(capetown_pool(Path("conf")))
     blocks = pools_.blocks
     counts = [float(len(b.parcels)) for b in blocks]
     sel = [i for i in pools_.recipients if len(blocks[i].parcels) <= 110]
