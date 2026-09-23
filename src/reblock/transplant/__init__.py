@@ -11,6 +11,8 @@ reproduce and extend those results:
 - `transport` parcel-centroid anchors, the fitted donor -> recipient map, and line warping
 - `snap`      putting warped linework onto the recipient's own routing substrate
 - `signature` a cheap GW-consistent shape descriptor for shortlisting donors
+- `consensus` a weighted demand field over several donors, extracted on the recipient's substrate
+- `operating_points` the named parameter sets every published result was measured at
 
 No derivation or method module imports this package, so nothing here is in any derivation's code
 closure and editing it never invalidates the cache.
