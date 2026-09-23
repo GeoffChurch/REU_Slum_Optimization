@@ -34,6 +34,7 @@ import struct
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -53,6 +54,10 @@ EXPLORE = ROOT / "examples" / "explore"
 # made better and far cheaper by gen_screen_bakeoff) and its frozen directory was DELETED
 # 2026-09-20, so this is no longer a choice between two paths -- the other one is gone.
 MB = ROOT / "examples" / "multiblock_depth_density"
+# The method the home page's hero draws: the Explore page's pinned method
+# (`scripts/_example_block.PINNED_METHOD`), so both pages open on the same roads. Spelled here
+# because this module is stdlib-only; a test holds the two equal.
+HERO_METHOD = "clearance_looped"
 # The SECOND region from the SAME screen (`seed_rank: 1`). Shown because the shipped metric
 # is a product of depth and density, and a single region cannot exhibit a trade-off between
 # two factors -- see `_region_section`.
@@ -107,6 +112,14 @@ def _num(x: float, nd: int = 0) -> str:
 
 def _pct(x: float) -> str:
     return f"{100 * x:.1f}%"
+
+
+def _single_block(meta: dict[str, Any]) -> bool:
+    """Whether a grown region stayed its seed block alone -- which a seed over the growth budget
+    on its own does (`DenseClusterRegionBuilder`), and which the flagship's does since growth
+    budgets on Open Buildings. Every caption naming a region asks this first: they said "grown
+    into a multi-block region" and "1 blocks" over a figure of one block."""
+    return int(meta["region_members"]) == 1
 
 
 def _read_csv(path: Path) -> list[dict[str, str]]:
@@ -831,10 +844,14 @@ def _region_section(root: Path, asset_dir: str, heading: str, *,
         # "depth_density_2" -- which is not a metric. Both regions are ranked by the SAME
         # `depth_density`. Only rank 0 names it; rank 1 says "the same screen", which is both
         # true and the thing the pair exists to show.
-        grown = (f"into a **{meta['region_members']}-block region of "
-                 f"{_num(meta['region_parcels'])} parcels** — mean depth "
-                 f"{meta['region_mean_depth']:.1f} rings, mean density "
-                 f"{meta['region_mean_density_per_ha']:.0f} buildings/ha.\n")
+        parcels = _num(meta["region_parcels"])
+        depth = f"{meta['region_mean_depth']:.1f} rings"
+        density = f"{meta['region_mean_density_per_ha']:.0f} buildings/ha"
+        grown = (f"— growth added no neighbours, so the region is that **single block of "
+                 f"{parcels} parcels**. Mean depth {depth}, mean density {density}.\n"
+                 if _single_block(meta)
+                 else f"into a **{meta['region_members']}-block region of {parcels} parcels** — "
+                      f"mean depth {depth}, mean density {density}.\n")
         if seed_rank == 0:
             parts.append(f"The `{meta['metric']}` metric tessellated and peeled the top "
                          f"**{_num(meta['flagged'])}** blocks of "
@@ -854,9 +871,12 @@ def _region_section(root: Path, asset_dir: str, heading: str, *,
                            f"{_num(meta['total_blocks'])}, coloured by true peel depth. The count "
                            f"is the pre-filter budget, not an estimate of how many blocks are "
                            f"informal."),
-            "region.png": (f"The region grown from the top-scoring block: "
-                           f"{meta['region_members']} blocks, "
-                           f"{_num(meta['region_parcels'])} parcels."),
+            # "from its seed", not "from the top-scoring block": the rank-1 region shares this.
+            "region.png": ("The region grown from its seed block: " +
+                           (f"the seed alone, {_num(meta['region_parcels'])} parcels."
+                            if _single_block(meta)
+                            else f"{meta['region_members']} blocks, "
+                                 f"{_num(meta['region_parcels'])} parcels.")),
         }
         scenes = ("screen.png", "region.png") if show_screen else ("region.png",)
         for name in scenes:
@@ -1283,8 +1303,10 @@ def _mb_section(m: M) -> list[str]:
     # sentence was touched -- the region had been 15 and then 13 blocks while the text said 12.
     _mbpath = MB / "meta.json"
     _mbmeta = json.loads(_mbpath.read_text(encoding="utf-8")) if _mbpath.exists() else {}
-    _desc = (f"the {_mbmeta['region_members']}-block, {_num(_mbmeta['region_parcels'])}-parcel"
-             if _mbmeta.get("region_members") else "the")
+    _parcels = f"{_num(_mbmeta['region_parcels'])}-parcel" if _mbmeta else ""
+    _desc = ("the" if not _mbmeta.get("region_members")
+             else f"the single-block, {_parcels}" if _single_block(_mbmeta)
+             else f"the {_mbmeta['region_members']}-block, {_parcels}")
     parts.append(f"From the [Cape Town benchmark](../../results/frontier.md) — {_desc} "
                  f"`multiblock_depth_density` region.\n")
     if gif:
@@ -1454,19 +1476,35 @@ def gen_methods_overview() -> str:
 
 
 def _hero_block() -> str:
-    """Home hero figure: the grown settlement render, copied into assets/. Gated on existence, so
-    a partial checkout yields no hero figure rather than a broken image. Marked skip-lightbox: it
-    is the page's opening image, and the same render is zoomable on Results where it carries the
-    argument."""
-    url = _copy_asset(MB / "region.png", "home")
-    if not url:
+    """Home hero figure: `HERO_METHOD`'s roads on the flagship region at matched displacement,
+    copied into assets/. It showed `region.png` -- the region map, which draws no roads -- under a
+    caption promising "proposed roads threaded through it" in "a multi-block region" that is one
+    block. So the figure is now the render the caption describes, and every fact in the caption is
+    read from the run: its size from meta.json, the road length and displacement from the lens
+    table beside it.
+
+    Gated on existence, so a partial checkout yields no hero figure rather than a broken image.
+    Marked skip-lightbox: it is the page's opening image, and the same render is zoomable on
+    Results, which shows every method's `after_*_disp_depth.png`."""
+    meta_path, lens_path = MB / "meta.json", MB / "lens_displacement.csv"
+    if not (meta_path.exists() and lens_path.exists()):
         return ""
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    rows = {r["method"]: r for r in _read_csv(lens_path)}
+    url = _copy_asset(MB / f"after_{HERO_METHOD}_disp_depth.png", "home")
+    if not url or HERO_METHOD not in rows:
+        return ""
+    row, name = rows[HERO_METHOD], friendly_method_name(HERO_METHOD)
+    extent = (f"one street-bounded block of {_num(meta['region_parcels'])} parcels"
+              if _single_block(meta)
+              else f"a {meta['region_members']}-block region of {_num(meta['region_parcels'])} "
+                   f"parcels")
     return _figure(
         url,
-        "The grown Cape Town settlement region with proposed roads threaded through it",
-        'A screened settlement grown into a multi-block region, with proposed roads '
-        'threaded through it — see the full run on '
-        '<a href="results/frontier/">Results</a>.',
+        f"{name}'s proposed roads through the Cape Town screen's top-ranked settlement",
+        f"The {name}'s proposed roads — {_num(float(row['road_m']))} m of them, displacing "
+        f"{_pct(float(row['displacement']))} of homes — through the Cape Town screen's top-ranked "
+        f"settlement, {extent}. See the full run on <a href=\"results/frontier/\">Results</a>.",
         fig_class="sbu-hero__figure", skip_lightbox=True)
 
 

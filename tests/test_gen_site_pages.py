@@ -1011,3 +1011,63 @@ def test_explore_is_in_the_nav() -> None:
     build still exits 0, so nothing else here would catch its absence."""
     assert re.search(r"^\s+- Explore: explore\.md$",
                      (ROOT / "mkdocs.yml").read_text(encoding="utf-8"), flags=re.M)
+
+
+def _region_dir(root: Path, *, members: int) -> Path:
+    """A minimal example directory: meta, the Lens A table, and one render per figure."""
+    import json
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "meta.json").write_text(json.dumps({
+        "metric": "depth_density", "deepest_block": "B", "deepest_depth": 9.0,
+        "region_parcels": 4321, "region_member_ids": ["B"] * members,
+        "region_members": members, "region_mean_depth": 5.0,
+        "region_mean_density_per_ha": 120.0, "flagged": 10, "total_blocks": 100}))
+    (root / "lens_displacement.csv").write_text(
+        "method,road_m,displacement,permeability,access_burden_reduction,at_budget\n"
+        "clearance_looped,1234.5,0.0987,0.7,0.9,True\n")
+    for name in ("region.png", "after_clearance_looped_disp_depth.png"):
+        (root / name).write_bytes(b"png")
+    return root
+
+
+def test_the_hero_draws_roads_and_its_caption_quotes_the_run(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The hero once showed `region.png` -- the region map, which draws no roads -- captioned
+    "proposed roads threaded through it" in "a multi-block region" of one block. It must show a
+    road render, and every fact in its caption must come from the run.
+
+    FAULT INJECTION: pointing the hero back at `region.png` fails the first assertion."""
+    import scripts.gen_site_pages as gsp
+    monkeypatch.setattr(gsp, "DOCS", tmp_path / "docs")
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "docs" / "assets")
+    monkeypatch.setattr(gsp, "MB", _region_dir(tmp_path / "one", members=1))
+    hero = gsp._hero_block()
+    assert f'src="assets/home/after_{gsp.HERO_METHOD}_disp_depth.png"' in hero
+    assert "1,234 m" in hero and "9.9%" in hero and "4,321 parcels" in hero
+    assert "one street-bounded block" in hero and "multi-block" not in hero
+    monkeypatch.setattr(gsp, "MB", _region_dir(tmp_path / "many", members=7))
+    assert "a 7-block region of 4,321 parcels" in gsp._hero_block()
+
+
+def test_the_hero_method_is_the_explore_pages_pinned_method() -> None:
+    """Spelled twice because `gen_site_pages` is stdlib-only and `_example_block` is not; held
+    equal here so the home page and the Explore page open on the same roads."""
+    import scripts.gen_site_pages as gsp
+    from scripts._example_block import PINNED_METHOD
+    assert gsp.HERO_METHOD == PINNED_METHOD
+
+
+def test_a_single_block_region_is_never_called_grown_into_blocks(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A seed over the growth budget stays alone, and the captions said "a 1-block region" and
+    "1 blocks" over it. Both regions' wording comes from `region_members`."""
+    import scripts.gen_site_pages as gsp
+    monkeypatch.setattr(gsp, "DOCS", tmp_path / "docs")
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "docs" / "assets")
+    one = gsp._region_section(_region_dir(tmp_path / "one", members=1), "x", "## h\n",
+                              seed_rank=0, show_screen=False)
+    assert "single block of 4,321 parcels" in one and "the seed alone" in one
+    assert "1-block" not in one and "1 blocks" not in one
+    many = gsp._region_section(_region_dir(tmp_path / "many", members=7), "y", "## h\n",
+                               seed_rank=1, show_screen=False)
+    assert "7-block region of 4,321 parcels" in many and "7 blocks, 4,321 parcels" in many
