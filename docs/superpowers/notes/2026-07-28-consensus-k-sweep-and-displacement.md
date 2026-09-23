@@ -1,6 +1,7 @@
 # The consensus gain is the extraction, not the consensus — and it loses on displacement
 
 **Date:** 2026-07-28
+**2026-09-23: re-measured at n=220 on the current metric with shared lenses -- see [`consensus-re-measured`](2026-09-23-consensus-re-measured.md), which confirms the k-sweep correction and supersedes the numbers here.**
 **Status:** measured, 20 recipients × 8 rungs of k, both matching conventions.
 `scripts/consensus_sweep.py`, data `scratchpad/ot/consensus_sweep.parquet`.
 **Corrects [`consensus-at-scale`](2026-07-28-consensus-at-scale.md)'s headline reading.**

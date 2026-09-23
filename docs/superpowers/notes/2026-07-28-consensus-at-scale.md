@@ -1,6 +1,7 @@
 # Barycenter consensus at n=20: functionally strong, geometrically not a reconstruction
 
 **Date:** 2026-07-28
+**2026-09-23: re-measured at n=220 on the current metric with shared lenses -- see [`consensus-re-measured`](2026-09-23-consensus-re-measured.md), which confirms the k-sweep correction and supersedes the numbers here.**
 **Status: HEADLINE CORRECTED by [`consensus-k-sweep-and-displacement`](2026-07-28-consensus-k-sweep-and-displacement.md).**
 Two claims below do not survive. (a) "beats the best single donor in 100% of blocks, +0.412" was
 measuring the EXTRACTION method, not consensus: at k=1, where averaging cannot operate,
