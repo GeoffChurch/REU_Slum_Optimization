@@ -15,6 +15,7 @@ from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Metrics, Proposal
 from reblock.derive.access import parcel_access_layers
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
@@ -28,6 +29,7 @@ from reblock.render import (
     render_field,
     save_render,
 )
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -41,7 +43,9 @@ def _grid_block(n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _connector_proposal(block: Block) -> Proposal:
@@ -50,7 +54,8 @@ def _connector_proposal(block: Block) -> Proposal:
     # tests/eval/test_kcomplexity.py's fixture).
     connector = with_width(gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM),
                            DEFAULT_ROAD_WIDTH_M)
-    return Proposal(block_id=block.block_id, crs=UTM, roads=connector, method="topology")
+    return Proposal(block_id=block.block_id, crs=UTM, roads=connector, method="topology",
+                    edges=None, proposal_id="topology", params={}, block_identity=None)
 
 
 def _field_block(n: int = 3, cell: float = 20.0) -> Block:
@@ -72,7 +77,8 @@ def _field_block(n: int = 3, cell: float = 20.0) -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     return Block(block_id="f", crs=UTM, boundary=boundary, parcels=parcels,
                  streets=gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM),
-                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM),
+                 source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def _mid_road(block: Block) -> gpd.GeoDataFrame:
@@ -124,7 +130,8 @@ def test_render_after_with_no_roads_adds_no_extra_artist() -> None:
     # Contract: a proposal with roads=None must not blow up, and (since
     # there's nothing new to draw) shouldn't add a roads collection either.
     block = _grid_block(3)
-    proposal = Proposal(block_id=block.block_id, crs=UTM, roads=None, method="topology")
+    proposal = Proposal(block_id=block.block_id, crs=UTM, roads=None, method="topology",
+                        edges=None, proposal_id="topology", params={}, block_identity=None)
     layers = parcel_access_layers(block, None)
 
     fig_before = render_before(block, layers, vmax=2)
@@ -157,6 +164,7 @@ def test_render_after_accepts_optional_metrics() -> None:
     metrics = Metrics(
         block_id=block.block_id, method="topology", eval="kcomplexity",
         values={"k_before": 2.0, "k_after": 1.0, "delta_k": 1.0, "added_road_length_m": 1.0},
+        fields={},
     )
 
     fig = render_after(block, proposal, layers, vmax=2, metrics=metrics)
@@ -381,7 +389,8 @@ def test_displaced_buildings_are_outlines_carrying_their_share(tmp_path):
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (20, 0)])], crs=crs)
     pts = gpd.GeoDataFrame(geometry=[Point(10, 10), Point(10, 12)], crs=crs)
     block = Block(block_id="b", crs=crs, boundary=boundary, parcels=parcels,
-                  streets=streets, building_geometries=pts)
+                  streets=streets, building_geometries=pts,
+                  source_content_hash=None, building_tier=SpacingDiscs)
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(0, 10), (20, 10)])], crs=crs),
         DEFAULT_ROAD_WIDTH_M)

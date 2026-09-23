@@ -51,8 +51,9 @@ def stripped_region(blocks: list[Block]) -> Block:
     """
     fused = region_block(blocks)
     outer = gpd.GeoDataFrame(geometry=[fused.boundary.boundary], crs=fused.crs)
+    # Uncacheable: this is the fused region with its streets swapped, not anything a source hashed.
     return Block(block_id=fused.block_id + ":stripped", crs=fused.crs, boundary=fused.boundary,
-                 parcels=fused.parcels, streets=outer,
+                 parcels=fused.parcels, streets=outer, source_content_hash=None,
                  building_geometries=fused.building_geometries,
                  building_tier=fused.building_tier)
 

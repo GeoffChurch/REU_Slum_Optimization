@@ -19,6 +19,7 @@ from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -37,7 +38,9 @@ def _grid_block(n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(n * n))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_access_burden_is_sum_of_squared_depths() -> None:
@@ -89,7 +92,9 @@ def test_line_proximity_scores_a_sparse_straight_chord() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (3.0, 0.0)])], crs=UTM)  # bottom
-    block = Block(block_id="deep", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    block = Block(block_id="deep", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     chord = with_width(gpd.GeoDataFrame(geometry=[LineString([(1.5, 0.0), (1.5, 7.0)])], crs=UTM),
                        DEFAULT_ROAD_WIDTH_M)  # spine
     _, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, chord.iloc[:0]))
@@ -293,7 +298,8 @@ def _straight_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (20, 0)])], crs=UTM)
     points = _points([(5.0, 5.0), (15.0, 5.0)])
     block = Block(block_id="two_roads", crs=UTM, boundary=boundary, parcels=parcels,
-                 streets=streets, building_geometries=points)
+                 streets=streets, building_geometries=points,
+                 source_content_hash=None, building_tier=SpacingDiscs)
     roads = _roads([LineString([(5, 0), (5, 10)]), LineString([(15, 0), (15, 10)])])
     return block, roads
 
@@ -310,7 +316,9 @@ def _deep_column_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
     parcels = gpd.GeoDataFrame({"parcel_id": [0, 1, 2, 3]}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (1, 0)])], crs=UTM)
-    block = Block(block_id="deep_col", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    block = Block(block_id="deep_col", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     road_a = LineString([(1, 0), (1, 2)])
     road_b = LineString([(1, 2), (1, 4)])
     roads = with_width(gpd.GeoDataFrame(geometry=[road_a, road_b], crs=UTM), DEFAULT_ROAD_WIDTH_M)
@@ -339,7 +347,9 @@ def _permeability_grid_block_and_roads() -> tuple[Block, gpd.GeoDataFrame]:
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k * cell, 0)])], crs=UTM)
     boundary = Polygon([(0, 0), (k * cell, 0), (k * cell, k * cell), (0, k * cell)])
     block = Block(block_id="perm_grid", crs=UTM, boundary=boundary, parcels=parcels,
-                 streets=streets)
+                 streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
     roads = gpd.GeoDataFrame(geometry=[
         LineString([(15, 0), (15, 135)]),           # the drainage trunk (spur)
         LineString([(0, 115), (30, 115)]),          # cross-connector, grounded only via the spur
@@ -547,7 +557,8 @@ def test_every_scored_prefix_reaches_the_street() -> None:
         parcels=parcels,
         streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
         building_geometries=gpd.GeoDataFrame(
-            geometry=[Point(x, 25) for x in xs], crs=UTM))
+            geometry=[Point(x, 25) for x in xs], crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
 
     drain = road_drainage(block, roads)
     assert drain[0] > max(drain[1], drain[2]), (
@@ -607,7 +618,8 @@ def test_ordering_reduces_to_plain_drainage_when_that_is_already_buildable() -> 
         parcels=parcels,
         streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
         building_geometries=gpd.GeoDataFrame(
-            geometry=[Point(25, 25), Point(85, 25), Point(75, 25)], crs=UTM))
+            geometry=[Point(25, 25), Point(85, 25), Point(75, 25)], crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
 
     drain = road_drainage(block, roads)
     plain = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
@@ -645,7 +657,8 @@ def test_drainage_counts_parcels_not_segment_traversals() -> None:
                 geometry=[Polygon([(x, y), (x + 10, y), (x + 10, y + 10), (x, y + 10)])],
                 crs=UTM),
             streets=gpd.GeoDataFrame(geometry=[street], crs=UTM),
-            building_geometries=gpd.GeoDataFrame(geometry=[Point(x + 5, y + 5)], crs=UTM))
+            building_geometries=gpd.GeoDataFrame(geometry=[Point(x + 5, y + 5)], crs=UTM),
+            source_content_hash=None, building_tier=SpacingDiscs)
 
     plain = LineString([(20.0, 0.0), (20.0, 40.0)])
     subdivided = LineString([(20.0, 0.0), (20.0, 10.0), (20.0, 20.0), (20.0, 30.0), (20.0, 40.0)])
@@ -678,7 +691,8 @@ def _crossing_block() -> tuple[Block, gpd.GeoDataFrame]:
         boundary=Polygon([(0, 0), (100, 0), (100, 80), (0, 80)]),
         parcels=parcels,
         streets=gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (100.0, 0.0)])], crs=UTM),
-        building_geometries=gpd.GeoDataFrame(geometry=[Point(x, 45) for x in xs], crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=[Point(x, 45) for x in xs], crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
     return block, _roads([stem, crossbar])
 
 
@@ -730,7 +744,8 @@ def test_network_efficiency_ignores_whether_a_crossing_is_drawn_as_a_vertex() ->
         parcels=parcels,
         streets=gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (100.0, 0.0)])], crs=UTM),
         building_geometries=gpd.GeoDataFrame(
-            geometry=[Point(10, 50), Point(90, 50), Point(50, 10), Point(50, 90)], crs=UTM))
+            geometry=[Point(10, 50), Point(90, 50), Point(50, 10), Point(50, 90)], crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
 
     bare = _roads([LineString([(0.0, 50.0), (100.0, 50.0)]),
                    LineString([(50.0, 0.0), (50.0, 100.0)])])
@@ -781,7 +796,8 @@ def test_every_prefix_is_connected_by_the_same_test_the_peel_uses() -> None:
         block_id="knife", crs=UTM,
         boundary=Polygon([(0, 0), (100, 0), (100, 40), (0, 40)]),
         parcels=parcels, streets=streets,
-        building_geometries=gpd.GeoDataFrame(geometry=[Point(x, 5) for x in xs], crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=[Point(x, 5) for x in xs], crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
 
     street_geom = unary_union(list(streets.geometry))
     raw = false_front.distance(street_geom)

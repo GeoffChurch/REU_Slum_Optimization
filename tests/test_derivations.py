@@ -11,8 +11,10 @@ from shapely.geometry import Polygon
 
 import reblock.derivations as D
 import reblock.derive_graph as dg
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import parcel_access_layers
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -33,14 +35,15 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     dg.clear_l1()
 
 
-def _grid_block(hash_: str) -> Block:
+def _grid_block(hash_: str | None) -> Block:
     polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
              for i in range(3) for j in range(3)]
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(9))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
     return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels,
-                 streets=streets, source_content_hash=hash_)
+                 streets=streets, source_content_hash=hash_,
+                 building_geometries=no_buildings(UTM), building_tier=SpacingDiscs)
 
 
 def test_access_before_matches_direct_and_caches(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,14 +73,15 @@ def test_before_and_after_use_distinct_keys(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(D, "parcel_access_layers", spy)
 
     block = _grid_block("deadbeef")
-    prop = Proposal(block_id="g", crs=UTM, block_identity=block.identity, proposal_id="peel")
+    prop = Proposal(block_id="g", crs=UTM, roads=None, edges=None, proposal_id="peel",
+                    method="peel", params={}, block_identity=block.identity)
     D.access_before(block)
     D.access_after(block, prop)                   # distinct fn.identity -> distinct key
     assert box["n"] == 2
 
 
-def test_bypass_when_hash_empty() -> None:
-    block = _grid_block("")                        # identity None -> uncacheable
+def test_bypass_when_uncacheable() -> None:
+    block = _grid_block(None)                      # identity None -> uncacheable
     out = D.access_before(block)
     assert isinstance(out, pd.Series)             # computes directly, no cache touch
 
@@ -114,7 +118,8 @@ def _member_block(block_id: str, hash_: str, x0: int) -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
     return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels,
-                 streets=streets, source_content_hash=hash_)
+                 streets=streets, source_content_hash=hash_,
+                 building_geometries=no_buildings(UTM), building_tier=SpacingDiscs)
 
 
 def test_region_reblock_routes_through_the_propose_cache(monkeypatch: pytest.MonkeyPatch) -> None:

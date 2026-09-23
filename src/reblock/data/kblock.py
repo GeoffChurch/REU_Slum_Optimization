@@ -150,10 +150,10 @@ class KblockSource:
         # byte-identical to the key it replaces.
         sch = source_hash(self.blocks_path, *frame.read_from)
         return Region(region_id=self.region_id, crs=utm,
-                      blocks=self._blocks_from(blocks.to_crs(utm), bld, sch))
+                      blocks=self._blocks_from(blocks.to_crs(utm), bld, sch), roads=None)
 
     def _blocks_from(self, blocks: gpd.GeoDataFrame, bld: gpd.GeoDataFrame,
-                     source_content_hash: str) -> Iterator[Block]:
+                     source_content_hash: str | None) -> Iterator[Block]:
         utm = blocks.crs
         if utm is None:
             raise ValueError(f"{self.region_id}: blocks GeoDataFrame has no CRS")

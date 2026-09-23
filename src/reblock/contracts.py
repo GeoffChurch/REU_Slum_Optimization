@@ -6,21 +6,16 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-import geopandas as gpd
 from geopandas import GeoDataFrame
 from pyproj import CRS
 from shapely.geometry import MultiPolygon, Polygon
 
-from reblock.buildings import Extents, SpacingDiscs, tier_identity
+from reblock.buildings import Extents, tier_identity
 
 if TYPE_CHECKING:
     import pandas as pd
 
     from reblock.data.counts import BuildingCount
-
-
-def _empty_points() -> GeoDataFrame:
-    return gpd.GeoDataFrame({"geometry": []}, geometry="geometry")
 
 
 def _require_columns(gdf: GeoDataFrame, cols: set[str], name: str) -> None:
@@ -39,7 +34,7 @@ class Region:
     region_id: str
     crs: CRS
     blocks: Iterable[Block]
-    roads: GeoDataFrame | None = None
+    roads: GeoDataFrame | None
     attrs: Mapping[str, object] = field(default_factory=dict)
 
 
@@ -50,10 +45,9 @@ class Block:
     boundary: Polygon | MultiPolygon   # a block is a Polygon; a gappy region is a MultiPolygon
     parcels: GeoDataFrame
     streets: GeoDataFrame
-    source_content_hash: str = ""   # content hash of the Source's file(s); "" => uncacheable
-    attrs: Mapping[str, object] = field(default_factory=dict)
+    source_content_hash: str | None   # content hash of the Source's file(s); None => uncacheable
     # real sites; may be empty. Named for GEOMETRY, not points: at tier 3 it holds polygons.
-    building_geometries: GeoDataFrame = field(default_factory=_empty_points)
+    building_geometries: GeoDataFrame
     # The injected building-geometry TIER (reblock.buildings), as the STRATEGY rather than a bound
     # instance: SpacingDiscs | AreaDiscs | Footprints. Resolved once where config and data are
     # read, passed down, and applied to this block's own points by `buildings` below -- so no call
@@ -64,7 +58,8 @@ class Block:
     # `replace(block, building_geometries=...)` and silently describes the OLD points. That
     # desync is
     # unrepresentable here, because the tier is a function OF the data instead of a copy of it.
-    building_tier: Callable[[GeoDataFrame], Extents] = SpacingDiscs
+    building_tier: Callable[[GeoDataFrame], Extents]
+    attrs: Mapping[str, object] = field(default_factory=dict)
 
     @cached_property
     def buildings(self) -> Extents:
@@ -77,6 +72,8 @@ class Block:
         if self.parcels.empty:
             raise ValueError("Block.parcels must be non-empty")
         _require_columns(self.streets, {"geometry"}, "Block.streets")
+        if self.source_content_hash == "":
+            raise ValueError("Block.source_content_hash must be a hash, or None when uncacheable")
 
     @property
     def identity(self) -> tuple[str, str, str] | None:
@@ -87,19 +84,25 @@ class Block:
         # the same block at two tiers gives two answers. Without it here, switching tiers would
         # hit the cache and return the OTHER tier's result -- no error, plausible numbers.
         return ((self.source_content_hash, self.block_id, tier_identity(self.building_tier))
-                if self.source_content_hash else None)
+                if self.source_content_hash is not None else None)
 
 
 @dataclass(frozen=True)
 class Proposal:
     block_id: str
     crs: CRS
-    roads: GeoDataFrame | None = None
-    edges: GeoDataFrame | None = None
-    proposal_id: str = ""
-    method: str = ""
-    params: Mapping[str, object] = field(default_factory=dict)
-    block_identity: Hashable | None = None
+    roads: GeoDataFrame | None
+    edges: GeoDataFrame | None
+    proposal_id: str
+    method: str
+    params: Mapping[str, object]
+    block_identity: Hashable | None
+
+    def __post_init__(self) -> None:
+        # It keys the derivation cache beside `block_identity` and names the rendered file, so an
+        # empty one would collide with every other empty one in both places.
+        if not self.proposal_id:
+            raise ValueError("Proposal.proposal_id must be non-empty")
 
     @property
     def identity(self) -> tuple[Hashable, str] | None:
@@ -114,7 +117,7 @@ class Metrics:
     method: str
     eval: str
     values: Mapping[str, float]
-    fields: Mapping[str, pd.Series] = field(default_factory=dict)
+    fields: Mapping[str, pd.Series]
 
 
 @dataclass(frozen=True)

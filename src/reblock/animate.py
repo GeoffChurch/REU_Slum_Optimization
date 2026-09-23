@@ -60,7 +60,11 @@ def _frame_png(task: tuple[int, float]) -> tuple[int, bytes]:
     idx, cutoff = task
     k, prefix = _prefix_at(cutoff)
     block: Block = _CTX["block"]
-    proposal = Proposal(block_id=block.block_id, crs=block.crs, roads=prefix)
+    # A render-only prefix of some method's roads: never scored, so never cached.
+    proposal = Proposal(block_id=block.block_id, crs=block.crs, roads=prefix, edges=None,
+                        proposal_id=f"street_first_prefix:{cutoff:g}",
+                        method="street_first_prefix", params={"cutoff_m": cutoff},
+                        block_identity=None)
     layers = parcel_access_layers(block, prefix if k else None)
     fig = render_after(block, proposal, layers, vmax=_CTX["vmax"], frame=_CTX["frame"],
                        displaced_buildings=_displaced_buildings(block, proposal) if k else None)

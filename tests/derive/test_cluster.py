@@ -1,10 +1,12 @@
 import geopandas as gpd
 import pytest
 from pyproj import CRS
-from shapely.geometry import MultiLineString, Polygon, box
+from shapely.geometry import MultiLineString, Point, Polygon, box
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Region
 from reblock.derive.cluster import merge_cluster
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
 
@@ -17,11 +19,13 @@ def _block(bid: str, poly: Polygon, n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(n))}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[poly.boundary], crs=UTM)
     return Block(block_id=bid, crs=UTM, boundary=poly, parcels=parcels, streets=streets,
-                 attrs={"kblock_k": 3.0})
+                 attrs={"kblock_k": 3.0},
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _region(*blocks: Block) -> Region:
-    return Region(region_id="t", crs=UTM, blocks=list(blocks))
+    return Region(region_id="t", crs=UTM, blocks=list(blocks), roads=None)
 
 
 def test_merge_two_adjacent_blocks() -> None:
@@ -34,6 +38,29 @@ def test_merge_two_adjacent_blocks() -> None:
     assert m.attrs["block_ids"] == ["a", "b"]
     assert isinstance(m.attrs["interior_boundaries"], MultiLineString)
     assert m.attrs["interior_boundaries"].length > 0   # the shared x=10 edge
+
+
+def test_merge_keeps_its_members_buildings_and_tier() -> None:
+    """The merged super-block is where every per-block derivation runs, so it must hold the
+    buildings its members hold -- at their tier. Built without them it read as a block with no
+    buildings, where every road displaces nothing."""
+    from dataclasses import replace
+
+    from reblock.buildings import AreaDiscs
+
+    def sites(*xy: tuple[float, float]) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame({"area_in_meters": [20.0] * len(xy)},
+                                geometry=[Point(x, y) for x, y in xy], crs=UTM)
+
+    a = replace(_block("a", box(0, 0, 10, 10), 2),
+                building_geometries=sites((2, 2), (7, 7)), building_tier=AreaDiscs)
+    b = replace(_block("b", box(10, 0, 20, 10), 3),
+                building_geometries=sites((15, 5),), building_tier=AreaDiscs)
+    m = merge_cluster(_region(b, a))
+
+    assert m.building_tier is AreaDiscs
+    assert m.building_geometries.get_coordinates().values.tolist() == [[2, 2], [7, 7], [15, 5]]
+    assert len(m.buildings) == 3
 
 
 def test_merge_non_adjacent_raises() -> None:

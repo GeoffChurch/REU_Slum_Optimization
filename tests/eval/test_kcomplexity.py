@@ -4,9 +4,11 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon, box
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
 from reblock.methods.topology import TopologyMethod
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -18,7 +20,9 @@ def _grid_block(n: int, ox: float = 0.0, oy: float = 0.0) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _grid5() -> Block:
@@ -26,7 +30,9 @@ def _grid5() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(25))}, geometry=polys, crs=UTM)
     b = cast(Polygon, parcels.geometry.union_all())
     return Block(block_id="g5", crs=UTM, boundary=b, parcels=parcels,
-                 streets=gpd.GeoDataFrame(geometry=[b.exterior], crs=UTM))
+                 streets=gpd.GeoDataFrame(geometry=[b.exterior], crs=UTM),
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_delta_k_from_interior_connector() -> None:
@@ -36,7 +42,8 @@ def test_delta_k_from_interior_connector() -> None:
     # weak-dual on this grid.
     block = _grid_block(3)
     connector = gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=connector, method="topology")
+    proposal = Proposal(block_id="g", crs=UTM, roads=connector, method="topology",
+                        edges=None, proposal_id="topology", params={}, block_identity=None)
 
     metrics = KComplexityEval().score(block, proposal)
     v = metrics.values
@@ -58,7 +65,8 @@ def test_delta_k_with_nonzero_origin() -> None:
     # needs no origin-relative bookkeeping to get this right.
     block = _grid_block(3, ox=100.0, oy=200.0)
     connector = gpd.GeoDataFrame(geometry=[LineString([(101, 200), (101, 201)])], crs=UTM)
-    proposal = Proposal(block_id="g", crs=UTM, roads=connector, method="topology")
+    proposal = Proposal(block_id="g", crs=UTM, roads=connector, method="topology",
+                        edges=None, proposal_id="topology", params={}, block_identity=None)
 
     v = KComplexityEval().score(block, proposal).values
     assert v["k_before"] == 2
@@ -71,7 +79,8 @@ def test_no_roads_leaves_k_unchanged() -> None:
     # Contract: with no proposed roads, k_after == k_before, delta_k == 0,
     # and added_road_length_m == 0. Uses roads=None (the empty-roads path).
     block = _grid_block(3)
-    proposal = Proposal(block_id="g", crs=UTM, roads=None, method="topology")
+    proposal = Proposal(block_id="g", crs=UTM, roads=None, method="topology",
+                        edges=None, proposal_id="topology", params={}, block_identity=None)
 
     v = KComplexityEval().score(block, proposal).values
     assert v["k_after"] == v["k_before"]
@@ -93,7 +102,8 @@ def test_topology_roads_are_street_connected_and_unchanged() -> None:
 def test_diagnostics_present_and_zero_for_no_roads() -> None:
     block = _grid5()
     empty = Proposal(block_id="g5", crs=UTM, roads=gpd.GeoDataFrame(geometry=[], crs=UTM),
-                     method="none")
+                     method="none",
+                     edges=None, proposal_id="none", params={}, block_identity=None)
     m = KComplexityEval().score(block, empty)
     assert m.values["n_road_components"] == 0.0
     assert m.values["connected_road_frac"] == 0.0
@@ -104,7 +114,8 @@ def test_geometric_access_emitted() -> None:
     # topological peel-k: a scalar summary in .values and a per-parcel
     # field in .fields, indexed like the peel fields.
     block = _grid5()
-    proposal = Proposal(block_id="g5", crs=UTM, roads=None, method="none")
+    proposal = Proposal(block_id="g5", crs=UTM, roads=None, method="none",
+                        edges=None, proposal_id="none", params={}, block_identity=None)
 
     m = KComplexityEval().score(block, proposal)
     assert m.values["geometric_access_max_m"] >= 0.0
@@ -115,7 +126,8 @@ def test_weakdual_k_pins_old_behavior() -> None:
     # WeakDualKEval retains the old topology-weak-dual logic verbatim, for
     # Brelsford/literature comparability, and emits no per-parcel fields.
     block = _grid_block(3)
-    proposal = Proposal(block_id="g", crs=UTM, roads=None, method="topology")
+    proposal = Proposal(block_id="g", crs=UTM, roads=None, method="topology",
+                        edges=None, proposal_id="topology", params={}, block_identity=None)
 
     metrics = WeakDualKEval().score(block, proposal)
     assert metrics.eval == "weakdual_k"

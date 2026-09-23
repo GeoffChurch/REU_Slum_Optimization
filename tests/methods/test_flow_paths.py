@@ -14,6 +14,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.flow_paths import FlowPathsReblocker, accumulate_flow
@@ -30,7 +31,8 @@ def _slab(w: int, h: int) -> Block:
     return Block(block_id="slab", crs=UTM, boundary=cast(Polygon, unary_union(polys)),
                  parcels=parcels,
                  streets=gpd.GeoDataFrame(geometry=[LineString([(0, 0), (w, 0)])], crs=UTM),
-                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+                 building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM),
+                 source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def test_flow_concentrates_more_sharply_as_the_block_grows() -> None:

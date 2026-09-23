@@ -454,18 +454,16 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
     save_render(fig_before, out_dir / f"{short_label(block.block_id)}_before.png")
     plt.close(fig_before)
 
-    for i, r in enumerate(group):
+    for r in group:
         kc = _kcomplexity_metrics(r.metrics)
         if kc is None:
             continue
-        # proposal_id defaults to "" (a method may leave it unset); fall back to
-        # a per-proposal index so multiple afters never collide/overwrite.
-        name = r.proposal.proposal_id or f"proposal{i}"
         fig_after = render_after(
             block, r.proposal, kc.fields["access_after"], vmax=vmax, metrics=kc, frame=frame,
             context_outlines=context_outlines, context_points=context_points,
             own_buildings=own_buildings,
             displaced_buildings=_displaced_buildings(block, r.proposal),
         )
-        save_render(fig_after, out_dir / f"{short_label(block.block_id)}_{name}_after.png")
+        save_render(fig_after,
+                    out_dir / f"{short_label(block.block_id)}_{r.proposal.proposal_id}_after.png")
         plt.close(fig_after)

@@ -74,8 +74,8 @@ class MethodCurve:
     block_id: str    # a plain block_id for a singleton region, else the region label
     metric: str
     curve: Curve
-    pct_paved: float = 0.0
-    pct_displaced: float = 0.0
+    pct_paved: float
+    pct_displaced: float
 
 
 def _region_label(region: list[Block]) -> str:

@@ -10,9 +10,11 @@ from shapely import union_all
 from shapely.geometry import LineString, Point, Polygon, box
 from shapely.geometry.base import BaseGeometry
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.methods.euclidean_grid import EuclideanGridReblocker
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -28,7 +30,9 @@ def _rect_block(w: float, h: float, streets: list[LineString] | None = None) -> 
     parcels = gpd.GeoDataFrame({"parcel_id": [0]}, geometry=[poly], crs=UTM)
     lines = streets if streets is not None else [LineString([(-100, -100), (-99, -100)])]
     street_gdf = gpd.GeoDataFrame(geometry=lines, crs=UTM)
-    return Block(block_id="rect", crs=UTM, boundary=poly, parcels=parcels, streets=street_gdf)
+    return Block(block_id="rect", crs=UTM, boundary=poly, parcels=parcels, streets=street_gdf,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _clustered_block() -> Block:
@@ -41,7 +45,9 @@ def _clustered_block() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all().convex_hull)
     streets = gpd.GeoDataFrame(geometry=[LineString([(200, 200), (201, 200)])], crs=UTM)
-    return Block(block_id="cluster", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="cluster", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _dense_cluster_block() -> Block:
@@ -56,7 +62,9 @@ def _dense_cluster_block() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = box(0, 0, 60, 60)
     streets = gpd.GeoDataFrame(geometry=[LineString([(200, 200), (201, 200)])], crs=UTM)
-    return Block(block_id="dense", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="dense", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _dumbbell_block() -> Block:
@@ -70,7 +78,9 @@ def _dumbbell_block() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = box(0, 0, 53, 3)
     streets = gpd.GeoDataFrame(geometry=[LineString([(200, 200), (201, 200)])], crs=UTM)
-    return Block(block_id="dumbbell", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="dumbbell", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 CLUSTER_AREA = box(0, 0, 20, 20)     # the finely-subdivided corner of _dense_cluster_block
@@ -88,7 +98,9 @@ def _uniform_block() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(200, 200), (201, 200)])], crs=UTM)
-    return Block(block_id="uniform", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="uniform", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _two_cluster_block(gap: float) -> Block:
@@ -102,7 +114,9 @@ def _two_cluster_block(gap: float) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = box(0, 0, rx + 6, 6)
     streets = gpd.GeoDataFrame(geometry=[LineString([(500, 500), (501, 500)])], crs=UTM)
-    return Block(block_id="two", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="two", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _road_components(roads: gpd.GeoDataFrame) -> int:
@@ -217,7 +231,9 @@ def test_overlap_suppression_keeps_the_nonoverlapping_remainder() -> None:
 def test_empty_streets_raises() -> None:
     block = _rect_block(20.0, 20.0)
     bad = Block(block_id="nostreet", crs=block.crs, boundary=block.boundary,
-                parcels=block.parcels, streets=gpd.GeoDataFrame(geometry=[], crs=block.crs))
+                parcels=block.parcels, streets=gpd.GeoDataFrame(geometry=[], crs=block.crs),
+                source_content_hash=None, building_geometries=no_buildings(block.crs),
+                building_tier=SpacingDiscs)
     with pytest.raises(ValueError, match="streets"):
         EuclideanGridReblocker().propose(bad)
 
@@ -418,7 +434,9 @@ def test_parcel_hug_buffer_scales_with_the_blocks_own_parcel_spacing() -> None:
         boundary = box(-step, -step, 6 * step, 6 * step)
         streets = gpd.GeoDataFrame(geometry=[LineString([(1e4, 1e4), (1e4 + 1, 1e4)])], crs=UTM)
         return Block(block_id=f"s{step}", crs=UTM, boundary=boundary, parcels=parcels,
-                     streets=streets)
+                     streets=streets,
+                     source_content_hash=None, building_geometries=no_buildings(UTM),
+                     building_tier=SpacingDiscs)
 
     # identical layout, one 10x sparser than the other, SAME spacing -> the derived hug buffer
     # tracks the block's own parcel scale, not `spacing` (dataset-agnostic across dense/sparse)
@@ -460,7 +478,9 @@ def _street_bounded_tiling(n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = box(0, 0, n, n)
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="tiling", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="tiling", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_follow_parcels_follows_boundary_edges_weighted_by_density() -> None:

@@ -8,6 +8,7 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.eval.access_burden import AccessBurdenEval, burden
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
@@ -26,7 +27,8 @@ def _strip(n: int = 6, step: float = 10.0) -> Block:
         parcels=gpd.GeoDataFrame({"parcel_id": [str(k) for k in range(n)]},
                                  geometry=polys, crs=UTM),
         streets=gpd.GeoDataFrame(geometry=[LineString([(-step, 0.0), (step * 2, 0.0)])], crs=UTM),
-        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def test_burden_is_zero_exactly_at_universal_street_access() -> None:
@@ -51,10 +53,12 @@ def test_a_road_reaching_the_deep_end_reduces_the_burden() -> None:
     ev = AccessBurdenEval()
     empty = Proposal(block_id=block.block_id, crs=UTM, method="none",
                      roads=with_width(gpd.GeoDataFrame(geometry=[], crs=UTM),
-                                      DEFAULT_ROAD_WIDTH_M))
+                                      DEFAULT_ROAD_WIDTH_M),
+                     edges=None, proposal_id="none", params={}, block_identity=None)
     spine_road = gpd.GeoDataFrame(geometry=[LineString([(5.0, 0.0), (5.0, 60.0)])], crs=UTM)
     spine = Proposal(block_id=block.block_id, crs=UTM, method="spine",
-                     roads=with_width(spine_road, DEFAULT_ROAD_WIDTH_M))
+                     roads=with_width(spine_road, DEFAULT_ROAD_WIDTH_M),
+                     edges=None, proposal_id="spine", params={}, block_identity=None)
 
     m0 = ev.score(block, empty)
     m1 = ev.score(block, spine)
@@ -75,7 +79,8 @@ def test_reduction_is_zero_not_nan_when_the_block_already_has_universal_access()
     """
     block = _strip(n=1)
     ev = AccessBurdenEval()
-    m = ev.score(block, Proposal(block_id=block.block_id, crs=UTM, method="none", roads=None))
+    m = ev.score(block, Proposal(block_id=block.block_id, crs=UTM, method="none", roads=None,
+                                 edges=None, proposal_id="none", params={}, block_identity=None))
     assert m.values["burden_before"] == 0.0
     assert m.values["burden_reduction"] == 0.0
 
@@ -88,6 +93,7 @@ def test_it_reports_under_its_own_eval_name() -> None:
     """
     block = _strip()
     m = AccessBurdenEval().score(
-        block, Proposal(block_id=block.block_id, crs=UTM, method="none", roads=None))
+        block, Proposal(block_id=block.block_id, crs=UTM, method="none", roads=None,
+                        edges=None, proposal_id="none", params={}, block_identity=None))
     assert m.eval == "access_burden"
     assert set(m.fields) == {"access_before", "access_after"}

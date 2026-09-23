@@ -9,6 +9,7 @@ from matplotlib.figure import Figure
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.compare import PermeabilityConfig
 from reblock.contracts import Block, Proposal
 from reblock.permeability import (
@@ -18,6 +19,7 @@ from reblock.permeability import (
     with_width,
 )
 from reblock.render import save_render as _real_save_render
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -39,7 +41,9 @@ def _street_block(x0: int, block_id: str) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(9))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[LineString([(x0, 0), (x0 + 3, 0)])], crs=UTM)
-    return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _sparse_stub_block() -> tuple[Block, gpd.GeoDataFrame]:
@@ -64,7 +68,8 @@ def _sparse_stub_block() -> tuple[Block, gpd.GeoDataFrame]:
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k * cell, 0)])], crs=UTM)
     points = gpd.GeoDataFrame(geometry=[p.centroid for p in polys], crs=UTM)
     block = Block(block_id="sparse_stub", crs=UTM, boundary=boundary, parcels=parcels,
-                 streets=streets, building_geometries=points)
+                 streets=streets, building_geometries=points,
+                 source_content_hash=None, building_tier=SpacingDiscs)
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(5.0, 0.0), (5.0, 5.0)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)
@@ -85,7 +90,9 @@ class _FixedRoadMethod:
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
-        return Proposal(block_id=block.block_id, crs=block.crs, roads=self._roads)
+        return Proposal(block_id=block.block_id, crs=block.crs, roads=self._roads,
+                        edges=None, proposal_id="fixed_road_test", method="fixed_road_test",
+                        params={}, block_identity=None)
 
 
 def test_load_permeability_config_reads_the_committed_yaml() -> None:

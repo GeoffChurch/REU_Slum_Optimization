@@ -17,6 +17,7 @@ from reblock.methods.peel import PeelReblocker
 
 
 def reconciled_baseline(region: Region, merged: Block, tol: float = STREET_TOL) -> Proposal:
+    # Probe proposals are scored directly and never cached: their ids do not encode `tol`.
     blocks = sorted(region.blocks, key=lambda b: b.block_id)
     segments: list[BaseGeometry] = []
     for b in blocks:
@@ -26,13 +27,15 @@ def reconciled_baseline(region: Region, merged: Block, tol: float = STREET_TOL) 
     if not segments:
         return Proposal(block_id=merged.block_id, crs=merged.crs, method="peel_reconciled",
                         proposal_id="peel_reconciled",
-                        roads=gpd.GeoDataFrame(geometry=[], crs=merged.crs))
+                        roads=gpd.GeoDataFrame(geometry=[], crs=merged.crs), edges=None,
+                        params={"tol": tol}, block_identity=None)
     # snap co-located endpoints together (reconcile stubs meeting across a boundary)
     reference = union_all(segments)
     reconciled = [snap(g, reference, tol) for g in segments]
     roads = gpd.GeoDataFrame(geometry=reconciled, crs=merged.crs)
     return Proposal(block_id=merged.block_id, crs=merged.crs, method="peel_reconciled",
-                    proposal_id="peel_reconciled", roads=roads)
+                    proposal_id="peel_reconciled", roads=roads, edges=None,
+                    params={"tol": tol}, block_identity=None)
 
 
 def _midline(a: LineString, b: LineString) -> LineString:
@@ -70,4 +73,5 @@ def spine_merge_reference(
             used[i] = True
     roads = gpd.GeoDataFrame(geometry=trunks, crs=merged.crs)
     return Proposal(block_id=merged.block_id, crs=merged.crs, method="spine_merge_ref",
-                    proposal_id="spine_merge_ref", roads=roads)
+                    proposal_id="spine_merge_ref", roads=roads, edges=None,
+                    params={"tol": tol, "band": band}, block_identity=None)

@@ -5,20 +5,23 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.topology import TopologyMethod
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
 
-def _grid(n: int, hash_: str = "") -> Block:
+def _grid(n: int, hash_: str | None) -> Block:
     polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
              for i in range(n) for j in range(n)]
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
     return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
-                 source_content_hash=hash_)
+                 source_content_hash=hash_,
+                 building_geometries=no_buildings(UTM), building_tier=SpacingDiscs)
 
 
 def _split_square(size: float = 10.0) -> Block:
@@ -36,7 +39,9 @@ def _split_square(size: float = 10.0) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[left, right], crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="split", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="split", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _grid_with_south_street_only(n: int) -> Block:
@@ -53,11 +58,13 @@ def _grid_with_south_street_only(n: int) -> Block:
     boundary = cast(Polygon, parcels.geometry.union_all())
     south = LineString([(i, 0) for i in range(n + 1)])
     streets = gpd.GeoDataFrame(geometry=[south], crs=UTM)
-    return Block(block_id="g_south", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g_south", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_proposes_roads_for_interior_parcel() -> None:
-    proposal = TopologyMethod().propose(_grid(3))
+    proposal = TopologyMethod().propose(_grid(3, hash_=None))
     assert proposal.method == "topology" and proposal.crs == UTM
     assert proposal.roads is not None and len(proposal.roads) >= 1
     assert proposal.roads.geometry.length.sum() > 0
@@ -68,7 +75,7 @@ def test_proposes_roads_for_interior_parcel() -> None:
 
 
 def test_propose_is_deterministic_across_runs() -> None:
-    block = _grid(3)
+    block = _grid(3, hash_=None)
     a = TopologyMethod(seed=0).propose(block)
     b = TopologyMethod(seed=0).propose(block)
     assert a.roads is not None and b.roads is not None
@@ -79,7 +86,7 @@ def test_all_interior_parcels_connected() -> None:
     from topology import build_all_roads
 
     from reblock.derive.parcel_graph import to_parcel_graph
-    ppg = to_parcel_graph(_grid(3))
+    ppg = to_parcel_graph(_grid(3, hash_=None))
     ppg.graph.define_roads()
     ppg.graph.define_interior_parcels()
     random.seed(0)
@@ -91,12 +98,12 @@ def test_all_interior_parcels_connected() -> None:
 def test_propose_accepts_explicit_prior_none() -> None:
     # `prior` is unused today (topology is block-independent) but must be
     # accepted so TopologyMethod structurally satisfies the Method protocol.
-    proposal = TopologyMethod(seed=0).propose(_grid(3), prior=None)
+    proposal = TopologyMethod(seed=0).propose(_grid(3, hash_=None), prior=None)
     assert proposal.roads is not None and len(proposal.roads) >= 1
 
 
 def test_proposal_id_encodes_alpha_and_seed() -> None:
-    proposal = TopologyMethod(alpha=2.0, seed=0).propose(_grid(3))
+    proposal = TopologyMethod(alpha=2.0, seed=0).propose(_grid(3, hash_=None))
     assert proposal.proposal_id == "topology_a2.0_s0"
 
 
@@ -125,7 +132,7 @@ def test_partial_streets_yield_a_different_larger_proposal() -> None:
     # `define_roads()`), far more parcels start out interior (6 of 9, vs. just
     # the 1 center parcel for full-boundary streets) and the greedy builder
     # must add substantially more new road to resolve them all.
-    full = TopologyMethod(seed=0).propose(_grid(3))
+    full = TopologyMethod(seed=0).propose(_grid(3, hash_=None))
     partial = TopologyMethod(seed=0).propose(_grid_with_south_street_only(3))
     assert full.roads is not None and partial.roads is not None
     assert partial.roads.geometry.length.sum() > full.roads.geometry.length.sum()
@@ -149,7 +156,7 @@ def test_propose_does_not_perturb_global_rng() -> None:
     # propose() seeds np.random/random internally (build_all_roads draws from
     # the global np.random.choice), so it must save+restore that global state.
     import numpy as np
-    block = _grid(3)
+    block = _grid(3, hash_=None)
     np.random.seed(12345)
     np_state_before = np.random.get_state()[1].tolist()
     py_state_before = random.getstate()

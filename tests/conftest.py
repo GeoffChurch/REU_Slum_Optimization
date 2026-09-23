@@ -46,7 +46,9 @@ from pyproj import CRS  # noqa: E402
 from shapely.geometry import LineString, Polygon  # noqa: E402
 
 import reblock.derive_graph as _dg  # noqa: E402
+from reblock.buildings import SpacingDiscs  # noqa: E402
 from reblock.contracts import Block  # noqa: E402
+from tests.block_fixtures import no_buildings  # noqa: E402
 
 UTM = CRS.from_epsg(32734)
 
@@ -73,4 +75,6 @@ def real_block() -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (k * cell, 0)])], crs=UTM)
     boundary = Polygon([(0, 0), (k * cell, 0), (k * cell, k * cell), (0, k * cell)])
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)

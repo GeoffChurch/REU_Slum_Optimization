@@ -4,8 +4,10 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import parcel_access_layers
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
 
@@ -19,7 +21,9 @@ def _grid_block(n: int, x0: float = 0.0) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_2x2_all_on_street() -> None:
@@ -39,7 +43,9 @@ def test_strip_is_honest_not_degenerate() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(5))}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     block = Block(block_id="s", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
-                  parcels=parcels, streets=streets)
+                  parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     assert parcel_access_layers(block, None).max() == 5     # weak-dual wrongly gives 1
 
 
@@ -53,7 +59,9 @@ def test_indexed_by_parcel_id_survives_reorder() -> None:
     reordered["parcel_id"] = reordered["parcel_id"] + 1000
     reordered = reordered.sample(frac=1, random_state=1).reset_index(drop=True)
     block = Block(block_id="g", crs=base.crs, boundary=base.boundary,
-                  parcels=reordered, streets=base.streets)
+                  parcels=reordered, streets=base.streets,
+                  source_content_hash=None, building_geometries=no_buildings(base.crs),
+                  building_tier=SpacingDiscs)
     layers = parcel_access_layers(block, None)
     assert layers.index.name == "parcel_id"
     # original centre id 4 -> now 1004; still the sole layer-2 parcel, by id
@@ -85,7 +93,9 @@ def test_diagonal_touch_is_not_adjacency() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": [0, 1, 2]}, geometry=[p0, p1, p2], crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     block = Block(block_id="L", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
-                  parcels=parcels, streets=streets)
+                  parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     layers = parcel_access_layers(block, None)
     assert layers.loc[0] == 1
     assert layers.loc[1] == 2
@@ -108,7 +118,9 @@ def test_disconnected_road_gives_no_credit() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(5))}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     block = Block(block_id="s", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
-                  parcels=parcels, streets=streets)
+                  parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     floating = gpd.GeoDataFrame(geometry=[LineString([(3, 0.5), (4, 0.5)])], crs=UTM)  # interior
     assert parcel_access_layers(block, floating).max() == 5          # no unearned credit
     assert parcel_access_layers(block, None).max() == 5
@@ -121,7 +133,9 @@ def test_connected_road_reduces_depth() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(5))}, geometry=polys, crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     block = Block(block_id="s", crs=UTM, boundary=cast(Polygon, parcels.geometry.union_all()),
-                  parcels=parcels, streets=streets)
+                  parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     connected = gpd.GeoDataFrame(geometry=[LineString([(0, 0.5), (4, 0.5)])], crs=UTM)  # touches
     assert parcel_access_layers(block, connected).max() == 1
 
@@ -136,7 +150,9 @@ def test_disconnected_parcel_gets_layer_past_deepest() -> None:
     parcels = gpd.GeoDataFrame({"parcel_id": [0, 1]}, geometry=[near, far], crs=UTM)
     streets = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (0, 1)])], crs=UTM)
     hull = cast(Polygon, parcels.geometry.union_all().convex_hull)
-    block = Block(block_id="d", crs=UTM, boundary=hull, parcels=parcels, streets=streets)
+    block = Block(block_id="d", crs=UTM, boundary=hull, parcels=parcels, streets=streets,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
     layers = parcel_access_layers(block, None)
     assert layers.loc[0] == 1
     assert layers.loc[1] == 2

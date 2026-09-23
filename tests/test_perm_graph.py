@@ -4,9 +4,11 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.perm_graph import GraphFigure, permeability_graph
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
 
@@ -25,7 +27,9 @@ def _grid_block(k: int = 6, cell: float = 10.0, street: bool = True) -> Block:
             else LineString([(0.0, -1e5), (k * cell, -1e5)]))
     streets = gpd.GeoDataFrame(geometry=[line], crs=UTM)
     boundary = Polygon([(0, 0), (k * cell, 0), (k * cell, k * cell), (0, k * cell)])
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def _roads(lines: list[LineString]) -> gpd.GeoDataFrame:
@@ -118,7 +122,9 @@ def test_current_is_zero_when_every_parcel_fronts_the_street():
     base = _grid_block(2, 10.0)
     ring = gpd.GeoDataFrame(geometry=[base.boundary.boundary], crs=UTM)
     block = Block(block_id="ring", crs=UTM, boundary=base.boundary,
-                  parcels=base.parcels, streets=ring)
+                  parcels=base.parcels, streets=ring,
+                  source_content_hash=None, building_geometries=no_buildings(UTM),
+                  building_tier=SpacingDiscs)
 
     fig = permeability_graph(block, None)
     assert len(fig.rows) > 0                       # not vacuous

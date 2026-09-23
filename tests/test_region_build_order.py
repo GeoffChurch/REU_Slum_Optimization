@@ -15,6 +15,7 @@ from pyproj import CRS
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.region import (
     ConvexHullRegionBuilder,
@@ -24,6 +25,7 @@ from reblock.region import (
     ShapeStandardizingRegionBuilder,
     region_block,
 )
+from tests.block_fixtures import no_buildings
 
 # A 4x4 grid of 100 m blocks with a 2 m street gap, placed in UTM 33S near Cape Town. 100 m is
 # small enough that 0.5 DEGREES (~55 km) swallows the whole grid, which is what makes the
@@ -127,7 +129,9 @@ def _adjacent_blocks() -> tuple[Block, Block]:
         boundary = cast(Polygon, unary_union(polys))
         streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs="EPSG:32734")
         return Block(block_id=block_id, crs=CRS.from_epsg(32734), boundary=boundary,
-                    parcels=parcels, streets=streets, source_content_hash=source_content_hash)
+                    parcels=parcels, streets=streets, source_content_hash=source_content_hash,
+                    building_geometries=no_buildings(CRS.from_epsg(32734)),
+                    building_tier=SpacingDiscs)
 
     return _block(0, "a", "srcA"), _block(3, "b", "srcB")
 

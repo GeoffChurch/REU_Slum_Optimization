@@ -2,8 +2,10 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon, box
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.eval.structure import StructureEval
+from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
 
@@ -17,13 +19,17 @@ def _grid_block(n: int) -> Block:
     parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
     boundary = Polygon([(0, 0), (n, 0), (n, n), (0, n)])
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
-    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets)
+    return Block(block_id="g", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
 
 
 def test_structure_eval_emits_the_basis() -> None:
     block = _grid_block(3)
     roads = gpd.GeoDataFrame(geometry=[LineString([(1.5, 0), (1.5, 3)])], crs=UTM)
-    m = StructureEval().score(block, Proposal(block_id="g", crs=UTM, roads=roads, method="x"))
+    m = StructureEval().score(block, Proposal(block_id="g", crs=UTM, roads=roads, method="x",
+                                              edges=None, proposal_id="x", params={},
+                                              block_identity=None))
     for key in ("meshedness", "four_way_fraction", "dead_end_fraction", "n_crossings",
                 "n_dead_ends", "circuity", "throughput_ratio", "geometric_access_p95_m",
                 "added_road_length_per_parcel", "n_cross_block_streets"):

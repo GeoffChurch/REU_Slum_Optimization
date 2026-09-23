@@ -15,6 +15,7 @@ from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import Block, Region
+from reblock.region import pooled_buildings, shared_tier
 
 
 def _blocks_sorted(region: Region) -> list[Block]:
@@ -58,7 +59,9 @@ def merge_cluster(region: Region) -> Block:
         geometry=[union_all([g for b in blocks for g in b.streets.geometry])], crs=crs)
 
     interior = _interior_boundaries(blocks)
+    # Uncacheable: a probe's merged cluster has no content address of its own.
     return Block(
         block_id="+".join(b.block_id for b in blocks), crs=crs, boundary=boundary,
-        parcels=parcels, streets=streets,
+        parcels=parcels, streets=streets, source_content_hash=None,
+        building_geometries=pooled_buildings(blocks, crs), building_tier=shared_tier(blocks),
         attrs={"block_ids": [b.block_id for b in blocks], "interior_boundaries": interior})

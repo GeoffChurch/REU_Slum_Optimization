@@ -123,10 +123,11 @@ def block_from_bundle(bundle: AuthoringBundle) -> Block:
     # `Discs` with the baked radii, whatever tier baked them: the solve reads a building only as a
     # radius at its anchor, so this is that tier as far as anything here can tell.
     radii = np.asarray(bundle["building_radii"], dtype=np.float64)
+    # Uncacheable: a bundle carries no source hash to key a derivation on.
     return Block(block_id=bundle["block_id"], crs=crs,
                  boundary=Polygon(boundary_rings[0], boundary_rings[1:]),
-                 parcels=parcels, streets=streets, building_geometries=points,
-                 building_tier=partial(Discs, radii=radii))
+                 parcels=parcels, streets=streets, source_content_hash=None,
+                 building_geometries=points, building_tier=partial(Discs, radii=radii))
 
 
 def adjacency_from_bundle(bundle: AuthoringBundle) -> list[set[int]]:

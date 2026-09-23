@@ -11,7 +11,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from itertools import islice
 
 import pandas as pd
@@ -29,7 +29,6 @@ from reblock.contracts import (
 from reblock.data.counts import resolved
 from reblock.derivations import propose
 from reblock.region import (
-    IdentityRegionBuilder,
     RegionBuilder,
     _block_adjacency,
     block_depths,
@@ -52,17 +51,17 @@ class PipelineSpec:
     screen: Screen
     method: Method
     evals: list[Eval]
-    max_blocks: int = 1
-    region_builder: RegionBuilder = field(default_factory=IdentityRegionBuilder)
-    block_groups: list[list[str]] | None = None
+    max_blocks: int
+    region_builder: RegionBuilder
+    block_groups: list[list[str]] | None
 
 
 @dataclass(frozen=True)
 class RunOutput:
     selection: list[str] | None       # the full block selection (None = all blocks)
     results: list[Result]             # one per reblocked region (or sampled block)
-    regions: list[list[str]] = field(default_factory=list)  # the builder's expanded groups
-    seed_groups: list[list[str]] = field(default_factory=list)  # pre-expansion seed groups
+    regions: list[list[str]]          # the builder's expanded groups
+    seed_groups: list[list[str]]      # pre-expansion seed groups
 
 
 def reblock_block(block: Block, method: Method, evals: list[Eval]) -> Result:

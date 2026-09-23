@@ -59,8 +59,8 @@ def propose(method: Method, block: Block) -> Proposal:
 @dataclass(frozen=True)
 class VoronoiInput:
     """Identified carrier for the Voronoi build: derive() keys on .identity
-    (never the geometry); a missing source_id makes it uncacheable (bypass)."""
-    source_id: str
+    (never the geometry); a None source_id makes it uncacheable (bypass)."""
+    source_id: str | None
     block_id: str
     poly: Polygon
     points: list[Point]
@@ -68,7 +68,7 @@ class VoronoiInput:
 
     @property
     def identity(self) -> tuple[str, str, str] | None:
-        return ("voronoi", self.source_id, self.block_id) if self.source_id else None
+        return ("voronoi", self.source_id, self.block_id) if self.source_id is not None else None
 
 
 def _voronoi_impl(vin: VoronoiInput) -> Any:

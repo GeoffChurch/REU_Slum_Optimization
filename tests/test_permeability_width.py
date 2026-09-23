@@ -15,6 +15,7 @@ import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
@@ -42,7 +43,8 @@ def _block(n: int = 6, step: float = 10.0) -> Block:
                                  geometry=polys, crs=UTM),
         streets=gpd.GeoDataFrame(
             geometry=[LineString([(-step, 0.0), (n * step + step, 0.0)])], crs=UTM),
-        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM))
+        building_geometries=gpd.GeoDataFrame(geometry=pts, crs=UTM),
+        source_content_hash=None, building_tier=SpacingDiscs)
 
 
 def _roads() -> gpd.GeoDataFrame:
