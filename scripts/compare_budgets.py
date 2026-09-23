@@ -72,7 +72,7 @@ from reblock.contracts import Block, Method, Proposal, Screen, Source
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.emit import _displaced_buildings, compare_report
+from reblock.emit import _displaced_buildings, compare_report, pct_displaced, pct_paved
 from reblock.eval.access_burden import burden
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.permeability import (
@@ -173,11 +173,15 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     curve_label = short_label(label if label is not None else str(region[0].block_id))
     lens_t0 = time.perf_counter()
     curves: list[MethodCurve] = []
+    block_area = float(block.parcels.geometry.union_all().area)
     for name, roads in roads_by_method.items():
+        pp, pd_ = pct_paved(roads, block_area), pct_displaced(roads, block.buildings)
         curves.append(MethodCurve(name, curve_label, "permeability",
-                                  permeability_curve(block, roads, params)))
+                                  permeability_curve(block, roads, params),
+                                  pct_paved=pp, pct_displaced=pd_))
         curves.append(MethodCurve(name, curve_label, "displacement",
-                                  displacement_curve(block, roads)))
+                                  displacement_curve(block, roads),
+                                  pct_paved=pp, pct_displaced=pd_))
     compare_report(curves, out_dir, method_order=list(methods),
                    matched_displacement=matched_displacement,
                    matched_permeability=matched_permeability,

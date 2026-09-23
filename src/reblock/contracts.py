@@ -34,7 +34,7 @@ class Region:
     region_id: str
     crs: CRS
     blocks: Iterable[Block]
-    roads: GeoDataFrame | None = None
+    roads: GeoDataFrame | None
     attrs: Mapping[str, object] = field(default_factory=dict)
 
 
@@ -117,7 +117,7 @@ class Metrics:
     method: str
     eval: str
     values: Mapping[str, float]
-    fields: Mapping[str, pd.Series] = field(default_factory=dict)
+    fields: Mapping[str, pd.Series]
 
 
 @dataclass(frozen=True)

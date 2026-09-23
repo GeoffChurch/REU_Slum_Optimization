@@ -21,7 +21,7 @@ def _chain_gdf() -> gpd.GeoDataFrame:
 
 
 def test_runoutput_holds_selection_and_results() -> None:
-    out = RunOutput(selection=["a", "b", "c"], results=[])
+    out = RunOutput(selection=["a", "b", "c"], results=[], regions=[], seed_groups=[])
     assert out.selection == ["a", "b", "c"] and out.results == []
 
 

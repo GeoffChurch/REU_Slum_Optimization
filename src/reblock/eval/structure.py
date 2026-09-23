@@ -57,4 +57,5 @@ class StructureEval:
         values.update({k: float(v) for k, v in degree_fractions(graph).items()})  # F permeability
         values.update({k: float(v) for k, v in crossing_counts(graph).items()})  # F crossings/T
         return Metrics(
-            block_id=block.block_id, method=proposal.method, eval="structure", values=values)
+            block_id=block.block_id, method=proposal.method, eval="structure", values=values,
+            fields={})

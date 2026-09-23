@@ -25,7 +25,7 @@ def _block(bid: str, poly: Polygon, n: int) -> Block:
 
 
 def _region(*blocks: Block) -> Region:
-    return Region(region_id="t", crs=UTM, blocks=list(blocks))
+    return Region(region_id="t", crs=UTM, blocks=list(blocks), roads=None)
 
 
 def test_merge_two_adjacent_blocks() -> None:

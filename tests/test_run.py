@@ -17,6 +17,7 @@ from reblock.derive.access import STREET_TOL
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
 from reblock.methods.topology import TopologyMethod
 from reblock.pipeline import PipelineSpec, run
+from reblock.region import IdentityRegionBuilder
 from reblock.run import spec_from_cfg
 from reblock.screen.identity import IdentityScreen
 from tests.block_fixtures import no_buildings
@@ -54,6 +55,8 @@ def _phule_spec(evals: list[Eval], max_blocks: int = 1) -> PipelineSpec:
         method=TopologyMethod(alpha=2.0, seed=0),
         evals=evals,
         max_blocks=max_blocks,
+        region_builder=IdentityRegionBuilder(),
+        block_groups=None,
     )
 
 
@@ -290,11 +293,10 @@ def _dji_source() -> KblockSource:
 
 def _dji_spec(block_groups: list[list[str]], *, depth_target: int = 2) -> PipelineSpec:
     from reblock.methods.clearance import ClearanceReblocker
-    from reblock.region import IdentityRegionBuilder
     return PipelineSpec(
         source=_dji_source(), screen=IdentityScreen(),
         method=ClearanceReblocker(depth_target=depth_target), evals=[KComplexityEval()],
-        region_builder=IdentityRegionBuilder(), block_groups=block_groups,
+        max_blocks=1, region_builder=IdentityRegionBuilder(), block_groups=block_groups,
     )
 
 

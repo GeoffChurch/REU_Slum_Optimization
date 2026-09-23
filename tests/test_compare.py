@@ -64,8 +64,10 @@ def test_compare_report_writes_frontier(tmp_path: Path) -> None:
     from reblock.budget import Curve
     from reblock.compare import MethodCurve, compare_report
     results = [
-        MethodCurve("clearance", "b1", "permeability", Curve([0.0, 1.0], [0.0, 0.9])),
-        MethodCurve("topology", "b1", "permeability", Curve([0.0, 2.0], [0.0, 0.9])),
+        MethodCurve("clearance", "b1", "permeability", Curve([0.0, 1.0], [0.0, 0.9]),
+                    pct_paved=0.0, pct_displaced=0.0),
+        MethodCurve("topology", "b1", "permeability", Curve([0.0, 2.0], [0.0, 0.9]),
+                    pct_paved=0.0, pct_displaced=0.0),
     ]
     compare_report(results, tmp_path, method_order=["clearance", "topology"],
                    matched_displacement=0.10, matched_permeability=0.60, frontier_xmax=0.40)

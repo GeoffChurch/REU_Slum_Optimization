@@ -164,6 +164,7 @@ def test_render_after_accepts_optional_metrics() -> None:
     metrics = Metrics(
         block_id=block.block_id, method="topology", eval="kcomplexity",
         values={"k_before": 2.0, "k_after": 1.0, "delta_k": 1.0, "added_road_length_m": 1.0},
+        fields={},
     )
 
     fig = render_after(block, proposal, layers, vmax=2, metrics=metrics)

@@ -138,7 +138,7 @@ def test_render_results_names_each_after_by_its_proposal_id(tmp_path: Path) -> N
 
 def test_render_results_skips_block_without_kcomplexity(tmp_path: Path) -> None:
     block = _grid_block(3)
-    other = Metrics(block_id="g", method="x", eval="weakdual_k", values={"k": 1.0})
+    other = Metrics(block_id="g", method="x", eval="weakdual_k", values={"k": 1.0}, fields={})
     result = Result(block=block, proposal=_proposal(None), metrics=(other,))
     render_results([result], tmp_path, RenderConfig(enabled=True),
                    _source_with_neighbour_and_points())
@@ -479,7 +479,8 @@ def test_compare_report_without_permeability_rows_writes_nothing(tmp_path: Path)
     from reblock.budget import Curve
     from reblock.compare import MethodCurve
     from reblock.emit import compare_report
-    curves = [MethodCurve("clearance", "B", "displacement", Curve([0.0, 100.0], [0.0, 0.42]))]
+    curves = [MethodCurve("clearance", "B", "displacement", Curve([0.0, 100.0], [0.0, 0.42]),
+                          pct_paved=0.0, pct_displaced=0.0)]
     compare_report(curves, tmp_path, method_order=["clearance"],
                    matched_displacement=0.10, matched_permeability=0.60, frontier_xmax=0.40)
     assert list(tmp_path.iterdir()) == []

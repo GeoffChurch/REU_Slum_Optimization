@@ -105,4 +105,5 @@ class WeakDualKEval:
         return Metrics(block_id=block.block_id, method=proposal.method, eval="weakdual_k",
                        values={"k_before": float(k_before), "k_after": float(k_after),
                                "delta_k": float(k_before - k_after),
-                               "added_road_length_m": added})
+                               "added_road_length_m": added},
+                       fields={})

@@ -92,7 +92,7 @@ class ShapefileSource:
         raw, utm = self._prepared()
         sch = source_hash(self.path)
         return Region(region_id=self.region_id, crs=utm,
-                      blocks=self._iter_blocks(raw, utm, sch))
+                      blocks=self._iter_blocks(raw, utm, sch), roads=None)
 
     def block_geometries(self, bbox: BBox | None = None) -> gpd.GeoDataFrame:
         """block_id + dissolved connected-component geometry (it genuinely has block

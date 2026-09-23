@@ -31,7 +31,7 @@ def test_reconciled_baseline_unions_per_block_roads() -> None:
     from reblock.derive.cluster import merge_cluster
     a = _block("a", box(0, 0, 4, 3), [0, 1, 2, 3])
     b = _block("b", box(4, 0, 8, 3), [4, 5, 6, 7])
-    region = Region(region_id="t", crs=UTM, blocks=[a, b])
+    region = Region(region_id="t", crs=UTM, blocks=[a, b], roads=None)
     merged = merge_cluster(region)
     prop = reconciled_baseline(region, merged)
     # peel produced roads for both blocks
