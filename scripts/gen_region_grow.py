@@ -261,7 +261,7 @@ def load_blocks(city: str) -> gpd.GeoDataFrame:
     every block in the metro reads as adjacent to every other. Task 1 made the builders project
     defensively; this projects at the boundary so the requirement is visible at the call site.
     """
-    src = cached_kblock_source(city, min_buildings=MIN_COUNT)
+    src = cached_kblock_source(city, min_buildings=MIN_COUNT, member_buildings=None)
     # Resolve BEFORE the MIN_COUNT filter: the threshold is on the count itself, so filtering on
     # the source's vendor column and scoring on another selects a different pool than the screen
     # does. Same correction as `gen_screen_bakeoff.load`.

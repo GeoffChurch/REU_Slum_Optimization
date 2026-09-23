@@ -58,7 +58,7 @@ class _MetricScreen:
 
 def _peelable() -> Source:
     # I/O-free at construction, so placeholder paths are fine: nothing here reads them.
-    return KblockSource("blocks.parquet", "buildings.parquet")
+    return KblockSource("blocks.parquet", "buildings.parquet", member_buildings=None)
 
 
 def test_capabilities_are_answered_by_the_shipped_types() -> None:

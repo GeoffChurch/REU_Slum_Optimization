@@ -60,7 +60,7 @@ class KblockSource:
                  region_id: str = "kblock", *, min_buildings: int = 10,
                  block_ids: list[str] | None = None,
                  building_tier: Callable[[gpd.GeoDataFrame], Extents] = SpacingDiscs,
-                 member_buildings: BuildingSource | None = None) -> None:
+                 member_buildings: BuildingSource | None) -> None:
         self.blocks_path = Path(blocks_path)
         self.buildings_path = Path(buildings_path)
         self.region_id = region_id
@@ -71,7 +71,8 @@ class KblockSource:
         # reading `buildings_path` over the whole corpus; this feeds only `region()`, which the
         # pipeline calls after narrowing `block_ids` to the chosen members. None means "the same
         # parquet the screen reads" -- a real choice, not a fallback: at the point and area tiers
-        # that file already holds everything the model needs.
+        # that file already holds everything the model needs. Required, so every construction
+        # states which it wants; `conf/buildings/` spells the point and area tiers' choice `null`.
         self.member_buildings: BuildingSource = (
             member_buildings if member_buildings is not None
             else ParquetBuildings(self.buildings_path))

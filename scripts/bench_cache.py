@@ -26,7 +26,7 @@ def _dir_bytes(p: Path) -> int:
 def _timed_run(blocks_path: Path, buildings_path: Path) -> float:
     spec = PipelineSpec(
         source=KblockSource(str(blocks_path), str(buildings_path),
-                            region_id="capetown", block_ids=BLOCK_IDS),
+                            region_id="capetown", block_ids=BLOCK_IDS, member_buildings=None),
         screen=IdentityScreen(BLOCK_IDS),
         method=PeelReblocker(),
         evals=[KComplexityEval()],

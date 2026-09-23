@@ -355,7 +355,7 @@ def block_depths(source: Source, block_ids: list[str]) -> dict[str, float]:
     # would swallow a rename here while every direct-access site broke loudly.
     sub = KblockSource(source.blocks_path, source.buildings_path, "depth",
                        min_buildings=source.min_buildings,
-                       block_ids=list(block_ids))
+                       block_ids=list(block_ids), member_buildings=None)
     return {str(b.block_id): float(access_before(b).max()) for b in sub.region().blocks}
 
 

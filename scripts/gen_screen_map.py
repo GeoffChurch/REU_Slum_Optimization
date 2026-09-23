@@ -291,7 +291,7 @@ def load_blocks(city: str, epsg: int, counter: BuildingCount) -> gpd.GeoDataFram
     `gen_screen_bakeoff.py`'s own `load()` uses for Cape Town, generalised to both cities. The
     zero-area/zero-perimeter guard is defensive (measured empirically: no block above MIN_COUNT is
     degenerate on either cached parquet, so it never fires today) and mirrors that script's own."""
-    src = cached_kblock_source(city, min_buildings=MIN_COUNT)
+    src = cached_kblock_source(city, min_buildings=MIN_COUNT, member_buildings=None)
     raw = gpd.read_parquet(src.blocks_path, columns=["block_id", "building_count", "geometry"])
     raw["block_id"] = raw["block_id"].astype(str)
     b = raw.to_crs(epsg)

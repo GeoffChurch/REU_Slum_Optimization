@@ -49,7 +49,7 @@ def ensure_city_data(city: str, *, cache_dir: Path = DEFAULT_CACHE) -> tuple[Pat
 def cached_kblock_source(city: str, *, block_ids: list[str] | None = None,
                          min_buildings: int = 10, cache_dir: Path = DEFAULT_CACHE,
                          building_tier: Callable[[gpd.GeoDataFrame], Extents] = SpacingDiscs,
-                         member_buildings: BuildingSource | None = None,
+                         member_buildings: BuildingSource | None,
                          ) -> KblockSource:
     blocks_path, buildings_path = ensure_city_data(city, cache_dir=cache_dir)
     return KblockSource(blocks_path, buildings_path, region_id=city,

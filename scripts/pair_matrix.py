@@ -199,7 +199,7 @@ def zone_source(epsg: int, *, min_buildings: int = 30) -> KblockSource:
         subset.to_parquet(zone_path)
         print(f"  materialized {zone_path.name}: {len(subset):,} blocks", flush=True)
     return KblockSource(zone_path, buildings, region_id=f"shortlist-z{epsg}",
-                        min_buildings=min_buildings)
+                        min_buildings=min_buildings, member_buildings=None)
 
 
 def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
@@ -302,7 +302,8 @@ def load_pools(
     """
     screen = screen or default_screen(min_buildings)
     region_builder = region_builder or IdentityRegionBuilder()
-    src_all = source or cached_kblock_source(city, min_buildings=min_buildings)
+    src_all = source or cached_kblock_source(city, min_buildings=min_buildings,
+                                             member_buildings=None)
 
     flagged = screen.select(src_all)
     raw = pd.read_parquet(
@@ -325,10 +326,15 @@ def load_pools(
     )
     ids = sorted({b for group in groups for b in group} | set(donor_ids))
 
+    # The given source narrowed to `ids` -- its own building tier and member buildings included,
+    # which a rebuild from its two paths alone would silently reset to the defaults.
     src = (KblockSource(src_all.blocks_path, src_all.buildings_path,
-                        region_id=src_all.region_id, min_buildings=min_buildings, block_ids=ids)
+                        region_id=src_all.region_id, min_buildings=min_buildings, block_ids=ids,
+                        building_tier=src_all.building_tier,
+                        member_buildings=src_all.member_buildings)
            if source is not None
-           else cached_kblock_source(city, block_ids=ids, min_buildings=min_buildings))
+           else cached_kblock_source(city, block_ids=ids, min_buildings=min_buildings,
+                                     member_buildings=None))
     blocks = [b for b in src.region().blocks if len(b.parcels) >= MIN_PARCELS]
     blocks.sort(key=lambda b: b.block_id)
     if not blocks:

@@ -9,7 +9,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 
 def _src() -> KblockSource:
     return KblockSource(_ROOT / "data/kblock/blocks_dji_sample.parquet",
-                        _ROOT / "data/kblock/buildings_dji_sample.parquet", "dji")
+                        _ROOT / "data/kblock/buildings_dji_sample.parquet", "dji",
+                        member_buildings=None)
 
 
 def test_depth_metric_selects_and_scores_by_true_depth() -> None:

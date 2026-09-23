@@ -288,7 +288,7 @@ _DJI = (str(_KB / "blocks_dji_sample.parquet"), str(_KB / "buildings_dji_sample.
 
 
 def _dji_source() -> KblockSource:
-    return KblockSource(*_DJI, region_id="dji")
+    return KblockSource(*_DJI, region_id="dji", member_buildings=None)
 
 
 def _dji_spec(block_groups: list[list[str]], *, depth_target: int = 2) -> PipelineSpec:
@@ -313,7 +313,7 @@ def test_singleton_group_run_matches_single_block_reblock() -> None:
     r = out.results[0]
     assert r.block.block_id == bid   # plain block id, NOT a "region:..." block => reblock_block
 
-    direct_src = KblockSource(*_DJI, region_id="dji", block_ids=[bid])
+    direct_src = KblockSource(*_DJI, region_id="dji", block_ids=[bid], member_buildings=None)
     block = next(b for b in direct_src.region().blocks if b.block_id == bid)
     direct = reblock_block(block, ClearanceReblocker(), [KComplexityEval()])
     assert r.proposal.proposal_id == direct.proposal.proposal_id

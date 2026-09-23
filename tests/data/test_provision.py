@@ -33,7 +33,8 @@ def test_ensure_city_data_uses_cache_no_download(tmp_path: Path) -> None:
 
 def test_cached_kblock_source_builds_from_cache(tmp_path: Path) -> None:
     _seed(tmp_path)
-    src = cached_kblock_source("capetown", block_ids=["ZAF.9.3.1_1_44882"], cache_dir=tmp_path)
+    src = cached_kblock_source("capetown", block_ids=["ZAF.9.3.1_1_44882"], cache_dir=tmp_path,
+                               member_buildings=None)
     blocks = list(src.region().blocks)
     assert [b.block_id for b in blocks] == ["ZAF.9.3.1_1_44882"]
 

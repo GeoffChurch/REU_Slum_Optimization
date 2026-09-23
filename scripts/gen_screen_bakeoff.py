@@ -78,7 +78,7 @@ def load(counter: BuildingCount) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     went on grading Ecopia-ranked screens and republished its old table byte-identical.
     """
     ext = settlement_extents(epsg=UTM)
-    src = cached_kblock_source("capetown", min_buildings=MIN_COUNT)
+    src = cached_kblock_source("capetown", min_buildings=MIN_COUNT, member_buildings=None)
     raw = gpd.read_parquet(src.blocks_path, columns=["block_id", "building_count", "geometry"])
     raw["block_id"] = raw["block_id"].astype(str)
     projected = raw.crs is not None and CRS.from_user_input(raw.crs).is_projected

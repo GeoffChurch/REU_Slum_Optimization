@@ -165,7 +165,7 @@ def test_footprint_parcels_are_identical_to_point_parcels(tmp_path: Path) -> Non
                      crs=4326).to_parquet(points_p)
 
     pts = next(iter(KblockSource(blocks_p, points_p, building_tier=SpacingDiscs,
-                                 min_buildings=4).region().blocks))
+                                 min_buildings=4, member_buildings=None).region().blocks))
     fp = next(iter(KblockSource(blocks_p, points_p, building_tier=Footprints, min_buildings=4,
                                 member_buildings=FootprintTiles(cache_dir=cache, fetch=fetch)
                                 ).region().blocks))
