@@ -113,11 +113,8 @@ def main() -> None:
     # surface a committed example dir predates (lens_a_external.csv, curve_{external,internal}_
     # connectivity_*.png, depth_vs_road_*.png, displacement_*.png/*.csv,
     # frontier_{external,internal}_connectivity.csv) -- leaves no orphans (all regenerated below).
-    # `*.jpg` is in the list because renders used to be JPG-flattened and are not any more (see
-    # region_map below): 122 unreferenced fossils survived every regeneration because the old
-    # cleanup globbed only .png/.gif, and one of them was still linked from the top-level README.
     for pattern in ("reblock_*.gif", "after_*.png", "curve_*.png", "depth_vs_road_*.png",
-                    "displacement_*.png", "*.jpg"):
+                    "displacement_*.png"):
         for stale in out.glob(pattern):
             stale.unlink()
     for name in ("displacement_table.csv", "displacement_vs_length.csv",
@@ -185,8 +182,8 @@ def main() -> None:
                        # The SAME counter the screen ranked on, so the map grades blocks on the
                        # number the pipeline used rather than the source's vendor column.
                        counts=scoring.counts)
-            # region_map already writes screen.png/region.png (transparent, via save_render) at
-            # the example naming -- no JPG flatten step needed.
+            # region_map writes screen.png/region.png (transparent, via save_render) at the
+            # example naming.
 
         methods = {str(n): registry[n] for n in cfg.methods}
         # osm_footpaths: the real as-built informal network, from a committed per-region OSM

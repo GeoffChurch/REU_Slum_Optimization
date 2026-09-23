@@ -1454,21 +1454,20 @@ def gen_methods_overview() -> str:
 
 
 def _hero_block() -> str:
-    """Home hero figure: the grown settlement render, copied into assets/. Extension-agnostic (the
-    example image pipeline is migrating JPG->PNG) and gated on existence, so a partial checkout
-    yields no hero figure rather than a broken image. Marked skip-lightbox: it is the page's
-    opening image, and the same render is zoomable on Results where it carries the argument."""
-    for name in ("region.png", "region.jpg", "region.jpeg"):
-        url = _copy_asset(MB / name, "home")
-        if url:
-            return _figure(
-                url,
-                "The grown Cape Town settlement region with proposed roads threaded through it",
-                'A screened settlement grown into a multi-block region, with proposed roads '
-                'threaded through it — see the full run on '
-                '<a href="results/frontier/">Results</a>.',
-                fig_class="sbu-hero__figure", skip_lightbox=True)
-    return ""
+    """Home hero figure: the grown settlement render, copied into assets/. Gated on existence, so
+    a partial checkout yields no hero figure rather than a broken image. Marked skip-lightbox: it
+    is the page's opening image, and the same render is zoomable on Results where it carries the
+    argument."""
+    url = _copy_asset(MB / "region.png", "home")
+    if not url:
+        return ""
+    return _figure(
+        url,
+        "The grown Cape Town settlement region with proposed roads threaded through it",
+        'A screened settlement grown into a multi-block region, with proposed roads '
+        'threaded through it — see the full run on '
+        '<a href="results/frontier/">Results</a>.',
+        fig_class="sbu-hero__figure", skip_lightbox=True)
 
 
 def _hero_logo() -> str:
