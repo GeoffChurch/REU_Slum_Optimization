@@ -2,9 +2,11 @@ _target_: reblock.methods.arterial.GreedyArterialReblocker
 realizer:
   _target_: reblock.methods.arterial.SnapToBoundary
   lam: 2.0
-objective: directness
+objective:
+  _target_: reblock.methods.arterial.Directness
 # repulsion = soft never-zero proximity cost, routes around homes without degenerating
-cost: repulsion
+cost:
+  _target_: reblock.methods.arterial.Repulsion
 # Greedy budget + candidate-generation knobs (first-class so they're plain `method.<k>=` overrides).
 # Cost is ~fixed per road (~1 step scores n_anchors^2 + n_anchors*top_k candidates), so max_roads is
 # a near-linear runtime dial -- lower it to keep arterial tractable on a big region.

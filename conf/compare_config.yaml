@@ -17,8 +17,8 @@ defaults:
 # just not benchmarked. The registry order below also keys the plot colour palette.
 all_methods:
   topology: {_target_: reblock.methods.topology.TopologyMethod}
-  greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: directness, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}}}
-  greedy_arterial_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: directness, cost: repulsion, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}}}
+  greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: {_target_: reblock.methods.arterial.Directness}, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}}}
+  greedy_arterial_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: {_target_: reblock.methods.arterial.Directness}, cost: {_target_: reblock.methods.arterial.Repulsion}, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}}}
   # aspirational (ideal straight chords, not snapped to frontages) is a DIAGNOSTIC -- it isolates
   # the effect of frontage-snapping, NOT a universal directness ceiling. directness/E measure
   # internal circulation (all-pairs, door-to-door incl. the walk-to-road legs); under that honest
@@ -68,10 +68,10 @@ all_methods:
   # ShortlistEngine + max_anchors work is what made 15 affordable at region scale, and this spends
   # that headroom. BOTH variants move together: they are a matched pair differing only in `cost`,
   # so a difference in budget would make the one comparison they exist for meaningless.
-  greedy_arterial_access_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: access, cost: repulsion, max_roads: 60, max_anchors: 128, engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512}}
-  greedy_arterial_access_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: access, cost: displacement, max_roads: 60, max_anchors: 128, engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512}}
-  greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: directness, engine: {_target_: reblock.methods.arterial.ExactEngine}}
-  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: directness, cost: displacement, road_width_m: 7.0, engine: {_target_: reblock.methods.arterial.ExactEngine}}
+  greedy_arterial_access_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: {_target_: reblock.methods.arterial.Access}, cost: {_target_: reblock.methods.arterial.Repulsion}, max_roads: 60, max_anchors: 128, engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512}}
+  greedy_arterial_access_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: {_target_: reblock.methods.arterial.Access}, cost: {_target_: reblock.methods.arterial.Displacement}, max_roads: 60, max_anchors: 128, engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512}}
+  greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: {_target_: reblock.methods.arterial.Directness}, engine: {_target_: reblock.methods.arterial.ExactEngine}}
+  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: {_target_: reblock.methods.arterial.Directness}, cost: {_target_: reblock.methods.arterial.Displacement}, road_width_m: 7.0, engine: {_target_: reblock.methods.arterial.ExactEngine}}
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
   demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", depth_target: 2, max_roads: 400}
 

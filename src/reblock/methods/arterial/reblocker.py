@@ -16,7 +16,9 @@ import hashlib
 from dataclasses import dataclass
 
 from reblock.contracts import Block, Proposal
+from reblock.methods.arterial.costs import ArterialCost, CostIdentity, Length
 from reblock.methods.arterial.engines import ArterialEngine, EngineIdentity, ExactEngine
+from reblock.methods.arterial.objectives import ArterialObjective, Directness, ObjectiveIdentity
 from reblock.methods.arterial.realize import ChordRealizer, RealizerIdentity, SnapToBoundary
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
@@ -28,8 +30,8 @@ class ArterialIdentity:
     dataclass compares type before fields, so this never equals another identity type). Frozen ->
     hashable, so it works as an L1 dict key and pickles into the joblib L2 key."""
     realizer: RealizerIdentity
-    objective: str
-    cost: str
+    objective: ObjectiveIdentity
+    cost: CostIdentity
     road_width_m: float
     max_roads: int
     n_anchors: int
@@ -45,13 +47,14 @@ class GreedyArterialReblocker:
     # frontage-snapping, NOT a universal directness ceiling -- see the design doc's correction
     # note).
     realizer: ChordRealizer = SnapToBoundary()
-    objective: str = "directness"    # "access" | "efficiency" | "directness"
+    # What a road gains -- Access, Efficiency or Directness (see objectives.py).
+    objective: ArterialObjective = Directness()
     n_anchors: int = 32
     top_k: int = 8
     max_roads: int = 15
-    # "length" (Delta-benefit/metre) | "displacement" (Delta-benefit/building, see budget.py)
-    # | "repulsion" (Delta-benefit / soft quadratic-tail proximity cost, never-zero & CELF-safe)
-    cost: str = "length"
+    # What a road is charged -- Length (per metre), Displacement (per home newly displaced) or
+    # Repulsion (soft quadratic-tail proximity, never zero, CELF-safe). See costs.py.
+    cost: ArterialCost = Length()
     # Total width of the roads this method emits; also the displacement corridor it
     # scores against (half-width each side). Stamped on every road it returns.
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
@@ -71,16 +74,14 @@ class GreedyArterialReblocker:
         # Every field that changes the proposed roads must be in the derive-cache key. road_width_m
         # is one under EVERY cost: it is stamped on each emitted road, and permeability and
         # displacement both read that column -- so it belongs here even where it cannot change
-        # which roads win (cost="length"). max_roads / n_anchors / top_k all
-        # change the greedy search, so they belong in the key too -- otherwise a budget/candidate
-        # sweep silently returns another setting's cached proposal. `realizer.identity` (not
-        # `realizer` itself) so a non-snapping realizer's irrelevant fields -- none exist today, but
-        # the seam is the same one `SnapToBoundary.identity`/`IdealChord.identity` already use --
-        # can never leak into the key. `engine.identity` for the identical reason -- ExactEngine
-        # has no fields, and LazyEngine's policy/rescore_every only matter when the engine IS lazy.
+        # which roads win (`Length`). max_roads / n_anchors / top_k all change the greedy search,
+        # so they belong in the key too -- otherwise a budget/candidate sweep silently returns
+        # another setting's cached proposal. Each injected strategy contributes its `.identity` --
+        # the part of it that can change the roads -- never itself, so a field that cannot
+        # (ShortlistEngine's `threads`) never splits the key.
         return ArterialIdentity(
-            realizer=self.realizer.identity, objective=self.objective, cost=self.cost,
-            road_width_m=self.road_width_m,
+            realizer=self.realizer.identity, objective=self.objective.identity,
+            cost=self.cost.identity, road_width_m=self.road_width_m,
             max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k,
             engine=self.engine.identity, max_anchors=self.max_anchors)
 
@@ -92,6 +93,7 @@ class GreedyArterialReblocker:
             half_width_m=self.road_width_m / 2.0, workers=self.workers,
             max_anchors=self.max_anchors)
         realizer_name = type(self.realizer).__name__
+        objective_name, cost_name = type(self.objective).__name__, type(self.cost).__name__
         # `proposal_id` is half of `Proposal.identity`, which keys the eval caches
         # (`access_after`, `geometric_after`), so it must tell apart every configuration `identity`
         # does -- a readable head, then a digest of the whole identity (it also names render
@@ -100,10 +102,10 @@ class GreedyArterialReblocker:
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
             roads=with_width(roads, self.road_width_m),
-            proposal_id=f"greedy_arterial:{realizer_name}:{self.objective}:{self.cost}:{digest}",
+            proposal_id=f"greedy_arterial:{realizer_name}:{objective_name}:{cost_name}:{digest}",
             method="greedy_arterial",
             params={"segments": len(roads), "realizer": realizer_name,
-                    "objective": self.objective,
-                    "cost": self.cost, "road_width_m": self.road_width_m,
+                    "objective": objective_name,
+                    "cost": cost_name, "road_width_m": self.road_width_m,
                     "engine": type(self.engine).__name__},
             block_identity=block.identity)

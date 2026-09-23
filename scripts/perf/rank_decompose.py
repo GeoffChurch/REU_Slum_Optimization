@@ -38,8 +38,8 @@ import reblock.methods.arterial.engines as engines
 import reblock.methods.arterial.scoring as scoring
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import GreedyArterialReblocker, SnapToBoundary
-from reblock.methods.arterial.primitives import _explode, _planarize, _union_with
+from reblock.methods.arterial import Access, Displacement, GreedyArterialReblocker, SnapToBoundary
+from reblock.methods.arterial.primitives import _planarize
 from scripts.pair_matrix import evenly_spaced, load_pools
 from scripts.perf.first_order_rank import first_order_gain
 
@@ -64,20 +64,17 @@ _HALF_W = 3.0
 
 
 def _eval_hook(chord: LineString) -> tuple[float, BaseGeometry | None]:
-    """`eval_candidate`, plus the (benefit, cost) split it discards. Recomputed here rather than
-    plumbed out of `eval_candidate`, so the shipped scorer is untouched and the gain it returns is
-    the real one -- these two numbers only have to be consistent with each other."""
+    """`eval_candidate`, plus the (benefit, cost) split it discards. Recomputed here from the
+    step's own gain and cost rather than plumbed out of `eval_candidate`, so the shipped scorer is
+    untouched and the gain it returns is the real one."""
     st = scoring._STEP_STATE
     gain, real = _ORIG_EVAL(chord)
     assert st is not None
     if real is None or real.length == 0:
         _EXACT.append((0.0, 0.0, 0.0))
         return gain, real
-    trial = _explode(_union_with(st.base_merged, real), st.crs, 2.0 * st.half_width_m)
-    raw = scoring._score(
-        st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
-    assert st.overlap is not None
-    denom = st.overlap.delta(real.buffer(st.half_width_m))
+    raw = st.gain.of(real)
+    denom = st.cost.of(real)
     _EXACT.append((raw, denom, float(real.length)))
     return gain, real
 
@@ -185,7 +182,7 @@ def main() -> None:
         print(f"  {b.block_id}  ({len(b.parcels)} parcels)", flush=True)
         # workers=1 -> the serial path, so `_eval_hook`'s stash survives (a fork pool would
         # compute it in children and discard it)
-        GreedyArterialReblocker(realizer=SnapToBoundary(), objective="access", cost="displacement",
+        GreedyArterialReblocker(realizer=SnapToBoundary(), objective=Access(), cost=Displacement(),
                                 workers=1, max_roads=MAX_ROADS).propose(b)
         by_block[b.block_id] = list(_ROWS)
     OUT.write_text(json.dumps(by_block, indent=1))
