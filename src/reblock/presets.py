@@ -14,6 +14,10 @@ makes every constructor part of startup, which is why none of them may touch the
 desire-line source fetches on `desire_lines`, footprint tiles on `for_blocks`;
 `data/provision.cached_kblock_source` alone provisions when called, and it is the data source, which
 every entry point built first already).
+
+`tests/test_presets.py` loads every preset of every config group, and every example variant,
+through these functions and checks each field against its annotation -- which is what puts "load
+time" in CI.
 """
 from __future__ import annotations
 

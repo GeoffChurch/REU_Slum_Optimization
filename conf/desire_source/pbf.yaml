@@ -3,5 +3,8 @@
 defaults:
   - _footpath_tags
 _target_: reblock.data.osm_extract.PbfDesireLines
-pbf_path: ???        # e.g. ~/.cache/reblock/osm_pbf/south-africa-latest.osm.pbf
+# Built as a `Path`, because YAML has no path type and a bare string would reach the source as a
+# `str`, which it cannot `.stat()`. Supply it as
+#   desire_source.pbf_path._args_=[~/.cache/reblock/osm_pbf/south-africa-latest.osm.pbf]
+pbf_path: {_target_: pathlib.Path, _args_: ["???"]}
 tags: ${footpath_tags}
