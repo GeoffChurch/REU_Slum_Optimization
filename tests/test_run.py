@@ -15,7 +15,9 @@ from reblock.data.kblock import KblockSource
 from reblock.data.shapefile import ShapefileSource
 from reblock.derive.access import STREET_TOL
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
+from reblock.methods.substrates import ChordSubstrate
 from reblock.methods.topology import TopologyMethod
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.pipeline import PipelineSpec, run
 from reblock.region import IdentityRegionBuilder
 from reblock.run import spec_from_cfg
@@ -51,8 +53,8 @@ def _grid_block(n: int) -> Block:
 def _phule_spec(evals: list[Eval], max_blocks: int = 1) -> PipelineSpec:
     return PipelineSpec(
         source=ShapefileSource(PHULE, region_id="phule", assumed_crs=3857),
-        screen=IdentityScreen(),
-        method=TopologyMethod(alpha=2.0, seed=0),
+        screen=IdentityScreen(block_ids=None),
+        method=TopologyMethod(alpha=2.0, seed=0, road_width_m=DEFAULT_ROAD_WIDTH_M),
         evals=evals,
         max_blocks=max_blocks,
         region_builder=IdentityRegionBuilder(),
@@ -288,14 +290,17 @@ _DJI = (str(_KB / "blocks_dji_sample.parquet"), str(_KB / "buildings_dji_sample.
 
 
 def _dji_source() -> KblockSource:
-    return KblockSource(*_DJI, region_id="dji", member_buildings=None)
+    return KblockSource(*_DJI, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
 
 
-def _dji_spec(block_groups: list[list[str]], *, depth_target: int = 2) -> PipelineSpec:
+def _dji_spec(block_groups: list[list[str]], *, depth_target: int) -> PipelineSpec:
     from reblock.methods.clearance import ClearanceReblocker
     return PipelineSpec(
-        source=_dji_source(), screen=IdentityScreen(),
-        method=ClearanceReblocker(depth_target=depth_target), evals=[KComplexityEval()],
+        source=_dji_source(), screen=IdentityScreen(block_ids=None),
+        method=ClearanceReblocker(depth_target=depth_target, substrate=ChordSubstrate(),
+                                  repulsion=0.0, max_roads=400,
+                                  road_width_m=DEFAULT_ROAD_WIDTH_M), evals=[KComplexityEval()],
         max_blocks=1, region_builder=IdentityRegionBuilder(), block_groups=block_groups,
     )
 
@@ -308,14 +313,17 @@ def test_singleton_group_run_matches_single_block_reblock() -> None:
     from reblock.methods.clearance import ClearanceReblocker
     from reblock.pipeline import reblock_block
     bid = "DJI.1_2_602"
-    out = run(_dji_spec([[bid]]))
+    out = run(_dji_spec([[bid]], depth_target=2))
     assert len(out.results) == 1
     r = out.results[0]
     assert r.block.block_id == bid   # plain block id, NOT a "region:..." block => reblock_block
 
-    direct_src = KblockSource(*_DJI, region_id="dji", block_ids=[bid], member_buildings=None)
+    direct_src = KblockSource(*_DJI, region_id="dji", min_buildings=10, block_ids=[bid],
+                              building_tier=SpacingDiscs, member_buildings=None)
     block = next(b for b in direct_src.region().blocks if b.block_id == bid)
-    direct = reblock_block(block, ClearanceReblocker(), [KComplexityEval()])
+    clearance = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
+                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+    direct = reblock_block(block, clearance, [KComplexityEval()])
     assert r.proposal.proposal_id == direct.proposal.proposal_id
     assert r.metric("kcomplexity", "delta_k") == direct.metric("kcomplexity", "delta_k")
     assert r.metric("kcomplexity", "k_after") == direct.metric("kcomplexity", "k_after")
@@ -325,7 +333,7 @@ def test_two_adjacent_block_region_reblocks_jointly() -> None:
     # An adjacent DJI pair as ONE seed group yields ONE joint region Result (block_id
     # "region:...") whose proposal road network reaches into BOTH original blocks -- proving
     # they were reblocked jointly (region_reblock), not as two independent per-block reblocks.
-    # depth_target=1: the pair's combined existing street network already satisfies the default
+    # depth_target=1: the pair's combined existing street network already satisfies the shipped
     # depth_target=2 with zero new roads, too trivial to prove the cross-block reach below.
     from shapely.ops import unary_union
     ids = ["DJI.3_1_1808", "DJI.3_1_1809"]
@@ -388,11 +396,10 @@ def test_metric_config_group_instantiates_each_preset() -> None:
 
     import geopandas as gpd
     from hydra import compose, initialize_config_dir
-    from hydra.utils import instantiate
     from pyproj import CRS
     from shapely.geometry import Polygon
 
-    from reblock.metric import BlockMetric
+    from reblock.presets import load_metric
     cfgdir = str(Path(__file__).resolve().parent.parent / "conf")
     # a one-block frame so we can call proxy() on the built metric -- a Product's terms must be a
     # PLAIN list of real nodes (needs `_convert_: all` in the config), or `terms[0].proxy` resolves
@@ -404,8 +411,8 @@ def test_metric_config_group_instantiates_each_preset() -> None:
                              ("density_compactness", False)]:
         with initialize_config_dir(version_base=None, config_dir=cfgdir):
             cfg = compose(config_name="config", overrides=[f"metric={name}"])
-        metric = instantiate(cfg.metric)
-        assert isinstance(metric, BlockMetric) and metric.needs_peel is needs_peel
+        metric = load_metric(cfg.metric)
+        assert metric.needs_peel is needs_peel
         assert float(metric.proxy(blocks).iloc[0]) >= 0.0      # a runtime call, not just a field
         assert metric.fine(3.0, 16.0, 4.0, 8.0) >= 0.0
 
@@ -430,7 +437,7 @@ def test_topology_reblocks_a_synthetic_nested_block() -> None:
     # peel-depth 2, and TopologyMethod's greedy road-builder demonstrably
     # reaches it.
     block = _grid_block(3)
-    proposal = TopologyMethod(alpha=2.0, seed=0).propose(block)
+    proposal = TopologyMethod(alpha=2.0, seed=0, road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block)
     m = KComplexityEval().score(block, proposal).values
 
     assert m["k_before"] == 2.0

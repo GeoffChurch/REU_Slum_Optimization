@@ -35,7 +35,7 @@ permeability the real networks lose.
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 import geopandas as gpd
@@ -50,8 +50,8 @@ from shapely.ops import unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
-from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.methods.substrates import RoutingGraph, Substrate
+from reblock.permeability import with_width
 
 Destination = Literal["gateway", "all_pairs"]
 
@@ -146,16 +146,16 @@ class FlowPathsReblocker:
     """Keep the edges carrying the most traffic. `flow_quantile` is the hierarchy knob: a low cut
     keeps the worn footpath web, a high cut keeps only the arterial skeleton it feeds."""
 
-    substrate: Substrate = field(default_factory=ChordSubstrate)
-    destination: Destination = "all_pairs"
-    iterations: int = 3
-    reinforcement: float = 0.5
-    flow_quantile: float = 0.90
-    max_sources: int = 400
-    seed: int = 0
+    substrate: Substrate
+    destination: Destination
+    iterations: int
+    reinforcement: float
+    flow_quantile: float
+    max_sources: int
+    seed: int
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:

@@ -20,6 +20,7 @@ from reblock.derive.access import (
     one_past_deepest,
     parcel_access_layers,
 )
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
@@ -99,7 +100,7 @@ def test_propose_matches_direct_and_caches(monkeypatch: pytest.MonkeyPatch) -> N
     from reblock.methods.peel import PeelReblocker
 
     box = {"n": 0}
-    method = PeelReblocker()
+    method = PeelReblocker(tol=STREET_TOL, road_width_m=DEFAULT_ROAD_WIDTH_M)
     real_propose = method.propose
 
     def spy(block: Block, prior: Proposal | None = None) -> Proposal:
@@ -141,7 +142,7 @@ def test_region_reblock_routes_through_the_propose_cache(monkeypatch: pytest.Mon
     from reblock.region import region_reblock
 
     box = {"n": 0}
-    method = PeelReblocker()
+    method = PeelReblocker(tol=STREET_TOL, road_width_m=DEFAULT_ROAD_WIDTH_M)
     real_propose = method.propose
 
     def spy(block: Block, prior: Proposal | None = None) -> Proposal:

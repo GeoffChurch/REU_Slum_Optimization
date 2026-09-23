@@ -12,13 +12,14 @@ import urllib.request
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString
 
 
+@runtime_checkable
 class DesireLineSource(Protocol):
     def desire_lines(
         self, bbox_wgs84: tuple[float, float, float, float], crs: CRS
@@ -68,7 +69,6 @@ def _parse_overpass_geom(payload: dict[str, Any], target_crs: CRS) -> gpd.GeoDat
 
 
 _USER_AGENT = "reblock-osm-footpaths/0.1 (informal-settlement research)"
-_DEFAULT_TAGS = ("path", "footway", "track", "steps", "pedestrian", "living_street")
 
 
 def _default_cache_dir() -> Path:
@@ -83,11 +83,11 @@ class OSMDesireLines:
     when live (uncacheable, so the derivation cache bypasses and never serves stale OSM), and a
     stable tuple keyed on the snapshot's content hash when a snapshot is pinned."""
 
-    tags: Sequence[str] = _DEFAULT_TAGS
-    endpoint: str = "https://overpass-api.de/api/interpreter"
-    cache_dir: str | None = None
-    snapshot: str | None = None
-    timeout_s: float = 60.0            # client read timeout; raise for a large region's bbox
+    tags: Sequence[str]
+    endpoint: str
+    cache_dir: str | None
+    snapshot: str | None
+    timeout_s: float                   # client read timeout; raise for a large region's bbox
 
     @property
     def identity(self) -> Hashable:

@@ -1,10 +1,10 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import geopandas as gpd
 import pytest
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from pyproj import CRS
 from shapely import union_all
 from shapely.geometry import LineString, Point, Polygon, box
@@ -14,9 +14,20 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.methods.euclidean_grid import EuclideanGridReblocker
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from reblock.presets import load_method
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
+
+# Every setting spelled once, at the values `conf/method/euclidean_grid.yaml` ships (pinned by
+# `test_euclidean_grid_method_yaml_is_grid`); each test varies what it is about.
+GRID = EuclideanGridReblocker(
+    road_width_m=DEFAULT_ROAD_WIDTH_M, spacing=60.0, angle=0.0, min_seg_len=1.0,
+    street_buffer=0.5, seek_density=True, adaptive=True, fine_spacing=None,
+    density_threshold_percentile=75.0, parcel_hug_buffer=None, parcel_bridge_gap=None,
+    follow_parcels=False, follow_min_coverage=0.03, follow_max_coverage=0.45,
+    follow_density_gamma=3.0, follow_min_component=None)
 
 
 def _parcel_boundary_union(block: Block) -> BaseGeometry:
@@ -146,37 +157,37 @@ def _no_collinear_overlap(roads: gpd.GeoDataFrame) -> bool:
 
 
 def test_identity_encodes_all_tunable_params() -> None:
-    m = EuclideanGridReblocker()
-    m2 = EuclideanGridReblocker(spacing=30.0, angle=15.0, min_seg_len=2.0,
-                                street_buffer=1.0, seek_density=False)
-    assert m.identity == EuclideanGridReblocker().identity
+    m = GRID
+    m2 = replace(GRID, spacing=30.0, angle=15.0, min_seg_len=2.0,
+                       street_buffer=1.0, seek_density=False)
+    assert m.identity == GRID.identity
     assert m.identity != m2.identity
-    # an explicit hug/bridge override is a distinct config from the auto default and from each other
-    assert (EuclideanGridReblocker(parcel_hug_buffer=5.0).identity
-            != EuclideanGridReblocker().identity)
-    assert (EuclideanGridReblocker(parcel_bridge_gap=5.0).identity
-            != EuclideanGridReblocker().identity)
-    assert (EuclideanGridReblocker(parcel_hug_buffer=5.0).identity
-            != EuclideanGridReblocker(parcel_bridge_gap=5.0).identity)
+    # an explicit hug/bridge override is a distinct config from the derived one and from each other
+    assert (replace(GRID, parcel_hug_buffer=5.0).identity
+            != GRID.identity)
+    assert (replace(GRID, parcel_bridge_gap=5.0).identity
+            != GRID.identity)
+    assert (replace(GRID, parcel_hug_buffer=5.0).identity
+            != replace(GRID, parcel_bridge_gap=5.0).identity)
     # the follow-parcels mode and its coverage / stitch knobs are distinct identity axes too
-    assert (EuclideanGridReblocker(follow_parcels=True).identity
-            != EuclideanGridReblocker(follow_parcels=False).identity)
-    assert (EuclideanGridReblocker(follow_parcels=True, follow_min_coverage=0.3).identity
-            != EuclideanGridReblocker(follow_parcels=True).identity)
-    assert (EuclideanGridReblocker(follow_parcels=True, follow_min_component=5.0).identity
-            != EuclideanGridReblocker(follow_parcels=True).identity)
+    assert (replace(GRID, follow_parcels=True).identity
+            != replace(GRID, follow_parcels=False).identity)
+    assert (replace(GRID, follow_parcels=True, follow_min_coverage=0.3).identity
+            != replace(GRID, follow_parcels=True).identity)
+    assert (replace(GRID, follow_parcels=True, follow_min_component=5.0).identity
+            != replace(GRID, follow_parcels=True).identity)
 
 
 def test_identity_separates_adaptive_configs() -> None:
-    base = EuclideanGridReblocker(spacing=20.0, adaptive=False)   # adaptive now defaults on
+    base = replace(GRID, spacing=20.0, adaptive=False)   # GRID has adaptive on
     variants = [
-        EuclideanGridReblocker(spacing=20.0, adaptive=True),
-        EuclideanGridReblocker(spacing=20.0, adaptive=True, fine_spacing=5.0),
-        EuclideanGridReblocker(spacing=20.0, adaptive=True, density_threshold_percentile=50.0),
-        EuclideanGridReblocker(spacing=20.0, parcel_hug_buffer=3.0),
-        EuclideanGridReblocker(spacing=20.0, parcel_bridge_gap=3.0),
-        EuclideanGridReblocker(spacing=20.0, follow_parcels=True),
-        EuclideanGridReblocker(spacing=20.0, follow_parcels=True, follow_density_gamma=2.0),
+        replace(GRID, spacing=20.0, adaptive=True),
+        replace(GRID, spacing=20.0, adaptive=True, fine_spacing=5.0),
+        replace(GRID, spacing=20.0, adaptive=True, density_threshold_percentile=50.0),
+        replace(GRID, spacing=20.0, parcel_hug_buffer=3.0),
+        replace(GRID, spacing=20.0, parcel_bridge_gap=3.0),
+        replace(GRID, spacing=20.0, follow_parcels=True),
+        replace(GRID, spacing=20.0, follow_parcels=True, follow_density_gamma=2.0),
     ]
     identities = [base.identity, *(v.identity for v in variants)]
     assert len(set(identities)) == len(identities)   # no cache-key collisions between configs
@@ -184,7 +195,7 @@ def test_identity_separates_adaptive_configs() -> None:
 
 def test_basic_grid_generation_on_rectangular_block() -> None:
     block = _rect_block(100.0, 100.0)
-    m = EuclideanGridReblocker(spacing=30.0, seek_density=False)
+    m = replace(GRID, spacing=30.0, seek_density=False)
     proposal = m.propose(block)
     roads = proposal.roads
     assert roads is not None and not roads.empty
@@ -205,7 +216,7 @@ def test_overlap_suppression_keeps_the_nonoverlapping_remainder() -> None:
     # spanning y in [0, 20]; a street covers only the bottom half (y in [0, 12]) of it.
     street = LineString([(10, 0), (10, 12)])
     block = _rect_block(20.0, 20.0, streets=[street])
-    m = EuclideanGridReblocker(spacing=10.0, street_buffer=0.5, min_seg_len=1.0, seek_density=False)
+    m = replace(GRID, spacing=10.0, street_buffer=0.5, min_seg_len=1.0, seek_density=False)
     proposal = m.propose(block)
     roads = proposal.roads
     assert roads is not None and not roads.empty
@@ -226,16 +237,16 @@ def test_empty_streets_raises() -> None:
                 source_content_hash=None, building_geometries=no_buildings(block.crs),
                 building_tier=SpacingDiscs)
     with pytest.raises(ValueError, match="streets"):
-        EuclideanGridReblocker().propose(bad)
+        GRID.propose(bad)
 
 
 def test_seek_density_shifts_grid_phase_toward_the_cluster() -> None:
     block = _clustered_block()
-    # adaptive=False to isolate the phase shift (adaptive now defaults on)
-    m_density = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=True,
-                                       adaptive=False)
-    m_plain = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False,
-                                     adaptive=False)
+    # adaptive=False to isolate the phase shift (GRID has it on)
+    m_density = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=True,
+                              adaptive=False)
+    m_plain = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False,
+                            adaptive=False)
     p_density = m_density.propose(block)
     p_plain = m_plain.propose(block)
 
@@ -252,9 +263,9 @@ def test_seek_density_shifts_grid_phase_toward_the_cluster() -> None:
 
 def test_adaptive_infills_a_finer_mesh_over_the_dense_cluster() -> None:
     block = _dense_cluster_block()
-    plain = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False,
-                                   adaptive=False)
-    fine = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False, adaptive=True)
+    plain = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False,
+                          adaptive=False)
+    fine = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False, adaptive=True)
     p_plain = plain.propose(block)
     p_fine = fine.propose(block)
     assert p_plain.roads is not None and p_fine.roads is not None
@@ -287,9 +298,9 @@ def test_adaptive_infills_a_finer_mesh_over_the_dense_cluster() -> None:
 
 def test_adaptive_on_a_flat_density_field_adds_nothing() -> None:
     block = _uniform_block()
-    plain = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False,
-                                   adaptive=False)
-    fine = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False, adaptive=True)
+    plain = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False,
+                          adaptive=False)
+    fine = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False, adaptive=True)
     p_plain, p_fine = plain.propose(block), fine.propose(block)
     assert p_plain.roads is not None and p_fine.roads is not None
 
@@ -300,11 +311,11 @@ def test_adaptive_on_a_flat_density_field_adds_nothing() -> None:
 
 def test_finer_fine_spacing_and_lower_percentile_add_more_mesh() -> None:
     block = _dense_cluster_block()
-    base = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False, adaptive=True)
-    finer = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False,
-                                   adaptive=True, fine_spacing=2.5)
-    looser = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False,
-                                    adaptive=True, density_threshold_percentile=0.0)
+    base = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False, adaptive=True)
+    finer = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False,
+                          adaptive=True, fine_spacing=2.5)
+    looser = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False,
+                           adaptive=True, density_threshold_percentile=0.0)
     p_base, p_finer, p_looser = base.propose(block), finer.propose(block), looser.propose(block)
     assert p_base.roads is not None and p_finer.roads is not None and p_looser.roads is not None
 
@@ -320,12 +331,12 @@ def test_finer_fine_spacing_and_lower_percentile_add_more_mesh() -> None:
 
 def test_seek_density_and_adaptive_are_independent_and_composable() -> None:
     block = _dense_cluster_block()
-    p_seek = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1,
-                                    seek_density=True, adaptive=False).propose(block)
-    p_both = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1,
-                                    seek_density=True, adaptive=True).propose(block)
-    p_adapt = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1,
-                                     seek_density=False, adaptive=True).propose(block)
+    p_seek = replace(GRID, spacing=10.0, min_seg_len=0.1,
+                           seek_density=True, adaptive=False).propose(block)
+    p_both = replace(GRID, spacing=10.0, min_seg_len=0.1,
+                           seek_density=True, adaptive=True).propose(block)
+    p_adapt = replace(GRID, spacing=10.0, min_seg_len=0.1,
+                            seek_density=False, adaptive=True).propose(block)
     assert p_seek.roads is not None and p_both.roads is not None and p_adapt.roads is not None
 
     # both flags active: the base grid is still phased on the hotspot, and infill still lands
@@ -341,11 +352,11 @@ def test_seek_density_and_adaptive_are_independent_and_composable() -> None:
 
 def test_adaptive_false_ignores_the_infill_params() -> None:
     block = _dense_cluster_block()
-    p_plain = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=True,
-                                     adaptive=False).propose(block)
-    p_inert = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=True,
-                                     adaptive=False, fine_spacing=1.0,
-                                     density_threshold_percentile=10.0).propose(block)
+    p_plain = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=True,
+                            adaptive=False).propose(block)
+    p_inert = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=True,
+                            adaptive=False, fine_spacing=1.0,
+                            density_threshold_percentile=10.0).propose(block)
     assert p_plain.roads is not None and p_inert.roads is not None
     assert (sorted(g.wkt for g in p_inert.roads.geometry)
             == sorted(g.wkt for g in p_plain.roads.geometry))
@@ -354,14 +365,14 @@ def test_adaptive_false_ignores_the_infill_params() -> None:
         assert key not in p_plain.params
 
 
-def test_default_is_the_adaptive_hugging_bridging_grid() -> None:
-    # the out-of-the-box method (no flags) is the density-concentrated straight-line grid with the
+def test_shipped_is_the_adaptive_hugging_bridging_grid() -> None:
+    # the shipped method (GRID) is the density-concentrated straight-line grid with the
     # hugging trim and bridge-gap stitching -- NOT follow_parcels, NOT a uniform grid
-    m = EuclideanGridReblocker()
+    m = GRID
     assert m.adaptive is True and m.seek_density is True and m.follow_parcels is False
 
-    # only spacing/min_seg_len set (to suit the small test block); every mode flag stays default
-    p = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1).propose(_dense_cluster_block())
+    # only spacing/min_seg_len set (to suit the small test block); every mode flag stays as shipped
+    p = replace(GRID, spacing=10.0, min_seg_len=0.1).propose(_dense_cluster_block())
     roads = p.roads
     assert roads is not None and not roads.empty
     assert "follow_parcels" not in p.params                 # the grid path, not the parcel path
@@ -382,9 +393,9 @@ def test_default_is_the_adaptive_hugging_bridging_grid() -> None:
 def test_parcel_hug_trims_lines_tightly_to_the_parcel_geometry() -> None:
     block = _dumbbell_block()
     parcel_union = union_all(list(block.parcels.geometry))
-    # no hug/bridge parameter is set: the trim is unconditional, always-on default behaviour
-    # (adaptive=False to isolate the hugging trim from the density infill, now default-on)
-    m = EuclideanGridReblocker(spacing=3.0, min_seg_len=0.1, seek_density=False, adaptive=False)
+    # no hug/bridge parameter is set: the trim is unconditional, always-on behaviour
+    # (adaptive=False to isolate the hugging trim from the density infill, which GRID has on)
+    m = replace(GRID, spacing=3.0, min_seg_len=0.1, seek_density=False, adaptive=False)
     proposal = m.propose(block)
     roads = proposal.roads
     assert roads is not None and not roads.empty
@@ -431,8 +442,8 @@ def test_parcel_hug_buffer_scales_with_the_blocks_own_parcel_spacing() -> None:
 
     # identical layout, one 10x sparser than the other, SAME spacing -> the derived hug buffer
     # tracks the block's own parcel scale, not `spacing` (dataset-agnostic across dense/sparse)
-    dense = EuclideanGridReblocker(spacing=5.0, seek_density=False).propose(block_at(1.0))
-    sparse = EuclideanGridReblocker(spacing=5.0, seek_density=False).propose(block_at(10.0))
+    dense = replace(GRID, spacing=5.0, seek_density=False).propose(block_at(1.0))
+    sparse = replace(GRID, spacing=5.0, seek_density=False).propose(block_at(10.0))
     assert cast(float, dense.params["parcel_scale"]) == pytest.approx(1.0, abs=0.2)
     assert cast(float, sparse.params["parcel_scale"]) == pytest.approx(
         10.0 * cast(float, dense.params["parcel_scale"]), rel=0.2)
@@ -443,22 +454,23 @@ def test_parcel_hug_buffer_scales_with_the_blocks_own_parcel_spacing() -> None:
 
 
 def test_hug_bridges_small_gaps_but_severs_wide_ones() -> None:
-    # unit parcels -> nn ~ 1 m, so the default buffer ~ 0.5 m and bridge gap ~ 3 m: gaps up to
+    # unit parcels -> nn ~ 1 m, so the derived buffer ~ 0.5 m and bridge gap ~ 3 m: gaps up to
     # roughly bridge + 2*buffer (~ 4 m) are spanned to keep the network whole, wider ones are cut.
-    def propose(gap: float, parcel_bridge_gap: float | None = None) -> gpd.GeoDataFrame:
-        # parcel_bridge_gap=None -> the reblocker's derived default; 0.0 -> bridging off
-        p = EuclideanGridReblocker(
-            spacing=2.0, min_seg_len=0.1, seek_density=False, adaptive=False,
+    def propose(gap: float, parcel_bridge_gap: float | None) -> gpd.GeoDataFrame:
+        # parcel_bridge_gap=None -> derived from the block; 0.0 -> bridging off
+        p = replace(
+            GRID, spacing=2.0, min_seg_len=0.1, seek_density=False, adaptive=False,
             parcel_bridge_gap=parcel_bridge_gap).propose(_two_cluster_block(gap))
         assert p.roads is not None
         return p.roads
 
     # a small (3 m) gap: bridging keeps the two clusters connected as one network, where turning
     # bridging off (parcel_bridge_gap=0) severs them into separate components
-    assert _road_components(propose(3.0)) < _road_components(propose(3.0, parcel_bridge_gap=0.0))
+    assert (_road_components(propose(3.0, parcel_bridge_gap=None))
+            < _road_components(propose(3.0, parcel_bridge_gap=0.0)))
 
     # a wide (12 m) gap is never bridged: no road runs through the empty strip between the clusters
-    wide = propose(12.0)
+    wide = propose(12.0, parcel_bridge_gap=None)
     assert all(g.intersection(box(8, -1, 16, 7)).length < 1e-9 for g in wide.geometry)   # x 6..18
 
 
@@ -476,7 +488,7 @@ def _street_bounded_tiling(n: int) -> Block:
 
 def test_follow_parcels_follows_boundary_edges_weighted_by_density() -> None:
     block = _dense_cluster_block()
-    proposal = EuclideanGridReblocker(follow_parcels=True).propose(block)
+    proposal = replace(GRID, follow_parcels=True).propose(block)
     roads = proposal.roads
     assert roads is not None and not roads.empty
     assert proposal.method == "euclidean_grid"
@@ -498,13 +510,13 @@ def test_follow_parcels_follows_boundary_edges_weighted_by_density() -> None:
             > cast(float, proposal.params["selected_density_min"]))
 
 
-def test_follow_parcels_defaults_select_a_sparse_minority_of_edges() -> None:
-    # the tuned-sparse defaults (low floor, sharp gamma, sub-1.0 ceiling) must pick only a minority
-    # of candidate edges, so the network is legible rather than a mesh blanketing the whole block
+def test_follow_parcels_shipped_coverage_selects_a_sparse_minority_of_edges() -> None:
+    # the tuned-sparse shipped coverage (low floor, sharp gamma, sub-1.0 ceiling) must pick only a
+    # minority of candidate edges, so the network is legible rather than a mesh blanketing the block
     block = _dense_cluster_block()
-    default = EuclideanGridReblocker(follow_parcels=True).propose(block)
-    full = EuclideanGridReblocker(follow_parcels=True, follow_min_coverage=1.0,
-                                  follow_max_coverage=1.0).propose(block)
+    default = replace(GRID, follow_parcels=True).propose(block)
+    full = replace(GRID, follow_parcels=True, follow_min_coverage=1.0,
+                         follow_max_coverage=1.0).propose(block)
     considered = cast(int, default.params["boundary_edges_considered"])
     selected = cast(int, default.params["boundary_edges_selected"])
     assert cast(int, full.params["boundary_edges_selected"]) == considered   # coverage 1.0 -> all
@@ -516,7 +528,7 @@ def test_follow_parcels_segments_stay_at_individual_parcel_edge_scale() -> None:
     # roads follow real parcel edges and are never concatenated into long chains: every emitted
     # segment is a single straight span (exactly two vertices), bounded by one parcel edge
     block = _dense_cluster_block()
-    roads = EuclideanGridReblocker(follow_parcels=True).propose(block).roads
+    roads = replace(GRID, follow_parcels=True).propose(block).roads
     assert roads is not None and not roads.empty
     for g in roads.geometry:
         assert g.geom_type == "LineString"
@@ -528,9 +540,9 @@ def test_follow_parcels_network_reaches_the_street_frontage() -> None:
     # a deliberately sparse, uniform coverage fragments the raw selection; the connectivity stitch
     # must then wire every surviving piece back to the street frontage. follow_min_component=0.0
     # keeps noise-dropping out of the way so this isolates the street-reaching stitch guarantee.
-    m = EuclideanGridReblocker(follow_parcels=True, follow_min_coverage=0.3,
-                               follow_max_coverage=0.3, follow_min_component=0.0,
-                               street_buffer=0.1, min_seg_len=0.1)
+    m = replace(GRID, follow_parcels=True, follow_min_coverage=0.3,
+                      follow_max_coverage=0.3, follow_min_component=0.0,
+                      street_buffer=0.1, min_seg_len=0.1)
     proposal = m.propose(block)
     roads = proposal.roads
     assert roads is not None and not roads.empty
@@ -546,12 +558,12 @@ def test_follow_parcels_network_reaches_the_street_frontage() -> None:
 
 def test_follow_parcels_min_component_drops_noise_for_a_sparser_network() -> None:
     block = _dense_cluster_block()
-    # the default noise-drop (follow_min_component derived from parcel scale) removes the lone edges
+    # the derived noise-drop (follow_min_component None -> parcel scale) removes the lone edges
     # the sparse floor scatters through low-density areas, leaving a sparser network than keeping
     # every cluster (follow_min_component=0.0) would
-    default = EuclideanGridReblocker(follow_parcels=True).propose(block)
-    unfiltered = EuclideanGridReblocker(
-        follow_parcels=True, follow_min_component=0.0).propose(block)
+    default = replace(GRID, follow_parcels=True).propose(block)
+    unfiltered = replace(
+        GRID, follow_parcels=True, follow_min_component=0.0).propose(block)
     assert default.roads is not None and unfiltered.roads is not None
     assert cast(int, default.params["connectivity_edges_dropped"]) > 0
     assert cast(float, default.params["follow_min_component"]) > 0.0
@@ -566,7 +578,7 @@ def test_follow_parcels_min_component_drops_noise_for_a_sparser_network() -> Non
 
 def test_follow_parcels_is_deterministic() -> None:
     block = _street_bounded_tiling(6)
-    m = EuclideanGridReblocker(follow_parcels=True, street_buffer=0.1, min_seg_len=0.1)
+    m = replace(GRID, follow_parcels=True, street_buffer=0.1, min_seg_len=0.1)
     pa, pb = m.propose(block), m.propose(block)
     assert pa.roads is not None and pb.roads is not None
     a = sorted(g.wkt for g in pa.roads.geometry)
@@ -576,12 +588,12 @@ def test_follow_parcels_is_deterministic() -> None:
 
 def test_follow_parcels_off_preserves_grid_behaviour() -> None:
     block = _dense_cluster_block()
-    # follow_parcels defaults off; the proposal is the ordinary grid, with no follow-mode params
-    grid = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False)
+    # GRID has follow_parcels off; the proposal is the ordinary grid, with no follow-mode params
+    grid = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False)
     assert grid.follow_parcels is False
     p_default = grid.propose(block)
-    p_explicit = EuclideanGridReblocker(spacing=10.0, min_seg_len=0.1, seek_density=False,
-                                        follow_parcels=False).propose(block)
+    p_explicit = replace(GRID, spacing=10.0, min_seg_len=0.1, seek_density=False,
+                               follow_parcels=False).propose(block)
     assert p_default.roads is not None and p_explicit.roads is not None
     assert "follow_parcels" not in p_default.params        # grid path records no follow-mode keys
     assert "spacing" in p_default.params
@@ -589,10 +601,10 @@ def test_follow_parcels_off_preserves_grid_behaviour() -> None:
             == sorted(g.wkt for g in p_explicit.roads.geometry))
 
 
-def test_euclidean_grid_method_yaml_instantiates_with_defaults() -> None:
+def test_euclidean_grid_method_yaml_is_grid() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="config", overrides=["method=euclidean_grid"])
-    method = instantiate(cfg.method)
+    method = load_method(cfg.method)
     assert isinstance(method, EuclideanGridReblocker)
-    assert method.identity == EuclideanGridReblocker().identity
+    assert method.identity == GRID.identity

@@ -5,7 +5,8 @@
 # reblock.methods.loop_closure.LoopClosureRefiner.
 _target_: reblock.methods.loop_closure.LoopClosureRefiner
 base: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}",
-       repulsion: 0.0, depth_target: 1, max_roads: 400}   # depth_target 1 = deeper base (best-of-both)
+       repulsion: 0.0, depth_target: 1, max_roads: 400,
+       road_width_m: 7.0}   # depth_target 1 = deeper base (best-of-both)
 budget_frac: 0.12
 min_bridges_per_m: 0.01
 max_loops: 400
@@ -13,4 +14,6 @@ min_loop_len_m: 40.0
 # search_radius_m 45 m: sufficient for block-scale bases with the uniform max_candidates cap,
 # which bounds the expensive per-pair snap volume regardless of mesh density (see _subsample_pairs).
 search_radius_m: 45.0
+snap_lam: 2.0
 max_candidates: 1500
+road_width_m: 7.0

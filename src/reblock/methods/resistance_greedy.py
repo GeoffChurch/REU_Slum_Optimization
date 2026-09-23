@@ -40,7 +40,7 @@ sketches.
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import geopandas as gpd
 import numpy as np
@@ -55,9 +55,8 @@ from shapely.ops import nearest_points, unary_union
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
 from reblock.methods.loop_closure import loop_candidates
-from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
+from reblock.methods.substrates import RoutingGraph, Substrate
 from reblock.permeability import (
-    DEFAULT_ROAD_WIDTH_M,
     EgressContext,
     PermeabilityParams,
     _road_corridor,
@@ -128,10 +127,10 @@ def linearized_gain(
 class ResistanceGreedyReblocker:
     """Greedily add the road with the best permeability gain per metre."""
 
-    substrate: Substrate = field(default_factory=ChordSubstrate)
-    max_roads: int = 400
-    shortlist: int = 6
-    # OFF by default, and the reason is measured rather than assumed. Loop connectors ARE
+    substrate: Substrate
+    max_roads: int
+    shortlist: int
+    # OFF as shipped, and the reason is measured rather than assumed. Loop connectors ARE
     # generated in quantity when this is on (90-275 per round on 50-160 parcel blocks) and are
     # NEVER selected: an access road moves a parcel from footpath-only to road-adjacent, a large
     # first-order gain, while a connector only adds redundancy among already-served parcels, a
@@ -140,15 +139,15 @@ class ResistanceGreedyReblocker:
     # bit-for-bit not at all. Kept because it is the honest test of "one objective over both move
     # types", and the answer it gives -- access first, redundancy never inside this budget -- is a
     # finding about the objective.
-    loop_radius_m: float = 0.0
-    min_loop_len_m: float = 40.0
-    max_loop_candidates: int = 400
-    min_gain_per_m: float = 1e-6
-    seed: int = 0
-    params: PermeabilityParams = field(default_factory=PermeabilityParams)
+    loop_radius_m: float
+    min_loop_len_m: float
+    max_loop_candidates: int
+    min_gain_per_m: float
+    seed: int
+    params: PermeabilityParams
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:

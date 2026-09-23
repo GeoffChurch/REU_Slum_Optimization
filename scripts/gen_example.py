@@ -33,19 +33,19 @@ import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TextIO, cast
+from typing import TextIO
 
 import segno
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from omegaconf import open_dict
 from shapely.ops import unary_union
 
 from reblock.compare import load_permeability_config
-from reblock.contracts import Method, ScoringScreen, Screen, Source
+from reblock.contracts import ScoringScreen
 from reblock.emit import region_map
 from reblock.pipeline import build_regions
-from reblock.region import RegionBuilder, block_depths
+from reblock.presets import load_method, load_methods, load_stages
+from reblock.region import block_depths
 from reblock.render import google_maps_url
 from scripts.compare_budgets import run_permeability_lenses
 from scripts.gen_example_readme import write_readme
@@ -128,9 +128,10 @@ def main() -> None:
             stale_path.unlink()
     pinned = cfg.block_ids                # None -> grow a region; a list -> pin these
     with _tee_to_file(out / "run.log"):
-        source = cast(Source, instantiate(cfg.data))
-        screen = cast(Screen, instantiate(cfg.screen))
-        region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
+        stages = load_stages(cfg)
+        source, screen, region_builder = stages.source, stages.screen, stages.region_builder
+        # Every registered method, before the screen spends its minutes: a broken entry fails now.
+        registry = load_methods(cfg.all_methods)
 
         # The ONE branch the two region modes force. A pinned variant has no screen selection to
         # report, so it also omits the screen/region keys from meta and the README generator (which
@@ -187,7 +188,7 @@ def main() -> None:
             # region_map already writes screen.png/region.png (transparent, via save_render) at
             # the example naming -- no JPG flatten step needed.
 
-        methods = {n: cast(Method, instantiate(cfg.all_methods[n])) for n in cfg.methods}
+        methods = {str(n): registry[n] for n in cfg.methods}
         # osm_footpaths: the real as-built informal network, from a committed per-region OSM
         # snapshot (fetched once by scripts.fetch_desire_lines_snapshot) so the example
         # reproduces offline.
@@ -195,7 +196,7 @@ def main() -> None:
         if snapshot.exists():
             with open_dict(cfg):
                 cfg.desire_source.snapshot = str(snapshot)
-            methods["osm_footpaths"] = cast(Method, instantiate(cfg.all_methods.osm_footpaths))
+            methods["osm_footpaths"] = load_method(cfg.all_methods.osm_footpaths)
         run_permeability_lenses(region, methods, out, pcfg=load_permeability_config(),
                                 label=seed)
 

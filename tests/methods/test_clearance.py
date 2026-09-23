@@ -7,7 +7,6 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from pyproj import CRS
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
@@ -41,6 +40,7 @@ from reblock.methods.substrates import (
     _build_grid,
 )
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from reblock.presets import load_method, load_methods, load_substrate
 from tests.block_fixtures import no_buildings
 
 
@@ -129,6 +129,11 @@ def test_repulsion_bends_the_path_around_buildings() -> None:
 
 UTM = CRS.from_epsg(32643)
 
+# Every setting spelled once, at the values `conf/method/clearance.yaml` ships (pinned by
+# `test_clearance_method_yaml_is_clearance`); each test varies what it is about.
+CLEARANCE = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
+                               max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+
 
 def _column_block(h: int) -> Block:
     """A 1-wide, h-tall column of unit parcels with street frontage only on the bottom edge ->
@@ -209,8 +214,8 @@ def _column_block_with_buildings(h: int) -> Block:
                  source_content_hash=None, building_tier=SpacingDiscs)
 
 
-def test_default_substrate_is_chord_diag() -> None:
-    m = ClearanceReblocker(repulsion=0.0)
+def test_chord_diag_substrate_reblocks_to_depth_target() -> None:
+    m = replace(CLEARANCE, repulsion=0.0)
     assert m.substrate.tag == "chord_diag"
     p = m.propose(_column_block_with_buildings(6))
     assert p.proposal_id == "clearance:chord_diag:r0:d2:mr400"
@@ -245,17 +250,17 @@ def test_propose_is_deterministic_and_leaves_rng_untouched() -> None:
     block = _column_block_with_buildings(8)
     np.random.seed(123)
     state = np.random.get_state()[1].tolist()
-    p1 = ClearanceReblocker(depth_target=2, substrate=GridSubstrate(res=0.5)).propose(block)
-    p2 = ClearanceReblocker(depth_target=2, substrate=GridSubstrate(res=0.5)).propose(block)
+    p1 = replace(CLEARANCE, depth_target=2, substrate=GridSubstrate(res=0.5)).propose(block)
+    p2 = replace(CLEARANCE, depth_target=2, substrate=GridSubstrate(res=0.5)).propose(block)
     assert np.random.get_state()[1].tolist() == state
     assert p1.roads is not None and p2.roads is not None and len(p1.roads) > 0
     assert [g.wkt for g in p1.roads.geometry] == [g.wkt for g in p2.roads.geometry]
 
 
 def test_propose_metadata_and_identity() -> None:
-    m = ClearanceReblocker(substrate=GridSubstrate(res=0.75), repulsion=2.0,
+    m = replace(CLEARANCE, substrate=GridSubstrate(res=0.75), repulsion=2.0,
                            depth_target=3, max_roads=50)
-    assert m.identity != ClearanceReblocker(substrate=GridSubstrate(res=0.75), repulsion=2.0,
+    assert m.identity != replace(CLEARANCE, substrate=GridSubstrate(res=0.75), repulsion=2.0,
                                             depth_target=3, max_roads=51).identity
     p = m.propose(_column_block_with_buildings(4))
     assert p.method == "clearance"
@@ -267,14 +272,14 @@ def test_propose_metadata_and_identity() -> None:
 def test_distinct_repulsions_get_distinct_proposal_identity() -> None:
     # so access_after / geometric_after (keyed on the proposal) never collide across the knob
     # (res=0.5: the fixture's unit-width column needs a sub-1 grid resolution, like every other
-    # _column_block_with_buildings test here -- the default res=1.5 is for real meter-scale blocks.
+    # _column_block_with_buildings test here -- the shipped res=1.5 is for real meter-scale blocks.
     # source_content_hash gives the block a non-None identity, matching the real (Source-loaded)
     # blocks this collision concern is actually about -- Block.identity is None for the bare
     # synthetic fixture, which would make Proposal.identity collapse to None regardless of
     # proposal_id and the second assertion vacuously fail.)
     block = replace(_column_block_with_buildings(6), source_content_hash="test-hash")
-    a = ClearanceReblocker(repulsion=-6.0, substrate=GridSubstrate(res=0.5)).propose(block)
-    b = ClearanceReblocker(repulsion=6.0, substrate=GridSubstrate(res=0.5)).propose(block)
+    a = replace(CLEARANCE, repulsion=-6.0, substrate=GridSubstrate(res=0.5)).propose(block)
+    b = replace(CLEARANCE, repulsion=6.0, substrate=GridSubstrate(res=0.5)).propose(block)
     assert a.proposal_id != b.proposal_id
     assert a.identity != b.identity
 
@@ -287,7 +292,7 @@ def test_prebuilt_substrate_makes_proposal_uncacheable_even_on_a_real_block() ->
     block = replace(_column_block_with_buildings(6), source_content_hash="test-hash")
     assert block.identity is not None
     graph = GridSubstrate(res=0.5).build(block)
-    method = ClearanceReblocker(substrate=PrebuiltSubstrate(graph), depth_target=2)
+    method = replace(CLEARANCE, substrate=PrebuiltSubstrate(graph), depth_target=2)
     proposal = method.propose(block)
     assert method.identity is None       # Method already uncacheable (substrate identity None)
     assert proposal.identity is None     # ...and now the Proposal too (block_identity dropped)
@@ -301,7 +306,7 @@ def test_propose_achieves_target_on_real_block() -> None:
     from scoring_fixtures import _block_1808
 
     block = _block_1808()
-    m = ClearanceReblocker(depth_target=2, substrate=GridSubstrate(res=0.75))
+    m = replace(CLEARANCE, depth_target=2, substrate=GridSubstrate(res=0.75))
     roads = m.propose(block).roads
     assert roads is not None
     after = parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
@@ -318,22 +323,20 @@ def test_clearance_module_is_in_its_own_cache_key() -> None:
     assert any(p.name == "clearance.py" and p.parent.name == "methods" for p in paths)
 
 
-def test_clearance_method_yaml_instantiates_with_defaults() -> None:
+def test_clearance_method_yaml_is_clearance() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="config", overrides=["method=clearance"])
-    method = instantiate(cfg.method)
+    method = load_method(cfg.method)
     assert isinstance(method, ClearanceReblocker)
-    assert method.identity == ClearanceReblocker(
-        substrate=ChordSubstrate(), repulsion=0.0, depth_target=2, max_roads=400,
-        road_width_m=DEFAULT_ROAD_WIDTH_M).identity
+    assert method.identity == CLEARANCE.identity
 
 
 def test_clearance_registered_in_compare_all_methods() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config")
-    method = instantiate(cfg.all_methods["clearance"])
+    method = load_method(cfg.all_methods["clearance"])
     assert isinstance(method, ClearanceReblocker)
 
 
@@ -363,7 +366,7 @@ def test_propose_routes_through_memoized_derivation() -> None:
 
     from reblock.derivations import propose
     block = _block_1808()
-    m = ClearanceReblocker(depth_target=2, substrate=GridSubstrate(res=0.75))
+    m = replace(CLEARANCE, depth_target=2, substrate=GridSubstrate(res=0.75))
     r1 = propose(m, block).roads
     r2 = propose(m, block).roads
     assert r1 is not None and r2 is not None
@@ -377,15 +380,15 @@ def test_substrate_config_group_instantiates_each() -> None:
     for name, ident in expected.items():
         with initialize_config_dir(version_base=None, config_dir=conf_dir):
             cfg = compose(config_name="config", overrides=[f"substrate={name}"])
-        sub = instantiate(cfg.substrate)
+        sub = load_substrate(cfg.substrate)
         assert sub.identity == ident
 
 
-def test_clearance_method_defaults_to_chord_diag_substrate() -> None:
+def test_clearance_method_ships_chord_diag_substrate() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="config", overrides=["method=clearance"])
-    method = instantiate(cfg.method)
+    method = load_method(cfg.method)
     assert isinstance(method, ClearanceReblocker)
     assert method.substrate.tag == "chord_diag"
 
@@ -394,15 +397,19 @@ def test_compare_registers_clearance_and_grid_variant() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config")
-    assert instantiate(cfg.all_methods["clearance"]).substrate.tag == "chord_diag"
-    assert instantiate(cfg.all_methods["clearance_grid"]).substrate.tag == "grid"
+    methods = load_methods(cfg.all_methods)
+    clearance, clearance_grid = methods["clearance"], methods["clearance_grid"]
+    assert isinstance(clearance, ClearanceReblocker)
+    assert isinstance(clearance_grid, ClearanceReblocker)
+    assert clearance.substrate.tag == "chord_diag"
+    assert clearance_grid.substrate.tag == "grid"
 
 
-def test_default_chord_diag_propose_is_deterministic() -> None:
-    # The committed gallery default -- its determinism is load-bearing.
+def test_shipped_chord_diag_propose_is_deterministic() -> None:
+    # The committed gallery configuration -- its determinism is load-bearing.
     block = _column_block_with_buildings(8)
-    p1 = ClearanceReblocker().propose(block)
-    p2 = ClearanceReblocker().propose(block)
+    p1 = CLEARANCE.propose(block)
+    p2 = CLEARANCE.propose(block)
     assert p1.roads is not None and p2.roads is not None and len(p1.roads) > 0
     assert p1.proposal_id.startswith("clearance:chord_diag:")
     assert [g.wkt for g in p1.roads.geometry] == [g.wkt for g in p2.roads.geometry]
@@ -413,6 +420,6 @@ def test_prebuilt_substrate_makes_the_method_uncacheable() -> None:
     # derive() bypasses the memoized propose (distinct ad-hoc graphs must not key-collide).
     g = RoutingGraph(pts=np.array([[0.0, 0.0], [1.0, 0.0]]), rows=np.array([0, 1]),
                      cols=np.array([1, 0]), edist=np.array([1.0, 1.0]), net_tol=0.5)
-    assert ClearanceReblocker(substrate=PrebuiltSubstrate(g)).identity is None
+    assert replace(CLEARANCE, substrate=PrebuiltSubstrate(g)).identity is None
     # a named substrate stays cacheable (non-None identity)
-    assert ClearanceReblocker().identity is not None
+    assert CLEARANCE.identity is not None

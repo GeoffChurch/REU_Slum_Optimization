@@ -14,6 +14,7 @@ from reblock.contracts import Block, Proposal, Region
 from reblock.derive.access import STREET_TOL
 from reblock.derive.network_metrics import _crosses_boundary, _road_lines
 from reblock.methods.peel import PeelReblocker
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 
 
 def reconciled_baseline(region: Region, merged: Block, tol: float = STREET_TOL) -> Proposal:
@@ -21,7 +22,7 @@ def reconciled_baseline(region: Region, merged: Block, tol: float = STREET_TOL) 
     blocks = sorted(region.blocks, key=lambda b: b.block_id)
     segments: list[BaseGeometry] = []
     for b in blocks:
-        prop = PeelReblocker(tol=tol).propose(b)
+        prop = PeelReblocker(tol=tol, road_width_m=DEFAULT_ROAD_WIDTH_M).propose(b)
         if prop.roads is not None and not prop.roads.empty:
             segments.extend(prop.roads.geometry)
     if not segments:

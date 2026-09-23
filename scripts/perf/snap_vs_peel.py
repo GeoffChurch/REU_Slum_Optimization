@@ -27,7 +27,7 @@ from typing import cast
 import numpy as np
 
 from reblock.budget import access_burden
-from reblock.contracts import Block, Screen, Source
+from reblock.contracts import Block
 from reblock.derive.access import (
     STREET_TOL,
     ParcelAdjacency,
@@ -58,21 +58,19 @@ def region_block_cached() -> Block:
         with CACHE.open("rb") as fh:
             return cast(Block, pickle.load(fh))
     from hydra import compose, initialize_config_dir
-    from hydra.utils import instantiate
 
     from reblock.pipeline import build_regions
-    from reblock.region import RegionBuilder, region_block
+    from reblock.presets import load_stages
+    from reblock.region import region_block
 
     overrides = ["metric=depth", "data=capetown_full", "screen=dense_compact",
                  "region_builder=dense_cluster", "region_builder.max_buildings=3000",
                  "max_blocks=1"]
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=overrides)
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    rb = cast(RegionBuilder, instantiate(cfg.region_builder))
+    stages = load_stages(cfg)
     t0 = time.perf_counter()
-    region = build_regions(source, screen, rb, None, 1)[0]
+    region = build_regions(stages.source, stages.screen, stages.region_builder, None, 1)[0]
     blk = region_block(region)
     print(f"  built region: {len(region)} blocks, {len(blk.parcels):,} parcels "
           f"({time.perf_counter() - t0:.0f} s)", flush=True)

@@ -1,8 +1,10 @@
 # A Screen (selectable like conf/method, conf/eval). Reads paths from the run's Source (a
 # KblockSource) at select() time; the top-level `metric` + `metric_gate` decide what's flagged
-# (pluggable via `metric=depth|depth_density|density_compactness` at the CLI).
+# (pluggable via `metric=depth|depth_density|density_compactness` at the CLI), and `counts` is the
+# `building_count` group's choice (`building_count=kblock|open_buildings`).
 _target_: reblock.screen.dense_compact.DenseCompactScreen
 metric: ${metric}
 gate: ${metric_gate}
 proxy_keep_n: ${proxy_keep_n}
 min_buildings: 10
+counts: ${building_count}

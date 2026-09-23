@@ -1,2 +1,4 @@
 # Single method per run (see conf/method/topology.yaml).
 _target_: reblock.methods.peel.PeelReblocker
+tol: {_target_: hydra.utils.get_object, path: reblock.derive.access.STREET_TOL}
+road_width_m: 7.0

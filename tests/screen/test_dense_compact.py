@@ -9,7 +9,9 @@ from pyproj import CRS
 from shapely.geometry import Point, box
 
 import reblock.derive_graph as dg
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
+from reblock.data.counts import OpenBuildingsCount
 from reblock.data.kblock import KblockSource
 from reblock.derivations import access_before
 from reblock.metric import AbsoluteGate, Depth
@@ -55,8 +57,10 @@ def test_select_two_tier_drops_shallow(tmp_path: Path) -> None:
     bp, dp = _write_synth(tmp_path)
     # proxy_keep_n far above the fixture size -> both A, B survive the (permissive) pre-filter;
     # the metric.fine (max depth) gate at 2.0 keeps A (max-depth 3), drops B (max-depth 1).
-    s = DenseCompactScreen(Depth(), AbsoluteGate(2.0), proxy_keep_n=1000, min_buildings=10)
-    src = KblockSource(bp, dp, region_id="test", min_buildings=10, member_buildings=None)
+    s = DenseCompactScreen(Depth(), AbsoluteGate(2.0), proxy_keep_n=1000, min_buildings=10,
+                           counts=OpenBuildingsCount())
+    src = KblockSource(bp, dp, region_id="test", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     assert s.select(src) == ["A"]
 
 
@@ -65,8 +69,10 @@ def test_select_flags_flagship_on_real_fixture() -> None:
     # flagship's real proxy (~3.75 = sqrt(n*A)/P over the free columns -- comfortably inside the
     # top 1000 of this fixture). Returned order is max-access-depth descending (not alphabetical),
     # so assert membership, not sort.
-    s = DenseCompactScreen(Depth(), AbsoluteGate(1.3))
-    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", member_buildings=None)
+    s = DenseCompactScreen(Depth(), AbsoluteGate(1.3), proxy_keep_n=1000, min_buildings=10,
+                           counts=OpenBuildingsCount())
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     ids = s.select(src)
     assert ids is not None and "ZAF.9.3.1_1_44882" in ids
 
@@ -75,8 +81,10 @@ def test_gate_drops_blocks_without_a_deep_parcel(tmp_path: Path) -> None:
     bp, dp = _write_synth(tmp_path)
     # A: max-depth 3; B: max-depth 1. The gate operates directly on the metric's fine score (for
     # Depth, the true max peel depth) -- AbsoluteGate(3.0) keeps only A.
-    s = DenseCompactScreen(Depth(), AbsoluteGate(3.0), proxy_keep_n=1000, min_buildings=10)
-    src = KblockSource(bp, dp, region_id="test", min_buildings=10, member_buildings=None)
+    s = DenseCompactScreen(Depth(), AbsoluteGate(3.0), proxy_keep_n=1000, min_buildings=10,
+                           counts=OpenBuildingsCount())
+    src = KblockSource(bp, dp, region_id="test", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     assert s.select(src) == ["A"]
 
 
@@ -102,8 +110,10 @@ def _write_sort_fixture(tmp: Path) -> tuple[str, str]:
 
 def test_select_ranks_by_max_depth_descending(tmp_path: Path) -> None:
     bp, dp = _write_sort_fixture(tmp_path)
-    s = DenseCompactScreen(Depth(), AbsoluteGate(1.0), proxy_keep_n=1000, min_buildings=10)
-    src = KblockSource(bp, dp, region_id="test", min_buildings=10, member_buildings=None)
+    s = DenseCompactScreen(Depth(), AbsoluteGate(1.0), proxy_keep_n=1000, min_buildings=10,
+                           counts=OpenBuildingsCount())
+    src = KblockSource(bp, dp, region_id="test", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     # deep "zzz" (max-depth 3) outranks shallow "aaa" (max-depth 1) -> reverse-alphabetical,
     # which alphabetical sorted() could never produce -> proves the severity sort.
     assert s.select(src) == ["zzz", "aaa"]
@@ -135,8 +145,10 @@ def test_select_result_is_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         return access_before(blk)
     monkeypatch.setattr("reblock.screen.dense_compact.access_before", spy)
 
-    s = DenseCompactScreen(Depth(), AbsoluteGate(2.0), proxy_keep_n=1000, min_buildings=10)
-    src = KblockSource(bp, dp, region_id="test", min_buildings=10, member_buildings=None)
+    s = DenseCompactScreen(Depth(), AbsoluteGate(2.0), proxy_keep_n=1000, min_buildings=10,
+                           counts=OpenBuildingsCount())
+    src = KblockSource(bp, dp, region_id="test", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     first = s.select(src)
     after_first = box_["n"]
     second = s.select(src)                 # (source_hash + gates)-keyed cache hit

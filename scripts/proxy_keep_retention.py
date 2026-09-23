@@ -49,9 +49,11 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 
+from reblock.contracts import CountingScreen
 from reblock.data.counts import resolved
+from reblock.data.kblock import KblockSource
+from reblock.presets import load_stages
 
 KS = (1, 5, 15)
 VARIANTS = ("depth", "depth_density")     # the only two needs_peel metrics with example configs
@@ -64,7 +66,9 @@ def required_n(variant: str, city: str) -> tuple[int, dict[int, int]]:
         cfg = compose(config_name="compare_config",
                       overrides=[f"+example={variant}", f"data={city}_full",
                                  f"proxy_keep_n={UNBOUNDED}"])
-    source, screen = instantiate(cfg.data), instantiate(cfg.screen)
+    stages = load_stages(cfg)
+    source, screen = stages.source, stages.screen
+    assert isinstance(source, KblockSource) and isinstance(screen, CountingScreen)
     ranked = screen.select(source)
 
     blocks = gpd.read_parquet(

@@ -30,7 +30,13 @@ from reblock.contracts import Block
 from reblock.data.settlements import exclusion_holdout
 from reblock.eval.agreement import buffered_iou
 from reblock.methods.clearance import ClearanceReblocker
-from reblock.permeability import EgressContext, PermeabilityParams, permeability
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+)
 from scripts.consensus_matrix import _bc, donor_quality, extract_consensus, fit_donors
 from scripts.pair_matrix import (
     desire_source,
@@ -132,7 +138,9 @@ def main() -> None:
         ctx = EgressContext.of(recipient, PermeabilityParams())
         perm_own = float(permeability(ctx, own))
 
-        direct_full = ClearanceReblocker().propose(recipient).roads
+        direct_full = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
+                                         max_roads=400,
+                                         road_width_m=DEFAULT_ROAD_WIDTH_M).propose(recipient).roads
         cum = direct_full.geometry.length.cumsum()
         direct_len = direct_full[cum <= target_len] if target_len > 0 else direct_full.iloc[:0]
         # Matched on DISPLACEMENT to the block's own network: same cost in homes, so the

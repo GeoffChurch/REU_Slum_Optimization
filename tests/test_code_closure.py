@@ -14,6 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from reblock.derive_graph import _closure_paths
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "reblock"
 
@@ -85,13 +87,23 @@ def test_a_methods_code_version_is_blind_to_its_siblings() -> None:
     def modules(inst: object) -> frozenset[Path]:
         return _closure_paths(type(inst).__module__) | _closure_paths(_propose_impl.__module__)
 
-    clearance, cycle = modules(ClearanceReblocker()), modules(CycleNativeReblocker())
+    clearance = modules(ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0,
+                                           depth_target=2, max_roads=400,
+                                           road_width_m=DEFAULT_ROAD_WIDTH_M))
+    cycle = modules(CycleNativeReblocker(substrate=ChordSubstrate(), max_displacement=0.10,
+                                         max_cycles=400, shortlist=8, params=PermeabilityParams(),
+                                         road_width_m=DEFAULT_ROAD_WIDTH_M))
     assert clearance != cycle
     assert SRC / "methods" / "cycle_native.py" not in clearance
     assert SRC / "methods" / "clearance.py" not in cycle
 
-    a = _code_version(_propose_impl, (ClearanceReblocker(),))
-    b = _code_version(_propose_impl, (CycleNativeReblocker(),))
+    a = _code_version(_propose_impl, (ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0,
+                                                         depth_target=2, max_roads=400,
+                                                         road_width_m=DEFAULT_ROAD_WIDTH_M),))
+    b = _code_version(_propose_impl, (CycleNativeReblocker(substrate=ChordSubstrate(),
+                                                           max_displacement=0.10, max_cycles=400,
+                                                           shortlist=8, params=PermeabilityParams(),
+                                                           road_width_m=DEFAULT_ROAD_WIDTH_M),))
     assert a != b, "two methods must not share a code version"
 
 

@@ -56,28 +56,30 @@ def test_primitive_proxy_and_fine_closed_forms() -> None:
 
 def test_combinators_fold_proxy_fine_and_needs_peel() -> None:
     b = _blocks()
-    dd = Product([Depth(), Density()])
+    dd = Product([Depth(), Density()], name="product")
     assert np.allclose(dd.proxy(b).to_numpy(),
                        Depth().proxy(b).to_numpy() * Density().proxy(b).to_numpy())
     assert dd.fine(7.0, 16.0, 4.0, 8.0) == 7.0 * (16 / 4)
     assert dd.needs_peel is True                        # OR over children
-    dc = Product([Density(), Compactness()])
+    dc = Product([Density(), Compactness()], name="product")
     assert dc.needs_peel is False                       # no Depth in the tree
     assert dc.fine(0.0, 16.0, 4.0, 8.0) == (16 / 4) * (4 / 64)
     # Power over a SUB-EXPRESSION: sqrt(depth*density)
-    root = Power(Product([Depth(), Density()]), 0.5)
+    root = Power(Product([Depth(), Density()], name="product"), 0.5, name="power")
     assert root.fine(9.0, 16.0, 4.0, 8.0) == (9.0 * (16 / 4)) ** 0.5
     assert np.allclose(root.proxy(b).to_numpy(), dd.proxy(b).to_numpy() ** 0.5)
     # Count weights density x compactness by total building count -> n^2 / P^2
-    ndc = Product([Count(), Density(), Compactness()])
+    ndc = Product([Count(), Density(), Compactness()], name="product")
     assert ndc.fine(0.0, 16.0, 4.0, 8.0) == 16.0 * (16 / 4) * (4 / 64)
     assert ndc.needs_peel is False
 
 
 def test_identity_distinguishes_expressions() -> None:
-    assert Product([Depth(), Density()]).identity != Product([Density(), Compactness()]).identity
+    depth_density = Product([Depth(), Density()], name="product")
+    density_compactness = Product([Density(), Compactness()], name="product")
+    assert depth_density.identity != density_compactness.identity
     assert Depth().identity == Depth().identity
-    assert Power(Depth(), 2.0).identity != Power(Depth(), 3.0).identity
+    assert Power(Depth(), 2.0, name="power").identity != Power(Depth(), 3.0, name="power").identity
 
 
 def test_gate_absolute_and_percentile() -> None:

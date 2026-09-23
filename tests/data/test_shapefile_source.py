@@ -36,7 +36,7 @@ def test_streets_excludes_interior_gap_rings() -> None:
     squares = [box(x, y, x + 1, y + 1) for x in range(3) for y in range(3)
                if not (x == 1 and y == 1)]
     raw = gpd.GeoDataFrame(geometry=squares, crs=utm)
-    block = next(ShapefileSource("unused", region_id="donut")._iter_blocks(
+    block = next(ShapefileSource("unused", region_id="donut", assumed_crs=None)._iter_blocks(
         raw, utm, source_content_hash=None))
     assert isinstance(block.boundary, Polygon)    # a single block is a Polygon (holes and all)
     assert len(block.boundary.interiors) == 1     # the central hole really exists
@@ -48,7 +48,7 @@ def test_missing_crs_without_assumed_crs_raises() -> None:
     # (e.g. defaulting to Web Mercator) can silently land parcels on Null
     # Island. Fail loud instead.
     with pytest.raises(ValueError, match="CRS"):
-        ShapefileSource(PHULE, region_id="phule").region()
+        ShapefileSource(PHULE, region_id="phule", assumed_crs=None).region()
 
 
 def test_epworth_full_drain_is_non_fatal_and_skips_unloadable_components() -> None:

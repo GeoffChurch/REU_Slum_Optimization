@@ -18,11 +18,11 @@ from dataclasses import dataclass
 
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
-from reblock.methods.arterial.costs import ArterialCost, Length
-from reblock.methods.arterial.engines import ArterialEngine, ExactEngine
-from reblock.methods.arterial.objectives import ArterialObjective, Directness
-from reblock.methods.arterial.realize import ChordRealizer, SnapToBoundary
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.methods.arterial.costs import ArterialCost
+from reblock.methods.arterial.engines import ArterialEngine
+from reblock.methods.arterial.objectives import ArterialObjective
+from reblock.methods.arterial.realize import ChordRealizer
+from reblock.permeability import with_width
 
 
 @dataclass
@@ -31,28 +31,28 @@ class GreedyArterialReblocker:
     # shippable navigability method) or IdealChord (a diagnostic isolating the effect of
     # frontage-snapping, NOT a universal directness ceiling -- see the design doc's correction
     # note).
-    realizer: ChordRealizer = SnapToBoundary()
+    realizer: ChordRealizer
     # What a road gains -- Access, Efficiency or Directness (see objectives.py).
-    objective: ArterialObjective = Directness()
-    n_anchors: int = 32
-    top_k: int = 8
-    max_roads: int = 15
+    objective: ArterialObjective
+    n_anchors: int
+    top_k: int
+    max_roads: int
     # What a road is charged -- Length (per metre), Displacement (per home newly displaced) or
     # Repulsion (soft quadratic-tail proximity, never zero, CELF-safe). See costs.py.
-    cost: ArterialCost = Length()
+    cost: ArterialCost
     # Total width of the roads this method emits; also the displacement corridor it
     # scores against (half-width each side). Stamped on every road it returns.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
-    workers: int = 16         # fork-pool size for per-step candidate scoring; 1 == serial no-op
-    # Which candidates get scored exactly, each step -- ExactEngine (default, byte-identical) or
+    road_width_m: float
+    workers: int              # fork-pool size for per-step candidate scoring; 1 == serial no-op
+    # Which candidates get scored exactly, each step -- ExactEngine (the reference) or
     # LazyEngine (CELF lazy-greedy, valid only for submodular objectives). Injected rather than
     # selected by lazy/candidate_policy/rescore_every flags, matching `realizer` above.
-    engine: ArterialEngine = ExactEngine()
+    engine: ArterialEngine
     # A CAP, not a mode switch: 0 = uncapped (every network vertex + arc-length samples,
     # byte-identical); >0 only ever REDUCES that uncapped anchor count, falling back to
     # ~max_anchors arc-length samples when the uncapped set does not already fit -- see
     # _anchor_points.
-    max_anchors: int = 0
+    max_anchors: int
 
     @property
     def identity(self) -> Hashable | None:

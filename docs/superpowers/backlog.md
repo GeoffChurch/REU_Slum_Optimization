@@ -1877,6 +1877,24 @@ not move it much, but that is an argument, not a measurement.
 - **Continental scale** — multi-UTM-zone or equal-area CRS handling (fail-loud on a multi-zone
   extent); `git-lfs` (or a downloader instead of committed fixtures) once datasets multiply.
 
+## Presets spell every field -- what still has a default (2026-09-23)
+
+Every class conf/ instantiates declares its fields without defaults, so a preset that omits one is
+a `TypeError` at load, and `tests/test_presets.py` loads them all. Three copies of a shipped value
+survive outside the presets:
+
+- **`PermeabilityParams` keeps its defaults.** The in-browser solver (`web/src/py/solve.py`) builds
+  `PermeabilityParams()` because the authoring bundle carries no params. So `cycle_native`,
+  `resistance_greedy` and `resistance_lp` are configured with
+  `params: {_target_: reblock.permeability.PermeabilityParams}` -- "the defaults" -- while
+  `compare.load_permeability_config` reads the same numbers from `conf/permeability.yaml`. Equal
+  today only because neither has been tuned alone. Needs the authoring bundle to carry the params
+  (a bake); then the defaults go and both readers take `conf/permeability.yaml`.
+- **`demand_edge_weights` defaults `buffer_m`/`eps`/`gamma`** to the module constants the
+  `demand_greedy` preset now spells, for its two direct callers (a test, `scripts/consensus_matrix`).
+- **`OSMDesireLines.cache_dir: null` means `~/.cache/reblock/osm`**, resolved inside the class; the
+  footprint and full-city caches name their directory in the preset instead.
+
 ## Licensing / data hygiene (see kblock-source spec)
 
 - Add a top-level `LICENSE` (Apache-2.0 recommended, pending owner confirmation vs GPLv3).

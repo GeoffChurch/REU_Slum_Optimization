@@ -16,6 +16,8 @@ from reblock.data.counts import KblockCount, resolved
 from reblock.data.kblock import KblockSource
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.methods.clearance import ClearanceReblocker
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.region import (
     ConvexHullRegionBuilder,
     DenseClusterRegionBuilder,
@@ -227,9 +229,10 @@ def test_region_reblock_reblocks_the_region_block_against_its_existing_network()
     rb = region_block([a, b])
 
     # depth_target=1: the lone center parcel of a 3x3 all-perimeter-frontage grid is already at
-    # depth 2 (the default target), which would let ClearanceReblocker propose zero roads -- too
+    # depth 2 (the shipped target), which would let ClearanceReblocker propose zero roads -- too
     # trivial to prove the region_reblock == propose(region-block) plumbing invariant below.
-    method = ClearanceReblocker(depth_target=1)
+    method = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                                max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
     result = region_reblock([a, b], method, [KComplexityEval()])
 
     assert isinstance(result, Result)
@@ -299,7 +302,8 @@ def test_convex_hull_region_builder_raises_clear_error_for_unknown_block_id() ->
 
 
 def test_kblock_source_block_geometries_is_cheap_and_wellformed() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     geoms = src.block_geometries()
 
     assert not geoms.empty
@@ -308,14 +312,16 @@ def test_kblock_source_block_geometries_is_cheap_and_wellformed() -> None:
 
 
 def test_kblock_building_points_are_points_in_region_utm() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     pts = src.building_geometries()
     assert not pts.empty and (pts.geometry.geom_type == "Point").all()
     assert pts.crs == src.block_geometries().crs                 # same UTM -> overlays align
 
 
 def test_kblock_building_points_bbox_windows() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     allpts = src.building_geometries()
     minx, miny, maxx, maxy = allpts.total_bounds
     # Bottom-left quadrant of the extent -- a strict, non-empty subset (the DJI points
@@ -325,7 +331,8 @@ def test_kblock_building_points_bbox_windows() -> None:
 
 
 def test_kblock_block_carries_building_points() -> None:
-    block = next(iter(KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji",
+    block = next(iter(KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10,
+                                   block_ids=None, building_tier=SpacingDiscs,
                                    member_buildings=None).region().blocks))
     assert not block.building_geometries.empty
     assert (block.building_geometries.geometry.geom_type == "Point").all()
@@ -333,7 +340,8 @@ def test_kblock_block_carries_building_points() -> None:
 
 
 def test_kblock_block_geometries_bbox_windows() -> None:
-    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                       building_tier=SpacingDiscs, member_buildings=None)
     allg = src.block_geometries()
     minx, miny, maxx, maxy = allg.total_bounds
     sub = (minx, miny, (minx + maxx) / 2, (miny + maxy) / 2)
@@ -350,7 +358,8 @@ def test_dense_cluster_grows_seed_to_buildings_budget() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]], depth_fn=None)
 
@@ -367,7 +376,8 @@ def test_dense_cluster_small_budget_returns_seed_only() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     out = DenseClusterRegionBuilder(max_buildings=40).build(bg, [["DJI.3_1_3238"]], depth_fn=None)
     assert out == [["DJI.3_1_3238"]]
@@ -379,7 +389,8 @@ def test_dense_cluster_region_is_contiguous() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     out = DenseClusterRegionBuilder(max_buildings=150).build(bg, [["DJI.3_1_3238"]], depth_fn=None)
     by_id = dict(zip(bg["block_id"], bg.geometry, strict=True))
@@ -392,7 +403,8 @@ def test_dense_cluster_deterministic() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     builder = DenseClusterRegionBuilder(max_buildings=150)
     seed = [["DJI.3_1_3238"]]
@@ -423,7 +435,8 @@ def test_dense_cluster_falls_back_to_block_count_without_building_count() -> Non
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
     bg = bg.drop(columns=["building_count"])
 
@@ -440,15 +453,16 @@ def test_dense_cluster_empty_groups_returns_empty_list() -> None:
     # `block_geometries()` exposes the VENDOR count; a region builder consumes the RESOLVED one,
     # so the test resolves exactly as `build_regions` does. KblockCount keeps the vendor numbers
     # this test's expectations (53 / 107 / 66) were written against.
-    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", member_buildings=None)
+    _src = KblockSource(DJI_BLOCKS, DJI_BLD, region_id="dji", min_buildings=10, block_ids=None,
+                        building_tier=SpacingDiscs, member_buildings=None)
     bg = resolved(_src.block_geometries(), _src.buildings_path, KblockCount())
-    assert DenseClusterRegionBuilder().build(bg, [], depth_fn=None) == []
+    assert DenseClusterRegionBuilder(max_buildings=150).build(bg, [], depth_fn=None) == []
 
 
 def test_dense_cluster_raises_clear_error_for_unknown_block_id() -> None:
     geoms = _block_geoms(("A", 0, 0), ("B", 1, 0))
     with pytest.raises(ValueError, match="ZZZ"):
-        DenseClusterRegionBuilder().build(geoms, [["A", "ZZZ"]], depth_fn=None)
+        DenseClusterRegionBuilder(max_buildings=150).build(geoms, [["A", "ZZZ"]], depth_fn=None)
 
 
 def test_dense_cluster_warns_for_a_non_adjacent_seed_group(
@@ -462,7 +476,8 @@ def test_dense_cluster_warns_for_a_non_adjacent_seed_group(
     # don't error, still grow).
     geoms = _block_geoms(("A", 0, 0), ("C", 5, 0))
     with caplog.at_level(logging.WARNING, logger="reblock.region"):
-        result = DenseClusterRegionBuilder().build(geoms, [["A", "C"]], depth_fn=None)
+        result = DenseClusterRegionBuilder(max_buildings=150).build(geoms, [["A", "C"]],
+                                                                    depth_fn=None)
     assert result == [["A", "C"]]                      # still grown/passed through, just disjoint
     assert any("dense_cluster" in r.message for r in caplog.records)
     assert any("convex_hull" in r.message for r in caplog.records)
@@ -504,7 +519,8 @@ def test_block_depths_matches_access_before_peel() -> None:
     root = Path(__file__).resolve().parent
     src = KblockSource(root / "data/kblock/blocks_dji_sample.parquet",
                        root / "data/kblock/buildings_dji_sample.parquet", "dji",
-                       block_ids=["DJI.3_1_1808"], member_buildings=None)
+                       block_ids=["DJI.3_1_1808"], min_buildings=10, building_tier=SpacingDiscs,
+                       member_buildings=None)
     block = next(iter(src.region().blocks))
     expected = float(access_before(block).max())
     assert block_depths(src, ["DJI.3_1_1808"]) == {"DJI.3_1_1808": expected}
@@ -524,8 +540,8 @@ def test_block_depths_empty_for_non_peelable_or_empty() -> None:
     assert block_depths(_Bare(), ["anything"]) == {}
     root = Path(__file__).resolve().parent
     src = KblockSource(root / "data/kblock/blocks_dji_sample.parquet",
-                       root / "data/kblock/buildings_dji_sample.parquet", "dji",
-                       member_buildings=None)
+                       root / "data/kblock/buildings_dji_sample.parquet", "dji", min_buildings=10,
+                       block_ids=None, building_tier=SpacingDiscs, member_buildings=None)
     assert block_depths(src, []) == {}
 
 

@@ -45,7 +45,7 @@ between them: K=1 is the pure one-shot LP, large K approaches the greedy.
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import geopandas as gpd
 import numpy as np
@@ -62,9 +62,8 @@ from reblock.buildings import Extents, IncrementalOverlap
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
 from reblock.methods.resistance_greedy import _mesh, linearized_gain
-from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
+from reblock.methods.substrates import RoutingGraph, Substrate
 from reblock.permeability import (
-    DEFAULT_ROAD_WIDTH_M,
     EgressContext,
     PermeabilityParams,
     _road_corridor,
@@ -201,21 +200,21 @@ def solve_coverage_lp(
 class ResistanceLPReblocker:
     """Choose the road set by LP against a displacement budget, re-linearizing between chunks."""
 
-    substrate: Substrate = field(default_factory=ChordSubstrate)
-    max_displacement: float = 0.10
-    # A HARD metre cap, off by default. An in-objective length PRICE was built here and deleted:
-    # normalized per instance it was a pure loss at block scale (displacement 0.0271 -> 0.0354 with
-    # no metre saving) and far too weak where it was meant to help -- on the sparse `depth` region,
-    # price 16 still drew 33,623 m against clearance_looped's 18,061 m while displacing 2.2x more.
-    # The web there is not the method over-building (its block-scale network is the SHORTEST of any
-    # method); it is that a 10%-displacement budget on sparse fabric permits enormous length. That
-    # is a gap in lens A, not something a method-side knob patches.
-    max_road_m: float = 1e6
-    chunks: int = 8
-    params: PermeabilityParams = field(default_factory=PermeabilityParams)
+    substrate: Substrate
+    max_displacement: float
+    # A HARD metre cap, off as shipped (1e6). An in-objective length PRICE was built here and
+    # deleted: normalized per instance it was a pure loss at block scale (displacement 0.0271 ->
+    # 0.0354 with no metre saving) and far too weak where it was meant to help -- on the sparse
+    # `depth` region, price 16 still drew 33,623 m against clearance_looped's 18,061 m while
+    # displacing 2.2x more. The web there is not the method over-building (its block-scale network
+    # is the SHORTEST of any method); it is that a 10%-displacement budget on sparse fabric permits
+    # enormous length. That is a gap in lens A, not something a method-side knob patches.
+    max_road_m: float
+    chunks: int
+    params: PermeabilityParams
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:

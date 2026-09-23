@@ -5,6 +5,7 @@ Those two properties are exactly what separate it from `clearance` (which has no
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import cast
 
 import geopandas as gpd
@@ -16,8 +17,15 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.demand_greedy import DemandGreedyReblocker, demand_edge_weights
 from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 
 UTM = CRS.from_epsg(32734)
+
+# Every setting spelled once, at `conf/method/demand_greedy.yaml`'s values but with no prior; each
+# test supplies its own prior and varies what it is about with `replace`.
+DEMAND = DemandGreedyReblocker(desire_source=None, substrate=ChordSubstrate(), buffer_m=3.0,
+                               eps=0.1, gamma=1.0, depth_target=2, max_roads=400,
+                               road_width_m=DEFAULT_ROAD_WIDTH_M)
 
 
 def _slab(w: int, h: int) -> Block:
@@ -66,8 +74,8 @@ def test_a_sparse_prior_still_reaches_every_parcel() -> None:
     """The reason to use desire lines as a PRIOR rather than as the roads: one line must still
     yield a network that serves the whole block, which `osm_footpaths` cannot promise."""
     block = _slab(4, 4)
-    proposal = DemandGreedyReblocker(
-        desire_source=_Source(_line_at(block, 2.0)), depth_target=1).propose(block)
+    proposal = replace(
+        DEMAND, desire_source=_Source(_line_at(block, 2.0)), depth_target=1).propose(block)
 
     assert cast(int, proposal.params["demand_segments"]) == 1
     assert cast(int, proposal.params["max_depth_after"]) <= 1
@@ -86,8 +94,8 @@ def test_the_prior_can_only_choose_among_substrate_edges() -> None:
     """
     block = _slab(4, 4)
     diagonal = gpd.GeoDataFrame(geometry=[LineString([(0, 0), (4, 4)])], crs=block.crs)
-    roads = DemandGreedyReblocker(
-        desire_source=_Source(diagonal), depth_target=1).propose(block).roads
+    roads = replace(
+        DEMAND, desire_source=_Source(diagonal), depth_target=1).propose(block).roads
     assert roads is not None
 
     nodes = {(round(x, 6), round(y, 6)) for x, y in ChordSubstrate().build(block).pts}
@@ -103,5 +111,5 @@ def test_a_live_source_makes_the_method_uncacheable() -> None:
     """A live fetch must propagate None upward, or a memoized proposal could be served for OSM
     that has since changed -- the same propagation ClearanceReblocker does for its substrate."""
     live = _Source(gpd.GeoDataFrame(geometry=[], crs=UTM), identity=None)
-    assert DemandGreedyReblocker(desire_source=live).identity is None
-    assert DemandGreedyReblocker(desire_source=None).identity is not None
+    assert replace(DEMAND, desire_source=live).identity is None
+    assert replace(DEMAND, desire_source=None).identity is not None

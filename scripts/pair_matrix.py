@@ -56,9 +56,12 @@ from scipy import stats
 from shapely.ops import unary_union
 
 from reblock.budget import displacement
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
+from reblock.data.counts import OpenBuildingsCount
 from reblock.data.kblock import KblockSource
 from reblock.data.osm_extract import (
+    FOOTPATH_TAGS,
     PbfDesireLines,
     utm_zone_epsg,
 )
@@ -68,6 +71,7 @@ from reblock.derivations import access_before
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.desire_lines import DesireLineSource, OSMDesireLines
 from reblock.methods.osm_footpaths import interior_desire_lines
+from reblock.methods.substrates import ChordSubstrate
 from reblock.metric import (
     DENSITY_COMPACTNESS_FLOOR,
     Compactness,
@@ -162,7 +166,7 @@ def default_screen(min_buildings: int = 30) -> DenseCompactScreen:
     return DenseCompactScreen(
         Product(name="density_compactness", terms=(Density(), Compactness())),
         Gate(kind="absolute", value=DENSITY_COMPACTNESS_FLOOR),
-        min_buildings=min_buildings,
+        min_buildings=min_buildings, proxy_keep_n=1000, counts=OpenBuildingsCount(),
     )
 
 
@@ -199,7 +203,8 @@ def zone_source(epsg: int, *, min_buildings: int = 30) -> KblockSource:
         subset.to_parquet(zone_path)
         print(f"  materialized {zone_path.name}: {len(subset):,} blocks", flush=True)
     return KblockSource(zone_path, buildings, region_id=f"shortlist-z{epsg}",
-                        min_buildings=min_buildings, member_buildings=None)
+                        min_buildings=min_buildings, block_ids=None, building_tier=SpacingDiscs,
+                        member_buildings=None)
 
 
 def displacement_fraction(block: Block, roads: gpd.GeoDataFrame) -> float:
@@ -302,7 +307,8 @@ def load_pools(
     """
     screen = screen or default_screen(min_buildings)
     region_builder = region_builder or IdentityRegionBuilder()
-    src_all = source or cached_kblock_source(city, min_buildings=min_buildings,
+    src_all = source or cached_kblock_source(city, min_buildings=min_buildings, block_ids=None,
+                                             cache_dir=DEFAULT_CACHE, building_tier=SpacingDiscs,
                                              member_buildings=None)
 
     flagged = screen.select(src_all)
@@ -335,6 +341,7 @@ def load_pools(
                         member_buildings=src_all.member_buildings)
            if source is not None
            else cached_kblock_source(city, block_ids=ids, min_buildings=min_buildings,
+                                     cache_dir=DEFAULT_CACHE, building_tier=SpacingDiscs,
                                      member_buildings=None))
     blocks = [b for b in src.region().blocks if len(b.parcels) >= MIN_PARCELS]
     blocks.sort(key=lambda b: b.block_id)
@@ -732,13 +739,15 @@ def desire_source(kind: str, iso: str = "ZAF") -> DesireLineSource:
     third-party service that, measured here, failed 214 of 241 donor fetches in one run.
     """
     if kind == "overpass":
-        return OSMDesireLines()
+        return OSMDesireLines(tags=FOOTPATH_TAGS,
+                              endpoint="https://overpass-api.de/api/interpreter", cache_dir=None,
+                              snapshot=None, timeout_s=60.0)
     pbf = DEFAULT_CACHE / "osm_pbf" / PBF_BY_ISO[iso]
     if not pbf.exists():
         raise SystemExit(
             f"missing {pbf}\ndownload it from https://download.geofabrik.de/, or pass "
             f"--desire-source overpass to use the live API instead.")
-    return PbfDesireLines(pbf_path=pbf)
+    return PbfDesireLines(pbf_path=pbf, tags=FOOTPATH_TAGS)
 
 
 def fetch_donor_lines(
@@ -805,7 +814,9 @@ def score_pair(
 
     t = time.time()
     road_len = float(moved.geometry.length.sum())
-    direct = ClearanceReblocker().propose(recipient).roads
+    direct = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
+                                max_roads=400,
+                                road_width_m=DEFAULT_ROAD_WIDTH_M).propose(recipient).roads
     # Length-match the baseline by truncating to a prefix of comparable total length.
     cum = direct.geometry.length.cumsum()
     direct = direct[cum <= road_len] if road_len > 0 else direct.iloc[:0]

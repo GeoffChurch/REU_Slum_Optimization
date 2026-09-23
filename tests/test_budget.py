@@ -18,6 +18,7 @@ from reblock.buildings import ANCHOR_COL, SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, ParcelAdjacency
 from reblock.methods.clearance import ClearanceReblocker
+from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
@@ -59,7 +60,9 @@ def test_road_drainage_trunks_exceed_leaves() -> None:
     # cell, so the default target is satisfied by ONE road (no trunk/leaf branching to measure);
     # depth_target=1 forces every parcel to the street, producing a genuine branching tree.
     block = _grid_block(5)
-    roads = ClearanceReblocker(depth_target=1).propose(block).roads
+    roads = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
+                               max_roads=400,
+                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None
     drain = road_drainage(block, roads)
     assert len(drain) == len(roads) and max(drain) > min(drain) and max(drain) >= 2
@@ -78,7 +81,9 @@ def test_road_drainage_floating_roads_get_zero() -> None:
 def test_efficiency_and_directness_rise_with_roads() -> None:
     from reblock.budget import network_efficiency
     block = _grid_block(5)
-    roads = ClearanceReblocker().propose(block).roads
+    roads = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
+                               max_roads=400,
+                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None
     e_none, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, roads.iloc[:0]))   # no roads
     e_full, d_full = network_efficiency(block, roads)
@@ -117,7 +122,9 @@ def test_directness_is_a_bounded_circuity_ratio() -> None:
 
     from reblock.budget import network_efficiency
     block = _grid_block(5)
-    roads = ClearanceReblocker().propose(block).roads
+    roads = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
+                               max_roads=400,
+                               road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None
     _, d_roads = network_efficiency(block, roads)
     chord = with_width(gpd.GeoDataFrame(geometry=[LineString([(2.5, 0.0), (2.5, 5.0)])], crs=UTM),

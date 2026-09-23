@@ -20,7 +20,7 @@ from shapely import make_valid, voronoi_polygons
 from shapely.geometry import GeometryCollection, MultiPoint, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
-from reblock.buildings import ANCHOR_COL, Extents, SpacingDiscs
+from reblock.buildings import ANCHOR_COL, Extents
 from reblock.contracts import BBox, Block, Region
 from reblock.data._util import _window
 from reblock.data.counts import RAW_COUNT
@@ -57,9 +57,8 @@ def _voronoi_parcels(poly: Polygon, points: list[Point], crs: CRS) -> gpd.GeoDat
 
 class KblockSource:
     def __init__(self, blocks_path: str | Path, buildings_path: str | Path,
-                 region_id: str = "kblock", *, min_buildings: int = 10,
-                 block_ids: list[str] | None = None,
-                 building_tier: Callable[[gpd.GeoDataFrame], Extents] = SpacingDiscs,
+                 region_id: str, *, min_buildings: int, block_ids: list[str] | None,
+                 building_tier: Callable[[gpd.GeoDataFrame], Extents],
                  member_buildings: BuildingSource | None) -> None:
         self.blocks_path = Path(blocks_path)
         self.buildings_path = Path(buildings_path)
@@ -71,8 +70,7 @@ class KblockSource:
         # reading `buildings_path` over the whole corpus; this feeds only `region()`, which the
         # pipeline calls after narrowing `block_ids` to the chosen members. None means "the same
         # parquet the screen reads" -- a real choice, not a fallback: at the point and area tiers
-        # that file already holds everything the model needs. Required, so every construction
-        # states which it wants; `conf/buildings/` spells the point and area tiers' choice `null`.
+        # that file already holds everything the model needs.
         self.member_buildings: BuildingSource = (
             member_buildings if member_buildings is not None
             else ParquetBuildings(self.buildings_path))

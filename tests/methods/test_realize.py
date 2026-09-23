@@ -16,7 +16,7 @@ def test_ideal_chord_returns_the_chord_untouched() -> None:
 
 def test_realizers_report_whether_they_snap() -> None:
     """`snaps` exists so no consumer has to ask which realizer it holds."""
-    assert SnapToBoundary().snaps is True
+    assert SnapToBoundary(lam=2.0).snaps is True
     assert IdealChord().snaps is False
 
 
@@ -29,7 +29,7 @@ def test_ideal_chord_identity_carries_no_lam() -> None:
 
 def test_both_satisfy_the_protocol() -> None:
     """Both implementations conform to ChordRealizer protocol; non-conformers don't."""
-    snap_to_boundary = SnapToBoundary()
+    snap_to_boundary = SnapToBoundary(lam=2.0)
     ideal_chord = IdealChord()
 
     # Positive: both are ChordRealizer instances

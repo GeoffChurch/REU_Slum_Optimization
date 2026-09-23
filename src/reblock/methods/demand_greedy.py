@@ -33,7 +33,7 @@ to a pure shortest-path drainage tree -- the honest ablation for "how much is th
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import geopandas as gpd
 import numpy as np
@@ -47,8 +47,8 @@ from reblock.derive_graph import config_identity
 from reblock.methods.clearance import greedy_drainage
 from reblock.methods.desire_lines import DesireLineSource
 from reblock.methods.osm_footpaths import interior_desire_lines
-from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.methods.substrates import RoutingGraph, Substrate
+from reblock.permeability import with_width
 
 # Guards the divide when an edge sits entirely outside the demand field, and sets how much cheaper
 # a fully-in-demand edge is than a fully-outside one: at gamma=1 the ratio is (eps+1)/eps = 11x.
@@ -99,16 +99,16 @@ def demand_edge_weights(
 class DemandGreedyReblocker:
     """Greedy drainage tree whose routing is attracted to a desire-line demand field."""
 
-    desire_source: DesireLineSource | None = None
-    substrate: Substrate = field(default_factory=ChordSubstrate)
-    buffer_m: float = BUFFER_M
-    eps: float = DEMAND_EPS
-    gamma: float = DEMAND_GAMMA
-    depth_target: int = 2
-    max_roads: int = 400
+    desire_source: DesireLineSource | None
+    substrate: Substrate
+    buffer_m: float
+    eps: float
+    gamma: float
+    depth_target: int
+    max_roads: int
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:

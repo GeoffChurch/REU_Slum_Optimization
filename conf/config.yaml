@@ -8,6 +8,7 @@ defaults:
   - buildings: spacing
   - desire_source: osm
   - metric: depth_density_proxy
+  - building_count: open_buildings
   - _self_
 
 # Top-level scalars are the interpolation sources the data/method config

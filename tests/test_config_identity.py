@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 
 from reblock.derive_graph import Identified, config_identity
+from reblock.presets import load_methods
 
 # Settings that cannot change the output, by qualified field name -- each the one field its class
 # exempts. A new entry here needs a reason in that class.
@@ -78,12 +78,11 @@ def _configured_methods() -> dict[str, Identified]:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
     out: dict[str, Identified] = {}
-    for name in cfg.all_methods:
+    for name, method in load_methods(cfg.all_methods).items():
         if name in NEEDS_NETWORK:
             continue
-        method = instantiate(cfg.all_methods[name])
         assert isinstance(method, Identified), name
-        out[str(name)] = method
+        out[name] = method
     return out
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol, cast, runtime_checkable
+from typing import ClassVar, Protocol, cast, runtime_checkable
 
 import numpy as np
 import pandas as pd
@@ -67,9 +67,9 @@ def _cols(blocks: GeoDataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
 
 @runtime_checkable
 class BlockMetric(Protocol):
-    # `@property`, not plain attributes: every implementation is a frozen dataclass field (or,
-    # for Power/Product's needs_peel, an actual @property) -- both read-only under mypy's
-    # structural check, so the protocol must declare them read-only too (mirrors `identity` below).
+    # `@property`, not plain attributes: a primitive's are class constants and Power/Product's
+    # needs_peel an actual @property -- both read-only under mypy's structural check, so the
+    # protocol must declare them read-only too (mirrors `identity` below).
     @property
     def name(self) -> str: ...
 
@@ -86,8 +86,8 @@ class BlockMetric(Protocol):
 
 @dataclass(frozen=True)
 class Depth:
-    name: str = "depth"
-    needs_peel: bool = True
+    name: ClassVar[str] = "depth"
+    needs_peel: ClassVar[bool] = True
 
     def proxy(self, blocks: GeoDataFrame) -> pd.Series:
         count, area, perim = _cols(blocks)
@@ -103,8 +103,8 @@ class Depth:
 
 @dataclass(frozen=True)
 class Density:
-    name: str = "density"
-    needs_peel: bool = False
+    name: ClassVar[str] = "density"
+    needs_peel: ClassVar[bool] = False
 
     def proxy(self, blocks: GeoDataFrame) -> pd.Series:
         count, area, _ = _cols(blocks)
@@ -161,8 +161,8 @@ class DepthProxy:
     definition.
     """
 
-    name: str = "depth_proxy"
-    needs_peel: bool = False
+    name: ClassVar[str] = "depth_proxy"
+    needs_peel: ClassVar[bool] = False
 
     def proxy(self, blocks: GeoDataFrame) -> pd.Series:
         count, area, perim = _cols(blocks)
@@ -178,8 +178,8 @@ class DepthProxy:
 
 @dataclass(frozen=True)
 class Compactness:
-    name: str = "compactness"
-    needs_peel: bool = False
+    name: ClassVar[str] = "compactness"
+    needs_peel: ClassVar[bool] = False
 
     def proxy(self, blocks: GeoDataFrame) -> pd.Series:
         _, area, perim = _cols(blocks)
@@ -195,8 +195,8 @@ class Compactness:
 
 @dataclass(frozen=True)
 class Count:
-    name: str = "count"
-    needs_peel: bool = False
+    name: ClassVar[str] = "count"
+    needs_peel: ClassVar[bool] = False
 
     def proxy(self, blocks: GeoDataFrame) -> pd.Series:
         count, _, _ = _cols(blocks)
@@ -214,7 +214,7 @@ class Count:
 class Power:
     base: BlockMetric
     exp: float
-    name: str = "power"
+    name: str
 
     def proxy(self, blocks: GeoDataFrame) -> pd.Series:
         return self.base.proxy(blocks) ** self.exp
@@ -234,7 +234,7 @@ class Power:
 @dataclass(frozen=True)
 class Product:
     terms: Sequence[BlockMetric]
-    name: str = "product"
+    name: str
 
     def proxy(self, blocks: GeoDataFrame) -> pd.Series:
         out = self.terms[0].proxy(blocks)

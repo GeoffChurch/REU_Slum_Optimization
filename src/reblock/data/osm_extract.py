@@ -120,7 +120,7 @@ class PbfDesireLines:
     """
 
     pbf_path: Path
-    tags: Sequence[str] = FOOTPATH_TAGS
+    tags: Sequence[str]
     # compare=False on both caches: a DataFrame's truth value is ambiguous, so the
     # dataclass-generated __eq__ would raise (`ValueError: The truth value of a DataFrame is
     # ambiguous`) comparing two instances that have each populated their own cache -- these are

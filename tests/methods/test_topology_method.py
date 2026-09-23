@@ -1,4 +1,5 @@
 import random
+from dataclasses import replace
 from typing import cast
 
 import geopandas as gpd
@@ -8,9 +9,14 @@ from shapely.geometry import LineString, Polygon
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.topology import TopologyMethod
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
+
+# Every setting spelled once, at the values `conf/method/topology.yaml` ships; each test varies
+# what it is about with `replace`.
+TOPOLOGY = TopologyMethod(alpha=2.0, seed=0, road_width_m=DEFAULT_ROAD_WIDTH_M)
 
 
 def _grid(n: int, hash_: str | None) -> Block:
@@ -64,7 +70,7 @@ def _grid_with_south_street_only(n: int) -> Block:
 
 
 def test_proposes_roads_for_interior_parcel() -> None:
-    proposal = TopologyMethod().propose(_grid(3, hash_=None))
+    proposal = TOPOLOGY.propose(_grid(3, hash_=None))
     assert proposal.method == "topology" and proposal.crs == UTM
     assert proposal.roads is not None and len(proposal.roads) >= 1
     assert proposal.roads.geometry.length.sum() > 0
@@ -76,8 +82,8 @@ def test_proposes_roads_for_interior_parcel() -> None:
 
 def test_propose_is_deterministic_across_runs() -> None:
     block = _grid(3, hash_=None)
-    a = TopologyMethod(seed=0).propose(block)
-    b = TopologyMethod(seed=0).propose(block)
+    a = replace(TOPOLOGY, seed=0).propose(block)
+    b = replace(TOPOLOGY, seed=0).propose(block)
     assert a.roads is not None and b.roads is not None
     assert sorted(g.wkt for g in a.roads.geometry) == sorted(g.wkt for g in b.roads.geometry)
 
@@ -98,12 +104,12 @@ def test_all_interior_parcels_connected() -> None:
 def test_propose_accepts_explicit_prior_none() -> None:
     # `prior` is unused today (topology is block-independent) but must be
     # accepted so TopologyMethod structurally satisfies the Method protocol.
-    proposal = TopologyMethod(seed=0).propose(_grid(3, hash_=None), prior=None)
+    proposal = replace(TOPOLOGY, seed=0).propose(_grid(3, hash_=None), prior=None)
     assert proposal.roads is not None and len(proposal.roads) >= 1
 
 
 def test_proposal_id_encodes_alpha_and_seed() -> None:
-    proposal = TopologyMethod(alpha=2.0, seed=0).propose(_grid(3, hash_=None))
+    proposal = replace(TOPOLOGY, alpha=2.0, seed=0).propose(_grid(3, hash_=None))
     assert proposal.proposal_id == "topology_a2.0_s0"
 
 
@@ -114,7 +120,7 @@ def test_interior_chord_with_boundary_endpoints_is_not_marked_road() -> None:
     # whole-edge/within-corridor match rejects it. (Fails under the old
     # endpoint-only predicate; passes once the edge itself must lie on the
     # street.)
-    proposal = TopologyMethod(seed=0).propose(_split_square(10.0))
+    proposal = replace(TOPOLOGY, seed=0).propose(_split_square(10.0))
     assert proposal.edges is not None
     party_line = LineString([(5.0, 0.0), (5.0, 10.0)])
     marked = [bool(is_road)
@@ -132,8 +138,8 @@ def test_partial_streets_yield_a_different_larger_proposal() -> None:
     # `define_roads()`), far more parcels start out interior (6 of 9, vs. just
     # the 1 center parcel for full-boundary streets) and the greedy builder
     # must add substantially more new road to resolve them all.
-    full = TopologyMethod(seed=0).propose(_grid(3, hash_=None))
-    partial = TopologyMethod(seed=0).propose(_grid_with_south_street_only(3))
+    full = replace(TOPOLOGY, seed=0).propose(_grid(3, hash_=None))
+    partial = replace(TOPOLOGY, seed=0).propose(_grid_with_south_street_only(3))
     assert full.roads is not None and partial.roads is not None
     assert partial.roads.geometry.length.sum() > full.roads.geometry.length.sum()
     assert len(partial.roads) > len(full.roads)
@@ -143,14 +149,15 @@ def test_partial_streets_yield_a_different_larger_proposal() -> None:
 
 def test_proposal_carries_block_identity() -> None:
     block = _grid(3, hash_="deadbeef")
-    proposal = TopologyMethod().propose(block)
+    proposal = TOPOLOGY.propose(block)
     assert proposal.block_identity == block.identity
 
 
 def test_identity_is_stable_per_params() -> None:
-    assert TopologyMethod(alpha=2.0, seed=0).identity == TopologyMethod(alpha=2.0, seed=0).identity
-    assert TopologyMethod(alpha=2.0, seed=0).identity != TopologyMethod(alpha=2.0, seed=1).identity
-    assert TopologyMethod(alpha=2.0, seed=0).identity != TopologyMethod(alpha=3.0, seed=0).identity
+    assert TOPOLOGY.identity == TopologyMethod(alpha=2.0, seed=0,
+                                               road_width_m=DEFAULT_ROAD_WIDTH_M).identity
+    assert TOPOLOGY.identity != replace(TOPOLOGY, seed=1).identity
+    assert TOPOLOGY.identity != replace(TOPOLOGY, alpha=3.0).identity
 
 
 def test_propose_does_not_perturb_global_rng() -> None:
@@ -162,6 +169,6 @@ def test_propose_does_not_perturb_global_rng() -> None:
     np.random.seed(12345)
     np_state_before = np.random.get_state()[1].tolist()
     py_state_before = random.getstate()
-    TopologyMethod(alpha=2.0, seed=0).propose(block)
+    replace(TOPOLOGY, alpha=2.0, seed=0).propose(block)
     assert np.random.get_state()[1].tolist() == np_state_before
     assert random.getstate() == py_state_before

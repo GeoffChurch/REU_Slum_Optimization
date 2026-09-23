@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 
 import geopandas as gpd
 import numpy as np
@@ -35,6 +35,7 @@ class RoutingGraph:
     net_tol: float
 
 
+@runtime_checkable
 class Substrate(Protocol):
     def build(self, block: Block) -> RoutingGraph: ...
     @property
@@ -100,7 +101,7 @@ class GridSubstrate:
     """8-connected regular grid at resolution `res` (m). Faithful cost-field sampler, but node
     count scales with block AREA (∝ area/res²) and paths staircase at 45°."""
 
-    res: float = 1.5
+    res: float
 
     @property
     def identity(self) -> Hashable:
@@ -172,7 +173,7 @@ class SpannerSubstrate:
     edge spanner with bounded stretch. Sparsest of the tessellation substrates. `net_tol =
     STREET_TOL`."""
 
-    cones: int = 6
+    cones: int
 
     @property
     def identity(self) -> Hashable:

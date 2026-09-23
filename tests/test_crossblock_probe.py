@@ -3,6 +3,7 @@ from pathlib import Path
 import geopandas as gpd
 from shapely.geometry import MultiLineString
 
+from reblock.buildings import SpacingDiscs
 from scripts.crossblock_probe import enumerate_adjacent_pairs, probe_cluster
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,7 +42,8 @@ def test_baseline_never_crosses_an_interior_boundary_on_real_cluster() -> None:
     from reblock.derive.network_metrics import n_cross_block_streets
 
     src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown",
-                       block_ids=["ZAF.9.3.1_1_44882", "ZAF.9.3.1_1_44673"], member_buildings=None)
+                       block_ids=["ZAF.9.3.1_1_44882", "ZAF.9.3.1_1_44673"], min_buildings=10,
+                       building_tier=SpacingDiscs, member_buildings=None)
     region = src.region()
     region = Region(region_id=region.region_id, crs=region.crs, blocks=list(region.blocks),
                     roads=region.roads, attrs=region.attrs)
@@ -66,7 +68,8 @@ def test_baseline_never_crosses_the_worst_jagged_frontage_pair() -> None:
     from reblock.derive.network_metrics import n_cross_block_streets
 
     src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown",
-                       block_ids=["ZAF.9.3.1_1_16951", "ZAF.9.3.1_1_17068"], member_buildings=None)
+                       block_ids=["ZAF.9.3.1_1_16951", "ZAF.9.3.1_1_17068"], min_buildings=10,
+                       building_tier=SpacingDiscs, member_buildings=None)
     region = src.region()
     region = Region(region_id=region.region_id, crs=region.crs, blocks=list(region.blocks),
                     roads=region.roads, attrs=region.attrs)

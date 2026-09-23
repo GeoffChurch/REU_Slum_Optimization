@@ -18,10 +18,10 @@ from pathlib import Path
 
 import geopandas as gpd
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from omegaconf import open_dict
 
 from reblock.pipeline import build_regions
+from reblock.presets import load_desire_source, load_stages
 
 
 def main() -> None:
@@ -31,15 +31,13 @@ def main() -> None:
     overrides = ["max_blocks=1", *sys.argv[2:]]
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=overrides)
-    source = instantiate(cfg.data)
-    screen = instantiate(cfg.screen)
-    region_builder = instantiate(cfg.region_builder)
+    stages = load_stages(cfg)
     # Match the example orchestrator: with no explicit block_ids, screen-select and grow the top
     # region (groups=None), NOT an explicit seed -- growing from `[[seed]]` can yield a different
     # (larger) region than the screen's own top pick, giving a wrong, oversized bbox.
     groups = ([[str(b) for b in grp] for grp in cfg.block_ids]
               if cfg.get("block_ids") is not None else None)
-    region = build_regions(source, screen, region_builder, groups, 1)[0]
+    region = build_regions(stages.source, stages.screen, stages.region_builder, groups, 1)[0]
     boundary = gpd.GeoSeries([b.boundary for b in region], crs=region[0].crs).union_all()
     bbox = gpd.GeoSeries([boundary], crs=region[0].crs).to_crs(4326).total_bounds
     # Fetch through the CONFIGURED desire_source (with snapshot forced off), so the endpoint is
@@ -47,7 +45,7 @@ def main() -> None:
     # `desire_source.endpoint=...`.
     with open_dict(cfg):
         cfg.desire_source.snapshot = None
-    lines = instantiate(cfg.desire_source).desire_lines(
+    lines = load_desire_source(cfg.desire_source).desire_lines(
         (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])), region[0].crs)
     print(f"fetched {len(lines)} desire-line ways -> {out}")
     assert len(lines) > 20, "sparse OSM coverage -- investigate before committing the snapshot"

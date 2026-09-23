@@ -42,7 +42,7 @@ Run (module form -- mirrors scripts/fetch_desire_lines_snapshot.py's Hydra boots
        block_ids=[[ZAF.9.3.1_1_5810]] all_methods.clearance.max_roads=3000 \
        all_methods.clearance.depth_target=3 \
        all_methods.greedy_arterial_buildable.engine.policy._target_=reblock.methods.arterial.Fixed \
-       +all_methods.greedy_arterial_buildable.max_anchors=64 \
+       all_methods.greedy_arterial_buildable.max_anchors=64 \
        desire_source.snapshot=examples/multiblock/desire_lines_5810.geojson
 """
 from __future__ import annotations
@@ -58,7 +58,6 @@ from typing import cast
 import matplotlib.pyplot as plt
 from geopandas import GeoDataFrame
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 
 from reblock.animate import reblock_gif
 from reblock.budget import (
@@ -68,7 +67,7 @@ from reblock.budget import (
     prefix_to_permeability,
 )
 from reblock.compare import MethodCurve, PermeabilityConfig, load_permeability_config
-from reblock.contracts import Block, Method, Proposal, Screen, Source
+from reblock.contracts import Block, Method, Proposal
 from reblock.derivations import propose
 from reblock.derive.access import parcel_access_layers, past_every_parcel
 from reblock.emit import _displaced_buildings, compare_report, pct_displaced, pct_paved
@@ -81,7 +80,8 @@ from reblock.permeability import (
     permeability_curve,
 )
 from reblock.pipeline import build_regions
-from reblock.region import RegionBuilder, region_reblock
+from reblock.presets import load_methods, load_stages
+from reblock.region import region_reblock
 from reblock.render import frame_bbox, render_after, render_before, save_render, short_label
 
 log = logging.getLogger(__name__)
@@ -314,12 +314,11 @@ def main() -> None:
     overrides = ["max_blocks=1", *sys.argv[3:]]
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=overrides)
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
+    stages = load_stages(cfg)
+    registry = load_methods(cfg.all_methods)
+    methods = {n: registry[n] for n in method_names}
     groups = [[str(b) for b in g] for g in cfg.block_ids]
-    region = build_regions(source, screen, region_builder, groups, 1)[0]
-    methods = {n: cast(Method, instantiate(cfg.all_methods[n])) for n in method_names}
+    region = build_regions(stages.source, stages.screen, stages.region_builder, groups, 1)[0]
     pcfg = load_permeability_config()
     matched_displacement = pcfg.matched_displacement
     matched_permeability = pcfg.matched_permeability

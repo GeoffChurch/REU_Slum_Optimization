@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from collections import deque
 from collections.abc import Hashable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import geopandas as gpd
 import numpy as np
@@ -37,8 +37,8 @@ from reblock.derive.access import (
     past_every_parcel,
 )
 from reblock.derive_graph import config_identity
-from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.methods.substrates import RoutingGraph, Substrate
+from reblock.permeability import with_width
 
 _CLEARANCE_EPS = 0.3       # keeps node cost finite on a grid node sitting on a building point
 _SIGMOID_EPS = 1e-15       # clamps sigmoid strictly inside (0, 1); float64 underflows to exact
@@ -244,17 +244,17 @@ def _drainage(
 
 @dataclass
 class ClearanceReblocker:
-    """Greedy least-cost-path reblocker on a pluggable routing substrate (default chord_diag,
+    """Greedy least-cost-path reblocker on a pluggable routing substrate (shipped as chord_diag,
     the parcel-boundary graph + all within-cell diagonals). `repulsion` is the logit knob (s):
     s -> -inf straight (aspirational), 0 balanced, s -> +inf Voronoi-following (buildable)."""
 
-    substrate: Substrate = field(default_factory=ChordSubstrate)   # chord_diag, the default winner
-    repulsion: float = 0.0
-    depth_target: int = 2
-    max_roads: int = 400
+    substrate: Substrate
+    repulsion: float
+    depth_target: int
+    max_roads: int
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
-    road_width_m: float = DEFAULT_ROAD_WIDTH_M
+    road_width_m: float
 
     @property
     def identity(self) -> Hashable | None:
