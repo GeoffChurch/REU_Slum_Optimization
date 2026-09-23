@@ -34,11 +34,14 @@ import tempfile
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import geopandas as gpd
 import pandas as pd
 from shapely.geometry import Point, shape
+
+if TYPE_CHECKING:
+    from _typeshed import WriteableBuffer
 
 # ---------------------------------------------------------------------------
 # Source endpoints (verified live against the real services while writing this
@@ -186,15 +189,16 @@ class _HTTPRangeFile(io.RawIOBase):
     def tell(self) -> int:
         return self._pos
 
-    def readinto(self, b: bytearray) -> int:
-        n = len(b)
+    def readinto(self, b: WriteableBuffer) -> int:
+        view = memoryview(b).cast("B")
+        n = len(view)
         if n == 0 or self._pos >= self.size:
             return 0
         end = min(self._pos + n, self.size) - 1
         req = _request(self.url, headers={"Range": f"bytes={self._pos}-{end}"})
         with urllib.request.urlopen(req, timeout=120) as resp:
             data = resp.read()
-        b[: len(data)] = data
+        view[: len(data)] = data
         self._pos += len(data)
         return len(data)
 
@@ -348,22 +352,26 @@ def select_dense_blocks(
     bld_utm = buildings.to_crs(utm)
 
     joined = gpd.sjoin(
-        bld_utm, blocks_utm[["block_id", "geometry"]], predicate="within", how="inner"
+        bld_utm, cast(gpd.GeoDataFrame, blocks_utm[["block_id", "geometry"]]),
+        predicate="within", how="inner"
     )
 
-    area_km2 = blocks_utm.geometry.area / 1e6
-    area_ha = blocks_utm.geometry.area / 1e4
+    area_km2: pd.Series[float] = blocks_utm.geometry.area / 1e6
+    area_ha: pd.Series[float] = blocks_utm.geometry.area / 1e4
     n_bld = blocks_utm["block_id"].map(joined.groupby("block_id").size()).fillna(0.0)
-    density = n_bld / area_ha
+    density: pd.Series[float] = n_bld / area_ha
 
     eligible = (density >= min_density_per_ha) & (area_km2 <= max_area_km2)
     ranked = blocks_utm.loc[eligible].assign(_density=density[eligible])
     ranked = ranked.sort_values("_density", ascending=False)
     kept_ids = set(ranked["block_id"].head(cap)) | pinned_ids
 
-    kept_blocks = blocks[blocks["block_id"].isin(kept_ids)].reset_index(drop=True)
+    kept_blocks = cast(gpd.GeoDataFrame,
+                       blocks[blocks["block_id"].isin(kept_ids)]).reset_index(drop=True)
     kept_bld_positions = joined.index[joined["block_id"].isin(kept_ids)].unique()
-    kept_buildings = buildings.loc[buildings.index.isin(kept_bld_positions)].reset_index(drop=True)
+    kept_buildings = cast(gpd.GeoDataFrame,
+                          buildings.loc[buildings.index.isin(kept_bld_positions)]
+                          ).reset_index(drop=True)
     return kept_blocks, kept_buildings
 
 

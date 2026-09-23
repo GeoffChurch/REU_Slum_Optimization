@@ -197,8 +197,9 @@ def main() -> None:
         # budget: it is the cost that is actually paid in homes.
         target_disp = displacement_fraction(block, own)
 
-        def matched(roads: gpd.GeoDataFrame, blk: Block = block,
+        def matched(roads: gpd.GeoDataFrame | None, blk: Block = block,
                     t: float = target_disp) -> gpd.GeoDataFrame:
+            assert roads is not None, "every method compared here proposes a road frame"
             return displacement_matched_prefix(blk, roads, t)
 
         nets = {"real": own}

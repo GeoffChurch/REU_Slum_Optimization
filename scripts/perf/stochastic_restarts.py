@@ -46,7 +46,7 @@ from reblock.derive.access import (
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import Access, Displacement, SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
-from reblock.methods.arterial.shortlist import FirstOrder
+from reblock.methods.arterial.shortlist import CandidateSelector, FirstOrder
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
@@ -70,7 +70,7 @@ def main() -> None:
     counts = [float(len(b.parcels)) for b in blocks]
     sel = [i for i in pools_.recipients if len(blocks[i].parcels) <= 110]
 
-    arms = [("exact", ScoreAll()), (f"fo-{K}", FirstOrder(K))]
+    arms: list[tuple[str, CandidateSelector]] = [("exact", ScoreAll()), (f"fo-{K}", FirstOrder(K))]
     for pool in POOLS:
         arms += [(f"sfo-{pool}-r{r}", StochasticFirstOrder(K, pool, r)) for r in range(R)]
 
@@ -84,14 +84,14 @@ def main() -> None:
         rec: dict[str, dict[str, float]] = {}
         for name, selector in arms:
             t0 = time.perf_counter()
-            r = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
-                                  cost=Displacement(),
-                                  half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                  max_roads=MAX_ROADS, selector=selector)
+            roads = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
+                                      cost=Displacement(),
+                                      half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
+                                      max_roads=MAX_ROADS, selector=selector)
             dt = time.perf_counter() - t0
-            if r is None or len(r) == 0:
+            if roads is None or len(roads) == 0:
                 continue
-            pre = prefix_to_displacement(b, r, 0.10)
+            pre = prefix_to_displacement(b, roads, 0.10)
             if len(pre) == 0:
                 continue
             b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))
@@ -100,10 +100,11 @@ def main() -> None:
                          "road_m": float(pre.geometry.length.sum()), "secs": dt}
         if len(rec) == len(arms):
             rows[b.block_id] = rec
-            best = {p: max(rec[f"sfo-{p}-r{r}"]["burden_red"] for r in range(R)) for p in POOLS}
+            best_by_pool = {p: max(rec[f"sfo-{p}-r{r}"]["burden_red"] for r in range(R))
+                            for p in POOLS}
             print(f"  {b.block_id:<22} n={n:<4} exact={rec['exact']['burden_red']:.4f}  "
                   f"fo={rec[f'fo-{K}']['burden_red']:.4f}  "
-                  + "  ".join(f"best-of-{R}(pool={p})={v:.4f}" for p, v in best.items()),
+                  + "  ".join(f"best-of-{R}(pool={p})={v:.4f}" for p, v in best_by_pool.items()),
                   flush=True)
     OUT.write_text(json.dumps(rows, indent=1))
     if not rows:

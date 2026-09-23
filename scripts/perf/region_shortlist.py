@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from shapely import STRtree
+from shapely.geometry import LineString
 
 from reblock.derive.access import (
     STREET_TOL,
@@ -42,7 +43,7 @@ THREADS = 8            # measured optimum -- see shortlist.first_order_score
 SCALING = False        # the thread-scaling table is already measured and recorded; skip the re-run
 
 
-def _threaded_rank(chords: list, weights: np.ndarray, ptree: STRtree, btree: STRtree,
+def _threaded_rank(chords: list[LineString], weights: np.ndarray, ptree: STRtree, btree: STRtree,
                    half_w: float, threads: int) -> np.ndarray:
     """The same chunk loop as `rank_candidates`, spread over a thread pool."""
     los = list(range(0, len(chords), CHUNK))

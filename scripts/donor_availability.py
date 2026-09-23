@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -60,12 +61,12 @@ def candidates(min_density: float, min_k: int, min_buildings: int,
             raise SystemExit(f"missing {path} -- run `python -m scripts.osm_census --iso {iso}`")
         frames.append(pd.read_parquet(path).assign(iso=iso))
     df = pd.concat(frames, ignore_index=True)
-    df = df[~df["census_failed"]].copy()
+    df = cast(pd.DataFrame, df[~df["census_failed"]]).copy()
     df["density"] = df["building_count"] / (df["area_m2"] / 1e6)
     keep = (df["building_count"].between(min_buildings, max_buildings)
             & (df["k_complexity"] >= min_k)
             & (df["density"] >= min_density))
-    return df[keep].reset_index(drop=True)
+    return cast(pd.DataFrame, df[keep]).reset_index(drop=True)
 
 
 def centroids(block_ids: set[str]) -> dict[str, tuple[float, float]]:
@@ -115,8 +116,8 @@ def main() -> None:
     print(f"  covered (>=1 interior segment)          : {n_cov:,}")
     print(f"  donatable (>={args.min_interior_m:.0f} m interior)          : {donor_ok.sum():,}")
 
-    xy = centroids(set(pool["block_id"].astype(str)))
-    pool = pool[pool["block_id"].astype(str).isin(xy)].reset_index(drop=True)
+    xy = centroids({str(b) for b in pool["block_id"]})
+    pool = cast(pd.DataFrame, pool[pool["block_id"].astype(str).isin(xy)]).reset_index(drop=True)
     lon = np.array([xy[str(b)][0] for b in pool["block_id"]])
     lat = np.array([xy[str(b)][1] for b in pool["block_id"]])
     pts = _ecef(lon, lat)

@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Literal, TypedDict
 
 import numpy as np
 
@@ -67,28 +68,43 @@ DISP = 0.10                   # the displacement budget every arm is truncated t
 OUT = Path("scripts/perf/anchor_cap.json")
 
 
+class CapResult(TypedDict):
+    """One block's result under one cap, exactly as written to `OUT`."""
+
+    burden_red: float
+    perm: float
+    road_m: float
+    n_roads: float
+    secs: float
+    cand: list[int]
+
+
 def main() -> None:
     pools_ = load_pools()
     blocks = pools_.blocks
     counts = [float(len(b.parcels)) for b in blocks]
     sel = [i for i in pools_.recipients if len(blocks[i].parcels) <= 110]
 
-    rows: dict[str, dict[str, dict[str, float | list[int]]]] = {}
+    rows: dict[str, dict[str, CapResult]] = {}
     for i in evenly_spaced(sorted(sel), counts, N_BLOCKS):
         b = blocks[i]
         adjacency = ParcelAdjacency.of(b, STREET_TOL)
         ctx = EgressContext(adjacency, PermeabilityParams())
         n = len(b.parcels)
         b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
-        rec: dict[str, dict[str, float | list[int]]] = {}
+        rec: dict[str, CapResult] = {}
         for cap in CAPS:
             per_step: list[int] = []
+
+            def tick(step: int, n_cand: int, n_roads: int, acc: list[int] = per_step) -> None:
+                acc.append(n_cand)
+
             t0 = time.perf_counter()
             r = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
                                   max_roads=MAX_ROADS, max_anchors=cap, selector=FirstOrder(K),
-                                  on_step=lambda s, c, nr, acc=per_step: acc.append(c))
+                                  on_step=tick)
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue
@@ -113,8 +129,8 @@ def main() -> None:
         print("no blocks completed")
         return
 
-    def col(cap: int, key: str) -> np.ndarray:
-        return np.array([float(v[str(cap)][key]) for v in rows.values()])  # type: ignore[arg-type]
+    def col(cap: int, key: Literal["burden_red", "perm", "road_m", "secs"]) -> np.ndarray:
+        return np.array([v[str(cap)][key] for v in rows.values()])
 
     ref_b, ref_p, ref_s = col(0, "burden_red"), col(0, "perm"), col(0, "secs")
 
@@ -140,7 +156,6 @@ def main() -> None:
         first, last = [], []
         for v in rows.values():
             c = v[str(cap)]["cand"]
-            assert isinstance(c, list)
             if c:
                 first.append(c[0])
                 last.append(c[-1])

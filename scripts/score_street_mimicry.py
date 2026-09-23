@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import cast
 
 import geopandas as gpd
 import pandas as pd
@@ -122,7 +123,7 @@ def main() -> None:
             if roads is None or roads.empty:
                 continue
             cum = roads.geometry.length.cumsum()
-            roads = roads[cum <= target] if target > 0 else roads.iloc[:0]
+            roads = cast(gpd.GeoDataFrame, roads[cum <= target] if target > 0 else roads.iloc[:0])
             if roads.empty:
                 continue
             prec, rec = directional_chamfer(roads, ref)
@@ -143,8 +144,8 @@ def main() -> None:
         return
     print(f"{'method':24} {'n':>3} {'IoU@10m':>8} {'IoU@20m':>8} {'recall m':>9} "
           f"{'precision m':>12} {'disp':>6}")
-    for name, g in df.groupby("method"):
-        print(f"{name:24} {len(g):>3} {g.iou_10m.median():>8.3f} {g.iou_20m.median():>8.3f} "
+    for method_name, g in df.groupby("method"):
+        print(f"{method_name:24} {len(g):>3} {g.iou_10m.median():>8.3f} {g.iou_20m.median():>8.3f} "
               f"{g.chamfer_recall_m.median():>9.1f} {g.chamfer_precision_m.median():>12.1f} "
               f"{g.displacement.median():>6.3f}")
     print("\nrecall = mean distance from a REAL street to the nearest proposed road")

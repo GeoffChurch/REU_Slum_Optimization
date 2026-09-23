@@ -37,6 +37,7 @@ import geopandas as gpd
 import numpy as np
 from pyproj import Transformer
 from shapely import STRtree
+from shapely.geometry.base import BaseGeometry
 
 from reblock.data.counts import BuildingCount, KblockCount, OpenBuildingsCount, resolved
 from reblock.screen.dense_compact import _chunk_depths
@@ -48,7 +49,7 @@ OB = Path.home() / ".cache/reblock/buildings_capetown_polygons.parquet"
 
 
 
-def _maps_url(geom: object, lat: float, lon: float, viewport_px: int = 900) -> str:
+def _maps_url(geom: BaseGeometry, lat: float, lon: float, viewport_px: int = 900) -> str:
     """A satellite link ZOOMED TO THE BLOCK, not to a fixed level.
 
     A fixed zoom is wrong at both ends of this worksheet: `ZAF.9.3.1_1_44685` is 0.3 ha and
@@ -61,7 +62,7 @@ def _maps_url(geom: object, lat: float, lon: float, viewport_px: int = 900) -> s
     """
     import math
 
-    x0, y0, x1, y1 = geom.bounds                          # type: ignore[attr-defined]
+    x0, y0, x1, y1 = geom.bounds
     # `geom` must be in DEGREES: the span below multiplies by 111_320 m/degree. Handing this a
     # projected geometry does not raise -- it inflates the span ~111_320x, drives the zoom
     # negative, and the clamp below quietly returns 14.0z for every block. Caught 2026-09-17 when
@@ -103,6 +104,7 @@ def main() -> int:
     # see the pool note in gen_screen_bakeoff.load.
     b, _ = load(KblockCount())
     b = b.rename(columns={"a_m2": "block_area_m2"})
+    assert b.crs is not None, "the blocks parquet carries its CRS"
     lab, cover = b["informal"].to_numpy(), b["cover"].to_numpy()
     short = {col: name.split("   ")[0] for col, name, _ in METRICS}
     pts = str(Path.home() / ".cache/reblock/buildings_capetown_full.parquet")
@@ -114,11 +116,11 @@ def main() -> int:
     counts: dict[str, np.ndarray] = {}
     ranks: dict[str, dict[int, int]] = {}
     for tag, counter in sources.items():
-        r = resolved(b, pts, counter)
-        n = r["building_count"].to_numpy(dtype=float)
+        counted = resolved(b, pts, counter)
+        n = counted["building_count"].to_numpy(dtype=float)
         counts[tag] = n
-        a = r["block_area_m2"].to_numpy(dtype=float)
-        per = r.geometry.length.to_numpy()
+        a = counted["block_area_m2"].to_numpy(dtype=float)
+        per = counted.geometry.length.to_numpy()
         for col, _, _ in METRICS:
             sc = {"depth_density proxy": np.sqrt(n * a) / per * (n / a), "density": n / a,
                   "density_compactness": n / per ** 2,

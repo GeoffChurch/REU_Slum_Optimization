@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import time
 from pathlib import Path
+from typing import cast
 
 import geopandas as gpd
 import numpy as np
@@ -66,11 +67,11 @@ def displacement_matched_prefix(
     lo, hi = 0, len(roads)
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if displacement_fraction(block, roads.iloc[:mid]) <= target_disp:
+        if displacement_fraction(block, cast(gpd.GeoDataFrame, roads.iloc[:mid])) <= target_disp:
             lo = mid
         else:
             hi = mid - 1
-    return roads.iloc[:lo]
+    return cast(gpd.GeoDataFrame, roads.iloc[:lo])
 
 
 def main() -> None:
@@ -106,10 +107,13 @@ def main() -> None:
         return roads_cache[b.block_id]
 
     rows: list[dict[str, object]] = []
+    done: set[tuple[str, int]] = set()
     if args.out.exists():
-        rows = pd.read_parquet(args.out).to_dict("records")
+        prior = pd.read_parquet(args.out)
+        # This script's own output, so its column labels are the `str` keys `rows.append` wrote.
+        rows = cast(list[dict[str, object]], prior.to_dict("records"))
+        done = {(str(rec), int(k)) for rec, k in zip(prior["recipient"], prior["k"], strict=True)}
         print(f"resuming from {args.out}: {len(rows)} rows", flush=True)
-    done = {(str(r["recipient"]), int(r["k"])) for r in rows}
 
     for n, i in enumerate(chosen, 1):
         recipient = blocks[i]
@@ -141,8 +145,10 @@ def main() -> None:
         direct_full = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
                                          max_roads=400,
                                          road_width_m=DEFAULT_ROAD_WIDTH_M).propose(recipient).roads
+        assert direct_full is not None, "ClearanceReblocker always proposes a road frame"
         cum = direct_full.geometry.length.cumsum()
-        direct_len = direct_full[cum <= target_len] if target_len > 0 else direct_full.iloc[:0]
+        direct_len = cast(gpd.GeoDataFrame, direct_full[cum <= target_len] if target_len > 0
+                          else direct_full.iloc[:0])
         # Matched on DISPLACEMENT to the block's own network: same cost in homes, so the
         # permeability comparison is finally like-for-like on the metric pair.
         direct_disp = displacement_matched_prefix(recipient, direct_full, disp_own)
@@ -186,8 +192,8 @@ def main() -> None:
         print("k-sweep (median over recipients):")
         print(f"{'k':>4} {'n':>4} {'perm/own':>9} {'perm/direct':>12} {'IoU@10m':>8} "
               f"{'DISPMATCH perm/direct':>22}")
-        for k, g in df.groupby("k"):
-            print(f"{k:>4} {len(g):>4} "
+        for rung, g in df.groupby("k"):
+            print(f"{rung:>4} {len(g):>4} "
                   f"{(g.perm_consensus_lenmatch / g.perm_own).median():>9.3f} "
                   f"{(g.perm_consensus_lenmatch / g.perm_direct_lenmatch).median():>12.3f} "
                   f"{g.iou_10m.median():>8.3f} "

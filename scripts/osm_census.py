@@ -38,7 +38,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import shapely
 from geopandas import GeoDataFrame
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
+from shapely.geometry.base import BaseGeometry
 
 from reblock.data.osm_extract import (
     FOOTPATH_TAGS,
@@ -98,12 +99,30 @@ def _prefilter(blocks: GeoDataFrame, min_k: int, min_buildings: int) -> GeoDataF
     multi-hour run and a few minutes. Missing values fail the filter: a block with no recorded
     `building_count` cannot be shown to clear the floor.
     """
-    keep = pd.Series(True, index=blocks.index)
+    keep = pd.Series(True, index=blocks.index, dtype=bool)
     if min_k > 0:
         keep &= blocks["k_complexity"].fillna(-1) >= min_k
     if min_buildings > 0:
         keep &= blocks["building_count"].fillna(-1) >= min_buildings
     return cast(GeoDataFrame, blocks[keep])
+
+
+def _point(geom: BaseGeometry) -> Point:
+    """`representative_point` always yields a Point; the GeoSeries it comes back in is typed over
+    every geometry, so say so here -- and raise, rather than read `.x` off something else."""
+    if not isinstance(geom, Point):
+        raise TypeError(f"expected a representative Point, got {geom.geom_type}")
+    return geom
+
+
+def _count(row: dict[str, object], col: str) -> int:
+    """A census count column. `census_rows` writes an `int`, and so does the resume path's
+    `to_dict("records")` round-trip; anything else is a schema change, which raises here rather
+    than being coerced."""
+    value = row[col]
+    if not isinstance(value, int):
+        raise TypeError(f"{col} = {value!r} is not a count")
+    return value
 
 
 def _checkpoint(rows: list[dict[str, object]], out: Path) -> None:
@@ -172,9 +191,8 @@ def main() -> None:
         # reachable both from --tolerances and from a schema change between runs, so check the
         # whole expected column set rather than trusting either.
         wanted = set(census_rows(
-            cast(GeoDataFrame, GeoDataFrame(
-                {"block_id": ["probe"]},
-                geometry=[Polygon([(0, 0), (1, 0), (1, 1)])], crs=4326)),
+            GeoDataFrame({"block_id": ["probe"]},
+                         geometry=[Polygon([(0, 0), (1, 0), (1, 1)])], crs=4326),
             gpd.GeoDataFrame(geometry=[], crs=4326),
             gpd.GeoDataFrame(geometry=[], crs=4326),
             32734, tolerances=args.tolerances)[0])
@@ -209,8 +227,7 @@ def main() -> None:
         # --limit counts blocks READ from the source, so it is applied before the prefilter:
         # "smoke-run the first 5,000 blocks" should mean the same thing whatever the thresholds.
         seen += len(blocks)
-        blocks = cast(GeoDataFrame,
-                      _prefilter(blocks, args.min_k, args.min_buildings).reset_index(drop=True))
+        blocks = _prefilter(blocks, args.min_k, args.min_buildings).reset_index(drop=True)
         kept_total += len(blocks)
         if blocks.empty:
             if args.limit is not None and seen >= args.limit:
@@ -218,13 +235,13 @@ def main() -> None:
             continue
 
         by_zone: dict[int, list[int]] = defaultdict(list)
-        reps = blocks.geometry.representative_point()
+        reps = [_point(g) for g in blocks.geometry.representative_point()]
         for i, pt in enumerate(reps):
             by_zone[utm_zone_epsg(pt.x, pt.y)].append(i)
 
         for epsg, idx in by_zone.items():
             sub: GeoDataFrame = cast(GeoDataFrame, blocks.iloc[idx])
-            assert_zone_fit(float(reps.iloc[idx[0]].x), epsg)
+            assert_zone_fit(float(reps[idx[0]].x), epsg)
             sub = cast(GeoDataFrame, sub[~sub["block_id"].astype(str).isin(done_ids)])
             if sub.empty:
                 continue
@@ -260,7 +277,7 @@ def main() -> None:
         _checkpoint(rows, out)
 
     gate = f"n_interior_segments_{min(args.tolerances)}"
-    covered = sum(1 for r in rows if int(r[gate]) > 0)
+    covered = sum(1 for r in rows if _count(r, gate) > 0)
     failed = sum(1 for r in rows if r.get("census_failed"))
     dropped = seen - kept_total
     if failed:

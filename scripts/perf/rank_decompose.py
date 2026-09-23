@@ -25,6 +25,7 @@ has infinities (a beneficial zero-displacement road) that a linear correlation c
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
@@ -36,6 +37,7 @@ from shapely.geometry.base import BaseGeometry
 
 import reblock.methods.arterial.engines as engines
 import reblock.methods.arterial.scoring as scoring
+from reblock.contracts import Block
 from reblock.derive.access import (
     STREET_TOL,
     ParcelAdjacency,
@@ -49,7 +51,8 @@ from reblock.methods.arterial import (
     GreedyArterialReblocker,
     SnapToBoundary,
 )
-from reblock.methods.arterial.primitives import _planarize
+from reblock.methods.arterial.primitives import _candidate_chords, _planarize
+from reblock.methods.arterial.scoring import _best_candidate, eval_candidate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from scripts.pair_matrix import evenly_spaced, load_pools
 from scripts.perf.first_order_rank import first_order_gain
@@ -62,15 +65,12 @@ OUT = Path("scripts/perf/rank_decompose.json")
 _EXACT: list[tuple[float, float, float]] = []       # (raw benefit, exact denom, snapped length)
 _CHORDS: list[LineString] = []
 _ROWS: list[dict[str, float]] = []
-_ORIG_CHORDS = engines._candidate_chords
-_ORIG_BEST = engines._best_candidate
-_ORIG_EVAL = engines.eval_candidate
 
-_BLOCK: object = None
+_BLOCK: Block | None = None
 _ADJACENCY: ParcelAdjacency | None = None
 _TREE: STRtree | None = None
 _BTREE: STRtree | None = None
-_COMMITTED: list[BaseGeometry] = []
+_COMMITTED: list[LineString] = []
 _HALF_W = 3.0
 
 
@@ -79,11 +79,12 @@ def _eval_hook(chord: LineString) -> tuple[float, BaseGeometry | None]:
     step's own gain and cost rather than plumbed out of `eval_candidate`, so the shipped scorer is
     untouched and the gain it returns is the real one."""
     st = scoring._STEP_STATE
-    gain, real = _ORIG_EVAL(chord)
+    gain, real = eval_candidate(chord)
     assert st is not None
     if real is None or real.length == 0:
         _EXACT.append((0.0, 0.0, 0.0))
         return gain, real
+    assert isinstance(real, LineString)             # what `eval_candidate`'s realizers produce
     raw = st.gain.of(real)
     denom = st.cost.of(real)
     _EXACT.append((raw, denom, float(real.length)))
@@ -93,7 +94,7 @@ def _eval_hook(chord: LineString) -> tuple[float, BaseGeometry | None]:
 def _chords_hook(anchors: list[tuple[float, float]],
                  targets: list[tuple[float, float]]) -> list[LineString]:
     global _CHORDS
-    _CHORDS = _ORIG_CHORDS(anchors, targets)
+    _CHORDS = _candidate_chords(anchors, targets)
     _EXACT.clear()
     return _CHORDS
 
@@ -105,20 +106,21 @@ def _rho(a: np.ndarray, b: np.ndarray) -> float:
     return float(spearmanr(a[ok], b[ok]).statistic)
 
 
-def _best_hook(results: object) -> tuple[float, BaseGeometry | None]:
-    res = list(results)                              # type: ignore[call-overload]
-    gain, real = _ORIG_BEST(res)
+def _best_hook(results: Iterable[tuple[float, BaseGeometry | None]]
+               ) -> tuple[float, BaseGeometry | None]:
+    res = list(results)
+    gain, real = _best_candidate(res)
     blk = _BLOCK
     if (real is None or blk is None or _TREE is None or _ADJACENCY is None
             or len(_EXACT) != len(_CHORDS)):
         return gain, real
 
-    base = _planarize(list(_COMMITTED), blk.crs, 2.0 * _HALF_W)          # type: ignore[attr-defined]
+    base = _planarize(list(_COMMITTED), blk.crs, 2.0 * _HALF_W)
     # The adjacency set beside `_BLOCK`, for the same block -- both are written together
     # below, and the adjacency carries its block, so the peel cannot read another one's.
-    depths = parcel_access_layers(_ADJACENCY, base if len(base) else None,  # type: ignore[arg-type]
+    depths = parcel_access_layers(_ADJACENCY, base if len(base) else None,
                                   unreached=past_every_parcel)
-    order = depths.loc[blk.parcels["parcel_id"]].to_numpy(dtype=float)    # type: ignore[attr-defined]
+    order = depths.loc[blk.parcels["parcel_id"]].to_numpy(dtype=float)
     weights = order ** 2 - 1.0
 
     est = first_order_gain(_CHORDS, weights, _TREE, RADIUS)
@@ -164,6 +166,7 @@ def _best_hook(results: object) -> tuple[float, BaseGeometry | None]:
         "frac_zero_denom": float((denom_x[live] <= 0).mean()),
     }
     _ROWS.append(row)
+    assert isinstance(real, LineString)             # as `_greedy_arterials` asserts on commit
     _COMMITTED.append(real)
     print(f"      step {len(_COMMITTED)}: {len(_CHORDS):>5,} cand  "
           f"rho(num) {row['rho_num']:+.2f}  rho(len~disp) {row['rho_den_length']:+.2f}  "
@@ -174,9 +177,11 @@ def _best_hook(results: object) -> tuple[float, BaseGeometry | None]:
 
 
 def main() -> None:
-    engines._candidate_chords = _chords_hook           # type: ignore[assignment]
-    engines._best_candidate = _best_hook               # type: ignore[assignment]
-    engines.eval_candidate = _eval_hook                # type: ignore[assignment]
+    # Replaced in `engines`, the namespace its loop looks them up in -- it imports the first two
+    # without re-exporting them, which is all the ignores concede.
+    engines._candidate_chords = _chords_hook           # type: ignore[attr-defined]
+    engines._best_candidate = _best_hook               # type: ignore[attr-defined]
+    engines.eval_candidate = _eval_hook
     pools = load_pools()
     blocks = pools.blocks
     counts = [float(len(b.parcels)) for b in blocks]

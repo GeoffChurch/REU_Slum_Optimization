@@ -58,9 +58,9 @@ def main() -> int:
 
     agree = Counter((r["survey_label"], collapsed(r["verdict"].strip())) for r in filled)
     print("\n1. survey vs adjudicator")
-    for (surv, hand), n in sorted(agree.items()):
-        flag = "" if surv == hand else "   <- DISAGREE"
-        print(f"   survey={surv:8s} hand={hand:8s} {n:4d}{flag}")
+    for (surv_label, hand_label), n in sorted(agree.items()):
+        flag = "" if surv_label == hand_label else "   <- DISAGREE"
+        print(f"   survey={surv_label:8s} hand={hand_label:8s} {n:4d}{flag}")
     missed = agree[("formal", "informal")]
     over = agree[("informal", "formal")]
     print(f"   survey MISSED {missed} settlement(s); over-called {over}. "

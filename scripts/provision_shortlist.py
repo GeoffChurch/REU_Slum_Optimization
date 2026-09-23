@@ -68,12 +68,12 @@ def shortlist_ids(min_density: float, min_k: int, min_buildings: int,
         if not path.exists():
             raise SystemExit(f"missing {path} -- run `python -m scripts.osm_census --iso {iso}`")
         df = pd.read_parquet(path)
-        df = df[~df["census_failed"]]
-        density = df["building_count"] / (df["area_m2"] / 1e6)
+        df = cast(pd.DataFrame, df[~df["census_failed"]])
+        density: pd.Series[float] = df["building_count"] / (df["area_m2"] / 1e6)
         keep = (df["building_count"].between(min_buildings, max_buildings)
                 & (df["k_complexity"] >= min_k)
                 & (density >= min_density))
-        ids |= set(df.loc[keep, "block_id"].astype(str))
+        ids |= {str(b) for b in df["block_id"][keep]}
     return ids
 
 
@@ -97,7 +97,7 @@ def shortlist_blocks(ids: set[str]) -> gpd.GeoDataFrame:
                 geometry=shapely.from_wkb(hit["geometry"]), crs=4326))
     if not frames:
         raise SystemExit("no shortlist blocks located in the country parquets")
-    return cast(gpd.GeoDataFrame, pd.concat(frames, ignore_index=True))
+    return pd.concat(frames, ignore_index=True)
 
 
 def point_tiles() -> gpd.GeoDataFrame:
@@ -108,7 +108,7 @@ def point_tiles() -> gpd.GeoDataFrame:
     for ZAF+KEN).
     """
     with urllib.request.urlopen(_request(OPEN_BUILDINGS_TILES_URL), timeout=120) as resp:
-        tiles = cast(gpd.GeoDataFrame, gpd.read_file(resp))
+        tiles = gpd.read_file(resp)
     tiles["tile_url"] = tiles["tile_url"].str.replace(OB_POLYGON_PREFIX, OB_POINT_PREFIX)
     return tiles
 
@@ -156,9 +156,10 @@ def filter_tile(raw: Path, shortlist: gpd.GeoDataFrame, out_path: Path,
             crs=4326)
         inside = filter_to_shortlist(pts, shortlist)
         if len(inside):
-            kept.append(inside[["area_in_meters", "confidence", "geometry"]])
+            kept.append(cast(gpd.GeoDataFrame,
+                             inside[["area_in_meters", "confidence", "geometry"]]))
 
-    out = (cast(gpd.GeoDataFrame, pd.concat(kept, ignore_index=True)) if kept
+    out = (pd.concat(kept, ignore_index=True) if kept
            else gpd.GeoDataFrame({"area_in_meters": [], "confidence": []},
                                  geometry=[], crs=4326))
     tmp_path = out_path.with_name(out_path.name + ".tmp")
@@ -226,7 +227,7 @@ def main() -> None:
     # is unreadable by every geo consumer downstream -- including KblockSource, which is the only
     # reason this file exists.
     parts = [gpd.read_parquet(p) for p in sorted(tile_dir.glob("*.parquet"))]
-    merged = cast(gpd.GeoDataFrame, pd.concat([p for p in parts if len(p)], ignore_index=True))
+    merged = pd.concat([p for p in parts if len(p)], ignore_index=True)
     buildings_out = CACHE / "buildings_shortlist.parquet"
     merged.to_parquet(buildings_out)
     print(f"\nwrote {buildings_out}  ({len(merged):,} points, {total:,} across tiles)")

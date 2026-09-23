@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import cast
 
 import geopandas as gpd
 import pandas as pd
@@ -136,7 +137,8 @@ def main() -> None:
             # uses. Without it a method that simply draws more road scores better recall by
             # construction: the pilot had clearance at 3x flow_paths' length.
             cum = roads.geometry.length.cumsum()
-            roads = roads[cum <= target_len] if target_len > 0 else roads.iloc[:0]
+            roads = cast(gpd.GeoDataFrame,
+                         roads[cum <= target_len] if target_len > 0 else roads.iloc[:0])
             row: dict[str, object] = {
                 "block": block.block_id, "method": name,
                 "road_len_m": float(roads.geometry.length.sum()) if len(roads) else 0.0,
@@ -158,8 +160,8 @@ def main() -> None:
         return
     print(f"{'method':24} {'n':>3} {'FOOT iou10':>11} {'recall m':>9} | "
           f"{'STREET iou10':>13} {'recall m':>9} | {'road m':>8} {'disp':>6}")
-    for name, g in df.groupby("method"):
-        print(f"{name:24} {len(g):>3} {g.foot_iou_10m.median():>11.3f} "
+    for method_name, g in df.groupby("method"):
+        print(f"{method_name:24} {len(g):>3} {g.foot_iou_10m.median():>11.3f} "
               f"{g.foot_chamfer_recall_m.median():>9.1f} | "
               f"{g.street_iou_10m.median():>13.3f} {g.street_chamfer_recall_m.median():>9.1f} | "
               f"{g.road_len_m.median():>8.0f} {g.displacement.median():>6.3f}")
