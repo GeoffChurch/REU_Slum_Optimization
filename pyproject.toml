@@ -125,7 +125,7 @@ test = { depends-on = ["test-py", "web-test"] }
 # NOTE: these explicit file arguments OVERRIDE `[tool.mypy] files` entirely -- a module
 # listed there and not here is NOT checked by the gate. tests/test_typecheck_config.py
 # pins the two lists together.
-typecheck-py = "mypy --strict src tests scripts/crossblock_probe.py scripts/calibrate_permeability.py scripts/perf/records.py scripts/perf/region_cap_report.py scripts/_default_road.py scripts/_bundle_io.py scripts/gen_displacement_field.py scripts/gen_web_bundle.py scripts/gen_frontier_bundle.py scripts/gen_region_grow.py scripts/gen_screen_map.py scripts/gen_authoring_block.py web/src/py/solve.py"
+typecheck-py = "mypy --strict src tests scripts web/src/py/solve.py"
 web = { cmd = "npm ci && npm run build", cwd = "web" }
 web-check = { cmd = "npm ci && npm run check", cwd = "web" }
 typecheck = { depends-on = ["typecheck-py", "web-check"] }
@@ -147,20 +147,20 @@ regen-examples = "bash scripts/regenerate_examples.sh"
 [tool.mypy]
 python_version = "3.11"
 strict = true
-# Named scripts only, NOT the whole scripts/ dir: the pre-existing scripts/fetch_kblock_fixtures.py
-# (Task 0) has its own pre-existing --strict findings and was never covered by this config. Files
-# are added here as they are made strict-clean -- scripts/perf/{records,region_cap_report}.py are
-# the typed boundary and analysis for the region-cap experiments, and are listed so the dataclasses
-# that replaced their string-keyed dict access cannot silently rot back.
+# The whole scripts/ directory, not a hand-picked list of its files: a script left off a list rots
+# where nobody sees it.
 #
 # THIS LIST IS INERT FOR THE GATE ON ITS OWN: `typecheck-py` above passes explicit file arguments,
 # which override `files` entirely, so every entry here has to appear there too. Adding a module to
 # one list and not the other is the failure tests/test_typecheck_config.py exists to catch.
-files = ["src", "tests", "scripts/crossblock_probe.py", "scripts/calibrate_permeability.py",
-         "scripts/perf/records.py", "scripts/perf/region_cap_report.py", "scripts/_default_road.py",
-         "scripts/gen_web_bundle.py", "scripts/gen_frontier_bundle.py",
-         "scripts/_bundle_io.py", "scripts/gen_displacement_field.py", "scripts/gen_region_grow.py",
-         "scripts/gen_screen_map.py", "scripts/gen_authoring_block.py", "web/src/py/solve.py"]
+files = ["src", "tests", "scripts", "web/src/py/solve.py"]
+# The two files the directory walk skips. scripts/pair_matrix.py and scripts/consensus_matrix.py
+# import the gitignored `scratchpad/ot/` spike -- never on disk in CI or a fresh checkout, so mypy
+# cannot resolve it -- pending the owner's decision on whether to vendor that code. `exclude` only
+# governs the walk; other scripts import both, and the follow_imports=silent override below is what
+# keeps their bodies quiet when mypy follows those imports. tests/test_typecheck_config.py pins this
+# to exactly these two files, so widening it is a decision rather than a regex accident.
+exclude = ['^scripts/pair_matrix\.py$', '^scripts/consensus_matrix\.py$']
 # topology is installed via a PEP 660 "strict" editable install, whose .pth
 # registers a sys.meta_path finder at runtime rather than a plain sys.path
 # entry — mypy's static .pth scan can't see through that, so point it at the
@@ -251,29 +251,13 @@ module = [
 follow_imports = "silent"
 
 [[tool.mypy.overrides]]
-# reblock/data/provision.py imports download_dataverse_blocks/download_capetown_buildings/
-# CT_BBOX from scripts/fetch_kblock_fixtures.py -- a pre-existing script (Task 0, out of
-# scope here) with its own pre-existing --strict findings, previously excluded from `files`
-# (see the "files" comment above) precisely so it wasn't checked. Since provision.py *is*
-# in `files`, mypy's default follow_imports="normal" would transitively re-check that
-# script's whole body anyway. follow_imports=silent still parses it (so the imported
-# names have real inferred types at provision.py's call sites, not Any) but suppresses
-# its own unrelated errors, mirroring the topology.graph.my_graph* override above.
-module = "scripts.fetch_kblock_fixtures"
-follow_imports = "silent"
-
-[[tool.mypy.overrides]]
-# scripts/pair_matrix.py and scripts/osm_census.py are likewise deliberately excluded from
-# `files` (see the comment above) -- pair_matrix.py imports the gitignored `scratchpad/ot/`
-# spike (mypy can never resolve it: that directory is never on disk in CI/a fresh checkout) and
-# osm_census.py has its own pre-existing --strict findings, neither in scope here. tests/test_
-# pair_matrix.py and tests/test_osm_census.py import both scripts to exercise their real
-# functions, which -- since those test files ARE in `files` -- makes mypy's default
-# follow_imports="normal" transitively re-check both scripts' whole bodies anyway.
-# follow_imports=silent still parses them (so the imported names have real inferred types at the
-# test files' call sites, not Any) but suppresses their own unrelated errors, exactly mirroring
-# the scripts.fetch_kblock_fixtures override above.
-module = ["scripts.pair_matrix", "scripts.osm_census"]
+# The two scripts `exclude` skips (see the comment there) are still IMPORTED by checked code --
+# tests/test_pair_matrix.py and a dozen scripts reach pair_matrix.py, consensus_sweep.py reaches
+# consensus_matrix.py -- and mypy's default follow_imports="normal" would re-check both whole
+# bodies through those imports, unresolvable spike import included. follow_imports=silent still
+# parses them (so the imported names have real inferred types at their call sites, not Any) but
+# suppresses their own errors, mirroring the topology.graph.my_graph* override above.
+module = ["scripts.pair_matrix", "scripts.consensus_matrix"]
 follow_imports = "silent"
 
 [[tool.mypy.overrides]]
