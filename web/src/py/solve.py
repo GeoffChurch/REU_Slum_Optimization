@@ -73,6 +73,17 @@ class BaselineDict(TypedDict):
     potential: list[float]
 
 
+class ParamsDict(TypedDict):
+    """`PermeabilityParams`, field for field -- `web/src/authoring.d.ts`'s `params`. Baked from
+    conf/permeability.yaml, because `conf/` does not travel with the wheel the browser installs."""
+    g_walk: float
+    g_road_per_m: float
+    g_street: float
+    road_margin_m: float
+    min_road_width_m: float
+    radius_frac: float
+
+
 class AuthoringBundle(TypedDict):
     """The whole artifact's shape -- `web/src/authoring.d.ts`'s `AuthoringBlock`.
     `block_from_bundle` below reads a subset of these fields (everything except `nodes`, `edges`,
@@ -88,6 +99,7 @@ class AuthoringBundle(TypedDict):
     streets: list[list[list[float]]]
     building_points: list[list[float]]
     building_radii: list[float]
+    params: ParamsDict
     nodes: NodesDict
     edges: EdgesDict
     baseline: BaselineDict
@@ -165,15 +177,17 @@ def adjacency_from_bundle(bundle: AuthoringBundle, block: Block) -> ParcelAdjace
 
 def context_from_bundle(bundle: AuthoringBundle) -> EgressContext:
     """Everything `solve` reads that no road changes, built ONCE at boot from the bundle: the
-    rebuilt block, its baked adjacency (`adjacency_from_bundle`) and the params.
-
-    `PermeabilityParams()` is constructed with no arguments -- the wheel `micropip` installs ships
-    `src/reblock` alone, so `conf/` cannot reach the browser, and the baked
-    `examples/authoring/block.json` was itself baked against these same defaults. The mesh the
-    context caches is built by the first `solve`, not here, and then reused by every later one.
+    rebuilt block, its baked adjacency (`adjacency_from_bundle`) and the params -- the bundle's
+    own, which the bake read from conf/permeability.yaml, since `conf/` does not travel with the
+    wheel the browser installs. The mesh the context caches is built by the first `solve`, not
+    here, and then reused by every later one.
     """
-    return EgressContext(adjacency_from_bundle(bundle, block_from_bundle(bundle)),
-                         PermeabilityParams())
+    p = bundle["params"]
+    params = PermeabilityParams(
+        g_walk=p["g_walk"], g_road_per_m=p["g_road_per_m"], g_street=p["g_street"],
+        road_margin_m=p["road_margin_m"], min_road_width_m=p["min_road_width_m"],
+        radius_frac=p["radius_frac"])
+    return EgressContext(adjacency_from_bundle(bundle, block_from_bundle(bundle)), params)
 
 
 def solve(ctx: EgressContext, road: list[list[float]], p0: float) -> PyResult:

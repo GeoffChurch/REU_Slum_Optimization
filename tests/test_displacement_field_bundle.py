@@ -41,7 +41,7 @@ def test_the_committed_dts_is_what_the_generator_writes() -> None:
 
 
 def test_every_declared_field_is_present_and_the_shapes_agree(bundle: dict[str, Any]) -> None:
-    from reblock.permeability import PermeabilityParams
+    from reblock.compare import load_permeability_config
     b = bundle
     n = b["n_buildings"]
     assert n > 0
@@ -54,9 +54,10 @@ def test_every_declared_field_is_present_and_the_shapes_agree(bundle: dict[str, 
             f"building {i}'s outline is not a list of polygons of closed rings")
     assert len(b["roads"]) == 2, "two default roads (spec section 2)"
     assert all(len(r["coords"]) == 2 for r in b["roads"]), "the default roads are straight segments"
-    assert b["width"]["floor_m"] == PermeabilityParams.min_road_width_m, (
+    floor = load_permeability_config().params.min_road_width_m
+    assert b["width"]["floor_m"] == floor, (
         f"the slider floor is {b['width']['floor_m']} but permeability.py:205 raises below "
-        f"{PermeabilityParams.min_road_width_m} -- the slider would offer a road the metric "
+        f"{floor} -- the slider would offer a road the metric "
         f"refuses to score. Re-bake: pixi run python -m scripts.gen_displacement_field")
     assert b["width"]["default_m"] >= b["width"]["floor_m"]
     assert b["width"]["max_m"] > b["width"]["default_m"]

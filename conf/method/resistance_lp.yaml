@@ -22,5 +22,5 @@ substrate: ${substrate}
 max_displacement: 0.20
 max_road_m: 1000000.0   # a hard metre cap, effectively off; see the class docstring
 chunks: 8
-params: {_target_: reblock.permeability.PermeabilityParams}
+params: ${permeability.params}
 road_width_m: 7.0

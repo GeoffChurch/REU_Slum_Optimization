@@ -18,5 +18,5 @@ max_displacement: 0.20
 # reported curve at 6.9-16.0% displacement in every settlement region while the config said 0.20.
 max_cycles: 400
 shortlist: 8
-params: {_target_: reblock.permeability.PermeabilityParams}
+params: ${permeability.params}
 road_width_m: 7.0

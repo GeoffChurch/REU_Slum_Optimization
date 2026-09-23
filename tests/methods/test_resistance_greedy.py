@@ -21,10 +21,10 @@ from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
-    PermeabilityParams,
     permeability,
     with_width,
 )
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32734)
 
@@ -33,7 +33,7 @@ UTM = CRS.from_epsg(32734)
 GREEDY = ResistanceGreedyReblocker(substrate=ChordSubstrate(), max_roads=400, shortlist=6,
                                    loop_radius_m=0.0, min_loop_len_m=40.0,
                                    max_loop_candidates=400, min_gain_per_m=1e-6, seed=0,
-                                   params=PermeabilityParams(), road_width_m=DEFAULT_ROAD_WIDTH_M)
+                                   params=SHIPPED, road_width_m=DEFAULT_ROAD_WIDTH_M)
 
 
 def _slab(w: int, h: int) -> Block:
@@ -69,7 +69,7 @@ def test_the_first_road_is_the_ARGMAX_over_candidates_by_gain_per_metre() -> Non
 
     block = _slab(6, 6)
     empty = gpd.GeoDataFrame(geometry=[], crs=block.crs)
-    ctx = EgressContext.of(block, PermeabilityParams())
+    ctx = EgressContext.of(block, SHIPPED)
     base = permeability(ctx, empty)
 
     graph = ChordSubstrate().build(block)

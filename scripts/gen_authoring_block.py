@@ -76,6 +76,7 @@ if TYPE_CHECKING:
         BaselineDict,
         EdgesDict,
         NodesDict,
+        ParamsDict,
         ReferenceCase,
         block_from_bundle,
     )
@@ -145,6 +146,16 @@ export interface AuthoringBlock {
    * `Discs(building_points, building_radii)` reproduces whatever tier baked it -- a footprint's
    * equivalent-area radius included -- without shipping a single polygon. */
   building_radii: number[];
+  /** `PermeabilityParams`, field for field, baked from conf/permeability.yaml: `conf/` does not
+   * travel with the wheel the browser installs, so the solve builds its params from these. */
+  params: {
+    g_walk: number;
+    g_road_per_m: number;
+    g_street: number;
+    road_margin_m: number;
+    min_road_width_m: number;
+    radius_frac: number;
+  };
   reference: AuthoringReference[];
 
   /** The road-INVARIANT half of the graph (design §1.6), baked once so the runtime returns two
@@ -236,6 +247,7 @@ if not TYPE_CHECKING:
     BaselineDict = _solve_mod.BaselineDict
     EdgesDict = _solve_mod.EdgesDict
     NodesDict = _solve_mod.NodesDict
+    ParamsDict = _solve_mod.ParamsDict
     ReferenceCase = _solve_mod.ReferenceCase
     block_from_bundle = _solve_mod.block_from_bundle
 
@@ -360,22 +372,10 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     OUT.mkdir(parents=True, exist_ok=True)
 
-    # The dataclass defaults, NOT `load_permeability_config()`: the wheel micropip installs in the
-    # browser is built from `src/reblock` alone (pyproject's hatch `packages`), so `conf/` does not
-    # travel with it and the browser's `PermeabilityParams()` is the default set. Baking against
-    # the configured set instead would make the parity test compare two different metrics. The
-    # check below turns a yaml edit into a bake failure rather than leaving this widget silently
-    # scoring roads by different parameters from every other figure on the site; note that
-    # `load_permeability_config` reads five of the six fields (it does not read
-    # `min_road_width_m`), so that one field compares default against default.
-    params = PermeabilityParams()
-    configured = load_permeability_config().params
-    if params != configured:
-        raise SystemExit(
-            f"conf/permeability.yaml no longer matches PermeabilityParams' defaults: {configured} "
-            f"vs {params}. The browser constructs the defaults -- conf/ is not in the wheel -- so "
-            f"this bundle would score roads differently from the rest of the site. Either move the "
-            f"defaults with the yaml, or teach the bundle to carry the params.")
+    # The CONFIGURED params, baked into the bundle: `conf/` does not travel with the wheel the
+    # browser installs, so the in-browser solve builds its `PermeabilityParams` from these fields,
+    # and a yaml edit reaches the widget with the next bake like every other figure on the site.
+    params = load_permeability_config().params
 
     block = load_example_region()
     epsg = block.crs.to_epsg()
@@ -431,6 +431,10 @@ def main() -> None:
                  for coords in _lines(g, what=f"block {block.block_id!r}'s street")],
         building_points=[[float(x), float(y)] for x, y in anchors],
         building_radii=[float(r) for r in radii_b],
+        params=ParamsDict(g_walk=params.g_walk, g_road_per_m=params.g_road_per_m,
+                          g_street=params.g_street, road_margin_m=params.road_margin_m,
+                          min_road_width_m=params.min_road_width_m,
+                          radius_frac=params.radius_frac),
         nodes=NodesDict(cx=mesh.cx.tolist(), cy=mesh.cy.tolist(),
                         ground=[bool(g) for g in mesh.ground]),
         edges=EdgesDict(rows=mesh.rows.tolist(), cols=mesh.cols.tolist(),

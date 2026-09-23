@@ -48,6 +48,7 @@ from reblock.methods.arterial.scoring import _best_candidate
 from reblock.methods.boundary_graph import _boundary_graph
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 from tests.block_fixtures import no_buildings
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32643)
 
@@ -347,7 +348,7 @@ def test_greedy_is_deterministic() -> None:
 
 def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     from reblock.budget import road_drainage
-    from reblock.permeability import EgressContext, PermeabilityParams, permeability_curve
+    from reblock.permeability import EgressContext, permeability_curve
     block = _grid_block(6)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
@@ -356,7 +357,7 @@ def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     assert len(roads) >= 1
     assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
     # integrates w/ budget machinery
-    curve = permeability_curve(EgressContext.of(block, PermeabilityParams()), roads)
+    curve = permeability_curve(EgressContext.of(block, SHIPPED), roads)
     assert len(curve.cost) >= 2                                  # multiple budget points, not stub
     assert curve.benefit[-1] >= curve.benefit[0]                 # benefit doesn't regress w/ budget
 

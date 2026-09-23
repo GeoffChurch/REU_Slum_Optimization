@@ -22,11 +22,11 @@ from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
-    PermeabilityParams,
     permeability,
     with_width,
 )
 from tests.block_fixtures import no_buildings
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32643)
 
@@ -407,7 +407,7 @@ def test_prefix_to_depth_reports_floor_when_target_unreachable() -> None:
 def test_prefix_to_permeability_returns_minimal_prefix_that_reaches_target() -> None:
     from reblock.budget import prefix_to_permeability
     block, roads = _permeability_grid_block_and_roads()
-    ctx = EgressContext.of(block, PermeabilityParams())
+    ctx = EgressContext.of(block, SHIPPED)
     p1 = permeability(ctx, cast(gpd.GeoDataFrame, roads.iloc[:1]))
     p2 = permeability(ctx, roads)
     assert 0.0 < p1 < p2                       # spur alone helps but the pair does strictly more
@@ -420,7 +420,7 @@ def test_prefix_to_permeability_returns_minimal_prefix_that_reaches_target() -> 
 def test_prefix_to_permeability_reaches_a_higher_target_only_with_all_roads() -> None:
     from reblock.budget import prefix_to_permeability
     block, roads = _permeability_grid_block_and_roads()
-    ctx = EgressContext.of(block, PermeabilityParams())
+    ctx = EgressContext.of(block, SHIPPED)
     p1 = permeability(ctx, cast(gpd.GeoDataFrame, roads.iloc[:1]))
     p2 = permeability(ctx, roads)
     target = (p1 + p2) / 2.0                   # strictly between: needs both roads
@@ -432,7 +432,7 @@ def test_prefix_to_permeability_reaches_a_higher_target_only_with_all_roads() ->
 def test_prefix_to_permeability_reports_unreached_when_target_unreachable() -> None:
     from reblock.budget import prefix_to_permeability
     block, roads = _permeability_grid_block_and_roads()
-    ctx = EgressContext.of(block, PermeabilityParams())
+    ctx = EgressContext.of(block, SHIPPED)
     prefix, reached = prefix_to_permeability(ctx, roads, 1.5)   # 1.5 exceeds max (permeability<1)
     assert not reached
     assert len(prefix) == len(roads)           # best effort = all roads in drainage order
@@ -444,7 +444,7 @@ def test_prefix_to_permeability_empty_roads_returns_empty_unreached() -> None:
     from reblock.budget import prefix_to_permeability
     block, _roads = _permeability_grid_block_and_roads()
     empty_roads = gpd.GeoDataFrame(geometry=[], crs=UTM)
-    prefix, reached = prefix_to_permeability(EgressContext.of(block, PermeabilityParams()),
+    prefix, reached = prefix_to_permeability(EgressContext.of(block, SHIPPED),
                                              empty_roads, 0.1)
     assert len(prefix) == 0
     assert not reached
@@ -530,7 +530,7 @@ def test_permeability_and_displacement_curves_share_cost_samples():
     from reblock.budget import displacement_curve
     from reblock.permeability import permeability_curve
     block, roads = _straight_block_with_two_roads()
-    perm = permeability_curve(EgressContext.of(block, PermeabilityParams()), roads)
+    perm = permeability_curve(EgressContext.of(block, SHIPPED), roads)
     disp = displacement_curve(block, roads)
     assert list(perm.cost) == list(disp.cost)
 

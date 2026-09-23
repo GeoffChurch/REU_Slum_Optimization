@@ -33,6 +33,16 @@ export interface AuthoringBlock {
    * `Discs(building_points, building_radii)` reproduces whatever tier baked it -- a footprint's
    * equivalent-area radius included -- without shipping a single polygon. */
   building_radii: number[];
+  /** `PermeabilityParams`, field for field, baked from conf/permeability.yaml: `conf/` does not
+   * travel with the wheel the browser installs, so the solve builds its params from these. */
+  params: {
+    g_walk: number;
+    g_road_per_m: number;
+    g_street: number;
+    road_margin_m: number;
+    min_road_width_m: number;
+    radius_frac: number;
+  };
   reference: AuthoringReference[];
 
   /** The road-INVARIANT half of the graph (design §1.6), baked once so the runtime returns two

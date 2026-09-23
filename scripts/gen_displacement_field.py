@@ -28,8 +28,9 @@ from shapely.geometry.base import BaseGeometry
 
 from reblock.budget import displacement
 from reblock.buildings import ANCHOR_COL, Extents, Footprints
+from reblock.compare import load_permeability_config
 from reblock.contracts import Block
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.render import (
     _BOUNDARY_COLOR,
     _BOUNDARY_LW,
@@ -51,18 +52,13 @@ log = logging.getLogger(__name__)
 OUT = Path("examples/displacement-field")
 DTS = Path("web/src/field.d.ts")
 
-# The slider's floor is not "7.0" but the value permeability.py:205 RAISES below, and the default is
-# the width a method emits when nothing else specifies one -- both read from their declarations
-# rather than retyped. A road narrower than the floor is one the pipeline rejects, so a slider that
-# could produce one would offer the reader a configuration the metric refuses to score.
-#
-# NOTE these are the CODE's defaults (`PermeabilityParams`' dataclass field and
-# `permeability.DEFAULT_ROAD_WIDTH_M`), NOT conf/permeability.yaml:31 -- which happens to set the
-# same 7.0. The dataclass is the right binding because it is what the validator at :205 compares
-# against when no config overrides it, so the slider and the validator cannot disagree. Editing the
-# yaml does NOT move the slider; re-basing the dataclass default does, and fails
-# tests/test_displacement_field_bundle.py until the bundle is re-baked.
-WIDTH_FLOOR_M = PermeabilityParams.min_road_width_m
+# The slider's floor is not "7.0" but the value the metric RAISES below -- the configured
+# `min_road_width_m`, the same number every scorer on the site reads -- and the default is the width
+# a method emits. Both are read, not retyped: a road narrower than the floor is one the pipeline
+# rejects, so a slider that could produce one would offer a configuration the metric refuses to
+# score. Editing conf/permeability.yaml moves the slider on the next bake, and
+# tests/test_displacement_field_bundle.py fails until that bake happens.
+WIDTH_FLOOR_M = load_permeability_config().params.min_road_width_m
 WIDTH_DEFAULT_M = DEFAULT_ROAD_WIDTH_M
 WIDTH_MAX_M = 20.0
 WIDTH_STEP_M = 0.5

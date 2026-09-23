@@ -17,7 +17,8 @@ from reblock.buildings import Discs, SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.resistance_lp import ResistanceLPReblocker, solve_coverage_lp
 from reblock.methods.substrates import ChordSubstrate
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from tests.permeability_fixtures import SHIPPED
 
 CORRIDOR_M = 3.0
 
@@ -65,7 +66,7 @@ def test_displacement_budget_is_respected(cap: float) -> None:
     """
     block = _grid_block()
     roads = ResistanceLPReblocker(max_displacement=cap, substrate=ChordSubstrate(), max_road_m=1e6,
-                                  chunks=8, params=PermeabilityParams(),
+                                  chunks=8, params=SHIPPED,
                                   road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None and len(roads) > 0, "no roads: the cap is vacuous"
     got = displacement(block.buildings, roads) / len(
@@ -87,7 +88,7 @@ def test_every_road_reaches_the_street() -> None:
     """
     block = _grid_block()
     roads = ResistanceLPReblocker(max_displacement=0.15, substrate=ChordSubstrate(), max_road_m=1e6,
-                                  chunks=8, params=PermeabilityParams(),
+                                  chunks=8, params=SHIPPED,
                                   road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None and len(roads) > 0
 

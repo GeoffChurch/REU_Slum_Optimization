@@ -19,14 +19,15 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.cycle_native import CycleNativeReblocker
 from reblock.methods.substrates import ChordSubstrate
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32734)
 
 # Every setting spelled once, at the values `conf/method/cycle_native.yaml` ships; each test varies
 # what it is about with `replace`.
 CYCLE = CycleNativeReblocker(substrate=ChordSubstrate(), max_displacement=0.20, max_cycles=400,
-                             shortlist=8, params=PermeabilityParams(),
+                             shortlist=8, params=SHIPPED,
                              road_width_m=DEFAULT_ROAD_WIDTH_M)
 
 

@@ -22,7 +22,7 @@ from reblock.emit import compare_report as compare_report
 from reblock.emit import pct_displaced, pct_paved
 from reblock.permeability import EgressContext, PermeabilityParams, permeability_curve
 from reblock.pipeline import build_regions
-from reblock.presets import load_method, load_methods, load_stages
+from reblock.presets import load_method, load_methods, load_permeability_params, load_stages
 from reblock.region import region_reblock
 from reblock.render import google_maps_url, short_label
 
@@ -50,19 +50,15 @@ class PermeabilityConfig:
 def load_permeability_config(config_dir: Path = Path("conf")) -> PermeabilityConfig:
     """`conf/permeability.yaml` -> `PermeabilityConfig`. The ONE reader of that file.
 
-    There were three copies of this before -- here, `scripts.compare_budgets` and
-    `scripts.calibrate_permeability` -- and this one had silently dropped `road_margin_m`, so the
-    frontier path built `PermeabilityParams` with the dataclass default while the other two read
-    the configured value. Inert only because the configured value happened to equal the default;
-    editing the yaml would have moved two of the three call sites. Hence one implementation.
+    `params` is built by the typed loader from the file's own `_target_` node -- the same node every
+    method preset interpolates -- and `PermeabilityParams` has no defaults, so a field the file
+    omits is an error here rather than a silently substituted value. (A hand-listed constructor
+    here once dropped `road_margin_m`, and later `min_road_width_m`, each taking the dataclass
+    default while other readers took the configured value.)
     """
     raw = cast(DictConfig, OmegaConf.load(config_dir / "permeability.yaml"))
     return PermeabilityConfig(
-        params=PermeabilityParams(g_walk=float(raw.g_walk),
-                                  g_road_per_m=float(raw.g_road_per_m),
-                                  g_street=float(raw.g_street),
-                                  road_margin_m=float(raw.road_margin_m),
-                                  radius_frac=float(raw.radius_frac)),
+        params=load_permeability_params(raw.params),
         matched_displacement=float(raw.matched_displacement),
         matched_permeability=float(raw.matched_permeability),
         frontier_xmax=float(raw.frontier_xmax))

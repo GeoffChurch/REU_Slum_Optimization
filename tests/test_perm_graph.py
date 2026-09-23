@@ -10,10 +10,10 @@ from reblock.perm_graph import GraphFigure, permeability_graph
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
-    PermeabilityParams,
     with_width,
 )
 from tests.block_fixtures import no_buildings
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32734)
 
@@ -38,7 +38,7 @@ def _grid_block(k: int = 6, cell: float = 10.0, street: bool = True) -> Block:
 
 
 def _ctx(block: Block) -> EgressContext:
-    return EgressContext.of(block, PermeabilityParams())
+    return EgressContext.of(block, SHIPPED)
 
 
 def _roads(lines: list[LineString]) -> gpd.GeoDataFrame:

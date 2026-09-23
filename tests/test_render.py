@@ -36,6 +36,7 @@ from reblock.render import (
     save_render,
 )
 from tests.block_fixtures import no_buildings
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32643)
 
@@ -426,11 +427,11 @@ def test_displaced_buildings_are_outlines_carrying_their_share(tmp_path):
 
 def test_render_graph_returns_figure_with_axes() -> None:
     from reblock.perm_graph import permeability_graph
-    from reblock.permeability import EgressContext, PermeabilityParams
+    from reblock.permeability import EgressContext
     from reblock.render import render_graph
 
     block = _grid_block(6)
-    fig_data = permeability_graph(EgressContext.of(block, PermeabilityParams()), None)
+    fig_data = permeability_graph(EgressContext.of(block, SHIPPED), None)
     fig = render_graph(fig_data, block, layer="conductance",
                        vmax=float(fig_data.potential.max()),
                        width_norm=float(fig_data.conductance.max()))
@@ -450,7 +451,7 @@ def test_render_graph_draws_upgraded_edges_in_the_road_colour() -> None:
     from matplotlib.colors import to_rgba, to_rgba_array
 
     from reblock.perm_graph import permeability_graph
-    from reblock.permeability import EgressContext, PermeabilityParams
+    from reblock.permeability import EgressContext
     from reblock.render import _ROAD_COLOR, _UPGRADED_LW, render_graph
 
     block = _grid_block(6)
@@ -458,7 +459,7 @@ def test_render_graph_draws_upgraded_edges_in_the_road_colour() -> None:
         gpd.GeoDataFrame(geometry=[LineString([(3.0, 0.0), (3.0, 5.0)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)
 
-    ctx = EgressContext.of(block, PermeabilityParams())
+    ctx = EgressContext.of(block, SHIPPED)
     plain = permeability_graph(ctx, None)
     roaded = permeability_graph(ctx, roads)
     assert roaded.upgraded.any(), "fixture road must upgrade an edge or the test is vacuous"

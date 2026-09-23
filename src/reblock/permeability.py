@@ -78,7 +78,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PermeabilityParams:
-    g_walk: float = 0.1
+    g_walk: float
     # Conductance per METRE of usable width, per unit distance. Replaces the old `g_road` ("the
     # conductance of a standard road"), which only meant something relative to a standard width --
     # and so needed a global `corridor_m` that every road silently inherited. With width carried per
@@ -90,15 +90,15 @@ class PermeabilityParams:
     # much SPACE a lane takes is not a claim that a lane carries more traffic.
     # 20.0 / 3.0 m keeps one lane at exactly 20.0, so a default road's conductance is
     # unchanged by the re-base and only its footprint moved.
-    g_road_per_m: float = 6.666666666666667
-    g_street: float = 20.0
+    g_road_per_m: float
+    g_street: float
     # Irreducible margin of a road corridor -- verge, drainage, wall clearance -- paid ONCE
     # regardless of how many lanes it carries. Usable capacity is therefore (W - margin), which
     # makes conductance AFFINE in width and zero for a road too narrow to use at all.
     # Consequence worth knowing: widening is SUPERLINEAR in capacity (the margin is paid once), so
     # this rewards fewer, wider roads over many narrow ones -- which is what real street hierarchies
     # look like, but it is a behavioural change, not just realism.
-    road_margin_m: float = 1.0
+    road_margin_m: float
     # Narrowest BUILDABLE road. Conductance is affine in width, which is right ABOVE this floor --
     # extra width really does buy throughput, because in a dense settlement one parked vehicle or
     # vendor otherwise blocks the way outright -- and fiction BELOW it: a road with less than one
@@ -122,13 +122,13 @@ class PermeabilityParams:
     # This is a re-baseline: a buildable street is 7 m, not 6 m, so every method's roads displace
     # more than they used to. Permeability per covered edge is unchanged (see g_road_per_m), so
     # what moved is the COST side only -- the same function, honestly priced.
-    min_road_width_m: float = 7.0
+    min_road_width_m: float
     # Scales the per-parcel footprint radii the footpath clearance is measured against. 1.0 uses
     # `buildings.SpacingDiscs` as-is (half the nearest-neighbour distance), which is a geometric
     # fact rather than a tuned constant -- unlike the r0_frac=0.55 this replaces, which existed to
     # size a single block-median corridor. Kept as a knob because a metric change of this kind has
     # to be recalibratable, not because a value other than 1.0 is known to be better.
-    radius_frac: float = 1.0
+    radius_frac: float
 
 
 def _road_corridor(roads: GeoDataFrame | None, half_width_m: float) -> BaseGeometry | None:
@@ -151,8 +151,9 @@ WIDTH_COL = "width_m"
 DEFAULT_ROAD_WIDTH_M = 7.0
 """Total width of a road a method emits when nothing else specifies one.
 
-Equals `PermeabilityParams.min_road_width_m`: the default road is the narrowest street that can
-actually carry two directions. Re-based from 6.0 with the floor on 2026-07-31.
+Equals the configured `min_road_width_m` (conf/permeability.yaml; pinned by
+tests/test_permeability_width.py): the default road is the narrowest street that can actually carry
+two directions. Re-based from 6.0 with the floor on 2026-07-31.
 
 Every method carries this as a `road_width_m` field, so it is a default a caller can override --
 never a global the metric falls back to. The metric itself has no default at all: roads without a

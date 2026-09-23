@@ -72,20 +72,21 @@ def test_the_committed_readme_is_what_the_generator_writes() -> None:
         "pixi run python -m scripts.gen_authoring_block")
 
 
-def test_the_browser_gets_the_configured_params_because_they_are_the_defaults() -> None:
-    """The bundle carries no params, and the wheel `micropip` installs is built from `src/reblock`
-    alone, so `conf/` never reaches the browser and the browser's only parameter set is
-    `PermeabilityParams()`. This baker therefore bakes against the defaults -- correct only while
-    the defaults ARE what `conf/permeability.yaml` configures.
+def test_the_bundle_carries_the_configured_params(bundle: dict[str, Any]) -> None:
+    """The browser builds its `PermeabilityParams` from the bundle's `params` -- `conf/` does not
+    travel with the wheel `micropip` installs -- so a yaml edit with no re-bake would leave this
+    widget scoring roads by different parameters from every other figure on the site. Every field,
+    compared exactly, both ways."""
+    import dataclasses
 
-    A repo invariant, so it belongs here as well as in the baker: a yaml edit with no re-bake of
-    this one bundle would otherwise leave this widget scoring roads by different parameters from
-    every other figure on the site, and nothing in CI would notice. `load_permeability_config`
-    reads five of the six fields (not `min_road_width_m`); the whole-dataclass comparison covers
-    the sixth automatically if a reader is ever added for it."""
     from reblock.compare import load_permeability_config
-    from reblock.permeability import PermeabilityParams
-    assert load_permeability_config().params == PermeabilityParams()
+    shipped = load_permeability_config().params
+    baked = bundle["params"]
+    assert set(baked) == {f.name for f in dataclasses.fields(shipped)}
+    for name, value in baked.items():
+        assert value == getattr(shipped, name), (
+            f"field {name}: bundle {value!r} vs conf {getattr(shipped, name)!r}; re-bake: "
+            f"pixi run python -m scripts.gen_authoring_block")
 
 
 def test_it_is_the_spine_block_and_a_projected_crs(bundle: dict[str, Any]) -> None:

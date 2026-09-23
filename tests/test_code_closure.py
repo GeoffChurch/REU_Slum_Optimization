@@ -15,7 +15,8 @@ from pathlib import Path
 
 from reblock.derive_graph import _closure_paths
 from reblock.methods.substrates import ChordSubstrate
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from tests.permeability_fixtures import SHIPPED
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "reblock"
 
@@ -91,7 +92,7 @@ def test_a_methods_code_version_is_blind_to_its_siblings() -> None:
                                            depth_target=2, max_roads=400,
                                            road_width_m=DEFAULT_ROAD_WIDTH_M))
     cycle = modules(CycleNativeReblocker(substrate=ChordSubstrate(), max_displacement=0.10,
-                                         max_cycles=400, shortlist=8, params=PermeabilityParams(),
+                                         max_cycles=400, shortlist=8, params=SHIPPED,
                                          road_width_m=DEFAULT_ROAD_WIDTH_M))
     assert clearance != cycle
     assert SRC / "methods" / "cycle_native.py" not in clearance
@@ -102,7 +103,7 @@ def test_a_methods_code_version_is_blind_to_its_siblings() -> None:
                                                          road_width_m=DEFAULT_ROAD_WIDTH_M),))
     b = _code_version(_propose_impl, (CycleNativeReblocker(substrate=ChordSubstrate(),
                                                            max_displacement=0.10, max_cycles=400,
-                                                           shortlist=8, params=PermeabilityParams(),
+                                                           shortlist=8, params=SHIPPED,
                                                            road_width_m=DEFAULT_ROAD_WIDTH_M),))
     assert a != b, "two methods must not share a code version"
 

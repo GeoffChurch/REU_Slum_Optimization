@@ -20,11 +20,11 @@ from reblock.contracts import Block
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
-    PermeabilityParams,
     permeability,
     road_conductance,
     with_width,
 )
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32734)
 
@@ -66,7 +66,7 @@ def test_a_default_road_gives_one_direction_exactly_the_calibrated_lane_conducta
 
     FAULT INJECTION: dropping the margin from `road_conductance` (pure `k*W/2d`) gives 23.33.
     """
-    pr = PermeabilityParams()
+    pr = SHIPPED
     assert road_conductance(pr, DEFAULT_ROAD_WIDTH_M, 1.0) == pytest.approx(20.0)
     # ...and the default road IS the floor, so the cheapest legal road is exactly one lane each way
     assert DEFAULT_ROAD_WIDTH_M == pytest.approx(pr.min_road_width_m)
@@ -81,7 +81,7 @@ def test_widening_is_superlinear_because_the_margin_is_paid_once() -> None:
 
     FAULT INJECTION: dropping the margin makes this exactly 2.0 and the strict inequality fails.
     """
-    pr = PermeabilityParams()
+    pr = SHIPPED
     w = DEFAULT_ROAD_WIDTH_M
     ratio = road_conductance(pr, 2 * w, 1.0) / road_conductance(pr, w, 1.0)
     assert ratio > 2.0, f"widening should be superlinear, got {ratio:.4f}"
@@ -94,7 +94,7 @@ def test_a_road_below_the_floor_is_refused() -> None:
 
     FAULT INJECTION: removing the `bad.any()` raise scores the road instead of refusing it.
     """
-    pr = PermeabilityParams()
+    pr = SHIPPED
     block, roads = _block(), _roads()
     narrow = with_width(roads, 4.0)
     with pytest.raises(ValueError, match="below the 7 m floor"):
@@ -109,7 +109,7 @@ def test_above_the_floor_width_still_buys_capacity_continuously() -> None:
     FAULT INJECTION: quantizing `road_conductance`'s usable width to whole lanes flattens the
     diff to zero between 7.0 and 7.4, and between 8.2 and 9.5.
     """
-    pr = PermeabilityParams()
+    pr = SHIPPED
     widths = np.array([7.0, 7.4, 8.2, 9.5])
     g = road_conductance(pr, widths, np.ones(len(widths)))
     assert (np.diff(g) > 0).all(), f"width must buy capacity continuously above the floor, got {g}"
@@ -126,7 +126,14 @@ def test_a_wider_road_scores_at_least_as_well_end_to_end() -> None:
     OVERWRITE a footpath edge that was already better, and this fails.
     """
     block, roads = _block(), _roads()
-    ctx = EgressContext.of(block, PermeabilityParams())
+    ctx = EgressContext.of(block, SHIPPED)
     scores = [float(permeability(ctx, with_width(roads, w))) for w in (7.0, 9.0, 14.0)]
     assert all(np.isfinite(scores))
     assert scores[0] <= scores[1] + 1e-12 <= scores[2] + 1e-12, scores
+
+
+def test_the_default_road_is_the_configured_floor() -> None:
+    """`DEFAULT_ROAD_WIDTH_M` is a code constant and `min_road_width_m` a configured value; the
+    constant claims to BE the floor, so a yaml edit to the floor must fail here rather than leave
+    every method emitting roads the metric refuses."""
+    assert DEFAULT_ROAD_WIDTH_M == SHIPPED.min_road_width_m

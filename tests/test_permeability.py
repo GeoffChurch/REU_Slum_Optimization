@@ -13,7 +13,6 @@ from reblock.derive.access import ParcelAdjacency
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
-    PermeabilityParams,
     _footpath_conductance,
     edge_conductances,
     egress_power,
@@ -25,9 +24,10 @@ from reblock.permeability import (
     with_width,
 )
 from tests.block_fixtures import no_buildings
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32734)
-PARAMS = PermeabilityParams()
+PARAMS = SHIPPED
 
 def _grid_block(k=4, cell=1.0):
     # k x k `cell`-sized parcels tiling a k*cell x k*cell square; south edge (y=0) is the
@@ -78,7 +78,7 @@ def test_monotone_under_added_roads():
 
 def test_loop_beats_spur_at_equal_length():
     # A 15x15 grid of 10m parcels (225 parcels; centroid spacing 10m) -- large enough, at the
-    # PermeabilityParams() default that a road's buffered corridor stays THIN
+    # SHIPPED default that a road's buffered corridor stays THIN
     # (covers a local band, not the whole grid): measured coverage is 10.0% of footpath edges
     # for spur, 8.6% for loop -- both well under 100% (see task-1-report.md for the full
     # measurement). (A 6x6 grid of 1m unit parcels -- this repo's earlier attempt -- fails this:
@@ -115,7 +115,7 @@ def test_loop_beats_spur_at_equal_length():
     loop = _roads([LineString([(15, 0), (15, 103)]),
                     LineString([(15, 22), (5, 22), (5, 0)])])
     assert spur.geometry.length.sum() == loop.geometry.length.sum() == 135.0
-    ctx = EgressContext.of(b, PermeabilityParams(g_walk=1.0))
+    ctx = EgressContext.of(b, replace(SHIPPED, g_walk=1.0))
     assert permeability(ctx, loop) > permeability(ctx, spur)
 
 def test_ungrounded_returns_zero_benefit_or_guarded():
@@ -226,7 +226,7 @@ def test_parcel_radii_are_PER_PARCEL_and_scale_with_local_spacing():
     FAULT INJECTION: return `np.full(n, radii.mean())` from `parcel_radii` and the dense/sparse
     ratio survives but `test_footpath_clearance_is_LOCAL_not_a_block_median` below fails.
     """
-    params = PermeabilityParams()
+    params = SHIPPED
     dense = parcel_radii(_points_block(6, spacing=4.0), params)
     sparse = parcel_radii(_points_block(6, spacing=12.0), params)
     assert dense.shape == (1,) and sparse.shape == (1,)
@@ -247,7 +247,7 @@ def test_footpath_clearance_is_LOCAL_not_a_block_median():
     assert same[0] == pytest.approx(same[1])
 
 def test_parcel_radii_fall_back_to_zero_without_enough_building_points():
-    params = PermeabilityParams()
+    params = SHIPPED
     b = _grid_block()   # no buildings
     assert not parcel_radii(b, params).any()
 
@@ -264,7 +264,7 @@ def test_a_road_upgrade_never_lowers_an_edges_conductance():
     #   median(shape) = 0.4; median(1/dist) = 0.1; scale = (0.1 * 0.1) / 0.4 = 0.025
     #   raw = scale * shape = [0.0005, 0.01, 0.02485]; road_g = 20/dist = [20, 2, 0.02]
     #   at dist=1000: raw = 0.02485 > road_g = 0.02 -- the footpath EXCEEDS the road.
-    params = PermeabilityParams()
+    params = SHIPPED
     dist = np.array([1.0, 10.0, 1000.0])
     foot = _footpath_conductance(dist, np.full(dist.size, 6.0), g_walk=params.g_walk)
     road = road_conductance(params, np.full(3, DEFAULT_ROAD_WIDTH_M), dist)
@@ -331,12 +331,12 @@ def test_the_mesh_is_built_under_the_contexts_own_params():
     median of 1/dist), so doubling `g_walk` doubles every mesh edge -- which holds only if the mesh
     reads the context's params rather than some other set.
 
-    FAULT INJECTION: building the mesh under `PermeabilityParams()` instead of `ctx.params` makes
+    FAULT INJECTION: building the mesh under `SHIPPED` instead of `ctx.params` makes
     the ratio 1.
     """
     block = _grid_block()
-    base = EgressContext.of(block, PermeabilityParams(g_walk=0.1)).mesh.footpath_g
-    doubled = EgressContext.of(block, PermeabilityParams(g_walk=0.2)).mesh.footpath_g
+    base = EgressContext.of(block, replace(SHIPPED, g_walk=0.1)).mesh.footpath_g
+    doubled = EgressContext.of(block, replace(SHIPPED, g_walk=0.2)).mesh.footpath_g
     assert len(base) > 0
     np.testing.assert_allclose(doubled / base, 2.0, rtol=1e-12)
 

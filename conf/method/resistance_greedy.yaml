@@ -19,5 +19,5 @@ min_loop_len_m: 40.0
 max_loop_candidates: 400
 min_gain_per_m: 1.0e-06
 seed: 0
-params: {_target_: reblock.permeability.PermeabilityParams}
+params: ${permeability.params}
 road_width_m: 7.0

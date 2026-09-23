@@ -1,41 +1,49 @@
+# @package permeability
+# Composed into every entry config as `permeability` (see their `defaults:`) and read directly by
+# `reblock.compare.load_permeability_config`. `params` is THE PermeabilityParams: every method
+# preset that scores permeability interpolates `${permeability.params}`, and the class has no
+# defaults, so there is no second place these numbers can come from.
+#
 # Permeability metric params + the two universal calibration thresholds. D was set 2026-07-22 from
 # scripts/calibrate_permeability.py's frontiers (Task 3 checkpoint, owner sign-off): methods
 # converge at low displacement (mostly <20%), so D=10% is the matched level where >=2 methods are
 # still building.
 #
-# g_walk lowered 1.0 -> 0.1 and the footpath edge switched from a plain g_walk/dist model to the
-# clearance-fraction corridor model (radius_frac below) 2026-07-23: scratchpad experiments
-# (conductance_variants.py / combination_experiment.py / r0_sweep.py) on
-# multiblock_density_compactness found this combination massively improves method discrimination
-# (D=10% method-spread ~0.9pts -> ~11.8pts) -- see reblock.permeability's module docstring for
-# the formula.
-g_walk: 0.1
-# Conductance per METRE of usable road width, per unit distance. Replaced g_road (20.0) + the
-# global corridor_m (3.0) 2026-07-31: width is carried per road now, so there is no standard road
-# for a single g_road to describe.
-#
-# The calibrated quantity is one LANE at 20.0 -- that is what was tuned against g_walk. So this rate
-# fell with the lane re-base (2.5 m -> 3.0 m, see the width floors below): 20.0/3.0 keeps one lane at
-# exactly 20.0, leaving a default road's conductance unchanged and moving only its footprint.
-g_road_per_m: 6.666666666666667
-g_street: 20.0
-# Irreducible corridor margin (verge, drainage, wall clearance), paid once per road however many
-# lanes it carries. Makes conductance AFFINE in width, so widening is superlinear in capacity.
-road_margin_m: 1.0
-# Narrowest BUILDABLE road -- it has to fit both directions at once. The metric REFUSES anything
-# narrower rather than scoring a road that could not be built (permeability.buildable_widths).
-# Re-based 2026-07-31 from 6.0, which implied a 2.5 m lane: barely a light vehicle, nothing for a
-# service vehicle plus clearance. This encodes a 3.0 m lane, the low end of the 3.0-4.0 m clear
-# width usually cited for fire/ambulance/refuse access. Engineering judgement, not a specific
-# jurisdiction's clause -- edit freely.
-min_road_width_m: 7.0
-# Scales the per-parcel footprint radii the footpath clearance is measured against; 1.0 uses
-# building_radii as-is (half the nearest-neighbour distance), a geometric fact rather than a tuned
-# constant. Replaced r0_frac=0.55, which sized a single block-median corridor half-width -- the same
-# clearance estimate with both radii averaged away, so one assumed gap served a block's packed core
-# and its sparse edge alike. Kept as a knob because a metric change of this kind must be
-# recalibratable, not because a value other than 1.0 is known to be better.
-radius_frac: 1.0
+params:
+  _target_: reblock.permeability.PermeabilityParams
+  # g_walk lowered 1.0 -> 0.1 and the footpath edge switched from a plain g_walk/dist model to the
+  # clearance-fraction corridor model (radius_frac below) 2026-07-23: scratchpad experiments
+  # (conductance_variants.py / combination_experiment.py / r0_sweep.py) on
+  # multiblock_density_compactness found this combination massively improves method discrimination
+  # (D=10% method-spread ~0.9pts -> ~11.8pts) -- see reblock.permeability's module docstring for
+  # the formula.
+  g_walk: 0.1
+  # Conductance per METRE of usable road width, per unit distance. Replaced g_road (20.0) + the
+  # global corridor_m (3.0) 2026-07-31: width is carried per road now, so there is no standard road
+  # for a single g_road to describe.
+  #
+  # The calibrated quantity is one LANE at 20.0 -- that is what was tuned against g_walk. So this rate
+  # fell with the lane re-base (2.5 m -> 3.0 m, see the width floors below): 20.0/3.0 keeps one lane at
+  # exactly 20.0, leaving a default road's conductance unchanged and moving only its footprint.
+  g_road_per_m: 6.666666666666667
+  g_street: 20.0
+  # Irreducible corridor margin (verge, drainage, wall clearance), paid once per road however many
+  # lanes it carries. Makes conductance AFFINE in width, so widening is superlinear in capacity.
+  road_margin_m: 1.0
+  # Narrowest BUILDABLE road -- it has to fit both directions at once. The metric REFUSES anything
+  # narrower rather than scoring a road that could not be built (permeability.buildable_widths).
+  # Re-based 2026-07-31 from 6.0, which implied a 2.5 m lane: barely a light vehicle, nothing for a
+  # service vehicle plus clearance. This encodes a 3.0 m lane, the low end of the 3.0-4.0 m clear
+  # width usually cited for fire/ambulance/refuse access. Engineering judgement, not a specific
+  # jurisdiction's clause -- edit freely.
+  min_road_width_m: 7.0
+  # Scales the per-parcel footprint radii the footpath clearance is measured against; 1.0 uses
+  # building_radii as-is (half the nearest-neighbour distance), a geometric fact rather than a tuned
+  # constant. Replaced r0_frac=0.55, which sized a single block-median corridor half-width -- the same
+  # clearance estimate with both radii averaged away, so one assumed gap served a block's packed core
+  # and its sparse edge alike. Kept as a knob because a metric change of this kind must be
+  # recalibratable, not because a value other than 1.0 is known to be better.
+  radius_frac: 1.0
 matched_displacement: 0.10   # 10% of homes (Lens A)
 # Lens B -- matched permeability: truncate every method to its first prefix reaching this
 # permeability level, then compare displacement cost to get there (a method whose full network

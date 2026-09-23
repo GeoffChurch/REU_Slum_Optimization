@@ -8,6 +8,7 @@ defaults:
   - desire_source: osm
   - metric: depth_density_proxy
   - building_count: open_buildings
+  - permeability
   - _self_
 
 # The methods available, then the names to actually run. Overriding the names via
@@ -165,7 +166,7 @@ all_methods:
     max_loop_candidates: 400
     min_gain_per_m: 1.0e-06
     seed: 0
-    params: {_target_: reblock.permeability.PermeabilityParams}
+    params: ${permeability.params}
     road_width_m: 7.0
   # Whole road set chosen at once by LP, budgeting DISPLACEMENT (what the lenses score) rather than
   # metres. Decides over paths, so connectivity is structural and the route-(A) rounding obstacle
@@ -181,7 +182,7 @@ all_methods:
     max_displacement: 0.20
     max_road_m: 1000000.0
     chunks: 8
-    params: {_target_: reblock.permeability.PermeabilityParams}
+    params: ${permeability.params}
     road_width_m: 7.0
   # Cycle-native: each move is a loop from the street back to the street, so the output is
   # bridgeless by construction and every road can be oriented one-way. See conf/method/cycle_native.yaml.
@@ -191,7 +192,7 @@ all_methods:
     max_displacement: 0.20
     max_cycles: 400
     shortlist: 8
-    params: {_target_: reblock.permeability.PermeabilityParams}
+    params: ${permeability.params}
     road_width_m: 7.0
   # Flow accumulation rather than drainage: route every trip, count edge traffic, keep the busiest.
   # Sparse, can contain loops, does not reach every parcel -- the properties real footpaths have and

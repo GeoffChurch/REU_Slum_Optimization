@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from reblock.budget import prefix_to_displacement
+from reblock.compare import load_permeability_config
 from reblock.derive.access import (
     STREET_TOL,
     ParcelAdjacency,
@@ -48,7 +49,6 @@ from reblock.methods.arterial.shortlist import FirstOrder
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
-    PermeabilityParams,
     permeability,
 )
 from scripts.perf.snap_vs_peel import region_block_cached
@@ -82,7 +82,7 @@ def main() -> None:
           flush=True)
 
     adjacency = ParcelAdjacency.of(block, STREET_TOL)
-    ctx = EgressContext(adjacency, PermeabilityParams())
+    ctx = EgressContext(adjacency, load_permeability_config().params)
     b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
     print(f"  baseline burden {b0:.4f}\n", flush=True)
 

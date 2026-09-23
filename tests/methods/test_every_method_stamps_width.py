@@ -30,11 +30,12 @@ from shapely.geometry import LineString, Polygon
 from reblock.budget import displacement
 from reblock.buildings import ANCHOR_COL, Footprints, SpacingDiscs
 from reblock.contracts import Block
-from reblock.permeability import WIDTH_COL, EgressContext, PermeabilityParams, permeability
+from reblock.permeability import WIDTH_COL, EgressContext, permeability
 from reblock.presets import load_method
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32734)
-PARAMS = PermeabilityParams()
+PARAMS = SHIPPED
 
 # Needs a live OSM/Overpass fetch, so it cannot run offline; its width is asserted by
 # tests/methods/test_osm_footpaths.py instead.

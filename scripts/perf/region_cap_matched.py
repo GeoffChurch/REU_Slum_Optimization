@@ -26,6 +26,7 @@ import geopandas as gpd
 from shapely import wkt
 
 from reblock.budget import displacement, prefix_to_displacement
+from reblock.compare import load_permeability_config
 from reblock.contracts import Block
 from reblock.derive.access import (
     STREET_TOL,
@@ -37,7 +38,6 @@ from reblock.eval.access_burden import burden
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
-    PermeabilityParams,
     permeability,
 )
 from scripts.perf import region_pool
@@ -70,7 +70,7 @@ def main() -> int:
         block = pool[int(ri)]
         n = len(block.parcels)
         adjacency = ParcelAdjacency.of(block, STREET_TOL)
-        ctx = EgressContext(adjacency, PermeabilityParams())
+        ctx = EgressContext(adjacency, load_permeability_config().params)
         nb = len(block.building_geometries)
         b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
         roads = {a: _gdf(arms[a]["roads_wkt"], block) for a in ARMS}

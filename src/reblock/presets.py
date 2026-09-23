@@ -30,6 +30,7 @@ from reblock.contracts import Eval, Method, Screen, Source
 from reblock.methods.desire_lines import DesireLineSource
 from reblock.methods.substrates import Substrate
 from reblock.metric import BlockMetric, Gate
+from reblock.permeability import PermeabilityParams
 from reblock.region import RegionBuilder
 
 
@@ -105,6 +106,13 @@ def load_metric(node: DictConfig) -> BlockMetric:
     built = instantiate(node)
     if not isinstance(built, BlockMetric):
         raise _mismatch(node, built, "BlockMetric")
+    return built
+
+
+def load_permeability_params(node: DictConfig) -> PermeabilityParams:
+    built = instantiate(node)
+    if not isinstance(built, PermeabilityParams):
+        raise _mismatch(node, built, "PermeabilityParams")
     return built
 
 

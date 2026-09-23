@@ -28,6 +28,7 @@ from pathlib import Path
 import numpy as np
 
 from reblock.budget import prefix_to_displacement
+from reblock.compare import load_permeability_config
 from reblock.data.pools import capetown_pool, evenly_spaced, load_pools
 from reblock.derive.access import (
     STREET_TOL,
@@ -42,7 +43,6 @@ from reblock.methods.arterial.shortlist import CandidateSelector, FirstOrder
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
-    PermeabilityParams,
     permeability,
 )
 from scripts.perf.selectors import RandomSample, ScoreAll
@@ -73,7 +73,7 @@ def main() -> None:
     for i in evenly_spaced(sorted(sel), counts, N_BLOCKS):
         b = blocks[i]
         adjacency = ParcelAdjacency.of(b, STREET_TOL)
-        ctx = EgressContext(adjacency, PermeabilityParams())
+        ctx = EgressContext(adjacency, load_permeability_config().params)
         n = len(b.parcels)
         b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
         rec: dict[str, dict[str, float]] = {}

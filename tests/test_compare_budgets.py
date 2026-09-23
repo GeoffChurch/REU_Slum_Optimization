@@ -15,12 +15,12 @@ from reblock.contracts import Block, Proposal
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
-    PermeabilityParams,
     road_conductance,
     with_width,
 )
 from reblock.render import save_render as _real_save_render
 from tests.block_fixtures import no_buildings
+from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32643)
 
@@ -28,7 +28,7 @@ UTM = CRS.from_epsg(32643)
 def _pcfg(matched_displacement: float, matched_permeability: float) -> PermeabilityConfig:
     """Test lens thresholds, default metric params. `frontier_xmax` is display-only, so tests that
     exercise the lenses pin it to the shipped value rather than varying it."""
-    return PermeabilityConfig(params=PermeabilityParams(),
+    return PermeabilityConfig(params=SHIPPED,
                               matched_displacement=matched_displacement,
                               matched_permeability=matched_permeability,
                               frontier_xmax=0.40)
@@ -114,8 +114,9 @@ def test_load_permeability_config_reads_the_committed_yaml() -> None:
 
 def test_load_permeability_config_reads_every_field_from_the_yaml_not_a_default() -> None:
     """The defect this loader was consolidated to kill: a field silently omitted from the reader
-    falls back to the dataclass default and nothing raises. Rewrite the yaml with values that
-    differ from every default, and check each one lands."""
+    fell back to the dataclass default and nothing raised (`min_road_width_m` was, until the class
+    lost its defaults). Rewrite the yaml with values that differ from every shipped one, and check
+    each one lands."""
     import textwrap
 
     from reblock.compare import load_permeability_config as load
@@ -123,15 +124,17 @@ def test_load_permeability_config_reads_every_field_from_the_yaml_not_a_default(
     src = (Path("conf") / "permeability.yaml").read_text()
     with tempfile.TemporaryDirectory() as td:
         conf = Path(td)
-        # Perturb every field this reader is responsible for, away from both the committed value
-        # and the PermeabilityParams default, so a dropped field cannot coincidentally pass.
+        # Perturb every field this reader is responsible for, away from the committed value, so a
+        # dropped field cannot coincidentally pass.
         body = textwrap.dedent("""
-            g_walk: 0.17
-            g_road_per_m: 5.5
-            g_street: 21.5
-            road_margin_m: 1.75
-            radius_frac: 0.85
-            min_road_width_m: 7.0
+            params:
+              _target_: reblock.permeability.PermeabilityParams
+              g_walk: 0.17
+              g_road_per_m: 5.5
+              g_street: 21.5
+              road_margin_m: 1.75
+              radius_frac: 0.85
+              min_road_width_m: 8.5
             matched_displacement: 0.11
             matched_permeability: 0.61
             frontier_xmax: 0.37
@@ -139,12 +142,13 @@ def test_load_permeability_config_reads_every_field_from_the_yaml_not_a_default(
         (conf / "permeability.yaml").write_text(body)
         cfg = load(conf)
 
-    defaults = PermeabilityParams()
-    assert cfg.params.g_walk == 0.17 != defaults.g_walk
-    assert cfg.params.g_road_per_m == 5.5 != defaults.g_road_per_m
-    assert cfg.params.g_street == 21.5 != defaults.g_street
-    assert cfg.params.road_margin_m == 1.75 != defaults.road_margin_m
-    assert cfg.params.radius_frac == 0.85 != defaults.radius_frac
+    shipped = SHIPPED
+    assert cfg.params.g_walk == 0.17 != shipped.g_walk
+    assert cfg.params.g_road_per_m == 5.5 != shipped.g_road_per_m
+    assert cfg.params.g_street == 21.5 != shipped.g_street
+    assert cfg.params.road_margin_m == 1.75 != shipped.road_margin_m
+    assert cfg.params.min_road_width_m == 8.5 != shipped.min_road_width_m
+    assert cfg.params.radius_frac == 0.85 != shipped.radius_frac
     assert cfg.matched_displacement == 0.11
     assert cfg.matched_permeability == 0.61
     assert cfg.frontier_xmax == 0.37
