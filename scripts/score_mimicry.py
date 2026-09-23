@@ -31,6 +31,8 @@ import pandas as pd
 
 from reblock.contracts import Block, Method
 from reblock.data.osm_extract import FOOTPATH_TAGS, NEAR_MISS_TAGS, PbfDesireLines
+from reblock.data.pools import capetown_pool, evenly_spaced, iso_of, load_pools, pbf_path
+from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
@@ -39,14 +41,6 @@ from reblock.methods.loop_closure import LoopClosureRefiner
 from reblock.methods.osm_footpaths import interior_desire_lines
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
-from scripts.pair_matrix import (
-    DEFAULT_CACHE,
-    PBF_BY_ISO,
-    displacement_fraction,
-    evenly_spaced,
-    iso_of,
-    load_pools,
-)
 
 
 def _reference(block: Block, source: PbfDesireLines) -> gpd.GeoDataFrame:
@@ -74,10 +68,9 @@ def main() -> None:
                     default=Path("data/benchmarks/mimicry_scores.parquet"))
     args = ap.parse_args()
 
-    pools = load_pools()
+    pools = load_pools(capetown_pool(Path("conf")))
     blocks = pools.blocks
-    iso = iso_of(blocks)
-    pbf = DEFAULT_CACHE / "osm_pbf" / PBF_BY_ISO[iso]
+    pbf = pbf_path(iso_of(blocks))
     foot_src = PbfDesireLines(pbf_path=pbf, tags=FOOTPATH_TAGS)
     street_src = PbfDesireLines(pbf_path=pbf, tags=NEAR_MISS_TAGS)
 
@@ -142,7 +135,7 @@ def main() -> None:
             row: dict[str, object] = {
                 "block": block.block_id, "method": name,
                 "road_len_m": float(roads.geometry.length.sum()) if len(roads) else 0.0,
-                "displacement": displacement_fraction(block, roads),
+                "displacement": pct_displaced(roads, block.buildings),
                 "n_segments": len(roads),
             }
             for label, ref in (("foot", foot), ("street", street)):

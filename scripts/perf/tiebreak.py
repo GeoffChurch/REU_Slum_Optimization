@@ -32,6 +32,7 @@ from shapely.geometry.base import BaseGeometry
 
 import reblock.methods.arterial.engines as art
 from reblock.budget import prefix_to_displacement
+from reblock.data.pools import capetown_pool, evenly_spaced, load_pools
 from reblock.derive.access import (
     STREET_TOL,
     ParcelAdjacency,
@@ -52,7 +53,6 @@ from reblock.permeability import (
     PermeabilityParams,
     permeability,
 )
-from scripts.pair_matrix import evenly_spaced, load_pools
 
 RULES = ("wkt", "shortest", "longest")
 N_BLOCKS = 12
@@ -84,7 +84,7 @@ def main() -> None:
     # Replaced in `engines`, the namespace its loop looks it up in -- it imports `_best_candidate`
     # without re-exporting it, which is all the ignore concedes.
     art._best_candidate = _best                       # type: ignore[attr-defined]
-    pools = load_pools()
+    pools = load_pools(capetown_pool(Path("conf")))
     blocks = pools.blocks
     counts = [float(len(b.parcels)) for b in blocks]
     sel = [i for i in pools.recipients if len(blocks[i].parcels) <= 110]

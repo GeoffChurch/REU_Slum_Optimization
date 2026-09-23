@@ -46,23 +46,25 @@ from shapely.geometry.base import BaseMultipartGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL
-from reblock.derive.geometric_access import geometric_access_distances
-from reblock.derive.network_metrics import meshedness, node_network
-from reblock.methods.clearance import ClearanceReblocker
-from reblock.methods.demand_greedy import DemandGreedyReblocker
-from reblock.methods.loop_closure import LoopClosureRefiner
-from reblock.methods.substrates import ChordSubstrate
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M
-from scripts.consensus_sweep import displacement_matched_prefix
-from scripts.pair_matrix import (
-    desire_source,
-    displacement_fraction,
+from reblock.data.pools import (
+    DonorSkip,
+    capetown_pool,
     evenly_spaced,
     fetch_donor_lines,
     iso_of,
     load_pools,
+    pbf_footpaths,
 )
+from reblock.derive.access import STREET_TOL
+from reblock.derive.geometric_access import geometric_access_distances
+from reblock.derive.network_metrics import meshedness, node_network
+from reblock.emit import pct_displaced
+from reblock.methods.clearance import ClearanceReblocker
+from reblock.methods.demand_greedy import DemandGreedyReblocker
+from reblock.methods.loop_closure import LoopClosureRefiner
+from reblock.methods.substrates import ChordSubstrate
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from scripts.consensus_sweep import displacement_matched_prefix
 
 SNAP_TOL = 0.5      # metres; endpoints closer than this are the same node
 
@@ -167,7 +169,7 @@ def metrics_for(block: Block, roads: gpd.GeoDataFrame) -> dict[str, float]:
         "deadend_frac": deadends / max(len(degree), 1),
         "straightness": float(np.mean([s for s in straight if s])) if straight else 0.0,
         "road_len_m": total_len,
-        "displacement": displacement_fraction(block, roads),
+        "displacement": pct_displaced(roads, block.buildings),
     }
 
 
@@ -177,9 +179,9 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path("scratchpad/ot/real_vs_synthetic.parquet"))
     args = ap.parse_args()
 
-    pools = load_pools()
+    pools = load_pools(capetown_pool(Path("conf")))
     blocks = pools.blocks
-    source = desire_source("pbf", iso_of(blocks))
+    source = pbf_footpaths(iso_of(blocks))
     usable = sorted(set(pools.recipients) & set(pools.donors))
     counts = [float(len(b.parcels)) for b in blocks]
     chosen = evenly_spaced(usable, counts, args.recipients)
@@ -188,14 +190,16 @@ def main() -> None:
     rows: list[dict[str, object]] = []
     for n, i in enumerate(chosen, 1):
         block = blocks[i]
-        status, own = fetch_donor_lines(source, block)
-        if status != "ok" or own is None:
+        fetched = fetch_donor_lines(source, block)
+        if isinstance(fetched, DonorSkip):
             continue
+        # The real network scored as what `osm_footpaths` proposes: a street built on each path.
+        own = with_width(fetched, DEFAULT_ROAD_WIDTH_M)
         # Matched on DISPLACEMENT, not length. A length prefix cuts loop_closure's connectors --
         # which are appended AFTER its base tree -- off entirely, so looped_tree and clearance
         # came out identical on every statistic in the first run. Displacement is also the fairer
         # budget: it is the cost that is actually paid in homes.
-        target_disp = displacement_fraction(block, own)
+        target_disp = pct_displaced(own, block.buildings)
 
         def matched(roads: gpd.GeoDataFrame | None, blk: Block = block,
                     t: float = target_disp) -> gpd.GeoDataFrame:
