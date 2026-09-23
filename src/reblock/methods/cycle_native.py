@@ -58,7 +58,7 @@ from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
-from reblock.budget import displacement
+from reblock.buildings import IncrementalOverlap
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
@@ -140,11 +140,13 @@ class CycleNativeReblocker:
 
         roads: list[LineString] = []
         cur_p = float(permeability(block, empty, self.params, adj=adj, radii=pradii))
+        # The committed corridor as per-building covered pieces, so a candidate cycle is priced by
+        # the buildings IT reaches rather than by re-unioning the whole network -- a recompute
+        # whose cost grows with every road committed (see `IncrementalOverlap`).
+        taken = IncrementalOverlap(block.buildings)
+        hw = self.road_width_m / 2.0
         for _ in range(self.max_cycles):
-            spent = displacement(block.buildings,
-                                 with_width(gpd.GeoDataFrame(geometry=roads, crs=crs),
-                                            self.road_width_m)) / n_b \
-                if roads else 0.0
+            spent = taken.total() / n_b
             if spent >= self.max_displacement:
                 break
             net = list(seeds)
@@ -161,7 +163,8 @@ class CycleNativeReblocker:
             # deepest-first shortlist, then score each candidate CYCLE exactly
             depth = np.array([_d[starts[i]] if np.isfinite(_d[starts[i]]) else -1.0 for i in pool])
             order = [pool[k] for k in np.argsort(-depth)[: max(self.shortlist, 1)]]
-            best, best_val = None, 0.0
+            best: tuple[list[LineString], float, shapely.geometry.base.BaseGeometry] | None = None
+            best_val = 0.0
             for i in order:
                 out_nodes = _trace(graph, pred, int(starts[i]))
                 out_geom = _geom(graph, out_nodes, street)
@@ -180,19 +183,21 @@ class CycleNativeReblocker:
                 if pred2[int(starts[i])] >= 0:
                     back = _geom(graph, _trace(graph, pred2, int(starts[i])), street)
                 cand = [out_geom] + ([back] if back is not None else [])
-                trial = with_width(gpd.GeoDataFrame(geometry=[*roads, *cand], crs=crs),
-                                   self.road_width_m)
-                d = displacement(block.buildings, trial) / n_b
+                piece = unary_union([g.buffer(hw) for g in cand])
+                d = spent + taken.delta(piece) / n_b
                 if d > self.max_displacement:
                     continue
+                trial = with_width(gpd.GeoDataFrame(geometry=[*roads, *cand], crs=crs),
+                                   self.road_width_m)
                 gain = float(permeability(block, trial, self.params, adj=adj, radii=pradii)) - cur_p
                 cost = max(d - spent, 1e-9)
                 if gain > 0 and gain / cost > best_val:
-                    best, best_val = (cand, gain + cur_p), gain / cost
+                    best, best_val = (cand, gain + cur_p, piece), gain / cost
             if best is None:
                 break
             roads.extend(best[0])
             cur_p = best[1]
+            taken.add(best[2])
         return self._out(block, gpd.GeoDataFrame(geometry=roads, crs=crs))
 
     def _out(self, block: Block, roads: gpd.GeoDataFrame) -> Proposal:

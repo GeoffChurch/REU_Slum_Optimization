@@ -51,9 +51,6 @@ class GreedyArterialReblocker:
     max_roads: int = 15
     # "length" (Delta-benefit/metre) | "displacement" (Delta-benefit/building, see budget.py)
     # | "repulsion" (Delta-benefit / soft quadratic-tail proximity cost, never-zero & CELF-safe)
-    # "displacement_fast" is "displacement" computed incrementally -- 1.43x, agrees to ~1e-10 but
-    # not bit-exactly, so it takes a different trajectory on ~29% of runs. Kept as a VARIANT until
-    # measured to win or lose; if it always wins it replaces `displacement` and this note goes away.
     cost: str = "length"
     # Total width of the roads this method emits; also the displacement corridor it
     # scores against (half-width each side). Stamped on every road it returns.

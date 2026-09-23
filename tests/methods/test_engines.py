@@ -58,7 +58,8 @@ def test_shortlist_with_non_binding_k_is_the_exact_engine() -> None:
     """The shortlist re-states the exact step loop so an injected ranking can cut the candidate
     list mid-loop. With k above every step's candidate count it must reduce to the exact greedy
     EXACTLY -- the two have separate copies of a dozen per-step setup lines, and dropping one
-    (committed_disp, base_val, the step context) changes scores silently rather than crashing.
+    (the committed overlap, base_val, the step context) changes scores silently rather than
+    crashing.
 
     Uses the access objective with cost=displacement because that is the combination the shortlist
     exists for, and _two_arm_block supplies the building points displacement needs."""

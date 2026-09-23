@@ -26,7 +26,6 @@ from reblock.budget import (
     _BlockScoringContext,
     _StepContext,
     access_burden,
-    displacement,
     repulsion,
     road_corridor,
 )
@@ -55,8 +54,8 @@ def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]
 
 
 def committed_overlap(buildings: Extents, committed: GeoDataFrame) -> IncrementalOverlap:
-    """The step's committed corridor as an `IncrementalOverlap`, so `cost="displacement_fast"`
-    scores each candidate from only the buildings it touches, never by unioning it in."""
+    """The step's committed corridor as an `IncrementalOverlap`, so `cost="displacement"` scores
+    each candidate from only the buildings it touches, never by unioning it in."""
     tracker = IncrementalOverlap(buildings)
     if len(committed):
         tracker.add(road_corridor(committed))
@@ -87,9 +86,8 @@ class _StepState:
     objective: str
     cost: str
     half_width_m: float
-    committed_disp: float
-    # For cost="displacement_fast": the committed corridor's per-building pieces, fixed for the
-    # step, so a candidate is scored locally. None for other costs.
+    # For cost="displacement": the committed corridor's per-building pieces, fixed for the step,
+    # so a candidate is scored locally. None for other costs.
     overlap: IncrementalOverlap | None
     block: Block
     crs: CRS
@@ -120,7 +118,6 @@ def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
     real = st.realizer.realize(chord, st.sg)
     if real is None or real.length == 0:
         return 0.0, None
-    trial: GeoDataFrame | None = None
     if st.step is not None:
         e, direct = st.step.score_candidate(real)
         raw = (e if st.objective == "efficiency" else direct) - st.base_val
@@ -130,17 +127,15 @@ def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
     else:
         trial = _planarize(st.committed + [real], st.crs, 2.0 * st.half_width_m)
         raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
-    if st.cost == "displacement_fast":
+    if st.cost == "displacement":
         # Scored against the step's committed pieces, touching only the buildings the candidate
-        # reaches -- no union of the candidate into the committed corridor. See IncrementalOverlap.
+        # reaches -- never a union of the candidate into the committed corridor. Recomputing
+        # `displacement(buildings, committed + candidate)` instead is the same number to ~1e-8 and
+        # MEASURED 11x slower per candidate with 5 committed roads and 210x with 60, on
+        # ZAF.9.3.1_1_5810's footprints: it re-unions the whole network every time, so its cost
+        # grows with the network while this one stays ~5 ms. See IncrementalOverlap.
         assert st.overlap is not None
         denom = st.overlap.delta(real.buffer(st.half_width_m))
-    elif st.cost == "displacement":
-        if trial is None:
-            # step -> buildable
-            trial = _explode(_union_with(st.base_merged, real), st.crs,
-                             2.0 * st.half_width_m)
-        denom = float(displacement(st.block.buildings, trial) - st.committed_disp)
     elif st.cost == "repulsion":
         denom = repulsion(st.block.buildings, real)
     else:

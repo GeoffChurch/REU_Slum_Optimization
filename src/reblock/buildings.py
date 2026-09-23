@@ -402,8 +402,8 @@ class IncrementalOverlap:
     candidate against a grown corridor expensive. `delta` scores a piece without committing it
     (safe to call from a fork pool); `add` commits it.
 
-    Used where displacement must be enforced or scored incrementally: `greedy_arterial`'s
-    `displacement_fast` and `resistance_lp`'s rounding, which is the step that enforces its cap.
+    Used wherever displacement is scored or enforced one piece at a time: `greedy_arterial`'s and
+    `cycle_native`'s displacement cost, and `resistance_lp`'s rounding, which enforces its cap.
     """
 
     def __init__(self, buildings: Extents) -> None:

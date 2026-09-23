@@ -40,7 +40,11 @@ Two different sensitivities, and the first probe measured the one that is not th
 versions, platforms, or any refactor that touches the cost arithmetic in the last bits. The current
 published values are one arbitrary draw from a distribution nobody had sampled.
 
-**`displacement_fast`'s apparent 3-for-3 win is inside this noise.** It differed from the exact cost
+**`displacement_fast`'s apparent 3-for-3 win is inside this noise.** (Settled 2026-09-22 on speed
+instead: under the footprint-overlap metric the full recompute costs 11x the incremental one per
+candidate with 5 committed roads and 210x with 60, so the incremental formulation became THE
+`displacement` cost and the recompute path was deleted. The noise argument below still says the
+trajectory change it causes is not a quality difference in either direction.) It differed from the exact cost
 on 3 runs and won all 3 (burden_red +0.011/+0.109/+0.016). Those magnitudes are precisely the
 perturbation spread measured here, so the comparison carries no information about which formulation
 is better. Establishing that would need enough blocks for the medians to separate — and since the

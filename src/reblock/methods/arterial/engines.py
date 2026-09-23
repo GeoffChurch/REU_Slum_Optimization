@@ -23,7 +23,6 @@ from shapely.geometry.base import BaseGeometry
 from reblock.budget import (
     _BlockScoringContext,
     access_burden,
-    displacement,
     road_drainage,
 )
 from reblock.contracts import Block
@@ -111,9 +110,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
         overlap = (committed_overlap(block.buildings, base)
-                   if cost == "displacement_fast" else None)
-        committed_disp = (displacement(block.buildings, base)
-                          if cost == "displacement" else 0.0)
+                   if cost == "displacement" else None)
         # Route per-candidate scoring by realizer. BUILDABLE trials are boundary-snapped (they join
         # the committed/street network at shared graph vertices), so the incremental
         # `step.score_candidate` is bit-exact to `_score(objective, _planarize(committed+[real]))`
@@ -146,7 +143,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
         scoring._STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             realizer=realizer, objective=objective, cost=cost, half_width_m=half_width_m,
-            committed_disp=committed_disp, overlap=overlap, block=block,
+            overlap=overlap, block=block,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             if use_pool:
@@ -242,16 +239,14 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: 
         base = _explode(base_merged, block.crs, 2.0 * half_width_m)
         base_val = _score(objective, block, base, adj, base_burden, ctx)
         overlap = (committed_overlap(block.buildings, base)
-                   if cost == "displacement_fast" else None)
-        committed_disp = (displacement(block.buildings, base)
-                          if cost == "displacement" else 0.0)
+                   if cost == "displacement" else None)
         stepctx = ctx.step(base) if (ctx is not None and realizer.snaps) else None
         assert scoring._STEP_STATE is None, (
             "eval_candidate's per-step state holder is not reentrant")
         scoring._STEP_STATE = _StepState(
             step=stepctx, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             realizer=realizer, objective=objective, cost=cost, half_width_m=half_width_m,
-            committed_disp=committed_disp, overlap=overlap, block=block,
+            overlap=overlap, block=block,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             # eager-score candidates entering this step
@@ -349,9 +344,7 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: str,
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
         overlap = (committed_overlap(block.buildings, base)
-                   if cost == "displacement_fast" else None)
-        committed_disp = (displacement(block.buildings, base)
-                          if cost == "displacement" else 0.0)
+                   if cost == "displacement" else None)
         step = ctx.step(base) if (ctx is not None and realizer.snaps) else None
 
         # --- the one difference from `_greedy_arterials`: reduce the candidate list ---
@@ -377,7 +370,7 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: str,
         scoring._STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             realizer=realizer, objective=objective, cost=cost, half_width_m=half_width_m,
-            committed_disp=committed_disp, overlap=overlap, block=block,
+            overlap=overlap, block=block,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             if use_pool:

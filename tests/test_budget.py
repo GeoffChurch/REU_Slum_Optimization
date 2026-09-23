@@ -797,3 +797,43 @@ def test_every_prefix_is_connected_by_the_same_test_the_peel_uses() -> None:
         assert frac == 1.0, (
             f"prefix[:{k}] ({prefix.geometry.length.sum():.1f} m) is {frac:.3f} street-connected "
             f"by the peel's own test -- the lens would score road nobody could build")
+
+
+@pytest.mark.parametrize("tier", ["discs", "footprints"])
+def test_incremental_overlap_is_the_full_recompute_one_road_at_a_time(tier: str) -> None:
+    """`greedy_arterial` and `cycle_native` price every candidate with `IncrementalOverlap.delta`
+    instead of recomputing `displacement` over the whole grown network -- measured 11-210x faster
+    on a 6,619-building block -- so the two must be the SAME number. Grown one road at a time,
+    through roads that cross, run parallel into a building from both sides, and repeat exactly,
+    because union-by-area is where an incremental rule goes wrong: a slice covered twice must count
+    once, and two different slices of one building must both count.
+
+    FAULT INJECTION: `_pieces` returning `new_part` without the union with `old` (a later piece
+    overwriting an earlier one) fails this at the second road."""
+    import numpy as np
+
+    from reblock.budget import displacement
+    from reblock.buildings import Discs, Footprints, IncrementalOverlap
+    crs = "EPSG:32734"
+    rng = np.random.default_rng(3)
+    xy = rng.uniform(0, 60, size=(120, 2))
+    pts = gpd.GeoDataFrame(geometry=[Point(x, y) for x, y in xy], crs=crs)
+    b: Discs | Footprints = (
+        Discs(pts, rng.uniform(1.0, 3.0, len(xy))) if tier == "discs" else
+        Footprints(gpd.GeoDataFrame(
+            {ANCHOR_COL: pts.geometry.to_numpy()},
+            geometry=[Point(x, y).buffer(1.5, cap_style="square").union(
+                Point(x + 1.2, y + 1.2).buffer(0.9)) for x, y in xy], crs=crs)))
+    lines = [LineString([(0, 30), (60, 30)]), LineString([(30, 0), (30, 60)]),
+             LineString([(0, 33), (60, 33)]), LineString([(0, 30), (60, 30)]),
+             LineString([(5, 5), (55, 50)]), LineString([(10, 0), (10, 60)])]
+    tracker = IncrementalOverlap(b)
+    for k, line in enumerate(lines):
+        roads = with_width(gpd.GeoDataFrame(geometry=lines[:k + 1], crs=crs), 4.0)
+        full = displacement(b, roads)
+        before = tracker.total()
+        delta = tracker.delta(line.buffer(2.0))
+        assert delta == pytest.approx(full - before, abs=1e-9), f"road {k}: delta"
+        tracker.add(line.buffer(2.0))
+        assert tracker.total() == pytest.approx(full, abs=1e-9), f"road {k}: total"
+    assert displacement(b, roads) > 0.0
