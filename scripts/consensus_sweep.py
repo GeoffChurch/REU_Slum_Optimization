@@ -30,7 +30,7 @@ from reblock.contracts import Block
 from reblock.data.settlements import exclusion_holdout
 from reblock.eval.agreement import buffered_iou
 from reblock.methods.clearance import ClearanceReblocker
-from reblock.permeability import permeability
+from reblock.permeability import EgressContext, PermeabilityParams, permeability
 from scripts.consensus_matrix import _bc, donor_quality, extract_consensus, fit_donors
 from scripts.pair_matrix import (
     desire_source,
@@ -129,7 +129,8 @@ def main() -> None:
         transported, dists = fit_donors(recipient, picked, roads_cache)
         target_len = float(own.geometry.length.sum())
         disp_own = displacement_fraction(recipient, own)
-        perm_own = float(permeability(recipient, own))
+        ctx = EgressContext.of(recipient, PermeabilityParams())
+        perm_own = float(permeability(ctx, own))
 
         direct_full = ClearanceReblocker().propose(recipient).roads
         cum = direct_full.geometry.length.cumsum()
@@ -150,18 +151,18 @@ def main() -> None:
                 "recipient": recipient.block_id, "k": k,
                 "perm_own": perm_own, "disp_own": disp_own,
                 # length-matched (comparable to the n=20 benchmark)
-                "perm_consensus_lenmatch": float(permeability(recipient, cons_len)),
+                "perm_consensus_lenmatch": float(permeability(ctx, cons_len)),
                 "disp_consensus_lenmatch": displacement_fraction(recipient, cons_len),
-                "perm_direct_lenmatch": float(permeability(recipient, direct_len)),
+                "perm_direct_lenmatch": float(permeability(ctx, direct_len)),
                 "disp_direct_lenmatch": displacement_fraction(recipient, direct_len),
                 # displacement-matched to the block's own network
-                "perm_consensus_dispmatch": float(permeability(recipient, cons_disp)),
-                "perm_direct_dispmatch": float(permeability(recipient, direct_disp)),
+                "perm_consensus_dispmatch": float(permeability(ctx, cons_disp)),
+                "perm_direct_dispmatch": float(permeability(ctx, direct_disp)),
                 "len_consensus_dispmatch": (float(cons_disp.geometry.length.sum())
                                             if len(cons_disp) else 0.0),
                 "len_direct_dispmatch": (float(direct_disp.geometry.length.sum())
                                          if len(direct_disp) else 0.0),
-                "perm_single": float(permeability(recipient, single)),
+                "perm_single": float(permeability(ctx, single)),
                 "iou_10m": buffered_iou(cons_len, own, r=10.0) if len(cons_len) else 0.0,
                 "mean_gw_dist": float(np.mean(dists[:k])),
             })

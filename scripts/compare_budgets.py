@@ -70,13 +70,12 @@ from reblock.budget import (
 from reblock.compare import MethodCurve, PermeabilityConfig, load_permeability_config
 from reblock.contracts import Block, Method, Proposal, Screen, Source
 from reblock.derivations import propose
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import parcel_access_layers, past_every_parcel
 from reblock.emit import _displaced_buildings, compare_report, pct_displaced, pct_paved
 from reblock.eval.access_burden import burden
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.permeability import (
-    egress_power,
+    EgressContext,
     parcel_potentials,
     permeability,
     permeability_curve,
@@ -160,6 +159,9 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         log.info("reblocked %s: %d segments, %.0f m (%.1fs)", name, len(roads),
                  float(roads.geometry.length.sum()), time.perf_counter() - t0)
     assert block is not None
+    # Every method is scored on this one block, so one context -- one mesh, one no-roads baseline
+    # -- serves every curve, lens and render below.
+    ctx = EgressContext.of(block, params)
 
     n_buildings = len(block.building_geometries)
 
@@ -177,7 +179,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     for name, roads in roads_by_method.items():
         pp, pd_ = pct_paved(roads, block_area), pct_displaced(roads, block.buildings)
         curves.append(MethodCurve(name, curve_label, "permeability",
-                                  permeability_curve(block, roads, params),
+                                  permeability_curve(ctx, roads),
                                   pct_paved=pp, pct_displaced=pd_))
         curves.append(MethodCurve(name, curve_label, "displacement",
                                   displacement_curve(block, roads),
@@ -190,14 +192,12 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     # Lens prefixes -- either lens can fall short of its target with a fixed/sparse method's own
     # network (Lens A: `at_budget=False` below, prefix_a is that method's full network shown at its
     # own terminal; Lens B: `reached=False`, prefix_b is likewise its full network).
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    p0, _ = egress_power(block, None, params, adj=adj)
     prefix_a: dict[str, GeoDataFrame] = {}
     prefix_b: dict[str, GeoDataFrame] = {}
     reached_b: dict[str, bool] = {}
     for name, roads in roads_by_method.items():
         prefix_a[name] = prefix_to_displacement(block, roads, matched_displacement)
-        pb, reached = prefix_to_permeability(block, roads, matched_permeability, params)
+        pb, reached = prefix_to_permeability(ctx, roads, matched_permeability)
         prefix_b[name] = pb
         reached_b[name] = reached
     log.info("lens/frontier curves computed for %d methods (%.1fs)", len(methods),
@@ -216,7 +216,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     save_render(fig, out_dir / "before_depth.png")
     plt.close(fig)
 
-    potentials0 = parcel_potentials(block, None, params)
+    potentials0 = parcel_potentials(ctx, None)
     perm_vmax = float(potentials0.max()) if len(potentials0) else 0.0
     fig = render_before(block, potentials0, vmax=perm_vmax, field="perm", frame=frame)
     save_render(fig, out_dir / "before_perm.png")
@@ -226,23 +226,22 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     rows: list[OutcomeRow] = []
     disp_csv_rows: list[list[object]] = []
     perm_csv_rows: list[list[object]] = []
-    # access baseline, road-independent, computed once for the region like p0 is
-    burden0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj,
-                                          unreached_depth=len(block.parcels) + 1))
+    # access baseline, road-independent, computed once for the region like the permeability
+    # baseline is; unreached parcels at the prefix-stable depth, since prefixes are compared
+    burden0 = burden(parcel_access_layers(ctx.adjacency, None, unreached=past_every_parcel))
 
     def _burden_red(prefix: GeoDataFrame) -> float:
         if burden0 <= 0.0:
             return 0.0
-        after = burden(parcel_access_layers(block, prefix, tol=STREET_TOL, adj=adj,
-                                            unreached_depth=len(block.parcels) + 1))
+        after = burden(parcel_access_layers(ctx.adjacency, prefix, unreached=past_every_parcel))
         return 1.0 - after / burden0
 
     for name in methods:
         pa, pb, reached = prefix_a[name], prefix_b[name], reached_b[name]
         disp_frac_a = _disp_frac(pa)
-        perm_at_a = permeability(block, pa, params, p0=p0, adj=adj)
+        perm_at_a = permeability(ctx, pa)
         disp_frac_b = _disp_frac(pb)
-        perm_at_b = permeability(block, pb, params, p0=p0, adj=adj)
+        perm_at_b = permeability(ctx, pb)
         # Displacement is monotone, but a method can still exhaust its OWN roads short of D (many
         # methods converge well below matched_displacement -- see the calibration probe): a method
         # is only genuinely "at the budget" if its Lens-A prefix's actual displacement reached D,
@@ -266,7 +265,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
             save_render(fig, out_dir / f"after_{name}_{tag}_depth.png")
             plt.close(fig)
 
-            potentials = parcel_potentials(block, prefix, params)
+            potentials = parcel_potentials(ctx, prefix)
             fig = render_after(block, truncated, potentials, vmax=perm_vmax, field="perm",
                                frame=frame,
                                displaced_buildings=_displaced_buildings(block, truncated))

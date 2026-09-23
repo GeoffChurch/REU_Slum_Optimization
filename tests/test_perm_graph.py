@@ -7,7 +7,12 @@ from shapely.geometry import LineString, Polygon
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.perm_graph import GraphFigure, permeability_graph
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    with_width,
+)
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
@@ -32,6 +37,10 @@ def _grid_block(k: int = 6, cell: float = 10.0, street: bool = True) -> Block:
                  building_tier=SpacingDiscs)
 
 
+def _ctx(block: Block) -> EgressContext:
+    return EgressContext.of(block, PermeabilityParams())
+
+
 def _roads(lines: list[LineString]) -> gpd.GeoDataFrame:
     return with_width(gpd.GeoDataFrame(geometry=lines, crs=UTM), DEFAULT_ROAD_WIDTH_M)
 
@@ -40,7 +49,7 @@ SPINE = [LineString([(15.0, 0.0), (15.0, 55.0)])]
 
 
 def test_shapes_are_consistent():
-    fig = permeability_graph(_grid_block(), _roads(SPINE))
+    fig = permeability_graph(_ctx(_grid_block()), _roads(SPINE))
     assert isinstance(fig, GraphFigure)
     assert fig.n == 36
     for arr in (fig.cx, fig.cy, fig.potential, fig.ground_g):
@@ -54,12 +63,12 @@ def test_shapes_are_consistent():
 def test_upgraded_is_empty_without_roads_and_nonempty_with_a_road():
     """`upgraded` means the road RAISED this edge -- so it is vacuous with no roads, and a spine
     road through the grid must raise at least one edge."""
-    assert not permeability_graph(_grid_block(), None).upgraded.any()
-    assert permeability_graph(_grid_block(), _roads(SPINE)).upgraded.any()
+    assert not permeability_graph(_ctx(_grid_block()), None).upgraded.any()
+    assert permeability_graph(_ctx(_grid_block()), _roads(SPINE)).upgraded.any()
 
 
 def test_ground_g_is_g_street_on_street_fronting_parcels_only():
-    fig = permeability_graph(_grid_block(), None)
+    fig = permeability_graph(_ctx(_grid_block()), None)
     grounded = fig.ground_g > 0.0
     assert grounded.sum() == 6                      # the south row of a 6x6 grid
     assert np.allclose(fig.ground_g[grounded], 20.0)   # PermeabilityParams.g_street
@@ -69,7 +78,7 @@ def test_ungrounded_block_raises():
     """A figure of an ungrounded block would be a picture of no flow anywhere -- absent is fine,
     silently zero is not."""
     with pytest.raises(ValueError, match="ungrounded"):
-        permeability_graph(_grid_block(street=False), None)
+        permeability_graph(_ctx(_grid_block(street=False)), None)
 
 
 def _node_net_current(fig: GraphFigure) -> np.ndarray:
@@ -96,7 +105,7 @@ def test_energy_identity(roads):
     identity of the two field assignments, not a computation. It still guards one real cross-module
     contract -- that `b` stays all-ones in `solve_egress` -- which is why it is kept.
     """
-    fig = permeability_graph(_grid_block(), roads)
+    fig = permeability_graph(_ctx(_grid_block()), roads)
     dphi = fig.potential[fig.rows] - fig.potential[fig.cols]
     drawn = float((fig.conductance * dphi**2).sum() + (fig.ground_g * fig.potential**2).sum())
     assert drawn == pytest.approx(fig.p, rel=1e-9)
@@ -107,7 +116,7 @@ def test_energy_identity(roads):
 def test_per_node_kirchhoff(roads):
     """Every node injects exactly one unit. Catches indexing and sign errors the aggregate energy
     identity can absorb -- a globally-flipped current still squares to the same power."""
-    fig = permeability_graph(_grid_block(), roads)
+    fig = permeability_graph(_ctx(_grid_block()), roads)
     assert np.allclose(_node_net_current(fig), 1.0, rtol=1e-9, atol=1e-9)
 
 
@@ -126,7 +135,7 @@ def test_current_is_zero_when_every_parcel_fronts_the_street():
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
 
-    fig = permeability_graph(block, None)
+    fig = permeability_graph(_ctx(block), None)
     assert len(fig.rows) > 0                       # not vacuous
     assert np.all(fig.ground_g > 0.0)              # every parcel fronts the ring
     assert np.allclose(fig.current, 0.0)

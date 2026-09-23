@@ -4,9 +4,10 @@
 The configured objective is a frozen, fieldless dataclass (its own cache identity, like the
 engines'). Everything it scores with is per-block state, built ONCE by `for_block` and closed over
 by the `BlockObjective` it returns: the frozen `_BlockScoringContext` for the two network-metric
-objectives, the no-roads access burden for `Access`. Each greedy step then asks that for a
-`StepGain` over the roads committed so far, which is what `scoring.eval_candidate` calls per
-candidate -- so no engine, and no candidate, ever asks which objective it has.
+objectives, the block's `ParcelAdjacency` and no-roads access burden for `Access`. Each greedy
+step then asks that for a `StepGain` over the roads committed so far, which is what
+`scoring.eval_candidate` calls per candidate -- so no engine, and no candidate, ever asks which
+objective it has.
 """
 from __future__ import annotations
 
@@ -20,8 +21,7 @@ from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
 from reblock.budget import _BlockScoringContext, _StepContext, access_burden
-from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers
+from reblock.derive.access import ParcelAdjacency, parcel_access_layers, past_every_parcel
 from reblock.methods.arterial.primitives import _explode, _planarize, _union_with
 from reblock.methods.arterial.realize import ChordRealizer
 
@@ -56,12 +56,13 @@ class BlockObjective(Protocol):
 
 @runtime_checkable
 class ArterialObjective(Protocol):
-    """What the greedy maximizes. `for_block` builds the per-block scorer once per proposal."""
+    """What the greedy maximizes. `for_block` builds the per-block scorer once per proposal, from
+    the block's adjacency -- which carries the block itself."""
 
     @property
     def identity(self) -> ObjectiveIdentity: ...
 
-    def for_block(self, block: Block, adj: list[set[int]]) -> BlockObjective: ...
+    def for_block(self, adjacency: ParcelAdjacency) -> BlockObjective: ...
 
 
 @dataclass(frozen=True)
@@ -109,15 +110,14 @@ class _Incremental:
 
 @dataclass(frozen=True)
 class _AccessBlock:
-    block: Block
-    adj: list[set[int]]
+    adjacency: ParcelAdjacency
     base_burden: float          # access burden with no roads at all -- the denominator
 
     def value(self, roads: GeoDataFrame) -> float:
         if self.base_burden == 0.0:
             return 0.0
-        depths = parcel_access_layers(self.block, roads, tol=STREET_TOL, adj=self.adj,
-                                      unreached_depth=len(self.block.parcels) + 1)
+        # Prefix-stable unreached depth: the burden is compared across the greedy's steps.
+        depths = parcel_access_layers(self.adjacency, roads, unreached=past_every_parcel)
         return 1.0 - access_burden(depths) / self.base_burden
 
     def at_step(self, committed: CommittedNetwork, realizer: ChordRealizer) -> StepGain:
@@ -163,10 +163,10 @@ class Access:
     def identity(self) -> ObjectiveIdentity:
         return self
 
-    def for_block(self, block: Block, adj: list[set[int]]) -> BlockObjective:
+    def for_block(self, adjacency: ParcelAdjacency) -> BlockObjective:
         base_burden = access_burden(parcel_access_layers(
-            block, None, tol=STREET_TOL, adj=adj, unreached_depth=len(block.parcels) + 1))
-        return _AccessBlock(block, adj, base_burden)
+            adjacency, None, unreached=past_every_parcel))
+        return _AccessBlock(adjacency, base_burden)
 
 
 @dataclass(frozen=True)
@@ -177,9 +177,8 @@ class Efficiency:
     def identity(self) -> ObjectiveIdentity:
         return self
 
-    def for_block(self, block: Block, adj: list[set[int]]) -> BlockObjective:
-        del adj
-        return _MetricBlock(_BlockScoringContext(block), _efficiency)
+    def for_block(self, adjacency: ParcelAdjacency) -> BlockObjective:
+        return _MetricBlock(_BlockScoringContext(adjacency.block), _efficiency)
 
 
 @dataclass(frozen=True)
@@ -190,9 +189,8 @@ class Directness:
     def identity(self) -> ObjectiveIdentity:
         return self
 
-    def for_block(self, block: Block, adj: list[set[int]]) -> BlockObjective:
-        del adj
-        return _MetricBlock(_BlockScoringContext(block), _directness)
+    def for_block(self, adjacency: ParcelAdjacency) -> BlockObjective:
+        return _MetricBlock(_BlockScoringContext(adjacency.block), _directness)
 
 
 ObjectiveIdentity: TypeAlias = Access | Efficiency | Directness

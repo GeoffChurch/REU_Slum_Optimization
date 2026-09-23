@@ -21,7 +21,7 @@ from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
 from reblock.emit import compare_report as compare_report
 from reblock.emit import pct_displaced, pct_paved
-from reblock.permeability import PermeabilityParams, permeability_curve
+from reblock.permeability import EgressContext, PermeabilityParams, permeability_curve
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, region_reblock
 from reblock.render import google_maps_url, short_label
@@ -153,7 +153,7 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
             block_area = float(block.parcels.geometry.union_all().area)
             pp = pct_paved(roads, block_area)
             pd_ = pct_displaced(roads, block.buildings)
-            perm = permeability_curve(block, roads, params)
+            perm = permeability_curve(EgressContext.of(block, params), roads)
             disp = displacement_curve(block, roads)
             raw.append((name, label, "permeability", perm, pp, pd_))
             raw.append((name, label, "displacement", disp, pp, pd_))

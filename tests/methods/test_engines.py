@@ -4,8 +4,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point
 
-from reblock.derive.access import STREET_TOL
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import STREET_TOL, ParcelAdjacency
 from reblock.methods.arterial import (
     Access,
     Directness,
@@ -27,8 +26,8 @@ from tests.methods.test_arterial import UTM, _grid_block, _two_arm_block  # reus
 
 
 def _policy(spec, block):
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    return spec.build(block, list(block.streets.geometry), 6, 4, adj, 0)
+    return spec.build(ParcelAdjacency.of(block, STREET_TOL), list(block.streets.geometry), 6, 4,
+                      0)
 
 
 def test_engines_are_their_own_identity_and_discriminate() -> None:

@@ -37,13 +37,22 @@ from pathlib import Path
 import numpy as np
 
 from reblock.budget import prefix_to_displacement
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import Access, Displacement, SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.shortlist import FirstOrder
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+)
 from scripts.pair_matrix import evenly_spaced, load_pools
 from scripts.perf.selectors import ScoreAll, StochasticFirstOrder
 
@@ -68,9 +77,10 @@ def main() -> None:
     rows: dict[str, dict[str, dict[str, float]]] = {}
     for i in evenly_spaced(sorted(sel), counts, N_BLOCKS):
         b = blocks[i]
-        adj = parcel_adjacency(list(b.parcels.geometry), STREET_TOL)
+        adjacency = ParcelAdjacency.of(b, STREET_TOL)
+        ctx = EgressContext(adjacency, PermeabilityParams())
         n = len(b.parcels)
-        b0 = burden(parcel_access_layers(b, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
+        b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
         rec: dict[str, dict[str, float]] = {}
         for name, selector in arms:
             t0 = time.perf_counter()
@@ -84,10 +94,9 @@ def main() -> None:
             pre = prefix_to_displacement(b, r, 0.10)
             if len(pre) == 0:
                 continue
-            b1 = burden(parcel_access_layers(b, pre, tol=STREET_TOL, adj=adj,
-                                             unreached_depth=n + 1))
+            b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))
             rec[name] = {"burden_red": (1.0 - b1 / b0) if b0 > 0 else 0.0,
-                         "perm": float(permeability(b, pre)),
+                         "perm": float(permeability(ctx, pre)),
                          "road_m": float(pre.geometry.length.sum()), "secs": dt}
         if len(rec) == len(arms):
             rows[b.block_id] = rec

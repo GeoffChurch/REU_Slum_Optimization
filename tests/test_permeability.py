@@ -11,6 +11,7 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
     PermeabilityParams,
     _footpath_conductance,
     edge_conductances,
@@ -25,6 +26,7 @@ from reblock.permeability import (
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
+PARAMS = PermeabilityParams()
 
 def _grid_block(k=4, cell=1.0):
     # k x k `cell`-sized parcels tiling a k*cell x k*cell square; south edge (y=0) is the
@@ -49,12 +51,12 @@ def _roads(lines): return with_width(gpd.GeoDataFrame(geometry=lines, crs=UTM),
                                      DEFAULT_ROAD_WIDTH_M)
 
 def test_no_roads_permeability_is_zero():
-    b = _grid_block()
-    assert permeability(b, None) == 0.0 and permeability(b, _roads([])) == 0.0
+    ctx = EgressContext.of(_grid_block(), PARAMS)
+    assert permeability(ctx, None) == 0.0 and permeability(ctx, _roads([])) == 0.0
 
 def test_permeability_in_unit_interval_and_positive_with_a_road():
-    b = _grid_block()
-    p = permeability(b, _roads([LineString([(2, 0), (2, 4)])]))   # a spine road to the interior
+    ctx = EgressContext.of(_grid_block(), PARAMS)
+    p = permeability(ctx, _roads([LineString([(2, 0), (2, 4)])]))   # a spine road to the interior
     assert 0.0 < p < 1.0
 
 def test_monotone_under_added_roads():
@@ -68,10 +70,10 @@ def test_monotone_under_added_roads():
     # footpath edges neither road alone covers. Coverage: r1 42/420=10.00%, r2 47/420=11.19%
     # (measured, not both 100%) -- confirms the added road has real marginal effect, so a
     # STRICT increase is the honest assertion (not just `>=`).
-    b = _grid_block(15, cell=10.0)
+    ctx = EgressContext.of(_grid_block(15, cell=10.0), PARAMS)
     r1 = _roads([LineString([(15, 0), (15, 135)])])
     r2 = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
-    assert permeability(b, r2) > permeability(b, r1)   # adding a road with real coverage helps
+    assert permeability(ctx, r2) > permeability(ctx, r1)   # adding a road with real coverage helps
 
 def test_loop_beats_spur_at_equal_length():
     # A 15x15 grid of 10m parcels (225 parcels; centroid spacing 10m) -- large enough, at the
@@ -112,22 +114,23 @@ def test_loop_beats_spur_at_equal_length():
     loop = _roads([LineString([(15, 0), (15, 103)]),
                     LineString([(15, 22), (5, 22), (5, 0)])])
     assert spur.geometry.length.sum() == loop.geometry.length.sum() == 135.0
-    params = PermeabilityParams(g_walk=1.0)
-    assert permeability(b, loop, params) > permeability(b, spur, params)
+    ctx = EgressContext.of(b, PermeabilityParams(g_walk=1.0))
+    assert permeability(ctx, loop) > permeability(ctx, spur)
 
 def test_ungrounded_returns_zero_benefit_or_guarded():
     b = _grid_block()
     b.streets.geometry = gpd.GeoSeries([], crs=UTM)   # no street -> no ground
-    P, v = egress_power(b, None)
+    ctx = EgressContext.of(b, PARAMS)
+    P, v = egress_power(ctx, None)
     assert not np.isfinite(P)     # +inf; permeability() guards this (returns nan) -- assert guard
-    assert math.isnan(permeability(b, None))          # exercise the actual nan guard, not just P
+    assert math.isnan(permeability(ctx, None))        # exercise the actual nan guard, not just P
 
 def test_solve_egress_conductance_covers_the_whole_mesh():
     """The returned conductance is one value per mesh edge, at or above the footpath term
     everywhere -- roads enter only through a max(), so no edge can come back lower."""
     b = _grid_block(15, cell=10.0)
     r = _roads([LineString([(15, 0), (15, 135)])])
-    sol = solve_egress(b, r)
+    sol = solve_egress(EgressContext.of(b, PARAMS), r)
     assert len(sol.conductance) == len(sol.mesh.rows) == len(sol.mesh.footpath_g)
     assert np.all(sol.conductance >= sol.mesh.footpath_g)
     assert np.any(sol.conductance > sol.mesh.footpath_g)   # that road really does upgrade edges
@@ -138,30 +141,32 @@ def test_permeability_curve_terminal_matches_full_permeability():
     # this grid, not the 1m-unit default, is needed to avoid corridor saturation).
     b = _grid_block(15, cell=10.0)
     roads = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
-    curve = permeability_curve(b, roads, n_points=10)
-    assert abs(curve.benefit[-1] - permeability(b, roads)) < 1e-9
+    ctx = EgressContext.of(b, PARAMS)
+    curve = permeability_curve(ctx, roads, n_points=10)
+    assert abs(curve.benefit[-1] - permeability(ctx, roads)) < 1e-9
 
 def test_permeability_curve_starts_at_zero_and_is_bounded():
     b = _grid_block(15, cell=10.0)
     roads = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
-    curve = permeability_curve(b, roads, n_points=10)
+    curve = permeability_curve(EgressContext.of(b, PARAMS), roads, n_points=10)
     assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
     assert all(0.0 <= v < 1.0 for v in curve.benefit)
 
 def test_permeability_curve_is_monotone_non_decreasing():
     b = _grid_block(15, cell=10.0)
     roads = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
-    curve = permeability_curve(b, roads, n_points=10)
+    curve = permeability_curve(EgressContext.of(b, PARAMS), roads, n_points=10)
     assert curve.benefit == sorted(curve.benefit)
 
-def test_permeability_curve_freezes_p0_matching_a_manual_baseline():
-    # p0 is frozen once via egress_power(block, None, params)[0] -- every sample must equal
-    # permeability(block, prefix, params, p0=p0_manual) computed against that SAME baseline.
+def test_permeability_curve_scores_against_the_contexts_own_baseline():
+    # Every sample divides by `ctx.baseline.p`, the context's one no-roads solve -- so the terminal
+    # sample must equal 1 - P(roads)/P(no roads) computed by hand against that same baseline.
     b = _grid_block(15, cell=10.0)
     roads = _roads([LineString([(15, 0), (15, 135)])])
-    p0, _ = egress_power(b, None)
-    curve = permeability_curve(b, roads, n_points=4)
-    assert abs(curve.benefit[-1] - permeability(b, roads, p0=p0)) < 1e-9
+    ctx = EgressContext.of(b, PARAMS)
+    curve = permeability_curve(ctx, roads, n_points=4)
+    p1, _ = egress_power(ctx, roads)
+    assert abs(curve.benefit[-1] - (1.0 - p1 / ctx.baseline.p)) < 1e-9
 
 def test_permeability_at_displacement_first_crossing_and_unreached():
     from reblock.budget import Curve

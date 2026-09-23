@@ -19,6 +19,7 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
     PermeabilityParams,
     permeability,
     road_conductance,
@@ -97,7 +98,7 @@ def test_a_road_below_the_floor_is_refused() -> None:
     block, roads = _block(), _roads()
     narrow = with_width(roads, 4.0)
     with pytest.raises(ValueError, match="below the 7 m floor"):
-        permeability(block, narrow, pr)
+        permeability(EgressContext.of(block, pr), narrow)
 
 
 def test_above_the_floor_width_still_buys_capacity_continuously() -> None:
@@ -124,8 +125,8 @@ def test_a_wider_road_scores_at_least_as_well_end_to_end() -> None:
     FAULT INJECTION: replacing the `max(g[hit], ...)` with a plain assignment makes a wide road
     OVERWRITE a footpath edge that was already better, and this fails.
     """
-    pr = PermeabilityParams()
     block, roads = _block(), _roads()
-    scores = [float(permeability(block, with_width(roads, w), pr)) for w in (7.0, 9.0, 14.0)]
+    ctx = EgressContext.of(block, PermeabilityParams())
+    scores = [float(permeability(ctx, with_width(roads, w))) for w in (7.0, 9.0, 14.0)]
     assert all(np.isfinite(scores))
     assert scores[0] <= scores[1] + 1e-12 <= scores[2] + 1e-12, scores

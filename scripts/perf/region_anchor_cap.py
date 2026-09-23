@@ -34,13 +34,22 @@ import time
 from pathlib import Path
 
 from reblock.budget import prefix_to_displacement
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import Access, Displacement, SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.shortlist import FirstOrder
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+)
 from scripts.perf.snap_vs_peel import region_block_cached
 
 SHORTLIST = 512        # matches region_shortlist.py, so the uncapped arm IS the 79.6-min baseline
@@ -59,8 +68,9 @@ def main() -> None:
     print(f"\nregion block: {n:,} parcels, {len(block.building_geometries):,} buildings\n",
           flush=True)
 
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
+    ctx = EgressContext(adjacency, PermeabilityParams())
+    b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
     print(f"  baseline burden {b0:.4f}\n", flush=True)
 
     out: dict[str, dict[str, object]] = {}
@@ -92,10 +102,9 @@ def main() -> None:
         if len(pre) == 0:
             print("    empty displacement prefix -- skipped", flush=True)
             continue
-        b1 = burden(parcel_access_layers(block, pre, tol=STREET_TOL, adj=adj,
-                                         unreached_depth=n + 1))
+        b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))
         red = (1.0 - b1 / b0) if b0 > 0 else 0.0
-        perm = float(permeability(block, pre))
+        perm = float(permeability(ctx, pre))
         out[label] = {"burden_red": red, "perm": perm, "secs": dt,
                       "road_m": float(pre.geometry.length.sum()), "n_roads": len(pre),
                       "cand": per_step,

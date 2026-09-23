@@ -42,13 +42,22 @@ import time
 from pathlib import Path
 
 from reblock.budget import displacement
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import Access, Displacement, SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.shortlist import FirstOrder
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+)
 from scripts.perf import region_pool
 
 N_REGIONS = 6
@@ -91,9 +100,9 @@ def main() -> None:
         n = len(block.parcels)
         print(f"\n=== region {ri}: {n:,} parcels, {len(block.building_geometries):,} buildings ===",
               flush=True)
-        adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-        b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj,
-                                         unreached_depth=n + 1))
+        adjacency = ParcelAdjacency.of(block, STREET_TOL)
+        ctx = EgressContext(adjacency, PermeabilityParams())
+        b0 = burden(parcel_access_layers(adjacency, None, unreached=past_every_parcel))
         arms: dict[str, dict[str, object]] = {}
 
         for cap in CAPS:
@@ -125,10 +134,9 @@ def main() -> None:
             # budget chosen here would silently degrade to "all roads" and fake a matched result.
             nb = len(block.building_geometries)
             reach = displacement(block.buildings, roads) / nb if nb else 0.0
-            b1 = burden(parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj,
-                                             unreached_depth=n + 1))
+            b1 = burden(parcel_access_layers(adjacency, roads, unreached=past_every_parcel))
             at = {"all": {"burden_red": (1.0 - b1 / b0) if b0 > 0 else 0.0,
-                          "perm": float(permeability(block, roads)),
+                          "perm": float(permeability(ctx, roads)),
                           "road_m": float(roads.geometry.length.sum()),
                           "n_roads": float(len(roads)), "displaced_frac": float(reach)}}
             # roads_wkt is the FULL list, not a prefix, so any future budget question is a

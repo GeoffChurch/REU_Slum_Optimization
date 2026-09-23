@@ -17,8 +17,12 @@ from shapely.geometry import LineString
 from shapely.ops import nearest_points
 
 from reblock.contracts import Block, Proposal
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+)
 from reblock.derive_graph import config_identity
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
@@ -49,9 +53,12 @@ class PeelReblocker:
             )
         geoms = list(block.parcels.geometry)
         pos = {pid: i for i, pid in enumerate(ids)}
-        layer = parcel_access_layers(block, None, tol=self.tol)
+        # One adjacency for both the peel and the descent below, so the two cannot disagree about
+        # which parcels are neighbours.
+        adjacency = ParcelAdjacency.of(block, self.tol)
+        layer = parcel_access_layers(adjacency, None, unreached=one_past_deepest)
         depth = {pid: int(layer.loc[pid]) for pid in ids}
-        adj = parcel_adjacency(geoms, self.tol)
+        adj = adjacency.neighbours
         # representative_point() (not centroid) is guaranteed to lie inside the
         # polygon for arbitrary/non-convex shapes, so every served parcel's link
         # actually touches it -- a reflex/L-shaped parcel's centroid can fall outside.

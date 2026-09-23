@@ -16,7 +16,13 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.resistance_greedy import ResistanceGreedyReblocker
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability, with_width
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+    with_width,
+)
 
 UTM = CRS.from_epsg(32734)
 
@@ -54,7 +60,8 @@ def test_the_first_road_is_the_ARGMAX_over_candidates_by_gain_per_metre() -> Non
 
     block = _slab(6, 6)
     empty = gpd.GeoDataFrame(geometry=[], crs=block.crs)
-    base = permeability(block, empty)
+    ctx = EgressContext.of(block, PermeabilityParams())
+    base = permeability(ctx, empty)
 
     graph = ChordSubstrate().build(block)
     street = unary_union(list(block.streets.geometry))
@@ -76,13 +83,13 @@ def test_the_first_road_is_the_ARGMAX_over_candidates_by_gain_per_metre() -> Non
         road = _path_road(graph, pred, int(starts[i]), reps[i], street)
         if road is None or road.length <= 0:
             continue
-        rate = (permeability(block, with_width(
+        rate = (permeability(ctx, with_width(
             gpd.GeoDataFrame(geometry=[road], crs=block.crs), DEFAULT_ROAD_WIDTH_M)) - base)
         best_rate = max(best_rate, rate / road.length)
 
     chosen = ResistanceGreedyReblocker(max_roads=1, shortlist=999).propose(block).roads
     assert chosen is not None and len(chosen) == 1
-    got = (permeability(block, chosen) - base) / float(chosen.geometry.length.sum())
+    got = (permeability(ctx, chosen) - base) / float(chosen.geometry.length.sum())
     assert got >= best_rate - 1e-12, f"not the argmax: chose {got}, best available {best_rate}"
 
 

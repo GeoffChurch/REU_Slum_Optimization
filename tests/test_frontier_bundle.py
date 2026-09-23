@@ -204,19 +204,16 @@ def test_permeability_matches_the_solver_at_every_prefix(
     from reblock.budget import street_first_ordered
     from reblock.compare import load_permeability_config
     from reblock.derive.access import STREET_TOL
-    from reblock.derive.adjacency import parcel_adjacency
-    from reblock.permeability import egress_power, permeability
+    from reblock.permeability import EgressContext, permeability
     from scripts._example_block import TEST_VARIANT, load_example_block
 
     block, roads_by_method = load_example_block(variant=TEST_VARIANT)
     assert block.block_id == small_bundle["block_id"], (
         "the fixture was baked from a different block than TEST_VARIANT pins today")
-    params = load_permeability_config().params
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    p0, _ = egress_power(block, None, params, adj=adj)
+    ctx = EgressContext.of(block, load_permeability_config().params)
     for name, roads in roads_by_method.items():
         ordered = street_first_ordered(block, roads, STREET_TOL)
-        got = [permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0, adj=adj)
+        got = [permeability(ctx, cast(GeoDataFrame, ordered.iloc[:m]))
                for m in range(len(ordered) + 1)]
         np.testing.assert_allclose(small_bundle["methods"][name]["permeability"], got, rtol=1e-5,
                                    atol=1e-9, err_msg=name)

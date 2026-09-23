@@ -28,9 +28,13 @@ from shapely.ops import unary_union
 
 from reblock.buildings import Extents
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
-from reblock.permeability import PermeabilityParams, egress_power, permeability
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+)
+from reblock.permeability import EgressContext, permeability
 
 _Node = tuple[float, float]      # an _rnd-snapped (x, y) graph node
 _Pair = tuple[_Node, _Node]      # an undirected edge as its two endpoints
@@ -828,16 +832,15 @@ def _sweep(block: Block, roads: GeoDataFrame, value: Callable[[GeoDataFrame | No
     return costs, vals
 
 
-def max_access_depth(block: Block, roads: GeoDataFrame | None, *, tol: float = STREET_TOL,
-                     adj: list[set[int]] | None = None) -> int:
+def max_access_depth(adjacency: ParcelAdjacency, roads: GeoDataFrame | None) -> int:
     """The block's deepest BFS access-depth (`parcel_access_layers`) given `roads` -- 1 = every
-    parcel fronts a street, higher = buried. `adj` (parcel adjacency) may be passed to avoid
-    rebuilding it across repeated calls on the same block."""
-    return int(parcel_access_layers(block, roads, tol=tol, adj=adj).max())
+    parcel fronts a street, higher = buried. An unreachable parcel counts one past the deepest
+    reached layer (`one_past_deepest`), the depth a reader is shown."""
+    return int(parcel_access_layers(adjacency, roads, unreached=one_past_deepest).max())
 
 
-def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
-                    tol: float = STREET_TOL) -> tuple[GeoDataFrame, int]:
+def prefix_to_depth(adjacency: ParcelAdjacency, roads: GeoDataFrame,
+                    target_depth: int) -> tuple[GeoDataFrame, int]:
     """The minimal drainage-ordered prefix of `roads` whose max BFS access-depth is
     <= `target_depth`, paired with that prefix's actual max depth. Access-depth is monotone
     non-increasing as drainage-ordered roads are added (a larger street seed only shrinks depths),
@@ -845,15 +848,16 @@ def prefix_to_depth(block: Block, roads: GeoDataFrame, target_depth: int, *,
     peels. If even all `roads` cannot reach `target_depth`, returns (all roads in canonical order,
     floor depth) with floor depth > `target_depth` -- the caller reports that as unreached (an
     `osm_footpaths`-style fixed input that never reaches the deep interior). Empty `roads` returns
-    (empty, the no-road peel's max depth)."""
-    adj = parcel_adjacency(list(block.parcels.geometry), tol)
+    (empty, the no-road peel's max depth). Roads are ordered at the adjacency's own tolerance, so
+    the order and the peel can never disagree about what touches the street."""
+    block, tol = adjacency.block, adjacency.tol
     if len(roads) == 0:
         empty = cast(GeoDataFrame, roads.iloc[:0])
-        return empty, max_access_depth(block, empty, tol=tol, adj=adj)
+        return empty, max_access_depth(adjacency, empty)
     ordered = street_first_ordered(block, roads, tol)
 
     def depth_at(m: int) -> int:
-        return max_access_depth(block, cast(GeoDataFrame, ordered.iloc[:m]), tol=tol, adj=adj)
+        return max_access_depth(adjacency, cast(GeoDataFrame, ordered.iloc[:m]))
 
     n = len(ordered)
     full_depth = depth_at(n)
@@ -905,10 +909,9 @@ def prefix_to_displacement(block: Block, roads: GeoDataFrame, d_frac: float, *,
 
 
 def prefix_to_permeability(
-    block: Block,
+    ctx: EgressContext,
     roads: GeoDataFrame,
     p_star: float,
-    params: PermeabilityParams = PermeabilityParams(),  # noqa: B008 (frozen, immutable)
     *,
     tol: float = STREET_TOL,
 ) -> tuple[GeoDataFrame, bool]:
@@ -918,22 +921,18 @@ def prefix_to_permeability(
     dissipated power is monotone non-increasing by Rayleigh's monotonicity theorem; see
     permeability.py's module docstring), so a binary search over the prefix length finds the
     smallest sufficient prefix in O(log R) peels, mirroring `prefix_to_displacement`'s binary
-    search. The no-roads baseline p0 is frozen ONCE via `egress_power` rather than recomputed per
-    probed prefix. `adj` (parcel_adjacency, an STRtree spatial join -- costly at region scale) is
-    likewise built ONCE and threaded through every `egress_power`/`permeability` call: adjacency
-    is a function of `block.parcels` geometry alone, invariant across road prefixes, exactly the
-    precomputed-adj pattern `prefix_to_depth` already uses. If even all `roads`
+    search. Every probe is scored against the one `ctx`, so the mesh and the no-roads baseline are
+    built once per block, not per probed prefix -- nor per method, when a caller lenses several
+    methods on one block. If even all `roads`
     cannot reach `p_star` (including an ungrounded block, where permeability is nan and every
     comparison is False), returns (all roads in canonical order, False). Empty `roads` returns
     (empty, False)."""
     if len(roads) == 0:
         return cast(GeoDataFrame, roads.iloc[:0]), False
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    p0, _ = egress_power(block, None, params, adj=adj)
-    ordered = street_first_ordered(block, roads, tol)
+    ordered = street_first_ordered(ctx.block, roads, tol)
 
     def perm_at(m: int) -> float:
-        return permeability(block, cast(GeoDataFrame, ordered.iloc[:m]), params, p0=p0, adj=adj)
+        return permeability(ctx, cast(GeoDataFrame, ordered.iloc[:m]))
 
     n = len(ordered)
     if not (perm_at(n) >= p_star):                 # unreachable (incl. nan): best effort all roads

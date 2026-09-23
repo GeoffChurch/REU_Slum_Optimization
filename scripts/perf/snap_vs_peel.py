@@ -28,8 +28,12 @@ import numpy as np
 
 from reblock.budget import access_burden
 from reblock.contracts import Block, Screen, Source
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.methods.arterial.objectives import _AccessBlock
 from reblock.methods.arterial.primitives import (
     _anchor_points,
@@ -84,7 +88,7 @@ def main() -> None:
     print(f"\nregion block: {n:,} parcels, {len(block.streets)} street rows\n")
 
     t0 = time.perf_counter()
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
     t_adj = time.perf_counter() - t0
 
     t0 = time.perf_counter()
@@ -94,9 +98,9 @@ def main() -> None:
 
     t0 = time.perf_counter()
     base_burden = access_burden(parcel_access_layers(
-        block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
+        adjacency, None, unreached=past_every_parcel))
     t_peel0 = time.perf_counter() - t0
-    scorer = _AccessBlock(block, adj, base_burden)     # what `Access().for_block` builds
+    scorer = _AccessBlock(adjacency, base_burden)     # what `Access().for_block` builds
 
     print(f"  ONCE PER BLOCK      parcel_adjacency {t_adj:8.2f} s")
     print(f"                      boundary graph   {t_graph:8.2f} s  "
@@ -106,7 +110,7 @@ def main() -> None:
     # --- step 0 exactly as `_greedy_arterials` sets it up (committed empty) ---
     t0 = time.perf_counter()
     anchors = _anchor_points(list(block.streets.geometry), 32, 0)
-    targets = _deep_targets(block, None, 8, adj)
+    targets = _deep_targets(adjacency, None, 8)
     candidates = _candidate_chords(anchors, targets)
     t_cand = time.perf_counter() - t0
     print(f"  STEP 0              {len(anchors):,} anchors -> {len(candidates):,} candidates "

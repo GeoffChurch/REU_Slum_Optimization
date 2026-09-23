@@ -45,7 +45,7 @@ from reblock.data.settlements import exclusion_holdout
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.substrates import ChordSubstrate
-from reblock.permeability import permeability
+from reblock.permeability import EgressContext, PermeabilityParams, permeability
 from scripts.pair_matrix import (
     _ot,
     desire_source,
@@ -98,7 +98,8 @@ def _bc() -> SimpleNamespace:
 def _perm_disp(block: Block, roads: gpd.GeoDataFrame) -> tuple[float, float]:
     radii = block.buildings.radii
     del radii
-    return (float(permeability(block, roads)), displacement_fraction(block, roads))
+    return (float(permeability(EgressContext.of(block, PermeabilityParams()), roads)),
+            displacement_fraction(block, roads))
 
 
 def donor_quality(donor: Block, roads: gpd.GeoDataFrame) -> float:

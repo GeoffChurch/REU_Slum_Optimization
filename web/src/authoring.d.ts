@@ -40,7 +40,7 @@ export interface AuthoringBlock {
    * road is drawn; only the conductances on those edges do. */
   nodes: { cx: number[]; cy: number[]; ground: boolean[] };
   edges: { rows: number[]; cols: number[]; footpath_g: number[] };
-  /** `solve_egress(block, None)`'s own answer: the no-roads baseline permeability divides
+  /** `solve_egress(ctx, None)`'s own answer: the no-roads baseline permeability divides
    * against, and the potentials the "before" picture shows. Road-invariant, so computing it in
    * the browser on every edit would be waste. */
   baseline: { p0: number; potential: number[] };

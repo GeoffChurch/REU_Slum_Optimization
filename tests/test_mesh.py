@@ -8,7 +8,7 @@ import inspect
 import pytest
 
 from reblock.mesh import Mesh, footpath_mesh
-from reblock.permeability import PermeabilityParams
+from reblock.permeability import EgressContext, PermeabilityParams
 
 
 def test_footpath_mesh_takes_no_roads():
@@ -17,7 +17,7 @@ def test_footpath_mesh_takes_no_roads():
 
 
 def test_mesh_arrays_are_consistent(real_block):
-    m = footpath_mesh(real_block, PermeabilityParams())
+    m = EgressContext.of(real_block, PermeabilityParams()).mesh
     assert isinstance(m, Mesh)
     assert m.n == len(real_block.parcels)
     assert len(m.cx) == len(m.cy) == m.n
@@ -46,6 +46,6 @@ def test_extraction_changed_nothing(real_block):
     task-1-report.md).
     """
     from reblock.permeability import egress_power
-    p, v = egress_power(real_block, None, PermeabilityParams())
+    p, v = egress_power(EgressContext.of(real_block, PermeabilityParams()), None)
     assert p == pytest.approx(28549.99999999984, rel=1e-12)
     assert len(v) == len(real_block.parcels)

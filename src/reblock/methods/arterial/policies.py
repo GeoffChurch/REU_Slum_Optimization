@@ -5,8 +5,8 @@ exactly (add/remove) -- byte-identical to the exact greedy when paired with `res
 
 `Fixed`/`Grow`/`Faithful` are the CONFIGURABLE specs -- injected rather than selected by a
 `candidate_policy` string, so nothing downstream asks which policy it has. Each closes over
-nothing (frozen, no fields); the block-specific state (block, adjacency, seed candidates) is
-per-proposal and lives on the `CandidatePolicy` instance `build()` returns, not on the spec.
+nothing (frozen, no fields); the block-specific state (the block's adjacency, seed candidates)
+is per-proposal and lives on the `CandidatePolicy` instance `build()` returns, not on the spec.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import Block
+from reblock.derive.access import ParcelAdjacency
 from reblock.methods.arterial.primitives import (
     _anchor_points,
     _candidate_chords,
@@ -50,8 +51,7 @@ class _FixedPolicy:
 
 @dataclass
 class _GrowPolicy:
-    block: Block
-    adj: list[set[int]]
+    adjacency: ParcelAdjacency
     anchors: list[tuple[float, float]]         # accumulates committed-road vertices
     top_k: int
     seen: set[str]                              # wkt of every candidate ever emitted
@@ -66,8 +66,8 @@ class _GrowPolicy:
             if v not in self.anchors:
                 self.anchors.append(v)
         self.anchors.sort()
-        targets = _deep_targets(self.block, _committed_gdf(committed, self.block),
-                                self.top_k, self.adj)
+        targets = _deep_targets(self.adjacency,
+                                _committed_gdf(committed, self.adjacency.block), self.top_k)
         cands = _candidate_chords(self.anchors, targets)
         added = [ls for ls in cands if ls.wkt not in self.seen]
         for ls in added:
@@ -77,10 +77,9 @@ class _GrowPolicy:
 
 @dataclass
 class _FaithfulPolicy:
-    block: Block
+    adjacency: ParcelAdjacency
     streets: list[BaseGeometry]
     n_anchors: int
-    adj: list[set[int]]
     top_k: int
     live: set[str]
     _initial: list[LineString]
@@ -94,7 +93,8 @@ class _FaithfulPolicy:
         network = [*self.streets, *committed]
         cands = _candidate_chords(
             _anchor_points(network, self.n_anchors, self.max_anchors),
-            _deep_targets(self.block, _committed_gdf(committed, self.block), self.top_k, self.adj))
+            _deep_targets(self.adjacency, _committed_gdf(committed, self.adjacency.block),
+                          self.top_k))
         now = {ls.wkt: ls for ls in cands}
         added = [ls for k, ls in now.items() if k not in self.live]
         removed = [k for k in self.live if k not in now]
@@ -113,19 +113,18 @@ class CandidatePolicy(Protocol):
 
 @runtime_checkable
 class CandidatePolicySpec(Protocol):
-    """The CONFIGURABLE half of a policy. The policies themselves close over block state (block,
-    adjacency, seed candidates), which is per-proposal and cannot be built where config is read --
-    so config injects a spec and the engine calls `build` once per block."""
+    """The CONFIGURABLE half of a policy. The policies themselves close over block state (the
+    block's adjacency, seed candidates), which is per-proposal and cannot be built where config is
+    read -- so config injects a spec and the engine calls `build` once per block."""
 
-    def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
-              adj: list[set[int]], max_anchors: int) -> CandidatePolicy: ...
+    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int,
+              top_k: int, max_anchors: int) -> CandidatePolicy: ...
 
 
-def _seed(block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
-          adj: list[set[int]], max_anchors: int
-          ) -> tuple[list[tuple[float, float]], list[LineString]]:
+def _seed(adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int, top_k: int,
+          max_anchors: int) -> tuple[list[tuple[float, float]], list[LineString]]:
     anchors0 = _anchor_points(streets, n_anchors, max_anchors)
-    targets0 = _deep_targets(block, None, top_k, adj)
+    targets0 = _deep_targets(adjacency, None, top_k)
     return anchors0, _candidate_chords(anchors0, targets0)
 
 
@@ -133,9 +132,9 @@ def _seed(block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
 class Fixed:
     """Score only the step-0 candidate set forever. Cheapest, and blind to continuations."""
 
-    def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
-              adj: list[set[int]], max_anchors: int) -> CandidatePolicy:
-        _, initial = _seed(block, streets, n_anchors, top_k, adj, max_anchors)
+    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int,
+              top_k: int, max_anchors: int) -> CandidatePolicy:
+        _, initial = _seed(adjacency, streets, n_anchors, top_k, max_anchors)
         return _FixedPolicy(initial)
 
 
@@ -143,11 +142,10 @@ class Fixed:
 class Grow:
     """Add continuations from each committed road's vertices as they appear. The shipped default."""
 
-    def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
-              adj: list[set[int]], max_anchors: int) -> CandidatePolicy:
-        anchors0, initial = _seed(block, streets, n_anchors, top_k, adj, max_anchors)
-        return _GrowPolicy(block, adj, list(anchors0), top_k,
-                           {ls.wkt for ls in initial}, initial)
+    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int,
+              top_k: int, max_anchors: int) -> CandidatePolicy:
+        anchors0, initial = _seed(adjacency, streets, n_anchors, top_k, max_anchors)
+        return _GrowPolicy(adjacency, list(anchors0), top_k, {ls.wkt for ls in initial}, initial)
 
 
 @dataclass(frozen=True)
@@ -155,8 +153,8 @@ class Faithful:
     """Regenerate the exact greedy's candidate set every step. With rescore_every=1 this makes the
     lazy engine byte-identical to the exact one -- the oracle the lazy path is checked against."""
 
-    def build(self, block: Block, streets: list[BaseGeometry], n_anchors: int, top_k: int,
-              adj: list[set[int]], max_anchors: int) -> CandidatePolicy:
-        _, initial = _seed(block, streets, n_anchors, top_k, adj, max_anchors)
-        return _FaithfulPolicy(block, list(streets), n_anchors, adj, top_k,
+    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int,
+              top_k: int, max_anchors: int) -> CandidatePolicy:
+        _, initial = _seed(adjacency, streets, n_anchors, top_k, max_anchors)
+        return _FaithfulPolicy(adjacency, list(streets), n_anchors, top_k,
                                {ls.wkt for ls in initial}, initial, max_anchors)

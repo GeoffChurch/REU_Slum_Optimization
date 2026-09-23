@@ -17,7 +17,12 @@ from shapely.geometry import LineString, Point, Polygon
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Metrics, Proposal
-from reblock.derive.access import parcel_access_layers
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+)
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 from reblock.render import (
     _CONTEXT_OUTLINE,
@@ -33,6 +38,13 @@ from reblock.render import (
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
+
+
+def _layers(block: Block, roads: gpd.GeoDataFrame | None) -> pd.Series:
+    """The peel as a reader is shown it: adjacency at `STREET_TOL`, an unreachable parcel one
+    layer past the deepest reached."""
+    return parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
+                                unreached=one_past_deepest)
 
 
 def _grid_block(n: int) -> Block:
@@ -102,7 +114,7 @@ def test_point_disks_are_the_radius_asked_for_whatever_columns_ride_along() -> N
 
 def test_render_before_returns_figure_with_axes() -> None:
     block = _grid_block(3)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
 
     fig = render_before(block, layers, vmax=2)
 
@@ -113,7 +125,7 @@ def test_render_before_returns_figure_with_axes() -> None:
 def test_render_after_returns_figure_with_axes() -> None:
     block = _grid_block(3)
     proposal = _connector_proposal(block)
-    layers = parcel_access_layers(block, proposal.roads)
+    layers = _layers(block, proposal.roads)
 
     fig = render_after(block, proposal, layers, vmax=2)
 
@@ -127,8 +139,8 @@ def test_render_after_adds_a_roads_artist_over_render_before() -> None:
     # proposal.roads -- so with a non-empty proposal it has strictly more.
     block = _grid_block(3)
     proposal = _connector_proposal(block)
-    layers_before = parcel_access_layers(block, None)
-    layers_after = parcel_access_layers(block, proposal.roads)
+    layers_before = _layers(block, None)
+    layers_after = _layers(block, proposal.roads)
 
     fig_before = render_before(block, layers_before, vmax=2)
     fig_after = render_after(block, proposal, layers_after, vmax=2)
@@ -142,7 +154,7 @@ def test_render_after_with_no_roads_adds_no_extra_artist() -> None:
     block = _grid_block(3)
     proposal = Proposal(block_id=block.block_id, crs=UTM, roads=None, method="topology",
                         edges=None, proposal_id="topology", params={}, block_identity=None)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
 
     fig_before = render_before(block, layers, vmax=2)
     fig_after = render_after(block, proposal, layers, vmax=2)
@@ -155,8 +167,8 @@ def test_render_before_and_after_share_the_passed_vmax() -> None:
     # scale, so a viewer can compare shading across the two figures directly.
     block = _grid_block(3)
     proposal = _connector_proposal(block)
-    layers_before = parcel_access_layers(block, None)
-    layers_after = parcel_access_layers(block, proposal.roads)
+    layers_before = _layers(block, None)
+    layers_after = _layers(block, proposal.roads)
 
     fig_before = render_before(block, layers_before, vmax=2)
     fig_after = render_after(block, proposal, layers_after, vmax=2)
@@ -170,7 +182,7 @@ def test_render_before_and_after_share_the_passed_vmax() -> None:
 def test_render_after_accepts_optional_metrics() -> None:
     block = _grid_block(3)
     proposal = _connector_proposal(block)
-    layers = parcel_access_layers(block, proposal.roads)
+    layers = _layers(block, proposal.roads)
     metrics = Metrics(
         block_id=block.block_id, method="topology", eval="kcomplexity",
         values={"k_before": 2.0, "k_after": 1.0, "delta_k": 1.0, "added_road_length_m": 1.0},
@@ -194,7 +206,7 @@ def test_render_before_defaults_to_depth_field() -> None:
     # Backward-friendly: an existing caller that never passes `field=` still gets the depth
     # coloring (vmin=1, YlOrRd), unchanged from before the perm coloring was added.
     block = _grid_block(3)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
 
     fig = render_before(block, layers, vmax=2)
 
@@ -233,7 +245,7 @@ def test_render_before_and_after_have_no_title() -> None:
     # Global cleanup: bare heatmaps, no decorative title (matches the already-bare screen map).
     block = _grid_block(3)
     proposal = _connector_proposal(block)
-    layers = parcel_access_layers(block, proposal.roads)
+    layers = _layers(block, proposal.roads)
 
     fig_before = render_before(block, layers, vmax=2)
     fig_after = render_after(block, proposal, layers, vmax=2)
@@ -247,7 +259,7 @@ def test_draw_heatmap_uses_poster_figsize() -> None:
     # save_render's dpi=300 after bbox_inches="tight"/pad_inches=0 cropping -- sharp at
     # 3-4 ft poster scale; see the comment at the figsize call site.
     block = _grid_block(3)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
 
     fig = render_before(block, layers, vmax=2)
 
@@ -256,7 +268,7 @@ def test_draw_heatmap_uses_poster_figsize() -> None:
 
 def test_save_render_writes_a_nonempty_file(tmp_path: Path) -> None:
     block = _grid_block(3)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
     fig = render_before(block, layers, vmax=2)
     out = tmp_path / "b.png"
 
@@ -290,7 +302,7 @@ def test_draw_heatmap_with_context_and_own_buildings_renders_without_error(
     # outlines/points + own buildings, one a point and one a real outline) and must not raise, and
     # must still produce a written, non-empty file.
     block = _grid_block(3)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
     context_outlines = gpd.GeoDataFrame(
         {"block_id": ["neighbour"]},
         geometry=[Polygon([(5, 5), (7, 5), (7, 7), (5, 7)])],
@@ -315,7 +327,7 @@ def test_draw_heatmap_with_context_and_own_buildings_renders_without_error(
 def test_render_after_marks_displaced_buildings_and_writes_a_file(tmp_path: Path) -> None:
     block = _grid_block(3)
     proposal = _connector_proposal(block)
-    layers = parcel_access_layers(block, proposal.roads)
+    layers = _layers(block, proposal.roads)
     # sits on the connector: an OUTLINE carrying c, which is what _displaced_buildings produces.
     displaced = gpd.GeoDataFrame({"c": [0.8]}, geometry=[Point(1.0, 0.5).buffer(1.0)], crs=UTM)
 
@@ -331,7 +343,7 @@ def test_render_after_displaced_buildings_add_an_artist_over_own_buildings_alone
     # with them must have strictly more collections than the same call without.
     block = _grid_block(3)
     proposal = _connector_proposal(block)
-    layers = parcel_access_layers(block, proposal.roads)
+    layers = _layers(block, proposal.roads)
     own_buildings = gpd.GeoSeries([Point(0.5, 0.5), Point(1.0, 0.5)], crs=UTM)
     displaced = gpd.GeoDataFrame({"c": [0.8]}, geometry=[Point(1.0, 0.5).buffer(1.0)], crs=UTM)
 
@@ -359,7 +371,7 @@ def test_render_after_with_no_displaced_buildings_adds_no_extra_artist() -> None
     # building) must not add anything or raise.
     block = _grid_block(3)
     proposal = _connector_proposal(block)
-    layers = parcel_access_layers(block, proposal.roads)
+    layers = _layers(block, proposal.roads)
     empty_displaced = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
 
     fig_without = render_after(block, proposal, layers, vmax=2)
@@ -374,7 +386,7 @@ def test_render_before_uses_the_passed_frame_verbatim() -> None:
     # kwarg, so the context query and the axes view never drift apart. Passing an explicit
     # frame must set the view to exactly that bbox, not recompute one internally.
     block = _grid_block(3)
-    layers = parcel_access_layers(block, None)
+    layers = _layers(block, None)
     frame = (-100.0, -100.0, 200.0, 200.0)
 
     fig = render_before(block, layers, vmax=2, frame=frame)
@@ -414,10 +426,11 @@ def test_displaced_buildings_are_outlines_carrying_their_share(tmp_path):
 
 def test_render_graph_returns_figure_with_axes() -> None:
     from reblock.perm_graph import permeability_graph
+    from reblock.permeability import EgressContext, PermeabilityParams
     from reblock.render import render_graph
 
     block = _grid_block(6)
-    fig_data = permeability_graph(block, None)
+    fig_data = permeability_graph(EgressContext.of(block, PermeabilityParams()), None)
     fig = render_graph(fig_data, block, layer="conductance",
                        vmax=float(fig_data.potential.max()),
                        width_norm=float(fig_data.conductance.max()))
@@ -437,6 +450,7 @@ def test_render_graph_draws_upgraded_edges_in_the_road_colour() -> None:
     from matplotlib.colors import to_rgba, to_rgba_array
 
     from reblock.perm_graph import permeability_graph
+    from reblock.permeability import EgressContext, PermeabilityParams
     from reblock.render import _ROAD_COLOR, _UPGRADED_LW, render_graph
 
     block = _grid_block(6)
@@ -444,8 +458,9 @@ def test_render_graph_draws_upgraded_edges_in_the_road_colour() -> None:
         gpd.GeoDataFrame(geometry=[LineString([(3.0, 0.0), (3.0, 5.0)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)
 
-    plain = permeability_graph(block, None)
-    roaded = permeability_graph(block, roads)
+    ctx = EgressContext.of(block, PermeabilityParams())
+    plain = permeability_graph(ctx, None)
+    roaded = permeability_graph(ctx, roads)
     assert roaded.upgraded.any(), "fixture road must upgrade an edge or the test is vacuous"
 
     def _edge_colours(f: Figure) -> set[tuple[float, ...]]:

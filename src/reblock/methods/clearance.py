@@ -29,8 +29,13 @@ from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
 from reblock.contracts import Block, Proposal
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.derive_graph import config_identity
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
@@ -103,7 +108,7 @@ def _relax_depth(depth: NDArray[np.float64], adj: list[set[int]], served: Iterab
 
     PRECONDITION: `depth` must be a proper BFS distance labelling in which any parcel with no
     adjacency path to a street is pinned to a sentinel >= every possible true in-block distance
-    -- build it with `parcel_access_layers(..., unreached_depth=len(parcels)+1)`. Given that,
+    -- build it with `parcel_access_layers(..., unreached=past_every_parcel)`. Given that,
     this equals a full `parcel_access_layers` recompute for the post-road network: a road only
     adds street frontage (parcel adjacency is unchanged), so the post-road depth is a BFS from
     (original street seeds) union (newly served parcels), and every stale placeholder is high
@@ -164,11 +169,12 @@ def _drainage(
     parcels = block.parcels
     geoms = list(parcels.geometry)
     parcel_ids = np.asarray(parcels["parcel_id"])
-    adj = parcel_adjacency(geoms, STREET_TOL)
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
+    adj = adjacency.neighbours
     # Seed unreached (adjacency-disconnected) parcels to a sentinel above any true in-block
     # distance so `_relax_depth` stays exact as roads connect them (see its docstring precondition).
     depth = parcel_access_layers(
-        block, None, adj=adj, unreached_depth=len(geoms) + 1).to_numpy().astype(np.float64)
+        adjacency, None, unreached=past_every_parcel).to_numpy().astype(np.float64)
 
     empty = gpd.GeoDataFrame(geometry=[], crs=block.crs)
     if depth.size == 0 or float(depth.max()) <= depth_target:
@@ -226,7 +232,8 @@ def _drainage(
         net.extend(pathn)
 
     gdf = gpd.GeoDataFrame(geometry=roads, crs=block.crs)
-    final = parcel_access_layers(block, gdf, adj=adj)     # honest max over the ACTUAL network
+    # honest max over the ACTUAL network
+    final = parcel_access_layers(adjacency, gdf, unreached=one_past_deepest)
     max_depth_after = int(final.max())                    # surfaces any grid-stranded parcel
     max_roads_hit = len(roads) >= max_roads and max_depth_after > depth_target
     params: dict[str, object] = {

@@ -9,8 +9,7 @@ from hydra import compose, initialize_config_dir
 from hydra.utils import instantiate
 from shapely.geometry import LineString, Point
 
-from reblock.derive.access import STREET_TOL
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import STREET_TOL, ParcelAdjacency
 from reblock.methods.arterial import (
     Access,
     ArterialCost,
@@ -98,10 +97,10 @@ def test_step_state_is_frozen() -> None:
     """Forked workers inherit `_STEP_STATE` copy-on-write and only ever read it; frozen makes that
     real rather than a convention."""
     block = _grid_block(3)
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     net = engines._step_network([], block, 1.0)
     st = step_state(block, sg=_snap_graph(_boundary_graph(block.parcels)),
-                    realizer=SnapToBoundary(), objective=Directness().for_block(block, adj),
+                    realizer=SnapToBoundary(),
+                    objective=Directness().for_block(ParcelAdjacency.of(block, STREET_TOL)),
                     cost=Length(), committed=net)
     with pytest.raises(dataclasses.FrozenInstanceError):
         st.cost = Repulsion().at_step(block, net)    # type: ignore[misc]

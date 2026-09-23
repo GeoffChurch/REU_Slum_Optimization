@@ -61,14 +61,12 @@ from shapely.ops import nearest_points, unary_union
 
 from reblock.buildings import IncrementalOverlap
 from reblock.contracts import Block, Proposal
-from reblock.derive.access import STREET_TOL
-from reblock.derive.adjacency import parcel_adjacency
 from reblock.derive_graph import config_identity
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
     PermeabilityParams,
-    parcel_radii,
     permeability,
     with_width,
 )
@@ -126,8 +124,8 @@ class CycleNativeReblocker:
         if not geoms or len(graph.pts) == 0:
             return self._out(block, empty)
 
-        adj = parcel_adjacency(geoms, STREET_TOL)
-        pradii = parcel_radii(block, self.params)
+        # Every candidate cycle is scored against this one block's mesh and no-roads baseline.
+        ctx = EgressContext.of(block, self.params)
         n_b = max(len(block.building_geometries), 1)
         street = unary_union(list(block.streets.geometry))
         seeds = np.flatnonzero(
@@ -144,7 +142,7 @@ class CycleNativeReblocker:
         cc = np.concatenate([graph.cols, graph.rows])
 
         roads: list[LineString] = []
-        cur_p = float(permeability(block, empty, self.params, adj=adj, radii=pradii))
+        cur_p = float(permeability(ctx, empty))
         # The committed corridor as per-building covered pieces, so a candidate cycle is priced by
         # the buildings IT reaches rather than by re-unioning the whole network -- a recompute
         # whose cost grows with every road committed (see `IncrementalOverlap`).
@@ -194,7 +192,7 @@ class CycleNativeReblocker:
                     continue
                 trial = with_width(gpd.GeoDataFrame(geometry=[*roads, *cand], crs=crs),
                                    self.road_width_m)
-                gain = float(permeability(block, trial, self.params, adj=adj, radii=pradii)) - cur_p
+                gain = float(permeability(ctx, trial)) - cur_p
                 cost = max(d - spent, 1e-9)
                 if gain > 0 and gain / cost > best_val:
                     best, best_val = (cand, gain + cur_p, piece), gain / cost

@@ -22,8 +22,12 @@ from shapely.geometry.base import BaseGeometry
 
 from reblock.budget import road_drainage
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.methods.arterial import scoring
 from reblock.methods.arterial.costs import ArterialCost
 from reblock.methods.arterial.objectives import ArterialObjective, CommittedNetwork
@@ -83,7 +87,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
     vertex + arc-length samples); a positive value only ever REDUCES the anchor count below that
     uncapped set, never inflates it, falling back to ~`max_anchors` arc-length samples when the
     uncapped family does not already fit -- see `_anchor_points`."""
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
     g = _boundary_graph(block.parcels)
     sg = _snap_graph(g)                    # precomputed once per block -- see `_snap`
     # Raw street geometries (may be a MultiLineString for a holed/courtyard block) -- do NOT
@@ -91,7 +95,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
     # _anchor_points explodes Multi* internally.
     streets: list[BaseGeometry] = list(block.streets.geometry)
     # ONE scorer per block (the objective's frozen per-block constants), shared by every step.
-    scorer = objective.for_block(block, adj)
+    scorer = objective.for_block(adjacency)
 
     committed: list[LineString] = []                        # realized geometry, in commit order
     while len(committed) < max_roads:
@@ -99,7 +103,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
         anchors = _anchor_points(network, n_anchors, max_anchors)
         net = _step_network(committed, block, half_width_m)
         curr_roads = net.roads if len(committed) else None
-        targets = _deep_targets(block, curr_roads, top_k, adj)
+        targets = _deep_targets(adjacency, curr_roads, top_k)
 
         # Evaluate every candidate against the frozen per-step state, via the module-level holder
         # (COW-inheritable by the fork pool). Both the serial and pool paths funnel through the SAME
@@ -182,11 +186,11 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
     Reuses arterial's EXACT scoring machinery unchanged (via `eval_candidate` +
     `scoring._STEP_STATE`), so with `rescore_every=1` + the `Faithful` policy spec it is
     byte-identical to the exact greedy."""
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
     sg = _snap_graph(_boundary_graph(block.parcels))
     streets = list(block.streets.geometry)
-    scorer = objective.for_block(block, adj)
-    policy = policy_spec.build(block, streets, n_anchors, top_k, adj, max_anchors)
+    scorer = objective.for_block(adjacency)
+    policy = policy_spec.build(adjacency, streets, n_anchors, top_k, max_anchors)
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
@@ -280,14 +284,14 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: Arter
     an hour and reports nothing until it returns, so without this a kill destroys the whole run's
     evidence -- see docs/superpowers/notes/2026-08-11-max-anchors-is-a-region-scale-win.md.
     """
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
     g = _boundary_graph(block.parcels)
     sg = _snap_graph(g)
     # Raw street geometries (may be a MultiLineString for a holed/courtyard block) -- do NOT
     # filter to LineString, or Multi* streets get dropped and the proposal comes back empty;
     # _anchor_points explodes Multi* internally.
     streets: list[BaseGeometry] = list(block.streets.geometry)
-    scorer = objective.for_block(block, adj)
+    scorer = objective.for_block(adjacency)
     # The two trees the ranking queries against -- built once per block, like `_snap_graph` above.
     parcel_tree = STRtree(list(block.parcels.geometry))
     # Building CENTRES, at every tier: the shortlist counts centres within the corridor.
@@ -300,7 +304,7 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: Arter
         anchors = _anchor_points(network, n_anchors, max_anchors)
         net = _step_network(committed, block, half_width_m)
         curr_roads = net.roads if len(committed) else None
-        targets = _deep_targets(block, curr_roads, top_k, adj)
+        targets = _deep_targets(adjacency, curr_roads, top_k)
 
         # --- the one difference from `_greedy_arterials`: reduce the candidate list ---
         candidates = _candidate_chords(anchors, targets)
@@ -309,8 +313,7 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: Arter
         # committed. `.loc[ids]` puts it in the positional order `parcel_tree` indexes. Computed
         # for every selector, including one that ignores it, so a timing comparison between
         # selectors is never flattered by one of them skipping work the others pay for.
-        depths = parcel_access_layers(block, curr_roads, tol=STREET_TOL, adj=adj,
-                                      unreached_depth=len(block.parcels) + 1)
+        depths = parcel_access_layers(adjacency, curr_roads, unreached=past_every_parcel)
         candidates = selector.select(candidates, RankContext(
             depths=depths.loc[ids].to_numpy(dtype=float), parcel_tree=parcel_tree,
             building_tree=building_tree, half_width_m=half_width_m, step=len(committed)))

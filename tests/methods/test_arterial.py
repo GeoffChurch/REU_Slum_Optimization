@@ -12,8 +12,13 @@ from shapely.ops import unary_union
 from reblock.budget import displacement, road_corridor
 from reblock.buildings import Discs, SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers, street_connectivity
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+    street_connectivity,
+)
 from reblock.methods.arterial import (
     Access,
     Directness,
@@ -104,8 +109,7 @@ def test_max_anchors_above_the_anchor_count_is_a_no_op() -> None:
 
 def test_deep_targets_are_the_deepest_parcels() -> None:
     block = _grid_block(5)                       # center parcel is deepest, full-boundary streets
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    targets = _deep_targets(block, None, k=1, adj=adj)
+    targets = _deep_targets(ParcelAdjacency.of(block, STREET_TOL), None, k=1)
     assert len(targets) == 1
     assert Point(targets[0]).distance(Point(2.5, 2.5)) < 1.0   # near the 5x5 center
 
@@ -335,7 +339,7 @@ def test_greedy_is_deterministic() -> None:
 
 def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     from reblock.budget import road_drainage
-    from reblock.permeability import PermeabilityParams, permeability_curve
+    from reblock.permeability import EgressContext, PermeabilityParams, permeability_curve
     block = _grid_block(6)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
@@ -343,7 +347,8 @@ def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
                               max_roads=5, n_anchors=12)
     assert len(roads) >= 1
     assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
-    curve = permeability_curve(block, roads, PermeabilityParams())  # integrates w/ budget machinery
+    # integrates w/ budget machinery
+    curve = permeability_curve(EgressContext.of(block, PermeabilityParams()), roads)
     assert len(curve.cost) >= 2                                  # multiple budget points, not stub
     assert curve.benefit[-1] >= curve.benefit[0]                 # benefit doesn't regress w/ budget
 
@@ -430,7 +435,9 @@ def test_proposal_identity_distinguishes_configurations_on_one_block() -> None:
     assert len(one.roads) != len(three.roads)                  # precondition: different roads
     assert one.identity != three.identity
     access_after(block, one)
-    assert access_after(block, three).equals(parcel_access_layers(block, three.roads))
+    direct = parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), three.roads,
+                                  unreached=one_past_deepest)
+    assert access_after(block, three).equals(direct)
 
 
 def test_lam_does_not_enter_identity_for_the_aspirational_realizer() -> None:
@@ -802,9 +809,8 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
                   streets=streets, building_geometries=pts,
                   source_content_hash=None, building_tier=SpacingDiscs)
 
-    from reblock.derive.access import parcel_access_layers
-    adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    base_depth = parcel_access_layers(block, None, tol=STREET_TOL, adj=adj).max()
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
+    base_depth = parcel_access_layers(adjacency, None, unreached=one_past_deepest).max()
     assert base_depth >= 5                              # precondition: a genuinely deep pocket
 
     roads = _greedy_arterials(
@@ -815,7 +821,7 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     # interior rather than building zero-benefit gap roads (a zero-benefit road has raw=0 -> gain=0
     # under the always-positive repulsion denominator, so it can never win).
     assert len(roads) >= 1
-    depth_with_roads = parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj).max()
+    depth_with_roads = parcel_access_layers(adjacency, roads, unreached=one_past_deepest).max()
     assert depth_with_roads < base_depth                      # access strictly improves
     # (ii) the committed roads' total displacement is finite and non-trivial (a real corridor
     # through the building field), not degenerate.

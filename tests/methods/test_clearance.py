@@ -14,13 +14,17 @@ from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 from shapely import STRtree
 from shapely.geometry import LineString, Point, Polygon
-from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.methods.clearance import (
     ClearanceReblocker,
     _edge_weights,
@@ -143,8 +147,10 @@ def test_relax_depth_matches_full_recompute() -> None:
     # parcel_access_layers computes from scratch for that road.
     block = _column_block(6)
     geoms = list(block.parcels.geometry)
-    adj = parcel_adjacency(geoms, STREET_TOL)
-    depth = parcel_access_layers(block, None, adj=adj).to_numpy().astype(float)
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
+    adj = adjacency.neighbours
+    depth = parcel_access_layers(adjacency, None,
+                                 unreached=one_past_deepest).to_numpy().astype(float)
     assert list(depth) == [1, 2, 3, 4, 5, 6]  # sanity: deep column
 
     road = gpd.GeoDataFrame(geometry=[LineString([(0.5, 0.0), (0.5, 6.0)])], crs=UTM)
@@ -152,7 +158,8 @@ def test_relax_depth_matches_full_recompute() -> None:
         road.geometry.iloc[0], predicate="dwithin", distance=STREET_TOL)]
     _relax_depth(depth, adj, served)
 
-    naive = parcel_access_layers(block, road, adj=adj).to_numpy().astype(float)
+    naive = parcel_access_layers(adjacency, road,
+                                 unreached=one_past_deepest).to_numpy().astype(float)
     assert list(depth) == list(naive)
     assert max(depth) == 1.0  # every parcel now fronts the street-connected road
 
@@ -161,7 +168,7 @@ def test_relax_depth_matches_recompute_on_disconnected_component() -> None:
     # The relax equals a full recompute ONLY when the base array pins unreached parcels to a
     # high sentinel (len+1). This locks in that precondition and shows the default-seeded base
     # (unreached = max(reached)+1) diverges -- which is exactly why Task 3's greedy seeds with
-    # unreached_depth=len+1. Row A (3 parcels) fronts the street; column B (5 parcels, disjoint
+    # `past_every_parcel`. Row A (3 parcels) fronts the street; column B (5 parcels, disjoint
     # from A) is unreached until a road connects its near end.
     a = [Polygon([(i, 0), (i + 1, 0), (i + 1, 1), (i, 1)]) for i in range(3)]
     b = [Polygon([(0, y), (1, y), (1, y + 1), (0, y + 1)]) for y in range(5, 10)]  # gap at y=1..5
@@ -172,21 +179,23 @@ def test_relax_depth_matches_recompute_on_disconnected_component() -> None:
     block = Block(block_id="disc", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
-    adj = parcel_adjacency(cast(list[BaseGeometry], polys), STREET_TOL)
-    n = len(polys)
+    adjacency = ParcelAdjacency.of(block, STREET_TOL)
+    adj = adjacency.neighbours
 
     # street-connected road reaching ONLY B's near end (top at y=5.4 -> >0.5 from B[1] at y=6)
     road = gpd.GeoDataFrame(geometry=[LineString([(0.5, 0.0), (0.5, 5.4)])], crs=UTM)
     served = [int(p) for p in STRtree(polys).query(
         road.geometry.iloc[0], predicate="dwithin", distance=STREET_TOL)]
-    naive = parcel_access_layers(block, road, adj=adj).to_numpy().astype(float)
+    naive = parcel_access_layers(adjacency, road,
+                                 unreached=one_past_deepest).to_numpy().astype(float)
 
     seeded = parcel_access_layers(
-        block, None, adj=adj, unreached_depth=n + 1).to_numpy().astype(float)
+        adjacency, None, unreached=past_every_parcel).to_numpy().astype(float)
     _relax_depth(seeded, adj, served)
     assert list(seeded) == list(naive)                 # correct precondition -> exact
 
-    default_base = parcel_access_layers(block, None, adj=adj).to_numpy().astype(float)
+    default_base = parcel_access_layers(
+        adjacency, None, unreached=one_past_deepest).to_numpy().astype(float)
     _relax_depth(default_base, adj, served)
     assert list(default_base) != list(naive)           # default seeding -> falsely shallow
 
@@ -206,7 +215,8 @@ def test_default_substrate_is_chord_diag() -> None:
     p = m.propose(_column_block_with_buildings(6))
     assert p.proposal_id == "clearance:chord_diag:r0:d2:mr400"
     assert p.params["substrate"] == "chord_diag"
-    after = parcel_access_layers(_column_block_with_buildings(6), p.roads).to_numpy()
+    after = parcel_access_layers(ParcelAdjacency.of(_column_block_with_buildings(6), STREET_TOL),
+                                 p.roads, unreached=one_past_deepest).to_numpy()
     assert int(after.max()) <= 2
 
 
@@ -216,7 +226,8 @@ def test_greedy_reblock_achieves_depth_target() -> None:
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
                                     radii=np.zeros(len(block.building_geometries)))
     assert len(roads) > 0
-    after = parcel_access_layers(block, roads).to_numpy()
+    after = parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
+                                 unreached=one_past_deepest).to_numpy()
     assert int(after.max()) <= 2
     assert params["max_roads_hit"] is False
 
@@ -293,7 +304,8 @@ def test_propose_achieves_target_on_real_block() -> None:
     m = ClearanceReblocker(depth_target=2, substrate=GridSubstrate(res=0.75))
     roads = m.propose(block).roads
     assert roads is not None
-    after = parcel_access_layers(block, roads).to_numpy()
+    after = parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
+                                 unreached=one_past_deepest).to_numpy()
     assert int(after.max()) <= 2  # invariant holds whether or not roads were needed
 
 

@@ -9,6 +9,8 @@ capping at 8) and is native per-parcel by `parcel_id`.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import NamedTuple
 
 import networkx as nx
@@ -58,6 +60,67 @@ from reblock.derive.adjacency import parcel_adjacency
 # `street_connectivity` disagreed about three of nine of them.
 # See notes/2026-09-14-road-net-is-not-planarized.md.
 STREET_TOL = 0.5 + 1e-8
+
+
+@dataclass(frozen=True, eq=False)
+class ParcelAdjacency:
+    """A block's parcel adjacency at one tolerance: built ONCE and handed to everything that walks
+    it -- the peel (`parcel_access_layers`), the permeability mesh (`reblock.permeability.
+    EgressContext`), the arterial's per-candidate scoring.
+
+    It carries its block, so nothing takes a block and its neighbour sets side by side, and no
+    caller can pair one block with another block's adjacency.
+
+    `neighbours` is a field rather than something derived on access so that a caller holding the
+    adjacency from elsewhere can supply it -- the browser rebuilds it from a baked bundle, because
+    computing it under Pyodide kills the interpreter (`web/src/py/solve.py`). `of` is the ordinary
+    way in. Either way the length is checked against the block, which is what catches another
+    block's adjacency; it cannot catch another tolerance's, so `tol` is carried beside it and every
+    consumer reads the tolerance from here rather than taking its own.
+
+    Frozen and compared by identity: two adjacencies are the same only if they are the same object,
+    and nothing hashes or compares them. The neighbour sets are exactly `parcel_adjacency`'s --
+    never re-built into another container, because set iteration order decides edge order in the
+    permeability mesh and therefore the summation order of its Laplacian.
+    """
+    block: Block
+    tol: float
+    neighbours: list[set[int]]
+
+    def __post_init__(self) -> None:
+        if len(self.neighbours) != len(self.block.parcels):
+            raise ValueError(
+                f"adjacency has {len(self.neighbours)} neighbour sets but block "
+                f"{self.block.block_id!r} has {len(self.block.parcels)} parcels -- it was built "
+                f"for a different block")
+
+    @classmethod
+    def of(cls, block: Block, tol: float) -> ParcelAdjacency:
+        """`block`'s parcel adjacency at `tol` (`parcel_adjacency`)."""
+        return cls(block, tol, parcel_adjacency(list(block.parcels.geometry), tol))
+
+
+UnreachedDepth = Callable[[int, int], int]
+"""The depth `parcel_access_layers` reports for a parcel with NO path to a street, from
+`(deepest reached layer, parcel count)`. A required argument, because the two behaviours below
+answer different questions and neither is a safe default for the other."""
+
+
+def one_past_deepest(deepest: int, n_parcels: int) -> int:
+    """One layer past the deepest reached parcel: sorts an unreachable parcel last, honestly,
+    instead of silently capping it like the weak-dual `k` did. What a displayed or reported depth
+    wants. It MOVES as roads are added -- the deepest reached layer shrinks -- so it is wrong for
+    anything compared across road prefixes."""
+    del n_parcels
+    return deepest + 1
+
+
+def past_every_parcel(deepest: int, n_parcels: int) -> int:
+    """`n_parcels + 1`, deeper than any true in-block depth can be. Prefix-STABLE: an access
+    burden compared across road prefixes needs an unreachable parcel to cost the same at every
+    prefix, and `clearance._relax_depth` needs every placeholder to sit above any real depth."""
+    del deepest
+    return n_parcels + 1
 
 
 class StreetConnectivity(NamedTuple):
@@ -110,26 +173,24 @@ def street_connectivity(
 
 
 def parcel_access_layers(
-    block: Block, roads: GeoDataFrame | None, *, tol: float = STREET_TOL,
-    adj: list[set[int]] | None = None, unreached_depth: int | None = None,
+    adjacency: ParcelAdjacency, roads: GeoDataFrame | None, *, unreached: UnreachedDepth,
 ) -> pd.Series:
-    """BFS-peel access depth per parcel: 1 = touches a street, L = L-1 parcels deep.
+    """BFS-peel access depth per parcel of `adjacency.block`: 1 = touches a street, L = L-1
+    parcels deep.
 
-    Seeds the frontier with parcels within `tol` of the street network
+    Seeds the frontier with parcels within `adjacency.tol` of the street network
     (`block.streets`, plus any additional `roads`), then peels outward one
     parcel-adjacency hop at a time. A parcel with no path to any street
-    (disconnected from the rest of the block) gets one layer past the
-    deepest reached layer, so it sorts last honestly instead of silently
-    capping like the old weak-dual `k`.
+    (disconnected from the rest of the block) gets the depth `unreached` assigns it --
+    `one_past_deepest` or `past_every_parcel`; see each for which question it answers.
 
     Returned `pd.Series` is indexed by `parcel_id` (not position), so it
     survives reordering of `block.parcels`.
     """
+    block, tol, adj = adjacency.block, adjacency.tol, adjacency.neighbours
     parcels = block.parcels
     ids = list(parcels["parcel_id"])
     geoms = list(parcels.geometry)
-
-    adj = adj if adj is not None else parcel_adjacency(geoms, tol)
 
     street = street_connectivity(block.streets, roads, tol).seed_geom
 
@@ -159,13 +220,10 @@ def parcel_access_layers(
                 layer[j] = layer[i] + 1
                 frontier.append(j)
 
-    unreached = [i for i, depth in enumerate(layer) if depth == 0]
-    if unreached:
-        # `unreached_depth` pins unreached parcels to a caller-supplied, prefix-stable
-        # value (the budget curve needs this for cross-prefix comparability); default is
-        # the historical "one past the deepest reached layer".
-        far = unreached_depth if unreached_depth is not None else max(layer) + 1
-        for i in unreached:
+    stranded = [i for i, depth in enumerate(layer) if depth == 0]
+    if stranded:
+        far = unreached(max(layer), len(layer))
+        for i in stranded:
             layer[i] = far
 
     return pd.Series(layer, index=pd.Index(ids, name="parcel_id"), dtype="int64")

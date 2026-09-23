@@ -1,17 +1,31 @@
 from typing import cast
 
 import geopandas as gpd
+import pandas as pd
 import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon, box
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers, street_connectivity
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    one_past_deepest,
+    parcel_access_layers,
+    street_connectivity,
+)
 from reblock.methods.peel import PeelReblocker
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
+
+
+def _layers(block: Block, roads: gpd.GeoDataFrame | None) -> pd.Series:
+    """The peel as a reader is shown it: adjacency at `STREET_TOL`, an unreachable parcel one
+    layer past the deepest reached."""
+    return parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
+                                unreached=one_past_deepest)
 
 
 def _grid5() -> Block:
@@ -27,7 +41,7 @@ def _grid5() -> Block:
 def test_spine_reaches_k1_and_is_street_connected() -> None:
     block = _grid5()
     proposal = PeelReblocker().propose(block)
-    assert parcel_access_layers(block, proposal.roads).max() == 1          # full access
+    assert _layers(block, proposal.roads).max() == 1          # full access
     sc = street_connectivity(block.streets, proposal.roads, STREET_TOL)
     assert sc.connected_frac == 1.0                            # every corridor reaches street
     # Bound to the constant, not to a typed literal: the id records WHICH tolerance was used, and
@@ -105,10 +119,10 @@ def test_spine_serves_non_convex_reflex_parcel() -> None:
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
 
-    assert parcel_access_layers(block, None).loc[1] == 2  # p starts at depth 2, via q
+    assert _layers(block, None).loc[1] == 2  # p starts at depth 2, via q
 
     proposal = PeelReblocker().propose(block)
-    assert parcel_access_layers(block, proposal.roads).max() == 1  # p is served (depth 1)
+    assert _layers(block, proposal.roads).max() == 1  # p is served (depth 1)
 
 
 def test_duplicate_parcel_id_raises() -> None:

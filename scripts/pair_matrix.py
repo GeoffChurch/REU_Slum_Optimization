@@ -75,7 +75,13 @@ from reblock.metric import (
     Gate,
     Product,
 )
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability, with_width
+from reblock.permeability import (
+    DEFAULT_ROAD_WIDTH_M,
+    EgressContext,
+    PermeabilityParams,
+    permeability,
+    with_width,
+)
 from reblock.region import IdentityRegionBuilder, RegionBuilder
 from reblock.screen.dense_compact import DenseCompactScreen
 
@@ -799,8 +805,9 @@ def score_pair(
     timings["clearance"] += time.time() - t
 
     t = time.time()
-    perm_prop = permeability(recipient, moved)
-    perm_direct = permeability(recipient, direct)
+    ctx = EgressContext.of(recipient, PermeabilityParams())
+    perm_prop = permeability(ctx, moved)
+    perm_direct = permeability(ctx, direct)
     timings["permeability"] += time.time() - t
 
     return {

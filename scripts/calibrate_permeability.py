@@ -82,7 +82,7 @@ from reblock.budget import Curve, displacement_curve
 from reblock.compare import load_permeability_config
 from reblock.contracts import Block, Method, Screen, Source
 from reblock.derivations import propose
-from reblock.permeability import PermeabilityParams, permeability_curve
+from reblock.permeability import EgressContext, PermeabilityParams, permeability_curve
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, region_block
 
@@ -266,7 +266,8 @@ def _method_frontier(block: Block, method: Method, params: PermeabilityParams, *
     def _report(i: int, total: int) -> None:
         _log(f"    {label}: solve {i}/{total}")
 
-    perm_curve = permeability_curve(block, roads, params, n_points=20, progress=_report)
+    perm_curve = permeability_curve(EgressContext.of(block, params), roads, n_points=20,
+                                    progress=_report)
     disp_curve = displacement_curve(block, roads, n_points=20)
     return MethodFrontier(
         n_roads=int(len(roads)),
