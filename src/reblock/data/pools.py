@@ -1,6 +1,6 @@
 """Research pools: screened recipients and donatable donors, materialized as real Blocks.
 
-The OT-transplant benchmarks (`scripts/pair_matrix.py`, `scripts/consensus_*.py`), the mimicry
+The OT-transplant benchmarks (`scripts/pair_matrix.py`, `scripts/consensus_matrix.py`), the mimicry
 scorers and the `scripts/perf/` studies all draw their blocks here, so each is measured on the same
 population -- and that population is selected through the shipped `Source -> Screen ->
 RegionBuilder` stages, built from conf/ by `reblock.presets`, not a private band. A private
@@ -16,11 +16,14 @@ gate would make "does fidelity depend on depth?" unanswerable.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
-from collections.abc import Sequence
+from abc import ABC, abstractmethod
+from collections.abc import Hashable, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from functools import cache
 from pathlib import Path
 from typing import cast
 from urllib.error import URLError
@@ -30,14 +33,21 @@ import numpy as np
 import pandas as pd
 from hydra import compose, initialize_config_dir
 from omegaconf import DictConfig
+from pyproj import CRS
 
 from reblock.contracts import Block
 from reblock.data.counts import RAW_COUNT
 from reblock.data.kblock import KblockSource
 from reblock.data.osm_extract import FOOTPATH_TAGS, PbfDesireLines, utm_zone_epsg
 from reblock.data.provision import DEFAULT_CACHE
-from reblock.methods.desire_lines import OSMDesireLines
-from reblock.methods.osm_footpaths import FootpathSource, block_bbox_wgs84, interior_footpaths
+from reblock.derive_graph import closure_hash
+from reblock.methods.desire_lines import DesireField, OSMDesireLines, mapped_field
+from reblock.methods.osm_footpaths import (
+    FootpathSource,
+    block_bbox_wgs84,
+    block_footpaths,
+    interior_footpaths,
+)
 from reblock.presets import Stages, load_stages
 
 log = logging.getLogger(__name__)
@@ -142,7 +152,7 @@ class Pools:
     """
 
     blocks: list[Block]             # sorted by block_id
-    blocks_gdf: gpd.GeoDataFrame    # block boundaries in `blocks` order, for `exclusion_holdout`
+    blocks_gdf: gpd.GeoDataFrame    # block boundaries in `blocks` order, for exclusion radii
     recipients: list[int]           # indices into `blocks`
     donors: list[int]
 
@@ -273,6 +283,112 @@ def overpass_footpaths() -> OSMDesireLines:
     Not a fallback for `pbf_footpaths` -- the two cover disjoint ranges."""
     return OSMDesireLines(tags=FOOTPATH_TAGS, endpoint="https://overpass-api.de/api/interpreter",
                           cache_dir=None, snapshot=None, timeout_s=60.0)
+
+
+class DonorPool(ABC):
+    """A materialized pool as configuration: what a donor-driven method draws its donors from, and
+    what a study draws its recipients from.
+
+    Materialized on first use, never at construction. A pool is built by `reblock.presets` with
+    everything else an entry point is configured with, and materializing one is a census read, a
+    screen and a Voronoi per block.
+    """
+
+    @abstractmethod
+    def pools(self) -> Pools: ...
+
+    @abstractmethod
+    def footpaths(self) -> FootpathSource:
+        """Where every block's own footpaths are read from: the donors' material, and the
+        ground truth a recipient's prediction is scored against."""
+
+    @property
+    @abstractmethod
+    def identity(self) -> Hashable | None:
+        """The pool's CONTENT: every donor's block identity, in order, and the footpath source's.
+        Which recipients the screen flags is not part of it -- no donor-driven method reads
+        them."""
+
+
+@dataclass(frozen=True, eq=False)
+class _Materialized:
+    pools: Pools
+    footpaths: PbfDesireLines
+    identity: Hashable | None
+
+
+class SpecPool(DonorPool):
+    """A pool `load_pools` draws from a `PoolSpec`, with footpaths from its own country's PBF
+    (`iso_of`). Materialized once per process however many methods are configured with an equal
+    pool -- four study arms share one."""
+
+    @abstractmethod
+    def spec(self) -> PoolSpec: ...
+
+    def pools(self) -> Pools:
+        return _materialize(self).pools
+
+    def footpaths(self) -> PbfDesireLines:
+        return _materialize(self).footpaths
+
+    @property
+    def identity(self) -> Hashable | None:
+        return _materialize(self).identity
+
+
+@cache
+def _materialize(pool: SpecPool) -> _Materialized:
+    pools = load_pools(pool.spec())
+    footpaths = pbf_footpaths(iso_of(pools.blocks))
+    donors = [pools.blocks[j].identity for j in pools.donors]
+    if any(d is None for d in donors):
+        return _Materialized(pools=pools, footpaths=footpaths, identity=None)
+    digest = hashlib.sha256(repr(donors).encode()).hexdigest()
+    return _Materialized(pools=pools, footpaths=footpaths,
+                         identity=("donor_pool", digest, footpaths.identity))
+
+
+@dataclass(frozen=True)
+class CapetownPool(SpecPool):
+    """`capetown_pool`: the pool every committed pair-matrix and consensus result was drawn from."""
+
+    config_dir: Path
+
+    def spec(self) -> PoolSpec:
+        return capetown_pool(self.config_dir)
+
+
+@dataclass(frozen=True)
+class ShortlistZonePool(SpecPool):
+    """`zone_pool`: the Cape Town pool's screen and bounds over one UTM zone of the ZAF+KEN
+    shortlist."""
+
+    config_dir: Path
+    epsg: int
+
+    def spec(self) -> PoolSpec:
+        return zone_pool(self.config_dir, self.epsg)
+
+
+@dataclass(frozen=True)
+class PoolFootpaths:
+    """A pool's own footpath source as a configurable desire source (`conf/desire_source/pool`):
+    the ground truth a study scores predictions against then comes from the very source the
+    donors' material does, and is read once."""
+
+    pool: DonorPool
+
+    @property
+    def identity(self) -> Hashable | None:
+        source = self.pool.footpaths().identity
+        return None if source is None else (closure_hash(__name__), source)
+
+    def footpaths(self, bbox_wgs84: tuple[float, float, float, float],
+                  crs: CRS) -> gpd.GeoDataFrame:
+        return self.pool.footpaths().footpaths(bbox_wgs84, crs)
+
+    def desire_field(self, block: Block) -> DesireField:
+        return mapped_field(block_footpaths(self, block))
 
 
 class DonorSkip(StrEnum):

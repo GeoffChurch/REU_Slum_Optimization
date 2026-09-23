@@ -1,0 +1,6 @@
+# The Cape Town pool's screen and bounds over ONE UTM zone of the provisioned ZAF+KEN shortlist:
+# each zone is a different metro, so a zone run is a replication. See reblock.data.pools.zone_pool.
+#   donor_pool=shortlist_zone donor_pool.epsg=32735
+_target_: reblock.data.pools.ShortlistZonePool
+config_dir: {_target_: pathlib.Path, _args_: [conf]}
+epsg: ???

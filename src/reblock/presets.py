@@ -22,6 +22,7 @@ time" in CI.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeVar
 
 from hydra.utils import instantiate
 from omegaconf import DictConfig, ListConfig
@@ -33,6 +34,8 @@ from reblock.methods.substrates import Substrate
 from reblock.metric import BlockMetric, Gate
 from reblock.permeability import PermeabilityParams
 from reblock.region import RegionBuilder
+
+T = TypeVar("T")
 
 
 def _mismatch(node: DictConfig, built: object, kind: str) -> TypeError:
@@ -128,6 +131,22 @@ def load_gate(node: DictConfig) -> Gate:
     built = instantiate(node)
     if not isinstance(built, Gate):
         raise _mismatch(node, built, "Gate")
+    return built
+
+
+def load_research(node: DictConfig, kind: type[T]) -> T:
+    """A research object -- `reblock.transplant`, `reblock.data.pools` -- checked against the class
+    its caller names.
+
+    Generic where every loader above is not, because this module must not import the research
+    code: it is in shipped modules' import closures, and a GW constant would then sit in their
+    code hashes (`tests/transplant/test_isolation.py`). So it cannot name the kind; the caller,
+    which may import it, does. A research object reaches a shipped Method only as a configured
+    field, and carries its own code in its `identity`.
+    """
+    built = instantiate(node)
+    if not isinstance(built, kind):
+        raise _mismatch(node, built, kind.__qualname__)
     return built
 
 

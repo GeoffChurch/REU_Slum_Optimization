@@ -1,0 +1,6 @@
+# The donor pool's own footpaths: the PBF extract of the pool's country, the same instance the
+# donors' material is read from. The consensus study's `own` arm proposes through it, so every
+# prediction is scored against the source its donors came from. See
+# reblock.data.pools.PoolFootpaths.
+_target_: reblock.data.pools.PoolFootpaths
+pool: ${donor_pool}

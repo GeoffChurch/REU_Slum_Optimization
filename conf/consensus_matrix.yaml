@@ -1,0 +1,35 @@
+# The consensus study (scripts/consensus_matrix.py). Every arm is a Method composed from the run
+# config (conf/config.yaml) under its overrides, and every arm is scored through the same
+# truncations: Lens A, Lens B, and the prediction lens at the reference network's displacement.
+
+# Recipients: evenly spaced over the pool's recipients that carry their own mapped footpaths, by
+# parcel count (reblock.data.pools.evenly_spaced), so the extremes are in by construction.
+recipients: 20
+
+# Overrides every arm is composed under, and the pool the recipients are drawn from: one pool for
+# the whole study, so the recipients, every donor arm and the reference all read the same corpus.
+common: [donor_pool=capetown]
+
+# The arms available, by name -> the run-config overrides that select each.
+arms:
+  consensus_held_out: [method=consensus, donors=held_out]
+  consensus_leaky: [method=consensus, donors=leaky]
+  single_held_out: [method=donor_transplant, donors=held_out]
+  single_leaky: [method=donor_transplant, donors=leaky]
+  clearance: [method=clearance]
+  own: [method=osm_footpaths, desire_source=pool]
+
+# The arms to run, and the one whose whole network is the ground truth every prediction is scored
+# against (it is also scored as an arm, through the same truncations as the rest).
+run: [consensus_held_out, consensus_leaky, single_held_out, single_leaky, clearance, own]
+reference: own
+
+# Each named arm again at each k, as `{arm}_k{k}` with `donors.k={k}` appended. A GW fit does not
+# depend on k, so the rungs share every solve and nest (k=3's donors are k=15's first three).
+k_sweep:
+  arms: []
+  ks: []
+
+# Where the rows go (the skipped arms beside them, as <out>.skips.json). No default: the committed
+# data/benchmarks/consensus_matrix.parquet predates this study's truncations.
+out: ???

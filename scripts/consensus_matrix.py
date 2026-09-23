@@ -1,319 +1,275 @@
-"""Barycenter-consensus benchmark: predict a block's real footpaths from its mapped neighbours.
+"""The consensus study: predict a block's real footpaths from its mapped neighbours, and ask what
+the prediction is worth as a reblocker -- every arm an ordinary Method, every one scored through the
+SAME truncations.
 
-The single-donor question is answered and the answer is no -- transplant fidelity does not
-measurably depend on donor GW distance (beta = -0.18, 95% [-4.09, +3.85]; see
-notes/2026-07-28-no-detectable-distance-effect.md), which corroborates the 2026-07-23 finding that
-single-donor transplant is Pareto-dominated. What that study ALSO found, and what had never been
-tested beyond n=1, is that a weighted CONSENSUS of several similar blocks' real OSM footpaths
-reaches ~94% of a recipient's own network. This measures that at scale.
+ARMS are Methods built from conf/ like any other (`conf/consensus_matrix.yaml`), each named by the
+run-config overrides that select it:
 
-The mechanism is `reblock.transplant.consensus` at its operating point: fit GW+UOT from each
-donor's parcel cloud to the recipient's, transport the donor's real footpaths through it, weight
-donors by `quality_i * exp(-gw_dist_i / tau)` (quality = the donor's own permeability x (1 -
-displacement), tau = median GW distance), buffer the transported networks into a demand field, and
-extract a network gap-aware along the recipient's own ChordSubstrate. Everything is then
-length-matched to the recipient's OWN footpath length, so "matched budget" means what the real
-network actually spent. A footpath is scored as the street `osm_footpaths` would build on it.
+- the consensus: `demand_greedy` routed toward a weighted field of GW-transported donor footpaths
+  (`method=consensus`, `reblock.transplant.consensus`);
+- the single-donor transplant: the closest donor's footpaths, routed onto the recipient's gaps
+  (`method=donor_transplant`);
+- a from-scratch baseline (`method=clearance`);
+- the block's own mapped footpaths (`method=osm_footpaths desire_source=pool`), which is also the
+  REFERENCE every prediction is scored against.
 
-TWO ARMS, always run as a pair. With the exclusion radius, donors must be >2 km away; without it,
-the nearest donors are admitted. The gap between the arms is the LEAKAGE estimate, and it is not
-hypothetical: a median 26.7% of a recipient's nearest 15 donors sit inside 2 km, and for 24.5% of
-recipients all 15 do (`scripts/donor_availability.py`). The 94% figure was measured with no
-distance constraint at all, so the held-out arm is the one that can be believed.
+The donor arms come in pairs, `donors=held_out` (donors > 2 km away) and `donors=leaky` (nearest
+wherever); the gap between them is the leakage estimate, and the held-out arm is the one that can
+be believed. `k_sweep` runs named arms again at each k (`donors.k`); a GW fit does not depend on k,
+so the rungs share every solve through the derivation cache and nest.
 
-NOT comparable to that 94% numerically. The GW solve uses eps=0.01, and since the Prop.-2 gradient
-factor was fixed (notes/2026-07-27-gw-pot-crossvalidation.md) that is HALF the regularization the
-original run actually had. Same mechanism, tighter coupling.
+TRUNCATION. No arm is scored on its own untruncated network, and every arm goes through one
+function, `truncate`:
 
-Nor does a re-run reproduce the committed `data/benchmarks/consensus_matrix.parquet`: that ran on
-2026-07-28, before the permeability metric was recalibrated (per-road widths, a 7 m buildable
-floor, the per-parcel footpath clearance), before displacement became footprint overlap, and on a
-pool screened with the kblock building count rather than Open Buildings.
+- Lens A and Lens B are `reblock.compare.lens_prefixes`, the truncation `scripts/compare_budgets`
+  reports every shipped method at: the first street-first prefix displacing >= the universal
+  `matched_displacement` (its permeability read off), and the first reaching >= the universal
+  `matched_permeability` (the displacement it cost read off).
+- The PREDICTION question -- did the arm put paths where the real ones are
+  (`reblock.eval.agreement`) -- is asked at ONE canonical truncation,
+  `budget.prefix_to_displacement` at the displacement of the block's own network: the function
+  Lens A uses. Displacement, not length, because it is the cost the metric reports, and a metre
+  along a gap is not a metre through homes; matched to the real network's own so that "the same
+  budget" is what the real network actually spent. Every arm, the reference included, overshoots
+  it by at most one road, under the same rule. The reference it is scored AGAINST is the reference
+  arm's whole network: the ground truth is not truncated.
 
-    pixi run python -m scripts.consensus_matrix --recipients 5 --k 15   # pilot
-    pixi run python -m scripts.consensus_matrix --out data/benchmarks/consensus_matrix.parquet
+Before this, the study matched budgets with its own code, and the copies disagreed: the consensus
+took the shortest street-first prefix REACHING the reference's length, the baseline the longest
+construction-order prefix WITHIN it, the consensus extracted at depth 1 and the baseline at 2, and
+the sweep's single-donor arm was not matched at all.
+
+    pixi run python -m scripts.consensus_matrix out=<parquet> recipients=4        # pilot
+    pixi run python -m scripts.consensus_matrix out=<parquet> recipients=2 \\
+        'run=[consensus_held_out,single_held_out,clearance,own]' \\
+        'k_sweep.arms=[consensus_held_out,single_held_out]' 'k_sweep.ks=[1,3,8,15]'
 """
 from __future__ import annotations
 
-import argparse
+import json
 import logging
+import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict, cast
 
-import geopandas as gpd
-import numpy as np
 import pandas as pd
+from geopandas import GeoDataFrame
+from hydra import compose, initialize_config_dir
+from omegaconf import DictConfig
 
-from reblock.compare import load_permeability_config
-from reblock.contracts import Block, Method
-from reblock.data.pools import (
-    DonorSkip,
-    capetown_pool,
-    evenly_spaced,
-    fetch_donor_lines,
-    iso_of,
-    load_pools,
-    pbf_footpaths,
-    zone_pool,
+from reblock.budget import prefix_to_displacement
+from reblock.compare import (
+    LensPrefixes,
+    PermeabilityConfig,
+    lens_prefixes,
+    load_permeability_config,
 )
-from reblock.data.settlements import exclusion_holdout
+from reblock.contracts import Block, Method
+from reblock.data.pools import DonorPool, evenly_spaced
+from reblock.derivations import propose
 from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
-from reblock.methods.clearance import ClearanceReblocker
-from reblock.methods.osm_footpaths import FootpathSource
-from reblock.methods.substrates import ChordSubstrate
-from reblock.permeability import (
-    DEFAULT_ROAD_WIDTH_M,
-    EgressContext,
-    PermeabilityParams,
-    permeability,
-    with_width,
-)
-from reblock.transplant.consensus import (
-    ConsensusParams,
-    DonorFit,
-    extract_consensus,
-    fit_donors,
-    length_matched_prefix,
-)
-from reblock.transplant.gw import Arr
-from reblock.transplant.operating_points import CONSENSUS, SIGNATURE, TRANSPORT
-from reblock.transplant.signature import signature, signature_distance
-from reblock.transplant.snap import GapSnap, RoutedSnap
-from reblock.transplant.transport import TransportParams, parcel_xy
+from reblock.permeability import EgressContext, permeability
+from reblock.presets import load_method, load_research
+from reblock.transplant.donors import Donors, TooFewDonors
 
 CONF = Path("conf")
 
 
-def within_length(roads: gpd.GeoDataFrame, target_m: float) -> gpd.GeoDataFrame:
-    """The longest construction-order prefix of `roads` within `target_m` -- how the direct
-    baseline is length-matched."""
-    cum = roads.geometry.length.cumsum()
-    return cast(gpd.GeoDataFrame, roads[cum <= target_m] if target_m > 0 else roads.iloc[:0])
-
-
-class ConsensusRow(TypedDict):
+class StudyRow(TypedDict):
     """One (recipient, arm) row, exactly as written to the parquet."""
 
     recipient: str
     arm: str
-    k: int
-    k_requested: int
-    own_len_m: float
-    perm_ratio_own: float
-    perm_ratio_direct: float
-    perm_consensus: float
-    perm_own: float
-    perm_single: float
-    perm_direct: float
-    disp_consensus: float
-    disp_own: float
-    disp_direct: float
+    parcels: int
+    params: str                     # the arm's Proposal.params, as JSON
+    # Lens A: the first prefix displacing >= matched_displacement
+    a_road_m: float
+    a_displacement: float
+    a_permeability: float
+    a_at_budget: bool               # False: the whole network displaces less than the budget
+    # Lens B: the first prefix reaching >= matched_permeability
+    b_road_m: float
+    b_displacement: float
+    b_permeability: float
+    b_reached: bool
+    # Prediction: the first prefix displacing >= the reference network's own displacement
+    p_target_displacement: float
+    p_road_m: float
+    p_displacement: float
+    p_permeability: float
     iou_3m: float
     iou_10m: float
-    chamfer_precision_m: float
-    chamfer_recall_m: float
-    mean_gw_dist: float
-    min_gw_dist: float
-    consensus_len_m: float
+    chamfer_precision_m: float      # mean distance from a predicted path to the nearest real one
+    chamfer_recall_m: float         # mean distance from a real path to the nearest predicted one
 
 
-@dataclass(frozen=True)
-class ConsensusScorer:
-    """Everything the benchmark scores with, resolved once."""
+class SkipRow(TypedDict):
+    """A (recipient, arm) that proposed nothing to score, and why -- written beside the parquet."""
 
-    transport: TransportParams
-    consensus: ConsensusParams
-    single: GapSnap             # how the best single donor's transplant reaches the substrate
-    direct: Method              # the from-scratch baseline, truncated to a length prefix
-    permeability: PermeabilityParams
-    road_width_m: float         # stamped on footpaths and on the single-donor transplant
+    recipient: str
+    arm: str
+    reason: str
 
-    def as_roads(self, footpaths: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-        """A block's own footpaths as roads: a street built along each, as `osm_footpaths`
-        proposes them."""
-        return with_width(footpaths, self.road_width_m)
 
-    def donor_quality(self, donor: Block, roads: gpd.GeoDataFrame) -> float:
-        """`own_perm * (1 - own_disp)` -- how good the donor's real network is ON ITS OWN BLOCK.
+@dataclass(frozen=True, eq=False)
+class Truncations:
+    """Every truncation an arm is scored at."""
 
-        A donor with an excellent network is worth more in the consensus than a close-but-poorly-
-        served one, which is why weight is quality x proximity rather than proximity alone.
-        """
-        perm = permeability(EgressContext.of(donor, self.permeability), roads)
-        return float(perm * (1.0 - pct_displaced(roads, donor.buildings)))
+    lenses: LensPrefixes
+    prediction: GeoDataFrame
 
-    def single_donor(self, recipient: Block, fits: Sequence[DonorFit]) -> gpd.GeoDataFrame:
-        """The closest donor's transplant alone, snapped: the single-donor arm."""
-        best = min(fits, key=lambda f: f.gw_dist)
-        return with_width(self.single.snap(best.transported, recipient), self.road_width_m)
 
-    def direct_roads(self, recipient: Block) -> gpd.GeoDataFrame:
-        roads = self.direct.propose(recipient).roads
-        assert roads is not None, "the direct baseline always proposes a road frame"
-        return roads
+def truncate(ctx: EgressContext, roads: GeoDataFrame, target_displacement: float,
+             pcfg: PermeabilityConfig) -> Truncations:
+    """THE truncation every arm is scored through, and the only one."""
+    return Truncations(lenses=lens_prefixes(ctx, roads, pcfg),
+                       prediction=prefix_to_displacement(ctx.block, roads, target_displacement))
 
-    def score(self, recipient: Block, own: gpd.GeoDataFrame, donors: Sequence[Block],
-              networks: Mapping[str, gpd.GeoDataFrame], quality: Mapping[str, float], *,
-              arm: str, k: int) -> ConsensusRow:
-        target = float(own.geometry.length.sum())
-        fits = fit_donors(recipient, donors, networks, self.transport)
-        consensus = extract_consensus(recipient, fits, quality, self.consensus)
-        cons = length_matched_prefix(recipient, consensus, target)
-        sing = length_matched_prefix(recipient, self.single_donor(recipient, fits), target)
-        direct = within_length(self.direct_roads(recipient), target)
 
-        ctx = EgressContext.of(recipient, self.permeability)
-        perm_own, perm_cons = permeability(ctx, own), permeability(ctx, cons)
-        perm_dir = permeability(ctx, direct)
-        precision_m, recall_m = (directional_chamfer(cons, own) if len(cons)
-                                 else (float("nan"), float("nan")))
-        dists = [f.gw_dist for f in fits]
-        return ConsensusRow(
-            recipient=recipient.block_id, arm=arm, k=len(donors), k_requested=k,
-            own_len_m=target,
-            # The headline the 2026-07-23 study reported as "94% of a block's own OSM".
-            perm_ratio_own=perm_cons / perm_own if perm_own > 0 else float("nan"),
-            perm_ratio_direct=perm_cons / perm_dir if perm_dir > 0 else float("nan"),
-            perm_consensus=perm_cons, perm_own=perm_own,
-            perm_single=permeability(ctx, sing), perm_direct=perm_dir,
-            disp_consensus=pct_displaced(cons, recipient.buildings),
-            disp_own=pct_displaced(own, recipient.buildings),
-            disp_direct=pct_displaced(direct, recipient.buildings),
-            # Geometric agreement with the ground truth, the prediction branch's own scorer.
+def _road_m(roads: GeoDataFrame) -> float:
+    return float(roads.geometry.length.sum()) if len(roads) else 0.0
+
+
+def score_recipient(block: Block, roads: Mapping[str, GeoDataFrame],
+                    params: Mapping[str, Mapping[str, object]], reference: str,
+                    pcfg: PermeabilityConfig) -> list[StudyRow]:
+    """Every arm's row on one recipient. Nothing here reads an arm's roads except through
+    `truncate`; the reference's whole network is only ever the thing agreement is measured
+    against."""
+    ctx = EgressContext.of(block, pcfg.params)
+    truth = roads[reference]
+    target = pct_displaced(truth, block.buildings)
+    rows: list[StudyRow] = []
+    for arm, arm_roads in roads.items():
+        t = truncate(ctx, arm_roads, target, pcfg)
+        a, b, p = t.lenses.displacement, t.lenses.permeability, t.prediction
+        a_disp = pct_displaced(a, block.buildings)
+        precision_m, recall_m = directional_chamfer(p, truth)
+        rows.append(StudyRow(
+            recipient=block.block_id, arm=arm, parcels=len(block.parcels),
+            params=json.dumps(dict(params[arm]), default=str, sort_keys=True),
+            a_road_m=_road_m(a), a_displacement=a_disp, a_permeability=permeability(ctx, a),
+            # `compare_budgets`' own reading of "at the budget" (its `OutcomeRow.at_budget`).
+            a_at_budget=a_disp >= pcfg.matched_displacement - 1e-9,
+            b_road_m=_road_m(b), b_displacement=pct_displaced(b, block.buildings),
+            b_permeability=permeability(ctx, b), b_reached=t.lenses.reached,
+            p_target_displacement=target, p_road_m=_road_m(p),
+            p_displacement=pct_displaced(p, block.buildings), p_permeability=permeability(ctx, p),
             # IoU at two radii because buffers stop overlapping past 2r -- at 3 m it reads 0 for
-            # anything more than 6 m off, which a predicted network easily is, so a single radius
-            # would report a flat zero and hide the gradient. Chamfer is kept DIRECTIONAL, per its
-            # own contract: precision is paths drawn that are not there, recall is real paths
-            # missed, and blending them hides which way the prediction fails.
-            iou_3m=buffered_iou(cons, own, r=3.0) if len(cons) else 0.0,
-            iou_10m=buffered_iou(cons, own, r=10.0) if len(cons) else 0.0,
-            chamfer_precision_m=precision_m, chamfer_recall_m=recall_m,
-            mean_gw_dist=float(np.mean(dists)), min_gw_dist=float(np.min(dists)),
-            consensus_len_m=float(cons.geometry.length.sum()) if len(cons) else 0.0,
-        )
+            # anything more than 6 m off, which a predicted network easily is. Chamfer is kept
+            # DIRECTIONAL, per its own contract: blending the two hides which way a prediction
+            # fails.
+            iou_3m=buffered_iou(p, truth, r=3.0), iou_10m=buffered_iou(p, truth, r=10.0),
+            chamfer_precision_m=precision_m, chamfer_recall_m=recall_m))
+    return rows
 
 
-def consensus_scorer() -> ConsensusScorer:
-    """The benchmark's scorer: the transplant and extraction at their operating points, the
-    routed snap for the single-donor arm, and the shipped clearance preset as the baseline."""
-    return ConsensusScorer(
-        transport=TRANSPORT, consensus=CONSENSUS, single=RoutedSnap(ChordSubstrate()),
-        direct=ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                                  max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
-        permeability=load_permeability_config(CONF).params, road_width_m=DEFAULT_ROAD_WIDTH_M)
+def _run_config(overrides: Sequence[str]) -> DictConfig:
+    with initialize_config_dir(version_base=None, config_dir=str(CONF.resolve())):
+        return compose(config_name="config", overrides=list(overrides))
 
 
-class Material:
-    """Each block's own footpaths as roads, and their quality as a donor -- fetched once per block
-    and shared across recipients, arms and rungs."""
+@dataclass(frozen=True, eq=False)
+class Study:
+    """The study's configuration, resolved: the pool recipients come from, and the arms."""
 
-    def __init__(self, source: FootpathSource, scorer: ConsensusScorer) -> None:
-        self._source, self._scorer = source, scorer
-        self.roads: dict[str, gpd.GeoDataFrame] = {}
-        self.quality: dict[str, float] = {}
-        self._skipped: set[str] = set()
-
-    def of(self, block: Block) -> gpd.GeoDataFrame | None:
-        """The block's footpaths as roads, or None when it has none to give."""
-        if block.block_id in self._skipped:
-            return None
-        if block.block_id not in self.roads:
-            fetched = fetch_donor_lines(self._source, block)
-            if isinstance(fetched, DonorSkip):
-                self._skipped.add(block.block_id)
-                return None
-            roads = self._scorer.as_roads(fetched)
-            self.roads[block.block_id] = roads
-            self.quality[block.block_id] = self._scorer.donor_quality(block, roads)
-        return self.roads[block.block_id]
+    pool: DonorPool
+    arms: dict[str, Method]
+    reference: str
+    recipients: int
+    out: Path
 
 
-def nearest_donors(recipient: Block, eligible: Sequence[int], blocks: Sequence[Block],
-                   signatures: Mapping[str, Arr],
-                   material: Callable[[Block], gpd.GeoDataFrame | None],
-                   k: int) -> list[Block]:
-    """Up to `k` eligible donors that carry material, nearest first by shape signature."""
-    r_sig = signatures[recipient.block_id]
-    ranked = sorted(eligible,
-                    key=lambda j: signature_distance(signatures[blocks[j].block_id], r_sig))
-    picked: list[Block] = []
-    for j in ranked:
-        if len(picked) >= k:
-            break
-        if material(blocks[j]) is not None:
-            picked.append(blocks[j])
-    return picked
+def arm_overrides(cfg: DictConfig) -> dict[str, list[str]]:
+    """Each selected arm's run-config overrides -- `common` first -- with every `k_sweep` rung
+    added as `{arm}_k{k}`, which appends `donors.k={k}`."""
+    common = [str(o) for o in cfg.common]
+    out = {str(name): [*common, *(str(o) for o in cfg.arms[name])] for name in cfg.run}
+    for name in cfg.k_sweep.arms:
+        for k in cfg.k_sweep.ks:
+            out[f"{name}_k{k}"] = [*common, *(str(o) for o in cfg.arms[name]), f"donors.k={k}"]
+    return out
+
+
+def load_study(cfg: DictConfig) -> Study:
+    if cfg.reference not in cfg.run:
+        raise ValueError(f"reference arm {cfg.reference!r} must be run: every prediction is "
+                         f"scored against its network")
+    # The pool as the donor arms draw it: `common` selects it for every arm alike.
+    pool = load_research(_run_config([str(o) for o in cfg.common]).donors, Donors).pool
+    arms = {name: load_method(_run_config(o).method) for name, o in arm_overrides(cfg).items()}
+    return Study(pool=pool, arms=arms, reference=str(cfg.reference),
+                 recipients=int(cfg.recipients), out=Path(str(cfg.out)))
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--recipients", type=int, default=20)
-    ap.add_argument("--k", type=int, default=15, help="consensus donors per recipient")
-    ap.add_argument("--exclusion-radius-m", type=float, default=2000.0)
-    ap.add_argument("--utm-zone", type=int, default=None)
-    ap.add_argument("--out", type=Path,
-                    default=Path("data/benchmarks/consensus_matrix.parquet"))
-    args = ap.parse_args()
-
     logging.basicConfig(level=logging.INFO, format="  %(message)s")
-    pools = load_pools(zone_pool(CONF, args.utm_zone) if args.utm_zone else capetown_pool(CONF))
-    blocks, gdf = pools.blocks, pools.blocks_gdf
-    signatures = {b.block_id: signature(parcel_xy(b), SIGNATURE) for b in blocks}
-    scorer = consensus_scorer()
-    material = Material(pbf_footpaths(iso_of(blocks)), scorer)
+    with initialize_config_dir(version_base=None, config_dir=str(CONF.resolve())):
+        cfg = compose(config_name="consensus_matrix", overrides=sys.argv[1:])
+    study = load_study(cfg)
+    pcfg = load_permeability_config(CONF)
+    pools = study.pool.pools()
 
     # A recipient needs its OWN footpaths as ground truth, so it must itself be donatable.
     usable = sorted(set(pools.recipients) & set(pools.donors))
-    parcel_counts = [float(len(b.parcels)) for b in blocks]
-    chosen = evenly_spaced(usable, parcel_counts, args.recipients)
-    print(f"  {len(usable):,} recipients with own OSM; running {len(chosen)}", flush=True)
+    chosen = evenly_spaced(usable, [float(len(b.parcels)) for b in pools.blocks],
+                           study.recipients)
+    print(f"  {len(usable):,} recipients with own OSM; running {len(chosen)} x "
+          f"{len(study.arms)} arms", flush=True)
 
-    rows: list[ConsensusRow] = []
-    done: set[tuple[str, str]] = set()
-    if args.out.exists():
-        # This script's own output, so its records are the `ConsensusRow`s it wrote.
-        rows = cast(list[ConsensusRow], pd.read_parquet(args.out).to_dict("records"))
-        done = {(r["recipient"], r["arm"]) for r in rows}
-        print(f"resuming from {args.out}: {len(rows)} rows", flush=True)
+    rows: list[StudyRow] = []
+    skips: list[SkipRow] = []
+    done: set[str] = set()
+    skips_path = study.out.with_suffix(".skips.json")
+    if study.out.exists():
+        # This script's own output, so its records are the `StudyRow`s and `SkipRow`s it wrote.
+        rows = cast(list[StudyRow], pd.read_parquet(study.out).to_dict("records"))
+        skips = cast(list[SkipRow], json.loads(skips_path.read_text()))
+        done = {r["recipient"] for r in rows}
+        print(f"resuming from {study.out}: {len(done)} recipients", flush=True)
 
-    donor_set = set(pools.donors)
     for n, i in enumerate(chosen, 1):
-        recipient = blocks[i]
-        own = material.of(recipient)
-        if own is None:
+        block = pools.blocks[i]
+        if block.block_id in done:
             continue
-        for arm, radius in (("held_out", args.exclusion_radius_m), ("leaky", 0.0)):
-            if (recipient.block_id, arm) in done:
+        t0 = time.time()
+        roads: dict[str, GeoDataFrame] = {}
+        params: dict[str, Mapping[str, object]] = {}
+        for arm, method in study.arms.items():
+            try:
+                proposal = propose(method, block)
+            except TooFewDonors as exc:
+                skips.append(SkipRow(recipient=block.block_id, arm=arm, reason=str(exc)))
                 continue
-            eligible = [j for j in exclusion_holdout(gdf, i, radius_m=radius) if j in donor_set]
-            picked = nearest_donors(recipient, eligible, blocks, signatures, material.of, args.k)
-            if len(picked) < 3:
-                print(f"  [{n}] {recipient.block_id} {arm}: only {len(picked)} donors, skipping",
-                      flush=True)
-                continue
-            t0 = time.time()
-            row = scorer.score(recipient, own, picked, material.roads, material.quality,
-                               arm=arm, k=args.k)
-            rows.append(row)
-            print(f"  [{n}/{len(chosen)}] {recipient.block_id} {arm:8s} k={len(picked):2d}  "
-                  f"perm/own={row['perm_ratio_own']:.3f}  iou10={row['iou_10m']:.3f}  "
-                  f"[{time.time()-t0:.1f}s]", flush=True)
-            args.out.parent.mkdir(parents=True, exist_ok=True)
-            pd.DataFrame(rows).to_parquet(args.out)
+            assert proposal.roads is not None, f"{arm} proposed no road frame"
+            roads[arm], params[arm] = proposal.roads, proposal.params
+        if roads[study.reference].empty:
+            skips.append(SkipRow(recipient=block.block_id, arm=study.reference,
+                                 reason="no interior footpaths to score against"))
+            continue
+        rows += score_recipient(block, roads, params, study.reference, pcfg)
+        print(f"  [{n}/{len(chosen)}] {block.block_id}: {len(roads)} arms "
+              f"[{time.time() - t0:.1f}s]", flush=True)
+        study.out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_parquet(study.out)
+        skips_path.write_text(json.dumps(skips, indent=1))
 
     df = pd.DataFrame(rows)
-    print(f"\nwrote {args.out} ({len(df)} rows)")
+    print(f"\nwrote {study.out} ({len(df)} rows, {len(skips)} skipped)")
     if len(df):
-        for arm_name, g in df.groupby("arm"):
-            print(f"  {arm_name!s:8s} n={len(g):2d}  "
-                  f"perm/own median {g.perm_ratio_own.median():.3f}  "
-                  f"perm/direct {g.perm_ratio_direct.median():.3f}  "
-                  f"iou10 {g.iou_10m.median():.3f}  "
-                  f"chamfer recall {g.chamfer_recall_m.median():.1f}m")
+        print(f"  medians -- Lens A at D={pcfg.matched_displacement:g}, Lens B at "
+              f"P*={pcfg.matched_permeability:g}, prediction at the reference's displacement")
+        print(f"  {'arm':28s} {'n':>3} {'A perm':>7} {'B disp':>7} {'B reached':>9} "
+              f"{'P perm':>7} {'IoU@10m':>8} {'recall m':>9}")
+        for name, g in df.groupby("arm", sort=False):
+            print(f"  {name!s:28s} {len(g):>3} {g.a_permeability.median():>7.3f} "
+                  f"{g.b_displacement.median():>7.3f} {g.b_reached.mean():>9.2f} "
+                  f"{g.p_permeability.median():>7.3f} {g.iou_10m.median():>8.3f} "
+                  f"{g.chamfer_recall_m.median():>9.1f}")
 
 
 if __name__ == "__main__":

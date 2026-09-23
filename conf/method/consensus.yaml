@@ -1,0 +1,23 @@
+# Barycenter consensus: demand_greedy routed toward where the recipient's donors' real footpaths,
+# GW-transported onto it, agree. The desire field is one group per donor, weighted by the donor's
+# own permeability x (1 - displacement) and its shape closeness, normalized to sum 1. Which donors
+# is the `donors` group: `donors=held_out` (> 2 km away) or `donors=leaky` (nearest wherever).
+# See reblock.transplant.consensus.ConsensusDesireSource.
+#
+# The extraction at the operating point every published consensus result was measured at: a 3 m
+# corridor, a 0.05 floor -- 21x cheaper inside a full-agreement corridor than outside any -- and a
+# complete tree (depth_target 1). `demand_greedy`'s own preset differs on the last two (eps 0.1,
+# depth 2); these are the consensus benchmarks' values, not a re-tune.
+_target_: reblock.methods.demand_greedy.DemandGreedyReblocker
+desire_source:
+  _target_: reblock.transplant.consensus.ConsensusDesireSource
+  donors: ${donors}
+  permeability: ${permeability.params}
+  road_width_m: 7.0     # a donor's footpaths are judged as the street osm_footpaths would build
+substrate: {_target_: reblock.methods.substrates.ChordSubstrate}
+buffer_m: 3.0
+eps: 0.05
+gamma: 1.0
+depth_target: 1
+max_roads: 400
+road_width_m: 7.0

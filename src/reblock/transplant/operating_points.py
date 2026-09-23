@@ -1,14 +1,13 @@
-"""The parameter sets the transplant benchmarks run at: one each, named, shared by every script.
+"""The GW transport and shape signature the transplant benchmarks run at: one each, named.
 
-Every published OT result (docs/superpowers/notes/2026-07-2[3-8]-*) was measured at these values,
-so a script that wants to be comparable passes these and a script that varies one says so where it
-does. Python rather than conf/ because no Hydra entry point reads them.
+Every published OT result (docs/superpowers/notes/2026-07-2[3-8]-*) was measured at these values.
+`scripts/pair_matrix.py` reads them here; the donor presets every donor-driven method is configured
+with (`conf/donors/_selection.yaml`) spell the same numbers, and
+`tests/transplant/test_donors.py::test_the_donor_presets_run_at_the_published_operating_point`
+fails if the two drift.
 """
 from __future__ import annotations
 
-from reblock.methods.substrates import ChordSubstrate
-from reblock.permeability import DEFAULT_ROAD_WIDTH_M
-from reblock.transplant.consensus import ConsensusParams
 from reblock.transplant.gw import GWParams
 from reblock.transplant.signature import SignatureParams
 from reblock.transplant.transport import TransportParams
@@ -23,10 +22,3 @@ TRANSPORT = TransportParams(gw=GWParams(eps=0.01, tau=1.0, outer_iters=30, inner
 # 50 points so a block's signature is always a real 50-parcel subsample -- which is why the pools
 # floor blocks at 50 parcels -- averaged over 5 draws.
 SIGNATURE = SignatureParams(n_sub=50, n_boot=5, seed=0)
-
-# The 2026-07-23 extraction as the consensus benchmarks ran it: a 3 m corridor (the metric's old
-# corridor_m), a 0.05 floor -- 21x cheaper inside a full-agreement corridor than outside any --
-# and a complete tree (depth_target=1). `demand_greedy`'s own preset differs on the last two
-# (eps 0.1, depth 2); these are the consensus benchmarks' values, not a re-tune.
-CONSENSUS = ConsensusParams(substrate=ChordSubstrate(), buffer_m=3.0, eps=0.05, gamma=1.0,
-                            depth_target=1, max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)

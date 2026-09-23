@@ -1229,7 +1229,7 @@ detected from the ground truth of use, not synthesized from geometry.
   from imagery. This delivered a working as-built baseline with no ML and full offline
   reproducibility (a committed per-region OSM snapshot).
 * **Phase 2 (planned):** detect desire lines directly from satellite imagery, slotting into the
-  same `DesireLineSource` seam Phase 1 defined. Deriving desire lines from cheap signals
+  same `FootpathSource` seam Phase 1 defined. Deriving desire lines from cheap signals
   (imagery heuristics, building-point geometry) was probed and found not to match OSM's
   human-mapped network — see `docs/superpowers/notes/2026-07-15-desire-line-detection.md` in the
   repository — so this phase is where the real detector work lives.

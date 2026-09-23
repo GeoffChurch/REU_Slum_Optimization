@@ -36,11 +36,13 @@ from reblock.presets import (
     load_methods,
     load_metric,
     load_region_builder,
+    load_research,
     load_screen,
     load_source,
     load_stages,
     load_substrate,
 )
+from reblock.transplant.donors import Donors
 from tests.methods.test_arterial import ARTERIAL
 from tests.methods.test_clearance import CLEARANCE
 from tests.methods.test_cycle_native import CYCLE
@@ -53,7 +55,8 @@ from tests.test_loop_closure import LOOPS
 CONF = Path("conf").resolve()
 ROOT = Path(__file__).resolve().parents[1]
 # Keys a preset leaves `???` for the run to supply, and the value supplied here.
-REQUIRED = {"desire_source=pbf": ["desire_source.pbf_path._args_=[/nonexistent/x.osm.pbf]"]}
+REQUIRED = {"desire_source=pbf": ["desire_source.pbf_path._args_=[/nonexistent/x.osm.pbf]"],
+            "donor_pool=shortlist_zone": ["donor_pool.epsg=32735"]}
 
 
 def _compose(config_name: str, overrides: list[str]) -> DictConfig:
@@ -177,6 +180,9 @@ GROUP_LOADERS: dict[str, tuple[list[str], Callable[[DictConfig], list[object]]]]
     "desire_source": ([], lambda cfg: [load_desire_source(cfg.desire_source),
                                         load_footpath_source(cfg.desire_source)]),
     "metric": ([], _load_metric),
+    # A pool is only ever built as a donor draw's; the draw's shallow check covers the pool's own.
+    "donor_pool": ([], lambda cfg: [load_research(cfg.donors, Donors)]),
+    "donors": ([], lambda cfg: [load_research(cfg.donors, Donors)]),
     "buildings": (["data=capetown"], _load_data),
     "building_count": (["screen=dense_compact"], _load_screen),
 }

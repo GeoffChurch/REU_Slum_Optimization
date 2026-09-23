@@ -1,0 +1,8 @@
+# The corpus donor-driven methods draw donors from, and the consensus study its recipients: Cape
+# Town's full-city blocks, recipients the density_compactness screen flags, donors the OSM census
+# says carry >= 100 m of interior footpath, both within 60-300 buildings. The pool every committed
+# pair-matrix and consensus result was drawn from. See reblock.data.pools.capetown_pool.
+#
+# Materialized on first use, once per process, never at load.
+_target_: reblock.data.pools.CapetownPool
+config_dir: {_target_: pathlib.Path, _args_: [conf]}

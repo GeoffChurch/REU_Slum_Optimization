@@ -17,6 +17,7 @@ from reblock.derive_graph import _closure_paths
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.permeability_fixtures import SHIPPED
+from tests.transplant.test_isolation import ENTRY_POINTS
 
 SRC = Path(__file__).resolve().parent.parent / "src" / "reblock"
 
@@ -147,6 +148,10 @@ def test_every_configurable_strategy_can_invalidate_something() -> None:
     # Not circular: this models what `_code_version` actually does at runtime.
     covered |= {f for m in _target_modules() if m.startswith("reblock.methods.")
                 for f in _closure_paths(m)}
+    # The research code is in no shipped closure by design. It reaches a derivation as a
+    # configured field, through an entry point whose identity leads with its own closure hash
+    # (`tests/transplant/test_isolation.py`), so that closure rides the key instead.
+    covered |= {f for cls in ENTRY_POINTS for f in _closure_paths(cls.__module__)}
 
     uncovered = sorted(m for m in _target_modules()
                        if (f := _closure_paths(m)) and not (f & covered))

@@ -1,0 +1,21 @@
+# What every donor draw shares: the pool, how many donors, and how each is fitted. `held_out` and
+# `leaky` differ only in how far a donor must be from its recipient. See
+# reblock.transplant.donors.Donors.
+pool: ${donor_pool}
+# 15 inherited from the 2026-07-23 spike, never calibrated -- which is what a k-sweep is for
+# (`donors.k=...`; a fit does not depend on k, so the rungs share every GW solve and nest).
+k: 15
+# A recipient with fewer eligible donors carrying footpaths gets no proposal, at any k.
+min_donors: 3
+# The published transplant operating point. reblock.transplant.operating_points mirrors both for
+# scripts/pair_matrix.py, and tests/transplant/test_donors.py fails if they drift.
+signature:
+  _target_: reblock.transplant.signature.SignatureParams
+  n_sub: 50
+  n_boot: 5
+  seed: 0
+transport:
+  _target_: reblock.transplant.transport.TransportParams
+  gw: {_target_: reblock.transplant.gw.GWParams, eps: 0.01, tau: 1.0, outer_iters: 30,
+       inner_iters: 100}
+  idw_k: 8

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import cast
 
 import geopandas as gpd
 import numpy as np
@@ -64,9 +65,34 @@ from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
-from scripts.consensus_sweep import displacement_matched_prefix
 
 SNAP_TOL = 0.5      # metres; endpoints closer than this are the same node
+
+
+def displacement_matched_prefix(
+    block: Block, roads: gpd.GeoDataFrame, target_disp: float,
+) -> gpd.GeoDataFrame:
+    """The longest leading prefix of `roads` whose displacement stays within `target_disp`.
+
+    `roads` arrives in the greedy construction order, so a prefix is a coherent partial network
+    rather than an arbitrary subset. Displacement is monotone non-decreasing in the prefix (adding
+    road can only put more buildings inside a corridor), so this binary-searches instead of walking
+    every prefix: ~9 evaluations rather than one per segment.
+
+    NOT the lenses' truncation (`budget.prefix_to_displacement`: street-first order, the first
+    prefix REACHING the budget) -- this study's own convention, kept as it was measured.
+    """
+    if len(roads) == 0:
+        return roads
+    lo, hi = 0, len(roads)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        prefix = cast(gpd.GeoDataFrame, roads.iloc[:mid])
+        if pct_displaced(prefix, block.buildings) <= target_disp:
+            lo = mid
+        else:
+            hi = mid - 1
+    return cast(gpd.GeoDataFrame, roads.iloc[:lo])
 
 
 def _gini(x: np.ndarray) -> float:
