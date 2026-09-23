@@ -87,8 +87,8 @@ nodejs = "22.*"
 # dependencies of the package -- same grouping-by-purpose intent as the dev feature above
 # (which is likewise always present in the default environment).
 [tool.pixi.feature.research.dependencies]
-# Reference OT/GW solvers. scratchpad/ot/ot_gw.py hand-rolled entropic GW + unbalanced
-# log-domain Sinkhorn because POT was not installed; POT is the independent implementation
+# Reference OT/GW solvers. reblock.transplant.gw hand-rolls entropic GW + unbalanced log-domain
+# Sinkhorn because POT has no unbalanced entropic GW; POT is the independent implementation
 # `real_gw_dist` -- the independent variable in the pair-matrix result -- is checked against,
 # and it supplies gromov_barycenters for the barycenter-consensus work.
 pot = "*"
@@ -154,13 +154,8 @@ strict = true
 # which override `files` entirely, so every entry here has to appear there too. Adding a module to
 # one list and not the other is the failure tests/test_typecheck_config.py exists to catch.
 files = ["src", "tests", "scripts", "web/src/py/solve.py"]
-# The two files the directory walk skips. scripts/pair_matrix.py and scripts/consensus_matrix.py
-# import the gitignored `scratchpad/ot/` spike -- never on disk in CI or a fresh checkout, so mypy
-# cannot resolve it -- pending the owner's decision on whether to vendor that code. `exclude` only
-# governs the walk; other scripts import both, and the follow_imports=silent override below is what
-# keeps their bodies quiet when mypy follows those imports. tests/test_typecheck_config.py pins this
-# to exactly these two files, so widening it is a decision rather than a regex accident.
-exclude = ['^scripts/pair_matrix\.py$', '^scripts/consensus_matrix\.py$']
+# No `exclude`: the directory walk checks every file it finds. tests/test_typecheck_config.py pins
+# that, so skipping a file is a decision rather than a regex accident.
 # topology is installed via a PEP 660 "strict" editable install, whose .pth
 # registers a sys.meta_path finder at runtime rather than a plain sys.path
 # entry — mypy's static .pth scan can't see through that, so point it at the
@@ -248,16 +243,6 @@ module = [
     "topology.graph.my_graph_helpers",
     "topology.utils.lazy_property",
 ]
-follow_imports = "silent"
-
-[[tool.mypy.overrides]]
-# The two scripts `exclude` skips (see the comment there) are still IMPORTED by checked code --
-# tests/test_pair_matrix.py and a dozen scripts reach pair_matrix.py, consensus_sweep.py reaches
-# consensus_matrix.py -- and mypy's default follow_imports="normal" would re-check both whole
-# bodies through those imports, unresolvable spike import included. follow_imports=silent still
-# parses them (so the imported names have real inferred types at their call sites, not Any) but
-# suppresses their own errors, mirroring the topology.graph.my_graph* override above.
-module = ["scripts.pair_matrix", "scripts.consensus_matrix"]
 follow_imports = "silent"
 
 [[tool.mypy.overrides]]

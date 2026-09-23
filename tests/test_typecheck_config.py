@@ -17,11 +17,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
-# The only files the gate skips. Both import the gitignored `scratchpad/ot/` spike, which mypy
-# cannot resolve on a checkout without it, pending the owner's decision on vendoring that code.
-# Spelled out rather than derived from the config: adding a file here is a decision to stop
-# type-checking it.
-EXCLUDED = {"scripts/pair_matrix.py", "scripts/consensus_matrix.py"}
+# The files the gate skips: none. Spelled out rather than derived from the config: adding a file
+# here is a decision to stop type-checking it.
+EXCLUDED: frozenset[str] = frozenset()
 
 
 def _config() -> dict[str, Any]:
@@ -59,7 +57,8 @@ def test_exclude_skips_exactly_the_named_files() -> None:
     pattern that stops matching its file fails here instead of letting a file back in unannounced.
     """
     cfg = _config()
-    patterns = [re.compile(p) for p in cfg["tool"]["mypy"]["exclude"]]
+    # An absent `exclude` is mypy's own "skip nothing" -- the state this pins, not a fallback.
+    patterns = [re.compile(p) for p in cfg["tool"]["mypy"].get("exclude", [])]
 
     def excluded(rel: str) -> bool:
         return any(p.search(rel) for p in patterns)
