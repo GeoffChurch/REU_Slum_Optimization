@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import cast
 
 import geopandas as gpd
@@ -10,7 +11,7 @@ from shapely.ops import unary_union
 from reblock.budget import displacement, road_corridor
 from reblock.buildings import Discs, SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, street_connectivity
+from reblock.derive.access import STREET_TOL, parcel_access_layers, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.arterial import ArterialIdentity, GreedyArterialReblocker, engines
 from reblock.methods.arterial.engines import (
@@ -369,7 +370,7 @@ def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
 def test_identity_and_proposal_metadata() -> None:
     m = GreedyArterialReblocker(objective="directness")
     assert m.identity == ArterialIdentity(
-        realizer=SnapToBoundary(), objective="directness", cost="length", corridor_key=0.0,
+        realizer=SnapToBoundary(), objective="directness", cost="length", road_width_m=7.0,
         max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
     # max_roads / n_anchors / top_k change the proposed roads -> must change the cache key,
     # else a budget/candidate sweep silently returns another setting's cached proposal.
@@ -385,6 +386,38 @@ def test_identity_and_proposal_metadata() -> None:
     assert GreedyArterialReblocker(max_anchors=48).identity != m.identity
     proposal = GreedyArterialReblocker(objective="directness").propose(_grid_block(5))
     assert proposal.block_identity == _grid_block(5).identity
+
+
+def test_road_width_splits_the_cache_key_under_every_cost() -> None:
+    """Every road the arterial emits carries `width_m`, and permeability and displacement both read
+    it -- so width changes the PROPOSAL under every cost, not only the costs that price a corridor.
+    Keying width only for displacement/repulsion let a length-cost width sweep get the first
+    width's cached roads back, stamped with the first width."""
+    from reblock.derivations import propose
+    block = replace(_grid_block(3), source_content_hash="width-splits-the-key")
+    narrow = GreedyArterialReblocker(objective="directness", n_anchors=6, road_width_m=7.0)
+    wide = replace(narrow, road_width_m=9.0)
+    assert narrow.identity != wide.identity
+    assert propose(narrow, block).roads is not None
+    roads = propose(wide, block).roads
+    assert roads is not None and len(roads) > 0
+    assert set(roads["width_m"]) == {9.0}
+
+
+def test_proposal_identity_distinguishes_configurations_on_one_block() -> None:
+    """`Proposal.identity` keys the eval caches (`access_after`, `geometric_after`), so two configs
+    that propose different roads on one block must not share it. The id used to encode only the
+    realizer and objective, so a budget or cost variant was scored with the other's depths."""
+    from reblock.derivations import access_after
+    block = replace(_grid_block(5), source_content_hash="pid-splits-the-key")
+    one = GreedyArterialReblocker(objective="directness", n_anchors=6, max_roads=1).propose(block)
+    three = GreedyArterialReblocker(objective="directness", n_anchors=6,
+                                    max_roads=3).propose(block)
+    assert one.roads is not None and three.roads is not None
+    assert len(one.roads) != len(three.roads)                  # precondition: different roads
+    assert one.identity != three.identity
+    access_after(block, one)
+    assert access_after(block, three).equals(parcel_access_layers(block, three.roads))
 
 
 def test_lam_does_not_enter_identity_for_the_aspirational_realizer() -> None:
@@ -435,7 +468,7 @@ def test_config_and_derivation_wiring() -> None:
     # previously asserted ExactEngine) found and fixed incidentally while updating these tuples for
     # max_anchors; unrelated to the anchor-cap feature itself.
     assert m.identity == ArterialIdentity(
-        realizer=SnapToBoundary(), objective="directness", cost="length", corridor_key=0.0,
+        realizer=SnapToBoundary(), objective="directness", cost="length", road_width_m=7.0,
         max_roads=15, n_anchors=32, top_k=8, engine=LazyEngine(), max_anchors=0)
 
 
@@ -453,7 +486,7 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
     assert isinstance(m.realizer, IdealChord)
     assert (m.objective, m.cost, m.road_width_m) == ("directness", "displacement", 7.0)
     assert m.identity == ArterialIdentity(
-        realizer=IdealChord(), objective="directness", cost="displacement", corridor_key=7.0,
+        realizer=IdealChord(), objective="directness", cost="displacement", road_width_m=7.0,
         max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
 
     # The standalone conf/method/greedy_arterial_displacement.yaml config group (config.yaml's
@@ -497,7 +530,7 @@ def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
         # on this identity, so the next change to it is deliberate rather than drift.
         assert m.identity == ArterialIdentity(
             realizer=SnapToBoundary(), objective="access", cost=cost,
-            corridor_key=DEFAULT_ROAD_WIDTH_M, max_roads=60, n_anchors=32, top_k=8,
+            road_width_m=DEFAULT_ROAD_WIDTH_M, max_roads=60, n_anchors=32, top_k=8,
             engine=ShortlistIdentity(k=512), max_anchors=128), name
 
     # Negative direction: the cap and ShortlistEngine are access-only. "Tidying" either onto a
@@ -551,7 +584,7 @@ def test_greedy_handles_multilinestring_streets() -> None:
 def test_cost_displacement_in_identity() -> None:
     m = GreedyArterialReblocker(realizer=IdealChord(), objective="directness", cost="displacement")
     assert m.identity == ArterialIdentity(
-        realizer=IdealChord(), objective="directness", cost="displacement", corridor_key=7.0,
+        realizer=IdealChord(), objective="directness", cost="displacement", road_width_m=7.0,
         max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
 
 

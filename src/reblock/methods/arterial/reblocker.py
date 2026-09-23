@@ -12,6 +12,7 @@ docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-design.md.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 
 from reblock.contracts import Block, Proposal
@@ -29,8 +30,7 @@ class ArterialIdentity:
     realizer: RealizerIdentity
     objective: str
     cost: str
-    # road_width_m when cost in {displacement, repulsion} else 0.0 -- DERIVED (see the property).
-    corridor_key: float
+    road_width_m: float
     max_roads: int
     n_anchors: int
     top_k: int
@@ -69,19 +69,18 @@ class GreedyArterialReblocker:
     @property
     def identity(self) -> ArterialIdentity:
         # Every field that changes the proposed roads must be in the derive-cache key. road_width_m
-        # changes which roads win only under cost="displacement"/"repulsion"; hold it fixed so
-        # length-cost methods stay corridor-independent (two methods differing only in road_width_m
-        # must NOT share a cached proposal when it matters). max_roads / n_anchors / top_k all
+        # is one under EVERY cost: it is stamped on each emitted road, and permeability and
+        # displacement both read that column -- so it belongs here even where it cannot change
+        # which roads win (cost="length"). max_roads / n_anchors / top_k all
         # change the greedy search, so they belong in the key too -- otherwise a budget/candidate
         # sweep silently returns another setting's cached proposal. `realizer.identity` (not
         # `realizer` itself) so a non-snapping realizer's irrelevant fields -- none exist today, but
         # the seam is the same one `SnapToBoundary.identity`/`IdealChord.identity` already use --
         # can never leak into the key. `engine.identity` for the identical reason -- ExactEngine
         # has no fields, and LazyEngine's policy/rescore_every only matter when the engine IS lazy.
-        corridor_key = self.road_width_m if self.cost in ("displacement", "repulsion") else 0.0
         return ArterialIdentity(
             realizer=self.realizer.identity, objective=self.objective, cost=self.cost,
-            corridor_key=corridor_key,
+            road_width_m=self.road_width_m,
             max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k,
             engine=self.engine.identity, max_anchors=self.max_anchors)
 
@@ -93,10 +92,15 @@ class GreedyArterialReblocker:
             half_width_m=self.road_width_m / 2.0, workers=self.workers,
             max_anchors=self.max_anchors)
         realizer_name = type(self.realizer).__name__
+        # `proposal_id` is half of `Proposal.identity`, which keys the eval caches
+        # (`access_after`, `geometric_after`), so it must tell apart every configuration `identity`
+        # does -- a readable head, then a digest of the whole identity (it also names render
+        # files, which a raw repr would fill with spaces and brackets).
+        digest = hashlib.sha256(repr(self.identity).encode()).hexdigest()[:10]
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
             roads=with_width(roads, self.road_width_m),
-            proposal_id=f"greedy_arterial_{realizer_name}_{self.objective}",
+            proposal_id=f"greedy_arterial:{realizer_name}:{self.objective}:{self.cost}:{digest}",
             method="greedy_arterial",
             params={"segments": len(roads), "realizer": realizer_name,
                     "objective": self.objective,
