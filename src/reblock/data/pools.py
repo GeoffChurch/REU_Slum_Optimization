@@ -44,7 +44,7 @@ from reblock.data.counts import RAW_COUNT
 from reblock.data.kblock import KblockSource
 from reblock.data.osm_extract import FOOTPATH_TAGS, PbfDesireLines, utm_zone_epsg
 from reblock.data.provision import DEFAULT_CACHE
-from reblock.derive_graph import closure_hash
+from reblock.derive_graph import closure_hash, config_identity
 from reblock.methods.desire_lines import DesireField, OSMDesireLines, mapped_field
 from reblock.methods.osm_footpaths import (
     FootpathSource,
@@ -166,6 +166,14 @@ class PoolIds:
     members: tuple[str, ...]        # every block to build: the grown recipient groups and donors
 
 
+# One selection per distinct pool per process, as `_MATERIALIZED` holds one build: every arm of a
+# study instantiates its own stages, and each arm's pool re-read the source's geometries and the
+# census (six times over in the consensus study). Keyed on what the selection reads. The screen
+# enters by what it flagged: it has no identity of its own, and asking it again is one lookup of
+# its own derivation (`derivations.screen_selection`).
+_SELECTED: dict[Hashable, PoolIds] = {}
+
+
 def select_pool(spec: PoolSpec) -> PoolIds:
     """Screen, bound and grow the pool -- everything but building it.
 
@@ -178,9 +186,21 @@ def select_pool(spec: PoolSpec) -> PoolIds:
     is not built until something needs it.
     """
     source = _kblock(spec.stages)
+    selected = spec.stages.screen.select(source)
+    builder = config_identity(spec.stages.region_builder)
+    if builder is None:     # a builder holding something uncacheable: select afresh, as `derive`
+        return _select(spec, source, selected)
+    key = (_source_key(source), None if selected is None else tuple(selected), builder,
+           spec.census_dir, spec.min_building_count, spec.max_building_count,
+           spec.min_interior_m)
+    if key not in _SELECTED:
+        _SELECTED[key] = _select(spec, source, selected)
+    return _SELECTED[key]
+
+
+def _select(spec: PoolSpec, source: KblockSource, selected: list[str] | None) -> PoolIds:
     frame = source.block_geometries()
     counts = dict(zip(frame["block_id"], frame[RAW_COUNT], strict=True))
-    selected = spec.stages.screen.select(source)
     flagged = set(counts) if selected is None else set(selected)
     in_band = {b for b, c in counts.items()
                if spec.min_building_count <= float(c) <= spec.max_building_count}
@@ -328,7 +348,7 @@ def _source_key(source: KblockSource) -> Hashable:
 
 def _materialize(spec: PoolSpec) -> _Materialized:
     source = _kblock(spec.stages)
-    ids = select_pool(spec)     # cheap once the screen's own derivation is cached
+    ids = select_pool(spec)     # one selection per distinct pool (`_SELECTED`)
     key = (_source_key(source), ids, spec.min_parcels)
     if key not in _MATERIALIZED:
         pools = build_pool(source, ids, spec.min_parcels)
