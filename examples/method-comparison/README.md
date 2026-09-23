@@ -30,14 +30,14 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 83 m | 7.2% | 61.9% |  |
-| Least-Cost Tree | 89 m | 7.9% | 62.5% |  |
-| Loop Network | 93 m | 4.4% | 64.3% |  |
-| Grid | 130 m | 9.7% | 71.6% |  |
-| Frontage (street-priced) | 170 m | 3.6% | 64.2% |  |
-| OSM Footpaths | 174 m | 7.8% | 73.8% |  |
-| Direct Objective (LP) | 147 m | 4.8% | 62.1% |  |
-| Topology | 93 m | 7.1% | 60.7% |  |
+| Looped Tree | 83 m | 4.8% | 60.7% |  |
+| Least-Cost Tree | 89 m | 5.0% | 61.7% |  |
+| Loop Network | 89 m | 3.5% | 61.8% |  |
+| Grid | 130 m | 7.3% | 70.2% |  |
+| Frontage (street-priced) | 178 m | 4.3% | 63.9% |  |
+| OSM Footpaths | 174 m | 6.0% | 71.9% |  |
+| Direct Objective (LP) | 120 m | 4.3% | 62.2% |  |
+| Topology | 106 m | 6.3% | 61.6% |  |
 
 > **On the access-objective arterial row.** This example scores ONE pinned block, and `objective=access` maximises a sum of squared *integer* depths — so different networks routinely tie exactly, and the greedy picks between them arbitrarily. Perturbing the gains by 1e-10 moves this method's burden reduction by up to 15% on a third of blocks. Its number here is one draw, not a stable estimate; the medians over many blocks reported in the notes are the trustworthy form. No other method in this table has that sensitivity.
 
@@ -59,14 +59,14 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Least-Cost Tree | 143 m | 12.2% | 69.1% |  |
-| Looped Tree | 110 m | 10.1% | 66.4% |  |
-| Loop Network | 243 m | 11.3% | 77.0% |  |
-| Grid | 218 m | 17.1% | 79.1% |  |
-| Frontage (street-priced) | 339 m | 14.4% | 81.5% |  |
-| OSM Footpaths | 215 m | 10.7% | 81.5% |  |
-| Direct Objective (LP) | 407 m | 10.7% | 88.8% |  |
-| Topology | 142 m | 10.6% | 67.2% |  |
+| Least-Cost Tree | 191 m | 10.7% | 72.9% |  |
+| Looped Tree | 177 m | 10.3% | 74.0% |  |
+| Loop Network | 335 m | 10.5% | 88.0% |  |
+| Grid | 218 m | 13.0% | 78.5% |  |
+| Frontage (street-priced) | 493 m | 10.2% | 91.0% |  |
+| OSM Footpaths | 287 m | 11.9% | 85.7% |  |
+| Direct Objective (LP) | 438 m | 10.1% | 91.2% |  |
+| Topology | 212 m | 10.1% | 72.4% |  |
 
 > **On the access-objective arterial row.** This example scores ONE pinned block, and `objective=access` maximises a sum of squared *integer* depths — so different networks routinely tie exactly, and the greedy picks between them arbitrarily. Perturbing the gains by 1e-10 moves this method's burden reduction by up to 15% on a third of blocks. Its number here is one draw, not a stable estimate; the medians over many blocks reported in the notes are the trustworthy form. No other method in this table has that sensitivity.
 

@@ -47,10 +47,10 @@ Every method truncated where permeability first reaches the standard target, so 
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 1,366 m | 5.2% | 61.0% |  |
-| Loop Network | 1,979 m | 5.6% | 60.6% |  |
-| Grid | 4,068 m | 10.3% | 60.1% |  |
-| Frontage (street-priced) | 3,348 m | 5.2% | 60.4% |  |
+| Looped Tree | 1,366 m | 3.6% | 61.1% |  |
+| Loop Network | 1,536 m | 3.4% | 60.1% |  |
+| Grid | 4,068 m | 7.5% | 60.1% |  |
+| Frontage (street-priced) | 3,588 m | 3.8% | 60.2% |  |
 
 
 Access-depth coloring:
@@ -71,10 +71,10 @@ Every method truncated to the same displacement %, so this compares the **permea
 
 | Method | Road | Displacement | Permeability | Note |
 |---|---|---|---|---|
-| Looped Tree | 2,457 m | 10.0% | 74.6% |  |
-| Loop Network | 3,406 m | 10.1% | 75.0% |  |
-| Grid | 3,993 m | 10.2% | 60.0% |  |
-| Frontage (street-priced) | 7,301 m | 8.4% | 74.7% | converged below budget |
+| Looped Tree | 3,708 m | 10.0% | 81.4% |  |
+| Loop Network | 5,106 m | 10.0% | 82.5% |  |
+| Grid | 5,277 m | 9.4% | 64.0% | converged below budget |
+| Frontage (street-priced) | 7,148 m | 6.1% | 76.1% | converged below budget |
 
 
 Access-depth coloring:

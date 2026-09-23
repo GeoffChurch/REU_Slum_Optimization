@@ -93,6 +93,9 @@ else
   # The frontier bundle shares the same pinned block (via scripts/_example_block.py) but is a
   # separate file for a separate page -- see gen_frontier_bundle's module docstring.
   run pixi run python -m scripts.gen_frontier_bundle
+  # The parity FIXTURE too: tests/test_frontier_bundle.py holds live code to it, and a regen
+  # that changes the methods leaves it stale unless it is re-baked beside the shipped bundle.
+  run pixi run python -m scripts.gen_frontier_bundle --fixture
   # The displacement field: the same pinned block once more, its own bundle AND its own fallback
   # PNG (deliberately not shared with the perm-graph bundle -- see gen_displacement_field's module
   # docstring). Both are committed, so the same I7 reasoning applies: on this path, not off it.

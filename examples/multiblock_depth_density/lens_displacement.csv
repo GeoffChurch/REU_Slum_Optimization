@@ -1,6 +1,6 @@
 method,road_m,displacement,permeability,access_burden_reduction,at_budget
-clearance_looped,5377.1,0.1002,0.741614,0.946427,True
-euclidean_grid,5543.8,0.1032,0.874407,0.927011,True
-cycle_native,7278.8,0.1008,0.893279,0.951021,True
-greedy_arterial_access_displacement,9712.7,0.0704,0.802042,0.971702,False
-osm_footpaths,3094.1,0.0250,0.214176,0.018876,False
+clearance_looped,7996.9,0.1005,0.788114,0.972739,True
+euclidean_grid,7330.1,0.0940,0.892375,0.944067,False
+cycle_native,10347.9,0.1000,0.92457,0.974926,True
+greedy_arterial_access_displacement,11591.9,0.0353,0.821291,0.97414,False
+osm_footpaths,3094.1,0.0141,0.240863,0.018876,False
