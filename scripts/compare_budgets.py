@@ -60,13 +60,13 @@ from geopandas import GeoDataFrame
 from hydra import compose, initialize_config_dir
 
 from reblock.animate import reblock_gif
-from reblock.budget import (
-    displacement,
-    displacement_curve,
-    prefix_to_displacement,
-    prefix_to_permeability,
+from reblock.budget import displacement, displacement_curve
+from reblock.compare import (
+    MethodCurve,
+    PermeabilityConfig,
+    lens_prefixes,
+    load_permeability_config,
 )
-from reblock.compare import MethodCurve, PermeabilityConfig, load_permeability_config
 from reblock.contracts import Block, Method, Proposal
 from reblock.derivations import propose
 from reblock.derive.access import parcel_access_layers, past_every_parcel
@@ -196,10 +196,10 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     prefix_b: dict[str, GeoDataFrame] = {}
     reached_b: dict[str, bool] = {}
     for name, roads in roads_by_method.items():
-        prefix_a[name] = prefix_to_displacement(block, roads, matched_displacement)
-        pb, reached = prefix_to_permeability(ctx, roads, matched_permeability)
-        prefix_b[name] = pb
-        reached_b[name] = reached
+        lenses = lens_prefixes(ctx, roads, pcfg)
+        prefix_a[name] = lenses.displacement
+        prefix_b[name] = lenses.permeability
+        reached_b[name] = lenses.reached
     log.info("lens/frontier curves computed for %d methods (%.1fs)", len(methods),
              time.perf_counter() - lens_t0)
 

@@ -315,3 +315,40 @@ def test_run_permeability_lenses_reports_below_budget_and_unreached_honestly(
         (perm_row,) = list(csv.DictReader(f))
     assert perm_row["method"] == "sparse"
     assert perm_row["reached"] == "False"
+
+
+def test_every_method_is_truncated_through_the_shared_lenses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """`reblock.compare.lens_prefixes` is the one truncation both lenses report at -- here, and
+    for every arm of `scripts/consensus_matrix.py`. A sentinel in its place must be what every
+    method's row reads.
+
+    FAULT INJECTION: calling `prefix_to_permeability` directly for Lens B again (the code this
+    replaced) leaves `perm_road_m` at the method's real Lens B prefix instead of the sentinel's.
+    """
+    import scripts.compare_budgets as cb
+    from reblock.compare import LensPrefixes
+    from reblock.methods.clearance import ClearanceReblocker
+    from reblock.permeability import EgressContext
+
+    seen: list[int] = []
+
+    def sentinel(ctx: EgressContext, roads: gpd.GeoDataFrame,
+                 pcfg: PermeabilityConfig) -> LensPrefixes:
+        del ctx, pcfg
+        seen.append(len(roads))
+        return LensPrefixes(displacement=cast(gpd.GeoDataFrame, roads.iloc[:1]),
+                            permeability=cast(gpd.GeoDataFrame, roads.iloc[:1]), reached=True)
+
+    monkeypatch.setattr(cb, "lens_prefixes", sentinel)
+    region = [_street_block(0, "a")]
+    clearance = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=1,
+                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+    roads = cast(gpd.GeoDataFrame, clearance.propose(region[0]).roads)
+    assert len(roads) > 1
+    (row,) = cb.run_permeability_lenses(region, {"clearance": clearance}, tmp_path,
+                                        pcfg=_pcfg(0.3, 0.1))
+    assert seen == [len(roads)]
+    first = float(roads.geometry.length.iloc[0])
+    assert (row.disp_road_m, row.perm_road_m, row.reached) == (first, first, True)
