@@ -22,15 +22,13 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import cast
 
 import geopandas as gpd
 import pandas as pd
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from shapely.ops import unary_union
 
-from reblock.contracts import Block, Method, Screen, Source
+from reblock.contracts import Block, Method
 from reblock.data.osm_extract import NEAR_MISS_TAGS, PbfDesireLines
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
@@ -38,6 +36,7 @@ from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.flow_paths import FlowPathsReblocker
 from reblock.methods.osm_footpaths import interior_desire_lines
 from reblock.pipeline import build_regions
+from reblock.presets import load_screen, load_source
 from reblock.region import DenseClusterRegionBuilder, region_block
 from scripts.pair_matrix import DEFAULT_CACHE, PBF_BY_ISO, displacement_fraction
 
@@ -70,8 +69,8 @@ def main() -> None:
                  "region_builder=dense_cluster", "max_blocks=1"]
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=overrides)
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
+    source = load_source(cfg.data)
+    screen = load_screen(cfg.screen)
     builder = DenseClusterRegionBuilder(max_buildings=args.max_buildings)
     regions = build_regions(source, screen, builder, None, args.regions)
     print(f"  {len(regions)} regions", flush=True)

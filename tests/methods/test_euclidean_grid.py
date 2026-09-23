@@ -4,7 +4,6 @@ from typing import cast
 import geopandas as gpd
 import pytest
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from pyproj import CRS
 from shapely import union_all
 from shapely.geometry import LineString, Point, Polygon, box
@@ -14,6 +13,7 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.methods.euclidean_grid import EuclideanGridReblocker
+from reblock.presets import load_method
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
@@ -593,6 +593,6 @@ def test_euclidean_grid_method_yaml_instantiates_with_defaults() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="config", overrides=["method=euclidean_grid"])
-    method = instantiate(cfg.method)
+    method = load_method(cfg.method)
     assert isinstance(method, EuclideanGridReblocker)
     assert method.identity == EuclideanGridReblocker().identity

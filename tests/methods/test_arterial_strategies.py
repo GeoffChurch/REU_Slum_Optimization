@@ -6,7 +6,6 @@ from pathlib import Path
 import geopandas as gpd
 import pytest
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from shapely.geometry import LineString, Point
 
 from reblock.derive.access import STREET_TOL
@@ -27,6 +26,7 @@ from reblock.methods.arterial import (
 from reblock.methods.arterial.primitives import _snap_graph
 from reblock.methods.arterial.scoring import step_state
 from reblock.methods.boundary_graph import _boundary_graph
+from reblock.presets import load_method, load_methods
 from tests.methods.test_arterial import UTM, _grid_block, _grid_block_with_points
 
 OBJECTIVES: tuple[ArterialObjective, ...] = (Access(), Efficiency(), Directness())
@@ -54,13 +54,15 @@ def _configured_arterials() -> dict[str, GreedyArterialReblocker]:
     conf_dir = str(Path("conf").resolve())
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
-        out = {name: instantiate(entry) for name, entry in cfg.all_methods.items()
-               if entry["_target_"] == "reblock.methods.arterial.GreedyArterialReblocker"}
+        out = {name: m for name, m in load_methods(cfg.all_methods).items()
+               if isinstance(m, GreedyArterialReblocker)}
         for name in ("greedy_arterial", "greedy_arterial_repulsion",
                      "greedy_arterial_displacement"):
             method_cfg = compose(config_name="config",
                                  overrides=["shapefile=x", f"method={name}"])
-            out[f"method={name}"] = instantiate(method_cfg.method)
+            m = load_method(method_cfg.method)
+            assert isinstance(m, GreedyArterialReblocker), name
+            out[f"method={name}"] = m
     return out
 
 

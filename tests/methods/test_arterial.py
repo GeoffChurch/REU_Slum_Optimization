@@ -461,9 +461,9 @@ def test_config_and_derivation_wiring() -> None:
     from pathlib import Path
 
     from hydra import compose, initialize_config_dir
-    from hydra.utils import instantiate
 
     from reblock.derive_graph import _closure_paths
+    from reblock.presets import load_method
     # arterial.py became a package (task 1 of the arterial-engine-productionization refactor); the
     # public method now lives in reblocker.py, so that's the file this wiring check looks for. The
     # closure is walked from the class's own module, so every module under arterial/ that the
@@ -474,7 +474,7 @@ def test_config_and_derivation_wiring() -> None:
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config",
                       overrides=["shapefile=x", "methods=[greedy_arterial_buildable]"])
-    m = instantiate(cfg.all_methods["greedy_arterial_buildable"])
+    m = load_method(cfg.all_methods["greedy_arterial_buildable"])
     # NOTE: engine=LazyEngine() here (unlike other goldens in this file) matches
     # compare_config.yaml's inline greedy_arterial_buildable entry, which sets
     # engine: {_target_: ...LazyEngine} -- a pre-existing golden/config mismatch (this assertion
@@ -489,13 +489,15 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
     from pathlib import Path
 
     from hydra import compose, initialize_config_dir
-    from hydra.utils import instantiate
+
+    from reblock.presets import load_method
 
     conf_dir = str(Path("conf").resolve())
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config",
                       overrides=["shapefile=x", "methods=[greedy_arterial_displacement]"])
-    m = instantiate(cfg.all_methods["greedy_arterial_displacement"])
+    m = load_method(cfg.all_methods["greedy_arterial_displacement"])
+    assert isinstance(m, GreedyArterialReblocker)
     assert isinstance(m.realizer, IdealChord)
     assert (m.objective, m.cost, m.road_width_m) == (Directness(), Displacement(), 7.0)
     assert m.identity == GreedyArterialReblocker(
@@ -507,7 +509,7 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         method_cfg = compose(config_name="config",
                              overrides=["shapefile=x", "method=greedy_arterial_displacement"])
-    assert instantiate(method_cfg.method).identity == m.identity
+    assert load_method(method_cfg.method).identity == m.identity
 
 
 def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
@@ -525,17 +527,20 @@ def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
     from pathlib import Path
 
     from hydra import compose, initialize_config_dir
-    from hydra.utils import instantiate
+
+    from reblock.presets import load_methods
 
     conf_dir = str(Path("conf").resolve())
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
+    methods = load_methods(cfg.all_methods)
 
     costs: tuple[tuple[str, Repulsion | Displacement], ...] = (
         ("greedy_arterial_access_repulsion", Repulsion()),
         ("greedy_arterial_access_displacement", Displacement()))
     for name, cost in costs:
-        m = instantiate(cfg.all_methods[name])
+        m = methods[name]
+        assert isinstance(m, GreedyArterialReblocker), name
         assert isinstance(m.engine, ShortlistEngine), name
         assert isinstance(m.realizer, SnapToBoundary), name
         assert m.max_anchors == 128, name
@@ -552,7 +557,8 @@ def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
     # directness method later (greedy_arterial_buildable is already pinned to engine=LazyEngine(),
     # max_anchors=0 by test_config_and_derivation_wiring above) is a realistic, equally silent
     # mistake -- guard it here too, next to the property it must never acquire.
-    buildable = instantiate(cfg.all_methods["greedy_arterial_buildable"])
+    buildable = methods["greedy_arterial_buildable"]
+    assert isinstance(buildable, GreedyArterialReblocker)
     assert not isinstance(buildable.engine, ShortlistEngine)
     assert buildable.max_anchors == 0
 

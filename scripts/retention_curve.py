@@ -37,12 +37,14 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from numpy.typing import NDArray
 from shapely import STRtree
 
+from reblock.contracts import CountingScreen
 from reblock.data.counts import resolved
+from reblock.data.kblock import KblockSource
 from reblock.metric import _cols
+from reblock.presets import load_stages
 
 KS = (1, 5, 15, 50, 100, 500, 1000, 5000)
 VARIANTS = ("depth", "depth_density")
@@ -82,7 +84,9 @@ def main() -> int:
                 cfg = compose(config_name="compare_config",
                               overrides=[f"+example={variant}", f"data={city}_full",
                                          f"proxy_keep_n={UNBOUNDED}"])
-            source, screen = instantiate(cfg.data), instantiate(cfg.screen)
+            stages = load_stages(cfg)
+            source, screen = stages.source, stages.screen
+            assert isinstance(source, KblockSource) and isinstance(screen, CountingScreen)
             fine_order = list(screen.select(source))
             bl = gpd.read_parquet(source.blocks_path,
                                   columns=["block_id", "building_count", "block_area_m2",

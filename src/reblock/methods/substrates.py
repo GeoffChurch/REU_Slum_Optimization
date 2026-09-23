@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 
 import geopandas as gpd
 import numpy as np
@@ -35,6 +35,7 @@ class RoutingGraph:
     net_tol: float
 
 
+@runtime_checkable
 class Substrate(Protocol):
     def build(self, block: Block) -> RoutingGraph: ...
     @property

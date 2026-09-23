@@ -7,7 +7,6 @@ import geopandas as gpd
 import numpy as np
 import pytest
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 from pyproj import CRS
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
@@ -37,6 +36,7 @@ from reblock.methods.substrates import (
     _build_grid,
 )
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from reblock.presets import load_method, load_methods, load_substrate
 from tests.block_fixtures import no_buildings
 
 
@@ -310,7 +310,7 @@ def test_clearance_method_yaml_instantiates_with_defaults() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="config", overrides=["method=clearance"])
-    method = instantiate(cfg.method)
+    method = load_method(cfg.method)
     assert isinstance(method, ClearanceReblocker)
     assert method.identity == ClearanceReblocker(
         substrate=ChordSubstrate(), repulsion=0.0, depth_target=2, max_roads=400,
@@ -321,7 +321,7 @@ def test_clearance_registered_in_compare_all_methods() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config")
-    method = instantiate(cfg.all_methods["clearance"])
+    method = load_method(cfg.all_methods["clearance"])
     assert isinstance(method, ClearanceReblocker)
 
 
@@ -365,7 +365,7 @@ def test_substrate_config_group_instantiates_each() -> None:
     for name, ident in expected.items():
         with initialize_config_dir(version_base=None, config_dir=conf_dir):
             cfg = compose(config_name="config", overrides=[f"substrate={name}"])
-        sub = instantiate(cfg.substrate)
+        sub = load_substrate(cfg.substrate)
         assert sub.identity == ident
 
 
@@ -373,7 +373,7 @@ def test_clearance_method_defaults_to_chord_diag_substrate() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="config", overrides=["method=clearance"])
-    method = instantiate(cfg.method)
+    method = load_method(cfg.method)
     assert isinstance(method, ClearanceReblocker)
     assert method.substrate.tag == "chord_diag"
 
@@ -382,8 +382,12 @@ def test_compare_registers_clearance_and_grid_variant() -> None:
     conf_dir = str(Path(__file__).resolve().parents[2] / "conf")
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config")
-    assert instantiate(cfg.all_methods["clearance"]).substrate.tag == "chord_diag"
-    assert instantiate(cfg.all_methods["clearance_grid"]).substrate.tag == "grid"
+    methods = load_methods(cfg.all_methods)
+    clearance, clearance_grid = methods["clearance"], methods["clearance_grid"]
+    assert isinstance(clearance, ClearanceReblocker)
+    assert isinstance(clearance_grid, ClearanceReblocker)
+    assert clearance.substrate.tag == "chord_diag"
+    assert clearance_grid.substrate.tag == "grid"
 
 
 def test_default_chord_diag_propose_is_deterministic() -> None:

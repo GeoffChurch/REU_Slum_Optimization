@@ -23,7 +23,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Protocol
+from typing import NamedTuple, Protocol, runtime_checkable
 
 import geopandas as gpd
 import numpy as np
@@ -74,6 +74,7 @@ class BuildingFrame(NamedTuple):
     read_from: list[Path]           # the files it came from, folded into the block content hash
 
 
+@runtime_checkable
 class BuildingSource(Protocol):
     def for_blocks(self, blocks: gpd.GeoDataFrame) -> BuildingFrame:
         """Buildings covering these block polygons, their anchor points, and the files read.

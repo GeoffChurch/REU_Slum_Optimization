@@ -17,10 +17,10 @@ import time
 from pathlib import Path
 
 from hydra import compose, initialize_config_dir
-from hydra.utils import instantiate
 
 from reblock.methods.arterial import Access, Displacement, GreedyArterialReblocker, SnapToBoundary
 from reblock.pipeline import build_regions
+from reblock.presets import load_stages
 from reblock.region import region_block
 
 
@@ -29,10 +29,8 @@ def main() -> None:
         cfg = compose(config_name="compare_config", overrides=[
             "data=capetown_full", "screen=dense_compact", "metric=depth",
             "region_builder=dense_cluster", "region_builder.max_buildings=3000"])
-        src = instantiate(cfg.data)
-        screen = instantiate(cfg.screen)
-        rb = instantiate(cfg.region_builder)
-    regions = build_regions(src, screen, rb, None, 1)
+        stages = load_stages(cfg)
+    regions = build_regions(stages.source, stages.screen, stages.region_builder, None, 1)
     region = regions[0]
     blk = region_block(region) if len(region) > 1 else region[0]
     print(f"region: {len(region)} blocks, {len(blk.parcels):,} parcels\n", flush=True)

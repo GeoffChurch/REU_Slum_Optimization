@@ -12,13 +12,14 @@ import urllib.request
 from collections.abc import Hashable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString
 
 
+@runtime_checkable
 class DesireLineSource(Protocol):
     def desire_lines(
         self, bbox_wgs84: tuple[float, float, float, float], crs: CRS

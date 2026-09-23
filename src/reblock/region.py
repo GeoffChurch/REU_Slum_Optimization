@@ -190,6 +190,7 @@ def region_reblock(blocks: list[Block], method: Method, evals: list[Eval]) -> Re
     return Result(block=rb, proposal=proposal, metrics=metrics)
 
 
+@runtime_checkable
 class RegionBuilder(Protocol):
     """Maps user seed groups to expanded region member groups, on cheap block GEOMETRIES (no
     Voronoi) -- so members are chosen before the expensive full-Block build. `groups` is a list
@@ -465,6 +466,7 @@ class DenseClusterRegionBuilder:
         return result
 
 
+@runtime_checkable
 class ShapeObjective(Protocol):
     """Scores the OUTLINE of a candidate region union. Higher is better; scale-free.
 

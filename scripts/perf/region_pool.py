@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import cast
 
-from reblock.contracts import Block, Screen, Source
+from reblock.contracts import Block
 
 CACHE_DIR = Path("scratchpad/perf")
 OVERRIDES = ["metric=depth", "data=capetown_full", "screen=dense_compact",
@@ -35,18 +35,16 @@ def blocks(n: int) -> list[Block]:
         return out
 
     from hydra import compose, initialize_config_dir
-    from hydra.utils import instantiate
 
     from reblock.pipeline import build_regions
-    from reblock.region import RegionBuilder, region_block
+    from reblock.presets import load_stages
+    from reblock.region import region_block
 
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=[*OVERRIDES, f"max_blocks={n}"])
-    source = cast(Source, instantiate(cfg.data))
-    screen = cast(Screen, instantiate(cfg.screen))
-    rb = cast(RegionBuilder, instantiate(cfg.region_builder))
+    stages = load_stages(cfg)
     t0 = time.perf_counter()
-    regions = build_regions(source, screen, rb, None, n)
+    regions = build_regions(stages.source, stages.screen, stages.region_builder, None, n)
     print(f"  built {len(regions)} regions in {time.perf_counter() - t0:.0f} s", flush=True)
 
     out = []
