@@ -93,6 +93,9 @@ class FixedPool(DonorPool):
     def identity(self) -> Hashable | None:
         return self.content
 
+    def load(self) -> None:
+        """Nothing to read: the blocks and footpaths are held already."""
+
 
 def pool(blocks: Sequence[Block], *, with_paths: Sequence[Block],
          content: Hashable | None = None) -> FixedPool:

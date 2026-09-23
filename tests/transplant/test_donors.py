@@ -19,7 +19,7 @@ from reblock.transplant.donors import Donors, TooFewDonors
 from reblock.transplant.gw import Arr
 from reblock.transplant.operating_points import SIGNATURE as PUBLISHED_SIGNATURE
 from reblock.transplant.operating_points import TRANSPORT as PUBLISHED_TRANSPORT
-from reblock.transplant.signature import signature, signature_distance
+from reblock.transplant.signature import SignatureParams, signature, signature_distance
 from reblock.transplant.transport import Transport, TransportParams, fit_transport, parcel_xy
 from tests.transplant.pool_fixtures import SIGNATURE, TRANSPORT, pool, slab
 
@@ -98,6 +98,34 @@ def test_the_rungs_nest_and_share_every_fit(monkeypatch: pytest.MonkeyPatch) -> 
     assert calls == 3
     assert [(f.donor.block_id, f.gw_dist) for f in two] == [
         (f.donor.block_id, f.gw_dist) for f in three[:2]]
+
+
+def test_draws_from_one_pool_share_its_signatures(monkeypatch: pytest.MonkeyPatch,
+                                                  tmp_path: Path) -> None:
+    """A study's held-out and leaky arms are two `Donors` over one pool: its donors' signatures are
+    computed once between them, and again only under other signature parameters.
+
+    FAULT INJECTION: computing them in `Donors._signatures` itself makes the first count 14; keying
+    `_PoolSignatures` on the pool alone makes the second 8, the new parameters reading the old
+    parameters' signatures.
+    """
+    calls = 0
+
+    def counting(xy: Arr, params: SignatureParams) -> Arr:
+        nonlocal calls
+        calls += 1
+        return signature(xy, params)
+
+    monkeypatch.setattr(donors_module, "signature", counting)
+    # Named for this test's own tmp_path, so no other test's cached signatures answer for it.
+    shared = pool(BLOCKS, with_paths=BLOCKS, content=("test", str(tmp_path)))
+    for radius in (2000.0, 0.0):
+        Donors(pool=shared, exclusion_radius_m=radius, k=1, min_donors=1, signature=SIGNATURE,
+               transport=TRANSPORT).fits(RECIPIENT)
+    assert calls == len(BLOCKS) + 2         # every donor once; the recipient once per draw
+    Donors(pool=shared, exclusion_radius_m=0.0, k=1, min_donors=1,
+           signature=replace(SIGNATURE, seed=1), transport=TRANSPORT).fits(RECIPIENT)
+    assert calls == 2 * len(BLOCKS) + 3
 
 
 def test_a_recipient_in_another_crs_is_refused() -> None:

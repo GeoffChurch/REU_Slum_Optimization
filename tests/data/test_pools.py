@@ -3,7 +3,8 @@ how donor material is fetched and classified."""
 from __future__ import annotations
 
 import ast
-from dataclasses import replace
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -16,6 +17,7 @@ from omegaconf import DictConfig
 from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
+import reblock.data.pools as pools_module
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.data.counts import OpenBuildingsCount
@@ -30,6 +32,7 @@ from reblock.data.pools import (
     fetch_donor_lines,
     iso_of,
     load_pools,
+    select_pool,
 )
 from reblock.metric import DENSITY_COMPACTNESS_FLOOR, AbsoluteGate
 from reblock.presets import Stages, load_research, load_stages
@@ -100,6 +103,72 @@ def test_a_screen_that_selects_nothing_of_its_own_flags_everything(tmp_path: Pat
     pools = load_pools(replace(spec, stages=replace(spec.stages, screen=IdentityScreen(None)),
                                min_parcels=250))
     assert DONOR_ONLY in {pools.blocks[i].block_id for i in pools.recipients}
+
+
+def test_equal_pools_select_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every arm of a study instantiates its own stages -- equal, but distinct objects -- and they
+    select once between them. A pool differing in anything the selection reads selects again.
+
+    FAULT INJECTION: calling `_select` unconditionally in `select_pool` makes the first count 2.
+    """
+    reads = 0
+    real = pools_module.donatable_ids
+
+    def counting(census_dir: Path, iso: str, min_interior_m: float) -> set[str]:
+        nonlocal reads
+        reads += 1
+        return real(census_dir, iso, min_interior_m)
+
+    monkeypatch.setattr(pools_module, "donatable_ids", counting)
+    a, b = _spec(tmp_path), _spec(tmp_path)
+    assert a.stages.screen is not b.stages.screen and a.stages.source is not b.stages.source
+    assert select_pool(a) == select_pool(b)
+    assert reads == 1
+    select_pool(replace(a, min_interior_m=150.0))
+    select_pool(replace(a, stages=replace(a.stages, screen=IdentityScreen([BOTH_ROLES]))))
+    assert reads == 3
+
+
+class _Unidentified:
+    """A live source, say: something with no content address."""
+
+    identity = None
+
+
+@dataclass
+class _LiveGrowth:
+    """A region builder holding something no key can describe."""
+
+    source: _Unidentified
+
+    def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
+              depth_fn: Callable[[str], float] | None) -> list[list[str]]:
+        del block_geoms, depth_fn
+        return groups
+
+
+def test_a_pool_whose_builder_has_no_identity_selects_afresh(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """As `derive` does for an uncacheable input: two such builders may differ in exactly what the
+    key cannot see, so neither may answer for the other.
+
+    FAULT INJECTION: dropping the bypass in `select_pool` (keying on the builder's None) makes
+    it one read.
+    """
+    reads = 0
+    real = pools_module.donatable_ids
+
+    def counting(census_dir: Path, iso: str, min_interior_m: float) -> set[str]:
+        nonlocal reads
+        reads += 1
+        return real(census_dir, iso, min_interior_m)
+
+    monkeypatch.setattr(pools_module, "donatable_ids", counting)
+    spec = _spec(tmp_path)
+    live = replace(spec, stages=replace(spec.stages, region_builder=_LiveGrowth(_Unidentified())))
+    select_pool(live)
+    select_pool(live)
+    assert reads == 2
 
 
 def _compose(config_name: str, overrides: list[str]) -> DictConfig:

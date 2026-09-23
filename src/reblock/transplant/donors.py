@@ -12,7 +12,8 @@ For a recipient, `Donors.fits`
 The footpath read and the fit are the expensive steps, and both go through the derivation cache
 (`derive_graph.derive`), keyed on the blocks' identities, the footpath source's and the transport
 parameters. A fit does not depend on `k`, so a k-sweep pays for each (recipient, donor) pair once,
-and its rungs nest: k=3's donors are k=15's first three.
+and its rungs nest: k=3's donors are k=15's first three. The ranking's donor signatures go through
+it too, as one table per pool and signature parameters, which every draw from that pool shares.
 
 The two donor methods are what is built on these fits: a weighted consensus of all of them
 (`consensus.ConsensusDesireSource`, routed by `demand_greedy`) and the closest one alone
@@ -106,6 +107,25 @@ def _fit_impl(inp: _FitInput) -> _Transplant:
                        gw_dist=fit.gw_dist)
 
 
+@dataclass(frozen=True, eq=False)
+class _PoolSignatures:
+    """Identified carrier: every donor's shape signature in one pool, under one parameter set."""
+
+    pool: DonorPool
+    params: SignatureParams
+
+    @property
+    def identity(self) -> Hashable | None:
+        pool, params = self.pool.identity, config_identity(self.params)
+        return None if pool is None or params is None else ("donor_signatures", pool, params)
+
+
+def _signatures_impl(inp: _PoolSignatures) -> dict[str, Arr]:
+    pools = inp.pool.pools()
+    return {pools.blocks[j].block_id: signature(parcel_xy(pools.blocks[j]), inp.params)
+            for j in pools.donors}
+
+
 @dataclass(frozen=True)
 class Donors:
     """Which donors a recipient draws, and how each is fitted to it."""
@@ -128,9 +148,9 @@ class Donors:
 
     @cached_property
     def _signatures(self) -> dict[str, Arr]:
-        pools = self.pool.pools()
-        return {pools.blocks[j].block_id: signature(parcel_xy(pools.blocks[j]), self.signature)
-                for j in pools.donors}
+        # Keyed on the pool and the parameters, not on this Donors: a study's held-out and leaky
+        # arms, and every k rung, draw from one pool and share its one computation.
+        return derive(_signatures_impl, _PoolSignatures(pool=self.pool, params=self.signature))
 
     def eligible(self, recipient: Block) -> list[Block]:
         """Every pool donor beyond the exclusion radius, in pool order."""
