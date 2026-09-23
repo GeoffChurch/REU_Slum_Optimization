@@ -8,9 +8,9 @@ the building source (reads whatever points GeoParquet fixture-prep produced).
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import cast
+from typing import Final, cast
 
 import geopandas as gpd
 import numpy as np
@@ -22,7 +22,7 @@ from shapely.geometry.base import BaseGeometry
 
 from reblock.buildings import ANCHOR_COL, Extents
 from reblock.contracts import BBox, Block, Region
-from reblock.data._util import _window
+from reblock.data._util import _narrowed, _window
 from reblock.data.counts import RAW_COUNT
 from reblock.data.footprints import BuildingSource, ParquetBuildings
 from reblock.derivations import VoronoiInput, voronoi
@@ -64,17 +64,27 @@ class KblockSource:
         self.buildings_path = Path(buildings_path)
         self.region_id = region_id
         self.min_buildings = min_buildings
-        self.block_ids = list(block_ids) if block_ids is not None else None
+        # Final: a narrower source is a new one (`restricted`), so mypy rejects narrowing this one
+        # in place -- which is what every stage sharing it would then silently see.
+        self.block_ids: Final = tuple(block_ids) if block_ids is not None else None
         self.building_tier = building_tier
         # Where the MEMBER blocks' buildings come from. Screening, counts and growth depth keep
         # reading `buildings_path` over the whole corpus; this feeds only `region()`, which the
-        # pipeline calls after narrowing `block_ids` to the chosen members. None means "the same
+        # pipeline calls on a copy `restricted` to the chosen members. None means "the same
         # parquet the screen reads" -- a real choice, not a fallback: at the point and area tiers
         # that file already holds everything the model needs.
         self.member_buildings: BuildingSource = (
             member_buildings if member_buildings is not None
             else ParquetBuildings(self.buildings_path))
         self._utm: CRS | None = None
+
+    def restricted(self, block_ids: Sequence[str]) -> KblockSource:
+        """This source narrowed to `block_ids`, keeping its tier and member buildings."""
+        return KblockSource(self.blocks_path, self.buildings_path, self.region_id,
+                            min_buildings=self.min_buildings,
+                            block_ids=_narrowed(self.region_id, self.block_ids, block_ids),
+                            building_tier=self.building_tier,
+                            member_buildings=self.member_buildings)
 
     def _target_utm(self) -> CRS:
         """The UTM `region()`/the accessors reproject to, computed once from the blocks
@@ -89,9 +99,8 @@ class KblockSource:
         the blocks parquet (no buildings, no Voronoi), reprojected to the same UTM `region()`
         uses. `building_count` is a per-block building count (present for kblock sources),
         e.g. for budgeting region growth on buildings as a parcel proxy. Applies
-        `self.block_ids` as a flat filter if set (the region CLI passes a flat set of
-        candidate ids here, not the nested seed groups). `bbox` (in the target UTM) windows
-        the result via `.cx`; `bbox=None` returns everything."""
+        `self.block_ids` as a flat filter if set (see `restricted`). `bbox` (in the target UTM)
+        windows the result via `.cx`; `bbox=None` returns everything."""
         blocks = gpd.read_parquet(
             self.blocks_path, columns=["block_id", "building_count", "geometry"])
         # Renamed at the boundary: this is the VENDOR count, and only `counts.resolved()` may turn

@@ -175,10 +175,9 @@ def _best_hook(results: Iterable[tuple[float, BaseGeometry | None]]
 
 
 def main() -> None:
-    # Replaced in `engines`, the namespace its loop looks them up in -- it imports both without
-    # re-exporting them, which is all the ignores concede.
-    engines._candidate_chords = _chords_hook          # type: ignore[attr-defined]
-    engines._best_candidate = _best_hook              # type: ignore[attr-defined]
+    # Replaced in `engines`, the namespace its loop looks them up in.
+    engines._candidate_chords = _chords_hook
+    engines._best_candidate = _best_hook
     pools = donor_pool("donor_pool=capetown").pools()
     blocks = pools.blocks
     counts = [float(len(b.parcels)) for b in blocks]

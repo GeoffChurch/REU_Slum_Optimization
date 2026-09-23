@@ -200,7 +200,6 @@ def _load_multiblock_region(metric: str, city: str) -> tuple[Block, dict[str, Me
         raise RuntimeError(f"metric={metric!r} city={city!r} flagged 0 blocks -- check its gate")
     seed = selection[0]
 
-    source.block_ids = None                                          # type: ignore[attr-defined]
     region = build_regions(source, screen, region_builder, None, 1)[0]
 
     block = region_block(region)

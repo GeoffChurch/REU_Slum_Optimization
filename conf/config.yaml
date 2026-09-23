@@ -25,12 +25,10 @@ seed: 0
 assumed_crs: null
 max_blocks: 1
 
-# Render emitter (reblock.emit): opt-in, writes {block}_before.png +
-# {block}_{proposal}_after.png into the Hydra run dir. F1 supports png/separate.
+# Render emitter (reblock.emit.render_results): opt-in, writes {block}_before.png +
+# {block}_{proposal}_after.png into the Hydra run dir.
 render:
   enabled: false
-  format: png
-  layout: separate
 
 # City flagged-map emitter (reblock.emit.flagged_map): opt-in; draws all metro
 # blocks light with the screen's flagged blocks highlighted, into the run dir.

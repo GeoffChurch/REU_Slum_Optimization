@@ -75,7 +75,7 @@ def main() -> None:
             r = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                  max_roads=MAX_ROADS, selector=FirstOrder(k))
+                                  max_roads=MAX_ROADS, selector=FirstOrder(k, threads=1))
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue

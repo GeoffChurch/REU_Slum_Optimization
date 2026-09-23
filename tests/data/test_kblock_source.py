@@ -148,6 +148,34 @@ def test_block_ids_unknown_raises() -> None:
         src.region()
 
 
+def test_restricted_is_a_narrowed_copy_and_leaves_the_source_whole() -> None:
+    # The copy builds exactly what a source constructed narrowed builds -- same tier, same member
+    # buildings, same Blocks -- and the source it came from still yields every block. Narrowing
+    # the configured source in place was how a run's emitters came to see only the region.
+    ids = ["ZAF.9.3.1_1_44882", "ZAF.9.3.1_1_44571"]
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=None, min_buildings=10,
+                       building_tier=SpacingDiscs, member_buildings=None)
+    everything = len(src.block_geometries())
+    narrowed = src.restricted(ids)
+    direct = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=ids,
+                          min_buildings=10, building_tier=SpacingDiscs, member_buildings=None)
+    got, want = list(narrowed.region().blocks), list(direct.region().blocks)
+    assert [b.block_id for b in got] == sorted(ids)
+    for a, b in zip(got, want, strict=True):
+        assert a.identity == b.identity and a.parcels.equals(b.parcels)
+    assert narrowed.building_tier is src.building_tier
+    assert narrowed.member_buildings is src.member_buildings
+    assert src.block_ids is None and len(src.block_geometries()) == everything > len(ids)
+
+
+def test_restricting_a_narrowed_source_cannot_widen_it() -> None:
+    src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", block_ids=["ZAF.9.3.1_1_44882"],
+                       min_buildings=10, building_tier=SpacingDiscs, member_buildings=None)
+    assert src.restricted(["ZAF.9.3.1_1_44882"]).block_ids == ("ZAF.9.3.1_1_44882",)
+    with pytest.raises(ValueError, match="44571.*outside"):
+        src.restricted(["ZAF.9.3.1_1_44882", "ZAF.9.3.1_1_44571"])
+
+
 def test_capetown_fixture_has_density_columns() -> None:
     import geopandas as gpd
     cols = set(gpd.read_parquet(CT_BLOCKS).columns)

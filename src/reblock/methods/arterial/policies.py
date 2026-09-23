@@ -83,7 +83,7 @@ class _FaithfulPolicy:
     top_k: int
     live: set[str]
     _initial: list[LineString]
-    max_anchors: int = 0
+    max_anchors: int
 
     def initial(self) -> list[LineString]:
         return self._initial

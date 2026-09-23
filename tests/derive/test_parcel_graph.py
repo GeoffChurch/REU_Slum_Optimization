@@ -158,7 +158,7 @@ def test_derivation_matches_topology_native_ring_construction() -> None:
     not something to_parcel_graph should be graded on.)
     """
     region = ShapefileSource(PHULE.with_suffix(".shp"), region_id="phule",
-                              assumed_crs=3857).region()
+                              assumed_crs=3857, block_ids=None).region()
     blocks = list(region.blocks)
     assert len(blocks) == 370
 
@@ -205,7 +205,7 @@ def test_full_pipeline_facecount_over_all_phule_blocks() -> None:
     clean-up must never lose real parcel faces.
     """
     region = ShapefileSource(PHULE.with_suffix(".shp"), region_id="phule",
-                              assumed_crs=3857).region()
+                              assumed_crs=3857, block_ids=None).region()
     blocks = list(region.blocks)
     assert len(blocks) == 370
 

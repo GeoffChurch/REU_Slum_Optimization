@@ -52,7 +52,7 @@ def _grid_block(n: int) -> Block:
 
 def _phule_spec(evals: list[Eval], max_blocks: int = 1) -> PipelineSpec:
     return PipelineSpec(
-        source=ShapefileSource(PHULE, region_id="phule", assumed_crs=3857),
+        source=ShapefileSource(PHULE, region_id="phule", assumed_crs=3857, block_ids=None),
         screen=IdentityScreen(block_ids=None),
         method=TopologyMethod(alpha=2.0, seed=0, road_width_m=DEFAULT_ROAD_WIDTH_M),
         evals=evals,

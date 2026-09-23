@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+
 from geopandas import GeoDataFrame
 
 from reblock.contracts import BBox, Region
@@ -5,8 +9,11 @@ from reblock.screen.identity import IdentityScreen
 
 
 class _StubSource:
-    # satisfies Source structurally; none of the three are used by IdentityScreen
+    # satisfies Source structurally; none of its methods are used by IdentityScreen
     def region(self) -> Region:
+        raise NotImplementedError
+
+    def restricted(self, block_ids: Sequence[str]) -> _StubSource:
         raise NotImplementedError
 
     def block_geometries(self, bbox: BBox | None = None) -> GeoDataFrame:

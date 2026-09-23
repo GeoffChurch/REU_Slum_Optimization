@@ -6,7 +6,7 @@ from pyproj import CRS
 from shapely.geometry import Polygon, box
 
 from reblock.contracts import Block
-from reblock.data.shapefile import ShapefileSource
+from reblock.data.shapefile import ShapefileSource, _components
 
 ROOT = Path(__file__).resolve().parents[2]
 PHULE = ROOT / "ext" / "topology" / "examples" / "data" / "phule_nagar_v6.shp"
@@ -16,7 +16,7 @@ EPWORTH = ROOT / "ext" / "topology" / "Data" / "Epworth_Before.shp"
 def test_source_yields_metric_blocks() -> None:
     # Phule Nagar ships with no .prj sidecar, so a CRS assumption must be
     # supplied explicitly -- no more silent EPSG:3857 guessing.
-    region = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857).region()
+    region = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857, block_ids=None).region()
     blocks = list(region.blocks)
     assert len(blocks) >= 1
     b = blocks[0]
@@ -36,8 +36,8 @@ def test_streets_excludes_interior_gap_rings() -> None:
     squares = [box(x, y, x + 1, y + 1) for x in range(3) for y in range(3)
                if not (x == 1 and y == 1)]
     raw = gpd.GeoDataFrame(geometry=squares, crs=utm)
-    block = next(ShapefileSource("unused", region_id="donut", assumed_crs=None)._iter_blocks(
-        raw, utm, source_content_hash=None))
+    source = ShapefileSource("unused", region_id="donut", assumed_crs=None, block_ids=None)
+    block = next(source._iter_blocks(raw, utm, None, source._kept(_components(raw))))
     assert isinstance(block.boundary, Polygon)    # a single block is a Polygon (holes and all)
     assert len(block.boundary.interiors) == 1     # the central hole really exists
     assert len(block.streets) == 1                # ...but streets = the outer ring only
@@ -48,7 +48,7 @@ def test_missing_crs_without_assumed_crs_raises() -> None:
     # (e.g. defaulting to Web Mercator) can silently land parcels on Null
     # Island. Fail loud instead.
     with pytest.raises(ValueError, match="CRS"):
-        ShapefileSource(PHULE, region_id="phule", assumed_crs=None).region()
+        ShapefileSource(PHULE, region_id="phule", assumed_crs=None, block_ids=None).region()
 
 
 def test_epworth_full_drain_is_non_fatal_and_skips_unloadable_components() -> None:
@@ -72,7 +72,8 @@ def test_epworth_full_drain_is_non_fatal_and_skips_unloadable_components() -> No
     # assumed_crs=3857 is passed to exercise the same call shape as CRS-less
     # sources; it's harmlessly ignored here since Epworth ships a real .prj
     # (EPSG:32736).
-    region = ShapefileSource(EPWORTH, region_id="epworth", assumed_crs=3857).region()
+    region = ShapefileSource(EPWORTH, region_id="epworth", assumed_crs=3857,
+                             block_ids=None).region()
     with pytest.warns(UserWarning, match="skipping component"):
         blocks = list(region.blocks)
 
@@ -85,7 +86,7 @@ def test_epworth_full_drain_is_non_fatal_and_skips_unloadable_components() -> No
 
 
 def test_shapefile_blocks_carry_source_content_hash() -> None:
-    region = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857).region()
+    region = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857, block_ids=None).region()
     blocks = list(region.blocks)
     assert blocks, "expected at least one built block"
     h = blocks[0].source_content_hash
@@ -94,7 +95,7 @@ def test_shapefile_blocks_carry_source_content_hash() -> None:
 
 def test_shapefile_building_points_empty_and_block_geometries_present() -> None:
     # Phule Nagar has no .prj sidecar (see test_missing_crs_without_assumed_crs_raises).
-    src = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857)
+    src = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857, block_ids=None)
     assert src.building_geometries().empty          # no point cloud -- honest, not a stub
     bg = src.block_geometries()
     assert not bg.empty and set(bg.columns) >= {"block_id", "geometry"}
@@ -104,5 +105,27 @@ def test_shapefile_building_points_empty_and_block_geometries_present() -> None:
 def test_shapefile_block_has_empty_building_points() -> None:
     # A parcel shapefile has no point cloud -- Block.building_geometries is honestly empty (the
     # dataclass default), not a stub or a throwing accessor.
-    block = next(iter(ShapefileSource(PHULE, region_id="phule", assumed_crs=3857).region().blocks))
+    source = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857, block_ids=None)
+    block = next(iter(source.region().blocks))
     assert block.building_geometries.empty
+
+
+def test_restricted_yields_only_those_components_under_their_own_ids() -> None:
+    # Ids number EVERY component, so a restricted copy names each block exactly as the whole
+    # source does, with the same parcels -- and the source itself stays whole.
+    src = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857, block_ids=None)
+    whole = {b.block_id: b for b in src.region().blocks}
+    ids = sorted(whole)[1:3]
+    narrowed = src.restricted(ids)
+    got = list(narrowed.region().blocks)
+    assert [b.block_id for b in got] == ids
+    for b in got:
+        assert b.parcels.geometry.equals(whole[b.block_id].parcels.geometry)
+    assert sorted(narrowed.block_geometries()["block_id"]) == ids
+    assert src.block_ids is None and len(src.block_geometries()) > len(ids)
+
+
+def test_restricted_to_an_unknown_component_raises_on_read() -> None:
+    src = ShapefileSource(PHULE, region_id="phule", assumed_crs=3857, block_ids=None)
+    with pytest.raises(ValueError, match="phule_999999"):
+        src.restricted(["phule_999999"]).region()

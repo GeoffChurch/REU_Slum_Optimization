@@ -34,24 +34,27 @@ from reblock.methods.arterial.objectives import ArterialObjective, CommittedNetw
 from reblock.methods.arterial.policies import CandidatePolicySpec
 from reblock.methods.arterial.primitives import (
     _anchor_points,
-    _candidate_chords,
     _deep_targets,
     _explode,
     _merge,
     _planarize,
     _snap_graph,
 )
+
+# `_candidate_chords`, `_best_candidate` and `eval_candidate` are imported as explicit
+# self-aliases (mypy's --no-implicit-reexport convention, see reblock.compare's
+# `compare_report as compare_report`): tests and the scripts/perf/ instruments replace them in
+# THIS namespace, the one the greedy loop looks them up in (an instrumentable seam, same spirit
+# as `_PARALLEL_THRESHOLD`'s test-monkeypatch design). Exported, a replacement is type-checked
+# against the real signature; merely imported, --strict would flag the access and each site
+# needed an ignore that also hid a signature drift.
+from reblock.methods.arterial.primitives import _candidate_chords as _candidate_chords
 from reblock.methods.arterial.realize import ChordRealizer
 from reblock.methods.arterial.scoring import (
     _PARALLEL_THRESHOLD,
-    _best_candidate,
     step_state,
 )
-
-# Explicit self-alias (mypy's --no-implicit-reexport convention, see reblock.compare's
-# `compare_report as compare_report`): tests reach `engines.eval_candidate` directly (as an
-# instrumentable seam, same spirit as `_PARALLEL_THRESHOLD`'s test-monkeypatch design), which
-# --strict would otherwise flag as accessing a name this module merely imports, not exports.
+from reblock.methods.arterial.scoring import _best_candidate as _best_candidate
 from reblock.methods.arterial.scoring import eval_candidate as eval_candidate
 from reblock.methods.arterial.shortlist import CandidateSelector, FirstOrder, RankContext
 from reblock.methods.boundary_graph import _boundary_graph

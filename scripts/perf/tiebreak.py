@@ -82,9 +82,8 @@ def _best(results: Iterable[tuple[float, BaseGeometry | None]]
 
 
 def main() -> None:
-    # Replaced in `engines`, the namespace its loop looks it up in -- it imports `_best_candidate`
-    # without re-exporting it, which is all the ignore concedes.
-    art._best_candidate = _best                       # type: ignore[attr-defined]
+    # Replaced in `engines`, the namespace its loop looks it up in.
+    art._best_candidate = _best
     pools = donor_pool("donor_pool=capetown").pools()
     blocks = pools.blocks
     counts = [float(len(b.parcels)) for b in blocks]
