@@ -1071,3 +1071,27 @@ def test_a_single_block_region_is_never_called_grown_into_blocks(
     many = gsp._region_section(_region_dir(tmp_path / "many", members=7), "y", "## h\n",
                                seed_rank=1, show_screen=False)
     assert "7-block region of 4,321 parcels" in many and "7 blocks, 4,321 parcels" in many
+
+
+def test_the_headline_compares_only_what_lens_a_actually_matched(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Lens A returns a network that cannot reach the displacement budget WHOLE, so its row is an
+    unmatched number. The headline said "at a matched road budget" and set the winner against the
+    footpath network, whose whole network displaced 1.4% against a 10% budget.
+
+    FAULT INJECTION: picking the best row without `_matched` picks `greedy` here and fails."""
+    import scripts.gen_site_pages as gsp
+    root = _region_dir(tmp_path / "mb", members=1)
+    (root / "lens_displacement.csv").write_text(
+        "method,road_m,displacement,permeability,access_burden_reduction,at_budget\n"
+        "clearance_looped,1234.5,0.1004,0.70,0.9,True\n"
+        "greedy_arterial_access_displacement,9000.0,0.0350,0.95,0.9,False\n"
+        "osm_footpaths,3094.1,0.0141,0.24,0.0,False\n")
+    monkeypatch.setattr(gsp, "MB", root)
+    headline = gsp._key_result()
+    assert "Looped Tree" in headline and "70.0% permeability" in headline
+    assert "matched <strong>10.0%</strong>" in headline and "road budget" not in headline
+    assert "all 3,094 m of it, displacing only 1.4%" in headline and "never reaches" in headline
+    figures = gsp._key_figures()
+    assert "70.0%" in figures and "95.0%" not in figures
+    assert "single-block benchmark region" in figures and "1-block" not in figures

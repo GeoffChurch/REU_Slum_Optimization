@@ -1529,29 +1529,51 @@ def _hero_logo() -> str:
     return ""
 
 
+def _matched(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """The Lens A rows that REACHED the shared displacement budget. `prefix_to_displacement`
+    returns a network that cannot reach it whole, so an unmatched row is that method's entire
+    network at a smaller displacement -- not a matched number, and never a candidate for "best at
+    matched displacement"."""
+    return [r for r in rows if r["at_budget"] == "True"]
+
+
 def _key_result() -> str:
     """The headline finding, stated on the Home page in one sentence, entirely from Lens A of the
-    settlement benchmark: the permeability the best method buys at the shared road budget, set
-    against the as-built footpath network measured on the same basis. Emits nothing when the
-    artifacts are absent, so a partial checkout drops the claim rather than inventing one."""
+    settlement benchmark: the permeability the best method buys at the shared displacement budget,
+    set against the as-built footpath network. Emits nothing when the artifacts are absent, so a
+    partial checkout drops the claim rather than inventing one.
+
+    It said "at a matched road budget" -- Lens A matches DISPLACEMENT, not road -- and set the
+    winner against the footpath network as if matched, when the footpaths' whole 3,094 m displaces
+    1.4% and never reaches the budget. So the budget is quoted from the row, and a footpath network
+    that falls short is described as exactly that."""
     rows = _read_csv(MB / "lens_displacement.csv")
-    if not rows:
+    matched = _matched(rows)
+    if not matched:
         return ""
-    best = max(rows, key=lambda r: float(r["permeability"]))
+    best = max(matched, key=lambda r: float(r["permeability"]))
+    lead = (f"Displacing a matched <strong>{_pct(float(best['displacement']))}</strong> of "
+            f"homes, <strong>{friendly_method_name(best['method'])}</strong> reaches "
+            f"<strong>{_pct(float(best['permeability']))} permeability</strong>")
     osm = next((r for r in rows if r["method"] == "osm_footpaths"), None)
-    lead = (f"At a matched road budget, <strong>{friendly_method_name(best['method'])}</strong> "
-            f"reaches <strong>{_pct(float(best['permeability']))} permeability</strong>")
     if osm is None:
         # Block count from `meta`, never a literal. This said "12-block" while the key figures
         # two elements below said "1-block", both on the hero -- the same stale-literal failure
         # the comment at `_mb_section` records for "12-block, 11,006-parcel".
         meta_path = MB / "meta.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
-        where = (f"the {meta['region_members']}-block benchmark region"
-                 if "region_members" in meta else "the benchmark region")
+        where = ("the benchmark region" if "region_members" not in meta
+                 else "the single-block benchmark region" if _single_block(meta)
+                 else f"the {meta['region_members']}-block benchmark region")
         return f"{lead} across {where}."
-    return (f"{lead} — against <strong>{_pct(float(osm['permeability']))}</strong> for the "
-            f"footpath network residents have already worn into the same settlement.")
+    footpaths = ("the footpath network residents have already worn into the same settlement")
+    if osm["at_budget"] == "True":
+        return (f"{lead} — against <strong>{_pct(float(osm['permeability']))}</strong> for "
+                f"{footpaths}, at the same displacement.")
+    return (f"{lead}. {footpaths[0].upper()}{footpaths[1:]} reaches "
+            f"<strong>{_pct(float(osm['permeability']))}</strong> with all "
+            f"{_num(float(osm['road_m']))} m of it, displacing only "
+            f"{_pct(float(osm['displacement']))} — it never reaches that budget.")
 
 
 def _key_figures() -> str:
@@ -1564,7 +1586,8 @@ def _key_figures() -> str:
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
     if meta.get("region_parcels") and meta.get("region_members"):
         items.append((_num(meta["region_parcels"]),
-                      f"parcels across the {meta['region_members']}-block benchmark region"))
+                      "parcels in the single-block benchmark region" if _single_block(meta)
+                      else f"parcels across the {meta['region_members']}-block benchmark region"))
     # DELIBERATELY NOT a "blocks flagged" key figure. `meta["flagged"]` is the size of the
     # PRE-FILTER, not a finding: the `depth` variant's gate keeps every survivor, so the number
     # has only ever reported `proxy_keep_n`. It read as "13,793 of 83,192 Cape Town blocks are
@@ -1572,19 +1595,19 @@ def _key_figures() -> str:
     # switch to a count it would have rendered as a round 1,000 -- the same artifact, merely
     # obvious. There is no honest version of this statistic, so it is gone rather than restated.
 
-    disp = _read_csv(MB / "lens_displacement.csv")
-    if disp:
-        best = max(disp, key=lambda r: float(r["permeability"]))
+    matched = _matched(_read_csv(MB / "lens_displacement.csv"))
+    if matched:
+        best = max(matched, key=lambda r: float(r["permeability"]))
         items.append((_pct(float(best["permeability"])),
-                      f"permeability at a matched road budget "
-                      f"({friendly_method_name(best['method'])})"))
+                      f"permeability at a matched {_pct(float(best['displacement']))} "
+                      f"displacement — {friendly_method_name(best['method'])}"))
 
     reached = [r for r in _read_csv(MB / "lens_permeability.csv") if r["reached"] == "True"]
     if reached:
         cheapest = min(reached, key=lambda r: float(r["displacement"]))
         items.append((_pct(float(cheapest["displacement"])),
-                      f"of homes displaced to reach the shared permeability target "
-                      f"({friendly_method_name(cheapest['method'])})"))
+                      f"of homes displaced to reach the shared permeability target — "
+                      f"{friendly_method_name(cheapest['method'])}"))
 
     if not items:
         return ""
