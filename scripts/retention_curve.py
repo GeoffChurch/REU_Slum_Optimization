@@ -40,11 +40,11 @@ from hydra import compose, initialize_config_dir
 from numpy.typing import NDArray
 from shapely import STRtree
 
-from reblock.contracts import CountingScreen
 from reblock.data.counts import resolved
 from reblock.data.kblock import KblockSource
 from reblock.metric import _cols
 from reblock.presets import load_stages
+from reblock.screen.dense_compact import DenseCompactScreen
 
 KS = (1, 5, 15, 50, 100, 500, 1000, 5000)
 VARIANTS = ("depth", "depth_density")
@@ -58,6 +58,7 @@ def curve(fine_order: list[str], proxy_rank: dict[str, int]) -> NDArray[np.int64
 
 
 def _p90(blocks: gpd.GeoDataFrame, buildings_path: str) -> NDArray[np.float64]:
+    assert blocks.crs is not None, "the blocks parquet carries its CRS"
     g = gpd.read_parquet(buildings_path, columns=["area_in_meters", "geometry"]).to_crs(blocks.crs)
     a = g["area_in_meters"].to_numpy()
     blk, pt = STRtree(list(g.geometry)).query(np.asarray(blocks.geometry), predicate="contains")
@@ -86,7 +87,7 @@ def main() -> int:
                                          f"proxy_keep_n={UNBOUNDED}"])
             stages = load_stages(cfg)
             source, screen = stages.source, stages.screen
-            assert isinstance(source, KblockSource) and isinstance(screen, CountingScreen)
+            assert isinstance(source, KblockSource) and isinstance(screen, DenseCompactScreen)
             fine_order = list(screen.select(source))
             bl = gpd.read_parquet(source.blocks_path,
                                   columns=["block_id", "building_count", "block_area_m2",

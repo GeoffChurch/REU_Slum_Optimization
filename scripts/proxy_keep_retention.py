@@ -50,10 +50,10 @@ import geopandas as gpd
 import numpy as np
 from hydra import compose, initialize_config_dir
 
-from reblock.contracts import CountingScreen
 from reblock.data.counts import resolved
 from reblock.data.kblock import KblockSource
 from reblock.presets import load_stages
+from reblock.screen.dense_compact import DenseCompactScreen
 
 KS = (1, 5, 15)
 VARIANTS = ("depth", "depth_density")     # the only two needs_peel metrics with example configs
@@ -68,7 +68,7 @@ def required_n(variant: str, city: str) -> tuple[int, dict[int, int]]:
                                  f"proxy_keep_n={UNBOUNDED}"])
     stages = load_stages(cfg)
     source, screen = stages.source, stages.screen
-    assert isinstance(source, KblockSource) and isinstance(screen, CountingScreen)
+    assert isinstance(source, KblockSource) and isinstance(screen, DenseCompactScreen)
     ranked = screen.select(source)
 
     blocks = gpd.read_parquet(
