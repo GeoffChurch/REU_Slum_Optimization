@@ -219,7 +219,7 @@ def test_displaced_buildings_takes_its_corridor_from_the_roads_own_width() -> No
 
 
 def test_displaced_buildings_empty_without_building_points_or_roads() -> None:
-    block = _grid_block(3)   # building_geometries defaults to empty
+    block = _grid_block(3)   # no buildings
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)

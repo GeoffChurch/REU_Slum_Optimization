@@ -242,7 +242,7 @@ def test_footpath_clearance_is_LOCAL_not_a_block_median():
 
 def test_parcel_radii_fall_back_to_zero_without_enough_building_points():
     params = PermeabilityParams()
-    b = _grid_block()   # building_geometries defaults to empty
+    b = _grid_block()   # no buildings
     assert not parcel_radii(b, params).any()
 
 def test_a_road_upgrade_never_lowers_an_edges_conductance():
