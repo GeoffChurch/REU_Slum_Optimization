@@ -47,6 +47,7 @@ onto a finished tree. Choosing cycles from the start finds loops that also serve
 """
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 
 import geopandas as gpd
@@ -62,6 +63,7 @@ from reblock.buildings import IncrementalOverlap
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive_graph import config_identity
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
@@ -110,7 +112,10 @@ class CycleNativeReblocker:
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
-    identity = None
+
+    @property
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
@@ -208,4 +213,5 @@ class CycleNativeReblocker:
             # differing only in the cap must not be mistaken for the same proposal.
             proposal_id=f"cycle_native:d{self.max_displacement:g}:mc{self.max_cycles}",
             method="cycle_native",
-            params={"roads": len(out), "road_width_m": self.road_width_m}, block_identity=None)
+            params={"roads": len(out), "road_width_m": self.road_width_m},
+            block_identity=block.identity)

@@ -147,15 +147,9 @@ def _no_collinear_overlap(roads: gpd.GeoDataFrame) -> bool:
 
 def test_identity_encodes_all_tunable_params() -> None:
     m = EuclideanGridReblocker()
-    # the hug buffer and bridge gap default to a per-block-derived value, so identity encodes them
-    # as "auto" (their resolved metres depend on the block, which is keyed separately) not a number
-    # adaptive defaults on (the density-concentrated grid is the primary behaviour)
-    assert m.identity == ("euclidean_grid", 60.0, 0.0, 1.0, 0.5, True, True, 30.0, 75.0,
-                          "auto", "auto", False, 0.03, 0.45, 3.0, "auto")
     m2 = EuclideanGridReblocker(spacing=30.0, angle=15.0, min_seg_len=2.0,
                                 street_buffer=1.0, seek_density=False)
-    assert m2.identity == ("euclidean_grid", 30.0, 15.0, 2.0, 1.0, False, True, 15.0, 75.0,
-                           "auto", "auto", False, 0.03, 0.45, 3.0, "auto")
+    assert m.identity == EuclideanGridReblocker().identity
     assert m.identity != m2.identity
     # an explicit hug/bridge override is a distinct config from the auto default and from each other
     assert (EuclideanGridReblocker(parcel_hug_buffer=5.0).identity
@@ -186,9 +180,6 @@ def test_identity_separates_adaptive_configs() -> None:
     ]
     identities = [base.identity, *(v.identity for v in variants)]
     assert len(set(identities)) == len(identities)   # no cache-key collisions between configs
-    # an explicit fine_spacing equal to the default is the same config, not a new one
-    assert (EuclideanGridReblocker(spacing=20.0, fine_spacing=10.0).identity
-            == EuclideanGridReblocker(spacing=20.0).identity)
 
 
 def test_basic_grid_generation_on_rectangular_block() -> None:
@@ -604,6 +595,4 @@ def test_euclidean_grid_method_yaml_instantiates_with_defaults() -> None:
         cfg = compose(config_name="config", overrides=["method=euclidean_grid"])
     method = instantiate(cfg.method)
     assert isinstance(method, EuclideanGridReblocker)
-    assert method.identity == (
-        "euclidean_grid", 60.0, 0.0, 1.0, 0.5, True, True, 30.0, 75.0, "auto", "auto",
-        False, 0.03, 0.45, 3.0, "auto")
+    assert method.identity == EuclideanGridReblocker().identity

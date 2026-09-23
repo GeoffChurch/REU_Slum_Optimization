@@ -177,6 +177,18 @@ def test_region_block_keeps_its_members_footprint_tier() -> None:
     assert displacement(rb.buildings, road) == pytest.approx(2.0)   # both squares on y = 0.5
 
 
+def test_region_block_rows_do_not_depend_on_member_order() -> None:
+    """Same members, any accretion order: one cache key, so one row order. Watched failing with
+    `pooled_buildings` concatenating in arrival order."""
+    a = _grid_block(0, 0, 3, 3, block_id="a",
+                    points=gpd.GeoDataFrame(geometry=[Point(0.5, 0.5), Point(1.5, 1.5)], crs=UTM))
+    b = _grid_block(3, 0, 3, 3, block_id="b",
+                    points=gpd.GeoDataFrame(geometry=[Point(3.5, 0.5)], crs=UTM))
+    ab, ba = region_block([a, b]), region_block([b, a])
+    assert ab.identity == ba.identity
+    assert ab.building_geometries.geometry.equals(ba.building_geometries.geometry)
+
+
 def test_region_block_refuses_members_on_different_tiers() -> None:
     from reblock.buildings import AreaDiscs
     a = _grid_block(0, 0, 3, 3, block_id="a", points=no_buildings(UTM))

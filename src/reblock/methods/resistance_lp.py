@@ -62,6 +62,7 @@ from reblock.buildings import Extents, IncrementalOverlap
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive_graph import config_identity
 from reblock.methods.resistance_greedy import _mesh, linearized_gain
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
@@ -198,14 +199,6 @@ def solve_coverage_lp(
     return np.asarray(res.x[zoff:yoff], dtype=float)
 
 
-@dataclass(frozen=True)
-class ResistanceLPIdentity:
-    substrate: Hashable
-    max_displacement: float
-    max_road_m: float
-    chunks: int
-
-
 @dataclass
 class ResistanceLPReblocker:
     """Choose the road set by LP against a displacement budget, re-linearizing between chunks."""
@@ -227,12 +220,8 @@ class ResistanceLPReblocker:
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
-    def identity(self) -> ResistanceLPIdentity | None:
-        if self.substrate.identity is None:
-            return None
-        return ResistanceLPIdentity(
-            substrate=self.substrate.identity, max_displacement=float(self.max_displacement),
-            max_road_m=float(self.max_road_m), chunks=int(self.chunks))
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior

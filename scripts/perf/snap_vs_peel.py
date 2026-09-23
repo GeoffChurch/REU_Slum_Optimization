@@ -3,7 +3,7 @@
 The backlog entry "Making the access objective affordable at region scale" records two suspects for
 the >=37x penalty, and says to settle which one dominates BEFORE building tier 2:
 
-  * the PEEL -- `_score("access", ...)` runs a full BFS over all 11,006 parcels to score one local
+  * the PEEL -- `Access` scoring runs a full BFS over all 11,006 parcels to score one local
     road. Tier 2 (first-order local gain) attacks exactly this.
   * `_snap`  -- a Dijkstra over the region's parcel-boundary graph, once per candidate. Tier 2 does
     NOT touch this. If snapping dominates, the shortlist has to be formed BEFORE snapping (rank the
@@ -30,6 +30,7 @@ from reblock.budget import access_burden
 from reblock.contracts import Block, Screen, Source
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.methods.arterial.objectives import _AccessBlock
 from reblock.methods.arterial.primitives import (
     _anchor_points,
     _candidate_chords,
@@ -38,7 +39,6 @@ from reblock.methods.arterial.primitives import (
     _snap_graph,
 )
 from reblock.methods.arterial.realize import _snap
-from reblock.methods.arterial.scoring import _score
 from reblock.methods.boundary_graph import _boundary_graph
 
 CACHE = Path("scratchpad/perf/region_block.pkl")
@@ -96,6 +96,7 @@ def main() -> None:
     base_burden = access_burden(parcel_access_layers(
         block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
     t_peel0 = time.perf_counter() - t0
+    scorer = _AccessBlock(block, adj, base_burden)     # what `Access().for_block` builds
 
     print(f"  ONCE PER BLOCK      parcel_adjacency {t_adj:8.2f} s")
     print(f"                      boundary graph   {t_graph:8.2f} s  "
@@ -126,7 +127,7 @@ def main() -> None:
         from reblock.methods.arterial.primitives import _union_with
         trial = _explode(_union_with(None, real), block.crs, 2.0 * HALF_W)
         t0 = time.perf_counter()
-        _score("access", block, trial, adj, base_burden, None)
+        scorer.value(trial)
         peel_t.append(time.perf_counter() - t0)
 
     s, p = np.array(snap_t), np.array(peel_t)
@@ -135,7 +136,7 @@ def main() -> None:
     print(f"    {'':16}{'mean':>10}{'median':>10}{'max':>10}{'share':>9}")
     print(f"    {'_snap':16}{s.mean() * 1e3:>9.1f}m{np.median(s) * 1e3:>9.1f}m"
           f"{s.max() * 1e3:>9.1f}m{s.mean() / tot:>8.0%}")
-    print(f"    {'peel (_score)':16}{p.mean() * 1e3:>9.1f}m{np.median(p) * 1e3:>9.1f}m"
+    print(f"    {'peel (value)':16}{p.mean() * 1e3:>9.1f}m{np.median(p) * 1e3:>9.1f}m"
           f"{p.max() * 1e3:>9.1f}m{p.mean() / tot:>8.0%}")
     print(f"    {'total':16}{tot * 1e3:>9.1f}m\n")
 

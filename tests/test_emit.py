@@ -360,6 +360,29 @@ def test_region_map_without_depths_still_writes(tmp_path: Path) -> None:
     assert out is not None and out.exists()
 
 
+def test_region_map_with_no_score_anywhere_draws_the_flat_fill(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No screen scores and a source that cannot be peeled leave a member with no score at all.
+    The documented answer is the flat located fill; a stand-in 0.0 drew it as the palest step of
+    the depth ramp instead -- a measurement nobody made, on a map that shows measurements."""
+    import matplotlib.colors as mcolors
+    import numpy as np
+
+    import reblock.emit as emit
+    captured: dict[str, Figure] = {}
+
+    def spy(fig: Figure, path: str | Path) -> None:
+        captured.setdefault(Path(path).name, fig)
+        _real_save_render(fig, path)
+
+    monkeypatch.setattr(emit, "save_render", spy)
+    region_map(_source_with_neighbour_and_points(), [["g"]], [["g"]], tmp_path,
+               counts=KblockCount())
+    ax = captured["region.png"].axes[0]
+    members_fill = np.asarray(ax.collections[1].get_facecolor())[0]   # [0] is the context
+    assert np.allclose(members_fill, mcolors.to_rgba("#c0392b"))
+
+
 def test_region_map_scores_unflagged_members_by_metric_not_depth(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A member the screen didn't flag ("neighbour", not in `depths`) is coloured by the SAME
@@ -474,14 +497,10 @@ def test_compare_report_draws_matched_threshold_guide_lines(
     assert any("matched permeability" in lbl for lbl in legend_labels)
 
 
-def test_compare_report_without_permeability_rows_writes_nothing(tmp_path: Path) -> None:
-    # A results list with only "displacement" (no benefit metric) has no frontier to plot.
-    from reblock.budget import Curve
-    from reblock.compare import MethodCurve
+def test_compare_report_with_nothing_graded_writes_nothing(tmp_path: Path) -> None:
+    # A run whose screen selected no region grades nothing, so there is no frontier to plot.
     from reblock.emit import compare_report
-    curves = [MethodCurve("clearance", "B", "displacement", Curve([0.0, 100.0], [0.0, 0.42]),
-                          pct_paved=0.0, pct_displaced=0.0)]
-    compare_report(curves, tmp_path, method_order=["clearance"],
+    compare_report([], tmp_path, method_order=["clearance"],
                    matched_displacement=0.10, matched_permeability=0.60, frontier_xmax=0.40)
     assert list(tmp_path.iterdir()) == []
 

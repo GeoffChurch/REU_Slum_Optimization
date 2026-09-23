@@ -16,6 +16,14 @@ class _Datum:
         return self.tag
 
 
+class _Uncacheable:
+    """What a synthetic block or a live source is: an input that answers `identity` with None."""
+
+    @property
+    def identity(self) -> None:
+        return None
+
+
 class _NoIdentity:
     pass
 
@@ -63,16 +71,23 @@ def test_distinct_identity_is_distinct_key() -> None:
     assert box["n"] == 2
 
 
-def test_missing_identity_bypasses_cache(tmp_path: Path) -> None:
+def test_none_identity_bypasses_cache(tmp_path: Path) -> None:
     box = {"n": 0}
 
-    def fn(x: _NoIdentity) -> int:
+    def fn(x: _Uncacheable) -> int:
         box["n"] += 1
         return 42
-    dg.derive(fn, _NoIdentity())
-    dg.derive(fn, _NoIdentity())     # no identity -> never cached
+    dg.derive(fn, _Uncacheable())
+    dg.derive(fn, _Uncacheable())    # identity None -> never cached
     assert box["n"] == 2
     assert not dg._L1                 # nothing stored in L1
+
+
+def test_an_input_that_declares_no_identity_is_an_error() -> None:
+    """Every input `derive` receives declares `identity`, so one that does not is a bug in the
+    caller -- not an uncacheable input to recompute quietly, forever, while looking cached."""
+    with pytest.raises(AttributeError, match="identity"):
+        dg.derive(lambda x: x, _NoIdentity())     # type: ignore[arg-type]
 
 
 def test_version_bump_forces_a_miss(monkeypatch: pytest.MonkeyPatch) -> None:

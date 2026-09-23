@@ -31,6 +31,7 @@ from shapely.ops import nearest_points, unary_union
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive_graph import config_identity
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
@@ -234,17 +235,6 @@ def _drainage(
     return gdf, params
 
 
-@dataclass(frozen=True)
-class ClearanceIdentity:
-    """Cache-key identity for ClearanceReblocker. The dataclass type discriminates the method (no
-    string tag). `substrate` holds the child substrate's own identity verbatim (whatever it
-    returns -- a tuple today); frozen -> hashable, usable as an L1 dict key and joblib-picklable."""
-    substrate: Hashable            # the nested Substrate.identity (not converted in this pass)
-    repulsion: float
-    depth_target: int
-    max_roads: int
-
-
 @dataclass
 class ClearanceReblocker:
     """Greedy least-cost-path reblocker on a pluggable routing substrate (default chord_diag,
@@ -260,15 +250,8 @@ class ClearanceReblocker:
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
-    def identity(self) -> ClearanceIdentity | None:
-        # An uncacheable substrate (PrebuiltSubstrate: identity None) makes the whole method
-        # uncacheable -- propagate the None up so derive() bypasses the memoized propose, else two
-        # different ad-hoc graphs would key-collide in the access_after/geometric_after caches.
-        if self.substrate.identity is None:
-            return None
-        return ClearanceIdentity(
-            substrate=self.substrate.identity, repulsion=float(self.repulsion),
-            depth_target=int(self.depth_target), max_roads=int(self.max_roads))
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; the routing is block-only

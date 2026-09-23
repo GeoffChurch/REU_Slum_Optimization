@@ -14,7 +14,8 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
-from reblock.contracts import CountingScreen, Eval, Method, Screen, Source
+from reblock.contracts import CountingScreen, Eval, Method, ScoringScreen, Screen, Source
+from reblock.data.kblock import KblockSource
 from reblock.emit import flagged_map, region_map, render_results
 from reblock.pipeline import PipelineSpec, run
 from reblock.region import RegionBuilder
@@ -66,18 +67,17 @@ def main(cfg: DictConfig) -> None:
     if cfg.render.enabled:
         render_results(output.results, out_dir, cfg.render, spec.source)
     if cfg.flagged_map.enabled:
-        blocks_path = getattr(spec.source, "blocks_path", None)
-        if blocks_path is None:
+        if isinstance(spec.source, KblockSource):
+            flagged_map(str(spec.source.blocks_path), output.selection or [], out_dir)
+        else:
             log.warning("flagged_map: source %s has no blocks_path; skipping",
                         type(spec.source).__name__)
-        else:
-            flagged_map(str(blocks_path), output.selection or [], out_dir)
     if cfg.region_map.enabled:
-        sc = getattr(spec.screen, "selection_scores", None)
-        scores = sc(spec.source) if sc is not None else None
-        m = getattr(spec.screen, "metric", None)
+        scoring = spec.screen if isinstance(spec.screen, ScoringScreen) else None
+        m = scoring.metric if scoring is not None else None
         region_map(spec.source, output.regions, output.seed_groups, out_dir,
-                   selection=output.selection, depths=scores,
+                   selection=output.selection,
+                   depths=scoring.selection_scores(spec.source) if scoring is not None else None,
                    metric_name=m.name if m is not None else "score", metric=m,
                    counts=spec.screen.counts if isinstance(spec.screen, CountingScreen) else None)
 

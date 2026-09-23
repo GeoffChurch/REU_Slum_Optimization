@@ -56,6 +56,7 @@ from shapely.ops import nearest_points, unary_union
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive_graph import config_identity
 from reblock.methods.loop_closure import loop_candidates
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import (
@@ -148,17 +149,6 @@ def linearized_gain(
     return gain
 
 
-@dataclass(frozen=True)
-class ResistanceGreedyIdentity:
-    substrate: Hashable
-    max_roads: int
-    sample_size: int
-    min_gain_per_m: float
-    seed: int
-    loop_radius_m: float
-    min_loop_len_m: float
-
-
 @dataclass
 class ResistanceGreedyReblocker:
     """Greedily add the road with the best permeability gain per metre."""
@@ -186,14 +176,8 @@ class ResistanceGreedyReblocker:
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
-    def identity(self) -> ResistanceGreedyIdentity | None:
-        if self.substrate.identity is None:
-            return None
-        return ResistanceGreedyIdentity(
-            substrate=self.substrate.identity, max_roads=int(self.max_roads),
-            sample_size=int(self.shortlist), min_gain_per_m=float(self.min_gain_per_m),
-            seed=int(self.seed), loop_radius_m=float(self.loop_radius_m),
-            min_loop_len_m=float(self.min_loop_len_m))
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior

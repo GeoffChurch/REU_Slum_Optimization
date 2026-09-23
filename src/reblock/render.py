@@ -49,7 +49,7 @@ _CONTEXT_OUTLINE = "#dddddd"
 _CONTEXT_PT = "#c9c9c9"
 _OWN_PT = "#333333"
 _DISPLACED_PT = "#c0392b"
-_POINT_RADIUS_M = 2.0   # geographic radius (m) of a building/parcel point marker (x sqrt(weight))
+_POINT_RADIUS_M = 2.0   # geographic radius (m) of a building/parcel point marker
 
 # Line weights and the corridor's alpha, named rather than inline at the call sites for the reason
 # `render_field`'s docstring already gives about `_DISPLACED_PT`: a named constant is a thing a bake
@@ -111,16 +111,11 @@ def _parcels_with_layer(block: Block, layers: pd.Series) -> gpd.GeoDataFrame:
     return parcels
 
 
-def _point_disks(points: gpd.GeoDataFrame, radius_m: float | None = None) -> gpd.GeoDataFrame:
-    """Points as geographic-size disks, so markers scale with the map extent -- a dense region no
-    longer collapses into a screen-size (matplotlib `markersize`) thicket the way fixed-point
-    markers do. If a `weight` column is present, each disk's radius is `radius_m` scaled by
-    sqrt(weight) so its AREA is proportional to the weight; else all disks share `radius_m`."""
-    if "weight" in points.columns:
-        radii = (radius_m or 0.0) * (points["weight"].to_numpy() ** 0.5)
-    else:
-        radii = radius_m or 0.0
-    return gpd.GeoDataFrame(geometry=points.geometry.buffer(radii), crs=points.crs)
+def _point_disks(points: gpd.GeoDataFrame, radius_m: float) -> gpd.GeoDataFrame:
+    """Points as geographic-size disks of `radius_m`, so markers scale with the map extent -- a
+    dense region no longer collapses into a screen-size (matplotlib `markersize`) thicket the way
+    fixed-point markers do."""
+    return gpd.GeoDataFrame(geometry=points.geometry.buffer(radius_m), crs=points.crs)
 
 
 def _building_marks(buildings: gpd.GeoSeries) -> gpd.GeoSeries:

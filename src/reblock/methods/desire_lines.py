@@ -44,10 +44,20 @@ def _parse_overpass_geom(payload: dict[str, Any], target_crs: CRS) -> gpd.GeoDat
     """Overpass `out geom` JSON -> a GeoDataFrame of LineStrings in `target_crs`. Each `way` carries
     `geometry: [{lat, lon}, ...]`; ways with < 2 nodes are dropped, as are ways with
     `geometry: null` (nodes weren't downloaded). Coordinates are (lon, lat) = (x, y) in
-    EPSG:4326, then reprojected to `target_crs`."""
+    EPSG:4326, then reprojected to `target_crs`.
+
+    Raises on a failed query rather than returning what it got: whatever this returns is cached to
+    disk as the region's footpaths, for good."""
+    # Overpass reports a failed query -- a timeout, running out of memory -- as an ordinary
+    # response whose optional `remark` says so, carrying whatever elements it had reached.
+    remark = payload.get("remark")
+    if remark is not None and "error" in remark:
+        raise RuntimeError(f"Overpass query failed: {remark}")
     lines: list[LineString] = []
-    for el in payload.get("elements", []):
-        if el.get("type") != "way":
+    # Indexed: every Overpass response carries `elements` and every element its `type`. A default
+    # would read a payload that is not one as "no footpaths here".
+    for el in payload["elements"]:
+        if el["type"] != "way":
             continue
         coords = [(p["lon"], p["lat"]) for p in el.get("geometry") or []]
         if len(coords) < 2:

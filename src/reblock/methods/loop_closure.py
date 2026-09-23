@@ -23,6 +23,7 @@ from reblock.budget import _explode_segments, _noded_graph
 from reblock.contracts import Block, Method, Proposal
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
+from reblock.derive_graph import config_identity
 from reblock.methods.arterial.primitives import _snap_graph
 from reblock.methods.arterial.realize import _snap
 from reblock.methods.boundary_graph import _boundary_graph
@@ -210,21 +211,6 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
     return out
 
 
-@dataclass(frozen=True)
-class LoopClosureIdentity:
-    """Cache-key identity for LoopClosureRefiner. The dataclass type discriminates the refiner (no
-    string tag). `base` holds the wrapped base method's own identity verbatim (whatever it returns);
-    frozen -> hashable, usable as an L1 dict key and joblib-picklable."""
-    base: Hashable                 # the nested base Method.identity (not converted in this pass)
-    budget_frac: float
-    min_bridges_per_m: float
-    max_loops: int
-    min_loop_len_m: float
-    search_radius_m: float
-    snap_lam: float
-    max_candidates: int | None
-
-
 @dataclass
 class LoopClosureRefiner:
     """Method wrapper composing `loop_candidates` + `greedy_close_loops` behind the `Method.propose`
@@ -272,18 +258,8 @@ class LoopClosureRefiner:
     # 60 (see scripts/gen_multiblock_example.py).
 
     @property
-    def identity(self) -> LoopClosureIdentity | None:
-        # An uncacheable base (identity None) makes the whole refiner uncacheable -- propagate the
-        # None up so derive() bypasses the memoized propose, matching ClearanceReblocker's
-        # uncacheable-substrate handling.
-        bid = getattr(self.base, "identity", None)
-        if bid is None:
-            return None
-        return LoopClosureIdentity(
-            base=bid, budget_frac=self.budget_frac, min_bridges_per_m=self.min_bridges_per_m,
-            max_loops=self.max_loops, min_loop_len_m=self.min_loop_len_m,
-            search_radius_m=self.search_radius_m, snap_lam=self.snap_lam,
-            max_candidates=self.max_candidates)
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         # `prior`, when given, IS the base proposal to refine -- skip recomputing/re-fetching it

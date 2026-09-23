@@ -148,7 +148,9 @@ def test_proposal_carries_block_identity() -> None:
 
 
 def test_identity_is_stable_per_params() -> None:
-    assert TopologyMethod(alpha=2.0, seed=0).identity == ("topology", 2.0, 0)
+    assert TopologyMethod(alpha=2.0, seed=0).identity == TopologyMethod(alpha=2.0, seed=0).identity
+    assert TopologyMethod(alpha=2.0, seed=0).identity != TopologyMethod(alpha=2.0, seed=1).identity
+    assert TopologyMethod(alpha=2.0, seed=0).identity != TopologyMethod(alpha=3.0, seed=0).identity
 
 
 def test_propose_does_not_perturb_global_rng() -> None:

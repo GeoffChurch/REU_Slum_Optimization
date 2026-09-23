@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from collections.abc import Hashable
 from dataclasses import dataclass
 
 import geopandas as gpd
@@ -53,6 +54,7 @@ from shapely.ops import substring
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive_graph import config_identity
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 # `follow_parcels` density raster cell size, as a multiple of the block's own parcel-spacing scale
@@ -425,20 +427,8 @@ class EuclideanGridReblocker:
         return float(self.fine_spacing)
 
     @property
-    def identity(self) -> tuple[str | float | bool, ...]:
-        # A None hug/bridge distance is encoded as "auto", not a number: its resolved value depends
-        # on the block, so all "auto" configs share one identity (blocks are keyed separately) while
-        # an explicit override keys distinctly.
-        def _override(v: float | None) -> float | str:
-            return float(v) if v is not None else "auto"
-        return ("euclidean_grid", float(self.spacing), float(self.angle),
-                float(self.min_seg_len), float(self.street_buffer), bool(self.seek_density),
-                bool(self.adaptive), self.effective_fine_spacing,
-                float(self.density_threshold_percentile),
-                _override(self.parcel_hug_buffer), _override(self.parcel_bridge_gap),
-                bool(self.follow_parcels), float(self.follow_min_coverage),
-                float(self.follow_max_coverage), float(self.follow_density_gamma),
-                _override(self.follow_min_component))
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; the grid overlay is block-only

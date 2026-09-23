@@ -66,7 +66,11 @@ def test_compare_report_writes_frontier(tmp_path: Path) -> None:
     results = [
         MethodCurve("clearance", "b1", "permeability", Curve([0.0, 1.0], [0.0, 0.9]),
                     pct_paved=0.0, pct_displaced=0.0),
+        MethodCurve("clearance", "b1", "displacement", Curve([0.0, 1.0], [0.0, 0.1]),
+                    pct_paved=0.0, pct_displaced=0.0),
         MethodCurve("topology", "b1", "permeability", Curve([0.0, 2.0], [0.0, 0.9]),
+                    pct_paved=0.0, pct_displaced=0.0),
+        MethodCurve("topology", "b1", "displacement", Curve([0.0, 2.0], [0.0, 0.2]),
                     pct_paved=0.0, pct_displaced=0.0),
     ]
     compare_report(results, tmp_path, method_order=["clearance", "topology"],
@@ -79,18 +83,42 @@ def test_frontier_csv_has_displacement_and_permeability_samples(tmp_path: Path) 
     from reblock.budget import Curve
     from reblock.compare import MethodCurve
     from reblock.emit import compare_report
-    c = Curve(cost=[0.0, 100.0], benefit=[0.0, 0.8])
-    mc = MethodCurve("clearance", "B1", "permeability", c, pct_paved=0.041, pct_displaced=0.0)
-    compare_report([mc], tmp_path, method_order=["clearance"],
+    perm = MethodCurve("clearance", "B1", "permeability",
+                       Curve(cost=[0.0, 100.0], benefit=[0.0, 0.8]),
+                       pct_paved=0.041, pct_displaced=0.03)
+    disp = MethodCurve("clearance", "B1", "displacement",
+                       Curve(cost=[0.0, 100.0], benefit=[0.0, 0.03]),
+                       pct_paved=0.041, pct_displaced=0.03)
+    compare_report([perm, disp], tmp_path, method_order=["clearance"],
                    matched_displacement=0.10, matched_permeability=0.60, frontier_xmax=0.40)
     with (tmp_path / "frontier_permeability.csv").open(newline="") as f:
         rows = list(csv.DictReader(f))
     assert set(rows[0].keys()) == {"method", "block", "displacement", "permeability"}
     # both sampled frontier points are present, in curve order (permeability is %.6g -- see
-    # emit.py -- so small ratio values don't round to 0); no displacement row was supplied, so the
-    # x-axis falls back to the permeability curve's own cost (cumulative road length).
+    # emit.py -- so small ratio values don't round to 0), each at its displacement twin's x.
     assert [(r["displacement"], r["permeability"]) for r in rows] == [
-        ("0.0000", "0"), ("100.0000", "0.8")]
+        ("0.0000", "0"), ("0.0300", "0.8")]
+
+
+def test_a_permeability_curve_without_its_displacement_twin_is_an_error(tmp_path: Path) -> None:
+    """The frontier's x-axis IS the displacement curve. Without one, the curve used to be drawn
+    against its own road length -- metres, on an axis labelled and percent-formatted as
+    displacement. Neither caller can produce that, so it is a bug to surface, not a case to draw."""
+    import pytest
+
+    from reblock.budget import Curve
+    from reblock.compare import MethodCurve
+    from reblock.emit import compare_report
+    def curve(method: str, metric: str, benefit: list[float]) -> MethodCurve:
+        return MethodCurve(method, "B1", metric, Curve(cost=[0.0, 100.0], benefit=benefit),
+                           pct_paved=0.041, pct_displaced=0.03)
+    # topology is complete; clearance's permeability curve has no displacement twin
+    results = [curve("topology", "permeability", [0.0, 0.7]),
+               curve("topology", "displacement", [0.0, 0.02]),
+               curve("clearance", "permeability", [0.0, 0.8])]
+    with pytest.raises(KeyError, match="clearance"):
+        compare_report(results, tmp_path, method_order=["clearance", "topology"],
+                       matched_displacement=0.10, matched_permeability=0.60, frontier_xmax=0.40)
 
 
 def test_compare_method_sweep_expands_over_param_values(tmp_path: Path) -> None:

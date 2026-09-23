@@ -44,7 +44,7 @@ from reblock.budget import prefix_to_displacement
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.eval.access_burden import burden
-from reblock.methods.arterial import SnapToBoundary
+from reblock.methods.arterial import Access, Displacement, SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.shortlist import FirstOrder
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, permeability
@@ -74,8 +74,8 @@ def main() -> None:
         for cap in CAPS:
             per_step: list[int] = []
             t0 = time.perf_counter()
-            r = _greedy_shortlist(b, realizer=SnapToBoundary(), objective="access",
-                                  cost="displacement",
+            r = _greedy_shortlist(b, realizer=SnapToBoundary(), objective=Access(),
+                                  cost=Displacement(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
                                   max_roads=MAX_ROADS, max_anchors=cap, selector=FirstOrder(K),
                                   on_step=lambda s, c, nr, acc=per_step: acc.append(c))

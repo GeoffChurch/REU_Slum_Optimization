@@ -10,6 +10,7 @@ import networkx as nx
 import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry.base import BaseMultipartGeometry
 
 from reblock.budget import _rnd
 from reblock.buildings import SpacingDiscs
@@ -42,7 +43,7 @@ def _block(nx_: int = 7, ny: int = 7, step: float = 10.0) -> Block:
 def _road_graph(block: Block, roads: gpd.GeoDataFrame) -> nx.Graph:
     from shapely.ops import unary_union
     noded = unary_union([*roads.geometry, *block.streets.geometry])
-    pieces = list(noded.geoms) if hasattr(noded, "geoms") else [noded]
+    pieces = list(noded.geoms) if isinstance(noded, BaseMultipartGeometry) else [noded]
     g: nx.Graph = nx.Graph()
     for piece in pieces:
         cs = list(piece.coords)

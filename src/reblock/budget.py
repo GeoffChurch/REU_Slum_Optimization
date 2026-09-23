@@ -23,7 +23,7 @@ from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 from shapely import STRtree
 from shapely.geometry import LineString, Point
-from shapely.geometry.base import BaseGeometry
+from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.ops import unary_union
 
 from reblock.buildings import Extents
@@ -128,6 +128,13 @@ class _RoadNet:
         return cast(dict[_Node, float], d), cast(dict[_Node, list[_Node]], p)
 
 
+def _crossing_points(hit: BaseGeometry) -> list[Point]:
+    """Where two segments that intersect cross: the point(s) of `hit`, their intersection. A
+    collinear overlap is a LineString and crosses nowhere, so it contributes no point."""
+    parts = list(hit.geoms) if isinstance(hit, BaseMultipartGeometry) else [hit]
+    return [p for p in parts if isinstance(p, Point)]
+
+
 def _road_net(block: Block, roads: GeoDataFrame, tol: float) -> _RoadNet:
     """Build the planarized graph. See `_RoadNet` for what it is and why the two consumers share it.
 
@@ -144,7 +151,8 @@ def _road_net(block: Block, roads: GeoDataFrame, tol: float) -> _RoadNet:
     segs: list[LineString] = []
     seg_row: list[int] = []
     for i, geom in enumerate(roads.geometry):
-        parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]   # explode Multi*
+        # explode Multi*
+        parts = list(geom.geoms) if isinstance(geom, BaseMultipartGeometry) else [geom]
         for part in parts:
             cs = list(part.coords)
             for a, b in zip(cs, cs[1:], strict=False):
@@ -182,9 +190,7 @@ def _road_net(block: Block, roads: GeoDataFrame, tol: float) -> _RoadNet:
         for j in tree.query(ln, predicate="intersects"):
             if seg_row[j] == i:
                 continue
-            hit = ln.intersection(segs[j])
-            pts = [hit] if isinstance(hit, Point) else list(getattr(hit, "geoms", []))
-            cuts += [ln.project(pt) for pt in pts if isinstance(pt, Point)]
+            cuts += [ln.project(pt) for pt in _crossing_points(ln.intersection(segs[j]))]
         nodes = [node_of(ln.coords[0])]
         for m in sorted({c for c in cuts if 0.0 < c < ln.length}):
             cut = ln.interpolate(m)
@@ -328,7 +334,7 @@ def _explode_segments(geoms: Iterable[BaseGeometry]) -> list[_Pair]:
     for geom in geoms:
         if geom is None:
             continue
-        parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
+        parts = list(geom.geoms) if isinstance(geom, BaseMultipartGeometry) else [geom]
         for part in parts:
             cs = list(part.coords)
             for a, b in zip(cs, cs[1:], strict=False):
@@ -374,9 +380,7 @@ def _node_pairs(road_segs: list[_Pair], street_segs: list[_Pair]
         for j in tree.query(ln, predicate="intersects"):
             if int(j) == k:
                 continue
-            hit = ln.intersection(lines[int(j)])
-            pts = [hit] if isinstance(hit, Point) else list(getattr(hit, "geoms", []))
-            cuts += [ln.project(pt) for pt in pts if isinstance(pt, Point)]
+            cuts += [ln.project(pt) for pt in _crossing_points(ln.intersection(lines[int(j)]))]
         nodes = [_rnd(ln.coords[0])]
         for m in sorted({c for c in cuts if 0.0 < c < ln.length}):
             cut = ln.interpolate(m)
@@ -585,7 +589,7 @@ class _StepContext:
     `unary_union(committed + [real])` (the incremental-planarize noding diverges within `_rnd`
     rounding -- design "Bug 2"), so the greedy routes aspirational candidates through the full
     `ctx.score(_planarize(committed + [real]))` reference path instead (see
-    `arterial._greedy_arterials`); `score_candidate` is used only for buildable.
+    `arterial.objectives._MetricBlock.at_step`); `score_candidate` is used only for buildable.
 
     The step's per-parcel base freezes, for each parcel, ALL streets∪committed edges within `tol`,
     each as `(edge pair, parcel->edge distance, projection-along-edge, entry node)`. The final entry
@@ -645,7 +649,7 @@ class _StepContext:
             return 0.0, 0.0
         merged = (unary_union([self.base_merged, real]) if self.base_merged is not None
                   else unary_union([real]))
-        road_parts = list(merged.geoms) if hasattr(merged, "geoms") else [merged]
+        road_parts = list(merged.geoms) if isinstance(merged, BaseMultipartGeometry) else [merged]
         road_segs = _explode_segments(road_parts)
         road_segs, street_segs = _node_pairs(road_segs, ctx.street_segs)
         full_pairs = _edges_in_nx_order(road_segs, street_segs)

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import cast
 
 import geopandas as gpd
@@ -5,19 +6,27 @@ import networkx as nx
 import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
+from shapely.geometry.base import BaseMultipartGeometry
 from shapely.ops import unary_union
 
 from reblock.budget import displacement, road_corridor
 from reblock.buildings import Discs, SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, street_connectivity
+from reblock.derive.access import STREET_TOL, parcel_access_layers, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import ArterialIdentity, GreedyArterialReblocker, engines
+from reblock.methods.arterial import (
+    Access,
+    Directness,
+    Displacement,
+    GreedyArterialReblocker,
+    Length,
+    Repulsion,
+    engines,
+)
 from reblock.methods.arterial.engines import (
     ExactEngine,
     LazyEngine,
     ShortlistEngine,
-    ShortlistIdentity,
     _greedy_arterials,
 )
 from reblock.methods.arterial.policies import Fixed
@@ -172,7 +181,7 @@ def test_arterial_serial_refactor_identical() -> None:
         "buildable": SnapToBoundary(), "aspirational": IdealChord()}
     block = _grid_block(3)
     for name, want in expected.items():
-        roads = GreedyArterialReblocker(realizer=realizers[name], objective="directness",
+        roads = GreedyArterialReblocker(realizer=realizers[name], objective=Directness(),
                                         n_anchors=6).propose(block).roads
         assert roads is not None
         assert sorted(g.wkt for g in roads.geometry) == want
@@ -255,7 +264,7 @@ def test_arterial_parallel_soak(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
     block = _grid_block(3)
     for _ in range(30):
-        roads = GreedyArterialReblocker(objective="directness", n_anchors=6,
+        roads = GreedyArterialReblocker(objective=Directness(), n_anchors=6,
                                         workers=16).propose(block).roads
         assert roads is not None
         assert len(roads) > 0
@@ -289,7 +298,7 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
                   building_tier=SpacingDiscs)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(), objective="directness", max_roads=3,
+        realizer=SnapToBoundary(), objective=Directness(), cost=Length(), max_roads=3,
                               n_anchors=12)
     assert len(roads) >= 1
     # The property is a SPANNING arterial, and the network is what has to span -- not any single
@@ -299,7 +308,7 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
     # component, and a lengthwise span of at least 6.
     u = unary_union(list(roads.geometry))
     g: nx.Graph = nx.Graph()
-    for ln in (list(u.geoms) if hasattr(u, "geoms") else [u]):
+    for ln in (list(u.geoms) if isinstance(u, BaseMultipartGeometry) else [u]):
         cs = list(ln.coords)
         for a, b in zip(cs, cs[1:], strict=False):
             g.add_edge(a, b)
@@ -315,11 +324,11 @@ def test_greedy_is_deterministic() -> None:
     block = _grid_block(5)
     r1 = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(), objective="directness", max_roads=4,
+        realizer=SnapToBoundary(), objective=Directness(), cost=Length(), max_roads=4,
                            n_anchors=12)
     r2 = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(), objective="directness", max_roads=4,
+        realizer=SnapToBoundary(), objective=Directness(), cost=Length(), max_roads=4,
                            n_anchors=12)
     assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
 
@@ -330,7 +339,7 @@ def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     block = _grid_block(6)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(), objective="directness",
+        realizer=SnapToBoundary(), objective=Directness(), cost=Length(),
                               max_roads=5, n_anchors=12)
     assert len(roads) >= 1
     assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
@@ -346,7 +355,7 @@ def test_arterial_proposal_wkt_unchanged() -> None:
     # incremental union are perf-only changes; any drift here means a path or noding decision
     # actually changed.
     from scoring_fixtures import _REF, _block_1808
-    roads = GreedyArterialReblocker(realizer=SnapToBoundary(), objective="directness").propose(
+    roads = GreedyArterialReblocker(realizer=SnapToBoundary(), objective=Directness()).propose(
         _block_1808()).roads
     assert roads is not None
     assert sorted(g.wkt for g in roads.geometry) == sorted(_REF["arterial_buildable"]["wkt"])
@@ -356,7 +365,7 @@ def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
     block = _grid_block(6)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=IdealChord(), objective="directness", max_roads=6,
+        realizer=IdealChord(), objective=Directness(), cost=Length(), max_roads=6,
                               n_anchors=12)
     # Build the road+street graph as a CSR (the nx-free scoring path's own builders) and read
     # node degree off the CSR's per-row nnz -- a real crossroads noded by `_planarize` shows up
@@ -372,10 +381,10 @@ def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
 
 
 def test_identity_and_proposal_metadata() -> None:
-    m = GreedyArterialReblocker(objective="directness")
-    assert m.identity == ArterialIdentity(
-        realizer=SnapToBoundary(), objective="directness", cost="length", corridor_key=0.0,
-        max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
+    m = GreedyArterialReblocker(objective=Directness())
+    assert m.identity == GreedyArterialReblocker(
+        realizer=SnapToBoundary(), objective=Directness(), cost=Length(), road_width_m=7.0,
+        max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0).identity
     # max_roads / n_anchors / top_k change the proposed roads -> must change the cache key,
     # else a budget/candidate sweep silently returns another setting's cached proposal.
     assert GreedyArterialReblocker(max_roads=3).identity != m.identity
@@ -388,19 +397,51 @@ def test_identity_and_proposal_metadata() -> None:
     assert (GreedyArterialReblocker(engine=LazyEngine(rescore_every=2)).identity
             != GreedyArterialReblocker(engine=LazyEngine()).identity)
     assert GreedyArterialReblocker(max_anchors=48).identity != m.identity
-    proposal = GreedyArterialReblocker(objective="directness").propose(_grid_block(5))
+    proposal = GreedyArterialReblocker(objective=Directness()).propose(_grid_block(5))
     assert proposal.block_identity == _grid_block(5).identity
+
+
+def test_road_width_splits_the_cache_key_under_every_cost() -> None:
+    """Every road the arterial emits carries `width_m`, and permeability and displacement both read
+    it -- so width changes the PROPOSAL under every cost, not only the costs that price a corridor.
+    Keying width only for displacement/repulsion let a length-cost width sweep get the first
+    width's cached roads back, stamped with the first width."""
+    from reblock.derivations import propose
+    block = replace(_grid_block(3), source_content_hash="width-splits-the-key")
+    narrow = GreedyArterialReblocker(objective=Directness(), n_anchors=6, road_width_m=7.0)
+    wide = replace(narrow, road_width_m=9.0)
+    assert narrow.identity != wide.identity
+    assert propose(narrow, block).roads is not None
+    roads = propose(wide, block).roads
+    assert roads is not None and len(roads) > 0
+    assert set(roads["width_m"]) == {9.0}
+
+
+def test_proposal_identity_distinguishes_configurations_on_one_block() -> None:
+    """`Proposal.identity` keys the eval caches (`access_after`, `geometric_after`), so two configs
+    that propose different roads on one block must not share it. The id used to encode only the
+    realizer and objective, so a budget or cost variant was scored with the other's depths."""
+    from reblock.derivations import access_after
+    block = replace(_grid_block(5), source_content_hash="pid-splits-the-key")
+    one = GreedyArterialReblocker(objective=Directness(), n_anchors=6, max_roads=1).propose(block)
+    three = GreedyArterialReblocker(objective=Directness(), n_anchors=6,
+                                    max_roads=3).propose(block)
+    assert one.roads is not None and three.roads is not None
+    assert len(one.roads) != len(three.roads)                  # precondition: different roads
+    assert one.identity != three.identity
+    access_after(block, one)
+    assert access_after(block, three).equals(parcel_access_layers(block, three.roads))
 
 
 def test_lam_does_not_enter_identity_for_the_aspirational_realizer() -> None:
     """IdealChord never snaps, so lam cannot affect its roads. Two such configs must share a
     cache key. Before this they did not, and recomputed identical output under distinct keys."""
-    a = GreedyArterialReblocker(objective="directness", realizer=IdealChord())
-    b = GreedyArterialReblocker(objective="directness", realizer=IdealChord())
+    a = GreedyArterialReblocker(objective=Directness(), realizer=IdealChord())
+    b = GreedyArterialReblocker(objective=Directness(), realizer=IdealChord())
     assert a.identity == b.identity
     # and the snapping realizer's lam MUST still discriminate
-    c = GreedyArterialReblocker(objective="directness", realizer=SnapToBoundary(lam=2.0))
-    d = GreedyArterialReblocker(objective="directness", realizer=SnapToBoundary(lam=9.0))
+    c = GreedyArterialReblocker(objective=Directness(), realizer=SnapToBoundary(lam=2.0))
+    d = GreedyArterialReblocker(objective=Directness(), realizer=SnapToBoundary(lam=9.0))
     assert c.identity != d.identity
 
 
@@ -411,7 +452,7 @@ def test_both_realizers_produce_roads() -> None:
     block = _two_arm_block(pts)
     for realizer in (SnapToBoundary(), IdealChord()):
         proposal = GreedyArterialReblocker(
-            objective="directness", max_roads=1, realizer=realizer).propose(block)
+            objective=Directness(), max_roads=1, realizer=realizer).propose(block)
         assert proposal.roads is not None and len(proposal.roads) >= 1
         assert proposal.params["realizer"] == type(realizer).__name__
 
@@ -439,9 +480,9 @@ def test_config_and_derivation_wiring() -> None:
     # engine: {_target_: ...LazyEngine} -- a pre-existing golden/config mismatch (this assertion
     # previously asserted ExactEngine) found and fixed incidentally while updating these tuples for
     # max_anchors; unrelated to the anchor-cap feature itself.
-    assert m.identity == ArterialIdentity(
-        realizer=SnapToBoundary(), objective="directness", cost="length", corridor_key=0.0,
-        max_roads=15, n_anchors=32, top_k=8, engine=LazyEngine(), max_anchors=0)
+    assert m.identity == GreedyArterialReblocker(
+        realizer=SnapToBoundary(), objective=Directness(), cost=Length(), road_width_m=7.0,
+        max_roads=15, n_anchors=32, top_k=8, engine=LazyEngine(), max_anchors=0).identity
 
 
 def test_displacement_config_instantiates_with_right_params_and_identity() -> None:
@@ -456,10 +497,10 @@ def test_displacement_config_instantiates_with_right_params_and_identity() -> No
                       overrides=["shapefile=x", "methods=[greedy_arterial_displacement]"])
     m = instantiate(cfg.all_methods["greedy_arterial_displacement"])
     assert isinstance(m.realizer, IdealChord)
-    assert (m.objective, m.cost, m.road_width_m) == ("directness", "displacement", 7.0)
-    assert m.identity == ArterialIdentity(
-        realizer=IdealChord(), objective="directness", cost="displacement", corridor_key=7.0,
-        max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
+    assert (m.objective, m.cost, m.road_width_m) == (Directness(), Displacement(), 7.0)
+    assert m.identity == GreedyArterialReblocker(
+        realizer=IdealChord(), objective=Directness(), cost=Displacement(), road_width_m=7.0,
+        max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0).identity
 
     # The standalone conf/method/greedy_arterial_displacement.yaml config group (config.yaml's
     # `method=` default group), separate from compare_config's inline `all_methods` entry above.
@@ -490,8 +531,10 @@ def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
     with initialize_config_dir(version_base=None, config_dir=conf_dir):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
 
-    for name, cost in (("greedy_arterial_access_repulsion", "repulsion"),
-                       ("greedy_arterial_access_displacement", "displacement")):
+    costs: tuple[tuple[str, Repulsion | Displacement], ...] = (
+        ("greedy_arterial_access_repulsion", Repulsion()),
+        ("greedy_arterial_access_displacement", Displacement()))
+    for name, cost in costs:
         m = instantiate(cfg.all_methods[name])
         assert isinstance(m.engine, ShortlistEngine), name
         assert isinstance(m.realizer, SnapToBoundary), name
@@ -500,10 +543,10 @@ def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
         # BOUND in every settlement region (terminal 0.5-2.6% displacement, short of P* in 3 of 6),
         # so Lens A was grading the cap rather than the method. Pinned here, like every other field
         # on this identity, so the next change to it is deliberate rather than drift.
-        assert m.identity == ArterialIdentity(
-            realizer=SnapToBoundary(), objective="access", cost=cost,
-            corridor_key=DEFAULT_ROAD_WIDTH_M, max_roads=60, n_anchors=32, top_k=8,
-            engine=ShortlistIdentity(k=512), max_anchors=128), name
+        assert m.identity == GreedyArterialReblocker(
+            realizer=SnapToBoundary(), objective=Access(), cost=cost,
+            road_width_m=DEFAULT_ROAD_WIDTH_M, max_roads=60, n_anchors=32, top_k=8,
+            engine=ShortlistEngine(k=512), max_anchors=128).identity, name
 
     # Negative direction: the cap and ShortlistEngine are access-only. "Tidying" either onto a
     # directness method later (greedy_arterial_buildable is already pinned to engine=LazyEngine(),
@@ -552,16 +595,16 @@ def test_greedy_handles_multilinestring_streets() -> None:
     assert "Multi" in block.streets.geometry.iloc[0].geom_type    # precondition: streets ARE Multi
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(), objective="directness",
+        realizer=SnapToBoundary(), objective=Directness(), cost=Length(),
                               max_roads=3, n_anchors=12)
     assert len(roads) >= 1
 
 
 def test_cost_displacement_in_identity() -> None:
-    m = GreedyArterialReblocker(realizer=IdealChord(), objective="directness", cost="displacement")
-    assert m.identity == ArterialIdentity(
-        realizer=IdealChord(), objective="directness", cost="displacement", corridor_key=7.0,
-        max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0)
+    m = GreedyArterialReblocker(realizer=IdealChord(), objective=Directness(), cost=Displacement())
+    assert m.identity == GreedyArterialReblocker(
+        realizer=IdealChord(), objective=Directness(), cost=Displacement(), road_width_m=7.0,
+        max_roads=15, n_anchors=32, top_k=8, engine=ExactEngine(), max_anchors=0).identity
 
 
 def _two_arm_block(building_geometries: gpd.GeoDataFrame, h: int = 9, gap_x1: int = 10) -> Block:
@@ -586,10 +629,10 @@ def _two_arm_block(building_geometries: gpd.GeoDataFrame, h: int = 9, gap_x1: in
 
 
 def test_cost_displacement_avoids_the_denser_corridor() -> None:
-    # cost="displacement" must select differently from cost="length": dense building points along
+    # cost=Displacement() must select differently from cost=Length(): dense building points along
     # the LEFT arm, sparse (one, far-flung) on the RIGHT. The arms are length- and benefit-tied, so
-    # cost="length" is blind to the points (it falls to the wkt tie-break, landing on the LEFT arm);
-    # cost="displacement" steers away from the dense corridor to a road that displaces far fewer
+    # cost=Length() is blind to the points (it falls to the wkt tie-break, landing on the LEFT arm);
+    # cost=Displacement() steers away from the dense corridor to a road that displaces far fewer
     # buildings. NOTE the picked road is NOT a zero-displacement escape here -- under the OLD
     # centroid-count rule the greedy's optimum was a diagonal chord that grazed no CENTROID
     # (count=0, an infinite-gain "free" pick); but that diagonal passes through the lone sparse
@@ -603,10 +646,10 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
     pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
     block = _two_arm_block(pts)
 
-    roads_length = _greedy_arterials(block, realizer=IdealChord(), objective="access", max_roads=1,
-                                     n_anchors=8, top_k=2, half_width_m=1.0, cost="length")
-    roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective="access", max_roads=1,
-                                   n_anchors=8, top_k=2, half_width_m=1.0, cost="displacement")
+    roads_length = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
+                                     n_anchors=8, top_k=2, half_width_m=1.0, cost=Length())
+    roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
+                                   n_anchors=8, top_k=2, half_width_m=1.0, cost=Displacement())
 
     assert len(roads_length) == 1 and len(roads_disp) == 1
     # the cost switch changed WHICH road is proposed:
@@ -642,8 +685,8 @@ def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None
     # The FINITE-vs-FINITE case the greedy denominator exists for: every candidate here displaces
     # >0 buildings (points tile the whole block at half_width_m=1.0, so no free/zero-displacement
     # escape chord exists), so the pick is decided by the raw/denom comparison, NOT the inf branch.
-    # A heavy cluster sits astride the access-optimal corridor (x~2): cost="length" drives straight
-    # through it (many displaced); cost="displacement" must swerve to a sparser corridor that
+    # A heavy cluster sits astride the access-optimal corridor (x~2): cost=Length() drives straight
+    # through it (many displaced); cost=Displacement() must swerve to a sparser corridor that
     # displaces far fewer (disk measure) while giving up a little access benefit.
     base = [Point(i + 0.5, j + 0.5) for i in range(8) for j in range(3)]     # tile: no free chord
     cluster = [Point(2.0 + dx, 1.5 + dy) for dx in (-0.4, -0.2, 0.0, 0.2, 0.4)
@@ -651,10 +694,10 @@ def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None
     pts = gpd.GeoDataFrame(geometry=base + cluster, crs=UTM)
     block = _grid_block_with_points(pts)
 
-    roads_length = _greedy_arterials(block, realizer=IdealChord(), objective="access", max_roads=1,
-                                     n_anchors=10, top_k=4, half_width_m=1.0, cost="length")
-    roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective="access", max_roads=1,
-                                   n_anchors=10, top_k=4, half_width_m=1.0, cost="displacement")
+    roads_length = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
+                                     n_anchors=10, top_k=4, half_width_m=1.0, cost=Length())
+    roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
+                                   n_anchors=10, top_k=4, half_width_m=1.0, cost=Displacement())
     radii = SpacingDiscs(pts).radii
     d_length = displacement(Discs(pts, radii), roads_length)
     d_disp = displacement(Discs(pts, radii), roads_disp)
@@ -669,9 +712,9 @@ def test_cost_displacement_is_deterministic() -> None:
     right_pts = [Point(10.5, 4)]
     pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
     block = _two_arm_block(pts)
-    r1 = _greedy_arterials(block, realizer=IdealChord(), objective="access", cost="displacement",
+    r1 = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), cost=Displacement(),
                            max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0)
-    r2 = _greedy_arterials(block, realizer=IdealChord(), objective="access", cost="displacement",
+    r2 = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), cost=Displacement(),
                            max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0)
     assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
 
@@ -689,7 +732,7 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
     block = Block(block_id=plain.block_id, crs=plain.crs, boundary=plain.boundary,
                  parcels=plain.parcels, streets=plain.streets, building_geometries=far_points,
                  source_content_hash=None, building_tier=SpacingDiscs)
-    roads = _greedy_arterials(block, realizer=IdealChord(), objective="access", cost="displacement",
+    roads = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), cost=Displacement(),
                               max_roads=1, n_anchors=12, half_width_m=1.0)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 1.0                 # a real, non-degenerate candidate
@@ -721,21 +764,20 @@ def test_displacement_objective_is_extent_aware_unlike_the_old_centroid_rule() -
 
 
 def test_cost_repulsion_identity_and_valid_proposal() -> None:
-    # (i) cost="repulsion" is a cache key distinct from BOTH cost="length" and cost="displacement"
-    # (cost is a named field on ArterialIdentity).
-    rep = GreedyArterialReblocker(realizer=IdealChord(), objective="access", cost="repulsion")
-    length = GreedyArterialReblocker(realizer=IdealChord(), objective="access", cost="length")
-    disp = GreedyArterialReblocker(realizer=IdealChord(), objective="access", cost="displacement")
+    # (i) cost=Repulsion() is a cache key distinct from BOTH cost=Length() and cost=Displacement()
+    # (every field is in the derived key).
+    rep = GreedyArterialReblocker(realizer=IdealChord(), objective=Access(), cost=Repulsion())
+    length = GreedyArterialReblocker(realizer=IdealChord(), objective=Access(), cost=Length())
+    disp = GreedyArterialReblocker(realizer=IdealChord(), objective=Access(), cost=Displacement())
     assert rep.identity != length.identity
     assert rep.identity != disp.identity
-    assert rep.identity.cost == "repulsion"
     # (ii) it produces a valid (non-crashing) proposal on a small synthetic block with buildings.
     pts = gpd.GeoDataFrame(geometry=[Point(i + 0.5, j + 0.5) for i in range(8) for j in range(3)],
                            crs=UTM)
     block = _grid_block_with_points(pts)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=IdealChord(), objective="access", cost="repulsion",
+        realizer=IdealChord(), objective=Access(), cost=Repulsion(),
                               max_roads=1, n_anchors=8, top_k=4)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 0.0             # a real, non-degenerate committed road
@@ -767,7 +809,7 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
 
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(), objective="directness", cost="repulsion",
+        realizer=SnapToBoundary(), objective=Directness(), cost=Repulsion(),
                               max_roads=4, n_anchors=12)
     # (i) non-degeneracy: repulsion commits real, access-improving road(s) -- it reaches the
     # interior rather than building zero-benefit gap roads (a zero-benefit road has raw=0 -> gain=0

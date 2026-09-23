@@ -22,7 +22,6 @@ from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.methods.clearance import (
-    ClearanceIdentity,
     ClearanceReblocker,
     _edge_weights,
     _greedy_reblock,
@@ -31,11 +30,13 @@ from reblock.methods.clearance import (
     _sigmoid,
 )
 from reblock.methods.substrates import (
+    ChordSubstrate,
     GridSubstrate,
     PrebuiltSubstrate,
     RoutingGraph,
     _build_grid,
 )
+from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.block_fixtures import no_buildings
 
 
@@ -243,8 +244,8 @@ def test_propose_is_deterministic_and_leaves_rng_untouched() -> None:
 def test_propose_metadata_and_identity() -> None:
     m = ClearanceReblocker(substrate=GridSubstrate(res=0.75), repulsion=2.0,
                            depth_target=3, max_roads=50)
-    assert m.identity == ClearanceIdentity(
-        substrate=("grid", 0.75), repulsion=2.0, depth_target=3, max_roads=50)
+    assert m.identity != ClearanceReblocker(substrate=GridSubstrate(res=0.75), repulsion=2.0,
+                                            depth_target=3, max_roads=51).identity
     p = m.propose(_column_block_with_buildings(4))
     assert p.method == "clearance"
     assert p.proposal_id == "clearance:grid:r2:d3:mr50"
@@ -311,8 +312,9 @@ def test_clearance_method_yaml_instantiates_with_defaults() -> None:
         cfg = compose(config_name="config", overrides=["method=clearance"])
     method = instantiate(cfg.method)
     assert isinstance(method, ClearanceReblocker)
-    assert method.identity == ClearanceIdentity(
-        substrate=("chord_diag",), repulsion=0.0, depth_target=2, max_roads=400)
+    assert method.identity == ClearanceReblocker(
+        substrate=ChordSubstrate(), repulsion=0.0, depth_target=2, max_roads=400,
+        road_width_m=DEFAULT_ROAD_WIDTH_M).identity
 
 
 def test_clearance_registered_in_compare_all_methods() -> None:

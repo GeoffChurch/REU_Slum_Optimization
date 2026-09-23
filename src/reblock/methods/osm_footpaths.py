@@ -36,6 +36,7 @@ from shapely.ops import nearest_points, unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
+from reblock.derive_graph import config_identity
 from reblock.methods.desire_lines import DesireLineSource
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
@@ -131,12 +132,8 @@ class OsmFootpathsReblocker:
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
-    def identity(self) -> Hashable:
-        # Propagate an uncacheable (live) source up so the derivation cache bypasses -- else two
-        # different live OSM pulls would key-collide (mirrors clearance + PrebuiltSubstrate).
-        if self.source.identity is None:
-            return None
-        return ("osm_footpaths", self.source.identity, float(self.road_width_m))
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; routing is block-only

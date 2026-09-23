@@ -49,6 +49,7 @@ from shapely.geometry import LineString
 from shapely.ops import unary_union
 
 from reblock.contracts import Block, Proposal
+from reblock.derive_graph import config_identity
 from reblock.methods.substrates import ChordSubstrate, RoutingGraph, Substrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
@@ -140,17 +141,6 @@ def accumulate_flow(
     return flow
 
 
-@dataclass(frozen=True)
-class FlowPathsIdentity:
-    substrate: Hashable
-    destination: str
-    iterations: int
-    reinforcement: float
-    flow_quantile: float
-    max_sources: int
-    seed: int
-
-
 @dataclass
 class FlowPathsReblocker:
     """Keep the edges carrying the most traffic. `flow_quantile` is the hierarchy knob: a low cut
@@ -168,14 +158,8 @@ class FlowPathsReblocker:
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
-    def identity(self) -> FlowPathsIdentity | None:
-        if self.substrate.identity is None:
-            return None
-        return FlowPathsIdentity(
-            substrate=self.substrate.identity, destination=str(self.destination),
-            iterations=int(self.iterations), reinforcement=float(self.reinforcement),
-            flow_quantile=float(self.flow_quantile), max_sources=int(self.max_sources),
-            seed=int(self.seed))
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior

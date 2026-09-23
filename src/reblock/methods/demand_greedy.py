@@ -43,6 +43,7 @@ from shapely.geometry import Point
 from shapely.ops import unary_union
 
 from reblock.contracts import Block, Proposal
+from reblock.derive_graph import config_identity
 from reblock.methods.clearance import greedy_drainage
 from reblock.methods.desire_lines import DesireLineSource
 from reblock.methods.osm_footpaths import interior_desire_lines
@@ -94,21 +95,6 @@ def demand_edge_weights(
     return np.asarray(uw[order][np.searchsorted(ukey[order], key)], dtype=np.float64)
 
 
-@dataclass(frozen=True)
-class DemandGreedyIdentity:
-    """Cache-key identity. `demand` is the desire source's own identity, or None when the source
-    is live/uncacheable -- which propagates None upward exactly as ClearanceReblocker does for an
-    uncacheable substrate, so a live OSM fetch can never serve a stale memoized proposal."""
-
-    substrate: Hashable
-    demand: Hashable
-    buffer_m: float
-    eps: float
-    gamma: float
-    depth_target: int
-    max_roads: int
-
-
 @dataclass
 class DemandGreedyReblocker:
     """Greedy drainage tree whose routing is attracted to a desire-line demand field."""
@@ -125,19 +111,8 @@ class DemandGreedyReblocker:
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
-    def identity(self) -> DemandGreedyIdentity | None:
-        if self.substrate.identity is None:
-            return None
-        demand_id: Hashable = "uniform"
-        if self.desire_source is not None:
-            src_id = self.desire_source.identity
-            if src_id is None:                    # live fetch: uncacheable, propagate up
-                return None
-            demand_id = src_id
-        return DemandGreedyIdentity(
-            substrate=self.substrate.identity, demand=demand_id, buffer_m=float(self.buffer_m),
-            eps=float(self.eps), gamma=float(self.gamma), depth_target=int(self.depth_target),
-            max_roads=int(self.max_roads))
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def _demand(self, block: Block) -> gpd.GeoDataFrame:
         if self.desire_source is None:

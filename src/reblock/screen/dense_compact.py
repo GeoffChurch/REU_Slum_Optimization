@@ -125,8 +125,12 @@ def _compute_selection(inp: ScreenSelectionInput) -> list[tuple[str, float]]:
         depth_by = {b: mx for b, mx in                                      # {bid: max_depth}
                     _survivor_depths(survivors, inp.blocks_path, inp.buildings_path,
                                      inp.min_buildings)}
-        scores = {b: metric.fine(depth_by.get(b, 0.0), count[idx[b]], area[idx[b]], perim[idx[b]])
-                  for b in survivors}
+        # A survivor the fine pass could not build (too few buildings to tessellate, a non-Polygon
+        # dissolve) has no depth, so no score, so it cannot be flagged. A stand-in depth of 0 was
+        # still a score: a percentile gate kept it like any other, flagging a block that can never
+        # be reblocked.
+        scores = {b: metric.fine(depth_by[b], count[idx[b]], area[idx[b]], perim[idx[b]])
+                  for b in survivors if b in depth_by}
 
     kept = gate.keep(scores)
     ranked = sorted(((scores[b], b) for b in kept), key=lambda r: (-r[0], r[1]))

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Hashable
 from dataclasses import dataclass
 
 import geopandas as gpd
@@ -14,6 +15,7 @@ from topology import MyEdge, MyGraph, build_all_roads
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.parcel_graph import to_parcel_graph
+from reblock.derive_graph import config_identity
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 # The street-seam tolerance is shared with the BFS peel: both gate the same
@@ -71,8 +73,8 @@ class TopologyMethod:
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
-    def identity(self) -> tuple[str, float, int]:
-        return ("topology", self.alpha, self.seed)
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         ppg = to_parcel_graph(block)

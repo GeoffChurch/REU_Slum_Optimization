@@ -12,30 +12,17 @@ docs/superpowers/specs/2026-07-09-greedy-arterial-reblocker-design.md.
 """
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Hashable
 from dataclasses import dataclass
 
 from reblock.contracts import Block, Proposal
-from reblock.methods.arterial.engines import ArterialEngine, EngineIdentity, ExactEngine
-from reblock.methods.arterial.realize import ChordRealizer, RealizerIdentity, SnapToBoundary
+from reblock.derive_graph import config_identity
+from reblock.methods.arterial.costs import ArterialCost, Length
+from reblock.methods.arterial.engines import ArterialEngine, ExactEngine
+from reblock.methods.arterial.objectives import ArterialObjective, Directness
+from reblock.methods.arterial.realize import ChordRealizer, SnapToBoundary
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
-
-
-@dataclass(frozen=True)
-class ArterialIdentity:
-    """Cache-key identity for GreedyArterialReblocker: one named field per proposal-affecting
-    knob. The dataclass type itself discriminates the method (no string tag needed -- a frozen
-    dataclass compares type before fields, so this never equals another identity type). Frozen ->
-    hashable, so it works as an L1 dict key and pickles into the joblib L2 key."""
-    realizer: RealizerIdentity
-    objective: str
-    cost: str
-    # road_width_m when cost in {displacement, repulsion} else 0.0 -- DERIVED (see the property).
-    corridor_key: float
-    max_roads: int
-    n_anchors: int
-    top_k: int
-    engine: EngineIdentity
-    max_anchors: int
 
 
 @dataclass
@@ -45,13 +32,14 @@ class GreedyArterialReblocker:
     # frontage-snapping, NOT a universal directness ceiling -- see the design doc's correction
     # note).
     realizer: ChordRealizer = SnapToBoundary()
-    objective: str = "directness"    # "access" | "efficiency" | "directness"
+    # What a road gains -- Access, Efficiency or Directness (see objectives.py).
+    objective: ArterialObjective = Directness()
     n_anchors: int = 32
     top_k: int = 8
     max_roads: int = 15
-    # "length" (Delta-benefit/metre) | "displacement" (Delta-benefit/building, see budget.py)
-    # | "repulsion" (Delta-benefit / soft quadratic-tail proximity cost, never-zero & CELF-safe)
-    cost: str = "length"
+    # What a road is charged -- Length (per metre), Displacement (per home newly displaced) or
+    # Repulsion (soft quadratic-tail proximity, never zero, CELF-safe). See costs.py.
+    cost: ArterialCost = Length()
     # Total width of the roads this method emits; also the displacement corridor it
     # scores against (half-width each side). Stamped on every road it returns.
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
@@ -67,23 +55,10 @@ class GreedyArterialReblocker:
     max_anchors: int = 0
 
     @property
-    def identity(self) -> ArterialIdentity:
-        # Every field that changes the proposed roads must be in the derive-cache key. road_width_m
-        # changes which roads win only under cost="displacement"/"repulsion"; hold it fixed so
-        # length-cost methods stay corridor-independent (two methods differing only in road_width_m
-        # must NOT share a cached proposal when it matters). max_roads / n_anchors / top_k all
-        # change the greedy search, so they belong in the key too -- otherwise a budget/candidate
-        # sweep silently returns another setting's cached proposal. `realizer.identity` (not
-        # `realizer` itself) so a non-snapping realizer's irrelevant fields -- none exist today, but
-        # the seam is the same one `SnapToBoundary.identity`/`IdealChord.identity` already use --
-        # can never leak into the key. `engine.identity` for the identical reason -- ExactEngine
-        # has no fields, and LazyEngine's policy/rescore_every only matter when the engine IS lazy.
-        corridor_key = self.road_width_m if self.cost in ("displacement", "repulsion") else 0.0
-        return ArterialIdentity(
-            realizer=self.realizer.identity, objective=self.objective, cost=self.cost,
-            corridor_key=corridor_key,
-            max_roads=self.max_roads, n_anchors=self.n_anchors, top_k=self.top_k,
-            engine=self.engine.identity, max_anchors=self.max_anchors)
+    def identity(self) -> Hashable | None:
+        # `workers` sizes the fork pool that scores candidates; the pool and the serial path
+        # produce the same roads (tests/methods/test_arterial.py pins pool-vs-serial).
+        return config_identity(self, exempt=frozenset({"workers"}))
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
@@ -93,13 +68,19 @@ class GreedyArterialReblocker:
             half_width_m=self.road_width_m / 2.0, workers=self.workers,
             max_anchors=self.max_anchors)
         realizer_name = type(self.realizer).__name__
+        objective_name, cost_name = type(self.objective).__name__, type(self.cost).__name__
+        # `proposal_id` is half of `Proposal.identity`, which keys the eval caches
+        # (`access_after`, `geometric_after`), so it must tell apart every configuration `identity`
+        # does -- a readable head, then a digest of the whole identity (it also names render
+        # files, which a raw repr would fill with spaces and brackets).
+        digest = hashlib.sha256(repr(self.identity).encode()).hexdigest()[:10]
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
             roads=with_width(roads, self.road_width_m),
-            proposal_id=f"greedy_arterial_{realizer_name}_{self.objective}",
+            proposal_id=f"greedy_arterial:{realizer_name}:{objective_name}:{cost_name}:{digest}",
             method="greedy_arterial",
             params={"segments": len(roads), "realizer": realizer_name,
-                    "objective": self.objective,
-                    "cost": self.cost, "road_width_m": self.road_width_m,
+                    "objective": objective_name,
+                    "cost": cost_name, "road_width_m": self.road_width_m,
                     "engine": type(self.engine).__name__},
             block_identity=block.identity)

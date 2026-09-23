@@ -23,12 +23,15 @@ from reblock.contracts import (
     Eval,
     Method,
     Result,
+    ScoringScreen,
     Screen,
     Source,
 )
 from reblock.data.counts import resolved
+from reblock.data.kblock import KblockSource
 from reblock.derivations import propose
 from reblock.region import (
+    GrowingRegionBuilder,
     RegionBuilder,
     _block_adjacency,
     block_depths,
@@ -144,14 +147,19 @@ def _region_score_map(source: Source, screen: Screen, block_geoms: pd.DataFrame,
                       groups: list[list[str]], bound_buildings: float) -> dict[str, float]:
     """metric.fine for every block the DenseCluster growth could reach from `groups`. Peels the
     reachable neighbourhood in ONE `block_depths` call ONLY when the metric needs depth; otherwise
-    scores from columns alone (no peel). `{}` for a non-peel-capable source with a depth metric."""
-    metric = getattr(screen, "metric", None)
-    if metric is None or getattr(source, "blocks_path", None) is None:
+    scores from columns alone (no peel). `{}` unless the screen scores blocks and the source can be
+    peeled (a `KblockSource`)."""
+    if not isinstance(screen, ScoringScreen) or not isinstance(source, KblockSource):
         return {}
+    metric = screen.metric
     reach = _reachable_blocks(block_geoms, groups, bound_buildings)
     cols = {str(b): (c, a, p) for b, c, a, p in _reach_cols(block_geoms, reach)}
-    depths = block_depths(source, reach) if metric.needs_peel else {}
-    return {b: metric.fine(depths.get(b, 0.0), *cols[b]) for b in reach if b in cols}
+    if not metric.needs_peel:
+        return {b: metric.fine(0.0, *cols[b]) for b in reach}   # `fine` never reads depth
+    # A reach block the peel could not build has no depth, hence no score -- `depth_fn` then ranks
+    # it with every other unscored candidate.
+    depths = block_depths(source, reach)
+    return {b: metric.fine(depths[b], *cols[b]) for b in reach if b in depths}
 
 
 def _reach_cols(block_geoms: pd.DataFrame, ids: list[str]
@@ -207,18 +215,21 @@ def build_regions(source: Source, screen: Screen, region_builder: RegionBuilder,
     counter = screen.counts if isinstance(screen, CountingScreen) else None
     if counter is not None:
         block_geoms = resolved(block_geoms, source.buildings_path, counter)  # type: ignore[attr-defined]
-    # Only a growing builder (DenseCluster: has a `max_buildings` budget) ranks candidates by the
-    # configured metric's score; precompute it in ONE batched pass (peeling only if the metric
-    # needs depth) of the seed's reachable neighbourhood (bound ~3x the growth budget). Non-growing
-    # builders (identity/convex_hull) ignore depth_fn -> skip this precompute.
-    mb = getattr(region_builder, "max_buildings", None)
-    if mb is not None and counter is None:
+    # Only a growing builder (one with a `max_buildings` budget) ranks candidates by the configured
+    # metric's score; precompute it in ONE batched pass (peeling only if the metric needs depth) of
+    # the seed's reachable neighbourhood (bound ~3x the growth budget). Non-growing builders
+    # (identity/convex_hull) ignore depth_fn -> skip this precompute.
+    growing = region_builder if isinstance(region_builder, GrowingRegionBuilder) else None
+    if growing is not None and counter is None:
         raise TypeError(
             f"{type(region_builder).__name__} budgets region growth on building counts, but "
             f"{type(screen).__name__} carries no BuildingCount to resolve them with. Inject one "
             f"(conf/building_count/) rather than letting growth fall back to one-per-block.")
-    score_map = (_region_score_map(source, screen, block_geoms, groups, 3.0 * mb)
-                if isinstance(mb, int) and mb > 0 else {})
+    score_map = (_region_score_map(source, screen, block_geoms, groups,
+                                   3.0 * growing.max_buildings)
+                 if growing is not None and growing.max_buildings > 0 else {})
+    # An unscored candidate -- beyond the peeled reach, or one the peel could not build -- ranks as
+    # shallow (0.0), below every scored block; see `_reachable_blocks`.
     depth_fn: Callable[[str], float] | None = (
         (lambda bid: score_map.get(bid, 0.0)) if score_map else None)
     regions = region_builder.build(block_geoms, groups, depth_fn)[:max_blocks]

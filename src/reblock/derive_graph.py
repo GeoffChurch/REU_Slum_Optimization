@@ -2,8 +2,8 @@
 
 `derive(fn, *inputs)` computes `fn(*inputs)` with L1 (in-process) + L2 (joblib
 disk) caching, keyed on `(fn.identity, tuple(input identities))` -- heavy inputs
-are never hashed (passed via joblib `ignore=`). A missing input identity bypasses
-both layers. `fn.identity = (qualified-name, version)` where `version` is a
+are never hashed (passed via joblib `ignore=`). An input whose identity is None
+bypasses both layers. `fn.identity = (qualified-name, version)` where `version` is a
 content hash of the derivation modules + GEOS + PROJ, so any derivation-logic
 edit (or native-lib upgrade) is a clean miss. See
 docs/superpowers/specs/2026-07-08-content-addressed-dataflow-redesign.md.
@@ -11,12 +11,13 @@ docs/superpowers/specs/2026-07-08-content-addressed-dataflow-redesign.md.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import hashlib
 import os
 from collections.abc import Callable, Hashable
 from functools import cache
 from pathlib import Path
-from typing import Any, TypeVar, cast
+from typing import Protocol, TypeVar, cast, runtime_checkable
 
 import joblib
 import pyproj
@@ -28,7 +29,7 @@ _CACHE_DIR = Path(os.environ.get(
     "REBLOCK_CACHE_DIR", str(Path.home() / ".cache" / "reblock" / "derivations")))
 memory = joblib.Memory(location=str(_CACHE_DIR), verbose=0)
 
-_L1: dict[tuple[Any, ...], Any] = {}
+_L1: dict[tuple[object, ...], object] = {}
 
 def source_hash(*paths: Path) -> str:
     """sha256 over the sorted paths' names + bytes. Stable, content-sensitive,
@@ -95,8 +96,8 @@ def _imports_of(path: Path, module: str) -> set[str]:
     """
     out: set[str] = set()
     tree = ast.parse(path.read_text(), filename=str(path))
-    pkg = module.rsplit(".", 1)[0] if _module_file(module) and \
-        _module_file(module).name != "__init__.py" else module  # type: ignore[union-attr]
+    own = _module_file(module)
+    pkg = module.rsplit(".", 1)[0] if own is not None and own.name != "__init__.py" else module
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             out.update(a.name for a in node.names)
@@ -162,7 +163,7 @@ def _code_version_of(modules: frozenset[str]) -> str:
     return source_hash(*sorted(paths))
 
 
-def _code_version(fn: Callable[..., Any], inputs: tuple[object, ...]) -> str:
+def _code_version(fn: Callable[..., object], inputs: tuple[object, ...]) -> str:
     """The code a derivation actually runs, as a hash.
 
     The UNION of two things, because neither covers the other:
@@ -186,24 +187,94 @@ def clear_l1() -> None:
     _L1.clear()
 
 
-def _fn_identity(fn: Callable[..., Any],
+def _fn_identity(fn: Callable[..., object],
                  inputs: tuple[object, ...]) -> tuple[str, str, tuple[str, str]]:
     return (f"{fn.__module__}.{fn.__qualname__}", _code_version(fn, inputs), env_version())
 
 
-def _l2_impl(key: tuple[Any, ...], fn: Callable[..., Any], inputs: tuple[Any, ...]) -> Any:
+def _l2_impl(key: tuple[object, ...], fn: Callable[..., object],
+             inputs: tuple[object, ...]) -> object:
     return fn(*inputs)
 
 
 _l2 = memory.cache(_l2_impl, ignore=["fn", "inputs"])
 
 
-def derive(fn: Callable[..., T], *inputs: object) -> T:
+@runtime_checkable
+class Identified(Protocol):
+    """An input `derive` can key on. Every input declares its `identity`; None is the explicit
+    answer of one that has no content address -- a synthetic block, a live data source, an ad-hoc
+    routing graph -- and makes the derivation uncacheable, so two such inputs can never share a
+    key."""
+
+    @property
+    def identity(self) -> Hashable | None: ...
+
+
+class _Uncacheable:
+    """A nested input answered `identity is None`: the whole configuration has no address."""
+
+
+_UNCACHEABLE = _Uncacheable()
+
+
+def config_identity(config: object, *, exempt: frozenset[str] = frozenset()) -> Hashable | None:
+    """The cache key of a configured object (a Method, and anything it is configured with): its
+    class, then EVERY dataclass field by name except those in `exempt`.
+
+    Derived rather than listed: a hand-written identity is a second copy of the field list, and the
+    copies drift -- most methods' omitted `road_width_m`, two their `PermeabilityParams`, so a sweep
+    over those returned another setting's cached roads, silently. A field is in the key unless its
+    class NAMES it in `exempt`, which is for fields that cannot change the output (a worker count).
+
+    A field holding something `Identified` contributes that `identity`, and if that is None the
+    whole configuration is uncacheable (returns None) -- a live data source, an ad-hoc graph. A
+    nested plain dataclass (`PermeabilityParams`) contributes its own fields. Anything else that is
+    not a plain value raises: a key must never silently omit what it cannot describe."""
+    if not dataclasses.is_dataclass(config) or isinstance(config, type):
+        raise TypeError(f"config_identity needs a dataclass instance, got {type(config).__name__}")
+    fields = dataclasses.fields(config)
+    stale = exempt - {f.name for f in fields}
+    if stale:
+        raise ValueError(
+            f"{type(config).__name__} exempts fields it does not have: {sorted(stale)}")
+    parts: list[tuple[str, Hashable]] = []
+    for f in fields:
+        if f.name in exempt:
+            continue
+        # By name over the declared schema -- the one place dynamic access is correct -- and with
+        # no default, so a field that is not there raises.
+        value = _value_identity(getattr(config, f.name), f"{type(config).__name__}.{f.name}")
+        if value is _UNCACHEABLE:
+            return None
+        parts.append((f.name, value))
+    return (type(config).__qualname__, tuple(parts))
+
+
+def _value_identity(value: object, where: str) -> Hashable:
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, tuple | list | frozenset):
+        items = [_value_identity(v, where) for v in value]
+        if any(i is _UNCACHEABLE for i in items):
+            return _UNCACHEABLE
+        return tuple(sorted(items, key=repr)) if isinstance(value, frozenset) else tuple(items)
+    if isinstance(value, Identified):
+        ident = value.identity
+        return _UNCACHEABLE if ident is None else ident
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        nested = config_identity(value)
+        return _UNCACHEABLE if nested is None else nested
+    raise TypeError(f"{where} holds a {type(value).__name__}, which has no identity: give it one, "
+                    f"or exempt the field if it cannot change the output")
+
+
+def derive(fn: Callable[..., T], *inputs: Identified) -> T:
     """Memoized compute of `fn(*inputs)`, keyed on (fn.identity, input identities).
-    Bypasses (computes directly) if any input lacks a usable `.identity`."""
+    Bypasses (computes directly) if any input's `identity` is None."""
     ids: list[Hashable] = []
     for i in inputs:
-        ident = getattr(i, "identity", None)
+        ident = i.identity
         if ident is None:
             return fn(*inputs)          # bypass: uncacheable input
         ids.append(ident)

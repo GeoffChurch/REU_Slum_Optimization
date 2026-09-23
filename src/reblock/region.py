@@ -17,7 +17,7 @@ import logging
 import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol, cast
+from typing import Protocol, cast, runtime_checkable
 
 import geopandas as gpd
 import networkx as nx
@@ -133,9 +133,15 @@ def shared_tier(blocks: list[Block]) -> Callable[[gpd.GeoDataFrame], Extents]:
 
 
 def pooled_buildings(blocks: list[Block], crs: CRS) -> gpd.GeoDataFrame:
-    """Every member's buildings, concatenated in member order (not deduped: overlapping sites
-    from different members are both real). Empty only when every member's is."""
-    member_pts = [b.building_geometries for b in blocks if not b.building_geometries.empty]
+    """Every member's buildings, concatenated in SORTED member order -- the order `_shared_parts`
+    numbers parcels in -- not in the order members arrived (not deduped: overlapping sites from
+    different members are both real). Empty only when every member's is.
+
+    Sorted because the merged block's identity is order-free: the same members accreted in a
+    different order are the same cache key, so they must be the same rows, or a derivation cached
+    per building (or a tie broken by index) would be read back against another order."""
+    member_pts = [b.building_geometries for b in sorted(blocks, key=lambda b: b.block_id)
+                  if not b.building_geometries.empty]
     return (
         gpd.GeoDataFrame(pd.concat(member_pts, ignore_index=True), crs=crs) if member_pts
         else gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=crs)
@@ -204,6 +210,18 @@ class RegionBuilder(Protocol):
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
               depth_fn: Callable[[str], float] | None = None) -> list[list[str]]: ...
+
+
+@runtime_checkable
+class GrowingRegionBuilder(RegionBuilder, Protocol):
+    """A `RegionBuilder` that grows each seed group up to a building-count budget
+    (`DenseClusterRegionBuilder`, `ShapeStandardizingRegionBuilder`). The pipeline asks with
+    `isinstance`: growth budgets on building counts, so a growing builder needs the screen's
+    resolved counter, and one that cannot get it must say so rather than fall back to counting
+    every block as one building."""
+
+    @property
+    def max_buildings(self) -> int: ...
 
 
 def _validate_group_ids(block_geoms: gpd.GeoDataFrame, groups: list[list[str]]) -> None:

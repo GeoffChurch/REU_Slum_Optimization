@@ -7,6 +7,7 @@ from __future__ import annotations
 import geopandas as gpd
 import networkx as nx
 from shapely.geometry import Point
+from shapely.geometry.base import BaseMultipartGeometry
 from shapely.ops import unary_union
 
 
@@ -19,7 +20,7 @@ def _boundary_graph(parcels: gpd.GeoDataFrame) -> nx.Graph:
     boundary segments (shared party-walls dedup via unary_union), weight = length.
     Edges are added in sorted order for determinism."""
     noded = unary_union([g.boundary for g in parcels.geometry])
-    lines = list(noded.geoms) if hasattr(noded, "geoms") else [noded]
+    lines = list(noded.geoms) if isinstance(noded, BaseMultipartGeometry) else [noded]
     edges: set[tuple[tuple[float, float], tuple[float, float]]] = set()
     for ln in lines:
         cs = list(ln.coords)

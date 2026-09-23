@@ -1,8 +1,9 @@
-"""Per-candidate scoring for the arterial engines: `_score` mirrors the budget metrics for one
-road set, `_StepState` is the frozen per-greedy-step snapshot the fork process pool inherits via
-copy-on-write, and `eval_candidate` is the pure per-candidate evaluation both the exact and lazy
-engines call (serially, or as the parallel-map unit of work). `_best_candidate` is the shared
-argmax reduce over `eval_candidate`'s results.
+"""Per-candidate scoring for the arterial engines: `_StepState` is the frozen per-greedy-step
+snapshot the fork process pool inherits via copy-on-write, and `eval_candidate` is the pure
+per-candidate evaluation every engine calls (serially, or as the parallel-map unit of work).
+`_best_candidate` is the shared argmax reduce over `eval_candidate`'s results. What a candidate
+gains and what it costs are the injected objective's and cost's business -- see `objectives.py`
+and `costs.py`; this module only divides one by the other.
 
 `_STEP_STATE` is the module-level holder itself. Callers outside this module (the engines) MUST
 write it as `scoring._STEP_STATE = ...` -- a qualified module-attribute assignment via
@@ -17,83 +18,39 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from geopandas import GeoDataFrame
-from pyproj import CRS
 from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
-from reblock.budget import (
-    _BlockScoringContext,
-    _StepContext,
-    access_burden,
-    repulsion,
-    road_corridor,
-)
-from reblock.buildings import Extents, IncrementalOverlap
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.methods.arterial.primitives import _explode, _planarize, _SnapGraph, _union_with
+from reblock.methods.arterial.costs import ArterialCost, StepCost
+from reblock.methods.arterial.objectives import BlockObjective, CommittedNetwork, StepGain
+from reblock.methods.arterial.primitives import _SnapGraph
 from reblock.methods.arterial.realize import ChordRealizer
-
-
-def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]],
-           base_burden: float, ctx: _BlockScoringContext | None) -> float:
-    """Objective value of the road set (higher = better). Mirrors the budget metrics with a
-    cached parcel-adjacency for the greedy's inner loop. For efficiency/directness, scores through
-    the per-block `ctx` (frozen constants, one context per block, full entry re-derivation per
-    candidate) -- equivalent to `network_efficiency(block, roads)`."""
-    if objective == "access":
-        if base_burden == 0.0:
-            return 0.0
-        depths = parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj,
-                                      unreached_depth=len(block.parcels) + 1)
-        return 1.0 - access_burden(depths) / base_burden
-    assert ctx is not None
-    e, direct = ctx.score(roads)
-    return e if objective == "efficiency" else direct
-
-
-def committed_overlap(buildings: Extents, committed: GeoDataFrame) -> IncrementalOverlap:
-    """The step's committed corridor as an `IncrementalOverlap`, so `cost="displacement"` scores
-    each candidate from only the buildings it touches, never by unioning it in."""
-    tracker = IncrementalOverlap(buildings)
-    if len(committed):
-        tracker.add(road_corridor(committed))
-    return tracker
 
 
 @dataclass(frozen=True)
 class _StepState:
-    """Frozen per-greedy-step state, module-level so the fork process pool (task 2 of the
-    process-parallel-arterial design) can inherit it via copy-on-write instead of pickling the
-    CSR/graph context per task -- only the small chord goes in and `(gain, geometry)` comes out.
-    Set once per step by `_greedy_arterials`, read by `eval_candidate`, cleared in a `finally`.
-    `committed` is needed by the aspirational branch's full `_planarize(committed + [real])`;
-    `base_merged`/`adj`/`base_burden`/`ctx` by the access-objective-buildable and displacement
-    branches' `_score`/incremental-`_union_with` calls -- omitting any of these breaks a scoring
-    branch silently (wrong values, not a crash). Displacement and repulsion read the block's
-    building tier (`block.buildings`), so no radii ride along here. `frozen=True` makes the
-    read-only invariant real:
-    the workers only READ this holder, and its mutable members (`committed`, `base_merged`) are
-    mutated only in the PARENT and only AFTER the holder is cleared (a fresh `_StepState` is built
-    per step), so no worker ever observes a mid-mutation copy."""
-    step: _StepContext | None
+    """Frozen per-greedy-step state, module-level so the fork process pool can inherit it via
+    copy-on-write instead of pickling the CSR/graph context per task -- only the small chord goes
+    in and `(gain, geometry)` comes out. Set once per step by the engine, read by
+    `eval_candidate`, cleared in a `finally`. `gain` and `cost` close over everything their scoring
+    reads (the committed roads, the step's scoring context, the corridor's pieces), built in the
+    PARENT before the pool forks. `frozen=True` makes the read-only invariant real: the workers
+    only READ this holder, and the committed roads the parent goes on to extend are snapshotted into
+    it (`CommittedNetwork.lines` is a tuple), so no worker can observe a later step's roads."""
     sg: _SnapGraph
-    base_val: float
-    base_merged: BaseGeometry | None
-    committed: list[LineString]
     realizer: ChordRealizer
-    objective: str
-    cost: str
-    half_width_m: float
-    # For cost="displacement": the committed corridor's per-building pieces, fixed for the step,
-    # so a candidate is scored locally. None for other costs.
-    overlap: IncrementalOverlap | None
-    block: Block
-    crs: CRS
-    adj: list[set[int]]
-    base_burden: float
-    ctx: _BlockScoringContext | None
+    gain: StepGain
+    cost: StepCost
+
+
+def step_state(block: Block, *, sg: _SnapGraph, realizer: ChordRealizer,
+               objective: BlockObjective, cost: ArterialCost,
+               committed: CommittedNetwork) -> _StepState:
+    """One step's `_StepState`: the objective's and the cost's per-step scorers over `committed`.
+    Shared by every engine, so a step can never be set up two ways."""
+    return _StepState(sg=sg, realizer=realizer, gain=objective.at_step(committed, realizer),
+                      cost=cost.at_step(block, committed))
 
 
 _STEP_STATE: _StepState | None = None
@@ -105,43 +62,24 @@ _PARALLEL_THRESHOLD = 128
 
 
 def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
-    """Pure per-candidate evaluation, module-level so it doubles as the parallel-map unit of work
-    in a later task. Mirrors `_greedy_arterials`' former inline loop body EXACTLY (realizer/
-    objective/cost routing, the `cost="displacement"` denominator, the infinite-gain
-    zero-denominator escape) reading the frozen per-step state stashed in `_STEP_STATE` (see
+    """Pure per-candidate evaluation, module-level so it doubles as the parallel-map unit of work:
+    realize the chord, then its gain over its cost, with the infinite-gain zero-denominator escape
+    (a beneficial road that costs nothing ranks above every priced one -- take the free
+    navigability first). Reads the frozen per-step state stashed in `_STEP_STATE` (see
     `_StepState`). Returns `(0.0, None)` for a None/zero-length realization. Returns the shapely
     GEOMETRY (not wkt) -- `_best_candidate` compares `.wkt` only for its tie-break, and returning
-    the geometry keeps a future process-pool's pickled round-trip (WKB, lossless) bit-identical to
-    this serial path's `real`, unlike a lossy default-precision `to_wkt()`."""
+    the geometry keeps the process pool's pickled round-trip (WKB, lossless) bit-identical to the
+    serial path's `real`, unlike a lossy default-precision `to_wkt()`."""
     st = _STEP_STATE
     assert st is not None, "eval_candidate called with no _STEP_STATE set"
     real = st.realizer.realize(chord, st.sg)
     if real is None or real.length == 0:
         return 0.0, None
-    if st.step is not None:
-        e, direct = st.step.score_candidate(real)
-        raw = (e if st.objective == "efficiency" else direct) - st.base_val
-    elif st.realizer.snaps:
-        trial = _explode(_union_with(st.base_merged, real), st.crs, 2.0 * st.half_width_m)
-        raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
-    else:
-        trial = _planarize(st.committed + [real], st.crs, 2.0 * st.half_width_m)
-        raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
-    if st.cost == "displacement":
-        # Scored against the step's committed pieces, touching only the buildings the candidate
-        # reaches -- never a union of the candidate into the committed corridor. Recomputing
-        # `displacement(buildings, committed + candidate)` instead is the same number to ~1e-8 and
-        # MEASURED 11x slower per candidate with 5 committed roads and 210x with 60, on
-        # ZAF.9.3.1_1_5810's footprints: it re-unions the whole network every time, so its cost
-        # grows with the network while this one stays ~5 ms. See IncrementalOverlap.
-        assert st.overlap is not None
-        denom = st.overlap.delta(real.buffer(st.half_width_m))
-    elif st.cost == "repulsion":
-        denom = repulsion(st.block.buildings, real)
-    else:
-        denom = real.length
+    raw = st.gain.of(real)
+    denom = st.cost.of(real)
     gain = float("inf") if (denom <= 0 and raw > 0) else (raw / denom if denom > 0 else 0.0)
     return gain, real
+
 
 
 def _best_candidate(results: Iterable[tuple[float, BaseGeometry | None]]

@@ -25,7 +25,7 @@ from shapely import STRtree
 
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import SnapToBoundary
+from reblock.methods.arterial import Access, Displacement, SnapToBoundary
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords, _deep_targets
 from reblock.methods.arterial.shortlist import CHUNK, RANK_RADIUS, FirstOrder
@@ -97,8 +97,8 @@ def main() -> int:
               f"(total {(now - t0) / 60:5.1f} min, {n_roads} roads)", flush=True)
         last[0] = now
 
-    roads = _greedy_shortlist(block, realizer=SnapToBoundary(), objective="access",
-                              cost="displacement",
+    roads = _greedy_shortlist(block, realizer=SnapToBoundary(), objective=Access(),
+                              cost=Displacement(),
                               half_width_m=half_w, workers=16, max_roads=MAX_ROADS,
                               selector=FirstOrder(SHORTLIST, threads=THREADS), on_step=tick)
     dt = time.perf_counter() - t0

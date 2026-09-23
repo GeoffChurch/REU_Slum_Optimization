@@ -42,7 +42,7 @@ from omegaconf import open_dict
 from shapely.ops import unary_union
 
 from reblock.compare import load_permeability_config
-from reblock.contracts import CountingScreen, Method, Source
+from reblock.contracts import Method, ScoringScreen, Screen, Source
 from reblock.emit import region_map
 from reblock.pipeline import build_regions
 from reblock.region import RegionBuilder, block_depths
@@ -129,10 +129,7 @@ def main() -> None:
     pinned = cfg.block_ids                # None -> grow a region; a list -> pin these
     with _tee_to_file(out / "run.log"):
         source = cast(Source, instantiate(cfg.data))
-        # CountingScreen, not Screen: `region_map` and region growth both need the
-        # counter this screen resolved, and the cast is where that requirement is
-        # stated once instead of at each use.
-        screen = cast(CountingScreen, instantiate(cfg.screen))
+        screen = cast(Screen, instantiate(cfg.screen))
         region_builder = cast(RegionBuilder, instantiate(cfg.region_builder))
 
         # The ONE branch the two region modes force. A pinned variant has no screen selection to
@@ -141,13 +138,21 @@ def main() -> None:
         selection: list[str] = []
         scores: dict[str, float] = {}
         total = 0
+        # Growing a region needs a screen that scores blocks: the selection seeds it, and
+        # `region_map` colours by the same metric and grades on the counter the screen resolved.
+        scoring: ScoringScreen | None = None
         if pinned is None:
+            if not isinstance(screen, ScoringScreen):
+                raise SystemExit(f"{slug}: growing a region needs a scoring screen, but "
+                                 f"{type(screen).__name__} does not score blocks -- pin "
+                                 f"block_ids, or use screen=dense_compact")
+            scoring = screen
             t0 = time.perf_counter()
-            selection = screen.select(source) or []
+            selection = scoring.select(source) or []
             if not selection:
                 raise SystemExit(
                     f"metric={metric_name!r} flagged 0 blocks — check its gate/pre-filter")
-            scores = cast("dict[str, float]", screen.selection_scores(source))   # type: ignore[attr-defined]
+            scores = scoring.selection_scores(source)
             total = len(source.block_geometries())
             log.info("screen: flagged %d/%d blocks (%.1fs)", len(selection), total,
                      time.perf_counter() - t0)
@@ -172,13 +177,13 @@ def main() -> None:
         maps_url = google_maps_url(unary_union([b.boundary for b in region]), region[0].crs)
         write_maps_qr(maps_url, out / "maps_qr.png")
 
-        if pinned is None:
+        if scoring is not None:
             region_map(source, [members], [[seed]], out,
                        selection=selection, depths=scores, metric_name=metric_name,
-                       metric=getattr(screen, "metric", None),
+                       metric=scoring.metric,
                        # The SAME counter the screen ranked on, so the map grades blocks on the
                        # number the pipeline used rather than the source's vendor column.
-                       counts=screen.counts)
+                       counts=scoring.counts)
             # region_map already writes screen.png/region.png (transparent, via save_render) at
             # the example naming -- no JPG flatten step needed.
 

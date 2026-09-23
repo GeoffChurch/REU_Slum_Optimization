@@ -42,6 +42,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from shapely.geometry import LineString, Point
+from shapely.geometry.base import BaseMultipartGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block
@@ -87,7 +88,7 @@ def _noded(roads: gpd.GeoDataFrame) -> list[LineString]:
     if roads.empty:
         return []
     merged = unary_union(list(roads.geometry))
-    geoms = getattr(merged, "geoms", [merged])
+    geoms = list(merged.geoms) if isinstance(merged, BaseMultipartGeometry) else [merged]
     return [g for g in geoms if isinstance(g, LineString) and g.length > 0]
 
 

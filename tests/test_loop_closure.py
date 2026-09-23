@@ -13,7 +13,6 @@ from reblock.budget import _noded_graph
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
 from reblock.methods.loop_closure import (
-    LoopClosureIdentity,
     LoopClosureRefiner,
     _bridge_tree,
     _subsample_pairs,
@@ -520,12 +519,12 @@ def test_loop_closure_refiner_roads_are_superset_of_base_roads() -> None:
 def test_loop_closure_refiner_identity_folds_in_base_identity() -> None:
     base_prop = Proposal(block_id="b", crs=UTM, roads=None, edges=None, proposal_id="fake",
                          method="fake", params={}, block_identity=("t", "b"))
-    fake = _FakeBase(base_prop, ident=("fake", 1))
-    refiner = LoopClosureRefiner(base=fake)
-    ident = refiner.identity
+    # The base's identity is part of the refiner's: the same base keys the same, a different base
+    # keys differently -- asserted by behaviour, not by the key's internal layout.
+    ident = LoopClosureRefiner(base=_FakeBase(base_prop, ident=("fake", 1))).identity
     assert ident is not None
-    assert isinstance(ident, LoopClosureIdentity)
-    assert ident.base == fake.identity
+    assert LoopClosureRefiner(base=_FakeBase(base_prop, ident=("fake", 1))).identity == ident
+    assert LoopClosureRefiner(base=_FakeBase(base_prop, ident=("fake", 2))).identity != ident
 
 
 def test_loop_closure_refiner_identity_none_when_base_identity_none() -> None:

@@ -62,7 +62,7 @@ from scipy.sparse import coo_matrix, csr_matrix
 from scipy.sparse.linalg import spsolve
 from shapely import STRtree
 from shapely.geometry import LineString
-from shapely.geometry.base import BaseGeometry
+from shapely.geometry.base import BaseGeometry, BaseMultipartGeometry
 from shapely.ops import unary_union
 
 from reblock.contracts import Block
@@ -259,7 +259,7 @@ def edge_conductances(
     tree = STRtree(list(segments))
     for k, geom in enumerate(roads.geometry):
         w = float(widths[k])
-        parts = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
+        parts = list(geom.geoms) if isinstance(geom, BaseMultipartGeometry) else [geom]
         for part in parts:
             cs = list(part.coords)
             for a, b in zip(cs, cs[1:], strict=False):

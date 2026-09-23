@@ -8,6 +8,7 @@ connected centerline network reaching the street (full access).
 """
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass
 
 import geopandas as gpd
@@ -18,6 +19,7 @@ from shapely.ops import nearest_points
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
+from reblock.derive_graph import config_identity
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
 
 
@@ -29,8 +31,8 @@ class PeelReblocker:
     road_width_m: float = DEFAULT_ROAD_WIDTH_M
 
     @property
-    def identity(self) -> tuple[str, float]:
-        return ("peel", self.tol)
+    def identity(self) -> Hashable | None:
+        return config_identity(self)
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; steepest-descent is block-only

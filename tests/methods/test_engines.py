@@ -6,7 +6,15 @@ from shapely.geometry import LineString, Point
 
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.methods.arterial import GreedyArterialReblocker, IdealChord, SnapToBoundary
+from reblock.methods.arterial import (
+    Access,
+    Directness,
+    Displacement,
+    GreedyArterialReblocker,
+    IdealChord,
+    Length,
+    SnapToBoundary,
+)
 from reblock.methods.arterial.engines import (
     ArterialEngine,
     ExactEngine,
@@ -66,7 +74,7 @@ def test_shortlist_with_non_binding_k_is_the_exact_engine() -> None:
     pts = gpd.GeoDataFrame(geometry=[Point(0.5, y) for y in range(1, 8)] + [Point(10.5, 4)],
                            crs=UTM)
     block = _two_arm_block(pts)
-    kw: dict[str, object] = dict(objective="access", cost="displacement",
+    kw: dict[str, object] = dict(objective=Access(), cost=Displacement(),
                                  realizer=SnapToBoundary(), max_roads=3,
                                  road_width_m=DEFAULT_ROAD_WIDTH_M, workers=2)
     want = GreedyArterialReblocker(engine=ExactEngine(), **kw).propose(block)          # type: ignore[arg-type]
@@ -86,7 +94,7 @@ def test_lazy_fixed_and_faithful_run_and_differ_from_exact_is_ok():
     block = _grid_block(5)
     for spec in (Fixed(), Grow(), Faithful()):
         roads = GreedyArterialReblocker(
-            objective="directness", n_anchors=6,
+            objective=Directness(), n_anchors=6,
             max_roads=4, engine=LazyEngine(policy=spec),
         ).propose(block).roads
         assert roads is not None
@@ -141,11 +149,11 @@ def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads):
         block = _grid_block(grid_n)
         exact = _greedy_arterials(
             block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-            realizer=realizer, objective="directness", n_anchors=n_anchors,
+            realizer=realizer, objective=Directness(), cost=Length(), n_anchors=n_anchors,
                                   max_roads=max_roads, workers=1)
-        lazy = _greedy_arterials_lazy(block, realizer=realizer, objective="directness",
+        lazy = _greedy_arterials_lazy(block, realizer=realizer, objective=Directness(),
                                       n_anchors=n_anchors,
-                                      top_k=8, max_roads=max_roads, cost="length",
+                                      top_k=8, max_roads=max_roads, cost=Length(),
                                       half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=1,
                                       policy_spec=Faithful(), rescore_every=1)
         assert [g.wkt for g in exact.geometry] == [g.wkt for g in lazy.geometry], \
@@ -170,7 +178,7 @@ def test_faithful_policy_matches_arterial_candidate_set():
 
 def test_lazy_dispatch_and_determinism():
     block = _grid_block(5)
-    m = GreedyArterialReblocker(objective="directness", n_anchors=6,
+    m = GreedyArterialReblocker(objective=Directness(), n_anchors=6,
                                max_roads=4, engine=LazyEngine(policy=Grow()))
     a = m.propose(block).roads
     b = m.propose(block).roads
@@ -228,7 +236,7 @@ def test_lazy_roads_carry_drain_column_like_exact():
     # and downstream consumers (e.g. rendering) read `drain`. Regression test for the schema
     # divergence where the lazy engine ended on `_explode(_merge(committed))` with no `drain`.
     block = _grid_block(5)
-    roads = GreedyArterialReblocker(objective="directness", n_anchors=6,
+    roads = GreedyArterialReblocker(objective=Directness(), n_anchors=6,
                                     max_roads=4,
                                     engine=LazyEngine(policy=Grow())).propose(block).roads
     assert roads is not None
