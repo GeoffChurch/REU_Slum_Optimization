@@ -44,7 +44,7 @@ def committed(variant: str, city: str) -> tuple[Path, dict[str, object]] | None:
     block region, and a 37-block region whose parcel count moved by six.
     """
     cfg = OmegaConf.load(f"conf/example/{variant}.yaml")
-    slug = str(cfg.example.slug)                                    # type: ignore[union-attr]
+    slug = str(cfg.example.slug)
     d = Path(f"examples/{slug}") if city == "capetown" else Path(f"examples/{city}/{slug}")
     meta = d / "meta.json"
     if not meta.exists():
