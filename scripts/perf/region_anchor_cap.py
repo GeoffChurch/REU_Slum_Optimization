@@ -60,7 +60,6 @@ def main() -> None:
           flush=True)
 
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    radii = block.buildings.radii
     b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
     print(f"  baseline burden {b0:.4f}\n", flush=True)
 
@@ -89,7 +88,7 @@ def main() -> None:
         if roads is None or len(roads) == 0:
             print("    no roads -- skipped", flush=True)
             continue
-        pre = prefix_to_displacement(block, roads, radii, DISP)
+        pre = prefix_to_displacement(block, roads, DISP)
         if len(pre) == 0:
             print("    empty displacement prefix -- skipped", flush=True)
             continue

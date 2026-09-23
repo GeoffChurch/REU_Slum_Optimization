@@ -67,14 +67,14 @@ def parcel_radii(block: Block, params: PermeabilityParams) -> NDArray[np.float64
 
     n = len(block.parcels)
     out = np.zeros(n, dtype=np.float64)
-    pts = block.building_geometries
-    if n == 0 or len(pts) < 2:
+    buildings = block.buildings
+    if n == 0 or len(buildings) < 2:
         return out
-    radii = block.buildings.radii
-    xy = np.column_stack([pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy()])
-    hit = STRtree(shapely.points(xy)).query(
+    # The tier's POINTS, never the geometry column: at the footprint tier that holds polygons, and
+    # `xy` is the anchor the parcels were tessellated on -- so each lands in its own parcel.
+    hit = STRtree(shapely.points(buildings.xy)).query(
         np.asarray(list(block.parcels.geometry), dtype=object), predicate="contains")
-    out[hit[0]] = radii[hit[1]]
+    out[hit[0]] = buildings.radii[hit[1]]
     return params.radius_frac * out
 
 

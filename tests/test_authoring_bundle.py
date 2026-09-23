@@ -2,13 +2,13 @@
 
 Full float64 and not the cm-rounded form every render bundle ships. MEASURED on this bundle's own
 reference roads (`scripts/gen_authoring_block.REFERENCE_ROADS`): rounding every coordinate to
-centimetres and re-solving, baseline included, moves `crossing` by 1.6611e-03 and `spur` by
-1.9550e-03. Design §1.4's 4.71e-05 is the same effect measured on the clearance METHOD's road set --
-smaller than either figure above, and therefore the binding anchor `web/test/pyodide-parity.test.ts`
-sizes `PARITY_TOL` against, not the two here.
+centimetres and re-solving, baseline included, moves `crossing` by 5.3129e-05 and `spur` by
+4.6081e-05. Design §1.4's 4.71e-05 is the same effect measured on the clearance METHOD's road set;
+`spur`'s is the smallest of the three, and therefore the binding anchor
+`web/test/pyodide-parity.test.ts` sizes `PARITY_TOL` against.
 
 `web/test/pyodide-parity.test.ts` asserts the browser reproduces CPython's number on the SAME
-bundle, and a tolerance widened past 4.71e-05 -- the smallest of the effects a parity guard must
+bundle, and a tolerance widened past 4.6e-05 -- the smallest of the effects a parity guard must
 not absorb -- would be one that has stopped measuring the runtime. That is what these tests keep
 the bundle fit for.
 """
@@ -141,6 +141,15 @@ def test_building_points_are_one_per_parcel(bundle: dict[str, Any]) -> None:
     """`mesh.parcel_radii` resolves point-to-parcel by CONTAINMENT, not by index -- parcels are
     Voronoi cells of these points, so the count matches while the order does not."""
     assert len(bundle["building_points"]) == len(bundle["parcels"])
+
+
+def test_every_building_carries_a_positive_radius(bundle: dict[str, Any]) -> None:
+    """The browser rebuilds the block as `Discs(building_points, building_radii)`, so the two are
+    one list read in lock step: a short `building_radii` raises there, and a zero radius opens that
+    parcel's footpath edges completely (`parcel_radii`'s fallback), which the parity tests would
+    only catch if a reference road happened to route through it."""
+    assert len(bundle["building_radii"]) == len(bundle["building_points"])
+    assert all(r > 0.0 for r in bundle["building_radii"])
 
 
 def test_the_baseline_is_the_no_roads_solve(bundle: dict[str, Any]) -> None:

@@ -7,6 +7,7 @@ from pyproj import CRS
 from shapely.geometry import Point, Polygon, box
 from shapely.ops import unary_union
 
+from reblock.buildings import ANCHOR_COL
 from reblock.contracts import Block
 from reblock.data.kblock import KblockSource
 from reblock.derive.access import parcel_access_layers
@@ -29,6 +30,12 @@ def test_yields_wellformed_blocks_from_fixture() -> None:
     assert "kblock_k" in b.attrs
 
 
+def _anchored(bld: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Point rows as `region()` hands them to `_blocks_from`: each carrying its own point as its
+    `ANCHOR_COL`, which is what a point tier's anchor is."""
+    return bld.assign(**{ANCHOR_COL: bld.geometry})
+
+
 def test_voronoi_parcels_tile_a_synthetic_block() -> None:
     # 3x3 grid of building points in a unit-ish block -> 9 tiling parcels, centre at peel-depth 2.
     utm = CRS.from_epsg(32638)
@@ -38,7 +45,7 @@ def test_voronoi_parcels_tile_a_synthetic_block() -> None:
     bld = gpd.GeoDataFrame(geometry=pts, crs=utm)
     src = KblockSource("unused", "unused", region_id="t", min_buildings=4)
     # test helper: (blocks_gdf, bld_gdf) -> Iterator[Block]
-    block = next(src._blocks_from(blocks, bld, source_content_hash="", anchors=bld.geometry))
+    block = next(src._blocks_from(blocks, _anchored(bld), source_content_hash=""))
     assert len(block.parcels) == 9
     assert parcel_access_layers(block, None).max() == 2
 
@@ -57,8 +64,7 @@ def test_all_parcels_single_polygon_on_concave_block() -> None:
     pts = [Point(15, 5), Point(15, 15), Point(15, 25), Point(5, 15), Point(25, 15)]
     block = next(KblockSource("u", "u", region_id="t", min_buildings=4)._blocks_from(
         gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm),
-        gpd.GeoDataFrame(geometry=pts, crs=utm), source_content_hash="",
-        anchors=gpd.GeoSeries(pts, crs=utm)))
+        _anchored(gpd.GeoDataFrame(geometry=pts, crs=utm)), source_content_hash=""))
     assert all(g.geom_type == "Polygon" for g in block.parcels.geometry)
     assert block.parcels["parcel_id"].is_unique
 
@@ -76,7 +82,7 @@ def test_streets_are_full_boundary_including_holes() -> None:
     blocks = gpd.GeoDataFrame({"block_id": ["b"], "k_complexity": [0.0]}, geometry=[poly], crs=utm)
     bld = gpd.GeoDataFrame(geometry=pts, crs=utm)
     src = KblockSource("unused", "unused", region_id="t", min_buildings=4)
-    block = next(src._blocks_from(blocks, bld, source_content_hash="", anchors=bld.geometry))
+    block = next(src._blocks_from(blocks, _anchored(bld), source_content_hash=""))
     streets_len = float(block.streets.geometry.length.sum())
     assert abs(streets_len - poly.boundary.length) < 1e-6
     assert streets_len > poly.exterior.length + 1e-6  # the hole's ring adds length

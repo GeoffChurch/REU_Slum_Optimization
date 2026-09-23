@@ -209,7 +209,7 @@ def test_parcel_radii_are_PER_PARCEL_and_scale_with_local_spacing():
 
     The single-parcel fixture puts every point in one parcel, so containment resolves to that
     parcel and the radius is a real per-parcel quantity rather than an average. Radii scale 1:1 with
-    point spacing, as `building_radii` (NN/2) must.
+    point spacing, as `SpacingDiscs.radii` (NN/2) must.
 
     FAULT INJECTION: return `np.full(n, radii.mean())` from `parcel_radii` and the dense/sparse
     ratio survives but `test_footpath_clearance_is_LOCAL_not_a_block_median` below fails.

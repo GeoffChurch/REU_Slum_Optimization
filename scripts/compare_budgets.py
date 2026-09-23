@@ -72,7 +72,7 @@ from reblock.contracts import Block, Method, Proposal, Screen, Source
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.derive.adjacency import parcel_adjacency
-from reblock.emit import _displaced_points, compare_report
+from reblock.emit import _displaced_buildings, compare_report
 from reblock.eval.access_burden import burden
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.permeability import (
@@ -161,13 +161,12 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
                  float(roads.geometry.length.sum()), time.perf_counter() - t0)
     assert block is not None
 
-    radii = block.buildings.radii
     n_buildings = len(block.building_geometries)
 
     def _disp_frac(prefix: GeoDataFrame) -> float:
         if n_buildings == 0:
             return 0.0
-        return displacement(block.building_geometries, radii, prefix) / n_buildings
+        return displacement(block.buildings, prefix) / n_buildings
 
     # Frontier: permeability + displacement curves per method, from the SAME reblock above -- no
     # second propose. `compare_report` writes frontier_permeability.csv + frontier_<label>.png.
@@ -178,7 +177,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         curves.append(MethodCurve(name, curve_label, "permeability",
                                   permeability_curve(block, roads, params)))
         curves.append(MethodCurve(name, curve_label, "displacement",
-                                  displacement_curve(block, roads, radii)))
+                                  displacement_curve(block, roads)))
     compare_report(curves, out_dir, method_order=list(methods),
                    matched_displacement=matched_displacement,
                    matched_permeability=matched_permeability,
@@ -193,7 +192,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     prefix_b: dict[str, GeoDataFrame] = {}
     reached_b: dict[str, bool] = {}
     for name, roads in roads_by_method.items():
-        prefix_a[name] = prefix_to_displacement(block, roads, radii, matched_displacement)
+        prefix_a[name] = prefix_to_displacement(block, roads, matched_displacement)
         pb, reached = prefix_to_permeability(block, roads, matched_permeability, params)
         prefix_b[name] = pb
         reached_b[name] = reached
@@ -255,7 +254,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
             kc = kc_eval.score(block, truncated)
             fig = render_after(block, truncated, kc.fields["access_after"], vmax=depth_vmax,
                                metrics=kc, field="depth", frame=frame,
-                               displaced_points=_displaced_points(block, truncated))
+                               displaced_buildings=_displaced_buildings(block, truncated))
             if title_override is not None:
                 fig.axes[0].set_title(title_override, fontsize=16)
             save_render(fig, out_dir / f"after_{name}_{tag}_depth.png")
@@ -263,7 +262,8 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
 
             potentials = parcel_potentials(block, prefix, params)
             fig = render_after(block, truncated, potentials, vmax=perm_vmax, field="perm",
-                               frame=frame, displaced_points=_displaced_points(block, truncated))
+                               frame=frame,
+                               displaced_buildings=_displaced_buildings(block, truncated))
             if title_override is not None:
                 fig.axes[0].set_title(title_override, fontsize=16)
             save_render(fig, out_dir / f"after_{name}_{tag}_perm.png")

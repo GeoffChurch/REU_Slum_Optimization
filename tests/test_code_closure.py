@@ -3,8 +3,8 @@
 `derive_graph` hashed every derivation module into ONE `_CODE_HASH`, so editing any of them
 invalidated every cached proposal. Measured on the `depth` region: `cycle_native` (74 min) and
 the arterial (64 min) are 93% of that variant's proposal time, and a change touching only the
-scoring half of `budget.py` cannot affect `cycle_native` -- which imports `building_radii` and
-`displacement` and nothing else from it -- yet invalidated it anyway.
+scoring half of `budget.py` cannot affect `cycle_native` -- which imports `displacement` and
+nothing else from it -- yet invalidated it anyway.
 
 These tests pin the property that decides invalidation: which module files a derivation's key
 is computed over.
@@ -39,7 +39,7 @@ def test_a_methods_closure_excludes_its_siblings() -> None:
 
 
 def test_the_closure_is_transitive() -> None:
-    """`cycle_native` imports `permeability` and `budget` (via `building_radii`), so an edit to
+    """`cycle_native` imports `permeability` and `budget` (via `displacement`), so an edit to
     either must still reach it.
 
     FAULT INJECTION: a non-transitive closure (direct imports only) drops `mesh.py`, which

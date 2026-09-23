@@ -6,6 +6,9 @@ defaults:
   - override /metric: depth_density
   - override /screen: dense_compact
   - override /region_builder: dense_cluster
+  # Screen on points, PROPOSE on the real Open Buildings outlines: only the chosen blocks' tiles
+  # are fetched (conf/buildings/footprints.yaml).
+  - override /buildings: footprints
 
 example:
   slug: multiblock_depth_density_2

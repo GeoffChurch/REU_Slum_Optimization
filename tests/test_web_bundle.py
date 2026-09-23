@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from tests.city_caches import capetown_footprints_cached
 from tests.dts_keys import json_keys, ts_field_names
 
 BUNDLE = Path("examples/perm-graph/bundle.json")
@@ -183,9 +184,8 @@ def test_bundle_matches_permeability_graph_at_every_prefix(bundle: dict[str, Any
     tests/data/test_osm_extract.py:303-307. A contributor with a warm `~/.cache/reblock` (anyone
     who has run the baker or an example generator) gets the real guard for free; CI and a fresh
     clone get neither the guard nor the download."""
-    blocks = Path.home() / ".cache" / "reblock" / "blocks_capetown_full.parquet"
-    if not blocks.exists():
-        pytest.skip("needs the capetown_full cache; run "
+    if not capetown_footprints_cached():
+        pytest.skip("needs the capetown_full cache and the pinned block's footprint tile; run "
                     "`pixi run python -m scripts.gen_web_bundle`")
 
     from typing import cast

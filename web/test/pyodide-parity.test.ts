@@ -39,16 +39,13 @@ const BUNDLE = JSON.parse(
  * the 263-parcel spine block: `crossing` agreed to the last bit and `spur` differed by
  * 2.220446e-16, four units in the last place at that magnitude.
  *
- * RAISED 2026-09-20, from 1e-15 to 5e-15, and the difference is the finding the note below asks
- * for. The spine block moved to `ZAF.9.3.1_1_5810` -- 6,619 parcels against 263, a sparse solve
- * 25x larger -- and the disagreement grew with it: `crossing` now returns 1.1102230246251565e-15
- * under Pyodide where CPython bakes exactly 0. That is 5x the old worst case and it exceeded the
- * old tolerance, which is the test doing its job rather than a regression: floating-point error
- * in the tail of a sparse solve accumulates with the size of the system, so a 25x larger problem
- * disagreeing 5x more is the expected shape.
- *
- * Note WHERE it is: the baked value is exactly 0, so there is no relative tolerance to fall back
- * on and the absolute bound is the only one available at this magnitude.
+ * RAISED 2026-09-20, from 1e-15 to 5e-15, when the spine block moved to `ZAF.9.3.1_1_5810` --
+ * 6,619 parcels against 263, a sparse solve 25x larger. Floating-point error in the tail of a
+ * sparse solve accumulates with the size of the system, so a larger problem disagreeing more is the
+ * expected shape. MEASURED on this bundle: `crossing` (0.458) differs by 1.998e-15 and `spur`
+ * (0.0101) by 7.77e-16. (The measurement that first raised it was on reference roads that had not
+ * moved with the pin and missed the block entirely, both baked as exactly 0; the bake now refuses
+ * a reference road that changes nothing.)
  *
  * CPython on this machine reproduces the baked numbers exactly, so the disagreement is Pyodide's
  * arithmetic against CPython's, not a stale bake. The stacks differ underneath: numpy 2.2.5 /
@@ -56,16 +53,15 @@ const BUNDLE = JSON.parse(
  *
  * 1e-15 is a STATED tolerance, not one widened until the suite went green:
  *
- *   * it is ~4.5x the largest disagreement actually observed (5e-15 against 1.110223e-15);
- *   * it is ~9.4e9 times SMALLER than 4.71e-05 -- the SMALLEST effect `authoring.d.ts` records as
- *     one a runtime-parity guard must not absorb (design §1.4, measured on the clearance method's
- *     road set). `authoring.d.ts` also records what rounding THIS bundle's own reference roads to
- *     centimetres costs -- 1.66e-03 for `crossing`, 1.96e-03 for `spur` -- larger still, so
- *     4.71e-05 is the binding one;
+ *   * it is ~2.5x the largest disagreement actually observed (5e-15 against 1.998e-15);
+ *   * it is ~9.2e9 times SMALLER than 4.6081e-05 -- the SMALLEST effect `authoring.d.ts` records
+ *     as one a runtime-parity guard must not absorb: what rounding THIS bundle's `spur` to
+ *     centimetres costs. (`crossing` moves 5.3129e-05, and design §1.4's clearance road set
+ *     4.71e-05, so `spur` is the binding one);
  *   * it is strictly below the 1e-12 perturbation this task's fault injection 1 applies, so that
  *     injection reddens the test with three orders of magnitude to spare.
  *
- * A 4.5x margin is thin against noise, but this disagreement is not noise: wasm f64 arithmetic is
+ * A 2.5x margin is thin against noise, but this disagreement is not noise: wasm f64 arithmetic is
  * deterministic by specification and the Pyodide version is pinned, while the baked side is a
  * committed artifact already held to exact CPython equality by `tests/test_solve_py.py`. Both
  * sides are fixed, so the only thing that can move this difference is a deliberate version bump --

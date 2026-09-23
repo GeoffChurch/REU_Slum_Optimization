@@ -9,12 +9,14 @@ its own fallback image from becoming two different pictures under one caption.
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tests.city_caches import capetown_footprints_cached
 from tests.dts_keys import json_keys, ts_field_names
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,9 +45,13 @@ def test_every_declared_field_is_present_and_the_shapes_agree(bundle: dict[str, 
     b = bundle
     n = b["n_buildings"]
     assert n > 0
-    for key in ("x", "y", "r"):
-        assert len(b["buildings"][key]) == n, (
-            f"buildings.{key} has {len(b['buildings'][key])} of {n}")
+    assert len(b["buildings"]) == n, f"buildings has {len(b['buildings'])} outlines of {n}"
+    for i, building in enumerate(b["buildings"]):
+        # Every ring CLOSED: the widget drops each ring's last vertex as the repeated first, so an
+        # open ring would lose a real corner there and be clipped as a different shape.
+        assert building and all(ring and len(ring) >= 4 and ring[0] == ring[-1]
+                                for poly in building for ring in poly), (
+            f"building {i}'s outline is not a list of polygons of closed rings")
     assert len(b["roads"]) == 2, "two default roads (spec section 2)"
     assert all(len(r["coords"]) == 2 for r in b["roads"]), "the default roads are straight segments"
     assert b["width"]["floor_m"] == PermeabilityParams.min_road_width_m, (
@@ -101,8 +107,8 @@ def test_the_encoding_matches_reblock_renders_live_constants(bundle: dict[str, A
         _BOUNDARY_LW,
         _CONTEXT_OUTLINE,
         _CORRIDOR_ALPHA,
-        _DISK_OUTLINE_LW,
         _DISPLACED_PT,
+        _OUTLINE_LW,
         _PARCEL_LW,
         _ROAD_COLOR,
     )
@@ -117,18 +123,18 @@ def test_the_encoding_matches_reblock_renders_live_constants(bundle: dict[str, A
         "`_draw_boundary_and_streets`, so the widget must draw them at one width too")
     assert e["road_color"] == _ROAD_COLOR
     assert e["road_alpha"] == _CORRIDOR_ALPHA
-    assert e["disk_color"] == _DISPLACED_PT
-    assert e["disk_outline_lw"] == _DISK_OUTLINE_LW
+    assert e["building_color"] == _DISPLACED_PT
+    assert e["outline_lw"] == _OUTLINE_LW
     # POSITIVITY, and nothing more -- said plainly because the comment here used to claim "a stray
     # edit is visible", which is false: any other positive value passes, and nothing else in the
     # tree pins either number (`field-boot.test.ts` reads both back out of this same bundle). What
     # positivity is worth: zero or negative is the one wrong value that draws NOTHING and reports
     # nothing -- a zero `handle_radius_px` gives the drag a hit radius of zero, so the road stops
     # being draggable with no error anywhere, and a zero `pad` fits the drawing flush to the canvas
-    # edge, clipping the outermost disks by half their radius.
+    # edge, clipping the outermost buildings.
     assert e["handle_radius_px"] > 0.0 and e["pad"] > 0.0
     assert set(e) == {"parcel_color", "parcel_lw", "boundary_color", "boundary_lw", "street_lw",
-                      "road_color", "road_alpha", "disk_color", "disk_outline_lw",
+                      "road_color", "road_alpha", "building_color", "outline_lw",
                       "handle_radius_px", "pad"}, (
         f"encoding gained or lost a key: {sorted(e)}. A new one needs a line above, or it is "
         f"unchecked -- which is the state this test was written to end")
@@ -142,20 +148,26 @@ def test_the_reference_fixtures_cover_the_cases_that_could_hide_a_bug(
         sorted(cases))
     assert cases["outside"]["sum_c"] == 0.0, (
         "the outside-the-block fixture must be EXACTLY zero -- it is the only fixture that pins "
-        "the clip at d = r rather than a tolerance")
+        "compact support (a corridor reaching no outline costs nothing) rather than a tolerance")
     # Overlap is free, and the honest form of that is an EQUALITY, not an inequality: a road drawn
     # twice IS one road, because each road is buffered on its own and only then unioned. Measured:
-    # both 32.0260. Any implementation that charges per-road instead of per-union breaks this
+    # both 91.9005. Any implementation that charges per-road instead of per-union breaks this
     # immediately, where "coincident < apart" would still pass.
     assert cases["coincident"]["sum_c"] == cases["road1"]["sum_c"], (
         "two coincident roads must cost EXACTLY what one costs")
     assert cases["apart"]["sum_c"] > cases["road1"]["sum_c"], "adding a disjoint road adds cost"
-    # Width, isolated: same road, 20 m against 7 m. Measured 68.1452 against 32.0260.
+    # Width, isolated: same road, 20 m against 7 m. Measured 274.175 against 91.9005.
     assert cases["widest"]["sum_c"] > cases["road1"]["sum_c"]
-    # Position, isolated: same width, near-identical length (144.317 m against 143.664 m, both
-    # measured off the committed coordinates), through the field's widest gap. Measured 21.8509
-    # against 32.0260. NOT zero -- see `_cases`' docstring.
-    assert 0.0 < cases["in_a_gap"]["sum_c"] < cases["road1"]["sum_c"]
+    # Position, isolated PER METRE: same width, through the field's widest gap -- but a chord
+    # through the gap is SHORTER (632 m against 980 m on the committed coordinates), so comparing
+    # totals would credit the gap with what is only length. Measured 0.063 against 0.094
+    # buildings/m. NOT zero -- see `_cases`' docstring.
+    def per_metre(name: str) -> float:
+        (road,) = cases[name]["roads"]
+        (x0, y0), (x1, y1) = road["coords"]
+        return float(cases[name]["sum_c"]) / math.hypot(x1 - x0, y1 - y0)
+    assert cases["in_a_gap"]["sum_c"] > 0.0
+    assert per_metre("in_a_gap") < per_metre("road1")
 
 
 def test_each_derivable_fixture_moves_exactly_one_variable(bundle: dict[str, Any]) -> None:
@@ -214,69 +226,46 @@ def test_each_derivable_fixture_moves_exactly_one_variable(bundle: dict[str, Any
 
 
 @pytest.mark.slow
-def test_the_bundle_and_the_closed_form_both_still_match_live_python(
-        bundle: dict[str, Any]) -> None:
-    """THE one block-loading test in this feature. It carries two jobs, because the load is the
-    cost and everything else is microseconds:
-
-    1. the committed bundle has not gone stale against the code that made it, and
-    2. the closed-form identity holds on all EIGHT methods' real road sets -- 9 to 337 segments,
-       including multi-part geometry that synthetic fixtures do not produce.
-
-    Job 2 lived in Task 2 until it was measured: three tests sharing a module-scoped fixture became
-    three concurrent block loads under `-n auto` (18 minutes, killed). Task 2 now pins the identity
-    against shapely on synthetic geometry, which is fast and in one respect stronger (it can show
-    the residual falling quadratically with `quad_segs`); this is where it meets real roads.
+def test_the_bundle_still_matches_live_python(bundle: dict[str, Any]) -> None:
+    """THE one block-loading test in this feature: the committed bundle has not gone stale against
+    the code that made it.
 
     Job 1a covers every layer, not just the buildings, because it is the only guard that can see a
-    single coordinate move; the fast precision guards cannot (see their own note).
+    single coordinate move; the fast precision guards cannot (see their own note). Job 1b re-prices
+    every fixture from the bundle's own numbers.
 
-    Measured expectations, worst relative disagreement 4.36e-04, closed form higher in all eight
-    (shapely's buffer is INSCRIBED, so shapely's distance is the one that is too large, and a
-    larger d means a smaller c). Each pair below is `truth/closed` -- SHAPELY'S number first, the
-    closed form's second, so it is the SECOND of each pair that is the larger one; the sentence
-    above names the closed form first and the pairs do not, which read as a contradiction until it
-    was stated: clearance 102.3728/102.3888, clearance_looped 217.6588/217.6764,
-    cycle_native 51.2719/51.2880, euclidean_grid 123.9661/123.9667,
-    greedy_arterial_access_displacement 138.1986/138.2589, osm_footpaths 90.3466/90.3619,
-    resistance_lp 52.5456/52.5624, topology 178.7863/178.8301.
+    There is no second formula to hold against shapely here: the widget clips the same stored
+    outlines against the polygon GEOS buffers each road to, and
+    `web/test/displacement-model.test.ts` holds the TypeScript to Job 1b's own numbers.
 
     DEVELOPER-LOCAL, like every other block-loading test here: it needs ~/.cache/reblock's city
-    data and CI must stay hermetic (tests/conftest.py).
+    data and the pinned block's footprint tile, and CI must stay hermetic (tests/conftest.py).
     """
-    blocks = Path.home() / ".cache" / "reblock" / "blocks_capetown_full.parquet"
-    if not blocks.exists():
-        pytest.skip("needs the capetown_full cache; run "
+    if not capetown_footprints_cached():
+        pytest.skip("needs the capetown_full cache and the pinned block's footprint tile; run "
                     "`pixi run python -m scripts.gen_displacement_field`")
 
-    import numpy as np
-    from geopandas import GeoDataFrame, points_from_xy
+    import shapely
+    from geopandas import GeoDataFrame
 
-    from reblock.budget import displacement, displacement_from_distance
+    from reblock.budget import displacement
+    from reblock.buildings import ANCHOR_COL, Footprints
     from scripts._bundle_io import line_coords, polygon_rings, sigfig
-    from scripts._default_road import closed_form_distance, default_roads, segments
-    from scripts._example_block import (
-        TEST_VARIANT,
-        load_example_block,
-        load_example_region,
-    )
+    from scripts._default_road import default_roads
+    from scripts._example_block import load_example_region
     from scripts.gen_displacement_field import (
         WIDTH_FLOOR_M,
         fixture_roads,
+        outline_geometry,
         quantised_field,
         road_specs,
         roads_from_case,
     )
 
-    # Job 1a needs the SHIPPED block's geometry and never touches a road, so it builds the
-    # region without proposing: 18.6 s instead of ~2,900. Job 2 needs REAL road sets and does not
-    # care whose -- its point is multi-part geometry that synthetic fixtures do not produce -- so
-    # it takes the 263-parcel fixture variant, where the same five methods cost ~105 s against
-    # 2,861 on the spine block. Neither number is cacheable between runs: `tests/conftest.py`
-    # gives every session a cold REBLOCK_CACHE_DIR by design.
+    # Needs the SHIPPED block's geometry and never touches a road, so it builds the region without
+    # proposing: seconds instead of the ~2,900 a method run on the spine block costs. Not cacheable
+    # between runs: `tests/conftest.py` gives every session a cold REBLOCK_CACHE_DIR by design.
     block = load_example_region()
-    _, roads_by_method = load_example_block(None, variant=TEST_VARIANT)
-    radii = block.buildings.radii
     ox, oy = float(bundle["origin"][0]), float(bundle["origin"][1])
 
     # Job 1a: EVERY layer the bundle carries, re-derived from the live block through the
@@ -293,8 +282,7 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
                                 float(block.parcels.total_bounds[1])]
     assert bundle["block_id"] == block.block_id
     assert bundle["n_buildings"] == len(block.building_geometries)
-    field = quantised_field(block, radii, ox, oy)
-    assert bundle["buildings"] == field.stored
+    assert bundle["buildings"] == quantised_field(block, ox, oy).stored
     # `polygon_rings`, not `polygon_ring`: both fields carry EVERY ring since 2026-09-20. The
     # single-ring version raises on a hole rather than dropping one, which is how the spine block's
     # 1 holed parcel (of 6,619) and its holed BOUNDARY were found when the pin moved there.
@@ -307,13 +295,12 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
     assert bundle["roads"] == road_specs(default, ox, oy)
 
     # The SEVENTH carrier, and the only one nothing else can see. `in_a_gap` and `outside` are
-    # derived from the block's geometry (the largest nearest-neighbour gap; a translation by twice
+    # derived from the block's geometry (the widest nearest-neighbour gap; a translation by twice
     # the diagonal), so `bundle.roads` cannot pin them the way it pins the other four -- and Job 1b
     # cannot either, because it recomputes `sum_c` from these very coordinates: a vertex corrupted
-    # where no building sits moves no grazing distance and leaves `sum_c` bit-identical. Re-derived
-    # through the generator's own `fixture_roads`, which is why that was split out of `_cases`.
-    derived = {name: road_specs(rs, ox, oy)
-               for name, rs in fixture_roads(block, field.points, field.radii, default)}
+    # where no building sits moves no overlap and leaves `sum_c` bit-identical. Re-derived through
+    # the generator's own `fixture_roads`, which is why that was split out of `_cases`.
+    derived = {name: road_specs(rs, ox, oy) for name, rs in fixture_roads(block, default)}
     assert [c["name"] for c in bundle["reference"]] == list(derived), (
         f"the committed fixtures are {[c['name'] for c in bundle['reference']]} but the generator "
         f"now produces {list(derived)}")
@@ -322,55 +309,31 @@ def test_the_bundle_and_the_closed_form_both_still_match_live_python(
             f"fixture {case['name']}'s road geometry is not what the generator now derives; "
             f"regenerate: pixi run python -m scripts.gen_displacement_field")
 
-    # Job 1b: every fixture's `sum_c`, recomputed from the bundle's OWN coordinates. Exact through
-    # the same quantiser, not a tolerance: `sum_c` IS `sigfig(displacement(...))` of the quantised
-    # road against the quantised field (`gen_displacement_field.quantised_field`), so no slack is
-    # needed and any tolerance would have to be looser than the thing it is guarding. The store's
-    # own worst case is 5e-06 relative -- half a step in the 6th significant digit, largest when
-    # the mantissa is just above 1 -- which is wider than a last-digit typo in the committed file.
-    bx = np.asarray(bundle["buildings"]["x"], dtype=float) + ox
-    by = np.asarray(bundle["buildings"]["y"], dtype=float) + oy
-    pts = GeoDataFrame(geometry=points_from_xy(bx, by), crs=block.crs)
-    radii_b = np.asarray(bundle["buildings"]["r"], dtype=float)
+    # Job 1b: every fixture's `sum_c`, recomputed from the bundle's OWN outlines and roads. Exact
+    # through the same quantiser, not a tolerance: `sum_c` IS `sigfig(displacement(...))` of the
+    # quantised road against the quantised outlines (`gen_displacement_field.quantised_field`), so
+    # no slack is needed and any tolerance would have to be looser than the thing it is guarding.
+    stored = Footprints(GeoDataFrame(
+        {ANCHOR_COL: shapely.points(block.buildings.xy)},
+        geometry=[outline_geometry(o, ox, oy) for o in bundle["buildings"]], crs=block.crs))
     for case in bundle["reference"]:
-        recomputed = displacement(pts, radii_b, roads_from_case(block, case, (ox, oy)))
+        recomputed = displacement(stored, roads_from_case(block, case, (ox, oy)))
         assert sigfig(recomputed) == case["sum_c"], (
             f"{case['name']}: the committed bundle says {case['sum_c']}, the code now computes "
             f"{recomputed}; regenerate: pixi run python -m scripts.gen_displacement_field")
-
-    # Job 2: the closed form against shapely on every method's REAL road sets, at raw precision --
-    # nothing here is quantised, because this is about the formula. Five since the spine repin of
-    # 2026-09-20, where it was eight; `tests/test_frontier_bundle.py` says which two went.
-    # Job 2's coordinates and radii come from the SAME block its roads do -- the fixture one.
-    # Pairing the shipped block's buildings with the fixture's roads would compare a closed form
-    # against shapely on geometry that never coexisted, and both sides would agree on nonsense.
-    small = load_example_region(TEST_VARIANT)
-    radii = small.buildings.radii
-    raw_x = small.building_geometries.geometry.x.to_numpy(dtype=float)
-    raw_y = small.building_geometries.geometry.y.to_numpy(dtype=float)
-    assert len(roads_by_method) == 5, sorted(roads_by_method)
-    for name, roads in sorted(roads_by_method.items()):
-        truth = displacement(small.building_geometries, radii, roads)
-        closed = displacement_from_distance(
-            radii, closed_form_distance(raw_x, raw_y, segments(roads)))
-        assert closed == pytest.approx(truth, rel=1e-3), name
-        assert closed >= truth - 1e-9, (
-            f"{name}: the closed form came out LOWER than shapely ({closed} < {truth}). Shapely's "
-            "buffer is inscribed, so its distances are the large ones and its c the small ones -- "
-            "a reversal means the formula changed, not the discretisation")
 
 
 def _coordinates(b: dict[str, Any]) -> list[tuple[str, float]]:
     """Every coordinate the bundle carries, each labelled with where it came from.
 
-    Enumerated by NAME, not discovered by walking every float: `buildings.r`, `sum_c` and
-    `fraction` go through `sigfig`, not `cm`, so a blind walk would have to guess which rule
-    applies and would fail on the three fields where the answer is "the other one". The schema is
+    Enumerated by NAME, not discovered by walking every float: `sum_c` and `fraction` go through
+    `sigfig`, not `cm`, so a blind walk would have to guess which rule applies and would fail on
+    the fields where the answer is "the other one". The schema is
     closed and known while this is being written, which is exactly when a name beats a probe.
     """
     out: list[tuple[str, float]] = []
-    out += [("buildings.x", v) for v in b["buildings"]["x"]]
-    out += [("buildings.y", v) for v in b["buildings"]["y"]]
+    out += [("buildings", v) for building in b["buildings"] for poly in building for ring in poly
+            for xy in ring for v in xy]
     out += [("parcels", v) for ring in b["parcels"] for xy in ring for v in xy]
     # One level deeper than it used to be: `boundary` is a ring LIST now, so walking it as a
     # single ring hands `abs()` a coordinate pair and raises rather than checking anything.
@@ -396,9 +359,10 @@ def _coordinate_shaped(node: Any, path: str = "") -> dict[str, list[float]]:
 
     * a non-empty list whose every element is a list of exactly two numbers -- a ring, a polyline,
       or a road's `coords`;
-    * a dict carrying `x` and `y` as equal-length numeric lists -- the struct-of-arrays form
-      `buildings` uses. Its `r` is NOT a coordinate (it goes through `sigfig`, not `cm`) and is not
-      matched, because the rule keys on the pair of names, not on numeric-ness.
+    * a dict carrying `x` and `y` as equal-length numeric lists -- the struct-of-arrays form. No
+      layer uses it today (`buildings` did, until it became outlines), and it stays because a
+      future layer adding it would otherwise be invisible here. A sibling numeric list such as a
+      radius is NOT matched: the rule keys on the pair of names, not on numeric-ness.
 
     A bare list of exactly two numbers counts too, so that a single point added as `[x, y]` cannot
     slip through as a third shape. `origin` is the one such value the bundle carries today, and the
@@ -409,10 +373,10 @@ def _coordinate_shaped(node: Any, path: str = "") -> dict[str, list[float]]:
     that is neither of these -- three interleaved arrays, a flat `[x0, y0, x1, y1, ...]`, a string
     of WKT -- is invisible here, and the bundle would have to grow one for that to matter.
 
-    No FALSE POSITIVES on this artifact, measured: it finds 278 paths, and every one of them
-    normalises to one of the seven carriers `_coordinates` names (263 of them are parcel rings) --
-    plus `origin`. Nothing else in the bundle is coordinate-shaped: `width` and `encoding` hold
-    scalars, `buildings.r` is a bare float list, and `reference[].sum_c`/`fraction` are scalars.
+    No FALSE POSITIVES on this artifact: every path it finds normalises to one of the seven
+    carriers `_coordinates` names -- plus `origin`. Nothing else in the bundle is
+    coordinate-shaped: `width` and `encoding` hold scalars, and so do `reference[].sum_c` and
+    `fraction`.
     """
     def num(v: Any) -> bool:
         return isinstance(v, (int, float)) and not isinstance(v, bool)
@@ -528,8 +492,8 @@ def test_the_baked_colours_are_actually_in_the_committed_png(bundle: dict[str, A
 
     An EXACT match is available here, and the mechanism is worth stating because a plausible wrong
     story would justify a much looser tolerance. `save_render` passes `transparent=True`, so the
-    PNG is RGBA and the corridor's alpha 0.25 and each disk's alpha = c live in the alpha channel;
-    `convert("RGB")` DROPS that channel rather than compositing it against white, so every
+    PNG is RGBA and the corridor's alpha 0.25 and each building's alpha = c live in the alpha
+    channel; `convert("RGB")` DROPS that channel rather than compositing it against white, so every
     constant's exact RGB survives into the pixels this test reads. Measured: all four colours sit
     at distance 0, and a one-hex-step change measures 1.
 
@@ -547,7 +511,7 @@ def test_the_baked_colours_are_actually_in_the_committed_png(bundle: dict[str, A
             f"test's exactness depends on convert('RGB') DROPPING an alpha channel rather than "
             f"compositing it")
         px = np.asarray(img.convert("RGB"), dtype=np.int32).reshape(-1, 3)
-    for key in ("disk_color", "road_color", "boundary_color", "parcel_color"):
+    for key in ("building_color", "road_color", "boundary_color", "parcel_color"):
         want = str(bundle["encoding"][key])
         rgb = np.array([int(want[i:i + 2], 16) for i in (1, 3, 5)], dtype=np.int32)
         closest = int(np.abs(px - rgb).sum(axis=1).min())

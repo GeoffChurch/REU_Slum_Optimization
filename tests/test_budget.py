@@ -14,7 +14,7 @@ from reblock.budget import (
     road_drainage,
     street_first_ordered,
 )
-from reblock.buildings import SpacingDiscs
+from reblock.buildings import ANCHOR_COL, SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL
 from reblock.methods.clearance import ClearanceReblocker
@@ -136,100 +136,150 @@ def test_spacing_discs_fallback_when_fewer_than_two_points():
     assert list(SpacingDiscs(pts).radii) == [3.0]     # fallback = corridor_m
 
 
-def test_displacement_is_linear_ramp_in_distance_to_corridor():
-    import geopandas as gpd
-    import numpy as np
-    from shapely.geometry import LineString, Point
+def _band_fraction(y0: float, r: float, lo: float, hi: float) -> float:
+    """EXACT share of a disc (centre height y0, radius r) lying in the band lo <= y <= hi.
 
-    from reblock.budget import displacement
+    The area of a disc below a line at offset u from its centre is
+    r^2 arccos(-u/r) + u sqrt(r^2 - u^2), so a band is the difference of two of those.
+    """
+    import math
+
+    def below(u: float) -> float:
+        u = max(-r, min(r, u))
+        return r * r * math.acos(-u / r) + u * math.sqrt(r * r - u * u)
+    return (below(hi - y0) - below(lo - y0)) / (math.pi * r * r)
+
+
+def test_displacement_is_the_share_of_each_disc_the_corridor_covers() -> None:
+    """Displacement is overlap, checked against GEOMETRY rather than against the formula's own
+    earlier output: a disc cut by a straight band has an exact analytic area.
+
+    A long road along y=0, 2 m wide, is the band |y| <= 1. Three discs of radius 4 centred at
+    y = 1, 3, 10. The first sits with its CENTRE on the band's edge; the retired
+    `clip(1 - d/r)` scored it c = 1 there (d = 0), where the true share is 0.3045. Over all three
+    that formula summed to 1.5 against a true 0.50 -- the over-count, in miniature.
+    """
+    import numpy as np
+
+    from reblock.budget import displacement, road_corridor
+    from reblock.buildings import Discs
     crs = "EPSG:32734"
-    # one road along y=0; width 2 m -> corridor is the strip |y|<=1
-    roads = with_width(gpd.GeoDataFrame(geometry=[LineString([(-50, 0), (50, 0)])], crs=crs),
+    roads = with_width(gpd.GeoDataFrame(geometry=[LineString([(-500, 0), (500, 0)])], crs=crs),
                        2.0)
-    # point A on the corridor edge-ish (y=1 -> d=0 -> c=1); B at y=3 with r=4 -> d=2 -> c=0.5;
-    # C at y=10 with r=4 -> d=9 -> c=0 (far)
-    pts = gpd.GeoDataFrame(geometry=[Point(0, 1), Point(0, 3), Point(0, 10)], crs=crs)
-    radii = np.array([4.0, 4.0, 4.0])
-    # d_A = dist(A, strip|y|<=1) = 0 ; d_B = 3-1 = 2 ; d_C = 10-1 = 9
-    got = displacement(pts, radii, roads)
-    assert abs(got - (1.0 + 0.5 + 0.0)) < 1e-6
+    ys = [1.0, 3.0, 10.0]
+    b = Discs(gpd.GeoDataFrame(geometry=[Point(0, y) for y in ys], crs=crs), np.full(3, 4.0))
+    c = b.displacement(road_corridor(roads))
+    exact = [_band_fraction(y, 4.0, -1.0, 1.0) for y in ys]
+    # the disc outline is a 64-gon (shapely's default buffer), inscribed, so a partial slice is off
+    # by a few parts in 1e3 -- the only reason this is not exact
+    np.testing.assert_allclose(c, exact, rtol=5e-3, atol=1e-9)
+    assert abs(exact[0] - 0.3045) < 1e-4 and abs(sum(exact) - 0.5) < 1e-3
+    assert c[2] == 0.0                                       # never touched: exactly zero
+    assert abs(displacement(b, roads) - float(c.sum())) < 1e-12
 
 
-def test_displacement_zero_without_roads_or_points():
-    import geopandas as gpd
+def test_a_footprint_half_covered_is_half_displaced() -> None:
+    """Real outlines, no approximation anywhere: a 4 x 4 square whose lower half the corridor
+    covers exactly is displaced exactly 0.5 -- a corner clip costs a corner, not a home."""
+    from reblock.budget import road_corridor
+    from reblock.buildings import Footprints
+    crs = "EPSG:32734"
+    sq = Polygon([(0, -2), (4, -2), (4, 2), (0, 2)])
+    fp = Footprints(gpd.GeoDataFrame({ANCHOR_COL: [sq.centroid]}, geometry=[sq], crs=crs))
+    # along y = -1, 2 m wide: covers y in [-2, 0], exactly the square's lower half
+    road = with_width(gpd.GeoDataFrame(geometry=[LineString([(-50, -1), (50, -1)])], crs=crs),
+                      2.0)
+    assert abs(float(fp.displacement(road_corridor(road))[0]) - 0.5) < 1e-12
+
+
+def test_displacement_zero_without_roads_or_buildings() -> None:
     import numpy as np
-    from shapely.geometry import Point
 
     from reblock.budget import displacement
+    from reblock.buildings import Discs
     crs = "EPSG:32734"
     empty = gpd.GeoDataFrame(geometry=[], crs=crs)
-    pts = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=crs)
-    assert displacement(pts, np.array([3.0]), empty) == 0.0
-    assert displacement(empty, np.array([]), empty) == 0.0
+    one = Discs(gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=crs), np.array([3.0]))
+    assert displacement(one, empty) == 0.0
+    assert displacement(Discs(empty, np.zeros(0)), empty) == 0.0
 
 
-def test_displacement_counts_a_shared_site_once_under_overlapping_corridors():
-    # A building whose disk sits in the OVERLAP of two roads' corridors must contribute once, not
-    # once per overlapping road -- guaranteed by `displacement`'s design (one `union_all` corridor,
-    # one `distance` per building), but worth a direct regression test since this exact scenario
-    # used to be covered by the now-deleted `displacement_count` overlap test.
-    from reblock.budget import displacement
-    crs = "EPSG:32734"
-    road_a = LineString([(0.0, 0.0), (5.0, 0.0)])
-    road_b = LineString([(4.0, 0.0), (10.0, 0.0)])          # overlaps road_a's corridor near x=4-5
-    roads = with_width(gpd.GeoDataFrame(geometry=[road_a, road_b], crs=crs), 2.0)
-    pts = gpd.GeoDataFrame(geometry=[Point(1.0, 0.5), Point(9.0, 0.5), Point(4.5, 0.5)], crs=crs)
-    # the 3rd point sits in BOTH corridors; all 3 are >=1.75 m from every other point (r >= 1.75)
-    # and sit right on the (y=0) road line (d=0) -- each c_i = 1.0, so the sum must be exactly 3.0.
-    radii = SpacingDiscs(pts).radii
-    assert displacement(pts, radii, roads) == 3.0
-
-
-def test_displacement_contributions_pins_the_r_equals_zero_convention() -> None:
-    # r_i = 0 (coincident points) is the one branch `displacement_from_distance`'s sum can hide --
-    # a 0-or-1 contribution changes a total either way, so pin it on the per-building array
-    # directly: d <= 0 -> c = 1 (a coincident point sitting exactly on the corridor is fully
-    # displaced), d > 0 -> c = 0 (off the corridor with no radius to graze it at all). The third
-    # point (r=3, d=1.5) is the ordinary ramp, included so this isn't a degenerate all-zero-radius
-    # case.
+def test_displacement_charges_a_shared_building_once_under_overlapping_corridors() -> None:
+    """A building two roads both cover is displaced by their UNION: charged once, never once per
+    road. So scoring the pair must come out strictly below scoring each road alone and adding --
+    which is exactly the double-count a per-road sum would commit."""
     import numpy as np
 
-    from reblock.budget import displacement_contributions
-    radii = np.array([0.0, 0.0, 3.0])
-    d = np.array([0.0, 1.0, 1.5])
-    got = displacement_contributions(radii, d)
-    assert list(got) == [1.0, 0.0, 0.5]
+    from reblock.budget import displacement
+    from reblock.buildings import Discs
+    crs = "EPSG:32734"
+    road_a = LineString([(0.0, 0.0), (5.0, 0.0)])
+    road_b = LineString([(4.0, 0.0), (10.0, 0.0)])          # overlaps road_a's corridor, x 4-5
+    both = with_width(gpd.GeoDataFrame(geometry=[road_a, road_b], crs=crs), 2.0)
+    only_a = with_width(gpd.GeoDataFrame(geometry=[road_a], crs=crs), 2.0)
+    only_b = with_width(gpd.GeoDataFrame(geometry=[road_b], crs=crs), 2.0)
+    shared = Discs(gpd.GeoDataFrame(geometry=[Point(4.5, 0.0)], crs=crs), np.array([1.5]))
+    union = displacement(shared, both)
+    assert 0.0 < union <= 1.0
+    assert union < displacement(shared, only_a) + displacement(shared, only_b)
 
 
-def test_repulsion_is_positive_even_far_from_all_buildings():
-    from shapely.geometry import LineString, Point
+def test_a_building_without_extent_is_displaced_iff_the_corridor_covers_its_point() -> None:
+    """r = 0 (coincident points) has no area to take a share of, so the convention stands: c = 1
+    iff the corridor covers the point, else 0. Pinned per building, because a 0-or-1 term moves a
+    total either way and the sum would hide which way it went."""
+    import numpy as np
 
+    from reblock.budget import road_corridor
+    from reblock.buildings import Discs
+    crs = "EPSG:32734"
+    road = with_width(gpd.GeoDataFrame(geometry=[LineString([(-50, 0), (50, 0)])], crs=crs), 2.0)
+    b = Discs(gpd.GeoDataFrame(geometry=[Point(0, 0), Point(0, 5), Point(0, 0.5)], crs=crs),
+              np.array([0.0, 0.0, 3.0]))
+    c = b.displacement(road_corridor(road))
+    assert c[0] == 1.0 and c[1] == 0.0                       # on the corridor / off it, no radius
+    assert 0.0 < c[2] < 1.0                                  # an ordinary disc, partly covered
+
+
+def test_repulsion_is_positive_even_far_from_all_buildings() -> None:
     from reblock.budget import displacement, repulsion
     crs = "EPSG:32734"
-    # three buildings clustered near the origin
-    pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(0, 5), Point(5, 0)], crs=crs)
-    radii = SpacingDiscs(pts).radii
+    b = SpacingDiscs(gpd.GeoDataFrame(geometry=[Point(0, 0), Point(0, 5), Point(5, 0)], crs=crs))
     far_road = LineString([(1000.0, 1000.0), (1000.0, 1010.0)])   # nowhere near any building
     # the quadratic tail r^2/(r^2+d^2) never reaches zero -> repulsion stays strictly positive even
     # for a road far from every building (the key non-degeneracy property)...
-    assert repulsion(pts, radii, far_road) > 0.0
-    # ... whereas displacement's hard 0-beyond-r cutoff makes the very same far road cost 0 -- the
-    # degeneracy repulsion is designed to avoid.
+    assert repulsion(b, far_road) > 0.0
+    # ... whereas displacement is exactly 0 for a road that touches no building -- the degeneracy
+    # repulsion is designed to avoid.
     far_roads = with_width(gpd.GeoDataFrame(geometry=[far_road], crs=crs), DEFAULT_ROAD_WIDTH_M)
-    assert displacement(pts, radii, far_roads) == 0.0
+    assert displacement(b, far_roads) == 0.0
 
 
-def test_repulsion_higher_for_a_road_closer_to_buildings():
-    from shapely.geometry import LineString, Point
-
+def test_repulsion_higher_for_a_road_closer_to_buildings() -> None:
     from reblock.budget import repulsion
     crs = "EPSG:32734"
-    pts = gpd.GeoDataFrame(geometry=[Point(0, 0), Point(0, 10), Point(0, 20)], crs=crs)
-    radii = SpacingDiscs(pts).radii
+    b = SpacingDiscs(gpd.GeoDataFrame(geometry=[Point(0, 0), Point(0, 10), Point(0, 20)],
+                                      crs=crs))
     near = LineString([(2.0, 0.0), (2.0, 20.0)])      # 2 m from the building column
     far = LineString([(50.0, 0.0), (50.0, 20.0)])     # 50 m away
-    r_near, r_far = repulsion(pts, radii, near), repulsion(pts, radii, far)
-    assert r_near > r_far > 0.0                        # closer road intrudes strictly more
+    assert repulsion(b, near) > repulsion(b, far) > 0.0
+
+
+def test_repulsion_is_measured_from_centres_whatever_the_tier() -> None:
+    """Measured from a polygon, d becomes an EDGE distance and repulsion silently changes meaning
+    the moment a block moves to footprints. From the centre, a footprint and the disc sharing its
+    centre and equivalent radius must cost exactly the same. Watched failing with repulsion
+    measuring from `building_geometries` again."""
+    from reblock.budget import repulsion
+    from reblock.buildings import Discs, Footprints
+    crs = "EPSG:32734"
+    squares = [Polygon([(x, 0), (x + 4, 0), (x + 4, 4), (x, 4)]) for x in (0.0, 10.0)]
+    fp = Footprints(gpd.GeoDataFrame({ANCHOR_COL: [s.centroid for s in squares]},
+                                     geometry=squares, crs=crs))
+    discs = Discs(gpd.GeoDataFrame(geometry=[Point(float(x), float(y)) for x, y in fp.xy],
+                                   crs=crs), fp.radii)
+    road = LineString([(-5, 6), (20, 6)])
+    assert abs(repulsion(fp, road) - repulsion(discs, road)) < 1e-12
 
 
 def _straight_block_with_two_roads() -> tuple[Block, gpd.GeoDataFrame]:
@@ -374,17 +424,15 @@ def test_prefix_to_permeability_empty_roads_returns_empty_unreached() -> None:
 
 
 def test_displacement_curve_is_monotonic_and_ends_at_full():
-    import numpy as np
 
     from reblock.budget import displacement, displacement_curve
     block, roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_geometries), 3.0)
-    curve = displacement_curve(block, roads, radii)
+    curve = displacement_curve(block, roads)
     n = len(block.building_geometries)
     assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
     assert curve.benefit == sorted(curve.benefit)     # non-decreasing displacement
     assert abs(curve.benefit[-1]
-               - displacement(block.building_geometries, radii, roads) / n) < 1e-6
+               - displacement(block.buildings, roads) / n) < 1e-6
     # cost axis = cumulative added road length in METRES, non-decreasing, ending at the full
     # road length -- a `_sweep` property formerly pinned only by the retired
     # test_cost_axis_is_cumulative_road_length_metres (via cost_benefit_curve); migrated here
@@ -396,64 +444,53 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
 def test_displacement_curve_is_home_fraction() -> None:
     from reblock.budget import displacement, displacement_curve
     block, roads = _straight_block_with_two_roads()   # existing helper with building_geometries
-    radii = block.buildings.radii
-    curve = displacement_curve(block, roads, radii)
+    curve = displacement_curve(block, roads)
     n = len(block.building_geometries)
     assert all(0.0 <= b <= 1.0 for b in curve.benefit)          # fraction, not a count
     # terminal fraction == displacement(full roads)/n_buildings
     assert abs(curve.benefit[-1]
-               - displacement(block.building_geometries, radii, roads) / n) < 1e-9
+               - displacement(block.buildings, roads) / n) < 1e-9
 
 
 def test_prefix_to_displacement_returns_minimal_prefix_that_reaches_fraction() -> None:
-    import numpy as np
 
     from reblock.budget import displacement, prefix_to_displacement
     block, roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_geometries), 3.0)
     n = len(block.building_geometries)
-    frac1 = displacement(block.building_geometries, radii,
-                         cast(gpd.GeoDataFrame, roads.iloc[:1])) / n
-    frac2 = displacement(block.building_geometries, radii, roads) / n
+    frac1 = displacement(block.buildings, cast(gpd.GeoDataFrame, roads.iloc[:1])) / n
+    frac2 = displacement(block.buildings, roads) / n
     assert 0.0 < frac1 < frac2                  # road 0 alone displaces only its own building
-    prefix = prefix_to_displacement(block, roads, radii, frac1)
+    prefix = prefix_to_displacement(block, roads, frac1)
     assert len(prefix) == 1                     # the MINIMAL prefix, not both roads
     assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])
 
 
 def test_prefix_to_displacement_needs_all_roads_for_a_higher_fraction() -> None:
-    import numpy as np
 
     from reblock.budget import displacement, prefix_to_displacement
     block, roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_geometries), 3.0)
     n = len(block.building_geometries)
-    frac1 = displacement(block.building_geometries, radii,
-                         cast(gpd.GeoDataFrame, roads.iloc[:1])) / n
-    frac2 = displacement(block.building_geometries, radii, roads) / n
+    frac1 = displacement(block.buildings, cast(gpd.GeoDataFrame, roads.iloc[:1])) / n
+    frac2 = displacement(block.buildings, roads) / n
     target = (frac1 + frac2) / 2.0              # strictly between: needs both roads
-    prefix = prefix_to_displacement(block, roads, radii, target)
+    prefix = prefix_to_displacement(block, roads, target)
     assert len(prefix) == 2
 
 
 def test_prefix_to_displacement_returns_all_roads_when_fraction_unreachable() -> None:
-    import numpy as np
 
     from reblock.budget import prefix_to_displacement
     block, roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_geometries), 3.0)
-    prefix = prefix_to_displacement(block, roads, radii, 1.5)   # > 1.0, impossible
+    prefix = prefix_to_displacement(block, roads, 1.5)   # > 1.0, impossible
     assert len(prefix) == len(roads)            # best effort = all roads in drainage order
 
 
 def test_prefix_to_displacement_empty_roads_returns_empty() -> None:
-    import numpy as np
 
     from reblock.budget import prefix_to_displacement
     block, _roads = _straight_block_with_two_roads()
-    radii = np.full(len(block.building_geometries), 3.0)
     empty_roads = gpd.GeoDataFrame(geometry=[], crs=UTM)
-    prefix = prefix_to_displacement(block, empty_roads, radii, 0.5)
+    prefix = prefix_to_displacement(block, empty_roads, 0.5)
     assert len(prefix) == 0
 
 
@@ -466,9 +503,8 @@ def test_permeability_and_displacement_curves_share_cost_samples():
     from reblock.budget import displacement_curve
     from reblock.permeability import PermeabilityParams, permeability_curve
     block, roads = _straight_block_with_two_roads()
-    radii = block.buildings.radii
     perm = permeability_curve(block, roads, PermeabilityParams())
-    disp = displacement_curve(block, roads, radii)
+    disp = displacement_curve(block, roads)
     assert list(perm.cost) == list(disp.cost)
 
 

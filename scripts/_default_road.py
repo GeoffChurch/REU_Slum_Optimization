@@ -1,11 +1,9 @@
-"""The two default roads, and the closed-form corridor distance the widget implements.
+"""The two default roads the displacement widget boots with, and the chord rule behind them.
 
-Declared once because more than one caller needs it: today,
-`tests/test_displacement_closed_form.py`'s identity tests; per the implementation plan, a later
-task's bake script and its fixture generator will need the same two functions to produce the
-widget's boot payload, without duplicating them.
-`scripts/_example_block.py` set this precedent -- when each caller declared its own copy, changing
-one left the others describing something else while every test still passed.
+Declared once because more than one caller needs them: the bake (`scripts/gen_displacement_field`)
+and the bundle test that re-derives what it baked. `scripts/_example_block.py` set this precedent
+-- when each caller declared its own copy, changing one left the others describing something else
+while every test still passed.
 """
 from __future__ import annotations
 
@@ -41,8 +39,7 @@ def default_roads(block: Block, width_m: float) -> GeoDataFrame:
     the same road for fallback parity to mean anything, and the caption's numbers have to be
     measurements of it.
     """
-    pts = block.building_geometries
-    xy = np.column_stack([pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy()])
+    xy = block.buildings.xy
     centre = xy.mean(axis=0)
     # First principal component. `np.linalg.svd` on the centred cloud; the SIGN of a singular
     # vector is arbitrary in the linear algebra, not in this code's execution -- SVD is
@@ -115,42 +112,3 @@ def chord(hull: BaseGeometry, through: NDArray[np.float64],
             f"interior (block extent x=[{minx:.1f}, {maxx:.1f}], y=[{miny:.1f}, {maxy:.1f}]); the "
             "offset pushed the line clear of the hull, or it only grazed the hull's boundary")
     return LineString([longest.coords[0], longest.coords[-1]])
-
-
-def segments(roads: GeoDataFrame) -> NDArray[np.float64]:
-    """Every road flattened to `(x0, y0, x1, y1, half_width)` -- exactly what the widget receives.
-
-    Flattening here rather than in the bake means the identity test and the widget consume the same
-    shape, so a parity failure is a failure of the FORMULA and never of two different flattenings.
-    """
-    out: list[tuple[float, float, float, float, float]] = []
-    for geom, w in zip(roads.geometry, roads["width_m"].to_numpy(dtype=float), strict=True):
-        parts = list(geom.geoms) if isinstance(geom, BaseMultipartGeometry) else [geom]
-        for part in parts:
-            coords = np.asarray(part.coords, dtype=np.float64)
-            for a, b in zip(coords[:-1], coords[1:], strict=True):
-                out.append((float(a[0]), float(a[1]), float(b[0]), float(b[1]), float(w) / 2.0))
-    return np.asarray(out, dtype=np.float64).reshape(-1, 5)
-
-
-def closed_form_distance(px: NDArray[np.float64], py: NDArray[np.float64],
-                         segs: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Per-point distance to the corridor, without ever building the corridor.
-
-        dist(p, U_i buffer(L_i, w_i/2)) == min_i max(0, dist(p, L_i) - w_i/2)
-
-    This is the reference `web/src/model/displacement.ts` mirrors line for line. Kept in numpy here
-    and per-point there; same arithmetic.
-    """
-    if len(segs) == 0:
-        return np.full(len(px), np.inf)
-    x0, y0, x1, y1, hw = segs.T
-    dx, dy = x1 - x0, y1 - y0
-    L2 = dx * dx + dy * dy
-    # A zero-length road has dx=dy=0, so the numerator is 0 regardless of (px, py); dividing by
-    # 1.0 instead of L2 here avoids the 0/0 that would otherwise turn that already-correct t=0
-    # into NaN -- t=0 is what makes a zero-length road its own endpoint.
-    t = ((px[:, None] - x0) * dx + (py[:, None] - y0) * dy) / np.where(L2 > 0, L2, 1.0)
-    t = np.clip(t, 0.0, 1.0)
-    d = np.hypot(px[:, None] - (x0 + t * dx), py[:, None] - (y0 + t * dy)) - hw
-    return np.maximum(0.0, d).min(axis=1)

@@ -130,7 +130,6 @@ def main() -> None:
     # Both frozen once and threaded through every solve: functions of block geometry alone.
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
     p0, _ = egress_power(block, None, params, adj=adj)
-    radii = block.buildings.radii
     n_buildings = len(block.building_geometries)
 
     # Curve colours keyed exactly as the fallback PNG keys them: `method_colors` over the SAME
@@ -155,7 +154,7 @@ def main() -> None:
             # `tests/test_frontier_bundle.py` began importing its `DTS_TEMPLATE`.
             prefix = cast(GeoDataFrame, ordered.iloc[:m])
             road_m.append(sigfig(float(prefix.geometry.length.sum())))
-            disp.append(sigfig(displacement(block.building_geometries, radii, prefix) / n_buildings
+            disp.append(sigfig(displacement(block.buildings, prefix) / n_buildings
                                if n_buildings else 0.0))
             perm.append(sigfig(permeability(block, prefix, params, p0=p0, adj=adj)))
         methods[name] = {

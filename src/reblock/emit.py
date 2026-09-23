@@ -13,12 +13,11 @@ from typing import TYPE_CHECKING, cast
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import numpy as np
-import shapely
 from geopandas import GeoDataFrame
 from matplotlib.ticker import PercentFormatter
-from numpy.typing import NDArray
 
+from reblock.budget import displacement, road_corridor
+from reblock.buildings import Extents
 from reblock.contracts import Block, Metrics, Proposal, Result, Source
 from reblock.data.counts import COUNT, BuildingCount, resolved
 from reblock.method_labels import friendly_method_name
@@ -55,27 +54,20 @@ def _kcomplexity_metrics(metrics: tuple[Metrics, ...]) -> Metrics | None:
     return next((m for m in metrics if m.eval == _KCOMPLEXITY), None)
 
 
-def _displaced_points(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
-    """`block.building_geometries` with a per-point displacement fraction `c` = max(0, 1 - d/r)
-    (r = NN/2, see budget) and its disk `radius`, for the render to shade. Empty when there are no
-    points or no proposed roads."""
-    pts = block.building_geometries
-    if pts.empty or proposal.roads is None or proposal.roads.empty:
-        return cast(gpd.GeoDataFrame, pts.iloc[:0])
-    radii = block.buildings.radii
-    corridor = _corridor(proposal.roads)
-    d = pts.geometry.distance(corridor).to_numpy()
-    with np.errstate(divide="ignore", invalid="ignore"):
-        c = np.where(radii > 0.0, 1.0 - d / radii, np.where(d <= 0.0, 1.0, 0.0))
-    out = pts.copy()
-    out["c"] = np.clip(c, 0.0, 1.0)
-    out["radius"] = radii
+def _displaced_buildings(block: Block, proposal: Proposal) -> gpd.GeoDataFrame:
+    """Each building the proposal touches, as its OUTLINE at the block's tier (a disc, or the real
+    footprint), carrying `c` -- the share of it the road corridor takes -- for the render to shade.
+    Empty when there are no buildings or no proposed roads.
+
+    Outlines, not points plus a radius: the figure then draws the shape the model actually charges
+    for, whatever the tier, instead of redrawing a disc that a footprint block does not have."""
+    buildings = block.buildings
+    empty = gpd.GeoDataFrame({"c": []}, geometry=[], crs=block.crs)
+    if len(buildings) == 0 or proposal.roads is None or proposal.roads.empty:
+        return empty
+    c = buildings.displacement(road_corridor(proposal.roads))
+    out = gpd.GeoDataFrame({"c": c}, geometry=buildings.outlines.to_numpy(), crs=block.crs)
     return cast(gpd.GeoDataFrame, out[out["c"] > 0.0])
-
-
-def _corridor(roads: gpd.GeoDataFrame) -> shapely.geometry.base.BaseGeometry:
-    """Paved footprint: every road buffered by its OWN half-width."""
-    return roads.geometry.buffer(roads["width_m"].to_numpy(dtype=float) / 2.0).union_all()
 
 
 def pct_paved(roads: gpd.GeoDataFrame | None, block_area: float) -> float:
@@ -83,17 +75,15 @@ def pct_paved(roads: gpd.GeoDataFrame | None, block_area: float) -> float:
     displacement metric uses. 0 for an empty road set or a non-positive block area."""
     if roads is None or len(roads) == 0 or block_area <= 0:
         return 0.0
-    return float(_corridor(roads).area / block_area)
+    return float(road_corridor(roads).area / block_area)
 
 
-def pct_displaced(roads: gpd.GeoDataFrame | None, building_geometries: gpd.GeoDataFrame,
-                  radii: NDArray[np.float64]) -> float:
-    """Fraction of buildings-equivalent displaced: Σcᵢ / n_buildings (see budget.displacement)."""
-    from reblock.budget import displacement
-    n = len(building_geometries)
+def pct_displaced(roads: gpd.GeoDataFrame | None, buildings: Extents) -> float:
+    """Fraction of buildings-equivalent displaced: Sum c_i / n (see budget.displacement)."""
+    n = len(buildings)
     if roads is None or len(roads) == 0 or n == 0:
         return 0.0
-    return displacement(building_geometries, radii, roads) / n
+    return displacement(buildings, roads) / n
 
 
 def _member_ids(block_id: str) -> list[str]:
@@ -451,12 +441,15 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
     context_outlines = cast(gpd.GeoDataFrame, outlines[~is_member])
     member_union = (outlines[is_member].geometry.union_all() if is_member.any()
                     else block.boundary)
-    own_points = cast(gpd.GeoDataFrame, pts[pts.within(member_union)])
     context_points = cast(gpd.GeoDataFrame, pts[~pts.within(member_union)])
+    # The block's OWN buildings from the block, not from the source's points: at the footprint
+    # tier those are the real outlines, which is what the figure should show.
+    own_buildings = block.building_geometries.geometry
 
     fig_before = render_before(
         block, access_before, vmax=vmax, frame=frame,
-        context_outlines=context_outlines, context_points=context_points, own_points=own_points,
+        context_outlines=context_outlines, context_points=context_points,
+        own_buildings=own_buildings,
     )
     save_render(fig_before, out_dir / f"{short_label(block.block_id)}_before.png")
     plt.close(fig_before)
@@ -471,7 +464,8 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
         fig_after = render_after(
             block, r.proposal, kc.fields["access_after"], vmax=vmax, metrics=kc, frame=frame,
             context_outlines=context_outlines, context_points=context_points,
-            own_points=own_points, displaced_points=_displaced_points(block, r.proposal),
+            own_buildings=own_buildings,
+            displaced_buildings=_displaced_buildings(block, r.proposal),
         )
         save_render(fig_after, out_dir / f"{short_label(block.block_id)}_{name}_after.png")
         plt.close(fig_after)

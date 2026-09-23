@@ -20,7 +20,7 @@ from shapely import make_valid, voronoi_polygons
 from shapely.geometry import GeometryCollection, MultiPoint, MultiPolygon, Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
-from reblock.buildings import Extents, SpacingDiscs
+from reblock.buildings import ANCHOR_COL, Extents, SpacingDiscs
 from reblock.contracts import BBox, Block, Region
 from reblock.data._util import _window
 from reblock.data.counts import RAW_COUNT
@@ -127,7 +127,12 @@ class KblockSource:
             blocks = cast(gpd.GeoDataFrame, blocks[blocks["block_id"].isin(wanted)])
         # Every column, not just geometry: `columns=["geometry"]` is what dropped area_in_meters.
         frame = self.member_buildings.for_blocks(blocks)
-        bld = frame.buildings
+        # Every row carries its published ANCHOR beside its geometry -- for a point tier the same
+        # point, for `Footprints` the one its outline was sited from, which is what `xy` must be.
+        # Set AFTER `to_crs`: that reprojects the active geometry column only.
+        bld = frame.buildings.to_crs(utm)
+        bld[ANCHOR_COL] = gpd.GeoSeries(frame.anchors.to_crs(utm).to_numpy(), crs=utm,
+                                        index=bld.index)
         # Fail at LOAD, not deep inside a run: build the tier on the rows just read, so AreaDiscs
         # on a parquet without `area_in_meters`, or Footprints on point geometry, raises HERE --
         # naming the file -- before any block is yielded or any method runs, rather than on the
@@ -145,11 +150,10 @@ class KblockSource:
         # byte-identical to the key it replaces.
         sch = source_hash(self.blocks_path, *frame.read_from)
         return Region(region_id=self.region_id, crs=utm,
-                      blocks=self._blocks_from(blocks.to_crs(utm), bld.to_crs(utm), sch,
-                                               frame.anchors.to_crs(utm)))
+                      blocks=self._blocks_from(blocks.to_crs(utm), bld, sch))
 
     def _blocks_from(self, blocks: gpd.GeoDataFrame, bld: gpd.GeoDataFrame,
-                     source_content_hash: str, anchors: gpd.GeoSeries) -> Iterator[Block]:
+                     source_content_hash: str) -> Iterator[Block]:
         utm = blocks.crs
         if utm is None:
             raise ValueError(f"{self.region_id}: blocks GeoDataFrame has no CRS")
@@ -157,8 +161,8 @@ class KblockSource:
         # straddling a block edge would otherwise fail `within` and vanish, and anchoring on a
         # centroid computed here instead moved the Voronoi by enough to change every parcel (see
         # `BuildingSource.for_blocks`). Only the building MODEL varies by tier; parcels do not.
-        anchor = bld.assign(_row=np.arange(len(bld))).set_geometry(
-            gpd.GeoSeries(anchors.to_numpy(), crs=anchors.crs, index=bld.index))
+        anchor = gpd.GeoDataFrame({"_row": np.arange(len(bld))},
+                                  geometry=bld[ANCHOR_COL].to_numpy(), crs=utm)
         joined = gpd.sjoin(anchor, blocks, predicate="within", how="inner")
         by_block: dict[object, tuple[list[Point], NDArray[np.int64]]] = {
             bid: (cast(list[Point], list(grp.geometry)), grp["_row"].to_numpy(dtype=np.int64))

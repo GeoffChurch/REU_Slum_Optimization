@@ -23,7 +23,7 @@ from PIL import Image
 from reblock.budget import street_first_ordered
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL, parcel_access_layers
-from reblock.emit import _displaced_points
+from reblock.emit import _displaced_buildings
 from reblock.render import render_after
 
 _T = TypeVar("_T")
@@ -63,7 +63,7 @@ def _frame_png(task: tuple[int, float]) -> tuple[int, bytes]:
     proposal = Proposal(block_id=block.block_id, crs=block.crs, roads=prefix)
     layers = parcel_access_layers(block, prefix if k else None)
     fig = render_after(block, proposal, layers, vmax=_CTX["vmax"], frame=_CTX["frame"],
-                       displaced_points=_displaced_points(block, proposal) if k else None)
+                       displaced_buildings=_displaced_buildings(block, proposal) if k else None)
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=_CTX["dpi"])   # fixed frame => fixed pixel size (GIF-safe)
     plt.close(fig)

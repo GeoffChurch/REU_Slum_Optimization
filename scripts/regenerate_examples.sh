@@ -97,6 +97,7 @@ else
   # PNG (deliberately not shared with the perm-graph bundle -- see gen_displacement_field's module
   # docstring). Both are committed, so the same I7 reasoning applies: on this path, not off it.
   run pixi run python -m scripts.gen_displacement_field
+  run pixi run python -m scripts.gen_authoring_block
   # The region-grow neighbourhood bundle. It was OFF this path and it drifted: baked before the
   # 2026-09-17 switch to Open Buildings counts, it went stale the moment `load_blocks` started
   # resolving a different count, and its own parity test did not catch it because that test SKIPS

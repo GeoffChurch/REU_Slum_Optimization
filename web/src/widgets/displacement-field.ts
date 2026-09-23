@@ -10,7 +10,7 @@ import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
 import { observeSize } from "../dom/resize.js";
-import { contributions, corridorDistance, flatten, sumC } from "../model/displacement.js";
+import { contributions, flatten, outline, sumC } from "../model/displacement.js";
 import { sizeCanvas } from "../render/canvas.js";
 import { drawField, handles, type Handle } from "../render/field.js";
 import { fitBbox, nearest, toScreen, toWorld, type Bbox, type View } from "../view/transform.js";
@@ -57,8 +57,9 @@ function activeRoads(s: FieldState): Road[] {
  * 0-143.49 m, and the escaping vertex above is a boundary vertex), so fitting to the parcels is
  * what puts every layer this widget draws inside the box, at any pad and any canvas size. */
 function fieldBbox(b: FieldBundle): Bbox {
-  const xs: number[][] = [b.buildings.x, ...b.parcels.map((ring) => ring.map((p) => p[0]))];
-  const ys: number[][] = [b.buildings.y, ...b.parcels.map((ring) => ring.map((p) => p[1]))];
+  const rings = [...b.buildings.flat(2), ...b.parcels];
+  const xs: number[][] = rings.map((ring) => ring.map((p) => p[0]));
+  const ys: number[][] = rings.map((ring) => ring.map((p) => p[1]));
   const fold = (vs: number[][], f: (...n: number[]) => number, seed: number): number =>
     vs.reduce((acc, v) => f(acc, ...v), seed);
   return {
@@ -210,6 +211,8 @@ function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBu
   }
 
   const bbox = fieldBbox(b);
+  // Prepared ONCE: each building's rings, area and box never change, only the roads do.
+  const outlines = b.buildings.map(outline);
   // Both assigned by the observer below and by nothing else. Everything that reads them -- `render`,
   // the pointer handlers -- is wired from inside the first sized callback, so there is no ordering
   // in which they are read before that callback has run.
@@ -219,12 +222,11 @@ function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBu
 
   const render = (): void => {
     const roads = activeRoads(state.get());
-    const d = corridorDistance(b.buildings.x, b.buildings.y, flatten(roads));
-    // The disks' shading and the number under them come from ONE distance array through one
-    // formula (`contributions`, which `sumC` is a sum of), so the picture and the readout cannot
-    // disagree about what the road costs.
-    drawField(ctx, b, { view, roads, c: contributions(b.buildings.r, d) }, size);
-    const total = sumC(b.buildings.r, d);
+    // The buildings' shading and the number under them are ONE array (`sumC` is a sum of it), so
+    // the picture and the readout cannot disagree about what the road costs.
+    const c = contributions(outlines, flatten(roads));
+    drawField(ctx, b, { view, roads, c }, size);
+    const total = sumC(c);
     // Cost only -- both numbers, every frame. The page defines displacement as Σcᵢ and reports the
     // fraction, so quoting one and not the other would make the widget disagree with the prose
     // above it. There is deliberately no verdict here: the benefit half of the tradeoff is

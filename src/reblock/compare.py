@@ -151,11 +151,10 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
                 block = result.block
                 roads = cast(GeoDataFrame, result.proposal.roads)
             block_area = float(block.parcels.geometry.union_all().area)
-            radii = block.buildings.radii
             pp = pct_paved(roads, block_area)
-            pd_ = pct_displaced(roads, block.building_geometries, radii)
+            pd_ = pct_displaced(roads, block.buildings)
             perm = permeability_curve(block, roads, params)
-            disp = displacement_curve(block, roads, radii)
+            disp = displacement_curve(block, roads)
             raw.append((name, label, "permeability", perm, pp, pd_))
             raw.append((name, label, "displacement", disp, pp, pd_))
     # No cross-method normalization: the frontier is reported as raw (road length, benefit)

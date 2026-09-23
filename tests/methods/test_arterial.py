@@ -7,8 +7,8 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
-from reblock.budget import displacement
-from reblock.buildings import SpacingDiscs
+from reblock.budget import displacement, road_corridor
+from reblock.buildings import Discs, SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
@@ -580,15 +580,14 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
     # the LEFT arm, sparse (one, far-flung) on the RIGHT. The arms are length- and benefit-tied, so
     # cost="length" is blind to the points (it falls to the wkt tie-break, landing on the LEFT arm);
     # cost="displacement" steers away from the dense corridor to a road that displaces far fewer
-    # buildings under the disk measure. NOTE the picked road is NOT a zero-displacement escape here
-    # -- under the OLD centroid-count rule the greedy's optimum was a diagonal chord that grazed no
-    # CENTROID (count=0, an infinite-gain "free" pick); but that diagonal actually passes close
-    # enough to the lone sparse point's large disk (its radius is NN/2=5.0, since it is far from
-    # every other point) to score WORSE under the disk measure (~1.30) than the arm-serving road the
-    # disk-based greedy picks instead (1.0, the sparse point fully inside the corridor) -- exactly
-    # the degenerate "denom=0 for candidates that graze footprint edges but miss centroids" escape
-    # this migration closes. The FINITE raw/denom ranking (two candidates both displacing >0, pick
-    # the cheaper) is covered by the next test.
+    # buildings. NOTE the picked road is NOT a zero-displacement escape here -- under the OLD
+    # centroid-count rule the greedy's optimum was a diagonal chord that grazed no CENTROID
+    # (count=0, an infinite-gain "free" pick); but that diagonal passes through the lone sparse
+    # point's large disc (radius NN/2 = 5.0, since it is far from every other point), so it costs
+    # displacement too, and the greedy picks an arm-serving road instead -- exactly the degenerate
+    # "denom=0 for candidates that graze footprint edges but miss centroids" escape this migration
+    # closes. The FINITE raw/denom ranking (two candidates both displacing >0, pick the cheaper) is
+    # covered by the next test.
     left_pts = [Point(0.5, y) for y in range(1, 8)]     # dense: 7 sites astride the left arm
     right_pts = [Point(10.5, 4)]                        # sparse: 1 site astride the right arm
     pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
@@ -604,10 +603,16 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
     assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt
     # ... to one that displaces fewer buildings (disk measure) than the length-optimal pick:
     radii = SpacingDiscs(pts).radii
-    d_length = displacement(pts, radii, roads_length)
-    d_disp = displacement(pts, radii, roads_disp)
+    d_length = displacement(Discs(pts, radii), roads_length)
+    d_disp = displacement(Discs(pts, radii), roads_disp)
     assert d_disp < d_length
-    assert d_disp == 1.0    # right arm's single (large-radius) point, fully inside its corridor
+    # It displaces ONLY the right arm's single, large building (r = NN/2 = 5.0: far from every
+    # other point) -- the last point in `pts`. Its centre sits inside the 2 m corridor, which the
+    # retired centre-distance rule scored a full 1.0; true overlap is a 2 m band through a radius-5
+    # disc, 0.253 exactly (0.248 on the 64-gon outline shapely buffers to).
+    c = block.buildings.displacement(road_corridor(roads_disp))
+    assert int((c > 0.0).sum()) == 1 and c[-1] > 0.0
+    assert d_disp == pytest.approx(0.253, abs=6e-3)
 
 
 def _grid_block_with_points(building_geometries: gpd.GeoDataFrame, w: int = 8, h: int = 3) -> Block:
@@ -640,8 +645,8 @@ def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None
     roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective="access", max_roads=1,
                                    n_anchors=10, top_k=4, half_width_m=1.0, cost="displacement")
     radii = SpacingDiscs(pts).radii
-    d_length = displacement(pts, radii, roads_length)
-    d_disp = displacement(pts, radii, roads_disp)
+    d_length = displacement(Discs(pts, radii), roads_length)
+    d_disp = displacement(Discs(pts, radii), roads_disp)
 
     assert roads_length.geometry.iloc[0].wkt != roads_disp.geometry.iloc[0].wkt   # cost changed it
     assert d_disp > 0.0              # the pick DISPLACES -> the finite raw/denom branch, not inf
@@ -677,7 +682,7 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 1.0                 # a real, non-degenerate candidate
     far_radii = SpacingDiscs(far_points).radii
-    assert displacement(far_points, far_radii, roads) == 0.0
+    assert displacement(Discs(far_points, far_radii), roads) == 0.0
 
 
 def test_displacement_objective_is_extent_aware_unlike_the_old_centroid_rule() -> None:
@@ -699,7 +704,7 @@ def test_displacement_objective_is_extent_aware_unlike_the_old_centroid_rule() -
 
     corridor = road.geometry.buffer(1.0).union_all()
     assert not pts.geometry.within(corridor).any()          # OLD centroid rule: nobody displaced
-    d = displacement(pts, radii, road)
+    d = displacement(Discs(pts, radii), road)
     assert d > 0.0                                          # disk rule: A is partially displaced
 
 
@@ -760,5 +765,5 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     # (ii) the committed roads' total displacement is finite and non-trivial (a real corridor
     # through the building field), not degenerate.
     radii = SpacingDiscs(pts).radii
-    disp = displacement(pts, radii, roads)
+    disp = displacement(Discs(pts, radii), roads)
     assert 0.0 < disp < float("inf")

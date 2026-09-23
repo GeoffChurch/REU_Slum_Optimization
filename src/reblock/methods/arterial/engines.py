@@ -14,7 +14,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol, TypeAlias, runtime_checkable
 
-import numpy as np
+import shapely
 from geopandas import GeoDataFrame
 from shapely import STRtree
 from shapely.geometry import LineString
@@ -23,7 +23,6 @@ from shapely.geometry.base import BaseGeometry
 from reblock.budget import (
     _BlockScoringContext,
     access_burden,
-    corridor_distance,
     displacement,
     road_drainage,
 )
@@ -47,6 +46,7 @@ from reblock.methods.arterial.scoring import (
     _best_candidate,
     _score,
     _StepState,
+    committed_overlap,
 )
 
 # Explicit self-alias (mypy's --no-implicit-reexport convention, see reblock.compare's
@@ -100,7 +100,6 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
     ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
     # Constant across every step (depends only on block.building_geometries), so computed ONCE here
     # rather than per-step.
-    radii = block.buildings.radii
 
     committed: list[LineString] = []                        # realized geometry, in commit order
     while len(committed) < max_roads:
@@ -111,12 +110,9 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
         base_val = _score(objective, block, base, adj, base_burden, ctx)
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
-        committed_dist = building_xy = None
-        if cost == "displacement_fast":
-            building_xy = np.asarray(list(block.building_geometries.geometry), dtype=object)
-            committed_dist = (corridor_distance(block.building_geometries, base)
-                              if len(base) else None)
-        committed_disp = (displacement(block.building_geometries, radii, base)
+        overlap = (committed_overlap(block.buildings, base)
+                   if cost == "displacement_fast" else None)
+        committed_disp = (displacement(block.buildings, base)
                           if cost == "displacement" else 0.0)
         # Route per-candidate scoring by realizer. BUILDABLE trials are boundary-snapped (they join
         # the committed/street network at shared graph vertices), so the incremental
@@ -150,8 +146,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: str, 
         scoring._STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             realizer=realizer, objective=objective, cost=cost, half_width_m=half_width_m,
-            committed_disp=committed_disp, committed_dist=committed_dist,
-            building_xy=building_xy, block=block, radii=radii,
+            committed_disp=committed_disp, overlap=overlap, block=block,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             if use_pool:
@@ -225,7 +220,6 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: 
     policy = policy_spec.build(block, streets, n_anchors, top_k, adj, max_anchors)
     # Constant across every step (depends only on block.building_geometries), so computed ONCE here
     # rather than per-step.
-    radii = block.buildings.radii
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
@@ -247,22 +241,17 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer, objective: 
         base_merged = _merge(committed)
         base = _explode(base_merged, block.crs, 2.0 * half_width_m)
         base_val = _score(objective, block, base, adj, base_burden, ctx)
-        committed_disp = 0.0
-        committed_dist = building_xy = None
-        if cost in ("displacement", "displacement_fast"):
-            committed_disp = displacement(block.building_geometries, radii, base)
-        if cost == "displacement_fast":
-            building_xy = np.asarray(list(block.building_geometries.geometry), dtype=object)
-            committed_dist = (corridor_distance(block.building_geometries, base)
-                              if len(base) else None)
+        overlap = (committed_overlap(block.buildings, base)
+                   if cost == "displacement_fast" else None)
+        committed_disp = (displacement(block.buildings, base)
+                          if cost == "displacement" else 0.0)
         stepctx = ctx.step(base) if (ctx is not None and realizer.snaps) else None
         assert scoring._STEP_STATE is None, (
             "eval_candidate's per-step state holder is not reentrant")
         scoring._STEP_STATE = _StepState(
             step=stepctx, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             realizer=realizer, objective=objective, cost=cost, half_width_m=half_width_m,
-            committed_disp=committed_disp, committed_dist=committed_dist,
-            building_xy=building_xy, block=block, radii=radii,
+            committed_disp=committed_disp, overlap=overlap, block=block,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             # eager-score candidates entering this step
@@ -344,10 +333,10 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: str,
     # _anchor_points explodes Multi* internally.
     streets: list[BaseGeometry] = list(block.streets.geometry)
     ctx = (_BlockScoringContext(block) if objective in ("efficiency", "directness") else None)
-    radii = block.buildings.radii
     # The two trees the ranking queries against -- built once per block, like `_snap_graph` above.
     parcel_tree = STRtree(list(block.parcels.geometry))
-    building_tree = STRtree(list(block.building_geometries.geometry))
+    # Building CENTRES, at every tier: the shortlist counts centres within the corridor.
+    building_tree = STRtree(shapely.points(block.buildings.xy))
     ids = block.parcels["parcel_id"]
 
     committed: list[LineString] = []
@@ -359,12 +348,9 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: str,
         base_val = _score(objective, block, base, adj, base_burden, ctx)
         curr_roads = base if len(committed) else None
         targets = _deep_targets(block, curr_roads, top_k, adj)
-        committed_dist = building_xy = None
-        if cost == "displacement_fast":
-            building_xy = np.asarray(list(block.building_geometries.geometry), dtype=object)
-            committed_dist = (corridor_distance(block.building_geometries, base)
-                              if len(base) else None)
-        committed_disp = (displacement(block.building_geometries, radii, base)
+        overlap = (committed_overlap(block.buildings, base)
+                   if cost == "displacement_fast" else None)
+        committed_disp = (displacement(block.buildings, base)
                           if cost == "displacement" else 0.0)
         step = ctx.step(base) if (ctx is not None and realizer.snaps) else None
 
@@ -391,8 +377,7 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: str,
         scoring._STEP_STATE = _StepState(
             step=step, sg=sg, base_val=base_val, base_merged=base_merged, committed=committed,
             realizer=realizer, objective=objective, cost=cost, half_width_m=half_width_m,
-            committed_disp=committed_disp, committed_dist=committed_dist,
-            building_xy=building_xy, block=block, radii=radii,
+            committed_disp=committed_disp, overlap=overlap, block=block,
             crs=block.crs, adj=adj, base_burden=base_burden, ctx=ctx)
         try:
             if use_pool:

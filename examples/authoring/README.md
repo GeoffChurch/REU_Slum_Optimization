@@ -18,8 +18,8 @@ stage of the site follows. It carries 6,619 parcels, 2 street lines and 6,619 bu
 **Full float64, absolute coordinates.** Every other committed bundle here ships cm-rounded,
 origin-relative metres, which is right for drawing and wrong for solving. Measured on the reference
 roads below: rounding this block's geometry to centimetres and re-solving moves `crossing` by
-1.6611e-03 and `spur` by 1.9550e-03. (Design §1.4's 4.71e-05 is the same effect measured on the
-clearance method's road set -- smaller than either figure here, and the binding anchor
+5.3129e-05 and `spur` by 4.6081e-05. (Design §1.4's 4.71e-05 is the same effect measured on the
+clearance method's road set; `spur`'s is the smallest, and the binding anchor
 `web/test/pyodide-parity.test.ts` sizes its tolerance against.) The parity test compares the
 browser's answer against the baked CPython answers below to decide whether the WASM runtime agrees
 with CPython, so the two sides have to be reading the same numbers.
@@ -28,7 +28,7 @@ with CPython, so the two sides have to be reading the same numbers.
 else -- the mesh takes no roads and grounding comes from the street -- so the road-invariant half is
 baked once rather than recomputed on every edit: 6,619 parcel centroids, 452 of them street-fronting,
 19,443 footpath edges, and a no-roads baseline of
-p0 = 54124005.147296.
+p0 = 53609957.447083.
 
 **Reference roads.** Fixed polylines with `solve_egress`' own `1 - p/p0` for each. Before writing
 anything the baker rebuilds the block from the JSON it is about to write, checks every baked column
@@ -37,7 +37,7 @@ roads -- so a bundle that has lost precision never reaches the disk.
 
 | road | vertices | permeability |
 |---|---|---|
-| `crossing` | 3 | 0.0000000000 |
-| `spur` | 2 | 0.0000000000 |
+| `crossing` | 3 | 0.4581247798 |
+| `spur` | 2 | 0.0101393541 |
 
 Regenerate: `pixi run python -m scripts.gen_authoring_block`

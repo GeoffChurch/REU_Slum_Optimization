@@ -18,9 +18,10 @@ Coordinates are FULL float64 and absolute, which is what separates this bundle f
 one on the site. `scripts/_bundle_io.py`'s `cm`/`sigfig`/`polygon_rings` quantise by design -- they
 serve bundles that get drawn -- and here quantisation is not a rounding error, it is the answer
 changing. MEASURED on this bundle's own reference roads: rounding every coordinate to centimetres
-and re-solving (baseline included) moves `crossing` by 1.6611e-03 and `spur` by 1.9550e-03. Design
-§1.4's 4.71e-05 is the same effect measured on the clearance method's road set -- smaller than
-either figure above, and therefore the binding anchor a runtime-parity tolerance is sized against.
+and re-solving (baseline included) moves `crossing` by 5.3129e-05 and `spur` by 4.6081e-05. Design
+§1.4's 4.71e-05 is the same effect measured on the clearance method's road set; `spur`'s is the
+smallest of the three, and therefore the binding anchor a runtime-parity tolerance is sized
+against.
 `web/test/pyodide-parity.test.ts` compares the browser's answer against `reference` below to decide
 whether the WASM runtime agrees with CPython, and a tolerance wide enough to absorb 4.71e-05 would
 no longer be measuring that. It settled on 1e-15, having measured the two runtimes agreeing exactly
@@ -57,7 +58,7 @@ from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
 from reblock.mesh import parcel_radii
 from reblock.permeability import WIDTH_COL, PermeabilityParams, solve_egress
-from scripts._example_block import PINNED_METHOD, load_example_block
+from scripts._example_block import load_example_region
 
 if TYPE_CHECKING:
     # Static-only: `web/src/py/` ships to the browser and carries no `__init__.py`, so nothing
@@ -93,9 +94,15 @@ SOLVE_PY = Path("web/src/py/solve.py")
 # cannot pass. Both are literals rather than derived from the block, so a re-bake that moved the
 # geometry would change the ANSWER for a fixed road instead of quietly moving the road too.
 # Coordinates are absolute EPSG:32734 metres, the same frame the bundle's geometry is in.
+#
+# On ZAF.9.3.1_1_5810, the spine block: `crossing` runs the block's principal axis end to end with a
+# 25 m kink at its midpoint (a THREE-vertex polyline, so a join is exercised), and `spur` is its
+# first 60 m in from the street. Placed when the pin moved here -- the previous literals were never
+# moved with it and sat 14 km away, both scoring exactly 0.0, so the parity tests compared zero
+# against zero. `main` now refuses to bake a reference road that changes nothing.
 REFERENCE_ROADS: dict[str, list[tuple[float, float]]] = {
-    "crossing": [(276425.0, 6237640.0), (276495.0, 6237645.0), (276565.0, 6237695.0)],
-    "spur": [(276497.0, 6237600.0), (276497.0, 6237630.0)],
+    "crossing": [(290540.0, 6252654.0), (290906.0, 6252980.0), (291304.0, 6253267.0)],
+    "spur": [(290540.0, 6252654.0), (290587.0, 6252692.0)],
 }
 
 
@@ -123,18 +130,24 @@ export interface AuthoringBlock {
    * and a browser-side failure there would surface as a Pyodide traceback in a figcaption. */
   crs_epsg: number;
   /** FULL float64, NOT the cm-rounded form the render bundles ship. MEASURED: rounding this
-   * bundle's geometry to centimetres and re-solving moves `crossing` by 1.6611e-03 and `spur` by
-   * 1.9550e-03; design §1.4's 4.71e-05 is the same effect on the clearance method's road set, and
-   * is the smaller figure. Either is more than a runtime-parity guard can absorb.
+   * bundle's geometry to centimetres and re-solving moves `crossing` by 5.3129e-05 and `spur` by
+   * 4.6081e-05; design §1.4's 4.71e-05 is the same effect on the clearance method's road set. Any
+   * of them is more than a runtime-parity guard can absorb.
    * Exterior ring first, then interiors -- the same shape every `parcels` entry has. */
   boundary: [number, number][][];
   parcel_id: string[];
   parcels: [number, number][][][];
   streets: [number, number][][];
-  /** One per parcel, but NOT in parcel order -- `parcel_radii` resolves the correspondence by
-   * containment, and this bundle preserves whatever order the source had rather than inventing
-   * one the Python does not rely on. */
+  /** Each building's ANCHOR -- the point its parcel was tessellated on. One per parcel, but NOT in
+   * parcel order -- `parcel_radii` resolves the correspondence by containment, and this bundle
+   * preserves whatever order the source had rather than inventing one the Python does not rely
+   * on. */
   building_points: [number, number][];
+  /** Each building's radius AT THE BLOCK'S TIER, full float64, in `building_points` order. The
+   * solve reads a building only as a radius at its anchor, so rebuilding the block as
+   * `Discs(building_points, building_radii)` reproduces whatever tier baked it -- a footprint's
+   * equivalent-area radius included -- without shipping a single polygon. */
+  building_radii: number[];
   reference: AuthoringReference[];
 
   /** The road-INVARIANT half of the graph (design §1.6), baked once so the runtime returns two
@@ -319,8 +332,8 @@ stage of the site follows. It carries {counts}.
 **Full float64, absolute coordinates.** Every other committed bundle here ships cm-rounded,
 origin-relative metres, which is right for drawing and wrong for solving. Measured on the reference
 roads below: rounding this block's geometry to centimetres and re-solving moves `crossing` by
-1.6611e-03 and `spur` by 1.9550e-03. (Design §1.4's 4.71e-05 is the same effect measured on the
-clearance method's road set -- smaller than either figure here, and the binding anchor
+5.3129e-05 and `spur` by 4.6081e-05. (Design §1.4's 4.71e-05 is the same effect measured on the
+clearance method's road set; `spur`'s is the smallest, and the binding anchor
 `web/test/pyodide-parity.test.ts` sizes its tolerance against.) The parity test compares the
 browser's answer against the baked CPython answers below to decide whether the WASM runtime agrees
 with CPython, so the two sides have to be reading the same numbers.
@@ -365,12 +378,12 @@ def main() -> None:
             f"this bundle would score roads differently from the rest of the site. Either move the "
             f"defaults with the yaml, or teach the bundle to carry the params.")
 
-    block, _ = load_example_block(PINNED_METHOD)
+    block = load_example_region()
     epsg = block.crs.to_epsg()
     if epsg is None:
         raise SystemExit(f"{block.crs} has no EPSG code -- the browser rebuilds the CRS from one")
-    log.info("loaded %s: %d parcels, %d streets, %d building points", block.block_id,
-             len(block.parcels), len(block.streets), len(block.building_geometries))
+    log.info("loaded %s: %d parcels, %d streets, %d buildings", block.block_id,
+             len(block.parcels), len(block.streets), len(block.buildings))
 
     # Parcel adjacency and the per-parcel footprint radii are functions of `block` alone and do
     # not move when a road is added, so they are built ONCE and threaded through every solve on
@@ -386,7 +399,9 @@ def main() -> None:
     log.info("mesh: %d nodes, %d edges, %d grounded; p0 = %r", mesh.n, len(mesh.rows),
              int(mesh.ground.sum()), baseline.p)
 
-    points = block.building_geometries.geometry
+    # The tier's anchors and radii, not the geometry column: at the footprint tier that holds
+    # polygons, and the solve reads a building only as a radius at its anchor.
+    anchors, radii_b = block.buildings.xy, block.buildings.radii
 
     reference: list[ReferenceCase] = []
     for name, road in REFERENCE_ROADS.items():
@@ -396,6 +411,13 @@ def main() -> None:
         reference.append(ReferenceCase(name=name, road=coords,
                                        permeability=1.0 - sol.p / baseline.p))
         log.info("reference %s: permeability %r", name, reference[-1]["permeability"])
+        # A road that changes nothing makes every parity test built on it compare zero against
+        # zero -- which is what these fixtures did for a whole repin, unnoticed. Refuse to bake it.
+        if not reference[-1]["permeability"] > 1e-6:
+            raise SystemExit(
+                f"reference road {name!r} scores permeability {reference[-1]['permeability']!r} on "
+                f"block {block.block_id!r}: it does not reach the block, so it pins nothing. Move "
+                f"REFERENCE_ROADS onto the pinned block.")
 
     bundle = AuthoringBundle(
         block_id=block.block_id,
@@ -410,11 +432,8 @@ def main() -> None:
                  for i, g in enumerate(block.parcels.geometry)],
         streets=[coords for g in block.streets.geometry
                  for coords in _lines(g, what=f"block {block.block_id!r}'s street")],
-        # `.x`/`.y` off the GeoSeries, the same accessor `mesh.parcel_radii` reads these points
-        # through, rather than per-geometry attributes: iterating a GeoSeries yields
-        # `BaseGeometry`, which has no coordinates until it is narrowed.
-        building_points=[[float(x), float(y)]
-                         for x, y in zip(points.x, points.y, strict=True)],
+        building_points=[[float(x), float(y)] for x, y in anchors],
+        building_radii=[float(r) for r in radii_b],
         nodes=NodesDict(cx=mesh.cx.tolist(), cy=mesh.cy.tolist(),
                         ground=[bool(g) for g in mesh.ground]),
         edges=EdgesDict(rows=mesh.rows.tolist(), cols=mesh.cols.tolist(),

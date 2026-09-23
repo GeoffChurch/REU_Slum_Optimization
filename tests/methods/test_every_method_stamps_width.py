@@ -8,9 +8,16 @@ next regeneration.
 The lesson is that per-method tests cannot cover a per-method OBLIGATION -- a new method, or one the
 next refactor skips, is exactly what slips through. This walks `conf/compare_config.yaml`'s own
 `all_methods` so the guard's coverage grows with the config rather than with anyone's diligence.
+
+And at every TIER. Three sites read the building geometry column as points -- `.x` in
+`parcel_radii`, `get_coordinates` in clearance, a centre tree in the arterial shortlist -- and every
+test passed, because every block they saw was on points: the footprint tier would have crashed the
+examples regeneration, or silently fed clearance every footprint VERTEX as a building.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 import geopandas as gpd
@@ -22,6 +29,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Polygon
 
 from reblock.budget import displacement
+from reblock.buildings import ANCHOR_COL, Footprints
 from reblock.contracts import Block
 from reblock.permeability import WIDTH_COL, PermeabilityParams, permeability
 
@@ -49,6 +57,16 @@ def _block(k: int = 8, cell: float = 10.0) -> Block:
         building_geometries=gpd.GeoDataFrame(geometry=[p.centroid for p in polys], crs=UTM))
 
 
+def _footprint_block() -> Block:
+    """`_block` at the footprint tier: each point becomes a 4 x 4 m outline around it, the point
+    kept as its anchor, as the loader keeps the published point."""
+    b = _block()
+    centres = b.building_geometries.geometry
+    outlines = gpd.GeoDataFrame({ANCHOR_COL: centres.to_numpy()},
+                                geometry=centres.buffer(2.0, cap_style="square"), crs=UTM)
+    return replace(b, building_geometries=outlines, building_tier=Footprints)
+
+
 def _configured_methods() -> list[str]:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
@@ -56,13 +74,14 @@ def _configured_methods() -> list[str]:
     return [n for n in names if n not in NEEDS_NETWORK]
 
 
+@pytest.mark.parametrize("make_block", [_block, _footprint_block], ids=["points", "footprints"])
 @pytest.mark.parametrize("name", _configured_methods())
-def test_method_emits_scorable_roads(name: str) -> None:
+def test_method_emits_scorable_roads(name: str, make_block: Callable[[], Block]) -> None:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
     method = instantiate(cfg.all_methods[name])
 
-    block = _block()
+    block = make_block()
     roads = method.propose(block).roads
     if roads is None or len(roads) == 0:
         pytest.skip(f"{name} proposed nothing on the synthetic block")
@@ -80,5 +99,4 @@ def test_method_emits_scorable_roads(name: str) -> None:
     # (flow_paths reads -1.1e-13). That is the metric's floating-point zero, not a monotonicity
     # violation, and this test is not the place to audit any method's efficacy on a toy fixture.
     assert -1e-9 <= float(permeability(block, roads, PARAMS)) <= 1.0
-    radii = block.buildings.radii
-    assert displacement(block.building_geometries, radii, roads) >= 0.0
+    assert displacement(block.buildings, roads) >= 0.0

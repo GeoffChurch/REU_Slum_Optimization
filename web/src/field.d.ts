@@ -9,8 +9,8 @@ export interface Encoding {
   street_lw: number;
   road_color: string;
   road_alpha: number;
-  disk_color: string;
-  disk_outline_lw: number;
+  building_color: string;
+  outline_lw: number;
   handle_radius_px: number;
   pad: number;
 }
@@ -39,8 +39,10 @@ export interface FieldBundle {
   n_buildings: number;
   /** UTM easting/northing subtracted from every coordinate below; all geometry is local metres. */
   origin: [number, number];
-  /** Disk centres (relative to `origin`) and radii, in metres, in building order. */
-  buildings: { x: number[]; y: number[]; r: number[] };
+  /** Every building's OUTLINE at the block's tier (a disc's 64-gon, or the real footprint), in
+   * building order: its polygons, each a list of closed rings relative to `origin`, exterior
+   * first. Exteriors are CCW and holes CW, so one signed area sum over every ring is the area. */
+  buildings: [number, number][][][][];
   parcels: [number, number][][];
   /** The block's rings, EXTERIOR FIRST, relative to `origin` -- the rings the fallback PNG
    * draws. Rings, not a ring: see `bundle.d.ts`'s own note. Each is stroked closed and none is

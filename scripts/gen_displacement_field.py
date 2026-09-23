@@ -19,12 +19,15 @@ from pathlib import Path
 from typing import NamedTuple, TypedDict, cast
 
 import numpy as np
-from geopandas import GeoDataFrame, points_from_xy
-from numpy.typing import NDArray
+import shapely
+from geopandas import GeoDataFrame
+from scipy.spatial import cKDTree
 from shapely.affinity import translate
-from shapely.geometry import LineString
+from shapely.geometry import LineString, MultiPolygon, Polygon
+from shapely.geometry.base import BaseGeometry
 
 from reblock.budget import displacement
+from reblock.buildings import ANCHOR_COL, Extents, Footprints
 from reblock.contracts import Block
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, PermeabilityParams
 from reblock.render import (
@@ -32,8 +35,8 @@ from reblock.render import (
     _BOUNDARY_LW,
     _CONTEXT_OUTLINE,
     _CORRIDOR_ALPHA,
-    _DISK_OUTLINE_LW,
     _DISPLACED_PT,
+    _OUTLINE_LW,
     _PARCEL_LW,
     _ROAD_COLOR,
     render_field,
@@ -41,7 +44,7 @@ from reblock.render import (
 )
 from scripts._bundle_io import cm, line_coords, polygon_rings, sigfig
 from scripts._default_road import chord, default_roads
-from scripts._example_block import PINNED_METHOD, load_example_block
+from scripts._example_block import load_example_region
 
 log = logging.getLogger(__name__)
 
@@ -84,8 +87,8 @@ class Encoding(TypedDict):
     street_lw: float
     road_color: str
     road_alpha: float
-    disk_color: str
-    disk_outline_lw: float
+    building_color: str
+    outline_lw: float
     handle_radius_px: float
     pad: float
 
@@ -95,7 +98,7 @@ class Encoding(TypedDict):
 # thinner than the PNG does is drawing a different figure. It is kept as its own key because the
 # canvas draws the two layers separately and a future divergence should be expressible.
 #
-# UNITS: the four stroke weights below (`parcel_lw`, `boundary_lw`, `street_lw`, `disk_outline_lw`)
+# UNITS: the four stroke weights below (`parcel_lw`, `boundary_lw`, `street_lw`, `outline_lw`)
 # are ONE number handed to two APIs that measure in different units, and the canvas draws them
 # HEAVIER than the PNG does. This is known and deliberately not corrected. The arithmetic:
 #
@@ -127,8 +130,8 @@ ENCODING: Encoding = Encoding(
     street_lw=_BOUNDARY_LW,
     road_color=_ROAD_COLOR,
     road_alpha=_CORRIDOR_ALPHA,
-    disk_color=_DISPLACED_PT,
-    disk_outline_lw=_DISK_OUTLINE_LW,
+    building_color=_DISPLACED_PT,
+    outline_lw=_OUTLINE_LW,
     handle_radius_px=7.0,
     pad=0.04,
 )
@@ -148,11 +151,11 @@ class ReferenceCase(TypedDict):
     fraction: float
 
 
-class Buildings(TypedDict):
-    """Disk centres (origin-relative, `cm`) and radii (`sigfig`), in building order."""
-    x: list[float]
-    y: list[float]
-    r: list[float]
+#: One building's outline as the bundle stores it: its polygons, each a list of CLOSED rings
+#: (exterior first, then holes), each ring a list of origin-relative `cm` points. Exteriors are
+#: CCW and holes CW, so one signed shoelace sum over every ring is the building's area -- the
+#: widget relies on that and never works out which ring is a hole.
+Outline = list[list[list[list[float]]]]
 
 
 class Width(TypedDict):
@@ -171,7 +174,9 @@ class FieldBundle(TypedDict):
     block_id: str
     n_buildings: int
     origin: list[float]
-    buildings: Buildings
+    # Every building's OUTLINE at the block's tier, in building order: a disc tier's 64-gon, or the
+    # real footprint. The shape the model charges for, so the widget both draws it and measures it.
+    buildings: list[Outline]
     parcels: list[list[list[float]]]
     # RINGS, exterior first -- the same shape `parcels` has, and the same shape `field.d.ts`
     # declares. A single ring here would drop the spine block's own boundary hole.
@@ -238,38 +243,64 @@ def road_specs(roads: GeoDataFrame, ox: float, oy: float) -> list[RoadSpec]:
 class QuantisedField(NamedTuple):
     """The building field exactly as the bundle carries it, in the two forms the bake needs.
 
-    `stored` is what gets written -- origin-relative, `cm` for the centres and `sigfig` for the
-    radii. `points`/`radii` are those SAME numbers put back in the block's CRS, for measuring
-    fixtures against. One derivation, two shapes: `main` must not re-quantise the centres for the
-    payload, or the file and the measurement stop being guaranteed to describe each other.
+    `stored` is what gets written -- every outline, origin-relative at `cm`. `buildings` is those
+    SAME numbers put back in the block's CRS as a tier, for measuring fixtures against. One
+    derivation, two shapes: `main` must not re-quantise the outlines for the payload, or the file
+    and the measurement stop being guaranteed to describe each other.
     """
-    stored: Buildings
-    points: GeoDataFrame
-    radii: NDArray[np.float64]
+    stored: list[Outline]
+    buildings: Extents
 
 
-def quantised_field(block: Block, radii: NDArray[np.float64], ox: float,
-                    oy: float) -> QuantisedField:
+def stored_outline(geom: BaseGeometry, ox: float, oy: float) -> Outline:
+    """One building's polygons, oriented (exteriors CCW, holes CW) and origin-relative at `cm`."""
+    oriented = shapely.orient_polygons(geom)
+    if isinstance(oriented, MultiPolygon):
+        parts = list(oriented.geoms)
+    elif isinstance(oriented, Polygon):
+        parts = [oriented]
+    else:
+        raise TypeError(f"a building outline is a {oriented.geom_type}, not a (Multi)Polygon")
+    return [[[[cm(x - ox), cm(y - oy)] for x, y in ring.coords]
+             for ring in [part.exterior, *part.interiors]] for part in parts]
+
+
+def outline_geometry(outline: Outline, ox: float, oy: float) -> BaseGeometry:
+    """The inverse of `stored_outline`: a stored outline back in the block's CRS."""
+    parts = [Polygon([(x + ox, y + oy) for x, y in rings[0]],
+                     [[(x + ox, y + oy) for x, y in ring] for ring in rings[1:]])
+             for rings in outline]
+    return parts[0] if len(parts) == 1 else MultiPolygon(parts)
+
+
+def quantised_field(block: Block, ox: float, oy: float) -> QuantisedField:
     """The building field as the bundle carries it -- see `QuantisedField`.
 
     Every fixture is measured against THIS field rather than the raw one, and that is not a
-    rounding nicety. The browser reads `buildings.x/y/r` and a fixture's `coords`, and the parity
-    test compares its answer to `sum_c` at 1e-3 relative -- a tolerance justified by shapely's
-    inscribed-buffer residual (4.4e-04) and nothing else. Centimetre rounding moves a road by up
-    to 7 mm, which moves `c` for a grazed building by 7mm/r ~ 3e-03 and the sum by ~1e-02
-    absolute, ~2e-04 relative: the same order as the residual the tolerance exists for. Measuring
-    the raw geometry would spend the parity budget on the quantiser and leave the formula
-    unchecked.
+    rounding nicety: the widget measures the stored outlines, so the fixture's `sum_c` has to be
+    the cost of those outlines or the parity test compares two different buildings. Centimetre
+    rounding moves each vertex by up to 7 mm, a share of ~1e-3 of a 3 m outline's edge -- far
+    above the float noise the parity test otherwise sees.
+
+    Measured as `Footprints`, the tier whose outlines ARE the polygons it is given: which tier the
+    block was on is already baked into the shapes, a disc tier's as its 64-gons.
+
+    Raises if centimetre rounding leaves any outline invalid or empty. Neither happens on a disc of
+    any radius the tiers produce or a real footprint, and the widget's clipper assumes neither, so
+    an outline that did would be measured by the two sides as two different shapes.
     """
-    pts = block.building_geometries
-    stored = Buildings(x=[cm(v - ox) for v in pts.geometry.x],
-                       y=[cm(v - oy) for v in pts.geometry.y],
-                       r=[sigfig(v) for v in radii])
-    bx = np.asarray(stored["x"], dtype=np.float64) + ox
-    by = np.asarray(stored["y"], dtype=np.float64) + oy
-    return QuantisedField(stored=stored,
-                          points=GeoDataFrame(geometry=points_from_xy(bx, by), crs=block.crs),
-                          radii=np.asarray(stored["r"], dtype=np.float64))
+    stored = [stored_outline(g, ox, oy) for g in block.buildings.outlines]
+    geoms = [outline_geometry(o, ox, oy) for o in stored]
+    bad = [i for i, g in enumerate(geoms) if not g.is_valid or g.area <= 0.0]
+    if bad:
+        raise ValueError(
+            f"{len(bad)} building outline(s) are invalid or empty after centimetre rounding "
+            f"(e.g. building {bad[0]}); the widget would clip a different shape than Python "
+            f"measured")
+    return QuantisedField(
+        stored=stored,
+        buildings=Footprints(GeoDataFrame({ANCHOR_COL: shapely.points(block.buildings.xy)},
+                                          geometry=geoms, crs=block.crs)))
 
 
 def _set(block: Block, geoms: list[LineString], width_m: float) -> GeoDataFrame:
@@ -281,56 +312,58 @@ def _set(block: Block, geoms: list[LineString], width_m: float) -> GeoDataFrame:
                         geometry=list(geoms), crs=block.crs)
 
 
-def _cases(block: Block, pts: GeoDataFrame, radii: NDArray[np.float64], roads: GeoDataFrame,
-           ox: float, oy: float) -> list[ReferenceCase]:
+def _cases(block: Block, buildings: Extents, roads: GeoDataFrame, ox: float,
+           oy: float) -> list[ReferenceCase]:
     """The six parity fixtures. Chosen so no two of them could pass for the same reason:
 
     road1      -- road 1 alone at the floor width. The BASELINE, and the PNG's own number.
     apart      -- both default roads, corridors disjoint
     coincident -- road 2 moved onto road 1: costs EXACTLY what road1 costs
     widest     -- road 1 alone at WIDTH_MAX_M: isolates width
-    in_a_gap   -- road 1's direction through the field's widest gap: isolates position
+    in_a_gap   -- road 1's direction through the field's widest gap: isolates position, per metre
     outside    -- road 1 translated clear of the block: exactly zero
 
     Each isolates ONE of the page's claims against `road1`, which is why the baseline is in the set:
     without it, "in_a_gap is cheaper than apart" compares one road against two and demonstrates
     nothing about gaps.
 
-    Measured on the pinned block: road1 32.0260, apart 47.8436, coincident 32.0260, widest 68.1452,
-    in_a_gap 21.8509, outside 0.0. On the RAW, unquantised geometry the same six are 32.0260,
-    47.8488, 32.0260, 68.1581, 21.8465, 0.0 -- the 1.1e-04 to 2.0e-04 relative gap between the two
+    Measured on the pinned block's footprints: road1 91.9005, apart 187.35, coincident 91.9005,
+    widest 274.175, in_a_gap 39.6944, outside 0.0. On the RAW, unquantised outlines the same six are
+    91.9055, 187.3515, 91.9055, 274.1868, 39.6950, 0.0 -- the <= 5e-05 relative gap between the two
     columns is the quantiser, and measuring the quantised side is the point (see `quantised_field`).
 
-    `in_a_gap` is NOT free, and do not chase a zero: the widest gap here has radius 6.95 m against a
-    2.19 m median, so a 7 m road down its middle still leaves its two neighbours at d = 3.45 m
-    against r = 6.95, i.e. c ~ 0.5 each. A chord across a block cannot stay outside every disk.
-    `outside` is the fixture that pins the clip at d = r.
+    `in_a_gap` is SHORTER than `road1` (632 m against 980 m: a chord through the gap crosses less
+    of the block), so it isolates position only PER METRE -- 0.063 buildings/m against 0.094.
 
-    `pts`/`radii` are the QUANTISED field (see `quantised_field`), and every road set is round-
+    `in_a_gap` is NOT free, and do not chase a zero: the widest gap is 27.7 m between centres
+    against a 5.2 m median, yet the road still takes a share of 82 buildings (road1: 177), including
+    both of the pair it was aimed between (c = 0.244 and 0.120). A chord across a block cannot stay
+    clear of every building. `outside` is the fixture that pins compact support.
+
+    `buildings` is the QUANTISED field (see `quantised_field`), and every road set is round-
     tripped through `road_specs` before it is measured, so each `sum_c` is the cost of the road the
     bundle describes rather than of the unrounded road it came from.
     """
     out: list[ReferenceCase] = []
-    for name, rs in fixture_roads(block, pts, radii, roads):
+    for name, rs in fixture_roads(block, roads):
         specs = road_specs(rs, ox, oy)
-        total = displacement(pts, radii, roads_from_specs(block, specs, (ox, oy)))
+        total = displacement(buildings, roads_from_specs(block, specs, (ox, oy)))
         out.append(ReferenceCase(name=name, roads=specs, sum_c=sigfig(total),
-                                 fraction=sigfig(total / len(pts))))
+                                 fraction=sigfig(total / len(buildings))))
 
     # The one fixture with an EXACT expectation, checked on the value that will actually be
     # committed rather than on the float behind it. A fixture that is merely nearly outside the
-    # block proves nothing about the clip at d = r, so this fails the bake instead of shipping.
+    # block proves nothing about compact support, so this fails the bake instead of shipping.
     outside = next(c for c in out if c["name"] == "outside")
     if outside["sum_c"] != 0.0:
         raise AssertionError(
             f"the 'outside' fixture displaces {outside['sum_c']}, so it is not outside the block "
-            f"-- it would prove nothing about the clip at d = r. Fix the translation, do not bake "
+            f"-- it would prove nothing about compact support. Fix the translation, do not bake "
             f"it.")
     return out
 
 
-def fixture_roads(block: Block, pts: GeoDataFrame, radii: NDArray[np.float64],
-                  roads: GeoDataFrame) -> list[tuple[str, GeoDataFrame]]:
+def fixture_roads(block: Block, roads: GeoDataFrame) -> list[tuple[str, GeoDataFrame]]:
     """The six fixtures' road sets, by name, in the block's own CRS and before any quantisation.
 
     Split out of `_cases` so the DERIVATION is callable on its own. Four of the six are functions
@@ -348,19 +381,19 @@ def fixture_roads(block: Block, pts: GeoDataFrame, radii: NDArray[np.float64],
         coincident == [roads[0], roads[0]]           at the floor width   (overlap only)
         widest     == roads[0]                       at WIDTH_MAX_M       (width only)
     """
-    bp = np.column_stack([pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy()])
+    bp = block.buildings.xy
     r1 = cast(LineString, roads.geometry.iloc[0])
     r2 = cast(LineString, roads.geometry.iloc[1])
     hull = block.parcels.union_all()
     diag = float(np.hypot(*(np.asarray(block.parcels.total_bounds[2:])
                             - np.asarray(block.parcels.total_bounds[:2]))))
 
-    # The widest gap in the field IS the largest nearest-neighbour distance: that is what a large
-    # radius means. Put the road through the midpoint of that pair, along road 1's direction.
-    widest = int(np.argmax(radii))
-    others = np.delete(np.arange(len(bp)), widest)
-    partner = int(others[np.argmin(np.hypot(*(bp[others] - bp[widest]).T))])
-    gap_mid = (bp[widest] + bp[partner]) / 2.0
+    # The widest gap in the field: the building whose nearest neighbour is FARTHEST, measured
+    # between building centres at every tier. Put the road through the midpoint of that pair,
+    # along road 1's direction.
+    nn_dist, nn = cKDTree(bp).query(bp, k=2)
+    widest = int(np.argmax(nn_dist[:, 1]))
+    gap_mid = (bp[widest] + bp[int(nn[widest, 1])]) / 2.0
     r1_dir = np.asarray(r1.coords[-1], dtype=np.float64) - np.asarray(r1.coords[0],
                                                                      dtype=np.float64)
     r1_dir = r1_dir / np.hypot(*r1_dir)
@@ -394,8 +427,8 @@ export interface Encoding {
   street_lw: number;
   road_color: string;
   road_alpha: number;
-  disk_color: string;
-  disk_outline_lw: number;
+  building_color: string;
+  outline_lw: number;
   handle_radius_px: number;
   pad: number;
 }
@@ -424,8 +457,10 @@ export interface FieldBundle {
   n_buildings: number;
   /** UTM easting/northing subtracted from every coordinate below; all geometry is local metres. */
   origin: [number, number];
-  /** Disk centres (relative to `origin`) and radii, in metres, in building order. */
-  buildings: { x: number[]; y: number[]; r: number[] };
+  /** Every building's OUTLINE at the block's tier (a disc's 64-gon, or the real footprint), in
+   * building order: its polygons, each a list of closed rings relative to `origin`, exterior
+   * first. Exteriors are CCW and holes CW, so one signed area sum over every ring is the area. */
+  buildings: [number, number][][][][];
   parcels: [number, number][][];
   /** The block's rings, EXTERIOR FIRST, relative to `origin` -- the rings the fallback PNG
    * draws. Rings, not a ring: see `bundle.d.ts`'s own note. Each is stroked closed and none is
@@ -472,8 +507,8 @@ def readme_markdown(bundle: FieldBundle) -> str:
 # The displacement field
 
 The figure set for the site's [Displacement](../../docs/_partials/displacement.md) section: the
-model drawn literally — every building a disk of its own radius `rᵢ`, the road corridor beneath
-them, each disk shaded by the share `cᵢ` of it the corridor takes.
+model drawn literally — every building as its outline, the road corridor beneath them, each
+building shaded by the share `cᵢ` of it the corridor takes.
 
 ![the displacement model on the pinned block](field.png)
 
@@ -513,11 +548,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
     OUT.mkdir(parents=True, exist_ok=True)
 
-    # The roads are DISCARDED: this bake derives its own two by rule. `PINNED_METHOD` is passed
-    # only because the loader has no block-only mode, and solving one method is minutes cheaper
-    # than solving all eight for a block we then use on its own.
-    block, _ = load_example_block(PINNED_METHOD)
-    radii = block.buildings.radii
+    # The block alone, never a method's roads: this bake derives its own two by rule.
+    block = load_example_region()
     roads = default_roads(block, WIDTH_FLOOR_M)
 
     # Everything geometric is emitted RELATIVE to this, in metres. PARCEL bounds, not the building
@@ -528,11 +560,11 @@ def main() -> None:
 
     # The BOOT state, and road 1 only: road 2 defaults off, so the fallback image has to show what
     # the widget shows before the reader touches anything.
-    save_render(render_field(block, cast(GeoDataFrame, roads.iloc[[0]]), radii), OUT / "field.png")
+    save_render(render_field(block, cast(GeoDataFrame, roads.iloc[[0]])), OUT / "field.png")
     log.info("wrote %s", OUT / "field.png")
 
-    field = quantised_field(block, radii, ox, oy)
-    cases = _cases(block, field.points, field.radii, roads, ox, oy)
+    field = quantised_field(block, ox, oy)
+    cases = _cases(block, field.buildings, roads, ox, oy)
 
     # No `is not None` guard: `Block.streets` is a required, non-Optional field whose geometry
     # column `__post_init__` checks, so an empty frame is the only reachable "no streets" case and

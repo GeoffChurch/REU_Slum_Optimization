@@ -36,7 +36,8 @@ from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
-from reblock.budget import corridor_distance, displacement_contributions
+from reblock.budget import road_corridor
+from reblock.buildings import Extents
 from reblock.contracts import BBox, Block, Metrics, Proposal
 from reblock.perm_graph import GRAPH_LAYERS, GraphFigure, GraphLayer
 
@@ -60,7 +61,7 @@ _POINT_RADIUS_M = 2.0   # geographic radius (m) of a building/parcel point marke
 _PARCEL_LW = 0.4          # the pale parcel wireframe, in every figure that draws one
 _BOUNDARY_LW = 1.3        # the block outline AND the existing street network (_draw_boundary...)
 _CORRIDOR_ALPHA = 0.25    # the road corridor's fill, drawn under everything else
-_DISK_OUTLINE_LW = 0.5    # an untouched building's disk, drawn as an outline rather than a fill
+_OUTLINE_LW = 0.5        # an untouched building, drawn as its outline rather than a fill
 
 
 def short_label(label: str, limit: int = 80) -> str:
@@ -113,17 +114,22 @@ def _parcels_with_layer(block: Block, layers: pd.Series) -> gpd.GeoDataFrame:
 def _point_disks(points: gpd.GeoDataFrame, radius_m: float | None = None) -> gpd.GeoDataFrame:
     """Points as geographic-size disks, so markers scale with the map extent -- a dense region no
     longer collapses into a screen-size (matplotlib `markersize`) thicket the way fixed-point
-    markers do. If a `radius` column is present, each disk uses it verbatim (the per-building
-    footprint disks, radius = NN/2 -- see buildings.SpacingDiscs); elif a `weight` column is
-    present, each disk's radius is `radius_m` scaled by sqrt(weight) so its AREA is proportional to
-    the weight; else all disks share `radius_m`."""
-    if "radius" in points.columns:
-        radii = points["radius"].to_numpy()
-    elif "weight" in points.columns:
+    markers do. If a `weight` column is present, each disk's radius is `radius_m` scaled by
+    sqrt(weight) so its AREA is proportional to the weight; else all disks share `radius_m`."""
+    if "weight" in points.columns:
         radii = (radius_m or 0.0) * (points["weight"].to_numpy() ** 0.5)
     else:
         radii = radius_m or 0.0
     return gpd.GeoDataFrame(geometry=points.geometry.buffer(radii), crs=points.crs)
+
+
+def _building_marks(buildings: gpd.GeoSeries) -> gpd.GeoSeries:
+    """Each building as a map draws it: its real OUTLINE where the data has one, and a
+    `_POINT_RADIUS_M` dot where it is only a point. Per geometry, so a footprint block draws its
+    footprints and a point block its dots, from the same call."""
+    dots = buildings.buffer(_POINT_RADIUS_M)
+    return gpd.GeoSeries(np.where(buildings.geom_type == "Point", dots, buildings),
+                         crs=buildings.crs)
 
 
 _FIELD_CMAP: dict[str, str] = {"depth": _CMAP, "perm": _PERM_CMAP}
@@ -185,8 +191,8 @@ def _draw_heatmap(
     field: Literal["depth", "perm"] = "depth",
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
-    own_points: gpd.GeoDataFrame | None = None,
-    displaced_points: gpd.GeoDataFrame | None = None,
+    own_buildings: gpd.GeoSeries | None = None,
+    displaced_buildings: gpd.GeoDataFrame | None = None,
     frame: BBox | None = None,
 ) -> Figure:
     parcels = _parcels_with_layer(block, layers)
@@ -206,7 +212,7 @@ def _draw_heatmap(
     ax.set_ylim(view[1], view[3])
 
     # Dimmed context (neighbouring blocks' outlines + building points), drawn under the
-    # selection's own boundary/streets/points so the selection reads unambiguously on top.
+    # selection's own boundary/streets/buildings so the selection reads unambiguously on top.
     if context_outlines is not None and not context_outlines.empty:
         context_outlines.plot(ax=ax, facecolor="none", edgecolor=_CONTEXT_OUTLINE,
                               linewidth=_PARCEL_LW)
@@ -216,17 +222,16 @@ def _draw_heatmap(
 
     _draw_boundary_and_streets(ax, block)
 
-    if own_points is not None and not own_points.empty:
-        _point_disks(own_points, _POINT_RADIUS_M).plot(ax=ax, color=_OWN_PT, linewidth=0)
-    # Displaced sites (own_points' building-footprint disks, radius = NN/2): shaded grey->red by
-    # their displacement fraction c = max(0, 1 - d/r) -- drawn on top of own_points, the cost of
-    # the road made visible next to it, magnitude and all (not just a binary in/out mark).
-    if displaced_points is not None and not displaced_points.empty:
-        disks = _point_disks(displaced_points)                 # uses the `radius` column
-        # Fixed red, opacity = graze probability c: a barely-grazed home is nearly transparent, a
-        # certainly-displaced one solid red.
-        colors = [(1.0, 0.0, 0.0, float(ci)) for ci in displaced_points["c"].to_numpy()]
-        disks.plot(ax=ax, color=colors, zorder=5, linewidth=0)
+    if own_buildings is not None and not own_buildings.empty:
+        _building_marks(own_buildings).plot(ax=ax, color=_OWN_PT, linewidth=0)
+    # Displaced buildings, drawn as their OUTLINES at the block's tier (a disc, or the real
+    # footprint) and shaded by c, the share of each the road takes -- on top of own_buildings,
+    # the cost of the road made visible, magnitude and all (not just a binary in/out mark).
+    if displaced_buildings is not None and not displaced_buildings.empty:
+        # Fixed red, opacity = c: a barely-clipped home is nearly transparent, a fully taken one
+        # solid red.
+        colors = [(1.0, 0.0, 0.0, float(ci)) for ci in displaced_buildings["c"].to_numpy()]
+        displaced_buildings.plot(ax=ax, color=colors, zorder=5, linewidth=0)
 
     ax.set_aspect("equal")
     ax.axis("off")
@@ -238,16 +243,17 @@ def render_before(
     field: Literal["depth", "perm"] = "depth",
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
-    own_points: gpd.GeoDataFrame | None = None,
+    own_buildings: gpd.GeoSeries | None = None,
     frame: BBox | None = None,
 ) -> Figure:
     """Status-quo heatmap for `block` (method-independent). `field` selects the coloring:
     `"depth"` (default) colors by the access-depth `layers`; `"perm"` colors by per-parcel egress
-    potential (see the module docstring)."""
+    potential (see the module docstring). `own_buildings` is the block's own building geometry,
+    drawn as it is -- footprints where the block has them (see `_building_marks`)."""
     fig = _draw_heatmap(
         block, layers, vmax, field=field,
-        context_outlines=context_outlines, context_points=context_points, own_points=own_points,
-        frame=frame,
+        context_outlines=context_outlines, context_points=context_points,
+        own_buildings=own_buildings, frame=frame,
     )
     return fig
 
@@ -258,17 +264,18 @@ def render_after(
     metrics: Metrics | None = None,
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
-    own_points: gpd.GeoDataFrame | None = None,
-    displaced_points: gpd.GeoDataFrame | None = None,
+    own_buildings: gpd.GeoSeries | None = None,
+    displaced_buildings: gpd.GeoDataFrame | None = None,
     frame: BBox | None = None,
 ) -> Figure:
     """Post-intervention heatmap for `block`, plus `proposal.roads`. `field` selects the coloring
-    (see `render_before`). `displaced_points` (own building sites, each carrying a displacement
-    fraction `c` and disk `radius`, see emit.py) are shaded grey->red by `c`."""
+    (see `render_before`). `displaced_buildings` (the outlines a road takes a share of, each
+    carrying that share `c`, see emit.py) are shaded red at alpha `c`."""
     fig = _draw_heatmap(
         block, layers, vmax, field=field,
-        context_outlines=context_outlines, context_points=context_points, own_points=own_points,
-        displaced_points=displaced_points,
+        context_outlines=context_outlines, context_points=context_points,
+        own_buildings=own_buildings,
+        displaced_buildings=displaced_buildings,
         frame=frame,
     )
     ax = fig.axes[0]
@@ -392,42 +399,38 @@ def render_graph(
     return fig
 
 
-def field_contributions(building_geometries: gpd.GeoDataFrame, roads: gpd.GeoDataFrame | None,
-                        radii: NDArray[np.float64]) -> NDArray[np.float64]:
-    """Per-building displacement contribution `c_i = clip(1 - d_i/r_i, 0, 1)`, in
-    `building_geometries`
-    order. Delegates to `budget.displacement_contributions` for the formula itself (including the
-    `r == 0` convention) so it is written in exactly one place --
-    `budget.displacement_from_distance` sums the same array.
+def field_contributions(buildings: Extents, roads: gpd.GeoDataFrame | None
+                        ) -> NDArray[np.float64]:
+    """Per-building displacement `c_i`: the share of each building's outline the road corridor
+    takes, in building order. Computed by the tier (`Extents.displacement`) -- the same numbers
+    `budget.displacement` sums -- so there is one formula, not a copy of it here.
 
     Returned rather than left private inside `render_field` so a test can assert on the shading
     without reading pixels. NOT baked into the widget's bundle: the widget derives `c` itself from
     the road position, which is what makes the road draggable at all.
     """
-    n = len(building_geometries)
-    if n == 0 or roads is None or roads.empty:
-        return np.zeros(n, dtype=np.float64)
-    d = corridor_distance(building_geometries, roads)
-    return displacement_contributions(radii, d)
+    if len(buildings) == 0 or roads is None or roads.empty:
+        return np.zeros(len(buildings), dtype=np.float64)
+    return buildings.displacement(road_corridor(roads))
 
 
 def render_field(
     block: Block,
     roads: gpd.GeoDataFrame | None,
-    radii: NDArray[np.float64],
     *,
     frame: BBox | None = None,
 ) -> Figure:
-    """The displacement model, drawn literally: every building a disk of its own radius, the road
-    corridor drawn beneath it, each disk shaded by how much of it the corridor takes.
+    """The displacement model, drawn literally: every building as its OUTLINE at the block's tier (a
+    disc, or the real footprint), the road corridor drawn beneath it, each shaded by the share of
+    it the corridor takes.
 
     Differs from `render_after` in the one way that matters for this page: no choropleth underneath,
     and EVERY building drawn, not only the displaced ones. `render_after` shades displaced disks at
     `alpha = c` on top of the depth fill (`_draw_heatmap`), so disk shading and parcel fill compete
     in the same pixels -- which makes it impossible for a widget drawing disks over a wireframe to
     match, and impossible for a reader to see that a road threaded a GAP rather than merely missing
-    some homes. The gap is the subject: `c` clips to exactly 0 at `d = r`, so a road in a gap is
-    free, and only the disks it missed show that.
+    some homes. The gap is the subject: `c` is exactly 0 for any building the corridor does not
+    touch, so a road in a gap is free, and only the outlines it missed show that.
     """
     fig, ax = plt.subplots(figsize=(16, 16))
 
@@ -445,19 +448,17 @@ def render_field(
 
     _draw_boundary_and_streets(ax, block)
 
-    # Every building as its own disk. Two collections: the ones the corridor reaches, filled at
-    # alpha = c, and the ones it does not, as a thin outline. `_DISPLACED_PT` rather than
-    # render_after's inline `(1.0, 0.0, 0.0, c)` -- a named constant is a thing the bake can put in
-    # the widget's bundle, where a literal in a function body would have to be retyped in
-    # TypeScript and could then drift.
-    c = field_contributions(block.building_geometries, roads, radii)
-    disks = gpd.GeoDataFrame(
-        geometry=block.building_geometries.geometry.buffer(np.asarray(radii, dtype=np.float64)),
-        crs=block.crs)
+    # Every building as its OUTLINE at the block's tier. Two collections: the ones the corridor
+    # reaches, filled at alpha = c, and the ones it does not, as a thin outline. `_DISPLACED_PT`
+    # rather than render_after's inline `(1.0, 0.0, 0.0, c)` -- a named constant is a thing the
+    # bake can put in the widget's bundle, where a literal in a function body would have to be
+    # retyped in TypeScript and could then drift.
+    c = field_contributions(block.buildings, roads)
+    disks = gpd.GeoDataFrame(geometry=block.buildings.outlines.to_numpy(), crs=block.crs)
     grazed = c > 0.0
     if (~grazed).any():
         disks[~grazed].plot(ax=ax, facecolor="none", edgecolor=_DISPLACED_PT,
-                            linewidth=_DISK_OUTLINE_LW, zorder=5)
+                            linewidth=_OUTLINE_LW, zorder=5)
     if grazed.any():
         rgba = to_rgba(_DISPLACED_PT)
         disks[grazed].plot(ax=ax, color=[(*rgba[:3], float(ci)) for ci in c[grazed]],

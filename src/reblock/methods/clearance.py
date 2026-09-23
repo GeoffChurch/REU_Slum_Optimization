@@ -147,10 +147,9 @@ def _greedy_reblock(
     radii: NDArray[np.float64],
 ) -> tuple[gpd.GeoDataFrame, dict[str, object]]:
     """`greedy_drainage` under the clearance repulsion cost field."""
-    building_pts = (
-        shapely.get_coordinates(block.building_geometries.geometry.to_numpy())
-        if not block.building_geometries.empty else np.empty((0, 2), dtype=np.float64)
-    )
+    # One point per building, aligned with `radii`: `get_coordinates` of the geometry column
+    # would return every VERTEX of every footprint at the polygon tier.
+    building_pts = block.buildings.xy
     if len(graph.pts) == 0:
         raise ValueError("substrate yields no nodes for this block")
     w = _edge_weights(graph.pts, graph.rows, graph.cols, graph.edist, building_pts, radii, t)

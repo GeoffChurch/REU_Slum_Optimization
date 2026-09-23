@@ -6,17 +6,20 @@
      Markers: DISPFIELD (the interactive field figure -- fallback PNG, mount point, and a caption
      whose every number is read out of examples/displacement-field/field.json).
 
-     This page describes a MODEL, so the prose's only quantities are symbolic parameters (rᵢ, dᵢ,
+     This page describes a MODEL, so the prose's only quantities are symbolic parameters (Aᵢ, Kᵢ,
      cᵢ). No measured number is typed HERE: the figure's numbers arrive through DISPFIELD, off the
      baked artifact. -->
 
 # Displacement
 
-> **Displacement** is the expected number of **buildings** a road set displaces — not parcels.
-> Each building is a disk of radius `rᵢ`, half its nearest-neighbour distance. Its contribution is
-> the probability the road corridor grazes it under a uniform size prior,
-> `cᵢ = max(0, 1 − dᵢ/rᵢ)`, where `dᵢ` is the distance from the building to the corridor.
-> Displacement is `Σcᵢ`; the reported fraction divides by the number of buildings.
+> **Displacement** is how many **buildings** a road set takes — not parcels — counted by the share
+> of each one it takes. Building `i` contributes `cᵢ = Kᵢ / Aᵢ`: the area `Kᵢ` of its footprint
+> the road corridor covers, over its whole area `Aᵢ`. Displacement is `Σcᵢ`; the reported fraction
+> divides by the number of buildings.
+>
+> Where the real footprint outlines are available, `Aᵢ` is the footprint. Where only a building's
+> location is known, it is a disk of radius half its nearest-neighbour distance — an estimate of
+> the footprint, measured by the same rule.
 
 This is the cost half of the project's one graded tradeoff — the benefit half is
 [permeability](permeability.md). The figure below prices the cost and nothing else: it says what a
@@ -42,7 +45,7 @@ buffering each road on its own and only then taking the union, before any distan
 
 ## Parcels are not buildings
 
-`Block.parcels` and `Block.building_points` are two distinct fields on the same block. A parcel is a
+`Block.parcels` and `Block.building_geometries` are two distinct fields on the same block. A parcel is a
 cell of the tessellated block interior — land, not a structure — and that tessellation is the
 **Voronoi diagram of the building points**, so a parcel is normally one building's own share of the
 block: one cell, one building, as on the block drawn above. Normally, not always — clipping a cell
@@ -51,15 +54,22 @@ own right. A lobe that ends up holding no building is charged nothing, because t
 inside it to charge.
 
 What separates the two is therefore not whether a parcel holds a building, but what the charge is
-measured against. Displacement is charged **per building, against that building's own radius `rᵢ`**
-— half its nearest-neighbour distance — and never per parcel against parcel *area*. A road crossing
-one large parcel out at the sparse edge of a block is charged by how close it comes to the one
-building standing in it, not by how much land it takes; the same road through the packed core is
-charged, building by building, the share `cᵢ` of each disk it reaches into.
+measured against. Displacement is charged **per building, against that building's own footprint**,
+and never per parcel against parcel *area*. A road crossing one large parcel out at the sparse
+edge of a block is charged for the part of the one building standing in it that the road covers,
+not for how much land it takes; the same road through the packed core is charged, building by
+building, the share `cᵢ` of each footprint it covers.
 
 ## Gap-hugging is free
 
-Because `cᵢ` clips to exactly zero once a building's distance to the corridor reaches its own radius
-`rᵢ`, a road that hugs the tightest gap it can find between two buildings pays nothing at all for how
-close it runs. Displacement only ever prices a corridor that actually reaches into a building's own
-disk — there is no credit for merely coming close.
+Because `cᵢ` is exactly zero for any building the corridor does not cover, a road that hugs the
+tightest gap it can find between two buildings pays nothing at all for how close it runs.
+Displacement only ever prices the part of a building a corridor actually covers — there is no charge
+for merely coming close, and no credit either.
+
+## A share, not a verdict
+
+A corridor clipping a building's corner costs that corner, not the whole home. That matters most
+where methods are compared at *equal* displacement: a charge for any contact would over-count the
+methods whose roads graze many buildings, and every comparison would then favour the others by
+construction.

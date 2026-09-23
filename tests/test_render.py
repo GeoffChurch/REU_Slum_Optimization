@@ -265,12 +265,12 @@ def test_frame_bbox_is_square_centred_and_padded() -> None:
     assert width / 2 == pytest.approx(6.0 * 1.6)
 
 
-def test_draw_heatmap_with_context_and_own_points_renders_without_error(
+def test_draw_heatmap_with_context_and_own_buildings_renders_without_error(
     tmp_path: Path,
 ) -> None:
-    # Small synthetic context/own-point layers, disjoint from the block itself,
-    # exercise the full draw order (context outlines/points + own points) and
-    # must not raise, and must still produce a written, non-empty file.
+    # Small synthetic context/own-building layers exercise the full draw order (context
+    # outlines/points + own buildings, one a point and one a real outline) and must not raise, and
+    # must still produce a written, non-empty file.
     block = _grid_block(3)
     layers = parcel_access_layers(block, None)
     context_outlines = gpd.GeoDataFrame(
@@ -279,12 +279,13 @@ def test_draw_heatmap_with_context_and_own_points_renders_without_error(
         crs=UTM,
     )
     context_points = gpd.GeoDataFrame(geometry=[Point(6, 6)], crs=UTM)
-    own_points = gpd.GeoDataFrame(geometry=[Point(0.5, 0.5), Point(1.5, 1.5)], crs=UTM)
+    own_buildings = gpd.GeoSeries(
+        [Point(0.5, 0.5), Polygon([(1.3, 1.3), (1.7, 1.3), (1.7, 1.7), (1.3, 1.7)])], crs=UTM)
 
     fig = render_before(
         block, layers, vmax=2,
         context_outlines=context_outlines, context_points=context_points,
-        own_points=own_points,
+        own_buildings=own_buildings,
     )
     out = tmp_path / "with_context.png"
     save_render(fig, out)
@@ -293,48 +294,59 @@ def test_draw_heatmap_with_context_and_own_points_renders_without_error(
     assert out.stat().st_size > 0
 
 
-def test_render_after_marks_displaced_points_and_writes_a_file(tmp_path: Path) -> None:
+def test_render_after_marks_displaced_buildings_and_writes_a_file(tmp_path: Path) -> None:
     block = _grid_block(3)
     proposal = _connector_proposal(block)
     layers = parcel_access_layers(block, proposal.roads)
-    # sits on the connector; c/radius are the columns _displaced_points (emit.py) now attaches.
-    displaced = gpd.GeoDataFrame(
-        {"c": [0.8], "radius": [1.0]}, geometry=[Point(1.0, 0.5)], crs=UTM)
+    # sits on the connector: an OUTLINE carrying c, which is what _displaced_buildings produces.
+    displaced = gpd.GeoDataFrame({"c": [0.8]}, geometry=[Point(1.0, 0.5).buffer(1.0)], crs=UTM)
 
-    fig_after = render_after(block, proposal, layers, vmax=2, displaced_points=displaced)
+    fig_after = render_after(block, proposal, layers, vmax=2, displaced_buildings=displaced)
     out = tmp_path / "displaced.png"
     save_render(fig_after, out)
 
     assert out.exists() and out.stat().st_size > 0
 
 
-def test_render_after_displaced_points_add_an_artist_over_own_points_alone() -> None:
-    # The displaced-point disk is drawn on top of own_points as its own artist, so a call with
-    # displaced_points must have strictly more collections than the same call without.
+def test_render_after_displaced_buildings_add_an_artist_over_own_buildings_alone() -> None:
+    # The displaced buildings are drawn on top of own_buildings as their own artist, so a call
+    # with them must have strictly more collections than the same call without.
     block = _grid_block(3)
     proposal = _connector_proposal(block)
     layers = parcel_access_layers(block, proposal.roads)
-    own_points = gpd.GeoDataFrame(geometry=[Point(0.5, 0.5), Point(1.0, 0.5)], crs=UTM)
-    displaced = gpd.GeoDataFrame(
-        {"c": [0.8], "radius": [1.0]}, geometry=[Point(1.0, 0.5)], crs=UTM)
+    own_buildings = gpd.GeoSeries([Point(0.5, 0.5), Point(1.0, 0.5)], crs=UTM)
+    displaced = gpd.GeoDataFrame({"c": [0.8]}, geometry=[Point(1.0, 0.5).buffer(1.0)], crs=UTM)
 
-    fig_own_only = render_after(block, proposal, layers, vmax=2, own_points=own_points)
+    fig_own_only = render_after(block, proposal, layers, vmax=2, own_buildings=own_buildings)
     fig_with_displaced = render_after(
-        block, proposal, layers, vmax=2, own_points=own_points, displaced_points=displaced)
+        block, proposal, layers, vmax=2, own_buildings=own_buildings,
+        displaced_buildings=displaced)
 
     assert len(fig_with_displaced.axes[0].collections) > len(fig_own_only.axes[0].collections)
 
 
-def test_render_after_with_empty_displaced_points_adds_no_extra_artist() -> None:
-    # Guard-empty: an empty displaced_points frame (e.g. a method whose corridor hits no site)
-    # must not add anything or raise.
+def test_building_marks_draw_an_outline_as_itself_and_a_point_as_a_dot() -> None:
+    # Per geometry, so a footprint block shows its footprints and a point block its dots from the
+    # same call -- and a footprint is NOT shrunk or swollen to the dot radius.
+    from reblock.render import _POINT_RADIUS_M, _building_marks
+    square = Polygon([(10, 10), (14, 10), (14, 14), (10, 14)])
+    marks = _building_marks(gpd.GeoSeries([Point(0, 0), square], crs=UTM))
+    assert marks.iloc[1].equals(square)
+    assert marks.iloc[0].geom_type == "Polygon"
+    assert marks.iloc[0].area == pytest.approx(3.14159 * _POINT_RADIUS_M ** 2, rel=2e-3)
+
+
+def test_render_after_with_no_displaced_buildings_adds_no_extra_artist() -> None:
+    # Guard-empty: an empty displaced-buildings frame (e.g. a method whose corridor touches no
+    # building) must not add anything or raise.
     block = _grid_block(3)
     proposal = _connector_proposal(block)
     layers = parcel_access_layers(block, proposal.roads)
     empty_displaced = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
 
     fig_without = render_after(block, proposal, layers, vmax=2)
-    fig_with_empty = render_after(block, proposal, layers, vmax=2, displaced_points=empty_displaced)
+    fig_with_empty = render_after(block, proposal, layers, vmax=2,
+                                  displaced_buildings=empty_displaced)
 
     assert len(fig_with_empty.axes[0].collections) == len(fig_without.axes[0].collections)
 
@@ -354,13 +366,15 @@ def test_render_before_uses_the_passed_frame_verbatim() -> None:
     assert ax.get_ylim() == pytest.approx((frame[1], frame[3]))
 
 
-def test_displaced_points_carry_fraction_and_radius(tmp_path):
-    # a proposal with roads over a couple of building points -> _displaced_points has c in (0,1]
+def test_displaced_buildings_are_outlines_carrying_their_share(tmp_path):
+    # A road over a couple of buildings: _displaced_buildings returns each touched building's
+    # OUTLINE at the block's tier, carrying c in (0, 1]. Outlines, not points plus a radius -- the
+    # figure draws the shape the model charges for, whatever the tier.
     import geopandas as gpd
     from shapely.geometry import LineString, Point, Polygon
 
     from reblock.contracts import Block, Proposal
-    from reblock.emit import _displaced_points
+    from reblock.emit import _displaced_buildings
     crs = CRS.from_epsg(32734)
     boundary = Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
     parcels = gpd.GeoDataFrame({"parcel_id": [0]}, geometry=[boundary], crs=crs)
@@ -373,9 +387,10 @@ def test_displaced_points_carry_fraction_and_radius(tmp_path):
         DEFAULT_ROAD_WIDTH_M)
     prop = Proposal(block_id="b", crs=crs, roads=roads, edges=None,
                     proposal_id="x", method="m", params={"corridor_m": 1.0}, block_identity=None)
-    disp = _displaced_points(block, prop)
-    assert "c" in disp.columns and "radius" in disp.columns
-    assert (disp["c"] > 0).any() and (disp["c"] <= 1).all()
+    disp = _displaced_buildings(block, prop)
+    assert "c" in disp.columns and "radius" not in disp.columns
+    assert set(disp.geometry.geom_type) == {"Polygon"}          # outlines, not points
+    assert (disp["c"] > 0).all() and (disp["c"] <= 1).all()
 
 
 def test_render_graph_returns_figure_with_axes() -> None:
@@ -475,8 +490,7 @@ def test_render_field_draws_every_building_not_only_the_displaced_ones() -> None
     """The point of the figure: a reader must be able to see that a road THREADED a gap, which means
     seeing the disks it missed. `render_after` draws only the displaced ones."""
     block = _field_block()
-    radii = block.buildings.radii
-    fig = render_field(block, _mid_road(block), radii)
+    fig = render_field(block, _mid_road(block))
     n = len(block.building_geometries)
     drawn = _disk_paths(fig.axes[0])
     assert drawn == n, (
@@ -512,9 +526,8 @@ def test_render_field_shades_grazed_disks_by_their_own_c() -> None:
     """
     block = _field_block()
     roads = _mid_road(block)
-    radii = block.buildings.radii
-    c = field_contributions(block.building_geometries, roads, radii)
-    fig = render_field(block, roads, radii)
+    c = field_contributions(block.buildings, roads)
+    fig = render_field(block, roads)
     alphas = sorted(round(float(row[3]), 6)
                     for row in np.atleast_2d(np.asarray(
                         _grazed_disk_collection(fig.axes[0]).get_facecolor(), dtype=float)))
@@ -550,7 +563,7 @@ def test_render_field_never_fills_parcels() -> None:
     paths and a count would mistake it for the wireframe.
     """
     block = _field_block()
-    fig = render_field(block, _mid_road(block), block.buildings.radii)
+    fig = render_field(block, _mid_road(block))
     face = np.atleast_2d(np.asarray(
         _wireframe_collection(fig.axes[0]).get_facecolor(), dtype=float))
     assert face.size == 0 or float(face[0][3]) == 0.0, "parcels are filled"

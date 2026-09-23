@@ -172,6 +172,10 @@ def test_footprint_parcels_are_identical_to_point_parcels(tmp_path: Path) -> Non
     assert list(fp.parcels["parcel_id"]) == list(pts.parcels["parcel_id"])
     assert fp.parcels.geometry.equals(pts.parcels.geometry)
     assert set(fp.building_geometries.geometry.geom_type) == {"Polygon"}
+    # ...and the footprint tier's POINTS are those same published points, bit for bit -- not the
+    # offset centroids. `parcel_radii` finds each building's parcel by containment of `xy`, so a
+    # centroid there can land outside every parcel. Watched failing with `xy` as the centroid.
+    assert np.array_equal(fp.buildings.xy, pts.buildings.xy)
 
 
 def test_building_rows_align_with_the_point_tier(tmp_path: Path) -> None:

@@ -72,7 +72,6 @@ def main() -> None:
           flush=True)
 
     adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-    radii = block.buildings.radii
     b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
 
     out: dict[str, dict[str, object]] = {}
@@ -101,7 +100,7 @@ def main() -> None:
 
         at: dict[str, dict[str, float]] = {}
         for d in BUDGETS:
-            pre = prefix_to_displacement(block, roads, radii, d)
+            pre = prefix_to_displacement(block, roads, d)
             if len(pre) == 0:
                 continue
             b1 = burden(parcel_access_layers(block, pre, tol=STREET_TOL, adj=adj,

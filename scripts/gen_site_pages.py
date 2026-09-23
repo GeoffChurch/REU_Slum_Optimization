@@ -588,9 +588,9 @@ def _frontier_figure() -> str:
 
 
 def _displacement_field_figure() -> str:
-    """The Displacement page's one interactive figure: the model drawn literally -- every building a
-    disk of its own radius `rᵢ`, the road corridor beneath it, each disk shaded by the fraction `cᵢ`
-    of it the corridor takes -- with both roads draggable, the corridor width on a slider, and the
+    """The Displacement page's one interactive figure: the model drawn literally -- every building
+    as its outline, the road corridor beneath it, each building shaded by the fraction `cᵢ` of it
+    the corridor takes -- with both roads draggable, the corridor width on a slider, and the
     running cost read out beside the picture.
 
     The fallback PNG stays IN the figure, like every other mount point on this site: `dom/error.ts`
@@ -639,8 +639,8 @@ def _displacement_field_figure() -> str:
     attrs = f'data-widget="displacement-field" data-bundle="{bundle_url}"'
     caption = (
         f"The model drawn literally on block <code>{block}</code>: every one of its {n} buildings "
-        f"is a disk of its own radius <code>rᵢ</code>, the road corridor runs beneath them, and "
-        f"each disk is shaded by the share <code>cᵢ</code> of it the corridor takes. The road "
+        f"is drawn as its outline, the road corridor runs beneath them, and each building is "
+        f"shaded by the share <code>cᵢ</code> of it the corridor takes. The road "
         f"drawn here is one road at the {floor:.0f} m floor, and it costs "
         f"<strong>{one['sum_c']:.1f}</strong> buildings — {one['fraction']:.1%} of the block. "
         f"Drag either end of a road, widen the corridor, or switch the second road on. Switched on "
@@ -650,8 +650,8 @@ def _displacement_field_figure() -> str:
         f"for once."
     )
     return _figure(img_url,
-                   f"the displacement model on block {block}: buildings as disks, shaded by the "
-                   f"share of each that the road corridor takes",
+                   f"the displacement model on block {block}: buildings as their outlines, "
+                   f"shaded by the share of each that the road corridor takes",
                    caption, attrs=attrs)
 
 

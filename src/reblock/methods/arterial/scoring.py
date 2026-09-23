@@ -17,10 +17,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-import numpy as np
-import shapely
 from geopandas import GeoDataFrame
-from numpy.typing import NDArray
 from pyproj import CRS
 from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
@@ -30,9 +27,10 @@ from reblock.budget import (
     _StepContext,
     access_burden,
     displacement,
-    displacement_from_distance,
     repulsion,
+    road_corridor,
 )
+from reblock.buildings import Extents, IncrementalOverlap
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, parcel_access_layers
 from reblock.methods.arterial.primitives import _explode, _planarize, _SnapGraph, _union_with
@@ -56,6 +54,15 @@ def _score(objective: str, block: Block, roads: GeoDataFrame, adj: list[set[int]
     return e if objective == "efficiency" else direct
 
 
+def committed_overlap(buildings: Extents, committed: GeoDataFrame) -> IncrementalOverlap:
+    """The step's committed corridor as an `IncrementalOverlap`, so `cost="displacement_fast"`
+    scores each candidate from only the buildings it touches, never by unioning it in."""
+    tracker = IncrementalOverlap(buildings)
+    if len(committed):
+        tracker.add(road_corridor(committed))
+    return tracker
+
+
 @dataclass(frozen=True)
 class _StepState:
     """Frozen per-greedy-step state, module-level so the fork process pool (task 2 of the
@@ -65,9 +72,8 @@ class _StepState:
     `committed` is needed by the aspirational branch's full `_planarize(committed + [real])`;
     `base_merged`/`adj`/`base_burden`/`ctx` by the access-objective-buildable and displacement
     branches' `_score`/incremental-`_union_with` calls -- omitting any of these breaks a scoring
-    branch silently (wrong values, not a crash). `radii` (per-building disk radius, r=NN/2,
-    constant across a block's steps) feeds the `cost="displacement"` denominator's disk
-    `displacement` call. `frozen=True` makes the
+    branch silently (wrong values, not a crash). Displacement and repulsion read the block's
+    building tier (`block.buildings`), so no radii ride along here. `frozen=True` makes the
     read-only invariant real:
     the workers only READ this holder, and its mutable members (`committed`, `base_merged`) are
     mutated only in the PARENT and only AFTER the holder is cleared (a fresh `_StepState` is built
@@ -82,12 +88,10 @@ class _StepState:
     cost: str
     half_width_m: float
     committed_disp: float
-    # For cost="displacement_fast": per-building distance to the COMMITTED corridor, fixed for the
-    # step, plus the building geometries to measure a candidate against. None for other costs.
-    committed_dist: NDArray[np.float64] | None
-    building_xy: NDArray[np.object_] | None
+    # For cost="displacement_fast": the committed corridor's per-building pieces, fixed for the
+    # step, so a candidate is scored locally. None for other costs.
+    overlap: IncrementalOverlap | None
     block: Block
-    radii: NDArray[np.float64]
     crs: CRS
     adj: list[set[int]]
     base_burden: float
@@ -127,26 +131,18 @@ def eval_candidate(chord: LineString) -> tuple[float, BaseGeometry | None]:
         trial = _planarize(st.committed + [real], st.crs, 2.0 * st.half_width_m)
         raw = _score(st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
     if st.cost == "displacement_fast":
-        # dist(p, committed u cand) == min(dist(p, committed), dist(p, cand)), so only the
-        # candidate's own corridor distance is new work -- no union over the committed set. Agrees
-        # with `displacement` to ~1e-10, NOT bit-exactly (GEOS measures distance to a unioned
-        # polygon over a different vertex set than to the parts), and this greedy's argmax turns
-        # that into a different trajectory on ~29% of runs. See
-        # notes/2026-08-09-greedy-arterial-is-tie-sensitive.md -- the divergence is large when it
-        # lands (up to 11 points of burden reduction) but shows no systematic direction.
-        assert st.building_xy is not None
-        cand_d = shapely.distance(st.building_xy, real.buffer(st.half_width_m))
-        d = cand_d if st.committed_dist is None else np.minimum(st.committed_dist, cand_d)
-        denom = float(displacement_from_distance(st.radii, d) - st.committed_disp)
+        # Scored against the step's committed pieces, touching only the buildings the candidate
+        # reaches -- no union of the candidate into the committed corridor. See IncrementalOverlap.
+        assert st.overlap is not None
+        denom = st.overlap.delta(real.buffer(st.half_width_m))
     elif st.cost == "displacement":
         if trial is None:
             # step -> buildable
             trial = _explode(_union_with(st.base_merged, real), st.crs,
                              2.0 * st.half_width_m)
-        denom = float(displacement(st.block.building_geometries, st.radii, trial)
-                     - st.committed_disp)
+        denom = float(displacement(st.block.buildings, trial) - st.committed_disp)
     elif st.cost == "repulsion":
-        denom = repulsion(st.block.building_geometries, st.radii, real)
+        denom = repulsion(st.block.buildings, real)
     else:
         denom = real.length
     gain = float("inf") if (denom <= 0 and raw > 0) else (raw / denom if denom > 0 else 0.0)

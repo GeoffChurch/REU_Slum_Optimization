@@ -2,10 +2,11 @@
 
 Lives under `web/src/` because it ships to the browser like everything else here, and is plain
 CPython so `tests/test_solve_py.py` can test it without a runtime. Its imports below --
-`geopandas`, `pyproj`, `shapely`, `typing`, and `reblock.contracts`/`reblock.permeability`
-themselves -- are exactly what `reblock.permeability` already pulls in transitively (via
-`reblock.contracts`, which it imports `Block` from, and which itself uses `typing`). Nothing here
-adds a package to the browser's install.
+`functools`, `geopandas`, `numpy`, `pyproj`, `shapely`, `typing`, and
+`reblock.buildings`/`reblock.contracts`/`reblock.permeability` themselves -- are exactly what
+`reblock.permeability` already pulls in transitively (via `reblock.contracts`, which it imports
+`Block` from, and which itself imports `reblock.buildings`). Nothing here adds a package to the
+browser's install.
 
 `web/test/pyodide-parity.test.ts` runs this same file under the Pyodide runtime and checks its
 answers against the ones CPython baked into `examples/authoring/block.json`. That is the only
@@ -29,12 +30,15 @@ imports `block_from_bundle`, so there is one definition rather than two that cou
 """
 from __future__ import annotations
 
+from functools import partial
 from typing import TypedDict
 
 import geopandas as gpd
+import numpy as np
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
+from reblock.buildings import Discs
 from reblock.contracts import Block
 from reblock.permeability import WIDTH_COL, PermeabilityParams, solve_egress
 
@@ -81,6 +85,7 @@ class AuthoringBundle(TypedDict):
     parcels: list[list[list[list[float]]]]
     streets: list[list[list[float]]]
     building_points: list[list[float]]
+    building_radii: list[float]
     nodes: NodesDict
     edges: EdgesDict
     baseline: BaselineDict
@@ -115,9 +120,13 @@ def block_from_bundle(bundle: AuthoringBundle) -> Block:
     points = gpd.GeoDataFrame(
         {"geometry": [Point(x, y) for x, y in bundle["building_points"]]},
         geometry="geometry", crs=crs)
+    # `Discs` with the baked radii, whatever tier baked them: the solve reads a building only as a
+    # radius at its anchor, so this is that tier as far as anything here can tell.
+    radii = np.asarray(bundle["building_radii"], dtype=np.float64)
     return Block(block_id=bundle["block_id"], crs=crs,
                  boundary=Polygon(boundary_rings[0], boundary_rings[1:]),
-                 parcels=parcels, streets=streets, building_geometries=points)
+                 parcels=parcels, streets=streets, building_geometries=points,
+                 building_tier=partial(Discs, radii=radii))
 
 
 def adjacency_from_bundle(bundle: AuthoringBundle) -> list[set[int]]:

@@ -262,13 +262,12 @@ def _method_frontier(block: Block, method: Method, params: PermeabilityParams, *
     roads = prop.roads
     if roads is None or roads.empty:
         return None
-    radii = block.buildings.radii
 
     def _report(i: int, total: int) -> None:
         _log(f"    {label}: solve {i}/{total}")
 
     perm_curve = permeability_curve(block, roads, params, n_points=20, progress=_report)
-    disp_curve = displacement_curve(block, roads, radii, n_points=20)
+    disp_curve = displacement_curve(block, roads, n_points=20)
     return MethodFrontier(
         n_roads=int(len(roads)),
         terminal_permeability=perm_curve.benefit[-1],

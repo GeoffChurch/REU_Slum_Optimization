@@ -77,7 +77,7 @@ def _eval_hook(chord: LineString) -> tuple[float, BaseGeometry | None]:
     trial = _explode(_union_with(st.base_merged, real), st.crs, 2.0 * st.half_width_m)
     raw = scoring._score(
         st.objective, st.block, trial, st.adj, st.base_burden, st.ctx) - st.base_val
-    denom = float(displacement(st.block.building_geometries, st.radii, trial) - st.committed_disp)
+    denom = float(displacement(st.block.buildings, trial) - st.committed_disp)
     _EXACT.append((raw, denom, float(real.length)))
     return gain, real
 

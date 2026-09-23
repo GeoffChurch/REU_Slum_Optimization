@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { FieldBundle, ReferenceCase, Road } from "../src/field.js";
-import { contributions, corridorDistance, flatten } from "../src/model/displacement.js";
+import { contributions, flatten, outline } from "../src/model/displacement.js";
 import { handles } from "../src/render/field.js";
 import { localState, type StateSource } from "../src/state.js";
 import { urlStore } from "../src/url/store.js";
@@ -21,7 +21,7 @@ import {
  * first (by the bundle colour that identifies it, or by the shape of its path) and only then
  * asserts on it. Task 1 lost two guards to the other habit: a test that searches for *something*
  * satisfying a property accepts a match from whichever layer happens to satisfy it, and one of them
- * was reading the corridor's alpha while claiming to read the disks'.
+ * was reading the corridor's alpha while claiming to read the buildings'.
  *
  * Same minimal-stub spirit as perm-graph-boot.test.ts and frontier-boot.test.ts: no jsdom, one fake
  * element class, one recording 2D context. Neither the widget's module body nor anything it imports
@@ -44,13 +44,17 @@ function reference(name: string): ReferenceCase {
   return c;
 }
 
+/** Every vertex of every building outline, by axis. */
+const buildingXs = (b: FieldBundle): number[] => b.buildings.flat(3).map((p) => p[0]);
+const buildingYs = (b: FieldBundle): number[] => b.buildings.flat(3).map((p) => p[1]);
+
 /** The view the widget must fit: buildings UNIONED WITH the parcel rings. Every expected screen
  * coordinate below comes through this, so a widget fitting the buildings alone (the shape PermGraph
  * ships, which works on this block only because the pad absorbs it) fails on real numbers rather
  * than on a restated intention. `viewFits` below proves the two are actually distinguishable. */
 function unionBbox(b: FieldBundle): Bbox {
-  const xs = [...b.buildings.x, ...b.parcels.flatMap((ring) => ring.map((p) => p[0]))];
-  const ys = [...b.buildings.y, ...b.parcels.flatMap((ring) => ring.map((p) => p[1]))];
+  const xs = [...buildingXs(b), ...b.parcels.flatMap((ring) => ring.map((p) => p[0]))];
+  const ys = [...buildingYs(b), ...b.parcels.flatMap((ring) => ring.map((p) => p[1]))];
   return { minX: Math.min(...xs), minY: Math.min(...ys),
            maxX: Math.max(...xs), maxY: Math.max(...ys) };
 }
@@ -137,7 +141,7 @@ const arcArgs = (c: Call): number[] => {
 /** The four layers `render_field` draws, each named by what identifies it and nothing else. */
 function layers(cv: FakeElement): {
   parcels: Call[]; corridor: Call[]; outline: Call[]; streets: Call[];
-  diskOutlines: Call[]; diskFills: Call[]; handleFills: Call[]; handleOutlines: Call[];
+  buildingOutlines: Call[]; buildingFills: Call[]; handleFills: Call[]; handleOutlines: Call[];
 } {
   const f = lastFrame(cv);
   const strokes = f.filter((c) => c.op === "stroke");
@@ -151,11 +155,23 @@ function layers(cv: FakeElement): {
     corridor: strokes.filter((c) => c.globalAlpha === E.road_alpha),
     outline: boundaryish.slice(0, 1),
     streets: boundaryish.slice(1),
-    diskOutlines: strokes.filter((c) => c.strokeStyle === E.disk_color && isArc(c)),
-    diskFills: fills.filter((c) => c.fillStyle === E.disk_color && isArc(c)),
+    buildingOutlines: strokes.filter((c) => c.strokeStyle === E.building_color),
+    buildingFills: fills.filter((c) => c.fillStyle === E.building_color),
     handleFills: fills.filter((c) => c.fillStyle === E.road_color && isArc(c)),
     handleOutlines: strokes.filter((c) => c.strokeStyle === E.boundary_color && isArc(c)),
   };
+}
+
+/** Every building's outline, prepared as the widget prepares it. */
+const OUTLINES = bundle.buildings.map(outline);
+
+/** Building `i`'s path in screen pixels: every ring of every part, each closed, in the bundle's
+ * own order -- the path a canvas must be handed for a hole to stay unfilled. */
+function outlinePath(i: number): { op: string; args: number[] }[] {
+  return bundle.buildings[i]!.flatMap((poly) => poly.flatMap((ring) => [
+    ...ring.map(([x, y], v) => ({ op: v === 0 ? "moveTo" : "lineTo", args: [...toScreen(VIEW, x, y)] })),
+    { op: "closePath", args: [] },
+  ]));
 }
 
 /** `Σcᵢ` as the readout states it, parsed back out of the page. */
@@ -182,11 +198,10 @@ function cost(host: FakeElement): number {
  * dispatched, so the expected coordinates are bit-identical to the widget's own -- no tolerance is
  * needed anywhere below, and none is used. */
 function assertPictureMatchesRoads(cv: FakeElement, roads: Road[], why: string): void {
-  const { x, y, r } = bundle.buildings;
-  const c = contributions(r, corridorDistance(x, y, flatten(roads)));
+  const c = contributions(OUTLINES, flatten(roads));
   const grazed: number[] = [];
   const missed: number[] = [];
-  for (let i = 0; i < r.length; i++) (c[i]! > 0 ? grazed : missed).push(i);
+  for (let i = 0; i < OUTLINES.length; i++) (c[i]! > 0 ? grazed : missed).push(i);
   assert.ok(grazed.length > 0 && missed.length > 0,
     `${why}: this road neither grazes nor misses anything, so both branches must be live here`);
   const l = layers(cv);
@@ -203,22 +218,24 @@ function assertPictureMatchesRoads(cv: FakeElement, roads: Road[], why: string):
     roads.flatMap((road) => road.coords.map(([wx, wy]) => [...toScreen(VIEW, wx, wy)])),
     `${why}: the corridor is not drawn where the road now is`);
 
-  // The DISKS are shaded by the cost of that same road: one fill per grazed building at exactly its
-  // own alpha, one outline per untouched one, each at its own place and radius.
-  assert.equal(l.diskFills.length, grazed.length, `${why}: the grazed disks and the model disagree`);
-  assert.equal(l.diskOutlines.length, missed.length,
-    `${why}: the untouched disks and the model disagree`);
+  // The BUILDINGS are shaded by the cost of that same road: one fill per building it takes a share
+  // of, at exactly that share as alpha, one outline per untouched one, each its own shape in its
+  // own place.
+  assert.equal(l.buildingFills.length, grazed.length,
+    `${why}: the shaded buildings and the model disagree`);
+  assert.equal(l.buildingOutlines.length, missed.length,
+    `${why}: the untouched buildings and the model disagree`);
   grazed.forEach((i, k) => {
-    const call = l.diskFills[k]!;
+    const call = l.buildingFills[k]!;
     assert.equal(call.globalAlpha, c[i]!,
-      `${why}: disk ${i} was filled at alpha ${call.globalAlpha}, its cost is ${c[i]!}`);
-    assert.deepEqual(arcArgs(call).slice(0, 3),
-      [...toScreen(VIEW, x[i]!, y[i]!), r[i]! * VIEW.scaleX],
-      `${why}: disk ${i} is not at its own place and radius`);
+      `${why}: building ${i} was filled at alpha ${call.globalAlpha}, its cost is ${c[i]!}`);
+    assert.deepEqual(call.path, outlinePath(i), `${why}: building ${i} is not its own outline`);
   });
-  // The zero-cost disks are outlines at FULL alpha -- not faint versions of a grazed disk, but a
+  missed.forEach((i, k) => assert.deepEqual(l.buildingOutlines[k]!.path, outlinePath(i),
+    `${why}: untouched building ${i} is not its own outline`));
+  // The zero-cost buildings are outlines at FULL alpha -- not faint versions of a shaded one, but a
   // different statement: this home is not touched at all.
-  for (const call of l.diskOutlines) assert.equal(call.globalAlpha, 1, why);
+  for (const call of l.buildingOutlines) assert.equal(call.globalAlpha, 1, why);
 }
 
 /** A road as the widget holds it after a drag: the reader's pointer, put back through the same
@@ -267,7 +284,7 @@ test("boots, draws every layer in render_field's own order, and quotes Python's 
     assert.equal(frame[0]?.op, "clearRect", "the frame did not start by clearing");
 
     // (1) Parcels: one wireframe ring each, at the bundle's own weight and colour, NEVER filled --
-    // a filled parcel states one quantity twice and drowns the disks that are the subject.
+    // a filled parcel states one quantity twice and drowns the buildings that are the subject.
     assert.equal(l.parcels.length, bundle.parcels.length, "a parcel ring went missing");
     for (const c of l.parcels) assert.equal(c.lineWidth, E.parcel_lw);
     assert.equal(frame.filter((c) => c.op === "fill" && c.fillStyle === E.parcel_color).length, 0,
@@ -290,16 +307,16 @@ test("boots, draws every layer in render_field's own order, and quotes Python's 
     for (const c of l.streets) assert.equal(c.lineWidth, E.street_lw);
 
     // (4) Every building, and every one of them exactly once.
-    assert.equal(l.diskOutlines.length + l.diskFills.length, bundle.n_buildings,
-      "the disks and the buildings disagree about how many there are");
-    for (const c of l.diskOutlines) assert.equal(c.lineWidth, E.disk_outline_lw);
+    assert.equal(l.buildingOutlines.length + l.buildingFills.length, bundle.n_buildings,
+      "the drawing and the bundle disagree about how many buildings there are");
+    for (const c of l.buildingOutlines) assert.equal(c.lineWidth, E.outline_lw);
 
     // Context state, not a count. The corridor is the only layer that wants round caps; every layer
-    // after it must have them reset, or the boundary, the streets and the disks quietly inherit
+    // after it must have them reset, or the boundary, the streets and the buildings quietly inherit
     // them -- and the parcels inherit them on frame 2+ only, which is a first-paint-differs bug
     // that no single frame can show. The frame-identity test below is the other half of this.
     assert.equal(l.corridor[0]!.lineCap, "round");
-    for (const c of [...l.outline, ...l.streets, ...l.diskOutlines, ...l.handleOutlines]) {
+    for (const c of [...l.outline, ...l.streets, ...l.buildingOutlines, ...l.handleOutlines]) {
       assert.equal(c.lineCap, "butt", "a layer drawn after the corridor inherited its round caps");
     }
 
@@ -310,17 +327,18 @@ test("boots, draws every layer in render_field's own order, and quotes Python's 
       "the handle is not the baked pixel radius");
 
     // ORDER, which is the half that cannot be seen from counts. The corridor must sit UNDER the
-    // disks (render.py's zorder 2 against 5 and 6): a translucent corridor drawn over them would
-    // tint the very shading it exists to be read against. And handles last, so a handle sitting on
-    // a solid disk is still grabbable.
+    // buildings (render.py's zorder 2 against 5 and 6): a translucent corridor drawn over them
+    // would tint the very shading it exists to be read against. And handles last, so a handle
+    // sitting on a solid building is still grabbable.
     const at = (c: Call): number => frame.indexOf(c);
     assert.ok(at(l.parcels.at(-1)!) < at(l.corridor[0]!), "the corridor was drawn under the parcels");
     assert.ok(at(l.corridor[0]!) < at(l.outline[0]!), "the boundary was drawn under the corridor");
-    assert.ok(at(l.outline[0]!) < at(l.diskOutlines[0] ?? l.diskFills[0]!),
-      "a disk was drawn under the boundary");
-    assert.ok(at(l.corridor[0]!) < at(l.diskFills[0]!),
-      "the corridor was drawn OVER the disks, tinting the shading it exists to be read against");
-    assert.ok(at(l.diskFills.at(-1)!) < at(l.handleFills[0]!), "a handle was buried under a disk");
+    assert.ok(at(l.outline[0]!) < at(l.buildingOutlines[0] ?? l.buildingFills[0]!),
+      "a building was drawn under the boundary");
+    assert.ok(at(l.corridor[0]!) < at(l.buildingFills[0]!),
+      "the corridor was drawn OVER the buildings, tinting the shading it exists to be read against");
+    assert.ok(at(l.buildingFills.at(-1)!) < at(l.handleFills[0]!),
+      "a handle was buried under a building");
 
     // The readout quotes PYTHON's number for the boot state -- road 1 alone at the default width,
     // which is exactly the `road1` fixture `budget.displacement` measured -- and both halves of it,
@@ -334,19 +352,19 @@ test("boots, draws every layer in render_field's own order, and quotes Python's 
       `readout ${JSON.stringify(readout)} does not state the fraction of ${bundle.n_buildings}`);
   });
 
-test("each grazed disk is drawn at exactly its own cost, in its own place, at its own radius",
+test("each building the corridor takes a share of is drawn at exactly that share, as its own outline",
   async () => {
-    // The strongest guard in the file. The disks ARE the metric made visible: alpha is cᵢ, so a
-    // widget that shaded them from a stale array, at a fixed alpha, or against the wrong radius
-    // would still draw 263 plausible circles and report a correct-looking number beside them.
+    // The strongest guard in the file. The shading IS the metric made visible: alpha is cᵢ, so a
+    // widget that shaded from a stale array, at a fixed alpha, or on the wrong outline would still
+    // draw thousands of plausible buildings and report a correct-looking number beside them.
     const host = mountPoint();
     await mount(host);
     fireResize(SIZE, SIZE);
 
     assertPictureMatchesRoads(canvasOf(host), [bundle.roads[0]!], "at boot");
-    // ...and the untouched disks are the half `render_after` leaves out. Without them a reader
+    // ...and the untouched buildings are the half `render_after` leaves out. Without them a reader
     // cannot see that a road threaded a GAP, only that some homes went red.
-    assert.ok(layers(canvasOf(host)).diskOutlines.length > 0);
+    assert.ok(layers(canvasOf(host)).buildingOutlines.length > 0);
   });
 
 test("the view fits the parcels too, not just the buildings", async () => {
@@ -373,15 +391,15 @@ test("the view fits the parcels too, not just the buildings", async () => {
   // wrong: buildings are spread across a 6,619-parcel block, so their bbox nearly IS the block's.
   //
   // The bbox comparison is the property itself rather than a visible consequence of it, so no pad
-  // can hide it. MEASURED on this bundle: buildings span x 24.6..1547.5, buildings-plus-parcels
-  // span x 0.0..1556.5.
+  // can hide it. MEASURED on this bundle: the building outlines span x 21.97..1549.39,
+  // buildings-plus-parcels x 0.0..1556.46.
   const bbox = (xs: number[], ys: number[]) => ({
     minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys),
   });
-  const buildingsOnly = bbox(bundle.buildings.x, bundle.buildings.y);
+  const buildingsOnly = bbox(buildingXs(bundle), buildingYs(bundle));
   const withParcels = bbox(
-    [...bundle.buildings.x, ...bundle.parcels.flatMap((r) => r.map((p) => p[0]))],
-    [...bundle.buildings.y, ...bundle.parcels.flatMap((r) => r.map((p) => p[1]))]);
+    [...buildingXs(bundle), ...bundle.parcels.flatMap((r) => r.map((p) => p[0]))],
+    [...buildingYs(bundle), ...bundle.parcels.flatMap((r) => r.map((p) => p[1]))]);
   assert.notDeepEqual(withParcels, buildingsOnly,
     "the parcels do not widen the fit here, so the containment above proves nothing");
 });

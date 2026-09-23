@@ -14,7 +14,7 @@ from reblock.contracts import BBox, Block, Metrics, Proposal, Region, Result
 from reblock.data.counts import KblockCount
 from reblock.emit import (
     RenderConfig,
-    _displaced_points,
+    _displaced_buildings,
     _member_ids,
     method_colors,
     region_map,
@@ -168,9 +168,9 @@ def test_render_results_guards_empty_building_points(tmp_path: Path) -> None:
     assert (tmp_path / "g_before.png").stat().st_size > 0
 
 
-def test_displaced_points_only_keeps_sites_with_positive_displacement_fraction() -> None:
+def test_displaced_buildings_only_keeps_sites_with_positive_displacement_fraction() -> None:
     # Two points: one on the road corridor (c > 0, kept), one far off it (c == 0, dropped) --
-    # _displaced_points no longer gates on proposal.params["cost"] (Task 5 replaced the binary
+    # _displaced_buildings no longer gates on proposal.params["cost"] (Task 5 replaced the binary
     # within-corridor mark with a continuous disk-shading fraction, for every method).
     block = replace(_grid_block(3),
                     building_geometries=gpd.GeoDataFrame(
@@ -179,44 +179,48 @@ def test_displaced_points_only_keeps_sites_with_positive_displacement_fraction()
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM), 1.0)
     proposal = Proposal(block_id="g", crs=UTM, roads=roads)
 
-    displaced = _displaced_points(block, proposal)
+    displaced = _displaced_buildings(block, proposal)
 
-    assert list(displaced.geometry) == [Point(1.0, 0.5)]   # the far point's c == 0, dropped
-    assert "c" in displaced.columns and "radius" in displaced.columns
+    # The far point's c == 0, so it is dropped; the near one comes back as its OUTLINE, the shape
+    # the model charges for, not as the point it was sited from.
+    assert len(displaced) == 1
+    assert displaced.geometry.iloc[0].equals(block.buildings.outlines.iloc[0])
     assert (displaced["c"] > 0).all() and (displaced["c"] <= 1).all()
-    assert (displaced["radius"] > 0).all()
 
 
-def test_displaced_points_takes_its_corridor_from_the_roads_own_width() -> None:
-    # 1.5m from the road at x=1, inside a default 6m road's 3m half-width -- a
-    # single point, so its radius falls back to DEFAULT_BUILDING_RADIUS_M (SpacingDiscs, n < 2).
+def test_displaced_buildings_takes_its_corridor_from_the_roads_own_width() -> None:
+    # A single point, so its disc falls back to DEFAULT_BUILDING_RADIUS_M (SpacingDiscs, n < 2),
+    # partly inside the corridor at either width -- so c is the share the ROAD'S OWN width takes,
+    # and a corridor at any other width would read a different share.
     block = replace(_grid_block(3),
                     building_geometries=gpd.GeoDataFrame(geometry=[Point(1.0, 2.5)], crs=UTM))
-    roads = with_width(
-        gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM),
-        DEFAULT_ROAD_WIDTH_M)
-    proposal = Proposal(block_id="g", crs=UTM, roads=roads)
+    line = LineString([(1.0, 0.0), (1.0, 1.0)])
+    disc = block.buildings.outlines.iloc[0]
 
-    displaced = _displaced_points(block, proposal)
+    def share(width_m: float) -> float:
+        return float(disc.intersection(line.buffer(width_m / 2.0)).area / disc.area)
 
-    assert len(displaced) == 1
-    assert displaced["radius"].iloc[0] == pytest.approx(3.0)
-    assert displaced["c"].iloc[0] == pytest.approx(1.0)
+    for width_m in (DEFAULT_ROAD_WIDTH_M / 2.0, DEFAULT_ROAD_WIDTH_M):
+        roads = with_width(gpd.GeoDataFrame(geometry=[line], crs=UTM), width_m)
+        displaced = _displaced_buildings(block, Proposal(block_id="g", crs=UTM, roads=roads))
+        assert len(displaced) == 1
+        assert displaced["c"].iloc[0] == pytest.approx(share(width_m), abs=1e-12)
+    assert 0.0 < share(DEFAULT_ROAD_WIDTH_M / 2.0) < share(DEFAULT_ROAD_WIDTH_M) < 1.0
 
 
-def test_displaced_points_empty_without_building_points_or_roads() -> None:
+def test_displaced_buildings_empty_without_building_points_or_roads() -> None:
     block = _grid_block(3)   # building_geometries defaults to empty
     roads = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.0, 0.0), (1.0, 1.0)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)
-    assert _displaced_points(block, Proposal(block_id="g", crs=UTM, roads=roads)).empty
+    assert _displaced_buildings(block, Proposal(block_id="g", crs=UTM, roads=roads)).empty
 
     pts_block = replace(block, building_geometries=gpd.GeoDataFrame(
         geometry=[Point(1.0, 0.5)], crs=UTM))
-    assert _displaced_points(pts_block, Proposal(block_id="g", crs=UTM, roads=None)).empty
+    assert _displaced_buildings(pts_block, Proposal(block_id="g", crs=UTM, roads=None)).empty
 
 
-def test_render_results_marks_displaced_points(tmp_path: Path) -> None:
+def test_render_results_marks_displaced_buildings(tmp_path: Path) -> None:
     # End-to-end: a block with real building_geometries + a proposal whose roads corridor covers
     # one of them must still render the after-heatmap without error.
     block = replace(_grid_block(3),

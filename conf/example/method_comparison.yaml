@@ -11,6 +11,9 @@ defaults:
   - override /metric: depth
   - override /screen: identity
   - override /region_builder: identity
+  # Screen on points, PROPOSE on the real Open Buildings outlines: only the chosen blocks' tiles
+  # are fetched (conf/buildings/footprints.yaml).
+  - override /buildings: footprints
 
 example:
   slug: method-comparison

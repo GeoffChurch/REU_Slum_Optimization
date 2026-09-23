@@ -81,7 +81,7 @@ hover the picture to read the nearest node's own.
 ## Displacement {#displacement}
 
 A road that reaches everyone by demolishing everyone is not a solution, so every road is charged for
-what it costs. Displacement asks how far the road's corridor reaches into each building's own disk.
+what it costs. Displacement asks what share of each building's footprint the road's corridor covers.
 Drag either road's endpoints, widen the corridor, and switch the second road on: two overlapping
 corridors are charged once, not twice, which is why the cost is a property of the road *set* rather
 than a sum over roads.

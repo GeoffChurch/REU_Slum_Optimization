@@ -92,7 +92,6 @@ def main() -> None:
         print(f"\n=== region {ri}: {n:,} parcels, {len(block.building_geometries):,} buildings ===",
               flush=True)
         adj = parcel_adjacency(list(block.parcels.geometry), STREET_TOL)
-        radii = block.buildings.radii
         b0 = burden(parcel_access_layers(block, None, tol=STREET_TOL, adj=adj,
                                          unreached_depth=n + 1))
         arms: dict[str, dict[str, object]] = {}
@@ -125,7 +124,7 @@ def main() -> None:
             # every arm's reachable displacement and pick a budget that actually binds; an absolute
             # budget chosen here would silently degrade to "all roads" and fake a matched result.
             nb = len(block.building_geometries)
-            reach = displacement(block.building_geometries, radii, roads) / nb if nb else 0.0
+            reach = displacement(block.buildings, roads) / nb if nb else 0.0
             b1 = burden(parcel_access_layers(block, roads, tol=STREET_TOL, adj=adj,
                                              unreached_depth=n + 1))
             at = {"all": {"burden_red": (1.0 - b1 / b0) if b0 > 0 else 0.0,

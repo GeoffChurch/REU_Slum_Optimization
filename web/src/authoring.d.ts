@@ -15,18 +15,24 @@ export interface AuthoringBlock {
    * and a browser-side failure there would surface as a Pyodide traceback in a figcaption. */
   crs_epsg: number;
   /** FULL float64, NOT the cm-rounded form the render bundles ship. MEASURED: rounding this
-   * bundle's geometry to centimetres and re-solving moves `crossing` by 1.6611e-03 and `spur` by
-   * 1.9550e-03; design §1.4's 4.71e-05 is the same effect on the clearance method's road set, and
-   * is the smaller figure. Either is more than a runtime-parity guard can absorb.
+   * bundle's geometry to centimetres and re-solving moves `crossing` by 5.3129e-05 and `spur` by
+   * 4.6081e-05; design §1.4's 4.71e-05 is the same effect on the clearance method's road set. Any
+   * of them is more than a runtime-parity guard can absorb.
    * Exterior ring first, then interiors -- the same shape every `parcels` entry has. */
   boundary: [number, number][][];
   parcel_id: string[];
   parcels: [number, number][][][];
   streets: [number, number][][];
-  /** One per parcel, but NOT in parcel order -- `parcel_radii` resolves the correspondence by
-   * containment, and this bundle preserves whatever order the source had rather than inventing
-   * one the Python does not rely on. */
+  /** Each building's ANCHOR -- the point its parcel was tessellated on. One per parcel, but NOT in
+   * parcel order -- `parcel_radii` resolves the correspondence by containment, and this bundle
+   * preserves whatever order the source had rather than inventing one the Python does not rely
+   * on. */
   building_points: [number, number][];
+  /** Each building's radius AT THE BLOCK'S TIER, full float64, in `building_points` order. The
+   * solve reads a building only as a radius at its anchor, so rebuilding the block as
+   * `Discs(building_points, building_radii)` reproduces whatever tier baked it -- a footprint's
+   * equivalent-area radius included -- without shipping a single polygon. */
+  building_radii: number[];
   reference: AuthoringReference[];
 
   /** The road-INVARIANT half of the graph (design §1.6), baked once so the runtime returns two

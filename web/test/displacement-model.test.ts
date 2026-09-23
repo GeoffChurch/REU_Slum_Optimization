@@ -2,103 +2,122 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import type { FieldBundle } from "../src/field.js";
-import { corridorDistance, flatten, sumC } from "../src/model/displacement.js";
+import type { FieldBundle, Road } from "../src/field.js";
+import { contributions, flatten, outline, sumC } from "../src/model/displacement.js";
 
 const bundle = JSON.parse(
   readFileSync("../examples/displacement-field/field.json", "utf8")) as FieldBundle;
+const OUTLINES = bundle.buildings.map(outline);
 
-// 1e-3 relative. This is SHAPELY's residual, not slack invented for this test -- and the mechanism
-// is specific, not "bigger roads have bigger residuals" (an earlier draft of this comment claimed
-// exactly that on two data points and was wrong; see task-4-report.md's fix round 2). A buffer's
-// STRAIGHT SIDES are exact offsets of the line, so both shapely and this closed form agree on them
-// to float noise (~1e-16, confirmed for road1/coincident/in_a_gap, where every building's nearest
-// corridor point lands on a side). Only the ROUND CAPS at a segment's ends -- and any joins, for a
-// multi-segment road -- are polygonised by shapely, so only a building whose nearest corridor point
-// falls past an end, on a cap, can disagree at all; and the size of that disagreement still scales
-// with the corridor's half-width once it does. That is why "apart" (a 7 m fixture, but TWO roads,
-// hence four caps instead of two) shows a residual where the single 7 m roads do not, and why
-// "widest" (road1's own geometry, just 20 m instead of 7 m wide) shows the worst one: the same
-// capped buildings, a wider corridor. Recomputing all six fixtures from the bundle's own quantised
-// (x, y, r) against the baked `sum_c` values, worst relative disagreement is 6.07e-05 ("widest"), so
-// TOL carries ~16.5x headroom.
-const TOL = 1e-3;
+// 1e-5 relative, and it is the STORE's resolution, not the model's. The widget clips the same
+// quantised outlines Python measured, against the same polygon GEOS buffers each road to
+// (`capsule`), so the two agree to float noise; what they cannot agree past is `sum_c` itself,
+// which the bake writes at 6 significant figures -- half a step of that is up to 5e-6 relative.
+const TOL = 1e-5;
+
+const cost = (roads: readonly Road[]): number => sumC(contributions(OUTLINES, flatten(roads)));
 
 test("every baked fixture's sum_c is reproduced from its own coordinates", () => {
-  const { x, y, r } = bundle.buildings;
   assert.equal(bundle.reference.length, 6);
   for (const c of bundle.reference) {
-    const got = sumC(r, corridorDistance(x, y, flatten(c.roads)));
+    const got = cost(c.roads);
     const rel = Math.abs(got - c.sum_c) / Math.max(c.sum_c, 1);
     assert.ok(rel < TOL, `${c.name}: TS ${got} vs Python ${c.sum_c} (rel ${rel})`);
   }
 });
 
 test("the outside-the-block fixture is exactly zero, not merely close", () => {
-  const { x, y, r } = bundle.buildings;
   const outside = bundle.reference.find((c) => c.name === "outside")!;
-  assert.strictEqual(sumC(r, corridorDistance(x, y, flatten(outside.roads))), 0,
-    "outside's road clears every building by hundreds of metres, pinning compact support (far " +
-    "away costs exactly nothing) -- not the clip boundary itself, which needs its own case below");
+  assert.strictEqual(cost(outside.roads), 0,
+    "outside's road clears every building by hundreds of metres, pinning compact support: a "
+    + "corridor that reaches no outline costs exactly nothing");
 });
 
-test("a road drawn twice costs exactly what one costs", () => {
-  // The honest form of "overlap is free". Each road is buffered on its OWN width and only then
-  // unioned, so two coincident roads occupy one corridor and are charged once -- an equality, not
-  // a discount. A TypeScript port that summed per-road distances instead of minimising over
-  // segments would pass a `coincident < apart` check and fail this one.
-  const { x, y, r } = bundle.buildings;
-  const cost = (name: string): number => {
-    const c = bundle.reference.find((k) => k.name === name)!;
-    return sumC(r, corridorDistance(x, y, flatten(c.roads)));
-  };
-  assert.equal(cost("coincident"), cost("road1"));
-  assert.ok(cost("apart") > cost("road1"), "a disjoint second road must add cost");
+test("a road drawn twice costs what one costs", () => {
+  // The honest form of "overlap is free". The corridor is the UNION of the roads' buffers, so two
+  // coincident roads occupy one corridor and are charged once. Equal to float noise, not bit for
+  // bit: inclusion--exclusion reaches the union by adding both and subtracting their overlap,
+  // where Python's union never double-counts at all. A port that SUMMED per-road shares would
+  // charge this twice and fail by a factor of two, not by an ulp.
+  const one = cost([bundle.roads[0]!]);
+  const twice = cost([bundle.roads[0]!, bundle.roads[0]!]);
+  assert.ok(Math.abs(twice - one) <= 1e-9 * one, `one road ${one}, the same road twice ${twice}`);
+  assert.ok(cost(bundle.roads) > one, "a disjoint second road must add cost");
 });
 
-test("a zero-length road is its own endpoint rather than a NaN", () => {
-  const segs = flatten([{ coords: [[0, 0], [0, 0]], width_m: 7 }]);
-  const d = corridorDistance([10], [0], segs);
-  assert.ok(Number.isFinite(d[0]!), `degenerate road produced ${d[0]}`);
-  assert.equal(d[0], 10 - 3.5);
+/** A closed CCW ring from its corners. */
+const ring = (...pts: [number, number][]): [number, number][] => [...pts, pts[0]!];
+const square = (x0: number, y0: number, x1: number, y1: number): [number, number][] =>
+  ring([x0, y0], [x1, y0], [x1, y1], [x0, y1]);
+/** A straight road far longer than any shape below, so its caps are nowhere near them. */
+const band = (y: number, width_m: number): Road =>
+  ({ coords: [[-100, y], [100, y]], width_m });
+const along = (x: number, width_m: number): Road =>
+  ({ coords: [[x, -100], [x, 100]], width_m });
+const c1 = (polygons: [number, number][][][], roads: Road[]): number =>
+  contributions([outline(polygons)], flatten(roads))[0]!;
+
+test("c is the share of the building the corridor covers, not whether it touches", () => {
+  // Corridor |y| <= 1; the square spans y 0..2, so the corridor takes exactly its lower half. The
+  // retired centre-distance rule would have read this building as FULLY displaced (its centre,
+  // at y = 1, is inside), which is the over-count this model exists to remove.
+  assert.ok(Math.abs(c1([[square(0, 0, 1, 2)]], [band(0, 2)]) - 0.5) < 1e-12);
 });
 
-test("distance clamps to the segment, not the infinite line it lies on", () => {
-  // No baked fixture reaches this: every fixture road is a chord spanning (or nearly spanning) the
-  // whole block, so every building's perpendicular foot lands within [0, 1] of the segment and the
-  // clamp never binds there (confirmed by recomputing every fixture's projection parameter directly
-  // -- see task-4-report.md). This synthetic case is chosen so the clamp dominates: a short segment
-  // and a building well past one end, positioned so the clamped and unclamped answers are nowhere
-  // close.
-  const segs = flatten([{ coords: [[0, 0], [10, 0]], width_m: 4 }]);
-  const d = corridorDistance([60], [0], segs);
-  // Clamped: the nearest point on the SEGMENT is its (10, 0) endpoint, so distance = 50 - hw = 48.
-  // Unclamped, the projection parameter is t = 6, landing the "nearest point" at (60, 0) -- i.e. on
-  // top of the building -- for a distance near 0. 48 and 0 are not close by any tolerance.
-  assert.equal(d[0], 50 - 2);
+test("two crossing roads are charged their UNION, not the sum of their shares", () => {
+  // Square [-1,1]^2, one 1 m road along each axis: each takes 2 of its 4 m^2, together only 3 --
+  // the 1 m^2 where they cross is taken once. A per-road sum would read 1.0.
+  const got = c1([[square(-1, -1, 1, 1)]], [band(0, 1), along(0, 1)]);
+  assert.ok(Math.abs(got - 0.75) < 1e-12, `union share ${got}, expected 0.75`);
 });
 
-test("the clip's real boundary: d == r gives exactly zero, d just inside gives something positive", () => {
-  // "outside" pins compact support, but its road clears everything by hundreds of metres, nowhere
-  // near this boundary. "Gap-hugging is free" is entirely about d == r, so it needs a direct case.
-  const eps = 1e-6;
-  assert.strictEqual(sumC([10], new Float64Array([10])), 0, "d == r must clip to exactly 0");
-  assert.ok(sumC([10], new Float64Array([10 - eps])) > 0, "d just inside r must be strictly positive");
+test("a hole is not building: a CW interior ring subtracts", () => {
+  // A 4x4 courtyard house with a 2x2 open courtyard (hole CW, as the bake orients it), crossed by
+  // a 1 m road through the middle: the road covers 4 m^2 of the square but 2 of those are the
+  // courtyard, so it takes 2 m^2 of a 12 m^2 building. Ignoring the hole's orientation reads 1/4.
+  const courtyard: [number, number][] = [[-1, -1], [-1, 1], [1, 1], [1, -1], [-1, -1]];
+  const got = c1([[square(-2, -2, 2, 2), courtyard]], [band(0, 1)]);
+  assert.ok(Math.abs(got - 2 / 12) < 1e-12, `courtyard house share ${got}, expected 1/6`);
 });
 
-test("r == 0 (a coincident-points building) contributes exactly 1 or 0, never a fraction", () => {
-  // Mirrors tests/test_budget.py::test_displacement_contributions_pins_the_r_equals_zero_convention.
-  // Untested otherwise: this bundle's minimum baked radius is 1.13973, so r == 0 is unreachable
-  // through any baked fixture. r_i = 0 is the one branch sumC's total can hide -- a 0-or-1
-  // contribution moves an aggregate either way just as easily as any other -- so pin it directly:
-  // a coincident point sitting exactly on the corridor (d <= 0) is fully displaced, with no radius
-  // to graze it partially; one that is not touching (d > 0) contributes nothing at all, however
-  // close.
-  assert.equal(sumC([0], new Float64Array([0])), 1);
-  assert.equal(sumC([0], new Float64Array([0.001])), 0);
+test("a concave building cut into two pieces is charged both of them", () => {
+  // A U whose two prongs a 1 m road crosses: the clip is two disjoint 1x1 pieces, which the
+  // clipper returns as ONE ring bridged along the corridor's edge. The bridge carries no area, so
+  // the share is 2 of the U's 7 m^2 -- a clipper that dropped the second piece would read 1/7.
+  const u = ring([0, 0], [3, 0], [3, 3], [2, 3], [2, 1], [1, 1], [1, 3], [0, 3]);
+  const got = c1([[u]], [band(2, 1)]);
+  assert.ok(Math.abs(got - 2 / 7) < 1e-12, `U share ${got}, expected 2/7`);
 });
 
-test("no roads means no cost, not an empty-array minimum of Infinity leaking into sumC", () => {
-  assert.strictEqual(sumC(bundle.buildings.r, corridorDistance(
-    bundle.buildings.x, bundle.buildings.y, [])), 0);
+test("the corridor ends at the segment's round caps, not on the infinite line", () => {
+  // Road (0,0)-(10,0) at 4 m. A unit square just past the end sits wholly inside the cap (its far
+  // corner is 1.58 m from the endpoint); one 50 m further along the SAME line is on the infinite
+  // line's corridor but nowhere near this road's.
+  const road: Road = { coords: [[0, 0], [10, 0]], width_m: 4 };
+  assert.equal(c1([[square(10.5, -0.5, 11.5, 0.5)]], [road]), 1);
+  assert.equal(c1([[square(60, -0.5, 61, 0.5)]], [road]), 0);
+});
+
+test("a zero-length road is a disc of its own half-width, not a NaN", () => {
+  // GEOS buffers a zero-length line to a circle, and so does `capsule`. A 2x2 square centred on it
+  // lies inside radius 3.5 (corner at 1.41 m); one 10 m away does not reach it.
+  const dot: Road = { coords: [[0, 0], [0, 0]], width_m: 7 };
+  assert.equal(c1([[square(-1, -1, 1, 1)]], [dot]), 1);
+  assert.equal(c1([[square(9, -1, 11, 1)]], [dot]), 0);
+});
+
+test("c never leaves [0, 1], because canvas ignores an out-of-range alpha", () => {
+  // A square covered by the UNION of two overlapping bands but by neither alone: inclusion--
+  // exclusion reaches its area as a1 + a2 - a12, and on this one (found by random search -- 345 of
+  // 200,000 such squares do it) the float sum lands at 1 + 4.4e-16 unclamped. Canvas drops a
+  // `globalAlpha` above 1 and keeps the previous building's, so the clamp is what keeps each shade
+  // its own. A building inside every corridor is NOT a test of it: each clip then returns the
+  // subject unchanged, bit for bit, and the sum is exact.
+  const sq: [number, number][] = [
+    [8.482439517974854, 2.8757596015930176], [11.081203699111938, 2.8757596015930176],
+    [11.081203699111938, 5.4745237827301025], [8.482439517974854, 5.4745237827301025],
+    [8.482439517974854, 2.8757596015930176]];
+  const got = c1([[sq]], [band(2.8757596015930176, 4.626065880815358),
+                          band(5.4745237827301025, 3.7541263096212445)]);
+  assert.equal(got, 1, `c = ${got} for a building its two corridors cover between them`);
 });

@@ -4,8 +4,8 @@
 # The displacement field
 
 The figure set for the site's [Displacement](../../docs/_partials/displacement.md) section: the
-model drawn literally — every building a disk of its own radius `rᵢ`, the road corridor beneath
-them, each disk shaded by the share `cᵢ` of it the corridor takes.
+model drawn literally — every building as its outline, the road corridor beneath them, each
+building shaded by the share `cᵢ` of it the corridor takes.
 
 ![the displacement model on the pinned block](field.png)
 
@@ -32,11 +32,11 @@ them could pass for the same reason.
 
 | case | roads | width | Σcᵢ | of 6,619 buildings |
 |---|---|---|---|---|
-| `road1` | 1 | 7 m | 126.376 | 1.9% |
-| `apart` | 2 | 7 m, 7 m | 254.589 | 3.8% |
-| `coincident` | 2 | 7 m, 7 m | 126.376 | 1.9% |
-| `widest` | 1 | 20 m | 313.164 | 4.7% |
-| `in_a_gap` | 1 | 7 m | 56.6331 | 0.9% |
+| `road1` | 1 | 7 m | 91.9005 | 1.4% |
+| `apart` | 2 | 7 m, 7 m | 187.35 | 2.8% |
+| `coincident` | 2 | 7 m, 7 m | 91.9005 | 1.4% |
+| `widest` | 1 | 20 m | 274.175 | 4.1% |
+| `in_a_gap` | 1 | 7 m | 39.6944 | 0.6% |
 | `outside` | 1 | 7 m | 0 | 0.0% |
 
 Not one of the flagships in [`../README.md`](../README.md): those are walkthroughs that reproduce a

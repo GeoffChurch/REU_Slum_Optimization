@@ -13,6 +13,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 from reblock.budget import _noded_graph, displacement
+from reblock.buildings import Discs
 from reblock.contracts import Block
 from reblock.methods.resistance_lp import ResistanceLPReblocker, solve_coverage_lp
 
@@ -50,16 +51,19 @@ def test_displacement_budget_is_respected(cap: float) -> None:
     This is the method's whole premise -- it budgets displacement rather than metres -- so if the
     cap does not hold, nothing measured about it means anything.
 
-    FAULT INJECTION: neutering `_round`'s running-max displacement check drives displacement to
-    0.989 against both caps, failing here. Note that deleting the LP's own `sum_b u_b` budget row
-    does NOT fail this test -- the rounding enforces the cap independently -- which is why
+    `_round` enforces the cap with EXACT union displacement (`IncrementalOverlap`). It once used a
+    running max over segments, which under-charged a building flanked by two roads -- each takes a
+    different slice -- and this test caught the method exceeding its own cap at D = 0.15.
+
+    FAULT INJECTION: deleting `_round`'s `total + d > disp_budget` check drives displacement past
+    both caps, failing here. Deleting the LP's own `sum_b u_b` budget row does NOT fail this test --
+    the rounding enforces the cap independently -- which is why
     `test_lp_respects_displacement_budget` guards that row separately.
     """
     block = _grid_block()
     roads = ResistanceLPReblocker(max_displacement=cap).propose(block).roads
     assert roads is not None and len(roads) > 0, "no roads: the cap is vacuous"
-    radii = block.buildings.radii
-    got = displacement(block.building_geometries, radii, roads) / len(
+    got = displacement(block.buildings, roads) / len(
         block.building_geometries)
     assert got <= cap + 1e-9, f"displacement {got:.4f} exceeds cap {cap}"
 
@@ -146,8 +150,11 @@ def test_segment_displacement_sees_buildings_beside_a_LONG_span() -> None:
     pts = gpd.GeoDataFrame(geometry=[mid, end], crs=crs)
     radii = np.array([r, r])
 
-    (idx, c), = segment_displacement([seg], pts, radii, half)
+    (idx, c), = segment_displacement([seg], Discs(pts, radii), half)
     assert 0 in idx, "a building beside the MIDDLE of a long span must be counted"
     assert 1 in idx, "a building beside its END must still be counted"
-    # both sit 2 m off the line, so d = max(2 - 3.5, 0) = 0 -> fully displaced
-    assert c[list(idx).index(0)] == pytest.approx(1.0)
+    # Both centres sit 2 m off the line, inside the 3.5 m half-width -- but each is a radius-4 disc
+    # that OVERHANGS the corridor, so it is only partly displaced. The retired centre-distance rule
+    # scored it a full 1.0 because its centre was inside. Exact share of a disc centred 2 m off a
+    # band of half-width 3.5: (below(1.5) - below(-4)) / (16 pi) = 0.733.
+    assert c[list(idx).index(0)] == pytest.approx(0.733, abs=5e-3)

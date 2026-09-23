@@ -26,11 +26,12 @@ Four things that matter, none of which the greedy can express:
    proxy, and a bad one -- the same metres cost wildly different displacement depending on whether
    they run down a gap or through the dense interior. A metre-budgeted version of this LP sat at
    D = 0.080-0.118 where clearance sat at 0.060-0.096, and lost on the lens for that reason alone.
-2. **Displacement's union discount is modelled exactly.** `budget.displacement` measures each
-   building against the UNION corridor, so its cost is `max_s c_b(s)`, not `sum_s`. The `u_b`
-   constraint family is that max. Two roads flanking one building pay for it once. A greedy cannot
-   do this -- marginal displacement is not CELF-safe, which is exactly why `greedy_arterial` had to
-   abandon it for `repulsion`. Here it is a linear constraint and costs nothing.
+2. **Displacement's union discount is modelled, approximately.** `budget.displacement` measures each
+   building against the UNION corridor, and the `u_b` constraint family charges `max_s c_b(s)`.
+   That was exact under the old centre-distance formula; under overlap it is a close approximation
+   that under-counts only where separate roads flank a building (see `segment_displacement`). A
+   greedy cannot model the union at all -- marginal displacement is not CELF-safe, which is exactly
+   why `greedy_arterial` had to abandon it for `repulsion`. Here it is a linear constraint.
 3. **Sharing is credited on both sides.** Parcels whose paths share a trunk pay for it once
    (`z_s` appears once in the budget) and count its gain once (`y_e <= 1`).
 4. **Connectivity is structural, not a rounding repair.** `x_p <= z_s` means any solution with
@@ -57,6 +58,7 @@ from shapely import STRtree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
+from reblock.buildings import Extents, IncrementalOverlap
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive.adjacency import parcel_adjacency
@@ -110,46 +112,28 @@ def _path_segments(
 
 
 def segment_displacement(
-    seg_geom: list[LineString], pts: gpd.GeoDataFrame, radii: np.ndarray, half_width_m: float,
+    seg_geom: list[LineString], buildings: Extents, half_width_m: float,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Per segment, `(building indices, c_b)` for every building its corridor alone would graze.
+    """Per segment, `(building indices, c_b)` for every building its corridor alone would displace.
+    `c_b` is the share of that building's outline the segment's corridor covers -- computed by the
+    tier's own `Extents.displacement`, so it cannot drift from the metric.
 
-    Mirrors `budget.displacement` term for term -- `c = clip(1 - d/r)` with `d` measured to the
-    corridor, `r == 0` counting iff `d <= 0` -- so that the max of these over the chosen segments
-    is the exact union displacement, not an approximation of it.
-
-    The prefilter measures to the SEGMENT, not to its vertices. An earlier version queried balls
-    around each vertex, which silently missed any building beside the middle of a span longer than
-    `2 * (half_width_m + rmax)` -- and 8.31% of this method's own substrate edges are that long
-    (measured over 23,746 edges on 10 blocks, longest 38 m against an ~18 m threshold), so the
-    "exact union displacement" claim above was false and the LP under-counted what it had spent.
-    One bulk `dwithin` query costs no more than the per-vertex ball queries it replaces.
+    The LP charges a building `max_s c_b(s)` over the chosen segments. Under the old centre-distance
+    formula that WAS the exact union, because distance composes by `min`. Under overlap it is not:
+    overlap composes by AREA, and no LP-linear rule is exact. Relative to the true union, `max` is
+    exact where one segment covers a building (the common case, along a segment), close at joints
+    (consecutive segments' round caps cover the same slice), and UNDER-counts only where separate
+    roads flank a building from opposite sides, each taking a different slice -- there the true cost
+    is nearer the sum. `sum` would err the other way at EVERY joint, which is far more frequent, so
+    `max` is the better of the two. The LP's cap can therefore be exceeded slightly for a flanked
+    building. The REPORTED displacement is always recomputed exactly from the committed roads, so
+    this steers which roads the LP proposes and never moves a published number.
     """
-    if len(pts) == 0:
-        return [(np.zeros(0, dtype=np.int64), np.zeros(0)) for _ in seg_geom]
-    xy = np.column_stack([pts.geometry.x.to_numpy(), pts.geometry.y.to_numpy()])
-    rmax = float(radii.max()) if radii.size else 0.0
-    # One query for every segment at once: (input index, point index) pairs within reach of the
-    # SEGMENT. Sorting by input index lets each segment's slice be taken without a Python loop.
-    tree = STRtree(shapely.points(xy))
-    pairs = tree.query(np.asarray(seg_geom, dtype=object), predicate="dwithin",
-                       distance=half_width_m + rmax)
-    order = np.argsort(pairs[0], kind="stable")
-    seg_of, pt_of = pairs[0][order], pairs[1][order]
-    starts = np.searchsorted(seg_of, np.arange(len(seg_geom) + 1))
     out: list[tuple[np.ndarray, np.ndarray]] = []
-    for k, g in enumerate(seg_geom):
-        idx = np.unique(pt_of[starts[k]:starts[k + 1]].astype(np.int64))
-        if idx.size == 0:
-            out.append((idx, np.zeros(0)))
-            continue
-        d = np.maximum(shapely.distance(shapely.points(xy[idx]), g) - half_width_m, 0.0)
-        r = radii[idx]
-        with np.errstate(divide="ignore", invalid="ignore"):
-            c = np.where(r > 0.0, 1.0 - d / r, np.where(d <= 0.0, 1.0, 0.0))
-        c = np.clip(c, 0.0, 1.0)
-        keep = c > 0.0
-        out.append((idx[keep], c[keep]))
+    for g in seg_geom:
+        c = buildings.displacement(g.buffer(half_width_m))
+        idx = np.flatnonzero(c > 0.0).astype(np.int64)
+        out.append((idx, c[idx]))
     return out
 
 
@@ -271,9 +255,7 @@ class ResistanceLPReblocker:
         if not net0:
             return self._proposal(block, empty, {"roads": 0, "stopped": "no street frontage"})
 
-        pts = block.building_geometries
-        n_b = len(pts)
-        radii = block.buildings.radii
+        n_b = len(block.buildings)
         disp_cap = self.max_displacement * n_b
 
         pt_tree = cKDTree(graph.pts)
@@ -335,13 +317,14 @@ class ResistanceLPReblocker:
                  if seg_tree is not None else np.zeros(0, dtype=np.int64))
                 for g in seg_geom
             ]
-            seg_disp = segment_displacement(seg_geom, pts, radii, self.road_width_m / 2.0)
+            seg_disp = segment_displacement(seg_geom, block.buildings,
+                                            self.road_width_m / 2.0)
             allow = disp_cap * (t + 1) / k
             spent_m = float(sum(r.length for r in best))
             z = solve_coverage_lp(path_segs, seg_len, seg_edges, seg_disp, edge_gain,
                                   n_b, base_c, allow, max(self.max_road_m - spent_m, 0.0),
 )
-            roads, base_c2 = self._round(path_segs, seg_len, seg_geom, seg_disp, z, base_c,
+            roads, base_c2 = self._round(block.buildings, best, path_segs, seg_len, seg_geom, z,
                                          allow, max(self.max_road_m - spent_m, 0.0))
             if not roads:
                 continue
@@ -358,8 +341,8 @@ class ResistanceLPReblocker:
                                            "permeability": float(best_perm)})
 
     def _round(
-        self, path_segs: list[list[int]], seg_len: np.ndarray, seg_geom: list[LineString],
-        seg_disp: list[tuple[np.ndarray, np.ndarray]], z: np.ndarray, base_c: np.ndarray,
+        self, buildings: Extents, committed: list[LineString], path_segs: list[list[int]],
+        seg_len: np.ndarray, seg_geom: list[LineString], z: np.ndarray,
         disp_budget: float, len_budget: float,
     ) -> tuple[list[LineString], np.ndarray]:
         """Commit paths in LP-confidence order, street-first, each segment at most once.
@@ -367,15 +350,25 @@ class ResistanceLPReblocker:
         Committing a PREFIX of a path is legal and is why `_path_segments` orders street-first: a
         prefix still reaches the street, it just stops short of the parcel. Whole-path-only
         rounding silently returns nothing whenever the instalment is smaller than the cheapest
-        path. Displacement is tracked as the running per-building max, matching the union rule the
-        metric uses, so a segment beside an already-displaced building is charged only the
-        difference.
+        path.
+
+        Displacement is enforced EXACTLY here. The LP plans with an approximate accounting (a max
+        over segments; see `segment_displacement`), but this step is what the method's cap rests on
+        -- "output displacement cannot exceed the cap" is its whole premise -- so it must not
+        approximate. An `IncrementalOverlap` holds the committed roads' covered region per
+        building, and a segment is accepted only if the exact union displacement stays in budget.
+        Under the max it once used, a building flanked by two roads (each taking a different slice)
+        was charged for one slice, and the method exceeded its own cap.
         """
+        hw = self.road_width_m / 2.0
+        tracker = IncrementalOverlap(buildings)
+        if committed:
+            tracker.add(shapely.union_all([g.buffer(hw) for g in committed]))
+        total = tracker.total()
         order = sorted(range(len(path_segs)),
                        key=lambda p: -float(min(z[s] for s in path_segs[p])))
         built: set[int] = set()
         out: list[LineString] = []
-        cur = base_c.copy()
         spent = 0.0
         for p in order:
             for s in path_segs[p]:
@@ -383,17 +376,16 @@ class ResistanceLPReblocker:
                     continue
                 if spent + float(seg_len[s]) > len_budget:
                     break
-                bidx, c = seg_disp[s]
-                trial = cur.copy()
-                if bidx.size:
-                    trial[bidx] = np.maximum(trial[bidx], c)
-                if float(trial.sum()) > disp_budget:
+                piece = seg_geom[s].buffer(hw)
+                d = tracker.delta(piece)
+                if total + d > disp_budget:
                     break
+                tracker.add(piece)
+                total += d
                 built.add(s)
-                cur = trial
                 spent += float(seg_len[s])
                 out.append(seg_geom[s])
-        return out, cur
+        return out, tracker.c()
 
     def _proposal(self, block: Block, roads: gpd.GeoDataFrame,
                   params: dict[str, object]) -> Proposal:

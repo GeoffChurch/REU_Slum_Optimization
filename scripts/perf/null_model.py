@@ -64,7 +64,6 @@ def main() -> None:
     for i in evenly_spaced(sorted(sel), counts, N_BLOCKS):
         b = blocks[i]
         adj = parcel_adjacency(list(b.parcels.geometry), STREET_TOL)
-        radii = b.buildings.radii
         n = len(b.parcels)
         b0 = burden(parcel_access_layers(b, None, tol=STREET_TOL, adj=adj, unreached_depth=n + 1))
         rec: dict[str, dict[str, float]] = {}
@@ -77,7 +76,7 @@ def main() -> None:
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue
-            pre = prefix_to_displacement(b, r, radii, 0.10)
+            pre = prefix_to_displacement(b, r, 0.10)
             if len(pre) == 0:
                 continue
             b1 = burden(parcel_access_layers(b, pre, tol=STREET_TOL, adj=adj,
