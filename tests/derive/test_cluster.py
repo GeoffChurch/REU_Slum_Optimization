@@ -1,7 +1,7 @@
 import geopandas as gpd
 import pytest
 from pyproj import CRS
-from shapely.geometry import MultiLineString, Polygon, box
+from shapely.geometry import MultiLineString, Point, Polygon, box
 
 from reblock.contracts import Block, Region
 from reblock.derive.cluster import merge_cluster
@@ -34,6 +34,29 @@ def test_merge_two_adjacent_blocks() -> None:
     assert m.attrs["block_ids"] == ["a", "b"]
     assert isinstance(m.attrs["interior_boundaries"], MultiLineString)
     assert m.attrs["interior_boundaries"].length > 0   # the shared x=10 edge
+
+
+def test_merge_keeps_its_members_buildings_and_tier() -> None:
+    """The merged super-block is where every per-block derivation runs, so it must hold the
+    buildings its members hold -- at their tier. Built without them it read as a block with no
+    buildings, where every road displaces nothing."""
+    from dataclasses import replace
+
+    from reblock.buildings import AreaDiscs
+
+    def sites(*xy: tuple[float, float]) -> gpd.GeoDataFrame:
+        return gpd.GeoDataFrame({"area_in_meters": [20.0] * len(xy)},
+                                geometry=[Point(x, y) for x, y in xy], crs=UTM)
+
+    a = replace(_block("a", box(0, 0, 10, 10), 2),
+                building_geometries=sites((2, 2), (7, 7)), building_tier=AreaDiscs)
+    b = replace(_block("b", box(10, 0, 20, 10), 3),
+                building_geometries=sites((15, 5),), building_tier=AreaDiscs)
+    m = merge_cluster(_region(b, a))
+
+    assert m.building_tier is AreaDiscs
+    assert m.building_geometries.get_coordinates().values.tolist() == [[2, 2], [7, 7], [15, 5]]
+    assert len(m.buildings) == 3
 
 
 def test_merge_non_adjacent_raises() -> None:

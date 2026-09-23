@@ -15,6 +15,7 @@ from shapely.geometry import LineString, MultiLineString, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import Block, Region
+from reblock.region import pooled_buildings, shared_tier
 
 
 def _blocks_sorted(region: Region) -> list[Block]:
@@ -61,4 +62,5 @@ def merge_cluster(region: Region) -> Block:
     return Block(
         block_id="+".join(b.block_id for b in blocks), crs=crs, boundary=boundary,
         parcels=parcels, streets=streets,
+        building_geometries=pooled_buildings(blocks, crs), building_tier=shared_tier(blocks),
         attrs={"block_ids": [b.block_id for b in blocks], "interior_boundaries": interior})

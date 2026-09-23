@@ -28,6 +28,7 @@ from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
+from reblock.buildings import Extents
 from reblock.contracts import Block, Eval, Method, Result, Source
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
@@ -115,6 +116,30 @@ def _shared_parts(blocks: list[Block]) -> tuple[gpd.GeoDataFrame, Polygon | Mult
     return parcels, boundary, crs, source_content_hash
 
 
+def shared_tier(blocks: list[Block]) -> Callable[[gpd.GeoDataFrame], Extents]:
+    """The building tier a merged block models its buildings at: its members'. Carried over, never
+    chosen afresh -- re-modelling a footprint region as `SpacingDiscs` crashes at the first `.xy`,
+    and re-modelling `AreaDiscs` members as spacing discs would be silent. Members from one source
+    share one tier; any that do not have no single merged model, so refuse."""
+    tiers = {b.building_tier for b in blocks}
+    if len(tiers) != 1:
+        raise ValueError(
+            f"region members are on different building tiers {sorted(map(str, tiers))}; a "
+            f"region's buildings need ONE model")
+    (tier,) = tiers
+    return tier
+
+
+def pooled_buildings(blocks: list[Block], crs: CRS) -> gpd.GeoDataFrame:
+    """Every member's buildings, concatenated in member order (not deduped: overlapping sites
+    from different members are both real). Empty only when every member's is."""
+    member_pts = [b.building_geometries for b in blocks if not b.building_geometries.empty]
+    return (
+        gpd.GeoDataFrame(pd.concat(member_pts, ignore_index=True), crs=crs) if member_pts
+        else gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=crs)
+    )
+
+
 def region_block(blocks: list[Block]) -> Block:
     """The block a method reblocks. `streets` = the union of every block's existing streets
     (perimeter + inter-block = the full existing road network): routing on this means
@@ -123,23 +148,8 @@ def region_block(blocks: list[Block]) -> Block:
     parcels, boundary, crs, member_hash = _shared_parts(blocks)
 
     streets = gpd.GeoDataFrame(geometry=[_union_streets(blocks)], crs=crs)
-
-    # The members' building TIER, carried over -- not left to `Block`'s default. Dropping it once
-    # rebuilt a footprint region as `SpacingDiscs` over polygon rows (a crash at the first `.xy`);
-    # a region of `AreaDiscs` members would have been silently re-modelled instead. Members from
-    # one source share one tier; any that do not have no single merged model, so refuse.
-    tiers = {b.building_tier for b in blocks}
-    if len(tiers) != 1:
-        raise ValueError(
-            f"region members are on different building tiers {sorted(map(str, tiers))}; a "
-            f"region's buildings need ONE model")
-    (tier,) = tiers
-
-    member_pts = [b.building_geometries for b in blocks if not b.building_geometries.empty]
-    building_geometries = (
-        gpd.GeoDataFrame(pd.concat(member_pts, ignore_index=True), crs=crs) if member_pts
-        else gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=crs)
-    )
+    tier = shared_tier(blocks)
+    building_geometries = pooled_buildings(blocks, crs)
 
     # The identity folds in the region model version. derive() caches on the block's identity
     # (source_content_hash, block_id); the region's streets ARE the full existing network the
