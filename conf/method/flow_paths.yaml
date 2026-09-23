@@ -9,3 +9,6 @@ destination: all_pairs
 iterations: 3
 reinforcement: 0.5
 flow_quantile: 0.90
+max_sources: 400
+seed: 0
+road_width_m: 7.0

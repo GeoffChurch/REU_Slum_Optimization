@@ -7,6 +7,7 @@ defaults:
   - buildings: spacing
   - desire_source: osm
   - metric: depth_density_proxy
+  - building_count: open_buildings
   - _self_
 
 # The methods available, then the names to actually run. Overriding the names via
@@ -16,9 +17,31 @@ defaults:
 # cost cap the old AUC used). It stays a runnable method (conf/method/peel.yaml) and test fixture;
 # just not benchmarked. The registry order below also keys the plot colour palette.
 all_methods:
-  topology: {_target_: reblock.methods.topology.TopologyMethod}
-  greedy_arterial_buildable: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: {_target_: reblock.methods.arterial.Directness}, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}}}
-  greedy_arterial_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: {_target_: reblock.methods.arterial.Directness}, cost: {_target_: reblock.methods.arterial.Repulsion}, max_roads: 15, engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}}}
+  topology: {_target_: reblock.methods.topology.TopologyMethod, alpha: 2.0, seed: 0, road_width_m: 7.0}
+  greedy_arterial_buildable:
+    _target_: reblock.methods.arterial.GreedyArterialReblocker
+    realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
+    objective: {_target_: reblock.methods.arterial.Directness}
+    cost: {_target_: reblock.methods.arterial.Length}
+    max_roads: 15
+    n_anchors: 32
+    top_k: 8
+    road_width_m: 7.0
+    workers: 16
+    engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}, rescore_every: 0}
+    max_anchors: 0
+  greedy_arterial_repulsion:
+    _target_: reblock.methods.arterial.GreedyArterialReblocker
+    realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
+    objective: {_target_: reblock.methods.arterial.Directness}
+    cost: {_target_: reblock.methods.arterial.Repulsion}
+    max_roads: 15
+    n_anchors: 32
+    top_k: 8
+    road_width_m: 7.0
+    workers: 16
+    engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}, rescore_every: 0}
+    max_anchors: 0
   # aspirational (ideal straight chords, not snapped to frontages) is a DIAGNOSTIC -- it isolates
   # the effect of frontage-snapping, NOT a universal directness ceiling. directness/E measure
   # internal circulation (all-pairs, door-to-door incl. the walk-to-road legs); under that honest
@@ -48,7 +71,7 @@ all_methods:
   # in 4 of 6 -- an approximation for no speed. ShortlistEngine (tier 2: rank every candidate by a
   # cheap first-order estimate, score only the top k=512 exactly) is what makes access affordable
   # at region scale at all -- 11.6h unfinished -> ~80 min uncapped. `max_anchors: 128` (this pair
-  # ONLY; directness/CELF above keep the uncapped default) stacks a further 7.6x median
+  # ONLY; directness/CELF above stay uncapped at `max_anchors: 0`) stacks a further 7.6x median
   # (2.5-12.2x, 6/6 regions, no detectable quality difference at matched displacement) -- ~330x
   # combined, 11.6h unfinished to ~10 min (notes/2026-08-11-max-anchors-is-a-region-scale-win.md).
   # The cap changes which candidates exist, so it changes directness outcomes too, and every
@@ -68,12 +91,56 @@ all_methods:
   # ShortlistEngine + max_anchors work is what made 15 affordable at region scale, and this spends
   # that headroom. BOTH variants move together: they are a matched pair differing only in `cost`,
   # so a difference in budget would make the one comparison they exist for meaningless.
-  greedy_arterial_access_repulsion: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: {_target_: reblock.methods.arterial.Access}, cost: {_target_: reblock.methods.arterial.Repulsion}, max_roads: 60, max_anchors: 128, engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512}}
-  greedy_arterial_access_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.SnapToBoundary}, objective: {_target_: reblock.methods.arterial.Access}, cost: {_target_: reblock.methods.arterial.Displacement}, max_roads: 60, max_anchors: 128, engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512}}
-  greedy_arterial_aspirational: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: {_target_: reblock.methods.arterial.Directness}, engine: {_target_: reblock.methods.arterial.ExactEngine}}
-  greedy_arterial_displacement: {_target_: reblock.methods.arterial.GreedyArterialReblocker, realizer: {_target_: reblock.methods.arterial.IdealChord}, objective: {_target_: reblock.methods.arterial.Directness}, cost: {_target_: reblock.methods.arterial.Displacement}, road_width_m: 7.0, engine: {_target_: reblock.methods.arterial.ExactEngine}}
-  clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400}
-  demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", depth_target: 2, max_roads: 400}
+  greedy_arterial_access_repulsion:
+    _target_: reblock.methods.arterial.GreedyArterialReblocker
+    realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
+    objective: {_target_: reblock.methods.arterial.Access}
+    cost: {_target_: reblock.methods.arterial.Repulsion}
+    max_roads: 60
+    n_anchors: 32
+    top_k: 8
+    road_width_m: 7.0
+    workers: 16
+    engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512, threads: 8}
+    max_anchors: 128
+  greedy_arterial_access_displacement:
+    _target_: reblock.methods.arterial.GreedyArterialReblocker
+    realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
+    objective: {_target_: reblock.methods.arterial.Access}
+    cost: {_target_: reblock.methods.arterial.Displacement}
+    max_roads: 60
+    n_anchors: 32
+    top_k: 8
+    road_width_m: 7.0
+    workers: 16
+    engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512, threads: 8}
+    max_anchors: 128
+  greedy_arterial_aspirational:
+    _target_: reblock.methods.arterial.GreedyArterialReblocker
+    realizer: {_target_: reblock.methods.arterial.IdealChord}
+    objective: {_target_: reblock.methods.arterial.Directness}
+    cost: {_target_: reblock.methods.arterial.Length}
+    max_roads: 15
+    n_anchors: 32
+    top_k: 8
+    road_width_m: 7.0
+    workers: 16
+    engine: {_target_: reblock.methods.arterial.ExactEngine}
+    max_anchors: 0
+  greedy_arterial_displacement:
+    _target_: reblock.methods.arterial.GreedyArterialReblocker
+    realizer: {_target_: reblock.methods.arterial.IdealChord}
+    objective: {_target_: reblock.methods.arterial.Directness}
+    cost: {_target_: reblock.methods.arterial.Displacement}
+    max_roads: 15
+    n_anchors: 32
+    top_k: 8
+    road_width_m: 7.0
+    workers: 16
+    engine: {_target_: reblock.methods.arterial.ExactEngine}
+    max_anchors: 0
+  clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
+  demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", buffer_m: 3.0, eps: 0.1, gamma: 1.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
 
   # drainage tree. The gap to demand_greedy is exactly what the desire-line prior is worth.
 
@@ -88,7 +155,18 @@ all_methods:
   # entire effect and min_bridges_per_m 0.01 -> 0.0 is bit-for-bit inert, so it is NOT changed here.
   # The gain is also settings-dependent -- at the conf defaults (depth_target 1, budget_frac 0.12)
   # the same change is slightly NEGATIVE (0.7370 vs 0.7383); it helps at the example's deeper base.
-  resistance_greedy: {_target_: reblock.methods.resistance_greedy.ResistanceGreedyReblocker, substrate: "${substrate}", max_roads: 400, shortlist: 6, loop_radius_m: 0.0, min_loop_len_m: 40.0}
+  resistance_greedy:
+    _target_: reblock.methods.resistance_greedy.ResistanceGreedyReblocker
+    substrate: "${substrate}"
+    max_roads: 400
+    shortlist: 6
+    loop_radius_m: 0.0
+    min_loop_len_m: 40.0
+    max_loop_candidates: 400
+    min_gain_per_m: 1.0e-06
+    seed: 0
+    params: {_target_: reblock.permeability.PermeabilityParams}
+    road_width_m: 7.0
   # Whole road set chosen at once by LP, budgeting DISPLACEMENT (what the lenses score) rather than
   # metres. Decides over paths, so connectivity is structural and the route-(A) rounding obstacle
   # dissolves. chunks is a Frank-Wolfe step count. See conf/method/resistance_lp.yaml.
@@ -97,20 +175,35 @@ all_methods:
   # terminal network against everyone else's truncated prefix. At 0.10 cycle_native stopped at
   # 0.0998 and read `at_budget: False` on the flagship region -- its headline Lens A number was
   # its own cap, not its performance.
-  resistance_lp: {_target_: reblock.methods.resistance_lp.ResistanceLPReblocker, substrate: "${substrate}", max_displacement: 0.20, chunks: 8}
+  resistance_lp:
+    _target_: reblock.methods.resistance_lp.ResistanceLPReblocker
+    substrate: "${substrate}"
+    max_displacement: 0.20
+    max_road_m: 1000000.0
+    chunks: 8
+    params: {_target_: reblock.permeability.PermeabilityParams}
+    road_width_m: 7.0
   # Cycle-native: each move is a loop from the street back to the street, so the output is
   # bridgeless by construction and every road can be oriented one-way. See conf/method/cycle_native.yaml.
-  cycle_native: {_target_: reblock.methods.cycle_native.CycleNativeReblocker, substrate: "${substrate}", max_displacement: 0.20, shortlist: 8}
+  cycle_native:
+    _target_: reblock.methods.cycle_native.CycleNativeReblocker
+    substrate: "${substrate}"
+    max_displacement: 0.20
+    max_cycles: 400
+    shortlist: 8
+    params: {_target_: reblock.permeability.PermeabilityParams}
+    road_width_m: 7.0
   # Flow accumulation rather than drainage: route every trip, count edge traffic, keep the busiest.
   # Sparse, can contain loops, does not reach every parcel -- the properties real footpaths have and
   # a drainage tree cannot. flow_quantile is the hierarchy knob (low = footpath web, high = skeleton).
-  flow_paths: {_target_: reblock.methods.flow_paths.FlowPathsReblocker, substrate: "${substrate}", destination: all_pairs, iterations: 3, reinforcement: 0.5, flow_quantile: 0.90}
-  flow_paths_noreinforce: {_target_: reblock.methods.flow_paths.FlowPathsReblocker, substrate: "${substrate}", destination: all_pairs, iterations: 1, reinforcement: 0.0, flow_quantile: 0.90}
-  clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400}
+  flow_paths: {_target_: reblock.methods.flow_paths.FlowPathsReblocker, substrate: "${substrate}", destination: all_pairs, iterations: 3, reinforcement: 0.5, flow_quantile: 0.90, max_sources: 400, seed: 0, road_width_m: 7.0}
+  flow_paths_noreinforce: {_target_: reblock.methods.flow_paths.FlowPathsReblocker, substrate: "${substrate}", destination: all_pairs, iterations: 1, reinforcement: 0.0, flow_quantile: 0.90, max_sources: 400, seed: 0, road_width_m: 7.0}
+  clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
   clearance_looped:
     _target_: reblock.methods.loop_closure.LoopClosureRefiner
     base: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}",
-           repulsion: 0.0, depth_target: 1, max_roads: 400}   # depth_target 1 = deeper base (best-of-both)
+           repulsion: 0.0, depth_target: 1, max_roads: 400,
+           road_width_m: 7.0}   # depth_target 1 = deeper base (best-of-both)
     budget_frac: 0.12
     min_bridges_per_m: 0.01
     max_loops: 400
@@ -118,9 +211,28 @@ all_methods:
     # search_radius_m 45 m: sufficient for block-scale bases with the uniform max_candidates cap,
     # which bounds the expensive per-pair snap volume regardless of mesh density (see _subsample_pairs).
     search_radius_m: 45.0
+    snap_lam: 2.0
     max_candidates: 1500
+    road_width_m: 7.0
   osm_footpaths: {_target_: reblock.methods.osm_footpaths.OsmFootpathsReblocker, source: "${desire_source}", road_width_m: 7.0}
-  euclidean_grid: {_target_: reblock.methods.euclidean_grid.EuclideanGridReblocker, spacing: 60.0, angle: 0.0, min_seg_len: 1.0, street_buffer: 0.5, seek_density: true, adaptive: true}
+  euclidean_grid:
+    _target_: reblock.methods.euclidean_grid.EuclideanGridReblocker
+    road_width_m: 7.0
+    spacing: 60.0
+    angle: 0.0
+    min_seg_len: 1.0
+    street_buffer: 0.5
+    seek_density: true
+    adaptive: true
+    fine_spacing: null                  # null -> spacing / 2
+    density_threshold_percentile: 75.0
+    parcel_hug_buffer: null             # null -> derived per block from its parcel scale
+    parcel_bridge_gap: null             # null -> derived per block from its parcel scale
+    follow_parcels: false
+    follow_min_coverage: 0.03
+    follow_max_coverage: 0.45
+    follow_density_gamma: 3.0
+    follow_min_component: null          # null -> derived per block from its parcel scale
 methods: [topology, clearance, greedy_arterial_buildable]
 
 

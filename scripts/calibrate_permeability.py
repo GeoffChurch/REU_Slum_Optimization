@@ -185,7 +185,7 @@ def _load_multiblock_region(metric: str, city: str) -> tuple[Block, dict[str, Me
             "region_builder=dense_cluster", "region_builder.max_buildings=3000", "max_blocks=1",
             "all_methods.greedy_arterial_repulsion.engine.policy._target_="
             "reblock.methods.arterial.Fixed",
-            "+all_methods.greedy_arterial_repulsion.max_anchors=64",
+            "all_methods.greedy_arterial_repulsion.max_anchors=64",
             "all_methods.clearance_looped.base.depth_target=3",
             "all_methods.clearance_looped.base.max_roads=3000",
             "all_methods.clearance_looped.budget_frac=0.30",

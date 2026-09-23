@@ -4,6 +4,11 @@ realizer:
   lam: 2.0
 objective:
   _target_: reblock.methods.arterial.Directness
+cost:
+  _target_: reblock.methods.arterial.Length
+engine:
+  _target_: reblock.methods.arterial.ExactEngine
+road_width_m: 7.0
 # Greedy budget + candidate-generation knobs (first-class so they're plain `method.<k>=` overrides).
 # Cost is ~fixed per road (~1 step scores n_anchors^2 + n_anchors*top_k candidates), so max_roads is
 # a near-linear runtime dial -- lower it to keep arterial tractable on a big region.

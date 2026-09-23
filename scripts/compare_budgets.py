@@ -42,7 +42,7 @@ Run (module form -- mirrors scripts/fetch_desire_lines_snapshot.py's Hydra boots
        block_ids=[[ZAF.9.3.1_1_5810]] all_methods.clearance.max_roads=3000 \
        all_methods.clearance.depth_target=3 \
        all_methods.greedy_arterial_buildable.engine.policy._target_=reblock.methods.arterial.Fixed \
-       +all_methods.greedy_arterial_buildable.max_anchors=64 \
+       all_methods.greedy_arterial_buildable.max_anchors=64 \
        desire_source.snapshot=examples/multiblock/desire_lines_5810.geojson
 """
 from __future__ import annotations

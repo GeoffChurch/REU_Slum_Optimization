@@ -107,7 +107,7 @@ class ParquetBuildings:
         return BuildingFrame(bld, bld.geometry, [self.path])    # a point IS its published anchor
 
 
-def _fetch(url: str, dest: Path) -> None:
+def fetch_tile(url: str, dest: Path) -> None:
     _download_to(url, dest, timeout=1800)
 
 
@@ -121,7 +121,7 @@ class FootprintTiles:
 
     cache_dir: Path = DEFAULT_FOOTPRINT_CACHE
     min_confidence: float = OB_MIN_CONFIDENCE
-    fetch: Callable[[str, Path], None] = _fetch
+    fetch: Callable[[str, Path], None] = fetch_tile
 
     def for_blocks(self, blocks: gpd.GeoDataFrame) -> BuildingFrame:
         wgs = blocks.to_crs(4326)
