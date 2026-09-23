@@ -43,7 +43,7 @@ def _cacheable_block() -> Block:
 
 
 class _StubSource:
-    """Structurally a DesireLineSource: returns fixed lines in the block CRS, ignoring the bbox --
+    """Structurally a FootpathSource: returns fixed lines in the block CRS, ignoring the bbox --
     exercises the method's clip/dedupe without any network."""
 
     def __init__(self, lines: list[LineString], ident: Hashable = ("stub",)) -> None:
@@ -54,7 +54,7 @@ class _StubSource:
     def identity(self) -> Hashable:
         return self._ident
 
-    def desire_lines(self, bbox_wgs84: Bbox, crs: CRS) -> gpd.GeoDataFrame:
+    def footpaths(self, bbox_wgs84: Bbox, crs: CRS) -> gpd.GeoDataFrame:
         return gpd.GeoDataFrame(geometry=self._lines, crs=UTM)
 
 

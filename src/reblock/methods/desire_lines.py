@@ -1,12 +1,23 @@
-"""Desire-line sources for the osm_footpaths reblocker: pull the real informal circulation
-network (worn footpaths) for a region instead of synthesizing one. `DesireLineSource` is the
-pluggable seam (like a routing Substrate); `OSMDesireLines` (Phase 1) reads OpenStreetMap via
-Overpass. A later imagery detector becomes another DesireLineSource behind the same interface.
+"""Desire lines: where people already walk, as a DEMAND FIELD a reblocker can route toward.
+
+`DesireLineSource` is the pluggable seam (like a routing Substrate): for a block it returns a
+`DesireField`, weighted groups of lines, where the demand at a point is the total weight of the
+groups passing within a corridor of it (`demand_greedy.demand_edge_weights` reads it).
+
+- A mapped network is ONE group at weight 1 -- the block's own footpaths (`mapped_field`), so its
+  demand is the binary "inside the corridor or not". `OSMDesireLines` reads OpenStreetMap via
+  Overpass; `reblock.data.osm_extract.PbfDesireLines` a local extract. Both are also
+  `osm_footpaths.FootpathSource`s: that reblocker proposes the same lines as the roads themselves.
+- `NoDesire` is no group at all: every edge costs its own length.
+- A consensus of GW-transported donor networks is one group per donor, weighted by how good and how
+  close each is (`reblock.transplant.consensus`), and is injected by configuration only, so that
+  research code stays out of this module's import closure.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import math
 import urllib.parse
 import urllib.request
 from collections.abc import Hashable, Sequence
@@ -18,14 +29,59 @@ import geopandas as gpd
 from pyproj import CRS
 from shapely.geometry import LineString
 
+from reblock.contracts import Block
+from reblock.methods.osm_footpaths import block_footpaths
+
+
+@dataclass(frozen=True, eq=False)
+class WeightedLines:
+    """One group of desire lines: a point within the corridor of any of them gains `weight`."""
+
+    lines: gpd.GeoDataFrame     # in the block's CRS
+    weight: float
+
+    def __post_init__(self) -> None:
+        if not (math.isfinite(self.weight) and self.weight >= 0.0):
+            raise ValueError(f"a desire-line weight must be finite and >= 0, got {self.weight}")
+
+
+@dataclass(frozen=True, eq=False)
+class DesireField:
+    """Demand over a block: the total weight of the groups whose corridors hold a point. Groups
+    are summed in order, and none are normalized here -- a source that wants demand in [0, 1]
+    weights its groups to sum 1."""
+
+    groups: tuple[WeightedLines, ...]
+
+    @property
+    def n_lines(self) -> int:
+        return sum(len(g.lines) for g in self.groups)
+
+
+def mapped_field(lines: gpd.GeoDataFrame) -> DesireField:
+    """A mapped network as a field: one group, weight 1."""
+    return DesireField(groups=(WeightedLines(lines=lines, weight=1.0),))
+
 
 @runtime_checkable
 class DesireLineSource(Protocol):
-    def desire_lines(
-        self, bbox_wgs84: tuple[float, float, float, float], crs: CRS
-    ) -> gpd.GeoDataFrame: ...
+    def desire_field(self, block: Block) -> DesireField: ...
     @property
-    def identity(self) -> Hashable: ...
+    def identity(self) -> Hashable | None: ...
+
+
+@dataclass(frozen=True)
+class NoDesire:
+    """No desire lines at all: a uniform field, under which `demand_greedy` reduces to a pure
+    shortest-path drainage tree -- the honest ablation for "how much is the prior worth?"."""
+
+    @property
+    def identity(self) -> Hashable:
+        return ("no_desire",)
+
+    def desire_field(self, block: Block) -> DesireField:
+        del block
+        return DesireField(groups=())
 
 
 def _overpass_query(bbox_wgs84: tuple[float, float, float, float], tags: Sequence[str]) -> str:
@@ -77,8 +133,8 @@ def _default_cache_dir() -> Path:
 
 @dataclass
 class OSMDesireLines:
-    """A DesireLineSource backed by OpenStreetMap. Fetch precedence: a committed `snapshot`
-    GeoJSON (byte-stable, no network) -> a disk cache under `cache_dir` (default
+    """A FootpathSource and DesireLineSource backed by OpenStreetMap. Fetch precedence: a committed
+    `snapshot` GeoJSON (byte-stable, no network) -> a disk cache under `cache_dir` (default
     ~/.cache/reblock/osm; offline after first fetch) -> a live Overpass query. `identity` is None
     when live (uncacheable, so the derivation cache bypasses and never serves stale OSM), and a
     stable tuple keyed on the snapshot's content hash when a snapshot is pinned."""
@@ -113,7 +169,10 @@ class OSMDesireLines:
             payload: dict[str, Any] = json.loads(resp.read().decode())
             return payload
 
-    def desire_lines(
+    def desire_field(self, block: Block) -> DesireField:
+        return mapped_field(block_footpaths(self, block))
+
+    def footpaths(
         self, bbox_wgs84: tuple[float, float, float, float], crs: CRS
     ) -> gpd.GeoDataFrame:
         if self.snapshot is not None:

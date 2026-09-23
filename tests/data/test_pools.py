@@ -153,15 +153,15 @@ def _square() -> Block:
 
 
 class _Flaky:
-    """A DesireLineSource that fails `failures` times before returning `lines`."""
+    """A FootpathSource that fails `failures` times before returning `lines`."""
 
     identity = None
 
     def __init__(self, lines: gpd.GeoDataFrame, failures: int) -> None:
         self._lines, self.failures, self.calls = lines, failures, 0
 
-    def desire_lines(self, bbox: tuple[float, float, float, float],
-                     crs: CRS) -> gpd.GeoDataFrame:
+    def footpaths(self, bbox: tuple[float, float, float, float],
+                  crs: CRS) -> gpd.GeoDataFrame:
         del bbox
         self.calls += 1
         if self.calls <= self.failures:

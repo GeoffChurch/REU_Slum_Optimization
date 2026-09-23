@@ -64,7 +64,7 @@ from reblock.data.settlements import exclusion_holdout
 from reblock.derivations import access_before
 from reblock.emit import pct_displaced
 from reblock.methods.clearance import ClearanceReblocker
-from reblock.methods.desire_lines import DesireLineSource
+from reblock.methods.osm_footpaths import FootpathSource
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
@@ -640,8 +640,8 @@ def main() -> None:
     recipient_idx = evenly_spaced(pools.recipients, parcel_counts, n_recipients)
     donor_set = set(pools.donors)
 
-    source: DesireLineSource = (pbf_footpaths(iso_of(blocks)) if args.desire_source == "pbf"
-                                else overpass_footpaths())
+    source: FootpathSource = (pbf_footpaths(iso_of(blocks)) if args.desire_source == "pbf"
+                              else overpass_footpaths())
     scorer = pair_scorer()
     donor_cache: dict[str, gpd.GeoDataFrame | DonorSkip] = {}
 

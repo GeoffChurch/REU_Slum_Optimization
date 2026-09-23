@@ -63,7 +63,7 @@ from reblock.data.settlements import exclusion_holdout
 from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
-from reblock.methods.desire_lines import DesireLineSource
+from reblock.methods.osm_footpaths import FootpathSource
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
@@ -211,7 +211,7 @@ class Material:
     """Each block's own footpaths as roads, and their quality as a donor -- fetched once per block
     and shared across recipients, arms and rungs."""
 
-    def __init__(self, source: DesireLineSource, scorer: ConsensusScorer) -> None:
+    def __init__(self, source: FootpathSource, scorer: ConsensusScorer) -> None:
         self._source, self._scorer = source, scorer
         self.roads: dict[str, gpd.GeoDataFrame] = {}
         self.quality: dict[str, float] = {}

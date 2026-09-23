@@ -1,10 +1,11 @@
 """OsmFootpathsReblocker: the reblocker whose 'proposed roads' are the REAL informal circulation
 network for the region -- the worn footpaths people already walk, as mapped in OpenStreetMap --
-rather than a synthesized one. It fetches those footpaths through a pluggable DesireLineSource
-(`OSMDesireLines`), clips them to the block, drops the parts that merely retrace existing streets,
-and returns the interior remainder as the intervention. Deriving desire-lines instead from satellite
-imagery or from the building-point geometry was explored and dropped -- neither cheap signal matches
-OSM's human-mapped network (see docs/superpowers/notes/2026-07-15-desire-line-detection.md).
+rather than a synthesized one. It fetches those footpaths through a pluggable `FootpathSource`
+(`OSMDesireLines`, `PbfDesireLines`), clips them to the block, drops the parts that merely retrace
+existing streets, and returns the interior remainder as the intervention (`block_footpaths`).
+Deriving desire-lines instead from satellite imagery or from the building-point geometry was
+explored and dropped -- neither cheap signal matches OSM's human-mapped network (see
+docs/superpowers/notes/2026-07-15-desire-line-detection.md).
 
 ## What the width means
 
@@ -26,7 +27,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import cast
+from typing import Protocol, cast, runtime_checkable
 
 import geopandas as gpd
 from pyproj import CRS
@@ -37,8 +38,20 @@ from shapely.ops import nearest_points, unary_union
 from reblock.contracts import Block, Proposal
 from reblock.derive.access import STREET_TOL
 from reblock.derive_graph import config_identity
-from reblock.methods.desire_lines import DesireLineSource
 from reblock.permeability import with_width
+
+
+@runtime_checkable
+class FootpathSource(Protocol):
+    """The MAPPED footpath network: every way in a bbox, as it was drawn. `OSMDesireLines` reads it
+    from Overpass, `reblock.data.osm_extract.PbfDesireLines` from a local extract; a later imagery
+    detector would be a third."""
+
+    def footpaths(
+        self, bbox_wgs84: tuple[float, float, float, float], crs: CRS
+    ) -> gpd.GeoDataFrame: ...
+    @property
+    def identity(self) -> Hashable: ...
 
 
 def _reach_street(line: LineString, streets: BaseGeometry, reach: float) -> LineString:
@@ -125,9 +138,28 @@ def interior_desire_lines(
         geometry=[_reach_street(cast(LineString, g), streets, reach) for g in kept], crs=crs)
 
 
+def block_bbox_wgs84(block: Block) -> tuple[float, float, float, float]:
+    """The block's bounds in EPSG:4326, (min_lon, min_lat, max_lon, max_lat) -- what a
+    `FootpathSource` is queried with."""
+    b = gpd.GeoSeries([block.boundary], crs=block.crs).to_crs(4326).total_bounds
+    return (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
+
+
+def interior_footpaths(lines: gpd.GeoDataFrame, block: Block) -> gpd.GeoDataFrame:
+    """`interior_desire_lines` against the block's own boundary and streets."""
+    return interior_desire_lines(
+        lines, block.boundary, unary_union(list(block.streets.geometry)), block.crs)
+
+
+def block_footpaths(source: FootpathSource, block: Block) -> gpd.GeoDataFrame:
+    """The block's share of the mapped network: every footpath in its bbox, clipped to it with the
+    street corridor subtracted. Widthless -- an alignment, not a road."""
+    return interior_footpaths(source.footpaths(block_bbox_wgs84(block), block.crs), block)
+
+
 @dataclass
 class OsmFootpathsReblocker:
-    source: DesireLineSource
+    source: FootpathSource
     # Total width of the corridor each imported footpath is treated as.
     road_width_m: float
 
@@ -137,11 +169,7 @@ class OsmFootpathsReblocker:
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; routing is block-only
-        bbox = gpd.GeoSeries([block.boundary], crs=block.crs).to_crs(4326).total_bounds
-        lines = self.source.desire_lines(
-            (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])), block.crs)
-        roads = interior_desire_lines(
-            lines, block.boundary, unary_union(list(block.streets.geometry)), block.crs)
+        roads = block_footpaths(self.source, block)
         # proposal_id encodes the config so Proposal.identity distinguishes configs on a block
         # (mirrors clearance) -- else two OsmFootpaths configs collide in the eval cache. The
         # source identity is hashed (distinct-per-config yet filesystem-clean -- it feeds render

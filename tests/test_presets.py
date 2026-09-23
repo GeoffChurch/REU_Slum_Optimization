@@ -30,6 +30,7 @@ from reblock.contracts import Method
 from reblock.presets import (
     load_desire_source,
     load_evals,
+    load_footpath_source,
     load_gate,
     load_method,
     load_methods,
@@ -173,7 +174,8 @@ GROUP_LOADERS: dict[str, tuple[list[str], Callable[[DictConfig], list[object]]]]
     "method": ([], lambda cfg: [load_method(cfg.method)]),
     "eval": ([], lambda cfg: list(load_evals(cfg.eval))),
     "substrate": ([], lambda cfg: [load_substrate(cfg.substrate)]),
-    "desire_source": ([], lambda cfg: [load_desire_source(cfg.desire_source)]),
+    "desire_source": ([], lambda cfg: [load_desire_source(cfg.desire_source),
+                                        load_footpath_source(cfg.desire_source)]),
     "metric": ([], _load_metric),
     "buildings": (["data=capetown"], _load_data),
     "building_count": (["screen=dense_compact"], _load_screen),

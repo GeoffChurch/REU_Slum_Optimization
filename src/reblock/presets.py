@@ -11,7 +11,7 @@ renames a field is a `TypeError` from its constructor -- also here, also at load
 Loading is EAGER: an entry point builds everything it is configured with before it does any work,
 so a broken `all_methods` entry fails in the first second instead of after the screen has run. That
 makes every constructor part of startup, which is why none of them may touch the network (a
-desire-line source fetches on `desire_lines`, footprint tiles on `for_blocks`;
+desire-line source fetches on `desire_field`, footprint tiles on `for_blocks`;
 `data/provision.cached_kblock_source` alone provisions when called, and it is the data source, which
 every entry point built first already).
 
@@ -28,6 +28,7 @@ from omegaconf import DictConfig, ListConfig
 
 from reblock.contracts import Eval, Method, Screen, Source
 from reblock.methods.desire_lines import DesireLineSource
+from reblock.methods.osm_footpaths import FootpathSource
 from reblock.methods.substrates import Substrate
 from reblock.metric import BlockMetric, Gate
 from reblock.permeability import PermeabilityParams
@@ -92,6 +93,13 @@ def load_desire_source(node: DictConfig) -> DesireLineSource:
     built = instantiate(node)
     if not isinstance(built, DesireLineSource):
         raise _mismatch(node, built, "DesireLineSource")
+    return built
+
+
+def load_footpath_source(node: DictConfig) -> FootpathSource:
+    built = instantiate(node)
+    if not isinstance(built, FootpathSource):
+        raise _mismatch(node, built, "FootpathSource")
     return built
 
 

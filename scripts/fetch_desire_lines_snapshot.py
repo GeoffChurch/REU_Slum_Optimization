@@ -21,7 +21,7 @@ from hydra import compose, initialize_config_dir
 from omegaconf import open_dict
 
 from reblock.pipeline import build_regions
-from reblock.presets import load_desire_source, load_stages
+from reblock.presets import load_footpath_source, load_stages
 
 
 def main() -> None:
@@ -45,7 +45,7 @@ def main() -> None:
     # `desire_source.endpoint=...`.
     with open_dict(cfg):
         cfg.desire_source.snapshot = None
-    lines = load_desire_source(cfg.desire_source).desire_lines(
+    lines = load_footpath_source(cfg.desire_source).footpaths(
         (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])), region[0].crs)
     print(f"fetched {len(lines)} desire-line ways -> {out}")
     assert len(lines) > 20, "sparse OSM coverage -- investigate before committing the snapshot"

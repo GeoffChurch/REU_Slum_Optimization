@@ -66,8 +66,8 @@ def test_material_stamps_each_blocks_footpaths_once() -> None:
         identity = None
         calls = 0
 
-        def desire_lines(self, bbox: tuple[float, float, float, float],
-                         crs: CRS) -> gpd.GeoDataFrame:
+        def footpaths(self, bbox: tuple[float, float, float, float],
+                      crs: CRS) -> gpd.GeoDataFrame:
             del bbox
             Fixed.calls += 1
             return _paths(15, 35).to_crs(crs)

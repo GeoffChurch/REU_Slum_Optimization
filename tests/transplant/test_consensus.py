@@ -16,6 +16,7 @@ from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
 from reblock.derive.access import STREET_TOL, ParcelAdjacency
 from reblock.methods.demand_greedy import demand_edge_weights
+from reblock.methods.desire_lines import mapped_field
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.transplant.consensus import (
@@ -68,8 +69,8 @@ def test_one_donor_is_demand_greedys_own_corridor() -> None:
     lines = _line(2.25)
     field = ConsensusField.of([lines], [0.3], PARAMS.buffer_m)
     ours = consensus_edge_weights(graph, field, eps=PARAMS.eps, gamma=PARAMS.gamma)
-    theirs = demand_edge_weights(graph, lines, buffer_m=PARAMS.buffer_m, eps=PARAMS.eps,
-                                 gamma=PARAMS.gamma)
+    theirs = demand_edge_weights(graph, mapped_field(lines), buffer_m=PARAMS.buffer_m,
+                                 eps=PARAMS.eps, gamma=PARAMS.gamma)
     np.testing.assert_allclose(ours, theirs, rtol=1e-12)
     assert (ours < graph.edist - 1e-9).any(), "the corridor priced no edge below its length"
 

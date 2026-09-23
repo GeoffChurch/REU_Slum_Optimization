@@ -30,15 +30,14 @@ import numpy as np
 import pandas as pd
 from hydra import compose, initialize_config_dir
 from omegaconf import DictConfig
-from shapely.ops import unary_union
 
 from reblock.contracts import Block
 from reblock.data.counts import RAW_COUNT
 from reblock.data.kblock import KblockSource
 from reblock.data.osm_extract import FOOTPATH_TAGS, PbfDesireLines, utm_zone_epsg
 from reblock.data.provision import DEFAULT_CACHE
-from reblock.methods.desire_lines import DesireLineSource, OSMDesireLines
-from reblock.methods.osm_footpaths import interior_desire_lines
+from reblock.methods.desire_lines import OSMDesireLines
+from reblock.methods.osm_footpaths import FootpathSource, block_bbox_wgs84, interior_footpaths
 from reblock.presets import Stages, load_stages
 
 log = logging.getLogger(__name__)
@@ -283,14 +282,9 @@ class DonorSkip(StrEnum):
     EMPTY_INTERIOR = "empty_interior"   # fetched, but nothing is left once streets are subtracted
 
 
-def _bbox_wgs84(block: Block) -> tuple[float, float, float, float]:
-    b = gpd.GeoSeries([block.boundary], crs=block.crs).to_crs(4326).total_bounds
-    return (float(b[0]), float(b[1]), float(b[2]), float(b[3]))
-
-
-def fetch_donor_lines(source: DesireLineSource, block: Block, *, max_tries: int = 4,
+def fetch_donor_lines(source: FootpathSource, block: Block, *, max_tries: int = 4,
                       base_backoff_s: float = 2.0) -> gpd.GeoDataFrame | DonorSkip:
-    """The block's real interior footpaths, as `OsmFootpathsReblocker.propose` reads them -- but
+    """The block's real interior footpaths, as `osm_footpaths.block_footpaths` reads them -- but
     widthless: this is material (an alignment), and whoever builds a road on it stamps the width.
 
     Retries with exponential backoff, which a PBF source never needs and a network source
@@ -298,7 +292,7 @@ def fetch_donor_lines(source: DesireLineSource, block: Block, *, max_tries: int 
     """
     for attempt in range(max_tries):
         try:
-            lines = source.desire_lines(_bbox_wgs84(block), block.crs)
+            lines = source.footpaths(block_bbox_wgs84(block), block.crs)
             break
         except (URLError, TimeoutError, OSError, ValueError) as exc:
             if attempt == max_tries - 1:
@@ -308,6 +302,5 @@ def fetch_donor_lines(source: DesireLineSource, block: Block, *, max_tries: int 
             time.sleep(wait)
     else:
         raise ValueError(f"max_tries must be >= 1, got {max_tries}")
-    interior = interior_desire_lines(lines, block.boundary,
-                                     unary_union(list(block.streets.geometry)), block.crs)
+    interior = interior_footpaths(lines, block)
     return DonorSkip.EMPTY_INTERIOR if interior.empty else interior
