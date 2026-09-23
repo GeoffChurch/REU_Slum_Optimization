@@ -323,6 +323,7 @@ def load_pools(
         cast(gpd.GeoDataFrame,
              raw[raw["block_id"].isin(recipient_ids)].reset_index(drop=True)),
         [[b] for b in recipient_ids],
+        depth_fn=None,
     )
     ids = sorted({b for group in groups for b in group} | set(donor_ids))
 

@@ -71,7 +71,8 @@ def test_it_scores_the_UNION_not_the_candidate_block():
     region degrades to the tie-break order, failing the compactness assertion below.
     """
     geoms = _grid(5)
-    got = ShapeStandardizingRegionBuilder(max_buildings=40).build(geoms, [["2_2"]])[0]
+    got = ShapeStandardizingRegionBuilder(max_buildings=40).build(geoms, [["2_2"]],
+                                                                  depth_fn=None)[0]
     assert len(got) == 4, got
     # 4 identical squares: the compact 2x2 block scores 0.785, an L or a 1x4 strip far less
     assert _outline(got, geoms) > 0.7, f"grew a non-compact region: {got}"
@@ -83,8 +84,9 @@ def test_it_beats_dense_cluster_on_outline_for_the_same_budget():
     # Phase 3 test cannot use.
     geoms = _grid(6)
     seed, budget = [["3_3"]], 60
-    shaped = ShapeStandardizingRegionBuilder(max_buildings=budget).build(geoms, seed)[0]
-    dense = DenseClusterRegionBuilder(max_buildings=budget).build(geoms, seed)[0]
+    shaped = ShapeStandardizingRegionBuilder(max_buildings=budget).build(geoms, seed,
+                                                                         depth_fn=None)[0]
+    dense = DenseClusterRegionBuilder(max_buildings=budget).build(geoms, seed, depth_fn=None)[0]
     assert len(shaped) == len(dense), (shaped, dense)
     assert _outline(shaped, geoms) > _outline(dense, geoms), (
         f"shape-standardizing {_outline(shaped, geoms):.3f} did not beat dense-cluster "
@@ -103,11 +105,11 @@ def test_isoperimetric_TIES_ITSELF_INTO_a_bad_shape_which_is_why_it_is_not_the_d
     geoms = _grid(5)
     seed, budget = [["2_2"]], 40
     iso = ShapeStandardizingRegionBuilder(objective=Isoperimetric(), max_buildings=budget).build(
-        geoms, seed)[0]
+        geoms, seed, depth_fn=None)[0]
     rect = ShapeStandardizingRegionBuilder(objective=Rectangularity(), max_buildings=budget).build(
-        geoms, seed)[0]
+        geoms, seed, depth_fn=None)[0]
     sq = ShapeStandardizingRegionBuilder(objective=Squareness(), max_buildings=budget).build(
-        geoms, seed)[0]
+        geoms, seed, depth_fn=None)[0]
 
     # squareness finds the 2x2; the other two do not -- and isoperimetric misses it on its OWN
     # metric, scoring 0.503 where the 2x2 it declined to build scores 0.785
@@ -118,13 +120,14 @@ def test_isoperimetric_TIES_ITSELF_INTO_a_bad_shape_which_is_why_it_is_not_the_d
 
 def test_the_seed_is_always_kept_even_alone_over_budget():
     geoms = _grid(3)
-    got = ShapeStandardizingRegionBuilder(max_buildings=1).build(geoms, [["1_1"]])[0]
+    got = ShapeStandardizingRegionBuilder(max_buildings=1).build(geoms, [["1_1"]], depth_fn=None)[0]
     assert got == ["1_1"]
 
 
 def test_growth_is_contiguous_and_deterministic():
     geoms = _grid(5)
-    runs = [ShapeStandardizingRegionBuilder(max_buildings=50).build(geoms, [["0_0"]])[0]
+    runs = [ShapeStandardizingRegionBuilder(max_buildings=50).build(geoms, [["0_0"]],
+                                                                    depth_fn=None)[0]
             for _ in range(3)]
     assert runs[0] == runs[1] == runs[2], runs
     from shapely.ops import unary_union
@@ -135,11 +138,11 @@ def test_growth_is_contiguous_and_deterministic():
 def test_it_works_without_building_counts():
     # A non-kblock source: the budget becomes a block count, and the builder must still run.
     geoms = _grid(4).drop(columns=["building_count"])
-    got = ShapeStandardizingRegionBuilder(max_buildings=4).build(geoms, [["1_1"]])[0]
+    got = ShapeStandardizingRegionBuilder(max_buildings=4).build(geoms, [["1_1"]], depth_fn=None)[0]
     assert len(got) == 4 and "1_1" in got
 
 
 def test_an_unknown_seed_id_fails_with_a_named_error():
     geoms = _grid(3)
     with pytest.raises(ValueError, match="nope"):
-        ShapeStandardizingRegionBuilder().build(geoms, [["nope"]])
+        ShapeStandardizingRegionBuilder().build(geoms, [["nope"]], depth_fn=None)

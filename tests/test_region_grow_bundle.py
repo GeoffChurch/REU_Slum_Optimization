@@ -135,5 +135,5 @@ def test_bundle_is_what_production_builds_today() -> None:
 
     for case in bundle["reference"]:
         got = DenseClusterRegionBuilder(max_buildings=case["max_buildings"]).build(
-            blocks, [[case["seed"]]])[0]
+            blocks, [[case["seed"]]], depth_fn=None)[0]
         assert got == case["order"], (case["seed"], case["max_buildings"])

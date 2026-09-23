@@ -67,7 +67,8 @@ def test_geographic_frame_grows_the_same_region_as_its_projected_twin(
     """
     utm = _grid()
     geo = utm.to_crs("EPSG:4326")
-    assert builder.build(utm, [["1_1"]]) == builder.build(geo, [["1_1"]])
+    seed = [["1_1"]]
+    assert builder.build(utm, seed, depth_fn=None) == builder.build(geo, seed, depth_fn=None)
 
 
 def test_dense_cluster_returns_accretion_order_not_sorted_order() -> None:
@@ -84,7 +85,7 @@ def test_dense_cluster_returns_accretion_order_not_sorted_order() -> None:
     """
     # depth proxy is sqrt(n*A)/P; A and P are equal for every cell, so a higher count wins.
     grid = _grid({(1, 0): 30.0, (0, 1): 20.0, (2, 1): 15.0}, gap=0.3)
-    got = DenseClusterRegionBuilder(max_buildings=70).build(grid, [["1_1"]])[0]
+    got = DenseClusterRegionBuilder(max_buildings=70).build(grid, [["1_1"]], depth_fn=None)[0]
 
     assert got[0] == "1_1", "the seed comes first"
     assert got == ["1_1", "1_0", "0_1", "2_1"], got
@@ -94,7 +95,7 @@ def test_dense_cluster_returns_accretion_order_not_sorted_order() -> None:
 def test_shape_standardizing_returns_accretion_order() -> None:
     """Same contract, the other growing builder."""
     grid = _grid(gap=0.3)
-    got = ShapeStandardizingRegionBuilder(max_buildings=40).build(grid, [["1_1"]])[0]
+    got = ShapeStandardizingRegionBuilder(max_buildings=40).build(grid, [["1_1"]], depth_fn=None)[0]
     assert got[0] == "1_1", "the seed comes first"
     assert len(got) == len(set(got)), "no block appears twice"
 
@@ -103,8 +104,8 @@ def test_non_growing_builders_return_sorted_order() -> None:
     """`identity` and `convex_hull` have no accretion to report, so sorted IS their build order --
     stated as a test so the contract is one sentence for all four builders."""
     grid = _grid()
-    assert IdentityRegionBuilder().build(grid, [["1_1", "0_0"]]) == [["0_0", "1_1"]]
-    hull = ConvexHullRegionBuilder().build(grid, [["0_0", "1_1"]])[0]
+    assert IdentityRegionBuilder().build(grid, [["1_1", "0_0"]], depth_fn=None) == [["0_0", "1_1"]]
+    hull = ConvexHullRegionBuilder().build(grid, [["0_0", "1_1"]], depth_fn=None)[0]
     assert hull == sorted(hull)
 
 

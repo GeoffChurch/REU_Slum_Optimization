@@ -196,6 +196,10 @@ class RegionBuilder(Protocol):
     of seed groups (block_ids); returns the expanded groups (block_ids), each in BUILD ORDER,
     group order preserved.
 
+    `depth_fn` scores a growth candidate by block_id when the caller has a score for it (the
+    pipeline's peeled screen scores); `None` says it has none, and a growing builder then ranks by
+    its own geometric proxy. Required rather than defaulted, so every caller states which.
+
     Build order means accretion order where there is one: `DenseClusterRegionBuilder` and
     `ShapeStandardizingRegionBuilder` return the seed group (sorted) followed by each block in the
     order it was added, which is what the site's RegionGrow widget replays and what pins its
@@ -209,7 +213,7 @@ class RegionBuilder(Protocol):
     """
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
-              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]: ...
+              depth_fn: Callable[[str], float] | None) -> list[list[str]]: ...
 
 
 @runtime_checkable
@@ -262,7 +266,7 @@ class IdentityRegionBuilder:
     runs."""
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
-              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
+              depth_fn: Callable[[str], float] | None) -> list[list[str]]:
         del depth_fn   # these builders don't rank by depth
         _validate_group_ids(block_geoms, groups)
         block_geoms = _projected(block_geoms)
@@ -293,7 +297,7 @@ class ConvexHullRegionBuilder:
     no partition/merge across groups."""
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
-              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
+              depth_fn: Callable[[str], float] | None) -> list[list[str]]:
         del depth_fn   # these builders don't rank by depth
         _validate_group_ids(block_geoms, groups)
         block_geoms = _projected(block_geoms)
@@ -410,7 +414,7 @@ class DenseClusterRegionBuilder:
     max_buildings: int = 150
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
-              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
+              depth_fn: Callable[[str], float] | None) -> list[list[str]]:
         _validate_group_ids(block_geoms, groups)
         metric = _projected(block_geoms)
         ids = cast(list[str], list(block_geoms["block_id"]))
@@ -583,7 +587,7 @@ class ShapeStandardizingRegionBuilder:
     max_buildings: int = 150
 
     def build(self, block_geoms: gpd.GeoDataFrame, groups: list[list[str]],
-              depth_fn: Callable[[str], float] | None = None) -> list[list[str]]:
+              depth_fn: Callable[[str], float] | None) -> list[list[str]]:
         del depth_fn                      # shape is scored on geometry; access depth plays no part
         _validate_group_ids(block_geoms, groups)
         metric = _projected(block_geoms)

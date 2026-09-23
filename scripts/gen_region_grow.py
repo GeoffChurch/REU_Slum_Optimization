@@ -296,7 +296,8 @@ def neighbourhood(blocks: gpd.GeoDataFrame, seed: str, *, hops: int) -> list[str
 
 def growth(blocks: gpd.GeoDataFrame, seed: str, budget: int) -> GrowthCase:
     """One reference case, by calling DenseClusterRegionBuilder itself."""
-    order = DenseClusterRegionBuilder(max_buildings=budget).build(blocks, [[seed]])[0]
+    order = DenseClusterRegionBuilder(max_buildings=budget).build(blocks, [[seed]],
+                                                                  depth_fn=None)[0]
     counts = dict(zip(cast(list[str], list(blocks["block_id"])), blocks["building_count"],
                       strict=True))
     buildings = int(sum(float(counts[b]) for b in order))
