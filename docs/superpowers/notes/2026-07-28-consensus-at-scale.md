@@ -11,6 +11,11 @@ ahead in only 30–35% of blocks). The leakage result and the IoU result below b
 
 **Measured:** 20 Cape Town recipients × 15 donors, both holdout arms.
 `scripts/consensus_matrix.py`, artifact `data/benchmarks/consensus_matrix.parquet`.
+**2026-09-23: these numbers predate the current metric.** They were measured before per-road
+widths, the 7 m buildable floor and the per-parcel footpath clearance; before displacement
+became the share of each footprint a road covers; and on a pool screened by the kblock
+building count. The scripts now run the vendored `reblock.transplant` against all of that.
+They have not been re-run, and a re-run will not reproduce these tables.
 
 The single-donor question closed as a null ([`no-detectable-distance-effect`](2026-07-28-no-detectable-distance-effect.md)).
 This tests the mechanism the 2026-07-23 study actually found promising — a weighted consensus of

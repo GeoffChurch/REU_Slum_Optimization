@@ -8,6 +8,9 @@ or config was modified, no method was shipped. All code (`ot_gw.py`, `transplant
 note is the sole committed record of the work. This is the concrete follow-through on the OT/GW
 road-transplant idea flagged as backlog in `MEMORY.md` and scoped without an implementation in
 `transfer-idea-feasibility.md` (2026-07-10).
+**2026-09-23:** the pieces the benchmark scripts use -- GW, transport, both gap-snaps, the donor
+signature and the consensus extraction -- now ship as `reblock.transplant`; the rest of the spike
+stays scratchpad-only.
 
 **Outcome:** the literal geometric transplant this idea started as — copy one donor block's roads
 onto a recipient via optimal transport — is a dead end: it reproduces the donor's coverage

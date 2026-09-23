@@ -4,6 +4,11 @@
 **Status:** measured, 20 recipients × 8 rungs of k, both matching conventions.
 `scripts/consensus_sweep.py`, data `scratchpad/ot/consensus_sweep.parquet`.
 **Corrects [`consensus-at-scale`](2026-07-28-consensus-at-scale.md)'s headline reading.**
+**2026-09-23: these numbers predate the current metric.** They were measured before per-road
+widths, the 7 m buildable floor and the per-parcel footpath clearance; before displacement
+became the share of each footprint a road covers; and on a pool screened by the kblock
+building count. The scripts now run the vendored `reblock.transplant` against all of that.
+They have not been re-run, and a re-run will not reproduce these tables.
 
 ## 1. Averaging donors adds nothing
 
