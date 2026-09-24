@@ -14,8 +14,10 @@ raw:
   seed: 0
   quantiles: {_target_: builtins.tuple, _args_: [[0.80, 0.85, 0.90, 0.95, 0.98]]}
   contrast: {_target_: reblock.methods.betweenness.RawShare}
-  # The all-pairs pass forks one worker per core. Set 1 for runs that already fork per block: a
-  # daemonic pool worker may not fork again, and the source raises rather than silently serialize.
+  # The all-pairs pass forks one worker per core. Runs that already fork per block must set 1:
+  # inside a multiprocessing.Pool worker (daemonic) the source raises rather than silently
+  # serialize; inside a ProcessPoolExecutor worker (not daemonic) nesting works but runs
+  # blocks x cores processes and oversubscribes the machine.
   workers: ${cpu_count:}
 contrast:
   _target_: reblock.methods.betweenness.BetweennessDesire
@@ -26,4 +28,8 @@ contrast:
   seed: 0
   quantiles: {_target_: builtins.tuple, _args_: [[0.80, 0.85, 0.90, 0.95, 0.98]]}
   contrast: {_target_: reblock.methods.betweenness.PriorDeviance, floor: 1.0e-9}
+  # The all-pairs pass forks one worker per core. Runs that already fork per block must set 1:
+  # inside a multiprocessing.Pool worker (daemonic) the source raises rather than silently
+  # serialize; inside a ProcessPoolExecutor worker (not daemonic) nesting works but runs
+  # blocks x cores processes and oversubscribes the machine.
   workers: ${cpu_count:}
