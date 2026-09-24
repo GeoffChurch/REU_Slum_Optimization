@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import math
 import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import pytest
@@ -127,7 +128,7 @@ def test_egress_counts_each_home_once_on_its_way_to_the_street() -> None:
     assert f.max() == 1.0 and f[g.node[20, 20]] == 0.0      # endpoints are never credited
 
 
-def _pairs_in_daemon(_: int) -> None:
+def _pairs_in_a_worker(_: int) -> None:
     inside, cl, _wall = _two_rooms()
     g = build_graph(inside, cl, 1.0, 1.0)
     homes = np.array([g.node[5, 5], g.node[5, 35]], dtype=np.int64)
@@ -136,4 +137,16 @@ def _pairs_in_daemon(_: int) -> None:
 
 def test_parallel_pairs_inside_a_daemonic_worker_fail_by_name() -> None:
     with mp.get_context("fork").Pool(1) as pool, pytest.raises(RuntimeError, match="workers=1"):
-        pool.map(_pairs_in_daemon, [0])
+        pool.map(_pairs_in_a_worker, [0])
+
+
+def test_parallel_pairs_inside_an_executor_worker_fail_by_name() -> None:
+    """A ProcessPoolExecutor worker is not daemonic, so it CAN fork -- and each nested worker
+    would hold its own copy of the per-cell buffers.
+
+    FAULT INJECTION: guarding on `multiprocessing.current_process().daemon` (the old check) fails
+    this: the executor worker is not daemonic, so nothing raises.
+    """
+    with (ProcessPoolExecutor(1, mp_context=mp.get_context("fork")) as ex,
+          pytest.raises(RuntimeError, match="workers=1")):
+        ex.submit(_pairs_in_a_worker, 0).result()

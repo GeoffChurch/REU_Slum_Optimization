@@ -317,12 +317,13 @@ def pair_counts(g: StateGraph, bend: NDArray[np.float64], home_nodes: NDArray[np
                  source_homes: NDArray[np.int64], workers: int) -> NDArray[np.float64]:
     """All pairs: per cell, (source, target) pairs whose best routes pass through it.
     `source_homes` lists source home nodes (with repeats for homes sharing a cell)."""
-    if workers > 1 and multiprocessing.current_process().daemon:
+    if workers > 1 and multiprocessing.parent_process() is not None:
         raise RuntimeError(
-            f"pair_counts(workers={workers}) cannot fork: this process is a daemonic pool worker, "
-            f"and daemonic processes may not have children. Parallelize across blocks OR across "
-            f"sources, not both -- set workers=1 on the betweenness desire source for runs that "
-            f"already fork per block.")
+            f"pair_counts(workers={workers}) will not fork: this process is a worker of another "
+            f"pool (multiprocessing.Pool or ProcessPoolExecutor); each fork worker holds ~340 "
+            f"bytes per cell (~190 MB on a 6,619-building block), so nesting multiplies memory "
+            f"by the outer pool's size. Set workers=1 on the betweenness desire source for runs "
+            f"that already fork per block.")
     tnodes, tw = np.unique(home_nodes, return_counts=True)
     is_target = np.zeros(g.nbr.shape[0], dtype=np.bool_)
     is_target[tnodes] = True
