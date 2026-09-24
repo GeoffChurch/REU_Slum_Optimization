@@ -33,7 +33,11 @@ def test_it_is_a_desire_line_source_with_one_group_per_quantile() -> None:
 
 def test_a_block_with_no_buildings_has_no_desire_instead_of_crashing() -> None:
     b = _block_1808()
-    empty = dataclasses.replace(b, building_geometries=no_buildings(b.crs))
+    # source_content_hash=None too: under the real hash this is a block production can never
+    # construct (same content address, different buildings), and derive() would serve it the
+    # real block's cached counts instead of recomputing on empty buildings.
+    empty = dataclasses.replace(b, building_geometries=no_buildings(b.crs),
+                                source_content_hash=None)
     assert _src().desire_field(empty).groups == ()
 
 

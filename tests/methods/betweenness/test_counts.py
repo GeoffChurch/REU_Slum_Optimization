@@ -59,8 +59,12 @@ def test_the_prior_ignores_clearance_and_r0() -> None:
 def test_a_block_with_no_buildings_has_zero_counts_and_a_finite_raw_share() -> None:
     from reblock.methods.betweenness.contrast import RawShare
 
+    # source_content_hash=None too: under the real hash this is a block production can never
+    # construct (same content address, different buildings), and derive() would serve it the
+    # real block's cached counts instead of recomputing on empty buildings.
     b = dataclasses.replace(_block_1808(),
-                            building_geometries=_block_1808().building_geometries.head(0))
+                            building_geometries=_block_1808().building_geometries.head(0),
+                            source_content_hash=None)
     o, e = observed(b, P, 1), prior(b, P, 1)
     for c in (o, e):
         assert np.isnan(c.egress[~c.raster.inside]).all()
