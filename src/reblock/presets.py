@@ -21,11 +21,12 @@ time" in CI.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import TypeVar
 
 from hydra.utils import instantiate
-from omegaconf import DictConfig, ListConfig
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 from reblock.contracts import Eval, Method, Screen, Source
 from reblock.methods.desire_lines import DesireLineSource
@@ -36,6 +37,11 @@ from reblock.permeability import PermeabilityParams
 from reblock.region import RegionBuilder
 
 T = TypeVar("T")
+
+# `workers: ${cpu_count:}` (conf/betweenness.yaml, conf/consensus_matrix.yaml): this machine's
+# cores, read with the config. Registered here, the one instantiate site, so every config that
+# uses it resolves everywhere -- not only in the one script that used to register it.
+OmegaConf.register_new_resolver("cpu_count", os.cpu_count, replace=True)
 
 
 def _mismatch(node: DictConfig, built: object, kind: str) -> TypeError:

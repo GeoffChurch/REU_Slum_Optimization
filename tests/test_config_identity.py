@@ -21,7 +21,8 @@ from reblock.presets import load_methods
 
 # Settings that cannot change the output, by qualified field name -- each the one field its class
 # exempts. A new entry here needs a reason in that class.
-CANNOT_CHANGE_OUTPUT = {"GreedyArterialReblocker.workers", "ShortlistEngine.threads"}
+CANNOT_CHANGE_OUTPUT = {"GreedyArterialReblocker.workers", "ShortlistEngine.threads",
+                        "BetweennessDesire.workers"}
 
 # Needs a live fetch to construct a cacheable instance; their keys are covered by the helper tests.
 NEEDS_NETWORK = {"osm_footpaths", "demand_greedy"}

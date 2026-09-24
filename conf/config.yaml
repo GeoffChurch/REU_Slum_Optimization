@@ -12,6 +12,7 @@ defaults:
   - metric: depth_density_proxy
   - building_count: open_buildings
   - permeability
+  - betweenness
   - _self_
 
 # Top-level scalars are the interpolation sources the data/method config

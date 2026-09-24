@@ -10,6 +10,7 @@ defaults:
   - metric: depth_density_proxy
   - building_count: open_buildings
   - permeability
+  - betweenness
   - _self_
 
 # The methods available, then the names to actually run. Overriding the names via
@@ -143,6 +144,47 @@ all_methods:
     max_anchors: 0
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
   demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", buffer_m: 3.0, eps: 0.1, gamma: 1.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
+  # demand_greedy routed toward curvature-aware betweenness ridges (raw counts). Frontier point:
+  # on the (Lens A, Lens B) frontier in 6 of 36 large blocks; beats clearance on both lenses on 220
+  # small blocks and on the large ones. Same builder settings as conf/method/demand_greedy.yaml.
+  betweenness_tree: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${betweenness.raw}", substrate: "${substrate}", buffer_m: 3.0, eps: 0.1, gamma: 1.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
+  # demand_greedy routed toward curvature-aware betweenness ridges (prior-deviance contrast).
+  # Frontier point: on the (Lens A, Lens B) frontier in 1 of 36 large blocks; best Lens A of all
+  # the generators on the 220 small blocks, +0.032 over clearance.
+  betweenness_tree_contrast: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${betweenness.contrast}", substrate: "${substrate}", buffer_m: 3.0, eps: 0.1, gamma: 1.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
+  # The loop-closing refiner around betweenness_tree. The loop settings are the region-scale values
+  # the frontier study measured (conf/example/explore.yaml's clearance_looped tuning), not
+  # conf/method/loop_closure.yaml's block-scale 0.12 / 45. On the frontier in 11 of 36 large
+  # blocks; beats clearance_looped on both lenses in 94% / 78% of them; cycle_native leads Lens A
+  # by 0.015, greedy_arterial leads Lens B by 0.008.
+  betweenness_looped:
+    _target_: reblock.methods.loop_closure.LoopClosureRefiner
+    base: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${betweenness.raw}",
+           substrate: "${substrate}", buffer_m: 3.0, eps: 0.1, gamma: 1.0, depth_target: 2,
+           max_roads: 400, road_width_m: 7.0}
+    budget_frac: 0.30
+    min_bridges_per_m: 0.01
+    max_loops: 400
+    min_loop_len_m: 40.0
+    search_radius_m: 60.0
+    snap_lam: 2.0
+    max_candidates: 1500
+    road_width_m: 7.0
+  # The loop-closing refiner around betweenness_tree_contrast. On the frontier in 8 of 36 large
+  # blocks.
+  betweenness_looped_contrast:
+    _target_: reblock.methods.loop_closure.LoopClosureRefiner
+    base: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${betweenness.contrast}",
+           substrate: "${substrate}", buffer_m: 3.0, eps: 0.1, gamma: 1.0, depth_target: 2,
+           max_roads: 400, road_width_m: 7.0}
+    budget_frac: 0.30
+    min_bridges_per_m: 0.01
+    max_loops: 400
+    min_loop_len_m: 40.0
+    search_radius_m: 60.0
+    snap_lam: 2.0
+    max_candidates: 1500
+    road_width_m: 7.0
 
   # drainage tree. The gap to demand_greedy is exactly what the desire-line prior is worth.
 

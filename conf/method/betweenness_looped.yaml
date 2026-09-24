@@ -1,0 +1,24 @@
+# The loop-closing refiner around betweenness_tree. The loop settings are the region-scale values
+# the frontier study measured (conf/example/explore.yaml's clearance_looped tuning), not
+# conf/method/loop_closure.yaml's block-scale 0.12 / 45. On the frontier in 11 of 36 large blocks;
+# beats clearance_looped on both lenses in 94% / 78% of them; cycle_native leads Lens A by 0.015,
+# greedy_arterial leads Lens B by 0.008.
+_target_: reblock.methods.loop_closure.LoopClosureRefiner
+base:
+  _target_: reblock.methods.demand_greedy.DemandGreedyReblocker
+  desire_source: ${betweenness.raw}
+  substrate: ${substrate}
+  buffer_m: 3.0
+  eps: 0.1
+  gamma: 1.0
+  depth_target: 2
+  max_roads: 400
+  road_width_m: 7.0
+budget_frac: 0.30
+min_bridges_per_m: 0.01
+max_loops: 400
+min_loop_len_m: 40.0
+search_radius_m: 60.0
+snap_lam: 2.0
+max_candidates: 1500
+road_width_m: 7.0

@@ -68,7 +68,7 @@ from typing import Protocol, TypedDict, cast
 import pandas as pd
 from geopandas import GeoDataFrame
 from hydra import compose, initialize_config_dir
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from threadpoolctl import threadpool_info, threadpool_limits
 
 from reblock.budget import prefix_to_displacement
@@ -88,10 +88,6 @@ from reblock.presets import load_method, load_research
 from reblock.transplant.donors import TooFewDonors
 
 CONF = Path("conf")
-
-# `workers: ${cpu_count:}` in conf/consensus_matrix.yaml: this machine's cores, read with the
-# config.
-OmegaConf.register_new_resolver("cpu_count", os.cpu_count, replace=True)
 
 
 class StudyRow(TypedDict):
