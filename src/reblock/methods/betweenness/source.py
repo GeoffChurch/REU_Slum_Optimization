@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 
 from reblock.contracts import Block
-from reblock.derive_graph import config_identity
+from reblock.derive_graph import closure_hash, config_identity
 from reblock.methods.betweenness.contrast import FieldContrast
 from reblock.methods.betweenness.counts import CountParams
 from reblock.methods.betweenness.ridges import ridge_desire
@@ -43,7 +43,11 @@ class BetweennessDesire:
 
     @property
     def identity(self) -> Hashable | None:
-        return config_identity(self, exempt=frozenset({"workers"}))
+        # Led by this package's code hash: the source reaches `derive` only as a field of a
+        # Method (demand_greedy, loop_closure), whose key's import closure holds no file here, so
+        # without it an edit to the raster, the routing or the ridges would serve stale roads.
+        config = config_identity(self, exempt=frozenset({"workers"}))
+        return None if config is None else (closure_hash(__name__), config)
 
     def desire_field(self, block: Block) -> DesireField:
         params = CountParams(res_m=self.res_m, r0_m=self.r0_m, bend_lambda=self.bend_lambda,

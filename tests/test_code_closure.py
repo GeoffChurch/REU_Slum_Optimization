@@ -11,11 +11,16 @@ is computed over.
 """
 from __future__ import annotations
 
+import importlib
+import re
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
-from reblock.derive_graph import _closure_paths
+from reblock.contracts import Block, Proposal
+from reblock.derive_graph import Identified, _closure_paths, _module_file, closure_hash
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from tests.methods.betweenness.test_source import BASE as BETWEENNESS
 from tests.permeability_fixtures import SHIPPED
 from tests.transplant.test_isolation import ENTRY_POINTS
 
@@ -109,15 +114,35 @@ def test_a_methods_code_version_is_blind_to_its_siblings() -> None:
     assert a != b, "two methods must not share a code version"
 
 
-def _target_modules() -> set[str]:
-    """Every `_target_` class's module named anywhere in `conf/`, straight from the yaml."""
-    import re
+def _targets() -> list[object]:
+    """Every `_target_` named anywhere in `conf/`, straight from the yaml, imported. The names
+    are an open set parsed from files, so each is resolved here, once, with no default: a
+    `_target_` that no longer imports fails this module instead of dropping out of the check."""
     conf = Path(__file__).resolve().parent.parent / "conf"
-    out: set[str] = set()
-    for y in conf.rglob("*.yaml"):
-        for m in re.findall(r"_target_:\s*([A-Za-z_][\w.]*)", y.read_text()):
-            out.add(m.rsplit(".", 1)[0])
+    names = {t for y in conf.rglob("*.yaml")
+             for t in re.findall(r"_target_:\s*([A-Za-z_][\w.]*)", y.read_text())}
+    out: list[object] = []
+    for name in sorted(names):
+        module, _, attr = name.rpartition(".")
+        out.append(getattr(importlib.import_module(module), attr))
     return out
+
+
+@runtime_checkable
+class _Proposes(Protocol):
+    """`contracts.Method` less its `identity` property, which `issubclass` cannot test."""
+
+    def propose(self, block: Block, prior: Proposal | None = None) -> Proposal: ...
+
+
+# Strategies a Method holds as a FIELD whose own identity leads with their closure hash, so that
+# closure rides the Method's key. Credited below only while the hash is actually there.
+SELF_HASHED_FIELDS: tuple[Identified, ...] = (BETWEENNESS,)
+
+
+def _leads_with_its_own_closure_hash(strategy: Identified) -> bool:
+    identity = strategy.identity
+    return isinstance(identity, tuple) and identity[0] == closure_hash(type(strategy).__module__)
 
 
 def test_every_configurable_strategy_can_invalidate_something() -> None:
@@ -131,11 +156,14 @@ def test_every_configurable_strategy_can_invalidate_something() -> None:
     Enumerated from `conf/` rather than from a list here, so adding a strategy to the config
     without covering it fails HERE rather than in a stale artifact months later.
 
-    FAULT INJECTION: a `_closure_paths` that stops at the entry module drops most of these.
+    FAULT INJECTION: returning `config_identity(self, exempt=...)` alone from
+    `BetweennessDesire.identity` fails this, naming `reblock.methods.betweenness.source` and
+    `.contrast` -- a field strategy no key's closure reaches. So does a `_closure_paths` that
+    stops at the entry module.
     """
     from reblock.derivations import ScreenSelectionInput, VoronoiInput, _propose_impl
-    from reblock.derive_graph import _closure_paths
 
+    targets = _targets()
     # Everything a key is computed over: the derivation bodies, plus every type that reaches
     # `derive` as a top-level input (`_code_version` adds those), plus the carriers' own
     # closures (their fields' strategies ride the identity).
@@ -143,18 +171,31 @@ def test_every_configurable_strategy_can_invalidate_something() -> None:
     for mod in (_propose_impl.__module__, VoronoiInput.__module__,
                 ScreenSelectionInput.__module__, "reblock.pipeline", "reblock.run"):
         covered |= _closure_paths(mod)
-    # A Method reaches `derive` as a TOP-LEVEL input, so `_code_version` folds in its own
-    # closure -- and with it anything it holds as a field (a desire-line source, a substrate).
-    # Not circular: this models what `_code_version` actually does at runtime.
-    covered |= {f for m in _target_modules() if m.startswith("reblock.methods.")
-                for f in _closure_paths(m)}
+    # A Method reaches `derive` as a TOP-LEVEL input (a refiner's `base` through its own nested
+    # `propose`), so `_code_version` folds in its closure. A strategy it holds as a field does
+    # NOT: `_code_version` sees only `type(method).__module__`, so the field is covered only if
+    # that closure imports it or the field's own identity carries a code hash (next).
+    covered |= {f for t in targets if isinstance(t, type) and issubclass(t, _Proposes)
+                for f in _closure_paths(t.__module__)}
+    covered |= {f for s in SELF_HASHED_FIELDS if _leads_with_its_own_closure_hash(s)
+                for f in _closure_paths(type(s).__module__)}
     # The research code is in no shipped closure by design. It reaches a derivation as a
     # configured field, through an entry point whose identity leads with its own closure hash
     # (`tests/transplant/test_isolation.py`), so that closure rides the key instead.
     covered |= {f for cls in ENTRY_POINTS for f in _closure_paths(cls.__module__)}
 
-    uncovered = sorted(m for m in _target_modules()
-                       if (f := _closure_paths(m)) and not (f & covered))
-    assert not uncovered, (
+    modules = {t.__module__ for t in targets}
+    # STRICT for the Methods and the strategies they hold: the module that DEFINES the class must
+    # itself be in a key's closure. Sharing any file with one (the check below) is not enough --
+    # every such module imports `contracts`, which every key holds.
+    strict = sorted(m for m in modules if m.startswith("reblock.methods.")
+                    and _module_file(m) not in covered)
+    # Elsewhere the original, weaker check stands. Made strict everywhere, it would also flag the
+    # evals and `screen.identity` (never cached, so no hole) and `data.shapefile` (a real one:
+    # a shapefile Block's identity hashes the file's bytes, not the code that reads it, and no
+    # key's closure holds that module).
+    weak = sorted(m for m in modules if not m.startswith("reblock.methods.")
+                  and (f := _closure_paths(m)) and not (f & covered))
+    assert not strict + weak, (
         "these configurable strategies are in no cache key's closure, so editing them would "
-        f"invalidate nothing: {uncovered}")
+        f"invalidate nothing: {strict + weak}")

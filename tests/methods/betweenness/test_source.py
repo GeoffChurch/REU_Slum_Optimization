@@ -6,6 +6,7 @@ from typing import cast
 
 import pytest
 
+from reblock.derive_graph import closure_hash
 from reblock.methods.betweenness import BetweennessDesire, PriorDeviance, RawShare
 from reblock.methods.desire_lines import DesireLineSource
 from tests.block_fixtures import no_buildings
@@ -55,6 +56,20 @@ def test_the_contrast_strategy_runs_too() -> None:
     base_top = float(BASE.desire_field(b).groups[0].lines.length.sum())
     deviance_top = float(field.groups[0].lines.length.sum())
     assert base_top != deviance_top
+
+
+def test_identity_leads_with_the_packages_code_hash() -> None:
+    """The source reaches `derive` only as a field of a Method (demand_greedy, loop_closure), and
+    that Method's key hashes its own import closure, which holds no file of this package. The
+    code enters the key through this hash instead, riding the Method's identity.
+
+    FAULT INJECTION: returning `config_identity(self, exempt=...)` alone from
+    `BetweennessDesire.identity` fails this; an edit to the raster, the routing or the ridges
+    would then serve the old cached roads.
+    """
+    identity = BASE.identity
+    assert isinstance(identity, tuple)
+    assert identity[0] == closure_hash("reblock.methods.betweenness.source")
 
 
 def test_identity_covers_every_setting_but_workers() -> None:
