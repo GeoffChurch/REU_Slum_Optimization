@@ -251,6 +251,16 @@ follow_imports = "skip"
 follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
+# tifffile (pulled in transitively by skimage.io, which skimage/__init__.py imports eagerly, so
+# `from skimage.morphology import skeletonize` in test_thinning.py reaches it) uses a PEP 695
+# `type` statement, Python 3.12+ only syntax, which fails to parse under our python_version =
+# "3.11" target -- the same tifffile/mypy version mismatch as the numpy override above, unrelated
+# to our own typing. tifffile is test-only (skimage.morphology.skeletonize is the reference
+# `src/reblock/methods/betweenness/thinning.py` is pinned equal to); skipping it costs nothing.
+module = ["tifffile", "tifffile.*"]
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
 # topology.graph.{my_graph,my_graph_helpers} are the pre-existing, deliberately
 # unannotated legacy graph implementation (the brief scopes typing to the new
 # facade — topology/__init__.py and topology/graph/complexity.py — not to
