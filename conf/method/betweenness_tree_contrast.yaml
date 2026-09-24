@@ -3,6 +3,8 @@
 # generators on 220 small blocks, +0.032 over clearance (measured at 0.5 m, every home a
 # source); beats clearance on both lenses on the 36 large ones (at these settings). Same builder
 # settings as conf/method/demand_greedy.yaml.
+# Gives up runtime: the field takes minutes on a large block where clearance takes seconds
+# (Bloekombos: ~200 s at 40 workers), since the contrast needs the prior pass too.
 _target_: reblock.methods.demand_greedy.DemandGreedyReblocker
 desire_source: ${betweenness.contrast}
 substrate: ${substrate}

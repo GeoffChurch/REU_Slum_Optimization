@@ -1,6 +1,8 @@
 # The loop-closing refiner around betweenness_tree_contrast. The loop settings are the region-scale
 # values the frontier study measured (conf/example/explore.yaml's clearance_looped tuning), not
 # conf/method/loop_closure.yaml's block-scale 0.12 / 45. On the frontier in 8 of 36 large blocks.
+# Gives up road and runtime: 6.7 km against the tree's 5.2 km (median, 36 large blocks), and
+# minutes where clearance takes seconds (Bloekombos: ~200 s at 40 workers, prior pass included).
 _target_: reblock.methods.loop_closure.LoopClosureRefiner
 base:
   _target_: reblock.methods.demand_greedy.DemandGreedyReblocker
