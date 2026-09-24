@@ -27,9 +27,10 @@ Measured on real footprints (all numbers paired medians vs clearance, 95% bootst
 - Held out (sparser Cape Town, Nairobi): Lens B replicates in both (-0.005..-0.006).
 - 36 large blocks (>= 1,000 buildings, top of the depth_density screen, CT 24 + NBO 12): the looped
   generators beat clearance_looped on Lens A by +0.043..+0.048 (94-97% of blocks) and Lens B by
-  -0.004..-0.006; cycle_native still leads Lens A by 0.015-0.022; a generator arm is on the
-  (Lens A, Lens B) Pareto frontier in 15 of 36 blocks. So it is a frontier method, shipped as four
-  presets, one per measured operating point.
+  -0.004..-0.006; cycle_native still leads Lens A by 0.015-0.022 and greedy_arterial leads Lens B
+  (better in 83-94% of blocks); a generator arm is on the (Lens A, Lens B) Pareto frontier in 17 of
+  36 blocks, as the middle point between them, while clearance and clearance_looped are on it in
+  none. So it is a frontier method, shipped as four presets, one per measured operating point.
 
 The exact algorithm (every constant below was the measured configuration; do not "improve" any):
 - Raster at `res_m`: cell centres `x0 + j*res`, `y0 + i*res` from the boundary's bounds; `inside` by
@@ -1228,8 +1229,8 @@ In `conf/config.yaml` and `conf/compare_config.yaml` defaults, after `- permeabi
 
 ```yaml
 # demand_greedy routed toward curvature-aware betweenness ridges (raw counts). Frontier point:
-# on the (Lens A, Lens B) frontier in 12 of 36 large blocks; beats clearance on both lenses on 220
-# small blocks. Same builder settings as conf/method/demand_greedy.yaml.
+# on the (Lens A, Lens B) frontier in 6 of 36 large blocks; beats clearance on both lenses on 220
+# small blocks and on the large ones. Same builder settings as conf/method/demand_greedy.yaml.
 _target_: reblock.methods.demand_greedy.DemandGreedyReblocker
 desire_source: ${betweenness.raw}
 substrate: ${substrate}
@@ -1241,16 +1242,17 @@ max_roads: 400
 road_width_m: 7.0
 ```
 
-`conf/method/betweenness_tree_contrast.yaml`: identical except the comment (frontier 3/36 large; best
-Lens A on 220 small, +0.032) and `desire_source: ${betweenness.contrast}`.
+`conf/method/betweenness_tree_contrast.yaml`: identical except the comment (frontier 1/36 large; best
+Lens A of all the generators on the 220 small blocks, +0.032 over clearance) and `desire_source: ${betweenness.contrast}`.
 
 `conf/method/betweenness_looped.yaml`:
 
 ```yaml
 # The loop-closing refiner around betweenness_tree. The loop settings are the region-scale values
 # the frontier study measured (conf/example/explore.yaml's clearance_looped tuning), not
-# conf/method/loop_closure.yaml's block-scale 0.12 / 45. On the frontier in 15 of 36 large blocks;
-# beats clearance_looped on both lenses in 94-97% / 78% of them; cycle_native leads Lens A by 0.015.
+# conf/method/loop_closure.yaml's block-scale 0.12 / 45. On the frontier in 11 of 36 large blocks;
+# beats clearance_looped on both lenses in 94% / 78% of them; cycle_native leads Lens A by 0.015,
+# greedy_arterial leads Lens B by 0.008.
 _target_: reblock.methods.loop_closure.LoopClosureRefiner
 base:
   _target_: reblock.methods.demand_greedy.DemandGreedyReblocker
@@ -1272,7 +1274,7 @@ max_candidates: 1500
 road_width_m: 7.0
 ```
 
-`conf/method/betweenness_looped_contrast.yaml`: identical except comment (frontier 13/36) and
+`conf/method/betweenness_looped_contrast.yaml`: identical except comment (frontier 8/36) and
 `desire_source: ${betweenness.contrast}`.
 
 In `conf/compare_config.yaml` `all_methods`, after `demand_greedy`, add four entries
