@@ -1,7 +1,8 @@
 # demand_greedy routed toward curvature-aware betweenness ridges (prior-deviance contrast).
-# Frontier point: on the (Lens A, Lens B) frontier in 1 of 36 large blocks; best Lens A of all the
-# generators on the 220 small blocks, +0.032 over clearance. Same builder settings as
-# conf/method/demand_greedy.yaml.
+# Frontier point: on the (Lens A, Lens B) frontier in 1 of 36 large blocks. Best Lens A of the
+# generators on 220 small blocks, +0.032 over clearance (measured at 0.5 m, every home a
+# source); beats clearance on both lenses on the 36 large ones (at these settings). Same builder
+# settings as conf/method/demand_greedy.yaml.
 _target_: reblock.methods.demand_greedy.DemandGreedyReblocker
 desire_source: ${betweenness.contrast}
 substrate: ${substrate}

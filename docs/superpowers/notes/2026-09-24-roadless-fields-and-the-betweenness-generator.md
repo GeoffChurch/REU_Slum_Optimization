@@ -145,8 +145,11 @@ The builder is `DemandGreedyReblocker`, routed toward the field's ridges:
 - **Looped arms:** the builder wrapped in `LoopClosureRefiner`.
 
 ### 220 small recipients
-These are paired against clearance, whose medians are 0.763 on Lens A and 0.066 on Lens B. The
-fields were computed at 0.5 m, with every home as a source. The percentages are the share of blocks
+These are paired against clearance, whose medians are 0.763 on Lens A and 0.066 on Lens B. They
+differ from `consensus-re-measured`'s 0.777 / 0.065 for the same recipients because that study
+built them at the spacing-disc tier (its donor pool, `conf/donor_pool/capetown.yaml`, builds
+`SpacingDiscs`), while this one rebuilt them at the footprint tier. The fields were computed at
+0.5 m, with every home as a source. The percentages are the share of blocks
 where the arm is better.
 
 | arm - clearance | Lens A permeability | Lens B displacement |
