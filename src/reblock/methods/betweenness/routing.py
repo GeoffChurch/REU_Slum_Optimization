@@ -1,7 +1,8 @@
 """The (cell, direction-bucket) state graph and its two count passes.
 
-Field B (permeability) with the path field's smoothness: one best route per origin-destination
-pair, where a route pays for its turning. The state is (cell, direction bucket).
+Betweenness with a turning cost: one best route per origin-destination pair, where a route pays
+for its length, for passing close to buildings, and for turning. The state is (cell, direction
+bucket).
 
 * 16 lattice step directions (king + knight moves). Bucket b is the angular interval between
   directions b and b+1; inside a bucket a path alternates freely between the two bounding steps,
@@ -273,7 +274,7 @@ def _credit(first: NDArray[np.int64], pred: NDArray[np.int32], targets: NDArray[
     return it
 
 
-# ------------------------------------------------------------------ variants
+# ------------------------------------------------------------------ the all-pairs pass, forked
 
 def _alloc(N: int) -> tuple[NDArray[np.float64], NDArray[np.int32], NDArray[np.int32],
                              NDArray[np.int32], NDArray[np.int64], NDArray[np.int64]]:
