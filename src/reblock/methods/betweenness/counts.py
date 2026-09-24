@@ -51,8 +51,7 @@ class CountsInput:
 
     @property
     def identity(self) -> Hashable | None:
-        b = self.block.identity
-        return None if b is None else (b, self.params.identity)
+        return config_identity(self, exempt=frozenset({"workers"}))
 
 
 def _count(inp: CountsInput, *, with_buildings: bool) -> Counts:
@@ -64,7 +63,7 @@ def _count(inp: CountsInput, *, with_buildings: bool) -> Counts:
     empty = np.full(raster.shape, np.nan, dtype=np.float32)
     empty[raster.inside] = 0.0
     band_mask = raster.inside & (np.nan_to_num(raster.edge, nan=np.inf) <= 1.5 * p.res_m)
-    if len(rc) == 0 or not band_mask.any():
+    if len(rc) == 0:
         return Counts(raster=raster, egress=empty, pairs=empty.copy())
     homes = node[rc[:, 0], rc[:, 1]]
     band = node[band_mask]

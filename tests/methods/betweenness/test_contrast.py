@@ -16,4 +16,4 @@ def test_deviance_is_zero_where_observation_equals_prior_and_positive_where_it_e
     o = np.array([[0.0, 5.0, 50.0, 1.0]], np.float32)
     e = np.array([[0.0, 5.0, 2.0, 10.0]], np.float32)
     z = deviance_field(o, np.zeros_like(o), e, np.zeros_like(e), floor=1e-9)
-    assert abs(z[0, 0]) < 1e-4 and z[0, 1] == 0.0 and z[0, 2] > 5 and z[0, 3] < -1
+    assert np.isclose(z[0, 0], -np.sqrt(2e-9)) and z[0, 1] == 0.0 and z[0, 2] > 5 and z[0, 3] < -1
