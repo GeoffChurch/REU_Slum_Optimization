@@ -1,6 +1,7 @@
 """The typed njit wrapper compiles and keeps the function's signature for mypy."""
 from __future__ import annotations
 
+import numba.core.registry
 import numpy as np
 from numpy.typing import NDArray
 
@@ -17,4 +18,6 @@ def _total(a: NDArray[np.float64]) -> float:
 
 def test_a_jitted_function_runs_compiled() -> None:
     assert _total(np.arange(10.0)) == 45.0
-    assert hasattr(_total, "signatures") and _total.signatures   # numba dispatcher, compiled
+    # What `numba.njit` returns, and compiled for the call above -- not the plain function.
+    assert isinstance(_total, numba.core.registry.CPUDispatcher)
+    assert _total.signatures
