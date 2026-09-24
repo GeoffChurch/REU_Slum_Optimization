@@ -352,7 +352,8 @@ trapped the building-targeted run. **The candidate family was never the ceiling 
 it is then scored on, so these numbers BOUND what is achievable on this objective and measure how
 far the incumbents sit from that bound. They are NOT evidence it is a better reblocker. It targets
 16 roads chosen purely for vehicle width and ignores network structure entirely, so expect it to
-score badly on permeability. Score it there before calling it a method.
+score badly on permeability. Score it there before calling it a method. **Scored in Result 10:
+dominated by `cycle_native` on both blocks, and not built.**
 
 ## Result 8: we never had footprints, and the disc model OVER-READS access by 34% at W = 3.5
 
@@ -445,6 +446,46 @@ GAINS. Only 9 of 18 pairs have both members touching the street, so half are not
 **The cause is the cost model**: nothing prices road length or land take. The cheap fix is a
 post-pass merging near-parallel pairs on the `Method.prior` refiner seam -- free on the spine block,
 but one block is thin evidence for shipping a method change.
+
+## Result 10 (NEGATIVE): on the reported axes the direct optimizer is dominated by `cycle_native`
+
+2026-09-23. Result 7's caveat, closed. The saved W = 6 road sets (spine: 16 roads, 4,949 m; small:
+4 roads, 176 m) scored on the CURRENT metric -- footprint-overlap displacement at the explore
+variants' footprint tier, 7 m roads, permeability -- against each incumbent's own proposal
+truncated to the direct's displacement (`prefix_to_displacement`, the minimal prefix at or above
+it). Lens A's 10% cannot be applied: the direct stops by itself at 2.9% and 4.3%.
+
+    spine ZAF.9.3.1_1_5810        road_m        D       P    Lens B: D to reach P* = 0.60
+    direct (W = 6)                 4,949   0.0290   0.774    0.0187
+    cycle_native                   3,457   0.0297   0.806    0.0168
+    greedy_arterial (access_disp)  8,554   0.0291   0.802    0.0082
+    euclidean_grid                 2,113   0.0296   0.656    0.0296
+    clearance_looped               2,485   0.0292   0.624    0.0280
+    clearance                      3,020   0.0298   0.516    0.0472
+
+    small ZAF.9.3.1_1_40972       road_m        D       P    Lens B
+    direct (W = 6)                   176   0.0426   0.561    never reaches 0.60
+    greedy_arterial (access_disp)    270   0.0472   0.777    0.0182
+    euclidean_grid                   130   0.0730   0.716    0.0730
+    cycle_native                     119   0.0465   0.714    0.0465
+    clearance                         89   0.0491   0.625    0.0491
+    clearance_looped                  83   0.0446   0.619    0.0446
+
+* **`cycle_native` dominates it on both blocks**: more permeability at matched displacement, less
+  displacement to reach P*, and on the spine block 30% less road. The incumbents' prefixes sit
+  up to 0.0008 above the direct's D; at `cycle_native`'s measured slope (0.206 permeability per
+  0.0129 D) that is worth at most 0.011, a third of its 0.032 lead.
+* It is NOT the worst method on the spine block -- it beats `clearance`, `clearance_looped` and
+  `euclidean_grid` there -- and it IS the worst on the small one. Aiming at vehicle-width gates
+  buys some permeability as a side effect; not as much as methods that aim at network structure.
+* Caveats: two blocks, one run each; the roads were optimized under the old disc displacement,
+  before footprints; and the objective it wins on, vehicle access at W = 6, is not a reported
+  axis and was measured on discs, which Result 8 shows over-read access.
+
+**Decision: not built as a method** -- it would ship dominated on every reported axis. What would
+put it back on the list: vehicle access becoming a REPORTED axis, where it bounds the incumbents
+(and would first need footprint-tier clearance, per Result 8). *Untested:* aiming with the min-cut
+dual while scoring candidates on permeability instead of vehicle access.
 
 ## What to take from this
 
