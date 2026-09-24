@@ -128,6 +128,24 @@ def test_egress_counts_each_home_once_on_its_way_to_the_street() -> None:
     assert f.max() == 1.0 and f[g.node[20, 20]] == 0.0      # endpoints are never credited
 
 
+def test_the_forked_all_pairs_pass_equals_the_serial_one() -> None:
+    """20 distinct source homes, so the fork pool really runs (it takes over at 16 jobs).
+
+    FAULT INJECTION: splitting the jobs `jobs[i::workers + 1]` (which drops every
+    (workers+1)-th source) fails this.
+    """
+    inside, cl, _wall = _two_rooms()
+    g = build_graph(inside, cl, 1.0, 1.0)
+    free = np.argwhere(inside & (cl > 0))
+    pick = free[np.random.default_rng(2).choice(len(free), 20, replace=False)]
+    homes = np.unique(g.node[pick[:, 0], pick[:, 1]])
+    assert len(homes) == 20
+    bend = bend_table(50.0)
+    serial = pair_counts(g, bend, homes, homes, 1)
+    assert serial.sum() > 0
+    assert np.array_equal(pair_counts(g, bend, homes, homes, 2), serial)
+
+
 def _pairs_in_a_worker(_: int) -> None:
     inside, cl, _wall = _two_rooms()
     g = build_graph(inside, cl, 1.0, 1.0)
