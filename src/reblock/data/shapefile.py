@@ -15,7 +15,7 @@ from shapely.geometry import LineString, Polygon
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import BBox, Block, Region
 from reblock.data._util import _narrowed, _window
-from reblock.derive_graph import source_hash
+from reblock.derive_graph import reader_hash
 
 
 def _components(gdf: gpd.GeoDataFrame) -> list[list[int]]:
@@ -114,7 +114,7 @@ class ShapefileSource:
 
     def region(self) -> Region:
         raw, utm = self._prepared()
-        sch = source_hash(self.path)
+        sch = reader_hash(__name__, self.path)
         # Components, and so the id check, eagerly: an unknown id raises here, like
         # `KblockSource.region`, not partway through the iteration.
         kept = self._kept(_components(raw))

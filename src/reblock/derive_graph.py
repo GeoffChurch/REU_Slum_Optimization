@@ -33,8 +33,8 @@ _L1: dict[tuple[object, ...], object] = {}
 
 def source_hash(*paths: Path) -> str:
     """sha256 over the sorted paths' names + bytes. Stable, content-sensitive,
-    order-independent. Used for a Source's data files (Block.source_content_hash)
-    and for the derivation-module code hash below."""
+    order-independent. Used for a Source's data files (inside `reader_hash`) and for the
+    derivation-module code hash below."""
     h = hashlib.sha256()
     for p in sorted(paths, key=str):
         h.update(str(Path(p).name).encode())
@@ -141,6 +141,18 @@ def _closure_paths(module: str) -> frozenset[Path]:
 def closure_hash(module: str) -> str:
     """Content hash of `_closure_paths(module)` -- a derivation's own code version."""
     return source_hash(*sorted(_closure_paths(module)))
+
+
+def reader_hash(reader: str, *paths: Path) -> str:
+    """A Source's `Block.source_content_hash`: its data files' bytes AND the import closure of
+    `reader`, the module that turns them into Blocks.
+
+    The files alone name the data, not what was made of it. A reader edit -- how parcels group
+    into components, which rings count as streets -- changes every Block under an unchanged file
+    hash, and a derivation over a Block is keyed on the Block's identity plus its OWN closure,
+    which need not import the reader. The shapefile reader was in no key's closure at all.
+    """
+    return source_hash(*paths, *_closure_paths(reader))
 
 
 def env_version() -> tuple[str, str]:
