@@ -148,18 +148,24 @@ The builder is `DemandGreedyReblocker`, routed toward the field's ridges:
 These are paired against clearance, whose medians are 0.763 on Lens A and 0.066 on Lens B. They
 differ from `consensus-re-measured`'s 0.777 / 0.065 for the same recipients because that study
 built them at the spacing-disc tier (its donor pool, `conf/donor_pool/capetown.yaml`, builds
-`SpacingDiscs`), while this one rebuilt them at the footprint tier. The fields were computed at
-0.5 m, with every home as a source. The percentages are the share of blocks
-where the arm is better.
+`SpacingDiscs`), while this one rebuilt them at the footprint tier. Below 400 buildings every
+home is a source, so the two field resolutions differ in nothing else. The percentages are the
+share of blocks where the arm is better. Lens A n = 220, Lens B n = 217.
 
-| arm - clearance | Lens A permeability | Lens B displacement |
-|---|---|---|
-| toward raw | +0.022 [+0.014, +0.031], 65% | -0.006 [-0.010, -0.003], 66% |
-| toward contrast | +0.032 [+0.023, +0.047], 71% | -0.007 [-0.010, -0.004], 65% |
-| `NoDesire` (no field) | +0.000 | +0.001 |
-| toward the real OSM footpaths (oracle) | +0.007, not significant | not recorded |
+| arm - clearance | field | Lens A permeability | Lens B displacement |
+|---|---|---|---|
+| toward raw | 1 m (shipped) | +0.040 [+0.031, +0.052], 73% | -0.009 [-0.012, -0.006], 71% |
+| toward contrast | 1 m (shipped) | +0.047 [+0.033, +0.060], 77% | -0.011 [-0.013, -0.007], 72% |
+| toward raw | 0.5 m | +0.022 [+0.014, +0.031], 65% | -0.006 [-0.010, -0.003], 66% |
+| toward contrast | 0.5 m | +0.032 [+0.023, +0.047], 71% | -0.007 [-0.010, -0.004], 65% |
+| `NoDesire` (no field) | | +0.000 | +0.001 |
+| toward the real OSM footpaths (oracle) | | +0.007, not significant | not recorded |
 
 - **The gain is the field's.** `demand_greedy` with `NoDesire` ties clearance exactly.
+- **The coarser field generates better.** Paired on the same blocks, raw at 1 m beats raw at
+  0.5 m on both lenses (Lens A +0.013 [+0.003, +0.018], Lens B -0.002); for the contrast the two
+  tie. Why is *untested*; fewer skeleton spurs at 1 m is one candidate.
+- **At 1 m, contrast and raw tie** on these blocks.
 - **The field guides to good roads, not to existing ones.** The oracle reproduces the footpaths
   (IoU at 10 m +0.140) but does not improve permeability.
 
@@ -170,17 +176,39 @@ study's selection rule. A relaxed rule selects sparser blocks, at 35-49 building
 - at least 100 m of mapped interior footpath;
 - an area cap.
 
-| sample | arm | Lens A | Lens B |
-|---|---|---|---|
-| fresh Cape Town | raw | +0.025, n = 38, interval includes 0 | -0.005 [-0.007, -0.002], n = 140 |
-| fresh Cape Town | contrast | +0.010, n = 38, interval includes 0 | -0.005 [-0.009, -0.002], n = 140 |
-| Nairobi | raw | +0.054, n = 39 | -0.005 [-0.012, -0.002], n = 101 |
-| Nairobi | contrast | +0.052 [+0.042, +0.074], 95%, n = 39 | -0.006 [-0.009, -0.002], n = 101 |
+Fields at the shipped 1 m; fresh Cape Town is 220 blocks, Nairobi 104. Lens A is taken where both
+arms reach the 10% budget ("at budget"). The 0.5 m fields gave the same picture.
 
-- **Lens B replicates in both cities.**
-- **Lens A replicates in Nairobi.**
-- **Fresh Cape Town is mostly unscoreable on Lens A**, because few of its sparse blocks reach 10%
-  displacement.
+| sample | arm - clearance | Lens A at budget | Lens B |
+|---|---|---|---|
+| fresh Cape Town | raw | +0.023 [+0.001, +0.057], 65%, n = 40 | -0.006 [-0.009, -0.003], 64%, n = 144 |
+| fresh Cape Town | contrast | +0.050 [+0.037, +0.078], 81%, n = 36 | -0.006 [-0.010, -0.002], 65%, n = 144 |
+| Nairobi | raw | +0.073 [+0.045, +0.093], 86%, n = 37 | -0.006 [-0.011, -0.003], 70%, n = 99 |
+| Nairobi | contrast | +0.056 [+0.033, +0.070], 87%, n = 39 | -0.007 [-0.011, -0.002], 68%, n = 99 |
+
+- **Both lenses replicate in both cities.**
+- **Fresh Cape Town's Lens A rests on few blocks:** only 24% of clearance's networks there reach
+  10% displacement.
+- **Contrast leads raw in fresh Cape Town** on both lenses (Lens B -0.003 [-0.004, -0.001], n = 140;
+  Lens A at budget +0.035 [+0.014, +0.070], n = 34) and ties it in Nairobi.
+
+### The settings after the field are a flat optimum
+A one-at-a-time sweep from each shipped preset, on the 220 at 1 m, paired against the preset. 22
+arms. None beat the shipped raw preset on both lenses with an interval excluding 0.
+
+| knob | values tried | result against the preset |
+|---|---|---|
+| egress weight (egress share vs all-pairs share) | 0.25, 0.75, 1.0 (shipped 0.5) | ties; egress only is no better (Lens A -0.005, Lens B +0.002, intervals touch 0) |
+| partial contrast, raw / (prior + offset)^alpha | 0.25, 0.5, 1.0 | ties; alpha = 1 borderline (Lens A +0.007 [+0.000, +0.012]) |
+| ridge quantiles | sparse .90-.98, dense .60-.98 | ties from raw; sparse is worse from contrast (Lens A -0.011, Lens B +0.002) |
+| gamma | 0.5, 2 | 0.5 worse (Lens A -0.007 to -0.009); 2 borderline (Lens A +0.002 [+0.000, +0.005]) |
+| eps | 0.03, 0.3 | ties |
+| buffer_m | 2, 5 | ties; 5 worse from contrast (Lens A -0.004) |
+
+The two borderline settings (alpha = 1, gamma = 2) tie the shipped raw preset on both held-out
+samples, every interval including 0. The all-pairs half of the field is not diluting it, which
+was the seductive reason to expect egress-only to win. The field's own settings (r0, lambda) need
+new fields and were not swept.
 
 ### Bloekombos
 The owner judged 40972 (263 parcels) too small to be robust. So the flagship is the spine block,
@@ -312,7 +340,7 @@ forks per block must set `workers=1`.
 | preset | builder | desire | frontier blocks (of 36) |
 |---|---|---|---|
 | `betweenness_tree` | `DemandGreedyReblocker` | raw | 6 |
-| `betweenness_tree_contrast` | `DemandGreedyReblocker` | contrast | 1; the best Lens A on the 220 small blocks |
+| `betweenness_tree_contrast` | `DemandGreedyReblocker` | contrast | 1; ties raw on the 220 small blocks, leads it on fresh Cape Town |
 | `betweenness_looped` | `LoopClosureRefiner` around it | raw | 11 |
 | `betweenness_looped_contrast` | `LoopClosureRefiner` around it | contrast | 8 |
 
@@ -353,14 +381,16 @@ In the production run, the all-pairs pass is 111.7 s of the observed time and 79
 **Settled:**
 - **The field is worth something as a prior.**
   - On the 220 small Cape Town blocks, both tree arms (raw and contrast) beat clearance on both
-    lenses, with fields at 0.5 m and every home a source. The looped arms were not run there.
+    lenses, at the shipped 1 m and at 0.5 m, and replicate on held-out Cape Town and Nairobi
+    blocks. The looped arms were not run there.
   - On the 36 large blocks, at the shipped 1 m and 400 sampled sources, all four generator arms
     beat clearance on both lenses, in both cities.
   - On the same 36, the looped arms beat clearance_looped on both lenses, in both cities.
   - On the 220, `NoDesire` ties clearance, so the gain comes from the field.
-- **A field that finds lanes is not the same as one that generates well.** The contrast ranks worse
-  and, on the 220 small blocks, generates better; on the 36 large ones raw leads it. The oracle
-  reproduces footpaths and does not improve permeability.
+- **A field that finds lanes is not the same as one that generates well.** The contrast ranks
+  worse, yet generates as well as raw on small blocks (better on fresh Cape Town); on the 36 large
+  ones raw leads it. The oracle reproduces footpaths and does not improve permeability.
+- **The builder and post-processing settings are at a flat optimum** (the sweep above).
 - **Repelled betweenness does not pile into pinch points,** the failure July rejected betweenness
   for.
 - **The soft path field is dead,** for a structural reason (extensive path entropy), not a tuning
@@ -376,9 +406,7 @@ In the production run, the all-pairs pass is 111.7 s of the observed time and 79
 - **Road length and runtime were not frontier axes.** clearance_looped lays half the road (3.3 km
   against the looped generators' 6.7 km), and clearance runs in seconds against the field's minutes. Neither is dominated
   on those axes, so both stay.
-- **The small-block gains were measured at 0.5 m with every home as a source.** The presets carry
-  the large-block setting (1 m, 400 sampled sources). Whether that setting reproduces the
-  small-block gains is *untested*.
-- **Sparse Cape Town is unscoreable on held-out Lens A** (n = 38, intervals include 0).
+- **The field's own settings were chosen for pictures, not generation.** lambda 50 and r0 2 m
+  won the ranking study against Microsoft's lanes; neither has been swept as a generator.
 - **Large-block cores have only an imagery-derived ground truth** (Microsoft), and the core-picture
   result on it is one block.

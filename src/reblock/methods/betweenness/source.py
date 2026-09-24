@@ -3,10 +3,10 @@
 Where many homes' best routes -- to the street, and to each other -- run, with routes that pay for
 turning and are repelled by buildings. Measured as a road GENERATOR (demand_greedy toward its
 ridges; docs/superpowers/notes/2026-09-24-roadless-fields-and-the-betweenness-generator.md): it
-beats clearance on both lenses on 220 small blocks (fields at 0.5 m, every home a source) and on
-36 large ones (the shipped 1 m, 400 sampled sources). Looped, it beats clearance_looped on both
-lenses on the 36 large blocks; it was never run looped on the small ones. cycle_native still
-leads Lens A on large blocks."""
+beats clearance on both lenses on 220 small blocks, on held-out Cape Town and Nairobi blocks, and
+on 36 large ones, all at the shipped 1 m and 400 sampled sources. Looped, it beats
+clearance_looped on both lenses on the 36 large blocks; it was never run looped on the small
+ones. cycle_native still leads Lens A on large blocks."""
 from __future__ import annotations
 
 from collections.abc import Hashable
