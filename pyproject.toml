@@ -39,6 +39,10 @@ hydra-core = "*"
 # Backs reblock.cache's content-addressed L2 derivation cache (joblib.Memory).
 joblib = "*"
 segno = "*"
+# Compiles reblock.methods.betweenness's state-graph Dijkstra and thinning kernels. Measured: the
+# pure-numpy/scipy alternative needs an explicit 16-state-per-cell sparse graph (9M states on a
+# 6,619-building block) and was rejected on memory and time.
+numba = "*"
 
 # Install the reblock package itself, editable, from this directory.
 [tool.pixi.pypi-dependencies]
@@ -222,6 +226,12 @@ module = "threadpoolctl"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# numba ships no py.typed marker and no stub package. Every kernel goes through the typed
+# `reblock._jit.njit` wrapper, so untyped numba never reaches a signature; same shim as joblib.
+module = ["numba", "numba.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # pyogrio (backs reblock.data.osm_extract.read_pbf_lines' OGR-side `where` filter) ships no
 # py.typed marker. A types-pyogrio stub exists on PyPI but not on conda-forge, and every other
 # stub package here (types-geopandas, types-shapely, types-pyyaml) is installed as a conda-forge
@@ -239,6 +249,16 @@ ignore_missing_imports = true
 module = ["numpy", "numpy.*"]
 follow_imports = "skip"
 follow_imports_for_stubs = true
+
+[[tool.mypy.overrides]]
+# tifffile (pulled in transitively by skimage.io, which skimage/__init__.py imports eagerly, so
+# `from skimage.morphology import skeletonize` in test_thinning.py reaches it) uses a PEP 695
+# `type` statement, Python 3.12+ only syntax, which fails to parse under our python_version =
+# "3.11" target -- the same tifffile/mypy version mismatch as the numpy override above, unrelated
+# to our own typing. tifffile is test-only (skimage.morphology.skeletonize is the reference
+# `src/reblock/methods/betweenness/thinning.py` is pinned equal to); skipping it costs nothing.
+module = ["tifffile", "tifffile.*"]
+follow_imports = "skip"
 
 [[tool.mypy.overrides]]
 # topology.graph.{my_graph,my_graph_helpers} are the pre-existing, deliberately

@@ -1,0 +1,15 @@
+# demand_greedy routed toward curvature-aware betweenness ridges (raw counts). Frontier point:
+# on the (Lens A, Lens B) frontier in 6 of 36 large blocks. Beats clearance on both lenses on 220
+# small blocks (measured at 0.5 m, every home a source) and on the 36 large ones (at these
+# settings). Same builder settings as conf/method/demand_greedy.yaml.
+# Gives up runtime: the field takes minutes on a large block where clearance takes seconds
+# (Bloekombos: ~116 s at 40 workers, the observed pass alone).
+_target_: reblock.methods.demand_greedy.DemandGreedyReblocker
+desire_source: ${betweenness.raw}
+substrate: ${substrate}
+buffer_m: 3.0
+eps: 0.1
+gamma: 1.0
+depth_target: 2
+max_roads: 400
+road_width_m: 7.0
