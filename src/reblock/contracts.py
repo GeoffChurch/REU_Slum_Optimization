@@ -47,7 +47,9 @@ class Block:
     boundary: Polygon | MultiPolygon   # a block is a Polygon; a gappy region is a MultiPolygon
     parcels: GeoDataFrame
     streets: GeoDataFrame
-    source_content_hash: str | None   # content hash of the Source's file(s); None => uncacheable
+    # Content hash of the Source's files AND the code that read them (`derive_graph.reader_hash`);
+    # None => uncacheable.
+    source_content_hash: str | None
     # real sites; may be empty. Named for GEOMETRY, not points: at tier 3 it holds polygons.
     building_geometries: GeoDataFrame
     # The injected building-geometry TIER (reblock.buildings), as the STRATEGY rather than a bound

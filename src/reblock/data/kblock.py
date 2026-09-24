@@ -26,7 +26,7 @@ from reblock.data._util import _narrowed, _window
 from reblock.data.counts import RAW_COUNT
 from reblock.data.footprints import BuildingSource, ParquetBuildings
 from reblock.derivations import VoronoiInput, voronoi
-from reblock.derive_graph import source_hash
+from reblock.derive_graph import reader_hash
 
 
 def _voronoi_parcels(poly: Polygon, points: list[Point], crs: CRS) -> gpd.GeoDataFrame | None:
@@ -154,9 +154,8 @@ class KblockSource:
                              f"configured building tier: {e}") from e
         # Hash the files the buildings actually CAME from, not `buildings_path`: under
         # FootprintTiles those are the polygon tiles, and a key over the points file would never
-        # notice a tile changing. For ParquetBuildings `read_from == [buildings_path]`, so this is
-        # byte-identical to the key it replaces.
-        sch = source_hash(self.blocks_path, *frame.read_from)
+        # notice a tile changing.
+        sch = reader_hash(__name__, self.blocks_path, *frame.read_from)
         return Region(region_id=self.region_id, crs=utm,
                       blocks=self._blocks_from(blocks.to_crs(utm), bld, sch), roads=None)
 

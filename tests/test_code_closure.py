@@ -18,11 +18,14 @@ from typing import Protocol, runtime_checkable
 from unittest import mock
 
 from reblock import derive_graph
+from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal, Source
+from reblock.data.kblock import KblockSource
 from reblock.data.shapefile import ShapefileSource
 from reblock.derive_graph import Identified, _closure_paths, _module_file, closure_hash
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from tests.data.test_kblock_source import DJI_BLD, DJI_BLOCKS
 from tests.data.test_shapefile_source import PHULE
 from tests.methods.betweenness.test_source import BASE as BETWEENNESS
 from tests.permeability_fixtures import SHIPPED
@@ -152,7 +155,10 @@ def _leads_with_its_own_closure_hash(strategy: Identified) -> bool:
 # Sources whose Blocks carry their reader's closure in their identity (`derive_graph.reader_hash`),
 # so that closure rides every key over those Blocks. Credited below only while it actually does.
 READER_HASHED_SOURCES: tuple[Source, ...] = (
-    ShapefileSource(PHULE, "phule", assumed_crs=3857, block_ids=["phule_0"]),)
+    ShapefileSource(PHULE, "phule", assumed_crs=3857, block_ids=["phule_0"]),
+    KblockSource(DJI_BLOCKS, DJI_BLD, region_id="DJI", min_buildings=10,
+                 block_ids=["DJI.1_2_602"], building_tier=SpacingDiscs, member_buildings=None),
+)
 
 
 def _identity_moves_with_its_reader(source: Source) -> bool:
@@ -184,8 +190,9 @@ def test_every_configurable_strategy_can_invalidate_something() -> None:
     FAULT INJECTION: returning `config_identity(self, exempt=...)` alone from
     `BetweennessDesire.identity` fails this, naming `reblock.methods.betweenness.source` and
     `.contrast` -- a field strategy no key's closure reaches. So does a `_closure_paths` that
-    stops at the entry module. So does `ShapefileSource` hashing its file alone
-    (`source_hash(self.path)`), naming `reblock.data.shapefile`.
+    stops at the entry module. So does a Source hashing its files alone (`source_hash(...)` in
+    `ShapefileSource.region` or `KblockSource.region`), naming its module -- even `data.kblock`,
+    which `derivations` happens to import.
     """
     from reblock.derivations import ScreenSelectionInput, VoronoiInput, _propose_impl
 
@@ -209,17 +216,20 @@ def test_every_configurable_strategy_can_invalidate_something() -> None:
     # configured field, through an entry point whose identity leads with its own closure hash
     # (`tests/transplant/test_isolation.py`), so that closure rides the key instead.
     covered |= {f for cls in ENTRY_POINTS for f in _closure_paths(cls.__module__)}
-    # A Source's code shapes every Block it yields, and reaches a key through the Block's identity.
-    covered |= {f for s in READER_HASHED_SOURCES if _identity_moves_with_its_reader(s)
-                for f in _closure_paths(type(s).__module__)}
-
     modules = {t.__module__ for t in targets}
-    sources = {t.__module__ for t in targets if isinstance(t, type) and issubclass(t, Source)}
-    # STRICT for the Methods, the strategies they hold, and the Sources: the module that DEFINES
-    # the class must itself be in a key's closure. Sharing any file with one (the check below) is
-    # not enough -- every such module imports `contracts`, which every key holds.
-    strict = sorted(m for m in modules if (m.startswith("reblock.methods.") or m in sources)
+    # STRICT for the Methods and the strategies they hold: the module that DEFINES the class must
+    # itself be in a key's closure. Sharing any file with one (the check below) is not enough --
+    # every such module imports `contracts`, which every key holds.
+    strict = sorted(m for m in modules if m.startswith("reblock.methods.")
                     and _module_file(m) not in covered)
+    # STRICTEST for the Sources. A Source's code shapes every Block it yields, and a Block flows
+    # into derivations whose closures need not import its reader -- being in SOME key's closure
+    # covers only that key. So the Block's own identity must move with the reader, and nothing
+    # else is credited.
+    sources = {t.__module__ for t in targets if isinstance(t, type) and issubclass(t, Source)}
+    hashed = {type(s).__module__ for s in READER_HASHED_SOURCES
+              if _identity_moves_with_its_reader(s)}
+    strict += sorted(sources - hashed)
     # Elsewhere the original, weaker check stands. Made strict everywhere, it would also flag the
     # evals and `screen.identity`, which are never cached, so no hole.
     weak = sorted(m for m in modules if not m.startswith("reblock.methods.") and m not in sources

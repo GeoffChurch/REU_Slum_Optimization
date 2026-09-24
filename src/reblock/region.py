@@ -32,6 +32,7 @@ from reblock.buildings import Extents, SpacingDiscs
 from reblock.contracts import Block, Eval, Method, Result, Source
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
+from reblock.derive_graph import closure_hash
 
 logger = logging.getLogger(__name__)
 
@@ -159,14 +160,14 @@ def region_block(blocks: list[Block]) -> Block:
     tier = shared_tier(blocks)
     building_geometries = pooled_buildings(blocks, crs)
 
-    # The identity folds in the region model version. derive() caches on the block's identity
-    # (source_content_hash, block_id); the region's streets ARE the full existing network the
-    # access/curve derivations consume, so a change in what the region means -- here the move to
-    # existing-egress, superseding the old perimeter-egress eval-swap that scored a
-    # perimeter-streets block under this same identity -- must yield a FRESH key, not a stale hit.
+    # The identity folds in this module's own code. derive() keys on the block's identity, which
+    # names the members but not what was made of them: the streets (the full existing network
+    # every access and permeability derivation consumes), the pooled buildings and the parcel
+    # numbering are all built here, so an edit to any of it must be a fresh key -- automatically,
+    # not through a hand-written model tag that moves only when someone remembers to bump it.
     source_content_hash = (
         None if member_hash is None
-        else hashlib.sha256(("region-existing-egress|" + member_hash).encode()).hexdigest()
+        else hashlib.sha256(f"{closure_hash(__name__)}|{member_hash}".encode()).hexdigest()
     )
     block_id = "region:" + "+".join(sorted(b.block_id for b in blocks))
     return Block(block_id=block_id, crs=crs, boundary=boundary, parcels=parcels,

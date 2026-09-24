@@ -1,8 +1,8 @@
-import hashlib
 import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
+from unittest import mock
 
 import geopandas as gpd
 import pytest
@@ -10,10 +10,12 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
+from reblock import derive_graph
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Result
 from reblock.data.counts import KblockCount, resolved
 from reblock.data.kblock import KblockSource
+from reblock.derive_graph import _closure_paths, _module_file, closure_hash
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.substrates import ChordSubstrate
@@ -113,29 +115,37 @@ def test_region_block_streets_are_the_full_existing_network() -> None:
     assert outer_edge.within(street_union)
 
 
-def test_region_block_identity_folds_the_existing_egress_model_tag() -> None:
-    # The cache-identity fix: derive() caches on Block.identity = (source_content_hash, block_id),
-    # which EXCLUDES streets, so region_block folds a model-version tag into source_content_hash --
-    # otherwise a region scored under a different streets/egress model collides on the same key
-    # (the bug: the old perimeter-egress eval-swap's cached access reused under the new model).
-    # Needs CACHEABLE members (a source_content_hash) so the tagged branch runs; the
-    # _grid_block fixtures elsewhere have None hashes and take the uncacheable None branch.
+def test_region_block_identity_moves_with_the_code_that_builds_it() -> None:
+    """derive() keys on Block.identity, which names the members but not what `region_block` made
+    of them: the streets every access and permeability derivation consumes, the pooled buildings,
+    the parcel numbering. An edit to that code must be a fresh key.
+
+    Needs CACHEABLE members (a source_content_hash); the _grid_block fixtures elsewhere have None
+    hashes and take the uncacheable branch.
+
+    FAULT INJECTION: the hand-written model tag this replaced (`"region-existing-egress|" +
+    member_hash`) fails the last assertion -- the key did not move with the code.
+    """
     a = replace(_grid_block(0, 0, 3, 3, block_id="a", points=no_buildings(UTM)),
                 source_content_hash="srcA")
     b = replace(_grid_block(3, 0, 3, 3, block_id="b", points=no_buildings(UTM)),
                 source_content_hash="srcB")
     rb = region_block([a, b])
+    assert rb.identity is not None
+    assert region_block([a, b]).identity == rb.identity                 # deterministic
 
-    assert rb.identity is not None                       # cacheable: the tagged else-branch ran
-    member_hash = hashlib.sha256(
-        "|".join(sorted(f"{blk.source_content_hash}:{blk.block_id}" for blk in (a, b))).encode()
-    ).hexdigest()
-    # NOT the bare member hash the old (perimeter-egress) model keyed on ...
-    assert rb.source_content_hash != member_hash
-    # ... but exactly that member hash folded under the existing-egress version tag.
-    assert rb.source_content_hash == hashlib.sha256(
-        ("region-existing-egress|" + member_hash).encode()).hexdigest()
-    assert region_block([a, b]).source_content_hash == rb.source_content_hash   # deterministic
+    real, own = _closure_paths, _module_file("reblock.region")
+
+    def edited(m: str) -> frozenset[Path]:
+        return real(m) - {own} if m == "reblock.region" else real(m)
+
+    closure_hash.cache_clear()                   # memoized: it would hand back the unedited hash
+    try:
+        with mock.patch.object(derive_graph, "_closure_paths", edited):
+            moved = region_block([a, b]).identity
+    finally:
+        closure_hash.cache_clear()
+    assert moved != rb.identity
 
 
 def test_region_block_unions_member_building_points() -> None:
