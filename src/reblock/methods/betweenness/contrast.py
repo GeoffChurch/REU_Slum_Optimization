@@ -3,8 +3,12 @@
 RawShare  -- egress and all-pairs counts, each as a share of its own maximum, summed.
 PriorDeviance -- the signed root Poisson deviance of the observed total against the no-buildings
                  prior: what the buildings CHANNEL, with centrality and street approaches divided
-                 out. Ranks worse as a picture, generates better (it spreads the network to the
-                 detours the buildings force)."""
+                 out. Ranks worse as a picture. As a generator it led RawShare on 220 small blocks
+                 (fields at 0.5 m, every home a source: Lens A +0.032 over clearance against
+                 +0.022), but on 36 large blocks at the shipped settings RawShare led (Lens A
+                 0.856 against 0.841; on the frontier in 6 blocks against 1). Why it helps where
+                 it does -- spreading the network to the detours the buildings force -- is
+                 untested."""
 from __future__ import annotations
 
 from collections.abc import Hashable

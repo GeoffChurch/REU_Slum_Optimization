@@ -352,12 +352,15 @@ In the production run, the all-pairs pass is 111.7 s of the observed time and 79
 ## What this settles, and what it does not
 **Settled:**
 - **The field is worth something as a prior.**
-  - Every generator arm beats clearance on both lenses: on the 220 small Cape Town blocks, and on
-    the 36 large ones in both cities.
-  - The looped arms beat clearance_looped the same way.
-  - `NoDesire` ties clearance, so the gain comes from the field.
+  - On the 220 small Cape Town blocks, both tree arms (raw and contrast) beat clearance on both
+    lenses, with fields at 0.5 m and every home a source. The looped arms were not run there.
+  - On the 36 large blocks, at the shipped 1 m and 400 sampled sources, all four generator arms
+    beat clearance on both lenses, in both cities.
+  - On the same 36, the looped arms beat clearance_looped on both lenses, in both cities.
+  - On the 220, `NoDesire` ties clearance, so the gain comes from the field.
 - **A field that finds lanes is not the same as one that generates well.** The contrast ranks worse
-  and generates better. The oracle reproduces footpaths and does not improve permeability.
+  and, on the 220 small blocks, generates better; on the 36 large ones raw leads it. The oracle
+  reproduces footpaths and does not improve permeability.
 - **Repelled betweenness does not pile into pinch points,** the failure July rejected betweenness
   for.
 - **The soft path field is dead,** for a structural reason (extensive path entropy), not a tuning
