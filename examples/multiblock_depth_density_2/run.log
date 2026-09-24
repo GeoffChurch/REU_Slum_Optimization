@@ -1,8 +1,0 @@
-[__main__][INFO] screen: flagged 1000/83192 blocks (0.9s)
-[__main__][INFO] region built: 15 blocks / 5629 parcels (22.5s)
-[scripts.compare_budgets][INFO] reblocked clearance_looped: 181 segments, 5788 m (16.3s)
-[scripts.compare_budgets][INFO] reblocked euclidean_grid: 57 segments, 5277 m (0.3s)
-[scripts.compare_budgets][INFO] reblocked cycle_native: 518 segments, 14981 m (1116.8s)
-[scripts.compare_budgets][INFO] reblocked greedy_arterial_access_displacement: 124 segments, 7148 m (1683.7s)
-[scripts.compare_budgets][INFO] lens/frontier curves computed for 4 methods (50.7s)
-wrote examples/multiblock_depth_density_2: 15 blocks / 5629 parcels; flagged 1000/83192; 4 methods; README + maps + lens CSVs

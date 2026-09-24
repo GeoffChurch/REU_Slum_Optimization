@@ -1060,16 +1060,14 @@ def test_the_hero_method_is_the_explore_pages_pinned_method() -> None:
 def test_a_single_block_region_is_never_called_grown_into_blocks(
         monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A seed over the growth budget stays alone, and the captions said "a 1-block region" and
-    "1 blocks" over it. Both regions' wording comes from `region_members`."""
+    "1 blocks" over it. The wording comes from `region_members`."""
     import scripts.gen_site_pages as gsp
     monkeypatch.setattr(gsp, "DOCS", tmp_path / "docs")
     monkeypatch.setattr(gsp, "ASSETS", tmp_path / "docs" / "assets")
-    one = gsp._region_section(_region_dir(tmp_path / "one", members=1), "x", "## h\n",
-                              seed_rank=0, show_screen=False)
+    one = gsp._region_section(_region_dir(tmp_path / "one", members=1), "x", "## h\n")
     assert "single block of 4,321 parcels" in one and "the seed alone" in one
     assert "1-block" not in one and "1 blocks" not in one
-    many = gsp._region_section(_region_dir(tmp_path / "many", members=7), "y", "## h\n",
-                               seed_rank=1, show_screen=False)
+    many = gsp._region_section(_region_dir(tmp_path / "many", members=7), "y", "## h\n")
     assert "7-block region of 4,321 parcels" in many and "7 blocks, 4,321 parcels" in many
 
 

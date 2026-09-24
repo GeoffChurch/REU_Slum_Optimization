@@ -58,10 +58,6 @@ MB = ROOT / "examples" / "multiblock_depth_density"
 # (`scripts/_example_block.PINNED_METHOD`), so both pages open on the same roads. Spelled here
 # because this module is stdlib-only; a test holds the two equal.
 HERO_METHOD = "clearance_looped"
-# The SECOND region from the SAME screen (`seed_rank: 1`). Shown because the shipped metric
-# is a product of depth and density, and a single region cannot exhibit a trade-off between
-# two factors -- see `_region_section`.
-MB2 = ROOT / "examples" / "multiblock_depth_density_2"
 OUTPUTS = ROOT / "outputs"
 BAKEOFF = ROOT / "examples" / "screen-bakeoff"
 NAIROBI = ROOT / "examples" / "nairobi"
@@ -812,21 +808,8 @@ def _screen_map_figure() -> str:
 
 
 
-def _region_section(root: Path, asset_dir: str, heading: str, *,
-                    seed_rank: int, show_screen: bool) -> str:
-    """One settlement-scale region: its numbers, figures, lenses and per-method renders.
-
-    Parameterised over the region directory because the site shows TWO regions from ONE
-    screen -- `depth_density` at `seed_rank` 0 and 1 -- and that pair is the point. Rank 0
-    is a single block 24 rings deep at 115 buildings/ha; rank 1 is a fifteen-block
-    settlement a third as deep at 159/ha. The shipped metric is a PRODUCT of depth and
-    density, and one region cannot exhibit a trade-off between two factors, so a reader
-    shown only the first has no way to see what the second factor buys.
-
-    `show_screen` is False for the second region. The screen figure is a property of the
-    SCREEN, which both regions share; rendering it twice would assert two screens where
-    there is one. Everything else is per-region and is rendered for both.
-    """
+def _region_section(root: Path, asset_dir: str, heading: str) -> str:
+    """One settlement-scale region: its numbers, figures, lenses and per-method renders."""
     parts: list[str] = []
     meta_path = root / "meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.exists() else {}
@@ -839,11 +822,6 @@ def _region_section(root: Path, asset_dir: str, heading: str, *,
         # "screened N of M" read as a finding about how many Cape Town blocks are informal. It
         # is not: `flagged` is the pre-filter budget (`proxy_keep_n`), because the `depth`
         # variant's gate keeps every survivor. Say what it is.
-        # `meta['metric']` is the VARIANT name, not the metric: `gen_example` falls back to
-        # the variant when a config sets no `metric_name`, so the rank-1 variant reports
-        # "depth_density_2" -- which is not a metric. Both regions are ranked by the SAME
-        # `depth_density`. Only rank 0 names it; rank 1 says "the same screen", which is both
-        # true and the thing the pair exists to show.
         parcels = _num(meta["region_parcels"])
         depth = f"{meta['region_mean_depth']:.1f} rings"
         density = f"{meta['region_mean_density_per_ha']:.0f} buildings/ha"
@@ -852,17 +830,11 @@ def _region_section(root: Path, asset_dir: str, heading: str, *,
                  if _single_block(meta)
                  else f"into a **{meta['region_members']}-block region of {parcels} parcels** — "
                       f"mean depth {depth}, mean density {density}.\n")
-        if seed_rank == 0:
-            parts.append(f"The `{meta['metric']}` metric tessellated and peeled the top "
-                         f"**{_num(meta['flagged'])}** blocks of "
-                         f"{_num(meta['total_blocks'])} by the cheap proxy, then grew the "
-                         f"top-scoring block (`{meta['deepest_block']}`, peel depth "
-                         f"{meta['deepest_depth']:.0f}) " + grown)
-        else:
-            parts.append(f"The same screen over the same "
-                         f"**{_num(meta['flagged'])}** peeled blocks, one rank down: its "
-                         f"**rank-{seed_rank}** block (`{meta['deepest_block']}`, peel depth "
-                         f"{meta['deepest_depth']:.0f}) grown " + grown)
+        parts.append(f"The `{meta['metric']}` metric tessellated and peeled the top "
+                     f"**{_num(meta['flagged'])}** blocks of "
+                     f"{_num(meta['total_blocks'])} by the cheap proxy, then grew the "
+                     f"top-scoring block (`{meta['deepest_block']}`, peel depth "
+                     f"{meta['deepest_depth']:.0f}) " + grown)
         if meta.get("maps_url"):
             parts.append(f"[See the region on Google Maps]({meta['maps_url']})\n")
         scene_captions = {
@@ -871,15 +843,13 @@ def _region_section(root: Path, asset_dir: str, heading: str, *,
                            f"{_num(meta['total_blocks'])}, coloured by true peel depth. The count "
                            f"is the pre-filter budget, not an estimate of how many blocks are "
                            f"informal."),
-            # "from its seed", not "from the top-scoring block": the rank-1 region shares this.
             "region.png": ("The region grown from its seed block: " +
                            (f"the seed alone, {_num(meta['region_parcels'])} parcels."
                             if _single_block(meta)
                             else f"{meta['region_members']} blocks, "
                                  f"{_num(meta['region_parcels'])} parcels.")),
         }
-        scenes = ("screen.png", "region.png") if show_screen else ("region.png",)
-        for name in scenes:
+        for name in ("screen.png", "region.png"):
             url = _copy_asset(root / name, asset_dir)
             if url:
                 parts.append(_figure(url, name.removesuffix(".png"), scene_captions[name]))
@@ -1422,16 +1392,9 @@ def gen_benchmark_section() -> str:
                 parts.append(_figure(url, curve.stem, _curve_caption(curve.stem)))
 
     # ---- part 2: settlement scale -------------------------------------------------------
-    # One screen, two regions; `_region_section` explains why only the first draws the
-    # screen figure.
     parts.append(_region_section(
         MB, "multiblock_depth_density",
-        "## Settlement scale: the `multiblock_depth_density` region\n",
-        seed_rank=0, show_screen=True))
-    parts.append(_region_section(
-        MB2, "multiblock_depth_density_2",
-        "## The same screen, one rank down: the `multiblock_depth_density_2` region\n",
-        seed_rank=1, show_screen=False))
+        "## Settlement scale: the `multiblock_depth_density` region\n"))
     return "\n".join(parts)
 
 

@@ -75,7 +75,6 @@ def test_regenerate_dry_run_lists_all(tmp_path):
     # ONE entry point for every variant -- a variant differs only in its conf/example/<name>.yaml
     assert "gen_example depth_density" in out               # capetown
     assert "gen_example depth_density nairobi" in out       # nairobi
-    assert "gen_example depth_density_2" in out             # capetown, rank-1 seed
     assert "gen_example method_comparison" in out           # the pinned single-block flagship
     assert "gen_method_comparison" not in out, "the second entry point must be gone"
 

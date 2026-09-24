@@ -47,16 +47,9 @@ block_ids: null
 # method combined. It was 89% of a 62-minute bake.
 methods: [clearance_looped, euclidean_grid, cycle_native, greedy_arterial_access_displacement]
 max_blocks: 1
-# Which block of the screen's ranking seeds the region. 0 = the top-scoring block.
-# `depth_density_2` is the same variant at rank 1, so the site shows two regions from ONE screen
-# rather than one region from each of several screens -- the screens are compared in the bake-off,
-# which grades all four over the whole corpus and runs no methods at all.
-seed_rank: 0
-# 5,000 Open Buildings footprints, not 3,000. Region growth budgets on the SAME count the screen
-# ranks on since 2026-09-19, and the rank-0 seed `ZAF.9.3.1_1_5810` alone holds 6,619 -- so any
-# budget below that yields a one-block region. 5,000 keeps rank 0 as a single very deep block and
-# lets rank 1 (`_41785`, 638 footprints) grow into a 15-block settlement, which is a more
-# informative pair than forcing both to the same size.
+# 5,000 Open Buildings footprints. Region growth budgets on the SAME count the screen ranks on,
+# and Cape Town's seed `ZAF.9.3.1_1_5810` alone holds 6,619, so its region is that single, very
+# deep block. Nairobi's seed is under the budget and grows into a multi-block region.
 region_builder: {max_buildings: 5000}
 all_methods:
   clearance_looped:

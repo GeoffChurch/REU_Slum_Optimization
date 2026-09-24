@@ -51,7 +51,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # `conf/example/density_compactness.yaml`, which were kept for that purpose.
 REGIONS = [
     ("capetown/depth_density", "examples/multiblock_depth_density"),
-    ("capetown/depth_density_2", "examples/multiblock_depth_density_2"),
     ("nairobi/depth_density", "examples/nairobi/multiblock_depth_density"),
     ("one-block", "examples/method-comparison"),
 ]
