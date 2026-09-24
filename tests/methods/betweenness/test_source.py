@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-import dataclasses
+from collections.abc import Callable
+from dataclasses import replace
+from typing import cast
 
 import pytest
 
@@ -15,14 +17,9 @@ BASE = BetweennessDesire(res_m=1.0, r0_m=2.0, bend_lambda=50.0, max_sources=400,
                          quantiles=Q, contrast=RawShare(), workers=1)
 
 
-def _src(**kw: object) -> BetweennessDesire:
-    return dataclasses.replace(BASE, **kw)  # type: ignore[arg-type]
-
-
 def test_it_is_a_desire_line_source_with_one_group_per_quantile() -> None:
-    src = _src()
-    assert isinstance(src, DesireLineSource)
-    field = src.desire_field(_block_1808())
+    assert isinstance(BASE, DesireLineSource)
+    field = BASE.desire_field(_block_1808())
     assert len(field.groups) == len(Q)
     assert all(abs(g.weight - 1 / len(Q)) < 1e-12 for g in field.groups)
     assert field.n_lines > 0
@@ -31,31 +28,60 @@ def test_it_is_a_desire_line_source_with_one_group_per_quantile() -> None:
     assert lens[0] > lens[-1] > 0
 
 
+def test_ridges_lie_within_the_block_boundary() -> None:
+    b = _block_1808()
+    boundary = b.boundary.buffer(1e-6)
+    field = BASE.desire_field(b)
+    assert field.groups
+    for g in field.groups:
+        assert all(boundary.contains(line) for line in g.lines.geometry)
+
+
 def test_a_block_with_no_buildings_has_no_desire_instead_of_crashing() -> None:
     b = _block_1808()
     # source_content_hash=None too: under the real hash this is a block production can never
     # construct (same content address, different buildings), and derive() would serve it the
     # real block's cached counts instead of recomputing on empty buildings.
-    empty = dataclasses.replace(b, building_geometries=no_buildings(b.crs),
-                                source_content_hash=None)
-    assert _src().desire_field(empty).groups == ()
+    empty = replace(b, building_geometries=no_buildings(b.crs), source_content_hash=None)
+    assert BASE.desire_field(empty).groups == ()
 
 
 def test_the_contrast_strategy_runs_too() -> None:
-    assert len(_src(contrast=PriorDeviance(floor=1e-9)).desire_field(_block_1808()).groups) == 5
+    deviance = replace(BASE, contrast=PriorDeviance(floor=1e-9))
+    b = _block_1808()
+    field = deviance.desire_field(b)
+    assert len(field.groups) == 5
+    # a desire_field that ignored self.contrast would return the raw-share ridges here too.
+    base_top = float(BASE.desire_field(b).groups[0].lines.length.sum())
+    deviance_top = float(field.groups[0].lines.length.sum())
+    assert base_top != deviance_top
 
 
 def test_identity_covers_every_setting_but_workers() -> None:
-    a = _src()
-    assert a.identity == _src(workers=8).identity
-    for change in (dict(res_m=0.5), dict(r0_m=1.0), dict(bend_lambda=5.0), dict(max_sources=100),
-                   dict(seed=1), dict(quantiles=(0.8, 0.9)), dict(contrast=PriorDeviance(1e-9))):
-        assert _src(**change).identity != a.identity, change
+    assert replace(BASE, workers=8).identity == BASE.identity
+    for other in (replace(BASE, res_m=0.5), replace(BASE, r0_m=1.0),
+                 replace(BASE, bend_lambda=5.0), replace(BASE, max_sources=100),
+                 replace(BASE, seed=1), replace(BASE, quantiles=(0.8, 0.9)),
+                 replace(BASE, contrast=PriorDeviance(floor=1e-9))):
+        assert other.identity != BASE.identity, other
 
 
-@pytest.mark.parametrize("bad", [dict(quantiles=()), dict(quantiles=(0.9, 0.8)),
-                                 dict(quantiles=(0.0, 0.5)), dict(res_m=0.0),
-                                 dict(max_sources=0), dict(workers=0)])
-def test_invalid_settings_raise_at_construction(bad: dict[str, object]) -> None:
+_BAD: tuple[Callable[[], BetweennessDesire], ...] = (
+    lambda: replace(BASE, quantiles=()),
+    lambda: replace(BASE, quantiles=(0.9, 0.8)),
+    lambda: replace(BASE, quantiles=(0.8, 0.8)),
+    lambda: replace(BASE, quantiles=(0.0, 0.5)),
+    lambda: replace(BASE, quantiles=(0.5, 1.0)),
+    lambda: replace(BASE, quantiles=cast("tuple[float, ...]", [0.8, 0.9])),
+    lambda: replace(BASE, res_m=0.0),
+    lambda: replace(BASE, r0_m=-1.0),
+    lambda: replace(BASE, bend_lambda=-1.0),
+    lambda: replace(BASE, max_sources=0),
+    lambda: replace(BASE, workers=0),
+)
+
+
+@pytest.mark.parametrize("make", _BAD)
+def test_invalid_settings_raise_at_construction(make: Callable[[], BetweennessDesire]) -> None:
     with pytest.raises(ValueError):
-        _src(**bad)
+        make()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Hashable
 from dataclasses import dataclass
+from itertools import pairwise
 
 from reblock.contracts import Block
 from reblock.derive_graph import config_identity
@@ -32,8 +33,9 @@ class BetweennessDesire:
     def __post_init__(self) -> None:
         q = self.quantiles
         if not (isinstance(q, tuple) and q and all(0.0 < a < 1.0 for a in q)
-                and all(a < b for a, b in zip(q, q[1:], strict=False))):
-            raise ValueError(f"quantiles must be a non-empty increasing tuple in (0, 1), got {q!r}")
+                and all(a < b for a, b in pairwise(q))):
+            raise ValueError(
+                f"quantiles must be a non-empty strictly increasing tuple in (0, 1), got {q!r}")
         if self.res_m <= 0 or self.r0_m < 0 or self.bend_lambda < 0:
             raise ValueError(f"res_m > 0, r0_m >= 0, bend_lambda >= 0 required: {self!r}")
         if self.max_sources < 1 or self.workers < 1:
