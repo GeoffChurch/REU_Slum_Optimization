@@ -8,6 +8,7 @@ import pytest
 
 from reblock.derive_graph import closure_hash
 from reblock.methods.betweenness import BetweennessDesire, PriorDeviance, RawShare
+from reblock.methods.betweenness.contrast import FieldContrast
 from reblock.methods.desire_lines import DesireLineSource
 from tests.block_fixtures import no_buildings
 from tests.scoring_fixtures import _block_1808
@@ -16,6 +17,11 @@ Q = (0.80, 0.85, 0.90, 0.95, 0.98)
 
 BASE = BetweennessDesire(res_m=1.0, r0_m=2.0, bend_lambda=50.0, max_sources=400, seed=0,
                          quantiles=Q, contrast=RawShare(), workers=1)
+
+# Static conformance: mypy checks these assignments against each Protocol's signatures, which
+# the runtime `isinstance` below cannot (it only checks that the names exist).
+_s: DesireLineSource = BASE
+_c: FieldContrast = RawShare()
 
 
 def test_it_is_a_desire_line_source_with_one_group_per_quantile() -> None:
