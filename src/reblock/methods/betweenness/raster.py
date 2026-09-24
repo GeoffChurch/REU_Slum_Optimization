@@ -1,5 +1,6 @@
 """The block as a raster: which cells are inside, how far each is from the nearest building, and
-how far from the street. Every betweenness count is computed on this grid."""
+how far from the street (`Block.streets`, the egress every method routes to). Every betweenness
+count is computed on this grid."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -20,7 +21,7 @@ class BlockRaster:
     res: float
     inside: NDArray[np.bool_]                 # (ny, nx): cell centre inside the block
     clearance: NDArray[np.float64]            # metres to the nearest building outline; 0 inside
-    edge: NDArray[np.float64]                 # metres to the block boundary (the street)
+    edge: NDArray[np.float64]                 # metres to the nearest of `Block.streets`
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -52,8 +53,13 @@ class BlockRaster:
             clearance[inside] = d
         elif len(pts):
             clearance[inside] = np.inf            # no buildings: every inside cell is free
+        # The street is `Block.streets`, not the outline: a region block's inter-block streets
+        # run through its interior, and a shapefile block's hole rings are not streets. A min
+        # over the geometries, so a single-street block (a kblock face, `[poly.boundary]`) gets
+        # exactly the distance to that one geometry.
         edge = np.full(X.shape, np.nan)
-        edge[inside] = shapely.distance(pts, block.boundary.boundary)
+        streets = np.asarray(block.streets.geometry)
+        edge[inside] = np.min([shapely.distance(pts, g) for g in streets], axis=0)
         return cls(x0=float(xs[0]), y0=float(ys[0]), res=res, inside=inside,
                    clearance=clearance, edge=edge)
 

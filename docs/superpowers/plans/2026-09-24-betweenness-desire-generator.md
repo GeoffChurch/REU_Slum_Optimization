@@ -35,7 +35,9 @@ Measured on real footprints (all numbers paired medians vs clearance, 95% bootst
 The exact algorithm (every constant below was the measured configuration; do not "improve" any):
 - Raster at `res_m`: cell centres `x0 + j*res`, `y0 + i*res` from the boundary's bounds; `inside` by
   `contains_xy`; `clearance` = exact distance to the nearest building OUTLINE (0 inside one; NaN
-  outside the block); `edge` = distance to the block boundary. `free = inside & clearance > 0`.
+  outside the block); `edge` = distance to the nearest of `Block.streets` (the egress every method
+  routes to: on a kblock face that is the outline, on a region block it adds the inter-block
+  streets). `free = inside & clearance > 0`.
 - Homes: one per building, the free cell nearest its anchor (`block.buildings.xy`), by cKDTree.
 - Cost density `c = 1 + (r0 / max(clearance, res/2))^2` on free cells, 50 in buildings. 16 lattice
   directions (king + knight); state = (cell, bucket between adjacent directions); inside a bucket the
