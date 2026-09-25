@@ -379,5 +379,4 @@ class ResistanceLPReblocker:
                          f":k{self.chunks}"),
             method="resistance_lp",
             params={**params, "substrate": self.substrate.tag,
-                    "max_displacement": self.max_displacement, "chunks": self.chunks},
-            block_identity=block.identity if self.identity is not None else None)
+                    "max_displacement": self.max_displacement, "chunks": self.chunks})

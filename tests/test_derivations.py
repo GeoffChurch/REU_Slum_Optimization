@@ -84,7 +84,7 @@ def test_before_and_after_use_distinct_keys(monkeypatch: pytest.MonkeyPatch) -> 
 
     block = _grid_block("deadbeef")
     prop = Proposal(block_id="g", crs=UTM, roads=None, edges=None, proposal_id="peel",
-                    method="peel", params={}, block_identity=block.identity)
+                    method="peel", params={})
     D.access_before(block)
     D.access_after(block, prop)                   # distinct fn.identity -> distinct key
     assert box["n"] == 2

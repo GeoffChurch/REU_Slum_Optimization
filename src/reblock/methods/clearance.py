@@ -271,15 +271,9 @@ class ClearanceReblocker:
             max_roads=self.max_roads, radii=radii)
         pid = (f"clearance:{self.substrate.tag}:r{self.repulsion:g}"
                f":d{self.depth_target}:mr{self.max_roads}")
-        # An uncacheable substrate (PrebuiltSubstrate: identity None, fixed tag "prebuilt") gives
-        # ad-hoc roads proposal_id can't distinguish, so its eval must bypass the cache too: drop
-        # block_identity to None -> Proposal.identity None -> uncacheable end-to-end (matching
-        # Method.identity, already None). Else two prebuilt graphs collide on the eval-cache key.
-        cacheable = self.substrate.identity is not None
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
             roads=with_width(roads, self.road_width_m),
             proposal_id=pid, method="clearance",
             params={**params, "substrate": self.substrate.tag, "repulsion": self.repulsion,
-                    "depth_target": self.depth_target},
-            block_identity=block.identity if cacheable else None)
+                    "depth_target": self.depth_target})

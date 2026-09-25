@@ -44,7 +44,7 @@ def _grid_block(n: int) -> Block:
 def _proposal(roads: gpd.GeoDataFrame | None) -> Proposal:
     """A proposal of `roads` on `_grid_block`'s block "g"; uncached, as nothing here derives."""
     return Proposal(block_id="g", crs=UTM, roads=roads, edges=None, proposal_id="test",
-                    method="test", params={}, block_identity=None)
+                    method="test", params={})
 
 
 def test_member_ids_parses_region_id_and_passes_through_plain_id() -> None:
@@ -124,8 +124,7 @@ def test_render_results_names_each_after_by_its_proposal_id(tmp_path: Path) -> N
     block = _grid_block(3)
     results = [
         Result(block=block, proposal=Proposal(block_id="g", crs=UTM, roads=None, edges=None,
-                                              proposal_id=pid, method="peel", params={},
-                                              block_identity=None),
+                                              proposal_id=pid, method="peel", params={}),
                metrics=(_kc(block),))
         for pid in ("peel_tol0.5", "peel_tol1.0")
     ]

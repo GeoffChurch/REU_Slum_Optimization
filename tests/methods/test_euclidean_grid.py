@@ -207,7 +207,6 @@ def test_basic_grid_generation_on_rectangular_block() -> None:
     assert proposal.method == "euclidean_grid"
     assert proposal.proposal_id.startswith("euclidean_grid:")
     assert proposal.crs == block.crs
-    assert proposal.block_identity == block.identity
     assert "density_hotspot" not in proposal.params  # seek_density=False -> no hotspot recorded
 
 

@@ -69,10 +69,9 @@ class GreedyArterialReblocker:
             max_anchors=self.max_anchors)
         realizer_name = type(self.realizer).__name__
         objective_name, cost_name = type(self.objective).__name__, type(self.cost).__name__
-        # `proposal_id` is half of `Proposal.identity`, which keys the eval caches
-        # (`access_after`, `geometric_after`), so it must tell apart every configuration `identity`
-        # does -- a readable head, then a digest of the whole identity (it also names render
-        # files, which a raw repr would fill with spaces and brackets).
+        # `proposal_id` names render files, so it tells apart every configuration `identity` does
+        # -- a readable head, then a digest of the whole identity (a raw repr would fill the file
+        # names with spaces and brackets).
         digest = hashlib.sha256(repr(self.identity).encode()).hexdigest()[:10]
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
@@ -82,5 +81,4 @@ class GreedyArterialReblocker:
             params={"segments": len(roads), "realizer": realizer_name,
                     "objective": objective_name,
                     "cost": cost_name, "road_width_m": self.road_width_m,
-                    "engine": type(self.engine).__name__},
-            block_identity=block.identity)
+                    "engine": type(self.engine).__name__})

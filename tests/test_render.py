@@ -69,7 +69,7 @@ def _connector_proposal(block: Block) -> Proposal:
     connector = with_width(gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM),
                            DEFAULT_ROAD_WIDTH_M)
     return Proposal(block_id=block.block_id, crs=UTM, roads=connector, method="topology",
-                    edges=None, proposal_id="topology", params={}, block_identity=None)
+                    edges=None, proposal_id="topology", params={})
 
 
 def _field_block(n: int = 3, cell: float = 20.0) -> Block:
@@ -154,7 +154,7 @@ def test_render_after_with_no_roads_adds_no_extra_artist() -> None:
     # there's nothing new to draw) shouldn't add a roads collection either.
     block = _grid_block(3)
     proposal = Proposal(block_id=block.block_id, crs=UTM, roads=None, method="topology",
-                        edges=None, proposal_id="topology", params={}, block_identity=None)
+                        edges=None, proposal_id="topology", params={})
     layers = _layers(block, None)
 
     fig_before = render_before(block, layers, vmax=2)
@@ -418,7 +418,7 @@ def test_displaced_buildings_are_outlines_carrying_their_share(tmp_path):
         gpd.GeoDataFrame(geometry=[LineString([(0, 10), (20, 10)])], crs=crs),
         DEFAULT_ROAD_WIDTH_M)
     prop = Proposal(block_id="b", crs=crs, roads=roads, edges=None,
-                    proposal_id="x", method="m", params={"corridor_m": 1.0}, block_identity=None)
+                    proposal_id="x", method="m", params={"corridor_m": 1.0})
     disp = _displaced_buildings(block, prop)
     assert "c" in disp.columns and "radius" not in disp.columns
     assert set(disp.geometry.geom_type) == {"Polygon"}          # outlines, not points

@@ -31,7 +31,7 @@ def _block() -> Block:
 @pytest.fixture
 def _proposal() -> Proposal:
     return Proposal(block_id="b", crs=UTM, roads=None, edges=None, proposal_id="test",
-                    method="test", params={}, block_identity=None)
+                    method="test", params={})
 
 
 def test_block_constructs() -> None:
@@ -80,14 +80,14 @@ def test_metrics_and_proposal_records() -> None:
                 values={"k_before": 3.0, "k_after": 1.0}, fields={})
     assert m.values["k_before"] == 3.0
     assert Proposal(block_id="x", crs=UTM, roads=None, edges=None, proposal_id="topology",
-                    method="topology", params={}, block_identity=None).roads is None
+                    method="topology", params={}).roads is None
 
 
 def test_proposal_rejects_an_empty_id() -> None:
-    # An empty id would share its cache key and its rendered filename with every other empty one.
+    # An empty id would share its rendered filename with every other empty one.
     with pytest.raises(ValueError, match="proposal_id"):
         Proposal(block_id="x", crs=UTM, roads=None, edges=None, proposal_id="",
-                 method="topology", params={}, block_identity=("h", "x"))
+                 method="topology", params={})
 
 
 def test_metrics_carries_per_parcel_fields() -> None:

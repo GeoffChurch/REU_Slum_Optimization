@@ -265,37 +265,16 @@ def test_propose_metadata_and_identity() -> None:
     p = m.propose(_column_block_with_buildings(4))
     assert p.method == "clearance"
     assert p.proposal_id == "clearance:grid:r2:d3:mr50"
-    assert p.block_identity == _column_block_with_buildings(4).identity
     assert p.params["repulsion"] == 2.0 and p.params["depth_target"] == 3
 
 
-def test_distinct_repulsions_get_distinct_proposal_identity() -> None:
-    # so access_after / geometric_after (keyed on the proposal) never collide across the knob
-    # (res=0.5: the fixture's unit-width column needs a sub-1 grid resolution, like every other
-    # _column_block_with_buildings test here -- the shipped res=1.5 is for real meter-scale blocks.
-    # source_content_hash gives the block a non-None identity, matching the real (Source-loaded)
-    # blocks this collision concern is actually about -- Block.identity is None for the bare
-    # synthetic fixture, which would make Proposal.identity collapse to None regardless of
-    # proposal_id and the second assertion vacuously fail.)
-    block = replace(_column_block_with_buildings(6), source_content_hash="test-hash")
+def test_distinct_repulsions_get_distinct_labels() -> None:
+    # The label names render files, so the knob must show in it. (res=0.5: the fixture's
+    # unit-width column needs a sub-1 grid resolution.)
+    block = _column_block_with_buildings(6)
     a = replace(CLEARANCE, repulsion=-6.0, substrate=GridSubstrate(res=0.5)).propose(block)
     b = replace(CLEARANCE, repulsion=6.0, substrate=GridSubstrate(res=0.5)).propose(block)
     assert a.proposal_id != b.proposal_id
-    assert a.identity != b.identity
-
-
-def test_prebuilt_substrate_makes_proposal_uncacheable_even_on_a_real_block() -> None:
-    # A PrebuiltSubstrate is an ad-hoc graph (identity None, fixed tag "prebuilt"), so proposal_id
-    # can't distinguish two prebuilt graphs -- its eval must bypass the cache too, else the second
-    # graph's metrics get served from the first's cache entry. Proposal.identity must be None even
-    # on a block with a real (Source) identity.
-    block = replace(_column_block_with_buildings(6), source_content_hash="test-hash")
-    assert block.identity is not None
-    graph = GridSubstrate(res=0.5).build(block)
-    method = replace(CLEARANCE, substrate=PrebuiltSubstrate(graph), depth_target=2)
-    proposal = method.propose(block)
-    assert method.identity is None       # Method already uncacheable (substrate identity None)
-    assert proposal.identity is None     # ...and now the Proposal too (block_identity dropped)
 
 
 def test_propose_achieves_target_on_real_block() -> None:

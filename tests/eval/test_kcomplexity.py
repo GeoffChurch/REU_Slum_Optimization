@@ -44,7 +44,7 @@ def test_delta_k_from_interior_connector() -> None:
     block = _grid_block(3)
     connector = gpd.GeoDataFrame(geometry=[LineString([(1, 0), (1, 1)])], crs=UTM)
     proposal = Proposal(block_id="g", crs=UTM, roads=connector, method="topology",
-                        edges=None, proposal_id="topology", params={}, block_identity=None)
+                        edges=None, proposal_id="topology", params={})
 
     metrics = KComplexityEval().score(block, proposal)
     v = metrics.values
@@ -67,7 +67,7 @@ def test_delta_k_with_nonzero_origin() -> None:
     block = _grid_block(3, ox=100.0, oy=200.0)
     connector = gpd.GeoDataFrame(geometry=[LineString([(101, 200), (101, 201)])], crs=UTM)
     proposal = Proposal(block_id="g", crs=UTM, roads=connector, method="topology",
-                        edges=None, proposal_id="topology", params={}, block_identity=None)
+                        edges=None, proposal_id="topology", params={})
 
     v = KComplexityEval().score(block, proposal).values
     assert v["k_before"] == 2
@@ -81,7 +81,7 @@ def test_no_roads_leaves_k_unchanged() -> None:
     # and added_road_length_m == 0. Uses roads=None (the empty-roads path).
     block = _grid_block(3)
     proposal = Proposal(block_id="g", crs=UTM, roads=None, method="topology",
-                        edges=None, proposal_id="topology", params={}, block_identity=None)
+                        edges=None, proposal_id="topology", params={})
 
     v = KComplexityEval().score(block, proposal).values
     assert v["k_after"] == v["k_before"]
@@ -104,7 +104,7 @@ def test_diagnostics_present_and_zero_for_no_roads() -> None:
     block = _grid5()
     empty = Proposal(block_id="g5", crs=UTM, roads=gpd.GeoDataFrame(geometry=[], crs=UTM),
                      method="none",
-                     edges=None, proposal_id="none", params={}, block_identity=None)
+                     edges=None, proposal_id="none", params={})
     m = KComplexityEval().score(block, empty)
     assert m.values["n_road_components"] == 0.0
     assert m.values["connected_road_frac"] == 0.0
@@ -116,7 +116,7 @@ def test_geometric_access_emitted() -> None:
     # field in .fields, indexed like the peel fields.
     block = _grid5()
     proposal = Proposal(block_id="g5", crs=UTM, roads=None, method="none",
-                        edges=None, proposal_id="none", params={}, block_identity=None)
+                        edges=None, proposal_id="none", params={})
 
     m = KComplexityEval().score(block, proposal)
     assert m.values["geometric_access_max_m"] >= 0.0
@@ -128,7 +128,7 @@ def test_weakdual_k_pins_old_behavior() -> None:
     # Brelsford/literature comparability, and emits no per-parcel fields.
     block = _grid_block(3)
     proposal = Proposal(block_id="g", crs=UTM, roads=None, method="topology",
-                        edges=None, proposal_id="topology", params={}, block_identity=None)
+                        edges=None, proposal_id="topology", params={})
 
     metrics = WeakDualKEval().score(block, proposal)
     assert metrics.eval == "weakdual_k"

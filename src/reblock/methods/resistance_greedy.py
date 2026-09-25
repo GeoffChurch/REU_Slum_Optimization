@@ -281,5 +281,4 @@ class ResistanceGreedyReblocker:
             roads=with_width(roads, self.road_width_m),
             proposal_id=pid, method="resistance_greedy",
             params={**params, "substrate": self.substrate.tag,
-                    "shortlist": self.shortlist},
-            block_identity=block.identity if self.identity is not None else None)
+                    "shortlist": self.shortlist})

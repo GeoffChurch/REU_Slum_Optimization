@@ -188,5 +188,4 @@ class FlowPathsReblocker:
             proposal_id=pid, method="flow_paths",
             params={"roads": len(roads), "substrate": self.substrate.tag,
                     "destination": self.destination, "iterations": self.iterations,
-                    "reinforcement": self.reinforcement, "flow_quantile": self.flow_quantile},
-            block_identity=block.identity if self.identity is not None else None)
+                    "reinforcement": self.reinforcement, "flow_quantile": self.flow_quantile})

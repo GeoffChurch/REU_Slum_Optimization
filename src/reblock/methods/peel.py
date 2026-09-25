@@ -84,5 +84,4 @@ class PeelReblocker:
         return Proposal(block_id=block.block_id, crs=block.crs,
                         roads=with_width(roads, self.road_width_m), edges=None,
                         proposal_id=f"peel_tol{self.tol}", method="peel",
-                        params={"unreachable": unreachable},
-                        block_identity=block.identity)
+                        params={"unreachable": unreachable})

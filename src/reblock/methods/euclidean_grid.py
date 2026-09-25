@@ -544,8 +544,7 @@ class EuclideanGridReblocker:
                f":phb{parcel_hug_buffer:g}:pbg{parcel_bridge_gap:g}")
         return Proposal(block_id=block.block_id, crs=block.crs, edges=None,
                         roads=with_width(roads, self.road_width_m),
-                        proposal_id=pid, method="euclidean_grid", params=params,
-                        block_identity=block.identity)
+                        proposal_id=pid, method="euclidean_grid", params=params)
 
     def _propose_follow_parcels(self, block: Block) -> Proposal:
         """Carve roads from the parcel fabric: select shared parcel-boundary edges by local density,
@@ -627,6 +626,5 @@ class EuclideanGridReblocker:
                f":cov{lo:g}-{hi:g}:g{gamma:g}:mc{min_component:g}")
         return Proposal(block_id=block.block_id, crs=block.crs, edges=None,
                         roads=with_width(roads, self.road_width_m),
-                        proposal_id=pid, method="euclidean_grid", params=params,
-                        block_identity=block.identity)
+                        proposal_id=pid, method="euclidean_grid", params=params)
     

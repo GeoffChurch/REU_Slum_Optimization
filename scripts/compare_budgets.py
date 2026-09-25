@@ -23,8 +23,8 @@ it three ways, all from that SAME reblock (no second propose):
 
 Both lenses render one after-heatmap per method, in BOTH colorings (access-depth via
 `KComplexityEval`'s `access_after`, and the permeability potential via
-`reblock.permeability.parcel_potentials`) -- re-scoring against the truncated road set via a
-`Proposal` with `block_identity=None` so the derive memo never hands back the untruncated depth.
+`reblock.permeability.parcel_potentials`) -- re-scoring against the truncated road set, which is
+its own cache entry because a `Proposal`'s identity is a hash of its roads.
 One before-heatmap per region, also in both colorings. One reblock-drainage GIF per method, over
 that method's LENS B prefix -- so every animation ends at the same benefit and the row can be read
 side by side (full build-outs terminate wherever each method's own stopping rule lands, which is
@@ -207,8 +207,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     kc_eval = KComplexityEval()
     frame = frame_bbox(block.parcels)
     no_roads = Proposal(block_id=block.block_id, crs=block.crs, roads=None, edges=None,
-                        proposal_id="no_roads", method="no_roads", params={},
-                        block_identity=None)
+                        proposal_id="no_roads", method="no_roads", params={})
     kc0 = kc_eval.score(block, no_roads)
     depth_vmax = int(kc0.fields["access_before"].max())
     fig = render_before(block, kc0.fields["access_before"], vmax=depth_vmax, field="depth",
@@ -255,7 +254,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
         perm_title = None if reached else "unreached"
 
         for prefix, tag, title_override in ((pa, "disp", disp_title), (pb, "perm", perm_title)):
-            truncated = replace(proposals[name], roads=prefix, block_identity=None)
+            truncated = replace(proposals[name], roads=prefix)
             kc = kc_eval.score(block, truncated)
             fig = render_after(block, truncated, kc.fields["access_after"], vmax=depth_vmax,
                                metrics=kc, field="depth", frame=frame,

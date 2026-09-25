@@ -28,8 +28,7 @@ def test_structure_eval_emits_the_basis() -> None:
     block = _grid_block(3)
     roads = gpd.GeoDataFrame(geometry=[LineString([(1.5, 0), (1.5, 3)])], crs=UTM)
     m = StructureEval().score(block, Proposal(block_id="g", crs=UTM, roads=roads, method="x",
-                                              edges=None, proposal_id="x", params={},
-                                              block_identity=None))
+                                              edges=None, proposal_id="x", params={}))
     for key in ("meshedness", "four_way_fraction", "dead_end_fraction", "n_crossings",
                 "n_dead_ends", "circuity", "throughput_ratio", "geometric_access_p95_m",
                 "added_road_length_per_parcel", "n_cross_block_streets"):

@@ -413,8 +413,6 @@ def test_identity_and_proposal_metadata() -> None:
     assert (replace(ARTERIAL, engine=replace(lazy, rescore_every=2)).identity
             != replace(ARTERIAL, engine=lazy).identity)
     assert replace(ARTERIAL, max_anchors=48).identity != m.identity
-    proposal = replace(ARTERIAL, objective=Directness()).propose(_grid_block(5))
-    assert proposal.block_identity == _grid_block(5).identity
 
 
 def test_road_width_splits_the_cache_key_under_every_cost() -> None:

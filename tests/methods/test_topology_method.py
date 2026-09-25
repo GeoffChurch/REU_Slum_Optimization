@@ -147,12 +147,6 @@ def test_partial_streets_yield_a_different_larger_proposal() -> None:
             != sorted(g.wkt for g in full.roads.geometry))
 
 
-def test_proposal_carries_block_identity() -> None:
-    block = _grid(3, hash_="deadbeef")
-    proposal = TOPOLOGY.propose(block)
-    assert proposal.block_identity == block.identity
-
-
 def test_identity_is_stable_per_params() -> None:
     assert TOPOLOGY.identity == TopologyMethod(alpha=2.0, seed=0,
                                                road_width_m=DEFAULT_ROAD_WIDTH_M).identity

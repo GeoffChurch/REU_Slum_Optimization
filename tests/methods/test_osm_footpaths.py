@@ -83,33 +83,27 @@ def test_identity_propagates_none_from_uncacheable_source() -> None:
     assert method.identity is None
 
 
-def test_cacheable_source_encodes_config_into_proposal_identity() -> None:
-    # A stable-snapshot source (real identity) on a block with a real identity yields a cacheable
-    # Proposal; two methods differing only in corridor_m must NOT collide in the eval cache.
+def test_configs_get_distinct_labels_and_method_identities() -> None:
+    # Two methods differing only in road width write distinct render files and key the propose
+    # memo apart. (Their proposals' identities are their roads -- here both empty, so equal.)
     block = _cacheable_block()
-    assert block.identity is not None
     src_a = _StubSource([], ident=("osm", ("path",), "abc"))
     src_b = _StubSource([], ident=("osm", ("path",), "abc"))
     prop_a = OsmFootpathsReblocker(source=src_a, road_width_m=6).propose(block)
     prop_b = OsmFootpathsReblocker(source=src_b, road_width_m=10).propose(block)
-    assert prop_a.identity is not None
-    assert prop_a.proposal_id != prop_b.proposal_id      # config encoded -> no eval-cache collision
-    assert prop_a.identity != prop_b.identity
+    assert prop_a.proposal_id != prop_b.proposal_id
     # the Method-level identity (the propose() memo key) is likewise distinct per config
     m_a = OsmFootpathsReblocker(source=src_a, road_width_m=6)
     m_b = OsmFootpathsReblocker(source=src_a, road_width_m=10)
     assert m_a.identity is not None and m_a.identity != m_b.identity
 
 
-def test_live_source_makes_proposal_uncacheable_even_on_a_real_block() -> None:
-    # A live source's roads can drift, so its eval must bypass the cache regardless of the block:
-    # Proposal.identity must be None even when block.identity is a real tuple.
-    block = _cacheable_block()
-    assert block.identity is not None
+def test_live_source_makes_the_method_uncacheable() -> None:
+    # A live source's roads can drift, so the propose memo must bypass it. Its proposals need no
+    # such care: their identity is their roads, so drifted roads are a different key.
     method = OsmFootpathsReblocker(source=_StubSource([], ident=None),
                                    road_width_m=DEFAULT_ROAD_WIDTH_M)
-    prop = method.propose(block)
-    assert prop.identity is None
+    assert method.identity is None
 
 
 def test_osm_footpaths_instantiates_from_compare_config() -> None:

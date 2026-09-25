@@ -118,5 +118,4 @@ class TopologyMethod:
         return Proposal(block_id=block.block_id, crs=block.crs,
                         roads=with_width(roads, self.road_width_m), edges=edges,
                         proposal_id=f"topology_a{self.alpha}_s{self.seed}",
-                        method="topology", params={"alpha": self.alpha, "seed": self.seed},
-                        block_identity=block.identity)
+                        method="topology", params={"alpha": self.alpha, "seed": self.seed})

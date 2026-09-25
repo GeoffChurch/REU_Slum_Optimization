@@ -379,9 +379,7 @@ class _FakeBase:
 def _base_proposal(block: Block, roads: gpd.GeoDataFrame, *,
                    proposal_id: str = "tree-base") -> Proposal:
     return Proposal(block_id=block.block_id, crs=block.crs, roads=roads, edges=None,
-                    proposal_id=proposal_id, method="tree",
-                    block_identity=("test", block.block_id),
-                    params={})
+                    proposal_id=proposal_id, method="tree", params={})
 
 
 # budget_frac large enough that budget_m (= budget_frac * base road length) never binds on any
@@ -496,8 +494,7 @@ def test_loop_closure_refiner_prior_bypasses_base_propose() -> None:
     unused_prop = Proposal(
         block_id=block.block_id, crs=block.crs,
         roads=gpd.GeoDataFrame(geometry=[], crs=block.crs), edges=None,
-        proposal_id="should-not-be-used", method="tree", params={},
-        block_identity=("test", block.block_id))
+        proposal_id="should-not-be-used", method="tree", params={})
     fake = _FakeBase(unused_prop)
     refiner = replace(LOOPS_AT_FIXTURE_SCALE, base=fake, budget_frac=_UNLIMITED_BUDGET_FRAC,
                       max_loops=5)
@@ -521,7 +518,7 @@ def test_loop_closure_refiner_roads_are_superset_of_base_roads() -> None:
 
 def test_loop_closure_refiner_identity_folds_in_base_identity() -> None:
     base_prop = Proposal(block_id="b", crs=UTM, roads=None, edges=None, proposal_id="fake",
-                         method="fake", params={}, block_identity=("t", "b"))
+                         method="fake", params={})
     # The base's identity is part of the refiner's: the same base keys the same, a different base
     # keys differently -- asserted by behaviour, not by the key's internal layout.
     ident = replace(LOOPS, base=_FakeBase(base_prop, ident=("fake", 1))).identity
@@ -532,7 +529,7 @@ def test_loop_closure_refiner_identity_folds_in_base_identity() -> None:
 
 def test_loop_closure_refiner_identity_none_when_base_identity_none() -> None:
     base_prop = Proposal(block_id="b", crs=UTM, roads=None, edges=None, proposal_id="fake",
-                         method="fake", params={}, block_identity=None)
+                         method="fake", params={})
     fake = _FakeBase(base_prop, ident=None)
     refiner = replace(LOOPS, base=fake)
     assert refiner.identity is None
@@ -540,7 +537,7 @@ def test_loop_closure_refiner_identity_none_when_base_identity_none() -> None:
 
 def test_loop_closure_refiner_identity_changes_with_params() -> None:
     base_prop = Proposal(block_id="b", crs=UTM, roads=None, edges=None, proposal_id="fake",
-                         method="fake", params={}, block_identity=("t", "b"))
+                         method="fake", params={})
     fake = _FakeBase(base_prop, ident=("fake", 1))
     r1 = replace(LOOPS, base=fake, budget_frac=0.10)
     r2 = replace(LOOPS, base=fake, budget_frac=0.20)

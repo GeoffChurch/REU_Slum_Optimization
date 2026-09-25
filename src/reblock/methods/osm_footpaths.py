@@ -170,19 +170,12 @@ class OsmFootpathsReblocker:
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior  # accepted for Method conformance; routing is block-only
         roads = block_footpaths(self.source, block)
-        # proposal_id encodes the config so Proposal.identity distinguishes configs on a block
-        # (mirrors clearance) -- else two OsmFootpaths configs collide in the eval cache. The
-        # source identity is hashed (distinct-per-config yet filesystem-clean -- it feeds render
-        # filenames); road_width_m stays literal for legibility. A live (uncacheable) source has
-        # drift-prone roads, so its eval must bypass too: block_identity -> None -> uncacheable.
-        if self.source.identity is not None:
-            src_hash = hashlib.sha256(str(self.source.identity).encode()).hexdigest()[:8]
-            pid, block_identity = f"osm_footpaths:w{self.road_width_m:g}:{src_hash}", block.identity
-        else:
-            pid, block_identity = "osm_footpaths", None
+        # The label names render files, so it tells configurations apart: the source identity is
+        # hashed (filesystem-clean), road_width_m stays literal for legibility.
+        source = self.source.identity
+        src = "" if source is None else f":{hashlib.sha256(str(source).encode()).hexdigest()[:8]}"
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
             roads=with_width(roads, self.road_width_m),
-            proposal_id=pid, method="osm_footpaths",
-            params={"segments": len(roads), "road_width_m": self.road_width_m},
-            block_identity=block_identity)
+            proposal_id=f"osm_footpaths:w{self.road_width_m:g}{src}", method="osm_footpaths",
+            params={"segments": len(roads), "road_width_m": self.road_width_m})

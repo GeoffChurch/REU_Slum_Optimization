@@ -46,5 +46,4 @@ class DonorTransplantReblocker:
             block_id=block.block_id, crs=block.crs, edges=None, roads=roads, proposal_id=pid,
             method="donor_transplant",
             params={"donor": best.donor.block_id, "gw_dist": best.gw_dist, "donors": len(fits),
-                    "road_width_m": self.road_width_m},
-            block_identity=block.identity if identity is not None else None)
+                    "road_width_m": self.road_width_m})

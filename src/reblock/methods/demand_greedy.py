@@ -124,9 +124,8 @@ class DemandGreedyReblocker:
                                       gamma=self.gamma)
         roads, params = greedy_drainage(block, graph, weights, depth_target=self.depth_target,
                                         max_roads=self.max_roads)
-        # The source is hashed into the id the way `osm_footpaths` hashes its own: two sources on
-        # one block propose different roads, and the eval cache keys on (block, proposal_id). A
-        # live source's roads can drift, so its proposal is uncacheable instead (below).
+        # The source is hashed into the label the way `osm_footpaths` hashes its own: the label
+        # names render files, and two sources on one block propose different roads.
         source = self.desire_source.identity
         src = "" if source is None else f":{hashlib.sha256(str(source).encode()).hexdigest()[:8]}"
         pid = (f"demand_greedy{src}:{self.substrate.tag}:b{self.buffer_m:g}:e{self.eps:g}"
@@ -137,5 +136,4 @@ class DemandGreedyReblocker:
             proposal_id=pid, method="demand_greedy",
             params={**params, "substrate": self.substrate.tag, "buffer_m": self.buffer_m,
                     "eps": self.eps, "gamma": self.gamma, "depth_target": self.depth_target,
-                    "demand_segments": field.n_lines, "demand_groups": len(field.groups)},
-            block_identity=block.identity if self.identity is not None else None)
+                    "demand_segments": field.n_lines, "demand_groups": len(field.groups)})

@@ -290,5 +290,4 @@ class LoopClosureRefiner:
                     "max_loops": self.max_loops,
                     "min_loop_len_m": self.min_loop_len_m, "search_radius_m": self.search_radius_m,
                     "snap_lam": self.snap_lam, "max_candidates": self.max_candidates,
-                    "n_added": len(all_roads) - len(base_roads)},
-            block_identity=base_prop.block_identity)
+                    "n_added": len(all_roads) - len(base_roads)})

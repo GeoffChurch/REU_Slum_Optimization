@@ -206,9 +206,9 @@ class CycleNativeReblocker:
         out = with_width(roads, self.road_width_m)
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=out, edges=None,
-            # max_cycles is in the id because it CHANGES the road set whenever it binds -- two runs
-            # differing only in the cap must not be mistaken for the same proposal.
-            proposal_id=f"cycle_native:d{self.max_displacement:g}:mc{self.max_cycles}",
+            # The label names render files, so it carries what changes the road set: the
+            # substrate, and max_cycles whenever it binds.
+            proposal_id=(f"cycle_native:{self.substrate.tag}:d{self.max_displacement:g}"
+                         f":mc{self.max_cycles}"),
             method="cycle_native",
-            params={"roads": len(out), "road_width_m": self.road_width_m},
-            block_identity=block.identity)
+            params={"roads": len(out), "road_width_m": self.road_width_m})

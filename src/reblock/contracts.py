@@ -1,12 +1,15 @@
 """Canonical typed contracts — the waist every layer adapts to."""
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+import pandas as pd
+import shapely
 from geopandas import GeoDataFrame
 from pyproj import CRS
 from shapely.geometry import MultiPolygon, Polygon
@@ -14,8 +17,6 @@ from shapely.geometry import MultiPolygon, Polygon
 from reblock.buildings import Extents, tier_identity
 
 if TYPE_CHECKING:
-    import pandas as pd
-
     from reblock.data.counts import BuildingCount
     from reblock.metric import BlockMetric
 
@@ -97,22 +98,37 @@ class Proposal:
     crs: CRS
     roads: GeoDataFrame | None
     edges: GeoDataFrame | None
-    proposal_id: str
+    proposal_id: str       # a display label: it names rendered files and log lines
     method: str
     params: Mapping[str, object]
-    block_identity: Hashable | None
 
     def __post_init__(self) -> None:
-        # It keys the derivation cache beside `block_identity` and names the rendered file, so an
-        # empty one would collide with every other empty one in both places.
+        # It names the rendered file, so an empty one would collide with every other empty one.
         if not self.proposal_id:
             raise ValueError("Proposal.proposal_id must be non-empty")
 
-    @property
-    def identity(self) -> tuple[Hashable, str] | None:
-        """(block_identity, proposal_id) -- proposal_id encodes method+params, so
-        it distinguishes proposals for a block. None when block_identity is unknown."""
-        return (self.block_identity, self.proposal_id) if self.block_identity is not None else None
+    @cached_property
+    def identity(self) -> str:
+        """A content hash of the roads: the part of a Proposal that a derivation over
+        `(block, proposal)` reads. The block rides the key as its own input.
+
+        Not a hand-written id. One per method had to tell apart every configuration the method's
+        own identity does, and `cycle_native`'s omitted its substrate; a truncated road set
+        (`replace(p, roads=prefix)`) kept its id and had to switch the cache off by hand. Content
+        makes every different road set a different key and lets equal ones share one.
+        """
+        h = hashlib.sha256(self.crs.to_wkt().encode())
+        if self.roads is not None:
+            h.update(repr([(str(n), str(t)) for n, t in self.roads.dtypes.items()]).encode())
+            geometry = self.roads.geometry.name
+            for name in self.roads.columns:
+                if name == geometry:
+                    for wkb in shapely.to_wkb(self.roads.geometry.to_numpy()):    # exact bytes
+                        h.update(len(wkb).to_bytes(8, "little") + wkb)
+                else:
+                    h.update(pd.util.hash_pandas_object(self.roads[name], index=False)
+                             .to_numpy().tobytes())
+        return h.hexdigest()
 
 
 @dataclass(frozen=True)
