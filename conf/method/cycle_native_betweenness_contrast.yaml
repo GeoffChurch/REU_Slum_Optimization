@@ -1,0 +1,23 @@
+# cycle_native with its candidate loops routed along curvature-aware betweenness ridges
+# (prior-deviance contrast): the substrate's edges are shortened along the ridges
+# (reblock.methods.desire_substrate), and cycle_native still scores every candidate loop by
+# permeability gain per unit displacement. Against plain cycle_native: on 36 large blocks Lens A
+# +0.012, Lens B -0.005, in both cities; on small blocks Lens A +0.010 with Lens B tied (the 220,
+# and fresh Cape Town; borderline in Nairobi) -- never worse on either lens in any sample. On the
+# (Lens A, Lens B) frontier in 14 of 36 large blocks; greedy_arterial still leads Lens B (+0.005).
+# gamma 0.5, gentler than demand_greedy's 1: measured better than 1, 2 and 0.25.
+# Gives up road and runtime: x1.22 the road at the Lens A cut, and the field's observed and prior
+# passes (Bloekombos: ~200 s at 40 workers) on top of cycle_native's own time x1.18.
+_target_: reblock.methods.cycle_native.CycleNativeReblocker
+substrate:
+  _target_: reblock.methods.desire_substrate.DesireWarpedSubstrate
+  base: ${substrate}
+  desire_source: ${betweenness.contrast}
+  buffer_m: 3.0
+  eps: 0.1
+  gamma: 0.5
+max_displacement: 0.20
+max_cycles: 400
+shortlist: 8
+params: ${permeability.params}
+road_width_m: 7.0

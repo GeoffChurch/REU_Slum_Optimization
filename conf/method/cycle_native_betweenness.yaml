@@ -1,0 +1,22 @@
+# cycle_native with its candidate loops routed along curvature-aware betweenness ridges (raw
+# counts): the substrate's edges are shortened along the ridges (reblock.methods.desire_substrate),
+# and cycle_native still scores every candidate loop by permeability gain per unit displacement.
+# Against plain cycle_native: on 36 large blocks Lens A +0.012, Lens B -0.006 (Nairobi's intervals
+# touch 0); on small blocks Lens A +0.009 on the 220 but a tie on held-out Cape Town and Nairobi.
+# On the (Lens A, Lens B) frontier in 13 of 36 large blocks. Kept beside the contrast preset for
+# runtime: it needs no prior pass. gamma 0.5: measured better than 1, 2 and 0.25.
+# Gives up road and runtime: x1.20 the road at the Lens A cut, and the field's observed pass
+# (Bloekombos: ~116 s at 40 workers) on top of cycle_native's own time x1.16.
+_target_: reblock.methods.cycle_native.CycleNativeReblocker
+substrate:
+  _target_: reblock.methods.desire_substrate.DesireWarpedSubstrate
+  base: ${substrate}
+  desire_source: ${betweenness.raw}
+  buffer_m: 3.0
+  eps: 0.1
+  gamma: 0.5
+max_displacement: 0.20
+max_cycles: 400
+shortlist: 8
+params: ${permeability.params}
+road_width_m: 7.0

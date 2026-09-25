@@ -207,8 +207,37 @@ arms. None beat the shipped raw preset on both lenses with an interval excluding
 
 The two borderline settings (alpha = 1, gamma = 2) tie the shipped raw preset on both held-out
 samples, every interval including 0. The all-pairs half of the field is not diluting it, which
-was the seductive reason to expect egress-only to win. The field's own settings (r0, lambda) need
-new fields and were not swept.
+was the seductive reason to expect egress-only to win.
+
+### The field's own settings are flat too
+One at a time from the shipped point (r0 2 m, lambda 50), new fields at 1 m, on the 220, paired
+against the shipped raw preset (Lens A n = 220, Lens B n = 217):
+
+| setting | Lens A | Lens B |
+|---|---|---|
+| lambda 10 | +0.000 [+0.000, +0.000] | +0.000, a tie |
+| lambda 200 | +0.000 [-0.003, +0.000] | +0.000, a tie |
+| r0 1 m, raw | -0.006 [-0.013, -0.003] | +0.002 [+0.001, +0.005] |
+| r0 1 m, contrast | -0.012 [-0.018, -0.006] | +0.003 |
+| r0 3.5 m (the 7 m road's half-width) | +0.000 [-0.001, +0.007] | a tie |
+
+The bend penalty does not matter for generation anywhere from 10 to 200; the ranking study chose
+50 for pictures. Weaker repulsion is worse on both lenses. Lens A rises with r0 up to 2 m and is
+flat to 3.5 m; beyond 3.5 m is *untested*.
+
+### Parallel duplication
+The field is computed once, on the roadless block, so a builder could chase a ridge an earlier road
+already serves. Measured on the 220: a road counts as duplicated when another road of the same
+network lies within 15 m of it but is not reachable within 30 m along the network.
+- **Whole networks:** the generators duplicate 0.12-0.14 of their length against clearance's 0.04
+  (+0.065 and +0.086 [+0.048, +0.097], higher in 77-79% of blocks).
+- **Where Lens A scores** (cut to 10% displacement): the excess is +7 m per block [+4, +11] of about
+  190 m, no more than cycle_native's own excess (+12 m).
+- **It costs nothing measured:** excess duplication does not track a smaller margin over clearance
+  (every correlation within +-0.14).
+
+So recomputing the field after the first roads has little to fix on small blocks. The 36 large
+blocks are unchecked.
 
 ### Bloekombos
 The owner judged 40972 (263 parcels) too small to be robust. So the flagship is the spine block,
@@ -303,6 +332,58 @@ out of every arm run:
 - **It is usually the middle point,** between cycle_native (the highest Lens A) and greedy_arterial
   (the lowest Lens B).
 
+## Routing cycle_native along the field
+**The mechanism.** `DesireWarpedSubstrate` (`reblock.methods.desire_substrate`) shortens the
+substrate's edges along the ridges with demand_greedy's attraction, `length / (eps + demand)^gamma`
+(buffer 3 m, eps 0.1). cycle_native routes the two legs of each candidate loop in that metric and
+still chooses among the candidates by permeability gain per unit displacement. Its deepest-first
+shortlist ranks parcels by the warped distance too.
+
+### 36 large blocks
+Paired against plain cycle_native (medians 0.896 / 0.025); Lens A at budget, n = 35-36:
+
+| field, gamma | Lens A | Lens B | road at the Lens A cut | cycle_native's own time |
+|---|---|---|---|---|
+| raw, 0.5 | +0.012 [+0.008, +0.016], 83% | -0.006 [-0.008, -0.003], 78% | x1.20 | x1.16 |
+| contrast, 0.5 | +0.012 [+0.007, +0.018], 92% | -0.005 [-0.008, -0.003], 83% | x1.22 | x1.18 |
+| raw, 1 | +0.005 [+0.002, +0.012], 69% | -0.005 [-0.007, -0.004], 81% | x1.31 | x1.65 |
+| contrast, 1 | +0.008 [+0.002, +0.013], 67% | -0.004 [-0.006, -0.002], 75% | x1.27 | x1.62 |
+| raw, 0.25 | +0.008 [+0.005, +0.014] | -0.005 [-0.006, -0.003] | x1.22 | x1.51 |
+| contrast, 0.25 | +0.013 [+0.009, +0.018] | -0.005 [-0.007, -0.003] | x1.17 | x1.48 |
+| contrast, 2 | -0.017 [-0.030, -0.007] | -0.001, interval includes 0 | x1.31 | x1.80 |
+
+- **The attraction wants to be gentle.** gamma 0.5 against 1: Lens A +0.004 (borderline), Lens B a
+  tie, and less road and time. 0.25 ties 1 and is slower than 0.5; 2 is worse.
+- **By city:** in Cape Town (n = 24) every gamma-0.5 arm wins on both lenses. In Nairobi (n = 12)
+  the contrast at 0.5 wins on both (Lens A +0.017 [+0.005, +0.027], 12 of 12); raw's intervals touch 0.
+- **Against greedy_arterial:** a tie on Lens A (n = 16); it still trails on Lens B by +0.005
+  (greedy_arterial better in about 70% of blocks).
+- **Against the looped generators:** raw at 0.5 against looped raw, Lens A +0.026 and Lens B -0.003;
+  contrast at 0.5 against looped contrast, +0.041 and -0.005.
+- **The frontier**, over the study lineup plus every desire-routed arm: greedy_arterial 23 of 36,
+  contrast at 0.5 14, raw at 0.5 13, the looped generators 2 each, plain cycle_native 1. Some
+  desire-routed arm is on it in 33 of 36 (Cape Town 21 of 24, Nairobi 12 of 12).
+
+### Small blocks
+Paired against plain cycle_native. Every desire arm reaches the Lens A budget on 99-100% of blocks.
+
+| sample | field, gamma | Lens A | Lens B |
+|---|---|---|---|
+| the 220 | contrast, 0.5 | +0.010 [+0.004, +0.015] | a tie |
+| the 220 | raw, 0.5 | +0.009 [+0.003, +0.015] | a tie |
+| the 220 | raw, 1 | a tie | +0.005 [+0.002, +0.009], worse |
+| fresh Cape Town (220) | contrast, 0.5 | +0.011 [+0.002, +0.015] | a tie |
+| fresh Cape Town | raw, 0.5 | a tie | a tie |
+| fresh Cape Town | raw, 1 | -0.008 [-0.019, -0.003], worse | +0.004 [+0.003, +0.007], worse |
+| Nairobi (104) | contrast, 0.5 | +0.009 [+0.000, +0.016], borderline | a tie |
+| Nairobi | raw, 0.5 | a tie | a tie |
+
+- **The contrast at 0.5 is never worse than plain cycle_native** on either lens in any sample.
+- **Raw at gamma 1 is a regression on small blocks,** which is one reason gamma 1 does not ship.
+- **Plain cycle_native already beats both tree generators on both lenses here** (the 220: Lens A
+  +0.044 and +0.043, Lens B -0.011 and -0.014), laying about 1.5 times the road at the Lens A cut
+  (288 m against 190-193 m).
+
 ## Not `flow_paths`
 [`flow-paths-mimicry`](2026-07-29-flow-paths-mimicry.md) (2026-07-29) also routes all pairs, on the
 substrate, with reinforcement. But it keeps the busiest edges *as the roads*. It was refuted as a
@@ -334,15 +415,27 @@ large-block setting:
 `workers: ${cpu_count:}` forks one process per core for the all-pairs pass. A runner that already
 forks per block must set `workers=1`.
 
-**Shipped: four presets,** each a measured operating point. All four are also in
-`compare_config`'s `all_methods`, and none is on a published example lineup.
+**Shipped: `reblock.methods.desire_substrate.DesireWarpedSubstrate`,** a substrate Strategy that
+wraps any substrate and shortens its edges along a desire field. Not for `demand_greedy`, which
+would apply the attraction twice.
 
-| preset | builder | desire | frontier blocks (of 36) |
+**Shipped: six presets,** each a measured operating point. All six are also in `compare_config`'s
+`all_methods`, and none is on a published example lineup.
+
+| preset | method | desire | why it is on the frontier |
 |---|---|---|---|
-| `betweenness_tree` | `DemandGreedyReblocker` | raw | 6 |
-| `betweenness_tree_contrast` | `DemandGreedyReblocker` | contrast | 1; ties raw on the 220 small blocks, leads it on fresh Cape Town |
-| `betweenness_looped` | `LoopClosureRefiner` around it | raw | 11 |
-| `betweenness_looped_contrast` | `LoopClosureRefiner` around it | contrast | 8 |
+| `cycle_native_betweenness_contrast` | cycle_native on the warped substrate, gamma 0.5 | contrast | beats plain cycle_native on both lenses (large), Lens A with B tied (small) |
+| `cycle_native_betweenness` | cycle_native on the warped substrate, gamma 0.5 | raw | the same on large blocks; no prior pass, so cheaper |
+| `betweenness_tree` | `DemandGreedyReblocker` | raw | road: about 190 m at the Lens A cut against cycle_native's 288 m |
+| `betweenness_tree_contrast` | `DemandGreedyReblocker` | contrast | road, as above; leads raw on fresh Cape Town |
+| `betweenness_looped` | `LoopClosureRefiner` around the tree | raw | road: 6.7 km against about 9 km for the warped cycle_native (large) |
+| `betweenness_looped_contrast` | `LoopClosureRefiner` around the tree | contrast | road, as above |
+
+gamma 1 is not shipped: gamma 0.5 beats it on Lens A, ties it on Lens B, and costs less road and
+time; raw at gamma 1 is also worse than plain cycle_native on small blocks.
+
+The two cycle_native presets, built from `compare_config`, reproduce the research arms exactly:
+every lens value equal on 8 of the 220 blocks (51 to 733 buildings), both fields.
 
 The looped presets carry the region-scale loop settings that the frontier study measured, which is
 explore's clearance_looped tuning: budget_frac 0.30, min_loop_len_m 40, search_radius_m 60, and so
@@ -390,23 +483,22 @@ In the production run, the all-pairs pass is 111.7 s of the observed time and 79
 - **A field that finds lanes is not the same as one that generates well.** The contrast ranks
   worse, yet generates as well as raw on small blocks (better on fresh Cape Town); on the 36 large
   ones raw leads it. The oracle reproduces footpaths and does not improve permeability.
-- **The builder and post-processing settings are at a flat optimum** (the sweep above).
+- **The builder and post-processing settings are at a flat optimum** (the sweep above), and so
+  are the field's own (lambda from 10 to 200; r0 1 m is worse, 3.5 m ties).
+- **The field lifts cycle_native, the Lens A leader,** routed along it at gamma 0.5: both lenses on
+  36 large blocks, Lens A with Lens B tied on small ones. It moves the top of the frontier: some
+  desire-routed arm is on it in 33 of 36 large blocks.
 - **Repelled betweenness does not pile into pinch points,** the failure July rejected betweenness
   for.
 - **The soft path field is dead,** for a structural reason (extensive path entropy), not a tuning
   one.
 
 **Not settled:**
-- **It does not reach the top of the frontier.**
-  - cycle_native has the best Lens A. It leads the looped arms by 0.015-0.022, and the generator
-    is better in only 8-11% of blocks.
-  - greedy_arterial has the best Lens B. It is better in 83-94% of blocks, although it reaches the
-    Lens A budget on only 16 of 36.
-  - The generator is not dominated either: it is the frontier's middle point in 17 of 36 blocks.
-- **Road length and runtime were not frontier axes.** clearance_looped lays half the road (3.3 km
-  against the looped generators' 6.7 km), and clearance runs in seconds against the field's minutes. Neither is dominated
-  on those axes, so both stay.
-- **The field's own settings were chosen for pictures, not generation.** lambda 50 and r0 2 m
-  won the ranking study against Microsoft's lanes; neither has been swept as a generator.
+- **greedy_arterial still has the best Lens B,** by +0.005 over the desire-routed cycle_native.
+  The field cannot reach it the same way: it does not route over a substrate, so the field would
+  need another entry point (its realizer, or its candidate set). *Untested.*
+- **Road length and runtime were not frontier axes.** The tree and looped generators stay on the
+  frontier by road alone; clearance and clearance_looped by road and runtime.
+- **r0 beyond 3.5 m, and duplication on large blocks,** are unmeasured.
 - **Large-block cores have only an imagery-derived ground truth** (Microsoft), and the core-picture
   result on it is one block.

@@ -1,8 +1,9 @@
-# demand_greedy routed toward curvature-aware betweenness ridges (raw counts). Frontier point:
-# on the (Lens A, Lens B) frontier in 6 of 36 large blocks. Beats clearance on both lenses on 220
-# small blocks (Lens A +0.040, Lens B -0.009), on held-out Cape Town and Nairobi blocks, and on the
-# 36 large ones -- all at these settings. Same builder settings as conf/method/demand_greedy.yaml;
-# a sweep of them and of the field's post-processing found no better point.
+# demand_greedy routed toward curvature-aware betweenness ridges (raw counts). Beats clearance on
+# both lenses on 220 small blocks (Lens A +0.040, Lens B -0.009), on held-out Cape Town and Nairobi
+# blocks, and on 36 large ones -- all at these settings. Same builder settings as
+# conf/method/demand_greedy.yaml; a sweep of them and of the field's post-processing found no better
+# point. Plain cycle_native beats it on both lenses, large blocks and small (Lens A +0.044 on the
+# 220): it stays on the frontier for road, ~190 m at the Lens A cut against cycle_native's ~288 m.
 # Gives up runtime: the field takes minutes on a large block where clearance takes seconds
 # (Bloekombos: ~116 s at 40 workers, the observed pass alone).
 _target_: reblock.methods.demand_greedy.DemandGreedyReblocker

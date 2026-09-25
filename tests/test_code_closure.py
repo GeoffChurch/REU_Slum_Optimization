@@ -23,6 +23,7 @@ from reblock.contracts import Block, Proposal, Source
 from reblock.data.kblock import KblockSource
 from reblock.data.shapefile import ShapefileSource
 from reblock.derive_graph import Identified, _closure_paths, _module_file, closure_hash
+from reblock.methods.desire_substrate import DesireWarpedSubstrate
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from tests.data.test_kblock_source import DJI_BLD, DJI_BLOCKS
@@ -144,7 +145,11 @@ class _Proposes(Protocol):
 
 # Strategies a Method holds as a FIELD whose own identity leads with their closure hash, so that
 # closure rides the Method's key. Credited below only while the hash is actually there.
-SELF_HASHED_FIELDS: tuple[Identified, ...] = (BETWEENNESS,)
+SELF_HASHED_FIELDS: tuple[Identified, ...] = (
+    BETWEENNESS,
+    DesireWarpedSubstrate(base=ChordSubstrate(), desire_source=BETWEENNESS, buffer_m=3.0,
+                          eps=0.1, gamma=1.0),
+)
 
 
 def _leads_with_its_own_closure_hash(strategy: Identified) -> bool:

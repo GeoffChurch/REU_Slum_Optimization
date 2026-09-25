@@ -26,7 +26,11 @@ from reblock.derive.access import STREET_TOL
 class RoutingGraph:
     """A built substrate: node coords `pts` (M,2), symmetric COO edges `rows`/`cols` (each
     undirected edge stored both ways) with lengths `edist`, and `net_tol` (a node within this of
-    a street both seeds the network and gates the final street-snap)."""
+    a street both seeds the network and gates the final street-snap).
+
+    `edist` is the metric methods ROUTE in: Euclidean, unless a substrate warps it
+    (`desire_substrate.DesireWarpedSubstrate`). No method reads it as the length of what it
+    builds -- that comes from the road geometry."""
 
     pts: NDArray[np.float64]
     rows: NDArray[np.int64]
