@@ -1136,6 +1136,20 @@ METHODS = [
       "reads as a strong second to the LP rather than as the different thing it is.",
       idea="the cycle, not the spur — bridgeless by construction",
       mc_key="cycle_native", mb_key="cycle_native", conf="cycle_native"),
+    M("cycle_native_betweenness_contrast", "Loop Network (desire-routed)",
+      "The Loop Network, with each candidate loop routed along the lanes people would walk. "
+      "Before any road is placed, every home's best walking route — to the street, and to every "
+      "other home — is traced through the gaps between buildings, with routes that pay for "
+      "turning and keep their distance from walls. Where many routes run, beyond what the same "
+      "block with its buildings removed would send there, the ground is a desire line.\n\n"
+      "The routing grid is then made cheaper along those lines, so the two paths of every "
+      "candidate loop bend toward them. What gets built is still the Loop Network's choice — "
+      "each loop is scored by permeability gain per home displaced — only the shape of the "
+      "candidates follows the lanes. The pull is deliberately gentle: a stronger one drags roads "
+      "off the best loops.",
+      idea="the Loop Network, its loops bent toward where people would walk",
+      mc_key="cycle_native_betweenness_contrast", mb_key="cycle_native_betweenness_contrast",
+      conf="cycle_native_betweenness_contrast"),
     M("topology", "Topology",
       "The prior art: a whole-graph reblocker that solves the block in one shot rather than adding "
       "roads greedily. It is **single-block only** — a multi-block region gives it a disconnected "

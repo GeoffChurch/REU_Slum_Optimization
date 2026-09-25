@@ -3,6 +3,7 @@ topology,212.0,0.1013,0.723506,0.728075,True
 clearance,191.0,0.1069,0.729381,0.790348,True
 clearance_looped,176.9,0.1034,0.739663,0.673067,True
 cycle_native,335.3,0.1050,0.880271,0.856772,True
+cycle_native_betweenness_contrast,379.7,0.1023,0.91105,0.847431,True
 resistance_lp,438.5,0.1006,0.911884,0.903477,True
 euclidean_grid,217.5,0.1299,0.784837,0.70109,True
 greedy_arterial_access_displacement,492.8,0.1017,0.909532,0.927348,True

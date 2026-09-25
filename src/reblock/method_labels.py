@@ -18,6 +18,7 @@ FRIENDLY_METHOD_NAMES = {
     "resistance_greedy": "Direct Objective",
     "resistance_lp": "Direct Objective (LP)",
     "cycle_native": "Loop Network",
+    "cycle_native_betweenness_contrast": "Loop Network (desire-routed)",
     "flow_paths": "Worn Paths",
     "flow_paths_noreinforce": "Worn Paths (no feedback)",
 }

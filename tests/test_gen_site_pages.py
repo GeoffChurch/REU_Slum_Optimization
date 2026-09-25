@@ -102,7 +102,7 @@ def test_published_method_count_is_generated_not_typed() -> None:
     # is used in prose -- e.g. a comment explaining what the kwarg does -- and silently miscounts.
     published = len(re.findall(r'^    M\("[a-z_]+"', src, flags=re.M)) - len(
         re.findall(r'M\("[a-z_]+"[^)]*?published=False', src, flags=re.S))
-    assert published == 10, f"expected 10 published methods, registry says {published}"
+    assert published == 11, f"expected 11 published methods, registry says {published}"
     intro = (ROOT / "docs" / "_partials" / "intro.md").read_text(encoding="utf-8")
     assert "<!-- METHODCOUNT -->" in intro
     # Every word _COUNT_WORDS could produce, both cases -- not a hand-picked subset. A hardcoded

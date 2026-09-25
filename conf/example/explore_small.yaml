@@ -42,5 +42,6 @@ block_ids: [["ZAF.9.3.1_1_40972"]]
 # Exactly `explore.yaml`'s list and order. The point of this fixture is that it differs from the
 # shipped variant ONLY in which block it pins, so a parity test passing here means the baker is
 # right about the pipeline rather than about one block's data.
-methods: [clearance_looped, euclidean_grid, cycle_native, greedy_arterial_access_displacement]
+methods: [clearance_looped, euclidean_grid, cycle_native, cycle_native_betweenness_contrast,
+          greedy_arterial_access_displacement]
 max_blocks: 1

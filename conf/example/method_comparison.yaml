@@ -31,5 +31,6 @@ block_ids: [["ZAF.9.3.1_1_40972"]]
   # resistance_lp's 0.746) and 3rd of 8 on permeability (0.708 vs 0.778). Its `repulsion`-cost twin
   # is NOT included -- 5th and 4th on the two axes, so it does not earn a slot.
   # Note it is ~65x slower than resistance_lp (37.7s vs 0.6s median per block).
-methods: [topology, clearance, clearance_looped, cycle_native, resistance_lp, euclidean_grid, greedy_arterial_access_displacement]
+methods: [topology, clearance, clearance_looped, cycle_native, cycle_native_betweenness_contrast,
+          resistance_lp, euclidean_grid, greedy_arterial_access_displacement]
 max_blocks: 1

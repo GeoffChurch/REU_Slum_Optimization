@@ -10,7 +10,7 @@
 # this block's street seam disconnects it too. Repinning `method_comparison` here would therefore
 # have deleted the one method it exists for, and cost 7.5 minutes per attempt to discover it.
 #
-# So topology keeps the method-comparison page and this variant runs the five methods that DO
+# So topology keeps the method-comparison page and this variant runs the methods that DO
 # scale -- exactly `depth_density`'s list, which is why every one of them is already cached on
 # this block from that variant's own regeneration. `clearance` is omitted despite running here
 # fine (2.8 s, 400 roads): `clearance_looped` is its loop-closing refinement and supersedes it on
@@ -61,7 +61,8 @@ block_ids: [["ZAF.9.3.1_1_5810"]]
 # variant deliberately bakes no second copy. Re-ordering here alone re-colours every curve in
 # the figure while leaving both method SETS identical, which is the exact drift that test
 # exists to catch, and it caught it.
-methods: [clearance_looped, euclidean_grid, cycle_native, greedy_arterial_access_displacement]
+methods: [clearance_looped, euclidean_grid, cycle_native, cycle_native_betweenness_contrast,
+          greedy_arterial_access_displacement]
 max_blocks: 1
 
 # The REGION-SCALE method tuning, copied from `depth_density.yaml` because this is the same block

@@ -52,9 +52,9 @@ def test_pin_is_declared_once() -> None:
 
 
 def test_example_method_names_includes_osm_footpaths() -> None:
-    """`conf/example/explore.yaml` declares five methods; `osm_footpaths` -- the real as-built
+    """`conf/example/explore.yaml` declares its methods; `osm_footpaths` -- the real as-built
     informal network, injected from a committed OSM snapshot exactly as
-    scripts/gen_example.py:175-182 injects it -- is the sixth, and the reference the whole
+    scripts/gen_example.py:175-182 injects it -- is one more, and the reference the whole
     comparison is measured against, not a competitor. A loader that only reads the declared list
     silently returns five; this is the guard against exactly that.
 
@@ -71,6 +71,6 @@ def test_example_method_names_includes_osm_footpaths() -> None:
 
     names = example_method_names()
     assert set(names) == {
-        "clearance_looped", "euclidean_grid", "cycle_native",
+        "clearance_looped", "euclidean_grid", "cycle_native", "cycle_native_betweenness_contrast",
         "greedy_arterial_access_displacement", "osm_footpaths",
     }

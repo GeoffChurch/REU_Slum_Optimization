@@ -45,7 +45,8 @@ block_ids: null
 # The second reason is cost, and it is not small: the frontier bundle solves permeability once per
 # SEGMENT, so 5,617 segments is ~5,618 solves at ~590 ms = ~55 min, against ~7 min for every other
 # method combined. It was 89% of a 62-minute bake.
-methods: [clearance_looped, euclidean_grid, cycle_native, greedy_arterial_access_displacement]
+methods: [clearance_looped, euclidean_grid, cycle_native, cycle_native_betweenness_contrast,
+          greedy_arterial_access_displacement]
 max_blocks: 1
 # 5,000 Open Buildings footprints. Region growth budgets on the SAME count the screen ranks on,
 # and Cape Town's seed `ZAF.9.3.1_1_5810` alone holds 6,619, so its region is that single, very

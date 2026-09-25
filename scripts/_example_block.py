@@ -43,7 +43,7 @@ PINNED_METHOD = "clearance_looped"
 # The TEST fixture: the same pipeline on a 263-parcel block. Parity tests pass this rather than
 # re-deriving the shipped 6,619-parcel artifact, which MEASURED at 2,882 s of a 2,895 s test --
 # `tests/conftest.py` gives every session a cold `REBLOCK_CACHE_DIR` by design, so nothing is
-# cached across runs and every method is re-proposed. Same five methods, same order, ~105 s.
+# cached across runs and every method is re-proposed. Same methods, same order.
 # See `conf/example/explore_small.yaml` for the measurements and for why it is not
 # `method_comparison` (topology, 377 s on this block, which `explore` does not run).
 TEST_VARIANT = "explore_small"

@@ -153,6 +153,7 @@ nav:
           - methodology/methods/clearance_looped.md
           - methodology/methods/greedy_arterial_buildable.md
           - methodology/methods/cycle_native.md
+          - methodology/methods/cycle_native_betweenness_contrast.md
           - methodology/methods/topology.md
           - methodology/methods/resistance_lp.md
           - methodology/methods/greedy_arterial_access_displacement.md

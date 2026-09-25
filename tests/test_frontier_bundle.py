@@ -43,12 +43,11 @@ def bundle() -> dict[str, Any]:
 
 
 def test_every_curve_is_internally_consistent(bundle: dict[str, Any]) -> None:
-    # 5, not 8: the bundle is baked from `_example_block.py`'s pin, which moved to the `explore`
-    # variant on 2026-09-20. That variant runs four methods plus the `osm_footpaths` reference;
-    # the 8 was `method_comparison`'s seven-plus-reference, and `method_comparison` keeps the two
-    # this block cannot run -- `topology` (NodeNotFound at 6,619 parcels) and `resistance_lp`
-    # (dropped for a 6.2 m mean segment; see conf/example/explore.yaml).
-    assert len(bundle["methods"]) == 5
+    # The bundle is baked from `_example_block.py`'s pin, the `explore` variant: exactly its
+    # methods plus the `osm_footpaths` reference, read from the config rather than typed here.
+    from scripts._example_block import example_method_names
+
+    assert set(bundle["methods"]) == set(example_method_names())
     for name, c in bundle["methods"].items():
         n = len(c["road_m"])
         assert len(c["displacement"]) == len(c["permeability"]) == n, name
