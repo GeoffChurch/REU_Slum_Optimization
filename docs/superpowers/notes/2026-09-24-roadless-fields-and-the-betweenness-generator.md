@@ -384,6 +384,34 @@ Paired against plain cycle_native. Every desire arm reaches the Lens A budget on
   +0.044 and +0.043, Lens B -0.011 and -0.014), laying about 1.5 times the road at the Lens A cut
   (288 m against 190-193 m).
 
+### The field inside greedy_arterial: no measurable lift
+greedy_arterial does not route over a substrate: it snaps straight chords (between network anchors,
+or to the deepest parcels) onto the parcel-boundary graph, each edge costing length + lam x its
+distance from the chord. The test warped those edge lengths by the same attraction (gamma 0.5,
+buffer 3, eps 0.1), leaving the chord term alone; the warped lengths are read only as the snap's
+Dijkstra weight. 36 large blocks, paired against plain greedy_arterial:
+
+| arm | Lens A (both at budget) | Lens B | blocks reaching the Lens A budget |
+|---|---|---|---|
+| contrast, lam 2 | +0.011, n = 11, interval includes 0 | -0.000, a tie | 5 fewer |
+| raw, lam 2 | +0.009, n = 13, interval includes 0 | -0.001, a tie | 3 fewer |
+| contrast, lam 1 | +0.007, n = 8, interval includes 0 | -0.002 [-0.004, -0.001], 81% | 8 fewer |
+
+- **The one significant cell is confounded:** it also halves the chord pull, and plain greedy_arterial
+  at lam 1 was not run. It holds in Cape Town only.
+- **Every warped arm costs** 4-7% more road at the Lens A cut and 14-20% more time.
+- **The Lens B lead does not change hands:** the arterial family still leads the desire-routed
+  cycle_native by about 0.005.
+
+Two other ways in are *untested*: spurs aimed at ridge points instead of the deepest parcels, and
+anchors where egress ridges meet the street. Each changes the candidate set, and this result gives
+no reason to expect them to do better.
+
+### r0 for the desire-routed cycle_native: the shipped 2 m stands
+The contrast preset with the field's r0 at 3.5 and 5 m, on the 220: 3.5 m ties on both lenses; 5 m
+ties Lens A and wins Lens B (-0.003 [-0.006, -0.001]), but ties on both lenses held out (fresh Cape
+Town n = 220, Nairobi n = 104). Not run on the large blocks.
+
 ## Not `flow_paths`
 [`flow-paths-mimicry`](2026-07-29-flow-paths-mimicry.md) (2026-07-29) also routes all pairs, on the
 substrate, with reinforcement. But it keeps the busiest edges *as the roads*. It was refuted as a
@@ -495,10 +523,10 @@ In the production run, the all-pairs pass is 111.7 s of the observed time and 79
 
 **Not settled:**
 - **greedy_arterial still has the best Lens B,** by +0.005 over the desire-routed cycle_native.
-  The field cannot reach it the same way: it does not route over a substrate, so the field would
-  need another entry point (its realizer, or its candidate set). *Untested.*
+  Warping its snapping graph by the field does not move it (above); the candidate-set entry points
+  are *untested*.
 - **Road length and runtime were not frontier axes.** The tree and looped generators stay on the
   frontier by road alone; clearance and clearance_looped by road and runtime.
-- **r0 beyond 3.5 m, and duplication on large blocks,** are unmeasured.
+- **Duplication on large blocks** is unmeasured; it bears only on the tree generators.
 - **Large-block cores have only an imagery-derived ground truth** (Microsoft), and the core-picture
   result on it is one block.
