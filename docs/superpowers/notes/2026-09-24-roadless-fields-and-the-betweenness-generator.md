@@ -403,9 +403,17 @@ Dijkstra weight. 36 large blocks, paired against plain greedy_arterial:
 - **The Lens B lead does not change hands:** the arterial family still leads the desire-routed
   cycle_native by about 0.005.
 
-Two other ways in are *untested*: spurs aimed at ridge points instead of the deepest parcels, and
-anchors where egress ridges meet the street. Each changes the candidate set, and this result gives
-no reason to expect them to do better.
+The two other ways in, which change the candidate set instead of the snap, are null too (2026-09-26,
+36 large blocks, paired against plain greedy_arterial; the harness reproduced plain greedy_arterial
+exactly on its check blocks):
+
+| candidate set added | Lens A | Lens B | blocks reaching the Lens A budget | road at the Lens A cut |
+|---|---|---|---|---|
+| anchors where the contrast field's top ridges meet the network | -0.001 [-0.006, +0.015] | -0.0002, a tie | 15 vs 16 | +3.7% |
+| spurs to the top-ridge points in the deepest parcels | -0.005 [-0.021, +0.009] | -0.0003, a tie | 12 vs 16 | +1.4% |
+| both | -0.004 [-0.021, +0.013] | -0.0003, a tie | 11 vs 16 | +3.2% |
+
+So the field does not lift greedy_arterial through its snap, its anchors or its spur targets.
 
 ### r0 for the desire-routed cycle_native: the shipped 2 m stands
 The contrast preset with the field's r0 at 3.5 and 5 m, on the 220: 3.5 m ties on both lenses; 5 m
