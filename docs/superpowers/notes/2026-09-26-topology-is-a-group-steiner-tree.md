@@ -94,7 +94,32 @@ first, built edges free; reverse-delete pruning checked by max-flow.
   than greedy_arterial on both lenses in Nairobi.
 - **Loophole:** a group is a parcel plus its neighbours, so two spurs arriving at different
   neighbours from opposite sides satisfy it -- the rendered networks still carry many dead ends.
-  Closing it (both routes to one corner) is in progress.
+
+### Closing the loophole, and a softer incentive (k = 1, lambda 30)
+- **Same-corner:** both routes must end at one corner of the group (its 4 nearest tried), so every
+  served parcel is on a real loop: 0 interior dead ends. Reverse-delete must re-check only the groups
+  whose recorded routes use the removed edge; checking the whole built component ran for hours on 5810.
+- **Redundancy prize p:** every group gets one route; the second is built only if it costs <= p more
+  (metres + lambda x homes). p = 0 is a tree, large p approaches same-corner. Loops then appear where
+  they are cheap -- near the block edge; from deep inside, a second route to another street sector
+  costs more than 200 m, so the interior stays a tree (5810, 300 m central window: 72 dead ends at
+  p = 200 against 79 for the k = 1 tree and 0 for same-corner).
+
+36 large blocks, paired:
+
+| variant | vs desire-routed cycle_native, Lens A / Lens B | vs greedy_arterial, Lens A / Lens B | road at the Lens A cut vs desire-routed |
+|---|---|---|---|
+| two exits, group | -0.036 [-0.065, -0.020] / -0.002 (tie) | -0.014 / +0.002 | 1.42x |
+| same-corner | +0.009 [-0.001, +0.032] / +0.000 (tie) | +0.016 / +0.003 | 1.33x |
+| prize 200 | +0.014 [+0.002, +0.028] / -0.002 (tie) | +0.019 / +0.001 (tie) | 1.43x |
+| prize 50, 100 | worse; few blocks reach 10% displaced | | |
+
+220 small blocks: same-corner and prize 200 tie the desire-routed cycle_native on Lens A and beat it
+on Lens B (-0.010); they trail greedy_arterial and resistance_lp on Lens A by 0.006-0.010, tie Lens B.
+
+Land on 5810: k = 1 tree 16.2 km, 2.4% of homes, 25% of the open ground; prize 200 23.2 km, 7.9%,
+33%; same-corner 26.7 km, 10.5%, 37% (the k = 0 tree: 47%). The land caveat above applies with less
+force but still applies: these are a third of the open ground at 7 m.
 
 ## The betweenness field as greedy_arterial entry points: null
 Recorded in [the betweenness note](2026-09-24-roadless-fields-and-the-betweenness-generator.md).
@@ -105,7 +130,8 @@ street is a `MultiLineString` (an inner ring) marks no road at all. One of the 2
 large blocks have such streets. Not fixed.
 
 ## Open
-- Close the two-exit loophole; a softer loop incentive (redundancy prize, or travel distance).
+- Let a second route close on existing lanes (not only a different street sector), so the prize can
+  loop the interior; run the loop variants at k = 2; a travel-distance incentive needs a metric decision.
 - Decide productionizing the solver (a least-road k-access preset family) and topology's fate: it is
   dominated or tied at k = 0, 1, 2 but keeps Lens A's road-axis point.
 - Fix the `MultiLineString` street bug.
