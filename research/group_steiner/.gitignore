@@ -1,0 +1,9 @@
+# results of the studies: recomputable from the derive cache and the solvers, and large
+rows*/
+trees*/
+score_rows/
+large_score_rows/
+*.png
+*.log
+*.pkl
+*.txt
