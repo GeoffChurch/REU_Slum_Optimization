@@ -1151,11 +1151,15 @@ METHODS = [
       mc_key="cycle_native_betweenness_contrast", mb_key="cycle_native_betweenness_contrast",
       conf="cycle_native_betweenness_contrast"),
     M("topology", "Topology",
-      "The prior art: a whole-graph reblocker that solves the block in one shot rather than adding "
-      "roads greedily. It is **single-block only** — a multi-block region gives it a disconnected "
-      "source node and it fails — which is why it appears in the single-block flagship and nowhere "
-      "else, and why that flagship exists at all.",
-      idea="whole-graph, single-block — the prior art this project is measured against",
+      "The prior art (Brelsford, Martin & Bettencourt): it gives every parcel a road frontage with "
+      "as little new road as it can, repeatedly connecting the deepest parcels to the road network "
+      "by short paths along parcel boundaries. It is **practical only on small blocks**: at each "
+      "step it considers every short candidate path around the deepest parcels, and that grows "
+      "steeply with block size, so a single run can take hours on a block of several hundred "
+      "parcels. That is why it appears in the single-block flagship and nowhere else, and why that "
+      "flagship exists at all.",
+      idea="least new road to give every parcel frontage — the prior art this project is "
+           "measured against",
       mc_key="topology", conf="topology"),
     M("resistance_lp", "Direct Objective (LP)",
       "Chooses the **whole road set at once** with a linear program, rather than adding one road "

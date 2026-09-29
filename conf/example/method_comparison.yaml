@@ -4,9 +4,11 @@
 # instead of growing a region, and it runs more methods.
 #
 # The pinned block is the deepest one in a topology-tractable size window, auto-picked once and
-# fixed here so the example reproduces. `topology` is the prior art and is SINGLE-BLOCK ONLY -- a
-# multi-block region gives it a disconnected source node and it crashes -- which is the reason this
-# variant exists at all.
+# fixed here so the example reproduces. `topology` is the prior art and is practical only on
+# small blocks -- its run time grows steeply with block size (one run took 11.8 h on 759 parcels,
+# and on 36 of 220 study blocks, all >= 219 buildings, a run exceeded 15 minutes) -- which is the
+# reason this variant exists at all. It does run on multi-block regions; that it could not was a
+# street-matching bug, fixed 2026-09-29.
 defaults:
   - override /metric: depth
   - override /screen: identity

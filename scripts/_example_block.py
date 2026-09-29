@@ -10,11 +10,10 @@ The pin moved from `method_comparison` (`ZAF.9.3.1_1_40972`, 263 parcels) to `ex
 block the screen actually ranks first instead of a small one chosen for a different reason.
 
 It is a SEPARATE variant rather than a repinned `method_comparison` because that variant exists to
-host `topology`, the single-block-only prior art, and topology cannot run on this block -- MEASURED,
-`NodeNotFound: Source (305620.00,8022470.00) is not in G` after 454 s. Being one block is necessary
-and not sufficient for it: at 6,619 parcels this block's street seam disconnects the source the same
-way a multi-block region does. Repinning `method_comparison` would have deleted the one method it
-exists for. `conf/example/explore.yaml` carries the rest of that reasoning.
+host `topology`, the prior art, and topology cannot run at this size: its run time grows steeply
+with the block (one run took 11.8 h on 759 parcels; this block has 6,619). Repinning
+`method_comparison` would have deleted the one method it exists for. `conf/example/explore.yaml`
+carries the rest of that reasoning, including why the first attempt here crashed.
 
 Nothing here serves the method-comparison PAGE: that is `gen_example method_comparison`, reading
 its own config. So this module still declares exactly one pin, and topology keeps its home.

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import geopandas as gpd
 import numpy as np
-from shapely import union_all
+from shapely import get_parts, union_all
 from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 from topology import MyEdge, MyGraph, build_all_roads
@@ -34,9 +34,17 @@ def _edge_line(edge: MyEdge, origin: tuple[float, float]) -> LineString:
 
 def _streets_local_geometry(streets: gpd.GeoDataFrame,
                             origin: tuple[float, float]) -> BaseGeometry | None:
-    """`Block.streets`, origin-shifted into the parcel graph's local frame."""
-    lines = [LineString([(x - origin[0], y - origin[1]) for x, y in geom.coords])
-             for geom in streets.geometry if isinstance(geom, LineString)]
+    """`Block.streets`, origin-shifted into the parcel graph's local frame.
+
+    Multi-part streets (a split or ringed block boundary, and every multi-block region) are exploded
+    into their lines first. Keeping only `LineString` rows used to drop such a street whole, which
+    left no road to start from and crashed the path search with `NodeNotFound`."""
+    parts = get_parts(streets.geometry.to_numpy())
+    kinds = {p.geom_type for p in parts}
+    if not kinds <= {"LineString", "LinearRing"}:
+        raise ValueError("Block.streets must be lines (LineString, LinearRing or their Multi "
+                         f"forms), got {sorted(kinds)}")
+    lines = [LineString([(x - origin[0], y - origin[1]) for x, y in p.coords]) for p in parts]
     return union_all(lines) if lines else None
 
 

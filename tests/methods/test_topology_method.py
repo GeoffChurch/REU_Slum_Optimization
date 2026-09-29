@@ -4,7 +4,7 @@ from typing import cast
 
 import geopandas as gpd
 from pyproj import CRS
-from shapely.geometry import LineString, Polygon
+from shapely.geometry import LineString, MultiLineString, Polygon
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
@@ -67,6 +67,17 @@ def _grid_with_south_street_only(n: int) -> Block:
     return Block(block_id="g_south", crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
                  source_content_hash=None, building_geometries=no_buildings(UTM),
                  building_tier=SpacingDiscs)
+
+
+def _grid_with_multipart_street(n: int) -> Block:
+    """`_grid`'s block with the SAME street, delivered as one `MultiLineString` of two pieces
+    (south + east, north + west) -- the shape a block with a split or ringed boundary comes in, as
+    17 of the 36 large study blocks do."""
+    block = _grid(n, hash_=None)
+    a = LineString([(0, 0), (n, 0), (n, n)])
+    b = LineString([(n, n), (0, n), (0, 0)])
+    return replace(block, block_id="g_multi",
+                   streets=gpd.GeoDataFrame(geometry=[MultiLineString([a, b])], crs=UTM))
 
 
 def test_proposes_roads_for_interior_parcel() -> None:
@@ -166,3 +177,45 @@ def test_propose_does_not_perturb_global_rng() -> None:
     replace(TOPOLOGY, alpha=2.0, seed=0).propose(block)
     assert np.random.get_state()[1].tolist() == np_state_before
     assert random.getstate() == py_state_before
+
+
+def test_multipart_street_marks_the_same_roads_as_a_single_line() -> None:
+    """A `MultiLineString` street is a street. Keeping only `LineString` rows dropped it whole: no
+    edge was marked road, every parcel read as interior, and the path search had no road to start
+    from (`NodeNotFound`).
+
+    FAULT INJECTION: restoring the `isinstance(geom, LineString)` filter in
+    `_streets_local_geometry` fails this."""
+    single = replace(TOPOLOGY, seed=0).propose(_grid(3, hash_=None))
+    multi = replace(TOPOLOGY, seed=0).propose(_grid_with_multipart_street(3))
+    assert single.edges is not None and multi.edges is not None
+    assert int(multi.edges["road"].sum()) == int(single.edges["road"].sum()) > 0
+    assert single.roads is not None and multi.roads is not None
+    assert (sorted(g.wkt for g in multi.roads.geometry)
+            == sorted(g.wkt for g in single.roads.geometry))
+
+
+def _grid_at(n: int, x0: int, block_id: str) -> Block:
+    """`_grid`'s NxN block, shifted right by `x0`."""
+    polys = [Polygon([(x0 + i, j), (x0 + i + 1, j), (x0 + i + 1, j + 1), (x0 + i, j + 1)])
+             for i in range(n) for j in range(n)]
+    parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
+    boundary = cast(Polygon, parcels.geometry.union_all())
+    streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
+    return Block(block_id=block_id, crs=UTM, boundary=boundary, parcels=parcels, streets=streets,
+                 source_content_hash=None, building_geometries=no_buildings(UTM),
+                 building_tier=SpacingDiscs)
+
+
+def test_runs_on_a_multi_block_region() -> None:
+    """A region's streets are the union of its members' streets -- a `MultiLineString` -- so
+    topology used to crash on every multi-block region, which the docs recorded as
+    "single-block only".
+
+    FAULT INJECTION: restoring the `isinstance(geom, LineString)` filter in
+    `_streets_local_geometry` fails this with `NodeNotFound`."""
+    from reblock.region import region_block
+    region = region_block([_grid_at(3, 0, "west"), _grid_at(3, 3, "east")])
+    assert set(region.streets.geom_type) == {"MultiLineString"}
+    proposal = replace(TOPOLOGY, seed=0).propose(region)
+    assert proposal.roads is not None and proposal.roads.geometry.length.sum() > 0

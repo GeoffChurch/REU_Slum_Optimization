@@ -3,12 +3,14 @@
 # every other variant; it differs only in which block it pins and which methods it runs.
 #
 # Why a variant of its own rather than reusing `method_comparison`'s pin: that variant exists to
-# host `topology`, the single-block-only prior art, and topology cannot run here. MEASURED on
-# 2026-09-20 against this very block -- `NodeNotFound: Source (305620.00,8022470.00) is not in G`
-# after 454 s. That is the same disconnected-source failure its own comment attributes to
-# MULTI-block regions, so being a single block is necessary and not sufficient: at 6,619 parcels
-# this block's street seam disconnects it too. Repinning `method_comparison` here would therefore
-# have deleted the one method it exists for, and cost 7.5 minutes per attempt to discover it.
+# host `topology`, the prior art, and topology cannot run at this size. Its run time grows steeply
+# with the block (it enumerates candidate paths around every deep parcel): one run at alpha 10 took
+# 11.8 h on a 759-parcel block, and this one has 6,619. Repinning `method_comparison` here would
+# therefore have deleted the one method it exists for.
+#
+# (It first failed here on 2026-09-20 with `NodeNotFound` after 454 s. That was not the block: this
+# block's street is a MultiLineString, which topology's street matching dropped whole, fixed
+# 2026-09-29. It is the same bug that made topology look "single-block only".)
 #
 # So topology keeps the method-comparison page and this variant runs the methods that DO
 # scale -- exactly `depth_density`'s list, which is why every one of them is already cached on
