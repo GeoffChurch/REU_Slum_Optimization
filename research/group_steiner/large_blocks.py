@@ -6,6 +6,7 @@ repo's own config (`+example=explore`, footprints) so every lineup proposal is a
 """
 from __future__ import annotations
 
+import dataclasses
 import multiprocessing
 import os
 import sys
@@ -45,7 +46,17 @@ def build() -> None:
             assert type(b.buildings).__name__ == "Footprints", type(b.buildings)
             _BLOCKS[b.block_id] = (city, b)
         reg = load_methods(cfg.all_methods)
-        _ARMS[city] = {n: reg[n] for n in LINEUP}
+        arms = {n: reg[n] for n in LINEUP}
+        # pool workers cannot fork: the arterial's candidate pool and the betweenness all-pairs pass
+        # must run serially here. `workers` is exempt from both cache keys, so proposals are unchanged.
+        arms["greedy_arterial_access_displacement"] = dataclasses.replace(
+            arms["greedy_arterial_access_displacement"], workers=1)
+        m = arms["cycle_native_betweenness_contrast"]
+        src = m.substrate.desire_source
+        arms["cycle_native_betweenness_contrast"] = dataclasses.replace(
+            m, substrate=dataclasses.replace(m.substrate,
+                                             desire_source=dataclasses.replace(src, workers=1)))
+        _ARMS[city] = arms
         print(f"{city}: built {len(blocks)}/{len(ids)} blocks", flush=True)
 
 
@@ -99,7 +110,8 @@ if __name__ == "__main__":
     assert sys.argv[1] == "lineup"
     OUT.mkdir(exist_ok=True)
     build()
-    tasks = [(b, a) for b in by_size()[::-1] for a in LINEUP]
+    order = by_size() if os.environ.get("LB_LARGEST_FIRST") else by_size()[::-1]
+    tasks = [(b, a) for b in order for a in LINEUP]
     with multiprocessing.get_context("fork").Pool(int(sys.argv[2]), maxtasksperchild=1) as pool:
         list(pool.imap_unordered(_lineup_one, tasks))
     print("done", flush=True)
