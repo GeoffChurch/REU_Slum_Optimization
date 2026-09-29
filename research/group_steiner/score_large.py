@@ -21,13 +21,12 @@ HERE = Path(__file__).resolve().parent
 GAPS = HERE
 sys.path.insert(0, str(GAPS))
 OUT = HERE / "large_score_rows"
-ARMS = ["fast_k0_lam30", "fast_k0_lam100", "fast_k1_lam100", "fast_k2_lam100", "2r_k1_lam10", "2r_k1_lam30",
-        "2r_k2_lam30", "2rc_k1_lam30", "2rp50_k1_lam30", "2rp100_k1_lam30", "2rp200_k1_lam30"]
+ARMS = sorted(p.name[len("trees_"):] for p in HERE.glob("trees_*") if p.is_dir())
 _TASKS: list = []
 
 
 def one(task) -> None:
-    import large_study as LS
+    import large_blocks as LS
     from reblock.compare import lens_prefixes
     from reblock.emit import pct_displaced
     from reblock.permeability import EgressContext, permeability
@@ -60,7 +59,7 @@ def one(task) -> None:
 
 
 def run(workers: int) -> None:
-    import large_study as LS
+    import large_blocks as LS
     OUT.mkdir(exist_ok=True)
     LS.build()
     tasks = [(b, a) for b in LS.by_size()[::-1] for a in ARMS]
@@ -70,10 +69,7 @@ def run(workers: int) -> None:
 
 
 def report() -> None:
-    rows = [pd.read_parquet(p) for p in OUT.glob("*.parquet")]
-    rows += [pd.read_parquet(p) for p in (GAPS / "large_rows").glob("*.parquet")]
-    rows += [pd.read_parquet(p) for p in (GAPS / "cycfield" / "rows").glob("*cyc_contrast_g0.5.parquet")]
-    d = pd.concat(rows, ignore_index=True)
+    d = pd.concat([pd.read_parquet(p) for p in OUT.glob("*.parquet")], ignore_index=True)
     P = d.pivot_table(index="block_id", columns="arm", values="a_P")
     R = d.pivot_table(index="block_id", columns="arm", values="a_reached")
     M = d.pivot_table(index="block_id", columns="arm", values="a_m")
@@ -88,9 +84,10 @@ def report() -> None:
         bs = [np.median(rng.choice(x, len(x))) for _ in range(4000)]
         return f"[{np.quantile(bs, .025):+.4f}, {np.quantile(bs, .975):+.4f}]"
 
-    refs = ["cyc_contrast_g0.5", "cycle_native", "greedy_arterial_access_displacement",
-            "clearance_looped"]
-    for arm in [f"gst_{a}" for a in ARMS]:
+    refs = ["cycle_native_betweenness_contrast", "cycle_native", "greedy_arterial_access_displacement",
+            "resistance_lp", "clearance_looped"]
+    want = sys.argv[2:] or [f"gst_{a}" for a in ARMS]
+    for arm in want:
         if arm not in P:
             continue
         print(f"\n{arm}: blocks {int(P[arm].notna().sum())}; reaches the Lens A budget on "

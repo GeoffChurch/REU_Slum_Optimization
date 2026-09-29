@@ -105,7 +105,7 @@ def blocks(which: str) -> list:
     if which == "small":
         import study220
         return sorted(study220.build_blocks(study220.recipients()), key=lambda b: len(b.parcels))
-    import large_study as LS
+    import large_blocks as LS
     LS.build()
     return sorted((b for _, b in LS._BLOCKS.values()), key=lambda b: len(b.parcels))
 
