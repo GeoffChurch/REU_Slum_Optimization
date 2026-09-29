@@ -1,0 +1,6 @@
+*.log
+rows*/
+*.png
+*.parquet
+*.pkl
+__pycache__/
