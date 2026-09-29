@@ -119,4 +119,71 @@ edge by its cell's open fraction. Carving/obliterating adds sub-samples, so it s
 Open channel angle max/min, K 8, ell 3: W 2: h 0.5 1.158, h 0.25 1.073; W 4: 1.059, 1.028
 (binary cells K 16: 1.246 / 1.075 / 1.074 / 1.058).
 
-(pending: offset spread + h with sub-cell fractions, conv2/)
+**With sub-cell fractions the score converges** (conv2/, K 8, ell 3; perm' at the Lens A prefix):
+
+    block    h (offsets)     cl_looped    cycle_nat    resist_lp    greedy_art
+    18537    0.5 (4)         0.322-0.330  0.672-0.676  0.648-0.654  0.503-0.505
+             0.35 (2)        0.321-0.325  0.670-0.671  0.645-0.655  0.501-0.510
+             0.25            0.327        0.675        0.653        0.502
+    41132    0.5 (4)         0.147-0.174  0.259-0.297  0.237-0.276  0.171-0.200
+             0.35 (2)        0.154        0.252-0.256  0.246-0.251  0.177-0.180
+             0.25            0.149        0.237        0.242        0.176
+    52727    0.5 (4)         0.282-0.297  0.405-0.417  0.359-0.372  0.396-0.411
+             0.35 (2)        0.284-0.292  0.406-0.415  0.359-0.371  0.403-0.412
+             0.25            0.289        0.414        0.370        0.411
+
+Offset spread <= 0.01 on 2 of 3 blocks; 41132 at h 0.5 has one outlier offset (+0.03, the
+default one) -- a gap near 0.5 m, presumably. Ranking stable except the 41132 cycle_native /
+resistance_lp near-tie (0.005 apart at h 0.25). Stranded 0.000 everywhere. Monotone under both
+rules (obliterate: 48 steps, largest relative increase 1.9e-15).
+
+Working resolution: h 0.5, K 8, ell 3, one offset; offset noise to be quantified on a subsample.
+
+## Study: the lineup on the 220 (study.py, rows_h0.5_ell3_K8/)
+
+h 0.5, ell 3, K 8, one grid offset, CARVE unless stated. Same canonical street-first prefixes for
+both metrics. (First launch ran 40 workers each with a full BLAS pool: load ~1,240, 6 h for 28
+blocks; single-threaded the other 192 took 38 min.) Stranded median 0.000, max 0.068.
+
+Lens A (10% displaced), median perm old | roadless-carve | roadless-obliterate:
+
+    arterial 0.891 | 0.360 | 0.697     cycle 0.855 | 0.360 | 0.593
+    cycle_desire 0.864 | 0.362 | 0.619 resist_lp 0.891 | 0.368 | 0.673
+    grid 0.767 | 0.324 | 0.520         clear_loop 0.761 | 0.293 | 0.495   clear 0.763 | 0.266 | 0.454
+
+Paired vs plain cycle_native at Lens A, median [95% bootstrap CI], old | roadless:
+
+    arterial      +0.030 [+0.025,+0.038] | -0.002 [-0.014,+0.013]   (n 206)
+    resist_lp     +0.028 [+0.022,+0.034] | -0.000 [-0.014,+0.015]
+    cycle_desire  +0.010 [+0.004,+0.016] | +0.004 [-0.003,+0.017]
+    grid          -0.094 [-0.115,-0.068] | -0.034 [-0.048,-0.023]
+    clear_loop    -0.089 [-0.100,-0.076] | -0.053 [-0.068,-0.046]
+    clear         -0.084 [-0.094,-0.073] | -0.081 [-0.096,-0.071]
+
+**Roadless, the four leaders TIE** (arterial, resistance_lp, desire cycle, plain cycle: all
+within +-0.004, CIs straddle 0), where the old metric separated them by 0.02-0.03. grid and
+clearance_looped close most of their gap. Per-block Kendall tau old vs roadless: median +0.43
+(IQR +0.24..+0.62), negative on 11% of blocks. Best-at-Lens-A counts spread out: desire cycle
+53, resist_lp 44, arterial 43, cycle 40, grid 32. Frontier (Lens A perm, Lens B displacement)
+roadless at P*' 0.25: resist_lp 88, arterial 87, cycle 72, desire cycle 71, grid 41,
+clear_loop 18, clear 10 (old: 133, 130, 50, 65, 5, 1, 2).
+
+resistance_lp's mesh does NOT collapse (prediction wrong): at 10% displacement its corridors
+widen real alleys; it just loses its old-metric lead. The OLD metric's separation of the leaders
+is the road/walk conductance ratio at work: roads are ~200x open ground there.
+
+Obliterate (whole buildings touched) vs carve ranking: tau +0.52; obliterate rewards clipping
+many buildings slightly (arterial 0.697). Carve is the rule consistent with the fractional
+displacement charge.
+
+Owner 2026-09-29: roadless eval has no road-length axis -- the frontier is permeability vs
+displacement only.
+
+## Road-free clearing (clear.py)
+
+Owner's idea: greedy LOO over BUILDINGS, no roads. Exact LOO = one solve per building per step.
+TENSION screen: one solve with remaining buildings as eps = 0.01 conductor; first-order gain of
+clearing j = sum over its covered edges of (Delta u)^2 x weight gained (dP/dw_e = -(Delta u_e)^2).
+Screened greedy: top M by tension, exact solve each, clear the best.
+
+(pending: loo_b20 / loo_b110 -- does tension rank like exact LOO?)
