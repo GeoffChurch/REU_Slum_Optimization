@@ -114,32 +114,27 @@ class Grid:
         return out
 
 
-def demand(grid: Grid, footprints, ring_m: float = 1.0) -> tuple[NDArray[np.float64], int]:
-    """Per-cell injection (ny, nx): each building injects 1, uniformly over the free cells within
-    `ring_m` of it whose nearest building it is. Buildings with no such cell (enclosed) fall back
-    to their nearest free cell. Returns (field, n_fallback)."""
-    free0 = grid.inside & ~grid.building
-    ring = free0 & (grid.dist_b <= ring_m + 1e-9)
+def demand(grid: Grid, footprints, allowed: NDArray[np.bool_],
+           ring_m: float = 1.0) -> tuple[NDArray[np.float64], int]:
+    """Per-cell injection (ny, nx): each building injects 1, uniformly over the `allowed` free
+    cells within `ring_m` of it whose nearest building it is (`allowed` = cells with a path to
+    the street, so a ring partly in a sealed nook puts all its demand on the open side). A
+    building with no allowed ring cell is STRANDED: it injects nothing and is counted."""
+    ring = allowed & (grid.dist_b <= ring_m + 1e-9)
     rr, cc = np.nonzero(ring)
     polys = np.asarray(footprints)
+    n = len(polys)
+    f = np.zeros(grid.inside.shape)
+    if len(rr) == 0:
+        return f, n
     tree = shapely.STRtree(polys)
     pts = shapely.points(grid.xy[rr, cc, 0], grid.xy[rr, cc, 1])
     idx, _ = tree.query_nearest(pts, return_distance=True, all_matches=False)
     owner = np.full(len(rr), -1)
     owner[idx[0]] = idx[1]
-    n = len(polys)
     cnt = np.bincount(owner, minlength=n).astype(float)
-    f = np.zeros(grid.inside.shape)
     np.add.at(f, (rr, cc), 1.0 / cnt[owner])
-    missing = np.nonzero(cnt == 0)[0]
-    if len(missing):
-        fr, fc = np.nonzero(free0)
-        from scipy.spatial import cKDTree
-        t = cKDTree(np.c_[grid.xy[fr, fc, 0], grid.xy[fr, fc, 1]])
-        cen = shapely.get_coordinates(shapely.centroid(polys[missing]))
-        _, k = t.query(cen)
-        np.add.at(f, (fr[k], fc[k]), 1.0)
-    return f, len(missing)
+    return f, int((cnt == 0).sum())
 
 
 @dataclass(frozen=True)

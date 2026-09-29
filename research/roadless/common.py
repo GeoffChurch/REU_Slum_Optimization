@@ -85,19 +85,21 @@ class Carve:
 
 
 class Scorer:
-    def __init__(self, block, h: float, p: lifted.Params, rule=Carve()):
+    def __init__(self, block, h: float, p: lifted.Params, rule=None,
+                 offset: tuple[float, float] = (0.3713, 0.1931)):
+        rule = Carve() if rule is None else rule
         self.block, self.h, self.p, self.rule = block, h, p, rule
         self.polys = np.asarray(block.buildings.outlines)
         self.tree = shapely.STRtree(self.polys)
         streets = list(block.streets.geometry)
-        self.grid = lifted.Grid.of(block.boundary, self.polys, streets, h)
-        self.f, self.n_fallback = lifted.demand(self.grid, self.polys)
+        self.grid = lifted.Grid.of(block.boundary, self.polys, streets, h, offset=offset)
         self.free0 = self.grid.inside & ~self.grid.building
-        # homes in pockets sealed at baseline are left out of the demand (and counted), so the
-        # demand is fixed and freeing only ever adds conductance
+        # demand only where the street can be reached at baseline: fixed from here on, so
+        # freeing space only ever adds conductance. `stranded` = share of buildings with no
+        # reachable ring cell (they inject nothing).
         reach = lifted.grounded(self.grid, self.free0, p)
-        self.stranded = float(self.f[~reach].sum()) / max(len(self.polys), 1)
-        self.f = np.where(reach, self.f, 0.0)
+        self.f, n_str = lifted.demand(self.grid, self.polys, reach)
+        self.stranded = n_str / max(len(self.polys), 1)
         self.P0 = self.P_free(self.free0)
 
     def P_free(self, free) -> float:

@@ -9,6 +9,7 @@ arms = common.arms()
 idx = [int(a) for a in sys.argv[1].split(",")]
 hs = [float(a) for a in sys.argv[2].split(",")]
 K = int(sys.argv[3]); ell = float(sys.argv[4])
+off = tuple(float(a) for a in sys.argv[5].split(",")) if len(sys.argv) > 5 else (0.3713, 0.1931)
 names = ["clearance_looped", "cycle_native", "resistance_lp", "greedy_arterial_access_displacement"]
 for i in idx:
     b = blocks[i]
@@ -18,7 +19,7 @@ for i in idx:
         pre[n] = prefix_to_displacement(b, r, 0.10)
     for h in hs:
         t = time.time()
-        sc = common.Scorer(b, h, lifted.Params(ell_m=ell, K=K))
+        sc = common.Scorer(b, h, lifted.Params(ell_m=ell, K=K), offset=off)
         vals = {n: sc.perm(pre[n]) for n in names}
-        print(f"{b.block_id} n={len(b.buildings)} K={K} ell={ell} h={h}: P0 {sc.P0:9.1f} stranded {sc.stranded:.3f} "
+        print(f"{b.block_id} n={len(b.buildings)} K={K} ell={ell} h={h} off={off}: P0 {sc.P0:9.1f} stranded {sc.stranded:.3f} "
               + " ".join(f"{n[:12]} {v:.3f}" for n, v in vals.items()) + f"  {time.time()-t:.0f}s", flush=True)
