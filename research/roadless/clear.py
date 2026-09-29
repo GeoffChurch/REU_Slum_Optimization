@@ -9,10 +9,11 @@ Screened greedy. Each step: one tension solve, exact solves for the top M buildi
 clear the best. `loo` checks the screen against exact leave-one-out on one step.
 
     PYTHONPATH=. pixi run python research/roadless/clear.py loo <block idx> [h]
-    PYTHONPATH=. pixi run python research/roadless/clear.py greedy <block idx> [M] [h]
+    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <M> <h> <d_max>
 """
 from __future__ import annotations
 
+import os
 import sys
 import time
 from pathlib import Path
@@ -137,19 +138,15 @@ def loo(i: int, h: float) -> None:
               f"{exact[pick].max() / exact.max():.3f} of the true best", flush=True)
 
 
-def greedy(i: int, M: int, h: float, d_max: float = 0.20) -> None:
-    blocks = common.build_blocks(common.recipients())
-    b = blocks[i]
+def greedy_block(b, M: int, h: float, d_max: float, out: Path) -> None:
     c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8))
     P0 = c.sc.P0
-    P = P0
-    rows = [dict(step=0, D=0.0, perm=0.0, cleared=-1)]
-    out = HERE / f"clear_{b.block_id}_M{M}_h{h:g}.parquet"
+    rows = [dict(block=b.block_id, n=c.n, step=0, D=0.0, perm=0.0, cleared=-1, P0=P0)]
     step = 0
-    while c.removed.sum() / c.n < d_max - 1e-12:
-        t = time.time()
+    t0 = time.time()
+    while c.removed.sum() / c.n < d_max - 1e-12 and not c.removed.all():
         T = c.tension()
-        cand = np.argsort(-T)[:M]
+        cand = [j for j in np.argsort(-T)[:M] if not c.removed[j]]
         best, bestP = -1, np.inf
         for j in cand:
             r = c.removed.copy()
@@ -158,17 +155,45 @@ def greedy(i: int, M: int, h: float, d_max: float = 0.20) -> None:
             if Pj < bestP:
                 best, bestP = int(j), Pj
         c.removed[best] = True
-        P = bestP
         step += 1
-        rows.append(dict(step=step, D=c.removed.sum() / c.n, perm=1 - P / P0, cleared=best))
-        print(f"{b.block_id} M={M} step {step}: cleared {best}, D {rows[-1]['D']:.3f}, "
-              f"perm' {rows[-1]['perm']:.3f}  {time.time() - t:.0f}s", flush=True)
-        pd.DataFrame(rows).to_parquet(out)
+        rows.append(dict(block=b.block_id, n=c.n, step=step, D=c.removed.sum() / c.n,
+                         perm=1 - bestP / P0, cleared=best, P0=P0))
+    tmp = out.with_suffix(f".{os.getpid()}.tmp")
+    pd.DataFrame(rows).to_parquet(tmp)
+    os.replace(tmp, out)
+    print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {step} steps, perm' at end "
+          f"{rows[-1]['perm']:.3f}  {time.time() - t0:.0f}s", flush=True)
+
+
+_BLOCKS: list = []
+_CFG: dict = {}
+
+
+def _one(i: int) -> None:
+    b = _BLOCKS[i]
+    out = _CFG["dir"] / f"{b.block_id}.parquet"
+    if out.exists():
+        return
+    try:
+        greedy_block(b, _CFG["M"], _CFG["h"], _CFG["d_max"], out)
+    except Exception as e:
+        print(f"{b.block_id} FAILED {type(e).__name__}: {e}"[:300], flush=True)
+
+
+def run(workers: int, M: int, h: float, d_max: float) -> None:
+    import multiprocessing
+    global _BLOCKS, _CFG
+    d = HERE / f"clear_rows_M{M}_h{h:g}"
+    d.mkdir(exist_ok=True)
+    _CFG = dict(M=M, h=h, d_max=d_max, dir=d)
+    _BLOCKS = common.build_blocks(common.recipients())
+    with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=4) as pool:
+        for _ in pool.imap_unordered(_one, list(range(len(_BLOCKS)))[::-1]):
+            pass
 
 
 if __name__ == "__main__":
     if sys.argv[1] == "loo":
         loo(int(sys.argv[2]), float(sys.argv[3]) if len(sys.argv) > 3 else 0.5)
-    else:
-        greedy(int(sys.argv[2]), int(sys.argv[3]) if len(sys.argv) > 3 else 8,
-               float(sys.argv[4]) if len(sys.argv) > 4 else 0.5)
+    elif sys.argv[1] == "run":
+        run(int(sys.argv[2]), int(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]))

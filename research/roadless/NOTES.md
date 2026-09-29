@@ -186,4 +186,22 @@ TENSION screen: one solve with remaining buildings as eps = 0.01 conductor; firs
 clearing j = sum over its covered edges of (Delta u)^2 x weight gained (dP/dw_e = -(Delta u_e)^2).
 Screened greedy: top M by tension, exact solve each, clear the best.
 
-(pending: loo_b20 / loo_b110 -- does tension rank like exact LOO?)
+**Tension ranks like exact LOO** (loo_b*.log, h 0.5, single-threaded solves 1.5-1.8 s):
+
+    41132 (138): Spearman(tension, exact gain) +0.930; true best = tension's #1
+    18537 (76):  +0.947; tension #1 gets 0.997 of the best gain, top 4 contains it
+
+Top single-building gains on 18537 are 36-39% of P0 each. NOT a sealed-pocket artifact: per-home
+escape time max/mean 4.0-5.8 (old metric's no-road tau: 2.4-3.8), top 1% of homes hold 3-8% of
+P0 (tail.py). It is a real bottleneck: one building plugging the route many homes take.
+
+**LOO "cancellation" (owner asked).** First order: complete -- P is self-adjoint, so u is its own
+adjoint and every conductance derivative (dP/dw_e = -(Delta u_e)^2) comes from ONE solve; that
+is the tension. Exact: Woodbury makes P - P_j depend only on u near j and the Green's function
+on j's perimeter (~perimeter cells x K, hundreds of solves) -- not cheap. Cheap and CERTIFIED:
+a local correction solve in a window around j bounds the gain from above (Dirichlet form: gain_j
+<= D_j - r^T L_OO^-1 r, D_j = first-order term) and local flow rerouting bounds it from below
+(Thomson); both converge to exact as the window grows. Not built: with 1.7 s solves, M = 4
+screening already costs ~5 solves per step. Keep for the large blocks.
+
+Screened greedy M 4 to D 0.15 on the 220 running (clear_rows_M4_h0.5/, compare_clear.py).
