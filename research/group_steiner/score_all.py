@@ -46,7 +46,10 @@ def log(msg: str) -> None:
 def topology_runs() -> tuple[dict[str, str], set[tuple[str, str]]]:
     """(least-road successful run per block, every successful (block, run)) -- only blocks the
     topology study FINISHED, so no proposal here ever re-runs topology (uncapped) from cold."""
-    t = pd.concat([pd.read_parquet(p) for p in (TOPO / "rows").glob("*.parquet")])
+    paths = list((TOPO / "rows").glob("*.parquet"))
+    if not paths:                          # the topology study has not been (re)run
+        return {}, set()
+    t = pd.concat([pd.read_parquet(p) for p in paths])
     t = t[t.arm.str.startswith("topology") & (t.error.fillna("") == "")]
     best = t.loc[t.groupby("block").total_m.idxmin()].set_index("block").arm.to_dict()
     return best, set(zip(t.block, t.arm, strict=True))
@@ -145,8 +148,8 @@ def main() -> None:
     _ARMS = {k: v for k, v in reg.items() if not k.startswith("topology")}
     _ARMS["_topo"] = {k: v for k, v in reg.items() if k.startswith("topology")}
     _ARMS["_best"], _ARMS["_topo_ok"] = topology_runs()
-    _ARMS["_order"] = [*topo_obj.LINEUP, "clearance_d1", "topology_shipped", "topology_best",
-                       *SOLVER_ARMS]
+    topo_arms = ["topology_shipped", "topology_best"] if _ARMS["_best"] else []
+    _ARMS["_order"] = [*topo_obj.LINEUP, "clearance_d1", *topo_arms, *SOLVER_ARMS]
     log(f"{len(_BLOCKS)} blocks")
     with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=1) as pool:
         list(pool.imap_unordered(one, range(len(_BLOCKS))))

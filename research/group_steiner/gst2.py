@@ -145,16 +145,18 @@ class _Arcs:
     n: int                  # nodes incl. t (= n_nodes-2) and t2 (= n_nodes-1)
 
 
-def _arcs(inst: Inst2, group: np.ndarray, usable: np.ndarray) -> _Arcs:
+def _arcs(inst: Inst2, group: np.ndarray, usable: np.ndarray,
+          extra_root: np.ndarray | None = None) -> _Arcs:
     """Decision edges (both directions, only `usable` ones), R -> each sector, and the group's
     corners -> t and -> t2 -> t (two parallel ways in, so both routes may end at one corner)."""
     t, t2 = inst.n, inst.n + 1
     ids = np.flatnonzero(usable)
-    tail = [inst.eu[ids], inst.ev[ids], np.zeros(inst.n_sectors, np.int64),
+    ex = np.zeros(0, np.int64) if extra_root is None else np.asarray(extra_root, np.int64)
+    tail = [inst.eu[ids], inst.ev[ids], np.zeros(inst.n_sectors, np.int64), np.zeros(len(ex), np.int64),
             group, group, np.array([t2])]
-    head = [inst.ev[ids], inst.eu[ids], np.arange(1, inst.n_sectors + 1), np.full(len(group), t),
+    head = [inst.ev[ids], inst.eu[ids], np.arange(1, inst.n_sectors + 1), ex, np.full(len(group), t),
             np.full(len(group), t2), np.array([t])]
-    edge = [ids, ids, np.full(inst.n_sectors, -1), np.full(len(group), -1),
+    edge = [ids, ids, np.full(inst.n_sectors, -1), np.full(len(ex), -1), np.full(len(group), -1),
             np.full(len(group), -1), np.array([-1])]
     return _Arcs(np.concatenate(tail), np.concatenate(head), np.concatenate(edge), inst.n + 2)
 
@@ -168,11 +170,11 @@ def _path(pred: np.ndarray, src: int, dst: int) -> list[int] | None:
     return out[::-1]
 
 
-def suurballe(inst: Inst2, group: np.ndarray, cost_e: np.ndarray, usable: np.ndarray
-              ) -> set[int] | None:
+def suurballe(inst: Inst2, group: np.ndarray, cost_e: np.ndarray, usable: np.ndarray,
+              extra_root: np.ndarray | None = None) -> set[int] | None:
     """Decision edges of the cheapest pair of edge-disjoint R -> group routes through different
     sectors (costs per decision edge; fixed arcs are free). None if no such pair exists."""
-    A = _arcs(inst, group, usable)
+    A = _arcs(inst, group, usable, extra_root)
     t = inst.n
     c = np.where(A.edge >= 0, cost_e[np.maximum(A.edge, 0)], 0.0) + EPS
     g1 = sp.csr_matrix((c, (A.tail, A.head)), shape=(A.n, A.n))

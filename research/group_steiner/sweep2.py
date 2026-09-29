@@ -17,12 +17,14 @@ sys.path.insert(0, str(HERE))
 import gst2  # noqa: E402
 import study  # noqa: E402
 
-SECTOR_M = 150.0
+SECTOR_M = float(os.environ.get("GST_SECTOR_M", "150"))   # scale at which the two exits must differ, m
 WHICH = os.environ.get("GST_BLOCKS", "small")
 # MODE: "group" (either route may end anywhere in the group), "corner" (both routes to one corner,
 # mandatory), or "prize<p>" (one route always, the second only if it costs <= p more)
 MODE = os.environ.get("GST_MODE", "group")
 PREFIX = {"group": "2r"}.get(MODE, "2rc" if MODE == "corner" else f"2rp{MODE[5:]}")
+if SECTOR_M != 150.0:
+    PREFIX += f"_s{SECTOR_M:g}"
 _BLOCKS: list = []
 
 
