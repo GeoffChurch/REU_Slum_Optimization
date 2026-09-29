@@ -183,10 +183,15 @@ survivors and may flatter it.
 ## The betweenness field as greedy_arterial entry points: null
 Recorded in [the betweenness note](2026-09-24-roadless-fields-and-the-betweenness-generator.md).
 
-## Repo bug found on the way
-`reblock.methods.topology._streets_local_geometry` keeps only `LineString` rows, so a block whose
-street is a `MultiLineString` (an inner ring) marks no road at all. One of the 220 blocks and several
-large blocks have such streets. Not fixed.
+## Repo bug found on the way (fixed 2026-09-29, 632cd4c)
+`reblock.methods.topology._streets_local_geometry` kept only `LineString` rows, so a block whose street is
+a `MultiLineString` -- a split or ringed boundary, and every multi-block region, whose streets are the union of
+its members' -- marked no road at all and crashed with `NodeNotFound: Source (305620.00,8022470.00) is not in
+G`. 17 of the 36 large blocks (5810 among them) and 1 of the 220 have such streets. That crash was recorded as
+topology being "single-block only" (config comments, `scripts/_example_block.py`, the method page) and blamed on
+5810's "street seam". Fixed topology runs on two-block regions (3-5 s); the old filter crashes on the same
+regions with the same error. Street geometry is unchanged on the other 219 blocks, 40972 included. Topology's
+real limit is run time.
 
 ## Open
 - Prize 400 at k = 2, and a prize per depth; a travel-distance incentive needs a metric decision. Letting the
@@ -195,4 +200,3 @@ large blocks have such streets. Not fixed.
   the densest Cape Town block); no reported lens charges that.
 - Decide productionizing the solver (a least-road k-access preset family) and topology's fate: it is
   dominated or tied at k = 0, 1, 2 but keeps Lens A's road-axis point.
-- Fix the `MultiLineString` street bug.
