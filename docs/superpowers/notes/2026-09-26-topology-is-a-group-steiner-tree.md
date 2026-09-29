@@ -121,6 +121,31 @@ Land on 5810: k = 1 tree 16.2 km, 2.4% of homes, 25% of the open ground; prize 2
 33%; same-corner 26.7 km, 10.5%, 37% (the k = 0 tree: 47%). The land caveat above applies with less
 force but still applies: these are a third of the open ground at 7 m.
 
+### What keeps the interior a tree
+The prize places loops near the block edge; the 5810 close-up (72 dead ends in the 300 m central window
+against 79 for the k = 1 tree). Three measurements, lambda 30, prize 200, k = 1:
+- **The second route's extra cost by depth** (median in metres + lambda x homes; share of groups within the
+  prize), under the shipped rule (a different street sector) and a relaxed rule (the second route may end at
+  any built node), on two 365-372 parcel blocks and block 20269 (1,046 parcels):
+
+  | distance from the street | shipped rule | relaxed rule |
+  |---|---|---|
+  | 25-50 m, small blocks | 269, 20% | 195, 53% |
+  | 50-100 m, block 20269 | 213, 42% | 106, 70% |
+
+- **The relaxed rule is close to vacuous:** 58-64% of the groups already have a corner on a built
+  through-lane (degree >= 2) at decision time, and would be satisfied for free. Letting the second route rejoin
+  any lane therefore forces almost no loops; it mostly forbids dead-end stubs.
+- **The sector size is not the lever.** Requiring the two exits to differ at 150, 100 or 50 m gives the
+  same networks: on the 220 small blocks whole-network median 428, 428, 431 m and paired Lens A/B within 0.004
+  / 0.001 of each other; on the 36 large blocks road at the Lens A cut is x1.43 against the desire-routed
+  cycle_native in all three, and the paired differences are <= 0.003 (Lens A) and <= 0.001 (Lens B), intervals
+  overlapping. (The first two-exit run sized sectors at 150 m; small blocks are too shallow for it to matter,
+  every decision is within 50 m of the street.)
+
+So it is the price of a second route through dense fabric that stops interior loops, not the exit rule.
+The prize sweep (next section as it lands) tests that directly.
+
 ## The betweenness field as greedy_arterial entry points: null
 Recorded in [the betweenness note](2026-09-24-roadless-fields-and-the-betweenness-generator.md).
 
@@ -130,8 +155,8 @@ street is a `MultiLineString` (an inner ring) marks no road at all. One of the 2
 large blocks have such streets. Not fixed.
 
 ## Open
-- Let a second route close on existing lanes (not only a different street sector), so the prize can
-  loop the interior; run the loop variants at k = 2; a travel-distance incentive needs a metric decision.
+- Prize sweep (400, 800) and k = 2; a travel-distance incentive needs a metric decision. Letting the second
+  route rejoin any lane was considered and rejected (nearly vacuous, above).
 - Decide productionizing the solver (a least-road k-access preset family) and topology's fate: it is
   dominated or tied at k = 0, 1, 2 but keeps Lens A's road-axis point.
 - Fix the `MultiLineString` street bug.
