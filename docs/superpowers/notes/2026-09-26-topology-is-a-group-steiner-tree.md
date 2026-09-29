@@ -121,6 +121,65 @@ Land on 5810: k = 1 tree 16.2 km, 2.4% of homes, 25% of the open ground; prize 2
 33%; same-corner 26.7 km, 10.5%, 37% (the k = 0 tree: 47%). The land caveat above applies with less
 force but still applies: these are a third of the open ground at 7 m.
 
+### What keeps the interior a tree
+The prize places loops near the block edge; the 5810 close-up (72 dead ends in the 300 m central window
+against 79 for the k = 1 tree). Three measurements, lambda 30, prize 200, k = 1:
+- **The second route's extra cost by depth** (median in metres + lambda x homes; share of groups within the
+  prize), under the shipped rule (a different street sector) and a relaxed rule (the second route may end at
+  any built node), on two 365-372 parcel blocks and block 20269 (1,046 parcels):
+
+  | distance from the street | shipped rule | relaxed rule |
+  |---|---|---|
+  | 25-50 m, small blocks | 269, 20% | 195, 53% |
+  | 50-100 m, block 20269 | 213, 42% | 106, 70% |
+
+- **The relaxed rule is close to vacuous:** 58-64% of the groups already have a corner on a built
+  through-lane (degree >= 2) at decision time, and would be satisfied for free. Letting the second route rejoin
+  any lane therefore forces almost no loops; it mostly forbids dead-end stubs.
+- **The sector size is not the lever.** Requiring the two exits to differ at 150, 100 or 50 m gives the
+  same networks: on the 220 small blocks whole-network median 428, 428, 431 m and paired Lens A/B within 0.004
+  / 0.001 of each other; on the 36 large blocks road at the Lens A cut is x1.43 against the desire-routed
+  cycle_native in all three, and the paired differences are <= 0.003 (Lens A) and <= 0.001 (Lens B), intervals
+  overlapping. (The first two-exit run sized sectors at 150 m; small blocks are too shallow for it to matter,
+  every decision is within 50 m of the street.)
+
+So it is the price of a second route through dense fabric that stops interior loops, not the exit rule.
+
+### The prize sweep: cost is the lever (k = 1, lambda 30, sectors 150 m)
+Raising the prize does put loops in the interior. Block 5810, dead ends (degree-1 nodes):
+
+| prize | road | whole block | 300 m central window |
+|---|---|---|---|
+| 200 | 23.2 km | 239 | 70 |
+| 400 | 26.4 km | 107 | 9 |
+| 800 | 26.7 km | 97 | 0 (97 is also same-corner's count: every parcel on a loop) |
+
+Lenses, prize 200 / 400 / 800:
+- **36 large blocks vs the desire-routed cycle_native:** Lens A +0.0141 [+0.0015, +0.0282] / +0.0145 [+0.0042,
+  +0.0323] / +0.0092 [-0.0008, +0.0323]; blocks reaching the Lens A budget 25 / 28 / 28; road at the Lens A cut
+  x1.43 / x1.33 / x1.33; Lens B -0.0015 / -0.0004 / +0.0001, all ties. By city, Lens A: Cape Town +0.027 / +0.032
+  / +0.032; Nairobi -0.029 / +0.0005 / -0.015 (n = 8-9).
+- **vs greedy_arterial (16 blocks reach the budget):** Lens A +0.0195 / +0.0174 / +0.0159 (better on 81-88%),
+  road x1.02 / x0.92 / x0.92; Lens B +0.0011 / +0.0021 / +0.0027 (Nairobi worse by 0.002-0.004).
+- **vs resistance_lp:** Lens A -0.007 / -0.004 / -0.008, ties; Lens B +0.0015 / +0.0027 / +0.0047, slightly worse.
+- **220 small blocks:** whole network median 428 / 440 / 443 m; Lens A vs the desire-routed cycle_native +0.001 /
+  +0.008 / +0.008 (all within noise), Lens B -0.0097 / -0.0077 / -0.0095.
+
+So going from 200 to 400 buys interior loops for 14% more road on the largest block and does not hurt the lenses;
+400 is the best setting tried on the large blocks (Nairobi Lens A goes from -0.029 to a tie, less road at the
+cut, 28 blocks reaching the budget instead of 25), though its Lens A difference from 200 is within noise. 800 buys
+nothing more. The lenses reward loops only weakly: they are worth having for what they do to a network's shape,
+not because these metrics pay for them.
+
+### k = 2 (every parcel within two parcels of a road), prize 200
+Half the road: whole-network median 214 m on the 220 (428 m at k = 1); block 5810 15.7 km, 123 dead ends.
+It stops far short of 10% displacement (Lens A budget reached on 22 of 220 small and 1 of 36 large blocks), so
+Lens A is uninformative. Lens B, where it reaches P*: on the 36 large blocks (all reach it) -0.0055 [-0.0075,
+-0.0029] against the desire-routed cycle_native (better on 83%), and ties greedy_arterial (-0.0005 [-0.0039,
++0.0008]) and resistance_lp (-0.0013 [-0.0029, +0.0007]); in Cape Town it beats resistance_lp (-0.0027) and in
+Nairobi loses to it (+0.0024). On the 220 small blocks it reaches P* on only 112, so those comparisons cover the
+survivors and may flatter it.
+
 ## The betweenness field as greedy_arterial entry points: null
 Recorded in [the betweenness note](2026-09-24-roadless-fields-and-the-betweenness-generator.md).
 
@@ -130,8 +189,10 @@ street is a `MultiLineString` (an inner ring) marks no road at all. One of the 2
 large blocks have such streets. Not fixed.
 
 ## Open
-- Let a second route close on existing lanes (not only a different street sector), so the prize can
-  loop the interior; run the loop variants at k = 2; a travel-distance incentive needs a metric decision.
+- Prize 400 at k = 2, and a prize per depth; a travel-distance incentive needs a metric decision. Letting the
+  second route rejoin any lane was considered and rejected (nearly vacuous, above).
+- A land or road-area axis: every variant here pays for its lens wins in 7 m road (a third of the open ground on
+  the densest Cape Town block); no reported lens charges that.
 - Decide productionizing the solver (a least-road k-access preset family) and topology's fate: it is
   dominated or tied at k = 0, 1, 2 but keeps Lens A's road-axis point.
 - Fix the `MultiLineString` street bug.
