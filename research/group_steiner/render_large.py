@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import large_study as LS  # noqa: E402
+import large_blocks as LS  # noqa: E402
 
 from reblock.compare import lens_prefixes  # noqa: E402
 from reblock.emit import pct_displaced  # noqa: E402
@@ -54,7 +54,9 @@ for ax, bid in zip(axes.flat, big, strict=True):
     k = int(ARM.split("_k")[1][0])
     reach = ("every parcel fronts a road" if k == 0
              else f"every parcel within {k} parcel{'s' if k > 1 else ''} of one that does")
-    if ARM.startswith("2r"):
+    if ARM.startswith("2rp"):
+        reach += f", plus a second exit wherever it costs at most {ARM[3:].split('_')[0]}"
+    elif ARM.startswith("2r"):
         reach += ", with two disjoint exits to different street sectors"
     title = (f"{bid} ({city}) — {len(block.buildings):,} buildings — k = {k}\n"
              f"tree {km:.1f} km, displaces {d_full:.1%} of homes; {reach}\n"
@@ -70,7 +72,7 @@ print(out)
 # close-up: a 300 m window in the densest block, around the tree's centroid
 bid, block, roads, lens = stats[0]
 # the SAME window for every k, so the close-ups compare: the k=0 tree's centroid
-CENTRE = gpd.read_parquet(HERE / "trees_fast_k0_lam100" / f"{bid}.parquet").geometry.union_all().centroid.coords[0]
+CENTRE = gpd.read_parquet(HERE / "trees_2rp200_k1_lam30" / f"{bid}.parquet").geometry.union_all().centroid.coords[0]
 w = 150
 fig, ax = plt.subplots(figsize=(11, 11))
 cx, cy = CENTRE
