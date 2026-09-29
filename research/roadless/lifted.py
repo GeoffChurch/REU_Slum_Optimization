@@ -76,11 +76,36 @@ class Grid:
     x0: float
     y0: float
     h: float
-    inside: NDArray[np.bool_]
-    building: NDArray[np.bool_]          # cell centre inside some footprint (original)
-    ground: NDArray[np.bool_]            # within `band_m` of Block.streets
+    inside: NDArray[np.bool_]            # some sub-sample of the cell is inside the block
+    building: NDArray[np.bool_]          # most of the cell is footprint (for the EDT only)
+    ground: NDArray[np.bool_]            # centre within `band_m` of Block.streets
     dist_b: NDArray[np.float64]          # metres to the nearest building cell (EDT)
     xy: NDArray[np.float64]              # (ny, nx, 2) cell centres
+    isub: NDArray[np.bool_]              # (ny, nx, S*S) sub-samples inside the block
+    bsub: NDArray[np.bool_]              # (ny, nx, S*S) sub-samples inside a footprint
+    S: int
+
+    @property
+    def ff0(self) -> NDArray[np.float64]:
+        """Open fraction of each cell: inside the block and not footprint."""
+        return (self.isub & ~self.bsub).mean(axis=-1)
+
+    def _sub_xy(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        t = ((np.arange(self.S) + 0.5) / self.S - 0.5) * self.h
+        ox, oy = np.meshgrid(t, t)
+        X = self.xy[..., 0][..., None] + ox.ravel()[None, None, :]
+        Y = self.xy[..., 1][..., None] + oy.ravel()[None, None, :]
+        return X, Y
+
+    def sub_of(self, geom) -> NDArray[np.bool_]:
+        """(ny, nx, S*S): sub-samples inside `geom` (only those inside the block)."""
+        out = np.zeros_like(self.isub)
+        if geom is None or geom.is_empty:
+            return out
+        shapely.prepare(geom)
+        X, Y = self._sub_xy()
+        out[self.isub] = shapely.contains_xy(geom, X[self.isub], Y[self.isub])
+        return out
 
     @classmethod
     def of(cls, boundary, footprints, streets, h: float, band_m: float = 1.0,
@@ -90,19 +115,28 @@ class Grid:
         xs = np.arange(minx - h + offset[0] * h, maxx + 2 * h, h)
         ys = np.arange(miny - h + offset[1] * h, maxy + 2 * h, h)
         X, Y = np.meshgrid(xs, ys)
-        inside = shapely.contains_xy(boundary, X, Y)
-        building = np.zeros_like(inside)
+        S = 4
+        t = ((np.arange(S) + 0.5) / S - 0.5) * h
+        ox, oy = np.meshgrid(t, t)
+        XS = X[..., None] + ox.ravel()[None, None, :]
+        YS = Y[..., None] + oy.ravel()[None, None, :]
+        shapely.prepare(boundary)
+        isub = shapely.contains_xy(boundary, XS, YS)
+        bsub = np.zeros_like(isub)
         if len(footprints):
             fp = shapely.union_all(np.asarray(footprints))
             shapely.prepare(fp)
-            building[inside] = shapely.contains_xy(fp, X[inside], Y[inside])
+            bsub[isub] = shapely.contains_xy(fp, XS[isub], YS[isub])
+        inside = isub.any(axis=-1)
+        building = bsub.mean(axis=-1) > 0.5
         st = shapely.union_all(np.asarray(streets)).buffer(band_m)
         shapely.prepare(st)
         ground = np.zeros_like(inside)
         ground[inside] = shapely.contains_xy(st, X[inside], Y[inside])
         dist_b = ndimage.distance_transform_edt(~building) * h
         return cls(x0=float(xs[0]), y0=float(ys[0]), h=h, inside=inside, building=building,
-                   ground=ground, dist_b=dist_b, xy=np.stack([X, Y], axis=-1))
+                   ground=ground, dist_b=dist_b, xy=np.stack([X, Y], axis=-1),
+                   isub=isub, bsub=bsub, S=S)
 
     def mask_of(self, geom) -> NDArray[np.bool_]:
         out = np.zeros_like(self.inside)
@@ -143,10 +177,12 @@ class Params:
     K: int = 8
 
 
-def along_edges(free: NDArray[np.bool_], p: Params):
-    """Per axis k: (k, a, b, w) with a, b free-cell ids (row-major order of `free`), b = a + v_k,
-    every cell the step crosses free."""
+def along_edges(open_: NDArray[np.float64], p: Params):
+    """Per axis k: (k, a, b, w) with a, b open-cell ids (row-major order of `open_ > 0`),
+    b = a + v_k, every cell the step crosses open; w is scaled by the SMALLEST open fraction
+    among those cells (a gap narrower than a cell conducts in proportion to its width)."""
     v, _th, m, _gap = axes(p.K)
+    free = open_ > 0
     ny, nx = free.shape
     cell = -np.ones((ny, nx), dtype=np.int64)
     cell[free] = np.arange(int(free.sum()))
@@ -156,17 +192,19 @@ def along_edges(free: NDArray[np.bool_], p: Params):
         r2, c2 = rr + dy, cc + dx
         ok = (r2 >= 0) & (r2 < ny) & (c2 >= 0) & (c2 < nx)
         ok[ok] &= free[r2[ok], c2[ok]]
+        frac = np.minimum(open_[rr, cc], open_[np.clip(r2, 0, ny - 1), np.clip(c2, 0, nx - 1)])
         for (ix, iy) in _line_cells(dx, dy):
             r3, c3 = rr + iy, cc + ix
             o3 = (r3 >= 0) & (r3 < ny) & (c3 >= 0) & (c3 < nx)
             o3[o3] &= free[r3[o3], c3[o3]]
             ok &= o3
+            frac = np.minimum(frac, open_[np.clip(r3, 0, ny - 1), np.clip(c3, 0, nx - 1)])
         a = cell[rr[ok], cc[ok]]
         b = cell[r2[ok], c2[ok]]
-        yield k, a, b, np.full(len(a), m[k] / float(dx * dx + dy * dy))
+        yield k, a, b, frac[ok] * (m[k] / float(dx * dx + dy * dy))
 
 
-def crossing(free: NDArray[np.bool_], ground: NDArray[np.bool_], sol: Solution,
+def crossing(open_: NDArray[np.float64], ground: NDArray[np.bool_], sol: Solution,
              p: Params) -> dict[str, float]:
     """How much of the along-heading power flows where streams of different headings share a
     cell. Per free cell, J = sum_k F_k e_k (the net flux vector) and S = sum_k |F_k|;
@@ -175,15 +213,14 @@ def crossing(free: NDArray[np.bool_], ground: NDArray[np.bool_], sol: Solution,
     power-weighted over cells."""
     v, _th, _m, _gap = axes(p.K)
     e = v / np.linalg.norm(v, axis=1)[:, None]
-    nc = int(free.sum())
-    is_g = ground[free]
+    nc = int((open_ > 0).sum())
     uk = np.zeros((nc, p.K))
     live = sol.unk_cell >= 0
     uk[live] = sol.u.reshape(-1, p.K)
     J = np.zeros((nc, 2))
     S = np.zeros(nc)
     pw = np.zeros(nc)
-    for k, a, b, w in along_edges(free, p):
+    for k, a, b, w in along_edges(open_, p):
         F = w * (uk[a, k] - uk[b, k])            # flux from a to b along +v_k
         pe = w * (uk[a, k] - uk[b, k]) ** 2
         for c in (a, b):
@@ -200,10 +237,12 @@ def crossing(free: NDArray[np.bool_], ground: NDArray[np.bool_], sol: Solution,
                 share_gt_0_5=float(pw[canc > 0.5].sum() / tot))
 
 
-def operator(free: NDArray[np.bool_], ground: NDArray[np.bool_], h: float, p: Params):
-    """(L restricted to unknowns, unknown index per (cell, axis) or -1)."""
+def operator(open_: NDArray[np.float64], ground: NDArray[np.bool_], h: float, p: Params):
+    """(L restricted to unknowns, unknown index per (cell, axis) or -1). Cells are those with
+    open fraction > 0; turning edges are scaled by the cell's open fraction (its volume)."""
     _v, _th, _m, gap = axes(p.K)
     K = p.K
+    free = open_ > 0
     ny, nx = free.shape
     cell = -np.ones((ny, nx), dtype=np.int64)
     cell[free] = np.arange(int(free.sum()))
@@ -227,13 +266,13 @@ def operator(free: NDArray[np.bool_], ground: NDArray[np.bool_], h: float, p: Pa
         np.add.at(diag, ia[~ga], w[~ga])
         np.add.at(diag, ib[~gb], w[~gb])
 
-    for k, a, b, w in along_edges(free, p):
+    for k, a, b, w in along_edges(open_, p):
         add_edge(a, b, np.full(len(a), k), np.full(len(a), k), w)
     # turning edges inside every non-ground cell (ground cells are u = 0 in every layer)
     live = np.nonzero(~is_g)[0]
     for k in range(K):
         k2 = (k + 1) % K
-        w = np.full(len(live), h * h / (p.ell_m ** 2 * gap[k]))
+        w = open_[free][live] * (h * h / (p.ell_m ** 2 * gap[k]))
         add_edge(live, live, np.full(len(live), k), np.full(len(live), k2), w)
     rows.append(np.arange(N)); cols.append(np.arange(N)); vals.append(diag)
     L = sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
@@ -241,9 +280,10 @@ def operator(free: NDArray[np.bool_], ground: NDArray[np.bool_], h: float, p: Pa
     return L, cell, unk_cell
 
 
-def grounded(grid: Grid, free: NDArray[np.bool_], p: Params) -> NDArray[np.bool_]:
-    """Free cells with a path to the street (ground cells included)."""
-    L, cell, unk_cell = operator(free, grid.ground, grid.h, p)
+def grounded(grid: Grid, open_: NDArray[np.float64], p: Params) -> NDArray[np.bool_]:
+    """Open cells with a path to the street (ground cells included)."""
+    free = open_ > 0
+    L, cell, unk_cell = operator(open_, grid.ground, grid.h, p)
     n_comp, lab = sp.csgraph.connected_components(L, directed=False)
     dg = np.asarray(L.sum(axis=1)).ravel()
     ok_comp = np.zeros(n_comp, bool)
@@ -277,12 +317,13 @@ class Solution:
     n_unknowns: int
 
 
-def solve(grid: Grid, free: NDArray[np.bool_], f_cell: NDArray[np.float64], p: Params,
+def solve(grid: Grid, open_: NDArray[np.float64], f_cell: NDArray[np.float64], p: Params,
           ) -> Solution:
-    """Total escape power. Injection on a building/non-free cell would be a bug: demand cells
-    are free in the original geometry and freeing only adds cells."""
+    """Total escape power. Injection on a closed cell would be a bug: demand cells are open in
+    the original geometry and freeing only opens more."""
+    free = open_ > 0
     assert not (f_cell[~free] > 0).any()
-    L, cell, unk_cell = operator(free, grid.ground, grid.h, p)
+    L, cell, unk_cell = operator(open_, grid.ground, grid.h, p)
     _, _, m, _ = axes(p.K)
     rr, cc = np.nonzero(free)
     fc = f_cell[rr, cc]

@@ -71,8 +71,8 @@ class Obliterate:
     def freed(self, sc: Scorer, corridor) -> np.ndarray:
         hit = sc.tree.query(corridor, predicate="intersects")
         if len(hit) == 0:
-            return np.zeros_like(sc.grid.inside)
-        return sc.grid.mask_of(shapely.union_all(sc.polys[hit])) | sc.grid.mask_of(corridor)
+            return sc.grid.sub_of(corridor)
+        return sc.grid.sub_of(shapely.union_all([*sc.polys[hit], corridor]))
 
 
 @dataclass(frozen=True)
@@ -81,7 +81,7 @@ class Carve:
     name: str = "carve"
 
     def freed(self, sc: Scorer, corridor) -> np.ndarray:
-        return sc.grid.mask_of(corridor)
+        return sc.grid.sub_of(corridor)
 
 
 class Scorer:
@@ -93,11 +93,11 @@ class Scorer:
         self.tree = shapely.STRtree(self.polys)
         streets = list(block.streets.geometry)
         self.grid = lifted.Grid.of(block.boundary, self.polys, streets, h, offset=offset)
-        self.free0 = self.grid.inside & ~self.grid.building
+        self.free0 = self.grid.ff0
         # demand only where the street can be reached at baseline: fixed from here on, so
         # freeing space only ever adds conductance. `stranded` = share of buildings with no
         # reachable ring cell (they inject nothing).
-        reach = lifted.grounded(self.grid, self.free0, p)
+        reach = lifted.grounded(self.grid, self.free0, p)   # bool mask
         self.f, n_str = lifted.demand(self.grid, self.polys, reach)
         self.stranded = n_str / max(len(self.polys), 1)
         self.P0 = self.P_free(self.free0)
@@ -109,7 +109,8 @@ class Scorer:
         if roads is None or len(roads) == 0:
             return self.free0
         from reblock.budget import road_corridor
-        return self.free0 | (self.rule.freed(self, road_corridor(roads)) & self.grid.inside)
+        g = self.grid
+        return (g.isub & (~g.bsub | self.rule.freed(self, road_corridor(roads)))).mean(axis=-1)
 
     def perm(self, roads) -> float:
         free = self.free_of(roads)

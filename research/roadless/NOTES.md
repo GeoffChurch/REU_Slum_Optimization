@@ -103,4 +103,20 @@ oscillates), and the top two swap on 41132 and 52727. clearance_looped is last e
 Suspect rasterization flicker of gaps ~h (open/closed by cell-centre placement): testing grid-
 offset spread at h 0.5 / 0.35 (conv/off_*.log).
 
-(pending: offset spread, monotonicity)
+**Grid-offset spread (binary cells) is as big as the h effect** (conv/off_*.log): at h 0.5, four
+offsets give e.g. 52727 clearance_looped 0.358-0.403, 41132 cycle_native 0.278-0.316. It is
+rasterization FLICKER -- gaps ~h open or close by cell-centre placement. Offset-AVERAGED, the
+within-block ranking is identical at h 0.5 and 0.35 on all 3 blocks (18537 cn > rlp > ga > cl;
+41132 rlp > cn > ga > cl; 52727 cn > ga > rlp > cl), with a residual level shift ~0.03 on 52727.
+
+**Monotonicity: holds.** 18537 h 1, carve: 48 nested random-order steps, largest relative
+increase 0.00e+00.
+
+**Fix for the flicker: sub-cell open fractions** (4 x 4 sub-samples per cell). A cell exists if
+any sub-sample is open; an along edge's weight is scaled by the smallest open fraction among the
+cells it touches (a gap narrower than a cell conducts in proportion to its width), a turning
+edge by its cell's open fraction. Carving/obliterating adds sub-samples, so it stays monotone.
+Open channel angle max/min, K 8, ell 3: W 2: h 0.5 1.158, h 0.25 1.073; W 4: 1.059, 1.028
+(binary cells K 16: 1.246 / 1.075 / 1.074 / 1.058).
+
+(pending: offset spread + h with sub-cell fractions, conv2/)

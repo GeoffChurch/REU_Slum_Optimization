@@ -59,7 +59,7 @@ def cross_channel() -> None:
         grid = lifted.Grid.of(Polygon(c), [], [LineString([c[1], c[2]])], 0.5)
         f = (grid.mask_of(LineString([c[0], c[3]]).buffer(1.0)) & grid.inside & ~grid.ground).astype(float)
         f /= f.sum()
-        free = grid.inside
+        free = grid.ff0
         sol = lifted.solve(grid, free, f, p)
         print(f"single stream, channel at {a} deg:", lifted.crossing(free, grid.ground, sol, p), flush=True)
 

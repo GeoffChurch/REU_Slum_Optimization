@@ -27,7 +27,7 @@ def channel(alpha_deg: float, W: float, Lc: float, h: float, p: lifted.Params) -
     src = LineString([corners[0], corners[3]]).buffer(1.0)
     f = (grid.mask_of(src) & grid.inside & ~grid.ground).astype(float)
     f /= f.sum()
-    free = grid.inside & ~grid.building
+    free = grid.ff0
     return lifted.solve(grid, free, f, p).P
 
 
