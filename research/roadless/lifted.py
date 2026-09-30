@@ -148,27 +148,28 @@ class Grid:
         return out
 
 
-def demand(grid: Grid, footprints, allowed: NDArray[np.bool_],
-           ring_m: float = 1.0) -> tuple[NDArray[np.float64], int]:
-    """Per-cell injection (ny, nx): each building injects 1, uniformly over the `allowed` free
-    cells within `ring_m` of it whose nearest building it is (`allowed` = cells with a path to
-    the street, so a ring partly in a sealed nook puts all its demand on the open side). A
-    building with no allowed ring cell is STRANDED: it injects nothing and is counted."""
+def demand(grid: Grid, footprints, allowed: NDArray[np.bool_], weights: NDArray[np.float64],
+           ring_m: float = 1.0) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """Per-cell injection (ny, nx): building j injects weights[j] (its population), uniformly
+    over the `allowed` free cells within `ring_m` of it whose nearest building it is (`allowed` =
+    cells with a path to the street, so a ring partly in a sealed nook puts all its demand on the
+    open side). A building with no allowed ring cell is STRANDED: it injects nothing. Returns
+    (field, stranded mask per building)."""
     ring = allowed & (grid.dist_b <= ring_m + 1e-9)
     rr, cc = np.nonzero(ring)
     polys = np.asarray(footprints)
     n = len(polys)
     f = np.zeros(grid.inside.shape)
     if len(rr) == 0:
-        return f, n
+        return f, np.ones(n, dtype=bool)
     tree = shapely.STRtree(polys)
     pts = shapely.points(grid.xy[rr, cc, 0], grid.xy[rr, cc, 1])
     idx, _ = tree.query_nearest(pts, return_distance=True, all_matches=False)
     owner = np.full(len(rr), -1)
     owner[idx[0]] = idx[1]
     cnt = np.bincount(owner, minlength=n).astype(float)
-    np.add.at(f, (rr, cc), 1.0 / cnt[owner])
-    return f, int((cnt == 0).sum())
+    np.add.at(f, (rr, cc), weights[owner] / cnt[owner])
+    return f, cnt == 0
 
 
 @dataclass(frozen=True)

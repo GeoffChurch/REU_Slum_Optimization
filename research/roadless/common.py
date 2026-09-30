@@ -64,6 +64,58 @@ def arms() -> dict:
 
 
 @dataclass(frozen=True)
+class CountPopulation:
+    """One unit per building."""
+    name: str = "count"
+
+    def weights(self, polys: np.ndarray) -> np.ndarray:
+        return np.ones(len(polys))
+
+
+@dataclass(frozen=True)
+class AreaPopulation:
+    """Population proportional to footprint area, normalised to mean 1 (so the block total is
+    still the building count)."""
+    name: str = "area"
+
+    def weights(self, polys: np.ndarray) -> np.ndarray:
+        a = shapely.area(polys)
+        return a / a.mean() if len(a) and a.mean() > 0 else np.ones(len(polys))
+
+
+POPULATIONS = {"count": CountPopulation(), "area": AreaPopulation()}
+
+
+def displacement(block, roads, w: np.ndarray) -> float:
+    """Population-weighted share displaced: sum_i c_i w_i / sum_i w_i, c_i the share of building
+    i's outline the corridor takes (the project's overlap fraction)."""
+    if roads is None or len(roads) == 0 or len(w) == 0:
+        return 0.0
+    from reblock.budget import road_corridor
+    c = block.buildings.displacement(road_corridor(roads))
+    return float((c * w).sum() / w.sum())
+
+
+def prefix_to(block, roads, target: float, w: np.ndarray):
+    """The shortest street-first prefix whose weighted displacement reaches `target` (all roads,
+    in canonical order, if none does): `prefix_to_displacement` with a population."""
+    from reblock.budget import STREET_TOL, street_first_ordered
+    if len(roads) == 0:
+        return roads
+    ordered = street_first_ordered(block, roads, STREET_TOL)
+    if displacement(block, ordered, w) < target:
+        return ordered
+    lo, hi = 0, len(ordered)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if displacement(block, ordered.iloc[:mid], w) >= target:
+            hi = mid
+        else:
+            lo = mid + 1
+    return ordered.iloc[:lo]
+
+
+@dataclass(frozen=True)
 class Obliterate:
     """Every building the corridor touches is removed whole."""
     name: str = "obliterate"
@@ -86,8 +138,9 @@ class Carve:
 
 class Scorer:
     def __init__(self, block, h: float, p: lifted.Params, rule=None,
-                 offset: tuple[float, float] = (0.3713, 0.1931)):
+                 offset: tuple[float, float] = (0.3713, 0.1931), population=None):
         rule = Carve() if rule is None else rule
+        population = CountPopulation() if population is None else population
         self.block, self.h, self.p, self.rule = block, h, p, rule
         self.polys = np.asarray(block.buildings.outlines)
         self.tree = shapely.STRtree(self.polys)
@@ -98,8 +151,9 @@ class Scorer:
         # freeing space only ever adds conductance. `stranded` = share of buildings with no
         # reachable ring cell (they inject nothing).
         reach = lifted.grounded(self.grid, self.free0, p)   # bool mask
-        self.f, n_str = lifted.demand(self.grid, self.polys, reach)
-        self.stranded = n_str / max(len(self.polys), 1)
+        self.w = population.weights(self.polys)
+        self.f, stranded = lifted.demand(self.grid, self.polys, reach, self.w)
+        self.stranded = float(self.w[stranded].sum() / max(self.w.sum(), 1e-12))
         self.P0 = self.P_free(self.free0)
 
     def P_free(self, free) -> float:

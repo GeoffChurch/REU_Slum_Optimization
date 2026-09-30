@@ -237,3 +237,21 @@ turning cost prices how paths bend, not whether the open space forms lanes.
 Open question for the owner: is a scattered pattern of plazas what the metric SHOULD reward? The
 roadless score values open ground near congested homes; nothing in it asks for continuous lanes
 beyond the turning cost (ell 3 m is weak).
+
+## Population proportional to footprint area (owner, 2026-09-29)
+
+Owner: buildings contribute (fractional) population proportional to their area. Implemented as a
+population Strategy (common.CountPopulation / AreaPopulation, weights normalised to mean 1) that
+sets BOTH the escape demand (building j injects w_j) and the displacement (sum_i c_i w_i / sum
+w_i; `common.prefix_to` = prefix_to_displacement with weights -- the count version reproduces
+the project's prefixes exactly). The greedy ranks by tension per unit population and clears the
+best exact gain per unit population displaced. Also robust to Open Buildings merging adjoining
+shacks (a merged blob counts by its area). Caveat: large non-residential footprints are
+overweighted, and neither count nor area can tell.
+
+Also answered: the score DOES price width (conductance ~ width/length) and straightness (turning
+cost) and charges length; what it lacks is a THRESHOLD (a continuous path >= W to the street),
+and contention penalizes funnelling, so it widens bottlenecks rather than cutting lanes.
+
+Running: study.py ... area (rows_h0.5_ell3_K8_area/), clear.py ... area
+(clear_rows_M4_h0.5_area/).

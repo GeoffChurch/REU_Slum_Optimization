@@ -9,7 +9,7 @@ Screened greedy. Each step: one tension solve, exact solves for the top M buildi
 clear the best. `loo` checks the screen against exact leave-one-out on one step.
 
     PYTHONPATH=. pixi run python research/roadless/clear.py loo <block idx> [h]
-    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <M> <h> <d_max>
+    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <M> <h> <d_max> [pop]
 """
 from __future__ import annotations
 
@@ -31,8 +31,9 @@ EPS = 0.01
 
 
 class Clearing:
-    def __init__(self, block, h: float, p: lifted.Params):
-        self.sc = common.Scorer(block, h, p)
+    def __init__(self, block, h: float, p: lifted.Params, population=None):
+        self.sc = common.Scorer(block, h, p, population=population)
+        self.cost = self.sc.w / self.sc.w.sum()        # population share of each building
         self.p = p
         g = self.sc.grid
         # sub-sample -> building index (-1 = none); overlaps resolved arbitrarily
@@ -138,25 +139,30 @@ def loo(i: int, h: float) -> None:
               f"{exact[pick].max() / exact.max():.3f} of the true best", flush=True)
 
 
-def greedy_block(b, M: int, h: float, d_max: float, out: Path) -> None:
-    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8))
+def greedy_block(b, M: int, h: float, d_max: float, out: Path, population) -> None:
+    """Each step: rank remaining buildings by tension per unit of population, exact-solve the
+    top M, clear the one with the best exact gain per unit of population displaced."""
+    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8), population=population)
     P0 = c.sc.P0
+    P = P0
     rows = [dict(block=b.block_id, n=c.n, step=0, D=0.0, perm=0.0, cleared=-1, P0=P0)]
     step = 0
     t0 = time.time()
-    while c.removed.sum() / c.n < d_max - 1e-12 and not c.removed.all():
-        T = c.tension()
+    while c.cost[c.removed].sum() < d_max - 1e-12 and not c.removed.all():
+        T = c.tension() / c.cost
         cand = [j for j in np.argsort(-T)[:M] if not c.removed[j]]
-        best, bestP = -1, np.inf
+        best, bestP, bestv = -1, np.inf, -np.inf
         for j in cand:
             r = c.removed.copy()
             r[j] = True
             Pj = c.P(r)
-            if Pj < bestP:
-                best, bestP = int(j), Pj
+            v = (P - Pj) / c.cost[j]
+            if v > bestv:
+                best, bestP, bestv = int(j), Pj, v
         c.removed[best] = True
+        P = bestP
         step += 1
-        rows.append(dict(block=b.block_id, n=c.n, step=step, D=c.removed.sum() / c.n,
+        rows.append(dict(block=b.block_id, n=c.n, step=step, D=float(c.cost[c.removed].sum()),
                          perm=1 - bestP / P0, cleared=best, P0=P0))
     tmp = out.with_suffix(f".{os.getpid()}.tmp")
     pd.DataFrame(rows).to_parquet(tmp)
@@ -175,17 +181,22 @@ def _one(i: int) -> None:
     if out.exists():
         return
     try:
-        greedy_block(b, _CFG["M"], _CFG["h"], _CFG["d_max"], out)
+        greedy_block(b, _CFG["M"], _CFG["h"], _CFG["d_max"], out,
+                     common.POPULATIONS[_CFG["pop"]])
     except Exception as e:
         print(f"{b.block_id} FAILED {type(e).__name__}: {e}"[:300], flush=True)
 
 
-def run(workers: int, M: int, h: float, d_max: float) -> None:
+def rows_dir(M: int, h: float, pop: str) -> Path:
+    return HERE / (f"clear_rows_M{M}_h{h:g}" + ("" if pop == "count" else f"_{pop}"))
+
+
+def run(workers: int, M: int, h: float, d_max: float, pop: str) -> None:
     import multiprocessing
     global _BLOCKS, _CFG
-    d = HERE / f"clear_rows_M{M}_h{h:g}"
+    d = rows_dir(M, h, pop)
     d.mkdir(exist_ok=True)
-    _CFG = dict(M=M, h=h, d_max=d_max, dir=d)
+    _CFG = dict(M=M, h=h, d_max=d_max, dir=d, pop=pop)
     _BLOCKS = common.build_blocks(common.recipients())
     with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=4) as pool:
         for _ in pool.imap_unordered(_one, list(range(len(_BLOCKS)))[::-1]):
@@ -196,4 +207,5 @@ if __name__ == "__main__":
     if sys.argv[1] == "loo":
         loo(int(sys.argv[2]), float(sys.argv[3]) if len(sys.argv) > 3 else 0.5)
     elif sys.argv[1] == "run":
-        run(int(sys.argv[2]), int(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]))
+        run(int(sys.argv[2]), int(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]),
+            sys.argv[6] if len(sys.argv) > 6 else "count")

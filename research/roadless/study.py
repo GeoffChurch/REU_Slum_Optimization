@@ -3,8 +3,11 @@ prefixes: the canonical street-first prefix at each displacement budget in BUDGE
 network). Lens A is budget 0.10; Lens B is read afterwards from the curve (both metrics are
 monotone along the prefix order).
 
-    PYTHONPATH=. pixi run python research/roadless/study.py run <workers> <h> <ell> [K]
-    PYTHONPATH=. pixi run python research/roadless/study.py report <h> <ell> [K]
+    PYTHONPATH=. pixi run python research/roadless/study.py run <workers> <h> <ell> [K] [pop]
+    PYTHONPATH=. pixi run python research/roadless/study.py report <h> <ell> [K] [pop]
+
+pop: count (each building one unit) or area (proportional to footprint area): both the escape
+demand and the displacement weights.
 """
 from __future__ import annotations
 
@@ -28,8 +31,8 @@ _ARMS: dict = {}
 _CFG: dict = {}
 
 
-def rows_dir(h: float, ell: float, K: int) -> Path:
-    return HERE / f"rows_h{h:g}_ell{ell:g}_K{K}"
+def rows_dir(h: float, ell: float, K: int, pop: str = "count") -> Path:
+    return HERE / (f"rows_h{h:g}_ell{ell:g}_K{K}" + ("" if pop == "count" else f"_{pop}"))
 
 
 def one(i: int) -> None:
@@ -41,12 +44,11 @@ def one(i: int) -> None:
 
 
 def _one(i: int) -> None:
-    from reblock.budget import displacement, prefix_to_displacement
     from reblock.compare import load_permeability_config
     from reblock.derivations import propose
     from reblock.permeability import EgressContext, permeability
-    h, ell, K = _CFG["h"], _CFG["ell"], _CFG["K"]
-    out = rows_dir(h, ell, K) / f"{_BLOCKS[i].block_id}.parquet"
+    h, ell, K, pop = _CFG["h"], _CFG["ell"], _CFG["K"], _CFG["pop"]
+    out = rows_dir(h, ell, K, pop) / f"{_BLOCKS[i].block_id}.parquet"
     if out.exists():
         return
     b = _BLOCKS[i]
@@ -54,8 +56,10 @@ def _one(i: int) -> None:
     pcfg = load_permeability_config(common.REPO / "conf")
     ctx = EgressContext.of(b, pcfg.params)
     p = lifted.Params(ell_m=ell, K=K)
-    carve = common.Scorer(b, h, p, rule=common.Carve())
-    obl = common.Scorer(b, h, p, rule=common.Obliterate())
+    population = common.POPULATIONS[pop]
+    carve = common.Scorer(b, h, p, rule=common.Carve(), population=population)
+    obl = common.Scorer(b, h, p, rule=common.Obliterate(), population=population)
+    w = carve.w
     n = len(b.buildings)
     rows = []
     for name in common.LINEUP:
@@ -64,7 +68,7 @@ def _one(i: int) -> None:
             continue
         seen: dict[int, dict] = {}
         for bud in (*BUDGETS, None):
-            pre = roads if bud is None else prefix_to_displacement(b, roads, bud)
+            pre = roads if bud is None else common.prefix_to(b, roads, bud, w)
             key = len(pre)
             if key in seen:                       # budget unreachable: same (whole) prefix
                 rows.append({**seen[key], "budget": bud if bud is not None else np.nan,
@@ -72,7 +76,7 @@ def _one(i: int) -> None:
                 continue
             r = dict(block=b.block_id, n=n, arm=name, n_roads=len(pre),
                      road_m=float(pre.geometry.length.sum()),
-                     D=displacement(b.buildings, pre) / n,
+                     D=common.displacement(b, pre, w),
                      P_old=permeability(ctx, pre), P_carve=carve.perm(pre),
                      stranded=carve.stranded)
             if bud == 0.10:
@@ -87,10 +91,10 @@ def _one(i: int) -> None:
     print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={n} {time.time() - t0:.0f}s", flush=True)
 
 
-def run(workers: int, h: float, ell: float, K: int) -> None:
+def run(workers: int, h: float, ell: float, K: int, pop: str) -> None:
     global _BLOCKS, _ARMS, _CFG
-    _CFG = dict(h=h, ell=ell, K=K)
-    rows_dir(h, ell, K).mkdir(exist_ok=True)
+    _CFG = dict(h=h, ell=ell, K=K, pop=pop)
+    rows_dir(h, ell, K, pop).mkdir(exist_ok=True)
     _BLOCKS = common.build_blocks(common.recipients())
     _ARMS = common.arms()
     order = list(range(len(_BLOCKS)))[::-1]          # largest first: the long poles start early
@@ -132,8 +136,8 @@ def _tau(a: np.ndarray, b: np.ndarray) -> float:
     return float(kendalltau(a, b).statistic) if len(a) >= 3 else np.nan
 
 
-def report(h: float, ell: float, K: int) -> None:
-    d = pd.concat([pd.read_parquet(p) for p in rows_dir(h, ell, K).glob("*.parquet")],
+def report(h: float, ell: float, K: int, pop: str = "count") -> None:
+    d = pd.concat([pd.read_parquet(p) for p in rows_dir(h, ell, K, pop).glob("*.parquet")],
                   ignore_index=True)
     d["arm"] = d["arm"].map(SHORT)
     nb = d.block.nunique()
@@ -207,7 +211,9 @@ if __name__ == "__main__":
     cmd = sys.argv[1]
     if cmd == "run":
         K = int(sys.argv[5]) if len(sys.argv) > 5 else 8
-        run(int(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]), K)
+        pop = sys.argv[6] if len(sys.argv) > 6 else "count"
+        run(int(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]), K, pop)
     else:
         K = int(sys.argv[4]) if len(sys.argv) > 4 else 8
-        report(float(sys.argv[2]), float(sys.argv[3]), K)
+        pop = sys.argv[5] if len(sys.argv) > 5 else "count"
+        report(float(sys.argv[2]), float(sys.argv[3]), K, pop)
