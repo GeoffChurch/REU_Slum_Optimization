@@ -204,7 +204,8 @@ a local correction solve in a window around j bounds the gain from above (Dirich
 (Thomson); both converge to exact as the window grows. Not built: with 1.7 s solves, M = 4
 screening already costs ~5 solves per step. Keep for the large blocks.
 
-**Screened greedy (M 4) vs the lineup** (compare_clear.py, 139 of 220 blocks at first read):
+**Screened greedy (M 4) vs the lineup** (compare_clear.py; FULL 220: greedy 0.603 vs 0.360-0.368 for
+the top four road arms at Lens A, +0.212..+0.218, wins on every block; first read on 139 below):
 Lens A roadless perm 0.622 vs 0.37 for the best road arm (+0.216..+0.221 vs the top four, wins
 on EVERY block); Lens B P*' 0.25 at D 0.016 vs 0.051 (resist_lp). Frontier: greedy on all 139.
 
