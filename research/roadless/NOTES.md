@@ -204,4 +204,23 @@ a local correction solve in a window around j bounds the gain from above (Dirich
 (Thomson); both converge to exact as the window grows. Not built: with 1.7 s solves, M = 4
 screening already costs ~5 solves per step. Keep for the large blocks.
 
-Screened greedy M 4 to D 0.15 on the 220 running (clear_rows_M4_h0.5/, compare_clear.py).
+**Screened greedy (M 4) vs the lineup** (compare_clear.py, 139 of 220 blocks at first read):
+Lens A roadless perm 0.622 vs 0.37 for the best road arm (+0.216..+0.221 vs the top four, wins
+on EVERY block); Lens B P*' 0.25 at D 0.016 vs 0.051 (resist_lp). Frontier: greedy on all 139.
+
+Caveats, measured:
+- It is an ORACLE: it optimizes exactly the score it is graded on (cf. the vehicle-access direct
+  optimizer). Re-scoring its clearing under other settings (rescore.py: h 0.25, shifted grid,
+  ell 1, ell 10) is running.
+- It clears SCATTERED, LARGE, often free-standing buildings, not lanes (clear_vs_cycle_native_*.png).
+  Displacement counts a building as one home whatever its size, while freed space scales with
+  area. At 10% of homes the greedy clears 18.1% of footprint AREA (its buildings average 1.78x
+  the block mean) vs 11.4-12.7% for cycle_native / resistance_lp / arterial (area_share.py, 40
+  blocks).
+- MATCHED ON FOOTPRINT AREA the gap halves but holds (area_match.py, 155 blocks): at 10 / 15 / 20%
+  of area cleared the greedy leads the best road arm (cycle_native) by +0.126 / +0.131 / +0.134,
+  winning on 95-99% of blocks. And the greedy optimized per home, not per m^2.
+
+Open question for the owner: is a scattered pattern of plazas what the metric SHOULD reward? The
+roadless score values open ground near congested homes; nothing in it asks for continuous lanes
+beyond the turning cost (ell 3 m is weak).
