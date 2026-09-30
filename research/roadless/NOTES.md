@@ -255,3 +255,23 @@ and contention penalizes funnelling, so it widens bottlenecks rather than cuttin
 
 Running: study.py ... area (rows_h0.5_ell3_K8_area/), clear.py ... area
 (clear_rows_M4_h0.5_area/).
+
+## Equity: J_p = sum_i w_i u_i^p (owner chose option 2, 2026-09-30)
+
+u_i = building i's CONGESTED escape time: the injection-weighted mean potential of u = L^-1 f over
+its ring cells, so sum_i w_i u_i = P and p = 1 is the current score. u_i is half the marginal
+total cost of one more person leaving from i (dP/df_i = 2 u_i). Score: 1 - (J_p / J_p0)^(1/p).
+- Same family as the screen's closed form (notes 2026-09-19): ring counts are linear in depth, so
+  any polynomial weight collapses to n x const x depth_proxy^m; with u roughly quadratic in ring
+  depth, J_p at baseline closes to n x const x depth_proxy^(2p) (untested).
+- Adjoint: dJ/dw_e = -(du_e)(dlam_e), L lam = p u_i^(p-1) x injection. p = 1 is self-adjoint
+  (one solve); p != 1 costs one more solve for ALL buildings. Validated at p 2, area population,
+  41132: Spearman(tension, exact LOO gain) +0.936, tension's #1 is the true best.
+- NOT monotone in general -- but dead ends are neutral (no steady current into a demand-free
+  pocket; that worry was about hitting times). The remaining non-monotonicity is CONGESTION
+  SPILLOVER: opening a route for buried homes pushes flow past the homes at its outlet.
+
+Running (2026-09-30 00:47): study.py area rerun with P2_carve and tail columns (u95, umax, umed =
+ratio to baseline) into rows_h0.5_ell3_K8_area/ (the p = 1-only area rows are in
+rows_h0.5_ell3_K8_area_p1only/, obliterate dropped); clear.py area p 2 into
+clear_rows_M4_h0.5_area_p2/; clear.py area p 1 still running (clear_rows_M4_h0.5_area/).
