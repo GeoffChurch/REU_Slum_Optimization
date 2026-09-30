@@ -221,6 +221,19 @@ Caveats, measured:
   of area cleared the greedy leads the best road arm (cycle_native) by +0.126 / +0.131 / +0.134,
   winning on 95-99% of blocks. And the greedy optimized per home, not per m^2.
 
+**Not a discretization or ell exploit** (rescore.py, 20 random blocks; the greedy's Lens A set
+chosen at h 0.5 / ell 3, re-scored; gap = greedy minus the best of resist_lp / cycle / arterial):
+
+    setting   greedy  best road  gap median [min, max]   greedy ahead
+    base      0.630   0.437      +0.194 [+0.083, +0.248]  20/20
+    h 0.25    0.636   0.445      +0.200 [+0.081, +0.241]  20/20
+    shifted   0.633   0.439      +0.191 [+0.064, +0.238]  20/20
+    ell 1     0.589   0.395      +0.190 [+0.092, +0.229]  20/20
+    ell 10    0.700   0.501      +0.196 [+0.075, +0.277]  20/20
+
+Even a strong straightness preference (ell 10) does not penalize the scattered pattern: the
+turning cost prices how paths bend, not whether the open space forms lanes.
+
 Open question for the owner: is a scattered pattern of plazas what the metric SHOULD reward? The
 roadless score values open ground near congested homes; nothing in it asks for continuous lanes
 beyond the turning cost (ell 3 m is weak).
