@@ -58,7 +58,6 @@ def _one(i: int) -> None:
     p = lifted.Params(ell_m=ell, K=K)
     population = common.POPULATIONS[pop]
     carve = common.Scorer(b, h, p, rule=common.Carve(), population=population)
-    obl = common.Scorer(b, h, p, rule=common.Obliterate(), population=population)
     w = carve.w
     n = len(b.buildings)
     rows = []
@@ -77,10 +76,15 @@ def _one(i: int) -> None:
             r = dict(block=b.block_id, n=n, arm=name, n_roads=len(pre),
                      road_m=float(pre.geometry.length.sum()),
                      D=common.displacement(b, pre, w),
-                     P_old=permeability(ctx, pre), P_carve=carve.perm(pre),
-                     stranded=carve.stranded)
-            if bud == 0.10:
-                r["P_obl"] = obl.perm(pre)
+                     P_old=permeability(ctx, pre), stranded=carve.stranded)
+            free = carve.free_of(pre)
+            sol = lifted.solve(carve.grid, free, carve.f, p)
+            u = carve.home_u_of(sol, free)
+            u0 = carve.u0
+            r.update(P_carve=1.0 - sol.P / carve.P0, P2_carve=carve.perm_p(u, 2.0),
+                     u95=float(np.nanpercentile(u, 95) / np.nanpercentile(u0, 95)),
+                     umax=float(np.nanmax(u) / np.nanmax(u0)),
+                     umed=float(np.nanmedian(u) / np.nanmedian(u0)))
             seen[key] = r
             rows.append({**r, "budget": bud if bud is not None else np.nan, "full": bud is None})
     df = pd.DataFrame(rows)
@@ -143,6 +147,8 @@ def report(h: float, ell: float, K: int, pop: str = "count") -> None:
     nb = d.block.nunique()
     print(f"{nb} blocks, h {h} ell {ell} K {K}\n")
     A = d[(d.budget == 0.10) & (d.D >= 0.10 - 1e-9)]
+    if "P_obl" not in A:                          # later runs score carve only
+        A = A.assign(P_obl=np.nan)
     print("LENS A (10% displaced): blocks reaching, median perm old / roadless-carve / "
           "roadless-obliterate, median road m")
     for arm, g in A.groupby("arm"):

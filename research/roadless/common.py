@@ -152,12 +152,34 @@ class Scorer:
         # reachable ring cell (they inject nothing).
         reach = lifted.grounded(self.grid, self.free0, p)   # bool mask
         self.w = population.weights(self.polys)
-        self.f, stranded = lifted.demand(self.grid, self.polys, reach, self.w)
+        self.f, stranded, self.owner = lifted.demand(self.grid, self.polys, reach, self.w)
+        self.live_home = ~stranded
         self.stranded = float(self.w[stranded].sum() / max(self.w.sum(), 1e-12))
         self.P0 = self.P_free(self.free0)
+        self.u0 = self.home_u(self.free0)
 
     def P_free(self, free) -> float:
         return lifted.solve(self.grid, free, self.f, self.p).P
+
+    def home_u_of(self, sol: lifted.Solution, free) -> np.ndarray:
+        """Per building: its congested escape time u_i, the injection-weighted mean potential
+        over its ring cells (so sum_i w_i u_i = P). nan for stranded buildings."""
+        ub = lifted.cell_mean_u(sol, free, self.p)
+        on = self.owner >= 0
+        num = np.bincount(self.owner[on], weights=(self.f * ub)[on], minlength=len(self.polys))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(self.live_home, num / self.w, np.nan)
+
+    def home_u(self, free) -> np.ndarray:
+        return self.home_u_of(lifted.solve(self.grid, free, self.f, self.p), free)
+
+    def J(self, u: np.ndarray, power: float) -> float:
+        """J_p = sum_i w_i u_i^p over reachable buildings (J_1 = P)."""
+        ok = self.live_home
+        return float((self.w[ok] * u[ok] ** power).sum())
+
+    def perm_p(self, u: np.ndarray, power: float) -> float:
+        return 1.0 - (self.J(u, power) / self.J(self.u0, power)) ** (1.0 / power)
 
     def free_of(self, roads) -> np.ndarray:
         if roads is None or len(roads) == 0:

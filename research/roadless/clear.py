@@ -9,7 +9,7 @@ Screened greedy. Each step: one tension solve, exact solves for the top M buildi
 clear the best. `loo` checks the screen against exact leave-one-out on one step.
 
     PYTHONPATH=. pixi run python research/roadless/clear.py loo <block idx> [h]
-    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <M> <h> <d_max> [pop]
+    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <M> <h> <d_max> [pop] [p]
 """
 from __future__ import annotations
 
@@ -65,8 +65,10 @@ class Clearing:
     def P(self, removed: np.ndarray) -> float:
         return self.sc.P_free(self.open_(removed))
 
-    def tension(self) -> np.ndarray:
-        """First-order gain of clearing each (remaining) building, from one eps-material solve."""
+    def tension(self, power: float = 1.0) -> np.ndarray:
+        """First-order gain in J_power of clearing each (remaining) building, from one
+        eps-material solve (power 1: the potential is its own adjoint) or two (power != 1: the
+        adjoint L lam = dJ/du = power u_i^(power-1) x injection). dJ/dw_e = -(du_e)(dlam_e)."""
         g = self.sc.grid
         op = self.open_(self.removed)
         full = g.isub.mean(axis=-1)                       # everything open
@@ -77,13 +79,23 @@ class Clearing:
         uk = np.zeros((nc, K))
         live = sol.unk_cell >= 0
         uk[live] = sol.u.reshape(-1, K)
+        if power == 1.0:
+            lk = uk
+        else:
+            uh = self.sc.home_u_of(sol, op_eps)
+            mult = np.zeros_like(self.sc.f)
+            on = self.sc.owner >= 0
+            mult[on] = power * np.nan_to_num(uh[self.sc.owner[on]]) ** (power - 1.0)
+            lam = lifted.solve(g, op_eps, self.sc.f * mult, self.p)
+            lk = np.zeros((nc, K))
+            lk[live] = lam.u.reshape(-1, K)
         # per cell: sum over incident edges of (du)^2 x (weight fully open - weight now), halved
         T = np.zeros(nc)
         cur = {k: (a, b, w) for k, a, b, w in lifted.along_edges(op_eps, self.p)}
         for k, a, b, wf in lifted.along_edges(full, self.p):
             ca, cb, wc = cur[k]
             assert len(ca) == len(a) and (ca == a).all()
-            gain = (uk[a, k] - uk[b, k]) ** 2 * (wf - wc)
+            gain = (uk[a, k] - uk[b, k]) * (lk[a, k] - lk[b, k]) * (wf - wc)
             np.add.at(T, a, 0.5 * gain)
             np.add.at(T, b, 0.5 * gain)
         _v, _th, _m, gap = lifted.axes(K)
@@ -91,7 +103,7 @@ class Clearing:
         dvol = (full - op_eps)[op_eps > 0]
         for k in range(K):
             k2 = (k + 1) % K
-            T += (uk[free_ids, k] - uk[free_ids, k2]) ** 2 * dvol * (
+            T += (uk[free_ids, k] - uk[free_ids, k2]) * (lk[free_ids, k] - lk[free_ids, k2]) * dvol * (
                 g.h * g.h / (self.p.ell_m ** 2 * gap[k]))
         # grid cell (row-major over all cells) -> node id
         node = -np.ones(g.inside.size, dtype=np.int64)
@@ -109,26 +121,28 @@ class Clearing:
         return out
 
 
-def loo(i: int, h: float) -> None:
+def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     from scipy.stats import spearmanr
     blocks = common.build_blocks(common.recipients())
     b = blocks[i]
-    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8))
-    P0 = c.sc.P0
+    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8), population=common.POPULATIONS[pop])
+    sc = c.sc
+    P0 = sc.J(sc.u0, power)
     t = time.time()
-    T = c.tension()
+    T = c.tension(power)
     tt = time.time() - t
     t = time.time()
     exact = np.zeros(c.n)
     for j in range(c.n):
         r = c.removed.copy()
         r[j] = True
-        exact[j] = P0 - c.P(r)
+        op = c.open_(r)
+        exact[j] = P0 - sc.J(sc.home_u_of(lifted.solve(sc.grid, op, sc.f, c.p), op), power)
     te = time.time() - t
     rho = spearmanr(T, exact).statistic
     top = np.argsort(-exact)
     rankT = np.argsort(np.argsort(-T))
-    print(f"{b.block_id} n={c.n} h={h}: tension {tt:.0f}s, exact LOO {te:.0f}s "
+    print(f"{b.block_id} n={c.n} h={h} pop={pop} p={power:g}: tension {tt:.0f}s, exact LOO {te:.0f}s "
           f"({te / c.n:.1f}s each)", flush=True)
     print(f"  Spearman(tension, exact gain) {rho:+.3f}; tension rank of the exact top 5: "
           f"{rankT[top[:5]].tolist()}; exact gain top 5 (share of P0): "
@@ -139,31 +153,39 @@ def loo(i: int, h: float) -> None:
               f"{exact[pick].max() / exact.max():.3f} of the true best", flush=True)
 
 
-def greedy_block(b, M: int, h: float, d_max: float, out: Path, population) -> None:
-    """Each step: rank remaining buildings by tension per unit of population, exact-solve the
-    top M, clear the one with the best exact gain per unit of population displaced."""
+def greedy_block(b, M: int, h: float, d_max: float, out: Path, population,
+                 power: float = 1.0) -> None:
+    """Each step: rank remaining buildings by tension (in J_power) per unit of population,
+    exact-solve the top M, clear the one with the best exact J_power gain per unit of population
+    displaced. Records perm (in J_power) and perm1 (the p = 1 score) at every step."""
     c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8), population=population)
-    P0 = c.sc.P0
-    P = P0
-    rows = [dict(block=b.block_id, n=c.n, step=0, D=0.0, perm=0.0, cleared=-1, P0=P0)]
+    sc = c.sc
+    J0 = sc.J(sc.u0, power)
+    P0 = sc.P0
+    P = J0
+    rows = [dict(block=b.block_id, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=-1,
+                 P0=P0)]
     step = 0
     t0 = time.time()
     while c.cost[c.removed].sum() < d_max - 1e-12 and not c.removed.all():
-        T = c.tension() / c.cost
+        T = c.tension(power) / c.cost
         cand = [j for j in np.argsort(-T)[:M] if not c.removed[j]]
         best, bestP, bestv = -1, np.inf, -np.inf
         for j in cand:
             r = c.removed.copy()
             r[j] = True
-            Pj = c.P(r)
+            op = c.open_(r)
+            sol = lifted.solve(sc.grid, op, sc.f, c.p)
+            Pj = sc.J(sc.home_u_of(sol, op), power)
             v = (P - Pj) / c.cost[j]
             if v > bestv:
-                best, bestP, bestv = int(j), Pj, v
+                best, bestP, bestv, bestP1 = int(j), Pj, v, sol.P
         c.removed[best] = True
         P = bestP
         step += 1
         rows.append(dict(block=b.block_id, n=c.n, step=step, D=float(c.cost[c.removed].sum()),
-                         perm=1 - bestP / P0, cleared=best, P0=P0))
+                         perm=1 - (bestP / J0) ** (1 / power), perm1=1 - bestP1 / P0,
+                         cleared=best, P0=P0))
     tmp = out.with_suffix(f".{os.getpid()}.tmp")
     pd.DataFrame(rows).to_parquet(tmp)
     os.replace(tmp, out)
@@ -182,21 +204,22 @@ def _one(i: int) -> None:
         return
     try:
         greedy_block(b, _CFG["M"], _CFG["h"], _CFG["d_max"], out,
-                     common.POPULATIONS[_CFG["pop"]])
+                     common.POPULATIONS[_CFG["pop"]], _CFG["power"])
     except Exception as e:
         print(f"{b.block_id} FAILED {type(e).__name__}: {e}"[:300], flush=True)
 
 
-def rows_dir(M: int, h: float, pop: str) -> Path:
-    return HERE / (f"clear_rows_M{M}_h{h:g}" + ("" if pop == "count" else f"_{pop}"))
+def rows_dir(M: int, h: float, pop: str, power: float = 1.0) -> Path:
+    return HERE / (f"clear_rows_M{M}_h{h:g}" + ("" if pop == "count" else f"_{pop}")
+                   + ("" if power == 1.0 else f"_p{power:g}"))
 
 
-def run(workers: int, M: int, h: float, d_max: float, pop: str) -> None:
+def run(workers: int, M: int, h: float, d_max: float, pop: str, power: float) -> None:
     import multiprocessing
     global _BLOCKS, _CFG
-    d = rows_dir(M, h, pop)
+    d = rows_dir(M, h, pop, power)
     d.mkdir(exist_ok=True)
-    _CFG = dict(M=M, h=h, d_max=d_max, dir=d, pop=pop)
+    _CFG = dict(M=M, h=h, d_max=d_max, dir=d, pop=pop, power=power)
     _BLOCKS = common.build_blocks(common.recipients())
     with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=4) as pool:
         for _ in pool.imap_unordered(_one, list(range(len(_BLOCKS)))[::-1]):
@@ -205,7 +228,10 @@ def run(workers: int, M: int, h: float, d_max: float, pop: str) -> None:
 
 if __name__ == "__main__":
     if sys.argv[1] == "loo":
-        loo(int(sys.argv[2]), float(sys.argv[3]) if len(sys.argv) > 3 else 0.5)
+        loo(int(sys.argv[2]), float(sys.argv[3]) if len(sys.argv) > 3 else 0.5,
+            sys.argv[4] if len(sys.argv) > 4 else "count",
+            float(sys.argv[5]) if len(sys.argv) > 5 else 1.0)
     elif sys.argv[1] == "run":
         run(int(sys.argv[2]), int(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]),
-            sys.argv[6] if len(sys.argv) > 6 else "count")
+            sys.argv[6] if len(sys.argv) > 6 else "count",
+            float(sys.argv[7]) if len(sys.argv) > 7 else 1.0)

@@ -149,19 +149,21 @@ class Grid:
 
 
 def demand(grid: Grid, footprints, allowed: NDArray[np.bool_], weights: NDArray[np.float64],
-           ring_m: float = 1.0) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+           ring_m: float = 1.0
+           ) -> tuple[NDArray[np.float64], NDArray[np.bool_], NDArray[np.int64]]:
     """Per-cell injection (ny, nx): building j injects weights[j] (its population), uniformly
     over the `allowed` free cells within `ring_m` of it whose nearest building it is (`allowed` =
     cells with a path to the street, so a ring partly in a sealed nook puts all its demand on the
     open side). A building with no allowed ring cell is STRANDED: it injects nothing. Returns
-    (field, stranded mask per building)."""
+    (field, stranded mask per building, owner building per cell or -1)."""
     ring = allowed & (grid.dist_b <= ring_m + 1e-9)
     rr, cc = np.nonzero(ring)
     polys = np.asarray(footprints)
     n = len(polys)
     f = np.zeros(grid.inside.shape)
+    own = -np.ones(grid.inside.shape, dtype=np.int64)
     if len(rr) == 0:
-        return f, np.ones(n, dtype=bool)
+        return f, np.ones(n, dtype=bool), own
     tree = shapely.STRtree(polys)
     pts = shapely.points(grid.xy[rr, cc, 0], grid.xy[rr, cc, 1])
     idx, _ = tree.query_nearest(pts, return_distance=True, all_matches=False)
@@ -169,7 +171,8 @@ def demand(grid: Grid, footprints, allowed: NDArray[np.bool_], weights: NDArray[
     owner[idx[0]] = idx[1]
     cnt = np.bincount(owner, minlength=n).astype(float)
     np.add.at(f, (rr, cc), weights[owner] / cnt[owner])
-    return f, cnt == 0
+    own[rr, cc] = owner
+    return f, cnt == 0, own
 
 
 @dataclass(frozen=True)
@@ -348,3 +351,17 @@ def solve(grid: Grid, open_: NDArray[np.float64], f_cell: NDArray[np.float64], p
     else:
         u = _spd_solve(L, b)
     return Solution(P=float(b @ u), u=u, cell=cell, unk_cell=unk_cell, n_unknowns=L.shape[0])
+
+
+def cell_mean_u(sol: Solution, open_: NDArray[np.float64], p: Params) -> NDArray[np.float64]:
+    """(ny, nx): each open cell's potential averaged over axes by angular share (the weights the
+    injection uses), 0 on ground and closed cells."""
+    _, _, m, _ = axes(p.K)
+    free = open_ > 0
+    nc = int(free.sum())
+    uk = np.zeros((nc, p.K))
+    live = sol.unk_cell >= 0
+    uk[live] = sol.u.reshape(-1, p.K)
+    out = np.zeros(free.shape)
+    out[free] = uk @ (m / np.pi)
+    return out
