@@ -18,6 +18,7 @@ import shapely
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
+from clear import cleared_through  # noqa: E402
 from study import SHORT, _ci, rows_dir  # noqa: E402
 
 TARGETS = (0.10, 0.15, 0.20)
@@ -35,9 +36,9 @@ def curves(bid: str) -> list[dict]:
     tot = area.sum()
     out = []
     g = pd.read_parquet(HERE / f"clear_rows_M{_M}_h0.5" / f"{bid}.parquet").sort_values("step")
-    cl = g.cleared.to_numpy()[1:]
     out += [dict(block=bid, arm="clear_bldg", A=0.0, P=0.0)]
-    out += [dict(block=bid, arm="clear_bldg", A=float(area[cl[:k]].sum() / tot), P=float(p))
+    out += [dict(block=bid, arm="clear_bldg", A=float(area[cleared_through(g, k)].sum() / tot),
+                 P=float(p))
             for k, p in zip(g.step.to_numpy()[1:], g.perm.to_numpy()[1:], strict=True)]
     lin = pd.read_parquet(rows_dir(0.5, 3.0, 8) / f"{bid}.parquet")
     for arm, gg in lin.groupby("arm"):

@@ -1,7 +1,7 @@
 """Escape-time tail at Lens A (10% displaced): per building u_i relative to baseline -- median,
 95th percentile, max -- for the road lineup (from the study rows) and the greedy (re-solved).
 
-    PYTHONPATH=. pixi run python research/roadless/tails.py <pop> <power> <workers>
+    PYTHONPATH=. pixi run python research/roadless/tails.py <pop> <power> <workers> [picker]
 """
 import multiprocessing
 import sys
@@ -14,6 +14,7 @@ import shapely
 
 import common
 import lifted
+from clear import cleared_through
 from clear import rows_dir as clear_dir
 from study import SHORT, _ci, rows_dir
 
@@ -24,10 +25,11 @@ _CFG: dict = {}
 
 def one(bid: str) -> dict:
     b = _B[bid]
-    g = pd.read_parquet(clear_dir(4, 0.5, _CFG["pop"], _CFG["power"]) / f"{bid}.parquet")
+    g = pd.read_parquet(clear_dir(_CFG["picker"], 0.5, _CFG["pop"], _CFG["power"])
+                        / f"{bid}.parquet")
     g = g.sort_values("step")
     stop = g[g.D >= 0.10 - 1e-9].step.iloc[0]
-    rem = g[(g.step >= 1) & (g.step <= stop)].cleared.to_numpy()
+    rem = cleared_through(g, int(stop))
     sc = common.Scorer(b, 0.5, lifted.Params(ell_m=3.0, K=8),
                        population=common.POPULATIONS[_CFG["pop"]])
     gr = sc.grid
@@ -39,10 +41,10 @@ def one(bid: str) -> dict:
                 P2=sc.perm_p(u, 2.0))
 
 
-def main(pop: str, power: float, workers: int) -> None:
+def main(pop: str, power: float, workers: int, picker: str) -> None:
     global _B, _CFG
-    _CFG = dict(pop=pop, power=power)
-    done = sorted(p.stem for p in clear_dir(4, 0.5, pop, power).glob("*.parquet"))
+    _CFG = dict(pop=pop, power=power, picker=picker)
+    done = sorted(p.stem for p in clear_dir(picker, 0.5, pop, power).glob("*.parquet"))
     _B = {b.block_id: b for b in common.build_blocks(common.recipients()) if b.block_id in set(done)}
     with multiprocessing.get_context("fork").Pool(workers) as pool:
         G = pd.DataFrame(list(pool.imap_unordered(one, done)))
@@ -52,7 +54,7 @@ def main(pop: str, power: float, workers: int) -> None:
     A = lin[(lin.budget == 0.10) & (lin.D >= 0.10 - 1e-9) & lin.block.isin(done)]
     A = A.rename(columns={"P_carve": "P1", "P2_carve": "P2"})
     d = pd.concat([A[["block", "arm", "umed", "u95", "umax", "P1", "P2"]], G], ignore_index=True)
-    d.to_parquet(HERE / f"tails_{pop}_p{power:g}.parquet")
+    d.to_parquet(HERE / f"tails_{picker}_{pop}_p{power:g}.parquet")
     print(f"{len(done)} blocks, greedy optimized pop={pop} p={power:g}. Lens A, u relative to "
           "baseline (lower is better): median over blocks of the median / p95 / max home; "
           "perm p1, p2")
@@ -68,4 +70,5 @@ def main(pop: str, power: float, workers: int) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], float(sys.argv[2]), int(sys.argv[3]))
+    main(sys.argv[1], float(sys.argv[2]), int(sys.argv[3]),
+         sys.argv[4] if len(sys.argv) > 4 else "M4")

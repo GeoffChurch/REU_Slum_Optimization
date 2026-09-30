@@ -18,6 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
+from clear import cleared_through  # noqa: E402
 
 SETTINGS = {                       # name: (h, ell, offset)
     "base": (0.5, 3.0, (0.3713, 0.1931)),
@@ -37,7 +38,7 @@ def one(bid: str) -> list[dict]:
     b = _BLOCKS[bid]
     g = pd.read_parquet(HERE / "clear_rows_M4_h0.5" / f"{bid}.parquet").sort_values("step")
     stop = g[g.D >= 0.10 - 1e-9].step.iloc[0]
-    removed = g[(g.step >= 1) & (g.step <= stop)].cleared.to_numpy()
+    removed = cleared_through(g, int(stop))
     rows = []
     for name, (h, ell, off) in SETTINGS.items():
         t = time.time()

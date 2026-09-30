@@ -1,6 +1,6 @@
 """Road-free greedy clearing vs the road lineup, on the roadless (carve) score.
 
-    PYTHONPATH=. pixi run python research/roadless/compare_clear.py <M> [h] [pop]
+    PYTHONPATH=. pixi run python research/roadless/compare_clear.py <M4|B0.01g3> [h] [pop] [power]
 
 Greedy D counts whole buildings; the lineup's D is the overlap fraction its corridor takes. Lens A:
 the first greedy step with D >= 0.10 (the lineup's prefix is likewise the first reaching it).
@@ -19,16 +19,16 @@ sys.path.insert(0, str(HERE))
 from study import SHORT, _ci, _d_at, rows_dir  # noqa: E402
 
 
-def main(M: int, h: float, pop: str) -> None:
+def main(picker: str, h: float, pop: str, power: float) -> None:
     from clear import rows_dir as clear_dir
-    g = pd.concat([pd.read_parquet(p) for p in clear_dir(M, h, pop).glob("*.parquet")],
+    g = pd.concat([pd.read_parquet(p) for p in clear_dir(picker, h, pop, power).glob("*.parquet")],
                   ignore_index=True)
     lin = pd.concat([pd.read_parquet(p) for p in rows_dir(h, 3.0, 8, pop).glob("*.parquet")],
                     ignore_index=True)
     lin["arm"] = lin["arm"].map(SHORT)
     blocks = sorted(set(g.block))
     lin = lin[lin.block.isin(blocks)]
-    print(f"{len(blocks)} blocks with greedy M={M} rows\n")
+    print(f"{len(blocks)} blocks with greedy {picker} rows\n")
     # Lens A
     gA = g[g.D >= 0.10 - 1e-9].sort_values("step").groupby("block").head(1).set_index("block")
     A = lin[(lin.budget == 0.10) & (lin.D >= 0.10 - 1e-9)].pivot_table(
@@ -75,5 +75,6 @@ def main(M: int, h: float, pop: str) -> None:
 
 
 if __name__ == "__main__":
-    main(int(sys.argv[1]), float(sys.argv[2]) if len(sys.argv) > 2 else 0.5,
-         sys.argv[3] if len(sys.argv) > 3 else "count")
+    main(sys.argv[1], float(sys.argv[2]) if len(sys.argv) > 2 else 0.5,
+         sys.argv[3] if len(sys.argv) > 3 else "count",
+         float(sys.argv[4]) if len(sys.argv) > 4 else 1.0)

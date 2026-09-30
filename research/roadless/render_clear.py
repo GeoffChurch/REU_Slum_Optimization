@@ -1,6 +1,6 @@
 """Greedy's cleared buildings at Lens A next to a road method's Lens A corridor.
 
-    PYTHONPATH=. pixi run python research/roadless/render_clear.py <block idxs> [arm]
+    PYTHONPATH=. pixi run python research/roadless/render_clear.py <block ids,> [arm] [pop] [power] [picker]
 """
 from __future__ import annotations
 
@@ -18,27 +18,30 @@ import pandas as pd  # noqa: E402
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
+import lifted  # noqa: E402
 
 
-def main(idx: list[int], arm: str, pop: str = "count", power: float = 1.0) -> None:
+def main(ids: list[str], arm: str, pop: str = "count", power: float = 1.0,
+         picker: str = "M4") -> None:
+    from clear import cleared_through
     from clear import rows_dir as clear_dir
-    from study import rows_dir
-    from reblock.budget import prefix_to_displacement, road_corridor
+    from reblock.budget import road_corridor
     from reblock.derivations import propose
-    blocks = common.build_blocks(common.recipients())
+    by_id = {b.block_id: b for b in common.build_blocks(ids)}
     arms = common.arms()
-    for i in idx:
-        b = blocks[i]
-        g = pd.read_parquet(clear_dir(4, 0.5, pop, power) / f"{b.block_id}.parquet")
+    for i in ids:
+        b = by_id[i]
+        g = pd.read_parquet(clear_dir(picker, 0.5, pop, power) / f"{b.block_id}.parquet")
         g = g.sort_values("step")
         stop = g[g.D >= 0.10 - 1e-9].iloc[0]
-        order = g[(g.step >= 1) & (g.step <= stop.step)].cleared.to_numpy()
+        order = cleared_through(g, int(stop.step))
         polys = gpd.GeoSeries(list(b.buildings.outlines), crs=None)
         w = common.POPULATIONS[pop].weights(np.asarray(b.buildings.outlines))
         pre = common.prefix_to(b, propose(arms[arm], b).roads, 0.10, w)
         corr = gpd.GeoSeries([road_corridor(pre)])
-        lin = pd.read_parquet(rows_dir(0.5, 3.0, 8, pop) / f"{b.block_id}.parquet")
-        lp = lin[(lin.arm == arm) & (lin.budget == 0.10)].P_carve.iloc[0]
+        sc = common.Scorer(b, 0.5, lifted.Params(ell_m=3.0, K=8),
+                           population=common.POPULATIONS[pop])
+        lp = sc.perm(pre)
         fig, axes = plt.subplots(1, 2, figsize=(22, 11))
         for ax in axes:
             gpd.GeoSeries([b.boundary]).boundary.plot(ax=ax, color="k", lw=1)
@@ -52,7 +55,7 @@ def main(idx: list[int], arm: str, pop: str = "count", power: float = 1.0) -> No
             c = geom.representative_point()
             axes[0].annotate(str(rank + 1), (c.x, c.y), fontsize=5, ha="center", va="center",
                              color="w", weight="bold")
-        axes[0].set_title(f"greedy clearing (population {pop}, p {power:g}): {len(order)} of "
+        axes[0].set_title(f"greedy {picker} (population {pop}, p {power:g}): {len(order)} of "
                           f"{len(polys)} buildings, D {stop.D:.3f}, roadless perm (p 1) "
                           f"{stop.get('perm1', stop.perm):.3f}\n(numbers = order)")
         polys.plot(ax=axes[1], color="0.75", ec="0.4", lw=0.3)
@@ -61,13 +64,14 @@ def main(idx: list[int], arm: str, pop: str = "count", power: float = 1.0) -> No
         axes[1].set_title(f"{arm} at 10% displaced: roadless perm {lp:.3f}")
         fig.suptitle(b.block_id)
         fig.tight_layout()
-        out = HERE / f"clear_vs_{arm}_{b.block_id}_{pop}_p{power:g}.png"
+        out = HERE / f"clear_vs_{arm}_{b.block_id}_{picker}_{pop}_p{power:g}.png"
         fig.savefig(out, dpi=110)
         print(out, flush=True)
 
 
 if __name__ == "__main__":
-    main([int(a) for a in sys.argv[1].split(",")],
+    main(sys.argv[1].split(","),
          sys.argv[2] if len(sys.argv) > 2 else "cycle_native",
          sys.argv[3] if len(sys.argv) > 3 else "count",
-         float(sys.argv[4]) if len(sys.argv) > 4 else 1.0)
+         float(sys.argv[4]) if len(sys.argv) > 4 else 1.0,
+         sys.argv[5] if len(sys.argv) > 5 else "M4")

@@ -155,8 +155,9 @@ class Scorer:
         self.f, stranded, self.owner = lifted.demand(self.grid, self.polys, reach, self.w)
         self.live_home = ~stranded
         self.stranded = float(self.w[stranded].sum() / max(self.w.sum(), 1e-12))
-        self.P0 = self.P_free(self.free0)
-        self.u0 = self.home_u(self.free0)
+        sol = lifted.solve(self.grid, self.free0, self.f, p)
+        self.P0 = sol.P
+        self.u0 = self.home_u_of(sol, self.free0)
 
     def P_free(self, free) -> float:
         return lifted.solve(self.grid, free, self.f, self.p).P

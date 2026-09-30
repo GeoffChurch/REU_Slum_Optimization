@@ -138,6 +138,29 @@ class Grid:
                    ground=ground, dist_b=dist_b, xy=np.stack([X, Y], axis=-1),
                    isub=isub, bsub=bsub, S=S)
 
+    def label_sub(self, polys) -> NDArray[np.int64]:
+        """(ny, nx, S*S): index of the footprint holding each footprint sub-sample (-1 none;
+        overlaps go to the later footprint). Each footprint is tested only on the sub-sample
+        lattice inside its own bounding box: sub-sample column j sits at
+        x0 - h/2 + (j + 1/2) h/S (rows likewise), the points `_sub_xy` lays out."""
+        S, h = self.S, self.h
+        ny, nx = self.inside.shape
+        d = h / S
+        ox, oy = self.x0 - h / 2, self.y0 - h / 2
+        fine = -np.ones((ny * S, nx * S), dtype=np.int64)
+        for k, (bx0, by0, bx1, by1) in enumerate(shapely.bounds(polys)):
+            j0 = max(int(np.floor((bx0 - ox) / d - 0.5)), 0)
+            j1 = min(int(np.ceil((bx1 - ox) / d - 0.5)) + 1, nx * S)
+            i0 = max(int(np.floor((by0 - oy) / d - 0.5)), 0)
+            i1 = min(int(np.ceil((by1 - oy) / d - 0.5)) + 1, ny * S)
+            if j1 <= j0 or i1 <= i0:
+                continue
+            X, Y = np.meshgrid(ox + (np.arange(j0, j1) + 0.5) * d,
+                               oy + (np.arange(i0, i1) + 0.5) * d)
+            fine[i0:i1, j0:j1][shapely.contains_xy(polys[k], X, Y)] = k
+        lab = fine.reshape(ny, S, nx, S).transpose(0, 2, 1, 3).reshape(ny, nx, S * S)
+        return np.where(self.bsub, lab, -1)
+
     def mask_of(self, geom) -> NDArray[np.bool_]:
         out = np.zeros_like(self.inside)
         if geom is None or geom.is_empty:
