@@ -276,3 +276,16 @@ Running (2026-09-30 00:47): study.py area rerun with P2_carve and tail columns (
 ratio to baseline) into rows_h0.5_ell3_K8_area/ (the p = 1-only area rows are in
 rows_h0.5_ell3_K8_area_p1only/, obliterate dropped); clear.py area p 2 into
 clear_rows_M4_h0.5_area_p2/; clear.py area p 1 still running (clear_rows_M4_h0.5_area/).
+
+### Area population results (2026-09-30)
+
+Greedy (area, p 1) vs the lineup re-scored with area demand and area displacement
+(compare_clear.py 4 0.5 area, all 220): Lens A 0.537 vs 0.327-0.334 for the top road arms,
++0.171..+0.195, wins on every block; Lens B P*' 0.25 at D 0.021 vs 0.068 (cycle / resist_lp /
+arterial). Charging by area barely dents the lead: targeting, not the size discount, is most of it.
+
+Tails at Lens A (tails.py area 1): u relative to baseline, median over blocks of the median /
+p95 / max home: greedy 0.513 / 0.411 / 0.355; cycle 0.703 / 0.613 / 0.699; resist_lp 0.722 /
+0.621 / 0.703; arterial 0.713 / 0.632 / 0.688; grid 0.701 / 0.646 / 0.753. Greedy minus the best
+road arm per block: p95 -0.093 [-0.103, -0.086] (better on 96%), max -0.105 [-0.122, -0.087]
+(95%). The p = 1 greedy does NOT neglect the buried; it helps them most. Its P2 is 0.569 vs 0.34.
