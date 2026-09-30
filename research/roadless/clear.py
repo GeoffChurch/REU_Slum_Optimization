@@ -280,6 +280,19 @@ class GramSource(Protocol):
     def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray: ...
 
 
+@dataclass(frozen=True)
+class Independent:
+    """The null: every candidate independent (rho = 0), so the batch is the top by tension per
+    unit population."""
+
+    @property
+    def name(self) -> str:
+        return "ind"
+
+    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
+        return np.eye(len(cand))
+
+
 def _loaded(t: Tension, x: np.ndarray) -> np.ndarray:
     """Zero a right-hand side on unknowns in components with no ground (a building sealed off
     even as eps material has no response there)."""
@@ -513,16 +526,17 @@ def cleared_through(g: pd.DataFrame, step: int) -> np.ndarray:
 
 def picker_of(spec: str) -> Picker:
     """`M4` -> Screened(4); `B0.01g3` -> Batched(delta 0.01, gap 3 m); `S0.01imp`,
-    `S0.01sk32`, `S0.01cat` -> Spread(delta 0.01) with Impact, Sketch(k 32), Catchment."""
+    `S0.01sk32`, `S0.01cat`, `S0.01ind` -> Spread(delta 0.01) with Impact, Sketch(k 32), Catchment,
+    Independent."""
     if spec.startswith("M"):
         return Screened(int(spec[1:]))
     if spec.startswith("B"):
         delta, gap = spec[1:].split("g")
         return Batched(float(delta), float(gap))
-    m = re.fullmatch(r"S([0-9.]+)(imp|sk(\d+)|cat)", spec)
+    m = re.fullmatch(r"S([0-9.]+)(imp|sk(\d+)|cat|ind)", spec)
     if m:
-        src: GramSource = (Impact() if m.group(2) == "imp" else Catchment()
-                           if m.group(2) == "cat" else Sketch(int(m.group(3))))
+        src: GramSource = {"imp": Impact(), "cat": Catchment(), "ind": Independent()}.get(
+            m.group(2)) or Sketch(int(m.group(3)))
         return Spread(float(m.group(1)), src)
     raise ValueError(f"unknown picker {spec!r}")
 
