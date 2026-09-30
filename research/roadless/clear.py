@@ -17,6 +17,7 @@ exact leave-one-out on one step.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -25,7 +26,8 @@ from typing import NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
-import shapely
+import scipy.sparse as sp
+from numba import njit
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -33,6 +35,62 @@ import common  # noqa: E402
 import lifted  # noqa: E402
 
 EPS = 0.01
+
+
+def _cells_axes(sy: lifted.System, x: np.ndarray, K: int) -> np.ndarray:
+    """Per-unknown vector -> (free cells, K), zero on ground."""
+    out = np.zeros((len(sy.unk_cell), K))
+    live = sy.unk_cell >= 0
+    out[live] = x.reshape(-1, K)
+    return out
+
+
+class Tension:
+    """One eps-material solve's worth of state: the factorized system, primal u and adjoint lam
+    per unknown, the edges (ca, cb, ka, kb, dw, w): their weight now and the weight clearing
+everything would add, and A (free cells
+    x buildings), the share of each cell's gain a building owns. A building's edge coefficient is
+    beta_e = (A[a] + A[b]) / 2, so clearing it perturbs the operator by
+    dL_i = sum_e beta_e,i dw_e b_e b_e^T (to first order: `g` is the gain dJ, and `s` the
+    primal source dL_i u whose response L^-1 s is the building's impact field)."""
+
+    def __init__(self, system: lifted.System, u, lam, fam, A, K: int, home_u, removed):
+        self.system, self.u, self.lam, self.fam, self.A, self.K = system, u, lam, fam, A, K
+        self.home_u = home_u                  # per building, from the eps solve
+        self.g = self._gain()
+        self.g[removed] = -np.inf
+
+    def _gain(self) -> np.ndarray:
+        uk = _cells_axes(self.system, self.u, self.K)
+        lk = _cells_axes(self.system, self.lam, self.K)
+        nc = uk.shape[0]
+        T = np.zeros(nc)
+        for ca, cb, ka, kb, dw, _w in self.fam:
+            q = dw * (uk[ca, ka] - uk[cb, kb]) * (lk[ca, ka] - lk[cb, kb])
+            T += 0.5 * (np.bincount(ca, q, minlength=nc) + np.bincount(cb, q, minlength=nc))
+        return np.asarray(self.A.T @ T)
+
+    def s(self, cand: list[int]) -> sp.csc_matrix:
+        """(unknowns x len(cand)): column i is dL_cand[i] u."""
+        uk = _cells_axes(self.system, self.u, self.K)
+        AC = self.A[:, cand].tocsr()
+        touched = np.asarray(AC.sum(axis=1)).ravel() > 0
+        uc = self.system.unk_cell
+        rows, cols, vals = [], [], []
+        for ca, cb, ka, kb, dw, _w in self.fam:
+            e = np.flatnonzero(touched[ca] | touched[cb])
+            if not len(e):
+                continue
+            q = dw[e] * (uk[ca[e], ka[e]] - uk[cb[e], kb[e]])
+            beta = (0.5 * (AC[ca[e]] + AC[cb[e]])).tocoo()
+            val = q[beta.row] * beta.data
+            for cell, ax, sign in ((ca, ka, 1.0), (cb, kb, -1.0)):
+                un = uc[cell[e][beta.row]]
+                ok = un >= 0
+                rows.append(un[ok] * self.K + ax[e][beta.row][ok])
+                cols.append(beta.col[ok]); vals.append(sign * val[ok])
+        return sp.csc_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
+                             shape=(self.system.n, len(cand)))
 
 
 class Clearing:
@@ -62,7 +120,7 @@ class Clearing:
     def P(self, removed: np.ndarray) -> float:
         return self.sc.P_free(self.open_(removed))
 
-    def tension(self, power: float = 1.0) -> np.ndarray:
+    def tension(self, power: float = 1.0) -> Tension:
         """First-order gain in J_power of clearing each (remaining) building, from one
         eps-material solve (power 1: the potential is its own adjoint) or two (power != 1: the
         adjoint L lam = dJ/du = power u_i^(power-1) x injection). dJ/dw_e = -(du_e)(dlam_e)."""
@@ -70,53 +128,38 @@ class Clearing:
         op = self.open_(self.removed)
         full = g.isub.mean(axis=-1)                       # everything open
         op_eps = op + EPS * (full - op)
-        sol = lifted.solve(g, op_eps, self.sc.f, self.p)
-        K = self.p.K
-        nc = int((op_eps > 0).sum())
-        uk = np.zeros((nc, K))
-        live = sol.unk_cell >= 0
-        uk[live] = sol.u.reshape(-1, K)
+        sy = lifted.System(g, op_eps, self.p)
+        sol = lifted.solve(g, op_eps, self.sc.f, self.p, system=sy)
         if power == 1.0:
-            lk = uk
+            lam = sol.u
         else:
             uh = self.sc.home_u_of(sol, op_eps)
             mult = np.zeros_like(self.sc.f)
             on = self.sc.owner >= 0
             mult[on] = power * np.nan_to_num(uh[self.sc.owner[on]]) ** (power - 1.0)
-            lam = lifted.solve(g, op_eps, self.sc.f * mult, self.p)
-            lk = np.zeros((nc, K))
-            lk[live] = lam.u.reshape(-1, K)
-        # per cell: sum over incident edges of (du)^2 x (weight fully open - weight now), halved
-        T = np.zeros(nc)
-        cur = {k: (a, b, w) for k, a, b, w in lifted.along_edges(op_eps, self.p)}
-        for k, a, b, wf in lifted.along_edges(full, self.p):
-            ca, cb, wc = cur[k]
-            assert len(ca) == len(a) and (ca == a).all()
-            gain = (uk[a, k] - uk[b, k]) * (lk[a, k] - lk[b, k]) * (wf - wc)
-            np.add.at(T, a, 0.5 * gain)
-            np.add.at(T, b, 0.5 * gain)
-        _v, _th, _m, gap = lifted.axes(K)
-        free_ids = np.arange(nc)
-        dvol = (full - op_eps)[op_eps > 0]
-        for k in range(K):
-            k2 = (k + 1) % K
-            T += (uk[free_ids, k] - uk[free_ids, k2]) * (lk[free_ids, k] - lk[free_ids, k2]) * dvol * (
-                g.h * g.h / (self.p.ell_m ** 2 * gap[k]))
-        # grid cell (row-major over all cells) -> node id
+            lam = lifted.solve(g, op_eps, self.sc.f * mult, self.p, system=sy).u
+        # each edge's weight gained by clearing everything, from op_eps
+        fam = []
+        for (ca, cb, ka, kb, wf), (ca2, cb2, _, _, wc) in zip(
+                lifted.edges(full, g.h, self.p), lifted.edges(op_eps, g.h, self.p), strict=True):
+            assert (ca == ca2).all() and (cb == cb2).all()
+            fam.append((ca, cb, ka, kb, wf - wc, wc))
+        # attribution: building j owns frac/(1 - op) of each cell it covers
         node = -np.ones(g.inside.size, dtype=np.int64)
-        node[np.flatnonzero(op_eps > 0)] = np.arange(nc)
-        out = np.zeros(self.n)
+        node[np.flatnonzero(op_eps > 0)] = np.arange(int((op_eps > 0).sum()))
+        opf = op.ravel()
+        r, c, v = [], [], []
         for j, (cells, frac) in self.bcells.items():
             if self.removed[j]:
                 continue
             nd = node[cells]
             ok = nd >= 0
-            # the cell's tension is shared by the buildings covering it, by covered fraction
-            out[j] = float((T[nd[ok]] * frac[ok] / np.maximum(1 - op[np.unravel_index(
-                cells[ok], op.shape)], 1e-9)).sum())
-        out[self.removed] = -np.inf
-        return out
-
+            r.append(nd[ok]); c.append(np.full(int(ok.sum()), j))
+            v.append(frac[ok] / np.maximum(1 - opf[cells[ok]], 1e-9))
+        A = sp.csr_matrix((np.concatenate(v), (np.concatenate(r), np.concatenate(c))),
+                          shape=(len(node[node >= 0]), self.n))
+        return Tension(system=sy, u=sol.u, lam=lam, fam=fam, A=A, K=self.p.K,
+                       home_u=self.sc.home_u_of(sol, op_eps), removed=self.removed)
 
 def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     from scipy.stats import spearmanr
@@ -126,7 +169,7 @@ def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     sc = c.sc
     P0 = sc.J(sc.u0, power)
     t = time.time()
-    T = c.tension(power)
+    T = c.tension(power).g
     tt = time.time() - t
     t = time.time()
     exact = np.zeros(c.n)
@@ -157,10 +200,10 @@ class Picked(NamedTuple):
 
 
 class Picker(Protocol):
-    """What one greedy step clears, given the tension per unit population `T` and J_power now."""
+    """What one greedy step clears, given the round's tension and J_power now."""
     name: str
 
-    def pick(self, c: Clearing, T: np.ndarray, J: float, power: float) -> Picked: ...
+    def pick(self, c: Clearing, t: Tension, J: float, power: float) -> Picked: ...
 
 
 def _exact(c: Clearing, cleared: list[int], power: float) -> tuple[float, float]:
@@ -169,6 +212,12 @@ def _exact(c: Clearing, cleared: list[int], power: float) -> tuple[float, float]
     op = c.open_(r)
     sol = lifted.solve(c.sc.grid, op, c.sc.f, c.p)
     return c.sc.J(c.sc.home_u_of(sol, op), power), sol.P
+
+
+def _next_target(c: Clearing, delta: float) -> tuple[float, float]:
+    """(D now, the next multiple of delta above it)."""
+    D = float(c.cost[c.removed].sum())
+    return D, (np.floor(D / delta + 1e-9) + 1) * delta
 
 
 @dataclass(frozen=True)
@@ -181,7 +230,8 @@ class Screened:
     def name(self) -> str:
         return f"M{self.M}"
 
-    def pick(self, c: Clearing, T: np.ndarray, J: float, power: float) -> Picked:
+    def pick(self, c: Clearing, t: Tension, J: float, power: float) -> Picked:
+        T = t.g / c.cost
         best = Picked([], np.inf, np.inf)
         bestv = -np.inf
         for j in (int(j) for j in np.argsort(-T)[:self.M] if not c.removed[j]):
@@ -205,9 +255,9 @@ class Batched:
     def name(self) -> str:
         return f"B{self.delta:g}g{self.gap_m:g}"
 
-    def pick(self, c: Clearing, T: np.ndarray, J: float, power: float) -> Picked:
-        D = float(c.cost[c.removed].sum())
-        target = (np.floor(D / self.delta + 1e-9) + 1) * self.delta
+    def pick(self, c: Clearing, t: Tension, J: float, power: float) -> Picked:
+        T = t.g / c.cost
+        D, target = _next_target(c, self.delta)
         taken: list[int] = []
         near: set[int] = set()
         for j in (int(j) for j in np.argsort(-T) if not c.removed[j]):
@@ -219,6 +269,191 @@ class Batched:
             D += float(c.cost[j])
             near.update(int(k) for k in c.sc.tree.query(c.sc.polys[j], predicate="dwithin",
                                                          distance=self.gap_m))
+        return Picked(taken, *_exact(c, taken, power))
+
+
+class GramSource(Protocol):
+    """How alike the candidates' effects are: a PSD matrix over `cand` whose normalised entries
+    are the correlations rho_ij that `Spread` builds its batch from."""
+    name: str
+
+    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray: ...
+
+
+def _loaded(t: Tension, x: np.ndarray) -> np.ndarray:
+    """Zero a right-hand side on unknowns in components with no ground (a building sealed off
+    even as eps material has no response there)."""
+    x = np.asarray(x, dtype=float).ravel().copy()
+    x[~t.system.keep] = 0.0
+    return x
+
+
+@dataclass(frozen=True)
+class Impact:
+    """H_ij = s_i^T L^-1 s_j: the energy inner product of the candidates' impact fields
+    du_i = L^-1 dL_i u, one loose solve per candidate on the round's factorized system. For
+    power 1 it is the exact second-order cross term of the gain."""
+    rtol: float = 1e-4
+
+    @property
+    def name(self) -> str:
+        return "imp"
+
+    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
+        S = t.s(cand)
+        H = np.zeros((len(cand), len(cand)))
+        for i in range(len(cand)):
+            du = t.system.solve(_loaded(t, S[:, i].toarray()), rtol=self.rtol)
+            H[:, i] = S.T @ du
+        return 0.5 * (H + H.T)
+
+
+@dataclass(frozen=True)
+class Sketch:
+    """H ~ Z Z^T / k with z_i = s_i^T y_r, y_r = L^-1 x_r, x_r = sum_e xi_e sqrt(w_e) b_e a random
+    edge load (so cov x = L and cov y = L^-1): k loose solves per round however many candidates."""
+    k: int
+    rtol: float = 1e-4
+    seed: int = 0
+
+    @property
+    def name(self) -> str:
+        return f"sk{self.k}"
+
+    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
+        S = t.s(cand)
+        rng = np.random.default_rng(self.seed)
+        uc, K, n = t.system.unk_cell, t.K, t.system.n
+        Z = np.zeros((len(cand), self.k))
+        for r in range(self.k):
+            x = np.zeros(n)
+            for ca, cb, ka, kb, _dw, w in t.fam:
+                load = rng.standard_normal(len(w)) * np.sqrt(w)
+                for cell, ax, sign in ((ca, ka, 1.0), (cb, kb, -1.0)):
+                    un = uc[cell]
+                    ok = un >= 0
+                    x += sign * np.bincount(un[ok] * K + ax[ok], load[ok], minlength=n)
+            Z[:, r] = S.T @ t.system.solve(_loaded(t, x), rtol=self.rtol)
+        return Z @ Z.T / self.k
+
+
+@njit(cache=True)
+def _catch(indptr, indices, data, u, rowsum, order, inA, out):
+    """out[x, c] = share of node x's outflow that passes through candidate c's nodes (inA) on the
+    way to ground, sweeping nodes by increasing potential (flow only runs downhill)."""
+    C = inA.shape[1]
+    acc = np.zeros(C)
+    for x in order:
+        acc[:] = 0.0
+        Q = rowsum[x] * u[x]                                  # straight to ground
+        for p in range(indptr[x], indptr[x + 1]):
+            y = indices[p]
+            if y != x and u[y] < u[x]:
+                q = -data[p] * (u[x] - u[y])
+                Q += q
+                for c in range(C):
+                    acc[c] += q * out[y, c]
+        for c in range(C):
+            if inA[x, c]:
+                out[x, c] = 1.0
+            elif Q > 0:
+                out[x, c] = acc[c] / Q
+
+
+@dataclass(frozen=True)
+class Catchment:
+    """No solves: trace the round's flow downhill and give each candidate the share of each
+    home's flow that passes through its cells. H_ij = sum_h c_h v_i(h) v_j(h), with c_h the
+    home's weight in J_power (w_h u_h^power)."""
+    chunk: int = 16
+
+    @property
+    def name(self) -> str:
+        return "cat"
+
+    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
+        sy, K = t.system, t.K
+        A = sy.A
+        keep = np.flatnonzero(sy.keep)
+        u = t.u[keep]
+        rowsum = np.asarray(A.sum(axis=1)).ravel()
+        order = np.argsort(u, kind="stable")
+        # per kept unknown: its home (the owner of its cell) and its injection
+        free = sy.cell >= 0
+        owner_free = c.sc.owner[free]
+        live = sy.unk_cell >= 0
+        owner_unk = np.repeat(owner_free[live], K)[keep]
+        b = sy.load(c.sc.f, c.p)[keep]
+        home = owner_unk >= 0
+        inj = np.bincount(owner_unk[home], b[home], minlength=c.n)
+        cellA = t.A[:, cand].tocsc()
+        cell_unk = sy.unk_cell
+        pos = -np.ones(sy.n, dtype=np.int64)
+        pos[keep] = np.arange(len(keep))
+        V = np.zeros((c.n, len(cand)))
+        for s0 in range(0, len(cand), self.chunk):
+            cols = range(s0, min(s0 + self.chunk, len(cand)))
+            inA = np.zeros((len(keep), len(cols)), dtype=np.bool_)
+            for m, i in enumerate(cols):
+                cells = cellA[:, i].indices
+                un = cell_unk[cells]
+                un = un[un >= 0]
+                idx = pos[(un[:, None] * K + np.arange(K)[None, :]).ravel()]
+                inA[idx[idx >= 0], m] = True
+            out = np.zeros((len(keep), len(cols)))
+            _catch(A.indptr, A.indices, A.data, u, rowsum, order, inA, out)
+            for m, i in enumerate(cols):
+                V[:, i] = np.bincount(owner_unk[home], b[home] * out[home, m], minlength=c.n)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            V = np.where(inj[:, None] > 0, V / inj[:, None], 0.0)
+        wt = c.sc.w * np.nan_to_num(t.home_u) ** power
+        return (V * wt[:, None]).T @ V
+
+
+def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float) -> list[int]:
+    """Greedy batch under a normalised quadratic model: with rho = H's correlations, candidate i
+    is worth g_i - sum_{j in batch} rho_ij sqrt(g_i g_j) once the batch is chosen (a duplicate of
+    a chosen one is worth 0, an independent one keeps its g_i, a complementary one, rho < 0,
+    gains). Take the best worth per unit cost until the batch's cost reaches `need`."""
+    d = np.sqrt(np.clip(np.diag(H), 0.0, None))
+    with np.errstate(invalid="ignore", divide="ignore"):
+        rho = np.where(np.outer(d, d) > 0, H / np.outer(d, d), 0.0)
+    sg = np.sqrt(np.clip(gain, 0.0, None))
+    worth = gain.astype(float).copy()
+    avail = np.ones(len(gain), dtype=bool)
+    chosen: list[int] = []
+    taken = 0.0
+    while taken < need - 1e-12 and avail.any():
+        i = int(np.argmax(np.where(avail, worth / cost, -np.inf)))
+        chosen.append(i)
+        avail[i] = False
+        taken += float(cost[i])
+        worth -= rho[:, i] * sg * sg[i]
+    return chosen
+
+
+@dataclass(frozen=True)
+class Spread:
+    """Shortlist the top candidates by tension per unit population up to `reach` times the
+    round's population step, measure how alike their effects are with `source`, and take the
+    batch `_spread` builds from their correlations."""
+    delta: float
+    source: GramSource
+    reach: float = 3.0
+
+    @property
+    def name(self) -> str:
+        return f"S{self.delta:g}{self.source.name}"
+
+    def pick(self, c: Clearing, t: Tension, J: float, power: float) -> Picked:
+        T = t.g / c.cost
+        D, target = _next_target(c, self.delta)
+        order = [int(j) for j in np.argsort(-T) if not c.removed[j]]
+        cum = np.cumsum(c.cost[order])
+        cand = order[:int(np.searchsorted(cum, self.reach * (target - D))) + 1]
+        H = self.source.gram(c, t, cand, power)
+        chosen = _spread(t.g[cand], c.cost[cand], H, target - D)
+        taken = [cand[i] for i in chosen]
         return Picked(taken, *_exact(c, taken, power))
 
 
@@ -237,7 +472,7 @@ def greedy_block(b, picker: Picker, h: float, d_max: float, out: Path, populatio
     step = 0
     t0 = time.time()
     while c.cost[c.removed].sum() < d_max - 1e-12 and not c.removed.all():
-        pk = picker.pick(c, c.tension(power) / c.cost, J, power)
+        pk = picker.pick(c, c.tension(power), J, power)
         c.removed[pk.cleared] = True
         J = pk.J
         step += 1
@@ -277,12 +512,18 @@ def cleared_through(g: pd.DataFrame, step: int) -> np.ndarray:
 
 
 def picker_of(spec: str) -> Picker:
-    """`M4` -> Screened(4); `B0.01g3` -> Batched(delta 0.01, gap 3 m)."""
+    """`M4` -> Screened(4); `B0.01g3` -> Batched(delta 0.01, gap 3 m); `S0.01imp`,
+    `S0.01sk32`, `S0.01cat` -> Spread(delta 0.01) with Impact, Sketch(k 32), Catchment."""
     if spec.startswith("M"):
         return Screened(int(spec[1:]))
     if spec.startswith("B"):
         delta, gap = spec[1:].split("g")
         return Batched(float(delta), float(gap))
+    m = re.fullmatch(r"S([0-9.]+)(imp|sk(\d+)|cat)", spec)
+    if m:
+        src: GramSource = (Impact() if m.group(2) == "imp" else Catchment()
+                           if m.group(2) == "cat" else Sketch(int(m.group(3))))
+        return Spread(float(m.group(1)), src)
     raise ValueError(f"unknown picker {spec!r}")
 
 

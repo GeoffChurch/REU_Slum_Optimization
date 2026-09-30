@@ -29,7 +29,7 @@ import scipy.sparse as sp
 import shapely
 from numpy.typing import NDArray
 from scipy import ndimage
-from scipy.sparse.linalg import spsolve
+from scipy.sparse.linalg import factorized
 
 sys.path.insert(0, str(Path.home() / ".cache/reblock-research/pydeps"))
 import pyamg  # noqa: E402
@@ -264,43 +264,49 @@ def crossing(open_: NDArray[np.float64], ground: NDArray[np.bool_], sol: Solutio
                 share_gt_0_5=float(pw[canc > 0.5].sum() / tot))
 
 
-def operator(open_: NDArray[np.float64], ground: NDArray[np.bool_], h: float, p: Params):
-    """(L restricted to unknowns, unknown index per (cell, axis) or -1). Cells are those with
-    open fraction > 0; turning edges are scaled by the cell's open fraction (its volume)."""
+def edges(open_: NDArray[np.float64], h: float, p: Params):
+    """Every edge of the operator as families (ca, cb, ka, kb, w): free-cell ids and axes of the
+    two ends. Along-axis edges per axis, then the turning edges (k, k+1) inside every free cell,
+    scaled by its open fraction (its volume). Ground is applied by `operator`."""
     _v, _th, _m, gap = axes(p.K)
+    for k, a, b, w in along_edges(open_, p):
+        yield a, b, np.full(len(a), k), np.full(len(a), k), w
+    c = np.arange(int((open_ > 0).sum()))
+    vol = open_[open_ > 0]
+    for k in range(p.K):
+        yield (c, c, np.full(len(c), k), np.full(len(c), (k + 1) % p.K),
+               vol * (h * h / (p.ell_m ** 2 * gap[k])))
+
+
+def unknown_of(ground: NDArray[np.bool_], open_: NDArray[np.float64]) -> NDArray[np.int64]:
+    """Per free cell: its unknown block index (x K + axis), or -1 on ground (u = 0 there)."""
+    is_g = ground[open_ > 0]
+    unk_cell = -np.ones(len(is_g), dtype=np.int64)
+    unk_cell[~is_g] = np.arange(int((~is_g).sum()))
+    return unk_cell
+
+
+def operator(open_: NDArray[np.float64], ground: NDArray[np.bool_], h: float, p: Params):
+    """(L restricted to unknowns, free-cell id per grid cell, unknown index per free cell or -1).
+    Cells are those with open fraction > 0; an edge with a ground end only adds to the other
+    end's diagonal."""
     K = p.K
     free = open_ > 0
-    ny, nx = free.shape
-    cell = -np.ones((ny, nx), dtype=np.int64)
+    cell = -np.ones(free.shape, dtype=np.int64)
     cell[free] = np.arange(int(free.sum()))
-    nc = int(free.sum())
-    is_g = ground[free]
-    # unknowns: non-ground free cells x K
-    unk_cell = -np.ones(nc, dtype=np.int64)
-    unk_cell[~is_g] = np.arange(int((~is_g).sum()))
-    N = int((~is_g).sum()) * K
+    unk_cell = unknown_of(ground, open_)
+    N = int((unk_cell >= 0).sum()) * K
     rows, cols, vals = [], [], []
     diag = np.zeros(N)
-
-    def add_edge(a_cell, b_cell, ka, kb, w):
-        """a/b are free-cell ids; ground ends only add to the other end's diagonal."""
-        ga, gb = is_g[a_cell], is_g[b_cell]
-        ia = unk_cell[a_cell] * K + ka
-        ib = unk_cell[b_cell] * K + kb
+    for ca, cb, ka, kb, w in edges(open_, h, p):
+        ua, ub = unk_cell[ca], unk_cell[cb]
+        ia, ib = ua * K + ka, ub * K + kb
+        ga, gb = ua < 0, ub < 0
         both = ~ga & ~gb
         rows.append(ia[both]); cols.append(ib[both]); vals.append(-w[both])
         rows.append(ib[both]); cols.append(ia[both]); vals.append(-w[both])
-        np.add.at(diag, ia[~ga], w[~ga])
-        np.add.at(diag, ib[~gb], w[~gb])
-
-    for k, a, b, w in along_edges(open_, p):
-        add_edge(a, b, np.full(len(a), k), np.full(len(a), k), w)
-    # turning edges inside every non-ground cell (ground cells are u = 0 in every layer)
-    live = np.nonzero(~is_g)[0]
-    for k in range(K):
-        k2 = (k + 1) % K
-        w = open_[free][live] * (h * h / (p.ell_m ** 2 * gap[k]))
-        add_edge(live, live, np.full(len(live), k), np.full(len(live), k2), w)
+        diag += np.bincount(ia[~ga], weights=w[~ga], minlength=N)
+        diag += np.bincount(ib[~gb], weights=w[~gb], minlength=N)
     rows.append(np.arange(N)); cols.append(np.arange(N)); vals.append(diag)
     L = sp.csr_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
                       shape=(N, N))
@@ -324,15 +330,54 @@ def grounded(grid: Grid, open_: NDArray[np.float64], p: Params) -> NDArray[np.bo
     return out
 
 
-def _spd_solve(L, b, rtol: float = 1e-9):
-    if L.shape[0] < 20000:
-        return spsolve(L.tocsc(), b)
-    ml = pyamg.smoothed_aggregation_solver(L, symmetry="symmetric", max_coarse=2000)
-    res: list[float] = []
-    u = ml.solve(b, tol=rtol, accel="cg", maxiter=500, residuals=res)
-    if res[-1] > rtol * res[0] * 10:
-        raise RuntimeError(f"AMG-CG did not converge: {res[-1] / res[0]:.2e} after {len(res)}")
-    return u
+class System:
+    """L on the unknowns that reach ground, factorized or AMG-preconditioned ONCE, for any number
+    of right-hand sides. Unknowns in a component with no ground are dropped (u = 0 there);
+    injecting into one is an error."""
+
+    def __init__(self, grid: Grid, open_: NDArray[np.float64], p: Params):
+        self.L, self.cell, self.unk_cell = operator(open_, grid.ground, grid.h, p)
+        n_comp, lab = sp.csgraph.connected_components(self.L, directed=False)
+        grounded = np.zeros(n_comp, bool)
+        dg = np.asarray(self.L.sum(axis=1)).ravel()     # > 0 where an edge leaves to ground
+        grounded[np.unique(lab[dg > 1e-12])] = True
+        self.keep = grounded[lab]
+        A = self.L[self.keep][:, self.keep].tocsr() if n_comp > 1 else self.L
+        self.A = A
+        if A.shape[0] < 20000:
+            self._lu = factorized(A.tocsc())
+            self._ml = None
+        else:
+            self._ml = pyamg.smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=2000)
+
+    @property
+    def n(self) -> int:
+        return self.L.shape[0]
+
+    def solve(self, b: NDArray[np.float64], rtol: float = 1e-9) -> NDArray[np.float64]:
+        if (b[~self.keep] != 0).any():
+            raise ValueError(f"{(b[~self.keep] != 0).sum()} loaded unknowns have no path to ground")
+        u = np.zeros(self.n)
+        bk = b[self.keep]
+        if self._ml is None:
+            u[self.keep] = self._lu(bk)
+            return u
+        res: list[float] = []
+        u[self.keep] = self._ml.solve(bk, tol=rtol, accel="cg", maxiter=500, residuals=res)
+        if res[-1] > rtol * res[0] * 10:
+            raise RuntimeError(f"AMG-CG did not converge: {res[-1] / res[0]:.2e} after {len(res)}")
+        return u
+
+    def load(self, f_cell: NDArray[np.float64], p: Params) -> NDArray[np.float64]:
+        """Right-hand side of a per-cell injection, spread over the axes by angular share."""
+        _, _, m, _ = axes(p.K)
+        free = self.cell >= 0
+        fc = f_cell[free]
+        live = self.unk_cell >= 0
+        b = np.zeros(self.n)
+        idx = (self.unk_cell[live][:, None] * p.K + np.arange(p.K)[None, :]).ravel()
+        b[idx] = (fc[live][:, None] * (m / np.pi)[None, :]).ravel()
+        return b
 
 
 @dataclass(frozen=True, eq=False)
@@ -345,35 +390,15 @@ class Solution:
 
 
 def solve(grid: Grid, open_: NDArray[np.float64], f_cell: NDArray[np.float64], p: Params,
-          ) -> Solution:
+          system: System | None = None) -> Solution:
     """Total escape power. Injection on a closed cell would be a bug: demand cells are open in
-    the original geometry and freeing only opens more."""
-    free = open_ > 0
-    assert not (f_cell[~free] > 0).any()
-    L, cell, unk_cell = operator(open_, grid.ground, grid.h, p)
-    _, _, m, _ = axes(p.K)
-    rr, cc = np.nonzero(free)
-    fc = f_cell[rr, cc]
-    live = unk_cell >= 0
-    b = np.zeros(L.shape[0])
-    # each cell's injection spread over the axes by angular share
-    idx = (unk_cell[live][:, None] * p.K + np.arange(p.K)[None, :]).ravel()
-    b[idx] = (fc[live][:, None] * (m / np.pi)[None, :]).ravel()
-    # isolated components with injection but no ground would be singular: detect
-    n_comp, lab = sp.csgraph.connected_components(L, directed=False)
-    if n_comp > 1:
-        grounded = np.zeros(n_comp, bool)
-        dg = np.asarray(L.sum(axis=1)).ravel()          # > 0 where an edge leaves to ground
-        grounded[np.unique(lab[dg > 1e-12])] = True
-        bad = ~grounded[lab]
-        if (b[bad] > 0).any():
-            raise ValueError(f"{(b[bad] > 0).sum()} injected unknowns have no path to ground")
-        keep = ~bad
-        u = np.zeros(L.shape[0])
-        u[keep] = _spd_solve(L[keep][:, keep].tocsr(), b[keep])
-    else:
-        u = _spd_solve(L, b)
-    return Solution(P=float(b @ u), u=u, cell=cell, unk_cell=unk_cell, n_unknowns=L.shape[0])
+    the original geometry and freeing only opens more. Pass `system` (built for this `open_`)
+    to reuse its factorization."""
+    assert not (f_cell[~(open_ > 0)] > 0).any()
+    sy = System(grid, open_, p) if system is None else system
+    b = sy.load(f_cell, p)
+    u = sy.solve(b)
+    return Solution(P=float(b @ u), u=u, cell=sy.cell, unk_cell=sy.unk_cell, n_unknowns=sy.n)
 
 
 def cell_mean_u(sol: Solution, open_: NDArray[np.float64], p: Params) -> NDArray[np.float64]:
