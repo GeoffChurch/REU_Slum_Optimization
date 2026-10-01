@@ -20,6 +20,8 @@ m_k W / L in its own layer at every lattice angle (checked in checks.py).
 """
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import re
 import sys
 from dataclasses import dataclass
@@ -400,6 +402,178 @@ def _soft_vjp(dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
                         out[r3, c3] += coef
 
 
+class Scans(Protocol):
+    """Where SoftSightline's 1-D scans run. `xp` is the array module (numpy or cupy); fb returns
+    (F, B, Tf, Tb) and vjp_add accumulates into `out`, all `xp` arrays; to_host / to_dev move
+    arrays across."""
+    xp: object
+
+    def fb(self, open_, dx: int, dy: int, offs, s: float, kappa: float): ...
+
+    def vjp_add(self, dx: int, dy: int, offs, s: float, kappa: float, F, B, Tf, Tb, G,
+                out) -> None: ...
+
+    def to_dev(self, a): ...
+
+    def to_host(self, a) -> NDArray[np.float64]: ...
+
+
+@dataclass(frozen=True)
+class CpuScans:
+    """numba, one core."""
+    xp: object = np
+
+    def fb(self, open_, dx, dy, offs, s, kappa):
+        return _soft_fb(open_, dx, dy, offs, s, kappa)
+
+    def vjp_add(self, dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
+        _soft_vjp(dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out)
+
+    def to_dev(self, a):
+        return np.asarray(a)
+
+    def to_host(self, a):
+        return np.asarray(a)
+
+
+_SCAN_CU = r"""
+__device__ inline double opac(const double* o, int ny, int nx, int r, int c) {
+    return (r >= 0 && r < ny && c >= 0 && c < nx) ? 1.0 - o[r * nx + c] : 1.0;
+}
+// tau of the step from (r, c) to (r + sy*dy, c + sy*dx): its far end and the cells it crosses
+__device__ inline double step_tau(const double* o, int ny, int nx, int r, int c, int dx, int dy,
+                                  const int* offs, int noffs, int sy) {
+    double tau = opac(o, ny, nx, r + sy * dy, c + sy * dx);
+    for (int i = 0; i < noffs; i++) tau += opac(o, ny, nx, r + sy * offs[2*i+1], c + sy * offs[2*i]);
+    return tau;
+}
+extern "C" __global__ void soft_fb(const double* o, int ny, int nx, int dx, int dy,
+        const int* offs, int noffs, double s, double kappa, const int* sr, const int* sc,
+        int nstart, double* F, double* B, double* Tf, double* Tb) {
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= nstart) return;
+    double k = kappa * s / (noffs + 1);
+    int r = sr[t], c = sc[t], n = 0;
+    while (r >= 0 && r < ny && c >= 0 && c < nx) {            // B along the line, from its start
+        int x = r * nx + c;
+        if (n == 0) { Tb[x] = 0.0; B[x] = 0.0; }
+        else {
+            double T = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, -1));
+            Tb[x] = T; B[x] = T * (s + B[(r - dy) * nx + (c - dx)]);
+        }
+        r += dy; c += dx; n++;
+    }
+    r -= dy; c -= dx;
+    for (int j = 0; j < n; j++) {                             // F from its end, back to the start
+        int x = r * nx + c;
+        if (j == 0) { Tf[x] = 0.0; F[x] = 0.0; }
+        else {
+            double T = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, 1));
+            Tf[x] = T; F[x] = T * (s + F[(r + dy) * nx + (c + dx)]);
+        }
+        r -= dy; c -= dx;
+    }
+}
+__device__ inline void addto(double* out, int ny, int nx, int r, int c, double v) {
+    if (r >= 0 && r < ny && c >= 0 && c < nx) atomicAdd(&out[r * nx + c], v);
+}
+extern "C" __global__ void soft_vjp(int ny, int nx, int dx, int dy, const int* offs, int noffs,
+        double s, double kappa, const int* sr, const int* sc, int nstart, const double* F,
+        const double* B, const double* Tf, const double* Tb, const double* G, double* out) {
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= nstart) return;
+    double k = kappa * s / (noffs + 1);
+    // forward rays: F(p) = Tf(p) (s + F(x)), x = p + v: walk from the start, carrying bar F
+    int r = sr[t], c = sc[t], n = 0;
+    double bar = 0.0, Tprev = 0.0;
+    while (r >= 0 && r < ny && c >= 0 && c < nx) {
+        int x = r * nx + c;
+        bar = G[x] + Tprev * bar;
+        int r2 = r + dy, c2 = c + dx;
+        if (bar != 0.0 && r2 >= 0 && r2 < ny && c2 >= 0 && c2 < nx) {
+            double coef = bar * (s + F[r2 * nx + c2]) * Tf[x] * k;
+            addto(out, ny, nx, r2, c2, coef);
+            for (int i = 0; i < noffs; i++) addto(out, ny, nx, r + offs[2*i+1], c + offs[2*i], coef);
+        }
+        Tprev = Tf[x];
+        r += dy; c += dx; n++;
+    }
+    // backward rays: B(p) = Tb(p) (s + B(x)), x = p - v: walk from the end
+    r -= dy; c -= dx;
+    bar = 0.0; Tprev = 0.0;
+    for (int j = 0; j < n; j++) {
+        int x = r * nx + c;
+        bar = G[x] + Tprev * bar;
+        int r2 = r - dy, c2 = c - dx;
+        if (bar != 0.0 && r2 >= 0 && r2 < ny && c2 >= 0 && c2 < nx) {
+            double coef = bar * (s + B[r2 * nx + c2]) * Tb[x] * k;
+            addto(out, ny, nx, r2, c2, coef);
+            for (int i = 0; i < noffs; i++) addto(out, ny, nx, r - offs[2*i+1], c - offs[2*i], coef);
+        }
+        Tprev = Tb[x];
+        r -= dy; c -= dx;
+    }
+}
+"""
+
+
+@dataclass(frozen=True)
+class GpuScans:
+    """cupy: one GPU thread per lattice line along the direction (each line is an independent
+    forward / backward recurrence); the vjp scatters with atomicAdd (a crossed cell belongs to
+    other lines too). Needs cupy and CUDA_PATH."""
+
+    @property
+    def xp(self):
+        import cupy as cp
+        return cp
+
+    def _kernels(self):
+        import cupy as cp
+        mod = cp.RawModule(code=_SCAN_CU)
+        return mod.get_function("soft_fb"), mod.get_function("soft_vjp")
+
+    def _starts(self, ny: int, nx: int, dx: int, dy: int):
+        """Cells whose predecessor (r - dy, c - dx) is off the grid: one per line."""
+        cp = self.xp
+        r, c = np.meshgrid(np.arange(ny), np.arange(nx), indexing="ij")
+        rp, cpv = r - dy, c - dx
+        st = ~((rp >= 0) & (rp < ny) & (cpv >= 0) & (cpv < nx))
+        return (cp.asarray(r[st].astype(np.int32)), cp.asarray(c[st].astype(np.int32)),
+                int(st.sum()))
+
+    def fb(self, open_, dx, dy, offs, s, kappa):
+        cp = self.xp
+        ny, nx = open_.shape
+        f_fb, _ = self._kernels()
+        sr, sc, ns = self._starts(ny, nx, dx, dy)
+        F, B, Tf, Tb = (cp.zeros((ny, nx)) for _ in range(4))
+        og = cp.ascontiguousarray(open_, dtype=cp.float64)
+        oo = cp.asarray(np.asarray(offs, dtype=np.int32).ravel())
+        f_fb(((ns + 127) // 128,), (128,),
+             (og, np.int32(ny), np.int32(nx), np.int32(dx), np.int32(dy), oo,
+              np.int32(len(offs)), np.float64(s), np.float64(kappa), sr, sc, np.int32(ns),
+              F, B, Tf, Tb))
+        return F, B, Tf, Tb
+
+    def vjp_add(self, dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
+        cp = self.xp
+        ny, nx = F.shape
+        _, f_vjp = self._kernels()
+        sr, sc, ns = self._starts(ny, nx, dx, dy)
+        oo = cp.asarray(np.asarray(offs, dtype=np.int32).ravel())
+        f_vjp(((ns + 127) // 128,), (128,),
+              (np.int32(ny), np.int32(nx), np.int32(dx), np.int32(dy), oo, np.int32(len(offs)),
+               np.float64(s), np.float64(kappa), sr, sc, np.int32(ns), F, B, Tf, Tb,
+               cp.ascontiguousarray(G, dtype=cp.float64), out))
+
+    def to_dev(self, a):
+        return self.xp.asarray(a)
+
+    def to_host(self, a):
+        return self.xp.asnumpy(a)
+
+
 @dataclass(frozen=True)
 class SoftSightline:
     """Sightline with translucent buildings: a ray's intensity falls as exp(-kappa x the closed
@@ -415,6 +589,9 @@ class SoftSightline:
     r0_m: float = 20.0
     hill: float = 1.0          # the exponent n
     nmax: int = 6
+    scans: Scans = CpuScans()
+    # the last open field's layers (one round builds the same operator more than once)
+    _cache: dict = dataclasses.field(default_factory=dict, compare=False, repr=False)
 
     @property
     def name(self) -> str:
@@ -427,7 +604,7 @@ class SoftSightline:
 
     def dg(self, R):
         x = (R / self.r0_m) ** self.hill
-        return self.hill * x / (np.maximum(R, 1e-12) * (1.0 + x) ** 2)
+        return self.hill * x / ((R + 1e-12) * (1.0 + x) ** 2)
 
     def _dirs(self):
         dirs = directions(self.nmax)
@@ -444,37 +621,52 @@ class SoftSightline:
         the segments along d that pass through the cell (pairs of a start behind and an end
         ahead); its sum along a line of length L is L^2 / 2."""
         dirs, _ang = self._dirs()
+        od = self.scans.to_dev(open_)
         for i, (dx, dy) in enumerate(dirs):
             offs = np.array(_line_cells(dx, dy), dtype=np.int64).reshape(-1, 2)
-            F, B, _tf, _tb = _soft_fb(open_, dx, dy, offs, float(np.hypot(dx, dy) * h),
-                                      self.kappa)
-            yield i, F, B
+            F, B, _tf, _tb = self.scans.fb(od, dx, dy, offs, float(np.hypot(dx, dy) * h),
+                                           self.kappa)
+            yield i, self.scans.to_host(F), self.scans.to_host(B)
 
     def layers(self, open_, h, K):
-        _dirs, ang = self._dirs()
-        W = _angle_weights(K, ang)
-        out = np.ones((K, *open_.shape))
-        for i, R in self.runs(open_, h):
-            g = self.g(R)
-            for k in np.flatnonzero(W[:, i]):
-                out[k] += (self.beta * W[k, i]) * g
-        return out
-
-    def vjp(self, open_, h, K, A):
+        key = (hashlib.blake2b(np.ascontiguousarray(open_).tobytes(), digest_size=16).digest(),
+               h, K)
+        if key in self._cache:
+            return self._cache[key]
+        xp = self.scans.xp
         dirs, ang = self._dirs()
         W = _angle_weights(K, ang)
-        out = np.zeros(open_.shape)
+        od = self.scans.to_dev(open_)
+        out = xp.ones((K, *open_.shape))
+        for i, (dx, dy) in enumerate(dirs):
+            offs = np.array(_line_cells(dx, dy), dtype=np.int64).reshape(-1, 2)
+            F, B, _tf, _tb = self.scans.fb(od, dx, dy, offs, float(np.hypot(dx, dy) * h),
+                                           self.kappa)
+            g = self.g(F + B)
+            for k in np.flatnonzero(W[:, i]):
+                out[k] += (self.beta * W[k, i]) * g
+        res = self.scans.to_host(out)
+        self._cache.clear()
+        self._cache[key] = res
+        return res
+
+    def vjp(self, open_, h, K, A):
+        xp = self.scans.xp
+        dirs, ang = self._dirs()
+        W = _angle_weights(K, ang)
+        od = self.scans.to_dev(open_)
+        Ad = self.scans.to_dev(A)
+        out = xp.zeros(open_.shape)
         for i, (dx, dy) in enumerate(dirs):
             offs = np.array(_line_cells(dx, dy), dtype=np.int64).reshape(-1, 2)
             s = float(np.hypot(dx, dy) * h)
-            F, B, Tf, Tb = _soft_fb(open_, dx, dy, offs, s, self.kappa)
-            R = F + B
-            G = self.beta * self.dg(R) * np.tensordot(W[:, i], A, axes=1)
-            _soft_vjp(dx, dy, offs, s, self.kappa, F, B, Tf, Tb, G, out)
-        return out
+            F, B, Tf, Tb = self.scans.fb(od, dx, dy, offs, s, self.kappa)
+            G = self.beta * self.dg(F + B) * xp.tensordot(xp.asarray(W[:, i]), Ad, axes=1)
+            self.scans.vjp_add(dx, dy, offs, s, self.kappa, F, B, Tf, Tb, G, out)
+        return self.scans.to_host(out)
 
 
-def along_of(spec: str) -> AlongConductance:
+def along_of(spec: str, scans: Scans = CpuScans()) -> AlongConductance:
     """`uni` -> Uniform(); `sl3` -> Sightline(beta 3); `ss10k2` -> SoftSightline(beta 10,
     kappa 2); `ss30k2n2r30` -> SoftSightline(beta 30, kappa 2, hill 2, r0 30 m)."""
     if spec == "uni":
@@ -485,7 +677,8 @@ def along_of(spec: str) -> AlongConductance:
     if m:
         return SoftSightline(float(m.group(1)), float(m.group(2)),
                              *(() if m.group(3) is None else (float(m.group(4)),
-                                                              float(m.group(3)))))
+                                                              float(m.group(3)))),
+                             scans=scans)
     raise ValueError(f"unknown along conductance {spec!r}")
 
 
