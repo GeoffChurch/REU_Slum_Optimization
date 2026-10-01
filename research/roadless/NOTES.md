@@ -612,6 +612,16 @@ p 1, clear_rows_S0.01cat_h0.5_area); relax220_p1.parquet; medians:
   standard method, SIMP (material conductivity x^q, q -> 3, optimality-criteria updates), drives
   x to 0/1 and edges out the greedy on P. The greedy itself is that field's BESO (add whole
   elements by sensitivity, a fixed volume step per iteration).
-- On J_2 (Lens A) SIMP rounded worse than the greedy on 5618 from every start tried (0.30-0.34
-  vs 0.40, the continuous q-3 objective 0.44 only through ~5% grey buildings); the 220 run is
-  below.
+- On J_2 (Lens A), 220 blocks (relax220_p2.parquet; not convex, so Frank-Wolfe is a local
+  method and its gap no bound), paired against the J_2 greedy (S0.01cat p 2):
+
+    convex-start optimum (fractional)  +0.141 vs greedy
+    rounded by x                       -0.063 [-0.076, -0.051], wins on 3%
+    SIMP rounded                       +0.002 [-0.003, +0.006], wins on 55%: a TIE
+    SIMP rounded, largest quarter      +0.006 [+0.003, +0.011], wins on 67%
+    time: relaxation + SIMP 377 s median per block, greedy 261 s (older run, other load)
+
+  (5618, where SIMP rounded 0.30-0.34 against the greedy's 0.40 from every start, is an
+  outlier.) Frontier: the greedy is cheaper and ties overall; SIMP is better on big blocks
+  and on P. SIMP still leaves ~8% of buildings grey; its rounding (by decreasing x) is the
+  obvious place it loses value.
