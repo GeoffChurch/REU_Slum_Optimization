@@ -38,6 +38,8 @@ import common  # noqa: E402
 import lifted  # noqa: E402
 
 EPS = 0.01
+RTOL_TENSION = 1e-3     # a ranking: checked unchanged against 1e-9 (NOTES, "Speed")
+RTOL_SCORE = 1e-5       # P is quadratic in u: this gives it to ~1e-10
 
 
 def _cells_axes(sy: lifted.System, x: np.ndarray, K: int) -> np.ndarray:
@@ -75,10 +77,12 @@ class Tension:
         return np.asarray(self.A.T @ T)
 
 class Clearing:
-    def __init__(self, block, h: float, p: lifted.Params, population=None):
+    def __init__(self, block, h: float, p: lifted.Params, population=None,
+                 rtol: float = RTOL_TENSION):
         self.sc = common.Scorer(block, h, p, population=population)
         self.cost = self.sc.w / self.sc.w.sum()        # population share of each building
         self.p = p
+        self.rtol = rtol                               # for the tension solves
         g = self.sc.grid
         # sub-sample -> building index (-1 = none); overlaps go to the later footprint
         self.lab = lab = g.label_sub(self.sc.polys)
@@ -110,7 +114,7 @@ class Clearing:
         full = g.isub.mean(axis=-1)                       # everything open
         op_eps = op + EPS * (full - op)
         sy = lifted.System(g, op_eps, self.p)
-        sol = lifted.solve(g, op_eps, self.sc.f, self.p, system=sy)
+        sol = lifted.solve(g, op_eps, self.sc.f, self.p, system=sy, rtol=self.rtol)
         if power == 1.0:
             lam = sol.u
         else:
@@ -118,7 +122,7 @@ class Clearing:
             mult = np.zeros_like(self.sc.f)
             on = self.sc.owner >= 0
             mult[on] = power * np.nan_to_num(uh[self.sc.owner[on]]) ** (power - 1.0)
-            lam = lifted.solve(g, op_eps, self.sc.f * mult, self.p, system=sy).u
+            lam = lifted.solve(g, op_eps, self.sc.f * mult, self.p, system=sy, rtol=self.rtol).u
         # Each edge's weight gained by clearing everything, at the CURRENT along-factors (the
         # local term): w = w_uniform x min(factor at the two ends). The factors' own response to
         # clearing (straight runs lengthening through the cleared cells, boosting edges
@@ -217,7 +221,7 @@ def _exact(c: Clearing, cleared: list[int], power: float) -> tuple[float, float]
     r = c.removed.copy()
     r[cleared] = True
     op = c.open_(r)
-    sol = lifted.solve(c.sc.grid, op, c.sc.f, c.p)
+    sol = lifted.solve(c.sc.grid, op, c.sc.f, c.p, rtol=RTOL_SCORE)
     return c.sc.J(c.sc.home_u_of(sol, op), power), sol.P
 
 

@@ -686,14 +686,15 @@ class Solution:
 
 
 def solve(grid: Grid, open_: NDArray[np.float64], f_cell: NDArray[np.float64], p: Params,
-          system: System | None = None) -> Solution:
+          system: System | None = None, rtol: float = 1e-9) -> Solution:
     """Total escape power. Injection on a closed cell would be a bug: demand cells are open in
     the original geometry and freeing only opens more. Pass `system` (built for this `open_`)
-    to reuse its factorization."""
+    to reuse its factorization. P is quadratic in u, so rtol 1e-5 already gives it to ~1e-10;
+    a ranking (tension) is unchanged at 1e-3."""
     assert not (f_cell[~(open_ > 0)] > 0).any()
     sy = System(grid, open_, p) if system is None else system
     b = sy.load(f_cell, p)
-    u = sy.solve(b)
+    u = sy.solve(b, rtol=rtol)
     return Solution(P=float(b @ u), u=u, cell=sy.cell, unk_cell=sy.unk_cell, n_unknowns=sy.n)
 
 
