@@ -439,3 +439,17 @@ long lines fanning ACROSS the central field between cleared buildings on its two
 field is the corridor, and the greedy opens its frontage (opened_ZAF.9.3.1_1_5618_S0.01cat.png).
 Running: 5618 at the fitted scale (ss100k2n2r123), 5810 (S0.03cat) uni / ss30k2 / ss100k2 /
 ss100k2n2r74.
+
+### Speed (owner: "several hours on a big block is a lot", 2026-10-01)
+
+Per solve on 5618 (single thread): h 0.5 setup 7.8 s, solve 29 s at rtol 1e-9 (37 it), 19 s at
+1e-5 (P identical), 13.5 s at 1e-3 (P to 1e-6); h 1: setup 1.6 s, solve 5.8 / 3.4 / 2.4 s, P
++2.5%. Tension at rtol 1e-3 ranks IDENTICALLY to 1e-9 (5618, h 0.5 and 1: Spearman 1.000000,
+top-100 overlap 100/100) at half the time; set RTOL_TENSION 1e-3, RTOL_SCORE 1e-5.
+Search coarse, score fine (rescore_grid.py, S0.01cat, all 220): searched at h 1, re-scored at
+h 0.5 at D = 0.10: Lens A 0.534 vs 0.550 searched at h 0.5, -0.0028 [-0.004, -0.002] (coarse
+better on 33%); p 1 -0.0024. Compute 6.4 h vs 21.2 h (5618: 658 s vs 2,544 s). Together ~7.5x
+on the tension (5618: 106 s -> 14 s).
+Not done: a threaded AMG (pyamgcl does not build here -- needs Boost headers); the GPU is busy
+with another user's job. 5810 relaunched at h 1, rtol 1e-3, S0.01cat: uni / ss100k2 /
+ss100k2n2r74 (the old h 0.5 S0.03cat runs were stopped).
