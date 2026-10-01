@@ -357,14 +357,11 @@ def _angle_weights(K: int, ang: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 @njit(cache=True)
-def _soft_fb(open_, dx, dy, offs, s, kappa, sigma, Gbar):
+def _soft_fb(open_, dx, dy, offs, s, kappa):
     """Expected free path forward (F) and back (B) along (dx, dy) from each cell, the ray's
     intensity falling as exp(-kappa x the closed length it crosses): each step of length s takes
     optical depth kappa s mean(1 - open) over the cells it enters (its far end and `offs`;
-    outside the grid counts closed). After each step the walker keeps its heading with
-    probability 1 - sigma, else takes a fresh one, worth Gbar there (the heading-mean free
-    path; sigma 0 is the straight ray). Tf, Tb: each cell's step transmittance forward and
-    back."""
+    outside the grid counts closed). Tf, Tb: each cell's step transmittance forward and back."""
     ny, nx = open_.shape
     m = offs.shape[0] + 1
     F = np.zeros((ny, nx))
@@ -380,7 +377,7 @@ def _soft_fb(open_, dx, dy, offs, s, kappa, sigma, Gbar):
                     r3, c3 = r + offs[i, 1], c + offs[i, 0]
                     tau += 1.0 - open_[r3, c3] if (0 <= r3 < ny and 0 <= c3 < nx) else 1.0
                 Tf[r, c] = np.exp(-kappa * s / m * tau)
-                F[r, c] = Tf[r, c] * (s + sigma * Gbar[r2, c2] + (1.0 - sigma) * F[r2, c2])
+                F[r, c] = Tf[r, c] * (s + F[r2, c2])
     for r in range(ny):
         for c in range(nx):
             r2, c2 = r - dy, c - dx
@@ -390,70 +387,61 @@ def _soft_fb(open_, dx, dy, offs, s, kappa, sigma, Gbar):
                     r3, c3 = r - offs[i, 1], c - offs[i, 0]
                     tau += 1.0 - open_[r3, c3] if (0 <= r3 < ny and 0 <= c3 < nx) else 1.0
                 Tb[r, c] = np.exp(-kappa * s / m * tau)
-                B[r, c] = Tb[r, c] * (s + sigma * Gbar[r2, c2] + (1.0 - sigma) * B[r2, c2])
+                B[r, c] = Tb[r, c] * (s + B[r2, c2])
     return F, B, Tf, Tb
 
 
 @njit(cache=True)
-def _soft_vjp(dx, dy, offs, s, kappa, sigma, Gbar, F, B, Tf, Tb, GF, GB, out, gout):
-    """Add to `out` the gradient over open_ of sum_x GF[x] F[x] + GB[x] B[x], and to `gout` its
-    gradient over Gbar: reverse-mode through the two scans (each cotangent flows back along the
-    ray, damped by the transmittance and the chance of keeping the heading)."""
+def _soft_vjp(dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
+    """Add to `out` the gradient over open_ of sum_x G[x] (F[x] + B[x]): reverse-mode through
+    the two scans (each cotangent flows back along the ray, damped by the transmittance)."""
     ny, nx = F.shape
     m = offs.shape[0] + 1
-    keep = 1.0 - sigma
     bar = np.zeros((ny, nx))
-    # forward rays: F(p) = Tf(p) (s + sigma Gbar(x) + keep F(x)) with x = p + v: visit p first
+    # forward rays: F(p) = Tf(p) (s + F(x)) with x = p + v, so visit p before x
     for r in range(ny):
         for c in range(nx):
-            b = GF[r, c]
+            b = G[r, c]
             rp, cp = r - dy, c - dx
             if 0 <= rp < ny and 0 <= cp < nx:
-                b += keep * Tf[rp, cp] * bar[rp, cp]
+                b += Tf[rp, cp] * bar[rp, cp]
             bar[r, c] = b
             r2, c2 = r + dy, c + dx
             if b != 0.0 and 0 <= r2 < ny and 0 <= c2 < nx:
-                coef = (b * (s + sigma * Gbar[r2, c2] + keep * F[r2, c2]) * Tf[r, c]
-                        * kappa * s / m)
+                coef = b * (s + F[r2, c2]) * Tf[r, c] * kappa * s / m
                 out[r2, c2] += coef
                 for i in range(offs.shape[0]):
                     r3, c3 = r + offs[i, 1], c + offs[i, 0]
                     if 0 <= r3 < ny and 0 <= c3 < nx:
                         out[r3, c3] += coef
-                if sigma > 0.0:
-                    gout[r2, c2] += b * Tf[r, c] * sigma
     bar[:, :] = 0.0
     for r in range(ny - 1, -1, -1):
         for c in range(nx - 1, -1, -1):
-            b = GB[r, c]
+            b = G[r, c]
             rp, cp = r + dy, c + dx
             if 0 <= rp < ny and 0 <= cp < nx:
-                b += keep * Tb[rp, cp] * bar[rp, cp]
+                b += Tb[rp, cp] * bar[rp, cp]
             bar[r, c] = b
             r2, c2 = r - dy, c - dx
             if b != 0.0 and 0 <= r2 < ny and 0 <= c2 < nx:
-                coef = (b * (s + sigma * Gbar[r2, c2] + keep * B[r2, c2]) * Tb[r, c]
-                        * kappa * s / m)
+                coef = b * (s + B[r2, c2]) * Tb[r, c] * kappa * s / m
                 out[r2, c2] += coef
                 for i in range(offs.shape[0]):
                     r3, c3 = r - offs[i, 1], c - offs[i, 0]
                     if 0 <= r3 < ny and 0 <= c3 < nx:
                         out[r3, c3] += coef
-                if sigma > 0.0:
-                    gout[r2, c2] += b * Tb[r, c] * sigma
 
 
 class Scans(Protocol):
     """Where SoftSightline's 1-D scans run. `xp` is the array module (numpy or cupy); fb returns
-    (F, B, Tf, Tb) and vjp_add accumulates into `out` and `gout`, all `xp` arrays; to_host /
-    to_dev move arrays across."""
+    (F, B, Tf, Tb) and vjp_add accumulates into `out`, all `xp` arrays; to_host / to_dev move
+    arrays across."""
     xp: object
 
-    def fb(self, open_, dx: int, dy: int, offs, s: float, kappa: float, sigma: float,
-           Gbar): ...
+    def fb(self, open_, dx: int, dy: int, offs, s: float, kappa: float): ...
 
-    def vjp_add(self, dx: int, dy: int, offs, s: float, kappa: float, sigma: float, Gbar, F,
-                B, Tf, Tb, GF, GB, out, gout) -> None: ...
+    def vjp_add(self, dx: int, dy: int, offs, s: float, kappa: float, F, B, Tf, Tb, G,
+                out) -> None: ...
 
     def to_dev(self, a): ...
 
@@ -465,11 +453,11 @@ class CpuScans:
     """numba, one core."""
     xp: object = np
 
-    def fb(self, open_, dx, dy, offs, s, kappa, sigma, Gbar):
-        return _soft_fb(open_, dx, dy, offs, s, kappa, sigma, Gbar)
+    def fb(self, open_, dx, dy, offs, s, kappa):
+        return _soft_fb(open_, dx, dy, offs, s, kappa)
 
-    def vjp_add(self, dx, dy, offs, s, kappa, sigma, Gbar, F, B, Tf, Tb, GF, GB, out, gout):
-        _soft_vjp(dx, dy, offs, s, kappa, sigma, Gbar, F, B, Tf, Tb, GF, GB, out, gout)
+    def vjp_add(self, dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
+        _soft_vjp(dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out)
 
     def to_dev(self, a):
         return np.asarray(a)
@@ -490,19 +478,18 @@ __device__ inline double step_tau(const double* o, int ny, int nx, int r, int c,
     return tau;
 }
 extern "C" __global__ void soft_fb(const double* o, int ny, int nx, int dx, int dy,
-        const int* offs, int noffs, double s, double kappa, double sigma, const double* Gbar,
-        const int* sr, const int* sc, int nstart, double* F, double* B, double* Tf, double* Tb) {
+        const int* offs, int noffs, double s, double kappa, const int* sr, const int* sc,
+        int nstart, double* F, double* B, double* Tf, double* Tb) {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= nstart) return;
-    double k = kappa * s / (noffs + 1), keep = 1.0 - sigma;
+    double k = kappa * s / (noffs + 1);
     int r = sr[t], c = sc[t], n = 0;
     while (r >= 0 && r < ny && c >= 0 && c < nx) {            // B along the line, from its start
         int x = r * nx + c;
         if (n == 0) { Tb[x] = 0.0; B[x] = 0.0; }
         else {
-            int x2 = (r - dy) * nx + (c - dx);
             double T = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, -1));
-            Tb[x] = T; B[x] = T * (s + sigma * Gbar[x2] + keep * B[x2]);
+            Tb[x] = T; B[x] = T * (s + B[(r - dy) * nx + (c - dx)]);
         }
         r += dy; c += dx; n++;
     }
@@ -511,9 +498,8 @@ extern "C" __global__ void soft_fb(const double* o, int ny, int nx, int dx, int 
         int x = r * nx + c;
         if (j == 0) { Tf[x] = 0.0; F[x] = 0.0; }
         else {
-            int x2 = (r + dy) * nx + (c + dx);
             double T = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, 1));
-            Tf[x] = T; F[x] = T * (s + sigma * Gbar[x2] + keep * F[x2]);
+            Tf[x] = T; F[x] = T * (s + F[(r + dy) * nx + (c + dx)]);
         }
         r -= dy; c -= dx;
     }
@@ -522,42 +508,37 @@ __device__ inline void addto(double* out, int ny, int nx, int r, int c, double v
     if (r >= 0 && r < ny && c >= 0 && c < nx) atomicAdd(&out[r * nx + c], v);
 }
 extern "C" __global__ void soft_vjp(int ny, int nx, int dx, int dy, const int* offs, int noffs,
-        double s, double kappa, double sigma, const double* Gbar, const int* sr, const int* sc,
-        int nstart, const double* F, const double* B, const double* Tf, const double* Tb,
-        const double* GF, const double* GB, double* out, double* gout) {
+        double s, double kappa, const int* sr, const int* sc, int nstart, const double* F,
+        const double* B, const double* Tf, const double* Tb, const double* G, double* out) {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= nstart) return;
-    double k = kappa * s / (noffs + 1), keep = 1.0 - sigma;
-    // forward rays: F(p) = Tf(p) (s + sigma Gbar(x) + keep F(x)), x = p + v: walk from the start
+    double k = kappa * s / (noffs + 1);
+    // forward rays: F(p) = Tf(p) (s + F(x)), x = p + v: walk from the start, carrying bar F
     int r = sr[t], c = sc[t], n = 0;
     double bar = 0.0, Tprev = 0.0;
     while (r >= 0 && r < ny && c >= 0 && c < nx) {
         int x = r * nx + c;
-        bar = GF[x] + keep * Tprev * bar;
+        bar = G[x] + Tprev * bar;
         int r2 = r + dy, c2 = c + dx;
         if (bar != 0.0 && r2 >= 0 && r2 < ny && c2 >= 0 && c2 < nx) {
-            int x2 = r2 * nx + c2;
-            double coef = bar * (s + sigma * Gbar[x2] + keep * F[x2]) * Tf[x] * k;
+            double coef = bar * (s + F[r2 * nx + c2]) * Tf[x] * k;
             addto(out, ny, nx, r2, c2, coef);
             for (int i = 0; i < noffs; i++) addto(out, ny, nx, r + offs[2*i+1], c + offs[2*i], coef);
-            if (sigma > 0.0) atomicAdd(&gout[x2], bar * Tf[x] * sigma);
         }
         Tprev = Tf[x];
         r += dy; c += dx; n++;
     }
-    // backward rays: B(p) = Tb(p) (s + sigma Gbar(x) + keep B(x)), x = p - v: walk from the end
+    // backward rays: B(p) = Tb(p) (s + B(x)), x = p - v: walk from the end
     r -= dy; c -= dx;
     bar = 0.0; Tprev = 0.0;
     for (int j = 0; j < n; j++) {
         int x = r * nx + c;
-        bar = GB[x] + keep * Tprev * bar;
+        bar = G[x] + Tprev * bar;
         int r2 = r - dy, c2 = c - dx;
         if (bar != 0.0 && r2 >= 0 && r2 < ny && c2 >= 0 && c2 < nx) {
-            int x2 = r2 * nx + c2;
-            double coef = bar * (s + sigma * Gbar[x2] + keep * B[x2]) * Tb[x] * k;
+            double coef = bar * (s + B[r2 * nx + c2]) * Tb[x] * k;
             addto(out, ny, nx, r2, c2, coef);
             for (int i = 0; i < noffs; i++) addto(out, ny, nx, r - offs[2*i+1], c - offs[2*i], coef);
-            if (sigma > 0.0) atomicAdd(&gout[x2], bar * Tb[x] * sigma);
         }
         Tprev = Tb[x];
         r -= dy; c -= dx;
@@ -601,7 +582,7 @@ class GpuScans:
                                len(r))
         return self._memo[key]
 
-    def fb(self, open_, dx, dy, offs, s, kappa, sigma, Gbar):
+    def fb(self, open_, dx, dy, offs, s, kappa):
         cp = self.xp
         ny, nx = open_.shape
         f_fb, _ = self._kernels()
@@ -611,12 +592,11 @@ class GpuScans:
         oo = cp.asarray(np.asarray(offs, dtype=np.int32).ravel())
         f_fb(((ns + 127) // 128,), (128,),
              (og, np.int32(ny), np.int32(nx), np.int32(dx), np.int32(dy), oo,
-              np.int32(len(offs)), np.float64(s), np.float64(kappa), np.float64(sigma),
-              cp.ascontiguousarray(Gbar, dtype=cp.float64), sr, sc, np.int32(ns),
+              np.int32(len(offs)), np.float64(s), np.float64(kappa), sr, sc, np.int32(ns),
               F, B, Tf, Tb))
         return F, B, Tf, Tb
 
-    def vjp_add(self, dx, dy, offs, s, kappa, sigma, Gbar, F, B, Tf, Tb, GF, GB, out, gout):
+    def vjp_add(self, dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
         cp = self.xp
         ny, nx = F.shape
         _, f_vjp = self._kernels()
@@ -624,10 +604,8 @@ class GpuScans:
         oo = cp.asarray(np.asarray(offs, dtype=np.int32).ravel())
         f_vjp(((ns + 127) // 128,), (128,),
               (np.int32(ny), np.int32(nx), np.int32(dx), np.int32(dy), oo, np.int32(len(offs)),
-               np.float64(s), np.float64(kappa), np.float64(sigma),
-               cp.ascontiguousarray(Gbar, dtype=cp.float64), sr, sc, np.int32(ns), F, B, Tf,
-               Tb, cp.ascontiguousarray(GF, dtype=cp.float64),
-               cp.ascontiguousarray(GB, dtype=cp.float64), out, gout))
+               np.float64(s), np.float64(kappa), sr, sc, np.int32(ns), F, B, Tf, Tb,
+               cp.ascontiguousarray(G, dtype=cp.float64), out))
 
     def to_dev(self, a):
         return self.xp.asarray(a)
@@ -645,34 +623,21 @@ class SoftSightline:
     runs. Layer k's factor is 1 + beta x the angle-weighted mean of g(R_d) = R^n / (R^n + r0^n):
     n 1 is concave (short gaps already earn a lot), n 2 is S-shaped (gaps well under r0 earn
     almost nothing, lines past r0 nearly all; joining two runs across r0 pays most).
-    TURNING (owner: corridors that connect and reinforce): with `turn_m` finite the walker
-    keeps its heading for turn_m metres on average, then takes a fresh one, worth Gbar: the
-    power mean (exponent `sharp`, angle-weighted) of the free paths over all headings there.
-    sharp 1 is a uniformly random fresh heading (in a narrow corridor most hit the wall, so
-    turning only shortens); a large `sharp` takes the best one, so a corridor that meets
-    another, or bends, is credited with the length beyond the junction or the bend, and a
-    straight one loses nothing. The headings couple only through Gbar, settled by fixed-point
-    passes (each pass adds one more turn). Differentiable: `vjp` is exact (its adjoint settles
-    the same way)."""
+    Differentiable: `vjp` is exact. (Turning walkers were tried and dropped: NOTES, "Turning
+    sightline".)"""
     beta: float
     kappa: float = 2.0         # per metre of building crossed
     r0_m: float = 20.0
     hill: float = 1.0          # the exponent n
-    turn_m: float = np.inf     # mean straight run between fresh headings
-    sharp: float = 1.0         # power-mean exponent over the fresh headings (large: the best)
     nmax: int = 6
     scans: Scans = CpuScans()
-    tol: float = 1e-5          # relative change in Gbar that ends the fixed-point passes
-    # the last open field's layers and Gbar (one round builds the same operator more than once)
+    # the last open field's layers (one round builds the same operator more than once)
     _cache: dict = dataclasses.field(default_factory=dict, compare=False, repr=False)
 
     @property
     def name(self) -> str:
-        return (f"ss{self.beta:g}k{self.kappa:g}"
-                + ("" if self.hill == 1.0 and self.r0_m == 20.0
-                   else f"n{self.hill:g}r{self.r0_m:g}")
-                + ("" if np.isinf(self.turn_m) else f"t{self.turn_m:g}")
-                + ("" if self.sharp == 1.0 else f"q{self.sharp:g}"))
+        return f"ss{self.beta:g}k{self.kappa:g}" + (
+            "" if self.hill == 1.0 and self.r0_m == 20.0 else f"n{self.hill:g}r{self.r0_m:g}")
 
     def g(self, R):
         x = (R / self.r0_m) ** self.hill
@@ -688,51 +653,10 @@ class SoftSightline:
         return dirs, ang
 
     def _steps(self, h):
-        """Per fine direction: (index, offs, step length s, turn chance per step sigma, its
-        weight in Gbar: its share of [0, pi) / pi / 2 for each of F and B)."""
-        dirs, ang = self._dirs()
-        order = np.argsort(ang)
-        th = ang[order]
-        gap = np.diff(np.concatenate([th, [th[0] + np.pi]]))
-        share = np.empty(len(ang))
-        share[order] = 0.5 * (gap + np.roll(gap, 1)) / np.pi / 2.0
-        for i, (dx, dy) in enumerate(dirs):
-            s = float(np.hypot(dx, dy) * h)
-            sig = 0.0 if np.isinf(self.turn_m) else float(1.0 - np.exp(-s / self.turn_m))
-            yield (i, dx, dy, np.array(_line_cells(dx, dy), dtype=np.int64).reshape(-1, 2), s,
-                   sig, share[i])
-
-    def _key(self, open_, h):
-        return (hashlib.blake2b(np.ascontiguousarray(self.scans.to_host(open_)).tobytes(),
-                                digest_size=16).digest(), h)
-
-    def _gbar(self, od, h):
-        """The settled fresh-heading value Gbar (zero for straight rays), on the device."""
-        xp = self.scans.xp
-        Gbar = xp.zeros(od.shape)
-        if np.isinf(self.turn_m):
-            return Gbar
-        for _ in range(500):
-            acc = xp.zeros(od.shape)
-            q = self.sharp
-            for _i, dx, dy, offs, s, sig, w in self._steps(h):
-                F, B, _tf, _tb = self.scans.fb(od, dx, dy, offs, s, self.kappa, sig, Gbar)
-                acc += w * (F ** q + B ** q)
-            new = acc ** (1.0 / q)
-            change = float(xp.abs(new - Gbar).max()) / max(float(new.max()), 1e-12)
-            Gbar = new
-            if change < self.tol:
-                return Gbar
-        raise RuntimeError(f"turning sightline did not settle: change {change:.1e}")
-
-    def _settled(self, open_, h):
-        """(cache entry, device open) for this field: Gbar, and layers once asked for."""
-        key = self._key(open_, h)
-        od = self.scans.to_dev(open_)
-        if key not in self._cache:
-            self._cache.clear()
-            self._cache[key] = {"gbar": self._gbar(od, h)}
-        return self._cache[key], od
+        """Per fine direction: (index, dx, dy, crossed-cell offsets, step length)."""
+        for i, (dx, dy) in enumerate(self._dirs()[0]):
+            yield (i, dx, dy, np.array(_line_cells(dx, dy), dtype=np.int64).reshape(-1, 2),
+                   float(np.hypot(dx, dy) * h))
 
     def runs(self, open_, h):
         """Yield (d, R_d) per fine direction, R_d the expected free path in metres."""
@@ -742,80 +666,57 @@ class SoftSightline:
     def paths(self, open_, h):
         """Yield (d, F_d, B_d) on the host: the expected free path forward and back. F x B is
         the measure of the segments along d that pass through the cell (pairs of a start behind
-        and an end ahead); its sum along a straight line of length L is L^2 / 2."""
-        ent, od = self._settled(open_, h)
-        for i, dx, dy, offs, s, sig, _w in self._steps(h):
-            F, B, _tf, _tb = self.scans.fb(od, dx, dy, offs, s, self.kappa, sig, ent["gbar"])
+        and an end ahead); its sum along a line of length L is L^2 / 2."""
+        od = self.scans.to_dev(open_)
+        for i, dx, dy, offs, s in self._steps(h):
+            F, B, _tf, _tb = self.scans.fb(od, dx, dy, offs, s, self.kappa)
             yield i, self.scans.to_host(F), self.scans.to_host(B)
 
     def layers(self, open_, h, K):
         """(K, ny, nx) on the scans' device."""
-        ent, od = self._settled(open_, h)
-        if ("layers", K) in ent:
-            return ent[("layers", K)]
+        key = (hashlib.blake2b(np.ascontiguousarray(self.scans.to_host(open_)).tobytes(),
+                               digest_size=16).digest(), h, K)
+        if key in self._cache:
+            return self._cache[key]
         xp = self.scans.xp
         W = _angle_weights(K, self._dirs()[1])
+        od = self.scans.to_dev(open_)
         out = xp.ones((K, *od.shape))
-        for i, dx, dy, offs, s, sig, _w in self._steps(h):
-            F, B, _tf, _tb = self.scans.fb(od, dx, dy, offs, s, self.kappa, sig, ent["gbar"])
+        for i, dx, dy, offs, s in self._steps(h):
+            F, B, _tf, _tb = self.scans.fb(od, dx, dy, offs, s, self.kappa)
             g = self.g(F + B)
             for k in np.flatnonzero(W[:, i]):
                 out[k] += (self.beta * W[k, i]) * g
-        ent[("layers", K)] = out
+        self._cache.clear()
+        self._cache[key] = out
         return out
 
     def vjp(self, open_, h, K, A):
-        """(ny, nx) on the scans' device. With turning, the cotangent of Gbar (mu) settles by
-        the same fixed-point passes as Gbar itself: every scan's seed is its own term plus
-        mu x dGbar/d(its F or B) = mu w (F / Gbar)^(sharp - 1), and each pass returns the next
-        mu."""
+        """(ny, nx) on the scans' device."""
         xp = self.scans.xp
-        ent, od = self._settled(open_, h)
         W = _angle_weights(K, self._dirs()[1])
+        od = self.scans.to_dev(open_)
         Ad = self.scans.to_dev(A)
-        mu = xp.zeros(od.shape)
-        for _ in range(500):
-            out = xp.zeros(od.shape)
-            gout = xp.zeros(od.shape)
-            for i, dx, dy, offs, s, sig, w in self._steps(h):
-                F, B, Tf, Tb = self.scans.fb(od, dx, dy, offs, s, self.kappa, sig, ent["gbar"])
-                G = self.beta * self.dg(F + B) * xp.tensordot(xp.asarray(W[:, i]), Ad, axes=1)
-                if self.sharp == 1.0:
-                    GF = GB = G + w * mu
-                else:
-                    M = ent["gbar"]
-                    on = M > 0
-                    Ms = xp.where(on, M, 1.0)
-                    GF = G + xp.where(on, w * mu * (F / Ms) ** (self.sharp - 1.0), 0.0)
-                    GB = G + xp.where(on, w * mu * (B / Ms) ** (self.sharp - 1.0), 0.0)
-                self.scans.vjp_add(dx, dy, offs, s, self.kappa, sig, ent["gbar"], F, B, Tf, Tb,
-                                   GF, GB, out, gout)
-            if np.isinf(self.turn_m):
-                return out
-            change = float(xp.abs(gout - mu).max()) / max(float(xp.abs(gout).max()), 1e-30)
-            mu = gout
-            if change < self.tol:
-                return out
-        raise RuntimeError(f"turning sightline adjoint did not settle: change {change:.1e}")
+        out = xp.zeros(od.shape)
+        for i, dx, dy, offs, s in self._steps(h):
+            F, B, Tf, Tb = self.scans.fb(od, dx, dy, offs, s, self.kappa)
+            G = self.beta * self.dg(F + B) * xp.tensordot(xp.asarray(W[:, i]), Ad, axes=1)
+            self.scans.vjp_add(dx, dy, offs, s, self.kappa, F, B, Tf, Tb, G, out)
+        return out
 
 
 def along_of(spec: str, scans: Scans = CpuScans()) -> AlongConductance:
     """`uni` -> Uniform(); `sl3` -> Sightline(beta 3); `ss10k2` -> SoftSightline(beta 10,
-    kappa 2); `ss30k2n2r30` -> SoftSightline(beta 30, kappa 2, hill 2, r0 30 m); a trailing
-    `t20` turns every 20 m on average (turn_m), `t20q8` into the best headings (sharp 8)."""
+    kappa 2); `ss30k2n2r30` -> SoftSightline(beta 30, kappa 2, hill 2, r0 30 m)."""
     if spec == "uni":
         return Uniform()
     if spec.startswith("sl"):
         return Sightline(float(spec[2:]))
-    m = re.fullmatch(r"ss([0-9.]+)k([0-9.]+)(?:n([0-9.]+)r([0-9.]+))?"
-                     r"(?:t([0-9.]+)(?:q([0-9.]+))?)?", spec)
+    m = re.fullmatch(r"ss([0-9.]+)k([0-9.]+)(?:n([0-9.]+)r([0-9.]+))?", spec)
     if m:
         shape = {} if m.group(3) is None else dict(hill=float(m.group(3)),
                                                    r0_m=float(m.group(4)))
-        turn = ({} if m.group(5) is None else dict(turn_m=float(m.group(5)))) | (
-            {} if m.group(6) is None else dict(sharp=float(m.group(6))))
-        return SoftSightline(float(m.group(1)), float(m.group(2)), **shape, **turn,
-                             scans=scans)
+        return SoftSightline(float(m.group(1)), float(m.group(2)), **shape, scans=scans)
     raise ValueError(f"unknown along conductance {spec!r}")
 
 

@@ -560,3 +560,23 @@ red is line-like, long straight streaks running past the cleared buildings. Not 
 and should not be: only P (and each home's resistance to the street) must fall; flow reroutes
 into the new route as traffic does onto a road. Total current (person-metres) fell 1.33M ->
 1.23M (uni), 1.41M -> 1.24M (ss100k2).
+
+### Turning sightline (tried and dropped, 2026-10-01)
+
+Owner's ask: corridors that connect and reinforce, bends still rewarded. Built as SoftSightline
+with walkers that keep their heading for turn_m metres on average, then take a fresh one worth
+Gbar (a power mean, exponent `sharp`, of the free paths over all headings), settled by
+fixed-point passes; vjp exact (central differences 1e-6..1e-9, CPU = GPU to 1e-16). On a T
+junction (a 50 m stem meeting a bar):
+- uniform fresh heading (sharp 1): turning only SHORTENS (most fresh headings hit a corridor
+  wall): stem 48 m straight -> 32 m at turn_m 30 -> 19 m at 10; the junction adds ~0.5-1 m.
+- best fresh heading (sharp 8, 32): the reverse heading is a "long" option, so walkers
+  ping-pong: the stem ALONE scores 54 m, 110 m at sharp 32.
+Fixing it (no U-turns, turn only where it pays, a turn cost, a per-metre discount against loops
+round a building) builds a longest-polyline reach with no destination, which is exactly what
+needs the loop guards. Owner's point: that is a problem of myopia. The flow solve already rewards
+connection globally (a gap that joins a corridor carrying flow to the street has a large
+tension), the lifted operator already charges curvature (turning edges), and potential flow
+cannot loop (it runs downhill: the catchment sweep's DAG). Dropped; the code is in 4f56c4b.
+What would revive it: a measured gap that the flow cannot see, e.g. a block where the greedy
+leaves a T unjoined although joining it pays under P.
