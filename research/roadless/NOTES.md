@@ -580,3 +580,38 @@ tension), the lifted operator already charges curvature (turning edges), and pot
 cannot loop (it runs downhill: the catchment sweep's DAG). Dropped; the code is in 4f56c4b.
 What would revive it: a measured gap that the flow cannot see, e.g. a block where the greedy
 leaves a T unjoined although joining it pays under P.
+
+### One convex program, and SIMP (owner: "a very simple single approach?", 2026-10-01)
+
+relax.py. Clear a fraction x_j of each building; open fractions are affine in x, edge weights are
+mins of them (concave), and P(w) = max_u 2 f^T u - sum w (du)^2 is convex non-increasing in w,
+so min P(x) s.t. population . x <= D, x in [0, 1] is CONVEX. Frank-Wolfe on it: the gradient is
+the tension (-du dlam per edge; a min's gradient shared over the cells attaining it, a valid
+subgradient), the linear step is the batch pickers' fractional knapsack, and the gap certifies a
+bound. Objective in the eps world (J_eps <= J, so the bound covers real clearings). Gradient vs
+central differences 1e-6 (p 1 and 2).
+
+Result, 220 blocks, p 1 (P), D 0.10, against the greedy run on the same objective (S0.01cat,
+p 1, clear_rows_S0.01cat_h0.5_area); relax220_p1.parquet; medians:
+
+    convex optimum (fractional)        0.670
+    certified bound (no clearing beats) 0.675   greedy is 0.150 below it (quartiles 0.13-0.17)
+    convex optimum rounded by x        0.445   -0.052 [-0.059, -0.044] vs greedy, wins on 7%
+    SIMP (q 1.5 .. 3), rounded         0.516   +0.004 [+0.002, +0.005] vs greedy, wins on 60%
+                                               (largest quarter +0.006)
+    greedy (BESO-like batches)         0.517
+    time per block: greedy 97 s (CPU), relaxation + SIMP 154 s (FW start + 80 OC steps)
+
+- The convex optimum is GREY: 73% of buildings partly cleared (median). P is convex in the
+  conductances, so spreading a little clearing everywhere (every building made porous) beats
+  concentrating it (Jensen). Corridors pay only because clearing comes in whole buildings: road
+  form comes from the integrality, not from the flow model. Hence the weak rounding and a loose
+  bound (0.15 above the greedy: it does not say the greedy is near optimal).
+- This is topology optimization of heat conduction (the volume-to-point problem; thermal
+  compliance f^T K^-1 f = P, conducting material = clearing; Bejan's constructal trees). Its
+  standard method, SIMP (material conductivity x^q, q -> 3, optimality-criteria updates), drives
+  x to 0/1 and edges out the greedy on P. The greedy itself is that field's BESO (add whole
+  elements by sensitivity, a fixed volume step per iteration).
+- On J_2 (Lens A) SIMP rounded worse than the greedy on 5618 from every start tried (0.30-0.34
+  vs 0.40, the continuous q-3 objective 0.44 only through ~5% grey buildings); the 220 run is
+  below.
