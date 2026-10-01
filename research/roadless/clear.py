@@ -15,7 +15,8 @@ exact leave-one-out on one step.
     PYTHONPATH=. pixi run python research/roadless/clear.py some <workers> <picker> <h> <d_max> <pop> <p> <along> <solver> <ids,>
 
 picker: M4 | B0.01g3 | S0.01cat; along: uni | sl<beta> | ss<beta>k<kappa>[n<hill>r<r0>];
-solver: cpu | gpu (gpu needs CUDA_PATH, e.g. /usr)
+solver: cpu | gpu, the device of the solves, sightline scans and catchment sweep (gpu needs
+CUDA_PATH, e.g. /usr)
 """
 from __future__ import annotations
 
@@ -26,7 +27,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Protocol
+from typing import Callable, NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
@@ -43,39 +44,43 @@ RTOL_TENSION = 1e-3     # a ranking: checked unchanged against 1e-9 (NOTES, "Spe
 RTOL_SCORE = 1e-5       # P is quadratic in u: this gives it to ~1e-10
 
 
-def _cells_axes(sy: lifted.System, x: np.ndarray, K: int) -> np.ndarray:
-    """Per-unknown vector -> (free cells, K), zero on ground."""
-    out = np.zeros((len(sy.unk_cell), K))
-    live = sy.unk_cell >= 0
-    out[live] = x.reshape(-1, K)
+def _cells_axes(sy: lifted.System, x, K: int):
+    """Per-unknown device vector -> (free cells, K), zero on ground."""
+    out = sy.xp.zeros((len(sy.unk_cell), K))
+    out[sy.unk_cell >= 0] = x.reshape(-1, K)
     return out
 
 
 class Tension:
-    """One eps-material solve's worth of state: the factorized system, primal u and adjoint lam
-    per unknown, the edges (ca, cb, ka, kb, dw, w) with their weight now and the weight clearing
-    everything would add at the current along-factors, and A (free cells x buildings), the share
-    of each cell's gain a building owns. g = the LOCAL first-order gain (a building's own edges,
-    beta_e = (A[a] + A[b]) / 2 of each) + the NONLOCAL gain (the along-factors' response
-    elsewhere, e.g. straight runs lengthening through the cleared cells)."""
+    """One eps-material solve's worth of state, on the solver's device: the system, primal u and
+    adjoint lam per unknown, the edges (ca, cb, ka, kb, dw, w) with their weight now and the
+    weight clearing everything would add at the current along-factors, and the attribution
+    att = bfree x diag(scale) (buildings x free cells; in the eps world the free cells are the
+    inside cells), the share of each cell's gain a building owns. g (host) = the LOCAL
+    first-order gain (a building's own edges, beta_e = (att[a] + att[b]) / 2 of each) + the
+    NONLOCAL gain (the along-factors' response elsewhere, e.g. straight runs lengthening through
+    the cleared cells)."""
 
-    def __init__(self, system: lifted.System, u, lam, fam, A, K: int, home_u, removed,
-                 nonlocal_gain):
-        self.system, self.u, self.lam, self.fam, self.A, self.K = system, u, lam, fam, A, K
-        self.home_u = home_u                  # per building, from the eps solve
+    def __init__(self, system: lifted.System, u, lam, fam, bfree, scale, K: int, home_u,
+                 removed, nonlocal_gain, solver: lifted.Solver):
+        self.system, self.u, self.lam, self.fam, self.K = system, u, lam, fam, K
+        self.bfree, self.scale, self.solver = bfree, scale, solver
+        self.home_u = home_u                  # per building (host), from the eps solve
         self.g_local = self._gain()
         self.g = self.g_local + nonlocal_gain
         self.g[removed] = -np.inf
 
     def _gain(self) -> np.ndarray:
+        xp = self.system.xp
         uk = _cells_axes(self.system, self.u, self.K)
         lk = _cells_axes(self.system, self.lam, self.K)
         nc = uk.shape[0]
-        T = np.zeros(nc)
+        T = xp.zeros(nc)
         for ca, cb, ka, kb, dw, _w in self.fam:
             q = dw * (uk[ca, ka] - uk[cb, kb]) * (lk[ca, ka] - lk[cb, kb])
-            T += 0.5 * (np.bincount(ca, q, minlength=nc) + np.bincount(cb, q, minlength=nc))
-        return np.asarray(self.A.T @ T)
+            T += 0.5 * (xp.bincount(ca, q, minlength=nc) + xp.bincount(cb, q, minlength=nc))
+        return self.solver.to_host(self.bfree @ (self.scale * T))
+
 
 class Clearing:
     def __init__(self, block, h: float, p: lifted.Params, population=None,
@@ -88,22 +93,26 @@ class Clearing:
         self.ps = p if search is None else dataclasses.replace(p, along=search)
         self.rtol = rtol                               # for the tension solves
         g = self.sc.grid
+        xp = p.solver.xp
+        self.full = g.isub.mean(axis=-1)               # everything open
         # sub-sample -> building index (-1 = none); overlaps go to the later footprint
         self.lab = lab = g.label_sub(self.sc.polys)
         self.n = len(self.sc.polys)
-        # per building: its cells and the fraction of each it covers
-        ny, nx, S2 = lab.shape
+        # bfree (buildings x inside cells, row-major): the fraction of each cell a building covers
+        S2 = lab.shape[-1]
         flat = lab.reshape(-1, S2)
         cells, subs = np.nonzero(flat >= 0)
-        b = flat[cells, subs]
-        df = pd.DataFrame(dict(b=b, c=cells)).value_counts().reset_index(name="k")
-        self.bcells = {int(k): (g2.c.to_numpy(), g2.k.to_numpy() / S2)
-                       for k, g2 in df.groupby("b")}
+        inside_id = -np.ones(g.inside.size, dtype=np.int64)
+        inside_id[g.inside.ravel()] = np.arange(int(g.inside.sum()))
+        bf = sp.coo_matrix((np.full(len(cells), 1.0 / S2), (flat[cells, subs], inside_id[cells])),
+                           shape=(self.n, int(g.inside.sum()))).tocsr()
+        self.bfree = p.solver.sparse.csr_matrix(bf)
+        self.inside_flat = xp.asarray(np.flatnonzero(g.inside))
         self.removed = np.zeros(self.n, dtype=bool)
 
     def open_(self, removed: np.ndarray) -> np.ndarray:
         g = self.sc.grid
-        cleared = np.isin(self.lab, np.nonzero(removed)[0])
+        cleared = (self.lab >= 0) & removed[np.maximum(self.lab, 0)]
         return (g.isub & (~g.bsub | cleared)).mean(axis=-1)
 
     def P(self, removed: np.ndarray) -> float:
@@ -112,21 +121,25 @@ class Clearing:
     def tension(self, power: float = 1.0) -> Tension:
         """First-order gain in J_power of clearing each (remaining) building, from one
         eps-material solve (power 1: the potential is its own adjoint) or two (power != 1: the
-        adjoint L lam = dJ/du = power u_i^(power-1) x injection). dJ/dw_e = -(du_e)(dlam_e)."""
+        adjoint L lam = dJ/du = power u_i^(power-1) x injection). dJ/dw_e = -(du_e)(dlam_e).
+        Everything but the per-building results stays on the solver's device."""
         g = self.sc.grid
+        xp, th = self.p.solver.xp, self.p.solver.to_host
         op = self.open_(self.removed)
-        full = g.isub.mean(axis=-1)                       # everything open
-        op_eps = op + EPS * (full - op)
+        op_eps = op + EPS * (self.full - op)
         sy = lifted.System(g, op_eps, self.ps)
-        sol = lifted.solve(g, op_eps, self.sc.f, self.ps, system=sy, rtol=self.rtol)
+        sol = lifted.solve(g, op_eps, self.sc.f, self.ps, system=sy, rtol=self.rtol, host=False)
+        hsol = dataclasses.replace(sol, u=th(sol.u), cell=th(sol.cell),
+                                   unk_cell=th(sol.unk_cell))
+        home_u = self.sc.home_u_of(hsol, op_eps)
         if power == 1.0:
             lam = sol.u
         else:
-            uh = self.sc.home_u_of(sol, op_eps)
             mult = np.zeros_like(self.sc.f)
             on = self.sc.owner >= 0
-            mult[on] = power * np.nan_to_num(uh[self.sc.owner[on]]) ** (power - 1.0)
-            lam = lifted.solve(g, op_eps, self.sc.f * mult, self.ps, system=sy, rtol=self.rtol).u
+            mult[on] = power * np.nan_to_num(home_u[self.sc.owner[on]]) ** (power - 1.0)
+            lam = lifted.solve(g, op_eps, self.sc.f * mult, self.ps, system=sy, rtol=self.rtol,
+                               host=False).u
         # Each edge's weight gained by clearing everything, at the CURRENT along-factors (the
         # local term): w = w_uniform x min(factor at the two ends). The factors' own response to
         # clearing (straight runs lengthening through the cleared cells, boosting edges
@@ -134,47 +147,34 @@ class Clearing:
         K = self.p.K
         pu = dataclasses.replace(self.ps, along=lifted.Uniform())
         Fl = self.ps.along.layers(op_eps, g.h, K)
-        rr, cc = np.nonzero(op_eps > 0)
         uk = _cells_axes(sy, sol.u, K)
         lk = _cells_axes(sy, lam, K)
-        Agrad = np.zeros((K, *op_eps.shape))
+        ff = self.inside_flat                            # free cell -> flat (eps: all inside)
+        Agrad = xp.zeros((K, g.inside.size))
         fam = []
         for i, ((ca, cb, ka, kb, wf), (ca2, cb2, _, _, wc)) in enumerate(zip(
-                lifted.edges(full, g.h, pu), lifted.edges(op_eps, g.h, pu), strict=True)):
-            assert (ca == ca2).all() and (cb == cb2).all()
-            if i < K:                                   # along family, layer i
-                Fi = np.broadcast_to(Fl[i], op_eps.shape)
-                fa, fb = Fi[rr[ca], cc[ca]], Fi[rr[cb], cc[cb]]
-                boost = np.minimum(fa, fb)
+                lifted.edges(g, self.full, pu), lifted.edges(g, op_eps, pu), strict=True)):
+            assert bool((ca == ca2).all()) and bool((cb == cb2).all())
+            if i < K and not np.isscalar(Fl[i]):        # along family, layer i
+                Fi = xp.asarray(Fl[i]).ravel()
+                fa, fb = Fi[ff[ca]], Fi[ff[cb]]
+                boost = xp.minimum(fa, fb)
                 q = (uk[ca, ka] - uk[cb, kb]) * (lk[ca, ka] - lk[cb, kb])    # -dJ/dw_e
-                at_a = fa <= fb
-                np.add.at(Agrad[i], (np.where(at_a, rr[ca], rr[cb]),
-                                     np.where(at_a, cc[ca], cc[cb])), q * wc)
+                Agrad[i] += xp.bincount(xp.where(fa <= fb, ff[ca], ff[cb]), q * wc,
+                                        minlength=g.inside.size)
                 fam.append((ca, cb, ka, kb, (wf - wc) * boost, wc * boost))
+            elif i < K:
+                fam.append((ca, cb, ka, kb, (wf - wc) * Fl[i], wc * Fl[i]))
             else:
                 fam.append((ca, cb, ka, kb, wf - wc, wc))
         # nonlocal gain: d(gain)/d(open) at every cell, x the open each building would add
-        dgain = self.ps.along.vjp(op_eps, g.h, K, Agrad).ravel()
-        nonlocal_gain = np.zeros(self.n)
-        for j, (cells, frac) in self.bcells.items():
-            nonlocal_gain[j] = float((dgain[cells] * frac).sum()) * (1.0 - EPS)
+        dgain = xp.asarray(self.ps.along.vjp(op_eps, g.h, K, Agrad.reshape(K, *op_eps.shape)))
+        nonlocal_gain = th(self.bfree @ dgain.ravel()[ff]) * (1.0 - EPS)
         # attribution: building j owns frac/(1 - op) of each cell it covers
-        node = -np.ones(g.inside.size, dtype=np.int64)
-        node[np.flatnonzero(op_eps > 0)] = np.arange(int((op_eps > 0).sum()))
-        opf = op.ravel()
-        r, c, v = [], [], []
-        for j, (cells, frac) in self.bcells.items():
-            if self.removed[j]:
-                continue
-            nd = node[cells]
-            ok = nd >= 0
-            r.append(nd[ok]); c.append(np.full(int(ok.sum()), j))
-            v.append(frac[ok] / np.maximum(1 - opf[cells[ok]], 1e-9))
-        A = sp.csr_matrix((np.concatenate(v), (np.concatenate(r), np.concatenate(c))),
-                          shape=(len(node[node >= 0]), self.n))
-        return Tension(system=sy, u=sol.u, lam=lam, fam=fam, A=A, K=self.p.K,
-                       home_u=self.sc.home_u_of(sol, op_eps), removed=self.removed,
-                       nonlocal_gain=nonlocal_gain)
+        scale = 1.0 / xp.maximum(1.0 - xp.asarray(op).ravel()[ff], 1e-9)
+        return Tension(system=sy, u=sol.u, lam=lam, fam=fam, bfree=self.bfree, scale=scale,
+                       K=K, home_u=home_u, removed=self.removed, nonlocal_gain=nonlocal_gain,
+                       solver=self.p.solver)
 
 def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     from scipy.stats import spearmanr
@@ -295,6 +295,16 @@ class GramSource(Protocol):
     def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray: ...
 
 
+class Sweep(Protocol):
+    """Where Catchment's downhill sweep runs. prepare(A, u, rowsum) -> run(rows, cols, C): the
+    (n x C) device array out[x, c] = share of node x's outflow that passes through column c's
+    member nodes (the (rows, cols) pairs) on the way to ground. Flow only runs downhill, so out
+    at x needs out at x's lower neighbours first. `chunk`: columns per run (memory)."""
+    chunk: int
+
+    def prepare(self, A, u, rowsum) -> Callable: ...
+
+
 @njit(cache=True)
 def _catch(indptr, indices, data, u, rowsum, order, inA, out):
     """out[x, c] = share of node x's outflow that passes through candidate c's nodes (inA) on the
@@ -319,53 +329,169 @@ def _catch(indptr, indices, data, u, rowsum, order, inA, out):
 
 
 @dataclass(frozen=True)
+class CpuSweep:
+    """numba, one core: every node in order of increasing potential."""
+    chunk: int = 16
+
+    def prepare(self, A, u, rowsum):
+        order = np.argsort(u, kind="stable")
+
+        def run(rows, cols, C):
+            inA = np.zeros((len(u), C), dtype=np.bool_)
+            inA[rows, cols] = True
+            out = np.zeros((len(u), C))
+            _catch(A.indptr, A.indices, A.data, u, rowsum, order, inA, out)
+            return out
+        return run
+
+
+_SWEEP_CU = r"""
+extern "C" __global__ void indeg(const int* indptr, const int* indices, const double* u, int n,
+                                 int* deg) {
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    if (x >= n) return;
+    int d = 0;
+    for (int p = indptr[x]; p < indptr[x + 1]; p++) {
+        int y = indices[p];
+        if (y != x && u[y] < u[x]) d++;
+    }
+    deg[x] = d;
+}
+// Kahn's algorithm, one wave per launch: settle order[start:end), release their upper neighbours
+extern "C" __global__ void advance(const int* indptr, const int* indices, const double* u,
+                                   int* order, int start, int end, int* deg, int* tail) {
+    int t = blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= end - start) return;
+    int x = order[start + t];
+    for (int p = indptr[x]; p < indptr[x + 1]; p++) {
+        int y = indices[p];
+        if (y != x && u[y] > u[x] && atomicSub(&deg[y], 1) == 1) order[atomicAdd(tail, 1)] = y;
+    }
+}
+// one wave of the sweep: thread (i, c) for node order[start + i], column c
+extern "C" __global__ void catch_wave(const int* indptr, const int* indices, const double* data,
+        const double* u, const double* rowsum, const int* order, int start, int cnt,
+        const unsigned int* mask, int C, double* out) {
+    long long t = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (long long)cnt * C) return;
+    int i = (int)(t / C), c = (int)(t % C);
+    int x = order[start + i];
+    long long o = (long long)x * C + c;
+    if ((mask[x] >> c) & 1u) { out[o] = 1.0; return; }
+    double ux = u[x], Q = rowsum[x] * ux, acc = 0.0;
+    for (int p = indptr[x]; p < indptr[x + 1]; p++) {
+        int y = indices[p];
+        if (y != x && u[y] < ux) {
+            double q = -data[p] * (ux - u[y]);
+            Q += q;
+            acc += q * out[(long long)y * C + c];
+        }
+    }
+    out[o] = Q > 0 ? acc / Q : 0.0;
+}
+"""
+
+
+@dataclass(frozen=True)
+class GpuSweep:
+    """cupy: the downhill graph's topological waves (Kahn's algorithm, one launch per wave: a
+    node is ready once all its lower neighbours are), then one launch per wave for the sweep,
+    a thread per (node, column). Same arithmetic per node as the CPU sweep. `chunk` <= 32 (the
+    member mask is one uint32 per node)."""
+    chunk: int = 32
+    _memo: dict = dataclasses.field(default_factory=dict, compare=False, repr=False)
+
+    def _kernels(self):
+        import cupy as cp
+        if "k" not in self._memo:
+            mod = cp.RawModule(code=_SWEEP_CU)
+            self._memo["k"] = tuple(mod.get_function(f) for f in ("indeg", "advance",
+                                                                   "catch_wave"))
+        return self._memo["k"]
+
+    def prepare(self, A, u, rowsum):
+        import cupy as cp
+        k_deg, k_adv, k_wave = self._kernels()
+        n = len(u)
+        ip, ix = A.indptr.astype(cp.int32), A.indices.astype(cp.int32)
+        deg = cp.empty(n, dtype=cp.int32)
+        k_deg(((n + 255) // 256,), (256,), (ip, ix, u, np.int32(n), deg))
+        first = cp.flatnonzero(deg == 0).astype(cp.int32)
+        order = cp.empty(n, dtype=cp.int32)
+        order[:len(first)] = first
+        tail = cp.array([len(first)], dtype=cp.int32)
+        waves = [0, len(first)]
+        while waves[-1] < n:
+            s, e = waves[-2], waves[-1]
+            k_adv(((e - s + 255) // 256,), (256,), (ip, ix, u, order, np.int32(s), np.int32(e),
+                                                    deg, tail))
+            nxt = int(tail.get()[0])
+            if nxt == e:
+                raise RuntimeError("downhill graph has a cycle")
+            waves.append(nxt)
+
+        def run(rows, cols, C):
+            assert C <= 32
+            mask = cp.zeros(n, dtype=cp.uint32)
+            for m in range(C):
+                r = rows[cols == m]
+                mask[r] |= np.uint32(1 << m)
+            out = cp.zeros((n, C))
+            for s, e in zip(waves[:-1], waves[1:], strict=True):
+                tot = (e - s) * C
+                k_wave(((tot + 255) // 256,), (256,),
+                       (ip, ix, A.data, u, rowsum, order, np.int32(s), np.int32(e - s), mask,
+                        np.int32(C), out))
+            return out
+        return run
+
+
+@dataclass(frozen=True)
 class Catchment:
     """No solves: trace the round's flow downhill and give each candidate the share of each
     home's flow that passes through its cells. H_ij = sum_h c_h v_i(h) v_j(h), with c_h the
-    home's weight in J_power (w_h u_h^power)."""
-    chunk: int = 16
+    home's weight in J_power (w_h u_h^power). The sweep runs where `sweep` says."""
+    sweep: Sweep
 
     @property
     def name(self) -> str:
         return "cat"
 
     def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
-        sy, K = t.system, t.K
+        sy, K, xp = t.system, t.K, t.system.xp
+        spm = t.solver.sparse
         A = sy.A
-        keep = np.flatnonzero(sy.keep)
+        keep = xp.flatnonzero(sy.keep)
         u = t.u[keep]
-        rowsum = np.asarray(A.sum(axis=1)).ravel()
-        order = np.argsort(u, kind="stable")
+        rowsum = A @ xp.ones(A.shape[0])
         # per kept unknown: its home (the owner of its cell) and its injection
-        free = sy.cell >= 0
-        owner_free = c.sc.owner[free]
+        owner_free = xp.asarray(c.sc.owner).ravel()[sy.cell.ravel() >= 0]
         live = sy.unk_cell >= 0
-        owner_unk = np.repeat(owner_free[live], K)[keep]
+        owner_unk = xp.repeat(owner_free[live], K)[keep]
         b = sy.load(c.sc.f, c.p)[keep]
-        home = owner_unk >= 0
-        inj = np.bincount(owner_unk[home], b[home], minlength=c.n)
-        cellA = t.A[:, cand].tocsc()
-        cell_unk = sy.unk_cell
-        pos = -np.ones(sy.n, dtype=np.int64)
-        pos[keep] = np.arange(len(keep))
-        V = np.zeros((c.n, len(cand)))
-        for s0 in range(0, len(cand), self.chunk):
-            cols = range(s0, min(s0 + self.chunk, len(cand)))
-            inA = np.zeros((len(keep), len(cols)), dtype=np.bool_)
-            for m, i in enumerate(cols):
-                cells = cellA[:, i].indices
-                un = cell_unk[cells]
-                un = un[un >= 0]
-                idx = pos[(un[:, None] * K + np.arange(K)[None, :]).ravel()]
-                inA[idx[idx >= 0], m] = True
-            out = np.zeros((len(keep), len(cols)))
-            _catch(A.indptr, A.indices, A.data, u, rowsum, order, inA, out)
-            for m, i in enumerate(cols):
-                V[:, i] = np.bincount(owner_unk[home], b[home] * out[home, m], minlength=c.n)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            V = np.where(inj[:, None] > 0, V / inj[:, None], 0.0)
-        wt = c.sc.w * np.nan_to_num(t.home_u) ** power
-        return (V * wt[:, None]).T @ V
+        home = xp.flatnonzero(owner_unk >= 0)
+        inj = xp.bincount(owner_unk[home], b[home], minlength=c.n)
+        Hown = spm.coo_matrix((b[home], (owner_unk[home], home)),
+                              shape=(c.n, len(keep))).tocsr()
+        # members: kept positions of each candidate's unknowns (eps world: free cell = inside)
+        assert len(sy.unk_cell) == c.bfree.shape[1]
+        pos = -xp.ones(sy.n, dtype=xp.int64)
+        pos[keep] = xp.arange(len(keep))
+        sub = c.bfree[xp.asarray(cand)].tocoo()
+        un = sy.unk_cell[sub.col]
+        ok = un >= 0
+        idx = pos[(un[ok][:, None] * K + xp.arange(K)[None, :]).ravel()]
+        col = xp.repeat(sub.row[ok], K)
+        rows, cols = idx[idx >= 0], col[idx >= 0]
+        run = self.sweep.prepare(A, u, rowsum)
+        V = xp.zeros((c.n, len(cand)))
+        for s0 in range(0, len(cand), self.sweep.chunk):
+            C = min(self.sweep.chunk, len(cand) - s0)
+            sel = (cols >= s0) & (cols < s0 + C)
+            V[:, s0:s0 + C] = Hown @ run(rows[sel], cols[sel] - s0, C)
+        V = xp.where(inj[:, None] > 0, V / xp.where(inj > 0, inj, 1.0)[:, None], 0.0)
+        wt = xp.asarray(c.sc.w * np.nan_to_num(t.home_u) ** power)
+        return t.solver.to_host((V * wt[:, None]).T @ V)
 
 
 def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float) -> list[int]:
@@ -472,10 +598,20 @@ def cleared_through(g: pd.DataFrame, step: int) -> np.ndarray:
     return np.array([j for js in g.cleared for j in js], dtype=np.int64)
 
 
-def picker_of(spec: str) -> Picker:
+def sweep_of(spec: str) -> Sweep:
+    """`cpu` -> CpuSweep(); `gpu` -> GpuSweep() (chosen with the solver)."""
+    if spec == "cpu":
+        return CpuSweep()
+    if spec == "gpu":
+        return GpuSweep()
+    raise ValueError(f"unknown sweep {spec!r}")
+
+
+def picker_of(spec: str, sweep: Sweep) -> Picker:
     """`M4` -> Screened(4); `B0.01g3` -> Batched(delta 0.01, gap 3 m); `S0.01cat` ->
-    Spread(delta 0.01) with Catchment. (Impact, Sketch and the no-spacing null were measured and
-    dominated: NOTES.md, "Batching".)"""
+    Spread(delta 0.01) with Catchment (its sweep on `sweep`'s device). (Impact, Sketch and the
+    no-spacing null were measured and dominated: NOTES.md, "Batching"; Impact again on the GPU,
+    "GPU-resident rounds".)"""
     if spec.startswith("M"):
         return Screened(int(spec[1:]))
     if spec.startswith("B"):
@@ -483,7 +619,7 @@ def picker_of(spec: str) -> Picker:
         return Batched(float(delta), float(gap))
     m = re.fullmatch(r"S([0-9.]+)cat", spec)
     if m:
-        return Spread(float(m.group(1)), Catchment())
+        return Spread(float(m.group(1)), Catchment(sweep))
     raise ValueError(f"unknown picker {spec!r}")
 
 
@@ -520,7 +656,8 @@ if __name__ == "__main__":
         # run <workers> <picker> <h> <d_max> <pop> <p> <along>[@<search along>] <solver> [ids,]
         scans = lifted.scans_of(sys.argv[9])
         specs = sys.argv[8].split("@")
-        run(int(sys.argv[2]), picker_of(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]),
+        run(int(sys.argv[2]), picker_of(sys.argv[3], sweep_of(sys.argv[9])), float(sys.argv[4]),
+            float(sys.argv[5]),
             sys.argv[6], float(sys.argv[7]), lifted.along_of(specs[0], scans),
             lifted.solver_of(sys.argv[9]),
             lifted.along_of(specs[1], scans) if len(specs) == 2 else None,

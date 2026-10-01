@@ -41,10 +41,10 @@ def cross(idx: list[int], h: float) -> None:
         b = blocks[i]
         sc = common.Scorer(b, h, p)
         sol = lifted.solve(sc.grid, sc.free0, sc.f, p)
-        d0 = lifted.crossing(sc.free0, sc.grid.ground, sol, sc.grid.h, p)
+        d0 = lifted.crossing(sc.grid, sc.free0, sol, p)
         r = prefix_to_displacement(b, propose(arms["cycle_native"], b).roads, 0.10)
         fr = sc.free_of(r)
-        d1 = lifted.crossing(fr, sc.grid.ground, lifted.solve(sc.grid, fr, sc.f, p), sc.grid.h, p)
+        d1 = lifted.crossing(sc.grid, fr, lifted.solve(sc.grid, fr, sc.f, p), p)
         fmt = lambda d: " ".join(f"{k} {v:.3f}" for k, v in d.items())
         print(f"{b.block_id} h={h} no roads: {fmt(d0)} | cycle_native@10%: {fmt(d1)}", flush=True)
 
@@ -61,7 +61,7 @@ def cross_channel() -> None:
         f /= f.sum()
         free = grid.ff0
         sol = lifted.solve(grid, free, f, p)
-        print(f"single stream, channel at {a} deg:", lifted.crossing(free, grid.ground, sol, grid.h, p), flush=True)
+        print(f"single stream, channel at {a} deg:", lifted.crossing(grid, free, sol, p), flush=True)
 
 
 if __name__ == "__main__":

@@ -487,3 +487,61 @@ and the pyamg aggregation now dominate). perm' at D 0.15: 0.385 / 0.703 / 0.628.
 coherent diagonal bands and several long straight lines through chains of clearings; under uni,
 almost none. Three GPU runs plus 18 workers exhausted the 48 GB card (cupy's pool grew to ~20 GB
 per 5810 run before the pool release was added).
+
+### GPU-resident rounds (owner: "move the rest to the GPU", 2026-10-01)
+
+Profile of one 5810 round (h 0.5, ss100k2, S0.01cat, GPU solver + scans; profile_round.py):
+148 s = catchment sweep 76 (numba, one core) + operator assembly 24 (12 per System) + scan start
+cells 16 (rebuilt every call) + pyamg setup 10 + GPU solves 14 + rest. Setup per block 69 s.
+Now one round is **13 s** (11x) and setup ~40 s:
+- **Edge pattern once per grid** (lifted.Pattern): every edge among the inside cells, built once;
+  a field's operator keeps the edges whose cells are all open and fills in weights, on the
+  solver's device (numpy or cupy, the Solver Strategy carries xp / sparse / ndimage). Identical
+  matrices to the old assembly (max |diff| 7e-15, the float32 layers).
+- **Grounded components by labelling** the free mask (4-connected: a diagonal or knight step
+  needs every cell it crosses open, so the operator's cell graph is exactly 4-connectivity);
+  identical masks.
+- **One coarsening per block** (Coarsening, GpuAMG): pyamg's standard aggregation of the
+  operator on every inside cell, restricted to each system's unknowns, Galerkin sums on the GPU.
+  pyamg's aggregation at strength theta 0 reads only the sparsity pattern, so for the eps
+  (tension) systems this is the hierarchy pyamg would build afresh. System setup 5 s -> 0.2 s.
+- **K-cycle** (Notay: each coarse correction two flexible Krylov steps preconditioned by the next
+  level) instead of a V-cycle: 5810 eps system to 1e-3 in 63 iterations instead of 181, score
+  system to 1e-5 in 98 instead of 272 (2.2x the speed). Measured and dropped: 2-3 Jacobi sweeps
+  (no gain), strength theta 0.25 (3-7x slower: knight-axis layers lose every strong link),
+  Notay's pairwise aggregation (3-10x slower per solve), smoothed prolongators (cuSPARSE's
+  products wanted a 52 GB buffer on 5810, still 14-31 GB in row blocks). Convergence stays linear
+  (~0.94 per iteration at tight tolerance on 63718), so rtol 1e-9 takes ~350 iterations: the cap
+  is now 2000. A better coarsening for this anisotropic operator (aggregates along each heading's
+  chains, then across) is the remaining solver lever.
+- **Catchment sweep on the GPU** (Sweep Strategy: CpuSweep numba / GpuSweep): the downhill graph's
+  topological waves by Kahn's algorithm (a node is ready once all its lower neighbours are; one
+  launch per wave; 5618 is 2,113 waves deep, ~1,100 nodes per wave), then one launch per wave
+  for the sweep, a thread per (node, candidate). Same arithmetic per node: 76 s -> ~1 s.
+- **Tension on the device**: edges, gains, the nonlocal vjp and the building attribution (one
+  sparse buildings x cells matrix) never leave the GPU; only u (for the per-building escape
+  times) and the per-building gains come back.
+- **Grid construction**: block membership by a scanline fill of the boundary rings, footprints by
+  per-footprint bounding-box rasterization (what label_sub already did): identical sub-samples
+  on four blocks, 5810 58 s -> 6 s.
+Checks: new CPU vs old CPU and new GPU vs old GPU on 41132, 41148, 5618: tension within the
+solve tolerance (<= 1e-4 relative), identical candidates and picks, Gram matrices <= 1e-4.
+
+**Impact spacing on the GPU: still dominated.** Block CG (16 right-hand sides) makes it 56x
+faster than on the CPU (63718, 30 candidates: 6.9 s vs 387 s), but catchment on the GPU takes
+0.1 s there, and on 5810 at 3% Impact's Gram had not finished after 12 min against ~1 s. Its
+quality edge (+0.0025 over catchment at 3%, a tie at 1%) cannot pay for that; deleted again.
+
+End to end (5810 and 5618, ss100k2, S0.01cat, GPU): identical picks in 14 of 15 rounds on 5810
+(the other within solver tolerance) and 15 of 15 on 5618, same scores to 4 decimals; 5810 2,446 s
+-> **195 s** of rounds (+ ~40 s setup), 5618 25 s.
+
+**Current maps** (current_map.py; owner: "show the current through a point, not the
+conductance"). Per cell, the sum over headings of |flux| under the run's own conductance, before
+and after its 10% clearing (current_ZAF.9.3.1_1_5810_S0.01cat_h0.5.png). Before: a dendritic
+drainage network toward the street. The diff is global: a cleared gap lights the whole route it
+feeds, out to the street (red), and relieves the routes it replaces (blue); under sightline the
+red is line-like, long straight streaks running past the cleared buildings. Not monotone per cell
+and should not be: only P (and each home's resistance to the street) must fall; flow reroutes
+into the new route as traffic does onto a road. Total current (person-metres) fell 1.33M ->
+1.23M (uni), 1.41M -> 1.24M (ss100k2).

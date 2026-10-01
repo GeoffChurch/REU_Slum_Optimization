@@ -66,10 +66,10 @@ def main(idx: int) -> None:
         print(f"  {along.name:5s}  P0 {sc.P0:9.2f} -> {prev:9.2f}  largest relative rise {rises:+.1e}"
               f"  (one solve {time.time() - t:.1f}s)", flush=True)
     t = time.time()
-    lifted.operator(sc.grid.ff0, sc.grid.ground, sc.grid.h, lifted.Params(3.0, 8, ALONGS[0]))
+    lifted.operator(sc.grid, sc.grid.ff0, lifted.Params(3.0, 8, ALONGS[0]))
     t0 = time.time() - t
     t = time.time()
-    lifted.operator(sc.grid.ff0, sc.grid.ground, sc.grid.h, lifted.Params(3.0, 8, ALONGS[2]))
+    lifted.operator(sc.grid, sc.grid.ff0, lifted.Params(3.0, 8, ALONGS[2]))
     print(f"\n(3) operator build: Uniform {t0:.1f}s, Sightline {time.time() - t:.1f}s")
 
 
