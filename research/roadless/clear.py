@@ -11,10 +11,11 @@ to the next multiple of delta of population, one exact solve). `loo` checks the 
 exact leave-one-out on one step.
 
     PYTHONPATH=. pixi run python research/roadless/clear.py loo <block idx> [h]
-    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <along>
-    PYTHONPATH=. pixi run python research/roadless/clear.py some <workers> <picker> <h> <d_max> <pop> <p> <along> <ids,>
+    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <along> <solver>
+    PYTHONPATH=. pixi run python research/roadless/clear.py some <workers> <picker> <h> <d_max> <pop> <p> <along> <solver> <ids,>
 
-picker: M4 | B0.01g3 | S0.01cat; along: uni | sl<beta> | ss<beta>k<kappa>
+picker: M4 | B0.01g3 | S0.01cat; along: uni | sl<beta> | ss<beta>k<kappa>[n<hill>r<r0>];
+solver: cpu | gpu (gpu needs CUDA_PATH, e.g. /usr)
 """
 from __future__ import annotations
 
@@ -412,11 +413,12 @@ class Spread:
 
 
 def greedy_block(b, picker: Picker, h: float, d_max: float, out: Path, population,
-                 power: float, along: lifted.AlongConductance) -> None:
+                 power: float, along: lifted.AlongConductance, solver: lifted.Solver) -> None:
     """Each step: rank remaining buildings by tension (in J_power) per unit of population and
     let `picker` clear some. Records perm (in J_power) and perm1 (the p = 1 score) at every
     step; `cleared` lists the step's buildings in pick order."""
-    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8, along=along), population=population)
+    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8, along=along, solver=solver),
+                 population=population)
     sc = c.sc
     J0 = sc.J(sc.u0, power)
     P0 = sc.P0
@@ -454,7 +456,7 @@ def _one(i: int) -> None:
         return
     try:
         greedy_block(b, _CFG["picker"], _CFG["h"], _CFG["d_max"], out,
-                     common.POPULATIONS[_CFG["pop"]], _CFG["power"], _CFG["along"])
+                     common.POPULATIONS[_CFG["pop"]], _CFG["power"], _CFG["along"], _CFG["solver"])
     except Exception as e:
         print(f"{b.block_id} FAILED {type(e).__name__}: {e}"[:300], flush=True)
 
@@ -487,13 +489,15 @@ def rows_dir(picker: str, h: float, pop: str, power: float = 1.0, along: str = "
 
 
 def run(workers: int, picker: Picker, h: float, d_max: float, pop: str, power: float,
-        along: lifted.AlongConductance, ids: list[str] | None = None) -> None:
+        along: lifted.AlongConductance, solver: lifted.Solver,
+        ids: list[str] | None = None) -> None:
     """All 220 study blocks, largest first, or just `ids`."""
     import multiprocessing
     global _BLOCKS, _CFG
     d = rows_dir(picker.name, h, pop, power, along.name)
     d.mkdir(exist_ok=True)
-    _CFG = dict(picker=picker, h=h, d_max=d_max, dir=d, pop=pop, power=power, along=along)
+    _CFG = dict(picker=picker, h=h, d_max=d_max, dir=d, pop=pop, power=power, along=along,
+                solver=solver)
     _BLOCKS = common.build_blocks(common.recipients() if ids is None else ids)
     with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=4) as pool:
         for _ in pool.imap_unordered(_one, list(range(len(_BLOCKS)))[::-1]):
@@ -506,7 +510,7 @@ if __name__ == "__main__":
             sys.argv[4] if len(sys.argv) > 4 else "count",
             float(sys.argv[5]) if len(sys.argv) > 5 else 1.0)
     elif sys.argv[1] in ("run", "some"):
-        # run <workers> <picker> <h> <d_max> <pop> <p> <along> [ids,]
+        # run <workers> <picker> <h> <d_max> <pop> <p> <along> <solver> [ids,]
         run(int(sys.argv[2]), picker_of(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]),
             sys.argv[6], float(sys.argv[7]), lifted.along_of(sys.argv[8]),
-            sys.argv[9].split(",") if sys.argv[1] == "some" else None)
+            lifted.solver_of(sys.argv[9]), sys.argv[10].split(",") if sys.argv[1] == "some" else None)

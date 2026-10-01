@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 from pathlib import Path
 
 import numpy as np
@@ -489,11 +489,134 @@ def along_of(spec: str) -> AlongConductance:
     raise ValueError(f"unknown along conductance {spec!r}")
 
 
+class Solver(Protocol):
+    """How a grounded SPD system is solved: prepare(A) does the setup once and returns
+    solve(b, rtol) -> x, CG to a relative residual of rtol (exact below SMALL unknowns)."""
+
+    def prepare(self, A) -> Callable[[NDArray[np.float64], float], NDArray[np.float64]]: ...
+
+
+SMALL = 20000
+
+
+def _direct(A):
+    lu = factorized(A.tocsc())
+    return lambda b, rtol: lu(b)
+
+
+@dataclass(frozen=True)
+class CpuAMG:
+    """pyamg smoothed aggregation as a CG preconditioner (Gauss-Seidel smoothing), one core."""
+
+    def prepare(self, A):
+        if A.shape[0] < SMALL:
+            return _direct(A)
+        ml = pyamg.smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=2000)
+
+        def solve(b, rtol):
+            res: list[float] = []
+            x = ml.solve(b, tol=rtol, accel="cg", maxiter=500, residuals=res)
+            if res[-1] > rtol * res[0] * 10:
+                raise RuntimeError(f"AMG-CG did not converge: {res[-1] / res[0]:.2e} after "
+                                   f"{len(res)}")
+            return x
+        return solve
+
+
+@dataclass(frozen=True)
+class GpuAMG:
+    """The same smoothed-aggregation hierarchy (built by pyamg on the CPU), run on the GPU: CG
+    preconditioned by a symmetric V-cycle with damped-Jacobi smoothing (Gauss-Seidel is
+    sequential), omega = 4 / (3 rho(D^-1 A)) per level (rho by power iteration on the GPU, padded
+    5%), a dense inverse on the coarsest level. The prolongators use pyamg's 'local' weighting.
+    Needs cupy and CUDA_PATH (the toolkit headers)."""
+    sweeps: int = 2
+    smooth: object = None      # prolongator smoothing: None (unsmoothed aggregation) or a pyamg spec
+
+    def prepare(self, A):
+        if A.shape[0] < SMALL:
+            return _direct(A)
+        import cupy as cp
+        import cupyx.scipy.sparse as cs
+        # unsmoothed by default: smoothing the prolongators costs scipy's slow BSR
+        # sum_duplicates (7 of 11 s on 5618 at h 0.5), and the extra CG iterations it would save
+        # cost milliseconds on the GPU
+        ml = pyamg.smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=2000,
+                                               smooth=self.smooth,
+                                               presmoother=None, postsmoother=None)
+        lv = []
+        for i, L in enumerate(ml.levels):
+            Ai = L.A.tocsr()
+            Ag = cs.csr_matrix(Ai)
+            dinv = cp.asarray(1.0 / Ai.diagonal())
+            # rho(D^-1 A) by power iteration on the GPU
+            v = cp.random.default_rng(0).random(Ai.shape[0])
+            for _ in range(30):
+                w = dinv * (Ag @ v)
+                rho = float(cp.linalg.norm(w)) / float(cp.linalg.norm(v))
+                v = w / cp.linalg.norm(w)
+            lv.append(dict(A=Ag, dinv=dinv * (4.0 / (3.0 * 1.05 * rho)),
+                           P=cs.csr_matrix(L.P.tocsr()) if i < len(ml.levels) - 1 else None,
+                           R=cs.csr_matrix(L.R.tocsr()) if i < len(ml.levels) - 1 else None))
+        coarse = cp.asarray(np.linalg.inv(ml.levels[-1].A.toarray()))
+        sweeps = self.sweeps
+
+        def vcycle(i, b):
+            L = lv[i]
+            if L["P"] is None:
+                return coarse @ b
+            x = L["dinv"] * b
+            for _ in range(sweeps - 1):
+                x = x + L["dinv"] * (b - L["A"] @ x)
+            xc = vcycle(i + 1, L["R"] @ (b - L["A"] @ x))
+            x = x + L["P"] @ xc
+            for _ in range(sweeps):
+                x = x + L["dinv"] * (b - L["A"] @ x)
+            return x
+
+        A0 = lv[0]["A"]
+
+        def solve(b, rtol):
+            bg = cp.asarray(b)
+            x = cp.zeros_like(bg)
+            r = bg.copy()
+            nb = float(cp.linalg.norm(bg))
+            if nb == 0.0:
+                return np.zeros_like(b)
+            z = vcycle(0, r)
+            pdir = z.copy()
+            rz = float(r @ z)
+            for it in range(500):
+                Ap = A0 @ pdir
+                alpha = rz / float(pdir @ Ap)
+                x += alpha * pdir
+                r -= alpha * Ap
+                if float(cp.linalg.norm(r)) <= rtol * nb:
+                    return cp.asnumpy(x)
+                z = vcycle(0, r)
+                rz_new = float(r @ z)
+                pdir = z + (rz_new / rz) * pdir
+                rz = rz_new
+            raise RuntimeError(f"GPU AMG-CG did not converge: {float(cp.linalg.norm(r)) / nb:.2e}"
+                               f" after 500")
+        return solve
+
+
+def solver_of(spec: str) -> Solver:
+    """`cpu` -> CpuAMG(); `gpu` -> GpuAMG()."""
+    if spec == "cpu":
+        return CpuAMG()
+    if spec == "gpu":
+        return GpuAMG()
+    raise ValueError(f"unknown solver {spec!r}")
+
+
 @dataclass(frozen=True)
 class Params:
     ell_m: float = 2.0       # turning length: metres travelled per radian of heading change
     K: int = 8
     along: AlongConductance = Uniform()
+    solver: Solver = CpuAMG()
 
 
 def along_edges(open_: NDArray[np.float64], h: float, p: Params):
@@ -640,11 +763,7 @@ class System:
         self.keep = grounded[lab]
         A = self.L[self.keep][:, self.keep].tocsr() if n_comp > 1 else self.L
         self.A = A
-        if A.shape[0] < 20000:
-            self._lu = factorized(A.tocsc())
-            self._ml = None
-        else:
-            self._ml = pyamg.smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=2000)
+        self._solver = p.solver.prepare(A)
 
     @property
     def n(self) -> int:
@@ -654,14 +773,7 @@ class System:
         if (b[~self.keep] != 0).any():
             raise ValueError(f"{(b[~self.keep] != 0).sum()} loaded unknowns have no path to ground")
         u = np.zeros(self.n)
-        bk = b[self.keep]
-        if self._ml is None:
-            u[self.keep] = self._lu(bk)
-            return u
-        res: list[float] = []
-        u[self.keep] = self._ml.solve(bk, tol=rtol, accel="cg", maxiter=500, residuals=res)
-        if res[-1] > rtol * res[0] * 10:
-            raise RuntimeError(f"AMG-CG did not converge: {res[-1] / res[0]:.2e} after {len(res)}")
+        u[self.keep] = self._solver(b[self.keep], rtol)
         return u
 
     def load(self, f_cell: NDArray[np.float64], p: Params) -> NDArray[np.float64]:
