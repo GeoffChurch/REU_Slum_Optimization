@@ -14,10 +14,11 @@ exact leave-one-out on one step.
     PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <along>
     PYTHONPATH=. pixi run python research/roadless/clear.py some <workers> <picker> <h> <d_max> <pop> <p> <along> <ids,>
 
-picker: M4 | B0.01g3 | S0.01cat | S0.01imp | S0.01sk32 | S0.01ind; along: uni | sl<beta>
+picker: M4 | B0.01g3 | S0.01cat; along: uni | sl<beta> | ss<beta>k<kappa>
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import sys
@@ -49,17 +50,18 @@ def _cells_axes(sy: lifted.System, x: np.ndarray, K: int) -> np.ndarray:
 
 class Tension:
     """One eps-material solve's worth of state: the factorized system, primal u and adjoint lam
-    per unknown, the edges (ca, cb, ka, kb, dw, w): their weight now and the weight clearing
-everything would add, and A (free cells
-    x buildings), the share of each cell's gain a building owns. A building's edge coefficient is
-    beta_e = (A[a] + A[b]) / 2, so clearing it perturbs the operator by
-    dL_i = sum_e beta_e,i dw_e b_e b_e^T (to first order: `g` is the gain dJ, and `s` the
-    primal source dL_i u whose response L^-1 s is the building's impact field)."""
+    per unknown, the edges (ca, cb, ka, kb, dw, w) with their weight now and the weight clearing
+    everything would add at the current along-factors, and A (free cells x buildings), the share
+    of each cell's gain a building owns. g = the LOCAL first-order gain (a building's own edges,
+    beta_e = (A[a] + A[b]) / 2 of each) + the NONLOCAL gain (the along-factors' response
+    elsewhere, e.g. straight runs lengthening through the cleared cells)."""
 
-    def __init__(self, system: lifted.System, u, lam, fam, A, K: int, home_u, removed):
+    def __init__(self, system: lifted.System, u, lam, fam, A, K: int, home_u, removed,
+                 nonlocal_gain):
         self.system, self.u, self.lam, self.fam, self.A, self.K = system, u, lam, fam, A, K
         self.home_u = home_u                  # per building, from the eps solve
-        self.g = self._gain()
+        self.g_local = self._gain()
+        self.g = self.g_local + nonlocal_gain
         self.g[removed] = -np.inf
 
     def _gain(self) -> np.ndarray:
@@ -71,29 +73,6 @@ everything would add, and A (free cells
             q = dw * (uk[ca, ka] - uk[cb, kb]) * (lk[ca, ka] - lk[cb, kb])
             T += 0.5 * (np.bincount(ca, q, minlength=nc) + np.bincount(cb, q, minlength=nc))
         return np.asarray(self.A.T @ T)
-
-    def s(self, cand: list[int]) -> sp.csc_matrix:
-        """(unknowns x len(cand)): column i is dL_cand[i] u."""
-        uk = _cells_axes(self.system, self.u, self.K)
-        AC = self.A[:, cand].tocsr()
-        touched = np.asarray(AC.sum(axis=1)).ravel() > 0
-        uc = self.system.unk_cell
-        rows, cols, vals = [], [], []
-        for ca, cb, ka, kb, dw, _w in self.fam:
-            e = np.flatnonzero(touched[ca] | touched[cb])
-            if not len(e):
-                continue
-            q = dw[e] * (uk[ca[e], ka[e]] - uk[cb[e], kb[e]])
-            beta = (0.5 * (AC[ca[e]] + AC[cb[e]])).tocoo()
-            val = q[beta.row] * beta.data
-            for cell, ax, sign in ((ca, ka, 1.0), (cb, kb, -1.0)):
-                un = uc[cell[e][beta.row]]
-                ok = un >= 0
-                rows.append(un[ok] * self.K + ax[e][beta.row][ok])
-                cols.append(beta.col[ok]); vals.append(sign * val[ok])
-        return sp.csc_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
-                             shape=(self.system.n, len(cand)))
-
 
 class Clearing:
     def __init__(self, block, h: float, p: lifted.Params, population=None):
@@ -140,12 +119,37 @@ class Clearing:
             on = self.sc.owner >= 0
             mult[on] = power * np.nan_to_num(uh[self.sc.owner[on]]) ** (power - 1.0)
             lam = lifted.solve(g, op_eps, self.sc.f * mult, self.p, system=sy).u
-        # each edge's weight gained by clearing everything, from op_eps
+        # Each edge's weight gained by clearing everything, at the CURRENT along-factors (the
+        # local term): w = w_uniform x min(factor at the two ends). The factors' own response to
+        # clearing (straight runs lengthening through the cleared cells, boosting edges
+        # elsewhere) is the nonlocal term, from the along-conductance's vjp below.
+        K = self.p.K
+        pu = dataclasses.replace(self.p, along=lifted.Uniform())
+        Fl = self.p.along.layers(op_eps, g.h, K)
+        rr, cc = np.nonzero(op_eps > 0)
+        uk = _cells_axes(sy, sol.u, K)
+        lk = _cells_axes(sy, lam, K)
+        Agrad = np.zeros((K, *op_eps.shape))
         fam = []
-        for (ca, cb, ka, kb, wf), (ca2, cb2, _, _, wc) in zip(
-                lifted.edges(full, g.h, self.p), lifted.edges(op_eps, g.h, self.p), strict=True):
+        for i, ((ca, cb, ka, kb, wf), (ca2, cb2, _, _, wc)) in enumerate(zip(
+                lifted.edges(full, g.h, pu), lifted.edges(op_eps, g.h, pu), strict=True)):
             assert (ca == ca2).all() and (cb == cb2).all()
-            fam.append((ca, cb, ka, kb, wf - wc, wc))
+            if i < K:                                   # along family, layer i
+                Fi = np.broadcast_to(Fl[i], op_eps.shape)
+                fa, fb = Fi[rr[ca], cc[ca]], Fi[rr[cb], cc[cb]]
+                boost = np.minimum(fa, fb)
+                q = (uk[ca, ka] - uk[cb, kb]) * (lk[ca, ka] - lk[cb, kb])    # -dJ/dw_e
+                at_a = fa <= fb
+                np.add.at(Agrad[i], (np.where(at_a, rr[ca], rr[cb]),
+                                     np.where(at_a, cc[ca], cc[cb])), q * wc)
+                fam.append((ca, cb, ka, kb, (wf - wc) * boost, wc * boost))
+            else:
+                fam.append((ca, cb, ka, kb, wf - wc, wc))
+        # nonlocal gain: d(gain)/d(open) at every cell, x the open each building would add
+        dgain = self.p.along.vjp(op_eps, g.h, K, Agrad).ravel()
+        nonlocal_gain = np.zeros(self.n)
+        for j, (cells, frac) in self.bcells.items():
+            nonlocal_gain[j] = float((dgain[cells] * frac).sum()) * (1.0 - EPS)
         # attribution: building j owns frac/(1 - op) of each cell it covers
         node = -np.ones(g.inside.size, dtype=np.int64)
         node[np.flatnonzero(op_eps > 0)] = np.arange(int((op_eps > 0).sum()))
@@ -161,7 +165,8 @@ class Clearing:
         A = sp.csr_matrix((np.concatenate(v), (np.concatenate(r), np.concatenate(c))),
                           shape=(len(node[node >= 0]), self.n))
         return Tension(system=sy, u=sol.u, lam=lam, fam=fam, A=A, K=self.p.K,
-                       home_u=self.sc.home_u_of(sol, op_eps), removed=self.removed)
+                       home_u=self.sc.home_u_of(sol, op_eps), removed=self.removed,
+                       nonlocal_gain=nonlocal_gain)
 
 def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     from scipy.stats import spearmanr
@@ -280,76 +285,6 @@ class GramSource(Protocol):
     name: str
 
     def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray: ...
-
-
-@dataclass(frozen=True)
-class Independent:
-    """The null: every candidate independent (rho = 0), so the batch is the top by tension per
-    unit population."""
-
-    @property
-    def name(self) -> str:
-        return "ind"
-
-    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
-        return np.eye(len(cand))
-
-
-def _loaded(t: Tension, x: np.ndarray) -> np.ndarray:
-    """Zero a right-hand side on unknowns in components with no ground (a building sealed off
-    even as eps material has no response there)."""
-    x = np.asarray(x, dtype=float).ravel().copy()
-    x[~t.system.keep] = 0.0
-    return x
-
-
-@dataclass(frozen=True)
-class Impact:
-    """H_ij = s_i^T L^-1 s_j: the energy inner product of the candidates' impact fields
-    du_i = L^-1 dL_i u, one loose solve per candidate on the round's factorized system. For
-    power 1 it is the exact second-order cross term of the gain."""
-    rtol: float = 1e-4
-
-    @property
-    def name(self) -> str:
-        return "imp"
-
-    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
-        S = t.s(cand)
-        H = np.zeros((len(cand), len(cand)))
-        for i in range(len(cand)):
-            du = t.system.solve(_loaded(t, S[:, i].toarray()), rtol=self.rtol)
-            H[:, i] = S.T @ du
-        return 0.5 * (H + H.T)
-
-
-@dataclass(frozen=True)
-class Sketch:
-    """H ~ Z Z^T / k with z_i = s_i^T y_r, y_r = L^-1 x_r, x_r = sum_e xi_e sqrt(w_e) b_e a random
-    edge load (so cov x = L and cov y = L^-1): k loose solves per round however many candidates."""
-    k: int
-    rtol: float = 1e-4
-    seed: int = 0
-
-    @property
-    def name(self) -> str:
-        return f"sk{self.k}"
-
-    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
-        S = t.s(cand)
-        rng = np.random.default_rng(self.seed)
-        uc, K, n = t.system.unk_cell, t.K, t.system.n
-        Z = np.zeros((len(cand), self.k))
-        for r in range(self.k):
-            x = np.zeros(n)
-            for ca, cb, ka, kb, _dw, w in t.fam:
-                load = rng.standard_normal(len(w)) * np.sqrt(w)
-                for cell, ax, sign in ((ca, ka, 1.0), (cb, kb, -1.0)):
-                    un = uc[cell]
-                    ok = un >= 0
-                    x += sign * np.bincount(un[ok] * K + ax[ok], load[ok], minlength=n)
-            Z[:, r] = S.T @ t.system.solve(_loaded(t, x), rtol=self.rtol)
-        return Z @ Z.T / self.k
 
 
 @njit(cache=True)
@@ -527,19 +462,17 @@ def cleared_through(g: pd.DataFrame, step: int) -> np.ndarray:
 
 
 def picker_of(spec: str) -> Picker:
-    """`M4` -> Screened(4); `B0.01g3` -> Batched(delta 0.01, gap 3 m); `S0.01imp`,
-    `S0.01sk32`, `S0.01cat`, `S0.01ind` -> Spread(delta 0.01) with Impact, Sketch(k 32), Catchment,
-    Independent."""
+    """`M4` -> Screened(4); `B0.01g3` -> Batched(delta 0.01, gap 3 m); `S0.01cat` ->
+    Spread(delta 0.01) with Catchment. (Impact, Sketch and the no-spacing null were measured and
+    dominated: NOTES.md, "Batching".)"""
     if spec.startswith("M"):
         return Screened(int(spec[1:]))
     if spec.startswith("B"):
         delta, gap = spec[1:].split("g")
         return Batched(float(delta), float(gap))
-    m = re.fullmatch(r"S([0-9.]+)(imp|sk(\d+)|cat|ind)", spec)
+    m = re.fullmatch(r"S([0-9.]+)cat", spec)
     if m:
-        src: GramSource = {"imp": Impact(), "cat": Catchment(), "ind": Independent()}.get(
-            m.group(2)) or Sketch(int(m.group(3)))
-        return Spread(float(m.group(1)), src)
+        return Spread(float(m.group(1)), Catchment())
     raise ValueError(f"unknown picker {spec!r}")
 
 

@@ -247,11 +247,15 @@ def directions(nmax: int) -> list[tuple[int, int]]:
 class AlongConductance(Protocol):
     """Per-heading multipliers on the along-axis edges: layers(open_, h, K)[k] is layer k's
     (ny, nx) factor field (>= 1, non-decreasing as space is freed, so monotonicity survives) or
-    the scalar 1.0."""
+    the scalar 1.0. vjp(open_, h, K, A) is the gradient with respect to open_ of
+    sum_k sum_x A[k, x] layers[k][x] (what clearing a cell does to the factors elsewhere)."""
     name: str
 
     def layers(self, open_: NDArray[np.float64], h: float,
                K: int) -> list[float] | NDArray[np.float32]: ...
+
+    def vjp(self, open_: NDArray[np.float64], h: float, K: int,
+            A: NDArray[np.float64]) -> NDArray[np.float64]: ...
 
 
 @dataclass(frozen=True)
@@ -261,6 +265,9 @@ class Uniform:
 
     def layers(self, open_, h, K):
         return [1.0] * K
+
+    def vjp(self, open_, h, K, A):
+        return np.zeros(open_.shape)
 
 
 @dataclass(frozen=True)
@@ -294,23 +301,169 @@ class Sightline:
         return ang, R
 
     def layers(self, open_, h, K):
-        _v, th, _m, gap = axes(K)
         ang, R = self.runs(open_, h)
-        out = np.empty((K, *open_.shape), dtype=np.float32)
-        for k in range(K):
-            d = (ang - th[k] + np.pi / 2) % np.pi - np.pi / 2     # signed, in [-pi/2, pi/2)
-            half = np.where(d >= 0, gap[k], np.roll(gap, 1)[k])   # to the next / previous axis
-            wt = np.clip(1.0 - np.abs(d) / half, 0.0, None)
-            out[k] = 1.0 + self.beta * np.tensordot(wt / wt.sum(), R, axes=1)
+        W = _angle_weights(K, ang)
+        return (1.0 + self.beta * np.tensordot(W, R, axes=1)).astype(np.float32)
+
+    def vjp(self, open_, h, K, A):
+        """Hard runs are piecewise constant in open_: zero almost everywhere."""
+        return np.zeros(open_.shape)
+
+
+def _angle_weights(K: int, ang: NDArray[np.float64]) -> NDArray[np.float64]:
+    """(K, n_dir): direction d's share in layer k, a triangle in angle one axis gap either side
+    of axis k, normalised over d per layer."""
+    _v, th, _m, gap = axes(K)
+    W = np.zeros((K, len(ang)))
+    for k in range(K):
+        d = (ang - th[k] + np.pi / 2) % np.pi - np.pi / 2     # signed, in [-pi/2, pi/2)
+        half = np.where(d >= 0, gap[k], np.roll(gap, 1)[k])   # to the next / previous axis
+        wt = np.clip(1.0 - np.abs(d) / half, 0.0, None)
+        W[k] = wt / wt.sum()
+    return W
+
+
+@njit(cache=True)
+def _soft_fb(open_, dx, dy, offs, s, kappa):
+    """Expected free path forward (F) and back (B) along (dx, dy) from each cell, the ray's
+    intensity falling as exp(-kappa x the closed length it crosses): each step of length s takes
+    optical depth kappa s mean(1 - open) over the cells it enters (its far end and `offs`;
+    outside the grid counts closed). Tf, Tb: each cell's step transmittance forward and back."""
+    ny, nx = open_.shape
+    m = offs.shape[0] + 1
+    F = np.zeros((ny, nx))
+    B = np.zeros((ny, nx))
+    Tf = np.zeros((ny, nx))
+    Tb = np.zeros((ny, nx))
+    for r in range(ny - 1, -1, -1):
+        for c in range(nx - 1, -1, -1):
+            r2, c2 = r + dy, c + dx
+            if 0 <= r2 < ny and 0 <= c2 < nx:
+                tau = 1.0 - open_[r2, c2]
+                for i in range(offs.shape[0]):
+                    r3, c3 = r + offs[i, 1], c + offs[i, 0]
+                    tau += 1.0 - open_[r3, c3] if (0 <= r3 < ny and 0 <= c3 < nx) else 1.0
+                Tf[r, c] = np.exp(-kappa * s / m * tau)
+                F[r, c] = Tf[r, c] * (s + F[r2, c2])
+    for r in range(ny):
+        for c in range(nx):
+            r2, c2 = r - dy, c - dx
+            if 0 <= r2 < ny and 0 <= c2 < nx:
+                tau = 1.0 - open_[r2, c2]
+                for i in range(offs.shape[0]):
+                    r3, c3 = r - offs[i, 1], c - offs[i, 0]
+                    tau += 1.0 - open_[r3, c3] if (0 <= r3 < ny and 0 <= c3 < nx) else 1.0
+                Tb[r, c] = np.exp(-kappa * s / m * tau)
+                B[r, c] = Tb[r, c] * (s + B[r2, c2])
+    return F, B, Tf, Tb
+
+
+@njit(cache=True)
+def _soft_vjp(dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
+    """Add to `out` the gradient over open_ of sum_x G[x] (F[x] + B[x]): reverse-mode through
+    the two scans (each cotangent flows back along the ray, damped by the transmittance)."""
+    ny, nx = F.shape
+    m = offs.shape[0] + 1
+    bar = np.zeros((ny, nx))
+    # forward rays: F(p) = Tf(p) (s + F(x)) with x = p + v, so visit p before x
+    for r in range(ny):
+        for c in range(nx):
+            b = G[r, c]
+            rp, cp = r - dy, c - dx
+            if 0 <= rp < ny and 0 <= cp < nx:
+                b += Tf[rp, cp] * bar[rp, cp]
+            bar[r, c] = b
+            r2, c2 = r + dy, c + dx
+            if b != 0.0 and 0 <= r2 < ny and 0 <= c2 < nx:
+                coef = b * (s + F[r2, c2]) * Tf[r, c] * kappa * s / m
+                out[r2, c2] += coef
+                for i in range(offs.shape[0]):
+                    r3, c3 = r + offs[i, 1], c + offs[i, 0]
+                    if 0 <= r3 < ny and 0 <= c3 < nx:
+                        out[r3, c3] += coef
+    bar[:, :] = 0.0
+    for r in range(ny - 1, -1, -1):
+        for c in range(nx - 1, -1, -1):
+            b = G[r, c]
+            rp, cp = r + dy, c + dx
+            if 0 <= rp < ny and 0 <= cp < nx:
+                b += Tb[rp, cp] * bar[rp, cp]
+            bar[r, c] = b
+            r2, c2 = r - dy, c - dx
+            if b != 0.0 and 0 <= r2 < ny and 0 <= c2 < nx:
+                coef = b * (s + B[r2, c2]) * Tb[r, c] * kappa * s / m
+                out[r2, c2] += coef
+                for i in range(offs.shape[0]):
+                    r3, c3 = r - offs[i, 1], c - offs[i, 0]
+                    if 0 <= r3 < ny and 0 <= c3 < nx:
+                        out[r3, c3] += coef
+
+
+@dataclass(frozen=True)
+class SoftSightline:
+    """Sightline with translucent buildings: a ray's intensity falls as exp(-kappa x the closed
+    length it crosses), and R_d is its expected free path (forward + back) along direction d. A
+    line blocked only by a small building still scores, so clearing that building has a
+    gradient (the counterfactual corridor is visible); as kappa grows this tends to the hard
+    runs. Layer k's factor is 1 + beta x the angle-weighted mean of R_d / (R_d + r0), saturating
+    at the length scale r0 instead of a cap. Differentiable: `vjp` is exact."""
+    beta: float
+    kappa: float = 2.0         # per metre of building crossed
+    r0_m: float = 20.0
+    nmax: int = 6
+
+    @property
+    def name(self) -> str:
+        return f"ss{self.beta:g}k{self.kappa:g}"
+
+    def _dirs(self):
+        dirs = directions(self.nmax)
+        ang = np.array([np.arctan2(dy, dx) % np.pi for dx, dy in dirs])
+        return dirs, ang
+
+    def runs(self, open_, h):
+        """Yield (d, R_d) per fine direction, R_d the expected free path in metres."""
+        dirs, _ang = self._dirs()
+        for i, (dx, dy) in enumerate(dirs):
+            offs = np.array(_line_cells(dx, dy), dtype=np.int64).reshape(-1, 2)
+            F, B, _tf, _tb = _soft_fb(open_, dx, dy, offs, float(np.hypot(dx, dy) * h),
+                                      self.kappa)
+            yield i, F + B
+
+    def layers(self, open_, h, K):
+        _dirs, ang = self._dirs()
+        W = _angle_weights(K, ang)
+        out = np.ones((K, *open_.shape))
+        for i, R in self.runs(open_, h):
+            g = R / (R + self.r0_m)
+            for k in np.flatnonzero(W[:, i]):
+                out[k] += (self.beta * W[k, i]) * g
+        return out
+
+    def vjp(self, open_, h, K, A):
+        dirs, ang = self._dirs()
+        W = _angle_weights(K, ang)
+        out = np.zeros(open_.shape)
+        for i, (dx, dy) in enumerate(dirs):
+            offs = np.array(_line_cells(dx, dy), dtype=np.int64).reshape(-1, 2)
+            s = float(np.hypot(dx, dy) * h)
+            F, B, Tf, Tb = _soft_fb(open_, dx, dy, offs, s, self.kappa)
+            R = F + B
+            G = self.beta * self.r0_m / (R + self.r0_m) ** 2 * np.tensordot(W[:, i], A, axes=1)
+            _soft_vjp(dx, dy, offs, s, self.kappa, F, B, Tf, Tb, G, out)
         return out
 
 
 def along_of(spec: str) -> AlongConductance:
-    """`uni` -> Uniform(); `sl3` -> Sightline(beta 3)."""
+    """`uni` -> Uniform(); `sl3` -> Sightline(beta 3); `ss10k2` -> SoftSightline(beta 10,
+    kappa 2)."""
     if spec == "uni":
         return Uniform()
     if spec.startswith("sl"):
         return Sightline(float(spec[2:]))
+    if spec.startswith("ss"):
+        beta, kappa = spec[2:].split("k")
+        return SoftSightline(float(beta), float(kappa))
     raise ValueError(f"unknown along conductance {spec!r}")
 
 
@@ -347,8 +500,8 @@ def along_edges(open_: NDArray[np.float64], h: float, p: Params):
             frac = np.minimum(frac, open_[np.clip(r3, 0, ny - 1), np.clip(c3, 0, nx - 1)])
         a = cell[rr[ok], cc[ok]]
         b = cell[r2[ok], c2[ok]]
-        fk = F[k]
-        boost = fk if isinstance(fk, float) else np.minimum(fk[rr[ok], cc[ok]], fk[r2[ok], c2[ok]])
+        fk = np.broadcast_to(F[k], free.shape)
+        boost = np.minimum(fk[rr[ok], cc[ok]], fk[r2[ok], c2[ok]])
         yield k, a, b, frac[ok] * boost * (m[k] / float(dx * dx + dy * dy))
 
 

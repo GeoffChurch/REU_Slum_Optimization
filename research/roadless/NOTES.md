@@ -297,3 +297,87 @@ tails.py area 2: greedy p 2 at Lens A: umed 0.531, u95 0.397, umax 0.334, P1 0.5
 +0.018 (p 2 worse on 79%), p95 -0.014 (better on 80%), max -0.011 (76%), P1 -0.004, P2 +0.003.
 p 2 does what it says -- trades a little of the median for the tail -- but the effect is small
 next to the greedy-vs-roads gap (p95 -0.11, max -0.13 vs the best road arm per block).
+
+## Scaling: batching the greedy (2026-09-30 -- 10-01)
+
+One-at-a-time screened greedy (M4) on ZAF.9.3.1_1_5810 (6,619 buildings, 577k m^2, 14.6M
+unknowns, one solve 495 s single-threaded, 11 GB) would be ~800 steps x 5-6 solves: 600-700 h.
+Setup fixes: one baseline solve instead of two; building labels by per-footprint bounding-box
+rasterization (2 s instead of a whole-grid point query; differs only where footprints overlap).
+
+Pickers (clear.py, a Picker Strategy). Area population, p 2, d_max 0.15, all 220; Lens A
+interpolated to exactly D = 0.10 (picker_compare.py; first-step-past-0.10 scored coarse pickers
+at ~12%). Medians; diff = paired median vs M4:
+
+    picker                         Lens A   diff     Lens B 0.35   compute (load-confounded)
+    M4  one at a time, top-4 exact 0.565    --       0.039         112 h
+    1%  rounds, 3 m spacing        0.552    -0.010   0.043          27 h
+    1%  rounds, catchment          0.550    -0.011   0.044          21 h
+    1%  rounds, impact             0.551    -0.011   0.044          44 h   DOMINATED (ties cat, 2x)
+    1%  rounds, no spacing         0.548    -0.014   0.045          22 h   DOMINATED by cat
+    3%  rounds, catchment          0.537    -0.022   0.052           9 h
+    3%  rounds, impact             0.542    -0.018   0.049          27 h   DOMINATED by 1% cat
+    3%  rounds, sketch k 32        0.526    -0.026   0.054          26 h   DOMINATED (noisy)
+    3%  rounds, no spacing         0.519    -0.038   0.056           9 h   DOMINATED by 3% cat
+
+Spacing = how alike two candidates' effects are. Impact: correlation of their impact fields
+L^-1 dL_i u (energy inner product; the exact second-order cross term for p 1). Sketch: the same
+from k random edge-load probes. Catchment: overlap of the homes whose downhill flow passes
+through each (no solves). Batch built under a normalised quadratic model, worth_i = g_i -
+sum_{j in batch} rho_ij sqrt(g_i g_j) (duplicates worth 0, complements gain). Measured on 41132:
+touching pairs ranged rho +0.70 (redundant) .. +0.11 (independent) .. -0.21 (complementary), so
+distance is a poor proxy; sketch(400) matched impact (corr 0.95), catchment only weakly (0.35).
+- At 1% steps spacing barely matters (every rule ties; +0.0005 over none): the loss vs M4 is
+  from not re-ranking after every clearing, not from interference.
+- At 3% it matters: catchment recovers ~1/3 of no-spacing's loss at the same cost; impact a
+  little more (+0.0025 over catchment) at 3x.
+- Impact, sketch and the null were deleted (frontier rule). Kept: M4, B0.01g3 (simplest),
+  S0.01cat, S0.03cat.
+
+**5810 done** with B0.01g3: 15 rounds, 7.3 h single-threaded on a loaded machine (vs ~650 h).
+Lens A: 618 of 6,619 cleared, roadless perm (p 1) 0.330 vs cycle_native 0.183
+(clear_vs_cycle_native_ZAF.9.3.1_1_5810_B0.01g3_area_p2.png). Early rounds breach the dense
+fabric along the street edges (all flow converges there: tension = current^2 x conductance gained
+peaks at the outlets); later rounds work inward; also clears the large institutional buildings by
+the southern field; leaves the sparse west half and the north-east strip nearly untouched.
+
+## Road-favouring conductances (owner, 2026-10-01)
+
+Why the greedy nibbles: in a linear conduction model a channel's conductance grows only as its
+width -- a 3 m lane conducts like three 1 m strips -- so nothing rewards space being continuous,
+wide or straight. Three candidate fixes, mapped on 5810 before any clearing
+(conductance_map.py; owner: "pretty impressed by all three"):
+- width: local clear width (2 x distance to buildings; the street side of the edge counts open).
+- sightline: longest straight run >= 1.5 m wide over 8 headings.
+- vehicle layer: width >= 4.5 m, connected to a street. On 5810 it reaches most of the block,
+  so a 4.5 m threshold barely separates lane from gap there.
+
+Segment measure (owner's lift idea): the number of straight segments of length l a W-wide
+corridor holds, over positions and headings, is ~ W^2 / l -- so rewarding the FAMILY of segments
+gives width^2 without assuming it. Implemented as a per-heading multiplier on the along edges
+(lifted.AlongConductance Strategy in Params): layer k's factor = 1 + beta x the angle-weighted
+(triangle, one axis gap) mean over 48 fine lattice directions of the run through the cell.
+sightline_*.png maps the runs' mean (a connected path network) and dominant orientation (long
+coherent alleys). Checks (sightline_checks.py): channel resistance ratio to the original model at
+beta 3 falls 0.67 -> 0.46 from W 1 to 8 m (0.82 -> 0.44 at 30 deg); freeing never raises P;
+operator build 0.2 s vs 0.1 s.
+- Sightline (hard runs, cap 50 m) at beta 3 / 10, greedy S0.01cat on six blocks: SAME scattered
+  pattern as the original (alongs_*.png). Road lineup re-scored under it (along_lineup.py, five
+  blocks, p 1 at 10%): greedy minus best road +0.110/+0.080/+0.052 (30686, uni/3/10),
+  +0.068/+0.023/+0.012 (41148), +0.161/+0.145/+0.147, +0.130/+0.114/+0.121, but +0.170/+0.194/
+  +0.282 on 41132 (wide open space whose runs the greedy boosts). Roads gain more than the
+  greedy as beta rises, but do not overtake it -- and the road corridors were designed for other
+  objectives, so this does not show lanes cannot win.
+- SoftSightline (owner: translucent buildings): a ray's intensity falls as exp(-kappa x closed
+  length crossed); R_d = expected free path; saturating R / (R + r0) (r0 20 m) instead of the
+  arbitrary 50 m cap. Differentiable: vjp by reverse-mode through the 1-D scans, exact to 1e-9
+  vs finite differences. Tension now = local + NONLOCAL gain (clearing lengthens rays through
+  the building, boosting edges elsewhere); matches finite differences of P within a few % (the
+  residual is the old local term's finite step). Measured: the nonlocal term is < 1% of the gain
+  at beta 10, kappa 2, and < 2% at kappa 0.3 -- at these strengths lengthening runs is worth far
+  less than opening a hole, so transparency alone will not make corridors form.
+
+Running: beta sweep 10 / 30 / 100 (kappa 2) on the six blocks. Next: completion field
+(smoothing along headings in the lifted space -- the owner's "smooth only toward nearby
+corridors with similar angles"), and corridor-forming via a transparent SEARCH kappa annealed
+toward the scoring kappa, if the sweep shows lanes can pay.
