@@ -377,7 +377,25 @@ operator build 0.2 s vs 0.1 s.
   at beta 10, kappa 2, and < 2% at kappa 0.3 -- at these strengths lengthening runs is worth far
   less than opening a hole, so transparency alone will not make corridors form.
 
-Running: beta sweep 10 / 30 / 100 (kappa 2) on the six blocks. Next: completion field
+Beta sweep (SoftSightline kappa 2, greedy S0.01cat, five blocks; 5618 still running): the
+pattern stays SCATTERED at every strength (alongs_*.png, uni / ss10k2 / ss30k2 / ss100k2). Greedy
+minus the best road arm at 10% (p 1, under each conductance; along_lineup.py):
+
+    block   uni     ss10k2  ss30k2  ss100k2
+    19570  +0.161  +0.152  +0.183  +0.198
+    30686  +0.110  +0.088  +0.057  +0.068
+    41132  +0.170  +0.294  +0.376  +0.438
+    41148  +0.068  +0.065  +0.066  +0.070
+    63718  +0.130  +0.099  +0.094  +0.099
+
+Roads never overtake; on 41132 the greedy pulls far ahead. Reading (untested interpretation): the
+open space between footprints ALREADY forms a connected network of straight-ish channels (the
+conductance maps); a strong straight-run bonus makes that network fast, and the binding
+constraint becomes the last few metres from homes to it -- which is what the greedy breaches.
+A new lane would duplicate a channel that exists. The model's assumption doing the work: every
+gap between footprints is walkable (no walls, fences or private yards).
+
+Was running: beta sweep 10 / 30 / 100 (kappa 2) on the six blocks. Next: completion field
 (smoothing along headings in the lifted space -- the owner's "smooth only toward nearby
 corridors with similar angles"), and corridor-forming via a transparent SEARCH kappa annealed
 toward the scoring kappa, if the sweep shows lanes can pay.
