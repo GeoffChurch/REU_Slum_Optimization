@@ -31,20 +31,27 @@ D_LENS = 0.10
 FIELD = lifted.SoftSightline(beta=1.0, kappa=2.0, r0_m=20.0)
 
 
-def gained(g: lifted.Grid, before: np.ndarray, after: np.ndarray):
-    """(mean gain over headings, gain-weighted doubled-angle orientation in [0, 1), the
-    strength of that orientation)."""
+def gained(g: lifted.Grid, before: np.ndarray, after: np.ndarray, K: int = 8):
+    """Per cell, the gain in g(R) = R / (R + r0) after minus before, three ways: the MAX over the
+    48 fine headings (a whole unblocked line lights up along its length) with its heading in
+    [0, 1); the max over the K layers of the layer factor's gain (what the metric feels: each
+    layer averages ~6 nearby headings); and the MEAN over headings (the segment measure; falls
+    off like 1/distance from a cleared building, since only the headings through it gain)."""
     _dirs, ang = FIELD._dirs()
+    W = lifted._angle_weights(K, ang)
+    best = np.zeros(before.shape)
+    arg = np.zeros(before.shape)
+    layer = np.zeros((K, *before.shape))
     mean = np.zeros(before.shape)
-    c2 = np.zeros(before.shape)
-    s2 = np.zeros(before.shape)
     for (i, R0), (_i, R1) in zip(FIELD.runs(before, g.h), FIELD.runs(after, g.h), strict=True):
         d = R1 / (R1 + FIELD.r0_m) - R0 / (R0 + FIELD.r0_m)
+        up = d > best
+        best = np.where(up, d, best)
+        arg = np.where(up, ang[i] / np.pi, arg)
         mean += d
-        c2 += d * np.cos(2 * ang[i])
-        s2 += d * np.sin(2 * ang[i])
-    n = len(ang)
-    return mean / n, (np.arctan2(s2, c2) / 2) % np.pi / np.pi, np.hypot(c2, s2) / n
+        for k in np.flatnonzero(W[:, i]):
+            layer[k] += W[k, i] * d
+    return best, arg, layer.max(axis=0), mean / len(ang)
 
 
 def main(bid: str, picker: str, alongs: list[str]) -> None:
@@ -55,7 +62,7 @@ def main(bid: str, picker: str, alongs: list[str]) -> None:
     ext = (g.x0 - g.h / 2, g.x0 + (g.inside.shape[1] - 0.5) * g.h,
            g.y0 - g.h / 2, g.y0 + (g.inside.shape[0] - 0.5) * g.h)
     big = len(polys) > 1500
-    ncol = 3 if big else 2
+    ncol = 4
     fig, axes = plt.subplots(len(alongs), ncol, figsize=(11 * ncol, 11 * len(alongs)),
                              squeeze=False)
     window = None
@@ -65,7 +72,7 @@ def main(bid: str, picker: str, alongs: list[str]) -> None:
         stop = rows[rows.D >= D_LENS - 1e-9].iloc[0]
         cl = cleared_through(rows, int(stop.step))
         after = (g.isub & (~g.bsub | np.isin(lab, cl))).mean(axis=-1)
-        mean, hue, strength = gained(g, g.ff0, after)
+        best, hue, layer, mean = gained(g, g.ff0, after)
         if window is None:
             cx = np.median([p.centroid.x for p in polys[cl]])
             cy = np.median([p.centroid.y for p in polys[cl]])
@@ -74,20 +81,25 @@ def main(bid: str, picker: str, alongs: list[str]) -> None:
             window = (cx - half, cx + half, cy - half, cy + half)
         # only space that was ALREADY open: the cleared footprints themselves trivially gain
         was_open = g.ff0 >= 0.5
-        top = np.quantile(mean[was_open & (mean > 0)], 0.99)
-        stop_ = np.quantile(strength[was_open & (strength > 0)], 0.99)
+        fields = dict(line=(best, "max over 48 headings (lines)"),
+                      layer=(layer, "max over the 8 layers (what the metric feels)"),
+                      mean=(mean, "mean over 48 headings (segment measure)"))
+        tops = {k: np.quantile(v[was_open & (v > 0)], 0.99) for k, (v, _t) in fields.items()}
         rgb = mcolors.hsv_to_rgb(np.stack([hue, np.full_like(hue, 0.9),
-                                           np.clip(strength / stop_, 0, 1)], axis=-1))
+                                           np.clip(best / tops["line"], 0, 1)], axis=-1))
         rgb[~was_open] = 1.0
-        panels = [("full", "gain"), ("zoom", "gain"), ("zoom", "heading")] if big else \
-            [("full", "gain"), ("full", "heading")]
+        panels = [("zoom", "line"), ("zoom", "heading"), ("zoom", "layer"), ("zoom", "mean")] \
+            if big else [("full", "line"), ("full", "heading"), ("full", "layer"),
+                         ("full", "mean")]
         for col, (where, what) in enumerate(panels):
             ax = axes[row, col]
-            if what == "gain":
-                im = ax.imshow(np.where(was_open, mean, np.nan), origin="lower", extent=ext,
-                               cmap="magma", vmin=0, vmax=top, interpolation="nearest")
-                fig.colorbar(im, ax=ax, shrink=0.5, label="gain in mean R/(R+r0)")
+            if what in fields:
+                v, label = fields[what]
+                im = ax.imshow(np.where(was_open, v, np.nan), origin="lower", extent=ext,
+                               cmap="magma", vmin=0, vmax=tops[what], interpolation="nearest")
+                fig.colorbar(im, ax=ax, shrink=0.5, label="gain in R/(R+r0)")
             else:
+                label = "heading of the max (hue), its size (brightness)"
                 ax.imshow(rgb, origin="lower", extent=ext, interpolation="nearest")
             gpd.GeoSeries(list(np.delete(polys, cl))).plot(ax=ax, color="0.55", lw=0)
             gpd.GeoSeries(list(polys[cl])).plot(ax=ax, color="#2ca02c", lw=0)
@@ -98,9 +110,7 @@ def main(bid: str, picker: str, alongs: list[str]) -> None:
             if where == "zoom":
                 ax.set_xlim(window[0], window[1])
                 ax.set_ylim(window[2], window[3])
-            ax.set_title(f"{along}: {len(cl)} cleared (green), D {stop.D:.3f} -- "
-                         + ("straight-run gain" if what == "gain"
-                            else "heading that gained (hue), how one-directional (brightness)"),
+            ax.set_title(f"{along}: {len(cl)} cleared (green), D {stop.D:.3f}\n{label}",
                          fontsize=13)
     fig.suptitle(f"{bid}, greedy {picker}: what the 10% clearing opened", fontsize=16)
     fig.tight_layout()
