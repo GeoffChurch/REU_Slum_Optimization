@@ -453,3 +453,27 @@ on the tension (5618: 106 s -> 14 s).
 Not done: a threaded AMG (pyamgcl does not build here -- needs Boost headers); the GPU is busy
 with another user's job. 5810 relaunched at h 1, rtol 1e-3, S0.01cat: uni / ss100k2 /
 ss100k2n2r74 (the old h 0.5 S0.03cat runs were stopped).
+
+### Translucent search (owner, 2026-10-01)
+
+Tension ranked under a more translucent SEARCH conductance (kappa_search), scoring unchanged
+(ss100k2n2r30; `<along>@<search>`); greedy S0.01cat, GPU, six blocks; transparency.py at D 0.10.
+depth = median street-distance percentile of the cleared buildings among all buildings; long =
+m^2 of previously open space whose best line grew >= 30 m; perm = the run's score (fixed metric).
+
+    block   kappa_s:  2      0.5    0.2    0.05     (depth / long m^2 / perm)
+    19570   48.7/151/.836   47.8/284/.848   48.6/165/.840   47.0/205/.820
+    30686   50.0/ 52/.732   48.8/ 94/.759   45.1/180/.765   40.8/180/.758
+    41132   49.3/ 56/.861   50.0/ 57/.865   54.3/140/.830   52.9/ 45/.642
+    41148   56.2/130/.632   54.7/344/.664   53.0/211/.663   54.7/211/.627
+    5618    40.6/2300/.876  40.4/4393/.891  32.4/2955/.877  32.3/2322/.844
+    63718   52.6/ 81/.835   58.1/159/.798   52.4/178/.652   48.9/134/.602
+
+- NOT deeper: depth flat or SHALLOWER (5618 41 -> 32 percentile at kappa <= 0.2). Counterfactual
+  corridors are anchored at the street, so the buildings opening them sit at the frontage.
+- LONGER corridors: kappa_s 0.5 roughly doubles the long-line area on 5 of 6 blocks (5618 2,300
+  -> 4,393 m^2); 0.05 falls back (everything looks open; the gradient stops discriminating).
+- Kappa_s 0.5 also scores BETTER under the fixed metric on 5 of 6 (5618 0.876 -> 0.891, 30686
+  0.732 -> 0.759, 41148 0.632 -> 0.664; 63718 worse, 0.835 -> 0.798): the translucent gradient is
+  a better search, not just a different one. 0.05 is worse (41132 0.861 -> 0.642, 63718 -> 0.602).
+Six blocks only; the 220-block check is cheap on the GPU.
