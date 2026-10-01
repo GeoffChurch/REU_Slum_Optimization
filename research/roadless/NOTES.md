@@ -399,3 +399,43 @@ Was running: beta sweep 10 / 30 / 100 (kappa 2) on the six blocks. Next: complet
 (smoothing along headings in the lifted space -- the owner's "smooth only toward nearby
 corridors with similar angles"), and corridor-forming via a transparent SEARCH kappa annealed
 toward the scoring kappa, if the sweep shows lanes can pay.
+
+### Length response and its scale (owner, 2026-10-01)
+
+Length was SUBLINEAR: g(R) = R / (R + r0) on R = F + B is concave (a 10 m gap earned 1/3 of the
+max at r0 20 m). Owner: integrating along a corridor should give length the same quadratic weight
+integration gives width. Made exact: the segments along a heading through a cell are the pairs
+(start behind, end ahead), F x B of them, summing to L^2 / 2 along a line -- the natural lift
+measure is int F_theta B_theta dtheta. As a conductance it chokes a line's ends (B ~ 0 at the
+street), and unbounded growth is unphysical, so the metric uses an S-curve on the whole line,
+g = R^n / (R^n + r0^n) (SoftSightline hill n; exact vjp kept); F x B is used for display.
+
+Choosing r0 (owner: max entropy / dynamic range). The max-entropy g is the CDF of the block's
+line lengths (histogram equalization); the Hill curve IS a log-logistic CDF, so the fit is closed
+form: r0 = median L, n = pi / (sqrt 3 sd log L), L = a cell's best line (max over headings,
+soft F + B, before clearing). line_scale.py:
+
+    block   n      maxent r0  n    Otsu    percolation (as defined: not discriminating)
+    41132   138    31 m      3.3   21 m     60 m
+    41148   234    30 m      3.2   23 m     69 m
+    19570   312    19 m      2.7   18 m     74 m
+    30686   346    20 m      2.4   27 m    146 m
+    63718   372    13 m      2.2   13 m     74 m
+    5618    759   123 m      1.9   81 m    404 m
+    5810   6619    74 m      1.9  122 m    943 m
+
+n ~ 2-3 everywhere (the S-curve's form is what the data prefer); r0 30 m suits the small blocks
+but the big ones want 75-120 m. Otsu explains ~0.6 of the variance (not sharply bimodal).
+Percolation of the long-line cells to the street stays ~1 until t reaches the block's longest
+lines (edge and field runs connect everything): would need restricting to the interior.
+
+S-curve greedy (n 2, r0 30 m, beta 30 / 100), five small blocks: still scattered; greedy minus
+best road +0.142/+0.150 (19570), +0.052/+0.035 (30686), +0.368/+0.516 (41132), +0.059/+0.064
+(41148), +0.097/+0.119 (63718).
+
+5618 (S0.01cat; uni / sl10 / ss10k2 / ss30k2): the clearing still targets the frontage of the
+two built bands around the central field and the street edges; under ss30k2 the F x B view shows
+long lines fanning ACROSS the central field between cleared buildings on its two sides -- the
+field is the corridor, and the greedy opens its frontage (opened_ZAF.9.3.1_1_5618_S0.01cat.png).
+Running: 5618 at the fitted scale (ss100k2n2r123), 5810 (S0.03cat) uni / ss30k2 / ss100k2 /
+ss100k2n2r74.
