@@ -477,3 +477,13 @@ m^2 of previously open space whose best line grew >= 30 m; perm = the run's scor
   0.732 -> 0.759, 41148 0.632 -> 0.664; 63718 worse, 0.835 -> 0.798): the translucent gradient is
   a better search, not just a different one. 0.05 is worse (41132 0.861 -> 0.642, 63718 -> 0.602).
 Six blocks only; the 220-block check is cheap on the GPU.
+
+### 5810 at full resolution on the GPU (2026-10-01)
+
+S0.01cat, h 0.5, GPU solver: uni 1,839 s (the CPU estimate was ~6 h); ss100k2n2r74 3,332 s with
+CPU scans; ss100k2 2,446 s with GPU scans (only 27% faster: on 5810 operator assembly, catchment
+and the pyamg aggregation now dominate). perm' at D 0.15: 0.385 / 0.703 / 0.628. Pictures
+(alongs_ / opened_ZAF.9.3.1_1_5810_S0.01cat_h0.5.png) match the h 1 runs: under sightline,
+coherent diagonal bands and several long straight lines through chains of clearings; under uni,
+almost none. Three GPU runs plus 18 workers exhausted the 48 GB card (cupy's pool grew to ~20 GB
+per 5810 run before the pool release was added).
