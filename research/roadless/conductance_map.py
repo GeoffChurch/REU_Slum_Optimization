@@ -8,6 +8,7 @@
            fast layer a vehicle mode would add.
 
     PYTHONPATH=. pixi run python research/roadless/conductance_map.py <block id> [picker]
+    PYTHONPATH=. pixi run python research/roadless/conductance_map.py sightline <block id> [picker]
 """
 from __future__ import annotations
 
@@ -145,5 +146,70 @@ def main(bid: str, picker: str) -> None:
     print(out, flush=True)
 
 
+def sightline(bid: str, picker: str) -> None:
+    """The runs the Sightline factor is built from: their mean over all headings (the segment
+    measure) and their dominant orientation (the doubled-angle mean), full block and zoomed."""
+    from clear import cleared_through, rows_dir
+    [b] = common.build_blocks([bid])
+    polys = np.asarray(b.buildings.outlines)
+    g = lifted.Grid.of(b.boundary, polys, list(b.streets.geometry), 0.5)
+    sl = lifted.Sightline(1.0)
+    ang, R = sl.runs(g.ff0, g.h)
+    strength = R.mean(axis=0)                     # the segment measure: all headings alike
+    c2 = np.tensordot(np.cos(2 * ang), R, axes=1) / len(ang)
+    s2 = np.tensordot(np.sin(2 * ang), R, axes=1) / len(ang)
+    heading = (np.arctan2(s2, c2) / 2) % np.pi / np.pi
+    aniso = np.hypot(c2, s2)                      # how much of it is along one orientation
+    clear = g.ff0 >= sl.clear_frac
+    rgb = mcolors.hsv_to_rgb(np.stack([heading, np.full_like(heading, 0.9),
+                                       np.clip(aniso / 0.25, 0, 1)], axis=-1))
+    rgb[~clear] = 1.0
+    ext = (g.x0 - g.h / 2, g.x0 + (g.inside.shape[1] - 0.5) * g.h,
+           g.y0 - g.h / 2, g.y0 + (g.inside.shape[0] - 0.5) * g.h)
+    rows = pd.read_parquet(rows_dir(picker, 0.5, "area", 2.0) / f"{bid}.parquet")
+    stop = rows[rows.D >= 0.10 - 1e-9].step.min()
+    cl = polys[cleared_through(rows, int(stop))]
+    mx = float(np.median([p.centroid.x for p in cl]))
+    my = float(np.median([p.centroid.y for p in cl]))
+    minx, miny, maxx, maxy = b.boundary.bounds
+    half = 0.125 * max(maxx - minx, maxy - miny)
+    fig, axes = plt.subplots(2, 2, figsize=(22, 22))
+    for row in range(2):
+        for col in range(2):
+            ax = axes[row, col]
+            if col == 0:
+                im = ax.imshow(np.where(clear, strength, np.nan), origin="lower", extent=ext,
+                               cmap="magma", norm=mcolors.LogNorm(0.02, 1),
+                               interpolation="nearest")
+                if row == 0:
+                    fig.colorbar(im, ax=ax, shrink=0.5, label="mean capped run fraction")
+                    ax.set_title(f"segment measure: clear run through the cell averaged over "
+                                 f"{len(ang)} headings (cap {sl.r_max_m:g} m)", fontsize=16)
+            else:
+                ax.imshow(rgb, origin="lower", extent=ext, interpolation="nearest")
+                if row == 0:
+                    ax.set_title("dominant orientation (hue) and how one-directional the "
+                                 "runs are (brightness)", fontsize=16)
+            gpd.GeoSeries(list(polys)).plot(ax=ax, color="0.35", lw=0)
+            gpd.GeoSeries([b.boundary]).boundary.plot(ax=ax, color="k", lw=1)
+            gpd.GeoSeries(list(b.streets.geometry)).plot(ax=ax, color="r", lw=2)
+            ax.set_axis_off()
+            ax.set_aspect("equal")
+            if row == 1:
+                ax.set_xlim(mx - half, mx + half)
+                ax.set_ylim(my - half, my + half)
+            else:
+                ax.add_patch(plt.Rectangle((mx - half, my - half), 2 * half, 2 * half,
+                                           fill=False, ec="#2ca02c", lw=2))
+    fig.suptitle(f"{bid}: straight clear runs, before any clearing", fontsize=18)
+    fig.tight_layout()
+    out = HERE / f"sightline_{bid}.png"
+    fig.savefig(out, dpi=90)
+    print(out, flush=True)
+
+
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "B0.01g3")
+    if sys.argv[1] == "sightline":
+        sightline(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "B0.01g3")
+    else:
+        main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "B0.01g3")

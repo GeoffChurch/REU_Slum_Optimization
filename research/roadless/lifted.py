@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+from typing import Protocol
 from pathlib import Path
 
 import numpy as np
 import scipy.sparse as sp
 import shapely
+from numba import njit
 from numpy.typing import NDArray
 from scipy import ndimage
 from scipy.sparse.linalg import factorized
@@ -198,22 +200,130 @@ def demand(grid: Grid, footprints, allowed: NDArray[np.bool_], weights: NDArray[
     return f, cnt == 0, own
 
 
+@njit(cache=True)
+def _run_count(clear, dx, dy, offs):
+    """Per cell: the number of clear cells in the straight lattice run through it along
+    (dx, dy), a step counting only when its far end and every cell it crosses (`offs`, the
+    offsets `_line_cells` gives) are clear. Requires dy > 0, or dy == 0 and dx > 0, so that
+    visiting rows (then columns) in decreasing order settles each successor first."""
+    ny, nx = clear.shape
+    fwd = np.zeros((ny, nx), dtype=np.int64)
+    bwd = np.zeros((ny, nx), dtype=np.int64)
+    for r in range(ny - 1, -1, -1):
+        for c in range(nx - 1, -1, -1):
+            if clear[r, c]:
+                fwd[r, c] = 1
+                if _step_ok(clear, r, c, dx, dy, offs):
+                    fwd[r, c] += fwd[r + dy, c + dx]
+    for r in range(ny):
+        for c in range(nx):
+            if clear[r, c]:
+                bwd[r, c] = 1
+                if _step_ok(clear, r, c, -dx, -dy, -offs):
+                    bwd[r, c] += bwd[r - dy, c - dx]
+    return fwd + bwd - 1
+
+
+@njit(cache=True)
+def _step_ok(clear, r, c, dx, dy, offs):
+    ny, nx = clear.shape
+    r2, c2 = r + dy, c + dx
+    if not (0 <= r2 < ny and 0 <= c2 < nx and clear[r2, c2]):
+        return False
+    for i in range(offs.shape[0]):
+        r3, c3 = r + offs[i, 1], c + offs[i, 0]
+        if not (0 <= r3 < ny and 0 <= c3 < nx and clear[r3, c3]):
+            return False
+    return True
+
+
+def directions(nmax: int) -> list[tuple[int, int]]:
+    """Primitive lattice directions (dx, dy) with max(|dx|, |dy|) <= nmax, one per line
+    (dy > 0, or dy == 0 and dx > 0)."""
+    return [(dx, dy) for dy in range(0, nmax + 1) for dx in range(-nmax, nmax + 1)
+            if (dy > 0 or dx > 0) and np.gcd(dx, dy) == 1]
+
+
+class AlongConductance(Protocol):
+    """Per-heading multipliers on the along-axis edges: layers(open_, h, K)[k] is layer k's
+    (ny, nx) factor field (>= 1, non-decreasing as space is freed, so monotonicity survives) or
+    the scalar 1.0."""
+    name: str
+
+    def layers(self, open_: NDArray[np.float64], h: float,
+               K: int) -> list[float] | NDArray[np.float32]: ...
+
+
+@dataclass(frozen=True)
+class Uniform:
+    """Every open cell conducts alike (the original model)."""
+    name: str = "uni"
+
+    def layers(self, open_, h, K):
+        return [1.0] * K
+
+
+@dataclass(frozen=True)
+class Sightline:
+    """Layer k conducts better where long straight clear runs exist at headings near k. Over the
+    fine lattice directions d (max(|dx|, |dy|) <= nmax), R_d is the capped clear run through the
+    cell, as a fraction of r_max; layer k's factor is 1 + beta x the mean of R_d weighted by a
+    triangle in angle, width one axis gap either side of axis k. A cell is clear when at least
+    `clear_frac` of it is open. Integrated across a channel this measures the straight segments
+    it holds: a corridor of width W admits headings within ~W/L of its axis at every offset, so
+    its conductance grows faster than W."""
+    beta: float
+    r_max_m: float = 50.0
+    nmax: int = 6
+    clear_frac: float = 0.5
+
+    @property
+    def name(self) -> str:
+        return f"sl{self.beta:g}"
+
+    def runs(self, open_, h) -> tuple[NDArray[np.float64], NDArray[np.float32]]:
+        """(angle of each fine direction in [0, pi), capped run fraction (n_dir, ny, nx))."""
+        clear = open_ >= self.clear_frac
+        dirs = directions(self.nmax)
+        ang = np.array([np.arctan2(dy, dx) % np.pi for dx, dy in dirs])
+        R = np.empty((len(dirs), *open_.shape), dtype=np.float32)
+        for i, (dx, dy) in enumerate(dirs):
+            offs = np.array(_line_cells(dx, dy), dtype=np.int64).reshape(-1, 2)
+            run = _run_count(clear, dx, dy, offs) * (np.hypot(dx, dy) * h)
+            R[i] = np.minimum(run, self.r_max_m) / self.r_max_m
+        return ang, R
+
+    def layers(self, open_, h, K):
+        _v, th, _m, gap = axes(K)
+        ang, R = self.runs(open_, h)
+        out = np.empty((K, *open_.shape), dtype=np.float32)
+        for k in range(K):
+            d = (ang - th[k] + np.pi / 2) % np.pi - np.pi / 2     # signed, in [-pi/2, pi/2)
+            half = np.where(d >= 0, gap[k], np.roll(gap, 1)[k])   # to the next / previous axis
+            wt = np.clip(1.0 - np.abs(d) / half, 0.0, None)
+            out[k] = 1.0 + self.beta * np.tensordot(wt / wt.sum(), R, axes=1)
+        return out
+
+
 @dataclass(frozen=True)
 class Params:
     ell_m: float = 2.0       # turning length: metres travelled per radian of heading change
     K: int = 8
+    along: AlongConductance = Uniform()
 
 
-def along_edges(open_: NDArray[np.float64], p: Params):
+def along_edges(open_: NDArray[np.float64], h: float, p: Params):
     """Per axis k: (k, a, b, w) with a, b open-cell ids (row-major order of `open_ > 0`),
     b = a + v_k, every cell the step crosses open; w is scaled by the SMALLEST open fraction
-    among those cells (a gap narrower than a cell conducts in proportion to its width)."""
+    among those cells (a gap narrower than a cell conducts in proportion to its width) and by
+    the smaller of the two ends' `p.along` factors."""
     v, _th, m, _gap = axes(p.K)
     free = open_ > 0
     ny, nx = free.shape
     cell = -np.ones((ny, nx), dtype=np.int64)
     cell[free] = np.arange(int(free.sum()))
     rr, cc = np.nonzero(free)
+    F = p.along.layers(open_, h, p.K)
     for k in range(p.K):
         dx, dy = int(v[k, 0]), int(v[k, 1])
         r2, c2 = rr + dy, cc + dx
@@ -228,11 +338,13 @@ def along_edges(open_: NDArray[np.float64], p: Params):
             frac = np.minimum(frac, open_[np.clip(r3, 0, ny - 1), np.clip(c3, 0, nx - 1)])
         a = cell[rr[ok], cc[ok]]
         b = cell[r2[ok], c2[ok]]
-        yield k, a, b, frac[ok] * (m[k] / float(dx * dx + dy * dy))
+        fk = F[k]
+        boost = fk if isinstance(fk, float) else np.minimum(fk[rr[ok], cc[ok]], fk[r2[ok], c2[ok]])
+        yield k, a, b, frac[ok] * boost * (m[k] / float(dx * dx + dy * dy))
 
 
 def crossing(open_: NDArray[np.float64], ground: NDArray[np.bool_], sol: Solution,
-             p: Params) -> dict[str, float]:
+             h: float, p: Params) -> dict[str, float]:
     """How much of the along-heading power flows where streams of different headings share a
     cell. Per free cell, J = sum_k F_k e_k (the net flux vector) and S = sum_k |F_k|;
     cancellation 1 - |J|/S is ~0 for one stream (a little above 0 for a stream spread over
@@ -247,7 +359,7 @@ def crossing(open_: NDArray[np.float64], ground: NDArray[np.bool_], sol: Solutio
     J = np.zeros((nc, 2))
     S = np.zeros(nc)
     pw = np.zeros(nc)
-    for k, a, b, w in along_edges(open_, p):
+    for k, a, b, w in along_edges(open_, h, p):
         F = w * (uk[a, k] - uk[b, k])            # flux from a to b along +v_k
         pe = w * (uk[a, k] - uk[b, k]) ** 2
         for c in (a, b):
@@ -269,7 +381,7 @@ def edges(open_: NDArray[np.float64], h: float, p: Params):
     two ends. Along-axis edges per axis, then the turning edges (k, k+1) inside every free cell,
     scaled by its open fraction (its volume). Ground is applied by `operator`."""
     _v, _th, _m, gap = axes(p.K)
-    for k, a, b, w in along_edges(open_, p):
+    for k, a, b, w in along_edges(open_, h, p):
         yield a, b, np.full(len(a), k), np.full(len(a), k), w
     c = np.arange(int((open_ > 0).sum()))
     vol = open_[open_ > 0]
