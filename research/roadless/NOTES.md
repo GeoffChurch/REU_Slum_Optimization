@@ -478,6 +478,21 @@ m^2 of previously open space whose best line grew >= 30 m; perm = the run's scor
   a better search, not just a different one. 0.05 is worse (41132 0.861 -> 0.642, 63718 -> 0.602).
 Six blocks only; the 220-block check is cheap on the GPU.
 
+**220-block check (2026-10-01): kappa_s 0.5 wins.** Metric ss100k2n2r30, S0.01cat, h 0.5, CPU,
+paired per block (translucent220.parquet), medians:
+
+    perm (J_2) at D 0.10   kappa_s 2 0.7669   0.5 0.7889   diff +0.0144 [+0.012, +0.017]   better on 85%
+    perm1 (P)  at D 0.10             0.7048       0.7281        +0.0211 [+0.019, +0.024]             90%
+    perm (J_2) at D 0.15             0.8423       0.8526        +0.0119 [+0.009, +0.014]             86%
+    largest quarter (n >= 232)                                  +0.0227 [+0.015, +0.026]             87%
+    smallest quarter                                            +0.0121 [+0.007, +0.016]             85%
+
+Same cost (one extra layers evaluation per round). A more translucent gradient is a better search
+for the sightline metric, most on the big blocks; ss100k2n2r30@ss100k0.5n2r30 is the preset for
+that metric. Untested on 220: kappa_s 0.2 (mixed on the six), and whether the gain carries to
+the uniform metric (uni has no kappa to soften; a translucent sightline SEARCH for a uni metric
+would be a different question).
+
 ### 5810 at full resolution on the GPU (2026-10-01)
 
 S0.01cat, h 0.5, GPU solver: uni 1,839 s (the CPU estimate was ~6 h); ss100k2n2r74 3,332 s with
