@@ -1,5 +1,5 @@
-"""Two greedy pickers on the same objective, paired per block: Lens A (first step with
-D >= 0.10) perm (J_power) and perm1 (P), Lens B least D reaching perm1 0.25 / 0.35, and time.
+"""Two greedy pickers on the same objective, paired per block: Lens A (at D = 0.10, linear
+between steps, so pickers with coarse steps are not scored past it) perm (J_power) and perm1 (P), Lens B least D reaching perm1 0.25 / 0.35, and time.
 
     PYTHONPATH=. pixi run python research/roadless/picker_compare.py <a> <b> [pop] [power]
 """
@@ -18,6 +18,12 @@ from clear import rows_dir  # noqa: E402
 from study import _ci, _d_at  # noqa: E402
 
 
+def _at(g: pd.DataFrame, col: str, d: float) -> float:
+    """`col` at exactly D = d, linear between the steps either side (nan past the end)."""
+    g = g.sort_values("D")
+    return float(np.interp(d, g.D, g[col])) if g.D.max() >= d - 1e-9 else np.nan
+
+
 def load(picker: str, pop: str, power: float) -> pd.DataFrame:
     return pd.concat([pd.read_parquet(p) for p in rows_dir(picker, 0.5, pop, power)
                       .glob("*.parquet")], ignore_index=True)
@@ -33,8 +39,9 @@ def main(a: str, b: str, pop: str, power: float) -> None:
     per = {}
     for pk in (a, b):
         g = load(pk, pop, power)
-        A = g[g.D >= 0.10 - 1e-9].sort_values("step").groupby("block").head(1).set_index("block")
-        cols = dict(A=A.perm, A1=A.perm1)
+        cols = {col: pd.Series({blk: _at(gg, col, 0.10) for blk, gg in g.groupby("block")})
+                for col in ("perm", "perm1")}
+        cols = dict(A=cols["perm"], A1=cols["perm1"])
         for ps in (0.25, 0.35):
             cols[f"B{ps}"] = pd.Series({blk: _d_at(gg.rename(columns={"perm1": "P"}), "P", ps)
                                         for blk, gg in g.groupby("block")})
