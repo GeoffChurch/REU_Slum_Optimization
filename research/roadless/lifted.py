@@ -305,6 +305,15 @@ class Sightline:
         return out
 
 
+def along_of(spec: str) -> AlongConductance:
+    """`uni` -> Uniform(); `sl3` -> Sightline(beta 3)."""
+    if spec == "uni":
+        return Uniform()
+    if spec.startswith("sl"):
+        return Sightline(float(spec[2:]))
+    raise ValueError(f"unknown along conductance {spec!r}")
+
+
 @dataclass(frozen=True)
 class Params:
     ell_m: float = 2.0       # turning length: metres travelled per radian of heading change

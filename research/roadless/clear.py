@@ -11,8 +11,10 @@ to the next multiple of delta of population, one exact solve). `loo` checks the 
 exact leave-one-out on one step.
 
     PYTHONPATH=. pixi run python research/roadless/clear.py loo <block idx> [h]
-    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <M4|B0.01g3> <h> <d_max> [pop] [p]
-    PYTHONPATH=. pixi run python research/roadless/clear.py one <block id> <picker> <h> <d_max> <pop> <p>
+    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <along>
+    PYTHONPATH=. pixi run python research/roadless/clear.py some <workers> <picker> <h> <d_max> <pop> <p> <along> <ids,>
+
+picker: M4 | B0.01g3 | S0.01cat | S0.01imp | S0.01sk32 | S0.01ind; along: uni | sl<beta>
 """
 from __future__ import annotations
 
@@ -471,11 +473,11 @@ class Spread:
 
 
 def greedy_block(b, picker: Picker, h: float, d_max: float, out: Path, population,
-                 power: float = 1.0) -> None:
+                 power: float, along: lifted.AlongConductance) -> None:
     """Each step: rank remaining buildings by tension (in J_power) per unit of population and
     let `picker` clear some. Records perm (in J_power) and perm1 (the p = 1 score) at every
     step; `cleared` lists the step's buildings in pick order."""
-    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8), population=population)
+    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8, along=along), population=population)
     sc = c.sc
     J0 = sc.J(sc.u0, power)
     P0 = sc.P0
@@ -513,7 +515,7 @@ def _one(i: int) -> None:
         return
     try:
         greedy_block(b, _CFG["picker"], _CFG["h"], _CFG["d_max"], out,
-                     common.POPULATIONS[_CFG["pop"]], _CFG["power"])
+                     common.POPULATIONS[_CFG["pop"]], _CFG["power"], _CFG["along"])
     except Exception as e:
         print(f"{b.block_id} FAILED {type(e).__name__}: {e}"[:300], flush=True)
 
@@ -541,18 +543,21 @@ def picker_of(spec: str) -> Picker:
     raise ValueError(f"unknown picker {spec!r}")
 
 
-def rows_dir(picker: str, h: float, pop: str, power: float = 1.0) -> Path:
+def rows_dir(picker: str, h: float, pop: str, power: float = 1.0, along: str = "uni") -> Path:
     return HERE / (f"clear_rows_{picker}_h{h:g}" + ("" if pop == "count" else f"_{pop}")
-                   + ("" if power == 1.0 else f"_p{power:g}"))
+                   + ("" if power == 1.0 else f"_p{power:g}")
+                   + ("" if along == "uni" else f"_{along}"))
 
 
-def run(workers: int, picker: Picker, h: float, d_max: float, pop: str, power: float) -> None:
+def run(workers: int, picker: Picker, h: float, d_max: float, pop: str, power: float,
+        along: lifted.AlongConductance, ids: list[str] | None = None) -> None:
+    """All 220 study blocks, largest first, or just `ids`."""
     import multiprocessing
     global _BLOCKS, _CFG
-    d = rows_dir(picker.name, h, pop, power)
+    d = rows_dir(picker.name, h, pop, power, along.name)
     d.mkdir(exist_ok=True)
-    _CFG = dict(picker=picker, h=h, d_max=d_max, dir=d, pop=pop, power=power)
-    _BLOCKS = common.build_blocks(common.recipients())
+    _CFG = dict(picker=picker, h=h, d_max=d_max, dir=d, pop=pop, power=power, along=along)
+    _BLOCKS = common.build_blocks(common.recipients() if ids is None else ids)
     with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=4) as pool:
         for _ in pool.imap_unordered(_one, list(range(len(_BLOCKS)))[::-1]):
             pass
@@ -563,15 +568,8 @@ if __name__ == "__main__":
         loo(int(sys.argv[2]), float(sys.argv[3]) if len(sys.argv) > 3 else 0.5,
             sys.argv[4] if len(sys.argv) > 4 else "count",
             float(sys.argv[5]) if len(sys.argv) > 5 else 1.0)
-    elif sys.argv[1] == "one":
-        pk = picker_of(sys.argv[3])
-        pop, power = sys.argv[6], float(sys.argv[7])
-        d = rows_dir(pk.name, float(sys.argv[4]), pop, power)
-        d.mkdir(exist_ok=True)
-        [blk] = common.build_blocks([sys.argv[2]])
-        greedy_block(blk, pk, float(sys.argv[4]), float(sys.argv[5]),
-                     d / f"{blk.block_id}.parquet", common.POPULATIONS[pop], power)
-    elif sys.argv[1] == "run":
+    elif sys.argv[1] in ("run", "some"):
+        # run <workers> <picker> <h> <d_max> <pop> <p> <along> [ids,]
         run(int(sys.argv[2]), picker_of(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]),
-            sys.argv[6] if len(sys.argv) > 6 else "count",
-            float(sys.argv[7]) if len(sys.argv) > 7 else 1.0)
+            sys.argv[6], float(sys.argv[7]), lifted.along_of(sys.argv[8]),
+            sys.argv[9].split(",") if sys.argv[1] == "some" else None)
