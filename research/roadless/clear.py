@@ -106,6 +106,7 @@ class Clearing:
         inside_id[g.inside.ravel()] = np.arange(int(g.inside.sum()))
         bf = sp.coo_matrix((np.full(len(cells), 1.0 / S2), (flat[cells, subs], inside_id[cells])),
                            shape=(self.n, int(g.inside.sum()))).tocsr()
+        self.bf = bf                                   # host copy
         self.bfree = p.solver.sparse.csr_matrix(bf)
         self.inside_flat = xp.asarray(np.flatnonzero(g.inside))
         self.removed = np.zeros(self.n, dtype=bool)
