@@ -731,6 +731,9 @@ class GpuAMG:
             return _direct(A)
         import cupy as cp
         import cupyx.scipy.sparse as cs
+        # the pool keeps every freed block for reuse; rounds build new hierarchies, so without
+        # this a process only grows (~20 GB per 5810 run by round 5)
+        cp.get_default_memory_pool().free_all_blocks()
         # unsmoothed by default: smoothing the prolongators costs scipy's slow BSR
         # sum_duplicates (7 of 11 s on 5618 at h 0.5), and the extra CG iterations it would save
         # cost milliseconds on the GPU
