@@ -641,3 +641,13 @@ fw40.q3.i20.t1e-05:
 Same answers at a quarter of the time. Continuing to q 5 halves the grey (8% -> 4%) but does not
 raise the rounded score. (Times are under 12 parallel workers; small blocks solve directly on
 the CPU.)
+
+**SIMP on 5810** (J_2, D 0.10, GPU, uni): greedy (S0.01cat) Lens A 0.3189; SIMP fw0.q3.i20.t0.001
+**0.3468 (+0.028)** in 164 s wall including setup (the greedy is ~4 min to D 0.15 at today's
+speed); fw0.q5.i20.t0.001 0.3476 in 309 s. The gain grows with block size (220: +0.002 overall,
++0.006 largest quarter, +0.028 on the biggest block of all). simp_vs_greedy_ZAF.9.3.1_1_5810_*.png:
+SIMP clears 692 mostly small buildings packed into the dense band along the eastern street edge
+and the south-west edge; the greedy 524, including the big institutional buildings by the
+southern field, more scattered; 279 in both. Neither forms corridors under uni.
+Not dominance: the greedy gives every budget in one run (nested clearings: Lens B, phasing),
+SIMP one budget per run; SIMP is untested under the sightline conductances.
