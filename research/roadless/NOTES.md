@@ -625,3 +625,19 @@ p 1, clear_rows_S0.01cat_h0.5_area); relax220_p1.parquet; medians:
   outlier.) Frontier: the greedy is cheaper and ties overall; SIMP is better on big blocks
   and on P. SIMP still leaves ~8% of buildings grey; its rounding (by decreasing x) is the
   obvious place it loses value.
+
+**SIMP, cheaper** (relax.py plans `fw<FW its>.q<final q>.i<updates per q>.t<step rtol>`).
+Warm-started CG (System.solve x0: the last solve of the previous x; the eps world keeps the same
+unknowns), solves to 1e-3 while optimizing (scores stay exact), no Frank-Wolfe start (uniform
+x = D). 40 blocks (10 largest + 30 random), J_2, D 0.10, against the 220-run plan
+fw40.q3.i20.t1e-05:
+
+    plan                  vs 220 plan   vs greedy                     wins   median time
+    fw40.q3.i20.t1e-05    --            +0.009 [+0.001, +0.015]       68%    386 s
+    fw0.q3.i20.t0.001     +0.000        +0.010 [+0.003, +0.015]       70%     93 s   <- default
+    fw0.q5.i10.t0.001     -0.000        +0.009 [-0.003, +0.017]       60%     96 s
+    fw0.q5.i20.t0.001     +0.000        +0.010 [+0.002, +0.015]       68%    189 s
+
+Same answers at a quarter of the time. Continuing to q 5 halves the grey (8% -> 4%) but does not
+raise the rounded score. (Times are under 12 parallel workers; small blocks solve directly on
+the CPU.)

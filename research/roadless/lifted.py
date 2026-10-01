@@ -723,8 +723,9 @@ def along_of(spec: str, scans: Scans = CpuScans()) -> AlongConductance:
 class Solver(Protocol):
     """Where the operator lives and how a grounded SPD system on it is solved. `xp`, `sparse`
     and `ndimage` are the device's array, sparse-matrix and image modules (numpy / scipy, or
-    cupy / cupyx). prepare(A, coarsening) does the setup once and returns solve(b, rtol) -> x on
-    the device, CG to a relative residual of rtol (exact below SMALL unknowns). `coarsening`
+    cupy / cupyx). prepare(A, coarsening) does the setup once and returns solve(b, rtol, x0) ->
+    x on the device, CG from x0 (None: zero) to a relative residual of rtol (exact below SMALL
+    unknowns). `coarsening`
     lets a solver reuse one aggregation across a block's systems."""
 
     @property
@@ -778,21 +779,22 @@ class CpuAMG:
     def prepare(self, A, coarsening):
         if A.shape[0] < SMALL:
             lu = factorized(A.tocsc())
-            return lambda b, rtol: lu(b)
+            return lambda b, rtol, x0=None: lu(b)
         ml = pyamg.smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=2000)
 
-        def solve1(b, rtol):
+        def solve1(b, rtol, x0):
             res: list[float] = []
-            x = ml.solve(b, tol=rtol, accel="cg", maxiter=500, residuals=res)
+            x = ml.solve(b, x0=x0, tol=rtol, accel="cg", maxiter=500, residuals=res)
             if res[-1] > rtol * res[0] * 10:
                 raise RuntimeError(f"AMG-CG did not converge: {res[-1] / res[0]:.2e} after "
                                    f"{len(res)}")
             return x
 
-        def solve(b, rtol):
+        def solve(b, rtol, x0=None):
             if b.ndim == 1:
-                return solve1(b, rtol)
-            return np.stack([solve1(b[:, i], rtol) for i in range(b.shape[1])], axis=1)
+                return solve1(b, rtol, x0)
+            return np.stack([solve1(b[:, i], rtol, None if x0 is None else x0[:, i])
+                             for i in range(b.shape[1])], axis=1)
         return solve
 
 
@@ -865,7 +867,7 @@ class GpuAMG:
         cp, cs = self.xp, self.sparse
         if A.shape[0] < SMALL:
             lu = factorized(A.get().tocsc())
-            return lambda b, rtol: cp.asarray(lu(cp.asnumpy(b)))
+            return lambda b, rtol, x0=None: cp.asarray(lu(cp.asnumpy(b)))
         lv = []
         ids, Ai = coarsening.mid(), A
         for agg in self._aggregates(coarsening):
@@ -913,19 +915,22 @@ class GpuAMG:
             rho2 = bet - gam * gam / rho1
             return (a1 / rho1 - gam * a2 / (rho1 * rho2)) * c1 + (a2 / rho2) * c2
 
-        def solve(b, rtol):
-            return _pcg(A, lambda r: cycle(0, r), b, rtol, cp)
+        def solve(b, rtol, x0=None):
+            return _pcg(A, lambda r: cycle(0, r), b, rtol, cp, x0)
         return solve
 
 
-def _pcg(A, M, b, rtol: float, xp):
-    """Flexible (Polak-Ribiere) preconditioned CG from zero to ||r|| <= rtol ||b||; b may be
-    (n,) or (n, m) (columns solved independently, in lockstep). M may vary between calls."""
-    x = xp.zeros_like(b)
+def _pcg(A, M, b, rtol: float, xp, x0=None):
+    """Flexible (Polak-Ribiere) preconditioned CG from x0 (None: zero) to ||r|| <= rtol ||b||;
+    b may be (n,) or (n, m) (columns solved independently, in lockstep). M may vary between
+    calls."""
     nb = xp.linalg.norm(b, axis=0)
     if not bool((nb > 0).any()):
+        return xp.zeros_like(b)
+    x = xp.zeros_like(b) if x0 is None else x0.copy()
+    r = b.copy() if x0 is None else b - A @ x
+    if bool((xp.linalg.norm(r, axis=0) <= rtol * nb).all()):
         return x
-    r = b.copy()
     z = M(r)
     pdir = z.copy()
     rz = (r * z).sum(axis=0)
@@ -1201,12 +1206,14 @@ class System:
     def n(self) -> int:
         return len(self.keep)
 
-    def solve(self, b, rtol: float = 1e-9):
-        """Device b (n,) or (n, m) -> device u, zero on dropped unknowns."""
+    def solve(self, b, rtol: float = 1e-9, x0=None):
+        """Device b (n,) or (n, m) -> device u, zero on dropped unknowns; x0 a starting guess
+        over the same unknowns (e.g. the last solve of a nearby field: same numbering when the
+        free cells are the same)."""
         if bool((b[~self.keep] != 0).any()):
             raise ValueError("loaded unknowns have no path to ground")
         u = self.xp.zeros(b.shape)
-        u[self.keep] = self._solver(b[self.keep], rtol)
+        u[self.keep] = self._solver(b[self.keep], rtol, None if x0 is None else x0[self.keep])
         return u
 
     def load(self, f_cell, p: Params):
@@ -1232,15 +1239,17 @@ class Solution:
 
 
 def solve(grid: Grid, open_, f_cell: NDArray[np.float64], p: Params,
-          system: System | None = None, rtol: float = 1e-9, host: bool = True) -> Solution:
+          system: System | None = None, rtol: float = 1e-9, host: bool = True,
+          x0=None) -> Solution:
     """Total escape power. Injection on a closed cell would be a bug: demand cells are open in
     the original geometry and freeing only opens more. Pass `system` (built for this `open_`)
     to reuse its setup. P is quadratic in u, so rtol 1e-5 already gives it to ~1e-10; a ranking
-    (tension) is unchanged at 1e-3. `host` False keeps u, cell and unk_cell on the device."""
+    (tension) is unchanged at 1e-3. `host` False keeps u, cell and unk_cell on the device; x0
+    warm-starts the solve (System.solve)."""
     assert not (np.asarray(f_cell)[~(p.solver.to_host(open_) > 0)] > 0).any()
     sy = System(grid, open_, p) if system is None else system
     b = sy.load(f_cell, p)
-    u = sy.solve(b, rtol=rtol)
+    u = sy.solve(b, rtol=rtol, x0=x0)
     P = float(b @ u)
     if not host:
         return Solution(P=P, u=u, cell=sy.cell, unk_cell=sy.unk_cell, n_unknowns=sy.n)

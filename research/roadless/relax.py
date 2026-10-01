@@ -16,14 +16,19 @@ pickers' rule, best gain per unit population up to D). Step size: a parabola thr
 J'(0) = -gap and J(1), checked. Rounding: clear buildings by decreasing x while they fit,
 then score exactly.
 
-    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/relax.py <ids,|all> <p> <cpu|gpu> [iters] [workers]
+    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/relax.py <ids,|all> <p> <cpu|gpu> <plan> [workers]
+
+plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>.t<solve
+tolerance while optimizing>, e.g. fw40.q3.i20.t1e-05 (the first 220 runs) or fw0.q5.i10.t0.001.
 """
 from __future__ import annotations
 
 import dataclasses
+import re
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -43,8 +48,9 @@ class Relaxation:
     x_j^q of its cells' open fraction: q 1 is the convex relaxation, q > 1 (SIMP) makes partial
     clearing uneconomic (its conductance falls faster than its cost)."""
 
-    def __init__(self, c: Clearing, power: float, q: float = 1.0):
-        self.c, self.power, self.q = c, power, q
+    def __init__(self, c: Clearing, power: float, q: float = 1.0, rtol: float = RTOL_SCORE):
+        self.c, self.power, self.q, self.rtol = c, power, q, rtol
+        self._u = self._lam = None             # the last solves: warm starts for the next
         g = c.sc.grid
         self.ff0 = g.ff0.ravel()
         self.inside = np.flatnonzero(g.inside)
@@ -60,8 +66,9 @@ class Relaxation:
         op = self.open_of(x)
         op_eps = op + EPS * (c.full - op)
         sy = lifted.System(c.sc.grid, op_eps, c.p)
-        sol = lifted.solve(c.sc.grid, op_eps, c.sc.f, c.p, system=sy, rtol=RTOL_SCORE,
-                           host=False)
+        sol = lifted.solve(c.sc.grid, op_eps, c.sc.f, c.p, system=sy, rtol=self.rtol,
+                           host=False, x0=self._u)
+        self._u = sol.u                        # eps world: the same unknowns every time
         th = c.p.solver.to_host
         hsol = dataclasses.replace(sol, u=th(sol.u), cell=th(sol.cell),
                                    unk_cell=th(sol.unk_cell))
@@ -83,8 +90,9 @@ class Relaxation:
             mult = np.zeros_like(c.sc.f)
             on = c.sc.owner >= 0
             mult[on] = self.power * np.nan_to_num(home_u[c.sc.owner[on]]) ** (self.power - 1.0)
-            lam = lifted.solve(g, op_eps, c.sc.f * mult, p, system=sy, rtol=RTOL_SCORE,
-                               host=False).u
+            lam = lifted.solve(g, op_eps, c.sc.f * mult, p, system=sy, rtol=self.rtol,
+                               host=False, x0=self._lam).u
+            self._lam = lam
         K = p.K
         uk, lk = _cells_axes(sy, sol.u, K), _cells_axes(sy, lam, K)
         o = xp.asarray(op_eps).ravel()
@@ -183,19 +191,43 @@ def frank_wolfe(rel: Relaxation, budget: float, iters: int, log=print) -> dict:
 
 
 XMIN = 1e-3
-QS = (1.5, 2.0, 2.5, 3.0)
 
 
-def simp(rel: Relaxation, x0: np.ndarray, budget: float, iters: int, log=print,
-         move: float = 0.2) -> np.ndarray:
-    """SIMP continuation from x0: for q in QS, `iters` optimality-criteria updates x <- clip(
-    x (-g / (lam c))^1/2) within `move` of x and [XMIN, 1], lam bisected so that c . x =
-    budget. Non-convex: a local method."""
+class Plan(NamedTuple):
+    """How a block is solved: `fw` Frank-Wolfe iterations from x = 0 (0: start SIMP from the
+    uniform x = D, no bound), SIMP continuation q = 1.5, 2, ... `qmax` with up to `iters`
+    optimality-criteria updates each, solves to `rtol` while optimizing (scores are exact)."""
+    fw: int
+    qmax: float
+    iters: int
+    rtol: float
+
+    @property
+    def name(self) -> str:
+        return f"fw{self.fw}.q{self.qmax:g}.i{self.iters}.t{self.rtol:g}"
+
+    @property
+    def qs(self) -> tuple[float, ...]:
+        return tuple(float(q) for q in np.arange(1.5, self.qmax + 1e-9, 0.5))
+
+
+def plan_of(spec: str) -> Plan:
+    m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+)", spec)
+    if m is None:
+        raise ValueError(f"unknown plan {spec!r}")
+    return Plan(int(m.group(1)), float(m.group(2)), int(m.group(3)), float(m.group(4)))
+
+
+def simp(rel: Relaxation, x0: np.ndarray, budget: float, qs: tuple[float, ...], iters: int,
+         log=print, move: float = 0.2) -> np.ndarray:
+    """SIMP continuation from x0: for q in qs, up to `iters` optimality-criteria updates
+    x <- clip(x (-g / (lam c))^1/2) within `move` of x and [XMIN, 1], lam bisected so that
+    c . x = budget. Non-convex: a local method."""
     cost = rel.c.cost
     x = np.clip(x0, XMIN, 1.0)
     x *= min(1.0, budget / float(cost @ x))
     t0 = time.time()
-    for q in QS:
+    for q in qs:
         rel.q = q
         for it in range(iters):
             J, g = rel.value_grad(x)
@@ -220,52 +252,60 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float, iters: int, log=print,
     return x
 
 
-def one(bid: str, power: float, device: str, iters: int) -> dict:
+def one(bid: str, power: float, device: str, plan: Plan) -> dict:
     [b] = common.build_blocks([bid])
     p = lifted.Params(3.0, 8, solver=lifted.solver_of(device))
     c = Clearing(b, 0.5, p, population=common.POPULATIONS["area"])
-    rel = Relaxation(c, power)
+    rel = Relaxation(c, power, rtol=plan.rtol)
+    log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
-    fw = frank_wolfe(rel, D_LENS, iters, log=lambda s: print(f"{bid} {s}", flush=True))
-    r = round_by_x(fw["x"], c.cost, D_LENS)
-    Jr = rel.exact(r)
-    x = fw["x"]
-    xs = simp(rel, x, D_LENS, iters // 2, log=lambda s: print(f"{bid} {s}", flush=True))
+    out = dict(block=bid, n=c.n, power=power, plan=plan.name)
+    if plan.fw > 0:
+        fw = frank_wolfe(rel, D_LENS, plan.fw, log=log)
+        x = fw["x"]
+        r = round_by_x(x, c.cost, D_LENS)
+        frac = (x > 1e-6) & (x < 1 - 1e-6)
+        out.update(iters=len(fw["hist"]), relaxed_perm=rel.perm(fw["J"]),
+                   bound_perm=rel.perm(fw["lb"]), rounded_perm=rel.perm(rel.exact(r)),
+                   rounded_D=float(c.cost @ r), frac_share=float(np.mean(frac)),
+                   frac_cost=float(c.cost[frac].sum()), cleared=np.flatnonzero(r).tolist(),
+                   x=x.tolist())
+    else:
+        x = np.full(c.n, D_LENS)
+    xs = simp(rel, x, D_LENS, plan.qs, plan.iters, log=log)
     rs = round_by_x(xs, c.cost, D_LENS)
-    Js = rel.exact(rs)
-    out = dict(block=bid, n=c.n, power=power, iters=len(fw["hist"]),
-               relaxed_perm=rel.perm(fw["J"]), bound_perm=rel.perm(fw["lb"]),
-               rounded_perm=rel.perm(Jr), rounded_D=float(c.cost @ r),
-               frac_share=float(np.mean((x > 1e-6) & (x < 1 - 1e-6))),
-               frac_cost=float(c.cost[(x > 1e-6) & (x < 1 - 1e-6)].sum()),
-               simp_perm=rel.perm(Js), simp_D=float(c.cost @ rs),
+    out.update(simp_perm=rel.perm(rel.exact(rs)), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
-               cleared=np.flatnonzero(r).tolist(), x=x.tolist(),
                simp_cleared=np.flatnonzero(rs).tolist(), simp_x=xs.tolist(),
                t=time.time() - t0)
-    print(f"{bid} n={c.n} p={power:g}: relaxed {out['relaxed_perm']:.4f} bound "
-          f"{out['bound_perm']:.4f} rounded {out['rounded_perm']:.4f} (D {out['rounded_D']:.4f}) "
-          f"fractional cost {out['frac_cost']:.4f}; SIMP rounded {out['simp_perm']:.4f} "
-          f"(D {out['simp_D']:.4f}, grey {out['simp_grey']:.3f}); {out['t']:.0f}s", flush=True)
+    print(f"{bid} n={c.n} p={power:g} {plan.name}: "
+          + (f"relaxed {out['relaxed_perm']:.4f} bound {out['bound_perm']:.4f} rounded "
+             f"{out['rounded_perm']:.4f}; " if plan.fw > 0 else "")
+          + f"SIMP rounded {out['simp_perm']:.4f} (D {out['simp_D']:.4f}, grey "
+          f"{out['simp_grey']:.3f}); {out['t']:.0f}s", flush=True)
     return out
+
+
+def rows_of(plan: Plan) -> Path:
+    return OUT / plan.name
 
 
 _CFG: dict = {}
 
 
 def _run(bid: str) -> None:
-    power, device, iters = _CFG["power"], _CFG["device"], _CFG["iters"]
+    power, device, plan = _CFG["power"], _CFG["device"], _CFG["plan"]
     try:
-        pd.DataFrame([one(bid, power, device, iters)]).to_parquet(
-            OUT / f"{bid}_p{power:g}.parquet")
+        pd.DataFrame([one(bid, power, device, plan)]).to_parquet(
+            rows_of(plan) / f"{bid}_p{power:g}.parquet")
     except Exception as e:
         print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)
 
 
-def main(ids: list[str], power: float, device: str, iters: int, workers: int) -> None:
-    OUT.mkdir(exist_ok=True)
-    _CFG.update(power=power, device=device, iters=iters)
-    todo = [i for i in ids if not (OUT / f"{i}_p{power:g}.parquet").exists()]
+def main(ids: list[str], power: float, device: str, plan: Plan, workers: int) -> None:
+    rows_of(plan).mkdir(parents=True, exist_ok=True)
+    _CFG.update(power=power, device=device, plan=plan)
+    todo = [i for i in ids if not (rows_of(plan) / f"{i}_p{power:g}.parquet").exists()]
     if workers == 1:
         for bid in todo:
             _run(bid)
@@ -278,6 +318,5 @@ def main(ids: list[str], power: float, device: str, iters: int, workers: int) ->
 
 if __name__ == "__main__":
     ids = common.recipients() if sys.argv[1] == "all" else sys.argv[1].split(",")
-    main(ids, float(sys.argv[2]), sys.argv[3],
-         int(sys.argv[4]) if len(sys.argv) > 4 else 40,
+    main(ids, float(sys.argv[2]), sys.argv[3], plan_of(sys.argv[4]),
          int(sys.argv[5]) if len(sys.argv) > 5 else 1)
