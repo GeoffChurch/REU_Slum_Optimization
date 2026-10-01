@@ -20,6 +20,7 @@ m_k W / L in its own layer at every lattice angle (checked in checks.py).
 """
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
 from typing import Protocol
@@ -405,16 +406,28 @@ class SoftSightline:
     length it crosses), and R_d is its expected free path (forward + back) along direction d. A
     line blocked only by a small building still scores, so clearing that building has a
     gradient (the counterfactual corridor is visible); as kappa grows this tends to the hard
-    runs. Layer k's factor is 1 + beta x the angle-weighted mean of R_d / (R_d + r0), saturating
-    at the length scale r0 instead of a cap. Differentiable: `vjp` is exact."""
+    runs. Layer k's factor is 1 + beta x the angle-weighted mean of g(R_d) = R^n / (R^n + r0^n):
+    n 1 is concave (short gaps already earn a lot), n 2 is S-shaped (gaps well under r0 earn
+    almost nothing, lines past r0 nearly all; joining two runs across r0 pays most).
+    Differentiable: `vjp` is exact."""
     beta: float
     kappa: float = 2.0         # per metre of building crossed
     r0_m: float = 20.0
+    hill: float = 1.0          # the exponent n
     nmax: int = 6
 
     @property
     def name(self) -> str:
-        return f"ss{self.beta:g}k{self.kappa:g}"
+        return f"ss{self.beta:g}k{self.kappa:g}" + (
+            "" if self.hill == 1.0 and self.r0_m == 20.0 else f"n{self.hill:g}r{self.r0_m:g}")
+
+    def g(self, R):
+        x = (R / self.r0_m) ** self.hill
+        return x / (1.0 + x)
+
+    def dg(self, R):
+        x = (R / self.r0_m) ** self.hill
+        return self.hill * x / (np.maximum(R, 1e-12) * (1.0 + x) ** 2)
 
     def _dirs(self):
         dirs = directions(self.nmax)
@@ -423,19 +436,26 @@ class SoftSightline:
 
     def runs(self, open_, h):
         """Yield (d, R_d) per fine direction, R_d the expected free path in metres."""
+        for i, F, B in self.paths(open_, h):
+            yield i, F + B
+
+    def paths(self, open_, h):
+        """Yield (d, F_d, B_d): the expected free path forward and back. F x B is the measure of
+        the segments along d that pass through the cell (pairs of a start behind and an end
+        ahead); its sum along a line of length L is L^2 / 2."""
         dirs, _ang = self._dirs()
         for i, (dx, dy) in enumerate(dirs):
             offs = np.array(_line_cells(dx, dy), dtype=np.int64).reshape(-1, 2)
             F, B, _tf, _tb = _soft_fb(open_, dx, dy, offs, float(np.hypot(dx, dy) * h),
                                       self.kappa)
-            yield i, F + B
+            yield i, F, B
 
     def layers(self, open_, h, K):
         _dirs, ang = self._dirs()
         W = _angle_weights(K, ang)
         out = np.ones((K, *open_.shape))
         for i, R in self.runs(open_, h):
-            g = R / (R + self.r0_m)
+            g = self.g(R)
             for k in np.flatnonzero(W[:, i]):
                 out[k] += (self.beta * W[k, i]) * g
         return out
@@ -449,21 +469,23 @@ class SoftSightline:
             s = float(np.hypot(dx, dy) * h)
             F, B, Tf, Tb = _soft_fb(open_, dx, dy, offs, s, self.kappa)
             R = F + B
-            G = self.beta * self.r0_m / (R + self.r0_m) ** 2 * np.tensordot(W[:, i], A, axes=1)
+            G = self.beta * self.dg(R) * np.tensordot(W[:, i], A, axes=1)
             _soft_vjp(dx, dy, offs, s, self.kappa, F, B, Tf, Tb, G, out)
         return out
 
 
 def along_of(spec: str) -> AlongConductance:
     """`uni` -> Uniform(); `sl3` -> Sightline(beta 3); `ss10k2` -> SoftSightline(beta 10,
-    kappa 2)."""
+    kappa 2); `ss30k2n2r30` -> SoftSightline(beta 30, kappa 2, hill 2, r0 30 m)."""
     if spec == "uni":
         return Uniform()
     if spec.startswith("sl"):
         return Sightline(float(spec[2:]))
-    if spec.startswith("ss"):
-        beta, kappa = spec[2:].split("k")
-        return SoftSightline(float(beta), float(kappa))
+    m = re.fullmatch(r"ss([0-9.]+)k([0-9.]+)(?:n([0-9.]+)r([0-9.]+))?", spec)
+    if m:
+        return SoftSightline(float(m.group(1)), float(m.group(2)),
+                             *(() if m.group(3) is None else (float(m.group(4)),
+                                                              float(m.group(3)))))
     raise ValueError(f"unknown along conductance {spec!r}")
 
 

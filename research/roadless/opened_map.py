@@ -1,7 +1,6 @@
 """Which corridors did a clearing open? The straight-run field after the greedy's 10% clearing
-minus before it: per cell, the gain in the mean over 48 headings of R / (R + r0) (R = soft
-expected free path, kappa 2, r0 20 m -- the same field for every run, whatever conductance it
-was optimized under), and the heading that gained most, shown only on space that was already
+minus before it (soft expected free paths F, B per heading, kappa 2; the same field for every
+run, whatever conductance it was optimized under): see `gained`. Heading of the largest gain, shown only on space that was already
 open (the cleared footprints, green, gain trivially). A new corridor shows as a coherent streak
 running through the cleared buildings into the open space beyond.
 
@@ -28,30 +27,31 @@ import lifted  # noqa: E402
 from clear import cleared_through, rows_dir  # noqa: E402
 
 D_LENS = 0.10
-FIELD = lifted.SoftSightline(beta=1.0, kappa=2.0, r0_m=20.0)
+FIELD = lifted.SoftSightline(beta=1.0, kappa=2.0, r0_m=30.0, hill=2.0)
 
 
 def gained(g: lifted.Grid, before: np.ndarray, after: np.ndarray, K: int = 8):
-    """Per cell, the gain in g(R) = R / (R + r0) after minus before, three ways: the MAX over the
-    48 fine headings (a whole unblocked line lights up along its length) with its heading in
-    [0, 1); the max over the K layers of the layer factor's gain (what the metric feels: each
-    layer averages ~6 nearby headings); and the MEAN over headings (the segment measure; falls
-    off like 1/distance from a cleared building, since only the headings through it gain)."""
+    """Per cell, after minus before, with g = FIELD.g (S-shaped in the line length R = F + B):
+    the MAX over the 48 fine headings of the gain in g(R) (a whole unblocked line lights up along
+    its length) and that heading in [0, 1); the max over the K layers of the layer factor's gain
+    (what the metric feels: each layer averages ~6 nearby headings); and the max over headings of
+    the gain in F x B, the segments through the cell (quadratic in length, largest mid-line)."""
     _dirs, ang = FIELD._dirs()
     W = lifted._angle_weights(K, ang)
     best = np.zeros(before.shape)
     arg = np.zeros(before.shape)
     layer = np.zeros((K, *before.shape))
-    mean = np.zeros(before.shape)
-    for (i, R0), (_i, R1) in zip(FIELD.runs(before, g.h), FIELD.runs(after, g.h), strict=True):
-        d = R1 / (R1 + FIELD.r0_m) - R0 / (R0 + FIELD.r0_m)
+    seg = np.zeros(before.shape)
+    for (i, F0, B0), (_i, F1, B1) in zip(FIELD.paths(before, g.h), FIELD.paths(after, g.h),
+                                         strict=True):
+        d = FIELD.g(F1 + B1) - FIELD.g(F0 + B0)
         up = d > best
         best = np.where(up, d, best)
         arg = np.where(up, ang[i] / np.pi, arg)
-        mean += d
+        seg = np.maximum(seg, F1 * B1 - F0 * B0)
         for k in np.flatnonzero(W[:, i]):
             layer[k] += W[k, i] * d
-    return best, arg, layer.max(axis=0), mean / len(ang)
+    return best, arg, layer.max(axis=0), seg
 
 
 def main(bid: str, picker: str, alongs: list[str]) -> None:
@@ -72,7 +72,7 @@ def main(bid: str, picker: str, alongs: list[str]) -> None:
         stop = rows[rows.D >= D_LENS - 1e-9].iloc[0]
         cl = cleared_through(rows, int(stop.step))
         after = (g.isub & (~g.bsub | np.isin(lab, cl))).mean(axis=-1)
-        best, hue, layer, mean = gained(g, g.ff0, after)
+        best, hue, layer, seg = gained(g, g.ff0, after)
         if window is None:
             cx = np.median([p.centroid.x for p in polys[cl]])
             cy = np.median([p.centroid.y for p in polys[cl]])
@@ -81,23 +81,24 @@ def main(bid: str, picker: str, alongs: list[str]) -> None:
             window = (cx - half, cx + half, cy - half, cy + half)
         # only space that was ALREADY open: the cleared footprints themselves trivially gain
         was_open = g.ff0 >= 0.5
-        fields = dict(line=(best, "max over 48 headings (lines)"),
+        fields = dict(line=(best, f"line gain: max over 48 headings of g(F+B), S-curve r0 "
+                                  f"{FIELD.r0_m:g} m"),
                       layer=(layer, "max over the 8 layers (what the metric feels)"),
-                      mean=(mean, "mean over 48 headings (segment measure)"))
+                      seg=(seg, "segments through the cell: max over headings of F x B (m^2)"))
         tops = {k: np.quantile(v[was_open & (v > 0)], 0.99) for k, (v, _t) in fields.items()}
         rgb = mcolors.hsv_to_rgb(np.stack([hue, np.full_like(hue, 0.9),
                                            np.clip(best / tops["line"], 0, 1)], axis=-1))
         rgb[~was_open] = 1.0
-        panels = [("zoom", "line"), ("zoom", "heading"), ("zoom", "layer"), ("zoom", "mean")] \
+        panels = [("zoom", "line"), ("zoom", "heading"), ("zoom", "layer"), ("zoom", "seg")] \
             if big else [("full", "line"), ("full", "heading"), ("full", "layer"),
-                         ("full", "mean")]
+                         ("full", "seg")]
         for col, (where, what) in enumerate(panels):
             ax = axes[row, col]
             if what in fields:
                 v, label = fields[what]
                 im = ax.imshow(np.where(was_open, v, np.nan), origin="lower", extent=ext,
                                cmap="magma", vmin=0, vmax=tops[what], interpolation="nearest")
-                fig.colorbar(im, ax=ax, shrink=0.5, label="gain in R/(R+r0)")
+                fig.colorbar(im, ax=ax, shrink=0.5, label="gain")
             else:
                 label = "heading of the max (hue), its size (brightness)"
                 ax.imshow(rgb, origin="lower", extent=ext, interpolation="nearest")
