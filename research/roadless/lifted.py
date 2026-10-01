@@ -798,6 +798,15 @@ class GpuAMG:
         return solve
 
 
+def scans_of(spec: str) -> Scans:
+    """`cpu` -> CpuScans(); `gpu` -> GpuScans() (chosen with the solver)."""
+    if spec == "cpu":
+        return CpuScans()
+    if spec == "gpu":
+        return GpuScans()
+    raise ValueError(f"unknown scans {spec!r}")
+
+
 def solver_of(spec: str) -> Solver:
     """`cpu` -> CpuAMG(); `gpu` -> GpuAMG()."""
     if spec == "cpu":

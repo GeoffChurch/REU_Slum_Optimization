@@ -512,5 +512,5 @@ if __name__ == "__main__":
     elif sys.argv[1] in ("run", "some"):
         # run <workers> <picker> <h> <d_max> <pop> <p> <along> <solver> [ids,]
         run(int(sys.argv[2]), picker_of(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]),
-            sys.argv[6], float(sys.argv[7]), lifted.along_of(sys.argv[8]),
+            sys.argv[6], float(sys.argv[7]), lifted.along_of(sys.argv[8], lifted.scans_of(sys.argv[9])),
             lifted.solver_of(sys.argv[9]), sys.argv[10].split(",") if sys.argv[1] == "some" else None)
