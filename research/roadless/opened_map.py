@@ -4,7 +4,7 @@ run, whatever conductance it was optimized under): see `gained`. Heading of the 
 open (the cleared footprints, green, gain trivially). A new corridor shows as a coherent streak
 running through the cleared buildings into the open space beyond.
 
-    PYTHONPATH=. pixi run python research/roadless/opened_map.py <block id> [picker] [alongs,]
+    PYTHONPATH=. pixi run python research/roadless/opened_map.py <block id> [picker] [alongs,] [h of the run]
 """
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def gained(g: lifted.Grid, before: np.ndarray, after: np.ndarray, K: int = 8):
     return best, arg, layer.max(axis=0), seg
 
 
-def main(bid: str, picker: str, alongs: list[str]) -> None:
+def main(bid: str, picker: str, alongs: list[str], h: float = 0.5) -> None:
     [b] = common.build_blocks([bid])
     polys = np.asarray(b.buildings.outlines)
     g = lifted.Grid.of(b.boundary, polys, list(b.streets.geometry), 0.5)
@@ -67,7 +67,7 @@ def main(bid: str, picker: str, alongs: list[str]) -> None:
                              squeeze=False)
     window = None
     for row, along in enumerate(alongs):
-        rows = pd.read_parquet(rows_dir(picker, 0.5, "area", 2.0, along)
+        rows = pd.read_parquet(rows_dir(picker, h, "area", 2.0, along)
                                / f"{bid}.parquet").sort_values("step")
         stop = rows[rows.D >= D_LENS - 1e-9].iloc[0]
         cl = cleared_through(rows, int(stop.step))
@@ -115,11 +115,12 @@ def main(bid: str, picker: str, alongs: list[str]) -> None:
                          fontsize=13)
     fig.suptitle(f"{bid}, greedy {picker}: what the 10% clearing opened", fontsize=16)
     fig.tight_layout()
-    out = HERE / f"opened_{bid}_{picker}.png"
+    out = HERE / f"opened_{bid}_{picker}_h{h:g}.png"
     fig.savefig(out, dpi=80)
     print(out, flush=True)
 
 
 if __name__ == "__main__":
     main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "S0.01cat",
-         sys.argv[3].split(",") if len(sys.argv) > 3 else ["uni", "ss10k2", "ss100k2"])
+         sys.argv[3].split(",") if len(sys.argv) > 3 else ["uni", "ss10k2", "ss100k2"],
+         float(sys.argv[4]) if len(sys.argv) > 4 else 0.5)
