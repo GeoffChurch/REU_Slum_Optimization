@@ -25,6 +25,7 @@ import os
 import re
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, NamedTuple, Protocol
@@ -300,8 +301,10 @@ class Sweep(Protocol):
     """Where Catchment's downhill sweep runs. prepare(A, u, rowsum) -> run(rows, cols, C): the
     (n x C) device array out[x, c] = share of node x's outflow that passes through column c's
     member nodes (the (rows, cols) pairs) on the way to ground. Flow only runs downhill, so out
-    at x needs out at x's lower neighbours first. `chunk`: columns per run (memory)."""
-    chunk: int
+    at x needs out at x's lower neighbours first. columns(n): columns per run on n nodes, so
+    that the (n x C) result fits in memory."""
+
+    def columns(self, n: int) -> int: ...
 
     def prepare(self, A, u, rowsum) -> Callable: ...
 
@@ -333,6 +336,9 @@ def _catch(indptr, indices, data, u, rowsum, order, inA, out):
 class CpuSweep:
     """numba, one core: every node in order of increasing potential."""
     chunk: int = 16
+
+    def columns(self, n: int) -> int:
+        return self.chunk
 
     def prepare(self, A, u, rowsum):
         order = np.argsort(u, kind="stable")
@@ -369,15 +375,16 @@ extern "C" __global__ void advance(const int* indptr, const int* indices, const 
         if (y != x && u[y] > u[x] && atomicSub(&deg[y], 1) == 1) order[atomicAdd(tail, 1)] = y;
     }
 }
-// one wave of the sweep: thread (i, c) for node order[start + i], column c
+// one wave of the sweep: thread (i, c) for node order[start + i], column c; out is (n x C)
+// column-major, the layout cuSPARSE's csr @ dense takes without a copy
 extern "C" __global__ void catch_wave(const int* indptr, const int* indices, const double* data,
         const double* u, const double* rowsum, const int* order, int start, int cnt,
-        const unsigned int* mask, int C, double* out) {
+        const unsigned int* mask, int C, int n, double* out) {
     long long t = (long long)blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= (long long)cnt * C) return;
-    int i = (int)(t / C), c = (int)(t % C);
+    int i = (int)(t % cnt), c = (int)(t / cnt);
     int x = order[start + i];
-    long long o = (long long)x * C + c;
+    long long col = (long long)c * n, o = col + x;
     if ((mask[x] >> c) & 1u) { out[o] = 1.0; return; }
     double ux = u[x], Q = rowsum[x] * ux, acc = 0.0;
     for (int p = indptr[x]; p < indptr[x + 1]; p++) {
@@ -385,7 +392,7 @@ extern "C" __global__ void catch_wave(const int* indptr, const int* indices, con
         if (y != x && u[y] < ux) {
             double q = -data[p] * (ux - u[y]);
             Q += q;
-            acc += q * out[(long long)y * C + c];
+            acc += q * out[col + y];
         }
     }
     out[o] = Q > 0 ? acc / Q : 0.0;
@@ -409,6 +416,14 @@ class GpuSweep:
             self._memo["k"] = tuple(mod.get_function(f) for f in ("indeg", "advance",
                                                                    "catch_wave"))
         return self._memo["k"]
+
+    def columns(self, n: int) -> int:
+        """Up to `chunk`, as many as a quarter of the free device memory holds: a block of
+        several km^2 has ~50M unknowns, 32 columns of which are 11 GB."""
+        import cupy as cp
+        pool = cp.get_default_memory_pool()
+        free = cp.cuda.Device().mem_info[0] + pool.free_bytes()
+        return max(1, min(self.chunk, int(free / 4 / (8 * n))))
 
     def prepare(self, A, u, rowsum):
         import cupy as cp
@@ -437,12 +452,12 @@ class GpuSweep:
             for m in range(C):
                 r = rows[cols == m]
                 mask[r] |= np.uint32(1 << m)
-            out = cp.zeros((n, C))
+            out = cp.zeros((n, C), order="F")
             for s, e in zip(waves[:-1], waves[1:], strict=True):
                 tot = (e - s) * C
                 k_wave(((tot + 255) // 256,), (256,),
                        (ip, ix, A.data, u, rowsum, order, np.int32(s), np.int32(e - s), mask,
-                        np.int32(C), out))
+                        np.int32(C), np.int32(n), out))
             return out
         return run
 
@@ -486,8 +501,9 @@ class Catchment:
         rows, cols = idx[idx >= 0], col[idx >= 0]
         run = self.sweep.prepare(A, u, rowsum)
         V = xp.zeros((c.n, len(cand)))
-        for s0 in range(0, len(cand), self.sweep.chunk):
-            C = min(self.sweep.chunk, len(cand) - s0)
+        step = self.sweep.columns(len(keep))
+        for s0 in range(0, len(cand), step):
+            C = min(step, len(cand) - s0)
             sel = (cols >= s0) & (cols < s0 + C)
             V[:, s0:s0 + C] = Hown @ run(rows[sel], cols[sel] - s0, C)
         V = xp.where(inj[:, None] > 0, V / xp.where(inj > 0, inj, 1.0)[:, None], 0.0)
@@ -590,7 +606,9 @@ def _one(i: int) -> None:
                      common.POPULATIONS[_CFG["pop"]], _CFG["power"], _CFG["along"], _CFG["solver"],
                      _CFG["search"])
     except Exception as e:
-        print(f"{b.block_id} FAILED {type(e).__name__}: {e}"[:300], flush=True)
+        where = " <- ".join(f"{f.name}:{f.lineno}" for f in
+                            reversed(traceback.extract_tb(e.__traceback__)[-4:]))
+        print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]} at {where}", flush=True)
 
 
 def cleared_through(g: pd.DataFrame, step: int) -> np.ndarray:
