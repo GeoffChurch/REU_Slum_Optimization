@@ -271,7 +271,8 @@ class Plan(NamedTuple):
     and projected (Relaxation.proj) with beta from `b0` doubling each stage up to `bmax`,
     extra stages at qmax until it gets there (b0 0: no projection, not named); `keep` > 0:
     the answer is the best exact-scored rounding of the iterates every `keep` updates (0: the
-    last iterate's)."""
+    last iterate's); `kscore` > 0 scores the candidates in the eps world at that eps (the
+    relaxation's cached structure: no new system per candidate), the winner exactly."""
     fw: int
     qmax: float
     iters: int
@@ -280,13 +281,15 @@ class Plan(NamedTuple):
     b0: float = 0.0
     bmax: float = 0.0
     keep: int = 0
+    kscore: float = 0.0
 
     @property
     def name(self) -> str:
         return (f"fw{self.fw}.q{self.qmax:g}.i{self.iters}.t{self.rtol:g}"
                 + (f".e{self.eps:g}" if self.eps != EPS else "")
                 + (f".b{self.b0:g}-{self.bmax:g}" if self.b0 > 0 else "")
-                + (f".k{self.keep}" if self.keep > 0 else ""))
+                + (f".k{self.keep}" if self.keep > 0 else "")
+                + (f"s{self.kscore:g}" if self.kscore > 0 else ""))
 
     @property
     def stages(self) -> tuple[tuple[float, float], ...]:
@@ -306,14 +309,15 @@ class Plan(NamedTuple):
 
 def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+?)(?:\.e([0-9.e-]+?))?"
-                     r"(?:\.b([0-9.]+)-([0-9.]+))?(?:\.k(\d+))?", spec)
+                     r"(?:\.b([0-9.]+)-([0-9.]+))?(?:\.k(\d+)(?:s([0-9.e-]+))?)?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
     return Plan(int(m.group(1)), float(m.group(2)), int(m.group(3)), float(m.group(4)),
                 EPS if m.group(5) is None else float(m.group(5)),
                 0.0 if m.group(6) is None else float(m.group(6)),
                 0.0 if m.group(7) is None else float(m.group(7)),
-                0 if m.group(8) is None else int(m.group(8)))
+                0 if m.group(8) is None else int(m.group(8)),
+                0.0 if m.group(9) is None else float(m.group(9)))
 
 
 class Incumbent:
@@ -323,11 +327,23 @@ class Incumbent:
     substitutes, flipping between x 0.3 and 0.5 until the continuation drops them (NOTES)."""
 
     def __init__(self, rel: Relaxation, budget: float, every: int,
-                 first: np.ndarray | None = None):
+                 first: np.ndarray | None = None, score_eps: float = 0.0):
         self.rel, self.budget, self.every, self.first = rel, budget, every, first
+        self.score_eps = score_eps
         self.n = 0
         self.J, self.r = np.inf, np.zeros(rel.c.n)
         self._seen: set[bytes] = set()
+
+    def _score(self, r: np.ndarray) -> float:
+        if self.score_eps == 0.0:
+            return self.rel.exact(r)
+        rel = self.rel                  # the eps world at score_eps, q 1, no projection
+        saved = rel.eps, rel.q, rel.beta
+        rel.eps, rel.q, rel.beta = self.score_eps, 1.0, 0.0
+        try:
+            return rel.value(r)
+        finally:
+            rel.eps, rel.q, rel.beta = saved
 
     def offer(self, x: np.ndarray) -> None:
         r = round_by_x(x, self.rel.c.cost, self.budget, first=self.first)
@@ -335,9 +351,13 @@ class Incumbent:
         if key in self._seen:
             return
         self._seen.add(key)
-        J = self.rel.exact(r)
+        J = self._score(r)
         if J < self.J:
             self.J, self.r = J, r
+
+    def best(self) -> tuple[float, np.ndarray]:
+        """(exact J, clearing) of the best candidate."""
+        return (self.J if self.score_eps == 0.0 else self.rel.exact(self.r)), self.r
 
     def __call__(self, x: np.ndarray) -> None:
         self.n += 1
@@ -415,12 +435,12 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str) -> dict:
                    x=x.tolist())
     else:
         x = np.full(c.n, D_LENS)
-    inc = Incumbent(rel, D_LENS, max(plan.keep, 1))
+    inc = Incumbent(rel, D_LENS, max(plan.keep, 1), score_eps=plan.kscore)
     xs = simp(rel, x, D_LENS, plan.stages, plan.iters, log=log,
               watch=inc if plan.keep > 0 else None)
     inc.offer(xs)                                         # the last iterate's rounding
-    rs = inc.r
-    out.update(simp_perm=rel.perm(inc.J), simp_D=float(c.cost @ rs),
+    Jbest, rs = inc.best()
+    out.update(simp_perm=rel.perm(Jbest), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
                simp_cleared=np.flatnonzero(rs).tolist(), simp_x=xs.tolist(),
                t=time.time() - t0)
@@ -453,7 +473,8 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     for D in PATH_DS:
         rest = max(D - float(c.cost[fixed].sum()), 0.0)
         x = np.where(fixed, 1.0, rest / max(float(c.cost[~fixed].sum()), 1e-12))
-        inc = Incumbent(rel, D, max(plan.keep, 1), first=fixed.astype(float))
+        inc = Incumbent(rel, D, max(plan.keep, 1), first=fixed.astype(float),
+                        score_eps=plan.kscore)
         x = simp(rel, x, D, plan.stages, plan.iters, log=lambda s: None,
                  xlo=np.where(fixed, 1.0, XMIN), watch=inc if plan.keep > 0 else None)
         inc.offer(x)
