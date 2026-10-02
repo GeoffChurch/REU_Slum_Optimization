@@ -328,9 +328,12 @@ PATH_DS = tuple(round(0.01 * k, 2) for k in range(1, 16))
 
 
 def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.DataFrame:
-    """Nested SIMP: for D in PATH_DS, warm-start from the last budget's x with everything it
-    cleared held at 1 (the full q continuation at the first budget, then q = qmax), round, score
-    exactly. Rows in the greedy's format: `cleared` = the buildings new at this step."""
+    """Nested SIMP: for D in PATH_DS, everything cleared so far held at 1, the rest reset to an
+    even share of the remaining budget and the full q continuation rerun (warm-starting the
+    rest at q = qmax traps them: a building SIMP has switched off, x = XMIN, has gradient
+    ~ q x^(q-1) ~ 0 and multiplicative updates, so it never comes back -- measured: -0.076 Lens
+    A against the greedy), round, score exactly. Rows in the greedy's format: `cleared` = the
+    buildings new at this step."""
     c = _clearing(bid, device, along)
     rel = Relaxation(c, power, rtol=plan.rtol)
     J0, P0 = rel.J0, c.sc.P0
@@ -339,15 +342,17 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     fixed = np.zeros(c.n, dtype=bool)
     x = np.full(c.n, PATH_DS[0])
     t0 = time.time()
-    for k, D in enumerate(PATH_DS):
-        x = simp(rel, x, D, plan.qs if k == 0 else (plan.qmax,), plan.iters,
-                 log=lambda s: None, xlo=np.where(fixed, 1.0, XMIN))
+    for D in PATH_DS:
+        rest = max(D - float(c.cost[fixed].sum()), 0.0)
+        x = np.where(fixed, 1.0, rest / max(float(c.cost[~fixed].sum()), 1e-12))
+        x = simp(rel, x, D, plan.qs, plan.iters, log=lambda s: None,
+                 xlo=np.where(fixed, 1.0, XMIN))
         r = round_by_x(x, c.cost, D, first=fixed.astype(float)) > 0
         assert r[fixed].all()
         new = np.flatnonzero(r & ~fixed)
         fixed |= r
         J, P = rel.exact_JP(fixed.astype(float))
-        rows.append(dict(block=bid, n=c.n, step=k + 1, D=float(c.cost[fixed].sum()),
+        rows.append(dict(block=bid, n=c.n, step=len(rows), D=float(c.cost[fixed].sum()),
                          perm=1 - (J / J0) ** (1 / power), perm1=1 - P / P0,
                          cleared=new.tolist(), P0=P0, t=time.time() - t0))
         print(f"  {bid} D {D:.2f}: {rows[-1]['D']:.4f} perm' {rows[-1]['perm']:.4f} "

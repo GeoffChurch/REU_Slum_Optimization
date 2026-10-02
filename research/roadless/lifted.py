@@ -785,8 +785,9 @@ class CpuAMG:
         def solve1(b, rtol, x0):
             res: list[float] = []
             x = ml.solve(b, x0=x0, tol=rtol, accel="cg", maxiter=500, residuals=res)
-            if res[-1] > rtol * res[0] * 10:
-                raise RuntimeError(f"AMG-CG did not converge: {res[-1] / res[0]:.2e} after "
+            nb = float(np.linalg.norm(b))
+            if res[-1] > rtol * nb * 10:         # relative to b, as pyamg's tol (x0 may be close)
+                raise RuntimeError(f"AMG-CG did not converge: {res[-1] / nb:.2e} after "
                                    f"{len(res)}")
             return x
 
@@ -865,6 +866,9 @@ class GpuAMG:
 
     def prepare(self, A, coarsening):
         cp, cs = self.xp, self.sparse
+        # cupy's pool keeps every freed block; each system builds new matrices, so without this a
+        # process only grows (~20 GB per 5810 run; two big blocks then exhaust the 48 GB card)
+        cp.get_default_memory_pool().free_all_blocks()
         if A.shape[0] < SMALL:
             lu = factorized(A.get().tocsc())
             return lambda b, rtol, x0=None: cp.asarray(lu(cp.asnumpy(b)))
