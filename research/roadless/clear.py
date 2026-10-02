@@ -120,11 +120,14 @@ class Clearing:
     def P(self, removed: np.ndarray) -> float:
         return self.sc.P_free(self.open_(removed))
 
-    def tension(self, power: float = 1.0) -> Tension:
+    def tension(self, power: float = 1.0, restore: bool = False) -> Tension:
         """First-order gain in J_power of clearing each (remaining) building, from one
         eps-material solve (power 1: the potential is its own adjoint) or two (power != 1: the
         adjoint L lam = dJ/du = power u_i^(power-1) x injection). dJ/dw_e = -(du_e)(dlam_e).
-        Everything but the per-building results stays on the solver's device."""
+        `restore`: instead, of putting back each cleared building (negative: J rises), by the
+        same finite difference toward everything restored (a derivative at the 0/1 clearing
+        splits each edge among the many cells tied at the min of fully open space and
+        understates it). Everything but the per-building results stays on the device."""
         g = self.sc.grid
         xp, th = self.p.solver.xp, self.p.solver.to_host
         op = self.open_(self.removed)
@@ -154,8 +157,13 @@ class Clearing:
         ff = self.inside_flat                            # free cell -> flat (eps: all inside)
         Agrad = xp.zeros((K, g.inside.size))
         fam = []
+        if restore:                                     # everything put back (eps world)
+            op0 = self.open_(np.zeros(self.n, dtype=bool))
+            ref = op0 + EPS * (self.full - op0)
+        else:
+            ref = self.full
         for i, ((ca, cb, ka, kb, wf), (ca2, cb2, _, _, wc)) in enumerate(zip(
-                lifted.edges(g, self.full, pu), lifted.edges(g, op_eps, pu), strict=True)):
+                lifted.edges(g, ref, pu), lifted.edges(g, op_eps, pu), strict=True)):
             assert bool((ca == ca2).all()) and bool((cb == cb2).all())
             if i < K and not np.isscalar(Fl[i]):        # along family, layer i
                 Fi = xp.asarray(Fl[i]).ravel()
@@ -172,11 +180,16 @@ class Clearing:
         # nonlocal gain: d(gain)/d(open) at every cell, x the open each building would add
         dgain = xp.asarray(self.ps.along.vjp(op_eps, g.h, K, Agrad.reshape(K, *op_eps.shape)))
         nonlocal_gain = th(self.bfree @ dgain.ravel()[ff]) * (1.0 - EPS)
-        # attribution: building j owns frac/(1 - op) of each cell it covers
-        scale = 1.0 / xp.maximum(1.0 - xp.asarray(op).ravel()[ff], 1e-9)
+        # attribution: building j owns frac/(1 - op) of each cell it covers (restore: frac /
+        # (op - op0), its share of the cell's cleared part)
+        if restore:
+            nonlocal_gain = -nonlocal_gain
+            scale = 1.0 / xp.maximum(xp.asarray(op - op0).ravel()[ff], 1e-9)
+        else:
+            scale = 1.0 / xp.maximum(1.0 - xp.asarray(op).ravel()[ff], 1e-9)
         return Tension(system=sy, u=sol.u, lam=lam, fam=fam, bfree=self.bfree, scale=scale,
-                       K=K, home_u=home_u, removed=self.removed, nonlocal_gain=nonlocal_gain,
-                       solver=self.p.solver)
+                       K=K, home_u=home_u, removed=~self.removed if restore else self.removed,
+                       nonlocal_gain=nonlocal_gain, solver=self.p.solver)
 
 def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     from scipy.stats import spearmanr
@@ -559,38 +572,42 @@ class Spread:
         return Picked(taken, *_exact(c, taken, power))
 
 
+def grow(c: Clearing, picker: Picker, power: float, d_max: float, J: float):
+    """The greedy from c's current clearing (J_power J): each step ranks the remaining buildings
+    by tension per unit of population and lets `picker` clear some, until d_max. Yields
+    (Picked, D after) per step; c.removed is updated before each yield."""
+    while c.cost[c.removed].sum() < d_max - 1e-12 and not c.removed.all():
+        pk = picker.pick(c, c.tension(power), J, power)
+        c.removed[pk.cleared] = True
+        J = pk.J
+        yield pk, float(c.cost[c.removed].sum())
+
+
 def greedy_block(b, picker: Picker, h: float, d_max: float, out: Path, population,
                  power: float, along: lifted.AlongConductance, solver: lifted.Solver,
                  search: lifted.AlongConductance | None = None) -> None:
-    """Each step: rank remaining buildings by tension (in J_power) per unit of population and
-    let `picker` clear some. Records perm (in J_power) and perm1 (the p = 1 score) at every
+    """The greedy to d_max. Records perm (in J_power) and perm1 (the p = 1 score) at every
     step; `cleared` lists the step's buildings in pick order."""
     c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8, along=along, solver=solver),
                  population=population, search=search)
     sc = c.sc
     J0 = sc.J(sc.u0, power)
     P0 = sc.P0
-    J = J0
     rows = [dict(block=b.block_id, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[],
                  P0=P0, t=0.0)]
-    step = 0
     t0 = time.time()
-    while c.cost[c.removed].sum() < d_max - 1e-12 and not c.removed.all():
-        pk = picker.pick(c, c.tension(power), J, power)
-        c.removed[pk.cleared] = True
-        J = pk.J
-        step += 1
-        rows.append(dict(block=b.block_id, n=c.n, step=step, D=float(c.cost[c.removed].sum()),
+    for step, (pk, D) in enumerate(grow(c, picker, power, d_max, J0), start=1):
+        rows.append(dict(block=b.block_id, n=c.n, step=step, D=D,
                          perm=1 - (pk.J / J0) ** (1 / power), perm1=1 - pk.P1 / P0,
                          cleared=pk.cleared, P0=P0, t=time.time() - t0))
         if c.n > 1000:
-            print(f"  {b.block_id} step {step} D {rows[-1]['D']:.3f} perm' {rows[-1]['perm']:.3f}"
+            print(f"  {b.block_id} step {step} D {D:.3f} perm' {rows[-1]['perm']:.3f}"
                   f" {rows[-1]['t']:.0f}s", flush=True)
     tmp = out.with_suffix(f".{os.getpid()}.tmp")
     pd.DataFrame(rows).to_parquet(tmp)
     os.replace(tmp, out)
-    print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {step} steps, perm' at end "
-          f"{rows[-1]['perm']:.3f}  {time.time() - t0:.0f}s", flush=True)
+    print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {len(rows) - 1} steps, perm' at "
+          f"end {rows[-1]['perm']:.3f}  {time.time() - t0:.0f}s", flush=True)
 
 
 _BLOCKS: list = []

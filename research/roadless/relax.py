@@ -272,7 +272,9 @@ class Plan(NamedTuple):
     extra stages at qmax until it gets there (b0 0: no projection, not named); `keep` > 0:
     the answer is the best exact-scored rounding of the iterates every `keep` updates (0: the
     last iterate's); `kscore` > 0 scores the candidates in the eps world at that eps (the
-    relaxation's cached structure: no new system per candidate), the winner exactly."""
+    relaxation's cached structure: no new system per candidate), the winner exactly; `warm`
+    > 0 (path only): each budget after the first starts from the last budget's x (the free
+    buildings lifted to the uniform share) with `warm` updates per stage."""
     fw: int
     qmax: float
     iters: int
@@ -282,6 +284,7 @@ class Plan(NamedTuple):
     bmax: float = 0.0
     keep: int = 0
     kscore: float = 0.0
+    warm: int = 0
 
     @property
     def name(self) -> str:
@@ -289,7 +292,8 @@ class Plan(NamedTuple):
                 + (f".e{self.eps:g}" if self.eps != EPS else "")
                 + (f".b{self.b0:g}-{self.bmax:g}" if self.b0 > 0 else "")
                 + (f".k{self.keep}" if self.keep > 0 else "")
-                + (f"s{self.kscore:g}" if self.kscore > 0 else ""))
+                + (f"s{self.kscore:g}" if self.kscore > 0 else "")
+                + (f".w{self.warm}" if self.warm > 0 else ""))
 
     @property
     def stages(self) -> tuple[tuple[float, float], ...]:
@@ -309,7 +313,7 @@ class Plan(NamedTuple):
 
 def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+?)(?:\.e([0-9.e-]+?))?"
-                     r"(?:\.b([0-9.]+)-([0-9.]+))?(?:\.k(\d+)(?:s([0-9.e-]+))?)?", spec)
+                     r"(?:\.b([0-9.]+)-([0-9.]+))?(?:\.k(\d+)(?:s([0-9.e-]+))?)?(?:\.w(\d+))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
     return Plan(int(m.group(1)), float(m.group(2)), int(m.group(3)), float(m.group(4)),
@@ -317,7 +321,8 @@ def plan_of(spec: str) -> Plan:
                 0.0 if m.group(6) is None else float(m.group(6)),
                 0.0 if m.group(7) is None else float(m.group(7)),
                 0 if m.group(8) is None else int(m.group(8)),
-                0.0 if m.group(9) is None else float(m.group(9)))
+                0.0 if m.group(9) is None else float(m.group(9)),
+                0 if m.group(10) is None else int(m.group(10)))
 
 
 class Incumbent:
@@ -460,7 +465,9 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     even share of the remaining budget and the full q continuation rerun (warm-starting the
     rest at q = qmax traps them: a building SIMP has switched off, x = XMIN, has gradient
     ~ q x^(q-1) ~ 0 and multiplicative updates, so it never comes back -- measured: -0.076 Lens
-    A against the greedy), round, score exactly. Rows in the greedy's format: `cleared` = the
+    A against the greedy), round, score exactly. plan.warm > 0: after the first budget, the
+    rest start from the last x lifted to at least that even share (so none is trapped at
+    XMIN), and each stage gets plan.warm updates. Rows in the greedy's format: `cleared` = the
     buildings new at this step."""
     c = _clearing(bid, device, along)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
@@ -470,12 +477,14 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     fixed = np.zeros(c.n, dtype=bool)
     x = np.full(c.n, PATH_DS[0])
     t0 = time.time()
-    for D in PATH_DS:
+    for i, D in enumerate(PATH_DS):
         rest = max(D - float(c.cost[fixed].sum()), 0.0)
-        x = np.where(fixed, 1.0, rest / max(float(c.cost[~fixed].sum()), 1e-12))
+        even = rest / max(float(c.cost[~fixed].sum()), 1e-12)
+        warm = plan.warm > 0 and i > 0
+        x = np.where(fixed, 1.0, np.maximum(x, even) if warm else even)
         inc = Incumbent(rel, D, max(plan.keep, 1), first=fixed.astype(float),
                         score_eps=plan.kscore)
-        x = simp(rel, x, D, plan.stages, plan.iters, log=lambda s: None,
+        x = simp(rel, x, D, plan.stages, plan.warm if warm else plan.iters, log=lambda s: None,
                  xlo=np.where(fixed, 1.0, XMIN), watch=inc if plan.keep > 0 else None)
         inc.offer(x)
         r = inc.r > 0
