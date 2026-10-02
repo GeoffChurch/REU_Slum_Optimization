@@ -709,3 +709,26 @@ stays selectable, 15% faster):
 Not monotone: 1558 falls 0.523 -> 0.292 at e1e-4 (greedy 0.596). Still collapsed: 22422, 23597,
 20543, 38616. Median time to D 0.10: greedy 29 s, SIMP 61 s (e 0.01) / 70 s (e 1e-4); totals
 over the 59: greedy 3,681 s, SIMP e1e-4 6,354 s.
+
+### SIMP speed (owner: "why hours and not minutes?", 2026-10-02)
+
+Where the hours went: one SIMP run is <= 80 OC updates of two solves each (forward, adjoint) on
+every inside cell x 8 headings (30796: 48M unknowns, 241M nonzeros); the nested path reruns
+the whole continuation at 15 budgets (15x); batches multiply again. The greedy is minutes.
+Profile of one update on 30796, 5.1 s: solves 2.5 (18 -- 33 K-cycle CG iterations warm, each
+fine SpMV 5.6 ms at ~660 GB/s, near the card's bandwidth), AMG setup 1.15, the CSR sort 0.4,
+gradient 0.4, host-side home_u and copies 0.5.
+Same-answer engineering (0488d72), 5.1 -> 2.8 s per update, SIMP end to end 1.5 -- 1.8x
+(5810 169 -> 101 s; picks identical on 3 of 4 blocks, 3 of 621 differ on the fourth):
+  - the eps world has the same sparsity pattern on every update: the CSR structure and each
+    level's Galerkin map are cached per pattern (setup 1.15 -> 0.13 s), the power iteration for
+    the smoother's rho warm-starts (5 iterations, not 30);
+  - the K-cycle in single precision under the double outer CG (solves -28%); its dot products
+    must accumulate in double (rho2 = bet - gam^2/rho1 cancels to NaN in single). Costs ~1 GB
+    more memory: GpuAMG(single=False) stays for blocks at the card's edge;
+  - home_u on the device (the 48M potentials no longer go to the host).
+Fewer updates (fw0.q3.i10.t0.001.e0.0001 vs i20, 13 blocks): 3x faster in all with the above;
+ordinary blocks move by -0.0004 median (-0.004 .. +0.0004), but the gated blocks flip
+chaotically: 30848 0.719 -> 0.436, 20543 0.235 -> 0.538, 46841 0.522 -> 0.556. Whether SIMP
+opens a gate is basin luck under the grey leak, which is what projection is meant to fix. i10
+is the fast preset, i20 the default until projection is measured.
