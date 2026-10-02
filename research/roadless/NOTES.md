@@ -755,3 +755,12 @@ roundings scored once): SIMP proposes 0/1 clearings, the real objective picks.
 is no longer needed for the collapses; it wins some gated blocks and loses some controls: kept
 selectable, i10.k1 is the default. The exact scoring adds a second structure (real world) to
 the solver's caches: 1558 (1.38 km^2) now runs out of memory.
+
+**SIMP + incumbent on the large blocks** (fw0.q3.i10.t0.001.e0.0001.k1, J_2, uni, Lens A at D
+0.10; 56 of the 59 that fit the greedy; 1558, 20023, 30796 run out of memory with the exact
+scoring's second structure in the caches):
+    vs greedy          median +0.009 [+0.006, +0.012]  mean +0.008  ahead 84%  worst -0.037
+    (SIMP e1e-4 alone  median +0.007 [+0.005, +0.011]  mean -0.022  ahead 75%  worst -0.800)
+    by size: 1,000-1,500 bldgs +0.008 (33); 1,500-2,500 +0.009 (20); > 2,500 +0.022 (3)
+Median time 50 s (greedy 25 s to D 0.10). Worst: 38616 0.528 vs 0.565, 23597 0.750 vs 0.772.
+Best of greedy and SIMP adds only +0.002 in mean over SIMP + incumbent alone.
