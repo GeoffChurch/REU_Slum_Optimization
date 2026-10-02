@@ -30,7 +30,7 @@ nested runs).
 ## Greedy
 
 - **Exchange refinement**: now a special case of the add/remove search below.
-- **Batch size** (running: S0.005cat on the 44). Sentinel screen, Lens A at D 0.10, S0.005 /
+- **Batch size** (done: S0.005cat on the 44, +0.003 median, ahead 82%, 1.6x time; NOTES). Sentinel screen, Lens A at D 0.10, S0.005 /
   S0.01 / S0.02: 30848 0.776 / 0.770 / 0.750, 5810 0.329 / 0.319 / 0.306, 9712 0.181 / 0.176 /
   0.170, 22422 0.815 / 0.814 / -; monotone, smaller is better at 1.3 -- 3x the time; 0.02
   dropped from the full run.
@@ -41,7 +41,7 @@ nested runs).
 
 ## SIMP
 
-- **Cheaper incumbent** (running: `.k1s1e-06` on the 44). Candidates scored in the eps world
+- **Cheaper incumbent** (done: `.k1s1e-06` on the 44 equals `.k1`, 15% faster; NOTES). Candidates scored in the eps world
   at eps 1e-6 (the relaxation's cached structure), the winner exactly. Sentinel: the same
   scores (0.8144 / 0.7822 / 0.3476 / 0.1871 vs 0.814 / 0.782 / 0.348 / 0.187), 10 -- 25%
   faster. Not yet tried: every 2nd update (`.k2`).
@@ -49,8 +49,8 @@ nested runs).
   budget from the last may no longer trap (it did without: -0.076 Lens A); would cut the
   path's 15x.
 - **Memory** (partly done, 63fa484): structures are cached only for a pattern seen twice,
-  and the greedy releases its tension before the exact scoring (22422 fits again). Running:
-  1558, 20023, 30796 under `.k1s1e-06`.
+  and the greedy releases its tension before the exact scoring (22422 fits again); 1558,
+  20023, 30796 fit under `.k1s1e-06`.
 - **Damped OC or MMA** (idea). The gate and its substitutes flip x 0.3 <-> 0.5 every update
   under OC; a damped update or MMA should converge cleanly and propose better roundings.
 - **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).

@@ -777,3 +777,14 @@ Nesting costs little: the path at D 0.10 is within 0.004 of single-budget SIMP +
 (0.531 vs 0.535, 0.595 vs 0.600, 0.785 vs 0.782, 0.343 vs 0.348, 0.178 vs 0.179). The gain is
 largest at small budgets (30848: 0.305 -> 0.553 at D 0.02, the gate found first). Cost: 9 -- 29
 min per block for 15 budgets, against the greedy's 0.5 -- 2 min (before today's speedups to both).
+
+**Held-out confirmation** (the 44 large blocks not used for tuning; Lens A at D 0.10, J_2, uni):
+    greedy S0.005cat vs S0.01cat         median +0.003 [+0.002, +0.004]  mean +0.003  ahead 82%  worst -0.001
+    SIMP .k1s1e-06 vs greedy S0.01cat    median +0.009 [+0.006, +0.011]  mean +0.009  ahead 89%  worst -0.013
+    SIMP .k1s1e-06 vs greedy S0.005cat   median +0.006 [+0.004, +0.007]  mean +0.006  ahead 91%  worst -0.013
+Greedy S0.005 also needs a little less displacement for Lens B (perm 0.35: median -0.002 D, 38
+blocks). Median time to D 0.10: greedy S0.005 36 s, SIMP .k1s1e-06 36 s (same). The eps-scored
+incumbent (.k1s1e-06) gives .k1's answers (max |diff| 0.0002) 15% faster, and fits 1558,
+20023, 30796 (greedy / SIMP: 0.596 / 0.576, 0.337 / 0.342, 0.480 / 0.513).
+Frontier: at one budget SIMP + incumbent beats the greedy at equal time; the greedy stays for
+the nested curve (every budget in one run, where SIMP's path is ~15 runs).
