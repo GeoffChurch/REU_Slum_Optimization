@@ -700,3 +700,12 @@ cleared), so the gate is worth little. At the uniform start x = 0.10 the gate ra
 So neither contains the other: SIMP's grey continuation finds better spread-out clearings
 (5810 +0.03), the greedy's exact rescoring finds gates. Best of both, scored exactly, is the
 robust answer for large blocks at the cost of running both.
+
+**eps 1e-4 on all 59** (fw0.q3.i20.t0.001.e0.0001; now the plan to use, quality-first; e 0.01
+stays selectable, 15% faster):
+    vs greedy                      median +0.007 [+0.005, +0.011]  mean -0.026  SIMP ahead on 73%
+    vs SIMP at eps 0.01            median +0.001 [+0.001, +0.002]  mean +0.005  ahead on 90%
+    best of greedy and SIMP e1e-4  median +0.007 [+0.005, +0.011]  mean +0.009  never behind
+Not monotone: 1558 falls 0.523 -> 0.292 at e1e-4 (greedy 0.596). Still collapsed: 22422, 23597,
+20543, 38616. Median time to D 0.10: greedy 29 s, SIMP 61 s (e 0.01) / 70 s (e 1e-4); totals
+over the 59: greedy 3,681 s, SIMP e1e-4 6,354 s.
