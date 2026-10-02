@@ -29,10 +29,7 @@ nested runs).
 
 ## Greedy
 
-- **Exchange refinement at the budget** (idea, top pick). After the greedy reaches D, swap one
-  cleared for one uncleared building while exact J improves; add candidates by tension, drop
-  candidates by the adjoint's closing loss on cleared buildings. Targets the greedy's myopia
-  (where SIMP wins). Also applies to SIMP's incumbent.
+- **Exchange refinement**: now a special case of the add/remove search below.
 - **Batch size** (queued). S0.005cat and S0.02cat vs S0.01cat: chosen on the 220 small
   blocks; large blocks put many more buildings in a round.
 - **Screening width** (idea). Exact-score more top candidates per round (as `M4` does).
@@ -59,15 +56,31 @@ nested runs).
 
 ## New methods
 
-- **Grow then prune** (idea; from the mycooc vocabulary work, wiki
-  `pages/mycooc/experiments/lattice_pool_em_audit-results.md`: an overcomplete seed pool 3x
-  the target, pruned 20% per round by expected count under a refitted model, beat top-K by
-  5-10 F1 points). Here: clear ~3x the budget (greedy or SIMP at D 0.3, or every building with
-  positive tension), then reopen the least valuable batch per round, re-solving between
-  rounds, down to D. A gate and its companions are judged in each other's company, the
-  greedy's myopia from the other side. Risk: substitutes (three alternative gates each look
-  removable when all are open) pruned in the same batch; small batches, re-solve per round,
-  and the catchment overlap discount guard against it.
+- **Add/remove subset search** (idea, top pick; wiki `pages/methods/plus-l-take-away-r.md`).
+  One family, plus-l take-away-r / floating search: a schedule of (add a, remove r) moves with
+  an add scorer (tension, Spread's overlap discount), a remove scorer (the adjoint's closing
+  loss on cleared buildings, the same discount for removal batches) and an acceptance rule
+  (exact J). Special cases: the greedy (add batches, remove none), exchange refinement (at D,
+  add 1 remove 1, accept if better), grow then prune (add to ~3x D, then remove batches back
+  to D: the mycooc vocabulary recipe, `pages/mycooc/experiments/lattice_pool_em_audit-results.md`,
+  overcomplete pool 3x the target, 20% pruned per round with a refit, beat top-K by 5-10 F1),
+  floating search (add 1, remove while it helps). Removal judges a gate in its companions'
+  company (the greedy's blind spot); its risk is substitutes, each removable alone, dropped
+  together in one batch: small batches, a re-solve per round, the overlap discount. Build it
+  as one Strategy (schedule x scorers x acceptance), the greedy becoming its first preset.
+
+## Experiment design
+
+- **Adaptive block selection** (idea; wiki `pages/methods/adaptive-benchmark-items.md`).
+  Fit a factor model to the method x block matrix of paired differences (axes like "opens
+  gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the
+  most expected information per GPU-second about the decision, stop when it is made. The
+  headline number still comes from the untouched set; keep some random blocks in every
+  screen. Cheap first step: an SVD of the matrix we already have (greedy, SIMP variants,
+  translucent search; 220 + 59 blocks) to see which blocks load on which axis.
+- **Generalize kernelcore's outcome model** (idea, other repo). Its EVSI reweighting is
+  general; its likelihood is binary verdicts. A continuous heavy-tailed outcome model would
+  serve this backlog's screens and adaptive selection.
 
 ## Coverage and model
 
