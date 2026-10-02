@@ -58,15 +58,33 @@ class Relaxation:
     def __init__(self, c: Clearing, power: float, q: float = 1.0, rtol: float = RTOL_SCORE,
                  eps: float = EPS):
         self.c, self.power, self.q, self.rtol, self.eps = c, power, q, rtol, eps
+        self.beta = 0.0                        # projection sharpness (0: none); simp sets it
         self._u = self._lam = None             # the last solves: warm starts for the next
         g = c.sc.grid
         self.ff0 = g.ff0.ravel()
         self.inside = np.flatnonzero(g.inside)
         self.J0 = c.sc.J(c.sc.u0, power)
 
+    def proj(self, x: np.ndarray) -> np.ndarray:
+        """The clearing a design x stands for: x itself, or with beta > 0 a smooth step at
+        ETA, H(x) = (tanh(beta ETA) + tanh(beta (x - ETA))) / (tanh(beta ETA) + tanh(beta
+        (1 - ETA))), so a mostly-closed building conducts ~nothing (no grey leaks) and 0, 1
+        stay 0, 1. Conductance share H(x)^q, cost c . H(x)."""
+        if self.beta == 0.0:
+            return x
+        b = self.beta
+        return ((np.tanh(b * ETA) + np.tanh(b * (x - ETA)))
+                / (np.tanh(b * ETA) + np.tanh(b * (1 - ETA))))
+
+    def dproj(self, x: np.ndarray) -> np.ndarray:
+        if self.beta == 0.0:
+            return np.ones_like(x)
+        b = self.beta
+        return b * (1 - np.tanh(b * (x - ETA)) ** 2) / (np.tanh(b * ETA) + np.tanh(b * (1 - ETA)))
+
     def open_of(self, x: np.ndarray) -> np.ndarray:
         o = self.ff0.copy()
-        o[self.inside] += self.c.bf.T @ (x ** self.q)
+        o[self.inside] += self.c.bf.T @ (self.proj(x) ** self.q)
         return np.minimum(o, self.c.full.ravel()).reshape(self.c.full.shape)
 
     def _solve(self, x: np.ndarray):
@@ -86,7 +104,8 @@ class Relaxation:
     def value(self, x: np.ndarray) -> float:
         return self.c.sc.J(self._solve(x)[3], self.power)
 
-    def value_grad(self, x: np.ndarray) -> tuple[float, np.ndarray]:
+    def value_sgrad(self, x: np.ndarray) -> tuple[float, np.ndarray]:
+        """J and its gradient in the projected clearing s = proj(x)."""
         c, p = self.c, self.c.p
         xp = p.solver.xp
         g = c.sc.grid
@@ -142,8 +161,12 @@ class Relaxation:
             gc[free] += -q * (g.h * g.h / (p.ell_m ** 2 * gap[k]))
         grad = (1.0 - self.eps) * (c.bf @ p.solver.to_host(gc)[self.inside])
         if self.q != 1.0:
-            grad = grad * self.q * x ** (self.q - 1.0)
+            grad = grad * self.q * self.proj(x) ** (self.q - 1.0)
         return J, grad
+
+    def value_grad(self, x: np.ndarray) -> tuple[float, np.ndarray]:
+        J, gs = self.value_sgrad(x)
+        return J, gs * self.dproj(x)
 
     def exact(self, x: np.ndarray) -> float:
         """J_p of a 0/1 clearing in the real geometry (buildings closed)."""
@@ -221,72 +244,97 @@ def frank_wolfe(rel: Relaxation, budget: float, iters: int, log=print) -> dict:
 
 
 XMIN = 1e-3
+ETA = 0.5                                          # the projection's threshold
 
 
 class Plan(NamedTuple):
     """How a block is solved: `fw` Frank-Wolfe iterations from x = 0 (0: start SIMP from the
     uniform x = D, no bound), SIMP continuation q = 1.5, 2, ... `qmax` with up to `iters`
     optimality-criteria updates each, solves to `rtol` while optimizing (scores are exact),
-    closed buildings conducting `eps` while optimizing (named only when not the tension's)."""
+    closed buildings conducting `eps` while optimizing (named only when not the tension's),
+    and projected (Relaxation.proj) with beta from `b0` doubling each stage up to `bmax`,
+    extra stages at qmax until it gets there (b0 0: no projection, not named)."""
     fw: int
     qmax: float
     iters: int
     rtol: float
     eps: float = EPS
+    b0: float = 0.0
+    bmax: float = 0.0
 
     @property
     def name(self) -> str:
         return (f"fw{self.fw}.q{self.qmax:g}.i{self.iters}.t{self.rtol:g}"
-                + (f".e{self.eps:g}" if self.eps != EPS else ""))
+                + (f".e{self.eps:g}" if self.eps != EPS else "")
+                + (f".b{self.b0:g}-{self.bmax:g}" if self.b0 > 0 else ""))
 
     @property
-    def qs(self) -> tuple[float, ...]:
-        return tuple(float(q) for q in np.arange(1.5, self.qmax + 1e-9, 0.5))
+    def stages(self) -> tuple[tuple[float, float], ...]:
+        """(q, beta) per continuation stage."""
+        qs = [float(q) for q in np.arange(1.5, self.qmax + 1e-9, 0.5)]
+        if self.b0 == 0:
+            return tuple((q, 0.0) for q in qs)
+        out, b = [], self.b0
+        for q in qs:
+            out.append((q, b))
+            b = min(2 * b, self.bmax)
+        while out[-1][1] < self.bmax:
+            out.append((qs[-1], b))
+            b = min(2 * b, self.bmax)
+        return tuple(out)
 
 
 def plan_of(spec: str) -> Plan:
-    m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+?)(?:\.e([0-9.e-]+))?", spec)
+    m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+?)(?:\.e([0-9.e-]+?))?"
+                     r"(?:\.b([0-9.]+)-([0-9.]+))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
     return Plan(int(m.group(1)), float(m.group(2)), int(m.group(3)), float(m.group(4)),
-                EPS if m.group(5) is None else float(m.group(5)))
+                EPS if m.group(5) is None else float(m.group(5)),
+                0.0 if m.group(6) is None else float(m.group(6)),
+                0.0 if m.group(7) is None else float(m.group(7)))
 
 
-def simp(rel: Relaxation, x0: np.ndarray, budget: float, qs: tuple[float, ...], iters: int,
-         log=print, move: float = 0.2, xlo: np.ndarray | None = None) -> np.ndarray:
-    """SIMP continuation from x0: for q in qs, up to `iters` optimality-criteria updates
-    x <- clip(x (-g / (lam c))^1/2) within `move` of x and [xlo (default XMIN), 1], lam bisected
-    so that c . x = budget. Non-convex: a local method."""
+def simp(rel: Relaxation, x0: np.ndarray, budget: float,
+         stages: tuple[tuple[float, float], ...], iters: int, log=print, move: float = 0.2,
+         xlo: np.ndarray | None = None) -> np.ndarray:
+    """SIMP continuation from x0: for (q, beta) in stages, up to `iters` optimality-criteria
+    updates x <- clip(x (-g / (lam c H'(x)))^1/2) within `move` of x and [xlo (default XMIN),
+    1], lam bisected so that c . H(x) = budget (H = rel.proj; H' cancels the one in g, so the
+    ratio is the sensitivity to the projected clearing per unit cost). Non-convex: a local
+    method."""
     cost = rel.c.cost
     lo_ = np.full(len(cost), XMIN) if xlo is None else xlo
     x = np.clip(x0, lo_, 1.0)
     free = x > lo_
-    over = float(cost @ x) - budget
+    rel.q, rel.beta = stages[0]
+    over = float(cost @ rel.proj(x)) - budget
     if over > 0:                                         # scale the free part into the budget
         x[free] = np.maximum(lo_[free], x[free] * (1 - over / float(cost[free] @ x[free])))
     t0 = time.time()
-    for q in qs:
-        rel.q = q
+    for q, beta in stages:
+        rel.q, rel.beta = q, beta
         for it in range(iters):
-            J, g = rel.value_grad(x)
-            B = np.maximum(-g, 1e-300) / cost
+            J, gs = rel.value_sgrad(x)
+            B = np.maximum(-gs, 1e-300) / cost
             lo, hi = 1e-300, 1e300
             for _ in range(200):
                 lam = np.sqrt(lo * hi)
                 xn = np.clip(x * np.sqrt(B / lam), np.maximum(lo_, x - move),
                              np.minimum(1.0, x + move))
-                lo, hi = (lam, hi) if cost @ xn > budget else (lo, lam)
+                lo, hi = (lam, hi) if cost @ rel.proj(xn) > budget else (lo, lam)
                 if hi / lo < 1 + 1e-9:
                     break
             change = float(np.abs(xn - x).max())
             x = xn
             if it % 5 == 0 or change < 1e-3:
-                log(f"    simp q {q:g} it {it:2d} J {J:.6g} grey "
-                    f"{np.mean((x > 0.05) & (x < 0.95)):.3f} change {change:.3f} "
+                sx = rel.proj(x)
+                log(f"    simp q {q:g} beta {beta:g} it {it:2d} J {J:.6g} grey "
+                    f"{np.mean((sx > 0.05) & (sx < 0.95)):.3f} change {change:.3f} "
                     f"{time.time() - t0:.0f}s")
             if change < 1e-3:
                 break
-    rel.q = 1.0
+    rel.q, rel.beta = 1.0, 0.0
     return x
 
 
@@ -315,7 +363,7 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str) -> dict:
                    x=x.tolist())
     else:
         x = np.full(c.n, D_LENS)
-    xs = simp(rel, x, D_LENS, plan.qs, plan.iters, log=log)
+    xs = simp(rel, x, D_LENS, plan.stages, plan.iters, log=log)
     rs = round_by_x(xs, c.cost, D_LENS)
     out.update(simp_perm=rel.perm(rel.exact(rs)), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
@@ -350,7 +398,7 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     for D in PATH_DS:
         rest = max(D - float(c.cost[fixed].sum()), 0.0)
         x = np.where(fixed, 1.0, rest / max(float(c.cost[~fixed].sum()), 1e-12))
-        x = simp(rel, x, D, plan.qs, plan.iters, log=lambda s: None,
+        x = simp(rel, x, D, plan.stages, plan.iters, log=lambda s: None,
                  xlo=np.where(fixed, 1.0, XMIN))
         r = round_by_x(x, c.cost, D, first=fixed.astype(float)) > 0
         assert r[fixed].all()
