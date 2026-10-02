@@ -8,7 +8,7 @@ better off). Dropped: the current difference and the slowness (time per metre fo
 in a cell): outside the cleared cells the conductance is fixed, so slowness = current / w and
 both say what the flux and dissipation maps already say.
 
-    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/current_map.py <block id> <arms,> [cpu|gpu]
+    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/current_map.py <block id> <arms,> [cpu|gpu] [zoom|full]
 
 arm: g:<picker>:<along> (the greedy's prefix within D 0.10, current under <along>) or
 s:<plan>:<p>:<along> (relax.py's SIMP clearing for that plan, power and conductance).
@@ -105,7 +105,7 @@ def arm_of(spec: str, bid: str, cost: np.ndarray) -> Arm:
     raise ValueError(f"unknown arm {spec!r}")
 
 
-def main(bid: str, arms: list[str], device: str) -> None:
+def main(bid: str, arms: list[str], device: str, zoom: bool) -> None:
     [b] = common.build_blocks([bid])
     scans, solver = lifted.scans_of(device), lifted.solver_of(device)
     base = lifted.Params(3.0, 8, solver=solver)
@@ -123,7 +123,7 @@ def main(bid: str, arms: list[str], device: str) -> None:
     minx, miny, maxx, maxy = b.boundary.bounds
     half = 0.125 * max(maxx - minx, maxy - miny)
     window = (cx - half, cx + half, cy - half, cy + half)
-    big = len(polys) > 1500
+    big = zoom and len(polys) > 1500
     fig, axes = plt.subplots(len(arms_), 3, figsize=(36, 12 * len(arms_)), squeeze=False)
     before: dict[str, Flow] = {}
     for row, arm in enumerate(arms_):
@@ -176,10 +176,12 @@ def main(bid: str, arms: list[str], device: str) -> None:
     fig.suptitle(f"{bid}: what each clearing at D <= {D_LENS:g} did to the flow"
                  + (" (zoom)" if big else ""), fontsize=16)
     fig.tight_layout()
-    out = HERE / f"flowdiff_{bid}_{'_'.join(a.replace(':', '-') for a in arms)}.png"
+    out = HERE / (f"flowdiff_{bid}_{'_'.join(a.replace(':', '-') for a in arms)}"
+                  + ("" if zoom else "_full") + ".png")
     fig.savefig(out, dpi=80)
     print(out, flush=True)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2].split(","), sys.argv[3] if len(sys.argv) > 3 else "gpu")
+    main(sys.argv[1], sys.argv[2].split(","), sys.argv[3] if len(sys.argv) > 3 else "gpu",
+         {"zoom": True, "full": False}[sys.argv[4] if len(sys.argv) > 4 else "zoom"])
