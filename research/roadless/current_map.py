@@ -1,8 +1,10 @@
-"""Where does the flow go, and how did the greedy's 10% clearing reroute it? Per cell, the total
-current: the sum over headings of |flux| along that heading's edges (the walkers passing through
-it), solved under each run's own scoring conductance before and after its clearing. Unlike the
-straight-run gain (opened_map), the current change is global: a cleared gap that links into a
-corridor lights the whole route it feeds, out to the street, and dims the routes it relieves.
+"""What did a clearing do to the flow? Solved under the arm's own scoring conductance before and
+after its clearing, per cell: the CURRENT difference (sum over headings of |flux|: more or fewer
+walkers through the cell), the FLUX difference (sum over headings of |change in signed flux|:
+the rerouted flow, source-free since the injections and the streets are fixed, so a corridor
+that gains Q lights up ~Q along its whole length), and the DISSIPATION difference (w du^2 of
+every edge, split between its cells: the map sums exactly to the change in P, so it is where the
+score's improvement comes from).
 
     CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/current_map.py <block id> <arms,> [cpu|gpu]
 
@@ -36,22 +38,40 @@ D_LENS = 0.10
 H = 0.5
 
 
-def current(sc: common.Scorer, open_: np.ndarray, p: lifted.Params) -> np.ndarray:
-    """(ny, nx) host: per open cell, half the |flux| of every along edge touching it, summed
-    over headings (turning edges move no one in space). Zero elsewhere."""
+class Flow(NamedTuple):
+    """A field's flow, per grid cell (flat, host): phi (K, cells), the signed flux along each
+    heading (+v_k), half of every along edge credited to each end; power, the dissipation
+    w (du)^2 of every edge (along, turning, to the street), half to each end of an along edge,
+    all of a turning edge to its cell, so it sums to P."""
+    phi: np.ndarray
+    power: np.ndarray
+    P: float
+
+
+def flow(sc: common.Scorer, open_: np.ndarray, p: lifted.Params) -> Flow:
     xp = p.solver.xp
     g = sc.grid
-    sol = lifted.solve(g, open_, sc.f, p, rtol=1e-5, host=False)
-    nf = int((open_ > 0).sum())
+    sol = lifted.solve(g, open_, sc.f, p, rtol=1e-9, host=False)
+    free = xp.asarray(np.flatnonzero(open_ > 0))         # free-cell id -> flat cell
+    nf, N = len(free), open_.size
     uk = xp.zeros((nf, p.K))
     uk[sol.unk_cell >= 0] = sol.u.reshape(-1, p.K)
-    S = xp.zeros(nf)
+    phi = xp.zeros((p.K, N))
+    power = xp.zeros(N)
     for k, a, b, w in lifted.along_edges(g, open_, p):
-        F = xp.abs(w * (uk[a, k] - uk[b, k]))
-        S += 0.5 * (xp.bincount(a, F, minlength=nf) + xp.bincount(b, F, minlength=nf))
-    out = np.zeros(open_.shape)
-    out[open_ > 0] = p.solver.to_host(S)
-    return out
+        du = uk[a, k] - uk[b, k]
+        fa, fb = free[a], free[b]
+        phi[k] += 0.5 * (xp.bincount(fa, w * du, minlength=N) + xp.bincount(fb, w * du, minlength=N))
+        e = w * du * du
+        power += 0.5 * (xp.bincount(fa, e, minlength=N) + xp.bincount(fb, e, minlength=N))
+    _v, _th, _m, gap = lifted.axes(p.K)
+    vol = xp.asarray(open_.ravel()[np.flatnonzero(open_ > 0)])
+    for k in range(p.K):
+        k2 = (k + 1) % p.K
+        w = vol * (g.h * g.h / (p.ell_m ** 2 * gap[k]))
+        power[free] += w * (uk[:, k] - uk[:, k2]) ** 2
+    th = p.solver.to_host
+    return Flow(phi=th(phi), power=th(power), P=sol.P)
 
 
 class Arm(NamedTuple):
@@ -88,8 +108,9 @@ def main(bid: str, arms: list[str], device: str) -> None:
     g, polys = sc.grid, sc.polys
     lab = g.label_sub(polys)
     cost = sc.w / sc.w.sum()
-    ext = (g.x0 - g.h / 2, g.x0 + (g.inside.shape[1] - 0.5) * g.h,
-           g.y0 - g.h / 2, g.y0 + (g.inside.shape[0] - 0.5) * g.h)
+    shape = g.inside.shape
+    ext = (g.x0 - g.h / 2, g.x0 + (shape[1] - 0.5) * g.h,
+           g.y0 - g.h / 2, g.y0 + (shape[0] - 0.5) * g.h)
     arms_ = [arm_of(a, bid, cost) for a in arms]
     allc = np.concatenate([a.cleared for a in arms_])
     cx = float(np.median([q.centroid.x for q in polys[allc]]))
@@ -97,34 +118,39 @@ def main(bid: str, arms: list[str], device: str) -> None:
     minx, miny, maxx, maxy = b.boundary.bounds
     half = 0.125 * max(maxx - minx, maxy - miny)
     window = (cx - half, cx + half, cy - half, cy + half)
-    fig, axes = plt.subplots(len(arms_), 4, figsize=(44, 11 * len(arms_)), squeeze=False)
-    base_c: dict[str, np.ndarray] = {}
+    big = len(polys) > 1500
+    fig, axes = plt.subplots(len(arms_), 3, figsize=(36, 12 * len(arms_)), squeeze=False)
+    before: dict[str, Flow] = {}
     for row, arm in enumerate(arms_):
         p = dataclasses.replace(base, along=lifted.along_of(arm.along.split("@")[0], scans))
-        if arm.along not in base_c:
-            base_c[arm.along] = current(sc, g.ff0, p)
-        c0 = base_c[arm.along]
+        if arm.along not in before:
+            before[arm.along] = flow(sc, g.ff0, p)
+        f0 = before[arm.along]
         after = (g.isub & (~g.bsub | np.isin(lab, arm.cleared))).mean(axis=-1)
-        c1 = current(sc, after, p)
-        on = (c0 > 0) | (c1 > 0)
-        hi = np.quantile(np.maximum(c0, c1)[on], 0.995)
-        d = c1 - c0
-        dl = np.quantile(np.abs(d[on]), 0.995)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = np.log2(np.where(c0 > 0, c1 / c0, np.nan))
-        D = float(cost[arm.cleared].sum())
+        f1 = flow(sc, after, p)
+        dcur = np.abs(f1.phi).sum(axis=0) - np.abs(f0.phi).sum(axis=0)
+        dflux = np.abs(f1.phi - f0.phi).sum(axis=0)
+        dpow = f1.power - f0.power
+        on = (np.abs(f0.phi).sum(axis=0) > 0) | (np.abs(f1.phi).sum(axis=0) > 0)
+        print(f"{arm.label}: P {f0.P:.6g} -> {f1.P:.6g} (dP {f1.P - f0.P:.6g}); sum of the "
+              f"dissipation map {f0.power.sum():.6g} -> {f1.power.sum():.6g} (d "
+              f"{dpow.sum():.6g})", flush=True)
+
+        def sym(v):
+            lim = float(np.quantile(np.abs(v[on]), 0.995))
+            return dict(cmap="RdBu_r", norm=mcolors.SymLogNorm(lim * 1e-3, vmin=-lim, vmax=lim))
+        hi = float(np.quantile(dflux[on], 0.995))
         panels = [
-            (c1, "current after", False, dict(cmap="magma",
-                                               norm=mcolors.LogNorm(hi * 1e-4, hi))),
-            (d, "after - before (symlog)", False,
-             dict(cmap="RdBu_r", norm=mcolors.SymLogNorm(dl * 1e-3, vmin=-dl, vmax=dl))),
-            (d, "after - before, zoom", True,
-             dict(cmap="RdBu_r", norm=mcolors.SymLogNorm(dl * 1e-3, vmin=-dl, vmax=dl))),
-            (ratio, "log2(after / before), zoom", True, dict(cmap="RdBu_r", vmin=-3, vmax=3)),
+            (dcur, "current difference: sum_k |phi_k| after - before (symlog)", sym(dcur)),
+            (dflux, "flux difference: sum_k |phi_k after - phi_k before| (linear)",
+             dict(cmap="magma", vmin=0, vmax=hi)),
+            (dpow, f"dissipation difference (sums to dP = {f1.P - f0.P:.4g}; blue = P falls)",
+             sym(dpow)),
         ]
-        for col, (v, label, zoom, kw) in enumerate(panels):
+        D = float(cost[arm.cleared].sum())
+        for col, (v, label, kw) in enumerate(panels):
             ax = axes[row, col]
-            im = ax.imshow(np.where(on, v, np.nan), origin="lower", extent=ext,
+            im = ax.imshow(np.where(on, v, np.nan).reshape(shape), origin="lower", extent=ext,
                            interpolation="nearest", **kw)
             fig.colorbar(im, ax=ax, shrink=0.5)
             gpd.GeoSeries(list(np.delete(polys, arm.cleared))).plot(ax=ax, color="0.55", lw=0)
@@ -134,19 +160,15 @@ def main(bid: str, arms: list[str], device: str) -> None:
             gpd.GeoSeries(list(b.streets.geometry)).plot(ax=ax, color="k", lw=2)
             ax.set_axis_off()
             ax.set_aspect("equal")
-            if zoom:
+            if big:
                 ax.set_xlim(window[0], window[1])
                 ax.set_ylim(window[2], window[3])
-            elif col == 1:
-                ax.add_patch(plt.Rectangle((window[0], window[2]), 2 * half, 2 * half,
-                                           fill=False, ec="#2ca02c", lw=2))
             ax.set_title(f"{arm.label}: {len(arm.cleared)} cleared (green outline), D {D:.3f}"
                          f"\n{label}", fontsize=13)
-        print(f"{arm.label}: total current {c0.sum():.4g} -> {c1.sum():.4g}", flush=True)
-    fig.suptitle(f"{bid}: current (sum over headings of |flux|) before and after each "
-                 f"clearing at D <= {D_LENS:g}", fontsize=16)
+    fig.suptitle(f"{bid}: what each clearing at D <= {D_LENS:g} did to the flow"
+                 + (" (zoom)" if big else ""), fontsize=16)
     fig.tight_layout()
-    out = HERE / f"current_{bid}_{'_'.join(a.replace(':', '-') for a in arms)}.png"
+    out = HERE / f"flowdiff_{bid}_{'_'.join(a.replace(':', '-') for a in arms)}.png"
     fig.savefig(out, dpi=80)
     print(out, flush=True)
 
