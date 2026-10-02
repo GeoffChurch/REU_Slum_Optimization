@@ -1,10 +1,12 @@
 """What did a clearing do to the flow? Solved under the arm's own scoring conductance before and
-after its clearing, per cell: the CURRENT difference (sum over headings of |flux|: more or fewer
-walkers through the cell), the FLUX difference (sum over headings of |change in signed flux|:
+after its clearing, per cell: the FLUX difference (sum over headings of |change in signed flux|:
 the rerouted flow, source-free since the injections and the streets are fixed, so a corridor
 that gains Q lights up ~Q along its whole length), and the DISSIPATION difference (w du^2 of
 every edge, split between its cells: the map sums exactly to the change in P, so it is where the
-score's improvement comes from).
+score's improvement comes from), and the relative change in the ESCAPE TIME from each cell (who is
+better off). Dropped: the current difference and the slowness (time per metre for the walkers
+in a cell): outside the cleared cells the conductance is fixed, so slowness = current / w and
+both say what the flux and dissipation maps already say.
 
     CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/current_map.py <block id> <arms,> [cpu|gpu]
 
@@ -46,6 +48,7 @@ class Flow(NamedTuple):
     phi: np.ndarray
     power: np.ndarray
     P: float
+    u: np.ndarray        # escape time from the cell: its axes' potentials by angular share
 
 
 def flow(sc: common.Scorer, open_: np.ndarray, p: lifted.Params) -> Flow:
@@ -58,20 +61,22 @@ def flow(sc: common.Scorer, open_: np.ndarray, p: lifted.Params) -> Flow:
     uk[sol.unk_cell >= 0] = sol.u.reshape(-1, p.K)
     phi = xp.zeros((p.K, N))
     power = xp.zeros(N)
+    _v, _th, m, gap = lifted.axes(p.K)
     for k, a, b, w in lifted.along_edges(g, open_, p):
         du = uk[a, k] - uk[b, k]
         fa, fb = free[a], free[b]
         phi[k] += 0.5 * (xp.bincount(fa, w * du, minlength=N) + xp.bincount(fb, w * du, minlength=N))
         e = w * du * du
         power += 0.5 * (xp.bincount(fa, e, minlength=N) + xp.bincount(fb, e, minlength=N))
-    _v, _th, _m, gap = lifted.axes(p.K)
+    u = xp.zeros(N)
+    u[free] = uk @ xp.asarray(m / np.pi)
     vol = xp.asarray(open_.ravel()[np.flatnonzero(open_ > 0)])
     for k in range(p.K):
         k2 = (k + 1) % p.K
         w = vol * (g.h * g.h / (p.ell_m ** 2 * gap[k]))
         power[free] += w * (uk[:, k] - uk[:, k2]) ** 2
     th = p.solver.to_host
-    return Flow(phi=th(phi), power=th(power), P=sol.P)
+    return Flow(phi=th(phi), power=th(power), P=sol.P, u=th(u))
 
 
 class Arm(NamedTuple):
@@ -128,7 +133,6 @@ def main(bid: str, arms: list[str], device: str) -> None:
         f0 = before[arm.along]
         after = (g.isub & (~g.bsub | np.isin(lab, arm.cleared))).mean(axis=-1)
         f1 = flow(sc, after, p)
-        dcur = np.abs(f1.phi).sum(axis=0) - np.abs(f0.phi).sum(axis=0)
         dflux = np.abs(f1.phi - f0.phi).sum(axis=0)
         dpow = f1.power - f0.power
         on = (np.abs(f0.phi).sum(axis=0) > 0) | (np.abs(f1.phi).sum(axis=0) > 0)
@@ -140,12 +144,16 @@ def main(bid: str, arms: list[str], device: str) -> None:
             lim = float(np.quantile(np.abs(v[on]), 0.995))
             return dict(cmap="RdBu_r", norm=mcolors.SymLogNorm(lim * 1e-3, vmin=-lim, vmax=lim))
         hi = float(np.quantile(dflux[on], 0.995))
+        was = g.ff0.ravel() > 0                         # open before: u is comparable
+        with np.errstate(divide="ignore", invalid="ignore"):
+            rel_u = np.where(was & (f0.u > 0), (f1.u - f0.u) / f0.u, np.nan)
         panels = [
-            (dcur, "current difference: sum_k |phi_k| after - before (symlog)", sym(dcur)),
             (dflux, "flux difference: sum_k |phi_k after - phi_k before| (linear)",
              dict(cmap="magma", vmin=0, vmax=hi)),
             (dpow, f"dissipation difference (sums to dP = {f1.P - f0.P:.4g}; blue = P falls)",
              sym(dpow)),
+            (rel_u, "escape time from here: (after - before) / before (blue = faster out)",
+             dict(cmap="RdBu_r", vmin=-0.6, vmax=0.6)),
         ]
         D = float(cost[arm.cleared].sum())
         for col, (v, label, kw) in enumerate(panels):
