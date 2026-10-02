@@ -651,3 +651,16 @@ and the south-west edge; the greedy 524, including the big institutional buildin
 southern field, more scattered; 279 in both. Neither forms corridors under uni.
 Not dominance: the greedy gives every budget in one run (nested clearings: Lens B, phasing),
 SIMP one budget per run; SIMP is untested under the sightline conductances.
+
+**SIMP under the sightline metric** (ss100k2n2r30, J_2, D 0.10, 220; the gradient now includes the
+factors' response to opening via their vjp, exact against central differences):
+    vs greedy, search = metric        +0.003 [-0.002, +0.008] wins 55%; largest quarter +0.010
+                                      [+0.002, +0.018] wins 71%
+    vs greedy, translucent search     -0.010 [-0.013, -0.006] wins 26%; largest quarter -0.005
+SIMP ties the plain greedy and loses to the translucent-search greedy. Untried: SIMP with the
+same trick (its gradient under the kappa 0.5 conductance, the objective under the metric).
+
+**Block sizes.** The 220 are small blocks (median 137 buildings, max 759); the region's 28,768
+blocks have median 39, but 82 have >= 1,000 buildings (145k buildings, 7.5% of all), 16 >= 2,000
+and 6 >= 4,000 (5810 6,619; then 5,396, 5,023, 4,542, 4,374, 4,365). Every 220 result is a
+small-block result; block_sizes.parquet lists them all. Large-block benchmark: the 82 >= 1,000.
