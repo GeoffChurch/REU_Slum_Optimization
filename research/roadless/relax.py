@@ -269,7 +269,9 @@ class Plan(NamedTuple):
     optimality-criteria updates each, solves to `rtol` while optimizing (scores are exact),
     closed buildings conducting `eps` while optimizing (named only when not the tension's),
     and projected (Relaxation.proj) with beta from `b0` doubling each stage up to `bmax`,
-    extra stages at qmax until it gets there (b0 0: no projection, not named)."""
+    extra stages at qmax until it gets there (b0 0: no projection, not named); `keep` > 0:
+    the answer is the best exact-scored rounding of the iterates every `keep` updates (0: the
+    last iterate's)."""
     fw: int
     qmax: float
     iters: int
@@ -277,12 +279,14 @@ class Plan(NamedTuple):
     eps: float = EPS
     b0: float = 0.0
     bmax: float = 0.0
+    keep: int = 0
 
     @property
     def name(self) -> str:
         return (f"fw{self.fw}.q{self.qmax:g}.i{self.iters}.t{self.rtol:g}"
                 + (f".e{self.eps:g}" if self.eps != EPS else "")
-                + (f".b{self.b0:g}-{self.bmax:g}" if self.b0 > 0 else ""))
+                + (f".b{self.b0:g}-{self.bmax:g}" if self.b0 > 0 else "")
+                + (f".k{self.keep}" if self.keep > 0 else ""))
 
     @property
     def stages(self) -> tuple[tuple[float, float], ...]:
@@ -302,23 +306,53 @@ class Plan(NamedTuple):
 
 def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+?)(?:\.e([0-9.e-]+?))?"
-                     r"(?:\.b([0-9.]+)-([0-9.]+))?", spec)
+                     r"(?:\.b([0-9.]+)-([0-9.]+))?(?:\.k(\d+))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
     return Plan(int(m.group(1)), float(m.group(2)), int(m.group(3)), float(m.group(4)),
                 EPS if m.group(5) is None else float(m.group(5)),
                 0.0 if m.group(6) is None else float(m.group(6)),
-                0.0 if m.group(7) is None else float(m.group(7)))
+                0.0 if m.group(7) is None else float(m.group(7)),
+                0 if m.group(8) is None else int(m.group(8)))
+
+
+class Incumbent:
+    """The best 0/1 clearing among SIMP's iterates, each `every`-th rounded (`first` cleared
+    before any other) and scored exactly. SIMP's iterates can hold a gate and lose it: on 22422
+    the rounding of update 3 scores 0.810 and the last 0.012, the gate and its neighbours, being
+    substitutes, flipping between x 0.3 and 0.5 until the continuation drops them (NOTES)."""
+
+    def __init__(self, rel: Relaxation, budget: float, every: int,
+                 first: np.ndarray | None = None):
+        self.rel, self.budget, self.every, self.first = rel, budget, every, first
+        self.n = 0
+        self.J, self.r = np.inf, np.zeros(rel.c.n)
+        self._seen: set[bytes] = set()
+
+    def offer(self, x: np.ndarray) -> None:
+        r = round_by_x(x, self.rel.c.cost, self.budget, first=self.first)
+        key = np.packbits(r > 0).tobytes()
+        if key in self._seen:
+            return
+        self._seen.add(key)
+        J = self.rel.exact(r)
+        if J < self.J:
+            self.J, self.r = J, r
+
+    def __call__(self, x: np.ndarray) -> None:
+        self.n += 1
+        if self.n % self.every == 0:
+            self.offer(x)
 
 
 def simp(rel: Relaxation, x0: np.ndarray, budget: float,
          stages: tuple[tuple[float, float], ...], iters: int, log=print, move: float = 0.2,
-         xlo: np.ndarray | None = None) -> np.ndarray:
+         xlo: np.ndarray | None = None, watch=None) -> np.ndarray:
     """SIMP continuation from x0: for (q, beta) in stages, up to `iters` optimality-criteria
     updates x <- clip(x (-g / (lam c H'(x)))^1/2) within `move` of x and [xlo (default XMIN),
     1], lam bisected so that c . H(x) = budget (H = rel.proj; H' cancels the one in g, so the
     ratio is the sensitivity to the projected clearing per unit cost). Non-convex: a local
-    method."""
+    method. `watch(x)`, if given, sees every iterate."""
     cost = rel.c.cost
     lo_ = np.full(len(cost), XMIN) if xlo is None else xlo
     x = np.clip(x0, lo_, 1.0)
@@ -343,6 +377,8 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
                     break
             change = float(np.abs(xn - x).max())
             x = xn
+            if watch is not None:
+                watch(x)
             if it % 5 == 0 or change < 1e-3:
                 sx = rel.proj(x)
                 log(f"    simp q {q:g} beta {beta:g} it {it:2d} J {J:.6g} grey "
@@ -379,9 +415,12 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str) -> dict:
                    x=x.tolist())
     else:
         x = np.full(c.n, D_LENS)
-    xs = simp(rel, x, D_LENS, plan.stages, plan.iters, log=log)
-    rs = round_by_x(xs, c.cost, D_LENS)
-    out.update(simp_perm=rel.perm(rel.exact(rs)), simp_D=float(c.cost @ rs),
+    inc = Incumbent(rel, D_LENS, max(plan.keep, 1))
+    xs = simp(rel, x, D_LENS, plan.stages, plan.iters, log=log,
+              watch=inc if plan.keep > 0 else None)
+    inc.offer(xs)                                         # the last iterate's rounding
+    rs = inc.r
+    out.update(simp_perm=rel.perm(inc.J), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
                simp_cleared=np.flatnonzero(rs).tolist(), simp_x=xs.tolist(),
                t=time.time() - t0)
@@ -414,9 +453,11 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     for D in PATH_DS:
         rest = max(D - float(c.cost[fixed].sum()), 0.0)
         x = np.where(fixed, 1.0, rest / max(float(c.cost[~fixed].sum()), 1e-12))
+        inc = Incumbent(rel, D, max(plan.keep, 1), first=fixed.astype(float))
         x = simp(rel, x, D, plan.stages, plan.iters, log=lambda s: None,
-                 xlo=np.where(fixed, 1.0, XMIN))
-        r = round_by_x(x, c.cost, D, first=fixed.astype(float)) > 0
+                 xlo=np.where(fixed, 1.0, XMIN), watch=inc if plan.keep > 0 else None)
+        inc.offer(x)
+        r = inc.r > 0
         assert r[fixed].all()
         new = np.flatnonzero(r & ~fixed)
         fixed |= r

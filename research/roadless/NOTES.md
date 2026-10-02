@@ -732,3 +732,26 @@ ordinary blocks move by -0.0004 median (-0.004 .. +0.0004), but the gated blocks
 chaotically: 30848 0.719 -> 0.436, 20543 0.235 -> 0.538, 46841 0.522 -> 0.556. Whether SIMP
 opens a gate is basin luck under the grey leak, which is what projection is meant to fix. i10
 is the fast preset, i20 the default until projection is measured.
+
+### Projection and the incumbent (owner: "a more natural, non-Frankenstein approach?", 2026-10-02)
+
+Projection (plan .b<b0>-<bmax>: conductance H_beta(x)^q, budget c . H(x), beta doubling per stage)
+stops the grey leak: on 22422 the eps world with nothing cleared drops from perm 0.79 to 0.08,
+and the gate ranks 1st-2nd by -gradient / cost at the start (8th without). But SIMP still ends
+at 0.012 (13 blocks, i10: b8-32 median vs greedy -0.011, b1-32 -0.049; 1558 rescued 0.29 ->
+0.53, controls -0.005 .. -0.024).
+**Why: the trace** (22422, b8-32): the gate and its two neighbours are substitutes (any opens
+the pocket). Half open together, each looks redundant and OC cuts all three by the move limit;
+shut, each looks vital and OC raises them: they flip x 0.3 <-> 0.5 every update. The rounding
+of update 3 already scores 0.810, of q 2's first updates 0.815 and 0.819 (greedy 0.814); as
+beta and q rise the flip breaks the wrong way and the gate ends at x 0.001.
+**Incumbent** (plan .k<every>: round every iterate, score it exactly, return the best; repeated
+roundings scored once): SIMP proposes 0/1 clearings, the real objective picks.
+    12 blocks (6 gated + 6 controls; 1558 OOM), vs greedy at D 0.10:
+    i10 (last iterate)    median -0.004  mean -0.126  worst -0.800  ahead 6/12
+    i10.k1                median +0.011  mean +0.004  worst -0.037  ahead 8/12   ~2x i10's time
+    i10.b8-32.k1          median +0.007  mean +0.002  worst -0.062  ahead 8/12
+22422 0.814 / 0.819, 30848 0.782 / 0.708, 38616 0.528 / 0.573, 23597 0.750 / 0.760. Projection
+is no longer needed for the collapses; it wins some gated blocks and loses some controls: kept
+selectable, i10.k1 is the default. The exact scoring adds a second structure (real world) to
+the solver's caches: 1558 (1.38 km^2) now runs out of memory.
