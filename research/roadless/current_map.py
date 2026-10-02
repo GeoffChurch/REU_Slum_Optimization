@@ -7,7 +7,7 @@ corridor lights the whole route it feeds, out to the street, and dims the routes
     CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/current_map.py <block id> <arms,> [cpu|gpu]
 
 arm: g:<picker>:<along> (the greedy's prefix within D 0.10, current under <along>) or
-s:<plan>:<p> (relax.py's SIMP clearing for that plan and power, current under uni).
+s:<plan>:<p>:<along> (relax.py's SIMP clearing for that plan, power and conductance).
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class Arm(NamedTuple):
 
 
 def arm_of(spec: str, bid: str, cost: np.ndarray) -> Arm:
-    kind, name, extra = spec.split(":")
+    kind, name, extra, *rest = spec.split(":")
     if kind == "g":
         rows = pd.read_parquet(rows_dir(name, H, "area", 2.0, extra)
                                / f"{bid}.parquet").sort_values("step")
@@ -73,8 +73,10 @@ def arm_of(spec: str, bid: str, cost: np.ndarray) -> Arm:
                 left -= cost[j]
         return Arm(f"greedy {name} ({extra})", extra, np.array(take, dtype=int))
     if kind == "s":
-        r = pd.read_parquet(RELAX_OUT / name / f"{bid}_p{float(extra):g}.parquet").iloc[0]
-        return Arm(f"SIMP {name} (uni)", "uni", np.asarray(r.simp_cleared, dtype=int))
+        [along] = rest
+        r = pd.read_parquet(RELAX_OUT / along / name
+                            / f"{bid}_p{float(extra):g}.parquet").iloc[0]
+        return Arm(f"SIMP {name} ({along})", along, np.asarray(r.simp_cleared, dtype=int))
     raise ValueError(f"unknown arm {spec!r}")
 
 
