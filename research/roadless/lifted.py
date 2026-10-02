@@ -901,15 +901,16 @@ class GpuAMG:
             lu = factorized(A.get().tocsc())
             return lambda b, rtol, x0=None: cp.asarray(lu(cp.asnumpy(b)))
         # the hierarchy's structure depends only on A's pattern, which an eps-world system
-        # repeats on every call (SIMP's updates, the greedy's tension): keep the last two
+        # repeats on every call (SIMP's updates, the greedy's tension): kept once it repeats
         key = (A.shape[0], A.nnz, int(A.indices.sum()), int(A.indptr.sum()))
-        store = coarsening.cache.setdefault("galerkin", {})
-        if key not in store:
-            if len(store) >= 2:
-                store.pop(next(iter(store)))
-            store[key] = self._structure(A, coarsening)
+        store = _repeated(coarsening.cache, "galerkin")
+        if key in store:
+            levels = store[key]
+        else:
+            levels = self._structure(A, coarsening)
+            _remember(coarsening.cache, "galerkin", key, levels)
         lv, Ai = [], A
-        for L in store[key]:
+        for L in levels:
             dinv, L["v"] = self._dinv(Ai, L["v"])
             lv.append(dict(A=Ai, dinv=dinv, R=L["R"], P=L["P"]))
             Ai = cs.csr_matrix((cp.bincount(L["map"], weights=Ai.data,
@@ -1220,21 +1221,38 @@ def master_operator(grid: Grid, p: Params):
 
 def _csr(solver, vals, rows, cols, n: int, cache: dict):
     """The (n x n) CSR matrix of triplets, duplicates summed. Its structure (a sort of every
-    nonzero) is kept for the last two patterns seen: an eps-world system has the same pattern on
-    every call, only the values move."""
+    nonzero) is kept for a pattern seen twice (an eps-world system repeats its pattern on every
+    call, only the values move; a scoring system's pattern is new each time and is not kept:
+    holding it ran a 1 km^2 block out of memory)."""
     xp = solver.xp
     key = (n, len(rows), int(rows.sum()), int(cols.sum()), int((rows * 1000003 ^ cols).sum()))
-    store = cache.setdefault("csr", {})
-    if key not in store:
-        if len(store) >= 2:
-            store.pop(next(iter(store)))
+    store = _repeated(cache, "csr")
+    if key in store:
+        inv, indices, indptr = store[key]
+    else:
         ukeys, inv = xp.unique(rows.astype(xp.int64) * n + cols, return_inverse=True)
         indptr = xp.zeros(n + 1, dtype=xp.int32)
         indptr[1:] = xp.cumsum(xp.bincount(ukeys // n, minlength=n))
-        store[key] = (inv.ravel().astype(xp.int32), (ukeys % n).astype(xp.int32), indptr)
-    inv, indices, indptr = store[key]
+        inv, indices = inv.ravel().astype(xp.int32), (ukeys % n).astype(xp.int32)
+        _remember(cache, "csr", key, (inv, indices, indptr))
     return solver.sparse.csr_matrix(
         (xp.bincount(inv, weights=vals, minlength=len(indices)), indices, indptr), shape=(n, n))
+
+
+def _repeated(cache: dict, kind: str) -> dict:
+    """The structures of `kind` kept in `cache` (at most one: the pattern that repeats)."""
+    return cache.setdefault(kind, {})
+
+
+def _remember(cache: dict, kind: str, key, value) -> None:
+    """Keep `value` for `key` if `key` was seen before (it repeats), replacing what was kept."""
+    seen = cache.setdefault(kind + " seen", set())
+    if key in seen:
+        store = _repeated(cache, kind)
+        store.clear()
+        store[key] = value
+    else:
+        seen.add(key)
 
 
 class System:

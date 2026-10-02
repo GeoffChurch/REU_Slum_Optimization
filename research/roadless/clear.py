@@ -555,6 +555,7 @@ class Spread:
         H = self.source.gram(c, t, cand, power)
         chosen = _spread(t.g[cand], c.cost[cand], H, target - D)
         taken = [cand[i] for i in chosen]
+        del t, H                    # the round's system and hierarchy, before the scoring solve
         return Picked(taken, *_exact(c, taken, power))
 
 
@@ -606,8 +607,8 @@ def _one(i: int) -> None:
                      common.POPULATIONS[_CFG["pop"]], _CFG["power"], _CFG["along"], _CFG["solver"],
                      _CFG["search"])
     except Exception as e:
-        where = " <- ".join(f"{f.name}:{f.lineno}" for f in
-                            reversed(traceback.extract_tb(e.__traceback__)[-4:]))
+        ours = [f for f in traceback.extract_tb(e.__traceback__) if "roadless" in f.filename]
+        where = " <- ".join(f"{f.name}:{f.lineno}" for f in reversed(ours[-5:]))
         print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]} at {where}", flush=True)
 
 
