@@ -55,8 +55,9 @@ class Relaxation:
     faster than its cost). Under a road-favouring along-conductance the factors respond to
     opening too (their vjp), and nothing is convex."""
 
-    def __init__(self, c: Clearing, power: float, q: float = 1.0, rtol: float = RTOL_SCORE):
-        self.c, self.power, self.q, self.rtol = c, power, q, rtol
+    def __init__(self, c: Clearing, power: float, q: float = 1.0, rtol: float = RTOL_SCORE,
+                 eps: float = EPS):
+        self.c, self.power, self.q, self.rtol, self.eps = c, power, q, rtol, eps
         self._u = self._lam = None             # the last solves: warm starts for the next
         g = c.sc.grid
         self.ff0 = g.ff0.ravel()
@@ -71,7 +72,7 @@ class Relaxation:
     def _solve(self, x: np.ndarray):
         c = self.c
         op = self.open_of(x)
-        op_eps = op + EPS * (c.full - op)
+        op_eps = op + self.eps * (c.full - op)
         sy = lifted.System(c.sc.grid, op_eps, c.p)
         sol = lifted.solve(c.sc.grid, op_eps, c.sc.f, c.p, system=sy, rtol=self.rtol,
                            host=False, x0=self._u)
@@ -139,7 +140,7 @@ class Relaxation:
             k2 = (k + 1) % K
             q = (uk[:, k] - uk[:, k2]) * (lk[:, k] - lk[:, k2])
             gc[free] += -q * (g.h * g.h / (p.ell_m ** 2 * gap[k]))
-        grad = (1.0 - EPS) * (c.bf @ p.solver.to_host(gc)[self.inside])
+        grad = (1.0 - self.eps) * (c.bf @ p.solver.to_host(gc)[self.inside])
         if self.q != 1.0:
             grad = grad * self.q * x ** (self.q - 1.0)
         return J, grad
@@ -225,15 +226,18 @@ XMIN = 1e-3
 class Plan(NamedTuple):
     """How a block is solved: `fw` Frank-Wolfe iterations from x = 0 (0: start SIMP from the
     uniform x = D, no bound), SIMP continuation q = 1.5, 2, ... `qmax` with up to `iters`
-    optimality-criteria updates each, solves to `rtol` while optimizing (scores are exact)."""
+    optimality-criteria updates each, solves to `rtol` while optimizing (scores are exact),
+    closed buildings conducting `eps` while optimizing (named only when not the tension's)."""
     fw: int
     qmax: float
     iters: int
     rtol: float
+    eps: float = EPS
 
     @property
     def name(self) -> str:
-        return f"fw{self.fw}.q{self.qmax:g}.i{self.iters}.t{self.rtol:g}"
+        return (f"fw{self.fw}.q{self.qmax:g}.i{self.iters}.t{self.rtol:g}"
+                + (f".e{self.eps:g}" if self.eps != EPS else ""))
 
     @property
     def qs(self) -> tuple[float, ...]:
@@ -241,10 +245,11 @@ class Plan(NamedTuple):
 
 
 def plan_of(spec: str) -> Plan:
-    m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+)", spec)
+    m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+?)(?:\.e([0-9.e-]+))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
-    return Plan(int(m.group(1)), float(m.group(2)), int(m.group(3)), float(m.group(4)))
+    return Plan(int(m.group(1)), float(m.group(2)), int(m.group(3)), float(m.group(4)),
+                EPS if m.group(5) is None else float(m.group(5)))
 
 
 def simp(rel: Relaxation, x0: np.ndarray, budget: float, qs: tuple[float, ...], iters: int,
@@ -294,7 +299,7 @@ def _clearing(bid: str, device: str, along: str) -> Clearing:
 
 def one(bid: str, power: float, device: str, plan: Plan, along: str) -> dict:
     c = _clearing(bid, device, along)
-    rel = Relaxation(c, power, rtol=plan.rtol)
+    rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
     out = dict(block=bid, n=c.n, power=power, plan=plan.name, along=along)
@@ -335,7 +340,7 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     A against the greedy), round, score exactly. Rows in the greedy's format: `cleared` = the
     buildings new at this step."""
     c = _clearing(bid, device, along)
-    rel = Relaxation(c, power, rtol=plan.rtol)
+    rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     J0, P0 = rel.J0, c.sc.P0
     rows = [dict(block=bid, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[], P0=P0,
                  t=0.0)]

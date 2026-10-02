@@ -639,8 +639,8 @@ fw40.q3.i20.t1e-05:
     fw0.q5.i20.t0.001     +0.000        +0.010 [+0.002, +0.015]       68%    189 s
 
 Same answers at a quarter of the time. Continuing to q 5 halves the grey (8% -> 4%) but does not
-raise the rounded score. (Times are under 12 parallel workers; small blocks solve directly on
-the CPU.)
+raise the rounded score. (Times are under 12 parallel workers; nearly every block is over
+lifted.SMALL unknowns, so these are AMG solves, not direct ones.)
 
 **SIMP on 5810** (J_2, D 0.10, GPU, uni): greedy (S0.01cat) Lens A 0.3189; SIMP fw0.q3.i20.t0.001
 **0.3468 (+0.028)** in 164 s wall including setup (the greedy is ~4 min to D 0.15 at today's
@@ -664,3 +664,39 @@ same trick (its gradient under the kappa 0.5 conductance, the objective under th
 blocks have median 39, but 82 have >= 1,000 buildings (145k buildings, 7.5% of all), 16 >= 2,000
 and 6 >= 4,000 (5810 6,619; then 5,396, 5,023, 4,542, 4,374, 4,365). Every 220 result is a
 small-block result; block_sizes.parquet lists them all. Large-block benchmark: the 82 >= 1,000.
+
+### Large blocks (owner: "I only really care about the large blocks", 2026-10-02)
+
+The 82 blocks with >= 1,000 buildings, J_2, uni, Lens A at D 0.10, one GPU process at a time
+(large82_simp_vs_greedy.parquet; areas in large82_area.parquet).
+
+**What fits.** Area, not building count, sets the memory: the eps world solves on every inside
+cell x 8 headings. The greedy completes every block up to ~1.4 km^2 (59 of 82; 30796, 1.5 km^2,
+48M unknowns, peaks at 48.2 GB of the 48 GB card), SIMP up to ~1.5 km^2 (61). The other 21-23
+(1.4 -- 52 km^2: peri-urban land, 1,000 -- 4,400 scattered buildings) do not fit at h 0.5; they
+need a coarser grid or the grid cropped to the built-up area, both model changes (owner's call).
+Two memory fixes on the way: GpuAMG.prepare frees cupy's pool per system (the rewrite had
+dropped it), and the catchment sweep's (unknowns x columns) output is sized from free memory
+and written column-major (cuSPARSE's csr @ dense copied the row-major one: 2x per chunk).
+
+**SIMP (fw0.q3.i20.t0.001) vs greedy (S0.01cat), 59 blocks:** median +0.005 [+0.002, +0.008],
+SIMP wins 66%, but mean -0.031: SIMP collapses on six blocks (22422: greedy 0.814, SIMP 0.014;
+30848 0.770 / 0.434; 23597 0.772 / 0.503; 20543 0.556 / 0.234; 38616 0.566 / 0.400; 46841
+0.573 / 0.429). Median time 2x the greedy's to D 0.10 (5810 the exception: 142 s vs 1,168 s).
+
+**Why it collapses: stranded pockets behind a gate.** 22422's J_0 is 1.2e8 (pockets of homes
+with enormous escape times); the greedy's first round clears one building (cost 0.01) and gets
+0.534. SIMP optimizes in the eps world, where closed buildings conduct EPS 0.01 and every grey
+building x^q of its cells: there the pocket already drains (eps-world Lens A 0.75 with nothing
+cleared), so the gate is worth little. At the uniform start x = 0.10 the gate ranks 391st of
+1,977 by -gradient / cost (1st at x = XMIN); SIMP ends with it at 0.001.
+  - Frank-Wolfe start (fw5): its rounding finds the gate (22422 0.796, 23597 0.751, 20543
+    0.496), but the SIMP that follows lands where the uniform start did (0.014, 0.503, 0.234):
+    not the start, the leaky grey intermediate states.
+  - Smaller eps (plan suffix .e<eps>): 1e-4 and 1e-3 alike fix 30848 (0.434 -> 0.719) and 46841
+    (0.429 -> 0.522), leave the other four, and nudge the controls up (5810 0.3468 -> 0.3479).
+  - SIMP polishing the greedy's clearing (x0 = its 0/1 set, q 3, or q 2 .. 3): <= +0.007; it
+    stays in the greedy's basin (5810: 0.318, where SIMP from uniform finds 0.348).
+So neither contains the other: SIMP's grey continuation finds better spread-out clearings
+(5810 +0.03), the greedy's exact rescoring finds gates. Best of both, scored exactly, is the
+robust answer for large blocks at the cost of running both.
