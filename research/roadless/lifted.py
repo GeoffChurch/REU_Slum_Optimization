@@ -813,6 +813,7 @@ class GpuAMG:
     need more memory than the card on 5810). Needs cupy and CUDA_PATH (the toolkit
     headers)."""
     sweeps: int = 1
+    single: bool = True
 
     @property
     def xp(self):
@@ -832,17 +833,44 @@ class GpuAMG:
     def to_host(self, a):
         return self.xp.asnumpy(a)
 
-    def _dinv(self, A):
-        """The damped inverse diagonal omega D^-1 of one level."""
+    def _dinv(self, A, v0=None):
+        """(The damped inverse diagonal omega D^-1 of one level, the power iteration's last
+        vector): 30 iterations from random, 5 from v0 (the last system's: the same pattern, values
+        moved a little)."""
         cp = self.xp
         dinv = 1.0 / A.diagonal()
-        v = cp.random.default_rng(0).random(A.shape[0])
+        v = cp.random.default_rng(0).random(A.shape[0]) if v0 is None else v0
         rho = 1.0
-        for _ in range(30):
+        for _ in range(30 if v0 is None else 5):
             w = dinv * (A @ v)
             rho = float(cp.linalg.norm(w)) / float(cp.linalg.norm(v))
             v = w / cp.linalg.norm(w)
-        return dinv * (4.0 / (3.0 * 1.05 * rho))
+        return dinv * (4.0 / (3.0 * 1.05 * rho)), v
+
+    def _structure(self, A, coarsening: Coarsening) -> list:
+        """Per level, everything about the Galerkin coarsening but the values: R, P, and the
+        coarse operator's CSR structure with `map`, each fine nonzero's coarse nonzero (A_c =
+        T^T A T with T the 0/1 aggregation sums entries by aggregate pair)."""
+        cp, cs = self.xp, self.sparse
+        levels, ids, ip, ix, n = [], coarsening.mid(), A.indptr, A.indices, A.shape[0]
+        for agg in self._aggregates(coarsening):
+            # the master aggregates of this level's unknowns, renumbered over those present
+            uniq, local = cp.unique(agg[ids], return_inverse=True)
+            local = local.ravel()
+            nc = len(uniq)
+            R = cs.csr_matrix((cp.ones(n), (local, cp.arange(n))), shape=(nc, n))
+            rows = cp.searchsorted(ip, cp.arange(len(ix)), side="right") - 1
+            keys = local[rows].astype(cp.int64) * nc + local[ix]
+            del rows
+            ukeys, inv = cp.unique(keys, return_inverse=True)
+            del keys
+            indptr = cp.zeros(nc + 1, dtype=cp.int32)
+            indptr[1:] = cp.cumsum(cp.bincount(ukeys // nc, minlength=nc))
+            indices = (ukeys % nc).astype(cp.int32)
+            levels.append(dict(R=R, P=R.T.tocsr(), map=inv.ravel().astype(cp.int32),
+                               indices=indices, indptr=indptr, nc=nc, v=None))
+            ip, ix, n, ids = indptr, indices, nc, uniq
+        return levels
 
     def _aggregates(self, co: Coarsening) -> list:
         """Per level, the master aggregate of each node (device), cached per grid."""
@@ -872,24 +900,39 @@ class GpuAMG:
         if A.shape[0] < SMALL:
             lu = factorized(A.get().tocsc())
             return lambda b, rtol, x0=None: cp.asarray(lu(cp.asnumpy(b)))
-        lv = []
-        ids, Ai = coarsening.mid(), A
-        for agg in self._aggregates(coarsening):
-            # the master aggregates of this level's unknowns, renumbered over those present;
-            # Galerkin A_c = T^T A T with T the 0/1 aggregation: sum entries by aggregate pair
-            uniq, local = cp.unique(agg[ids], return_inverse=True)
-            local = local.ravel()
-            n, nc = Ai.shape[0], len(uniq)
-            R = cs.csr_matrix((cp.ones(n), (local, cp.arange(n))), shape=(nc, n))
-            lv.append(dict(A=Ai, dinv=self._dinv(Ai), R=R, P=R.T.tocsr()))
-            co = Ai.tocoo()
-            Ai = cs.coo_matrix((co.data, (local[co.row], local[co.col])), shape=(nc, nc)).tocsr()
-            ids = uniq
+        # the hierarchy's structure depends only on A's pattern, which an eps-world system
+        # repeats on every call (SIMP's updates, the greedy's tension): keep the last two
+        key = (A.shape[0], A.nnz, int(A.indices.sum()), int(A.indptr.sum()))
+        store = coarsening.cache.setdefault("galerkin", {})
+        if key not in store:
+            if len(store) >= 2:
+                store.pop(next(iter(store)))
+            store[key] = self._structure(A, coarsening)
+        lv, Ai = [], A
+        for L in store[key]:
+            dinv, L["v"] = self._dinv(Ai, L["v"])
+            lv.append(dict(A=Ai, dinv=dinv, R=L["R"], P=L["P"]))
+            Ai = cs.csr_matrix((cp.bincount(L["map"], weights=Ai.data,
+                                            minlength=len(L["indices"])),
+                                L["indices"], L["indptr"]), shape=(L["nc"], L["nc"]))
         coarse = cp.linalg.inv(Ai.toarray())
+        if self.single:
+            # the cycle in single precision (sums above in double); the outer CG's residual
+            # stays in double, so the answer meets rtol as before, only the preconditioner is
+            # cheaper (the solves are memory-bound: 8 -> 4 bytes per value)
+            f4 = cp.float32
+            lv = [dict(A=cs.csr_matrix((L["A"].data.astype(f4), L["A"].indices, L["A"].indptr),
+                                       shape=L["A"].shape),
+                       dinv=L["dinv"].astype(f4), R=L["R"].astype(f4), P=L["P"].astype(f4))
+                  for L in lv]
+            coarse = coarse.astype(f4)
+        dt = coarse.dtype
         sweeps = self.sweeps
 
         def dot(a, b):
-            return (a * b).sum(axis=0)
+            """Accumulated in double: in single the K-cycle's two-step coefficients lose
+            everything to cancellation (rho2 = bet - gam^2 / rho1) and the solve goes NaN."""
+            return (a * b).sum(axis=0, dtype=cp.float64)
 
         def cycle(i, b):
             if i == len(lv):
@@ -912,15 +955,16 @@ class GpuAMG:
             c1 = cycle(j, b)
             v1 = Aj @ c1
             rho1, a1 = dot(c1, v1), dot(c1, b)
-            r1 = b - (a1 / rho1) * v1
+            r1 = b - (a1 / rho1).astype(dt) * v1
             c2 = cycle(j, r1)
             v2 = Aj @ c2
             gam, bet, a2 = dot(c2, v1), dot(c2, v2), dot(c2, r1)
             rho2 = bet - gam * gam / rho1
-            return (a1 / rho1 - gam * a2 / (rho1 * rho2)) * c1 + (a2 / rho2) * c2
+            return ((a1 / rho1 - gam * a2 / (rho1 * rho2)).astype(dt) * c1
+                    + (a2 / rho2).astype(dt) * c2)
 
         def solve(b, rtol, x0=None):
-            return _pcg(A, lambda r: cycle(0, r), b, rtol, cp, x0)
+            return _pcg(A, lambda r: cycle(0, r.astype(dt)).astype(cp.float64), b, rtol, cp, x0)
         return solve
 
 
@@ -1174,6 +1218,25 @@ def master_operator(grid: Grid, p: Params):
     return operator(grid, grid.isub.mean(axis=-1), dataclasses.replace(p, along=Uniform()))[0]
 
 
+def _csr(solver, vals, rows, cols, n: int, cache: dict):
+    """The (n x n) CSR matrix of triplets, duplicates summed. Its structure (a sort of every
+    nonzero) is kept for the last two patterns seen: an eps-world system has the same pattern on
+    every call, only the values move."""
+    xp = solver.xp
+    key = (n, len(rows), int(rows.sum()), int(cols.sum()), int((rows * 1000003 ^ cols).sum()))
+    store = cache.setdefault("csr", {})
+    if key not in store:
+        if len(store) >= 2:
+            store.pop(next(iter(store)))
+        ukeys, inv = xp.unique(rows.astype(xp.int64) * n + cols, return_inverse=True)
+        indptr = xp.zeros(n + 1, dtype=xp.int32)
+        indptr[1:] = xp.cumsum(xp.bincount(ukeys // n, minlength=n))
+        store[key] = (inv.ravel().astype(xp.int32), (ukeys % n).astype(xp.int32), indptr)
+    inv, indices, indptr = store[key]
+    return solver.sparse.csr_matrix(
+        (xp.bincount(inv, weights=vals, minlength=len(indices)), indices, indptr), shape=(n, n))
+
+
 class System:
     """L on the unknowns that reach ground, set up ONCE for any number of right-hand sides, on
     the solver's device. Unknowns in a component with no ground are dropped (u = 0 there);
@@ -1191,10 +1254,10 @@ class System:
         nk = int(self.keep.sum())
         both = self.keep[r]                                   # an edge never leaves its component
         ar = xp.arange(N)[self.keep]
-        self.A = p.solver.sparse.coo_matrix(
-            (xp.concatenate([v[both], diag[self.keep]]),
-             (xp.concatenate([new[r[both]], new[ar]]), xp.concatenate([new[c[both]], new[ar]]))),
-            shape=(nk, nk)).tocsr()
+        cache = grid.cache.setdefault(("solver", K, p.ell_m), {})
+        self.A = _csr(p.solver, xp.concatenate([v[both], diag[self.keep]]),
+                      xp.concatenate([new[r[both]], new[ar]]),
+                      xp.concatenate([new[c[both]], new[ar]]), nk, cache)
 
         def mid():
             mc = -xp.ones(o.size, dtype=xp.int64)
@@ -1204,7 +1267,7 @@ class System:
             return (mc[flat][:, None] * K + xp.arange(K)[None, :]).ravel()[self.keep]
         self._solver = p.solver.prepare(self.A, Coarsening(
             mid=mid, master=lambda: master_operator(grid, p),
-            cache=grid.cache.setdefault(("solver", K, p.ell_m), {})))
+            cache=cache))
 
     @property
     def n(self) -> int:

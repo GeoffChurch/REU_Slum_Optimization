@@ -64,6 +64,12 @@ class Relaxation:
         self.ff0 = g.ff0.ravel()
         self.inside = np.flatnonzero(g.inside)
         self.J0 = c.sc.J(c.sc.u0, power)
+        xp = c.p.solver.xp                     # what home_u needs, on the device
+        on = np.flatnonzero(c.sc.owner.ravel() >= 0)
+        self._on = xp.asarray(on)
+        self._owner_on = xp.asarray(c.sc.owner.ravel()[on])
+        self._f_on = xp.asarray(c.sc.f.ravel()[on])
+        self._share = xp.asarray(lifted.axes(c.p.K)[2] / np.pi)
 
     def proj(self, x: np.ndarray) -> np.ndarray:
         """The clearing a design x stands for: x itself, or with beta > 0 a smooth step at
@@ -95,11 +101,21 @@ class Relaxation:
         sol = lifted.solve(c.sc.grid, op_eps, c.sc.f, c.p, system=sy, rtol=self.rtol,
                            host=False, x0=self._u)
         self._u = sol.u                        # eps world: the same unknowns every time
-        th = c.p.solver.to_host
-        hsol = dataclasses.replace(sol, u=th(sol.u), cell=th(sol.cell),
-                                   unk_cell=th(sol.unk_cell))
-        home_u = c.sc.home_u_of(hsol, op_eps)
-        return op_eps, sy, sol, home_u
+        return op_eps, sy, sol, self._home_u(sol, op_eps)
+
+    def _home_u(self, sol: lifted.Solution, op_eps: np.ndarray) -> np.ndarray:
+        """Scorer.home_u_of with the per-unknown potentials left on the device (48M of them on
+        a big block): each cell's potential by angular share, injection-weighted per home."""
+        c, xp = self.c, self.c.p.solver.xp
+        free = xp.flatnonzero(xp.asarray(op_eps).ravel() > 0)
+        uk = xp.zeros((len(free), c.p.K))
+        uk[sol.unk_cell >= 0] = sol.u.reshape(-1, c.p.K)
+        ub = xp.zeros(op_eps.size)
+        ub[free] = uk @ self._share
+        num = c.p.solver.to_host(xp.bincount(self._owner_on, weights=self._f_on * ub[self._on],
+                                             minlength=c.n))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.where(c.sc.live_home, num / c.sc.w, np.nan)
 
     def value(self, x: np.ndarray) -> float:
         return self.c.sc.J(self._solve(x)[3], self.power)
