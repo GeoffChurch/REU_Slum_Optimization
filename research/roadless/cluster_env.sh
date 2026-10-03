@@ -1,5 +1,5 @@
-# The environment of a reblock task on the ai cluster (sourced by cluster_task.sbatch and by
-# cluster.py's setup probe). CUDA comes from cupy's pip toolkit in the deps dir: the cluster's
+# The environment of a reblock task on the ai cluster (the prelude of cluster.py's blocks kind).
+# CUDA comes from cupy's pip toolkit in the deps dir: the cluster's
 # /usr/local/cuda is 11.8 and the nodes' drivers 12.8; the toolkit's headers and libraries are
 # outside site-packages, so cupy is told where (CUDA_PATH, LD_LIBRARY_PATH).
 D=$HOME/.cache/reblock-research/pydeps

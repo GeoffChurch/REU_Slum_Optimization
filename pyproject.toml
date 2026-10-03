@@ -105,8 +105,15 @@ scikit-image = "*"
 # included, where an environment variable set after numpy has loaded would do nothing.
 threadpoolctl = "*"
 
+[tool.pixi.feature.launch.pypi-dependencies]
+# The cluster launcher, GeoffChurch/cluster_submit, pinned to a commit. It has an environment
+# of its own because the cluster installs only the default one, so it never fetches this
+# private repo.
+cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "ce4d228fe992fa4a63317fb86f74b659ce1de25b" }
+
 [tool.pixi.environments]
 default = { features = ["dev", "research"], solve-group = "default" }
+launch = { features = ["dev", "research", "launch"], solve-group = "default" }
 
 [tool.pixi.tasks]
 # Split the same way typecheck is split below (typecheck-py + web-check, composed by typecheck):

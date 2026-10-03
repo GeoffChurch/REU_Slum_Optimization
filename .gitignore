@@ -93,3 +93,4 @@ site/
 # untracked -- not ignored, not committed, and therefore absent from every other machine while
 # looking present on the one that made them.
 /data/adjudication/*imagery/
+.cluster_submit/
