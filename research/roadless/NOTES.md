@@ -857,3 +857,41 @@ the methods apart better. Under this lens the translucent greedy is the frontier
 at twice the time.
 Memory: the sweep's column count now ignores the pool's cached fragments (22422 and 20543 failed
 under sightline asking for 8 GB that was not contiguous); plain SIMP still runs out on 1558.
+
+### Lens A at D 0.05 (owner: "We can try lens A at D 0.05", 2026-10-03)
+
+D_LENS is now 0.05 (relax.py): at D 0.10 the sightline scores crowd the ceiling. SIMP + the
+eps-scored incumbent (fw0.q3.i10.t0.001.e0.0001.k1s1e-06) at D 0.05 ran on the cluster
+(cluster.py; V100 and RTX 8000 cards). The greedies' times are from the RTX 6000 Ada here, and
+the same SIMP takes 1.5 -- 1.7x longer there at D 0.05 than here at D 0.10, so the SIMP time
+ratios below overstate its cost by about that factor. Paired per block (simp_compare.py; a
+greedy's perm is linear between its steps at D 0.05):
+
+**Uniform conductance, the held-out blocks:**
+    SIMP vs greedy S0.01cat (46)     median +0.015 [+0.009, +0.019]  mean +0.016  ahead 96%  worst -0.005
+    SIMP vs greedy S0.005cat (44)    median +0.010 [+0.006, +0.015]  mean +0.011  ahead 91%  worst -0.008
+    S0.005cat vs S0.01cat (44)       median +0.004 [+0.003, +0.005]  mean +0.005  ahead 93%  worst -0.001
+SIMP's lead over each greedy is about 1.7x its lead at D 0.10 (+0.009 / +0.006: the same script
+and blocks reproduce the held-out confirmation). Median time: SIMP 64 s (cluster), greedy to D
+0.05 12 s (S0.01) / 18 s (S0.005). The greedy gets to a small budget early, while SIMP's
+updates do not shrink with the budget. On the tuning blocks the gated ones are harder at the
+smaller budget: 23597 SIMP 0.475 vs greedy 0.594, 1558 0.466 vs 0.515 (at D 0.10 the worst
+was -0.020).
+
+**Sightline (ss100k2n2r30), the 13 tuning blocks:**
+    SIMP vs greedy                     median +0.008 [+0.001, +0.022]  mean +0.011  ahead 77%  worst -0.021
+    SIMP vs translucent greedy         median +0.000 [-0.001, +0.003]  mean +0.024  ahead 62%  worst -0.015
+    SIMP-translucent vs translucent    median +0.005 [-0.012, +0.033]  mean +0.020  ahead 54%  worst -0.066
+    translucent greedy vs greedy       median +0.005 [-0.001, +0.022]  mean -0.012  ahead 54%  worst -0.269
+At D 0.05 SIMP is ahead of the plain greedy and level with the translucent one. At D 0.10 it
+trailed the translucent greedy (median -0.003). The translucent greedy misses 22422's gate at
+small budgets: 0.717 vs 0.986 at D 0.05, and 0.697 behind at D 0.02. SIMP and the plain greedy
+find it; that one block is SIMP's mean lead over the translucent greedy. Median time: the
+greedies 45 s to D 0.05, SIMP 275 s, SIMP-translucent 333 s (cluster).
+
+**Saturation:** at D 0.05 the sightline median is 0.83, with 5 of 13 blocks above 0.9 (38%; 54% at
+D 0.10). At D 0.02 the greedy's median is 0.70, with 2 of 13 above 0.9. D 0.05 already separates
+the methods (SIMP vs the greedy: the interval excludes zero), so D 0.02 is not needed for that.
+The greedy rows give it for free (every budget in one run) if the 44 want it.
+**What follows:** the 44 under sightline at D 0.05: SIMP, the plain greedy and the translucent
+greedy. Neither greedy has rows on the 44 yet (5 of them do).

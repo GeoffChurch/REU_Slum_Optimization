@@ -4,9 +4,10 @@ A living list: add ideas, strike them when tried (the result goes to NOTES.md, w
 delete them when shown dominated. Status tags: **queued**, **running**, **idea**, **owner's
 call**, **blocked**.
 
-Baselines (NOTES.md, "Large blocks"): greedy `S0.01cat` and SIMP + incumbent
-`fw0.q3.i10.t0.001.e0.0001.k1`, both J_2, uni conductance, Lens A at D 0.10 (and Lens B from
-nested runs).
+Baselines (NOTES.md, "Large blocks" and "Lens A at D 0.05"): greedy `S0.01cat` /
+`S0.005cat` and SIMP + eps-scored incumbent `fw0.q3.i10.t0.001.e0.0001.k1s1e-06`, both J_2,
+uni conductance, Lens A at D 0.05 (`D_LENS`; owner 2026-10-03, 0.10 saturates under sightline),
+and Lens B from nested runs.
 
 ## How we run experiments
 
@@ -55,10 +56,12 @@ nested runs).
 - **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).
 - **Projection** (measured, kept selectable: `.b8-32` wins some gated blocks, loses some
   controls; not needed against collapses once the incumbent is on).
-- **SIMP + incumbent under the sightline metric** (done on the 13, NOTES "The large blocks
-  under the sightline conductance": ties the plain greedy, loses to the translucent greedy;
-  SIMP-translucent ties the translucent greedy at 2x time). Open: Lens A at D 0.10 saturates
-  under sightline (median 0.91); compare at a lens with room before the 44.
+- **SIMP + incumbent under the sightline metric** (done on the 13 at D 0.10 and D 0.05, NOTES
+  "Lens A at D 0.05": at D 0.05 SIMP leads the plain greedy, median +0.008 [+0.001, +0.022],
+  and ties the translucent one, which misses 22422's gate at small budgets; 38% of the 13 still
+  above 0.9, enough room to separate methods). **Next (queued): the 44 under sightline at D
+  0.05**: SIMP `.k1s1e-06`, and the plain and translucent greedies (nested, so D 0.02 comes
+  free), on the cluster.
 
 ## New methods
 
