@@ -102,11 +102,6 @@ and Lens B from nested runs.
 
 ## Infrastructure
 
-- **A shared cluster launcher package** (idea; owner 2026-10-03: reblock's launcher now, the
-  package later). Three repos now launch on the `ai` Slurm cluster their own way: GeoffChurch/bookgen
-  (`press/tools/ltcluster`: registry, ephemeral keys, allow-listed mirror sync, node pick by free
-  GPUs), GeoffChurch/mycooc (`scripts/mycoocluster`: job arrays, measured card sizes) and this
-  one (`research/roadless/cluster.py`: arrays per memory class, a block bank). Extract the generic
-  parts (push a clean tree, ship inputs, arrays with per-task lines, class-to-nodes routing, the
-  registry, the allow-listed pull) into one small package with the repo, env and command
-  injected; move all three onto it. Estimated 3 -- 5 days.
+- **Cluster launcher: moving bookgen and mycooc onto GeoffChurch/cluster_submit** (reblock moved
+  2026-10-03). The package and its migration guides (`docs/migrating/{bookgen,mycooc}.md` there)
+  hold what each still needs; their old tools print a deprecation notice.
