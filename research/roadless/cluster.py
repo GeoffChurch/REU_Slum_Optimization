@@ -50,12 +50,13 @@ def ssh(cmd: str) -> str:
 
 def push() -> str:
     """The tracked files at HEAD to the cluster checkout; refuses uncommitted changes."""
-    if subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=REPO).returncode:
+    if subprocess.run(["git", "diff", "--quiet", "--ignore-submodules=none", "HEAD"],
+                      cwd=REPO).returncode:
         raise SystemExit("commit first: the tasks name the commit they run")
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, check=True, text=True,
                           capture_output=True).stdout.strip()
-    files = subprocess.run(["git", "ls-files", "-z"], cwd=REPO, check=True,
-                           capture_output=True).stdout
+    files = subprocess.run(["git", "ls-files", "--recurse-submodules", "-z"], cwd=REPO,
+                           check=True, capture_output=True).stdout      # ext/ are submodules
     ssh(f"mkdir -p {REMOTE}")
     subprocess.run(["rsync", "-a", "--from0", "--files-from=-", ".", f"{HOST}:{REMOTE}/"],
                    cwd=REPO, input=files, check=True)
