@@ -79,5 +79,5 @@ PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.clusters.AI, env=PIXI
                      setup_commands=SETUP)
 
 if __name__ == "__main__":
-    sys.path.insert(0, str(HERE))       # common, for Blocks.plan
+    sys.path[:0] = [str(HERE), str(REPO)]   # common and the repo's scripts package, for Blocks.plan
     raise SystemExit(cs.main(PROJECT))
