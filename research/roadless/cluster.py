@@ -72,14 +72,17 @@ def setup() -> None:
     push()
     ssh("test -x ~/.pixi/bin/pixi || curl -fsSL https://pixi.sh/install.sh | bash")
     print(ssh(f"cd {REMOTE} && ~/.pixi/bin/pixi install --frozen 2>&1 | tail -3"))
+    deps = "~/.cache/reblock-research/pydeps"
     print(ssh(f"cd {REMOTE} && ~/.pixi/bin/pixi run --frozen python -m pip install -q "
-              f"--target ~/.cache/reblock-research/pydeps {CUPY} 2>&1 | tail -3"))
+              f"--target {deps} '{CUPY}' 2>&1 | tail -3"))
+    # the [ctk] extra drags numpy in, which would shadow the env's own on PYTHONPATH
+    ssh(f"rm -rf {deps}/numpy {deps}/numpy-*.dist-info {deps}/numpy.libs")
     probe = ("import cupy as cp; d = cp.cuda.runtime.getDeviceProperties(0); "
              "print(d['name'].decode(), d['totalGlobalMem'] // 2**30, 'GB', "
              "float(cp.arange(10.0).sum()))")
-    print(ssh(f"cd {REMOTE} && srun --gres=gpu:1 --mem=4G -t 5 --exclude=orion "
-              f"env PYTHONPATH=$HOME/.cache/reblock-research/pydeps "
-              f"~/.pixi/bin/pixi run --frozen python -c \"{probe}\""))
+    print(ssh(f"cd {REMOTE} && srun --gres=gpu:1 --mem=4G -t 5 --exclude=orion bash -c "
+              f"'source research/roadless/cluster_env.sh && "
+              f"~/.pixi/bin/pixi run --frozen python -c \"{probe}\"' 2>&1 | grep -v WARN"))
 
 
 def _class(million_unknowns: float) -> tuple[str, list[str]] | None:

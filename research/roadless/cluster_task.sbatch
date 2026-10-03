@@ -7,9 +7,9 @@
 set -euo pipefail
 LINE=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "$1")
 cd "$HOME/src/reblock"
-export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1
-export PYTHONUNBUFFERED=1 PYTHONUTF8=1      # CUDA from cupy's pip toolkit (cluster.py CUPY)
-export PYTHONPATH=.:$HOME/.cache/reblock-research/pydeps REBLOCK_BLOCK_BANK=$2
+# shellcheck source=cluster_env.sh
+source research/roadless/cluster_env.sh
+export REBLOCK_BLOCK_BANK=$2
 echo "task ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} on $(hostname), commit $(cat .cluster_commit): $LINE"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 # shellcheck disable=SC2086  # LINE is a script and its arguments
