@@ -55,10 +55,10 @@ class Blocks:
     def plan(self, args: argparse.Namespace, workdir: Path) -> cs.RunPlan:
         import common   # geopandas and the block sources: only a submit needs them
 
-        # REMAINDER swallows an option placed after the ids, so the command must follow `--`
-        if args.command[:1] != ["--"]:
+        # REMAINDER (which drops the `--`) swallows an option placed after the ids
+        command: list[str] = args.command
+        if not command or command[0].startswith("-"):
             raise SystemExit("usage: submit blocks <run> [--time T] [--gb G] <ids> -- <command>")
-        command = args.command[1:]
         line = " ".join(command)
         if "{id}" not in line:
             raise SystemExit("the command needs {id}")
