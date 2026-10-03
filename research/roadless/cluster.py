@@ -179,7 +179,7 @@ if __name__ == "__main__":
         cut = sys.argv.index("--")
         name, spec, limit = sys.argv[2:5]
         opts = sys.argv[5:cut]
-        if opts not in ([], ["--after", opts[-1]]):
+        if not (opts == [] or (len(opts) == 2 and opts[0] == "--after")):
             raise SystemExit(f"unknown options {opts}")
         ids = (Path(spec[1:]).read_text().split() if spec.startswith("@")
                else spec.split(","))
