@@ -34,9 +34,8 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
 from clear import cleared_through, rows_dir  # noqa: E402
-from relax import OUT as RELAX_OUT  # noqa: E402
+from relax import D_LENS, plan_of, rows_of  # noqa: E402
 
-D_LENS = 0.10
 H = 0.5
 
 
@@ -99,7 +98,7 @@ def arm_of(spec: str, bid: str, cost: np.ndarray) -> Arm:
         return Arm(f"greedy {name} ({extra})", extra, np.array(take, dtype=int))
     if kind == "s":
         [along] = rest
-        r = pd.read_parquet(RELAX_OUT / along / name
+        r = pd.read_parquet(rows_of(plan_of(name), along, D_LENS)
                             / f"{bid}_p{float(extra):g}.parquet").iloc[0]
         return Arm(f"SIMP {name} ({along})", along, np.asarray(r.simp_cleared, dtype=int))
     raise ValueError(f"unknown arm {spec!r}")

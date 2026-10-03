@@ -1,7 +1,7 @@
 """The greedy's Lens A clearing next to SIMP's, same block and budget (D = 0.10): which buildings
 each clears (greedy coloured by round, SIMP by its final x), with a zoom on big blocks.
 
-    PYTHONPATH=. pixi run python research/roadless/render_simp.py <id> <plan> <along> [p] [greedy picker]
+    PYTHONPATH=. pixi run python research/roadless/render_simp.py <id> <plan> <along> [p] [greedy picker] [budget]
 """
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 from clear import cleared_through, rows_dir  # noqa: E402
-from relax import D_LENS, OUT  # noqa: E402
+from relax import D_LENS, plan_of, rows_of  # noqa: E402
 
 
-def main(bid: str, plan: str, along: str, power: float, picker: str) -> None:
+def main(bid: str, plan: str, along: str, power: float, picker: str, budget: float) -> None:
     [b] = common.build_blocks([bid])
     polys = gpd.GeoSeries(list(b.buildings.outlines))
     w = common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines))
@@ -33,14 +33,14 @@ def main(bid: str, plan: str, along: str, power: float, picker: str) -> None:
     order = cleared_through(g, int(g.step.max()))
     rnd = np.concatenate([np.full(len(js), st) for st, js in zip(g.step, g.cleared, strict=True)
                           if st >= 1])
-    take, left = [], D_LENS + 1e-12                 # the greedy's prefix within the budget
+    take, left = [], budget + 1e-12                 # the greedy's prefix within the budget
     for j, r in zip(order, rnd, strict=True):
         if cost[j] <= left:
             take.append((j, r))
             left -= cost[j]
     gj = np.array([j for j, _r in take])
     gr = np.array([r for _j, r in take])
-    s = pd.read_parquet(OUT / along / plan / f"{bid}_p{power:g}.parquet").iloc[0]
+    s = pd.read_parquet(rows_of(plan_of(plan), along, budget) / f"{bid}_p{power:g}.parquet").iloc[0]
     sj = np.asarray(s.simp_cleared, dtype=int)
     sx = np.asarray(s.simp_x)
     big = len(polys) > 1500
@@ -72,8 +72,8 @@ def main(bid: str, plan: str, along: str, power: float, picker: str) -> None:
                 ax.add_patch(plt.Rectangle((window[0], window[2]), 2 * half, 2 * half,
                                            fill=False, ec="#2ca02c", lw=2))
         axes[0, col].set_title(label, fontsize=14)
-    gperm = float(np.interp(D_LENS, g.sort_values("D").D, g.sort_values("D").perm))
-    fig.suptitle(f"{bid}, {along}, J_{power:g} at D {D_LENS:g}: greedy {gperm:.4f} vs SIMP "
+    gperm = float(np.interp(budget, g.sort_values("D").D, g.sort_values("D").perm))
+    fig.suptitle(f"{bid}, {along}, J_{power:g} at D {budget:g}: greedy {gperm:.4f} vs SIMP "
                  f"{s.simp_perm:.4f}; {len(both)} buildings in both", fontsize=16)
     fig.tight_layout()
     out = HERE / f"simp_vs_greedy_{bid}_{along}_{plan}.png"
@@ -83,4 +83,5 @@ def main(bid: str, plan: str, along: str, power: float, picker: str) -> None:
 
 if __name__ == "__main__":
     main(sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4]) if len(sys.argv) > 4 else 2.0,
-         sys.argv[5] if len(sys.argv) > 5 else "S0.01cat")
+         sys.argv[5] if len(sys.argv) > 5 else "S0.01cat",
+         float(sys.argv[6]) if len(sys.argv) > 6 else D_LENS)

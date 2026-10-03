@@ -16,12 +16,12 @@ pickers' rule, best gain per unit population up to D). Step size: a parabola thr
 J'(0) = -gap and J(1), checked. Rounding: clear buildings by decreasing x while they fit,
 then score exactly.
 
-    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <along> [workers]
+    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <along> [workers] [budget]
 
-one: SIMP at D 0.10 (plus the Frank-Wolfe relaxation and bound if fw > 0), rows in
-relax_rows/<along>/<plan>/. path: nested budgets D 0.01 .. 0.15 (each warm-starts from the last
-and keeps what it cleared), rows in the greedy's format (clear.rows_dir, picker SIMP<plan>), so
-picker_compare / Lens A and B read them like any picker.
+one: SIMP at one budget (default D_LENS, 0.05; plus the Frank-Wolfe relaxation and bound if
+fw > 0), rows in relax_rows/<along>/<plan>/D<budget>/. path: nested budgets D 0.01 .. 0.15,
+rows in the greedy's format (clear.rows_dir, picker SIMP<plan>), so picker_compare reads them
+like any picker.
 
 plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>.t<solve
 tolerance while optimizing>, e.g. fw40.q3.i20.t1e-05 (the first 220 runs) or fw0.q5.i10.t0.001.
@@ -44,7 +44,7 @@ import common  # noqa: E402
 import lifted  # noqa: E402
 from clear import EPS, RTOL_SCORE, Clearing, _cells_axes, rows_dir  # noqa: E402
 
-D_LENS = 0.10
+D_LENS = 0.05          # Lens A's budget (owner, 2026-10-03: 0.10 saturates under sightline)
 OUT = HERE / "relax_rows"
 
 
@@ -425,16 +425,16 @@ def _clearing(bid: str, device: str, along: str) -> Clearing:
                     search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None)
 
 
-def one(bid: str, power: float, device: str, plan: Plan, along: str) -> dict:
+def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: float) -> dict:
     c = _clearing(bid, device, along)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
     out = dict(block=bid, n=c.n, power=power, plan=plan.name, along=along)
     if plan.fw > 0:
-        fw = frank_wolfe(rel, D_LENS, plan.fw, log=log)
+        fw = frank_wolfe(rel, budget, plan.fw, log=log)
         x = fw["x"]
-        r = round_by_x(x, c.cost, D_LENS)
+        r = round_by_x(x, c.cost, budget)
         frac = (x > 1e-6) & (x < 1 - 1e-6)
         out.update(iters=len(fw["hist"]), relaxed_perm=rel.perm(fw["J"]),
                    bound_perm=rel.perm(fw["lb"]), rounded_perm=rel.perm(rel.exact(r)),
@@ -442,9 +442,9 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str) -> dict:
                    frac_cost=float(c.cost[frac].sum()), cleared=np.flatnonzero(r).tolist(),
                    x=x.tolist())
     else:
-        x = np.full(c.n, D_LENS)
-    inc = Incumbent(rel, D_LENS, max(plan.keep, 1), score_eps=plan.kscore)
-    xs = simp(rel, x, D_LENS, plan.stages, plan.iters, log=log,
+        x = np.full(c.n, budget)
+    inc = Incumbent(rel, budget, max(plan.keep, 1), score_eps=plan.kscore)
+    xs = simp(rel, x, budget, plan.stages, plan.iters, log=log,
               watch=inc if plan.keep > 0 else None)
     inc.offer(xs)                                         # the last iterate's rounding
     Jbest, rs = inc.best()
@@ -503,20 +503,20 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     return pd.DataFrame(rows)
 
 
-def rows_of(plan: Plan, along: str) -> Path:
-    return OUT / along / plan.name
+def rows_of(plan: Plan, along: str, budget: float) -> Path:
+    return OUT / along / plan.name / f"D{budget:g}"
 
 
 _CFG: dict = {}
 
 
 def _run(bid: str) -> None:
-    mode, power, device, plan, along = (_CFG[k] for k in ("mode", "power", "device", "plan",
-                                                          "along"))
+    mode, power, device, plan, along, budget = (_CFG[k] for k in (
+        "mode", "power", "device", "plan", "along", "budget"))
     try:
         if mode == "one":
-            pd.DataFrame([one(bid, power, device, plan, along)]).to_parquet(
-                rows_of(plan, along) / f"{bid}_p{power:g}.parquet")
+            pd.DataFrame([one(bid, power, device, plan, along, budget)]).to_parquet(
+                rows_of(plan, along, budget) / f"{bid}_p{power:g}.parquet")
         else:
             out = rows_dir(f"SIMP{plan.name}", 0.5, "area", power, along) / f"{bid}.parquet"
             path(bid, power, device, plan, along).to_parquet(out)
@@ -525,19 +525,19 @@ def _run(bid: str) -> None:
         print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)
 
 
-def _target(mode: str, bid: str, power: float, plan: Plan, along: str) -> Path:
+def _target(mode: str, bid: str, power: float, plan: Plan, along: str, budget: float) -> Path:
     if mode == "one":
-        return rows_of(plan, along) / f"{bid}_p{power:g}.parquet"
+        return rows_of(plan, along, budget) / f"{bid}_p{power:g}.parquet"
     return rows_dir(f"SIMP{plan.name}", 0.5, "area", power, along) / f"{bid}.parquet"
 
 
 def main(mode: str, ids: list[str], power: float, device: str, plan: Plan, along: str,
-         workers: int) -> None:
+         workers: int, budget: float) -> None:
     if mode not in ("one", "path"):
         raise ValueError(f"unknown mode {mode!r}")
-    _target(mode, ids[0], power, plan, along).parent.mkdir(parents=True, exist_ok=True)
-    _CFG.update(mode=mode, power=power, device=device, plan=plan, along=along)
-    todo = [i for i in ids if not _target(mode, i, power, plan, along).exists()]
+    _target(mode, ids[0], power, plan, along, budget).parent.mkdir(parents=True, exist_ok=True)
+    _CFG.update(mode=mode, power=power, device=device, plan=plan, along=along, budget=budget)
+    todo = [i for i in ids if not _target(mode, i, power, plan, along, budget).exists()]
     if workers == 1:
         for bid in todo:
             _run(bid)
@@ -551,4 +551,5 @@ def main(mode: str, ids: list[str], power: float, device: str, plan: Plan, along
 if __name__ == "__main__":
     ids = common.recipients() if sys.argv[2] == "all" else sys.argv[2].split(",")
     main(sys.argv[1], ids, float(sys.argv[3]), sys.argv[4], plan_of(sys.argv[5]), sys.argv[6],
-         int(sys.argv[7]) if len(sys.argv) > 7 else 1)
+         int(sys.argv[7]) if len(sys.argv) > 7 else 1,
+         float(sys.argv[8]) if len(sys.argv) > 8 else D_LENS)
