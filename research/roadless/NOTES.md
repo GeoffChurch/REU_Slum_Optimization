@@ -817,3 +817,23 @@ Dominated by the SIMP path on the blocks measured (worse on the gated block, slo
 block). What would put it back: a substitute-aware restore (score restoring a building together
 with the others that carry its flow, or re-add after a restore that raises exact J -- the
 floating schedule), and screening cheap enough to compete.
+
+### Which blocks tell methods apart (adaptive block selection, first look, 2026-10-02)
+
+Method x block matrices of Lens A at D 0.10, double-centred (block difficulty and method mean
+removed), SVD; three matrices, each under one metric: 220 small x 10 methods (J_2 uni), 220
+small x 3 (J_2 sightline), 48 large x 6 (J_2 uni).
+- **One axis is nearly everything (87 -- 96% of the residual variance): collapses.** It sets the
+  method that sometimes collapses (SIMP without the incumbent; the old Frank-Wolfe-started SIMP
+  on small blocks) against the rest, and the top 10% of blocks carry 79 -- 97% of it: the gated
+  blocks (large 22422, 30848; small 5521, 38149, 45919; sightline 5613, 41275).
+- On large blocks the 4 most discriminating blocks rank the 6 methods as all 48 do (Kendall tau
+  0.97; 4 random blocks 0.41), because collapses drive the means. On small blocks they are no
+  better than random.
+- **Without the collapse blocks, method effects are consistent:** ranking methods by mean
+  within-block rank, 8 -- 16 random blocks agree with all of them (tau 0.81 -- 1.00), the most
+  typical blocks too (0.87 -- 1.00), and the most "discriminating" by rank residual are the worst
+  (-1.00 .. +0.69: atypical blocks, whose order departs from the consensus).
+So a screen = a sentinel of gated blocks (collapses) + a random sample (everything else);
+choosing "informative" blocks beyond the sentinel misleads. What sequential stopping would add
+is the sample size: +0.003 (batch size) needs ~40 blocks, +0.009 (SIMP + incumbent) ~13.

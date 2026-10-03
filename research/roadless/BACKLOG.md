@@ -78,7 +78,7 @@ nested runs).
 
 ## Experiment design
 
-- **Adaptive block selection** (idea; wiki `pages/methods/adaptive-benchmark-items.md`).
+- **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the
   most expected information per GPU-second about the decision, stop when it is made. The
