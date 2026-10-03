@@ -8,7 +8,7 @@ floor under that estimate, to send a block known to need a bigger card to one. R
 rows) come back to the same paths here, never overwriting a local file.
 
     pixi run -e launch python research/roadless/cluster.py setup
-    pixi run -e launch python research/roadless/cluster.py submit blocks <run> <ids,|@file> [--time T] [--gb G] -- <script> <args with {id}>
+    pixi run -e launch python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] <ids,|@file> -- <script> <args with {id}>
     pixi run -e launch python research/roadless/cluster.py status|sync [<run>]
     pixi run -e launch python research/roadless/cluster.py cancel <run>
     pixi run -e launch python research/roadless/cluster.py watch start|stop
@@ -55,7 +55,10 @@ class Blocks:
     def plan(self, args: argparse.Namespace, workdir: Path) -> cs.RunPlan:
         import common   # geopandas and the block sources: only a submit needs them
 
-        command = args.command[1:] if args.command[:1] == ["--"] else args.command
+        # REMAINDER swallows an option placed after the ids, so the command must follow `--`
+        if args.command[:1] != ["--"]:
+            raise SystemExit("usage: submit blocks <run> [--time T] [--gb G] <ids> -- <command>")
+        command = args.command[1:]
         line = " ".join(command)
         if "{id}" not in line:
             raise SystemExit("the command needs {id}")
