@@ -788,3 +788,32 @@ incumbent (.k1s1e-06) gives .k1's answers (max |diff| 0.0002) 15% faster, and fi
 20023, 30796 (greedy / SIMP: 0.596 / 0.576, 0.337 / 0.342, 0.480 / 0.513).
 Frontier: at one budget SIMP + incumbent beats the greedy at equal time; the greedy stays for
 the nested curve (every budget in one run, where SIMP's path is ~15 runs).
+
+### Warm SIMP path and grow-then-prune (owner, 2026-10-02)
+
+**Warm-started path** (.k1s1e-06.w3: each budget after the first starts from the last x, the
+free buildings lifted to the even share, 3 updates per stage instead of 10): 2.6 -- 2.9x faster
+than the cold path, a little worse. Lens A greedy / cold path / warm path:
+    18985  D 0.02 0.293/0.314/0.309  D 0.05 0.448/0.469/0.448  D 0.10 0.582/0.595/0.573   557 -> 215 s
+    30848  D 0.02 0.305/0.553/0.551  D 0.05 0.670/0.700/0.690  D 0.10 0.770/0.785/0.779  1749 -> 663 s
+    9710   D 0.02 0.073/0.079/0.077  D 0.05 0.123/0.128/0.127  D 0.10 0.173/0.178/0.175  1356 -> 462 s
+Lens B (D for 0.35) equal to the cold path's (30848 0.007 both, greedy 0.029). A cheaper
+preset, not a replacement; 3 blocks.
+
+**Grow then prune** (search.py GP3xS0.01catr0.005m8: the greedy to 3 x 0.15, then restore the
+cheapest per round, the 8 cheapest by first order rescored in the eps world at 1e-6):
+  - first-order restore scores alone fail (rank correlation 0.57 -- 0.74 with the exact restore
+    loss; Lens A 0.38 vs the greedy's 0.60 on 19421), but exact backward elimination beats the
+    greedy there (0.613 vs 0.601): the backward direction is sound, the scores were not;
+  - with the screened shortlist: small blocks 19421 0.608 vs 0.601, 19510 0.490 vs 0.528, 19537
+    0.863 vs 0.860 (0.655 vs 0.550 at D 0.02); 9712 0.182 vs 0.176;
+  - **collapses on 22422: 0.014 vs 0.814**, the substitutes failure: with 45% cleared the
+    pocket has other exits, so the gate is cheap to restore; its alternatives are restored one by
+    one later, each cheap given the others, and the pocket shuts;
+  - slow: 23 min on 9712, 61 min on 22422 (the SIMP path is 8 -- 29 min, warm 4 -- 11); the
+    eps 1e-6 screen failed to converge on 30848 (AMG-CG 2.4e-5 after 2000); 5810 stopped after
+    80 min of pruning.
+Dominated by the SIMP path on the blocks measured (worse on the gated block, slower on every
+block). What would put it back: a substitute-aware restore (score restoring a building together
+with the others that carry its flow, or re-add after a restore that raises exact J -- the
+floating schedule), and screening cheap enough to compete.

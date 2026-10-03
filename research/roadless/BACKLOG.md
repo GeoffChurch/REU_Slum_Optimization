@@ -45,9 +45,8 @@ nested runs).
   at eps 1e-6 (the relaxation's cached structure), the winner exactly. Sentinel: the same
   scores (0.8144 / 0.7822 / 0.3476 / 0.1871 vs 0.814 / 0.782 / 0.348 / 0.187), 10 -- 25%
   faster. Not yet tried: every 2nd update (`.k2`).
-- **Warm nested path** (idea). With the incumbent keeping good clearings, warm-starting each
-  budget from the last may no longer trap (it did without: -0.076 Lens A); would cut the
-  path's 15x.
+- **Warm nested path** (measured, `.w3`: 2.6 -- 2.9x faster, Lens A 0.002 -- 0.022 below the
+  cold path on 3 blocks; a cheaper preset; NOTES).
 - **Memory** (partly done, 63fa484): structures are cached only for a pattern seen twice,
   and the greedy releases its tension before the exact scoring (22422 fits again); 1558,
   20023, 30796 fit under `.k1s1e-06`.
@@ -61,7 +60,10 @@ nested runs).
 
 ## New methods
 
-- **Add/remove subset search** (idea, top pick; wiki `pages/methods/plus-l-take-away-r.md`).
+- **Add/remove subset search** (grow-then-prune measured: dominated by the SIMP path for now,
+  collapses on gated blocks through substitutes and is slow; NOTES "Warm SIMP path and
+  grow-then-prune". Next schedule to try: floating (re-add after a restore that hurts), and a
+  substitute-aware restore score; wiki `pages/methods/plus-l-take-away-r.md`).
   One family, plus-l take-away-r / floating search: a schedule of (add a, remove r) moves with
   an add scorer (tension, Spread's overlap discount), a remove scorer (the adjoint's closing
   loss on cleared buildings, the same discount for removal batches) and an acceptance rule
