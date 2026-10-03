@@ -16,7 +16,7 @@ mycoocluster (job arrays; always --mem; python -u; measured card sizes: h100 80 
 48 GB, tesla1-2 32 GB, orion broken). A shared launcher package is on BACKLOG.md.
 
     pixi run python research/roadless/cluster.py setup
-    pixi run python research/roadless/cluster.py submit <name> <ids,|@file> <time> -- <script> <args with {id}>
+    pixi run python research/roadless/cluster.py submit <name> <ids,|@file> <time> [--after <run>] -- <script> <args with {id}>
     pixi run python research/roadless/cluster.py status|sync|cancel <name>
 """
 from __future__ import annotations
@@ -92,7 +92,9 @@ def _class(million_unknowns: float) -> tuple[str, list[str]] | None:
     return None
 
 
-def submit(name: str, ids: list[str], limit: str, command: list[str]) -> None:
+def submit(name: str, ids: list[str], limit: str, command: list[str], after: str | None) -> None:
+    """`after`: an earlier run whose arrays must finish first (runs chain like classes do, so
+    MAX_GPUS holds across them)."""
     import common
     if "{id}" not in " ".join(command):
         raise SystemExit("the command needs {id}")
@@ -119,7 +121,8 @@ def submit(name: str, ids: list[str], limit: str, command: list[str]) -> None:
             "".join(" ".join(command).replace("{id}", b) + "\n" for b in bids))
     ssh(f"mkdir -p {remote}")
     subprocess.run(["rsync", "-a", f"{run}/", f"{HOST}:{remote}/"], check=True)
-    jobs, prev = {}, None
+    jobs = {}
+    prev = None if after is None else _record(after)["last"]
     for cls in sorted(by_class):
         args = ["sbatch", "--parsable", f"--job-name=rb-{name}-{cls}",
                 f"--array=0-{len(by_class[cls]) - 1}%{MAX_GPUS}", f"--time={limit}",
@@ -133,7 +136,7 @@ def submit(name: str, ids: list[str], limit: str, command: list[str]) -> None:
         print(f"class {cls} GB: {len(by_class[cls])} blocks, job {prev}")
     (LOCAL / f"{name}.json").write_text(json.dumps(dict(
         name=name, commit=head, command=command, time=limit, submitted=time.strftime("%F %T"),
-        jobs=jobs, too_big=too_big), indent=1) + "\n")
+        jobs=jobs, last=prev, after=after, too_big=too_big), indent=1) + "\n")
     if too_big:
         print(f"too big for any card ({len(too_big)}): {too_big}")
 
@@ -175,9 +178,12 @@ if __name__ == "__main__":
     elif verb == "submit":
         cut = sys.argv.index("--")
         name, spec, limit = sys.argv[2:5]
+        opts = sys.argv[5:cut]
+        if opts not in ([], ["--after", opts[-1]]):
+            raise SystemExit(f"unknown options {opts}")
         ids = (Path(spec[1:]).read_text().split() if spec.startswith("@")
                else spec.split(","))
-        submit(name, ids, limit, sys.argv[cut + 1:])
+        submit(name, ids, limit, sys.argv[cut + 1:], opts[1] if opts else None)
     elif verb == "status":
         status(sys.argv[2])
     elif verb == "sync":
