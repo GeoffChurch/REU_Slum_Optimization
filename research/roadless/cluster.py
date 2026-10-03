@@ -77,11 +77,11 @@ def setup() -> None:
               f"--target {deps} '{CUPY}' 2>&1 | tail -3"))
     # the [ctk] extra drags numpy in, which would shadow the env's own on PYTHONPATH
     ssh(f"rm -rf {deps}/numpy {deps}/numpy-*.dist-info {deps}/numpy.libs")
-    probe = ("import cupy as cp; d = cp.cuda.runtime.getDeviceProperties(0); "
-             "print(d['name'].decode(), d['totalGlobalMem'] // 2**30, 'GB', "
-             "float(cp.arange(10.0).sum()))")
+    probe = ("import cupy as cp, cupyx.scipy.sparse as cs; "     # no quotes: it nests in two
+             "print(cp.cuda.Device().mem_info[1] // 2**30, float(cp.arange(10.0).sum()), "
+             "float((cs.csr_matrix(cp.eye(4)) @ cp.ones(4)).sum()))")
     print(ssh(f"cd {REMOTE} && srun --gres=gpu:1 --mem=4G -t 5 --exclude=orion bash -c "
-              f"'source research/roadless/cluster_env.sh && "
+              f"'hostname && source research/roadless/cluster_env.sh && "
               f"~/.pixi/bin/pixi run --frozen python -c \"{probe}\"' 2>&1 | grep -v WARN"))
 
 
