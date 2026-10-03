@@ -36,7 +36,8 @@ REMOTE = "src/reblock"                  # the checkout, under the cluster home
 RUNS = "reblock-runs"                   # the cluster's per-run tasks, bank and logs
 LOCAL = HERE / "cluster_runs"
 MAX_GPUS = 4                            # owner, 2026-10-03: the cluster is shared
-CUPY = "cupy-cuda12x==14.2.0"           # as here
+CUPY = "cupy-cuda12x[ctk]==14.2.0"      # as here, with the CUDA 12 toolkit from pip: the cluster's
+                                        # /usr/local/cuda is 11.8 (nodes' drivers are 12.8)
 # (most million unknowns, class, where): a block goes to the first class that holds it
 CLASSES = [(26.0, "32", ["--exclude=orion"]),
            (50.0, "48", ["--exclude=orion,tesla1,tesla2"]),
@@ -44,8 +45,10 @@ CLASSES = [(26.0, "32", ["--exclude=orion"]),
 
 
 def ssh(cmd: str) -> str:
-    return subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, cmd], check=True, text=True,
-                          capture_output=True).stdout
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, cmd], text=True, capture_output=True)
+    if r.returncode:
+        raise SystemExit(f"on {HOST}: {cmd}\n{r.stderr[-2000:]}")
+    return r.stdout
 
 
 def push() -> str:
@@ -75,7 +78,7 @@ def setup() -> None:
              "print(d['name'].decode(), d['totalGlobalMem'] // 2**30, 'GB', "
              "float(cp.arange(10.0).sum()))")
     print(ssh(f"cd {REMOTE} && srun --gres=gpu:1 --mem=4G -t 5 --exclude=orion "
-              f"env CUDA_PATH=/usr/local/cuda PYTHONPATH=$HOME/.cache/reblock-research/pydeps "
+              f"env PYTHONPATH=$HOME/.cache/reblock-research/pydeps "
               f"~/.pixi/bin/pixi run --frozen python -c \"{probe}\""))
 
 
