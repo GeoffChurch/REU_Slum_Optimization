@@ -56,8 +56,11 @@ class Relaxation:
     opening too (their vjp), and nothing is convex."""
 
     def __init__(self, c: Clearing, power: float, q: float = 1.0, rtol: float = RTOL_SCORE,
-                 eps: float = EPS):
+                 eps: float = EPS, params: lifted.Params | None = None):
         self.c, self.power, self.q, self.rtol, self.eps = c, power, q, rtol, eps
+        # the conductance optimized under: the clearing's search one (c.ps, e.g. more
+        # translucent than the metric), or `params`; exact() always scores under the metric c.p
+        self.pp = c.ps if params is None else params
         self.beta = 0.0                        # projection sharpness (0: none); simp sets it
         self._u = self._lam = None             # the last solves: warm starts for the next
         g = c.sc.grid
@@ -97,8 +100,8 @@ class Relaxation:
         c = self.c
         op = self.open_of(x)
         op_eps = op + self.eps * (c.full - op)
-        sy = lifted.System(c.sc.grid, op_eps, c.p)
-        sol = lifted.solve(c.sc.grid, op_eps, c.sc.f, c.p, system=sy, rtol=self.rtol,
+        sy = lifted.System(c.sc.grid, op_eps, self.pp)
+        sol = lifted.solve(c.sc.grid, op_eps, c.sc.f, self.pp, system=sy, rtol=self.rtol,
                            host=False, x0=self._u)
         self._u = sol.u                        # eps world: the same unknowns every time
         return op_eps, sy, sol, self._home_u(sol, op_eps)
@@ -122,7 +125,7 @@ class Relaxation:
 
     def value_sgrad(self, x: np.ndarray) -> tuple[float, np.ndarray]:
         """J and its gradient in the projected clearing s = proj(x)."""
-        c, p = self.c, self.c.p
+        c, p = self.c, self.pp
         xp = p.solver.xp
         g = c.sc.grid
         op_eps, sy, sol, home_u = self._solve(x)
@@ -334,21 +337,16 @@ class Incumbent:
     def __init__(self, rel: Relaxation, budget: float, every: int,
                  first: np.ndarray | None = None, score_eps: float = 0.0):
         self.rel, self.budget, self.every, self.first = rel, budget, every, first
-        self.score_eps = score_eps
+        # score_eps > 0: candidates scored in the eps world at score_eps under the METRIC
+        # conductance (rel may optimize under a search one), q 1, no projection
+        self.scorer = (Relaxation(rel.c, rel.power, q=1.0, rtol=rel.rtol, eps=score_eps,
+                                  params=rel.c.p) if score_eps > 0 else None)
         self.n = 0
         self.J, self.r = np.inf, np.zeros(rel.c.n)
         self._seen: set[bytes] = set()
 
     def _score(self, r: np.ndarray) -> float:
-        if self.score_eps == 0.0:
-            return self.rel.exact(r)
-        rel = self.rel                  # the eps world at score_eps, q 1, no projection
-        saved = rel.eps, rel.q, rel.beta
-        rel.eps, rel.q, rel.beta = self.score_eps, 1.0, 0.0
-        try:
-            return rel.value(r)
-        finally:
-            rel.eps, rel.q, rel.beta = saved
+        return self.rel.exact(r) if self.scorer is None else self.scorer.value(r)
 
     def offer(self, x: np.ndarray) -> None:
         r = round_by_x(x, self.rel.c.cost, self.budget, first=self.first)
@@ -362,7 +360,7 @@ class Incumbent:
 
     def best(self) -> tuple[float, np.ndarray]:
         """(exact J, clearing) of the best candidate."""
-        return (self.J if self.score_eps == 0.0 else self.rel.exact(self.r)), self.r
+        return (self.J if self.scorer is None else self.rel.exact(self.r)), self.r
 
     def __call__(self, x: np.ndarray) -> None:
         self.n += 1
@@ -416,10 +414,15 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
 
 
 def _clearing(bid: str, device: str, along: str) -> Clearing:
+    """`along`: the metric's conductance, or <metric>@<search>: SIMP's gradient under the search
+    one (as the greedy's translucent search), every score under the metric."""
     [b] = common.build_blocks([bid])
-    p = lifted.Params(3.0, 8, along=lifted.along_of(along, lifted.scans_of(device)),
+    scans = lifted.scans_of(device)
+    specs = along.split("@")
+    p = lifted.Params(3.0, 8, along=lifted.along_of(specs[0], scans),
                       solver=lifted.solver_of(device))
-    return Clearing(b, 0.5, p, population=common.POPULATIONS["area"])
+    return Clearing(b, 0.5, p, population=common.POPULATIONS["area"],
+                    search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None)
 
 
 def one(bid: str, power: float, device: str, plan: Plan, along: str) -> dict:

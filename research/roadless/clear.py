@@ -432,10 +432,12 @@ class GpuSweep:
 
     def columns(self, n: int) -> int:
         """Up to `chunk`, as many as a quarter of the free device memory holds: a block of
-        several km^2 has ~50M unknowns, 32 columns of which are 11 GB."""
+        several km^2 has ~50M unknowns, 32 columns of which are 11 GB. The pool's cached blocks
+        are released first and not counted (they can be fragments of larger allocations: counted,
+        22422 and 20543 under the sightline conductance asked for 8 GB that was not there)."""
         import cupy as cp
-        pool = cp.get_default_memory_pool()
-        free = cp.cuda.Device().mem_info[0] + pool.free_bytes()
+        cp.get_default_memory_pool().free_all_blocks()
+        free = cp.cuda.Device().mem_info[0]
         return max(1, min(self.chunk, int(free / 4 / (8 * n))))
 
     def prepare(self, A, u, rowsum):
