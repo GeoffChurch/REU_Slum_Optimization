@@ -895,3 +895,36 @@ the methods (SIMP vs the greedy: the interval excludes zero), so D 0.02 is not n
 The greedy rows give it for free (every budget in one run) if the 44 want it.
 **What follows:** the 44 under sightline at D 0.05: SIMP, the plain greedy and the translucent
 greedy. Neither greedy has rows on the 44 yet (5 of them do).
+
+### Sightline on the held-out blocks at D 0.05 (owner: "we can launch the 44-block sightline run at D 0.05", 2026-10-03)
+
+All three methods ran on the cluster (V100 / RTX 8000), so these times can be compared with each
+other: SIMP + incumbent (`.k1s1e-06`), the plain greedy S0.01cat and the translucent greedy
+(`ss100k2n2r30@ss100k0.5n2r30`). The 46 held-out large blocks are the 44 plus 20023 and 30796, which
+fit under the incumbent. 30796's translucent greedy ran out of memory on a 48 GB card (in `_exact`'s
+CSR at step 4) and is pending on the H100, so the translucent pairs are on 45 blocks. Paired per block
+(simp_compare.py held):
+
+    SIMP vs greedy (46)              median +0.021 [+0.015, +0.026]  mean +0.021  ahead 96%  worst -0.023
+    SIMP vs translucent greedy (45)  median +0.005 [+0.001, +0.013]  mean +0.013  ahead 69%  worst -0.023
+    translucent vs greedy (45)       median +0.014 [+0.002, +0.022]  mean +0.008  ahead 78%  worst -0.165
+    at D 0.02: translucent vs greedy median +0.010 [-0.001, +0.018]  mean -0.002  ahead 64%  worst -0.228
+
+**SIMP's lead holds on blocks it was not tuned on, and is larger.** Against the plain greedy it is
++0.021 (+0.008 on the 13). Against the translucent greedy it is +0.005 with an interval that
+excludes zero (level on the 13). The translucent greedy's gain over the plain one is real on the
+median, but its tail is the same as on the 13: it misses a gate on some blocks (18910 -0.165 at
+D 0.05, 7662 -0.228 at D 0.02), so its mean gain is small. SIMP has no such tail: its worst block
+is -0.023.
+
+Medians: SIMP 0.746, the translucent greedy 0.741, the plain greedy 0.720. Median time: SIMP 103 s,
+either greedy 33 s to D 0.05, so SIMP costs 3.1x on the same cards.
+
+**Saturation:** 15% of the 46 are above 0.9 for SIMP and 11% for the greedies, against 38% of the
+13 tuning blocks, which are richer in gated pockets. D 0.05 leaves room on the held-out set. At
+D 0.02 the greedy median is 0.55, with 4% above 0.9.
+
+**What follows:** SIMP + incumbent is the frontier under sightline as under uni. It is on top of
+both greedies at 3x their time, and it never collapses on a gate the way the translucent greedy
+does. The open cost question is the greedy's speed (BACKLOG, Greedy: speed). Pending: 30796's
+translucent greedy on the H100.

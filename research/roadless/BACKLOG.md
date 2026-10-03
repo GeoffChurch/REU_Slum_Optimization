@@ -56,12 +56,12 @@ and Lens B from nested runs.
 - **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).
 - **Projection** (measured, kept selectable: `.b8-32` wins some gated blocks, loses some
   controls; not needed against collapses once the incumbent is on).
-- **SIMP + incumbent under the sightline metric** (done on the 13 at D 0.10 and D 0.05, NOTES
-  "Lens A at D 0.05": at D 0.05 SIMP leads the plain greedy, median +0.008 [+0.001, +0.022],
-  and ties the translucent one, which misses 22422's gate at small budgets; 38% of the 13 still
-  above 0.9, enough room to separate methods). **Next (queued): the 44 under sightline at D
-  0.05**: SIMP `.k1s1e-06`, and the plain and translucent greedies (nested, so D 0.02 comes
-  free), on the cluster.
+- **SIMP + incumbent under the sightline metric** (done: the 13 at D 0.10 and D 0.05, and the 46
+  held-out blocks at D 0.05, NOTES "Sightline on the held-out blocks at D 0.05". SIMP leads the
+  plain greedy by a median of +0.021 [+0.015, +0.026], ahead on 96% of blocks, and the translucent
+  greedy by +0.005 [+0.001, +0.013], at 3.1x their time. The translucent greedy keeps its gate
+  tail, 18910 -0.165.) **Pending:** 30796's translucent greedy on the H100; it ran out of memory on
+  48 GB.
 
 ## New methods
 
