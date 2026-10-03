@@ -9,7 +9,8 @@ confirmation; 20023 and 30796 lack greedy S0.005cat). Times are not comparable a
 the D 0.05 SIMP rows ran on the cluster's V100 / RTX 8000 cards, the greedies here on an RTX 6000
 Ada.
 
-    PYTHONPATH=. pixi run python research/roadless/simp_compare.py <tuning|held> <budget> <name>=<simp|greedy>,<along>,<plan|picker>... <b>/<a>...
+    PYTHONPATH=. pixi run python research/roadless/simp_compare.py <tuning|held> <budget> \
+        <name>=<simp|greedy>,<along>,<plan|picker>... <b>/<a>...
 """
 from __future__ import annotations
 
@@ -67,9 +68,10 @@ def main(which: str, budget: float, specs: list[str], pairs: list[str]) -> None:
         b, a = pair.split("/")
         both = per[a].index.intersection(per[b].index)
         s = per[b].perm[both] - per[a].perm[both]
+        ratio = (per[b].t[both] / per[a].t[both]).median()
         print(f"  {b} vs {a} [{len(s)}]: median {s.median():+.3f} {_ci(s)}  mean {s.mean():+.3f}"
               f"  ahead {np.mean(s > 0):.0%}  worst {s.min():+.3f}"
-              f" ({s.idxmin().split('_')[-1]})  time x{(per[b].t[both] / per[a].t[both]).median():.1f}")
+              f" ({s.idxmin().split('_')[-1]})  time x{ratio:.1f}")
 
 
 if __name__ == "__main__":
