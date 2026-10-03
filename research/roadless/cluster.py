@@ -36,8 +36,10 @@ REMOTE = "src/reblock"                  # the checkout, under the cluster home
 RUNS = "reblock-runs"                   # the cluster's per-run tasks, bank and logs
 LOCAL = HERE / "cluster_runs"
 MAX_GPUS = 4                            # owner, 2026-10-03: the cluster is shared
-CUPY = "cupy-cuda12x[ctk]==14.2.0"      # as here, with the CUDA 12 toolkit from pip: the cluster's
-                                        # /usr/local/cuda is 11.8 (nodes' drivers are 12.8)
+# the research deps outside the pixi env, as in this machine's deps dir; cupy with the CUDA 12
+# toolkit from pip (the cluster's /usr/local/cuda is 11.8, the nodes' drivers 12.8)
+CUPY = "'cupy-cuda12x[ctk]==14.2.0'"
+PYAMG = "pyamg==5.3.0"                  # without its deps: numpy and scipy are the env's
 # (most million unknowns, class, where): a block goes to the first class that holds it
 CLASSES = [(26.0, "32", ["--exclude=orion"]),
            (50.0, "48", ["--exclude=orion,tesla1,tesla2"]),
@@ -73,8 +75,9 @@ def setup() -> None:
     ssh("test -x ~/.pixi/bin/pixi || curl -fsSL https://pixi.sh/install.sh | bash")
     print(ssh(f"cd {REMOTE} && ~/.pixi/bin/pixi install --frozen 2>&1 | tail -3"))
     deps = "~/.cache/reblock-research/pydeps"
-    print(ssh(f"cd {REMOTE} && ~/.pixi/bin/pixi run --frozen python -m pip install -q "
-              f"--target {deps} '{CUPY}' 2>&1 | tail -3"))
+    pip = f"cd {REMOTE} && ~/.pixi/bin/pixi run --frozen python -m pip install -q --target {deps}"
+    print(ssh(f"{pip} {CUPY} 2>&1 | tail -3"))
+    print(ssh(f"{pip} --no-deps {PYAMG} 2>&1 | tail -3"))
     # the [ctk] extra drags numpy in, which would shadow the env's own on PYTHONPATH
     ssh(f"rm -rf {deps}/numpy {deps}/numpy-*.dist-info {deps}/numpy.libs")
     probe = ("import cupy as cp, cupyx.scipy.sparse as cs; "     # no quotes: it nests in two
