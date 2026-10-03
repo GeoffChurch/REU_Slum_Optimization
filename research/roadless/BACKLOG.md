@@ -55,8 +55,10 @@ nested runs).
 - **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).
 - **Projection** (measured, kept selectable: `.b8-32` wins some gated blocks, loses some
   controls; not needed against collapses once the incumbent is on).
-- **SIMP + incumbent under the sightline metric**, and with the translucent-search gradient
-  (idea; translucent search beat SIMP under ss100k2n2r30 before the incumbent existed).
+- **SIMP + incumbent under the sightline metric** (done on the 13, NOTES "The large blocks
+  under the sightline conductance": ties the plain greedy, loses to the translucent greedy;
+  SIMP-translucent ties the translucent greedy at 2x time). Open: Lens A at D 0.10 saturates
+  under sightline (median 0.91); compare at a lens with room before the 44.
 
 ## New methods
 

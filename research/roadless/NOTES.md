@@ -837,3 +837,23 @@ small x 3 (J_2 sightline), 48 large x 6 (J_2 uni).
 So a screen = a sentinel of gated blocks (collapses) + a random sample (everything else);
 choosing "informative" blocks beyond the sentinel misleads. What sequential stopping would add
 is the sample size: +0.003 (batch size) needs ~40 blocks, +0.009 (SIMP + incumbent) ~13.
+
+### The large blocks under the sightline conductance (owner, 2026-10-03)
+
+ss100k2n2r30, J_2, Lens A at D 0.10, the 13 tuning blocks (greedy / translucent search
+ss100k2n2r30@ss100k0.5n2r30 / SIMP + eps-scored incumbent / SIMP under the same translucent
+search conductance, incumbent and scores under the metric: relax `<metric>@<search>`):
+    SIMP vs greedy (10)                    median +0.005  mean -0.002  ahead 7/10
+    SIMP vs translucent greedy (10)        median -0.003  mean -0.006  ahead 3/10
+    translucent greedy vs greedy (13)      median +0.002  mean +0.003  ahead 10/13
+    SIMP-translucent vs translucent (13)   median -0.001  mean -0.005  ahead 6/13  worst -0.081
+Median time to D 0.10: greedies 89 -- 90 s, SIMP-translucent 198 s. SIMP-translucent wins where
+the score has room (5810 0.631 vs 0.595, 20269 0.764 vs 0.744, 9712 0.439 vs 0.432) and loses
+near the ceiling (23597 0.881 vs 0.961, 46841 0.913 vs 0.940, 38616 0.870 vs 0.886).
+**Lens A at D 0.10 saturates under sightline:** median 0.906 on these blocks, 54% above 0.9
+(uniform: 0.522, none above 0.9); 22422's gate is worth nothing here (0.99 for every method).
+A lens with room (D 0.02 -- 0.05, median 0.70 -- 0.83, or Lens B at a higher target) would tell
+the methods apart better. Under this lens the translucent greedy is the frontier: SIMP ties it
+at twice the time.
+Memory: the sweep's column count now ignores the pool's cached fragments (22422 and 20543 failed
+under sightline asking for 8 GB that was not contiguous); plain SIMP still runs out on 1558.
