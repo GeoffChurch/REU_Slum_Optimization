@@ -96,3 +96,14 @@ nested runs).
 - **Blocks over ~1.4 km^2** (owner's call). 21 -- 23 of the 82 large blocks do not fit 48 GB at
   h 0.5: a coarser grid, or the grid cropped to the built-up area. Both change the model.
 - **Coarse-to-fine** (idea). Early SIMP stages at h 1.0 (4x fewer unknowns), the last at 0.5.
+
+## Infrastructure
+
+- **A shared cluster launcher package** (idea; owner 2026-10-03: reblock's launcher now, the
+  package later). Three repos now launch on the `ai` Slurm cluster their own way: GeoffChurch/bookgen
+  (`press/tools/ltcluster`: registry, ephemeral keys, allow-listed mirror sync, node pick by free
+  GPUs), GeoffChurch/mycooc (`scripts/mycoocluster`: job arrays, measured card sizes) and this
+  one (`research/roadless/cluster.py`: arrays per memory class, a block bank). Extract the generic
+  parts (push a clean tree, ship inputs, arrays with per-task lines, class-to-nodes routing, the
+  registry, the allow-listed pull) into one small package with the repo, env and command
+  injected; move all three onto it. Estimated 3 -- 5 days.

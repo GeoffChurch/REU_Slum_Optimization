@@ -7,6 +7,8 @@ built once, scoring any road set by the free space its corridor opens.
 from __future__ import annotations
 
 import dataclasses
+import os
+import pickle
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,17 +32,41 @@ def recipients() -> list[str]:
     return sorted(rows["recipient"].unique())
 
 
+BANK_ENV = "REBLOCK_BLOCK_BANK"
+
+
 def build_blocks(ids: list[str]) -> list:
+    """The blocks, fewest buildings first: from the Cape Town source, or, when $REBLOCK_BLOCK_BANK
+    names a bank (a cluster node has no source data: cluster.py ships the blocks a run needs),
+    from it -- an id it lacks is an error."""
+    bank = os.environ.get(BANK_ENV)
+    if bank:
+        with open(bank, "rb") as f:
+            held = pickle.load(f)
+        blocks = [held[i] for i in ids]
+    else:
+        blocks = _from_source(ids)
+    assert all(type(b.buildings).__name__ == "Footprints" for b in blocks)
+    return sorted(blocks, key=lambda b: len(b.buildings))
+
+
+def _from_source(ids: list[str]) -> list:
     from hydra import compose, initialize_config_dir
 
     from reblock.presets import load_stages
     with initialize_config_dir(version_base=None, config_dir=str(REPO / "conf")):
         cfg = compose(config_name="compare_config",
                       overrides=["data=capetown_full", "buildings=footprints"])
-    source = load_stages(cfg).source
-    blocks = sorted(source.restricted(ids).region().blocks, key=lambda b: len(b.buildings))
-    assert all(type(b.buildings).__name__ == "Footprints" for b in blocks)
-    return blocks
+    return list(load_stages(cfg).source.restricted(ids).region().blocks)
+
+
+def write_bank(ids: list[str], path: Path) -> dict:
+    """Pickle the blocks `ids` (built from the source) for build_blocks on a machine without it;
+    returns them by id."""
+    bank = {b.block_id: b for b in _from_source(ids)}
+    with open(path, "wb") as f:
+        pickle.dump(bank, f)
+    return bank
 
 
 def arms() -> dict:
