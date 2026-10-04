@@ -24,16 +24,18 @@ rows in the greedy's format (clear.rows_dir, picker SIMP<plan>), so picker_compa
 like any picker.
 
 plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>.t<solve
-tolerance while optimizing>, e.g. fw40.q3.i20.t1e-05 (the first 220 runs) or fw0.q5.i10.t0.001.
+tolerance while optimizing>, e.g. fw40.q3.i20.t1e-05 (the first 220 runs) or fw0.q5.i10.t0.001;
+the optional suffixes are Plan's (.e .b .k[s] .w .c .u).
 """
 from __future__ import annotations
 
-import dataclasses
 import re
 import sys
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
@@ -266,6 +268,88 @@ XMIN = 1e-3
 ETA = 0.5                                          # the projection's threshold
 
 
+class Stepper(Protocol):
+    def trial(self, x: np.ndarray, B: np.ndarray, lo: np.ndarray
+              ) -> Callable[[float], np.ndarray]:
+        """The update of iterate x, as a function of the budget's multiplier lam (simp bisects
+        lam so the update spends the budget). B = -dJ/dx / cost, the sensitivity per unit
+        cost; lo the lower bounds."""
+        ...
+
+
+class Update(Protocol):
+    """SIMP's design update rule (the plan's `.u<name>`): `start()` gives a fresh stepper per
+    continuation stage (its objective changes with q)."""
+    @property
+    def name(self) -> str: ...
+
+    def start(self) -> Stepper: ...
+
+
+@dataclass(frozen=True)
+class OC:
+    """Optimality criteria: x (B / lam)^eta within `move` of x. eta 0.5 is the classic rule
+    (the stationarity condition of the linearized Lagrangian in x^2); a smaller eta damps it."""
+    eta: float = 0.5
+    move: float = 0.2
+
+    @property
+    def name(self) -> str:
+        return f"oc{self.eta:g}m{self.move:g}"
+
+    def start(self) -> Stepper:
+        return self
+
+    def trial(self, x, B, lo):
+        a, b = np.maximum(lo, x - self.move), np.minimum(1.0, x + self.move)
+        return lambda lam: np.clip(x * (B / lam) ** self.eta, a, b)
+
+
+@dataclass(frozen=True)
+class MMA:
+    """Method of moving asymptotes (Svanberg 1987) for this problem: J is non-increasing in x,
+    so its convex approximation needs only the lower asymptote L, and with the budget exact the
+    update is L + (x - L) sqrt(B / lam) -- OC is this with L fixed at 0. Each building's gap
+    x - L starts at x (the first step is OC's), then shrinks by `shrink` when its last two moves
+    reversed (an oscillation: a gate and its substitutes flipping) and grows by `grow` when they
+    agree (a steady climb, additive once L < 0, so a building near XMIN can come back). Moves
+    stay within 0.9 gap and `move` of x."""
+    move: float = 0.2
+    shrink: float = 0.7
+    grow: float = 1.2
+
+    @property
+    def name(self) -> str:
+        return f"mma{self.move:g}"
+
+    def start(self) -> Stepper:
+        return _MMAStep(self)
+
+
+class _MMAStep:
+    def __init__(self, rule: MMA):
+        self.rule = rule
+        self.prev: list[np.ndarray] = []        # the last two iterates
+        self.gap: np.ndarray | None = None
+
+    def trial(self, x, B, lo):
+        r = self.rule
+        if self.gap is None or len(self.prev) < 2:
+            gap = np.maximum(x, 0.01) if self.gap is None else self.gap
+        else:
+            turn = (x - self.prev[-1]) * (self.prev[-1] - self.prev[-2])
+            gap = self.gap * np.where(turn < 0, r.shrink, np.where(turn > 0, r.grow, 1.0))
+        self.gap = gap = np.clip(gap, 0.01, 10.0)
+        self.prev = [*self.prev[-1:], x.copy()]
+        L = x - gap
+        a = np.maximum(lo, np.maximum(x - r.move, x - 0.9 * gap))
+        b = np.minimum(1.0, np.minimum(x + r.move, x + 0.9 * gap))
+        return lambda lam: np.clip(L + gap * np.sqrt(B / lam), a, b)
+
+
+DEFAULT_UPDATE = OC()
+
+
 class Plan(NamedTuple):
     """How a block is solved: `fw` Frank-Wolfe iterations from x = 0 (0: start SIMP from the
     uniform x = D, no bound), SIMP continuation q = 1.5, 2, ... `qmax` with up to `iters`
@@ -277,7 +361,11 @@ class Plan(NamedTuple):
     last iterate's); `kscore` > 0 scores the candidates in the eps world at that eps (the
     relaxation's cached structure: no new system per candidate), the winner exactly; `warm`
     > 0 (path only): each budget after the first starts from the last budget's x (the free
-    buildings lifted to the uniform share) with `warm` updates per stage."""
+    buildings lifted to the uniform share) with `warm` updates per stage; `coarse` > 0 (one
+    only): every stage but the last on a grid of that spacing (h 1.0: 4x fewer unknowns), the
+    last at h 0.5 from its x (buildings, their costs and x do not depend on h), the incumbent
+    scoring at h 0.5 throughout; `update` the design update rule (`.u<name>`; OC's classic rule
+    is not named)."""
     fw: int
     qmax: float
     iters: int
@@ -288,6 +376,8 @@ class Plan(NamedTuple):
     keep: int = 0
     kscore: float = 0.0
     warm: int = 0
+    coarse: float = 0.0
+    update: Update = DEFAULT_UPDATE
 
     @property
     def name(self) -> str:
@@ -296,7 +386,9 @@ class Plan(NamedTuple):
                 + (f".b{self.b0:g}-{self.bmax:g}" if self.b0 > 0 else "")
                 + (f".k{self.keep}" if self.keep > 0 else "")
                 + (f"s{self.kscore:g}" if self.kscore > 0 else "")
-                + (f".w{self.warm}" if self.warm > 0 else ""))
+                + (f".w{self.warm}" if self.warm > 0 else "")
+                + (f".c{self.coarse:g}" if self.coarse > 0 else "")
+                + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
 
     @property
     def stages(self) -> tuple[tuple[float, float], ...]:
@@ -316,16 +408,21 @@ class Plan(NamedTuple):
 
 def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+?)(?:\.e([0-9.e-]+?))?"
-                     r"(?:\.b([0-9.]+)-([0-9.]+))?(?:\.k(\d+)(?:s([0-9.e-]+))?)?(?:\.w(\d+))?", spec)
+                     r"(?:\.b([0-9.]+)-([0-9.]+))?(?:\.k(\d+)(?:s([0-9.e-]+))?)?(?:\.w(\d+))?"
+                     r"(?:\.c([0-9.]+))?(?:\.u(?:oc([0-9.]+)m([0-9.]+)|mma([0-9.]+)))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
+    update: Update = (OC(float(m.group(12)), float(m.group(13))) if m.group(12) is not None
+                      else MMA(float(m.group(14))) if m.group(14) is not None
+                      else DEFAULT_UPDATE)
     return Plan(int(m.group(1)), float(m.group(2)), int(m.group(3)), float(m.group(4)),
                 EPS if m.group(5) is None else float(m.group(5)),
                 0.0 if m.group(6) is None else float(m.group(6)),
                 0.0 if m.group(7) is None else float(m.group(7)),
                 0 if m.group(8) is None else int(m.group(8)),
                 0.0 if m.group(9) is None else float(m.group(9)),
-                0 if m.group(10) is None else int(m.group(10)))
+                0 if m.group(10) is None else int(m.group(10)),
+                0.0 if m.group(11) is None else float(m.group(11)), update)
 
 
 class Incumbent:
@@ -369,12 +466,12 @@ class Incumbent:
 
 
 def simp(rel: Relaxation, x0: np.ndarray, budget: float,
-         stages: tuple[tuple[float, float], ...], iters: int, log=print, move: float = 0.2,
+         stages: tuple[tuple[float, float], ...], iters: int, update: Update, log=print,
          xlo: np.ndarray | None = None, watch=None) -> np.ndarray:
-    """SIMP continuation from x0: for (q, beta) in stages, up to `iters` optimality-criteria
-    updates x <- clip(x (-g / (lam c H'(x)))^1/2) within `move` of x and [xlo (default XMIN),
-    1], lam bisected so that c . H(x) = budget (H = rel.proj; H' cancels the one in g, so the
-    ratio is the sensitivity to the projected clearing per unit cost). Non-convex: a local
+    """SIMP continuation from x0: for (q, beta) in stages, up to `iters` updates by `update`
+    (classic OC: x <- clip(x (-g / (lam c H'(x)))^1/2) within 0.2 of x) within [xlo (default
+    XMIN), 1], lam bisected so that c . H(x) = budget (H = rel.proj; H' cancels the one in g, so
+    the ratio is the sensitivity to the projected clearing per unit cost). Non-convex: a local
     method. `watch(x)`, if given, sees every iterate."""
     cost = rel.c.cost
     lo_ = np.full(len(cost), XMIN) if xlo is None else xlo
@@ -387,14 +484,15 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
     t0 = time.time()
     for q, beta in stages:
         rel.q, rel.beta = q, beta
+        step = update.start()
         for it in range(iters):
             J, gs = rel.value_sgrad(x)
             B = np.maximum(-gs, 1e-300) / cost
+            trial = step.trial(x, B, lo_)
             lo, hi = 1e-300, 1e300
             for _ in range(200):
                 lam = np.sqrt(lo * hi)
-                xn = np.clip(x * np.sqrt(B / lam), np.maximum(lo_, x - move),
-                             np.minimum(1.0, x + move))
+                xn = trial(lam)
                 lo, hi = (lam, hi) if cost @ rel.proj(xn) > budget else (lo, lam)
                 if hi / lo < 1 + 1e-9:
                     break
@@ -413,7 +511,7 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
     return x
 
 
-def _clearing(bid: str, device: str, along: str) -> Clearing:
+def _clearing(bid: str, device: str, along: str, h: float = 0.5) -> Clearing:
     """`along`: the metric's conductance, or <metric>@<search>: SIMP's gradient under the search
     one (as the greedy's translucent search), every score under the metric."""
     [b] = common.build_blocks([bid])
@@ -421,7 +519,7 @@ def _clearing(bid: str, device: str, along: str) -> Clearing:
     specs = along.split("@")
     p = lifted.Params(3.0, 8, along=lifted.along_of(specs[0], scans),
                       solver=lifted.solver_of(device))
-    return Clearing(b, 0.5, p, population=common.POPULATIONS["area"],
+    return Clearing(b, h, p, population=common.POPULATIONS["area"],
                     search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None)
 
 
@@ -444,8 +542,17 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     else:
         x = np.full(c.n, budget)
     inc = Incumbent(rel, budget, max(plan.keep, 1), score_eps=plan.kscore)
-    xs = simp(rel, x, budget, plan.stages, plan.iters, log=log,
-              watch=inc if plan.keep > 0 else None)
+    watch = inc if plan.keep > 0 else None
+    stages = plan.stages
+    if plan.coarse > 0:
+        rel_c = Relaxation(_clearing(bid, device, along, plan.coarse), power, rtol=plan.rtol,
+                           eps=plan.eps)
+        log(f"  coarse h {plan.coarse:g}: {rel_c.c.sc.grid.inside.sum()} cells, fine "
+            f"{c.sc.grid.inside.sum()}")
+        x = simp(rel_c, x, budget, stages[:-1], plan.iters, plan.update, log=log, watch=watch)
+        del rel_c
+        stages = stages[-1:]
+    xs = simp(rel, x, budget, stages, plan.iters, plan.update, log=log, watch=watch)
     inc.offer(xs)                                         # the last iterate's rounding
     Jbest, rs = inc.best()
     out.update(simp_perm=rel.perm(Jbest), simp_D=float(c.cost @ rs),
@@ -472,6 +579,8 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     rest start from the last x lifted to at least that even share (so none is trapped at
     XMIN), and each stage gets plan.warm updates. Rows in the greedy's format: `cleared` = the
     buildings new at this step."""
+    if plan.coarse > 0:
+        raise ValueError(f"coarse-to-fine is not built for path: {plan.name}")
     c = _clearing(bid, device, along)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     J0, P0 = rel.J0, c.sc.P0
@@ -487,7 +596,8 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
         x = np.where(fixed, 1.0, np.maximum(x, even) if warm else even)
         inc = Incumbent(rel, D, max(plan.keep, 1), first=fixed.astype(float),
                         score_eps=plan.kscore)
-        x = simp(rel, x, D, plan.stages, plan.warm if warm else plan.iters, log=lambda s: None,
+        x = simp(rel, x, D, plan.stages, plan.warm if warm else plan.iters, plan.update,
+                 log=lambda s: None,
                  xlo=np.where(fixed, 1.0, XMIN), watch=inc if plan.keep > 0 else None)
         inc.offer(x)
         r = inc.r > 0
