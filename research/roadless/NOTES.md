@@ -973,3 +973,27 @@ about 0.65 GiB per million unknowns, only three of the 23 large blocks left out 
 A handful at 100 -- 125M unknowns might fit the 80 GB H100. The rest run from 130M to 1.66
 billion unknowns (4 -- 52 km^2) and stay out of reach at h 0.5, so the coarser-grid-or-crop
 question stays open for them.
+
+**Coverage screen (2026-10-04).** The leak fix alone was not enough on the screened blocks:
+- On the cluster, 14401 (43M unknowns, on a 32 GB card) and 32841 (64M, 48 GB) still ran out of
+  memory, both in a new system's CSR build. The pool held about 15% more than was live.
+- 7851 (56M) fitted.
+
+A new `System` now first hands cupy's cached free blocks back (`Solver.release`), so its CSR
+sort's temporaries no longer split earlier systems' freed chunks. With that, all three fit 48 GB
+for both methods:
+- the greedy to D 0.15 in 388 / 439 / 497 s;
+- SIMP `.k1s1e-06` at D 0.05 in 5 -- 7 min.
+
+The release cannot change a result: it frees only memory nothing uses. The bit-identity check on
+30848 is pending, because the local GPU is taken by another job.
+
+The large set is 62 of 82 blocks now. At uni, Lens A, D 0.05, SIMP minus greedy:
+
+    14401  greedy 0.386  SIMP 0.393  +0.007
+    7851   greedy 0.111  SIMP 0.128  +0.016
+    32841  greedy 0.305  SIMP 0.277  -0.028
+
+This is within the held-out spread. Also fixed: clear.py, relax.py and search.py now exit non-zero
+when a block fails. They used to catch the error, print FAILED and exit 0, so the launcher counted
+an out-of-memory block as passed.
