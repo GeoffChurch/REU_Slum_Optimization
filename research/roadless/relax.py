@@ -510,7 +510,8 @@ def rows_of(plan: Plan, along: str, budget: float) -> Path:
 _CFG: dict = {}
 
 
-def _run(bid: str) -> None:
+def _run(bid: str) -> str | None:
+    """`bid` if it failed (reported, and main exits non-zero at the end)."""
     mode, power, device, plan, along, budget = (_CFG[k] for k in (
         "mode", "power", "device", "plan", "along", "budget"))
     try:
@@ -523,6 +524,8 @@ def _run(bid: str) -> None:
             print(f"{time.strftime('%H:%M:%S')} {bid} path done", flush=True)
     except Exception as e:
         print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)
+        return bid
+    return None
 
 
 def _target(mode: str, bid: str, power: float, plan: Plan, along: str, budget: float) -> Path:
@@ -539,13 +542,13 @@ def main(mode: str, ids: list[str], power: float, device: str, plan: Plan, along
     _CFG.update(mode=mode, power=power, device=device, plan=plan, along=along, budget=budget)
     todo = [i for i in ids if not _target(mode, i, power, plan, along, budget).exists()]
     if workers == 1:
-        for bid in todo:
-            _run(bid)
-        return
-    import multiprocessing
-    with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=4) as pool:
-        for _ in pool.imap_unordered(_run, todo):
-            pass
+        failed = [f for f in map(_run, todo) if f]
+    else:
+        import multiprocessing
+        with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=4) as pool:
+            failed = [f for f in pool.imap_unordered(_run, todo) if f]
+    if failed:
+        raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
 
 
 if __name__ == "__main__":

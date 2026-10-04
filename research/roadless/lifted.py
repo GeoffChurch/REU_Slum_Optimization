@@ -739,6 +739,8 @@ class Solver(Protocol):
 
     def to_host(self, a) -> NDArray: ...
 
+    def release(self) -> None: ...      # return the device pool's cached free blocks
+
     def prepare(self, A, coarsening: Coarsening) -> Callable: ...
 
 
@@ -775,6 +777,9 @@ class CpuAMG:
 
     def to_host(self, a):
         return np.asarray(a)
+
+    def release(self) -> None:
+        """Nothing to release: numpy has no pool."""
 
     def prepare(self, A, coarsening):
         if A.shape[0] < SMALL:
@@ -832,6 +837,14 @@ class GpuAMG:
 
     def to_host(self, a):
         return self.xp.asnumpy(a)
+
+    def release(self) -> None:
+        """Hand cupy's cached free blocks back to the device. A new system's CSR build sorts a
+        key per nonzero (250M on 30796): left to the pool, those temporaries are carved out of
+        the freed chunks of earlier systems, which splits them, and on the largest blocks the
+        split chunks ran a 48 GB card out with ~10 GB of them free (NOTES, "Translucent greedy
+        on 30796")."""
+        self.xp.get_default_memory_pool().free_all_blocks()
 
     def _dinv(self, A, v0=None):
         """(The damped inverse diagonal omega D^-1 of one level, the power iteration's last
@@ -1276,6 +1289,7 @@ class System:
     injecting into one is an error."""
 
     def __init__(self, grid: Grid, open_, p: Params):
+        p.solver.release()
         xp = self.xp = p.solver.xp
         self.K = K = p.K
         o = xp.asarray(open_, dtype=xp.float64)

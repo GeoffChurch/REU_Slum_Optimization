@@ -124,6 +124,7 @@ def main(ids: list[str], plan: GrowPrune, power: float, device: str, along: str,
          d_max: float) -> None:
     out = rows_dir(plan.name, 0.5, "area", power, along)
     out.mkdir(parents=True, exist_ok=True)
+    failed = []
     for b in common.build_blocks(ids):
         f = out / f"{b.block_id}.parquet"
         if f.exists():
@@ -132,10 +133,13 @@ def main(ids: list[str], plan: GrowPrune, power: float, device: str, along: str,
             rows = grow_prune(b, plan, power, along, device, d_max)
         except Exception as e:
             print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]}", flush=True)
+            failed.append(b.block_id)
             continue
         tmp = f.with_suffix(f".{os.getpid()}.tmp")
         rows.to_parquet(tmp)
         os.replace(tmp, f)
+    if failed:
+        raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
 
 
 if __name__ == "__main__":

@@ -616,11 +616,12 @@ _BLOCKS: list = []
 _CFG: dict = {}
 
 
-def _one(i: int) -> None:
+def _one(i: int) -> str | None:
+    """The block's id if it failed (reported, and the run exits non-zero at the end)."""
     b = _BLOCKS[i]
     out = _CFG["dir"] / f"{b.block_id}.parquet"
     if out.exists():
-        return
+        return None
     try:
         greedy_block(b, _CFG["picker"], _CFG["h"], _CFG["d_max"], out,
                      common.POPULATIONS[_CFG["pop"]], _CFG["power"], _CFG["along"], _CFG["solver"],
@@ -629,6 +630,8 @@ def _one(i: int) -> None:
         ours = [f for f in traceback.extract_tb(e.__traceback__) if "roadless" in f.filename]
         where = " <- ".join(f"{f.name}:{f.lineno}" for f in reversed(ours[-5:]))
         print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]} at {where}", flush=True)
+        return b.block_id
+    return None
 
 
 def cleared_through(g: pd.DataFrame, step: int) -> np.ndarray:
@@ -682,8 +685,9 @@ def run(workers: int, picker: Picker, h: float, d_max: float, pop: str, power: f
                 solver=solver, search=search)
     _BLOCKS = common.build_blocks(common.recipients() if ids is None else ids)
     with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=4) as pool:
-        for _ in pool.imap_unordered(_one, list(range(len(_BLOCKS)))[::-1]):
-            pass
+        failed = [f for f in pool.imap_unordered(_one, list(range(len(_BLOCKS)))[::-1]) if f]
+    if failed:
+        raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
 
 
 if __name__ == "__main__":
