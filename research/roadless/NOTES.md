@@ -997,3 +997,30 @@ The large set is 62 of 82 blocks now. At uni, Lens A, D 0.05, SIMP minus greedy:
 This is within the held-out spread. Also fixed: clear.py, relax.py and search.py now exit non-zero
 when a block fails. They used to catch the error, print FAILED and exit 0, so the launcher counted
 an out-of-memory block as passed.
+
+### Greedy speed (2026-10-04)
+
+The greedy's step on 30848 (uni, V100) takes 8 -- 12 s: the ranking 3 -- 4.5 s, the gram 1 -- 7 s
+and the scoring solve 2 -- 6 s.
+
+**Scoring tolerance.** Loosening the scoring solve's rtol from 1e-5 to 1e-3 moves the reported perm
+by at most 3.5e-5, and usually by 2e-6. It cannot change a pick, since `Spread.pick` ignores the
+scoring J. It saves 0.3 -- 1.5 s a step.
+
+**Gram.** gramprobe.py shows the gram's cost is the catchment sweep's runs, one per 32-candidate
+chunk at about 0.9 s on 12M unknowns, so it grows linearly in candidates:
+
+    30848  12.2M unknowns  2.7 -- 4.0K waves  prepare 0.10 -- 0.14 s  ~0.029 s/candidate  5.2 -- 6.7 s/step
+    9712   15.7M unknowns  7.3 -- 7.6K waves  prepare 0.25 s          ~0.027 s/candidate  1.4 -- 1.9 s/step
+
+Kahn's wave pass is negligible, so wave launches are not the cost. Step-to-step swings of 0.8 /
+4.3 s seen earlier on 9712 came from the local card, which another job had started using. The
+cluster run is steady.
+
+**What follows.** The greedy can get perhaps 20 -- 30% faster:
+- the scoring tolerance;
+- a sweep kernel that reads each node's neighbour indices once per chunk rather than once per
+  column;
+- fewer candidates, which changes the greedy.
+
+This is not the 3x that separates it from SIMP under sightline, so SIMP's speed items come next.

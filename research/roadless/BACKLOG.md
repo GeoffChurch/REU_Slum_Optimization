@@ -36,9 +36,18 @@ and Lens B from nested runs.
   0.170, 22422 0.815 / 0.814 / -; monotone, smaller is better at 1.3 -- 3x the time; 0.02
   dropped from the full run.
 - **Screening width** (idea). Exact-score more top candidates per round (as `M4` does).
-- **Speed** (idea). Remeasure: the structure cache and single-precision K-cycle apply to its
-  tension solves (its 25 s median is stale). Its per-round exact rescoring has a new pattern
-  each round: measure the tolerance it needs.
+- **Speed** (measured 2026-10-04, gramprobe.py and a timing probe; NOTES "Greedy speed"). A step
+  on 30848 is 8 -- 12 s: the ranking (two solves at rtol 1e-3) 3 -- 4.5 s, the gram 1 -- 7 s,
+  scoring 2 -- 6 s.
+  - Scoring's rtol 1e-5 -> 1e-3 moves perm by at most 3.5e-5 and cannot change a pick (the
+    picker ignores the scoring J). It is 5 -- 10% of a step: take it with the next change.
+  - The gram scales with candidates x unknowns, about 0.03 s per candidate on 12 -- 16M
+    unknowns. The waves do not matter (Kahn's pass is 0.1 -- 0.25 s for 3 -- 7K waves), so
+    batching wave launches is dead.
+  - The levers left: fewer candidates (the picker's `reach`, which changes picks), or a sweep
+    kernel that reads each node's neighbour indices once rather than once per candidate column
+    (results identical; GPU kernel work).
+  - Altogether perhaps 20 -- 30% off the greedy, not 2x.
 
 ## SIMP
 
