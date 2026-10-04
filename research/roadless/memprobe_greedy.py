@@ -5,11 +5,12 @@ device arrays reachable from each long-lived holder: the grid's cache (solver st
 patterns), each conductance's layers cache, the Clearing. On a failed allocation it prints the
 same, then re-raises. Rows are not written: this is a probe, not a run.
 
-    python -u research/roadless/memprobe_greedy.py <id> <along>[@<search along>] <d_max>
+    python -u research/roadless/memprobe_greedy.py <id> <along>[@<search>] <d_max> [default|async|release|gc]
 """
 from __future__ import annotations
 
 import dataclasses
+import gc
 import sys
 import time
 from pathlib import Path
@@ -22,6 +23,16 @@ import cupy as cp  # noqa: E402
 import lifted  # noqa: E402
 
 GB = 2**30
+PEAK = [0]                      # the pool's most bytes in use since the last report
+POOL = [cp.get_default_memory_pool()]   # the pool allocations come from (argv: default | async)
+
+
+def _tracking_malloc(size: int):
+    """The pool's malloc, recording its high-water mark of bytes in use."""
+    pool = POOL[0]
+    mem = pool.malloc(size)
+    PEAK[0] = max(PEAK[0], pool.used_bytes())
+    return mem
 
 
 def dev_bytes(obj, seen: set[int] | None = None) -> int:
@@ -46,7 +57,7 @@ def dev_bytes(obj, seen: set[int] | None = None) -> int:
 
 
 def report(tag: str, c: clear.Clearing) -> None:
-    pool = cp.get_default_memory_pool()
+    pool = POOL[0]
     free, total = cp.cuda.Device().mem_info
     parts = {f"grid.cache[{k!r}]"[:60]: dev_bytes(v) for k, v in c.sc.grid.cache.items()}
     parts["p.along._cache"] = dev_bytes(getattr(c.p.along, "_cache", {}))
@@ -56,11 +67,18 @@ def report(tag: str, c: clear.Clearing) -> None:
     parts["scorer (but its grid)"] = dev_bytes({k: v for k, v in vars(c.sc).items() if k != "grid"})
     big = sorted(((v, k) for k, v in parts.items() if v > 0.05 * GB), reverse=True)
     print(f"[{time.strftime('%H:%M:%S')}] {tag}: pool used {pool.used_bytes() / GB:.2f} "
-          f"held {pool.total_bytes() / GB:.2f}, device free {free / GB:.2f} of {total / GB:.2f}"
+          f"(peak since last {PEAK[0] / GB:.2f}) held {pool.total_bytes() / GB:.2f}, "
+          f"device free {free / GB:.2f} of {total / GB:.2f}"
           + "".join(f"\n    {v / GB:6.2f} GB  {k}" for v, k in big), flush=True)
+    PEAK[0] = pool.used_bytes()
 
 
-def main(bid: str, spec: str, d_max: float) -> None:
+def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
+    if allocator == "async":
+        POOL[0] = cp.cuda.MemoryAsyncPool()
+    release = allocator == "release"    # free the pool's unused chunks before each phase
+    collect = allocator == "gc"         # run the cycle collector before each phase
+    cp.cuda.set_allocator(_tracking_malloc)
     specs = spec.split("@")
     scans = lifted.scans_of("gpu")
     along = lifted.along_of(specs[0], scans)
@@ -80,6 +98,12 @@ def main(bid: str, spec: str, d_max: float) -> None:
     def tension_(power, restore=False):
         step[0] += 1
         report(f"step {step[0]} before tension", c)
+        if release:
+            POOL[0].free_all_blocks()
+            report(f"step {step[0]} released", c)
+        if collect:
+            print(f"    gc.collect: {gc.collect()} objects", flush=True)
+            report(f"step {step[0]} collected", c)
         t = tension(power, restore)
         report(f"step {step[0]} after tension", c)
         return t
@@ -91,6 +115,12 @@ def main(bid: str, spec: str, d_max: float) -> None:
 
     def exact_(c_, cleared, power):
         report(f"step {step[0]} before scoring", c)
+        if release:
+            POOL[0].free_all_blocks()
+            report(f"step {step[0]} released", c)
+        if collect:
+            print(f"    gc.collect: {gc.collect()} objects", flush=True)
+            report(f"step {step[0]} collected", c)
         try:
             out = exact(c_, cleared, power)
         except Exception:
@@ -108,4 +138,5 @@ def main(bid: str, spec: str, d_max: float) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2], float(sys.argv[3]))
+    main(sys.argv[1], sys.argv[2], float(sys.argv[3]),
+         sys.argv[4] if len(sys.argv) > 4 else "default")

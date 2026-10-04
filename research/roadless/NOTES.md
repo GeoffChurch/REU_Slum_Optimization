@@ -926,5 +926,43 @@ D 0.02 the greedy median is 0.55, with 4% above 0.9.
 
 **What follows:** SIMP + incumbent is the frontier under sightline as under uni. It is on top of
 both greedies at 3x their time, and it never collapses on a gate the way the translucent greedy
-does. The open cost question is the greedy's speed (BACKLOG, Greedy: speed). Pending: 30796's
-translucent greedy on the H100.
+does. The open cost question is the greedy's speed (BACKLOG, Greedy: speed). 30796's translucent
+greedy ran on 2026-10-04 after a memory fix (next section).
+
+### Translucent greedy on 30796: an AMG hierarchy outlived its system (owner: "make it fit in 48GB", 2026-10-04)
+
+The translucent greedy ran out of memory on 30796 (48M unknowns) on 48 GB cards, in the scoring
+solve's CSR build at step 4, with cupy's pool holding 45.4 GiB. The H100 was booked for days, so
+the question was whether the work really needs more than 48 GB. memprobe_greedy.py measured the
+pool per greedy phase, with a high-water mark and the bytes held by each long-lived holder.
+
+**Cause.** `GpuAMG.prepare`'s `cycle` and `krylov2` were closures that call each other. That is a
+reference cycle, so a system's levels (2.6 GiB on 30796) stayed alive after the system until
+Python's cycle collector happened to run.
+- Live memory before each scoring solve climbed step by step: 12.0, 14.6, 17.2, 19.8, 22.4 GiB.
+- The scoring peak reached 42.8 GiB.
+- The pool's split chunks did the rest: at the failure, 27.9 GiB was live and 45.4 GiB held.
+- The plain greedy fitted with little margin (peak 38 GiB).
+- CUDA's stream-ordered allocator (`MemoryAsyncPool`) was not a fix: it took the whole card, and
+  thrust's sort then failed.
+
+**Fix.** The K-cycle is now a class (`_KCycle`), so a system's levels are freed with the system.
+- With `gc.collect()` before each phase, standing in for the fix: live memory before scoring stayed
+  at 9.3 GiB, the scoring peak was 31.2 GiB, and at least 11.9 GiB stayed free.
+- With the fix, a system's bytes return to the pool on `del` with the collector off (1.98 GiB
+  before, 2.79 during, 1.98 after).
+- Results are bit-identical: on 30848, translucent, 15 steps, every D, perm, perm1 and clearing
+  order is equal. The time is the same (131 s against 132 s).
+- 30796's translucent greedy then ran to D 0.15 on the local 48 GB card in 410 s.
+
+**With 30796 in**, the held-out sightline comparison, all 46 blocks:
+
+    D 0.05  SIMP vs translucent greedy   median +0.005 [+0.002, +0.012]  mean +0.013  ahead 70%
+    D 0.05  translucent vs plain greedy  median +0.015 [+0.002, +0.023]  mean +0.008  ahead 78%
+    D 0.02  translucent vs plain greedy  median +0.010 [+0.000, +0.018]  mean -0.002  ahead 65%
+
+This is the same as on 45 blocks.
+
+**What follows (untested).** The leak was in every GPU solve, SIMP's too, so on the biggest blocks
+the peaks were about 11 GiB above what the work needs. What ran out of memory before may now fit:
+the blocks over 1.4 km^2 are the candidates, before a coarser grid or cropping.

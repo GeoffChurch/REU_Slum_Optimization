@@ -48,9 +48,12 @@ and Lens B from nested runs.
   faster. Not yet tried: every 2nd update (`.k2`).
 - **Warm nested path** (measured, `.w3`: 2.6 -- 2.9x faster, Lens A 0.002 -- 0.022 below the
   cold path on 3 blocks; a cheaper preset; NOTES).
-- **Memory** (partly done, 63fa484): structures are cached only for a pattern seen twice,
-  and the greedy releases its tension before the exact scoring (22422 fits again); 1558,
-  20023, 30796 fit under `.k1s1e-06`.
+- **Memory** (partly done, 63fa484; 2026-10-04): structures are cached only for a pattern seen
+  twice, and the greedy releases its tension before the exact scoring (22422 fits again); 1558,
+  20023, 30796 fit under `.k1s1e-06`. Fixed 2026-10-04: the K-cycle's closures formed a reference
+  cycle that kept every system's AMG hierarchy (2.6 GB on 30796) until the cycle collector ran,
+  about 11 GB of dead hierarchies at the peak (NOTES, "Translucent greedy on 30796"). **Next
+  (untested):** retry what ran out of memory before it, starting with the blocks over 1.4 km^2.
 - **Damped OC or MMA** (idea). The gate and its substitutes flip x 0.3 <-> 0.5 every update
   under OC; a damped update or MMA should converge cleanly and propose better roundings.
 - **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).
@@ -59,9 +62,8 @@ and Lens B from nested runs.
 - **SIMP + incumbent under the sightline metric** (done: the 13 at D 0.10 and D 0.05, and the 46
   held-out blocks at D 0.05, NOTES "Sightline on the held-out blocks at D 0.05". SIMP leads the
   plain greedy by a median of +0.021 [+0.015, +0.026], ahead on 96% of blocks, and the translucent
-  greedy by +0.005 [+0.001, +0.013], at 3.1x their time. The translucent greedy keeps its gate
-  tail, 18910 -0.165.) **Pending:** 30796's translucent greedy on the H100; it ran out of memory on
-  48 GB.
+  greedy by +0.005 [+0.002, +0.012] (all 46, with 30796 after the memory fix), at 3.1x their
+  time. The translucent greedy keeps its gate tail, 18910 -0.165.)
 
 ## New methods
 
@@ -96,8 +98,9 @@ and Lens B from nested runs.
 
 ## Coverage and model
 
-- **Blocks over ~1.4 km^2** (owner's call). 21 -- 23 of the 82 large blocks do not fit 48 GB at
-  h 0.5: a coarser grid, or the grid cropped to the built-up area. Both change the model.
+- **Blocks over ~1.4 km^2** (owner's call). 21 -- 23 of the 82 large blocks did not fit 48 GB at
+  h 0.5: a coarser grid, or the grid cropped to the built-up area. Both change the model. Retry
+  them first after the 2026-10-04 memory fix (Memory, above), which needs no model change.
 - **Coarse-to-fine** (idea). Early SIMP stages at h 1.0 (4x fewer unknowns), the last at 0.5.
 
 ## Infrastructure

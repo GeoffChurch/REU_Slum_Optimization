@@ -927,46 +927,61 @@ class GpuAMG:
                        dinv=L["dinv"].astype(f4), R=L["R"].astype(f4), P=L["P"].astype(f4))
                   for L in lv]
             coarse = coarse.astype(f4)
-        dt = coarse.dtype
-        sweeps = self.sweeps
-
-        def dot(a, b):
-            """Accumulated in double: in single the K-cycle's two-step coefficients lose
-            everything to cancellation (rho2 = bet - gam^2 / rho1) and the solve goes NaN."""
-            return (a * b).sum(axis=0, dtype=cp.float64)
-
-        def cycle(i, b):
-            if i == len(lv):
-                return coarse @ b
-            L = lv[i]
-            d = L["dinv"] if b.ndim == 1 else L["dinv"][:, None]
-            x = d * b
-            for _ in range(sweeps - 1):
-                x = x + d * (b - L["A"] @ x)
-            rc = L["R"] @ (b - L["A"] @ x)
-            ec = krylov2(i + 1, rc) if i + 1 < len(lv) else cycle(i + 1, rc)
-            x = x + L["P"] @ ec
-            for _ in range(sweeps):
-                x = x + d * (b - L["A"] @ x)
-            return x
-
-        def krylov2(j, b):
-            """Two flexible CG steps on level j from zero, preconditioned by its cycle (Notay)."""
-            Aj = lv[j]["A"]
-            c1 = cycle(j, b)
-            v1 = Aj @ c1
-            rho1, a1 = dot(c1, v1), dot(c1, b)
-            r1 = b - (a1 / rho1).astype(dt) * v1
-            c2 = cycle(j, r1)
-            v2 = Aj @ c2
-            gam, bet, a2 = dot(c2, v1), dot(c2, v2), dot(c2, r1)
-            rho2 = bet - gam * gam / rho1
-            return ((a1 / rho1 - gam * a2 / (rho1 * rho2)).astype(dt) * c1
-                    + (a2 / rho2).astype(dt) * c2)
+        kc = _KCycle(lv, coarse, self.sweeps)
 
         def solve(b, rtol, x0=None):
-            return _pcg(A, lambda r: cycle(0, r.astype(dt)).astype(cp.float64), b, rtol, cp, x0)
+            return _pcg(A, lambda r: kc.cycle(0, r.astype(kc.dt)).astype(cp.float64), b, rtol,
+                        cp, x0)
         return solve
+
+
+class _KCycle:
+    """A GpuAMG system's preconditioner: the K-cycle over its levels (each a dict of A, dinv,
+    R, P) down to the dense inverse `coarse`. A class and not nested closures: `cycle` and
+    `krylov2` call each other, and as closures they form a reference cycle that kept every
+    system's levels alive until the cycle collector ran (2.6 GB per system on 30796, piling up
+    over greedy steps until the 48 GB card ran out; NOTES, "Translucent greedy on 30796")."""
+
+    def __init__(self, lv: list, coarse, sweeps: int):
+        self.lv, self.coarse, self.sweeps = lv, coarse, sweeps
+        self.dt = coarse.dtype
+
+    @staticmethod
+    def dot(a, b):
+        """Accumulated in double: in single the K-cycle's two-step coefficients lose
+        everything to cancellation (rho2 = bet - gam^2 / rho1) and the solve goes NaN."""
+        return (a * b).sum(axis=0, dtype=np.float64)
+
+    def cycle(self, i, b):
+        lv = self.lv
+        if i == len(lv):
+            return self.coarse @ b
+        L = lv[i]
+        d = L["dinv"] if b.ndim == 1 else L["dinv"][:, None]
+        x = d * b
+        for _ in range(self.sweeps - 1):
+            x = x + d * (b - L["A"] @ x)
+        rc = L["R"] @ (b - L["A"] @ x)
+        ec = self.krylov2(i + 1, rc) if i + 1 < len(lv) else self.cycle(i + 1, rc)
+        x = x + L["P"] @ ec
+        for _ in range(self.sweeps):
+            x = x + d * (b - L["A"] @ x)
+        return x
+
+    def krylov2(self, j, b):
+        """Two flexible CG steps on level j from zero, preconditioned by its cycle (Notay)."""
+        dot, dt = self.dot, self.dt
+        Aj = self.lv[j]["A"]
+        c1 = self.cycle(j, b)
+        v1 = Aj @ c1
+        rho1, a1 = dot(c1, v1), dot(c1, b)
+        r1 = b - (a1 / rho1).astype(dt) * v1
+        c2 = self.cycle(j, r1)
+        v2 = Aj @ c2
+        gam, bet, a2 = dot(c2, v1), dot(c2, v2), dot(c2, r1)
+        rho2 = bet - gam * gam / rho1
+        return ((a1 / rho1 - gam * a2 / (rho1 * rho2)).astype(dt) * c1
+                + (a2 / rho2).astype(dt) * c2)
 
 
 def _pcg(A, M, b, rtol: float, xp, x0=None):
