@@ -54,7 +54,8 @@ and Lens B from nested runs.
 - **Cheaper incumbent** (done: `.k1s1e-06` on the 44 equals `.k1`, 15% faster; NOTES). Candidates scored in the eps world
   at eps 1e-6 (the relaxation's cached structure), the winner exactly. Sentinel: the same
   scores (0.8144 / 0.7822 / 0.3476 / 0.1871 vs 0.814 / 0.782 / 0.348 / 0.187), 10 -- 25%
-  faster. Not yet tried: every 2nd update (`.k2`).
+  faster. Every 2nd iterate (`.k2`) is dead: it collapses on 22422, whose gate a single odd
+  iterate holds (NOTES, "SIMP: every 2nd candidate, coarse-to-fine, damped OC, MMA").
 - **Warm nested path** (measured, `.w3`: 2.6 -- 2.9x faster, Lens A 0.002 -- 0.022 below the
   cold path on 3 blocks; a cheaper preset; NOTES).
 - **Memory** (partly done, 63fa484; 2026-10-04): structures are cached only for a pattern seen
@@ -66,8 +67,12 @@ and Lens B from nested runs.
   the greedy and SIMP (62 of 82 large blocks). **Next:** the four at 100 -- 125M unknowns (19593,
   53556, 6498, 45267) on the 80 GB H100 when it is free (about 0.64 GiB per million unknowns
   live).
-- **Damped OC or MMA** (idea). The gate and its substitutes flip x 0.3 <-> 0.5 every update
-  under OC; a damped update or MMA should converge cleanly and propose better roundings.
+- **Damped OC or MMA** (done 2026-10-04, null; NOTES). Damped OC ties or trails slightly on the
+  13 (median -0.0005 / -0.0001), and MMA collapses on 22422. Both stay selectable (`.u`).
+- **Sturdier gate capture** (idea, from that null). On a gated block SIMP's answer is one lucky
+  iterate's rounding: `.k2` and MMA each lost 22422 by perturbing the iterate sequence. Instead,
+  keep the gate on purpose: several roundings per iterate (the top-x one plus randomized ones),
+  multiple starts (below), or the add/remove search seeded with the incumbent.
 - **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).
 - **Projection** (measured, kept selectable: `.b8-32` wins some gated blocks, loses some
   controls; not needed against collapses once the incumbent is on).
@@ -115,7 +120,9 @@ and Lens B from nested runs.
   2026-10-04 memory fixes brought three within 48 GB (Memory, above; 62 of 82 now). Four more at
   100 -- 125M unknowns may fit 80 GB, and the other 16 (130M -- 1.66 billion unknowns) still need
   one of the two.
-- **Coarse-to-fine** (idea). Early SIMP stages at h 1.0 (4x fewer unknowns), the last at 0.5.
+- **Coarse-to-fine** (`.c1`, tried 2026-10-04; NOTES). 0.75x the time, but it collapses on 30848
+  (-0.255). Kept selectable. Worth retrying only with a coarse h that keeps 30848's gate (0.75?)
+  or with only the first stage coarse.
 
 ## Infrastructure
 

@@ -1025,3 +1025,55 @@ cluster run is steady.
 - fewer candidates, which changes the greedy.
 
 This is not the 3x that separates it from SIMP under sightline, so SIMP's speed items come next.
+
+### SIMP: every 2nd candidate, coarse-to-fine, damped OC, MMA (owner: "We can try SIMP .k2 and coarse-to-fine and damped OC/MMA", 2026-10-04)
+
+Each was screened against `fw0.q3.i10.t0.001.e0.0001.k1s1e-06` (uni, J_2, Lens A at D 0.05) on
+the sentinel (22422 and 30848 gated, 5810 biggest, 9712 ordinary). The survivors also ran on the
+other 9 tuning blocks. relax.py's plan grammar gained `.c<h>` (coarse-to-fine) and
+`.u<rule>`, the update rule as a Strategy:
+- `ocETAmMOVE`: OC with exponent eta and move limit (the classic 0.5 / 0.2 is unnamed);
+- `mmaMOVE`: MMA with a per-building lower asymptote. J falls as x grows, so only the lower
+  asymptote matters, and the update is L + (x - L) sqrt(B / lam), OC with L fixed at 0. The gap
+  starts at x, shrinks x0.7 where a building's moves reverse and grows x1.2 where they agree.
+
+    sentinel        22422   30848   5810    9712    time vs base
+    base            0.7766  0.6541  0.2584  0.1297  1.0
+    .k2s1e-06       0.0115  0.6541  0.2584  0.1297  0.88
+    .c1             0.7756  0.3993  0.2575  0.1293  0.75
+    .uoc0.3m0.2     0.7783  0.6526  0.2572  0.1291  1.0
+    .uoc0.5m0.1     0.7766  0.6533  0.2583  0.1296  1.03
+    .umma0.2        0.1836  0.6532  0.2583  0.1296  1.03
+
+- **`.k2` (every 2nd iterate rounded and scored): dead.** It collapses on 22422. The gate there is
+  held by an odd-numbered iterate only, and the other iterates' roundings score 0.01. So the
+  incumbent is not a speed knob: SIMP's capture of a gate can hang on a single iterate.
+- **Coarse-to-fine `.c1`:** stages q 1.5 -- 2.5 on the h 1.0 grid (4x fewer cells), q 3 at h 0.5
+  from that x, with the incumbent scoring at h 0.5 throughout. It is the fastest variant (0.75x),
+  but it collapses on 30848 (-0.255): the iterates that reach the fine grid have lost the gate,
+  which h 1.0 presumably does not resolve. It stays selectable as the cheapest operating point.
+  - What would have to be true to try it again: a coarse h that keeps 30848's gate (0.75?), or
+    only the first stage coarse.
+- **Damped OC: no gain.**
+  - oc0.3 takes smaller steps (changes 0.06 -- 0.13 against 0.1 -- 0.2).
+  - Move 0.1 keeps hitting its own limit, so the flip-flop is capped, not cured.
+  - Neither converges within 10 updates a stage.
+  - On the 13:
+
+        .uoc0.3m0.2 - base   median -0.0005  mean -0.0018  ahead 2/13  worst -0.0166 (1558)
+        .uoc0.5m0.1 - base   median -0.0001  mean -0.0021  ahead 3/13  worst -0.0117 (38616)
+
+  - The incumbent already takes the best rounding of the oscillating iterates, so a calmer path
+    proposes nothing better. Not run on the 44: there is nothing to confirm. (Times of about 0.9x
+    are cross-card noise: the baseline ran on other cards at another time.)
+- **MMA: collapses on 22422 (0.18).** Its gaps grew more than they shrank (steps of 0.16 -- 0.19
+  by q 2.5 to 3), so it amplified the motion instead of damping it, and the iterate that holds
+  22422's gate never came. It stays selectable (it ties OC elsewhere), but there is no reason to
+  run it: damping, its other use, did not help either.
+
+**What follows.** Two of the three collapses come from one fragile mechanism: on a gated block,
+SIMP's answer is one lucky iterate's rounding (k2 and MMA each lost 22422 by perturbing the
+iterate sequence). A method that keeps the gate on purpose would be sturdier than tuning the path:
+- multiple starts (BACKLOG);
+- several roundings per iterate, not one, e.g. the top-x rounding plus a randomized one;
+- the add/remove search seeded with SIMP's incumbent.
