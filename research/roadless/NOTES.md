@@ -985,8 +985,9 @@ for both methods:
 - the greedy to D 0.15 in 388 / 439 / 497 s;
 - SIMP `.k1s1e-06` at D 0.05 in 5 -- 7 min.
 
-The release cannot change a result: it frees only memory nothing uses. The bit-identity check on
-30848 is pending, because the local GPU is taken by another job.
+The release cannot change a result: it frees only memory nothing uses. Checked on the cluster
+(`releaseprobe.py`): on 30848, the translucent greedy's 15 steps are bit-identical with and
+without it (D, perm, perm1, clearing order).
 
 The large set is 62 of 82 blocks now. At uni, Lens A, D 0.05, SIMP minus greedy:
 

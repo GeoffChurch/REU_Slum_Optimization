@@ -8,8 +8,10 @@ floor under that estimate, to send a block known to need a bigger card to one. R
 rows) come back to the same paths here, never overwriting a local file.
 
     pixi run -e launch python research/roadless/cluster.py setup
-    pixi run -e launch python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] <ids,|@file> -- <script> <args with {id}>
+    pixi run -e launch python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] <ids,|@file> -- <script> <args with {id}>
     pixi run -e launch python research/roadless/cluster.py status|sync [<run>]
+    pixi run -e launch python research/roadless/cluster.py wait <run> [--timeout 3h]    # exit 0 passed, 3 failed, 4 timed out, 5 blind
+    pixi run -e launch python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]   # its failed / missing blocks as <run>-r1
     pixi run -e launch python research/roadless/cluster.py cancel <run>
     pixi run -e launch python research/roadless/cluster.py watch start|stop
 """
