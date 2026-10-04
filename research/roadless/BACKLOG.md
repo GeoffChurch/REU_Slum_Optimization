@@ -52,8 +52,8 @@ and Lens B from nested runs.
   twice, and the greedy releases its tension before the exact scoring (22422 fits again); 1558,
   20023, 30796 fit under `.k1s1e-06`. Fixed 2026-10-04: the K-cycle's closures formed a reference
   cycle that kept every system's AMG hierarchy (2.6 GB on 30796) until the cycle collector ran,
-  about 11 GB of dead hierarchies at the peak (NOTES, "Translucent greedy on 30796"). **Next
-  (untested):** retry what ran out of memory before it, starting with the blocks over 1.4 km^2.
+  about 11 GB of dead hierarchies at the peak (NOTES, "Translucent greedy on 30796"). **Running:**
+  the greedy and SIMP on the three left-out blocks within reach of 48 GB (14401, 7851, 32841).
 - **Damped OC or MMA** (idea). The gate and its substitutes flip x 0.3 <-> 0.5 every update
   under OC; a damped update or MMA should converge cleanly and propose better roundings.
 - **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).
@@ -99,8 +99,10 @@ and Lens B from nested runs.
 ## Coverage and model
 
 - **Blocks over ~1.4 km^2** (owner's call). 21 -- 23 of the 82 large blocks did not fit 48 GB at
-  h 0.5: a coarser grid, or the grid cropped to the built-up area. Both change the model. Retry
-  them first after the 2026-10-04 memory fix (Memory, above), which needs no model change.
+  h 0.5: a coarser grid, or the grid cropped to the built-up area. Both change the model. The
+  2026-10-04 memory fix brings only three within reach of 48 GB (Memory, above). A few at 100 --
+  125M unknowns might fit 80 GB, and the rest (130M -- 1.66 billion unknowns) still need one of
+  the two.
 - **Coarse-to-fine** (idea). Early SIMP stages at h 1.0 (4x fewer unknowns), the last at 0.5.
 
 ## Infrastructure

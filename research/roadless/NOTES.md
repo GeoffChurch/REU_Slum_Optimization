@@ -963,6 +963,13 @@ Python's cycle collector happened to run.
 
 This is the same as on 45 blocks.
 
-**What follows (untested).** The leak was in every GPU solve, SIMP's too, so on the biggest blocks
-the peaks were about 11 GiB above what the work needs. What ran out of memory before may now fit:
-the blocks over 1.4 km^2 are the candidates, before a coarser grid or cropping.
+**What follows.** The leak was in every GPU solve, SIMP's too, so on the biggest blocks the peaks
+were about 11 GiB above what the work needs. That brings few new blocks within reach, though. At
+about 0.65 GiB per million unknowns, only three of the 23 large blocks left out are near 48 GB:
+- 14401: 1.36 km^2, 43M unknowns;
+- 7851: 1.75 km^2, 56M unknowns;
+- 32841: 2.01 km^2, 64M unknowns.
+
+A handful at 100 -- 125M unknowns might fit the 80 GB H100. The rest run from 130M to 1.66
+billion unknowns (4 -- 52 km^2) and stay out of reach at h 0.5, so the coarser-grid-or-crop
+question stays open for them.

@@ -24,7 +24,8 @@ import cluster_submit as cs
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-GB_PER_MILLION = 1.0    # an estimate (the eps world); raise it if a block runs out of memory
+GB_PER_MILLION = 0.7    # measured: the translucent greedy on 30796 peaks at 31.2 GiB for 48.7M
+                        # unknowns after the K-cycle fix (NOTES); raise it if a block runs out
 PIXI = cs.Pixi()
 DEPS = "~/.cache/reblock-research/pydeps"   # the research deps outside the lock
 # cupy with the CUDA 12 toolkit from pip (the cluster's /usr/local/cuda is 11.8, the nodes'
