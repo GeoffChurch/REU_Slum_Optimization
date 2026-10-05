@@ -437,7 +437,7 @@ def _draw_road_figure() -> str:
 
     Two fetch URLs, not one: `data-bundle` is the block, `data-wheel` is the `reblock` wheel
     `micropip` installs at boot. The wheel is built, never committed (`dist/` is gitignored) --
-    `pyproject.toml`'s `wheel` pixi task builds it for the local suite, and `deploy-site.yml`
+    the Makefile's `wheel` target builds it for the local suite, and `deploy-site.yml`
     builds it before this script runs in CI. Its NAME is derived, not discovered: `pyproject.toml`
     declares both the distribution name and the version, so the filename is constructed from them
     and a missing wheel RAISES naming the build command -- the same shape
@@ -480,7 +480,7 @@ def _draw_road_figure() -> str:
     wheel_url = _copy_asset(wheel, "wheels")
     if wheel_url is None:
         raise SystemExit(
-            f"{wheel} not found -- run `pixi run wheel` to build it (CI builds it in "
+            f"{wheel} not found -- run `make wheel` to build it (CI builds it in "
             f"deploy-site.yml before scripts/gen_site_pages.py). pyproject.toml declares "
             f"{name} {version}; a wheel built before a version bump will not match this name.")
     # A version bump changes this filename, so a previous version's wheel would otherwise sit in
@@ -1701,14 +1701,14 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
 
 
 def _assert_widget_bundle_present(pages_with_widgets: bool) -> None:
-    """A site built without `pixi run web` emits a <script> tag for a file that is not there: every
+    """A site built without `make web` emits a <script> tag for a file that is not there: every
     widget silently fails to boot, the PNG fallbacks still render, and the page looks FINE. Turn
     that into a build failure. File existence needs no imports, so this respects the stdlib-only
     contract."""
     if pages_with_widgets and not (DOCS / "js" / "widgets.js").exists():
         raise SystemExit(
             "docs/js/widgets.js is missing but a page carries a widget mount point -- run "
-            "`pixi run web` (CI does this in deploy-site.yml before mkdocs build)")
+            "`make web` (CI does this in deploy-site.yml before mkdocs build)")
 
 
 def main() -> None:

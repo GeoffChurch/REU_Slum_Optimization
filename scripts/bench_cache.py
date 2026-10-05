@@ -1,6 +1,6 @@
 """Benchmark the derive() L2 cache: cold (cleared) vs warm wall-time for a real
 Cape Town multi-block reblock, plus the derivation cache's disk footprint.
-Usage: PYTHONPATH=. pixi run python scripts/bench_cache.py
+Usage: PYTHONPATH=. uv run python scripts/bench_cache.py
 """
 from __future__ import annotations
 

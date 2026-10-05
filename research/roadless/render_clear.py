@@ -1,6 +1,6 @@
 """Greedy's cleared buildings at Lens A next to a road method's Lens A corridor.
 
-    PYTHONPATH=. pixi run python research/roadless/render_clear.py <block ids,> [arm] [pop] [power] [picker]
+    PYTHONPATH=. uv run python research/roadless/render_clear.py <block ids,> [arm] [pop] [power] [picker]
 """
 from __future__ import annotations
 

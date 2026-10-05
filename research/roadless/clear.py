@@ -10,9 +10,9 @@ solves for the top M by tension, clear the best) or Batched (a spaced set of the
 to the next multiple of delta of population, one exact solve). `loo` checks the screen against
 exact leave-one-out on one step.
 
-    PYTHONPATH=. pixi run python research/roadless/clear.py loo <block idx> [h]
-    PYTHONPATH=. pixi run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <along> <solver>
-    PYTHONPATH=. pixi run python research/roadless/clear.py some <workers> <picker> <h> <d_max> <pop> <p> <along> <solver> <ids,>
+    PYTHONPATH=. uv run python research/roadless/clear.py loo <block idx> [h]
+    PYTHONPATH=. uv run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <along> <solver>
+    PYTHONPATH=. uv run python research/roadless/clear.py some <workers> <picker> <h> <d_max> <pop> <p> <along> <solver> <ids,>
 
 picker: M4 | B0.01g3 | S0.01cat; along: uni | sl<beta> | ss<beta>k<kappa>[n<hill>r<r0>];
 solver: cpu | gpu, the device of the solves, sightline scans and catchment sweep (gpu needs

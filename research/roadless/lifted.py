@@ -23,10 +23,8 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import re
-import sys
 from dataclasses import dataclass
 from typing import Callable, NamedTuple, Protocol
-from pathlib import Path
 
 import numpy as np
 import scipy.sparse as sp
@@ -36,8 +34,7 @@ from numpy.typing import NDArray
 from scipy import ndimage
 from scipy.sparse.linalg import factorized
 
-sys.path.insert(0, str(Path.home() / ".cache/reblock-research/pydeps"))
-import pyamg  # noqa: E402
+import pyamg
 
 # axis lattice vectors (dx = column, dy = row), angles in [0, pi)
 AXES = {

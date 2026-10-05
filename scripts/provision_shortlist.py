@@ -26,8 +26,8 @@ Caching only the filtered result (which the first version did) means every chang
 costs another 4 GB fetch, which is exactly the coupling that made the density floor feel
 irreversible. With the raw tiles kept, `--refilter` re-derives everything for free.
 
-    pixi run python -m scripts.provision_shortlist --dry-run     # tiles + sizes, no download
-    pixi run python -m scripts.provision_shortlist
+    uv run python -m scripts.provision_shortlist --dry-run     # tiles + sizes, no download
+    uv run python -m scripts.provision_shortlist
 """
 from __future__ import annotations
 
@@ -147,7 +147,8 @@ def filter_tile(raw: Path, shortlist: gpd.GeoDataFrame, out_path: Path,
         raw, usecols=["latitude", "longitude", "area_in_meters", "confidence"],
         chunksize=CHUNK_ROWS,
     ):
-        chunk = chunk[chunk["confidence"] >= min_confidence]
+        # rows by boolean mask: pandas-stubs types the selection as a Series
+        chunk = cast(pd.DataFrame, chunk[chunk["confidence"] >= min_confidence])
         if chunk.empty:
             continue
         pts = gpd.GeoDataFrame(

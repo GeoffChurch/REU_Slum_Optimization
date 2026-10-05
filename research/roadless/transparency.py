@@ -7,7 +7,7 @@ D = 0.10 (the first step reaching it):
            soft line length F + B, kappa 2) grew by >= 30 m
   perm     the run's own score (perm', p 2) at D = 0.10, interpolated
 
-    PYTHONPATH=. pixi run python research/roadless/transparency.py <ids,> <metric> <kappas,>
+    PYTHONPATH=. uv run python research/roadless/transparency.py <ids,> <metric> <kappas,>
 """
 from __future__ import annotations
 

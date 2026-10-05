@@ -1,7 +1,7 @@
 """Escape-time tail at Lens A (10% displaced): per building u_i relative to baseline -- median,
 95th percentile, max -- for the road lineup (from the study rows) and the greedy (re-solved).
 
-    PYTHONPATH=. pixi run python research/roadless/tails.py <pop> <power> <workers> [picker]
+    PYTHONPATH=. uv run python research/roadless/tails.py <pop> <power> <workers> [picker]
 """
 import multiprocessing
 import sys

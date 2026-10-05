@@ -26,8 +26,8 @@ The curve is the honest form of the pre-filter question, because a single f(15) 
 are one unlucky block from a cliff. `f(15) = 106` with `f(16) = 4,000` is a very different setting
 from `f(15) = 106` with `f(200) = 250`.
 
-    pixi run python -m scripts.retention_curve
-    pixi run python -m scripts.retention_curve --cities capetown --png out.png
+    uv run python -m scripts.retention_curve
+    uv run python -m scripts.retention_curve --cities capetown --png out.png
 """
 from __future__ import annotations
 

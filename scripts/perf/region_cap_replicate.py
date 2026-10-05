@@ -155,7 +155,7 @@ def main() -> None:
         print("no arms completed")
         return
     print("\n  Recorded. Analysis lives in one place:")
-    print("    pixi run python -m scripts.perf.region_cap_report")
+    print("    uv run python -m scripts.perf.region_cap_report")
 
 
 if __name__ == "__main__":

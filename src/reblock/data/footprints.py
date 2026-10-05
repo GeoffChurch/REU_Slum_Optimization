@@ -23,7 +23,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Protocol, runtime_checkable
+from typing import NamedTuple, Protocol, cast, runtime_checkable
 
 import geopandas as gpd
 import numpy as np
@@ -181,7 +181,8 @@ class FootprintTiles:
                     fh, usecols=["latitude", "longitude", "area_in_meters", "confidence",
                                  "geometry"], chunksize=_CHUNK,
                     float_precision=OB_FLOAT_PRECISION)):   # MUST match the point tier's read
-                chunk = chunk[chunk["confidence"] >= self.min_confidence]
+                # rows by boolean mask: pandas-stubs types the selection as a Series
+                chunk = cast(pd.DataFrame, chunk[chunk["confidence"] >= self.min_confidence])
                 if chunk.empty:
                     continue
                 # Sort spatially so each row group covers a small patch and bbox reads skip the

@@ -7,8 +7,8 @@
     "ZAF.9.3.1_1_40972"
   ],
   "region_mean_depth": 7.0,
-  "region_mean_density_per_ha": 174.71086096426063,
+  "region_mean_density_per_ha": 174.71086096428803,
   "maps_url": "https://www.google.com/maps/@-33.97795,18.58064,18z",
-  "command": "pixi run python -m scripts.gen_example method_comparison",
+  "command": "uv run python -m scripts.gen_example method_comparison",
   "maps_qr": "maps_qr.png"
 }

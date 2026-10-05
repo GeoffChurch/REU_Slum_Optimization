@@ -1,7 +1,7 @@
 """The same greedy under different along-conductances, side by side at 10% displaced: does a
 road-favouring conductance turn nibbling into lanes? Cleared buildings coloured by round.
 
-    PYTHONPATH=. pixi run python research/roadless/render_alongs.py <ids,> [picker] [alongs,] [h of the run]
+    PYTHONPATH=. uv run python research/roadless/render_alongs.py <ids,> [picker] [alongs,] [h of the run]
 """
 from __future__ import annotations
 

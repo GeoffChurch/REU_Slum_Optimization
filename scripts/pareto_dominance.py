@@ -1,6 +1,6 @@
 """Pairwise Pareto-dominance across the method lineup, from the committed example frontiers.
 
-    pixi run python -m scripts.pareto_dominance
+    uv run python -m scripts.pareto_dominance
 
 Reads every `examples/**/frontier_permeability.csv` and asks, for each ordered pair (A, B): does A's
 achievable set cover B's whole curve? A dominates B iff at every displacement B samples, A can buy
@@ -40,7 +40,7 @@ from reblock.method_labels import friendly_method_name
 ROOT = Path(__file__).resolve().parent.parent
 # Only regions that REGENERATE. This was seven until 2026-09-20: `depth` and
 # `density_compactness` were dropped as example variants in c6ffab0, after which their four
-# directories were frozen artifacts that no `pixi run regen-examples` would ever refresh, and
+# directories were frozen artifacts that no `make regen-examples` would ever refresh, and
 # none had been rebuilt since the `block_area_m2` latitude fix. A dominance tally computed over
 # a mix of current and superseded regions is worse than one over fewer current ones.
 #

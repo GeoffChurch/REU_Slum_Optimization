@@ -3,7 +3,7 @@ displaced (area population) of the road lineup's corridors (carved) and of the g
 clearing (its perm1, linear to D = 0.10). If roads overtake the greedy under a road-favouring
 conductance, lanes are worth it and the greedy is not finding them.
 
-    PYTHONPATH=. pixi run python research/roadless/along_lineup.py <ids,> <workers> [picker] [alongs,]
+    PYTHONPATH=. uv run python research/roadless/along_lineup.py <ids,> <workers> [picker] [alongs,]
 """
 from __future__ import annotations
 

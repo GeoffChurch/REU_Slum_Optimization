@@ -2,7 +2,7 @@
 examples reproduce osm_footpaths offline + byte-stable (no live Overpass call at example time).
 
 Run (module form -- puts the repo root on sys.path so the data source's `from scripts...`
-import resolves): `pixi run python -m scripts.fetch_desire_lines_snapshot <out.geojson>
+import resolves): `uv run python -m scripts.fetch_desire_lines_snapshot <out.geojson>
 <hydra override>...`
 
   # multiblock variant (screen-selected region for a metric+city -- matches the orchestrator):

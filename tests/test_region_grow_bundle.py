@@ -105,7 +105,7 @@ def test_bundle_is_what_production_builds_today() -> None:
 
     DEVELOPER-LOCAL BY DESIGN. This is `slow` (needs a warm derivation cache -- `load_blocks`
     reaches `ensure_city_data`, which downloads the Cape Town blocks parquet from Dataverse on a
-    cold cache) and `pixi run test` -- which `.github/workflows/ci.yml` runs on every PR -- does
+    cold cache) and `make test` -- which `.github/workflows/ci.yml` runs on every PR -- does
     not deselect `slow` (see the marker's own registration comment in pyproject.toml: deselecting
     it by default would stop anyone running the guard without remembering an override, so it stays
     opt-in via a cache check instead of opt-out via addopts). This test's own `pytestmark` only
@@ -120,7 +120,7 @@ def test_bundle_is_what_production_builds_today() -> None:
     blocks_cache = Path.home() / ".cache" / "reblock" / "blocks_capetown_full.parquet"
     if not blocks_cache.exists():
         pytest.skip("needs the capetown_full cache; run "
-                    "`pixi run python -m scripts.gen_region_grow`")
+                    "`uv run python -m scripts.gen_region_grow`")
 
     from reblock.region import DenseClusterRegionBuilder
     from scripts.gen_region_grow import HOPS, load_blocks, neighbourhood

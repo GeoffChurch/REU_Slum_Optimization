@@ -289,10 +289,10 @@ def test_write_page_rewrites_data_bundle_url_for_its_depth(tmp_path: Path) -> No
 def test_assert_widget_bundle_present_fails_the_build_on_a_missing_bundle(
         monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """I6: nothing previously exercised `_assert_widget_bundle_present` -- a site built without
-    `pixi run web` would emit a <script> tag for a file that is not there, every widget would
+    `make web` would emit a <script> tag for a file that is not there, every widget would
     silently fail to boot behind an intact-looking PNG fallback, and no test would notice. Scoped to
     a throwaway `DOCS` (monkeypatched, not the real repo tree) so this test's pass/fail does not
-    depend on whether `pixi run web` happens to have been run in this checkout."""
+    depend on whether `make web` happens to have been run in this checkout."""
     import scripts.gen_site_pages as gsp
 
     monkeypatch.setattr(gsp, "DOCS", tmp_path)
@@ -403,7 +403,7 @@ def test_the_page_ships_the_bundle_it_points_at_with_everything_the_widget_needs
     must carry the chart block and the per-method label/colour the widget refuses to draw without.
 
     `DOCS`/`ASSETS` are redirected into `tmp_path` so this reads a copy no other test can be
-    mid-write on: `pixi run pytest` runs under xdist, several tests call `gen_methods_overview()`
+    mid-write on: `uv run pytest` runs under xdist, several tests call `gen_methods_overview()`
     (which copies these assets), and comparing bytes against the shared `docs/assets` copy made this
     test fail intermittently -- a flake I introduced and would rather not ship. Generating the page
     is what performs the copy, so calling the generator here is the fixture."""
@@ -477,7 +477,7 @@ def displacement_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
     `DOCS`/`ASSETS` are redirected into `tmp_path` because rendering a partial RUNS EVERY PRODUCER
     (`_render_partial` calls each entry of `MARKERS` whether or not that marker appears in the
     page), and producers copy assets. Left pointing at the real tree, every test using this would
-    write megabytes into the working copy -- and `pixi run pytest` runs under xdist, so several
+    write megabytes into the working copy -- and `uv run pytest` runs under xdist, so several
     workers would do it to the same paths at once. The partials themselves still come from the real
     repo: `PARTIALS` is bound at import time, so moving `DOCS` does not move it."""
     import scripts.gen_site_pages as gsp
@@ -704,7 +704,7 @@ def test_a_stray_wheel_in_dist_cannot_become_what_the_page_publishes(
     name, version = pyproject["project"]["name"], pyproject["project"]["version"]
     real = ROOT / "dist" / f"{name}-{version}-py3-none-any.whl"
     assert real.exists(), (
-        f"{real} is missing -- `pixi run wheel` builds it, and `test-py` depends on that task, so "
+        f"{real} is missing -- `make wheel` builds it, and `test-py` depends on that target, so "
         f"reaching this line without it means the dependency stopped firing")
 
     import scripts.gen_site_pages as gsp

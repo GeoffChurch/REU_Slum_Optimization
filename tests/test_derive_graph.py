@@ -1,11 +1,16 @@
+import importlib.metadata
+import re
+import tomllib
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import joblib
 import pytest
 
 import reblock.derive_graph as dg
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -31,7 +36,7 @@ class _NoIdentity:
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(dg, "memory", joblib.Memory(location=str(tmp_path), verbose=0))
-    monkeypatch.setattr(dg, "_l2", dg.memory.cache(dg._l2_impl, ignore=["fn", "inputs"]))
+    monkeypatch.setattr(dg, "_l2", dg.memory.cache(dg._l2_derive, ignore=["fn", "inputs"]))
     dg.clear_l1()
     yield
     dg.clear_l1()
@@ -90,17 +95,71 @@ def test_an_input_that_declares_no_identity_is_an_error() -> None:
         dg.derive(lambda x: x, _NoIdentity())     # type: ignore[arg-type]
 
 
-def test_version_bump_forces_a_miss(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("change", [   # each field by name, so a field renamed or dropped fails
+    pytest.param(lambda e: replace(e, python="CHANGED"), id="python"),
+    pytest.param(lambda e: replace(e, geos="CHANGED"), id="geos"),
+    pytest.param(lambda e: replace(e, proj="CHANGED"), id="proj"),
+    pytest.param(lambda e: replace(e, gdal="CHANGED"), id="gdal"),
+])
+def test_a_runtime_or_native_library_change_forces_a_miss(
+        monkeypatch: pytest.MonkeyPatch,
+        change: Callable[[dg.EnvVersions], dg.EnvVersions]) -> None:
+    """Python, GEOS, PROJ and GDAL (the files read through pyogrio) are each in the key alone."""
     box = {"n": 0}
     fn = _count(box)
     a = _Datum("a")
     dg.derive(fn, a)
-    # simulate a native-library change: env_version() returns a new tag. (A derivation-LOGIC
-    # change is no longer global -- see tests/test_code_closure.py.)
-    monkeypatch.setattr(dg, "env_version", lambda: ("CHANGED", "p"))
+    # simulate one library change. (A derivation-LOGIC change is no longer global -- see
+    # tests/test_code_closure.py.)
+    changed = change(dg.env_version())
+    monkeypatch.setattr(dg, "env_version", lambda: changed)
     dg.clear_l1()
     dg.derive(fn, a)                 # new version -> new key -> recompute
     assert box["n"] == 2
+
+
+def test_upgrading_a_keyed_package_forces_a_miss(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scipy upgrade (any keyed package) changes the key: the cache never serves what the old
+    version computed."""
+    box = {"n": 0}
+    fn = _count(box)
+    a = _Datum("a")
+    dg.derive(fn, a)
+    env = dg.env_version()
+    assert ("scipy", importlib.metadata.version("scipy")) in env.packages
+    upgraded = tuple((n, "99.0" if n == "scipy" else v) for n, v in env.packages)
+    monkeypatch.setattr(dg, "env_version", lambda: replace(env, packages=upgraded))
+    dg.clear_l1()
+    dg.derive(fn, a)
+    assert box["n"] == 2
+
+
+# The runtime packages NOT in the key, each with why it cannot change a derivation's result.
+# Spelled out, like KEYED_PACKAGES: exempting a package is a decision, made here.
+KEY_EXEMPT = {
+    "hydra-core",   # composes configuration before any derivation runs; the values it produces
+                    # reach keys through `config_identity`
+    "joblib",       # the cache itself
+    "matplotlib",   # rendering only: imported by run/render/animate, in no derivation's closure
+    "segno",        # QR codes for the site
+    "topology",     # covered as SOURCE: the closure walk follows topology.* (test_code_closure)
+}
+
+
+def test_every_runtime_package_is_keyed_or_exempt() -> None:
+    """A new package in pyproject.toml's `runtime` group fails here until it is classified: in
+    derive_graph.KEYED_PACKAGES, or in KEY_EXEMPT above with the reason."""
+    def norm(name: str) -> str:
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    runtime = {norm(re.split(r"[\s<>=!~;\[]", spec, maxsplit=1)[0])    # the name, sans specifier
+               for spec in pyproject["dependency-groups"]["runtime"]}
+    keyed = {norm(n) for n in dg.KEYED_PACKAGES}
+    assert not keyed & KEY_EXEMPT, f"both keyed and exempt: {sorted(keyed & KEY_EXEMPT)}"
+    assert runtime == keyed | KEY_EXEMPT, (
+        f"unclassified: {sorted(runtime - keyed - KEY_EXEMPT)}; "
+        f"not in the runtime group: {sorted((keyed | KEY_EXEMPT) - runtime)}")
 
 
 def test_source_hash_is_stable_and_content_sensitive(tmp_path: Path) -> None:

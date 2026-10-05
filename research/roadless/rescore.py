@@ -1,7 +1,7 @@
 """Is the greedy exploiting its own discretization? Re-score its Lens A clearing and the road
 lineup's Lens A prefixes under OTHER model settings (finer grid, shifted grid, other ell).
 
-    PYTHONPATH=. pixi run python research/roadless/rescore.py <n blocks> <workers>
+    PYTHONPATH=. uv run python research/roadless/rescore.py <n blocks> <workers>
 """
 from __future__ import annotations
 

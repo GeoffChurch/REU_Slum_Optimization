@@ -89,10 +89,10 @@ def test_every_reference_case_reproduces_its_baked_answer(ctx: EgressContext) ->
       changed ring winding, a dtype shift -- moves the answer by orders of magnitude more than
       this, which is what this test exists to catch.
 
-    The runtime-parity guard keeps its own much tighter 1e-15: both of ITS sides are fixed (wasm
-    f64 is deterministic by specification, and the baked side is committed), so it compares a
-    constant, not a distribution. A re-bake on a different machine would move the baked side by
-    roughly the 2 ULP seen here, which that tolerance still absorbs with room to spare.
+    The runtime-parity guard keeps its own much tighter tolerance (`PARITY_TOL` in
+    web/test/pyodide-parity.test.ts): between bakes both of ITS sides are fixed (wasm f64 is
+    deterministic by specification, and the baked side is committed), so it compares a constant.
+    A re-bake re-derives the block, though, and that moves the constant -- measured there.
     """
     for case in BUNDLE["reference"]:
         got = solve(ctx, case["road"], BUNDLE["baseline"]["p0"])

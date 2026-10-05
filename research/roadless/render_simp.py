@@ -1,7 +1,7 @@
 """The greedy's Lens A clearing next to SIMP's, same block and budget (D = 0.10): which buildings
 each clears (greedy coloured by round, SIMP by its final x), with a zoom on big blocks.
 
-    PYTHONPATH=. pixi run python research/roadless/render_simp.py <id> <plan> <along> [p] [greedy picker] [budget]
+    PYTHONPATH=. uv run python research/roadless/render_simp.py <id> <plan> <along> [p] [greedy picker] [budget]
 """
 from __future__ import annotations
 

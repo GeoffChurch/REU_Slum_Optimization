@@ -10,7 +10,7 @@ standalone agent output and stay that way.
 
 Images are under `control_imagery/`, which is this sheet's own directory and is NOT the
 worksheet's `imagery/`. Both are gitignored and regenerable:
-`pixi run python -m scripts.fetch_block_imagery --control`
+`uv run python -m scripts.fetch_block_imagery --control`
 
 | weight | block | agent says | survey says | ha | place | satellite |
 |---|---|---|---|---|---|---|

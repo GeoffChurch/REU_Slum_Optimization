@@ -1,6 +1,6 @@
 """Road-free greedy clearing vs the road lineup, on the roadless (carve) score.
 
-    PYTHONPATH=. pixi run python research/roadless/compare_clear.py <M4|B0.01g3> [h] [pop] [power]
+    PYTHONPATH=. uv run python research/roadless/compare_clear.py <M4|B0.01g3> [h] [pop] [power]
 
 Greedy D counts whole buildings; the lineup's D is the overlap fraction its corridor takes. Lens A:
 the first greedy step with D >= 0.10 (the lineup's prefix is likewise the first reaching it).

@@ -3,8 +3,8 @@ prefixes: the canonical street-first prefix at each displacement budget in BUDGE
 network). Lens A is budget 0.10; Lens B is read afterwards from the curve (both metrics are
 monotone along the prefix order).
 
-    PYTHONPATH=. pixi run python research/roadless/study.py run <workers> <h> <ell> [K] [pop]
-    PYTHONPATH=. pixi run python research/roadless/study.py report <h> <ell> [K] [pop]
+    PYTHONPATH=. uv run python research/roadless/study.py run <workers> <h> <ell> [K] [pop]
+    PYTHONPATH=. uv run python research/roadless/study.py report <h> <ell> [K] [pop]
 
 pop: count (each building one unit) or area (proportional to footprint area): both the escape
 demand and the displacement weights.

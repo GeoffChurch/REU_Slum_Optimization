@@ -21,7 +21,7 @@ adjudicator, not as a filter.
 `verdict` and `notes` are blank by design: fill them in, commit, and the file becomes the second
 label column. Never overwrite `survey_label` -- the disagreements are the finding.
 
-    pixi run python -m scripts.gen_adjudication_worksheet [k]
+    uv run python -m scripts.gen_adjudication_worksheet [k]
 """
 from __future__ import annotations
 

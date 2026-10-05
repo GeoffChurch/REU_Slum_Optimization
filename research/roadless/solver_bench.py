@@ -1,6 +1,6 @@
 """CPU vs GPU AMG-CG on a block's baseline system: setup and solve time, and P agreement.
 
-    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/solver_bench.py <id> [hs,]
+    CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/solver_bench.py <id> [hs,]
 """
 from __future__ import annotations
 

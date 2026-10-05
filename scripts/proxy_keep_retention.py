@@ -35,8 +35,8 @@ blocks) would have kept. That is why the knob is a COUNT and not a percentage: t
 a rank, and 2% is 575 blocks in Cape Town but 140 in Nairobi, shrinking the margin precisely where
 this measurement says the risk is highest.
 
-    pixi run python -m scripts.proxy_keep_retention
-    pixi run python -m scripts.proxy_keep_retention --cities capetown
+    uv run python -m scripts.proxy_keep_retention
+    uv run python -m scripts.proxy_keep_retention --cities capetown
 
 EXPENSIVE: a full-corpus fine pass per city x metric. Warm, every peel is an L2 hit and this is
 minutes; cold it is the fine pass over every eligible block in the city.

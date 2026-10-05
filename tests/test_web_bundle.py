@@ -93,7 +93,7 @@ def test_the_committed_dts_is_what_the_generator_writes() -> None:
     from scripts.gen_web_bundle import DTS_TEMPLATE
     assert DTS.read_text(encoding="utf-8") == DTS_TEMPLATE, (
         "web/src/bundle.d.ts was hand-edited; regenerate it: "
-        "pixi run python -m scripts.gen_web_bundle")
+        "uv run python -m scripts.gen_web_bundle")
 
 
 def test_dts_declares_exactly_the_bundle_keys(bundle: dict[str, Any]) -> None:
@@ -175,7 +175,7 @@ def test_bundle_matches_permeability_graph_at_every_prefix(bundle: dict[str, Any
 
     DEVELOPER-LOCAL BY DESIGN. This is `slow` (needs a warm derivation cache -- `ensure_city_data`
     reaches Dataverse for the Cape Town blocks parquet and Open Buildings for the matching tile on
-    a cold cache, at a 900 s timeout) and `pixi run test` -- which `.github/workflows/ci.yml` runs
+    a cold cache, at a 900 s timeout) and `make test` -- which `.github/workflows/ci.yml` runs
     on every PR -- does not deselect `slow` (see the marker's own registration comment in
     pyproject.toml: deselecting it by default would stop anyone running the guard without
     remembering an override, so it stays opt-in via a cache check instead of opt-out via addopts).
@@ -186,7 +186,7 @@ def test_bundle_matches_permeability_graph_at_every_prefix(bundle: dict[str, Any
     clone get neither the guard nor the download."""
     if not capetown_footprints_cached():
         pytest.skip("needs the capetown_full cache and the pinned block's footprint tile; run "
-                    "`pixi run python -m scripts.gen_web_bundle`")
+                    "`uv run python -m scripts.gen_web_bundle`")
 
     from typing import cast
 

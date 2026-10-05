@@ -1,7 +1,7 @@
 """Two greedy pickers on the same objective, paired per block: Lens A (at D = 0.10, linear
 between steps, so pickers with coarse steps are not scored past it) perm (J_power) and perm1 (P), Lens B least D reaching perm1 0.25 / 0.35, and time.
 
-    PYTHONPATH=. pixi run python research/roadless/picker_compare.py <a> <b> [pop] [power]
+    PYTHONPATH=. uv run python research/roadless/picker_compare.py <a> <b> [pop] [power]
 """
 from __future__ import annotations
 

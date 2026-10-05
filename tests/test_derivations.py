@@ -36,7 +36,7 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     # populated, undercounting this test's own spy calls. Mirrors
     # tests/test_derive_graph.py's `_isolate`.
     monkeypatch.setattr(dg, "memory", joblib.Memory(location=str(tmp_path), verbose=0))
-    monkeypatch.setattr(dg, "_l2", dg.memory.cache(dg._l2_impl, ignore=["fn", "inputs"]))
+    monkeypatch.setattr(dg, "_l2", dg.memory.cache(dg._l2_derive, ignore=["fn", "inputs"]))
     dg.clear_l1()
     yield
     dg.clear_l1()

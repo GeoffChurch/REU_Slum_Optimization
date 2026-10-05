@@ -8,7 +8,7 @@ better off). Dropped: the current difference and the slowness (time per metre fo
 in a cell): outside the cleared cells the conductance is fixed, so slowness = current / w and
 both say what the flux and dissipation maps already say.
 
-    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/current_map.py <block id> <arms,> [cpu|gpu] [zoom|full]
+    CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/current_map.py <block id> <arms,> [cpu|gpu] [zoom|full]
 
 arm: g:<picker>:<along> (the greedy's prefix within D 0.10, current under <along>) or
 s:<plan>:<p>:<along> (relax.py's SIMP clearing for that plan, power and conductance).

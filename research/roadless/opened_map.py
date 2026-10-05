@@ -4,7 +4,7 @@ run, whatever conductance it was optimized under): see `gained`. Heading of the 
 open (the cleared footprints, green, gain trivially). A new corridor shows as a coherent streak
 running through the cleared buildings into the open space beyond.
 
-    PYTHONPATH=. pixi run python research/roadless/opened_map.py <block id> [picker] [alongs,] [h of the run]
+    PYTHONPATH=. uv run python research/roadless/opened_map.py <block id> [picker] [alongs,] [h of the run]
 """
 from __future__ import annotations
 

@@ -11,7 +11,7 @@ def _module_level_names(src: str) -> set[str]:
     A literal substring scan (`'VARIANT = "' in text`) has false negatives: it misses
     single-quoted (`VARIANT = 'x'`) and annotated (`VARIANT: str = "x"`) re-declarations alike,
     and neither form is caught anywhere else in the gate (`ruff check .`'s selected rules have no
-    quote-style check, and `pixi run check` does not run `ruff format`). Parsing the module and
+    quote-style check, and `make check` does not run `ruff format`). Parsing the module and
     reading the AST's own binding targets is quoting- and annotation-independent."""
     tree = ast.parse(src)
     names: set[str] = set()

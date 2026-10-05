@@ -18,7 +18,7 @@ question.
 **The remedy is not this tool, it is `setsid`.** Launch long work into its own session so harness
 signals cannot reach it, and make the job resumable anyway:
 
-    setsid nohup pixi run python -u -m scripts.perf.<name> > log 2>&1 < /dev/null &
+    setsid nohup uv run python -u -m scripts.perf.<name> > log 2>&1 < /dev/null &
 
 Detaching costs the harness's completion notification, so poll the log or the output file. Keep
 running long jobs under this wrapper regardless -- if something else ever kills one, this is what
@@ -45,7 +45,7 @@ alone, those workers would inherit a mask blocking SIGTERM and could not be term
 the orphaned-worker failure this repo has hit before. `os.register_at_fork(after_in_child=...)`
 restores the default mask in every child, so only the parent is instrumented.
 
-Usage:  pixi run python -m scripts.perf.instrumented <module> <logfile>
+Usage:  uv run python -m scripts.perf.instrumented <module> <logfile>
 """
 from __future__ import annotations
 

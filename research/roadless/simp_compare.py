@@ -9,7 +9,7 @@ confirmation; 20023 and 30796 lack greedy S0.005cat). Times are not comparable a
 the D 0.05 SIMP rows ran on the cluster's V100 / RTX 8000 cards, the greedies here on an RTX 6000
 Ada.
 
-    PYTHONPATH=. pixi run python research/roadless/simp_compare.py <tuning|held> <budget> \
+    PYTHONPATH=. uv run python research/roadless/simp_compare.py <tuning|held> <budget> \
         <name>=<simp|greedy>,<along>,<plan|picker>... <b>/<a>...
 """
 from __future__ import annotations

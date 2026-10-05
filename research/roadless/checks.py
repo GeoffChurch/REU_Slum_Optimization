@@ -1,6 +1,6 @@
 """Synthetic checks of lifted.py.
 
-    pixi run python research/roadless/checks.py angle      # open channel: P vs angle
+    uv run python research/roadless/checks.py angle      # open channel: P vs angle
 """
 from __future__ import annotations
 

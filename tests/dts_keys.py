@@ -23,7 +23,7 @@ def ts_field_names(dts: str) -> set[str]:
     own 4-space-indented lines; others sit inline on one line, e.g. `nodes: { cx: number[]; cy:
     number[]; ground_g: number[] }`), so a line-anchored, fixed-indent regex only ever sees the
     outer style. Comments are stripped first: a bare `key:` regex would otherwise treat
-    "// Regenerate: pixi run ..." as declaring a field named `Regenerate`."""
+    "// Regenerate: uv run ..." as declaring a field named `Regenerate`."""
     stripped = _LINE_COMMENT.sub("", _BLOCK_COMMENT.sub("", dts))
     return set(re.findall(r"(\w+)\s*\??:\s", stripped))
 

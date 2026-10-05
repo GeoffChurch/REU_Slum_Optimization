@@ -1,6 +1,6 @@
 """Profile one greedy round (tension + pick + exact solve) on one block: where does the time go?
 
-    PYTHONPATH=. pixi run python research/roadless/profile_round.py <id> <h> <along> <solver> [picker]
+    PYTHONPATH=. uv run python research/roadless/profile_round.py <id> <h> <along> <solver> [picker]
 """
 from __future__ import annotations
 

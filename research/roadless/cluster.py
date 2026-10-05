@@ -7,13 +7,13 @@ million unknowns, and cluster_submit routes it to the smallest card that holds i
 floor under that estimate, to send a block known to need a bigger card to one. Results (parquet
 rows) come back to the same paths here, never overwriting a local file.
 
-    pixi run -e launch python research/roadless/cluster.py setup
-    pixi run -e launch python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] <ids,|@file> -- <script> <args with {id}>
-    pixi run -e launch python research/roadless/cluster.py status|sync [<run>]
-    pixi run -e launch python research/roadless/cluster.py wait <run> [--timeout 3h]    # exit 0 passed, 3 failed, 4 timed out, 5 blind
-    pixi run -e launch python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]   # its failed / missing blocks as <run>-r1
-    pixi run -e launch python research/roadless/cluster.py cancel <run>
-    pixi run -e launch python research/roadless/cluster.py watch start|stop
+    uv run python research/roadless/cluster.py setup
+    uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] <ids,|@file> -- <script> <args with {id}>
+    uv run python research/roadless/cluster.py status|sync [<run>]
+    uv run python research/roadless/cluster.py wait <run> [--timeout 3h]    # exit 0 passed, 3 failed, 4 timed out, 5 blind
+    uv run python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]   # its failed / missing blocks as <run>-r1
+    uv run python research/roadless/cluster.py cancel <run>
+    uv run python research/roadless/cluster.py watch start|stop
 """
 from __future__ import annotations
 
@@ -28,18 +28,8 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 GB_PER_MILLION = 0.7    # measured: the translucent greedy on 30796 peaks at 31.2 GiB for 48.7M
                         # unknowns after the K-cycle fix (NOTES); raise it if a block runs out
-PIXI = cs.Pixi()
-DEPS = "~/.cache/reblock-research/pydeps"   # the research deps outside the lock
-# cupy with the CUDA 12 toolkit from pip (the cluster's /usr/local/cuda is 11.8, the nodes'
-# drivers 12.8); pyamg without its deps (numpy and scipy are the env's). The numpy that the
-# [ctk] extra drags in would shadow the env's own on PYTHONPATH, so it goes.
-SETUP = (
-    f"test -d {DEPS}/cupy || {PIXI.run_prefix()} python -m pip install -q --target {DEPS} "
-    "'cupy-cuda12x[ctk]==14.2.0'",
-    f"test -d {DEPS}/pyamg || {PIXI.run_prefix()} python -m pip install -q --target {DEPS} "
-    "--no-deps pyamg==5.3.0",
-    f"rm -rf {DEPS}/numpy {DEPS}/numpy-*.dist-info {DEPS}/numpy.libs",
-)
+# The checkout's .venv from uv.lock, with every default group: cupy and pyamg (`gpu`) among them.
+ENV = cs.Uv()
 
 
 @dataclass(frozen=True)
@@ -80,9 +70,8 @@ class Blocks:
             describe=(f"{len(ids)} blocks: {line}",))
 
 
-PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.clusters.AI, env=PIXI,
-                     kinds=(Blocks(),), max_gpus=4,     # owner, 2026-10-03: a shared cluster
-                     setup_commands=SETUP)
+PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.clusters.AI, env=ENV,
+                     kinds=(Blocks(),), max_gpus=4)     # owner, 2026-10-03: a shared cluster
 
 if __name__ == "__main__":
     sys.path[:0] = [str(HERE), str(REPO)]   # common and the repo's scripts package, for Blocks.plan

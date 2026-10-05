@@ -35,7 +35,7 @@ nowhere near each other).
 generators and this module's own CLI load from, so a re-calibration only ever touches the yaml.
 
 Run (module form -- mirrors scripts/fetch_desire_lines_snapshot.py's Hydra bootstrapping):
-  pixi run python -m scripts.compare_budgets <out_dir> <m1,m2,...> <hydra override>...
+  uv run python -m scripts.compare_budgets <out_dir> <m1,m2,...> <hydra override>...
 
   e.g. examples/multiblock clearance,greedy_arterial_buildable,osm_footpaths \
        data=capetown_full region_builder=dense_cluster region_builder.max_buildings=3000 \

@@ -10,7 +10,7 @@ so the states are nested and the rows come out in the greedy's format (every bud
 run). A gate is judged with its companions cleared, the greedy's blind spot; the risk is
 substitutes (each cheap to restore alone) restored in one batch, hence small batches.
 
-    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/search.py <ids,> <spec> <p> <cpu|gpu> [along] [d_max]
+    CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> <cpu|gpu> [along] [d_max]
 
 spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
 GP3xS0.01catr0.005m8.

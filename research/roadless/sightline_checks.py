@@ -2,7 +2,7 @@
 Sightline (should grow faster than W); (2) monotonicity on a real block (freeing buildings never
 raises P); (3) operator build time.
 
-    PYTHONPATH=. pixi run python research/roadless/sightline_checks.py [block idx]
+    PYTHONPATH=. uv run python research/roadless/sightline_checks.py [block idx]
 """
 from __future__ import annotations
 

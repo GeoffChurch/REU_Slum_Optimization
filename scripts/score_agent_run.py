@@ -26,8 +26,8 @@ as an UPPER BOUND on survey misses until the queue is human-adjudicated, because
 false positive inflates it. The bound is still worth having: it is the first number in this
 project attached to a denominator.
 
-    pixi run python -m scripts.score_agent_run                    # every run found
-    pixi run python -m scripts.score_agent_run runs/foo.csv       # one
+    uv run python -m scripts.score_agent_run                    # every run found
+    uv run python -m scripts.score_agent_run runs/foo.csv       # one
 """
 from __future__ import annotations
 
@@ -164,7 +164,7 @@ def write_queue(run: Path, queue: list[tuple[float, str, str, str]],
         "",
         "Images are under `control_imagery/`, which is this sheet's own directory and is NOT the",
         "worksheet's `imagery/`. Both are gitignored and regenerable:",
-        "`pixi run python -m scripts.fetch_block_imagery --control`",
+        "`uv run python -m scripts.fetch_block_imagery --control`",
         "",
         "| weight | block | agent says | survey says | ha | place | satellite |",
         "|---|---|---|---|---|---|---|",

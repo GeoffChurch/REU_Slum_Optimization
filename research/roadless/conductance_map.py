@@ -7,8 +7,8 @@
   vehicle  where clear width >= W (4.5 m), split by whether that space touches a street: the
            fast layer a vehicle mode would add.
 
-    PYTHONPATH=. pixi run python research/roadless/conductance_map.py <block id> [picker]
-    PYTHONPATH=. pixi run python research/roadless/conductance_map.py sightline <block id> [picker]
+    PYTHONPATH=. uv run python research/roadless/conductance_map.py <block id> [picker]
+    PYTHONPATH=. uv run python research/roadless/conductance_map.py sightline <block id> [picker]
 """
 from __future__ import annotations
 

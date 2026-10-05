@@ -3,9 +3,10 @@ name = "reblock"
 version = "0.1.0"
 description = ""
 requires-python = ">=3.11"
-# Pure-Python / PyPI runtime deps go here. Heavy binary deps (the geospatial
-# and traffic-sim stack) are declared as conda-forge packages under
-# [tool.pixi.dependencies] instead — see the note there.
+# Empty on purpose. This wheel is what the DrawRoad widget's Pyodide runtime installs, with
+# `micropip.install(wheelUrl)` (web/src/py/runtime.ts), and micropip resolves every Requires-Dist
+# -- from PyPI, which has no wasm wheels for the science stack. What reblock needs to run is the
+# `runtime` dependency group below: uv installs it, and no dependency group reaches the wheel.
 dependencies = []
 
 [build-system]
@@ -16,144 +17,112 @@ build-backend = "hatchling.build"
 packages = ["src/reblock"]
 
 # ---------------------------------------------------------------------------
-# pixi: environment + dependency management (conda-forge + PyPI, locked)
+# uv: environment + dependency management (PyPI, locked in uv.lock); tasks are in the Makefile
 # ---------------------------------------------------------------------------
-[tool.pixi.workspace]
-channels = ["conda-forge"]
-# Add "osx-arm64" / "osx-64" / "win-64" here when collaborators are on those.
-platforms = ["linux-64", "osx-arm64"]
+[dependency-groups]
+runtime = [
+    "geopandas",
+    # Used directly, so declared rather than left to arrive transitively via geopandas: pandas
+    # (reblock.derive.access builds pd.Series), numpy, shapely, pyproj, and pyogrio
+    # (reblock.data.osm_extract's OGR `where` filter; derive_graph keys on its GDAL's version).
+    "pandas",
+    "numpy",
+    "shapely",
+    "pyproj",
+    "pyogrio",
+    # Below 25: pyarrow 25.0.1's wheel dropped the py.typed marker 24.0.0 ships, and mypy --strict
+    # then refuses every pyarrow import. Lift the cap when a release ships it again.
+    "pyarrow<25",
+    "networkx",
+    "scipy",
+    "matplotlib",
+    "pyshp",
+    "hydra-core",
+    # Backs reblock.cache's content-addressed L2 derivation cache (joblib.Memory).
+    "joblib",
+    "segno",
+    # Compiles reblock.methods.betweenness's state-graph Dijkstra and thinning kernels. Measured:
+    # the pure-numpy/scipy alternative needs an explicit 16-state-per-cell sparse graph (9M states
+    # on a 6,619-building block) and was rejected on memory and time.
+    "numba",
+    "topology",
+]
+# Dev-only tooling, kept out of the runtime set.
+dev = [
+    "mypy",
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist",   # parallel test execution (-n auto) -- the suite is CPU-bound, not serial
+    "ruff",
+    # geopandas, shapely, PyYAML and pyogrio ship no py.typed marker; these are the upstream
+    # typeshed stub packages (not ignore_missing_imports shims), so contracts.py's
+    # GeoDataFrame/Polygon/CRS, tests/data/test_osm_extract.py's `import yaml` and
+    # reblock.data.osm_extract's pyogrio calls stay fully checked under mypy --strict.
+    "types-geopandas",
+    "types-shapely",
+    "types-pyyaml",
+    "types-pyogrio",
+    # node, npm and npx in the venv's bin/, for building and type-checking the web/ widget bundle.
+    # Pinned to the same major as .github/workflows/deploy-site.yml's actions/setup-node, so a type
+    # error cannot pass locally and fail in the site build (or the reverse).
+    #
+    # web/package.json pins "typescript" to the latest 5.x (not 7.x, which `npm install
+    # typescript@latest` resolves to as of 2026-08): TypeScript 7 is a ground-up Go-ported
+    # reimplementation, not an incremental major on the 5.x lineage. This project only uses
+    # TypeScript for `tsc --noEmit` checking -- esbuild does all transpiling -- so 5.x costs
+    # nothing we need, while 7.x's less-settled diagnostics and inference would be what later
+    # tasks end up debugging widget code against. Declined deliberately; not staleness.
+    "nodejs-wheel~=22.0",
+]
+# Research/analysis stack for scripts/ and the OT retrieval work. Its own group rather than
+# `runtime`: no `src/reblock` module imports these, so they are not what the package needs to
+# run -- the same grouping-by-purpose as `dev` (and, like `dev`, installed by default).
+research = [
+    # Reference OT/GW solvers. reblock.transplant.gw hand-rolls entropic GW + unbalanced log-domain
+    # Sinkhorn because POT has no unbalanced entropic GW; POT is the independent implementation
+    # `real_gw_dist` -- the independent variable in the pair-matrix result -- is checked against,
+    # and it supplies gromov_barycenters for the barycenter-consensus work.
+    "POT",
+    # Independent check on scripts/pair_matrix.py's hand-rolled within-recipient fixed-effects
+    # regression (the cluster-preserving permutation test stays the primary significance check).
+    "statsmodels",
+    # Masked normalized cross-correlation (Padfield 2012) for the Phase 2 retrieval index.
+    "scikit-image",
+    # Pins BLAS and OpenMP to one thread in scripts/consensus_matrix.py's processes, forked workers
+    # included, where an environment variable set after numpy has loaded would do nothing.
+    "threadpoolctl",
+]
+# research/roadless's GPU stack, for its solvers here and on the cluster. cupy brings the CUDA 12
+# toolkit as wheels ([ctk]): the cluster's /usr/local/cuda is 11.8 and its nodes' drivers 12.8.
+gpu = [
+    "cupy-cuda12x[ctk]==14.2.0; sys_platform == 'linux'",
+    "pyamg==5.3.0",
+]
+# research/roadless's cluster launcher, GeoffChurch/cluster_submit (private), pinned in
+# [tool.uv.sources].
+submit = ["cluster_submit"]
 
-# Runtime deps resolved from conda-forge (binary-correct GDAL/GEOS stack).
-[tool.pixi.dependencies]
-python = ">=3.11,<3.13"
-geopandas = "*"
-# pandas is used directly (reblock.derive.access builds pd.Series), so declare
-# it explicitly rather than leaning on it arriving transitively via geopandas.
-pandas = "*"
-pyarrow = "*"
-networkx = "*"
-scipy = "*"
-matplotlib-base = "*"
-pyshp = "*"
-hydra-core = "*"
-# Backs reblock.cache's content-addressed L2 derivation cache (joblib.Memory).
-joblib = "*"
-segno = "*"
-# Compiles reblock.methods.betweenness's state-graph Dijkstra and thinning kernels. Measured: the
-# pure-numpy/scipy alternative needs an explicit 16-state-per-cell sparse graph (9M states on a
-# 6,619-building block) and was rejected on memory and time.
-numba = "*"
+[tool.uv]
+# `gpu` and `submit` too, on this branch: a sync installs exactly the groups it is given, so a plain
+# `uv run` or `uv sync` that left them out would uninstall cupy and the launcher.
+default-groups = ["runtime", "dev", "research", "gpu", "submit"]
+# A uv-managed CPython (python-build-standalone), never one found on the machine: the same build
+# here, in CI and on the cluster (.python-version names it to the patch), and an env that does not
+# break when a conda base or a system Python moves.
+python-preference = "only-managed"
+# The platforms the lock resolves for. Add one here when a collaborator is on it.
+environments = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+# The PEP 517 backend every reblock wheel is built with (`uv build`: `make wheel`,
+# web/scripts/test.sh and deploy-site.yml), pinned once, here. That wheel ships to readers through
+# the DrawRoad widget, so a backend bump should be a commit, not a surprise.
+build-constraint-dependencies = ["hatchling==1.32.0"]
 
-# Install the reblock package itself, editable, from this directory.
-[tool.pixi.pypi-dependencies]
-reblock = { path = ".", editable = true }
+[tool.uv.sources]
 topology = { path = "ext/topology", editable = true }
-
-# Dev-only tooling, kept out of the runtime dependency set.
-[tool.pixi.feature.dev.dependencies]
-# The PEP 517 backend the `wheel` task below builds with. Declared here, and the task passes
-# --no-build-isolation, so building the wheel resolves nothing from PyPI: `pixi run test-py`
-# depends on that task, so without this every test run -- and every CI gate -- would need the
-# network to fetch an UNPINNED hatchling into a throwaway build env. Declared here it comes from
-# the lock file like everything else, and the deploy workflow pins the same version explicitly so
-# the two build paths produce a byte-identical wheel.
-hatchling = "*"
-# `python -m pip` needs pip IN the environment. Without it the wheel task falls back to a
-# pip found on PATH -- outside this environment, blind to the hatchling above.
-pip = "*"
-mypy = "*"
-pytest = "*"
-pytest-cov = "*"
-pytest-xdist = "*"   # parallel test execution (-n auto) -- the suite is CPU-bound, not serial
-ruff = "*"
-# geopandas/shapely ship no py.typed marker; these are the upstream typeshed
-# stub packages (not an ignore_missing_imports shim) so contracts.py's use of
-# GeoDataFrame/Polygon/CRS stays fully checked under mypy --strict.
-types-geopandas = "*"
-types-shapely = "*"
-# PyYAML ships no py.typed marker either; same upstream-stub pattern as above so
-# tests/data/test_osm_extract.py's `import yaml` stays fully checked.
-types-pyyaml = "*"
-# Builds and type-checks the web/ widget bundle. Pinned to the same major as
-# .github/workflows/deploy-site.yml's actions/setup-node, so a type error cannot pass locally and
-# fail in the site build (or the reverse).
-nodejs = "22.*"
-
-# web/package.json pins "typescript" to the latest 5.x (not 7.x, which `npm install
-# typescript@latest` resolves to as of 2026-08): TypeScript 7 is a ground-up Go-ported
-# reimplementation, not an incremental major on the 5.x lineage. This project only uses
-# TypeScript for `tsc --noEmit` checking -- esbuild does all transpiling -- so 5.x costs
-# nothing we need, while 7.x's less-settled diagnostics and inference would be what later
-# tasks end up debugging widget code against. Declined deliberately; not staleness.
-
-# Research/analysis stack for scripts/ and the OT retrieval work. Deliberately NOT in
-# [tool.pixi.dependencies]: no `src/reblock` module imports these, so they are not runtime
-# dependencies of the package -- same grouping-by-purpose intent as the dev feature above
-# (which is likewise always present in the default environment).
-[tool.pixi.feature.research.dependencies]
-# Reference OT/GW solvers. reblock.transplant.gw hand-rolls entropic GW + unbalanced log-domain
-# Sinkhorn because POT has no unbalanced entropic GW; POT is the independent implementation
-# `real_gw_dist` -- the independent variable in the pair-matrix result -- is checked against,
-# and it supplies gromov_barycenters for the barycenter-consensus work.
-pot = "*"
-# Independent check on scripts/pair_matrix.py's hand-rolled within-recipient fixed-effects
-# regression (the cluster-preserving permutation test stays the primary significance check).
-statsmodels = "*"
-# Masked normalized cross-correlation (Padfield 2012) for the Phase 2 retrieval index.
-scikit-image = "*"
-# Pins BLAS and OpenMP to one thread in scripts/consensus_matrix.py's processes, forked workers
-# included, where an environment variable set after numpy has loaded would do nothing.
-threadpoolctl = "*"
-
-[tool.pixi.feature.launch.pypi-dependencies]
-# The cluster launcher, GeoffChurch/cluster_submit, pinned to a commit. It has an environment
-# of its own because the cluster installs only the default one, so it never fetches this
-# private repo.
-cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "240be996dc9721885629c05247bbaec32959b874" }
-
-[tool.pixi.environments]
-default = { features = ["dev", "research"], solve-group = "default" }
-launch = { features = ["dev", "research", "launch"], solve-group = "default" }
-
-[tool.pixi.tasks]
-# Split the same way typecheck is split below (typecheck-py + web-check, composed by typecheck):
-# web/'s transform.ts unit tests otherwise run only when a human types `npm test` by hand. CI
-# (.github/workflows/ci.yml) invokes `pixi run test`, so folding web-test in here is what puts
-# those tests on the gate -- with no new CI step for a future workflow edit to forget.
-# The reblock wheel `micropip` installs into DrawRoad's Pyodide runtime (web/src/widgets/
-# draw-road.ts's `data-wheel`) and the same wheel web/test/pyodide-parity.test.ts loads from
-# `dist/` under Node. `dist/` is gitignored, so a fresh checkout has none, and
-# gen_site_pages.py's DRAWROAD producer raises rather than emit a page pointing at a wheel that
-# was never built -- tests/test_gen_site_pages.py renders every partial through every producer, so
-# `test-py` would fail on any checkout that had not built the wheel without this dependency.
-# `web/scripts/test.sh` builds the SAME wheel again for its own leaf (`web-test`, below): the two
-# tasks give no ordering between them, so a bare `npm test` from web/ has to stay self-sufficient
-# rather than rely on `test-py` having already built it (see that script's own comment).
-# `python -m pip`, never bare `pip`: a bare `pip` resolves off PATH and on a machine with a
-# conda/venv base on it that is a pip from OUTSIDE this environment, which cannot see the
-# hatchling declared above and fails --no-build-isolation outright. `python` is the env's own.
-wheel = "python -m pip wheel --no-deps --no-build-isolation --wheel-dir dist ."
-test-py = { cmd = "pytest", depends-on = ["wheel"] }
-web-test = { cmd = "npm ci && npm test", cwd = "web" }
-test = { depends-on = ["test-py", "web-test"] }
-# NOTE: these explicit file arguments OVERRIDE `[tool.mypy] files` entirely -- a module
-# listed there and not here is NOT checked by the gate. tests/test_typecheck_config.py
-# pins the two lists together.
-typecheck-py = "mypy --strict src tests scripts web/src/py/solve.py"
-web = { cmd = "npm ci && npm run build", cwd = "web" }
-web-check = { cmd = "npm ci && npm run check", cwd = "web" }
-typecheck = { depends-on = ["typecheck-py", "web-check"] }
-lint = "ruff check ."
-# `fmt = "ruff format ."` was HERE and is deliberately gone. It reformatted 200 of 215 files, left
-# 12 lines over the `E501` limit it cannot split, and moved a `# type: ignore` off the line it
-# suppresses -- all measured 2026-09-20, all argued at `.githooks/pre-commit`. A task nobody can
-# safely run is worse than no task: it was fired by accident once in this repo's history and cost
-# a scoped revert to unpick.
-hooks = "git config core.hooksPath .githooks"
-check = { depends-on = ["lint", "typecheck", "test"] }
-run = "python -m reblock.run"
-compare = "python -m reblock.compare"
-regen-examples = "bash scripts/regenerate_examples.sh"
+cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "5e76c3925f2be53f3bf94ebea891a2adbcdef60c" }
 
 # ---------------------------------------------------------------------------
 # Tooling config
@@ -162,11 +131,8 @@ regen-examples = "bash scripts/regenerate_examples.sh"
 python_version = "3.11"
 strict = true
 # The whole scripts/ directory, not a hand-picked list of its files: a script left off a list rots
-# where nobody sees it.
-#
-# THIS LIST IS INERT FOR THE GATE ON ITS OWN: `typecheck-py` above passes explicit file arguments,
-# which override `files` entirely, so every entry here has to appear there too. Adding a module to
-# one list and not the other is the failure tests/test_typecheck_config.py exists to catch.
+# where nobody sees it. This is the ONE list of what the gate checks: the Makefile's `typecheck-py`
+# passes mypy no file arguments, because any it passed would override this list.
 files = ["src", "tests", "scripts", "web/src/py/solve.py"]
 # No `exclude`: the directory walk checks every file it finds. tests/test_typecheck_config.py pins
 # that, so skipping a file is a decision rather than a regex accident.
@@ -236,15 +202,6 @@ ignore_missing_imports = true
 # numba ships no py.typed marker and no stub package. Every kernel goes through the typed
 # `reblock._jit.njit` wrapper, so untyped numba never reaches a signature; same shim as joblib.
 module = ["numba", "numba.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-# pyogrio (backs reblock.data.osm_extract.read_pbf_lines' OGR-side `where` filter) ships no
-# py.typed marker. A types-pyogrio stub exists on PyPI but not on conda-forge, and every other
-# stub package here (types-geopandas, types-shapely, types-pyyaml) is installed as a conda-forge
-# package to match [tool.pixi.dependencies]'s binary-correct GDAL/GEOS stack -- so, like joblib
-# above, this is a plain ignore_missing_imports shim, not a preference over real stubs.
-module = "pyogrio.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

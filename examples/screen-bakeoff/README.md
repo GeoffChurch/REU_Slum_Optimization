@@ -4,7 +4,7 @@ Every other example grades reblocking **methods**. This one grades the **screens
 blocks get reblocked at all — a stage that was never validated against ground truth until
 2026-08-08, and where the answer turned out to matter.
 
-Reproduce with `pixi run python -m scripts.gen_screen_bakeoff` (downloads ~18 MB of ground truth
+Reproduce with `uv run python -m scripts.gen_screen_bakeoff` (downloads ~18 MB of ground truth
 once). Add `--counts kblock` to reproduce a pre-2026-09-17 figure; the default is `open_buildings`,
 which is what `conf/building_count/` ships.
 

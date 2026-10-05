@@ -47,30 +47,38 @@ const BUNDLE = JSON.parse(
  * moved with the pin and missed the block entirely, both baked as exactly 0; the bake now refuses
  * a reference road that changes nothing.)
  *
+ * RAISED 2026-10-05, from 5e-15 to 5e-14, when the examples were regenerated for the move from
+ * pixi to uv. The reference roads did not move; the BLOCK did -- re-derived under GEOS 3.13.1
+ * instead of 3.14.1, its parcels shifted in their last digits and `p0` by 3e-12 relative -- and
+ * on that re-derived system `crossing` differs by 1.432e-14 and `spur` by 6.106e-15, seven to
+ * eight times the figures above. Not the CPython stack: pixi's numpy 2.5.0 / scipy 1.18.0 and uv's
+ * 2.5.3 / 1.18.1 return the same bits for the new roads. So how far the two runtimes disagree
+ * depends on the system they solve, and a re-bake re-derives that system.
+ *
  * CPython on this machine reproduces the baked numbers exactly, so the disagreement is Pyodide's
  * arithmetic against CPython's, not a stale bake. The stacks differ underneath: numpy 2.2.5 /
  * scipy 1.14.1 on wasm against numpy 2.5.0 / scipy 1.18.0 on x86-64.
  *
- * 1e-15 is a STATED tolerance, not one widened until the suite went green:
+ * 5e-14 is a STATED tolerance, not one widened until the suite went green:
  *
- *   * it is ~2.5x the largest disagreement actually observed (5e-15 against 1.998e-15);
- *   * it is ~9.2e9 times SMALLER than 4.6081e-05 -- the SMALLEST effect `authoring.d.ts` records
+ *   * it is ~3.5x the largest disagreement actually observed (5e-14 against 1.432e-14);
+ *   * it is ~9.2e8 times SMALLER than 4.6081e-05 -- the SMALLEST effect `authoring.d.ts` records
  *     as one a runtime-parity guard must not absorb: what rounding THIS bundle's `spur` to
  *     centimetres costs. (`crossing` moves 5.3129e-05, and design §1.4's clearance road set
  *     4.71e-05, so `spur` is the binding one);
  *   * it is strictly below the 1e-12 perturbation this task's fault injection 1 applies, so that
- *     injection reddens the test with three orders of magnitude to spare.
+ *     injection reddens the test twenty times over.
  *
- * A 2.5x margin is thin against noise, but this disagreement is not noise: wasm f64 arithmetic is
- * deterministic by specification and the Pyodide version is pinned, while the baked side is a
- * committed artifact already held to exact CPython equality by `tests/test_solve_py.py`. Both
- * sides are fixed, so the only thing that can move this difference is a deliberate version bump --
- * and a version bump that moves it is exactly what this test should refuse to pass silently.
+ * Between bakes the difference is a constant, not noise: wasm f64 arithmetic is deterministic by
+ * specification and the Pyodide version is pinned, while the baked side is a committed artifact
+ * already held to CPython by `tests/test_solve_py.py`. What moves it is a version bump, which this
+ * test should refuse to pass silently, or a re-bake, which re-derives the block it solves on --
+ * hence a margin over the largest disagreement seen across re-derivations rather than over one.
  *
  * If this ever needs raising, the difference and its magnitude are the finding -- record them the
  * way this comment does. A tolerance widened until the test passes has stopped measuring the
  * runtime, which is the only thing this test exists to measure. */
-const PARITY_TOL = 5e-15;
+const PARITY_TOL = 5e-14;
 
 /** `node_modules/pyodide/`, absolute, with the trailing slash `pyodideRuntime` concatenates
  * `pyodide.mjs` onto.
@@ -126,7 +134,7 @@ async function boot(): Promise<number> {
     // one. Without this, `micropip.install` fails on a missing `file://` URL from inside Python
     // and the traceback says nothing about how to fix it.
     throw new Error(
-      `${WHEEL} does not exist. Build it with \`pixi run wheel\` from the repo root, or run the `
+      `${WHEEL} does not exist. Build it with \`make wheel\` from the repo root, or run the `
       + `suite through \`npm test\`, which builds it first.`);
   }
   const started = performance.now();

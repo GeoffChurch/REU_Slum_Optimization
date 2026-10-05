@@ -3,8 +3,8 @@
   "method": "clearance_looped",
   "p_star": 0.6,
   "permeability_before": 0.0,
-  "permeability_after": 0.6080067977079898,
-  "road_m": 2297.3945214372,
+  "permeability_after": 0.6080067977069441,
+  "road_m": 2297.394521438746,
   "n_parcels": 6619,
   "n_edges": 19443,
   "n_upgraded": 1100

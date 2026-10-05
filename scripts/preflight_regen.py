@@ -16,8 +16,8 @@ Read it as a cost estimate, not a verdict:
     all UNCHANGED  -> the methods will cache-hit; a regeneration is renders and bookkeeping
     any CHANGED    -> that variant re-runs every method from scratch, hours each
 
-    pixi run python -m scripts.preflight_regen
-    pixi run python -m scripts.preflight_regen --variants depth
+    uv run python -m scripts.preflight_regen
+    uv run python -m scripts.preflight_regen --variants depth
 """
 from __future__ import annotations
 

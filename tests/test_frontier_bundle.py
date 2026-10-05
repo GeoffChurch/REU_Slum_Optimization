@@ -108,7 +108,7 @@ def test_the_committed_dts_is_what_the_generator_writes() -> None:
     from scripts.gen_frontier_bundle import DTS_TEMPLATE
     assert DTS.read_text(encoding="utf-8") == DTS_TEMPLATE, (
         "web/src/frontier.d.ts was hand-edited; regenerate it: "
-        "pixi run python -m scripts.gen_frontier_bundle")
+        "uv run python -m scripts.gen_frontier_bundle")
 
 
 def test_dts_declares_the_bundle_keys(bundle: dict[str, Any]) -> None:
@@ -196,7 +196,7 @@ def test_permeability_matches_the_solver_at_every_prefix(
     blocks = Path.home() / ".cache" / "reblock" / "blocks_capetown_full.parquet"
     if not blocks.exists():
         pytest.skip("needs the capetown_full cache; run "
-                    "`pixi run python -m scripts.gen_frontier_bundle --fixture`")
+                    "`uv run python -m scripts.gen_frontier_bundle --fixture`")
 
     from geopandas import GeoDataFrame
 

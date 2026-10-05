@@ -1,7 +1,7 @@
 """Monotonicity over random nested road sets (both rules), and the crossing diagnostic.
 
-    PYTHONPATH=. pixi run python research/roadless/mono_cross.py mono <block idx> <h>
-    PYTHONPATH=. pixi run python research/roadless/mono_cross.py cross <block idxs> <h>
+    PYTHONPATH=. uv run python research/roadless/mono_cross.py mono <block idx> <h>
+    PYTHONPATH=. uv run python research/roadless/mono_cross.py cross <block idxs> <h>
 """
 import sys, time; sys.path.insert(0, 'research/roadless')
 import numpy as np, common, lifted

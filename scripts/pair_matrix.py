@@ -23,12 +23,12 @@ drives.
 Usage (module form -- puts the repo root on sys.path so `reblock.data.provision`'s
 `from scripts.fetch_kblock_fixtures import ...` resolves; see
 `scripts/fetch_desire_lines_snapshot.py` for the same convention):
-    pixi run python -m scripts.pair_matrix --pairs 20 --timing-only
-    pixi run python -m scripts.pair_matrix --pairs 100 --out data/benchmarks/gw_pair_matrix.parquet
+    uv run python -m scripts.pair_matrix --pairs 20 --timing-only
+    uv run python -m scripts.pair_matrix --pairs 100 --out data/benchmarks/gw_pair_matrix.parquet
 
 `--analyze` re-derives the headline statistics from an already-scored parquet (e.g. the committed
 `data/benchmarks/gw_pair_matrix.parquet`) with no GW, OSM, clearance or pool work at all:
-    pixi run python -m scripts.pair_matrix --analyze --out data/benchmarks/gw_pair_matrix.parquet
+    uv run python -m scripts.pair_matrix --analyze --out data/benchmarks/gw_pair_matrix.parquet
 """
 from __future__ import annotations
 

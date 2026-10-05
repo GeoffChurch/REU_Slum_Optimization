@@ -49,9 +49,9 @@
 #
 # Why build the esbuild bundle here, and check its exit code? test/widgets-bundle.test.ts
 # evaluates ../docs/js/widgets.js directly (the artifact that ships, not just the src/ modules)
-# -- but `pixi run test`'s web-test task and the `web` task (which is what actually runs esbuild)
-# are independent leaves of pixi.toml's dependency graph, neither depending on the other. Without
-# building here, `pixi run test` alone would either read a stale bundle from a previous `pixi run
+# -- but `make test`'s web-test target and the `web` target (which is what actually runs esbuild)
+# are independent leaves of the Makefile's dependency graph, neither depending on the other.
+# Without building here, `make test` alone would either read a stale bundle from a previous `make
 # web` or fail outright on a machine that never ran it. Building it as this script's first step
 # makes the test suite self-sufficient: no ordering requirement on `web` having run first, here or
 # in CI. `|| exit 1` matters because esbuild does NOT overwrite ../docs/js/widgets.js on a failed
@@ -67,19 +67,16 @@ npm run build || exit 1
 # whatever src/reblock looked like when that wheel was last built rather than what it looks like
 # now -- which is the one thing a parity guard must not do.
 #
-# This invokes pyproject.toml's `wheel` task rather than repeating its command, so the flags and
-# the output directory live in exactly one place; `pixi run` (not a bare task runner) so this
-# works from a plain shell as well as from `pixi run test`, and nesting it inside an outer `pixi
-# run` was measured to work. The task writes to the project's own dist/, which is what
+# This invokes the Makefile's `wheel` target rather than repeating its command, so the flags and
+# the output directory live in exactly one place, and it works from a plain shell as well as from
+# `make test`. The target writes to the project's own dist/, which is what
 # pyodide-parity.test.ts's own WHEEL constant resolves to as ../dist from web/.
 #
 # Micropip never tries to resolve the scientific stack from PyPI because [project] dependencies is
-# empty: the built wheel's METADATA carries no Requires-Dist at all (unzipped and checked), so
-# there is nothing to resolve. The task's own --no-deps does not affect that -- a flag on `pip
-# wheel` cannot alter metadata pip already wrote from pyproject.toml -- it only stops pip writing
-# dependency wheels into dist/ alongside reblock's own, which matters if dependencies ever stops
-# being empty.
-pixi run wheel || exit 1
+# empty -- what reblock needs to run is a uv dependency group, which never reaches the wheel -- so
+# the built wheel's METADATA carries no Requires-Dist at all (tests/test_wheel_metadata.py), and
+# there is nothing to resolve.
+make -C .. wheel || exit 1
 
 # Why is the Pyodide parity test on this gate rather than in a job of its own? MEASURED (Node
 # v24.12.0, this machine, five fresh warm runs): one full boot -- loadPyodide, the seven
@@ -93,7 +90,7 @@ pixi run wheel || exit 1
 # 15 s is not close to it even at the high end of the spread, so it runs here with everything else
 # and is deselected nowhere. Two consequences worth knowing rather than rediscovering:
 #
-#  1. `pixi run test` reaches this through `npm ci`, which DELETES node_modules -- so CI pays the
+#  1. `make test` reaches this through `npm ci`, which DELETES node_modules -- so CI pays the
 #     cold number every run, and needs a network to do it. That network dependency is on
 #     jsDelivr's AVAILABILITY, not its integrity: every package entry in the version-locked
 #     `pyodide-lock.json` carries its own sha256 (checked: it matches the cached wheel's bytes on

@@ -37,12 +37,12 @@ def _seed_run_dir(d, **meta):
 
 def test_readme_includes_command_and_qr(tmp_path):
     _seed_run_dir(tmp_path,
-        command="pixi run python -m scripts.gen_example depth",
+        command="uv run python -m scripts.gen_example depth",
         maps_qr="maps_qr.png", maps_url="https://maps.example/x",
         flagged=3, total_blocks=100, deepest_block="B1", deepest_depth=7.0)
     md = gen_example_readme(tmp_path, metric_name="depth", formula="f", blurb="b")
     assert "## How this was generated" in md
-    assert "pixi run python -m scripts.gen_example depth" in md
+    assert "uv run python -m scripts.gen_example depth" in md
     assert "run.log" in md
     assert "maps_qr.png" in md
 
@@ -55,12 +55,12 @@ def test_readme_omits_provenance_when_absent(tmp_path):
 
 def test_example_command_capetown_omits_city():
     assert example_command("depth", "capetown") == \
-        "pixi run python -m scripts.gen_example depth"
+        "uv run python -m scripts.gen_example depth"
 
 
 def test_example_command_other_city_appends_it():
     assert example_command("depth_density", "nairobi") == \
-        "pixi run python -m scripts.gen_example depth_density nairobi"
+        "uv run python -m scripts.gen_example depth_density nairobi"
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -84,7 +84,7 @@ def test_regenerate_dry_run_lists_all(tmp_path):
     # gen_screen_bakeoff, which grades all four over the whole corpus and runs no methods.
     for v in ("depth", "density_compactness"):
         assert f"gen_example {v} " not in out, f"{v} should not be in the default regeneration"
-        # ...but they stay SELECTABLE, so `pixi run python -m scripts.gen_example depth` works.
+        # ...but they stay SELECTABLE, so `uv run python -m scripts.gen_example depth` works.
         assert (ROOT / "conf" / "example" / f"{v}.yaml").exists(), f"conf/example/{v}.yaml removed"
 
 

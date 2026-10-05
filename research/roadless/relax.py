@@ -16,7 +16,7 @@ pickers' rule, best gain per unit population up to D). Step size: a parabola thr
 J'(0) = -gap and J(1), checked. Rounding: clear buildings by decreasing x while they fit,
 then score exactly.
 
-    CUDA_PATH=/usr PYTHONPATH=. pixi run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <along> [workers] [budget]
+    CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <along> [workers] [budget]
 
 one: SIMP at one budget (default D_LENS, 0.05; plus the Frank-Wolfe relaxation and bound if
 fw > 0), rows in relax_rows/<along>/<plan>/D<budget>/. path: nested budgets D 0.01 .. 0.15,

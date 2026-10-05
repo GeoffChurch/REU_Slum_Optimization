@@ -7,7 +7,7 @@ Candidate r0 for the S-curve g = L^n / (L^n + r0^n):
            with L >= t drops fastest (the scale at which a long-line network stops existing)
 Writes line_scale_<id>.png (histogram of log L with the three, and the connected share vs t).
 
-    PYTHONPATH=. pixi run python research/roadless/line_scale.py <ids,>
+    PYTHONPATH=. uv run python research/roadless/line_scale.py <ids,>
 """
 from __future__ import annotations
 

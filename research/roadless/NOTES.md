@@ -1,8 +1,8 @@
 # Roadless scoring: heading-aware conduction on the space a network frees (living note)
 
 Branch `research/roadless`, code in `research/roadless/`. Started 2026-09-29.
-pyamg lives OUTSIDE the project env: `~/.cache/reblock-research/pydeps` (pip --target), imported by
-`lifted.py`. Run scripts from the repo root with `PYTHONPATH=.`.
+cupy and pyamg are in the project env (pyproject's `gpu` dependency group, installed by default on
+this branch). Run scripts from the repo root with `PYTHONPATH=.`.
 
 ## The idea (owner, 2026-09-29)
 

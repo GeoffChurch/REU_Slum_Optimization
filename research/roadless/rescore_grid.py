@@ -2,7 +2,7 @@
 scoring grid? Re-score the coarse run's clearing on the fine grid at the two steps either side of
 D = 0.10 and interpolate (D does not depend on the grid), then pair with the fine run's own score.
 
-    PYTHONPATH=. pixi run python research/roadless/rescore_grid.py <picker> <h coarse> <workers>
+    PYTHONPATH=. uv run python research/roadless/rescore_grid.py <picker> <h coarse> <workers>
 """
 from __future__ import annotations
 

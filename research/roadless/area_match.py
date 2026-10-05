@@ -3,7 +3,7 @@ removed. Lineup: the study's prefixes (first n_roads of the street-first order),
 area under the corridor. Greedy: cumulative area of the cleared buildings. Linear interpolation on
 each curve through (0, 0); nan past its end.
 
-    PYTHONPATH=. pixi run python research/roadless/area_match.py [M]
+    PYTHONPATH=. uv run python research/roadless/area_match.py [M]
 """
 from __future__ import annotations
 

@@ -12,21 +12,23 @@ as composable Hydra stages.
 git clone --recurse-submodules <repo-url>
 # (or, if already cloned: git submodule update --init --recursive)
 
-# Install pixi: https://pixi.sh/latest/#installation
-pixi install
-pixi run hooks       # once per clone: points core.hooksPath at .githooks/
+# Install uv: https://docs.astral.sh/uv/getting-started/installation/
+uv sync          # the environment, from uv.lock (`make` and `uv run` keep it in sync after)
+make hooks       # once per clone: points core.hooksPath at .githooks/
 ```
 
 ## Common tasks
 
 ```bash
-pixi run test        # pytest + coverage, then the web/ node suite (~55 min with the city cache
-                     #   warm: the developer-local parity tests re-solve permeability on the
-                     #   6,619-parcel spine block. `pixi run pytest -m "not slow"` skips them.)
-pixi run typecheck   # mypy --strict + tsc --noEmit (web/)
-pixi run lint        # ruff check -- the formatting gate, in the hook and in CI
-pixi run hooks       # install the pre-commit hook (once per clone)
-pixi run check       # lint + typecheck + test
+make test        # pytest + coverage, then the web/ node suite (~4 min with the derivation
+                 #   cache warm, measured 2026-10-05; the slow tests re-solve permeability on
+                 #   the 6,619-parcel spine block, which a cold cache makes much longer.
+                 #   `make wheel && uv run pytest -m "not slow"` skips them; the wheel is what
+                 #   the site-page tests read from dist/.)
+make typecheck   # mypy --strict + tsc --noEmit (web/)
+make lint        # ruff check -- the formatting gate, in the hook and in CI
+make hooks       # install the pre-commit hook (once per clone)
+make check       # lint + typecheck + test
 ```
 
 There is no `fmt` task, deliberately. `ruff format` reformats 200 of this repo's 215 files, leaves
@@ -40,14 +42,14 @@ Render one block's access-depth heatmaps (before, and after a road-building meth
 with `block_ids` — no whole-city pass needed:
 
 ```bash
-pixi run python -m reblock.run data=capetown method=clearance eval=kcomplexity \
+uv run python -m reblock.run data=capetown method=clearance eval=kcomplexity \
   "block_ids=[[ZAF.9.3.1_1_44882]]" render.enabled=true
 ```
 
 Or screen a whole city for dense/deep informal blocks and reblock the worst survivors in one command:
 
 ```bash
-pixi run python -m reblock.run data=capetown_full screen=dense_compact method=clearance \
+uv run python -m reblock.run data=capetown_full screen=dense_compact method=clearance \
   eval=kcomplexity render.enabled=true flagged_map.enabled=true max_blocks=5
 ```
 
@@ -81,7 +83,8 @@ Each stage is a swappable Hydra config group; a run composes them left to right:
 - **`eval`** — the per-run scorer: `kcomplexity` by default, with `access_burden`, `structure` and
   `weakdual_k` as alternatives. The published head-to-head grading is separate: `reblock.compare`
   sweeps **permeability** against **displacement** and emits the frontier every method is compared
-  on.
+  on: `uv run python -m reblock.compare`, which takes Hydra overrides of `conf/compare_config.yaml`
+  the same way `reblock.run` does of `conf/config.yaml`.
 
 ## Examples
 
