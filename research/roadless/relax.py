@@ -486,9 +486,10 @@ class Incumbent:
 
     def offer(self, x: np.ndarray) -> None:
         cost = self.rel.c.cost
-        for r in [round_by_x(x, cost, self.budget, first=self.first),
-                  *(round_sampled(x, cost, self.budget, self.rng, first=self.first)
-                    for _ in range(self.samples))]:
+        grey = float(np.mean((x > 0.05) & (x < 0.95)))
+        for k, r in enumerate([round_by_x(x, cost, self.budget, first=self.first),
+                               *(round_sampled(x, cost, self.budget, self.rng, first=self.first)
+                                 for _ in range(self.samples))]):
             key = np.packbits(r > 0).tobytes()
             if key in self._seen:
                 continue
@@ -496,6 +497,9 @@ class Incumbent:
             J = self._score(r)
             if J < self.J:
                 self.J, self.r = J, r
+                # where the incumbent comes from: which kept iterate, which rounding
+                print(f"  incumbent J {J:.6g} from iterate {self.n} "
+                      f"({'top-x' if k == 0 else f'sample {k}'}, grey {grey:.3f})", flush=True)
 
     def best(self) -> tuple[float, np.ndarray]:
         """(exact J, clearing) of the best candidate."""
