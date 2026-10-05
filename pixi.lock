@@ -811,7 +811,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.0-pyhcf101f3_0.conda
       - pypi: ./
       - pypi: ./ext/topology
-      - pypi: git+https://github.com/GeoffChurch/cluster_submit.git?rev=f04d9b0185f4a8af905ddfb7ea02e104c0dbef9f#f04d9b0185f4a8af905ddfb7ea02e104c0dbef9f
+      - pypi: git+https://github.com/GeoffChurch/cluster_submit.git?rev=ec14c52a0e178a2e895c83941fa49f93ff79c98e#ec14c52a0e178a2e895c83941fa49f93ff79c98e
       osx-arm64:
       - conda: https://conda.anaconda.org/conda-forge/noarch/_python_abi3_support-1.0-hd8ed1ab_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/antlr-python-runtime-4.9.3-pyhd8ed1ab_1.tar.bz2
@@ -1067,7 +1067,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hbf9d68e_6.conda
       - pypi: ./
       - pypi: ./ext/topology
-      - pypi: git+https://github.com/GeoffChurch/cluster_submit.git?rev=f04d9b0185f4a8af905ddfb7ea02e104c0dbef9f#f04d9b0185f4a8af905ddfb7ea02e104c0dbef9f
+      - pypi: git+https://github.com/GeoffChurch/cluster_submit.git?rev=ec14c52a0e178a2e895c83941fa49f93ff79c98e#ec14c52a0e178a2e895c83941fa49f93ff79c98e
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
   build_number: 20
@@ -8468,7 +8468,7 @@ packages:
 - pypi: ./ext/topology
   name: topology
   requires_python: '>=3.7'
-- pypi: git+https://github.com/GeoffChurch/cluster_submit.git?rev=f04d9b0185f4a8af905ddfb7ea02e104c0dbef9f#f04d9b0185f4a8af905ddfb7ea02e104c0dbef9f
+- pypi: git+https://github.com/GeoffChurch/cluster_submit.git?rev=ec14c52a0e178a2e895c83941fa49f93ff79c98e#ec14c52a0e178a2e895c83941fa49f93ff79c98e
   name: cluster-submit
   version: 0.1.0
   requires_python: '>=3.11'
