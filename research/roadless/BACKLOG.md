@@ -71,9 +71,10 @@ and Lens B from nested runs.
   13 (median -0.0005 / -0.0001), and MMA collapses on 22422. Both stay selectable (`.u`).
 - **Sturdier gate capture** (from that null). On a gated block SIMP's answer is one lucky
   iterate's rounding: `.k2` and MMA each lost 22422 by perturbing the iterate sequence.
-  - Several roundings per iterate (**running**, `.r<n>`, NOTES "SIMP multi-rounding"): `.r2` on
-    the 13 is ahead on 5 (+0.008 to +0.038), never behind, 2.2x the time; the 46 held-out
-    blocks running. It partly rescues `.k2`'s and MMA's lost gate (0.55, not 0.78).
+  - Several roundings per iterate (done, `.r<n>`, NOTES "SIMP multi-rounding"): `.r2` on the 13
+    is ahead on 5 (+0.008 to +0.038) but on the 46 held out only +0.001 mean (none above 0.01),
+    never behind, 2x the time: selectable for hard blocks, not a default. It partly rescues
+    `.k2`'s and MMA's lost gate (0.55, not 0.78).
   - Cheaper `.r`: sample only where it pays (the 8 unchanged blocks pay 2.2x for nothing) --
     by iterate greyness, or only in the last stages; find first which iterates the winners came
     from.

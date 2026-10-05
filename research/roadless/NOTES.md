@@ -1111,5 +1111,15 @@ Sentinel, Lens A at D 0.05, J_2, uni (times: same session, same card types):
     20543 +0.0091 (16)   46841 +0.0077 (25)   the other 8 identical
 
 Gains on 5 of 13, three of them about the size of SIMP's whole lead over the greedy on the
-held-out blocks (median +0.021). The 8 unchanged blocks pay the 2.2x too. Held-out run (the 46):
-running.
+held-out blocks (median +0.021). The 8 unchanged blocks pay the 2.2x too.
+
+**Held out (the 46): small.**
+
+    r2 vs base [46]: median +0.000 [-0.000,+0.000]  mean +0.001  ahead 50%  worst -0.000  time x2.0
+
+No block gains more than 0.01; 7 gain 0.001 -- 0.009 (8480 +0.0092, 30796 +0.0086, 24240 +0.0082,
+43547, 20080, 44775, 5706); 39 within 0.001; the sum over 46 is +0.040. The tuning set's gains came
+from its makeup: it was chosen for its gated collapses, and multi-rounding pays where SIMP's answer
+hangs on a rounding, which on a typical block it does not. At 2x everywhere, not a default; never
+behind, so `.r2` stays selectable, the hard-block operating point. What would make it a default: a
+trigger that samples only where a rounding is in doubt (see the provenance run).
