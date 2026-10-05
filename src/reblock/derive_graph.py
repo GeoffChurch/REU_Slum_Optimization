@@ -17,9 +17,10 @@ import os
 from collections.abc import Callable, Hashable
 from functools import cache
 from pathlib import Path
-from typing import Protocol, TypeVar, cast, runtime_checkable
+from typing import NamedTuple, Protocol, TypeVar, cast, runtime_checkable
 
 import joblib
+import pyogrio
 import pyproj
 import shapely
 
@@ -155,14 +156,23 @@ def reader_hash(reader: str, *paths: Path) -> str:
     return source_hash(*paths, *_closure_paths(reader))
 
 
-def env_version() -> tuple[str, str]:
-    """(geos, proj) -- the native libraries a derivation's geometry depends on.
+class NativeVersions(NamedTuple):
+    """The native libraries a derivation's results depend on, by version."""
+    geos: str    # every geometry operation (shapely)
+    proj: str    # every reprojection (pyproj)
+    gdal: str    # every file read through pyogrio: the shapefile Block reader, footprints,
+                 # informal structures, desire-line snapshots, OSM footpaths
+
+
+def env_version() -> NativeVersions:
+    """The native libraries a derivation depends on.
 
     Read live so a test can monkeypatch it and force a miss. The CODE version is no longer
     here: it is per-derivation now (`_code_version`), because one global hash over every
     derivation module meant an edit to any of them invalidated all of them.
     """
-    return ".".join(str(x) for x in shapely.geos_version), pyproj.proj_version_str
+    return NativeVersions(geos=".".join(str(x) for x in shapely.geos_version),
+                          proj=pyproj.proj_version_str, gdal=pyogrio.__gdal_version_string__)
 
 
 @cache
@@ -200,7 +210,7 @@ def clear_l1() -> None:
 
 
 def _fn_identity(fn: Callable[..., object],
-                 inputs: tuple[object, ...]) -> tuple[str, str, tuple[str, str]]:
+                 inputs: tuple[object, ...]) -> tuple[str, str, NativeVersions]:
     return (f"{fn.__module__}.{fn.__qualname__}", _code_version(fn, inputs), env_version())
 
 

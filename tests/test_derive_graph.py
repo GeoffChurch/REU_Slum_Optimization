@@ -90,14 +90,19 @@ def test_an_input_that_declares_no_identity_is_an_error() -> None:
         dg.derive(lambda x: x, _NoIdentity())     # type: ignore[arg-type]
 
 
-def test_version_bump_forces_a_miss(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("library", dg.NativeVersions._fields)
+def test_a_native_library_change_forces_a_miss(monkeypatch: pytest.MonkeyPatch,
+                                               library: str) -> None:
+    """Each native library alone is in the key: GEOS, PROJ, and GDAL (the files read through
+    pyogrio)."""
     box = {"n": 0}
     fn = _count(box)
     a = _Datum("a")
     dg.derive(fn, a)
-    # simulate a native-library change: env_version() returns a new tag. (A derivation-LOGIC
-    # change is no longer global -- see tests/test_code_closure.py.)
-    monkeypatch.setattr(dg, "env_version", lambda: ("CHANGED", "p"))
+    # simulate one native-library change. (A derivation-LOGIC change is no longer global -- see
+    # tests/test_code_closure.py.)
+    changed = dg.env_version()._replace(**{library: "CHANGED"})
+    monkeypatch.setattr(dg, "env_version", lambda: changed)
     dg.clear_l1()
     dg.derive(fn, a)                 # new version -> new key -> recompute
     assert box["n"] == 2
