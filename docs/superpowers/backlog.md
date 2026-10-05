@@ -1893,6 +1893,12 @@ survive outside the presets:
 - **`OSMDesireLines.cache_dir: null` means `~/.cache/reblock/osm`**, resolved inside the class; the
   footprint and full-city caches name their directory in the preset instead.
 
+## Environment
+
+- **Lift `pyarrow<25`** (pyproject.toml's `runtime` group) when a pyarrow release ships its
+  `py.typed` marker again: 25.0.1's wheel dropped it, and mypy --strict then refuses every pyarrow
+  import (2026-10-05, the move to uv).
+
 ## Licensing / data hygiene (see kblock-source spec)
 
 - Add a top-level `LICENSE` (Apache-2.0 recommended, pending owner confirmation vs GPLv3).

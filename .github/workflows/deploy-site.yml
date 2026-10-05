@@ -59,7 +59,7 @@ jobs:
       # `dist/` is gitignored and gen_site_pages.py raises if no wheel is there, so this must run
       # before it.
       #
-      # The same command as `make wheel`. `uv build` installs only the build backend (hatchling,
+      # `make wheel` is `uv build --wheel`, which installs only the build backend (hatchling,
       # pinned in pyproject.toml's [tool.uv]), never the project's environment, so this job still
       # has no science stack -- which is also why `scripts/gen_site_pages.py` is stdlib-only and
       # runs under plain `python3`. The wheel declares no `Requires-Dist`
@@ -67,7 +67,7 @@ jobs:
       # scientific stack from PyPI, where no wasm wheel exists.
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Build the reblock wheel for Pyodide
-        run: uv build --wheel --out-dir dist
+        run: make wheel
       - run: python3 scripts/gen_site_pages.py
       # --strict promotes MkDocs' broken-link warnings to build failures (an orphan page -- one
       # outside nav -- only logs at INFO and does NOT fail the build even under --strict, verified

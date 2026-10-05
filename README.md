@@ -22,7 +22,8 @@ make hooks       # once per clone: points core.hooksPath at .githooks/
 ```bash
 make test        # pytest + coverage, then the web/ node suite (~55 min with the city cache
                  #   warm: the developer-local parity tests re-solve permeability on the
-                 #   6,619-parcel spine block. `uv run pytest -m "not slow"` skips them.)
+                 #   6,619-parcel spine block. `make wheel && uv run pytest -m "not slow"`
+                 #   skips them; the wheel is what the site-page tests read from dist/.)
 make typecheck   # mypy --strict + tsc --noEmit (web/)
 make lint        # ruff check -- the formatting gate, in the hook and in CI
 make hooks       # install the pre-commit hook (once per clone)
@@ -81,7 +82,8 @@ Each stage is a swappable Hydra config group; a run composes them left to right:
 - **`eval`** — the per-run scorer: `kcomplexity` by default, with `access_burden`, `structure` and
   `weakdual_k` as alternatives. The published head-to-head grading is separate: `reblock.compare`
   sweeps **permeability** against **displacement** and emits the frontier every method is compared
-  on.
+  on: `uv run python -m reblock.compare`, which takes Hydra overrides of `conf/compare_config.yaml`
+  the same way `reblock.run` does of `conf/config.yaml`.
 
 ## Examples
 

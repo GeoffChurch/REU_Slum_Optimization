@@ -90,7 +90,8 @@ def test_an_input_that_declares_no_identity_is_an_error() -> None:
         dg.derive(lambda x: x, _NoIdentity())     # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("library", dg.NativeVersions._fields)
+@pytest.mark.parametrize("library", ["geos", "proj", "gdal"])   # named: a field dropped from
+                                                                # the key must fail, not vanish
 def test_a_native_library_change_forces_a_miss(monkeypatch: pytest.MonkeyPatch,
                                                library: str) -> None:
     """Each native library alone is in the key: GEOS, PROJ, and GDAL (the files read through

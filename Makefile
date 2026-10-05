@@ -12,6 +12,12 @@
 
 .PHONY: wheel test-py web-test test typecheck-py web web-check typecheck lint hooks check \
 	regen-examples
+# Bare `make` is the whole gate.
+.DEFAULT_GOAL := check
+# One recipe at a time, even under `make -j`: `web-test`, `web` and `web-check` each run `npm ci`
+# in web/ (which deletes node_modules), and `wheel` runs inside `test-py` and again inside
+# web/scripts/test.sh, writing the same dist/ file. Run concurrently, they race.
+.NOTPARALLEL:
 
 # The reblock wheel `micropip` installs into DrawRoad's Pyodide runtime (web/src/widgets/
 # draw-road.ts's `data-wheel`), and the same wheel web/test/pyodide-parity.test.ts loads from
