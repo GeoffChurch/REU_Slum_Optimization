@@ -1123,3 +1123,20 @@ from its makeup: it was chosen for its gated collapses, and multi-rounding pays 
 hangs on a rounding, which on a typical block it does not. At 2x everywhere, not a default; never
 behind, so `.r2` stays selectable, the hard-block operating point. What would make it a default: a
 trigger that samples only where a rounding is in doubt (see the provenance run).
+
+**Where `.r2`'s winners come from** (run mr-r2-where, the 5 tuning blocks it gained on; relax.py
+now logs each new incumbent's iterate, rounding and greyness; all 5 reproduced their scores):
+
+    38616  iterate 40 sample 1 (grey 0.049)   1558   iterate 31 sample 1 (grey 0.064)
+    30848  iterate 35 sample 1 (grey 0.054)   20543  iterate 40 sample 2 (grey 0.046)
+    46841  iterate 26 sample 1 (grey 0.074)        (of 40: q 1.5, 2, 2.5, 3 x 10 updates)
+
+Every final winner is a random rounding from the last two stages, where 93 -- 95% of the
+buildings are decided; before it, a chain of improvements through q 2.5 and 3, mostly from
+samples. So the top-x rounding of a late, nearly binary iterate picks a worse subset of its few
+undecided buildings than a reordering does -- the gate and its substitutes sit in that set. Not
+"sample while grey" (the early grey iterates gave nothing that lasted). What follows:
+- **sample only in the last two stages** (half the sampling, ~1.5x instead of 2x);
+- **polish the undecided set**: from the incumbent, swap each still-grey building in or out,
+  scored exactly (50 -- 100 solves, a few updates' worth) -- a targeted case of the add/remove
+  search (BACKLOG).
