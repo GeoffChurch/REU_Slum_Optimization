@@ -1,11 +1,11 @@
 """derive_graph: one memoization primitive for the content-addressed dataflow.
 
 `derive(fn, *inputs)` computes `fn(*inputs)` with L1 (in-process) + L2 (joblib
-disk) caching, keyed on `(fn.identity, tuple(input identities))` -- heavy inputs
-are never hashed (passed via joblib `ignore=`). An input whose identity is None
-bypasses both layers. `fn.identity = (qualified-name, version)` where `version` is a
-content hash of the derivation modules + GEOS + PROJ, so any derivation-logic
-edit (or native-lib upgrade) is a clean miss. See
+disk) caching, keyed on a `DerivationKey`: the derivation's name, a content hash of the code it
+can reach (reblock's and topology's), the versions of everything else its results depend on
+(`env_version`), and its inputs' identities -- heavy inputs are never hashed (passed via joblib
+`ignore=`). An input whose identity is None bypasses both layers. So any edit to that code, and
+any upgrade of a library or native library under it, is a clean miss. See
 docs/superpowers/specs/2026-07-08-content-addressed-dataflow-redesign.md.
 """
 from __future__ import annotations
@@ -13,7 +13,10 @@ from __future__ import annotations
 import ast
 import dataclasses
 import hashlib
+import importlib.metadata
+import importlib.util
 import os
+import platform
 from collections.abc import Callable, Hashable
 from functools import cache
 from pathlib import Path
@@ -62,29 +65,43 @@ def source_hash(*paths: Path) -> str:
 # that no configurable strategy falls outside every key.
 
 
-_PKG_ROOT = Path(__file__).resolve().parent
-"""`src/reblock/` -- the root every module name below resolves against."""
+def _source_root(package: str) -> Path:
+    """Where an installed package's source lives, found from its import spec: locating a package
+    does not run it, so nothing executes while a cache key is built."""
+    spec = importlib.util.find_spec(package)
+    if spec is None or spec.submodule_search_locations is None:
+        raise ImportError(f"{package} is not an installed package")
+    return Path(list(spec.submodule_search_locations)[0]).resolve()
+
+
+# The packages whose SOURCE a derivation's code version covers: reblock, and topology -- the
+# vendored package (ext/topology, a git submodule) that reblock's methods.topology,
+# derive.parcel_graph and eval.kcomplexity call into, so an edit to it can change their results.
+# Every other library a derivation uses is covered by its installed version (`env_version`).
+_SOURCE_ROOTS: dict[str, Path] = {"reblock": Path(__file__).resolve().parent,
+                                  "topology": _source_root("topology")}
 
 
 def _module_file(name: str) -> Path | None:
-    """`reblock.a.b` -> its source file, or None if it is not one of ours.
+    """`reblock.a.b` or `topology.a.b` -> its source file, or None if it is not one of ours.
 
     Tries the module then the package, so `reblock.methods.arterial` resolves to that
     package's `__init__.py`. Resolution is by PATH, never by import: importing to find a
     file would run module-level code, and this is called while building a cache key.
     """
-    if name != "reblock" and not name.startswith("reblock."):
+    top, *rel = name.split(".")
+    root = _SOURCE_ROOTS.get(top)    # absent: a library, which the key covers by version
+    if root is None:
         return None
-    rel = name.split(".")[1:]
-    for cand in (_PKG_ROOT.joinpath(*rel).with_suffix(".py"),
-                 _PKG_ROOT.joinpath(*rel, "__init__.py")):
+    for cand in (root.joinpath(*rel).with_suffix(".py"), root.joinpath(*rel, "__init__.py")):
         if cand.is_file():
             return cand
     return None
 
 
 def _imports_of(path: Path, module: str) -> set[str]:
-    """Every `reblock.*` module name `path` imports, at ANY depth in its AST.
+    """Every module of ours (`reblock.*`, `topology.*`) that `path` imports, at ANY depth in its
+    AST.
 
     Nested and function-local imports count: `derivations._screen_selection_impl` imports
     `screen.dense_compact` inside the function body to dodge a cycle, and that module holds the
@@ -110,12 +127,13 @@ def _imports_of(path: Path, module: str) -> set[str]:
                 base = ".".join([*parts, base]) if base else ".".join(parts)
             out.add(base)
             out.update(f"{base}.{a.name}" for a in node.names)
-    return {n for n in out if n.startswith("reblock")}
+    return {n for n in out if n.split(".")[0] in _SOURCE_ROOTS}
 
 
 @cache
 def _closure_paths(module: str) -> frozenset[Path]:
-    """Every `reblock` source file reachable from `module` by imports, transitively.
+    """Every source file of ours (reblock's and topology's) reachable from `module` by imports,
+    transitively.
 
     This is the set a derivation's code hash is taken over, and therefore the exact set whose
     edits invalidate it. Static, so it OVER-approximates -- the safe direction: a module that
@@ -156,13 +174,31 @@ def reader_hash(reader: str, *paths: Path) -> str:
     return source_hash(*paths, *_closure_paths(reader))
 
 
+# The installed libraries a derivation's results can depend on, keyed by version. Every package in
+# pyproject.toml's `runtime` group is here or exempt in tests/test_derive_graph.py, which says why
+# and holds the two lists against the group, so a new runtime dependency has to be classified.
+KEYED_PACKAGES: tuple[str, ...] = (
+    "geopandas", "networkx", "numba", "numpy", "pandas", "pyarrow", "pyogrio", "pyproj", "pyshp",
+    "scipy", "shapely")
+
+
+@cache
+def _package_versions() -> tuple[tuple[str, str], ...]:
+    """(distribution, installed version) for each of KEYED_PACKAGES. Cached: what is installed
+    does not change under a running process."""
+    return tuple((name, importlib.metadata.version(name)) for name in KEYED_PACKAGES)
+
+
 @dataclasses.dataclass(frozen=True)
-class NativeVersions:
-    """The native libraries a derivation's results depend on, by version."""
-    geos: str    # every geometry operation (shapely)
-    proj: str    # every reprojection (pyproj)
+class EnvVersions:
+    """Everything outside the code a derivation runs that its results depend on, by version. (That
+    code, reblock's and topology's, is the key's `code`.)"""
+    python: str
+    geos: str    # every geometry operation (shapely's C library)
+    proj: str    # every reprojection (pyproj's)
     gdal: str    # every file read through pyogrio: the shapefile Block reader, footprints,
                  # informal structures, desire-line snapshots, OSM footpaths
+    packages: tuple[tuple[str, str], ...]    # (distribution, version) for KEYED_PACKAGES
 
 
 @dataclasses.dataclass(frozen=True)
@@ -174,19 +210,21 @@ class DerivationKey:
     never equal to a plain tuple of the same values."""
     fn: str                         # the derivation, as module.qualname
     code: str                       # `_code_version(fn, inputs)`: the code it actually runs
-    native: NativeVersions          # `env_version()`
+    env: EnvVersions                # `env_version()`
     inputs: tuple[Hashable, ...]    # each input's `identity`, in order
 
 
-def env_version() -> NativeVersions:
-    """The native libraries a derivation depends on.
+def env_version() -> EnvVersions:
+    """The versions a derivation's results depend on, beyond its own code.
 
-    Read live so a test can monkeypatch it and force a miss. The CODE version is no longer
-    here: it is per-derivation now (`_code_version`), because one global hash over every
-    derivation module meant an edit to any of them invalidated all of them.
+    Read live so a test can monkeypatch it and force a miss. The CODE version is not here: it is
+    per-derivation (`_code_version`), because one global hash over every derivation module meant
+    an edit to any of them invalidated all of them.
     """
-    return NativeVersions(geos=".".join(str(x) for x in shapely.geos_version),
-                          proj=pyproj.proj_version_str, gdal=pyogrio.__gdal_version_string__)
+    return EnvVersions(python=platform.python_version(),
+                       geos=".".join(str(x) for x in shapely.geos_version),
+                       proj=pyproj.proj_version_str, gdal=pyogrio.__gdal_version_string__,
+                       packages=_package_versions())
 
 
 @cache
@@ -313,7 +351,7 @@ def derive(fn: Callable[..., T], *inputs: Identified) -> T:
             return fn(*inputs)          # bypass: uncacheable input
         ids.append(ident)
     key = DerivationKey(fn=f"{fn.__module__}.{fn.__qualname__}", code=_code_version(fn, inputs),
-                        native=env_version(), inputs=tuple(ids))
+                        env=env_version(), inputs=tuple(ids))
     if key in _L1:
         return cast(T, _L1[key])
     out = cast(T, _l2(key, fn, inputs))  # joblib keys on `key`, ignores fn+inputs

@@ -68,6 +68,23 @@ def test_the_closure_is_transitive() -> None:
     assert SRC / "mesh.py" in paths, "transitive: permeability imports mesh, cycle_native does not"
 
 
+def test_topologys_source_is_in_the_closures_that_call_it() -> None:
+    """topology (ext/topology, a git submodule) is code a derivation runs, not a library pinned by
+    version: `eval.kcomplexity` calls `topology.k_complexity`, which lives in
+    `topology/graph/complexity.py` and works on `my_graph.py`'s classes, reached through its
+    relative imports. An edit to the submodule must miss what calls it -- and only that.
+
+    FAULT INJECTION: a walk that follows `reblock.*` alone (topology out of `_SOURCE_ROOTS`) fails
+    the first two asserts.
+    """
+    topology = derive_graph._SOURCE_ROOTS["topology"]
+    paths = _closure_paths("reblock.eval.kcomplexity")
+    assert topology / "graph" / "complexity.py" in paths
+    assert topology / "graph" / "my_graph.py" in paths, "complexity's relative import, followed"
+    unrelated = _closure_paths("reblock.methods.cycle_native")
+    assert topology / "graph" / "complexity.py" not in unrelated
+
+
 def test_nested_and_local_imports_are_followed() -> None:
     """`derivations._screen_selection_impl` imports `screen.dense_compact` INSIDE the function
     body to dodge a cycle, and that module is what the screen's selection logic lives in.
