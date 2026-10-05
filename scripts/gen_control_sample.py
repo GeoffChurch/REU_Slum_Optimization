@@ -33,9 +33,9 @@ Two things the worksheet cannot supply:
 `verdict` and `notes` are blank by design, exactly as in the worksheet, and `survey_label` is never
 to be overwritten: the disagreement is the finding.
 
-    pixi run python -m scripts.gen_control_sample            # 140 blocks, seed 20260917
-    pixi run python -m scripts.gen_control_sample --n 60     # a smaller first pass
-    pixi run python -m scripts.gen_control_sample --no-place # skip the Nominatim lookups
+    uv run python -m scripts.gen_control_sample            # 140 blocks, seed 20260917
+    uv run python -m scripts.gen_control_sample --n 60     # a smaller first pass
+    uv run python -m scripts.gen_control_sample --no-place # skip the Nominatim lookups
 """
 from __future__ import annotations
 

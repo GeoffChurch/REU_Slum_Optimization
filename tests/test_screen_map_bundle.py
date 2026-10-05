@@ -245,7 +245,7 @@ def test_bundle_matches_a_fresh_reload(capetown: dict[str, Any], nairobi: dict[s
     nairobi_cache = Path.home() / ".cache" / "reblock" / "blocks_nairobi_full.parquet"
     if not capetown_cache.exists() or not nairobi_cache.exists():
         pytest.skip("needs the capetown_full and nairobi_full caches; run "
-                    "`pixi run python -m scripts.gen_screen_map`")
+                    "`uv run python -m scripts.gen_screen_map`")
 
     from reblock.data.counts import COUNTERS
     from scripts.gen_screen_map import CITIES, load_blocks
@@ -265,7 +265,7 @@ def test_bundle_matches_a_fresh_reload(capetown: dict[str, Any], nairobi: dict[s
     shapefile = Path.home() / ".cache" / "reblock" / "coct_is" / "CoCT_IS_STRUCTURES_201802.shp"
     if not shapefile.exists():
         pytest.skip("needs the informal-structures shapefile (an 18 MB fetch no other test "
-                    "performs); run `pixi run python -m scripts.gen_screen_bakeoff` once")
+                    "performs); run `uv run python -m scripts.gen_screen_bakeoff` once")
 
     from reblock.data.informal import label_blocks, settlement_extents
 
@@ -303,4 +303,4 @@ def test_the_committed_readme_is_what_the_generator_writes() -> None:
     readme = OUT / "README.md"
     assert readme.read_text(encoding="utf-8") == readme_markdown(bundles, sizes), (
         "examples/screen-map/README.md is stale or hand-edited; regenerate it: "
-        "pixi run python -m scripts.gen_screen_map")
+        "uv run python -m scripts.gen_screen_map")

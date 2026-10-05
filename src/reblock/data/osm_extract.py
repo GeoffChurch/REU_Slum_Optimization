@@ -9,7 +9,6 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
 
 import geopandas as gpd
 import pyogrio
@@ -103,8 +102,8 @@ def read_pbf_lines(pbf_path: Path, tags: Sequence[str] = FOOTPATH_TAGS) -> gpd.G
         # letting an obscure OGR/SQL error surface from inside pyogrio.
         raise ValueError("tags must not be empty")
     quoted = ", ".join("'{}'".format(t.replace("'", "''")) for t in tags)
-    return cast(gpd.GeoDataFrame, pyogrio.read_dataframe(
-        pbf_path, layer="lines", where=f"highway IN ({quoted})", use_arrow=True))
+    return pyogrio.read_dataframe(
+        pbf_path, layer="lines", where=f"highway IN ({quoted})", use_arrow=True)
 
 
 @dataclass

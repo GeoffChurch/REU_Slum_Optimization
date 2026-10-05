@@ -107,7 +107,7 @@ def main() -> int:
         print("nothing to analyse")
         return 1
     print("\n  Recorded. Analysis lives in one place:")
-    print("    pixi run python -m scripts.perf.region_cap_report")
+    print("    uv run python -m scripts.perf.region_cap_report")
     return 0
 
 

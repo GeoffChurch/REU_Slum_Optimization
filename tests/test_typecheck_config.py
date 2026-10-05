@@ -1,12 +1,13 @@
-"""What `pixi run typecheck` actually checks.
+"""What `make typecheck` actually checks.
 
-There are two path lists -- `[tool.mypy] files` and the explicit file arguments in the
-`typecheck-py` pixi task -- and only one of them is consulted, because explicit command-line
-arguments OVERRIDE `files` entirely. The repo has kept them in sync by convention. This is the check
-that convention never had.
+`[tool.mypy] files` is the one list of what the gate type-checks, because the Makefile's
+`typecheck-py` runs mypy with no file arguments. A file argument added there would OVERRIDE `files`
+entirely and silently shrink the gate to whatever it names; the first test here is the check on
+that.
 
-Both lists name whole directories, so the other way a file drops out of the gate is `exclude`, which
-the directory walk consults. That is checked too: it must skip exactly the files it names.
+Both `files` entries and the walk name whole directories, so the other way a file drops out of the
+gate is `exclude`, which the directory walk consults. That is checked too: it must skip exactly the
+files it names.
 """
 from __future__ import annotations
 
@@ -26,27 +27,16 @@ def _config() -> dict[str, Any]:
     return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
 
-def test_the_two_mypy_lists_name_the_same_paths() -> None:
-    """`typecheck-py` passes explicit path args, which OVERRIDE `[tool.mypy] files` -- so a module
-    added to `files` alone is silently not type-checked by the gate, and a module dropped from the
-    cmdline is silently not checked even though `files` still lists it.
-
-    Compares EVERY path on both sides, not just the `.py` ones: `src`, `tests` and `scripts` are the
-    entries whose accidental removal would hide the most, and a `.py`-only comparison would not
-    notice any of them going missing.
-    """
-    cfg = _config()
-    cmd = cfg["tool"]["pixi"]["tasks"]["typecheck-py"]
-    args = cmd.split()
-    assert args[0] == "mypy", f"typecheck-py no longer starts with mypy: {cmd!r}"
-    # Every non-flag argument is a path. True while the only flag is `--strict`; a future flag that
-    # takes a SEPARATE value word (`--config-file x.toml`) would need excluding here, and would
-    # announce itself by failing this test rather than by quietly widening the set.
-    cmdline = {a for a in args[1:] if not a.startswith("-")}
-    listed = set(cfg["tool"]["mypy"]["files"])
-    assert cmdline == listed, (
-        f"only on the cmdline: {sorted(cmdline - listed)}; only in [tool.mypy] files: "
-        f"{sorted(listed - cmdline)}. A path in just one list is not covered by the gate.")
+def test_the_gate_runs_mypy_on_its_configured_files() -> None:
+    """The `typecheck-py` recipe is `uv run mypy` with flags only. Every word after `mypy` that is
+    not a flag would be a path, and paths on the command line override `[tool.mypy] files`."""
+    lines = (ROOT / "Makefile").read_text(encoding="utf-8").splitlines()
+    recipe = lines[lines.index("typecheck-py:") + 1]
+    words = recipe.split()
+    assert recipe.startswith("\t") and words[:3] == ["uv", "run", "mypy"], recipe
+    assert [w for w in words[3:] if not w.startswith("-")] == [], (
+        f"typecheck-py passes paths, which override [tool.mypy] files: {recipe.strip()!r}")
+    assert _config()["tool"]["mypy"]["files"], "[tool.mypy] files is empty: the gate checks nothing"
 
 
 def test_exclude_skips_exactly_the_named_files() -> None:

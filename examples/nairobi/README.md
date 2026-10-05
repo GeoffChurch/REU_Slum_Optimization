@@ -12,7 +12,7 @@ over from Cape Town and what does not. It is the exposé; this file is the map.
 **Regenerate a variant:**
 
 ```bash
-pixi run python -m scripts.gen_example <variant> nairobi
+uv run python -m scripts.gen_example <variant> nairobi
 ```
 
 where `<variant>` is the metric name — the subdirectory names below are `multiblock_<variant>`. Each

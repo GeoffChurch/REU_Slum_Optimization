@@ -44,8 +44,8 @@ and `workers=1` runs them in this process instead (`Serial`, `Forked`). Either w
 runs its BLAS and OpenMP on one thread, and the two produce the same bytes. Rows are written as each
 recipient finishes, always in recipient order, and a rerun with the same `out` resumes.
 
-    pixi run python -m scripts.consensus_matrix out=<parquet> recipients=4        # pilot
-    pixi run python -m scripts.consensus_matrix out=<parquet> recipients=2 \\
+    uv run python -m scripts.consensus_matrix out=<parquet> recipients=4        # pilot
+    uv run python -m scripts.consensus_matrix out=<parquet> recipients=2 \\
         'run=[consensus_held_out,single_held_out,clearance,own]' \\
         'k_sweep.arms=[consensus_held_out,single_held_out]' 'k_sweep.ks=[1,3,8,15]'
 """

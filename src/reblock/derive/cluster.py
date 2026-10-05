@@ -51,9 +51,9 @@ def merge_cluster(region: Region) -> Block:
             f"{region.region_id}: blocks are not contiguous (union is "
             f"{boundary.geom_type}, not a single Polygon): {[b.block_id for b in blocks]}")
 
-    parcels = pd.concat([b.parcels[["geometry"]] for b in blocks], ignore_index=True)
+    geoms = pd.concat([b.parcels.geometry for b in blocks], ignore_index=True)
     parcels = gpd.GeoDataFrame(
-        {"parcel_id": list(range(len(parcels)))}, geometry=parcels.geometry.to_numpy(), crs=crs)
+        {"parcel_id": list(range(len(geoms)))}, geometry=geoms.to_numpy(), crs=crs)
 
     streets = gpd.GeoDataFrame(
         geometry=[union_all([g for b in blocks for g in b.streets.geometry])], crs=crs)

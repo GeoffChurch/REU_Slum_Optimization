@@ -19,9 +19,9 @@ temp-SQLite PBF ingest (~5-20 min for the 417 MB South Africa extract) dominates
 Usage (module form -- `python scripts/osm_census.py` fails at import once anything imports
 transitively through `reblock.data.provision`, which needs the repo root on `sys.path`; see
 `scripts/pair_matrix.py` for the same convention):
-    pixi run python -m scripts.osm_census --iso ZAF --limit 5000
-    pixi run python -m scripts.osm_census --iso ZAF
-    pixi run python -m scripts.osm_census --iso ZAF --limit 20000 --tolerances 0.5,2,5
+    uv run python -m scripts.osm_census --iso ZAF --limit 5000
+    uv run python -m scripts.osm_census --iso ZAF
+    uv run python -m scripts.osm_census --iso ZAF --limit 20000 --tolerances 0.5,2,5
 """
 from __future__ import annotations
 

@@ -18,7 +18,7 @@ Scored with buffered IoU at two radii and directional Chamfer, kept directional 
 precision is path drawn where none exists, recall is real path missed, and blending them hides
 which way a generator fails.
 
-    pixi run python -m scripts.score_mimicry --recipients 20
+    uv run python -m scripts.score_mimicry --recipients 20
 """
 from __future__ import annotations
 

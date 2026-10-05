@@ -138,7 +138,7 @@ table above, misses the natural top-300 cutoff, so the union is 301, not 300).
 ## Reproducing
 
 ```bash
-pixi run python scripts/fetch_kblock_fixtures.py --out tests/data/kblock \
+uv run python scripts/fetch_kblock_fixtures.py --out tests/data/kblock \
     --raw-dir /path/to/raw   # optional: point at already-downloaded raw files to skip the network
 ```
 

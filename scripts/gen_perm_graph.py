@@ -10,7 +10,7 @@ pinned block, same config, same content-addressed derivation cache -- but iterat
 design must not cost a ten-method comparison run. This loads one block and one method and takes
 seconds.
 
-Run:  pixi run python -m scripts.gen_perm_graph
+Run:  uv run python -m scripts.gen_perm_graph
 """
 from __future__ import annotations
 

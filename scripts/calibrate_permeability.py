@@ -35,12 +35,12 @@ exists for that region -- a REFERENCE only: it is shown in every table but exclu
 P*) proposal math below, which is about the three tunable synthetic methods.
 
 Run one region (fast; also the smoke-test / debugging entry point):
-    pixi run python -m scripts.calibrate_permeability --region depth/capetown
-    pixi run python -m scripts.calibrate_permeability --region method_comparison
+    uv run python -m scripts.calibrate_permeability --region depth/capetown
+    uv run python -m scripts.calibrate_permeability --region method_comparison
 
 Run the full probe (SLOW -- 3-4 methods x 7 regions, each a subprocess reblock + curve build; the
 controller should budget real wall-clock time, not assume a quick turnaround):
-    pixi run python -m scripts.calibrate_permeability
+    uv run python -m scripts.calibrate_permeability
 
 PARALLELISM (two independent levels, both embarrassingly parallel -- no shared mutable state
 crosses a region or a method, so results are IDENTICAL to a fully serial run, just faster):

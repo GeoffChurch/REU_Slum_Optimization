@@ -20,7 +20,7 @@ a directory that already has the four raw files (see ``RAW_FILENAMES`` below) to
 the network entirely; any file missing from ``--raw-dir`` is fetched into it.
 
 Usage:
-    pixi run python scripts/fetch_kblock_fixtures.py --out tests/data/kblock \\
+    uv run python scripts/fetch_kblock_fixtures.py --out tests/data/kblock \\
         --raw-dir /path/to/already-downloaded/raw/parquets
 """
 from __future__ import annotations
@@ -262,7 +262,8 @@ def download_capetown_buildings(
                 & (chunk["confidence"] >= min_confidence)
             )
             if mask.any():
-                kept.append(chunk[mask])
+                # rows by boolean mask: pandas-stubs types the selection as a Series
+                kept.append(cast(pd.DataFrame, chunk[mask]))
         df = (
             pd.concat(kept, ignore_index=True)
             if kept

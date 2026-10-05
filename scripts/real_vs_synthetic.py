@@ -30,7 +30,7 @@ Candidates, each with a reason to exist:
 Reported as a paired comparison against the block's own real network, since blocks differ wildly
 and only the within-block contrast is meaningful.
 
-    pixi run python -m scripts.real_vs_synthetic --recipients 25
+    uv run python -m scripts.real_vs_synthetic --recipients 25
 """
 from __future__ import annotations
 

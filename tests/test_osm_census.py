@@ -1,6 +1,6 @@
 """Tests for scripts/osm_census.py's batch decode + driver logic.
 
-Run via module form (`pixi run python -m pytest tests/test_osm_census.py`); `scripts` is a regular
+Run via module form (`uv run python -m pytest tests/test_osm_census.py`); `scripts` is a regular
 package (see pyproject.toml's `pythonpath = ["."]` note) so `from scripts import osm_census`
 resolves at collection time.
 """

@@ -11,7 +11,7 @@ same 23 blocks under three questions:
 | `control_masked_both.csv` | `RULE.md`'s single question (4 labels) | `dd_proxy` |
 
 Each judge is scored against a **computed** quantity, so the experiment needs no new human labels.
-Truth is `../axis_truth.csv`; score with `pixi run python -m scripts.score_axis_run`.
+Truth is `../axis_truth.csv`; score with `uv run python -m scripts.score_axis_run`.
 
 **Read the 3×3 matrix, not the diagonal.** Density and depth correlate at Spearman 0.580 across
 the control sample, so a judge silently reporting "how informal does this look" would score

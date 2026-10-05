@@ -22,7 +22,7 @@ stays registered in `all_methods` and is worth re-adding if the question becomes
 synthetic methods miss" -- on the depth region it reached P* with FEWER metres than any other
 method, so it is not dominated.
 
-Run:  pixi run python -m scripts.gen_example <variant> [city]
+Run:  uv run python -m scripts.gen_example <variant> [city]
 """
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ def _tee_to_file(path: Path) -> Iterator[None]:
         f.close()
 
 def example_command(variant: str, city: str) -> str:
-    base = f"pixi run python -m scripts.gen_example {variant}"
+    base = f"uv run python -m scripts.gen_example {variant}"
     return base if city == "capetown" else f"{base} {city}"
 
 

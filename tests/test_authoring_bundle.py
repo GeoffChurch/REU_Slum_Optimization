@@ -55,7 +55,7 @@ def test_the_committed_dts_is_what_the_generator_writes() -> None:
     from scripts.gen_authoring_block import DTS_TEMPLATE
     assert DTS.read_text(encoding="utf-8") == DTS_TEMPLATE, (
         "web/src/authoring.d.ts was hand-edited; regenerate it: "
-        "pixi run python -m scripts.gen_authoring_block")
+        "uv run python -m scripts.gen_authoring_block")
 
 
 def test_the_committed_readme_is_what_the_generator_writes() -> None:
@@ -69,7 +69,7 @@ def test_the_committed_readme_is_what_the_generator_writes() -> None:
     typed: AuthoringBundle = json.loads(OUT.read_text(encoding="utf-8"))
     assert README.read_text(encoding="utf-8") == readme_markdown(typed), (
         "examples/authoring/README.md is stale or hand-edited; regenerate it: "
-        "pixi run python -m scripts.gen_authoring_block")
+        "uv run python -m scripts.gen_authoring_block")
 
 
 def test_the_bundle_carries_the_configured_params(bundle: dict[str, Any]) -> None:
@@ -86,7 +86,7 @@ def test_the_bundle_carries_the_configured_params(bundle: dict[str, Any]) -> Non
     for name, value in baked.items():
         assert value == getattr(shipped, name), (
             f"field {name}: bundle {value!r} vs conf {getattr(shipped, name)!r}; re-bake: "
-            f"pixi run python -m scripts.gen_authoring_block")
+            f"uv run python -m scripts.gen_authoring_block")
 
 
 def test_it_is_the_spine_block_and_a_projected_crs(bundle: dict[str, Any]) -> None:
@@ -178,7 +178,7 @@ def test_reference_cases_are_present_and_shaped(bundle: dict[str, Any]) -> None:
 
 def _type_checking_solve_imports(tree: ast.Module) -> set[str]:
     """Every name `scripts/gen_authoring_block.py` imports from `web.src.py.solve` inside its
-    `if TYPE_CHECKING:` block -- the STATIC half `pixi run typecheck` actually looks at."""
+    `if TYPE_CHECKING:` block -- the STATIC half `make typecheck` actually looks at."""
     names: set[str] = set()
     for node in ast.walk(tree):
         if (isinstance(node, ast.If) and isinstance(node.test, ast.Name)
@@ -216,9 +216,9 @@ def test_the_type_checking_and_runtime_solve_bindings_name_the_same_set() -> Non
     never looks inside the second block at all, so nothing type-checked ever sees it.
 
     DEMONSTRATED: deleting `ReferenceCase = _solve_mod.ReferenceCase` from the runtime block, with
-    `solve.py` and the static import both left untouched, leaves `pixi run typecheck` reporting
+    `solve.py` and the static import both left untouched, leaves `make typecheck` reporting
     'Success: no issues found' -- mypy only ever sees the (unmodified) `TYPE_CHECKING` branch --
-    while `pixi run python -m scripts.gen_authoring_block` raises `NameError: name 'ReferenceCase'
+    while `uv run python -m scripts.gen_authoring_block` raises `NameError: name 'ReferenceCase'
     is not defined`. That asymmetry (checked-but-not-run vs. run-but-not-checked) is exactly what
     this test exists to catch statically, before either command runs.
     """

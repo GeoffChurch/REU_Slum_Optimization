@@ -4,7 +4,7 @@
 # link instead of just warning (an orphan page -- one outside nav -- only logs at INFO and does
 # NOT fail the build, verified). For a local preview:
 #   python3 scripts/gen_site_pages.py   # regenerate data-driven pages from run artifacts
-#   mkdocs serve                        # needs mkdocs-material (e.g. `pixi exec --spec mkdocs-material mkdocs serve`)
+#   mkdocs serve                        # needs mkdocs-material (e.g. `uvx --with mkdocs-material mkdocs serve`)
 site_name: reblock · REU Slum Optimization
 site_description: >-
   Generating and evaluating road-network proposals for informal urban settlements —

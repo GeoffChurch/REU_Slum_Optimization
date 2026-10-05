@@ -16,7 +16,7 @@ residential / unclassified) clipped to the region, minus that same outer corrido
 Length-matched to the reference, because the reported metrics are IoU and Chamfer and their
 confound is how much line you draw.
 
-    pixi run python -m scripts.score_street_mimicry --regions 3
+    uv run python -m scripts.score_street_mimicry --regions 3
 """
 from __future__ import annotations
 

@@ -24,8 +24,8 @@ geography is uninformative WITHIN a metro; cross-metro regional typology is unte
 Distances are chord distances on a sphere (lon/lat -> ECEF, KD-tree). At these radii the chord
 underestimates the great-circle arc by <1e-5 relative -- far below anything this decides.
 
-    pixi run python -m scripts.donor_availability
-    pixi run python -m scripts.donor_availability --min-density 500 --exclusion-m 2000
+    uv run python -m scripts.donor_availability
+    uv run python -m scripts.donor_availability --min-density 500 --exclusion-m 2000
 """
 from __future__ import annotations
 

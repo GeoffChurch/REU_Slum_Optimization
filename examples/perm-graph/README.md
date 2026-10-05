@@ -31,4 +31,4 @@ same page -- the same pinned block, method and config as the PNGs above, baked b
 because it needs no matplotlib. It is this directory's largest committed file, so it is regenerated
 alongside the PNGs, not on its own separate cadence.
 
-Regenerate: `pixi run python -m scripts.gen_perm_graph && pixi run python -m scripts.gen_web_bundle`
+Regenerate: `uv run python -m scripts.gen_perm_graph && uv run python -m scripts.gen_web_bundle`

@@ -31,10 +31,10 @@ endpoint. Attribution is stamped into each image. Resolution varies by area and 
 is too coarse to separate shacks from small formal houses, that is visible in the picture and
 the adjudicator should say so rather than guess.
 
-    pixi run python -m scripts.fetch_block_imagery              # every un-adjudicated block
-    pixi run python -m scripts.fetch_block_imagery 12           # the first 12 of them
-    pixi run python -m scripts.fetch_block_imagery --all        # including adjudicated ones
-    pixi run python -m scripts.fetch_block_imagery --control     # the random control sample
+    uv run python -m scripts.fetch_block_imagery              # every un-adjudicated block
+    uv run python -m scripts.fetch_block_imagery 12           # the first 12 of them
+    uv run python -m scripts.fetch_block_imagery --all        # including adjudicated ones
+    uv run python -m scripts.fetch_block_imagery --control     # the random control sample
 """
 from __future__ import annotations
 

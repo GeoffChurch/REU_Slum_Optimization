@@ -132,7 +132,7 @@ none blocks on a later one.
   committed 278 KB `examples/perm-graph/bundle.json` plus a generated `web/src/bundle.d.ts`;
   `web/src/` holds a DOM-free `view/transform.ts`, a canvas mark layer, an injected `StateSource` and
   a mount contract that throws on an unknown widget name; esbuild bundles and `tsc` checks, wired
-  into `pixi run typecheck`/`test` and into `deploy-site.yml`. `PermGraph` replaces
+  into `make typecheck`/`test` and into `deploy-site.yml`. `PermGraph` replaces
   `graph_current_after.png` on the Permeability page, booting at the Lens-B prefix the caption quotes
   and running past it to the full 486 m network.
 
@@ -181,9 +181,9 @@ none blocks on a later one.
     that renders regardless — and `mountAll`'s loop has no try/catch, so throwing there would take
     down every later widget on the page.
 
-  **Chores:** `npm ci` runs twice per `pixi run check` (`web-check` + `web-test`, each wiping
+  **Chores:** `npm ci` runs twice per `make check` (`web-check` + `web-test`, each wiping
   `node_modules`) — a shared `web-install` task both depend on halves it; `README.md` documents
-  `pixi run typecheck` but not `pixi run web`, which the missing-bundle guard's own error message
+  `make typecheck` but not `make web`, which the missing-bundle guard's own error message
   tells the user to run; and esbuild has no explicit `--target` or sourcemap, so the deployed bundle
   is minified with no way to read a stack trace.
 
@@ -343,7 +343,7 @@ none blocks on a later one.
   **There is no committed bundle to go stale.** `docs/js/` is gitignored and `deploy-site.yml` runs
   `npm run build` before `mkdocs build`, so `widgets.js` is always built from the source in the same
   commit. `gen_site_pages.py` fails the build when a page carries a mount point and that file is
-  absent, which is what makes "built without `pixi run web`" loud instead of a silently dead widget
+  absent, which is what makes "built without `make web`" loud instead of a silently dead widget
   behind an intact PNG.
 
   **One published sentence was wrong and is now right.** The Displacement page's *Parcels are not
@@ -765,7 +765,7 @@ vertex, so candidates grow ~C(anchors,2) as the network densifies) times ~15 ste
 
 **`max_anchors` DOES rescue it -- measured 2026-08-11 across 6 regions. It is a SPEED win.** See
 `notes/2026-08-11-max-anchors-is-a-region-scale-win.md`; run
-`pixi run python -m scripts.perf.region_cap_report` for the numbers. `cap=128` gives a **7.6x median
+`uv run python -m scripts.perf.region_cap_report` for the numbers. `cap=128` gives a **7.6x median
 speedup** (2.5-12.2x, 6/6 regions), `cap=256` 5.5x. Region-scale access is ~10 minutes, roughly 330x
 on the original problem combined with tier 2.
 

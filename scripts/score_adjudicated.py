@@ -22,7 +22,7 @@ is the failure under investigation.
 whether the block contains fabric reblocking would serve, and a block that is half township and
 half shacks has it. The split is descriptive and nothing below depends on it.
 
-    pixi run python -m scripts.score_adjudicated [worksheet.csv]
+    uv run python -m scripts.score_adjudicated [worksheet.csv]
 """
 from __future__ import annotations
 

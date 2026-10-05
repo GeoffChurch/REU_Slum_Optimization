@@ -25,7 +25,7 @@ That is correct for measuring agreement between a judge and a quantity, and it i
 estimating any population rate. Nothing here may be weighted up to the 18,309-block pool; for
 that see `score_agent_run.py`, whose control rows are a stratified random draw.
 
-    pixi run python -m scripts.score_axis_run
+    uv run python -m scripts.score_axis_run
 """
 from __future__ import annotations
 

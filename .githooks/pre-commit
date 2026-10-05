@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the repo's lint gate before a commit lands. Install it once, per clone:
 #
-#     pixi run hooks
+#     make hooks
 #
 # WHY `ruff check` AND NOT `ruff format`. The obvious answer to "enforce formatting" is a
 # formatter, and this repo deliberately does not have one. MEASURED on 2026-09-20, running
@@ -27,10 +27,10 @@
 # the gate that actually decides.
 set -euo pipefail
 
-if ! command -v pixi >/dev/null 2>&1; then
-  echo "pre-commit: pixi not on PATH; skipping lint (CI still runs it)" >&2
+if ! command -v uv >/dev/null 2>&1; then
+  echo "pre-commit: uv not on PATH; skipping lint (CI still runs it)" >&2
   exit 0
 fi
 
 echo "pre-commit: ruff check ."
-pixi run lint
+make lint

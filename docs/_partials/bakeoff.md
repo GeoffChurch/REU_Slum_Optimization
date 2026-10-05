@@ -2,7 +2,7 @@
      do-not-edit note and fills four markers, all sourced from examples/screen-bakeoff/:
      SCREENTABLE and BAKEOFFFLOORS read screen_comparison.csv, BAKEOFFFIGS copies the three
      committed PNGs, and BAKEOFFSCALE reads ground_truth.json -- written by
-     `pixi run python -m scripts.gen_screen_bakeoff` alongside the CSV. Edit HERE, never
+     `uv run python -m scripts.gen_screen_bakeoff` alongside the CSV. Edit HERE, never
      docs/results/bakeoff.md (it is generated and gitignored).
 
      BAKEOFFSCALE returns a COMPLETE SENTENCE or "" (ruling F5), never a noun phrase to be spliced

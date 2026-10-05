@@ -50,17 +50,17 @@ CITIES=(capetown nairobi)
 gen() {  # <variant> <city>
   local variant="$1" city="$2"
   local slug
-  slug=$(pixi run python -c "
+  slug=$(uv run python -c "
 from omegaconf import OmegaConf
 c = OmegaConf.load('conf/example/${variant}.yaml')
 print(c.example.slug)" 2>/dev/null | tail -1)
   if [[ "$city" == capetown ]]; then _CURRENT_DIR="examples/$slug"; else _CURRENT_DIR="examples/$city/$slug"; fi
   if [[ $DRY -eq 1 ]]; then
-    echo "+ pixi run python -m scripts.gen_example $variant $([[ "$city" == capetown ]] || echo "$city")"
+    echo "+ uv run python -m scripts.gen_example $variant $([[ "$city" == capetown ]] || echo "$city")"
   else
-    echo "+ pixi run python -m scripts.gen_example $variant" \
+    echo "+ uv run python -m scripts.gen_example $variant" \
          "$([[ "$city" == capetown ]] || echo "$city")"
-    setsid pixi run python -m scripts.gen_example "$variant" \
+    setsid uv run python -m scripts.gen_example "$variant" \
         $([[ "$city" == capetown ]] || echo "$city") &
     _CHILD=$!
     wait "$_CHILD"
@@ -77,26 +77,26 @@ else
   # The screen bake-off is not a gen_example variant: it grades SCREENS against ground truth rather
   # than methods against a region, so it has its own entry point. Cape Town only -- the ground truth
   # is the City's own structure survey and no equivalent exists for Nairobi.
-  run pixi run python -m scripts.gen_screen_bakeoff
+  run uv run python -m scripts.gen_screen_bakeoff
   # The graph figure set is likewise its own entry point, and for the same kind of reason: it is a
   # figure set for one site page rather than a graded example, and it deliberately does NOT re-run
   # the ten-method comparison whose block and roads it borrows.
-  run pixi run python -m scripts.gen_perm_graph
+  run uv run python -m scripts.gen_perm_graph
   # The web bundle shares gen_perm_graph's block, method and pinned config, and is the directory's
   # largest committed file -- it belongs in the same regeneration path as the PNGs it must stay in
   # sync with (fix wave, I7), not off it where a re-bake is easy to forget.
-  run pixi run python -m scripts.gen_web_bundle
+  run uv run python -m scripts.gen_web_bundle
   # The frontier bundle shares the same pinned block (via scripts/_example_block.py) but is a
   # separate file for a separate page -- see gen_frontier_bundle's module docstring.
-  run pixi run python -m scripts.gen_frontier_bundle
+  run uv run python -m scripts.gen_frontier_bundle
   # The parity FIXTURE too: tests/test_frontier_bundle.py holds live code to it, and a regen
   # that changes the methods leaves it stale unless it is re-baked beside the shipped bundle.
-  run pixi run python -m scripts.gen_frontier_bundle --fixture
+  run uv run python -m scripts.gen_frontier_bundle --fixture
   # The displacement field: the same pinned block once more, its own bundle AND its own fallback
   # PNG (deliberately not shared with the perm-graph bundle -- see gen_displacement_field's module
   # docstring). Both are committed, so the same I7 reasoning applies: on this path, not off it.
-  run pixi run python -m scripts.gen_displacement_field
-  run pixi run python -m scripts.gen_authoring_block
+  run uv run python -m scripts.gen_displacement_field
+  run uv run python -m scripts.gen_authoring_block
   # The region-grow neighbourhood bundle. It was OFF this path and it drifted: baked before the
   # 2026-09-17 switch to Open Buildings counts, it went stale the moment `load_blocks` started
   # resolving a different count, and its own parity test did not catch it because that test SKIPS
@@ -104,5 +104,5 @@ else
   # design, so the parquet is not downloaded per run. A guard that only fires on a warm developer
   # cache is a guard that does not fire. The neighbourhood had gone 213 -> 226 blocks unnoticed.
   # Same I7 reasoning as the three bundles above: committed artifact, therefore on this path.
-  run pixi run python -m scripts.gen_region_grow
+  run uv run python -m scripts.gen_region_grow
 fi

@@ -44,9 +44,9 @@ jobs:
       # in either package can change theme markup or image handling under us with no commit to
       # point at. Bump these deliberately.
       - run: pip install mkdocs-material==9.7.7 mkdocs-glightbox==0.5.2
-      # The widget bundle. Node is pinned to the same major as pyproject.toml's pixi `nodejs`
-      # dependency, so the tsc that gates pull requests and the esbuild that ships are the same
-      # runtime. `npm ci` (not install) so package-lock.json is authoritative.
+      # The widget bundle. Node is pinned to the same major as the `nodejs-wheel` in
+      # pyproject.toml's dev group, so the tsc that gates pull requests and the esbuild that ships
+      # are the same runtime. `npm ci` (not install) so package-lock.json is authoritative.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -59,27 +59,15 @@ jobs:
       # `dist/` is gitignored and gen_site_pages.py raises if no wheel is there, so this must run
       # before it.
       #
-      # Built with THIS job's own pip rather than through pixi, which is deliberate and not a
-      # divergence from `pixi run wheel`: building this wheel needs nothing but hatchling reading
-      # pyproject.toml, so installing a whole pixi environment -- numpy, scipy, geopandas, the
-      # entire research stack -- to zip up src/reblock would be minutes of CI for no difference in
-      # output. VERIFIED, with hatchling pinned here to the version pixi resolves: the two paths
-      # produce a BYTE-IDENTICAL wheel -- sha256 51e54bf0e8604659a3623af1351a3c3681b1a0da8563a63
-      # 0ec5e1802fb9a8644 from both. Unpinned they differ only in the dist-info generator stamp,
-      # which is exactly what the pin removes. `Requires-Dist` is absent either way, and that is
-      # what keeps micropip from trying to resolve the scientific stack from PyPI, where no wasm
-      # wheel exists.
-      #
-      # This is also why `scripts/gen_site_pages.py` is stdlib-only and this job runs it under
-      # plain `python3`: the deploy path deliberately does not need the science stack, and adding
-      # pixi here to build one wheel would have quietly given it one.
-      #
-      # hatchling is pinned for the same reason the two mkdocs packages above are: this job
-      # renders what gets published, so a silent backend bump should be a commit, not a surprise.
-      # --no-build-isolation because it is already installed by the line above it.
-      - run: pip install hatchling==1.32.0
+      # The same command as `make wheel`. `uv build` installs only the build backend (hatchling,
+      # pinned in pyproject.toml's [tool.uv]), never the project's environment, so this job still
+      # has no science stack -- which is also why `scripts/gen_site_pages.py` is stdlib-only and
+      # runs under plain `python3`. The wheel declares no `Requires-Dist`
+      # (tests/test_wheel_metadata.py), which is what keeps micropip from trying to resolve the
+      # scientific stack from PyPI, where no wasm wheel exists.
+      - uses: astral-sh/setup-uv@v9.0.0
       - name: Build the reblock wheel for Pyodide
-        run: pip wheel --no-deps --no-build-isolation --wheel-dir dist .
+        run: uv build --wheel --out-dir dist
       - run: python3 scripts/gen_site_pages.py
       # --strict promotes MkDocs' broken-link warnings to build failures (an orphan page -- one
       # outside nav -- only logs at INFO and does NOT fail the build even under --strict, verified

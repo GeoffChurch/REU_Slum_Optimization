@@ -126,7 +126,7 @@ async function boot(): Promise<number> {
     // one. Without this, `micropip.install` fails on a missing `file://` URL from inside Python
     // and the traceback says nothing about how to fix it.
     throw new Error(
-      `${WHEEL} does not exist. Build it with \`pixi run wheel\` from the repo root, or run the `
+      `${WHEEL} does not exist. Build it with \`make wheel\` from the repo root, or run the `
       + `suite through \`npm test\`, which builds it first.`);
   }
   const started = performance.now();

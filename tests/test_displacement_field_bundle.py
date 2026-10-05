@@ -37,7 +37,7 @@ def test_the_committed_dts_is_what_the_generator_writes() -> None:
     from scripts.gen_displacement_field import DTS_TEMPLATE
     assert DTS.read_text(encoding="utf-8") == DTS_TEMPLATE, (
         "web/src/field.d.ts was hand-edited; regenerate it: "
-        "pixi run python -m scripts.gen_displacement_field")
+        "uv run python -m scripts.gen_displacement_field")
 
 
 def test_every_declared_field_is_present_and_the_shapes_agree(bundle: dict[str, Any]) -> None:
@@ -58,7 +58,7 @@ def test_every_declared_field_is_present_and_the_shapes_agree(bundle: dict[str, 
     assert b["width"]["floor_m"] == floor, (
         f"the slider floor is {b['width']['floor_m']} but permeability.py:205 raises below "
         f"{floor} -- the slider would offer a road the metric "
-        f"refuses to score. Re-bake: pixi run python -m scripts.gen_displacement_field")
+        f"refuses to score. Re-bake: uv run python -m scripts.gen_displacement_field")
     assert b["width"]["default_m"] >= b["width"]["floor_m"]
     assert b["width"]["max_m"] > b["width"]["default_m"]
     assert len(b["reference"]) == 6, "six parity fixtures (spec section 6)"
@@ -244,7 +244,7 @@ def test_the_bundle_still_matches_live_python(bundle: dict[str, Any]) -> None:
     """
     if not capetown_footprints_cached():
         pytest.skip("needs the capetown_full cache and the pinned block's footprint tile; run "
-                    "`pixi run python -m scripts.gen_displacement_field`")
+                    "`uv run python -m scripts.gen_displacement_field`")
 
     import shapely
     from geopandas import GeoDataFrame
@@ -308,7 +308,7 @@ def test_the_bundle_still_matches_live_python(bundle: dict[str, Any]) -> None:
     for case in bundle["reference"]:
         assert case["roads"] == derived[case["name"]], (
             f"fixture {case['name']}'s road geometry is not what the generator now derives; "
-            f"regenerate: pixi run python -m scripts.gen_displacement_field")
+            f"regenerate: uv run python -m scripts.gen_displacement_field")
 
     # Job 1b: every fixture's `sum_c`, recomputed from the bundle's OWN outlines and roads. Exact
     # through the same quantiser, not a tolerance: `sum_c` IS `sigfig(displacement(...))` of the
@@ -321,7 +321,7 @@ def test_the_bundle_still_matches_live_python(bundle: dict[str, Any]) -> None:
         recomputed = displacement(stored, roads_from_case(block, case, (ox, oy)))
         assert sigfig(recomputed) == case["sum_c"], (
             f"{case['name']}: the committed bundle says {case['sum_c']}, the code now computes "
-            f"{recomputed}; regenerate: pixi run python -m scripts.gen_displacement_field")
+            f"{recomputed}; regenerate: uv run python -m scripts.gen_displacement_field")
 
 
 def _coordinates(b: dict[str, Any]) -> list[tuple[str, float]]:
@@ -536,4 +536,4 @@ def test_the_committed_readme_is_what_the_generator_writes() -> None:
     loaded = json.loads(BUNDLE.read_text(encoding="utf-8"))
     assert readme.read_text(encoding="utf-8") == readme_markdown(loaded), (
         "examples/displacement-field/README.md is stale or hand-edited; regenerate it: "
-        "pixi run python -m scripts.gen_displacement_field")
+        "uv run python -m scripts.gen_displacement_field")
