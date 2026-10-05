@@ -25,7 +25,7 @@ like any picker.
 
 plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>.t<solve
 tolerance while optimizing>, e.g. fw40.q3.i20.t1e-05 (the first 220 runs) or fw0.q5.i10.t0.001;
-the optional suffixes are Plan's (.e .b .k[s] .w .c .u).
+the optional suffixes are Plan's (.e .b .k[s] .r .w .c .u).
 """
 from __future__ import annotations
 
@@ -231,6 +231,35 @@ def round_by_x(x: np.ndarray, cost: np.ndarray, budget: float,
     return r
 
 
+# The randomized roundings' generator seed: fixed, part of the method a plan's `.r<n>` names.
+SAMPLE_SEED = 0
+
+
+def round_sampled(x: np.ndarray, cost: np.ndarray, budget: float, rng: np.random.Generator,
+                  first: np.ndarray | None = None) -> np.ndarray:
+    """A randomized rounding: SIMP's live buildings (x above twice its floor XMIN) in a random
+    order drawn with probability proportional to x (Plackett-Luce, by Gumbel keys), then the
+    buildings at the floor by decreasing x as round_by_x takes them, cleared while they fit the
+    budget (`first` before any other). The floor sits out of the draw: hundreds of buildings at
+    XMIN outweigh a few ones and would push them out of the budget. So a near-binary x keeps its
+    ones, and grey buildings -- a gate and its substitutes flipping between x 0.3 and 0.5 --
+    come in different orders."""
+    live = x > 2 * XMIN
+    tier = np.where(live, 1, 2) if first is None else np.where(first > 0, 0, np.where(live, 1, 2))
+    gumbel = np.zeros(len(x))
+    gumbel[live] = -(np.log(x[live]) + rng.gumbel(size=int(live.sum())))
+    order = np.lexsort((np.where(live, gumbel, -x), tier))     # by tier, then key
+    r = np.zeros(len(x))
+    left = budget + 1e-12
+    for j in order:
+        if x[j] <= 1e-9:
+            break
+        if cost[j] <= left:
+            r[j] = 1.0
+            left -= cost[j]
+    return r
+
+
 def frank_wolfe(rel: Relaxation, budget: float, iters: int, log=print) -> dict:
     cost = rel.c.cost
     x = np.zeros(len(cost))
@@ -359,7 +388,9 @@ class Plan(NamedTuple):
     extra stages at qmax until it gets there (b0 0: no projection, not named); `keep` > 0:
     the answer is the best exact-scored rounding of the iterates every `keep` updates (0: the
     last iterate's); `kscore` > 0 scores the candidates in the eps world at that eps (the
-    relaxation's cached structure: no new system per candidate), the winner exactly; `warm`
+    relaxation's cached structure: no new system per candidate), the winner exactly; `samples`
+    > 0: each offered iterate is also rounded that many times at random (round_sampled), every
+    distinct candidate scored; `warm`
     > 0 (path only): each budget after the first starts from the last budget's x (the free
     buildings lifted to the uniform share) with `warm` updates per stage; `coarse` > 0 (one
     only): every stage but the last on a grid of that spacing (h 1.0: 4x fewer unknowns), the
@@ -375,6 +406,7 @@ class Plan(NamedTuple):
     bmax: float = 0.0
     keep: int = 0
     kscore: float = 0.0
+    samples: int = 0
     warm: int = 0
     coarse: float = 0.0
     update: Update = DEFAULT_UPDATE
@@ -386,6 +418,7 @@ class Plan(NamedTuple):
                 + (f".b{self.b0:g}-{self.bmax:g}" if self.b0 > 0 else "")
                 + (f".k{self.keep}" if self.keep > 0 else "")
                 + (f"s{self.kscore:g}" if self.kscore > 0 else "")
+                + (f".r{self.samples}" if self.samples > 0 else "")
                 + (f".w{self.warm}" if self.warm > 0 else "")
                 + (f".c{self.coarse:g}" if self.coarse > 0 else "")
                 + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
@@ -407,22 +440,26 @@ class Plan(NamedTuple):
 
 
 def plan_of(spec: str) -> Plan:
-    m = re.fullmatch(r"fw(\d+)\.q([0-9.]+)\.i(\d+)\.t([0-9.e-]+?)(?:\.e([0-9.e-]+?))?"
-                     r"(?:\.b([0-9.]+)-([0-9.]+))?(?:\.k(\d+)(?:s([0-9.e-]+))?)?(?:\.w(\d+))?"
-                     r"(?:\.c([0-9.]+))?(?:\.u(?:oc([0-9.]+)m([0-9.]+)|mma([0-9.]+)))?", spec)
+    m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)\.t(?P<t>[0-9.e-]+?)"
+                     r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
+                     r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+))?"
+                     r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?"
+                     r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
-    update: Update = (OC(float(m.group(12)), float(m.group(13))) if m.group(12) is not None
-                      else MMA(float(m.group(14))) if m.group(14) is not None
+    g = m.groupdict()
+    update: Update = (OC(float(g["oc"]), float(g["ocm"])) if g["oc"] is not None
+                      else MMA(float(g["mma"])) if g["mma"] is not None
                       else DEFAULT_UPDATE)
-    return Plan(int(m.group(1)), float(m.group(2)), int(m.group(3)), float(m.group(4)),
-                EPS if m.group(5) is None else float(m.group(5)),
-                0.0 if m.group(6) is None else float(m.group(6)),
-                0.0 if m.group(7) is None else float(m.group(7)),
-                0 if m.group(8) is None else int(m.group(8)),
-                0.0 if m.group(9) is None else float(m.group(9)),
-                0 if m.group(10) is None else int(m.group(10)),
-                0.0 if m.group(11) is None else float(m.group(11)), update)
+    return Plan(fw=int(g["fw"]), qmax=float(g["q"]), iters=int(g["i"]), rtol=float(g["t"]),
+                eps=EPS if g["e"] is None else float(g["e"]),
+                b0=0.0 if g["b0"] is None else float(g["b0"]),
+                bmax=0.0 if g["bmax"] is None else float(g["bmax"]),
+                keep=0 if g["k"] is None else int(g["k"]),
+                kscore=0.0 if g["ks"] is None else float(g["ks"]),
+                samples=0 if g["r"] is None else int(g["r"]),
+                warm=0 if g["w"] is None else int(g["w"]),
+                coarse=0.0 if g["c"] is None else float(g["c"]), update=update)
 
 
 class Incumbent:
@@ -431,9 +468,11 @@ class Incumbent:
     the rounding of update 3 scores 0.810 and the last 0.012, the gate and its neighbours, being
     substitutes, flipping between x 0.3 and 0.5 until the continuation drops them (NOTES)."""
 
-    def __init__(self, rel: Relaxation, budget: float, every: int,
+    def __init__(self, rel: Relaxation, budget: float, every: int, *, samples: int,
                  first: np.ndarray | None = None, score_eps: float = 0.0):
         self.rel, self.budget, self.every, self.first = rel, budget, every, first
+        # samples > 0: each offered iterate is also rounded that many times at random
+        self.samples, self.rng = samples, np.random.default_rng(SAMPLE_SEED)
         # score_eps > 0: candidates scored in the eps world at score_eps under the METRIC
         # conductance (rel may optimize under a search one), q 1, no projection
         self.scorer = (Relaxation(rel.c, rel.power, q=1.0, rtol=rel.rtol, eps=score_eps,
@@ -446,14 +485,17 @@ class Incumbent:
         return self.rel.exact(r) if self.scorer is None else self.scorer.value(r)
 
     def offer(self, x: np.ndarray) -> None:
-        r = round_by_x(x, self.rel.c.cost, self.budget, first=self.first)
-        key = np.packbits(r > 0).tobytes()
-        if key in self._seen:
-            return
-        self._seen.add(key)
-        J = self._score(r)
-        if J < self.J:
-            self.J, self.r = J, r
+        cost = self.rel.c.cost
+        for r in [round_by_x(x, cost, self.budget, first=self.first),
+                  *(round_sampled(x, cost, self.budget, self.rng, first=self.first)
+                    for _ in range(self.samples))]:
+            key = np.packbits(r > 0).tobytes()
+            if key in self._seen:
+                continue
+            self._seen.add(key)
+            J = self._score(r)
+            if J < self.J:
+                self.J, self.r = J, r
 
     def best(self) -> tuple[float, np.ndarray]:
         """(exact J, clearing) of the best candidate."""
@@ -541,7 +583,8 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
                    x=x.tolist())
     else:
         x = np.full(c.n, budget)
-    inc = Incumbent(rel, budget, max(plan.keep, 1), score_eps=plan.kscore)
+    inc = Incumbent(rel, budget, max(plan.keep, 1), samples=plan.samples,
+                    score_eps=plan.kscore)
     watch = inc if plan.keep > 0 else None
     stages = plan.stages
     if plan.coarse > 0:
@@ -594,8 +637,8 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
         even = rest / max(float(c.cost[~fixed].sum()), 1e-12)
         warm = plan.warm > 0 and i > 0
         x = np.where(fixed, 1.0, np.maximum(x, even) if warm else even)
-        inc = Incumbent(rel, D, max(plan.keep, 1), first=fixed.astype(float),
-                        score_eps=plan.kscore)
+        inc = Incumbent(rel, D, max(plan.keep, 1), samples=plan.samples,
+                        first=fixed.astype(float), score_eps=plan.kscore)
         x = simp(rel, x, D, plan.stages, plan.warm if warm else plan.iters, plan.update,
                  log=lambda s: None,
                  xlo=np.where(fixed, 1.0, XMIN), watch=inc if plan.keep > 0 else None)
