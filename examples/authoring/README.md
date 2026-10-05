@@ -28,7 +28,7 @@ with CPython, so the two sides have to be reading the same numbers.
 else -- the mesh takes no roads and grounding comes from the street -- so the road-invariant half is
 baked once rather than recomputed on every edit: 6,619 parcel centroids, 452 of them street-fronting,
 19,443 footpath edges, and a no-roads baseline of
-p0 = 53609957.447083.
+p0 = 53609957.446931.
 
 **Reference roads.** Fixed polylines with `solve_egress`' own `1 - p/p0` for each. Before writing
 anything the baker rebuilds the block from the JSON it is about to write, checks every baked column
