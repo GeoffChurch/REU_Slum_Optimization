@@ -20,10 +20,11 @@ make hooks       # once per clone: points core.hooksPath at .githooks/
 ## Common tasks
 
 ```bash
-make test        # pytest + coverage, then the web/ node suite (~55 min with the city cache
-                 #   warm: the developer-local parity tests re-solve permeability on the
-                 #   6,619-parcel spine block. `make wheel && uv run pytest -m "not slow"`
-                 #   skips them; the wheel is what the site-page tests read from dist/.)
+make test        # pytest + coverage, then the web/ node suite (~4 min with the derivation
+                 #   cache warm, measured 2026-10-05; the slow tests re-solve permeability on
+                 #   the 6,619-parcel spine block, which a cold cache makes much longer.
+                 #   `make wheel && uv run pytest -m "not slow"` skips them; the wheel is what
+                 #   the site-page tests read from dist/.)
 make typecheck   # mypy --strict + tsc --noEmit (web/)
 make lint        # ruff check -- the formatting gate, in the hook and in CI
 make hooks       # install the pre-commit hook (once per clone)
