@@ -22,9 +22,14 @@ packages = ["src/reblock"]
 [dependency-groups]
 runtime = [
     "geopandas",
-    # pandas is used directly (reblock.derive.access builds pd.Series), so declare it explicitly
-    # rather than leaning on it arriving transitively via geopandas.
+    # Used directly, so declared rather than left to arrive transitively via geopandas: pandas
+    # (reblock.derive.access builds pd.Series), numpy, shapely, pyproj, and pyogrio
+    # (reblock.data.osm_extract's OGR `where` filter; derive_graph keys on its GDAL's version).
     "pandas",
+    "numpy",
+    "shapely",
+    "pyproj",
+    "pyogrio",
     # Below 25: pyarrow 25.0.1's wheel dropped the py.typed marker 24.0.0 ships, and mypy --strict
     # then refuses every pyarrow import. Lift the cap when a release ships it again.
     "pyarrow<25",
@@ -60,15 +65,15 @@ dev = [
     # node, npm and npx in the venv's bin/, for building and type-checking the web/ widget bundle.
     # Pinned to the same major as .github/workflows/deploy-site.yml's actions/setup-node, so a type
     # error cannot pass locally and fail in the site build (or the reverse).
+    #
+    # web/package.json pins "typescript" to the latest 5.x (not 7.x, which `npm install
+    # typescript@latest` resolves to as of 2026-08): TypeScript 7 is a ground-up Go-ported
+    # reimplementation, not an incremental major on the 5.x lineage. This project only uses
+    # TypeScript for `tsc --noEmit` checking -- esbuild does all transpiling -- so 5.x costs
+    # nothing we need, while 7.x's less-settled diagnostics and inference would be what later
+    # tasks end up debugging widget code against. Declined deliberately; not staleness.
     "nodejs-wheel~=22.0",
 ]
-# web/package.json pins "typescript" to the latest 5.x (not 7.x, which `npm install
-# typescript@latest` resolves to as of 2026-08): TypeScript 7 is a ground-up Go-ported
-# reimplementation, not an incremental major on the 5.x lineage. This project only uses
-# TypeScript for `tsc --noEmit` checking -- esbuild does all transpiling -- so 5.x costs
-# nothing we need, while 7.x's less-settled diagnostics and inference would be what later
-# tasks end up debugging widget code against. Declined deliberately; not staleness.
-#
 # Research/analysis stack for scripts/ and the OT retrieval work. Its own group rather than
 # `runtime`: no `src/reblock` module imports these, so they are not what the package needs to
 # run -- the same grouping-by-purpose as `dev` (and, like `dev`, installed by default).
@@ -91,8 +96,8 @@ research = [
 [tool.uv]
 default-groups = ["runtime", "dev", "research"]
 # A uv-managed CPython (python-build-standalone), never one found on the machine: the same build
-# here, in CI and on the cluster, and an env that does not break when a conda base or a system
-# Python moves. The version is .python-version's.
+# here, in CI and on the cluster (.python-version names it to the patch), and an env that does not
+# break when a conda base or a system Python moves.
 python-preference = "only-managed"
 # The platforms the lock resolves for. Add one here when a collaborator is on it.
 environments = [
@@ -114,8 +119,8 @@ topology = { path = "ext/topology", editable = true }
 python_version = "3.11"
 strict = true
 # The whole scripts/ directory, not a hand-picked list of its files: a script left off a list rots
-# where nobody sees it. The ONE list of what the gate checks: the Makefile's `typecheck-py` runs
-# `mypy --strict` with no file arguments, which would override it.
+# where nobody sees it. This is the ONE list of what the gate checks: the Makefile's `typecheck-py`
+# passes mypy no file arguments, because any it passed would override this list.
 files = ["src", "tests", "scripts", "web/src/py/solve.py"]
 # No `exclude`: the directory walk checks every file it finds. tests/test_typecheck_config.py pins
 # that, so skipping a file is a decision rather than a regex accident.
