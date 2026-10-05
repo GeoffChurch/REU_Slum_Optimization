@@ -1,5 +1,5 @@
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import joblib
@@ -31,7 +31,7 @@ class _NoIdentity:
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setattr(dg, "memory", joblib.Memory(location=str(tmp_path), verbose=0))
-    monkeypatch.setattr(dg, "_l2", dg.memory.cache(dg._l2_impl, ignore=["fn", "inputs"]))
+    monkeypatch.setattr(dg, "_l2", dg.memory.cache(dg._l2_derive, ignore=["fn", "inputs"]))
     dg.clear_l1()
     yield
     dg.clear_l1()
@@ -102,7 +102,7 @@ def test_a_native_library_change_forces_a_miss(monkeypatch: pytest.MonkeyPatch,
     dg.derive(fn, a)
     # simulate one native-library change. (A derivation-LOGIC change is no longer global -- see
     # tests/test_code_closure.py.)
-    changed = dg.env_version()._replace(**{library: "CHANGED"})
+    changed = replace(dg.env_version(), **{library: "CHANGED"})
     monkeypatch.setattr(dg, "env_version", lambda: changed)
     dg.clear_l1()
     dg.derive(fn, a)                 # new version -> new key -> recompute

@@ -127,7 +127,7 @@ def _isolate(tmp_path_factory: pytest.TempPathFactory,
     # synthetic source content -> same source_hash + gates -> same key) already wrote.
     loc = tmp_path_factory.mktemp("l2")
     monkeypatch.setattr(dg, "memory", joblib.Memory(location=str(loc), verbose=0))
-    monkeypatch.setattr(dg, "_l2", dg.memory.cache(dg._l2_impl, ignore=["fn", "inputs"]))
+    monkeypatch.setattr(dg, "_l2", dg.memory.cache(dg._l2_derive, ignore=["fn", "inputs"]))
     dg.clear_l1()
     yield
     dg.clear_l1()

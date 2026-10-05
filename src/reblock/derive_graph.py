@@ -17,7 +17,7 @@ import os
 from collections.abc import Callable, Hashable
 from functools import cache
 from pathlib import Path
-from typing import NamedTuple, Protocol, TypeVar, cast, runtime_checkable
+from typing import Protocol, TypeVar, cast, runtime_checkable
 
 import joblib
 import pyogrio
@@ -30,7 +30,7 @@ _CACHE_DIR = Path(os.environ.get(
     "REBLOCK_CACHE_DIR", str(Path.home() / ".cache" / "reblock" / "derivations")))
 memory = joblib.Memory(location=str(_CACHE_DIR), verbose=0)
 
-_L1: dict[tuple[object, ...], object] = {}
+_L1: dict[DerivationKey, object] = {}
 
 def source_hash(*paths: Path) -> str:
     """sha256 over the sorted paths' names + bytes. Stable, content-sensitive,
@@ -156,12 +156,26 @@ def reader_hash(reader: str, *paths: Path) -> str:
     return source_hash(*paths, *_closure_paths(reader))
 
 
-class NativeVersions(NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class NativeVersions:
     """The native libraries a derivation's results depend on, by version."""
     geos: str    # every geometry operation (shapely)
     proj: str    # every reprojection (pyproj)
     gdal: str    # every file read through pyogrio: the shapefile Block reader, footprints,
                  # informal structures, desire-line snapshots, OSM footpaths
+
+
+@dataclasses.dataclass(frozen=True)
+class DerivationKey:
+    """What a derivation's result is cached under.
+
+    Built in `derive` and only ever hashed -- as the L1 dict's key, and by joblib, which pickles
+    it -- so it is a frozen dataclass: fields by name only, no position to index or unpack, and
+    never equal to a plain tuple of the same values."""
+    fn: str                         # the derivation, as module.qualname
+    code: str                       # `_code_version(fn, inputs)`: the code it actually runs
+    native: NativeVersions          # `env_version()`
+    inputs: tuple[Hashable, ...]    # each input's `identity`, in order
 
 
 def env_version() -> NativeVersions:
@@ -209,17 +223,15 @@ def clear_l1() -> None:
     _L1.clear()
 
 
-def _fn_identity(fn: Callable[..., object],
-                 inputs: tuple[object, ...]) -> tuple[str, str, NativeVersions]:
-    return (f"{fn.__module__}.{fn.__qualname__}", _code_version(fn, inputs), env_version())
-
-
-def _l2_impl(key: tuple[object, ...], fn: Callable[..., object],
-             inputs: tuple[object, ...]) -> object:
+def _l2_derive(key: DerivationKey, fn: Callable[..., object],
+               inputs: tuple[object, ...]) -> object:
     return fn(*inputs)
 
 
-_l2 = memory.cache(_l2_impl, ignore=["fn", "inputs"])
+# joblib keeps a cached function's results in a directory named after it, and WIPES that directory
+# when the function's source text changes. So this function is never edited: a new key format gets
+# a new function, and with it a directory of its own, which no checkout on another format wipes.
+_l2 = memory.cache(_l2_derive, ignore=["fn", "inputs"])
 
 
 @runtime_checkable
@@ -300,7 +312,8 @@ def derive(fn: Callable[..., T], *inputs: Identified) -> T:
         if ident is None:
             return fn(*inputs)          # bypass: uncacheable input
         ids.append(ident)
-    key = (_fn_identity(fn, inputs), tuple(ids))
+    key = DerivationKey(fn=f"{fn.__module__}.{fn.__qualname__}", code=_code_version(fn, inputs),
+                        native=env_version(), inputs=tuple(ids))
     if key in _L1:
         return cast(T, _L1[key])
     out = cast(T, _l2(key, fn, inputs))  # joblib keys on `key`, ignores fn+inputs
