@@ -109,7 +109,7 @@ threadpoolctl = "*"
 # The cluster launcher, GeoffChurch/cluster_submit, pinned to a commit. It has an environment
 # of its own because the cluster installs only the default one, so it never fetches this
 # private repo.
-cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "3a1f4ab1c6626172cc77d3dbf7da9a6d5156d0f8" }
+cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "f04d9b0185f4a8af905ddfb7ea02e104c0dbef9f" }
 
 [tool.pixi.environments]
 default = { features = ["dev", "research"], solve-group = "default" }
