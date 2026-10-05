@@ -69,10 +69,15 @@ and Lens B from nested runs.
   live).
 - **Damped OC or MMA** (done 2026-10-04, null; NOTES). Damped OC ties or trails slightly on the
   13 (median -0.0005 / -0.0001), and MMA collapses on 22422. Both stay selectable (`.u`).
-- **Sturdier gate capture** (idea, from that null). On a gated block SIMP's answer is one lucky
-  iterate's rounding: `.k2` and MMA each lost 22422 by perturbing the iterate sequence. Instead,
-  keep the gate on purpose: several roundings per iterate (the top-x one plus randomized ones),
-  multiple starts (below), or the add/remove search seeded with the incumbent.
+- **Sturdier gate capture** (from that null). On a gated block SIMP's answer is one lucky
+  iterate's rounding: `.k2` and MMA each lost 22422 by perturbing the iterate sequence.
+  - Several roundings per iterate (**running**, `.r<n>`, NOTES "SIMP multi-rounding"): `.r2` on
+    the 13 is ahead on 5 (+0.008 to +0.038), never behind, 2.2x the time; the 46 held-out
+    blocks running. It partly rescues `.k2`'s and MMA's lost gate (0.55, not 0.78).
+  - Cheaper `.r`: sample only where it pays (the 8 unchanged blocks pay 2.2x for nothing) --
+    by iterate greyness, or only in the last stages; find first which iterates the winners came
+    from.
+  - Multiple starts (below), or the add/remove search seeded with the incumbent.
 - **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).
 - **Projection** (measured, kept selectable: `.b8-32` wins some gated blocks, loses some
   controls; not needed against collapses once the incumbent is on).

@@ -1077,3 +1077,39 @@ iterate sequence). A method that keeps the gate on purpose would be sturdier tha
 - multiple starts (BACKLOG);
 - several roundings per iterate, not one, e.g. the top-x rounding plus a randomized one;
 - the add/remove search seeded with SIMP's incumbent.
+
+### SIMP multi-rounding `.r<n>` (owner: "Yes, try multi-rounding", 2026-10-05)
+
+The incumbent rounded each kept iterate once, by decreasing x. `.r<n>` adds n randomized roundings
+per kept iterate (relax.py `round_sampled`): SIMP's live buildings (x above 2 XMIN) in a
+Plackett-Luce order drawn proportional to x, the buildings at the floor after them as round_by_x
+takes them, cleared while they fit; each distinct candidate is scored in the eps world (`s1e-06`),
+the winner exactly. SIMP's path is unchanged -- only the incumbent sees more candidates -- so `.r<n>`
+cannot lose to its base plan beyond the eps-world pick (-0.000 below). Seed fixed (SAMPLE_SEED).
+First run on the uv env (cluster_submit Uv, cupy and pyamg from the lock); the base plan
+reproduced its earlier numbers to the 4th decimal.
+
+Sentinel, Lens A at D 0.05, J_2, uni (times: same session, same card types):
+
+    sentinel             22422   30848   5810    9712    time vs base
+    base .k1s1e-06       0.7766  0.6541  0.2584  0.1297  1.0
+    .r2                  0.7766  0.6757  0.2584  0.1297  2.1
+    .r4                  0.7766  0.6798  0.2584  0.1297  3.6
+    .k2s1e-06.r4         0.5476  0.6845  0.2584  0.1297  2.2   (.k2 alone: 22422 0.0115)
+    .r4.umma0.2          0.5506  0.6803  0.2583  0.1296  3.5   (MMA alone: 22422 0.1836)
+
+- Random roundings find better clearings than any iterate's top-x one on 30848 (+0.022 to +0.030).
+- They partly rescue the gate `.k2` and MMA lose on 22422 (0.01 -> 0.55, 0.18 -> 0.55), not to
+  0.78: still collapses by the screen's rule.
+- Survivor: `.r2` only (`.r4` is the best on 30848 but 3.6x the time, over the 3x rule).
+
+`.r2` on the 13 tuning blocks (simp_compare.py tuning):
+
+    r2 vs base [13]: median +0.000 [-0.000,+0.009]  mean +0.008  ahead 69%  worst -0.000  time x2.2
+
+    38616 +0.0384 (84 buildings changed)   1558 +0.0307 (49)   30848 +0.0216 (113)
+    20543 +0.0091 (16)   46841 +0.0077 (25)   the other 8 identical
+
+Gains on 5 of 13, three of them about the size of SIMP's whole lead over the greedy on the
+held-out blocks (median +0.021). The 8 unchanged blocks pay the 2.2x too. Held-out run (the 46):
+running.
