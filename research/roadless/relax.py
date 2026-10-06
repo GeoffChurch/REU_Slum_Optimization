@@ -498,7 +498,10 @@ class Plan(NamedTuple):
     `seed` (one only): that greedy picker's clearing within the budget offered to the incumbent
     before SIMP runs (`.g<picker>`: the polish starts from the better of the two); `track`
     (one only): that greedy's clearing polished as a second track, the better of the two
-    polished results kept (`.G<picker>`: a better start can polish to a worse end -- 5706);
+    polished results kept (`.G<picker>`: a better start can polish to a worse end -- 5706); with
+    `track_gate` >= 0 (`.G<picker>e<pct>`) the greedy's track is polished only if its unpolished
+    score is within that many percent of SIMP's polished one (replayed on the 13 and the 46, the
+    greedy track won only where its raw clearing was already ahead);
     `warm`
     > 0 (path only): each budget after the first starts from the last budget's x (the free
     buildings lifted to the uniform share) with `warm` updates per stage; `coarse` > 0 (one
@@ -530,6 +533,7 @@ class Plan(NamedTuple):
     starts: int = 0
     seed: str = ""
     track: str = ""
+    track_gate: float = -1.0
     update: Update = DEFAULT_UPDATE
 
     @property
@@ -550,6 +554,7 @@ class Plan(NamedTuple):
                 + (f".m{self.starts}" if self.starts > 1 else "")
                 + (f".g{self.seed}" if self.seed else "")
                 + (f".G{self.track}" if self.track else "")
+                + (f"e{self.track_gate:g}" if self.track and self.track_gate >= 0 else "")
                 + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
 
     @property
@@ -574,7 +579,7 @@ def plan_of(spec: str) -> Plan:
                      r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
                      r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?)?"
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
-                     r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?))?"
+                     r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
@@ -598,6 +603,7 @@ def plan_of(spec: str) -> Plan:
                 coarse=0.0 if g["c"] is None else float(g["c"]),
                 coarse_all=0.0 if g["C"] is None else float(g["C"]),
                 starts=0 if g["m"] is None else int(g["m"]), seed=g["g"] or "", track=g["G"] or "",
+                track_gate=-1.0 if g["Ge"] is None else float(g["Ge"]),
                 update=update)
 
 
@@ -829,7 +835,10 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     if plan.track:
         inc_g = Incumbent(rel, budget, 1, samples=0, sample_in=(), score_eps=plan.kscore)
         inc_g.consider(r_greedy, f"the greedy {plan.track}, the second track")
-        for everything in plan.polish_sets if plan.polish > 0 else ():
+        gated = plan.track_gate >= 0 and inc_g.J > inc.J * (1 + plan.track_gate / 100)
+        if gated:
+            log(f"  the greedy's track not polished: {inc_g.J:.6g} raw, SIMP {inc.J:.6g} polished")
+        for everything in plan.polish_sets if plan.polish > 0 and not gated else ():
             inc_g.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs, log=log)
         log(f"  tracks: SIMP {inc.J:.6g}, the greedy {inc_g.J:.6g}")
         if inc_g.J < inc.J:
