@@ -9,6 +9,25 @@ Baselines (NOTES.md, "Large blocks" and "Lens A at D 0.05"): greedy `S0.01cat` /
 uni conductance, Lens A at D 0.05 (`D_LENS`; owner 2026-10-03, 0.10 saturates under sightline),
 and Lens B from nested runs.
 
+## In flight (owner 2026-10-06: "leave no stone unturned. Every lead should be followed")
+
+Cluster runs (all D 0.05, J_2, uni, SIMP base `fw0.q3.i10.t0.001.e0.0001.k1s1e-06`):
+- `pl-p256` the 13: polish cap 256 (`.p256w8`; 64 was hit on 22422, 38616 while improving).
+- `c075` sentinel: coarse-to-fine at h 0.75 (`.c0.75`; `.c1` lost 30848's gate).
+- `gp-tune` the 13: greedy S0.01cat + polish over every building (polish_greedy.py, P64w8).
+- `pl-P64` the 13: SIMP's polish over every building (`.P64w8`) vs the undecided set.
+- `res-check` the 59: fixed clearings (SIMP, r2, p64, both, greedy) scored at h 0.5 / 0.75 / 1.0
+  (resolution_check.py): where coarse grids keep scores and order.
+- `ms-C1m4`, `ms-C075m2`, `ms-m2` the 13: multi-start, coarse (all stages at h) and fine, each
+  with the fine polish (`.p64w8.C1.m4`, `.p64w8.C0.75.m2`, `.p64w8.m2`).
+Local GPU: greedy + polish on the 46 held out (polish_greedy.py, sequential).
+
+Queued leads, in order: polish 2-for-1 moves and wider rounds (after pl-p256); greedy + polish
+on the 46 and its time against SIMP; per-block h from res-check (the over-1.4 km^2 blocks: owner's
+call, informed by it); the H100 for the four 100 -- 125M blocks (its 4 GPUs were taken
+2026-10-06); greedy screening width; the add/remove Strategy (floating search, the polish
+generalized); sequential stopping for screens.
+
 ## How we run experiments
 
 - **Tune on the 13, report on the 44.** The 13 tuning blocks (6 gated collapses, 1558, 6
