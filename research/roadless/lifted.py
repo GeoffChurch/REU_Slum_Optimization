@@ -801,6 +801,26 @@ class CpuAMG:
         return solve
 
 
+def aggregate_level(A) -> tuple[np.ndarray, int]:
+    """One level of pyamg's standard aggregation over A's (symmetric, theta 0) strength graph:
+    each node's aggregate and the aggregate count. An isolated node -- no off-diagonal entry, so
+    no strong neighbour -- is left in no aggregate by pyamg; it gets one of its own (decoupled,
+    it is solved exactly at the coarse level). First met on 53556 at h 0.5."""
+    from pyamg.aggregation.aggregate import standard_aggregation
+    from pyamg.strength import symmetric_strength_of_connection
+    Ag = sp.csr_matrix(standard_aggregation(symmetric_strength_of_connection(A, theta=0.0))[0])
+    counts = np.diff(Ag.indptr)
+    assert (counts <= 1).all(), "a node in two aggregates"
+    agg = np.empty(A.shape[0], dtype=np.int64)
+    agg[counts == 1] = Ag.indices
+    lone = np.flatnonzero(counts == 0)
+    if len(lone):
+        print(f"  AMG: {len(lone)} isolated unknown(s) of {A.shape[0]}, an aggregate each",
+              flush=True)
+        agg[lone] = Ag.shape[1] + np.arange(len(lone))
+    return agg, Ag.shape[1] + len(lone)
+
+
 @dataclass(frozen=True)
 class GpuAMG:
     """Flexible CG on the GPU preconditioned by an unsmoothed-aggregation K-cycle (Notay: each
@@ -886,16 +906,10 @@ class GpuAMG:
         """Per level, the master aggregate of each node (device), cached per grid."""
         key = "aggregates"
         if key not in co.cache:
-            from pyamg.aggregation.aggregate import standard_aggregation
-            from pyamg.strength import symmetric_strength_of_connection
             A = co.master().get().tocsr()
             aggs = []
             while A.shape[0] > 2000:
-                Ag = sp.csr_matrix(standard_aggregation(
-                    symmetric_strength_of_connection(A, theta=0.0))[0])
-                assert (np.diff(Ag.indptr) == 1).all(), "every node is aggregated"
-                agg = Ag.indices.astype(np.int64)
-                nc = Ag.shape[1]
+                agg, nc = aggregate_level(A)
                 co_ = A.tocoo()
                 A = sp.csr_matrix((co_.data, (agg[co_.row], agg[co_.col])), shape=(nc, nc))
                 aggs.append(self.xp.asarray(agg))
