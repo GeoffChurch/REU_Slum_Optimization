@@ -1207,3 +1207,15 @@ its extra time (the owner's call). Replayed on the held-out screens at tau 0.002
 
 At a 20-block minimum no replay mis-decides and the screens stop at about 20 of 46 blocks: a
 held-out confirmation can run in two halves, the second only if the first does not decide.
+
+### Polish cap 256, and coarse-to-fine at h 0.75 (2026-10-06)
+
+`.p256w8` on the 13 (same-session base pl-base): the cap of 64 bound only where the polish was
+still improving -- 38616 +0.0261 -> +0.0373 (13 moves, 112 scorings), 22422 +0.0039 -> +0.0043
+(10, 88); the other 11 stop by themselves, identical. Mean +0.0060 -> +0.0069, median time 1.19x
+-> 1.23x: the cap costs only where it pays. **`.p256w8` replaces `.p64w8` as the default.**
+
+`.c0.75` (every stage but the last at h 0.75) on the sentinel: 30848 -0.0009 (`.c1` lost its gate,
+-0.255), 9712 -0.0006, 22422 -0.0005, 5810 -0.0006, at 0.82 -- 0.90x the time. h 0.75 keeps the
+gate h 1.0 loses; a cheaper operating point at a small cost. Next: `.p256w8.c0.75` (does the
+polish recover it?) and the pair moves `.p256w8x2`, both on the 13.
