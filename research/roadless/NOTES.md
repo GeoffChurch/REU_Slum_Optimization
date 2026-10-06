@@ -1330,6 +1330,7 @@ Pairs on the held out, and pairs + seeding on the 13 (2026-10-06):
                  .pP256w8x2.gS0.01cat +0.0114  10/13  1.99x   (the two-phase adds nothing over pairs: dominated)
                  .pP256w8.gS0.01cat   +0.0111   8/13  1.42x
 
-**`.p256w8x2` is the new default**: above `.p256w8` on both sets (held out +0.004 against +0.003
-mean, never behind), for little more time. For hard blocks, pairs + the greedy; seeding can lose
+**`.p256w8x2` is the new default**: never below `.p256w8`, a little above on both sets -- the 13
++0.0028 mean; held out, paired with `.p256w8`, only +0.0002 mean (sum +0.009, largest 0.0026) --
+for little more time. For hard blocks, pairs + the greedy; seeding can lose
 (5706), so the two-track `.p256w8x2.GS0.01cat` is running on the 13 and the 46.
