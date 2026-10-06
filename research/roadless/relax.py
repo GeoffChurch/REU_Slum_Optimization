@@ -271,39 +271,76 @@ def round_sampled(x: np.ndarray, cost: np.ndarray, budget: float, rng: np.random
     return r
 
 
+# Pair moves draw from the PAIR_POOL most promising buildings to add and to close.
+PAIR_POOL = 64
+
+
+def _singles(g, ins, outs, cost, left):
+    """Add one (budget left permitting) or swap one in for one out: moves as rows (added,
+    added, closed, closed; -1 for none) and their linearized changes."""
+    ia, ib = np.meshgrid(ins, outs, indexing="ij")
+    none_s, none_p = np.full(len(ins), -1), np.full(ia.size, -1)
+    mv = np.concatenate([np.stack([ins, none_s, none_s, none_s]),
+                         np.stack([ia.ravel(), none_p, ib.ravel(), none_p])], axis=1)
+    est = np.concatenate([np.where(cost[ins] <= left, g[ins], np.inf),
+                          np.where(cost[ia] <= left + cost[ib], g[ia] - g[ib], np.inf).ravel()])
+    return mv, est
+
+
+def _pairs(g, ins, outs, cost, left):
+    """Two in for one out and one in for two out, among the PAIR_POOL buildings most promising
+    to add (most negative gradient) and cheapest to close."""
+    pin = ins[np.argsort(g[ins], kind="stable")[:PAIR_POOL]]
+    pout = outs[np.argsort(-g[outs], kind="stable")[:PAIR_POOL]]
+    i, j = np.triu_indices(len(pin), 1)
+    a1, a2, b = np.repeat(pin[i], len(pout)), np.repeat(pin[j], len(pout)), np.tile(pout, len(i))
+    k, m = np.triu_indices(len(pout), 1)
+    a, b1, b2 = np.repeat(pin, len(k)), np.tile(pout[k], len(pin)), np.tile(pout[m], len(pin))
+    mv = np.concatenate([np.stack([a1, a2, b, np.full(len(b), -1)]),
+                         np.stack([a, np.full(len(a), -1), b1, b2])], axis=1)
+    est = np.concatenate([
+        np.where(cost[a1] + cost[a2] <= left + cost[b], g[a1] + g[a2] - g[b], np.inf),
+        np.where(cost[a] <= left + cost[b1] + cost[b2], g[a] - g[b1] - g[b2], np.inf)])
+    return mv, est
+
+
 def exchange(score: Callable[[np.ndarray], float], grad: Callable[[np.ndarray], np.ndarray],
              J: float, r: np.ndarray, movable: np.ndarray, cost: np.ndarray, budget: float,
-             tries: int, width: int) -> tuple[float, np.ndarray, int, int]:
-    """Exchange refinement of the 0/1 clearing r (score J) over the buildings `movable`: each
-    round ranks every single move within them -- add one the budget left allows, or swap one in
-    for a cleared one -- by its linearized change from grad(r) (adding a: g_a; closing b: -g_b),
-    scores the best `width` and keeps the best of those if it improves. Stops when a round
-    improves nothing or `tries` scorings are spent. Returns (J, r, moves kept, scorings)."""
+             tries: int, width: int, pairs: bool) -> tuple[float, np.ndarray, int, int]:
+    """Exchange refinement of the 0/1 clearing r (score J) over the buildings `movable`. Each
+    round ranks the single moves within them -- add one the budget left allows, or swap one in
+    for a cleared one -- by their linearized change from grad(r) (adding a: g_a; closing b:
+    -g_b), scores the best `width` and keeps the best of those if it improves. With `pairs`, a
+    round whose singles improve nothing then tries the best `width` two-in-one-out and
+    one-in-two-out moves (_pairs; floating search's escalation: their summed estimates would
+    crowd the singles out of one ranking). Stops when a round improves nothing or `tries`
+    scorings are spent. Returns (J, r, moves kept, scorings)."""
     used = moves = 0
     while used < tries:
         g = grad(r)
         left = budget + 1e-12 - float(cost @ r)
         ins, outs = movable[r[movable] == 0], movable[r[movable] > 0]
-        est = np.concatenate([
-            np.where(cost[ins] <= left, g[ins], np.inf),
-            np.where(cost[ins][:, None] <= left + cost[outs][None, :],
-                     g[ins][:, None] - g[outs][None, :], np.inf).ravel()])
-        k = min(width, tries - used, int(np.isfinite(est).sum()))
-        if k == 0:
-            break
-        top = np.argpartition(est, k - 1)[:k]
         best = None
-        for i in top[np.argsort(est[top])]:
-            rn = r.copy()
-            if i < len(ins):
-                rn[ins[i]] = 1.0
-            else:
-                a, b = divmod(int(i) - len(ins), len(outs))
-                rn[ins[a]], rn[outs[b]] = 1.0, 0.0
-            used += 1
-            Jn = score(rn)
-            if Jn < J and (best is None or Jn < best[0]):
-                best = (Jn, rn)
+        for kind in (_singles, _pairs) if pairs else (_singles,):
+            mv, e = kind(g, ins, outs, cost, left)
+            k = min(width, tries - used, int(np.isfinite(e).sum()))
+            if k == 0:
+                continue
+            top = np.argpartition(e, k - 1)[:k]
+            for m in top[np.argsort(e[top])]:
+                rn = r.copy()
+                for x in mv[:2, m]:
+                    if x >= 0:
+                        rn[x] = 1.0
+                for x in mv[2:, m]:
+                    if x >= 0:
+                        rn[x] = 0.0
+                used += 1
+                Jn = score(rn)
+                if Jn < J and (best is None or Jn < best[0]):
+                    best = (Jn, rn)
+            if best is not None:
+                break
         if best is None:
             break
         J, r = best
@@ -444,7 +481,7 @@ class Plan(NamedTuple):
     distinct candidate scored, in every stage or (`late` > 0) only the last `late`; `polish`
     > 0: then exchange refinement on the undecided buildings (Incumbent.polish), `polish`
     scorings at most, the best `pwidth` ranked moves scored per round, over every building
-    if `polish_all` (`.P`); `warm`
+    if `polish_all` (`.P`), with two-for-one moves if `polish_pairs` (`x2`); `warm`
     > 0 (path only): each budget after the first starts from the last budget's x (the free
     buildings lifted to the uniform share) with `warm` updates per stage; `coarse` > 0 (one
     only): every stage but the last on a grid of that spacing (h 1.0: 4x fewer unknowns), the
@@ -468,6 +505,7 @@ class Plan(NamedTuple):
     polish: int = 0
     pwidth: int = 0
     polish_all: bool = False
+    polish_pairs: bool = False
     warm: int = 0
     coarse: float = 0.0
     coarse_all: float = 0.0
@@ -484,7 +522,7 @@ class Plan(NamedTuple):
                 + (f".r{self.samples}" if self.samples > 0 else "")
                 + (f"l{self.late}" if self.late > 0 else "")
                 + (f".{'P' if self.polish_all else 'p'}{self.polish}w{self.pwidth}"
-                   if self.polish > 0 else "")
+                   + ("x2" if self.polish_pairs else "") if self.polish > 0 else "")
                 + (f".w{self.warm}" if self.warm > 0 else "")
                 + (f".c{self.coarse:g}" if self.coarse > 0 else "")
                 + (f".C{self.coarse_all:g}" if self.coarse_all > 0 else "")
@@ -511,7 +549,7 @@ def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)\.t(?P<t>[0-9.e-]+?)"
                      r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
                      r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
-                     r"(?:\.(?P<pset>[pP])(?P<p>\d+)w(?P<pw>\d+))?"
+                     r"(?:\.(?P<pset>[pP])(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?)?"
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?", spec)
     if m is None:
@@ -530,7 +568,7 @@ def plan_of(spec: str) -> Plan:
                 late=0 if g["rl"] is None else int(g["rl"]),
                 polish=0 if g["p"] is None else int(g["p"]),
                 pwidth=0 if g["pw"] is None else int(g["pw"]),
-                polish_all=g["pset"] == "P",
+                polish_all=g["pset"] == "P", polish_pairs=g["px"] is not None,
                 warm=0 if g["w"] is None else int(g["w"]),
                 coarse=0.0 if g["c"] is None else float(g["c"]),
                 coarse_all=0.0 if g["C"] is None else float(g["C"]),
@@ -600,7 +638,7 @@ class Incumbent:
         if self.n % self.every == 0:
             self.offer(x, stage)
 
-    def polish(self, x: np.ndarray, tries: int, width: int, everything: bool,
+    def polish(self, x: np.ndarray, tries: int, width: int, everything: bool, pairs: bool,
                log=print) -> None:
         """Exchange refinement of the incumbent (`exchange`) over every building if `everything`,
         else over the undecided ones: grey in the final iterate x, or where the incumbent and x's
@@ -618,7 +656,7 @@ class Incumbent:
         J0 = self.J
         self.J, self.r, moves, used = exchange(
             self._score, lambda r: self.scorer.value_sgrad(r)[1], self.J, self.r, movable,
-            cost, self.budget, tries, width)
+            cost, self.budget, tries, width, pairs)
         log(f"  polish: {len(movable)} {'buildings' if everything else 'undecided buildings'}, "
             f"{moves} moves kept, {used} scorings, J {J0:.6g} -> {self.J:.6g}")
 
@@ -744,7 +782,7 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
             if k == 0 or inc.J < J_before:
                 xs = xk
     if plan.polish > 0:
-        inc.polish(xs, plan.polish, plan.pwidth, plan.polish_all, log=log)
+        inc.polish(xs, plan.polish, plan.pwidth, plan.polish_all, plan.polish_pairs, log=log)
     Jbest, rs = inc.best()
     out.update(simp_perm=rel.perm(Jbest), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
