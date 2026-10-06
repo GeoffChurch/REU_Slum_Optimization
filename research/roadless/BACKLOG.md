@@ -27,8 +27,8 @@ instead); greedy screening width `S0.01catw4` (+0.0006, marginal); pairs after t
 marginal); resolution (res-check: h 0.75 within 0.01 on 35 of 59, h 1.0 understates gated blocks by
 up to 0.31); sequential stopping (seqscreen.py: ~20 of 46 blocks decide, at the owner's tau).
 
-Running: `t-x2gate2` (the gated hard-block preset with the greedy's unused scoring skipped, for its
-time), `t-all` (does late sampling add on top of it?), `t-w16` (wider polish rounds).
+Also closed: wider polish rounds (w16 = w8 at 1.28x) and late sampling on top of the hard-block
+preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x -> 1.21x).
 
 Open:
 - **H100** for the four 100 -- 125M blocks (19593, 53556, 6498, 45267): its 4 GPUs taken all day.

@@ -1357,3 +1357,8 @@ sampling add on top?) and `.p256w16x2` (wider polish rounds).
 
 With the greedy's unused per-step scoring skipped (t-x2gate2): the same scores on all 13, the
 greedy's median 41 s -> 26 s, the hard-block preset 1.30x -> 1.21x the default `.p256w8x2`.
+
+The last parameters, the 13 (t-w16, t-all): wider polish rounds `.p256w16x2` equal `.p256w8x2` on
+the mean (+0.0097; ahead on 2, behind on 3) at 1.28x its time; late sampling on top of the
+hard-block preset `.r2l2.p256w8x2.GS0.01cate1` +0.0120 against +0.0119 (30848, 38616 up; 1558,
+20543, 46841 down -- sampling moves the incumbent the polish starts from) at 1.33x. Both dominated.
