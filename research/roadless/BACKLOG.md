@@ -31,8 +31,9 @@ Also closed: wider polish rounds (w16 = w8 at 1.28x) and late sampling on top of
 preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x -> 1.21x).
 
 Open:
-- **H100** for the four 100 -- 125M blocks (19593, 53556, 6498, 45267): its 4 GPUs taken all day.
-- **Owner's call, the over-1.4 km^2 blocks** (16 need a coarser grid or a crop): res-check says Lens
+- **H100**: 19593, 53556, 6498 queued for it (run big3, the default `.p256w8x2`; its 4 GPUs
+  taken all of 2026-10-06). 45267 is estimated at 86.6 GB, past any card: it joins the blocks below.
+- **Owner's call, the over-1.4 km^2 blocks** (17 with 45267 need a coarser grid or a crop): res-check says Lens
   A at h 0.75 reads ~0.005 low on average, up to ~0.08 low on gated blocks; h 1.0 up to 0.31 low.
 - **The owner's tau** for sequential stopping (the smallest mean gain worth a variant's time).
 
