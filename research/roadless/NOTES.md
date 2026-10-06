@@ -1219,3 +1219,29 @@ still improving -- 38616 +0.0261 -> +0.0373 (13 moves, 112 scorings), 22422 +0.0
 -0.255), 9712 -0.0006, 22422 -0.0005, 5810 -0.0006, at 0.82 -- 0.90x the time. h 0.75 keeps the
 gate h 1.0 loses; a cheaper operating point at a small cost. Next: `.p256w8.c0.75` (does the
 polish recover it?) and the pair moves `.p256w8x2`, both on the 13.
+
+### Greedy + polish, the every-building polish, and the methods' portfolio (2026-10-06)
+
+polish_greedy.py: S0.01cat to D 0.05, its clearing within the budget, then the polish over every
+building (P64w8). SIMP `.P64w8`: SIMP's polish over every building instead of the undecided set.
+On the 13, against SIMP base (same session, pl-base):
+
+    method                    mean vs SIMP  ahead  median time
+    greedy (own clearing)     -0.0129       4/13   0.40x
+    greedy + polish           -0.0039       4/13   0.81x
+    SIMP .p256w8              +0.0069       7/13   1.23x
+    SIMP .P64w8 (every bldg)  +0.0068       7/13   1.21x
+
+- The polish closes ~70% of the greedy's gap (23597: -0.092 -> -0.008), still cheaper than SIMP.
+- On the gated blocks the greedy beats SIMP outright: 1558 +0.049, 38616 +0.040, 30848 +0.018.
+- The two polishes win on different blocks: every building 1558 +0.052, 20543 +0.014, 46841 +0.014;
+  the undecided set 38616 +0.037 (every building +0.003).
+- Per-block best (a portfolio): greedy+polish or p256 +0.0095; p256 or P64 +0.0096; all three
+  +0.0113. Built to collect it in one run: greedy-seeded SIMP (`.g<picker>`: the greedy's
+  clearing offered to SIMP's incumbent, the polish from the better) and the two-phase polish
+  (`.pP`); queued on the 13.
+
+Held out (the 46; greedy + polish ran on the local RTX 6000 Ada, so its times are not the
+cluster's): greedy + polish vs SIMP base median -0.013 [-0.018,-0.008], mean -0.015, ahead 7%; the
+polish over the greedy's own clearing +0.0031 mean, ahead 65%, ~40% of its time. On typical blocks
+SIMP keeps its lead; greedy + polish is the cheap point of the frontier, not SIMP's replacement.
