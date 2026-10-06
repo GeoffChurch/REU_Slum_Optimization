@@ -25,7 +25,7 @@ like any picker.
 
 plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>.t<solve
 tolerance while optimizing>, e.g. fw40.q3.i20.t1e-05 (the first 220 runs) or fw0.q5.i10.t0.001;
-the optional suffixes are Plan's (.e .b .k[s] .r .w .c .u).
+the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .c .u).
 """
 from __future__ import annotations
 
@@ -390,7 +390,9 @@ class Plan(NamedTuple):
     last iterate's); `kscore` > 0 scores the candidates in the eps world at that eps (the
     relaxation's cached structure: no new system per candidate), the winner exactly; `samples`
     > 0: each offered iterate is also rounded that many times at random (round_sampled), every
-    distinct candidate scored; `warm`
+    distinct candidate scored, in every stage or (`late` > 0) only the last `late`; `polish`
+    > 0: then exchange refinement on the undecided buildings (Incumbent.polish), `polish`
+    scorings at most, the best `pwidth` ranked moves scored per round; `warm`
     > 0 (path only): each budget after the first starts from the last budget's x (the free
     buildings lifted to the uniform share) with `warm` updates per stage; `coarse` > 0 (one
     only): every stage but the last on a grid of that spacing (h 1.0: 4x fewer unknowns), the
@@ -407,6 +409,9 @@ class Plan(NamedTuple):
     keep: int = 0
     kscore: float = 0.0
     samples: int = 0
+    late: int = 0
+    polish: int = 0
+    pwidth: int = 0
     warm: int = 0
     coarse: float = 0.0
     update: Update = DEFAULT_UPDATE
@@ -419,6 +424,8 @@ class Plan(NamedTuple):
                 + (f".k{self.keep}" if self.keep > 0 else "")
                 + (f"s{self.kscore:g}" if self.kscore > 0 else "")
                 + (f".r{self.samples}" if self.samples > 0 else "")
+                + (f"l{self.late}" if self.late > 0 else "")
+                + (f".p{self.polish}w{self.pwidth}" if self.polish > 0 else "")
                 + (f".w{self.warm}" if self.warm > 0 else "")
                 + (f".c{self.coarse:g}" if self.coarse > 0 else "")
                 + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
@@ -442,7 +449,8 @@ class Plan(NamedTuple):
 def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)\.t(?P<t>[0-9.e-]+?)"
                      r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
-                     r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+))?"
+                     r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
+                     r"(?:\.p(?P<p>\d+)w(?P<pw>\d+))?"
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?", spec)
     if m is None:
@@ -458,6 +466,9 @@ def plan_of(spec: str) -> Plan:
                 keep=0 if g["k"] is None else int(g["k"]),
                 kscore=0.0 if g["ks"] is None else float(g["ks"]),
                 samples=0 if g["r"] is None else int(g["r"]),
+                late=0 if g["rl"] is None else int(g["rl"]),
+                polish=0 if g["p"] is None else int(g["p"]),
+                pwidth=0 if g["pw"] is None else int(g["pw"]),
                 warm=0 if g["w"] is None else int(g["w"]),
                 coarse=0.0 if g["c"] is None else float(g["c"]), update=update)
 
@@ -469,10 +480,13 @@ class Incumbent:
     substitutes, flipping between x 0.3 and 0.5 until the continuation drops them (NOTES)."""
 
     def __init__(self, rel: Relaxation, budget: float, every: int, *, samples: int,
+                 sample_in: tuple[tuple[float, float], ...],
                  first: np.ndarray | None = None, score_eps: float = 0.0):
         self.rel, self.budget, self.every, self.first = rel, budget, every, first
-        # samples > 0: each offered iterate is also rounded that many times at random
-        self.samples, self.rng = samples, np.random.default_rng(SAMPLE_SEED)
+        # samples > 0: each offered iterate of a stage in `sample_in` ((q, beta)) is also
+        # rounded that many times at random
+        self.samples, self.sample_in = samples, sample_in
+        self.rng = np.random.default_rng(SAMPLE_SEED)
         # score_eps > 0: candidates scored in the eps world at score_eps under the METRIC
         # conductance (rel may optimize under a search one), q 1, no projection
         self.scorer = (Relaxation(rel.c, rel.power, q=1.0, rtol=rel.rtol, eps=score_eps,
@@ -484,12 +498,13 @@ class Incumbent:
     def _score(self, r: np.ndarray) -> float:
         return self.rel.exact(r) if self.scorer is None else self.scorer.value(r)
 
-    def offer(self, x: np.ndarray) -> None:
+    def offer(self, x: np.ndarray, stage: tuple[float, float]) -> None:
         cost = self.rel.c.cost
         grey = float(np.mean((x > 0.05) & (x < 0.95)))
+        n = self.samples if stage in self.sample_in else 0
         for k, r in enumerate([round_by_x(x, cost, self.budget, first=self.first),
                                *(round_sampled(x, cost, self.budget, self.rng, first=self.first)
-                                 for _ in range(self.samples))]):
+                                 for _ in range(n))]):
             key = np.packbits(r > 0).tobytes()
             if key in self._seen:
                 continue
@@ -505,10 +520,55 @@ class Incumbent:
         """(exact J, clearing) of the best candidate."""
         return (self.J if self.scorer is None else self.rel.exact(self.r)), self.r
 
-    def __call__(self, x: np.ndarray) -> None:
+    def __call__(self, x: np.ndarray, stage: tuple[float, float]) -> None:
         self.n += 1
         if self.n % self.every == 0:
-            self.offer(x)
+            self.offer(x, stage)
+
+    def polish(self, x: np.ndarray, tries: int, width: int, log=print) -> None:
+        """Exchange refinement of the incumbent on the undecided buildings: those grey in the
+        final iterate x, and those where the incumbent and x's top-x rounding disagree (late
+        samples flip them; NOTES "Where .r2's winners come from"). Each round ranks every single
+        move -- add a building the budget left allows, or swap one in for a cleared one, both
+        within the set -- by its linearized change, from the gradient at the 0/1 incumbent in the
+        scorer's eps world (the greedy's tension); scores the best `width` and keeps the best of
+        those if it improves. Stops when a round improves nothing or `tries` scorings are spent."""
+        if self.scorer is None:
+            raise ValueError("polish ranks with the eps-world scorer: give the plan .k<n>s<eps>")
+        cost = self.rel.c.cost
+        und = np.flatnonzero(((x > 0.05) & (x < 0.95))
+                             | ((round_by_x(x, cost, self.budget, first=self.first) > 0)
+                                != (self.r > 0)))
+        J0, used, moves = self.J, 0, 0
+        while used < tries:
+            r = self.r
+            _, g = self.scorer.value_sgrad(r)
+            left = self.budget + 1e-12 - float(cost @ r)
+            free = und if self.first is None else und[self.first[und] == 0]   # held stay held
+            ins, outs = free[r[free] == 0], free[r[free] > 0]
+            cands: list[tuple[float, int, int]] = [(g[a], a, -1) for a in ins if cost[a] <= left]
+            if len(ins) and len(outs):
+                dg = g[ins][:, None] - g[outs][None, :]               # add a, close b
+                fits = cost[ins][:, None] <= left + cost[outs][None, :]
+                ia, ib = np.nonzero(fits)
+                cands += [(dg[i, j], ins[i], outs[j]) for i, j in zip(ia, ib)]
+            cands.sort(key=lambda t: t[0])
+            best = None
+            for _, a, b in cands[:min(width, tries - used)]:
+                rn = r.copy()
+                rn[a] = 1.0
+                if b >= 0:
+                    rn[b] = 0.0
+                used += 1
+                Jn = self._score(rn)
+                if Jn < self.J and (best is None or Jn < best[0]):
+                    best = (Jn, rn)
+            if best is None:
+                break
+            self.J, self.r = best
+            moves += 1
+        log(f"  polish: {len(und)} undecided buildings, {moves} moves kept, {used} scorings, "
+            f"J {J0:.6g} -> {self.J:.6g}")
 
 
 def simp(rel: Relaxation, x0: np.ndarray, budget: float,
@@ -518,7 +578,7 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
     (classic OC: x <- clip(x (-g / (lam c H'(x)))^1/2) within 0.2 of x) within [xlo (default
     XMIN), 1], lam bisected so that c . H(x) = budget (H = rel.proj; H' cancels the one in g, so
     the ratio is the sensitivity to the projected clearing per unit cost). Non-convex: a local
-    method. `watch(x)`, if given, sees every iterate."""
+    method. `watch(x, (q, beta))`, if given, sees every iterate and its stage."""
     cost = rel.c.cost
     lo_ = np.full(len(cost), XMIN) if xlo is None else xlo
     x = np.clip(x0, lo_, 1.0)
@@ -545,7 +605,7 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
             change = float(np.abs(xn - x).max())
             x = xn
             if watch is not None:
-                watch(x)
+                watch(x, (q, beta))
             if it % 5 == 0 or change < 1e-3:
                 sx = rel.proj(x)
                 log(f"    simp q {q:g} beta {beta:g} it {it:2d} J {J:.6g} grey "
@@ -588,6 +648,7 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     else:
         x = np.full(c.n, budget)
     inc = Incumbent(rel, budget, max(plan.keep, 1), samples=plan.samples,
+                    sample_in=plan.stages[-plan.late:] if plan.late > 0 else plan.stages,
                     score_eps=plan.kscore)
     watch = inc if plan.keep > 0 else None
     stages = plan.stages
@@ -600,7 +661,9 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
         del rel_c
         stages = stages[-1:]
     xs = simp(rel, x, budget, stages, plan.iters, plan.update, log=log, watch=watch)
-    inc.offer(xs)                                         # the last iterate's rounding
+    inc.offer(xs, plan.stages[-1])                        # the last iterate's rounding
+    if plan.polish > 0:
+        inc.polish(xs, plan.polish, plan.pwidth, log=log)
     Jbest, rs = inc.best()
     out.update(simp_perm=rel.perm(Jbest), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
@@ -626,8 +689,8 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     rest start from the last x lifted to at least that even share (so none is trapped at
     XMIN), and each stage gets plan.warm updates. Rows in the greedy's format: `cleared` = the
     buildings new at this step."""
-    if plan.coarse > 0:
-        raise ValueError(f"coarse-to-fine is not built for path: {plan.name}")
+    if plan.coarse > 0 or plan.polish > 0:
+        raise ValueError(f"coarse-to-fine and polish are not built for path: {plan.name}")
     c = _clearing(bid, device, along)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     J0, P0 = rel.J0, c.sc.P0
@@ -642,11 +705,12 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
         warm = plan.warm > 0 and i > 0
         x = np.where(fixed, 1.0, np.maximum(x, even) if warm else even)
         inc = Incumbent(rel, D, max(plan.keep, 1), samples=plan.samples,
+                        sample_in=plan.stages[-plan.late:] if plan.late > 0 else plan.stages,
                         first=fixed.astype(float), score_eps=plan.kscore)
         x = simp(rel, x, D, plan.stages, plan.warm if warm else plan.iters, plan.update,
                  log=lambda s: None,
                  xlo=np.where(fixed, 1.0, XMIN), watch=inc if plan.keep > 0 else None)
-        inc.offer(x)
+        inc.offer(x, plan.stages[-1])
         r = inc.r > 0
         assert r[fixed].all()
         new = np.flatnonzero(r & ~fixed)
