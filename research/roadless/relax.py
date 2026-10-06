@@ -233,6 +233,17 @@ def round_by_x(x: np.ndarray, cost: np.ndarray, budget: float,
 
 # The randomized roundings' generator seed: fixed, part of the method a plan's `.r<n>` names.
 SAMPLE_SEED = 0
+# Multi-start's: start s > 0 draws from START_SEED + s (`.m<k>`).
+START_SEED = 1000
+
+
+def start_x(s: int, cost: np.ndarray, budget: float) -> np.ndarray:
+    """SIMP's start s: s 0 the uniform x = D (cost . x = D, the costs summing to 1); s > 0
+    exponential weights scaled onto the budget, seeded (START_SEED + s)."""
+    if s == 0:
+        return np.full(len(cost), budget)
+    w = np.random.default_rng(START_SEED + s).exponential(size=len(cost))
+    return budget * w / float(cost @ w)
 
 
 def round_sampled(x: np.ndarray, cost: np.ndarray, budget: float, rng: np.random.Generator,
@@ -438,7 +449,10 @@ class Plan(NamedTuple):
     buildings lifted to the uniform share) with `warm` updates per stage; `coarse` > 0 (one
     only): every stage but the last on a grid of that spacing (h 1.0: 4x fewer unknowns), the
     last at h 0.5 from its x (buildings, their costs and x do not depend on h), the incumbent
-    scoring at h 0.5 throughout; `update` the design update rule (`.u<name>`; OC's classic rule
+    scoring at h 0.5 throughout; `coarse_all` > 0 (one only): every stage on that grid, each
+    start's incumbent scored there and only its winner at h 0.5; `starts` > 1 (one only): that
+    many SIMP runs (start_x), one incumbent over all of them (coarse_all: over their winners);
+    `update` the design update rule (`.u<name>`; OC's classic rule
     is not named)."""
     fw: int
     qmax: float
@@ -456,6 +470,8 @@ class Plan(NamedTuple):
     polish_all: bool = False
     warm: int = 0
     coarse: float = 0.0
+    coarse_all: float = 0.0
+    starts: int = 0
     update: Update = DEFAULT_UPDATE
 
     @property
@@ -471,6 +487,8 @@ class Plan(NamedTuple):
                    if self.polish > 0 else "")
                 + (f".w{self.warm}" if self.warm > 0 else "")
                 + (f".c{self.coarse:g}" if self.coarse > 0 else "")
+                + (f".C{self.coarse_all:g}" if self.coarse_all > 0 else "")
+                + (f".m{self.starts}" if self.starts > 1 else "")
                 + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
 
     @property
@@ -494,7 +512,7 @@ def plan_of(spec: str) -> Plan:
                      r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
                      r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
                      r"(?:\.(?P<pset>[pP])(?P<p>\d+)w(?P<pw>\d+))?"
-                     r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?"
+                     r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
@@ -514,7 +532,9 @@ def plan_of(spec: str) -> Plan:
                 pwidth=0 if g["pw"] is None else int(g["pw"]),
                 polish_all=g["pset"] == "P",
                 warm=0 if g["w"] is None else int(g["w"]),
-                coarse=0.0 if g["c"] is None else float(g["c"]), update=update)
+                coarse=0.0 if g["c"] is None else float(g["c"]),
+                coarse_all=0.0 if g["C"] is None else float(g["C"]),
+                starts=0 if g["m"] is None else int(g["m"]), update=update)
 
 
 class Incumbent:
@@ -559,6 +579,17 @@ class Incumbent:
                 # where the incumbent comes from: which kept iterate, which rounding
                 print(f"  incumbent J {J:.6g} from iterate {self.n} "
                       f"({'top-x' if k == 0 else f'sample {k}'}, grey {grey:.3f})", flush=True)
+
+    def consider(self, r: np.ndarray, label: str) -> None:
+        """A 0/1 candidate from outside this incumbent's iterates (a coarse start's winner)."""
+        key = np.packbits(r > 0).tobytes()
+        if key in self._seen:
+            return
+        self._seen.add(key)
+        J = self._score(r)
+        if J < self.J:
+            self.J, self.r = J, r
+            print(f"  incumbent J {J:.6g} from {label}", flush=True)
 
     def best(self) -> tuple[float, np.ndarray]:
         """(exact J, clearing) of the best candidate."""
@@ -667,22 +698,51 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
                    frac_cost=float(c.cost[frac].sum()), cleared=np.flatnonzero(r).tolist(),
                    x=x.tolist())
     else:
-        x = np.full(c.n, budget)
-    inc = Incumbent(rel, budget, max(plan.keep, 1), samples=plan.samples,
-                    sample_in=plan.stages[-plan.late:] if plan.late > 0 else plan.stages,
+        x = start_x(0, c.cost, budget)
+    starts = max(plan.starts, 1)
+    if starts > 1 and (plan.fw > 0 or plan.coarse > 0):
+        raise ValueError(f"multi-start is built for fw0 and without .c: {plan.name}")
+    if plan.coarse_all > 0 and (plan.coarse > 0 or plan.fw > 0):
+        raise ValueError(f".C is built for fw0 and without .c: {plan.name}")
+    sample_in = plan.stages[-plan.late:] if plan.late > 0 else plan.stages
+    inc = Incumbent(rel, budget, max(plan.keep, 1), samples=plan.samples, sample_in=sample_in,
                     score_eps=plan.kscore)
     watch = inc if plan.keep > 0 else None
-    stages = plan.stages
-    if plan.coarse > 0:
-        rel_c = Relaxation(_clearing(bid, device, along, plan.coarse), power, rtol=plan.rtol,
-                           eps=plan.eps)
-        log(f"  coarse h {plan.coarse:g}: {rel_c.c.sc.grid.inside.sum()} cells, fine "
-            f"{c.sc.grid.inside.sum()}")
-        x = simp(rel_c, x, budget, stages[:-1], plan.iters, plan.update, log=log, watch=watch)
+    xs = x
+    if plan.coarse_all > 0:
+        rel_c = Relaxation(_clearing(bid, device, along, plan.coarse_all), power,
+                           rtol=plan.rtol, eps=plan.eps)
+        log(f"  all stages at h {plan.coarse_all:g}: {rel_c.c.sc.grid.inside.sum()} cells, "
+            f"fine {c.sc.grid.inside.sum()}; {starts} start(s)")
+        for k in range(starts):
+            inc_c = Incumbent(rel_c, budget, max(plan.keep, 1), samples=plan.samples,
+                              sample_in=sample_in, score_eps=plan.kscore)
+            xk = simp(rel_c, start_x(k, c.cost, budget), budget, plan.stages, plan.iters,
+                      plan.update, log=log, watch=inc_c if plan.keep > 0 else None)
+            inc_c.offer(xk, plan.stages[-1])
+            J_before = inc.J
+            inc.consider(inc_c.r, f"start {k}'s winner at h {plan.coarse_all:g}")
+            if inc.J < J_before:
+                xs = xk                                   # the polish's undecided set from it
         del rel_c
-        stages = stages[-1:]
-    xs = simp(rel, x, budget, stages, plan.iters, plan.update, log=log, watch=watch)
-    inc.offer(xs, plan.stages[-1])                        # the last iterate's rounding
+    else:
+        for k in range(starts):
+            xk = x if k == 0 else start_x(k, c.cost, budget)
+            stages = plan.stages
+            if plan.coarse > 0:
+                rel_c = Relaxation(_clearing(bid, device, along, plan.coarse), power,
+                                   rtol=plan.rtol, eps=plan.eps)
+                log(f"  coarse h {plan.coarse:g}: {rel_c.c.sc.grid.inside.sum()} cells, fine "
+                    f"{c.sc.grid.inside.sum()}")
+                xk = simp(rel_c, xk, budget, stages[:-1], plan.iters, plan.update, log=log,
+                          watch=watch)
+                del rel_c
+                stages = stages[-1:]
+            J_before = inc.J
+            xk = simp(rel, xk, budget, stages, plan.iters, plan.update, log=log, watch=watch)
+            inc.offer(xk, plan.stages[-1])                # the last iterate's rounding
+            if k == 0 or inc.J < J_before:
+                xs = xk
     if plan.polish > 0:
         inc.polish(xs, plan.polish, plan.pwidth, plan.polish_all, log=log)
     Jbest, rs = inc.best()
@@ -710,8 +770,9 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     rest start from the last x lifted to at least that even share (so none is trapped at
     XMIN), and each stage gets plan.warm updates. Rows in the greedy's format: `cleared` = the
     buildings new at this step."""
-    if plan.coarse > 0 or plan.polish > 0:
-        raise ValueError(f"coarse-to-fine and polish are not built for path: {plan.name}")
+    if plan.coarse > 0 or plan.polish > 0 or plan.coarse_all > 0 or plan.starts > 1:
+        raise ValueError(f"coarse grids, polish and multi-start are not built for path: "
+                         f"{plan.name}")
     c = _clearing(bid, device, along)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     J0, P0 = rel.J0, c.sc.P0
