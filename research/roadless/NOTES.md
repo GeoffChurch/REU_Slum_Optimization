@@ -1190,3 +1190,20 @@ sampling moves the incumbent the polish starts from). Presets: `.p64w8` the new 
 (+0.003 mean, never behind, 1.3x), `.r2l2.p64w8` for hard blocks (best on the 13, +0.0106).
 `.r2` (every stage) is beaten by `.r2l2` on time at equal quality on the 13 and by the polish on
 the 46; it is one parameter value of `.r`, nothing to delete.
+
+### Sequential stopping replayed (BACKLOG "Sequential stopping", 2026-10-06)
+
+seqscreen.py: the posterior on a screen's mean paired difference after each block (seeded random
+orders), by the Bayesian bootstrap -- the differences are mostly exact zeros (the variant left the
+clearing alone) plus a skewed tail; a parametric Student-t pinned the mean at 0 and called the
+never-behind `.r2` behind after 3 blocks. For a variant that cannot score below its base the
+question is not "> 0" (the first positive block settles it) but "> tau", the smallest gain worth
+its extra time (the owner's call). Replayed on the held-out screens at tau 0.002, 20 orders each:
+
+    minimum  r2 (+0.0009)                 p64 (+0.0033)                both (+0.0029)
+    10       median 12 blocks, right      median 10, 2 of 20 wrong     median 17, 2 wrong
+    15       median 15, right             median 15, 1 wrong           median 20, right
+    20       median 20, right             median 20, right             median 21, right
+
+At a 20-block minimum no replay mis-decides and the screens stop at about 20 of 46 blocks: a
+held-out confirmation can run in two halves, the second only if the first does not decide.
