@@ -1321,3 +1321,15 @@ Held out (the 46, local): `.pP256w8.gS0.01cat` vs `.p256w8` mean -0.000, ahead 9
 greedy's clearing scored better than SIMP's incumbent before the polish, became the start, and
 polished to a worse end (SIMP's incumbent polishes +0.0196 there). Hence `.G<picker>`: both
 polished, the better kept. `.p256w8x2.GS0.01cat` on the 13 (cluster) and the 46 (local).
+
+Pairs on the held out, and pairs + seeding on the 13 (2026-10-06):
+
+    the 46       .p256w8x2 vs base: median +0.002 [+0.001,+0.004]  mean +0.004  ahead 89%  worst +0.000  time x1.4
+    the 13       .p256w8x2         +0.0097  10/13  1.26x
+                 .p256w8x2.gS0.01cat  +0.0114  10/13  1.59x   (pairs' 22422, 46841, 9717 + the greedy's 30848, 38616)
+                 .pP256w8x2.gS0.01cat +0.0114  10/13  1.99x   (the two-phase adds nothing over pairs: dominated)
+                 .pP256w8.gS0.01cat   +0.0111   8/13  1.42x
+
+**`.p256w8x2` is the new default**: above `.p256w8` on both sets (held out +0.004 against +0.003
+mean, never behind), for little more time. For hard blocks, pairs + the greedy; seeding can lose
+(5706), so the two-track `.p256w8x2.GS0.01cat` is running on the 13 and the 46.
