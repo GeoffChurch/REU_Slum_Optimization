@@ -1285,3 +1285,9 @@ now released before the fine finish.) Fine two-start `.m2`: running.
 Fine two-start `.p64w8.m2` on the 13: identical to one start on 12 (the seeded random start never
 beat the uniform one), 46841 +0.0015 instead of +0.0030, at 2.12x instead of 1.19x. SIMP from the
 uniform start is robust here; extra starts, fine or coarse, are dominated.
+
+Polish pair moves (`x2`) after the greedy, the 46 held out (local): P256w8x2 vs P64w8 mean +0.0005,
+median 0, ahead 30%, never behind (largest 43708 +0.0056, 41673 +0.0051); over the greedy's own
+clearing +0.0036 against +0.0031; the polish's median time 14 s against 9 s (28 scorings against
+16). Cap and pairs together; on typical blocks the cap rarely binds. A marginal point: a little
+more for ~1.5x the polish. SIMP's `.p256w8x2` on the 13: queued.
