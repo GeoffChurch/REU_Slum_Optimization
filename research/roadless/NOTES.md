@@ -1140,3 +1140,38 @@ undecided buildings than a reordering does -- the gate and its substitutes sit i
 - **polish the undecided set**: from the incumbent, swap each still-grey building in or out,
   scored exactly (50 -- 100 solves, a few updates' worth) -- a targeted case of the add/remove
   search (BACKLOG).
+
+### Late sampling `.r2l2` and the undecided-set polish `.p64w8` (owner: "Yes", 2026-10-05)
+
+Built from where `.r2`'s winners came from. `.r<n>l<L>`: the random roundings only in the last L
+stages. `.p<tries>w<width>`: after SIMP, exchange refinement of the incumbent on the undecided
+buildings (grey in the final iterate, or where the incumbent and its top-x rounding differ):
+each round ranks every add (budget left permitting) and swap within that set by its linearized
+change from the eps-world gradient at the 0/1 incumbent, scores the best `width`, keeps the best
+if it improves; stops when a round improves nothing or after `tries` scorings. Neither can score
+below its base plan, so the screen is gain against time: the 13 tuning blocks, base re-run in
+the same session for the times (runs pl-*):
+
+    13 tuning, Lens A D 0.05   mean gain  ahead  median time
+    .r2 (earlier session)       +0.0083    5/13   ~2.2x
+    .r2l2                       +0.0085    5/13   1.58x
+    .p64w8                      +0.0060    7/13   1.19x
+    .r2l2.p64w8                 +0.0106    8/13   1.85x
+
+    block   r2l2     p64      both     (polish: undecided / moves kept / scorings)
+    1558    +0.0297  +0.0424  +0.0379  88 / 3 / 32
+    38616   +0.0417  +0.0261  +0.0478  123 / 8 / 64 (cap)
+    30848   +0.0256  +0.0009  +0.0285  257 / 2 / 24
+    46841   +0.0065  +0.0030  +0.0097  60 / 1 / 16
+    20543   +0.0075  0        +0.0075  71 / 0 / 8
+    22422   0        +0.0039  +0.0039  146 / 8 / 64 (cap)
+    18895, 5810: polish +0.0015, +0.0005; the other 5 unchanged by all three
+
+- Late sampling keeps `.r2`'s gains at 1.58x instead of ~2.2x: the early stages' samples bought
+  nothing (the provenance said so).
+- The polish is cheap where it finds nothing (one round of 8 scorings: 1.05 -- 1.13x) and finds
+  different gains: 1558 more than sampling, 22422 (which sampling never moved), little on 30848
+  (where sampling finds +0.026). It hit its cap on 22422 and 38616 while still improving.
+- Together they are the best (+0.0106, 8 of 13), the gains roughly adding.
+- All three are on the gain-time frontier of the 13. Held out (the 46): the polish and the
+  combination running.
