@@ -9,24 +9,43 @@ Baselines (NOTES.md, "Large blocks" and "Lens A at D 0.05"): greedy `S0.01cat` /
 uni conductance, Lens A at D 0.05 (`D_LENS`; owner 2026-10-03, 0.10 saturates under sightline),
 and Lens B from nested runs.
 
-## In flight (owner 2026-10-06: "leave no stone unturned. Every lead should be followed")
+## Status of the leads (owner 2026-10-06: "leave no stone unturned. Every lead should be followed")
 
-Done today (NOTES): polish cap 256 the default; `.c0.75` keeps 30848's gate at 0.85x; greedy +
-polish -0.004 vs SIMP on the 13, -0.015 held out (the cheap point); the every-building polish
-`.P` ties `.p` on the mean, on different blocks; portfolio +0.0113 on the 13; sequential stopping
-(seqscreen.py: 20 blocks decide what 46 did, at the owner's tau); greedy screening width built
-(`S0.01catw<k>`); polish pair moves built (`x2`).
+Presets now (NOTES, 2026-10-05 -- 06; D 0.05, J_2, uni):
+- **Default: `.p256w8x2`** -- SIMP base + the undecided-set polish with pair moves. The 13 +0.0097
+  at 1.26x, the 46 held out +0.004 vs base (ahead 89%, never behind).
+- **Hard blocks: `.p256w8x2.GS0.01cate1`** -- plus the greedy as a second polished track, polished
+  only when its raw clearing is within 1% of SIMP's polished one. The 13 +0.0119 at 1.30x the
+  default; identical to the default on all 46 held out.
+- **Cheap: greedy + polish** (polish_greedy.py, P64w8) -- the 13 -0.004 at 0.81x, the 46 -0.015.
 
-Cluster, queued in this order (the 13 unless said; D 0.05, J_2, uni):
-- `res-check` the 59: fixed clearings at h 0.5 / 0.75 / 1.0 (resolution_check.py).
-- `ms-C1m4`, `ms-C075m2`, `ms-m2`: multi-start, coarse and fine, each + the polish.
-- `pl-p256c075`: `.p256w8.c0.75`; `pl-p256x2`: pair moves.
-- `cb-seed` `.p256w8.gS0.01cat`, `cb-pP` `.pP256w8`, `cb-pPseed` both: the portfolio in one run.
-- `gpw4-tune`: greedy with screening width 4 + polish 256.
-Local GPU: `.p256w8` on the 46 held out (the new default's confirmation).
+Closed (measured, NOTES): multi-rounding `.r<n>` (held out +0.001 at 2x; late `.r2l2` the same at
+1.58x); coarse-to-fine `.c0.75` (keeps gates at 0.85x, but with the polish dominated); coarse
+multi-start `.C<h>.m<k>` and fine `.m<k>` (neither faster nor better); the two-phase polish `.pP`
+(pairs reach the same blocks); seeding `.g` (loses where a better start polishes worse: `.G`
+instead); greedy screening width `S0.01catw4` (+0.0006, marginal); pairs after the greedy (+0.0005,
+marginal); resolution (res-check: h 0.75 within 0.01 on 35 of 59, h 1.0 understates gated blocks by
+up to 0.31); sequential stopping (seqscreen.py: ~20 of 46 blocks decide, at the owner's tau).
 
-Still to start: the H100 for the four 100 -- 125M blocks (taken all of 2026-10-06 so far); the
-over-1.4 km^2 blocks (owner's call, informed by res-check); the best combination on the 46.
+Running: `t-x2gate2` (the gated hard-block preset with the greedy's unused scoring skipped, for its
+time), `t-all` (does late sampling add on top of it?), `t-w16` (wider polish rounds).
+
+Open:
+- **H100** for the four 100 -- 125M blocks (19593, 53556, 6498, 45267): its 4 GPUs taken all day.
+- **Owner's call, the over-1.4 km^2 blocks** (16 need a coarser grid or a crop): res-check says Lens
+  A at h 0.75 reads ~0.005 low on average, up to ~0.08 low on gated blocks; h 1.0 up to 0.31 low.
+- **The owner's tau** for sequential stopping (the smallest mean gain worth a variant's time).
+
+Not pursued, with what would change that:
+- *A Galerkin coarse model* (the solver's AMG level as the design problem's model, which keeps a
+  sub-cell gate's conductance where re-gridding loses it): coarse runs were not cheap enough to pay
+  even where they kept gates (`.C0.75.m2` 1.36x, dominated) -- worth it only if a coarse model were
+  several times cheaper per update than h 0.75 and kept every gate.
+- *The greedy's sweep kernel* (results identical, ~20 -- 30% of the greedy): the greedy is now a
+  0.3 -- 0.4x add-on of the hard-block preset; worth it if the greedy becomes the main method.
+- *The add/remove search as one Strategy* (schedule x scorers x acceptance): realized in pieces --
+  exchange() with pair escalation is floating search, the greedy its add-only schedule; one class
+  over them is a refactor, not an experiment.
 
 ## How we run experiments
 
