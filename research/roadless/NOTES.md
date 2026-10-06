@@ -1348,3 +1348,9 @@ within e% of SIMP's polished one. e 0: polished on 2 of the 13 -- exactly the tw
 the 46; e 1%: 3 and 0; no win missed at either. `.G<picker>e<pct>` built; `.p256w8x2.GS0.01cate1`
 and `.p256w8x2` running on the 13 in one session for its time (quality as replayed: +0.0119).
 Its floor cost on a typical block is the greedy itself (~0.4x).
+
+Gated two tracks `.p256w8x2.GS0.01cate1`, the 13, same session as `.p256w8x2` (t-x2, t-x2gate):
++0.0119 (= ungated: the greedy's track polished on 3 of 13, as replayed), median time 1.30x
+`.p256w8x2` (2.68x ungated). That run's greedy still scored every step; t-x2gate2 repeats it with
+the greedy's unused scoring skipped (560a152). Queued: `.r2l2.p256w8x2.GS0.01cate1` (does late
+sampling add on top?) and `.p256w16x2` (wider polish rounds).
