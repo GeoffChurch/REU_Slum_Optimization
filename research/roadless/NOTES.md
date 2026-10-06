@@ -1281,3 +1281,7 @@ than their cell counts suggest (four h 1.0 runs ~2x one fine). h 0.75 with two s
 one fine run with the polish. The coarse lead left is h 0.75 coarse-to-fine (`.c0.75`, 0.85x,
 -0.0006) with the polish: queued. (1558 ran out of 32 GB in `.C`: the coarse phase's GPU blocks are
 now released before the fine finish.) Fine two-start `.m2`: running.
+
+Fine two-start `.p64w8.m2` on the 13: identical to one start on 12 (the seeded random start never
+beat the uniform one), 46841 +0.0015 instead of +0.0030, at 2.12x instead of 1.19x. SIMP from the
+uniform start is robust here; extra starts, fine or coarse, are dominated.
