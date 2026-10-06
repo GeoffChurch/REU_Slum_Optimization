@@ -1354,3 +1354,6 @@ Gated two tracks `.p256w8x2.GS0.01cate1`, the 13, same session as `.p256w8x2` (t
 `.p256w8x2` (2.68x ungated). That run's greedy still scored every step; t-x2gate2 repeats it with
 the greedy's unused scoring skipped (560a152). Queued: `.r2l2.p256w8x2.GS0.01cate1` (does late
 sampling add on top?) and `.p256w16x2` (wider polish rounds).
+
+With the greedy's unused per-step scoring skipped (t-x2gate2): the same scores on all 13, the
+greedy's median 41 s -> 26 s, the hard-block preset 1.30x -> 1.21x the default `.p256w8x2`.

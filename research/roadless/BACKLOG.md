@@ -15,8 +15,8 @@ Presets now (NOTES, 2026-10-05 -- 06; D 0.05, J_2, uni):
 - **Default: `.p256w8x2`** -- SIMP base + the undecided-set polish with pair moves. The 13 +0.0097
   at 1.26x, the 46 held out +0.004 vs base (ahead 89%, never behind).
 - **Hard blocks: `.p256w8x2.GS0.01cate1`** -- plus the greedy as a second polished track, polished
-  only when its raw clearing is within 1% of SIMP's polished one. The 13 +0.0119 at 1.30x the
-  default; identical to the default on all 46 held out.
+  only when its raw clearing is within 1% of SIMP's polished one. The 13 +0.0119 at 1.21x the
+  default (the greedy unscored); identical to the default on all 46 held out.
 - **Cheap: greedy + polish** (polish_greedy.py, P64w8) -- the 13 -0.004 at 0.81x, the 46 -0.015.
 
 Closed (measured, NOTES): multi-rounding `.r<n>` (held out +0.001 at 2x; late `.r2l2` the same at
