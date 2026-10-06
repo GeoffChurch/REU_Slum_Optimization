@@ -526,11 +526,13 @@ class Catchment:
         return t.solver.to_host((V * wt[:, None]).T @ V)
 
 
-def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float) -> list[int]:
+def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float,
+            first: int | None = None) -> list[int]:
     """Greedy batch under a normalised quadratic model: with rho = H's correlations, candidate i
     is worth g_i - sum_{j in batch} rho_ij sqrt(g_i g_j) once the batch is chosen (a duplicate of
     a chosen one is worth 0, an independent one keeps its g_i, a complementary one, rho < 0,
-    gains). Take the best worth per unit cost until the batch's cost reaches `need`."""
+    gains). Take the best worth per unit cost until the batch's cost reaches `need`; `first`, if
+    given, is taken first whatever its worth (Spread's screening width)."""
     d = np.sqrt(np.clip(np.diag(H), 0.0, None))
     with np.errstate(invalid="ignore", divide="ignore"):
         rho = np.where(np.outer(d, d) > 0, H / np.outer(d, d), 0.0)
@@ -540,7 +542,8 @@ def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float) -> l
     chosen: list[int] = []
     taken = 0.0
     while taken < need - 1e-12 and avail.any():
-        i = int(np.argmax(np.where(avail, worth / cost, -np.inf)))
+        i = (first if first is not None and not chosen
+             else int(np.argmax(np.where(avail, worth / cost, -np.inf))))
         chosen.append(i)
         avail[i] = False
         taken += float(cost[i])
@@ -552,14 +555,17 @@ def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float) -> l
 class Spread:
     """Shortlist the top candidates by tension per unit population up to `reach` times the
     round's population step, measure how alike their effects are with `source`, and take the
-    batch `_spread` builds from their correlations."""
+    batch `_spread` builds from their correlations. `width` > 1: build that many batches, the
+    k-th starting from the shortlist's k-th best by tension per unit population, score each
+    exactly and take the best (`width` exact solves a round instead of one)."""
     delta: float
     source: GramSource
     reach: float = 3.0
+    width: int = 1
 
     @property
     def name(self) -> str:
-        return f"S{self.delta:g}{self.source.name}"
+        return f"S{self.delta:g}{self.source.name}" + (f"w{self.width}" if self.width > 1 else "")
 
     def pick(self, c: Clearing, t: Tension, J: float, power: float) -> Picked:
         T = t.g / c.cost
@@ -568,10 +574,20 @@ class Spread:
         cum = np.cumsum(c.cost[order])
         cand = order[:int(np.searchsorted(cum, self.reach * (target - D))) + 1]
         H = self.source.gram(c, t, cand, power)
-        chosen = _spread(t.g[cand], c.cost[cand], H, target - D)
-        taken = [cand[i] for i in chosen]
-        del t, H                    # the round's system and hierarchy, before the scoring solve
-        return Picked(taken, *_exact(c, taken, power))
+        gain, cost = t.g[cand], c.cost[cand]
+        firsts = [None] + [int(i) for i in np.argsort(-gain / cost)[1:self.width]]
+        batches: dict[frozenset[int], list[int]] = {}   # distinct batches, each in pick order
+        for f in firsts:
+            chosen = _spread(gain, cost, H, target - D, first=f)
+            batches.setdefault(frozenset(chosen), chosen)
+        del t, H                    # the round's system and hierarchy, before the scoring solves
+        best = None
+        for batch in batches.values():
+            taken = [cand[i] for i in batch]
+            Jb, P1 = _exact(c, taken, power)
+            if best is None or Jb < best.J:
+                best = Picked(taken, Jb, P1)
+        return best
 
 
 def grow(c: Clearing, picker: Picker, power: float, d_max: float, J: float):
@@ -651,7 +667,8 @@ def sweep_of(spec: str) -> Sweep:
 
 def picker_of(spec: str, sweep: Sweep) -> Picker:
     """`M4` -> Screened(4); `B0.01g3` -> Batched(delta 0.01, gap 3 m); `S0.01cat` ->
-    Spread(delta 0.01) with Catchment (its sweep on `sweep`'s device). (Impact, Sketch and the
+    Spread(delta 0.01) with Catchment (its sweep on `sweep`'s device), `S0.01catw4` with screening
+    width 4. (Impact, Sketch and the
     no-spacing null were measured and dominated: NOTES.md, "Batching"; Impact again on the GPU,
     "GPU-resident rounds".)"""
     if spec.startswith("M"):
@@ -659,9 +676,10 @@ def picker_of(spec: str, sweep: Sweep) -> Picker:
     if spec.startswith("B"):
         delta, gap = spec[1:].split("g")
         return Batched(float(delta), float(gap))
-    m = re.fullmatch(r"S([0-9.]+)cat", spec)
+    m = re.fullmatch(r"S([0-9.]+)cat(?:w(\d+))?", spec)
     if m:
-        return Spread(float(m.group(1)), Catchment(sweep))
+        return Spread(float(m.group(1)), Catchment(sweep),
+                      width=1 if m.group(2) is None else int(m.group(2)))
     raise ValueError(f"unknown picker {spec!r}")
 
 
