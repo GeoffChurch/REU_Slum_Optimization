@@ -260,6 +260,46 @@ def round_sampled(x: np.ndarray, cost: np.ndarray, budget: float, rng: np.random
     return r
 
 
+def exchange(score: Callable[[np.ndarray], float], grad: Callable[[np.ndarray], np.ndarray],
+             J: float, r: np.ndarray, movable: np.ndarray, cost: np.ndarray, budget: float,
+             tries: int, width: int) -> tuple[float, np.ndarray, int, int]:
+    """Exchange refinement of the 0/1 clearing r (score J) over the buildings `movable`: each
+    round ranks every single move within them -- add one the budget left allows, or swap one in
+    for a cleared one -- by its linearized change from grad(r) (adding a: g_a; closing b: -g_b),
+    scores the best `width` and keeps the best of those if it improves. Stops when a round
+    improves nothing or `tries` scorings are spent. Returns (J, r, moves kept, scorings)."""
+    used = moves = 0
+    while used < tries:
+        g = grad(r)
+        left = budget + 1e-12 - float(cost @ r)
+        ins, outs = movable[r[movable] == 0], movable[r[movable] > 0]
+        est = np.concatenate([
+            np.where(cost[ins] <= left, g[ins], np.inf),
+            np.where(cost[ins][:, None] <= left + cost[outs][None, :],
+                     g[ins][:, None] - g[outs][None, :], np.inf).ravel()])
+        k = min(width, tries - used, int(np.isfinite(est).sum()))
+        if k == 0:
+            break
+        top = np.argpartition(est, k - 1)[:k]
+        best = None
+        for i in top[np.argsort(est[top])]:
+            rn = r.copy()
+            if i < len(ins):
+                rn[ins[i]] = 1.0
+            else:
+                a, b = divmod(int(i) - len(ins), len(outs))
+                rn[ins[a]], rn[outs[b]] = 1.0, 0.0
+            used += 1
+            Jn = score(rn)
+            if Jn < J and (best is None or Jn < best[0]):
+                best = (Jn, rn)
+        if best is None:
+            break
+        J, r = best
+        moves += 1
+    return J, r, moves, used
+
+
 def frank_wolfe(rel: Relaxation, budget: float, iters: int, log=print) -> dict:
     cost = rel.c.cost
     x = np.zeros(len(cost))
@@ -392,7 +432,8 @@ class Plan(NamedTuple):
     > 0: each offered iterate is also rounded that many times at random (round_sampled), every
     distinct candidate scored, in every stage or (`late` > 0) only the last `late`; `polish`
     > 0: then exchange refinement on the undecided buildings (Incumbent.polish), `polish`
-    scorings at most, the best `pwidth` ranked moves scored per round; `warm`
+    scorings at most, the best `pwidth` ranked moves scored per round, over every building
+    if `polish_all` (`.P`); `warm`
     > 0 (path only): each budget after the first starts from the last budget's x (the free
     buildings lifted to the uniform share) with `warm` updates per stage; `coarse` > 0 (one
     only): every stage but the last on a grid of that spacing (h 1.0: 4x fewer unknowns), the
@@ -412,6 +453,7 @@ class Plan(NamedTuple):
     late: int = 0
     polish: int = 0
     pwidth: int = 0
+    polish_all: bool = False
     warm: int = 0
     coarse: float = 0.0
     update: Update = DEFAULT_UPDATE
@@ -425,7 +467,8 @@ class Plan(NamedTuple):
                 + (f"s{self.kscore:g}" if self.kscore > 0 else "")
                 + (f".r{self.samples}" if self.samples > 0 else "")
                 + (f"l{self.late}" if self.late > 0 else "")
-                + (f".p{self.polish}w{self.pwidth}" if self.polish > 0 else "")
+                + (f".{'P' if self.polish_all else 'p'}{self.polish}w{self.pwidth}"
+                   if self.polish > 0 else "")
                 + (f".w{self.warm}" if self.warm > 0 else "")
                 + (f".c{self.coarse:g}" if self.coarse > 0 else "")
                 + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
@@ -450,7 +493,7 @@ def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)\.t(?P<t>[0-9.e-]+?)"
                      r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
                      r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
-                     r"(?:\.p(?P<p>\d+)w(?P<pw>\d+))?"
+                     r"(?:\.(?P<pset>[pP])(?P<p>\d+)w(?P<pw>\d+))?"
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?", spec)
     if m is None:
@@ -469,6 +512,7 @@ def plan_of(spec: str) -> Plan:
                 late=0 if g["rl"] is None else int(g["rl"]),
                 polish=0 if g["p"] is None else int(g["p"]),
                 pwidth=0 if g["pw"] is None else int(g["pw"]),
+                polish_all=g["pset"] == "P",
                 warm=0 if g["w"] is None else int(g["w"]),
                 coarse=0.0 if g["c"] is None else float(g["c"]), update=update)
 
@@ -525,50 +569,27 @@ class Incumbent:
         if self.n % self.every == 0:
             self.offer(x, stage)
 
-    def polish(self, x: np.ndarray, tries: int, width: int, log=print) -> None:
-        """Exchange refinement of the incumbent on the undecided buildings: those grey in the
-        final iterate x, and those where the incumbent and x's top-x rounding disagree (late
-        samples flip them; NOTES "Where .r2's winners come from"). Each round ranks every single
-        move -- add a building the budget left allows, or swap one in for a cleared one, both
-        within the set -- by its linearized change, from the gradient at the 0/1 incumbent in the
-        scorer's eps world (the greedy's tension); scores the best `width` and keeps the best of
-        those if it improves. Stops when a round improves nothing or `tries` scorings are spent."""
+    def polish(self, x: np.ndarray, tries: int, width: int, everything: bool,
+               log=print) -> None:
+        """Exchange refinement of the incumbent (`exchange`) over every building if `everything`,
+        else over the undecided ones: grey in the final iterate x, or where the incumbent and x's
+        top-x rounding disagree (late samples flip them; NOTES "Where .r2's winners come from").
+        Ranked by the gradient at the 0/1 incumbent in the scorer's eps world (the greedy's
+        tension)."""
         if self.scorer is None:
             raise ValueError("polish ranks with the eps-world scorer: give the plan .k<n>s<eps>")
         cost = self.rel.c.cost
-        und = np.flatnonzero(((x > 0.05) & (x < 0.95))
-                             | ((round_by_x(x, cost, self.budget, first=self.first) > 0)
-                                != (self.r > 0)))
-        J0, used, moves = self.J, 0, 0
-        while used < tries:
-            r = self.r
-            _, g = self.scorer.value_sgrad(r)
-            left = self.budget + 1e-12 - float(cost @ r)
-            free = und if self.first is None else und[self.first[und] == 0]   # held stay held
-            ins, outs = free[r[free] == 0], free[r[free] > 0]
-            cands: list[tuple[float, int, int]] = [(g[a], a, -1) for a in ins if cost[a] <= left]
-            if len(ins) and len(outs):
-                dg = g[ins][:, None] - g[outs][None, :]               # add a, close b
-                fits = cost[ins][:, None] <= left + cost[outs][None, :]
-                ia, ib = np.nonzero(fits)
-                cands += [(dg[i, j], ins[i], outs[j]) for i, j in zip(ia, ib)]
-            cands.sort(key=lambda t: t[0])
-            best = None
-            for _, a, b in cands[:min(width, tries - used)]:
-                rn = r.copy()
-                rn[a] = 1.0
-                if b >= 0:
-                    rn[b] = 0.0
-                used += 1
-                Jn = self._score(rn)
-                if Jn < self.J and (best is None or Jn < best[0]):
-                    best = (Jn, rn)
-            if best is None:
-                break
-            self.J, self.r = best
-            moves += 1
-        log(f"  polish: {len(und)} undecided buildings, {moves} moves kept, {used} scorings, "
-            f"J {J0:.6g} -> {self.J:.6g}")
+        und = (np.arange(len(x)) if everything
+               else np.flatnonzero(((x > 0.05) & (x < 0.95))
+                                   | ((round_by_x(x, cost, self.budget, first=self.first) > 0)
+                                      != (self.r > 0))))
+        movable = und if self.first is None else und[self.first[und] == 0]   # held stay held
+        J0 = self.J
+        self.J, self.r, moves, used = exchange(
+            self._score, lambda r: self.scorer.value_sgrad(r)[1], self.J, self.r, movable,
+            cost, self.budget, tries, width)
+        log(f"  polish: {len(movable)} {'buildings' if everything else 'undecided buildings'}, "
+            f"{moves} moves kept, {used} scorings, J {J0:.6g} -> {self.J:.6g}")
 
 
 def simp(rel: Relaxation, x0: np.ndarray, budget: float,
@@ -663,7 +684,7 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     xs = simp(rel, x, budget, stages, plan.iters, plan.update, log=log, watch=watch)
     inc.offer(xs, plan.stages[-1])                        # the last iterate's rounding
     if plan.polish > 0:
-        inc.polish(xs, plan.polish, plan.pwidth, log=log)
+        inc.polish(xs, plan.polish, plan.pwidth, plan.polish_all, log=log)
     Jbest, rs = inc.best()
     out.update(simp_perm=rel.perm(Jbest), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),

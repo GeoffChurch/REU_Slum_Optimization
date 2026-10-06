@@ -10,7 +10,7 @@ the D 0.05 SIMP rows ran on the cluster's V100 / RTX 8000 cards, the greedies he
 Ada.
 
     PYTHONPATH=. uv run python research/roadless/simp_compare.py <tuning|held> <budget> \
-        <name>=<simp|greedy>,<along>,<plan|picker>... <b>/<a>...
+        <name>=<simp|greedy|polished>,<along>,<plan|picker|picker.P<t>w<w>>... <b>/<a>...
 """
 from __future__ import annotations
 
@@ -52,13 +52,25 @@ def greedy(along: str, picker: str, budget: float) -> pd.DataFrame:
                          for col in ("perm", "t")})
 
 
+def polished(along: str, name: str, budget: float) -> pd.DataFrame:
+    """polish_greedy.py's rows, `name` = <picker>.P<tries>w<width>."""
+    d = pd.concat([pd.read_parquet(p) for p in
+                   (HERE / "polish_rows" / along / name / f"D{budget:g}").glob("*.parquet")],
+                  ignore_index=True)
+    return d.set_index("block")[["perm", "t"]]
+
+
+# A spec's kind, as typed on the command line: an unknown one raises.
+LOADERS = {"simp": simp, "greedy": greedy, "polished": polished}
+
+
 def main(which: str, budget: float, specs: list[str], pairs: list[str]) -> None:
     blocks = blocks_of(which)
     per = {}
     for spec in specs:
         name, rest = spec.split("=")
         kind, along, what = rest.split(",")
-        d = (simp if kind == "simp" else greedy)(along, what, budget)
+        d = LOADERS[kind](along, what, budget)
         per[name] = d.reindex(blocks).dropna()
     print(f"{which}: {len(blocks)} blocks, Lens A at D {budget:g}")
     for name, d in per.items():
