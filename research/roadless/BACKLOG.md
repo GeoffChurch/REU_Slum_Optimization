@@ -11,22 +11,22 @@ and Lens B from nested runs.
 
 ## In flight (owner 2026-10-06: "leave no stone unturned. Every lead should be followed")
 
-Cluster runs (all D 0.05, J_2, uni, SIMP base `fw0.q3.i10.t0.001.e0.0001.k1s1e-06`):
-- `pl-p256` the 13: polish cap 256 (`.p256w8`; 64 was hit on 22422, 38616 while improving).
-- `c075` sentinel: coarse-to-fine at h 0.75 (`.c0.75`; `.c1` lost 30848's gate).
-- `gp-tune` the 13: greedy S0.01cat + polish over every building (polish_greedy.py, P64w8).
-- `pl-P64` the 13: SIMP's polish over every building (`.P64w8`) vs the undecided set.
-- `res-check` the 59: fixed clearings (SIMP, r2, p64, both, greedy) scored at h 0.5 / 0.75 / 1.0
-  (resolution_check.py): where coarse grids keep scores and order.
-- `ms-C1m4`, `ms-C075m2`, `ms-m2` the 13: multi-start, coarse (all stages at h) and fine, each
-  with the fine polish (`.p64w8.C1.m4`, `.p64w8.C0.75.m2`, `.p64w8.m2`).
-Local GPU: greedy + polish on the 46 held out (polish_greedy.py, sequential).
+Done today (NOTES): polish cap 256 the default; `.c0.75` keeps 30848's gate at 0.85x; greedy +
+polish -0.004 vs SIMP on the 13, -0.015 held out (the cheap point); the every-building polish
+`.P` ties `.p` on the mean, on different blocks; portfolio +0.0113 on the 13; sequential stopping
+(seqscreen.py: 20 blocks decide what 46 did, at the owner's tau); greedy screening width built
+(`S0.01catw<k>`); polish pair moves built (`x2`).
 
-Queued leads, in order: polish 2-for-1 moves and wider rounds (after pl-p256); greedy + polish
-on the 46 and its time against SIMP; per-block h from res-check (the over-1.4 km^2 blocks: owner's
-call, informed by it); the H100 for the four 100 -- 125M blocks (its 4 GPUs were taken
-2026-10-06); greedy screening width; the add/remove Strategy (floating search, the polish
-generalized); sequential stopping for screens.
+Cluster, queued in this order (the 13 unless said; D 0.05, J_2, uni):
+- `res-check` the 59: fixed clearings at h 0.5 / 0.75 / 1.0 (resolution_check.py).
+- `ms-C1m4`, `ms-C075m2`, `ms-m2`: multi-start, coarse and fine, each + the polish.
+- `pl-p256c075`: `.p256w8.c0.75`; `pl-p256x2`: pair moves.
+- `cb-seed` `.p256w8.gS0.01cat`, `cb-pP` `.pP256w8`, `cb-pPseed` both: the portfolio in one run.
+- `gpw4-tune`: greedy with screening width 4 + polish 256.
+Local GPU: `.p256w8` on the 46 held out (the new default's confirmation).
+
+Still to start: the H100 for the four 100 -- 125M blocks (taken all of 2026-10-06 so far); the
+over-1.4 km^2 blocks (owner's call, informed by res-check); the best combination on the 46.
 
 ## How we run experiments
 
