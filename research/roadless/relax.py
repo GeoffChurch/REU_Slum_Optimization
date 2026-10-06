@@ -788,7 +788,10 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
             inc.consider(inc_c.r, f"start {k}'s winner at h {plan.coarse_all:g}")
             if inc.J < J_before:
                 xs = xk                                   # the polish's undecided set from it
+            del inc_c
         del rel_c
+        c.p.solver.release()     # the coarse systems' cached blocks: 1558 ran out of 32 GB without
+
     else:
         for k in range(starts):
             xk = x if k == 0 else start_x(k, c.cost, budget)

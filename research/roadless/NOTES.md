@@ -1249,3 +1249,35 @@ SIMP keeps its lead; greedy + polish is the cheap point of the frontier, not SIM
 `.p256w8` held out (the 46; local RTX 6000 Ada, so times are not the cluster's): vs base median
 +0.001 [+0.001,+0.004], mean +0.003, ahead 91%, worst -0.000; vs `.p64w8` identical (the cap binds
 only on hard blocks). Confirmed as the default.
+
+### Where resolution matters (res-check, the 59, 2026-10-06)
+
+resolution_check.py scored five fixed clearings per block (SIMP base, `.r2`, `.p64w8`,
+`.r2l2.p64w8`, the greedy's own within D 0.05) exactly at h 0.5, 0.75 and 1.0 (h 0.5 recomputed
+equals the stored scores to 3e-9). Score at h minus score at h 0.5, over all 295 clearings:
+
+    h      median   mean     |diff| > 0.02  > 0.05   blocks with every clearing within 0.01
+    0.75   -0.0005  -0.0052  22%            3%       35 / 59
+    1.0    -0.0029  -0.0192  26%            15%      28 / 59
+
+A coarser grid understates permeability, and on gated blocks by a lot: at h 1.0 38616 -0.313,
+45876 -0.209, 22267 -0.142, 1558 -0.114, 41806 -0.100 (h 0.75: 0.011, 0.075, 0.081, 0.043, 0.036).
+The clearings' order mostly survives (Kendall tau median 1.00 at both; the argmax moves on ~30% of
+blocks, mostly among near-tied variants). For the owner's call on the over-1.4 km^2 blocks: Lens A
+at h 0.75 would read ~0.005 low on average and up to ~0.08 low on gated blocks; at h 1.0 far worse.
+
+### Multi-start on coarse grids (the owner's question: several coarse runs vs one fine run)
+
+On the 13, each with the fine polish `.p64w8` (same-session base pl-base):
+
+    plan                         mean vs base  worst            median time
+    fine, one start (.p64w8)     +0.0060       +0.0000          1.19x
+    h 1.0, 4 starts (.C1.m4)     -0.0216       -0.254 (30848)   2.06x   (12 of 13; 1558 OOM)
+    h 0.75, 2 starts (.C0.75.m2) +0.0028       -0.0028          1.36x
+
+No: not faster and not better. h 1.0 loses 30848's gate even with four starts and a fine polish (a
+gate below the cell has no value in the coarse objective: res-check), and coarse runs cost more
+than their cell counts suggest (four h 1.0 runs ~2x one fine). h 0.75 with two starts is beaten by
+one fine run with the polish. The coarse lead left is h 0.75 coarse-to-fine (`.c0.75`, 0.85x,
+-0.0006) with the polish: queued. (1558 ran out of 32 GB in `.C`: the coarse phase's GPU blocks are
+now released before the fine finish.) Fine two-start `.m2`: running.
