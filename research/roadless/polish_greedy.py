@@ -46,12 +46,7 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
              for j in pk.cleared]
     t_greedy = time.time() - t0
     c.removed[:] = False
-    r = np.zeros(c.n)
-    left = budget + 1e-12
-    for j in order:
-        if c.cost[j] <= left:
-            r[j] = 1.0
-            left -= c.cost[j]
+    r = relax.cut_to_budget(order, c.cost, budget)
     rel = relax.Relaxation(c, power, rtol=RTOL)
     scorer = relax.Relaxation(c, power, q=1.0, rtol=RTOL, eps=SCORE_EPS, params=c.p)
     greedy_perm = rel.perm(rel.exact(r))

@@ -30,15 +30,6 @@ sys.path.insert(0, str(HERE))
 import relax  # noqa: E402
 
 
-def _cut(order: list[int], cost: np.ndarray, budget: float) -> list[int]:
-    out, left = [], budget + 1e-12
-    for j in order:
-        if cost[j] <= left:
-            out.append(j)
-            left -= cost[j]
-    return out
-
-
 def main(bid: str, power: float, device: str, along: str, clearings: str, hs: list[float],
          budget: float) -> None:
     src = Path(os.environ["CLUSTER_SUBMIT_INPUTS"]) / clearings \
@@ -55,7 +46,8 @@ def main(bid: str, power: float, device: str, along: str, clearings: str, hs: li
         cells = int(c.sc.grid.inside.sum())
         for name, cleared in zip(todo.name, todo.cleared):
             if name.endswith("_steps"):
-                name, cleared = name[:-len("_steps")], _cut(list(cleared), c.cost, budget)
+                name = name[:-len("_steps")]
+                cleared = np.flatnonzero(relax.cut_to_budget(list(cleared), c.cost, budget))
             r = np.zeros(c.n)
             r[np.asarray(cleared, dtype=np.int64)] = 1.0
             rows.append(dict(block=bid, name=name, h=h, perm=rel.perm(rel.exact(r)), cells=cells))

@@ -44,6 +44,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
+import clear  # noqa: E402
 from clear import EPS, RTOL_SCORE, Clearing, _cells_axes, rows_dir  # noqa: E402
 
 D_LENS = 0.05          # Lens A's budget (owner, 2026-10-03: 0.10 saturates under sightline)
@@ -214,6 +215,17 @@ def knapsack(grad: np.ndarray, cost: np.ndarray, budget: float) -> np.ndarray:
         s[j] = min(1.0, left / cost[j])
         left -= s[j] * cost[j]
     return s
+
+
+def cut_to_budget(order: list[int], cost: np.ndarray, budget: float) -> np.ndarray:
+    """A greedy's clearing within the budget: every building of its pick order while it fits."""
+    r = np.zeros(len(cost))
+    left = budget + 1e-12
+    for j in order:
+        if cost[j] <= left:
+            r[j] = 1.0
+            left -= cost[j]
+    return r
 
 
 def round_by_x(x: np.ndarray, cost: np.ndarray, budget: float,
@@ -481,7 +493,10 @@ class Plan(NamedTuple):
     distinct candidate scored, in every stage or (`late` > 0) only the last `late`; `polish`
     > 0: then exchange refinement on the undecided buildings (Incumbent.polish), `polish`
     scorings at most, the best `pwidth` ranked moves scored per round, over every building
-    if `polish_all` (`.P`), with two-for-one moves if `polish_pairs` (`x2`); `warm`
+    in each phase of `polish_sets` (True: every building, `P`; False: the undecided ones,
+    `p`; `pP` the undecided then every one), with two-for-one moves if `polish_pairs` (`x2`);
+    `seed` (one only): that greedy picker's clearing within the budget offered to the incumbent
+    before SIMP runs (`.g<picker>`: the polish starts from the better of the two); `warm`
     > 0 (path only): each budget after the first starts from the last budget's x (the free
     buildings lifted to the uniform share) with `warm` updates per stage; `coarse` > 0 (one
     only): every stage but the last on a grid of that spacing (h 1.0: 4x fewer unknowns), the
@@ -504,12 +519,13 @@ class Plan(NamedTuple):
     late: int = 0
     polish: int = 0
     pwidth: int = 0
-    polish_all: bool = False
+    polish_sets: tuple[bool, ...] = ()
     polish_pairs: bool = False
     warm: int = 0
     coarse: float = 0.0
     coarse_all: float = 0.0
     starts: int = 0
+    seed: str = ""
     update: Update = DEFAULT_UPDATE
 
     @property
@@ -521,12 +537,14 @@ class Plan(NamedTuple):
                 + (f"s{self.kscore:g}" if self.kscore > 0 else "")
                 + (f".r{self.samples}" if self.samples > 0 else "")
                 + (f"l{self.late}" if self.late > 0 else "")
-                + (f".{'P' if self.polish_all else 'p'}{self.polish}w{self.pwidth}"
-                   + ("x2" if self.polish_pairs else "") if self.polish > 0 else "")
+                + (f".{''.join('P' if a else 'p' for a in self.polish_sets)}{self.polish}"
+                   f"w{self.pwidth}" + ("x2" if self.polish_pairs else "")
+                   if self.polish > 0 else "")
                 + (f".w{self.warm}" if self.warm > 0 else "")
                 + (f".c{self.coarse:g}" if self.coarse > 0 else "")
                 + (f".C{self.coarse_all:g}" if self.coarse_all > 0 else "")
                 + (f".m{self.starts}" if self.starts > 1 else "")
+                + (f".g{self.seed}" if self.seed else "")
                 + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
 
     @property
@@ -549,8 +567,9 @@ def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)\.t(?P<t>[0-9.e-]+?)"
                      r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
                      r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
-                     r"(?:\.(?P<pset>[pP])(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?)?"
+                     r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?)?"
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
+                     r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
@@ -568,11 +587,12 @@ def plan_of(spec: str) -> Plan:
                 late=0 if g["rl"] is None else int(g["rl"]),
                 polish=0 if g["p"] is None else int(g["p"]),
                 pwidth=0 if g["pw"] is None else int(g["pw"]),
-                polish_all=g["pset"] == "P", polish_pairs=g["px"] is not None,
+                polish_sets=() if g["pset"] is None else tuple(ch == "P" for ch in g["pset"]),
+                polish_pairs=g["px"] is not None,
                 warm=0 if g["w"] is None else int(g["w"]),
                 coarse=0.0 if g["c"] is None else float(g["c"]),
                 coarse_all=0.0 if g["C"] is None else float(g["C"]),
-                starts=0 if g["m"] is None else int(g["m"]), update=update)
+                starts=0 if g["m"] is None else int(g["m"]), seed=g["g"] or "", update=update)
 
 
 class Incumbent:
@@ -746,6 +766,12 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     inc = Incumbent(rel, budget, max(plan.keep, 1), samples=plan.samples, sample_in=sample_in,
                     score_eps=plan.kscore)
     watch = inc if plan.keep > 0 else None
+    if plan.seed:
+        picker = clear.picker_of(plan.seed, clear.sweep_of(device))
+        order = [j for pk, _ in clear.grow(c, picker, power, budget, rel.J0) for j in pk.cleared]
+        c.removed[:] = False
+        inc.consider(cut_to_budget(order, c.cost, budget), f"the greedy {plan.seed}")
+        log(f"  seeded by {plan.seed}: {time.time() - t0:.0f}s")
     xs = x
     if plan.coarse_all > 0:
         rel_c = Relaxation(_clearing(bid, device, along, plan.coarse_all), power,
@@ -782,7 +808,8 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
             if k == 0 or inc.J < J_before:
                 xs = xk
     if plan.polish > 0:
-        inc.polish(xs, plan.polish, plan.pwidth, plan.polish_all, plan.polish_pairs, log=log)
+        for everything in plan.polish_sets:
+            inc.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs, log=log)
     Jbest, rs = inc.best()
     out.update(simp_perm=rel.perm(Jbest), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
@@ -808,7 +835,8 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     rest start from the last x lifted to at least that even share (so none is trapped at
     XMIN), and each stage gets plan.warm updates. Rows in the greedy's format: `cleared` = the
     buildings new at this step."""
-    if plan.coarse > 0 or plan.polish > 0 or plan.coarse_all > 0 or plan.starts > 1:
+    if (plan.coarse > 0 or plan.polish > 0 or plan.coarse_all > 0 or plan.starts > 1
+            or plan.seed):
         raise ValueError(f"coarse grids, polish and multi-start are not built for path: "
                          f"{plan.name}")
     c = _clearing(bid, device, along)
