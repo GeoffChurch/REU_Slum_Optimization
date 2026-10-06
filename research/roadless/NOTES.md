@@ -1245,3 +1245,7 @@ Held out (the 46; greedy + polish ran on the local RTX 6000 Ada, so its times ar
 cluster's): greedy + polish vs SIMP base median -0.013 [-0.018,-0.008], mean -0.015, ahead 7%; the
 polish over the greedy's own clearing +0.0031 mean, ahead 65%, ~40% of its time. On typical blocks
 SIMP keeps its lead; greedy + polish is the cheap point of the frontier, not SIMP's replacement.
+
+`.p256w8` held out (the 46; local RTX 6000 Ada, so times are not the cluster's): vs base median
++0.001 [+0.001,+0.004], mean +0.003, ahead 91%, worst -0.000; vs `.p64w8` identical (the cap binds
+only on hard blocks). Confirmed as the default.
