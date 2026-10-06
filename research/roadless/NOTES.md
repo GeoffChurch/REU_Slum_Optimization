@@ -1362,3 +1362,12 @@ The last parameters, the 13 (t-w16, t-all): wider polish rounds `.p256w16x2` equ
 the mean (+0.0097; ahead on 2, behind on 3) at 1.28x its time; late sampling on top of the
 hard-block preset `.r2l2.p256w8x2.GS0.01cate1` +0.0120 against +0.0119 (30848, 38616 up; 1558,
 20543, 46841 down -- sampling moves the incumbent the polish starts from) at 1.33x. Both dominated.
+
+### The largest blocks on the H100 (2026-10-06)
+
+Under the default `.p256w8x2` (first results; they never fit a 48 GB card): 19593 (4,365
+buildings) 0.0955 in 217 s, 6498 (1,559) 0.7987 in 242 s. 53556 failed in a minute: pyamg's
+aggregation left an isolated unknown (no off-diagonal entry) in no aggregate, which the solver's
+assertion refused; lifted.aggregate_level now gives such a node its own aggregate (with none,
+pyamg's aggregation exactly) and logs it; 53556 resubmitted (big3-r1). 45267 is estimated at
+86.6 GB, past the 80 GB card: with the other 16 over 1.4 km^2, the owner's coarse-or-crop call.
