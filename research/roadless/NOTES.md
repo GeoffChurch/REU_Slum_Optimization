@@ -1315,3 +1315,9 @@ Against the same base (pl-base; the runs are a day apart, so times carry cross-s
   closes. The greedy's screening width adds +0.0006 for +0.07x: marginal.
 Next: pairs + seeding (`.p256w8x2.gS0.01cat`, `.pP256w8x2.gS0.01cat`) on the 13; `.p256w8x2` on
 the 46; the local GPU runs `.pP256w8.gS0.01cat` on the 46.
+
+Held out (the 46, local): `.pP256w8.gS0.01cat` vs `.p256w8` mean -0.000, ahead 9%, worst -0.012
+(5706), at 1.4x. On typical blocks the combination adds nothing, and seeding can lose: on 5706 the
+greedy's clearing scored better than SIMP's incumbent before the polish, became the start, and
+polished to a worse end (SIMP's incumbent polishes +0.0196 there). Hence `.G<picker>`: both
+polished, the better kept. `.p256w8x2.GS0.01cat` on the 13 (cluster) and the 46 (local).
