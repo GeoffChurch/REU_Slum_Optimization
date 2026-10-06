@@ -133,7 +133,7 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
     object.__setattr__(picker.source, "gram", gram_)      # the source is a frozen dataclass
     clear._exact = exact_
     J0 = c.sc.J(c.sc.u0, 2.0)
-    for pk, D in clear.grow(c, picker, 2.0, d_max, J0):
+    for pk, D in clear.grow(c, picker, 2.0, d_max, J0, True):
         print(f"  step {step[0]} D {D:.3f} perm' {1 - (pk.J / J0) ** 0.5:.3f}", flush=True)
 
 

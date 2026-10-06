@@ -65,7 +65,7 @@ def main(bid: str, along: str, d_max: float) -> None:
 
     object.__setattr__(picker.source, "gram", gram_)
     J0 = c.sc.J(c.sc.u0, 2.0)
-    for _pk, _D in clear.grow(c, picker, 2.0, d_max, J0):
+    for _pk, _D in clear.grow(c, picker, 2.0, d_max, J0, True):
         pass
 
 

@@ -230,10 +230,12 @@ class Picked(NamedTuple):
 
 
 class Picker(Protocol):
-    """What one greedy step clears, given the round's tension and J_power now."""
+    """What one greedy step clears, given the round's tension and J_power now. `score`: the step's
+    exact J and P1 are wanted; without it a picker that needs no exact solve to choose returns
+    them as NaN (the greedy as a seed or a polish's start is re-scored where it is used)."""
     name: str
 
-    def pick(self, c: Clearing, t: Tension, J: float, power: float) -> Picked: ...
+    def pick(self, c: Clearing, t: Tension, J: float, power: float, score: bool) -> Picked: ...
 
 
 def _exact(c: Clearing, cleared: list[int], power: float) -> tuple[float, float]:
@@ -260,7 +262,7 @@ class Screened:
     def name(self) -> str:
         return f"M{self.M}"
 
-    def pick(self, c: Clearing, t: Tension, J: float, power: float) -> Picked:
+    def pick(self, c: Clearing, t: Tension, J: float, power: float, score: bool) -> Picked:
         T = t.g / c.cost
         best = Picked([], np.inf, np.inf)
         bestv = -np.inf
@@ -285,7 +287,7 @@ class Batched:
     def name(self) -> str:
         return f"B{self.delta:g}g{self.gap_m:g}"
 
-    def pick(self, c: Clearing, t: Tension, J: float, power: float) -> Picked:
+    def pick(self, c: Clearing, t: Tension, J: float, power: float, score: bool) -> Picked:
         T = t.g / c.cost
         D, target = _next_target(c, self.delta)
         taken: list[int] = []
@@ -299,7 +301,7 @@ class Batched:
             D += float(c.cost[j])
             near.update(int(k) for k in c.sc.tree.query(c.sc.polys[j], predicate="dwithin",
                                                          distance=self.gap_m))
-        return Picked(taken, *_exact(c, taken, power))
+        return Picked(taken, *(_exact(c, taken, power) if score else (np.nan, np.nan)))
 
 
 class GramSource(Protocol):
@@ -567,7 +569,7 @@ class Spread:
     def name(self) -> str:
         return f"S{self.delta:g}{self.source.name}" + (f"w{self.width}" if self.width > 1 else "")
 
-    def pick(self, c: Clearing, t: Tension, J: float, power: float) -> Picked:
+    def pick(self, c: Clearing, t: Tension, J: float, power: float, score: bool) -> Picked:
         T = t.g / c.cost
         D, target = _next_target(c, self.delta)
         order = [int(j) for j in np.argsort(-T) if not c.removed[j]]
@@ -581,6 +583,8 @@ class Spread:
             chosen = _spread(gain, cost, H, target - D, first=f)
             batches.setdefault(frozenset(chosen), chosen)
         del t, H                    # the round's system and hierarchy, before the scoring solves
+        if len(batches) == 1 and not score:          # nothing to choose between, nothing wanted
+            return Picked([cand[i] for i in next(iter(batches.values()))], np.nan, np.nan)
         best = None
         for batch in batches.values():
             taken = [cand[i] for i in batch]
@@ -590,12 +594,13 @@ class Spread:
         return best
 
 
-def grow(c: Clearing, picker: Picker, power: float, d_max: float, J: float):
+def grow(c: Clearing, picker: Picker, power: float, d_max: float, J: float, score: bool):
     """The greedy from c's current clearing (J_power J): each step ranks the remaining buildings
     by tension per unit of population and lets `picker` clear some, until d_max. Yields
-    (Picked, D after) per step; c.removed is updated before each yield."""
+    (Picked, D after) per step; c.removed is updated before each yield. `score`: each step's
+    exact J (Picker.pick)."""
     while c.cost[c.removed].sum() < d_max - 1e-12 and not c.removed.all():
-        pk = picker.pick(c, c.tension(power), J, power)
+        pk = picker.pick(c, c.tension(power), J, power, score)
         c.removed[pk.cleared] = True
         J = pk.J
         yield pk, float(c.cost[c.removed].sum())
@@ -614,7 +619,7 @@ def greedy_block(b, picker: Picker, h: float, d_max: float, out: Path, populatio
     rows = [dict(block=b.block_id, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[],
                  P0=P0, t=0.0)]
     t0 = time.time()
-    for step, (pk, D) in enumerate(grow(c, picker, power, d_max, J0), start=1):
+    for step, (pk, D) in enumerate(grow(c, picker, power, d_max, J0, True), start=1):
         rows.append(dict(block=b.block_id, n=c.n, step=step, D=D,
                          perm=1 - (pk.J / J0) ** (1 / power), perm1=1 - pk.P1 / P0,
                          cleared=pk.cleared, P0=P0, t=time.time() - t0))

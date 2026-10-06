@@ -37,7 +37,7 @@ def main(bid: str, h: float, along: str, solver: str, picker: str) -> None:
     t = c.tension(2.0)
     print(f"tension {time.time() - t0:.1f}s", flush=True)
     t1 = time.time()
-    out = pk.pick(c, t, J, 2.0)
+    out = pk.pick(c, t, J, 2.0, True)
     print(f"pick {time.time() - t1:.1f}s ({len(out.cleared)} cleared)", flush=True)
     pr.disable()
     pstats.Stats(pr).sort_stats("cumulative").print_stats(45)

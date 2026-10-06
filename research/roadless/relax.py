@@ -785,7 +785,8 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     if plan.seed or plan.track:
         spec = plan.seed or plan.track
         picker = clear.picker_of(spec, clear.sweep_of(device))
-        order = [j for pk, _ in clear.grow(c, picker, power, budget, rel.J0) for j in pk.cleared]
+        order = [j for pk, _ in clear.grow(c, picker, power, budget, rel.J0, False)
+                 for j in pk.cleared]
         c.removed[:] = False
         r_greedy = cut_to_budget(order, c.cost, budget)
         if plan.seed:

@@ -93,7 +93,7 @@ def grow_prune(b, plan: GrowPrune, power: float, along: str, device: str, d_max:
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
     for _pk, _D in grow(c, picker_of(plan.picker, sweep_of(device)), power,
-                        plan.grow * d_max, J0):
+                        plan.grow * d_max, J0, True):
         pass
     print(f"  {b.block_id} grown to D {float(c.cost[c.removed].sum()):.3f} "
           f"{time.time() - t0:.0f}s", flush=True)

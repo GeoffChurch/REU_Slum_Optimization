@@ -42,7 +42,7 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
     c = relax._clearing(bid, device, along)
     picker = clear.picker_of(picker_spec, clear.sweep_of(device))
     t0 = time.time()
-    order = [j for pk, _ in clear.grow(c, picker, power, budget, c.sc.J(c.sc.u0, power))
+    order = [j for pk, _ in clear.grow(c, picker, power, budget, c.sc.J(c.sc.u0, power), False)
              for j in pk.cleared]
     t_greedy = time.time() - t0
     c.removed[:] = False
