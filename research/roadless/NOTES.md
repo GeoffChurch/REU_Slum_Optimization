@@ -1291,3 +1291,27 @@ median 0, ahead 30%, never behind (largest 43708 +0.0056, 41673 +0.0051); over t
 clearing +0.0036 against +0.0031; the polish's median time 14 s against 9 s (28 scorings against
 16). Cap and pairs together; on typical blocks the cap rarely binds. A marginal point: a little
 more for ~1.5x the polish. SIMP's `.p256w8x2` on the 13: queued.
+
+### The polish's combinations on the 13 (2026-10-06)
+
+Against the same base (pl-base; the runs are a day apart, so times carry cross-session noise):
+
+    plan                            mean vs base  ahead  worst    median time
+    .p256w8 (default)               +0.0069       7/13   +0.0000  1.23x
+    .p256w8x2 (pair moves)          +0.0097       10/13  +0.0000  1.26x
+    .pP256w8 (two-phase)            +0.0095       8/13   +0.0000  1.27x
+    .p256w8.gS0.01cat (seeded)      +0.0100       7/13   +0.0000  1.57x
+    .pP256w8.gS0.01cat (both)       +0.0111       8/13   +0.0000  1.42x
+    .p256w8.c0.75                   +0.0042       6/13   -0.0016  1.23x
+    greedy + polish (P64w8)         -0.0039       4/13   -0.0357  0.81x
+    greedy w4 + polish (P256w8)     -0.0033       4/13   -0.0341  0.88x
+
+- Pair moves help SIMP far more than the greedy (there +0.0005): 1558 +0.0511, 20543 +0.0140,
+  46841 +0.0126, 22422 +0.0063, at ~no extra time -- the blocks the every-building phase reached,
+  so `.p256w8x2` beats `.p256w8` and `.pP256w8` on the 13.
+- Greedy seeding collects the greedy's gated wins (30848 +0.0222, 38616 +0.0445, 1558 +0.0506);
+  with the two-phase polish the best mean, +0.0111.
+- `.c0.75` with the polish is beaten by the polish alone at the same time: the coarse-to-fine lead
+  closes. The greedy's screening width adds +0.0006 for +0.07x: marginal.
+Next: pairs + seeding (`.p256w8x2.gS0.01cat`, `.pP256w8x2.gS0.01cat`) on the 13; `.p256w8x2` on
+the 46; the local GPU runs `.pP256w8.gS0.01cat` on the 46.
