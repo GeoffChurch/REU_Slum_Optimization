@@ -1334,3 +1334,17 @@ Pairs on the held out, and pairs + seeding on the 13 (2026-10-06):
 +0.0028 mean; held out, paired with `.p256w8`, only +0.0002 mean (sum +0.009, largest 0.0026) --
 for little more time. For hard blocks, pairs + the greedy; seeding can lose
 (5706), so the two-track `.p256w8x2.GS0.01cat` is running on the 13 and the 46.
+
+### Two polished tracks, and their gate (2026-10-06)
+
+`.p256w8x2.GS0.01cat`: SIMP's incumbent and the greedy's clearing each polished (pairs), the better
+kept. The 13: +0.0119, 10/13 ahead, never behind -- on every block the better of pairs alone and
+pairs + seeding (SIMP's track 1558, 46841; the greedy's 30848, 38616) -- but 2.68x. The 46 (local):
+identical to `.p256w8x2` on every block (5706 included): the greedy's track never wins on a typical
+block, and nothing is lost the way seeding lost 5706.
+
+Gate, replayed on those logs: polish the greedy's track only if its raw (unpolished) clearing is
+within e% of SIMP's polished one. e 0: polished on 2 of the 13 -- exactly the two it won -- and 0 of
+the 46; e 1%: 3 and 0; no win missed at either. `.G<picker>e<pct>` built; `.p256w8x2.GS0.01cate1`
+and `.p256w8x2` running on the 13 in one session for its time (quality as replayed: +0.0119).
+Its floor cost on a typical block is the greedy itself (~0.4x).
