@@ -1173,5 +1173,20 @@ the same session for the times (runs pl-*):
   different gains: 1558 more than sampling, 22422 (which sampling never moved), little on 30848
   (where sampling finds +0.026). It hit its cap on 22422 and 38616 while still improving.
 - Together they are the best (+0.0106, 8 of 13), the gains roughly adding.
-- All three are on the gain-time frontier of the 13. Held out (the 46): the polish and the
-  combination running.
+- All three are on the gain-time frontier of the 13.
+
+**Held out (the 46):** the polish holds, sampling does not.
+
+    p64 vs base [46]:  median +0.001 [+0.001,+0.004]  mean +0.003  ahead 83%  worst +0.000  time x1.3
+    both vs base [46]: median +0.001 [+0.001,+0.003]  mean +0.003  ahead 80%  worst +0.000  time x1.8
+    r2 vs base [46]:   median +0.000 [-0.000,+0.000]  mean +0.001  ahead 50%  worst -0.000  time x2.0
+
+    summed gain over the 46: p64 +0.153 (2 blocks above 0.01: 5706 +0.0196, 24240 +0.0151; 23 at
+    0.001 -- 0.01), both +0.134, r2 +0.040
+
+(Times against the base rows of an earlier session.) The polish finds four times `.r2`'s gain on
+typical blocks in less time; sampling on top adds nothing there (the combination's sum is lower:
+sampling moves the incumbent the polish starts from). Presets: `.p64w8` the new SIMP default
+(+0.003 mean, never behind, 1.3x), `.r2l2.p64w8` for hard blocks (best on the 13, +0.0106).
+`.r2` (every stage) is beaten by `.r2l2` on time at equal quality on the 13 and by the polish on
+the 46; it is one parameter value of `.r`, nothing to delete.

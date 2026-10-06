@@ -75,9 +75,13 @@ and Lens B from nested runs.
     is ahead on 5 (+0.008 to +0.038) but on the 46 held out only +0.001 mean (none above 0.01),
     never behind, 2x the time: selectable for hard blocks, not a default. It partly rescues
     `.k2`'s and MMA's lost gate (0.55, not 0.78).
-  - Cheaper `.r`: sample only where it pays (the 8 unchanged blocks pay 2.2x for nothing) --
-    by iterate greyness, or only in the last stages; find first which iterates the winners came
-    from.
+  - Cheaper `.r` (done): the winners come from the last two stages' random roundings, so
+    `.r2l2` samples only there (1.58x, same gains as `.r2`).
+  - Undecided-set polish (done, `.p<tries>w<width>`; NOTES "Late sampling and the polish"): the
+    new SIMP default `.p64w8` (46 held out: +0.003 mean, ahead 83%, never behind, 1.3x);
+    `.r2l2.p64w8` for hard blocks. **Next:** a larger cap (it hit 64 on 22422 and 38616 while
+    still improving); 2-for-1 moves; the same polish on the greedy's clearing (its undecided set:
+    the buildings near its last batches' cutoff).
   - Multiple starts (below), or the add/remove search seeded with the incumbent.
 - **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).
 - **Projection** (measured, kept selectable: `.b8-32` wins some gated blocks, loses some
