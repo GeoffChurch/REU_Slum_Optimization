@@ -8,7 +8,7 @@ floor under that estimate, to send a block known to need a bigger card to one. R
 rows) come back to the same paths here, never overwriting a local file.
 
     uv run python research/roadless/cluster.py setup
-    uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] <ids,|@file> -- <script> <args with {id}>
+    uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] [--with FILE ...] <ids,|@file> -- <script> <args with {id}>
     uv run python research/roadless/cluster.py status|sync [<run>]
     uv run python research/roadless/cluster.py wait <run> [--timeout 3h]    # exit 0 passed, 3 failed, 4 timed out, 5 blind
     uv run python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]   # its failed / missing blocks as <run>-r1
@@ -42,6 +42,9 @@ class Blocks:
         parser.add_argument("--time", help="sbatch --time (default: the cluster's)")
         parser.add_argument("--gb", type=float, default=0.0,
                             help="a floor under each task's GPU-memory estimate, in GB")
+        parser.add_argument("--with", dest="extra", type=Path, action="append", default=[],
+                            help="a file shipped beside the block bank (repeatable); a task "
+                                 "reads it as $CLUSTER_SUBMIT_INPUTS/<its name>")
         parser.add_argument("command", nargs=argparse.REMAINDER,
                             help="-- <script> <args with {id}>")
 
@@ -64,7 +67,7 @@ class Blocks:
             for b in ids)
         return cs.RunPlan(
             tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time),
-            inputs=(workdir / "bank.pkl",),
+            inputs=(workdir / "bank.pkl", *args.extra),
             prelude=("source research/roadless/cluster_env.sh",
                      'export REBLOCK_BLOCK_BANK="$CLUSTER_SUBMIT_INPUTS/bank.pkl"'),
             describe=(f"{len(ids)} blocks: {line}",))
