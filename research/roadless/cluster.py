@@ -8,7 +8,7 @@ floor under that estimate, to send a block known to need a bigger card to one. R
 rows) come back to the same paths here, never overwriting a local file.
 
     uv run python research/roadless/cluster.py setup
-    uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] [--with FILE ...] <ids,|@file> -- <script> <args with {id}>
+    uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] [--h H] [--with FILE ...] <ids,|@file> -- <script> <args with {id}>
     uv run python research/roadless/cluster.py status|sync [<run>]
     uv run python research/roadless/cluster.py wait <run> [--timeout 3h]    # exit 0 passed, 3 failed, 4 timed out, 5 blind
     uv run python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]   # its failed / missing blocks as <run>-r1
@@ -42,6 +42,9 @@ class Blocks:
         parser.add_argument("--time", help="sbatch --time (default: the cluster's)")
         parser.add_argument("--gb", type=float, default=0.0,
                             help="a floor under each task's GPU-memory estimate, in GB")
+        parser.add_argument("--h", type=float, default=0.5,
+                            help="the grid spacing the tasks use (relax.py's .h<h>; scales the "
+                                 "memory estimate, which assumes h 0.5)")
         parser.add_argument("--with", dest="extra", type=Path, action="append", default=[],
                             help="a file shipped beside the block bank (repeatable); a task "
                                  "reads it as $CLUSTER_SUBMIT_INPUTS/<its name>")
@@ -58,12 +61,14 @@ class Blocks:
         line = " ".join(command)
         if "{id}" not in line:
             raise SystemExit("the command needs {id}")
+        if args.h != 0.5 and f".h{args.h:g}" not in line:
+            raise SystemExit(f"--h {args.h:g} but the command's plan has no .h{args.h:g}")
         ids = (Path(args.ids[1:]).read_text().split() if args.ids.startswith("@")
                else args.ids.split(","))
         bank = common.write_bank(ids, workdir / "bank.pkl")
         tasks = tuple(
             cs.Task(f"python -u {line.replace('{id}', b)}",
-                    max(bank[b].boundary.area / 0.25 * 8 / 1e6 * GB_PER_MILLION, args.gb))
+                    max(bank[b].boundary.area / args.h ** 2 * 8 / 1e6 * GB_PER_MILLION, args.gb))
             for b in ids)
         return cs.RunPlan(
             tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time),

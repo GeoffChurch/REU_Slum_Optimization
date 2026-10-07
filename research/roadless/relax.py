@@ -510,7 +510,9 @@ class Plan(NamedTuple):
     scoring at h 0.5 throughout; `coarse_all` > 0 (one only): every stage on that grid, each
     start's incumbent scored there and only its winner at h 0.5; `starts` > 1 (one only): that
     many SIMP runs (start_x), one incumbent over all of them (coarse_all: over their winners);
-    `update` the design update rule (`.u<name>`; OC's classic rule
+    `update` the design update rule; `h` the metric's grid spacing (`.h<h>`, h 0.5 not named: a
+    coarser one only for blocks too large for it, and it reads low on gated blocks -- NOTES,
+    "Where resolution matters") (`.u<name>`; OC's classic rule
     is not named)."""
     fw: int
     qmax: float
@@ -535,6 +537,7 @@ class Plan(NamedTuple):
     track: str = ""
     track_gate: float = -1.0
     update: Update = DEFAULT_UPDATE
+    h: float = 0.5
 
     @property
     def name(self) -> str:
@@ -555,7 +558,8 @@ class Plan(NamedTuple):
                 + (f".g{self.seed}" if self.seed else "")
                 + (f".G{self.track}" if self.track else "")
                 + (f"e{self.track_gate:g}" if self.track and self.track_gate >= 0 else "")
-                + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
+                + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else "")
+                + (f".h{self.h:g}" if self.h != 0.5 else ""))
 
     @property
     def stages(self) -> tuple[tuple[float, float], ...]:
@@ -580,7 +584,8 @@ def plan_of(spec: str) -> Plan:
                      r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?)?"
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
-                     r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?", spec)
+                     r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?"
+                     r"(?:\.h(?P<h>[0-9.]+))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
     g = m.groupdict()
@@ -604,7 +609,7 @@ def plan_of(spec: str) -> Plan:
                 coarse_all=0.0 if g["C"] is None else float(g["C"]),
                 starts=0 if g["m"] is None else int(g["m"]), seed=g["g"] or "", track=g["G"] or "",
                 track_gate=-1.0 if g["Ge"] is None else float(g["Ge"]),
-                update=update)
+                update=update, h=0.5 if g["h"] is None else float(g["h"]))
 
 
 class Incumbent:
@@ -752,7 +757,7 @@ def _clearing(bid: str, device: str, along: str, h: float = 0.5) -> Clearing:
 
 
 def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: float) -> dict:
-    c = _clearing(bid, device, along)
+    c = _clearing(bid, device, along, plan.h)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
@@ -873,7 +878,7 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
             or plan.seed or plan.track):
         raise ValueError(f"coarse grids, polish and multi-start are not built for path: "
                          f"{plan.name}")
-    c = _clearing(bid, device, along)
+    c = _clearing(bid, device, along, plan.h)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     J0, P0 = rel.J0, c.sc.P0
     rows = [dict(block=bid, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[], P0=P0,
