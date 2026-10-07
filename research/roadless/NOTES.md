@@ -1371,3 +1371,28 @@ aggregation left an isolated unknown (no off-diagonal entry) in no aggregate, wh
 assertion refused; lifted.aggregate_level now gives such a node its own aggregate (with none,
 pyamg's aggregation exactly) and logs it; 53556 resubmitted (big3-r1). 45267 is estimated at
 86.6 GB, past the 80 GB card: with the other 16 over 1.4 km^2, the owner's coarse-or-crop call.
+
+### The oversized blocks: a coarser grid, and where local coarsening would pay (owner 2026-10-07: "We can try a coarser grid. Is local coarsening (in areas with fewer parcels, like a KDTree) possible?")
+
+The 17 blocks past every card at h 0.5 (45267 joins at 86.6 GB) are peri-urban: 1,000 -- 4,500
+buildings over 3.9 -- 52 km^2. Their share of area within d of a building (union of footprints
+buffered by d, inside the boundary):
+
+    d                      5 m      10 m     20 m     40 m
+    the ~4 km^2 blocks     8-17%    10-23%   14-30%   20-38%
+    the 12 -- 52 km^2      1-8%     2-12%    3-17%    5-22%    (4287, 472, 1182, 63818, 64070: 3-4% at 20 m)
+
+So nearly all of each block is open land far from any building, where the field is smooth; the
+resolution matters near buildings (gates: res-check). Local coarsening -- h 0.5 within ~20 m of a
+building, coarse cells beyond -- would keep the metric's resolution where it decides the score
+(4287: from 1.66 billion unknowns to ~50 -- 80 million). It is a new discretization (lifted.py's
+grid is uniform: 8 headings per cell, lattice moves such as (2, 1), sightline scans along grid
+lines): the fine/coarse interface needs its own stencils and conductances; validated against
+uniform h 0.5 on the 59 that fit. Owner's call on building it.
+
+Meanwhile the uniform coarse grid (`.h<h>`, the launcher's `--h`), the finest h each block fits on
+a 48 GB card (4287 needs the 80 GB one at h 2), base and the default `.p256w8x2`:
+h 0.75: 45267, 62385, 38142, 26061, 62403; h 1: 62523, 38190, 28051; h 1.5: 7499, 62803, 62441,
+63612; h 2: 64070, 63818, 472, 1182, 4287. And res-check at h 1.5 and 2 on the 59 (how low those
+read). 53556's rerun (the AMG fix) was cancelled while the H100 stayed booked -- the launcher's
+budget chained every later run behind it -- and goes back when the H100 frees.
