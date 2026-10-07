@@ -12,8 +12,8 @@ block has gates below that spacing. Buildings, their costs and a clearing do not
 clearings.parquet: block, name, cleared (building indices); in the cluster's inputs
 ($CLUSTER_SUBMIT_INPUTS) or a local path. A name ending `_steps` is a greedy's pick order, cut to
 `budget` as polish_greedy.py cuts it (every building in order while it fits) and reported
-without the suffix. Rows in res_rows/<along>/<id>_p<p>.parquet: block,
-name, h, perm (Lens A at that h), cells (inside cells at that h).
+without the suffix. Rows in res_rows/<along>/<id>_p<p>_h<h,h,...>.parquet:
+block, name, h, perm (Lens A at that h), cells (inside cells at that h).
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def main(bid: str, power: float, device: str, along: str, clearings: str, hs: li
               + ", ".join(f"{r['name']} {r['perm']:.4f}" for r in rows if r["h"] == h)
               + f" ({time.time() - t0:.0f}s)", flush=True)
         del rel, c
-    out = HERE / "res_rows" / along / f"{bid}_p{power:g}.parquet"
+    out = HERE / "res_rows" / along / f"{bid}_p{power:g}_h{','.join(f'{h:g}' for h in hs)}.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_parquet(out)
 
