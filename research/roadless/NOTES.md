@@ -1697,3 +1697,11 @@ solves on the way; the others ignore them. cells(block) gives the target, so a s
 without a solve. On 40144 it reproduces the prototype (333,642 cells against 333,639, GPU noise
 in the ranking at the cutoff; -0.00128 on every clearing), mesh and five scorings in 19 s.
 Validation on the 59: run goal-59, factors 1.2, 1.5 and 2, with a20x8 for comparison.
+
+The cheap preset on the 21 oversized and base-only blocks, on the SIMP runs' meshes (cheap-ov-*:
+a5x8, 4287 a5x32, 63612 a2.5x8), against SIMP base and the default on the same: cheap - default
+median -0.0107 (-0.0594 .. +0.0054), cheap - base median -0.0067 (-0.0588 .. +0.0258), at 0.50x
+the default's time and 0.72x the base's (median). As on the 46 held out (-0.015 against the
+default), a cheaper point, not a better one: it wins only on 28051 (+0.0054 over the default) and
+ties on 1182; its worst is 62385 (-0.059, a gate the SIMP presets find). Every large block now
+has all three presets' cheap and default points but 19593 and 6498 (default only, uniform h 0.5).
