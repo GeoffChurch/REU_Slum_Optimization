@@ -36,6 +36,7 @@ ENV = cs.Uv()
 class Blocks:
     name: str = "blocks"
     pull: cs.IntoTree = cs.IntoTree("research/roadless", ("*.parquet",))
+    routine_exits: frozenset[int] = frozenset()     # every non-zero exit is a failure
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("ids", help="block ids, comma-separated, or @file of ids")
@@ -71,7 +72,7 @@ class Blocks:
                     max(bank[b].boundary.area / args.h ** 2 * 8 / 1e6 * GB_PER_MILLION, args.gb))
             for b in ids)
         return cs.RunPlan(
-            tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time),
+            tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=None),
             inputs=(workdir / "bank.pkl", *args.extra),
             prelude=("source research/roadless/cluster_env.sh",
                      'export REBLOCK_BLOCK_BANK="$CLUSTER_SUBMIT_INPUTS/bank.pkl"'),
