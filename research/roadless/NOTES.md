@@ -1620,11 +1620,11 @@ for the 16 oversized blocks, 11.5 min for the 59 (a5x8). 73% of a build was the 
 test (`query_nearest` with a max distance, per box: is a piece within d0 2^(l-1)?). Measured per
 level on 26061, 30796, 1558 (a5 -- a20), against query_nearest:
 
-    near test                                        a5           a10     a20 (dense urban)
-    all `dwithin` pairs, any per box                 0.33 -- 0.59  0.48    1.47 -- 2.15
-    `dwithin` at dist/4, the rest at dist            0.34 -- 0.38  0.40    0.66 -- 0.76
-    `dwithin` at dist/8, /4, /2, dist                0.45 -- 0.51  0.52    0.58 -- 0.59
-    `dwithin` at a small radius, query_nearest rest  0.79 -- 0.85  0.86    0.69 -- 0.91
+    near test                                        a5            a10           a20 (dense urban)
+    all `dwithin` pairs, any per box                 0.33 -- 0.64  0.44 -- 0.48  1.17 -- 2.35
+    `dwithin` at dist/4, the rest at dist            0.34 -- 0.38  0.40          0.67 -- 0.76
+    `dwithin` at dist/8, /4, /2, dist                0.45 -- 0.51  0.52          0.58 -- 0.59
+    `dwithin` at a small radius, query_nearest rest  0.75 -- 0.85  0.86 -- 0.94  0.79 -- 0.95
 
 All pairs at once blows up where a dense block's top-level boxes (D 160 m at a20) each pair with
 hundreds of pieces; staging settles most boxes among few pairs. lifted._near is now the
