@@ -1487,3 +1487,41 @@ gone, even jumping straight from 0.5 m to 8 m. Design for the real build:
 - chosen upstream: a plan suffix for the mesh, built where the Clearing is.
 Validation before use: the composite against exact h 0.5 on the 59 (fixed clearings, as res-check)
 and SIMP on a few; then the 17 oversized blocks at h 0.5 near their buildings.
+
+### Local coarsening: built (2026-10-08)
+
+`lifted.CompositeGrid`, chosen by a mesh Strategy (`lifted.MeshSpec`: `UniformMesh(h)`,
+`AdaptiveMesh(h, d0, smax)`) resolved where the scorer is built: SIMP plans name it `.a<d0>x<smax>`,
+resolution_check.py and cluster.py `--mesh` take tokens `<h>` / `<h>a<d0>x<smax>`. The mesh:
+- Grid.of's own lattice and sub-samples, refined top-down from tiles of side smax: a cell of side
+  h 2^l stays whole when no footprint, street or block-edge piece is within d0 2^(l-1) of it (and
+  its centre is inside the block, so all of it is), else splits in four; the h cells are Grid's
+  (kept where a sub-sample is inside), with Grid's footprint labels, ground and dist_b computed on
+  them alone -- no raster, so 4287 (51.7 km^2, 207M cells uniform) builds in 82 s and 6 GB;
+- the prototype's interface rule on a graded mesh. A step into a much larger cell can land where
+  that cell's centre is BEHIND the source along v_k (a (2, 1) step into the corner of a cell 16x
+  its size: projected distance < 0, a negative conductance -- the prototype's r 16 row had some);
+  doubling the distance per level keeps neighbours within 2x for d0 > ~2.5 m, and the pattern
+  refuses a non-positive projected distance rather than build one;
+- every consumer takes the cells flat: the pattern carries each edge's fully-open weight (one
+  number on the uniform grid), the turning edges each cell's area, and the mesh answers reach
+  (Grid: ndimage labels; CompositeGrid: graph components on the host, kept for a repeating free
+  set). Sightline along-conductances need a raster and refuse the mesh (`needs_raster`).
+Checks: the uniform path is bit-identical to before (6310: geometry, demand, labels, the baseline
+and master operators, reach); an all-fine composite reproduces the uniform grid bit for bit; GPU
+and CPU agree. On 6310 (dense: the mesh saves only 16% there), Lens A of the five res-check
+clearings against exact h 0.5:
+
+    a10x8  -0.0001 (307k cells)    a5x8  -0.0004 (284k)    a2.5x8  -0.0016 .. -0.0018 (256k)
+
+GPU estimates (0.7 GB per million unknowns, cells x 8) on the oversized blocks: fine cells are
+66 -- 91% of every mesh (a third of 4287's only for its 51 km street edge), so smax barely matters:
+
+    mesh     range over the 17 (GB)   over 28 GB
+    a10x8    18 -- 52                  9 blocks
+    a5x8     14 -- 37                  63612 (37), 4287 (31.8)
+    a5x32    13 -- 36                  63612 (36), 4287 at 28.4
+    a2.5x8   10 -- 27                  none
+(uniform h 0.5: 87 -- 1159 GB.) So a5 for 16 blocks (4287 at a5x32), 63612 at a2.5, if the
+validation holds: res-check on the 59 at a10x8, a5x8, a5x32, a2.5x8 (run res-mesh), and on the
+oversized blocks the convergence in d0 of their coarse runs' clearings (ov_clearings.parquet).
