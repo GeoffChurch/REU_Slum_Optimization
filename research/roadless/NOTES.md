@@ -1543,3 +1543,15 @@ here (no cell of these urban blocks is 40 m from everything). So the oversized b
 (4287 at a5x32, 63612 at a2.5x8), base and default (ov-base-a5, ov-def-a5 and the per-block runs;
 16 blocks with 53556, which no longer needs the H100); their coarse runs' clearings rescored at
 several d0 (ov-mesh-*) show the convergence on peri-urban blocks themselves.
+
+On the oversized blocks themselves (runs ov-mesh-*: their coarse runs' base and default clearings
+rescored at several d0; 4.5M cells at most, 1.7 -- 5.1M), the composite converges in d0, a little
+more slowly than on the urban 59: a10 - a5 mean +0.0013 (+0.0004 .. +0.0026, 14 clearings), a2.5
+- a5 mean -0.0012 (-0.0044 .. +0.0026, 30). Here the far field counts a little: a5x32 - a5x8 is
+-0.0036 .. +0.0012 (472, 1182 the lowest), so 4287 at a5x32 may read up to ~0.004 low. The coarse
+runs' own scores were far off the composite's (coarse score minus a5): 45267 at h 1 -0.14 and
+28051 at h 1.25 -0.22 (gates below the cell), 472 at h 3 +0.16, 63818 at h 3 -0.14 (base) and
++0.07 (default) -- and on 63818 the coarse grid ranked the default's clearing above the base's
+(0.180 vs 0.173) where a5 puts it far below (0.111 vs 0.317): optimizing on the coarse grid found
+a worse clearing. The coarse-h numbers in "What a coarser grid does to Lens A" are superseded by
+the a5 runs.
