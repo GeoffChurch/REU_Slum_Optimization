@@ -509,12 +509,14 @@ class Plan(NamedTuple):
     scoring at h 0.5 throughout; `coarse_all` > 0 (one only): every stage on that grid, each
     start's incumbent scored there and only its winner at h 0.5; `starts` > 1 (one only): that
     many SIMP runs (start_x), one incumbent over all of them (coarse_all: over their winners);
-    `update` the design update rule (`.u<name>`; OC's classic rule is not named); `h` the
-    metric's grid spacing (`.h<h>`, h 0.5 not named: a coarser one only for blocks too large for
-    it, and it reads low on gated blocks -- NOTES, "Where resolution matters"); `d0` > 0
-    (`.a<d0>x<smax>`): the grid is local-coarsened (lifted.AdaptiveMesh), h within d0 metres of
-    every footprint, street and the block edge, cells doubling with distance up to `smax` (for
-    the blocks too large for a uniform h 0.5 -- NOTES, "Local coarsening")."""
+    `update` the design update rule (`.u<name>`; OC's classic rule is not named); `mesh` the
+    metric's grid, its suffix last (lifted.MeshSpec.suffix; uniform h 0.5 not named): `.h<h>`
+    a coarser uniform one (it reads low on gated blocks -- NOTES, "Where resolution matters"),
+    `.a<d0>x<smax>` local coarsening (lifted.AdaptiveMesh: h within d0 metres of every
+    footprint, street and the block edge, cells doubling with distance up to `smax`), and
+    `.g<d0>x<smax>f<factor>p<power>` that refined where J_power is sensitive (common.GoalMesh),
+    the last two for blocks too large for a uniform h 0.5 (NOTES, "Local coarsening",
+    "Goal-oriented refinement")."""
     fw: int
     qmax: float
     iters: int
@@ -538,9 +540,7 @@ class Plan(NamedTuple):
     track: str = ""
     track_gate: float = -1.0
     update: Update = DEFAULT_UPDATE
-    h: float = 0.5
-    d0: float = 0.0
-    smax: float = 0.0
+    mesh: lifted.MeshSpec = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
 
     @property
     def name(self) -> str:
@@ -563,13 +563,6 @@ class Plan(NamedTuple):
                 + (f"e{self.track_gate:g}" if self.track and self.track_gate >= 0 else "")
                 + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else "")
                 + self.mesh.suffix)
-
-    @property
-    def mesh(self) -> lifted.MeshSpec:
-        """The metric's grid."""
-        if self.d0 > 0:
-            return lifted.AdaptiveMesh(self.h, self.d0, self.smax, offset=lifted.OFFSET)
-        return lifted.UniformMesh(self.h, offset=lifted.OFFSET)
 
     @property
     def stages(self) -> tuple[tuple[float, float], ...]:
@@ -595,7 +588,8 @@ def plan_of(spec: str) -> Plan:
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?"
-                     r"(?:\.h(?P<h>[0-9.]+?))?(?:\.a(?P<ad>[0-9.]+)x(?P<ax>[0-9.]+))?", spec)
+                     r"(?:\.h(?P<h>[0-9.]+?))?(?P<mesh>\.[ag][0-9.]+x[0-9.]+?(?:f[0-9.]+p[0-9.]+)?)?",
+                     spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
     g = m.groupdict()
@@ -619,9 +613,9 @@ def plan_of(spec: str) -> Plan:
                 coarse_all=0.0 if g["C"] is None else float(g["C"]),
                 starts=0 if g["m"] is None else int(g["m"]), seed=g["g"] or "", track=g["G"] or "",
                 track_gate=-1.0 if g["Ge"] is None else float(g["Ge"]),
-                update=update, h=0.5 if g["h"] is None else float(g["h"]),
-                d0=0.0 if g["ad"] is None else float(g["ad"]),
-                smax=0.0 if g["ax"] is None else float(g["ax"]))
+                update=update,
+                mesh=common.mesh_of(("0.5" if g["h"] is None else g["h"])
+                                    + ("" if g["mesh"] is None else g["mesh"][1:])))
 
 
 class Incumbent:

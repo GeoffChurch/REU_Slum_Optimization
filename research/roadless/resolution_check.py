@@ -9,8 +9,9 @@ block has gates below that spacing. Buildings, their costs and a clearing do not
     PYTHONPATH=. uv run python research/roadless/resolution_check.py <id> <p> <cpu|gpu> <along> \\
         <clearings.parquet> <mesh,mesh,...> <budget>
 
-mesh: <h> (a uniform grid) or <h>a<d0>x<smax> (lifted.AdaptiveMesh: h within d0 metres of
-every footprint, street and the block edge, coarser with distance up to smax).
+mesh: <h> (a uniform grid), <h>a<d0>x<smax> (lifted.AdaptiveMesh: h within d0 metres of
+every footprint, street and the block edge, coarser with distance up to smax) or
+<h>g<d0>x<smax>f<factor>p<power> (common.GoalMesh: that refined where J_power is sensitive).
 
 clearings.parquet: block, name, cleared (building indices); in the cluster's inputs
 ($CLUSTER_SUBMIT_INPUTS) or a local path. A name ending `_steps` is a greedy's pick order, cut to
@@ -30,7 +31,7 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import lifted  # noqa: E402
+import common  # noqa: E402
 import relax  # noqa: E402
 
 
@@ -44,7 +45,7 @@ def main(bid: str, power: float, device: str, along: str, clearings: str, tokens
         raise SystemExit(f"{bid}: no clearings in {src}")
     rows = []
     for token in tokens:
-        mesh = lifted.mesh_of(token)
+        mesh = common.mesh_of(token)
         t0 = time.time()
         c = relax._clearing(bid, device, along, mesh)
         rel = relax.Relaxation(c, power)

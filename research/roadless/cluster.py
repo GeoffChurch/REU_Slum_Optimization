@@ -4,10 +4,11 @@
 shipped as an input (a node has no source data; common.build_blocks reads the bank). Each task
 needs GPU memory for the eps world, every inside cell x 8 headings, about GB_PER_MILLION GB per
 million unknowns, and cluster_submit routes it to the smallest card that holds it. `--mesh` is
-the grid the tasks use (lifted.mesh_of: <h> or <h>a<d0>x<smax>, the latter's cells counted
-here, SIZING_WORKERS blocks at a time); `--gb` sets a floor under the estimate, to send a block
-known to need a bigger card to one. Results (parquet rows) come back to the same paths here,
-never overwriting a local file.
+the grid the tasks use (common.mesh_of: <h>, <h>a<d0>x<smax> or
+<h>g<d0>x<smax>f<factor>p<power>), its cells counted here, SIZING_WORKERS blocks at a time (a
+goal mesh's: its target); `--gb` sets a floor under the estimate, to send a block known to need
+a bigger card to one. Results (parquet rows) come back to the same paths here, never
+overwriting a local file.
 
     uv run python research/roadless/cluster.py setup
     uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] \
@@ -61,7 +62,6 @@ class Blocks:
 
     def plan(self, args: argparse.Namespace, workdir: Path) -> cs.RunPlan:
         import common   # geopandas and the block sources: only a submit needs them
-        import lifted
 
         # REMAINDER (which drops the `--`) swallows an option placed after the ids
         command: list[str] = args.command
@@ -70,7 +70,7 @@ class Blocks:
         line = " ".join(command)
         if "{id}" not in line:
             raise SystemExit("the command needs {id}")
-        mesh = lifted.mesh_of(args.mesh)
+        mesh = common.mesh_of(args.mesh)
         if not _names(line, args.mesh, mesh):
             raise SystemExit(f"--mesh {args.mesh} but the command does not use it")
         ids = (Path(args.ids[1:]).read_text().split() if args.ids.startswith("@")
@@ -92,8 +92,7 @@ class Blocks:
 
 def _cells(mesh, block) -> float:
     """`mesh`'s cells on `block` (a pool worker's task)."""
-    return mesh.cells(block.boundary, list(block.buildings.outlines),
-                      list(block.streets.geometry))
+    return mesh.cells(block)
 
 
 def _names(line: str, token: str, mesh) -> bool:

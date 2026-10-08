@@ -7,7 +7,7 @@ world at 1e-6 as SIMP's incumbent does, the result exactly.
     PYTHONPATH=. uv run python research/roadless/polish_greedy.py <id> <p> <cpu|gpu> <picker> \\
         <tries> <width> <along> <budget> <mesh> [x2]
 
-mesh: <h> or <h>a<d0>x<smax> (lifted.mesh_of), the grid of every solve and score. `x2`:
+mesh: a common.mesh_of token, the grid of every solve and score. `x2`:
 two-for-one moves too (relax.exchange's pairs). Rows in
 polish_rows/<along>/<picker>.P<tries>w<width>[x2]<the mesh's suffix>/D<budget>/<id>_p<p>.parquet
 (h 0.5 unnamed, as in a SIMP plan): `perm` the polished clearing's Lens A, `greedy_perm` the
@@ -26,6 +26,7 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import clear  # noqa: E402
+import common  # noqa: E402
 import lifted  # noqa: E402
 import relax  # noqa: E402
 
@@ -76,4 +77,4 @@ if __name__ == "__main__":
         raise SystemExit("usage: <id> <p> <cpu|gpu> <picker> <tries> <width> <along> <budget> "
                          "<mesh> [x2]")
     main(a[0], float(a[1]), a[2], a[3], int(a[4]), int(a[5]), a[6], float(a[7]),
-         lifted.mesh_of(a[8]), len(a) == 10)
+         common.mesh_of(a[8]), len(a) == 10)

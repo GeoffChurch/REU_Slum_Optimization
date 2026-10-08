@@ -7,8 +7,10 @@ built once, scoring any road set by the free space its corridor opens.
 from __future__ import annotations
 
 import dataclasses
+import math
 import os
 import pickle
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -165,15 +167,24 @@ class Carve:
 class Scorer:
     def __init__(self, block, mesh: lifted.MeshSpec, p: lifted.Params, rule=None,
                  population=None):
-        rule = Carve() if rule is None else rule
         population = CountPopulation() if population is None else population
-        self.block, self.mesh, self.p, self.rule = block, mesh, p, rule
+        grid = mesh.build(block, p, population)
+        if p.along.needs_raster and not grid.raster:
+            raise ValueError(f"along {p.along.name} scans grid lines: not on mesh {mesh.name}")
+        self._on(block, grid, p, rule, population)
+
+    @classmethod
+    def on_grid(cls, block, grid, p: lifted.Params, population) -> Scorer:
+        """A scorer on a grid already built (GoalMesh's rounds)."""
+        sc = cls.__new__(cls)
+        sc._on(block, grid, p, None, population)
+        return sc
+
+    def _on(self, block, grid, p: lifted.Params, rule, population) -> None:
+        rule = Carve() if rule is None else rule
+        self.block, self.grid, self.p, self.rule = block, grid, p, rule
         self.polys = np.asarray(block.buildings.outlines)
         self.tree = shapely.STRtree(self.polys)
-        streets = list(block.streets.geometry)
-        self.grid = mesh.build(block.boundary, self.polys, streets)
-        if p.along.needs_raster and not self.grid.raster:
-            raise ValueError(f"along {p.along.name} scans grid lines: not on mesh {mesh.name}")
         self.free0 = self.grid.ff0
         # demand only where the street can be reached at baseline: fixed from here on, so
         # freeing space only ever adds conductance. `stranded` = share of buildings with no
@@ -222,3 +233,105 @@ class Scorer:
         if free is self.free0:
             return 0.0
         return 1.0 - self.P_free(free) / self.P0
+
+
+GOAL_EPS = 0.01      # the indicator's world: buildings conduct eps (the greedy's tension world,
+                     # clear.EPS, where the prototype was measured)
+GOAL_RTOL = 1e-3     # its solves: a ranking (as the tension's)
+GOAL_ALPHA = 1.0     # eta = E (s / h)^alpha: 1 and 2 within 1.4x of each other (NOTES)
+GOAL_STEP = 6        # a round splits ceil(gap / GOAL_STEP) cells (each adds 3): half the gap
+GOAL_REACH = 0.98    # done at this share of the target
+
+
+@dataclass(frozen=True)
+class GoalMesh:
+    """The distance mesh a<d0>x<smax> (lifted.AdaptiveMesh) refined where J_power is sensitive,
+    to `factor` x its cells. Each round solves the baseline with the buildings at GOAL_EPS and
+    its J_power adjoint, scores every coarse cell eta = E (s / h)^GOAL_ALPHA (E its share of
+    |w du dlam| over its edges, s its side), splits the largest ceil(gap / GOAL_STEP) and
+    balances (lifted.balance). NOTES, "Goal-oriented refinement"."""
+    h: float
+    d0: float
+    smax: float
+    factor: float
+    power: float
+    offset: tuple[float, float]
+
+    @property
+    def name(self) -> str:
+        return f"h{self.h:g}g{self.d0:g}x{self.smax:g}f{self.factor:g}p{self.power:g}"
+
+    @property
+    def suffix(self) -> str:
+        return (("" if self.h == 0.5 else f".h{self.h:g}")
+                + f".g{self.d0:g}x{self.smax:g}f{self.factor:g}p{self.power:g}")
+
+    @property
+    def pilot(self) -> lifted.AdaptiveMesh:
+        return lifted.AdaptiveMesh(self.h, self.d0, self.smax, offset=self.offset)
+
+    def cells(self, block) -> float:
+        """Its target (it stops within GOAL_REACH of it, or at the first round past it)."""
+        return float(round(self.factor * self.pilot.cells(block)))
+
+    def build(self, block, p: lifted.Params, population) -> lifted.CompositeGrid:
+        lay = self.pilot.layout(block)
+        target = self.factor * lifted._cells_of(lay)
+        _, footprints, streets = lifted._geometry(block)
+        while True:
+            grid = lifted.CompositeGrid.from_layout(lay, footprints, streets, self.h,
+                                                    band_m=lifted.BAND_M)
+            coarse = grid.level > 0
+            if len(grid.level) >= GOAL_REACH * target or not coarse.any():
+                return grid
+            eta = goal_indicator(block, grid, p, population, self.power)[coarse]
+            mask = np.zeros(len(eta), dtype=bool)
+            mask[np.argsort(-eta)[:math.ceil((target - len(grid.level)) / GOAL_STEP)]] = True
+            lay = lifted.balance(lifted.split_cells(lay, mask))
+            p.solver.release()
+
+
+def goal_indicator(block, grid, p: lifted.Params, population, power: float) -> np.ndarray:
+    """Per cell: eta = E (s / h)^GOAL_ALPHA, E the cell's half of |w du dlam| over each of its
+    edges (u the baseline with the buildings at GOAL_EPS, lam its J_power adjoint)."""
+    sc = Scorer.on_grid(block, grid, p, population)
+    xp, K = p.solver.xp, p.K
+    op = sc.free0 + GOAL_EPS * (grid.isub.mean(axis=-1) - sc.free0)
+    sol = lifted.solve(grid, op, sc.f, p, rtol=GOAL_RTOL, host=False)
+    host = dataclasses.replace(sol, u=p.solver.to_host(sol.u), cell=p.solver.to_host(sol.cell),
+                               unk_cell=p.solver.to_host(sol.unk_cell))
+    u_home = sc.home_u_of(host, op)
+    mult = np.zeros_like(sc.f)
+    on = sc.owner >= 0
+    mult[on] = power * np.nan_to_num(u_home[sc.owner[on]]) ** (power - 1.0)
+    lam = lifted.solve(grid, op, sc.f * mult, p, rtol=GOAL_RTOL, host=False)
+
+    def per_axis(s: lifted.Solution):
+        out = xp.zeros((len(s.unk_cell), K))
+        out[s.unk_cell >= 0] = s.u.reshape(-1, K)
+        return out
+
+    uk, lk = per_axis(sol), per_axis(lam)
+    n = uk.shape[0]
+    if n != len(grid.size):
+        raise ValueError(f"{n} free cells of {len(grid.size)}: the eps world frees every cell")
+    E = xp.zeros(n)
+    for ca, cb, ka, kb, w in lifted.edges(grid, op, p):
+        q = xp.abs(w * (uk[ca, ka] - uk[cb, kb]) * (lk[ca, ka] - lk[cb, kb]))
+        E += 0.5 * (xp.bincount(ca, q, minlength=n) + xp.bincount(cb, q, minlength=n))
+    return p.solver.to_host(E) * (grid.size / grid.h) ** GOAL_ALPHA
+
+
+def mesh_of(token: str) -> lifted.MeshSpec:
+    """A mesh named on a command line, at lifted.OFFSET: <h> (lifted.UniformMesh),
+    <h>a<d0>x<smax> (lifted.AdaptiveMesh) or <h>g<d0>x<smax>f<factor>p<power> (GoalMesh)."""
+    num = r"([0-9]+(?:\.[0-9]+)?)"
+    if m := re.fullmatch(num, token):
+        return lifted.UniformMesh(float(m[1]), offset=lifted.OFFSET)
+    if m := re.fullmatch(f"{num}a{num}x{num}", token):
+        return lifted.AdaptiveMesh(float(m[1]), float(m[2]), float(m[3]), offset=lifted.OFFSET)
+    if m := re.fullmatch(f"{num}g{num}x{num}f{num}p{num}", token):
+        return GoalMesh(float(m[1]), float(m[2]), float(m[3]), float(m[4]), float(m[5]),
+                        offset=lifted.OFFSET)
+    raise ValueError(f"unknown mesh {token!r}: <h>, <h>a<d0>x<smax> or "
+                     "<h>g<d0>x<smax>f<factor>p<power>")

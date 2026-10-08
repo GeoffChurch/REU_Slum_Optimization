@@ -474,16 +474,6 @@ class CompositeGrid:
         return (1 << self.level) * self.h
 
     @classmethod
-    def of(cls, boundary, footprints, streets, h: float, *, d0: float, smax: float,
-           band_m: float, offset: tuple[float, float]) -> CompositeGrid:
-        """Grid.of's lattice and sub-samples, refined top-down (`_layout`), with Grid's
-        attributes on the fine cells."""
-        footprints = np.asarray(footprints)
-        return cls.from_layout(_layout(boundary, footprints, streets, h, d0=d0, smax=smax,
-                                       band_m=band_m, offset=offset),
-                               footprints, streets, h, band_m=band_m)
-
-    @classmethod
     def from_layout(cls, lay: _Layout, footprints, streets, h: float, *,
                     band_m: float) -> CompositeGrid:
         """`lay`'s cells, with Grid's attributes on the fine ones (footprint sub-samples and
@@ -522,14 +512,6 @@ class CompositeGrid:
                    isub=np.concatenate([isub_f, np.ones((nc, S * S), dtype=bool)]),
                    bsub=np.concatenate([bsub_f, np.zeros((nc, S * S), dtype=bool)]),
                    fx=fx, fy=fy)
-
-    @staticmethod
-    def count(boundary, footprints, streets, h: float, *, d0: float, smax: float,
-              band_m: float, offset: tuple[float, float]) -> int:
-        """len(of(...).level) without the cells' attributes: what a run's memory scales with."""
-        lay = _layout(boundary, np.asarray(footprints), streets, h, d0=d0, smax=smax,
-                      band_m=band_m, offset=offset)
-        return len(lay.key) + sum(len(i) for _, i, _ in lay.coarse)
 
     def _sub_xy(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         t = (np.arange(self.S) + 0.5) / self.S - 0.5
@@ -677,7 +659,8 @@ class CompositeGrid:
 
 class MeshSpec(Protocol):
     """How a block is discretized: resolved once, where the scorer is built, and part of the
-    run's name."""
+    run's name. `build` gets the run's physics (`p`, the population): a mesh refined for the
+    score (common.GoalMesh) solves on the way; the others use only the block's geometry."""
 
     @property
     def name(self) -> str: ...
@@ -687,11 +670,17 @@ class MeshSpec(Protocol):
         """Its part of a SIMP plan's name (relax.Plan; the metric's uniform h 0.5 unnamed)."""
         ...
 
-    def build(self, boundary, footprints, streets) -> Grid | CompositeGrid: ...
+    def build(self, block, p: Params, population) -> Grid | CompositeGrid: ...
 
-    def cells(self, boundary, footprints, streets) -> float:
-        """How many cells it has on a block (what a run's memory scales with)."""
+    def cells(self, block) -> float:
+        """How many cells it has on a block (what a run's memory scales with), without a
+        solve."""
         ...
+
+
+def _geometry(block) -> tuple:
+    """A block's boundary, footprints and streets, as the grids take them."""
+    return (block.boundary, np.asarray(block.buildings.outlines), list(block.streets.geometry))
 
 
 @dataclass(frozen=True)
@@ -708,11 +697,11 @@ class UniformMesh:
     def suffix(self) -> str:
         return "" if self.h == 0.5 else f".h{self.h:g}"
 
-    def build(self, boundary, footprints, streets) -> Grid:
-        return Grid.of(boundary, footprints, streets, self.h, offset=self.offset)
+    def build(self, block, p: Params, population) -> Grid:
+        return Grid.of(*_geometry(block), self.h, offset=self.offset)
 
-    def cells(self, boundary, footprints, streets) -> float:
-        return boundary.area / self.h ** 2
+    def cells(self, block) -> float:
+        return block.boundary.area / self.h ** 2
 
 
 @dataclass(frozen=True)
@@ -732,24 +721,101 @@ class AdaptiveMesh:
     def suffix(self) -> str:
         return ("" if self.h == 0.5 else f".h{self.h:g}") + f".a{self.d0:g}x{self.smax:g}"
 
-    def build(self, boundary, footprints, streets) -> CompositeGrid:
-        return CompositeGrid.of(boundary, footprints, streets, self.h, d0=self.d0,
-                                smax=self.smax, band_m=BAND_M, offset=self.offset)
+    def layout(self, block) -> _Layout:
+        return _layout(*_geometry(block), self.h, d0=self.d0, smax=self.smax, band_m=BAND_M,
+                       offset=self.offset)
 
-    def cells(self, boundary, footprints, streets) -> float:
-        return float(CompositeGrid.count(boundary, footprints, streets, self.h, d0=self.d0,
-                                         smax=self.smax, band_m=BAND_M, offset=self.offset))
+    def build(self, block, p: Params, population) -> CompositeGrid:
+        return CompositeGrid.from_layout(self.layout(block), *_geometry(block)[1:], self.h,
+                                         band_m=BAND_M)
+
+    def cells(self, block) -> float:
+        return float(_cells_of(self.layout(block)))
 
 
-def mesh_of(token: str) -> MeshSpec:
-    """A mesh named on a command line: <h> (UniformMesh) or <h>a<d0>x<smax> (AdaptiveMesh), at
-    the standard OFFSET."""
-    m = re.fullmatch(r"(?P<h>[0-9.]+?)(?:a(?P<d0>[0-9.]+)x(?P<smax>[0-9.]+))?", token)
-    if m is None:
-        raise ValueError(f"unknown mesh {token!r}: <h> or <h>a<d0>x<smax>")
-    if m["d0"] is None:
-        return UniformMesh(float(m["h"]), offset=OFFSET)
-    return AdaptiveMesh(float(m["h"]), float(m["d0"]), float(m["smax"]), offset=OFFSET)
+def _cells_of(lay: _Layout) -> int:
+    return len(lay.key) + sum(len(i) for _, i, _ in lay.coarse)
+
+
+def _flat(lay: _Layout) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.int64]]:
+    """The coarse cells' (level, i0, j0) in `lay.coarse`'s order: CompositeGrid's order after
+    its fine cells."""
+    if not lay.coarse:
+        e = np.zeros(0, dtype=np.int64)
+        return e, e, e
+    return (np.concatenate([np.full(len(i), lv, dtype=np.int64) for lv, i, _ in lay.coarse]),
+            np.concatenate([i for _, i, _ in lay.coarse]).astype(np.int64),
+            np.concatenate([j for _, _, j in lay.coarse]).astype(np.int64))
+
+
+def split_cells(lay: _Layout, mask: NDArray[np.bool_]) -> _Layout:
+    """`lay` with the coarse cells flagged in `mask` (`_flat`'s order) split in four. A coarse
+    cell is wholly inside the block, so a child of side h is a fine cell with every sub-sample
+    inside."""
+    lev, i0, j0 = _flat(lay)
+    sl, si, sj = lev[mask], i0[mask], j0[mask]
+    half = np.repeat(1 << (sl - 1), 4)
+    cl = np.repeat(sl - 1, 4)
+    ci = np.repeat(si, 4) + np.tile([0, 0, 1, 1], len(si)) * half
+    cj = np.repeat(sj, 4) + np.tile([0, 1, 0, 1], len(sj)) * half
+    co = cl >= 1
+    lev, i0, j0 = (np.concatenate([lev[~mask], cl[co]]), np.concatenate([i0[~mask], ci[co]]),
+                   np.concatenate([j0[~mask], cj[co]]))
+    coarse = [(int(lv), i0[lev == lv], j0[lev == lv])
+              for lv in sorted(set(lev.tolist()), reverse=True)]
+    key = np.concatenate([lay.key, ci[~co] * len(lay.xs) + cj[~co]])
+    isub = np.concatenate([lay.isub, np.ones(((~co).sum(), lay.isub.shape[1]), dtype=bool)])
+    o = np.argsort(key, kind="stable")
+    return lay._replace(coarse=coarse, key=key[o], isub=isub[o])
+
+
+def _leaf_level(lay: _Layout, py: NDArray[np.int64], px: NDArray[np.int64]) -> NDArray[np.int64]:
+    """The level of the cell holding each fine-lattice point (row py, column px), -1 where none
+    (outside the block)."""
+    nx = len(lay.xs)
+    out = -np.ones(len(py), dtype=np.int64)
+    inb = (py >= 0) & (px >= 0) & (py < len(lay.ys)) & (px < nx)
+    k = py * nx + px
+    pos = np.minimum(np.searchsorted(lay.key, k), max(len(lay.key) - 1, 0))
+    out[inb & (lay.key[pos] == k)] = 0
+    lev, i0, j0 = _flat(lay)
+    for lv in np.unique(lev):
+        sel = lev == lv
+        keys = np.sort((i0[sel] >> lv) * (nx + 1) + (j0[sel] >> lv))
+        kk = (py >> lv) * (nx + 1) + (px >> lv)
+        pos = np.minimum(np.searchsorted(keys, kk), len(keys) - 1)
+        out[inb & (out < 0) & (keys[pos] == kk)] = lv
+    return out
+
+
+def balance(lay: _Layout) -> _Layout:
+    """Split coarse cells until none has a neighbour (across an edge or a corner) under half its
+    size, as the distance rule's meshes already are (CompositeGrid's interface weights assume
+    sizes within 2x). A level-l cell's neighbour of level <= l - 2 is caught by probing just
+    outside it every 2^(l-2) fine cells."""
+    while True:
+        lev, i0, j0 = _flat(lay)
+        cand = np.flatnonzero(lev >= 2)
+        bad = np.zeros(len(lev), dtype=bool)
+        for s0 in range(0, len(cand), BALANCE_CHUNK):
+            c = cand[s0:s0 + BALANCE_CHUNK]
+            lv, i, j = lev[c], i0[c], j0[c]
+            n, q = 1 << lv, 1 << (lv - 2)
+            probes = [(i - 1, j - 1), (i - 1, j + n), (i + n, j - 1), (i + n, j + n)]
+            for k in range(4):
+                probes += [(i - 1, j + k * q), (i + n, j + k * q), (i + k * q, j - 1),
+                           (i + k * q, j + n)]
+            ll = _leaf_level(lay, np.concatenate([py for py, _ in probes]),
+                             np.concatenate([px for _, px in probes]))
+            own = np.tile(np.arange(len(c)), len(probes))
+            hit = (ll >= 0) & (ll <= lv[own] - 2)
+            bad[c[np.unique(own[hit])]] = True
+        if not bad.any():
+            return lay
+        lay = split_cells(lay, bad)
+
+
+BALANCE_CHUNK = 200_000      # cells probed at once: bounds memory, not the answer
 
 
 def demand(grid: Grid | CompositeGrid, footprints, allowed: NDArray[np.bool_],
