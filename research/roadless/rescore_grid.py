@@ -31,7 +31,8 @@ def one(bid: str) -> dict:
                         / f"{bid}.parquet").sort_values("step")
     hi = int(g[g.D >= 0.10 - 1e-9].step.iloc[0])
     lo = hi - 1
-    c = Clearing(_B[bid], H_FINE, lifted.Params(3.0, 8), population=common.POPULATIONS["area"])
+    mesh = lifted.UniformMesh(H_FINE, offset=lifted.OFFSET)
+    c = Clearing(_B[bid], mesh, lifted.Params(3.0, 8), population=common.POPULATIONS["area"])
     sc = c.sc
     J0 = sc.J(sc.u0, POWER)
     vals = {}

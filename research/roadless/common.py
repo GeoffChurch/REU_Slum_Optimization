@@ -163,15 +163,17 @@ class Carve:
 
 
 class Scorer:
-    def __init__(self, block, h: float, p: lifted.Params, rule=None,
-                 offset: tuple[float, float] = (0.3713, 0.1931), population=None):
+    def __init__(self, block, mesh: lifted.MeshSpec, p: lifted.Params, rule=None,
+                 population=None):
         rule = Carve() if rule is None else rule
         population = CountPopulation() if population is None else population
-        self.block, self.h, self.p, self.rule = block, h, p, rule
+        self.block, self.mesh, self.p, self.rule = block, mesh, p, rule
         self.polys = np.asarray(block.buildings.outlines)
         self.tree = shapely.STRtree(self.polys)
         streets = list(block.streets.geometry)
-        self.grid = lifted.Grid.of(block.boundary, self.polys, streets, h, offset=offset)
+        self.grid = mesh.build(block.boundary, self.polys, streets)
+        if p.along.needs_raster and not self.grid.raster:
+            raise ValueError(f"along {p.along.name} scans grid lines: not on mesh {mesh.name}")
         self.free0 = self.grid.ff0
         # demand only where the street can be reached at baseline: fixed from here on, so
         # freeing space only ever adds conductance. `stranded` = share of buildings with no

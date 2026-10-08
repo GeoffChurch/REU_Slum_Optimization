@@ -3,12 +3,15 @@
 `blocks` runs one task per block: a script command with `{id}` in it, with the block bank
 shipped as an input (a node has no source data; common.build_blocks reads the bank). Each task
 needs GPU memory for the eps world, every inside cell x 8 headings, about GB_PER_MILLION GB per
-million unknowns, and cluster_submit routes it to the smallest card that holds it. `--gb` sets a
-floor under that estimate, to send a block known to need a bigger card to one. Results (parquet
-rows) come back to the same paths here, never overwriting a local file.
+million unknowns, and cluster_submit routes it to the smallest card that holds it. `--mesh` is
+the grid the tasks use (lifted.mesh_of: <h> or <h>a<d0>x<smax>, the latter's cells counted by
+building it here); `--gb` sets a floor under the estimate, to send a block known to need a bigger
+card to one. Results (parquet rows) come back to the same paths here, never overwriting a local
+file.
 
     uv run python research/roadless/cluster.py setup
-    uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] [--h H] [--with FILE ...] <ids,|@file> -- <script> <args with {id}>
+    uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] \
+        [--mesh M] [--with FILE ...] <ids,|@file> -- <script> <args with {id}>
     uv run python research/roadless/cluster.py status|sync [<run>]
     uv run python research/roadless/cluster.py wait <run> [--timeout 3h]    # exit 0 passed, 3 failed, 4 timed out, 5 blind
     uv run python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]   # its failed / missing blocks as <run>-r1
@@ -43,9 +46,10 @@ class Blocks:
         parser.add_argument("--time", help="sbatch --time (default: the cluster's)")
         parser.add_argument("--gb", type=float, default=0.0,
                             help="a floor under each task's GPU-memory estimate, in GB")
-        parser.add_argument("--h", type=float, default=0.5,
-                            help="the grid spacing the tasks use (relax.py's .h<h>; scales the "
-                                 "memory estimate, which assumes h 0.5)")
+        parser.add_argument("--mesh", default="0.5",
+                            help="the grid the tasks use (<h> or <h>a<d0>x<smax>: relax.py's "
+                                 ".h<h> / .a<d0>x<smax>, or one of resolution_check.py's); "
+                                 "sets the memory estimate")
         parser.add_argument("--with", dest="extra", type=Path, action="append", default=[],
                             help="a file shipped beside the block bank (repeatable); a task "
                                  "reads it as $CLUSTER_SUBMIT_INPUTS/<its name>")
@@ -54,6 +58,7 @@ class Blocks:
 
     def plan(self, args: argparse.Namespace, workdir: Path) -> cs.RunPlan:
         import common   # geopandas and the block sources: only a submit needs them
+        import lifted
 
         # REMAINDER (which drops the `--`) swallows an option placed after the ids
         command: list[str] = args.command
@@ -62,14 +67,17 @@ class Blocks:
         line = " ".join(command)
         if "{id}" not in line:
             raise SystemExit("the command needs {id}")
-        if args.h != 0.5 and f".h{args.h:g}" not in line:
-            raise SystemExit(f"--h {args.h:g} but the command's plan has no .h{args.h:g}")
+        mesh = lifted.mesh_of(args.mesh)
+        if not _names(line, args.mesh, mesh):
+            raise SystemExit(f"--mesh {args.mesh} but the command does not use it")
         ids = (Path(args.ids[1:]).read_text().split() if args.ids.startswith("@")
                else args.ids.split(","))
         bank = common.write_bank(ids, workdir / "bank.pkl")
         tasks = tuple(
             cs.Task(f"python -u {line.replace('{id}', b)}",
-                    max(bank[b].boundary.area / args.h ** 2 * 8 / 1e6 * GB_PER_MILLION, args.gb))
+                    max(mesh.cells(bank[b].boundary, list(bank[b].buildings.outlines),
+                                   list(bank[b].streets.geometry)) * 8 / 1e6 * GB_PER_MILLION,
+                        args.gb))
             for b in ids)
         return cs.RunPlan(
             tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=None),
@@ -77,6 +85,12 @@ class Blocks:
             prelude=("source research/roadless/cluster_env.sh",
                      'export REBLOCK_BLOCK_BANK="$CLUSTER_SUBMIT_INPUTS/bank.pkl"'),
             describe=(f"{len(ids)} blocks: {line}",))
+
+
+def _names(line: str, token: str, mesh) -> bool:
+    """Whether the command uses `mesh`: the token among its words or comma lists
+    (resolution_check.py), or its suffix in a SIMP plan (relax.py; h 0.5 unnamed)."""
+    return token in line.replace(",", " ").split() or mesh.suffix in line
 
 
 PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.clusters.AI, env=ENV,

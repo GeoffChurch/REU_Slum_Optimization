@@ -47,7 +47,8 @@ def main(bid: str, along: str, d_max: float) -> None:
     (b,) = common.build_blocks([bid])
     p = lifted.Params(ell_m=3.0, K=8, along=lifted.along_of(along, scans),
                       solver=lifted.solver_of("gpu"))
-    c = clear.Clearing(b, 0.5, p, population=common.POPULATIONS["area"])
+    mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
+    c = clear.Clearing(b, mesh, p, population=common.POPULATIONS["area"])
     clear.GpuSweep.prepare = _prepare(clear.GpuSweep.prepare)
     picker = clear.picker_of("S0.01cat", clear.sweep_of("gpu"))
     gram = picker.source.gram

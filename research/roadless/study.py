@@ -57,7 +57,8 @@ def _one(i: int) -> None:
     ctx = EgressContext.of(b, pcfg.params)
     p = lifted.Params(ell_m=ell, K=K)
     population = common.POPULATIONS[pop]
-    carve = common.Scorer(b, h, p, rule=common.Carve(), population=population)
+    mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
+    carve = common.Scorer(b, mesh, p, rule=common.Carve(), population=population)
     w = carve.w
     n = len(b.buildings)
     rows = []

@@ -25,6 +25,7 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import clear  # noqa: E402
+import lifted  # noqa: E402
 import relax  # noqa: E402
 
 RTOL = 1e-3          # the solves while polishing, as SIMP's base plan's (t0.001)
@@ -39,7 +40,7 @@ def rows_of(picker: str, tries: int, width: int, pairs: bool, along: str, budget
 def main(bid: str, power: float, device: str, picker_spec: str, tries: int, width: int,
          along: str, budget: float, pairs: bool) -> None:
     out = rows_of(picker_spec, tries, width, pairs, along, budget) / f"{bid}_p{power:g}.parquet"
-    c = relax._clearing(bid, device, along)
+    c = relax._clearing(bid, device, along, lifted.UniformMesh(0.5, offset=lifted.OFFSET))
     picker = clear.picker_of(picker_spec, clear.sweep_of(device))
     t0 = time.time()
     order = [j for pk, _ in clear.grow(c, picker, power, budget, c.sc.J(c.sc.u0, power), False)

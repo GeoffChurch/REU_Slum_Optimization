@@ -42,7 +42,7 @@ def one(bid: str) -> list[dict]:
     rows = []
     for name, (h, ell, off) in SETTINGS.items():
         t = time.time()
-        sc = common.Scorer(b, h, lifted.Params(ell_m=ell, K=8), offset=off)
+        sc = common.Scorer(b, lifted.UniformMesh(h, offset=off), lifted.Params(ell_m=ell, K=8))
         gr = sc.grid
         geom = shapely.union_all(sc.polys[removed])
         op = (gr.isub & (~gr.bsub | gr.sub_of(geom))).mean(axis=-1)

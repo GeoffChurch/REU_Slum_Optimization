@@ -84,11 +84,13 @@ class Tension:
 
 
 class Clearing:
-    def __init__(self, block, h: float, p: lifted.Params, population=None,
+    def __init__(self, block, mesh: lifted.MeshSpec, p: lifted.Params, population=None,
                  rtol: float = RTOL_TENSION, search: lifted.AlongConductance | None = None):
         """`search`: the along-conductance the TENSION ranks under (e.g. more translucent
         buildings, so counterfactual corridors show in the gradient); scoring stays `p`."""
-        self.sc = common.Scorer(block, h, p, population=population)
+        self.sc = common.Scorer(block, mesh, p, population=population)
+        if search is not None and search.needs_raster and not self.sc.grid.raster:
+            raise ValueError(f"search {search.name} scans grid lines: not on mesh {mesh.name}")
         self.cost = self.sc.w / self.sc.w.sum()        # population share of each building
         self.p = p
         self.ps = p if search is None else dataclasses.replace(p, along=search)
@@ -195,7 +197,8 @@ def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     from scipy.stats import spearmanr
     blocks = common.build_blocks(common.recipients())
     b = blocks[i]
-    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8), population=common.POPULATIONS[pop])
+    mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
+    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8), population=common.POPULATIONS[pop])
     sc = c.sc
     P0 = sc.J(sc.u0, power)
     t = time.time()
@@ -611,7 +614,8 @@ def greedy_block(b, picker: Picker, h: float, d_max: float, out: Path, populatio
                  search: lifted.AlongConductance | None = None) -> None:
     """The greedy to d_max. Records perm (in J_power) and perm1 (the p = 1 score) at every
     step; `cleared` lists the step's buildings in pick order."""
-    c = Clearing(b, h, lifted.Params(ell_m=3.0, K=8, along=along, solver=solver),
+    mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
+    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, along=along, solver=solver),
                  population=population, search=search)
     sc = c.sc
     J0 = sc.J(sc.u0, power)

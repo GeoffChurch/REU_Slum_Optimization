@@ -23,7 +23,8 @@ def main(bid: str, h: float, along: str, solver: str, picker: str) -> None:
     t0 = time.time()
     pr = cProfile.Profile()
     pr.enable()
-    c = Clearing(b, h, lifted.Params(3.0, 8, along=lifted.along_of(along, scans),
+    mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
+    c = Clearing(b, mesh, lifted.Params(3.0, 8, along=lifted.along_of(along, scans),
                                      solver=lifted.solver_of(solver)),
                  population=common.POPULATIONS["area"])
     pr.disable()

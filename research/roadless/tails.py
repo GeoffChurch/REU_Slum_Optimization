@@ -30,7 +30,8 @@ def one(bid: str) -> dict:
     g = g.sort_values("step")
     stop = g[g.D >= 0.10 - 1e-9].step.iloc[0]
     rem = cleared_through(g, int(stop))
-    sc = common.Scorer(b, 0.5, lifted.Params(ell_m=3.0, K=8),
+    mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
+    sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=8),
                        population=common.POPULATIONS[_CFG["pop"]])
     gr = sc.grid
     op = (gr.isub & (~gr.bsub | gr.sub_of(shapely.union_all(sc.polys[rem])))).mean(axis=-1)

@@ -85,7 +85,8 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
     search = lifted.along_of(specs[1], scans) if len(specs) == 2 else None
     (b,) = common.build_blocks([bid])
     p = lifted.Params(ell_m=3.0, K=8, along=along, solver=lifted.solver_of("gpu"))
-    c = clear.Clearing(b, 0.5, p, population=common.POPULATIONS["area"], search=search)
+    mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
+    c = clear.Clearing(b, mesh, p, population=common.POPULATIONS["area"], search=search)
     g = c.sc.grid
     print(f"{bid} {spec}: grid {g.inside.shape}, inside {int(g.inside.sum())}, "
           f"layers array {8 * g.inside.size * 8 / GB:.2f} GB (K x ny x nx float64)", flush=True)

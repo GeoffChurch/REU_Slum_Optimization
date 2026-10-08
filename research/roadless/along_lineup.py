@@ -31,7 +31,8 @@ def one(job: tuple[str, str]) -> list[dict]:
     bid, along = job
     b = _B[bid]
     pop = common.POPULATIONS["area"]
-    sc = common.Scorer(b, 0.5, lifted.Params(3.0, 8, lifted.along_of(along)), population=pop)
+    mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
+    sc = common.Scorer(b, mesh, lifted.Params(3.0, 8, lifted.along_of(along)), population=pop)
     w = pop.weights(sc.polys)
     rows = []
     for arm, m in _ARMS.items():

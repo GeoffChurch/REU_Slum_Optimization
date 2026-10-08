@@ -146,21 +146,19 @@ class Relaxation:
         uk, lk = _cells_axes(sy, sol.u, K), _cells_axes(sy, lam, K)
         o = xp.asarray(op_eps).ravel()
         cell, _nf = lifted._free_ids(o, xp)
-        pat = lifted.pattern(g, K, xp)
-        v, _th, m, gap = lifted.axes(K)
+        pat = g.pattern(K, xp)
+        _v, _th, _m, gap = lifted.axes(K)
         gc = xp.zeros(o.size)                           # dJ / d(open) per grid cell
         Fl = p.along.layers(op_eps, g.h, K)
         dF = None                                       # dJ / d(layer factor), if any vary
         for k in range(K):
-            a, b, line = pat.along[k]
+            a, b, line, const = pat.along[k]           # const: a fully open edge's weight
             cells = [a, b, *list(line)]
             vals = xp.stack([o[q] for q in cells])
             frac = vals.min(axis=0)
             act = vals <= frac[None, :]                  # the cells attaining the min
             ca, cb = cell[a], cell[b]
             q = (uk[ca, k] - uk[cb, k]) * (lk[ca, k] - lk[cb, k])
-            dx, dy = int(v[k, 0]), int(v[k, 1])
-            const = m[k] / float(dx * dx + dy * dy)
             if np.isscalar(Fl[k]):
                 boost = Fl[k]
             else:                                       # w = frac const min(F_a, F_b)
@@ -177,10 +175,11 @@ class Relaxation:
         if dF is not None:                              # the factors' own response to opening
             gc += xp.asarray(p.along.vjp(op_eps, g.h, K, dF.reshape(K, *op_eps.shape))).ravel()
         free = xp.flatnonzero(o > 0)
+        area = g.cell_area(xp, o > 0)
         for k in range(K):
             k2 = (k + 1) % K
             q = (uk[:, k] - uk[:, k2]) * (lk[:, k] - lk[:, k2])
-            gc[free] += -q * (g.h * g.h / (p.ell_m ** 2 * gap[k]))
+            gc[free] += -q * (area / (p.ell_m ** 2 * gap[k]))
         grad = (1.0 - self.eps) * (c.bf @ p.solver.to_host(gc)[self.inside])
         if self.q != 1.0:
             grad = grad * self.q * self.proj(x) ** (self.q - 1.0)
@@ -510,10 +509,12 @@ class Plan(NamedTuple):
     scoring at h 0.5 throughout; `coarse_all` > 0 (one only): every stage on that grid, each
     start's incumbent scored there and only its winner at h 0.5; `starts` > 1 (one only): that
     many SIMP runs (start_x), one incumbent over all of them (coarse_all: over their winners);
-    `update` the design update rule; `h` the metric's grid spacing (`.h<h>`, h 0.5 not named: a
-    coarser one only for blocks too large for it, and it reads low on gated blocks -- NOTES,
-    "Where resolution matters") (`.u<name>`; OC's classic rule
-    is not named)."""
+    `update` the design update rule (`.u<name>`; OC's classic rule is not named); `h` the
+    metric's grid spacing (`.h<h>`, h 0.5 not named: a coarser one only for blocks too large for
+    it, and it reads low on gated blocks -- NOTES, "Where resolution matters"); `d0` > 0
+    (`.a<d0>x<smax>`): the grid is local-coarsened (lifted.AdaptiveMesh), h within d0 metres of
+    every footprint, street and the block edge, cells doubling with distance up to `smax` (for
+    the blocks too large for a uniform h 0.5 -- NOTES, "Local coarsening")."""
     fw: int
     qmax: float
     iters: int
@@ -538,6 +539,8 @@ class Plan(NamedTuple):
     track_gate: float = -1.0
     update: Update = DEFAULT_UPDATE
     h: float = 0.5
+    d0: float = 0.0
+    smax: float = 0.0
 
     @property
     def name(self) -> str:
@@ -559,7 +562,14 @@ class Plan(NamedTuple):
                 + (f".G{self.track}" if self.track else "")
                 + (f"e{self.track_gate:g}" if self.track and self.track_gate >= 0 else "")
                 + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else "")
-                + (f".h{self.h:g}" if self.h != 0.5 else ""))
+                + self.mesh.suffix)
+
+    @property
+    def mesh(self) -> lifted.MeshSpec:
+        """The metric's grid."""
+        if self.d0 > 0:
+            return lifted.AdaptiveMesh(self.h, self.d0, self.smax, offset=lifted.OFFSET)
+        return lifted.UniformMesh(self.h, offset=lifted.OFFSET)
 
     @property
     def stages(self) -> tuple[tuple[float, float], ...]:
@@ -585,7 +595,7 @@ def plan_of(spec: str) -> Plan:
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?"
-                     r"(?:\.h(?P<h>[0-9.]+))?", spec)
+                     r"(?:\.h(?P<h>[0-9.]+?))?(?:\.a(?P<ad>[0-9.]+)x(?P<ax>[0-9.]+))?", spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
     g = m.groupdict()
@@ -609,7 +619,9 @@ def plan_of(spec: str) -> Plan:
                 coarse_all=0.0 if g["C"] is None else float(g["C"]),
                 starts=0 if g["m"] is None else int(g["m"]), seed=g["g"] or "", track=g["G"] or "",
                 track_gate=-1.0 if g["Ge"] is None else float(g["Ge"]),
-                update=update, h=0.5 if g["h"] is None else float(g["h"]))
+                update=update, h=0.5 if g["h"] is None else float(g["h"]),
+                d0=0.0 if g["ad"] is None else float(g["ad"]),
+                smax=0.0 if g["ax"] is None else float(g["ax"]))
 
 
 class Incumbent:
@@ -744,7 +756,7 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
     return x
 
 
-def _clearing(bid: str, device: str, along: str, h: float = 0.5) -> Clearing:
+def _clearing(bid: str, device: str, along: str, mesh: lifted.MeshSpec) -> Clearing:
     """`along`: the metric's conductance, or <metric>@<search>: SIMP's gradient under the search
     one (as the greedy's translucent search), every score under the metric."""
     [b] = common.build_blocks([bid])
@@ -752,12 +764,12 @@ def _clearing(bid: str, device: str, along: str, h: float = 0.5) -> Clearing:
     specs = along.split("@")
     p = lifted.Params(3.0, 8, along=lifted.along_of(specs[0], scans),
                       solver=lifted.solver_of(device))
-    return Clearing(b, h, p, population=common.POPULATIONS["area"],
+    return Clearing(b, mesh, p, population=common.POPULATIONS["area"],
                     search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None)
 
 
 def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: float) -> dict:
-    c = _clearing(bid, device, along, plan.h)
+    c = _clearing(bid, device, along, plan.mesh)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
@@ -799,8 +811,9 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
         log(f"  the greedy {spec}: {time.time() - t0:.0f}s")
     xs = x
     if plan.coarse_all > 0:
-        rel_c = Relaxation(_clearing(bid, device, along, plan.coarse_all), power,
-                           rtol=plan.rtol, eps=plan.eps)
+        coarse = lifted.UniformMesh(plan.coarse_all, offset=lifted.OFFSET)
+        rel_c = Relaxation(_clearing(bid, device, along, coarse), power, rtol=plan.rtol,
+                           eps=plan.eps)
         log(f"  all stages at h {plan.coarse_all:g}: {rel_c.c.sc.grid.inside.sum()} cells, "
             f"fine {c.sc.grid.inside.sum()}; {starts} start(s)")
         for k in range(starts):
@@ -822,7 +835,8 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
             xk = x if k == 0 else start_x(k, c.cost, budget)
             stages = plan.stages
             if plan.coarse > 0:
-                rel_c = Relaxation(_clearing(bid, device, along, plan.coarse), power,
+                coarse = lifted.UniformMesh(plan.coarse, offset=lifted.OFFSET)
+                rel_c = Relaxation(_clearing(bid, device, along, coarse), power,
                                    rtol=plan.rtol, eps=plan.eps)
                 log(f"  coarse h {plan.coarse:g}: {rel_c.c.sc.grid.inside.sum()} cells, fine "
                     f"{c.sc.grid.inside.sum()}")
@@ -878,7 +892,7 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
             or plan.seed or plan.track):
         raise ValueError(f"coarse grids, polish and multi-start are not built for path: "
                          f"{plan.name}")
-    c = _clearing(bid, device, along, plan.h)
+    c = _clearing(bid, device, along, plan.mesh)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     J0, P0 = rel.J0, c.sc.P0
     rows = [dict(block=bid, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[], P0=P0,

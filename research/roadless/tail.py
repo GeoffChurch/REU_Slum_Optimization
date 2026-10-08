@@ -12,7 +12,7 @@ blocks = common.build_blocks(common.recipients())
 for i in [int(a) for a in sys.argv[1].split(",")]:
     b = blocks[i]
     p = lifted.Params(ell_m=3.0, K=8)
-    sc = common.Scorer(b, 0.5, p)
+    sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p)
     sol = lifted.solve(sc.grid, sc.free0, sc.f, p)
     free = sc.free0 > 0
     nc = int(free.sum())

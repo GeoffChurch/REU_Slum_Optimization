@@ -89,7 +89,8 @@ def grow_prune(b, plan: GrowPrune, power: float, along: str, device: str, d_max:
                ) -> pd.DataFrame:
     p = lifted.Params(3.0, 8, along=lifted.along_of(along, lifted.scans_of(device)),
                       solver=lifted.solver_of(device))
-    c = Clearing(b, 0.5, p, population=common.POPULATIONS["area"])
+    mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
+    c = Clearing(b, mesh, p, population=common.POPULATIONS["area"])
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
     for _pk, _D in grow(c, picker_of(plan.picker, sweep_of(device)), power,

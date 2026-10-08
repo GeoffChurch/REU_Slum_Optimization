@@ -32,7 +32,9 @@ import shapely
 from numba import njit
 from numpy.typing import NDArray
 from scipy import ndimage
+from scipy.sparse.csgraph import connected_components
 from scipy.sparse.linalg import factorized
+from scipy.spatial import cKDTree
 
 import pyamg
 
@@ -42,6 +44,12 @@ AXES = {
     16: [(1, 0), (3, 1), (2, 1), (3, 2), (1, 1), (2, 3), (1, 2), (1, 3),
          (0, 1), (-1, 3), (-1, 2), (-2, 3), (-1, 1), (-3, 2), (-2, 1), (-3, 1)],
 }
+
+
+# cell centres off exactly-aligned geometry: the lattice's offset from the block's bounds, in
+# fractions of a cell
+OFFSET = (0.3713, 0.1931)
+BAND_M = 1.0              # ground: cell centres within this many metres of a street
 
 
 def axes(K: int) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64],
@@ -94,6 +102,54 @@ class Grid:
         """Open fraction of each cell: inside the block and not footprint."""
         return (self.isub & ~self.bsub).mean(axis=-1)
 
+    @property
+    def raster(self) -> bool:
+        """Fields are (ny, nx) rasters (what an along-conductance that scans grid lines needs)."""
+        return True
+
+    def pattern(self, K: int, xp) -> Pattern:
+        """The grid's Pattern for K axes on device `xp`, built once per grid."""
+        key = ("pattern", K, xp.__name__)
+        if key not in self.cache:
+            v, _th, m, _gap = axes(K)
+            inside = self.inside
+            ny, nx = inside.shape
+            rr, cc = np.nonzero(inside)
+            along = []
+            for k in range(K):
+                dx, dy = int(v[k, 0]), int(v[k, 1])
+                lines = [(dx, dy), *_line_cells(dx, dy)]
+                ok = np.ones(len(rr), dtype=bool)
+                for ix, iy in lines:
+                    r3, c3 = rr + iy, cc + ix
+                    o3 = (r3 >= 0) & (r3 < ny) & (c3 >= 0) & (c3 < nx)
+                    o3[o3] &= inside[r3[o3], c3[o3]]
+                    ok &= o3
+                a = rr[ok] * nx + cc[ok]
+                along.append((xp.asarray(a), xp.asarray(a + dy * nx + dx),
+                              xp.asarray(np.stack([a + iy * nx + ix for ix, iy in lines[1:]])
+                                         if len(lines) > 1 else np.zeros((0, len(a)), np.int64)),
+                              m[k] / float(dx * dx + dy * dy)))
+            self.cache[key] = Pattern(along=along, cells=xp.asarray(rr * nx + cc))
+        return self.cache[key]
+
+    def reach(self, o, p: Params):
+        """(ny, nx) device mask: open cells in a 4-connected component of open space holding a
+        ground cell. The operator's cell graph is exactly 4-connectivity (a diagonal or longer
+        step needs every cell it crosses open), so these are the cells with a path to the
+        street."""
+        xp = p.solver.xp
+        free = o > 0
+        lab, n = p.solver.ndimage.label(free)
+        ok = xp.zeros(int(n) + 1, dtype=bool)
+        ok[lab[free & xp.asarray(self.ground)]] = True
+        ok[0] = False
+        return ok[lab]
+
+    def cell_area(self, xp, free) -> float:
+        """The area of each of the `free` cells (one size: a number)."""
+        return self.h * self.h
+
     def _sub_xy(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         t = ((np.arange(self.S) + 0.5) / self.S - 0.5) * self.h
         ox, oy = np.meshgrid(t, t)
@@ -112,8 +168,8 @@ class Grid:
         return out
 
     @classmethod
-    def of(cls, boundary, footprints, streets, h: float, band_m: float = 1.0,
-           offset: tuple[float, float] = (0.3713, 0.1931)) -> Grid:
+    def of(cls, boundary, footprints, streets, h: float, band_m: float = BAND_M,
+           offset: tuple[float, float] = OFFSET) -> Grid:
         """`offset` (fractions of h) keeps cell centres off exactly-aligned geometry. Sub-sample
         (i, j) of the fine lattice sits at (x0 - h/2 + (j + 1/2) h/S, y0 - h/2 + (i + 1/2) h/S):
         inside the block by a scanline fill of its rings, inside a footprint by
@@ -203,30 +259,461 @@ def _rasterize(polys, fx: NDArray[np.float64], fy: NDArray[np.float64]) -> NDArr
     return fine
 
 
-def demand(grid: Grid, footprints, allowed: NDArray[np.bool_], weights: NDArray[np.float64],
-           ring_m: float = 1.0
+def _scanfill_at(geom, fx: NDArray[np.float64], fy: NDArray[np.float64], R: NDArray[np.int64],
+                 C: NDArray[np.int64]) -> NDArray[np.bool_]:
+    """`_scanfill` at the lattice points (fy[R], fx[C]) only: the same rule and arithmetic, so
+    the same answer, without the whole lattice. A row's crossings come from the ring edges
+    spanning it (min(y1, y2) <= y < max(y1, y2), `_scanfill`'s half-open test)."""
+    segs = []
+    for ring in shapely.get_rings(shapely.get_parts(geom)):
+        c = shapely.get_coordinates(ring)
+        segs.append(np.hstack([c[:-1], c[1:]]))
+    x1, y1, x2, y2 = np.vstack(segs).T
+    r0 = np.searchsorted(fy, np.minimum(y1, y2), side="left")
+    r1 = np.searchsorted(fy, np.maximum(y1, y2), side="left")
+    seg = np.repeat(np.arange(len(x1)), r1 - r0)
+    row = np.arange(len(seg)) - np.repeat(np.cumsum(r1 - r0) - (r1 - r0), r1 - r0) + r0[seg]
+    so = np.argsort(row, kind="stable")
+    seg, row = seg[so], row[so]
+    out = np.zeros(len(R), dtype=bool)
+    order = np.argsort(R, kind="stable")
+    rows, starts = np.unique(R[order], return_index=True)
+    ends = np.append(starts[1:], len(order))
+    lo = np.searchsorted(row, rows, side="left")
+    hi = np.searchsorted(row, rows, side="right")
+    for r, s0, e0, a, b in zip(rows, starts, ends, lo, hi):
+        y = fy[r]
+        hit = np.sort(seg[a:b])                            # _scanfill's order (no matter: sorted)
+        xc = np.sort(x1[hit] + (y - y1[hit]) * (x2[hit] - x1[hit]) / (y2[hit] - y1[hit]))
+        idx = order[s0:e0]
+        out[idx] = np.searchsorted(xc, fx[C[idx]]) % 2 == 1
+    return out
+
+
+def _rasterize_cells(polys, fx: NDArray[np.float64], fy: NDArray[np.float64], S: int,
+                     keys: NDArray[np.int64], nx: int) -> NDArray[np.int64]:
+    """`_rasterize` on the sub-samples of the fine cells with flat indices `keys` (i nx + j,
+    sorted) only, as (len(keys), S*S): the same rule (each polygon on the lattice points in its
+    bounding box, overlaps to the later polygon)."""
+    out = -np.ones((len(keys), S * S), dtype=np.int64)
+    if len(polys) == 0 or len(keys) == 0:
+        return out
+    d = fx[1] - fx[0]
+    for k, (bx0, by0, bx1, by1) in enumerate(shapely.bounds(polys)):
+        j0 = max(int(np.floor((bx0 - fx[0]) / d)), 0)
+        j1 = min(int(np.ceil((bx1 - fx[0]) / d)) + 1, len(fx))
+        i0 = max(int(np.floor((by0 - fy[0]) / d)), 0)
+        i1 = min(int(np.ceil((by1 - fy[0]) / d)) + 1, len(fy))
+        if j1 <= j0 or i1 <= i0:
+            continue
+        X, Y = np.meshgrid(fx[j0:j1], fy[i0:i1])
+        I, J = np.nonzero(shapely.contains_xy(polys[k], X, Y))
+        I, J = I + i0, J + j0
+        key = (I // S) * nx + J // S
+        pos = np.minimum(np.searchsorted(keys, key), len(keys) - 1)
+        ok = keys[pos] == key
+        out[pos[ok], ((I % S) * S + J % S)[ok]] = k
+    return out
+
+
+def _pieces(geoms) -> NDArray[np.object_]:
+    """Geometries as small pieces for an STRtree: lines split into their segments (a long
+    street or ring's box covers half the block), polygons and points whole."""
+    out = []
+    for g in shapely.get_parts(np.array(geoms, dtype=object)):
+        if g.geom_type in ("LineString", "LinearRing"):
+            c = shapely.get_coordinates(g)
+            out.extend(shapely.linestrings(np.stack([c[:-1], c[1:]], axis=1)))
+        elif g.geom_type == "Polygon":
+            out.append(g)
+        elif g.geom_type == "Point":
+            out.append(g)
+        else:
+            raise ValueError(f"unexpected geometry {g.geom_type}")
+    return np.asarray(out, dtype=object)
+
+
+@dataclass(eq=False)
+class CompositeGrid:
+    """A block's cells at several sizes (AdaptiveMesh): the metric's h near footprints,
+    streets and the block edge, h 2^l further out. Every attribute and method of Grid, over
+    flat cells (n,) where Grid has the (ny, nx) raster: the fine cells are exactly the uniform
+    grid's own (same lattice, sub-samples, footprint labels, ground, dist_b), in its row-major
+    order, then the coarse cells by level and row-major. A coarse cell is wholly inside the
+    block and open and off the ground (its sub-samples all inside, none footprint).
+
+    The operator on it: a cell steps along each axis by its own size x v_k to the cell holding
+    the point it lands on (every cell the step crosses open, the smallest open fraction scaling
+    the weight, as on the uniform grid). A step to a cell of its own size is the uniform edge
+    (forward only, m_k / |v_k|^2: the weight is scale-free); one to a LARGER cell (forward or
+    back) carries the flux-consistent weight m_k (s / |v_k|) / d, the source's strip width over
+    the projected distance between the centres; a step to a smaller cell is none (the smaller
+    cells' own steps reach this one). Turning edges scale with each cell's area. Checked
+    against the uniform h 0.5 grid (NOTES, "Local coarsening")."""
+    h: float
+    S: int
+    x0: float                            # the fine lattice's first cell centre (Grid's x0, y0)
+    y0: float
+    shape: tuple[int, int]               # the fine lattice (ny, nx)
+    level: NDArray[np.int64]             # (n,) cell side h 2^level
+    i0: NDArray[np.int64]                # (n,) fine-lattice row, column of the cell's first fine
+    j0: NDArray[np.int64]                #      cell
+    inside: NDArray[np.bool_]            # (n,) all True
+    building: NDArray[np.bool_]
+    ground: NDArray[np.bool_]
+    dist_b: NDArray[np.float64]          # metres from the centre to the nearest building cell's
+    xy: NDArray[np.float64]              # (n, 2) cell centres
+    isub: NDArray[np.bool_]              # (n, S*S)
+    bsub: NDArray[np.bool_]
+    fx: NDArray[np.float64]              # the sub-sample lattice (Grid.of's), for label_sub
+    fy: NDArray[np.float64]
+    cache: dict = dataclasses.field(default_factory=dict, compare=False, repr=False)
+
+    @property
+    def ff0(self) -> NDArray[np.float64]:
+        return (self.isub & ~self.bsub).mean(axis=-1)
+
+    @property
+    def raster(self) -> bool:
+        return False
+
+    @property
+    def size(self) -> NDArray[np.float64]:
+        """(n,) each cell's side in metres."""
+        return (1 << self.level) * self.h
+
+    @classmethod
+    def of(cls, boundary, footprints, streets, h: float, *, d0: float, smax: float,
+           band_m: float, offset: tuple[float, float]) -> CompositeGrid:
+        """Grid.of's lattice and sub-samples, refined top-down: a cell of side h 2^l (l >= 1)
+        stays whole when no footprint, street or block-edge piece is within d0 2^(l-1) of it
+        (and its centre is inside the block: then all of it is), else it splits in four; the
+        h cells are kept where some sub-sample is inside the block, as Grid's."""
+        L = int(round(np.log2(smax / h)))
+        if L < 1 or h * 2 ** L != smax:
+            raise ValueError(f"smax {smax:g} is not h {h:g} x a power of two >= 2")
+        if d0 <= band_m:
+            raise ValueError(f"d0 {d0:g} must exceed the ground band {band_m:g} (no coarse "
+                             "cell on the ground)")
+        minx, miny, maxx, maxy = boundary.bounds
+        xs = np.arange(minx - h + offset[0] * h, maxx + 2 * h, h)
+        ys = np.arange(miny - h + offset[1] * h, maxy + 2 * h, h)
+        ny, nx = len(ys), len(xs)
+        S = 4
+        d = h / S
+        fx = xs[0] - h / 2 + (np.arange(nx * S) + 0.5) * d
+        fy = ys[0] - h / 2 + (np.arange(ny * S) + 0.5) * d
+        footprints = np.asarray(footprints)
+        rings = shapely.get_rings(shapely.get_parts(boundary))
+        tree = shapely.STRtree(np.concatenate([_pieces(footprints), _pieces(list(streets)),
+                                               _pieces(rings)]))
+        shapely.prepare(boundary)
+        lx, ly = xs[0] - h / 2, ys[0] - h / 2              # the lattice's lower-left corner
+        r = 1 << L
+        ti, tj = np.meshgrid(np.arange(-(-ny // r)), np.arange(-(-nx // r)), indexing="ij")
+        ti, tj = ti.ravel(), tj.ravel()
+        coarse = []                                       # (level, i0, j0) per coarse cell
+        for lev in range(L, 0, -1):
+            r = 1 << lev
+            boxes = shapely.box(lx + tj * r * h, ly + ti * r * h, lx + (tj + 1) * r * h,
+                                ly + (ti + 1) * r * h)
+            near = np.zeros(len(boxes), dtype=bool)
+            near[tree.query_nearest(boxes, max_distance=d0 * 2 ** (lev - 1),
+                                    all_matches=False)[0]] = True
+            far = np.flatnonzero(~near)
+            keep = far[shapely.contains_xy(boundary, lx + (tj[far] + 0.5) * r * h,
+                                           ly + (ti[far] + 0.5) * r * h)]
+            coarse.append((lev, ti[keep] * r, tj[keep] * r))
+            ti = (2 * ti[near])[:, None] + np.array([0, 0, 1, 1])[None, :]
+            tj = (2 * tj[near])[:, None] + np.array([0, 1, 0, 1])[None, :]
+            ti, tj = ti.ravel(), tj.ravel()
+            ok = (ti * (r // 2) < ny) & (tj * (r // 2) < nx)
+            ti, tj = ti[ok], tj[ok]
+        # the fine cells: Grid's, where some sub-sample is inside the block
+        key = np.sort(ti * nx + tj)
+        fi, fj = key // nx, key % nx
+        sub_r = np.repeat(np.arange(S), S)                # sub-sample (row in cell) S + column
+        sub_c = np.tile(np.arange(S), S)
+        R = (fi * S)[:, None] + sub_r[None, :]
+        C = (fj * S)[:, None] + sub_c[None, :]
+        isub_f = _scanfill_at(boundary, fx, fy, R.ravel(), C.ravel()).reshape(-1, S * S)
+        ins = isub_f.any(axis=1)
+        key, fi, fj, isub_f = key[ins], fi[ins], fj[ins], isub_f[ins]
+        bsub_f = isub_f & (_rasterize_cells(footprints, fx, fy, S, key, nx) >= 0)
+        building_f = bsub_f.mean(axis=-1) > 0.5
+        st = shapely.union_all(np.asarray(streets)).buffer(band_m)
+        shapely.prepare(st)
+        ground_f = shapely.contains_xy(st, xs[fj], ys[fi])
+        lev_c = np.concatenate([np.full(len(i), lv) for lv, i, _ in coarse])
+        i0_c = np.concatenate([i for _, i, _ in coarse])
+        j0_c = np.concatenate([j for _, _, j in coarse])
+        nf, nc = len(key), len(lev_c)
+        level = np.concatenate([np.zeros(nf, dtype=np.int64), lev_c.astype(np.int64)])
+        i0 = np.concatenate([fi, i0_c]).astype(np.int64)
+        j0 = np.concatenate([fj, j0_c]).astype(np.int64)
+        rc = (1 << level[nf:]).astype(float)
+        xy = np.concatenate([np.stack([xs[fj], ys[fi]], axis=1),
+                             np.stack([lx + (j0_c + rc / 2) * h, ly + (i0_c + rc / 2) * h],
+                                      axis=1)])
+        # dist_b: Grid's EDT (centre to the nearest building cell's centre, in cells, x h)
+        bc = np.stack([fi[building_f], fj[building_f]], axis=1).astype(float)
+        centre = np.stack([i0 + ((1 << level) - 1) / 2, j0 + ((1 << level) - 1) / 2], axis=1)
+        dist_b = (cKDTree(bc).query(centre)[0] * h if len(bc) else np.full(nf + nc, np.inf))
+        return cls(h=h, S=S, x0=float(xs[0]), y0=float(ys[0]), shape=(ny, nx), level=level,
+                   i0=i0, j0=j0, inside=np.ones(nf + nc, dtype=bool),
+                   building=np.concatenate([building_f, np.zeros(nc, dtype=bool)]),
+                   ground=np.concatenate([ground_f, np.zeros(nc, dtype=bool)]),
+                   dist_b=dist_b, xy=xy,
+                   isub=np.concatenate([isub_f, np.ones((nc, S * S), dtype=bool)]),
+                   bsub=np.concatenate([bsub_f, np.zeros((nc, S * S), dtype=bool)]),
+                   fx=fx, fy=fy)
+
+    def _sub_xy(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        t = (np.arange(self.S) + 0.5) / self.S - 0.5
+        ox, oy = np.meshgrid(t, t)
+        s = self.size[:, None]
+        return (self.xy[:, 0][:, None] + ox.ravel()[None, :] * s,
+                self.xy[:, 1][:, None] + oy.ravel()[None, :] * s)
+
+    def sub_of(self, geom) -> NDArray[np.bool_]:
+        """(n, S*S): sub-samples inside `geom` (a coarse cell's spread over its area)."""
+        out = np.zeros_like(self.isub)
+        if geom is None or geom.is_empty:
+            return out
+        shapely.prepare(geom)
+        X, Y = self._sub_xy()
+        out[self.isub] = shapely.contains_xy(geom, X[self.isub], Y[self.isub])
+        return out
+
+    def label_sub(self, polys) -> NDArray[np.int64]:
+        """(n, S*S): Grid.label_sub on the fine cells; -1 on the coarse ones (no footprint)."""
+        ny, nx = self.shape
+        fine = np.flatnonzero(self.level == 0)
+        lab = -np.ones(self.isub.shape, dtype=np.int64)
+        lab[fine] = _rasterize_cells(np.asarray(polys), self.fx, self.fy, self.S,
+                                     self.i0[fine] * nx + self.j0[fine], nx)
+        return np.where(self.bsub, lab, -1)
+
+    def mask_of(self, geom) -> NDArray[np.bool_]:
+        out = np.zeros_like(self.inside)
+        if geom is None or geom.is_empty:
+            return out
+        shapely.prepare(geom)
+        out[:] = shapely.contains_xy(geom, self.xy[:, 0], self.xy[:, 1])
+        return out
+
+    def _locate(self, py: NDArray[np.float64], px: NDArray[np.float64]) -> NDArray[np.int64]:
+        """The cell holding each fine-lattice point (row py, column px; fine cell (i, j)'s centre
+        at (i, j)), -1 where none."""
+        if "locate" not in self.cache:
+            nx = self.shape[1]
+            index = []
+            for lev in range(int(self.level.max()) + 1):
+                ids = np.flatnonzero(self.level == lev)
+                k = (self.i0[ids] >> lev) * ((nx >> lev) + 1) + (self.j0[ids] >> lev)
+                o = np.argsort(k)
+                index.append((k[o], ids[o]))
+            self.cache["locate"] = index
+        ny, nx = self.shape
+        iy = np.floor(py + 0.5).astype(np.int64)
+        ix = np.floor(px + 0.5).astype(np.int64)
+        out = -np.ones(len(iy), dtype=np.int64)
+        todo = np.flatnonzero((iy >= 0) & (iy < ny) & (ix >= 0) & (ix < nx))
+        for lev, (keys, ids) in enumerate(self.cache["locate"]):
+            if len(todo) == 0 or len(keys) == 0:
+                continue
+            k = (iy[todo] >> lev) * ((nx >> lev) + 1) + (ix[todo] >> lev)
+            pos = np.minimum(np.searchsorted(keys, k), len(keys) - 1)
+            hit = keys[pos] == k
+            out[todo[hit]] = ids[pos[hit]]
+            todo = todo[~hit]
+        return out
+
+    def pattern(self, K: int, xp) -> Pattern:
+        """The mesh's Pattern for K axes on device `xp`, built once (the class docstring's
+        steps)."""
+        key = ("pattern", K, xp.__name__)
+        if key not in self.cache:
+            v, _th, m, _gap = axes(K)
+            r = 1 << self.level                            # fine cells per side
+            cy = self.i0 + (r - 1) / 2
+            cx = self.j0 + (r - 1) / 2
+            along = []
+            for k in range(K):
+                dx, dy = int(v[k, 0]), int(v[k, 1])
+                lc = _line_cells(dx, dy)
+                parts = []
+                for sign in (1, -1):
+                    t = self._locate(cy + sign * r * dy, cx + sign * r * dx)
+                    s = np.flatnonzero(t >= 0)
+                    t = t[s]
+                    keep = (r[t] > r[s]) | ((r[t] == r[s]) & (sign == 1))
+                    s, t = s[keep], t[keep]
+                    line = (np.stack([self._locate(cy[s] + sign * r[s] * iy,
+                                                   cx[s] + sign * r[s] * ix) for ix, iy in lc])
+                            if lc else np.zeros((0, len(s)), dtype=np.int64))
+                    ok = (line >= 0).all(axis=0)
+                    s, t, line = s[ok], t[ok], line[:, ok]
+                    # projected distance between the centres, x |v| (fine cells)
+                    proj = sign * ((cx[t] - cx[s]) * dx + (cy[t] - cy[s]) * dy)
+                    if not (proj > 0).all():
+                        raise ValueError(f"axis {k}: a step to a larger cell whose centre is "
+                                         "not ahead (the mesh grades too fast: raise d0)")
+                    wk = np.where(r[t] == r[s], m[k] / float(dx * dx + dy * dy),
+                                  m[k] * r[s] / proj)
+                    a, b = (s, t) if sign == 1 else (t, s)
+                    parts.append((a, b, line, wk))
+                along.append((xp.asarray(np.concatenate([q[0] for q in parts])),
+                              xp.asarray(np.concatenate([q[1] for q in parts])),
+                              xp.asarray(np.concatenate([q[2] for q in parts], axis=1)),
+                              xp.asarray(np.concatenate([q[3] for q in parts]))))
+            self.cache[key] = Pattern(along=along, cells=xp.arange(len(self.level)))
+        return self.cache[key]
+
+    def reach(self, o, p: Params):
+        """(n,) device mask: open cells in a component of the operator's cell graph (its along
+        edges between open cells) holding a ground cell. On the host (scipy); kept for a free
+        set that repeats (the eps world's: every cell)."""
+        xp = p.solver.xp
+        free = o > 0
+        pat = self.pattern(p.K, xp)
+        ab = []
+        for a, b, line, _wk in pat.along:
+            frac = xp.minimum(o[a], o[b])
+            for li in line:
+                frac = xp.minimum(frac, o[li])
+            ok = frac > 0
+            ab.append((a[ok], b[ok]))
+        key = (int(free.sum()), sum(len(a) for a, _ in ab), sum(int(a.sum()) for a, _ in ab),
+               sum(int(b.sum()) for _, b in ab))
+        store = _repeated(self.cache, "reach")
+        if key in store:
+            return store[key]
+        th = p.solver.to_host
+        a = np.concatenate([th(a) for a, _ in ab])
+        b = np.concatenate([th(b) for _, b in ab])
+        n = len(self.level)
+        _nc, lab = connected_components(
+            sp.coo_matrix((np.ones(len(a), dtype=np.int8), (a, b)), shape=(n, n)),
+            directed=False)
+        fh = th(free)
+        ok = np.zeros(int(lab.max()) + 1, dtype=bool)
+        ok[lab[fh & self.ground]] = True
+        out = xp.asarray(ok[lab] & fh)
+        _remember(self.cache, "reach", key, out)
+        return out
+
+    def cell_area(self, xp, free):
+        """The area of each of the `free` cells (device)."""
+        key = ("area", xp.__name__)
+        if key not in self.cache:
+            s = self.size
+            self.cache[key] = xp.asarray(s * s)
+        return self.cache[key][free]
+
+
+class MeshSpec(Protocol):
+    """How a block is discretized: resolved once, where the scorer is built, and part of the
+    run's name."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def suffix(self) -> str:
+        """Its part of a SIMP plan's name (relax.Plan; the metric's uniform h 0.5 unnamed)."""
+        ...
+
+    def build(self, boundary, footprints, streets) -> Grid | CompositeGrid: ...
+
+    def cells(self, boundary, footprints, streets) -> float:
+        """How many cells it has on a block (what a run's memory scales with)."""
+        ...
+
+
+@dataclass(frozen=True)
+class UniformMesh:
+    """One cell size everywhere (Grid)."""
+    h: float
+    offset: tuple[float, float]
+
+    @property
+    def name(self) -> str:
+        return f"h{self.h:g}"
+
+    @property
+    def suffix(self) -> str:
+        return "" if self.h == 0.5 else f".h{self.h:g}"
+
+    def build(self, boundary, footprints, streets) -> Grid:
+        return Grid.of(boundary, footprints, streets, self.h, offset=self.offset)
+
+    def cells(self, boundary, footprints, streets) -> float:
+        return boundary.area / self.h ** 2
+
+
+@dataclass(frozen=True)
+class AdaptiveMesh:
+    """h within d0 of every footprint, street and the block edge, h 2^l beyond d0 2^(l-1), up
+    to smax (CompositeGrid)."""
+    h: float
+    d0: float
+    smax: float
+    offset: tuple[float, float]
+
+    @property
+    def name(self) -> str:
+        return f"h{self.h:g}a{self.d0:g}x{self.smax:g}"
+
+    @property
+    def suffix(self) -> str:
+        return ("" if self.h == 0.5 else f".h{self.h:g}") + f".a{self.d0:g}x{self.smax:g}"
+
+    def build(self, boundary, footprints, streets) -> CompositeGrid:
+        return CompositeGrid.of(boundary, footprints, streets, self.h, d0=self.d0,
+                                smax=self.smax, band_m=BAND_M, offset=self.offset)
+
+    def cells(self, boundary, footprints, streets) -> float:
+        """Counted by building it (a minute or two on the largest blocks)."""
+        return float(len(self.build(boundary, footprints, streets).level))
+
+
+def mesh_of(token: str) -> MeshSpec:
+    """A mesh named on a command line: <h> (UniformMesh) or <h>a<d0>x<smax> (AdaptiveMesh), at
+    the standard OFFSET."""
+    m = re.fullmatch(r"(?P<h>[0-9.]+?)(?:a(?P<d0>[0-9.]+)x(?P<smax>[0-9.]+))?", token)
+    if m is None:
+        raise ValueError(f"unknown mesh {token!r}: <h> or <h>a<d0>x<smax>")
+    if m["d0"] is None:
+        return UniformMesh(float(m["h"]), offset=OFFSET)
+    return AdaptiveMesh(float(m["h"]), float(m["d0"]), float(m["smax"]), offset=OFFSET)
+
+
+def demand(grid: Grid | CompositeGrid, footprints, allowed: NDArray[np.bool_],
+           weights: NDArray[np.float64], ring_m: float = 1.0
            ) -> tuple[NDArray[np.float64], NDArray[np.bool_], NDArray[np.int64]]:
-    """Per-cell injection (ny, nx): building j injects weights[j] (its population), uniformly
-    over the `allowed` free cells within `ring_m` of it whose nearest building it is (`allowed` =
-    cells with a path to the street, so a ring partly in a sealed nook puts all its demand on the
-    open side). A building with no allowed ring cell is STRANDED: it injects nothing. Returns
-    (field, stranded mask per building, owner building per cell or -1)."""
+    """Per-cell injection (in the grid's shape): building j injects weights[j] (its population),
+    uniformly over the `allowed` free cells within `ring_m` of it whose nearest building it is
+    (`allowed` = cells with a path to the street, so a ring partly in a sealed nook puts all its
+    demand on the open side). A building with no allowed ring cell is STRANDED: it injects
+    nothing. Returns (field, stranded mask per building, owner building per cell or -1)."""
     ring = allowed & (grid.dist_b <= ring_m + 1e-9)
-    rr, cc = np.nonzero(ring)
+    at = np.nonzero(ring)
     polys = np.asarray(footprints)
     n = len(polys)
     f = np.zeros(grid.inside.shape)
     own = -np.ones(grid.inside.shape, dtype=np.int64)
-    if len(rr) == 0:
+    if len(at[0]) == 0:
         return f, np.ones(n, dtype=bool), own
     tree = shapely.STRtree(polys)
-    pts = shapely.points(grid.xy[rr, cc, 0], grid.xy[rr, cc, 1])
+    xy = grid.xy[at]
+    pts = shapely.points(xy[:, 0], xy[:, 1])
     idx, _ = tree.query_nearest(pts, return_distance=True, all_matches=False)
-    owner = np.full(len(rr), -1)
+    owner = np.full(len(at[0]), -1)
     owner[idx[0]] = idx[1]
     cnt = np.bincount(owner, minlength=n).astype(float)
-    np.add.at(f, (rr, cc), weights[owner] / cnt[owner])
-    own[rr, cc] = owner
+    np.add.at(f, at, weights[owner] / cnt[owner])
+    own[at] = owner
     return f, cnt == 0, own
 
 
@@ -281,6 +768,11 @@ class AlongConductance(Protocol):
     sum_k sum_x A[k, x] layers[k][x] (what clearing a cell does to the factors elsewhere)."""
     name: str
 
+    @property
+    def needs_raster(self) -> bool:
+        """It scans grid lines, so needs a raster field (a uniform Grid)."""
+        ...
+
     def layers(self, open_: NDArray[np.float64], h: float,
                K: int) -> list[float] | NDArray[np.float32]: ...
 
@@ -292,6 +784,10 @@ class AlongConductance(Protocol):
 class Uniform:
     """Every open cell conducts alike (the original model)."""
     name: str = "uni"
+
+    @property
+    def needs_raster(self) -> bool:
+        return False
 
     def layers(self, open_, h, K):
         return [1.0] * K
@@ -317,6 +813,10 @@ class Sightline:
     @property
     def name(self) -> str:
         return f"sl{self.beta:g}"
+
+    @property
+    def needs_raster(self) -> bool:
+        return True
 
     def runs(self, open_, h) -> tuple[NDArray[np.float64], NDArray[np.float32]]:
         """(angle of each fine direction in [0, pi), capped run fraction (n_dir, ny, nx))."""
@@ -635,6 +1135,10 @@ class SoftSightline:
     def name(self) -> str:
         return f"ss{self.beta:g}k{self.kappa:g}" + (
             "" if self.hill == 1.0 and self.r0_m == 20.0 else f"n{self.hill:g}r{self.r0_m:g}")
+
+    @property
+    def needs_raster(self) -> bool:
+        return True
 
     def g(self, R):
         x = (R / self.r0_m) ** self.hill
@@ -1066,38 +1570,13 @@ class Params:
 
 
 class Pattern(NamedTuple):
-    """Every edge the operator can have on a grid: those among its `inside` cells (any field's
-    open cells are inside ones). Per axis k, along[k] = (a, b, line): flat cell indices of each
-    edge's ends (b = a + v_k) and of the cells the step crosses (n_line, E), in row-major order
-    of a; `cells`: the inside cells, flat, row-major. Arrays live on the solver's device."""
+    """Every edge the operator can have on a mesh: those among its `inside` cells (any field's
+    open cells are inside ones). Per axis k, along[k] = (a, b, line, wk): flat cell indices of
+    each edge's ends (b ahead of a along v_k) and of the cells the step crosses (n_line, E), and
+    the weight of a fully open edge (a number where every edge has the same, m_k / |v_k|^2, else
+    per edge); `cells`: the inside cells, flat. Arrays live on the solver's device."""
     along: list
     cells: object
-
-
-def pattern(grid: Grid, K: int, xp) -> Pattern:
-    """The grid's Pattern for K axes on device `xp`, built once per grid."""
-    key = ("pattern", K, xp.__name__)
-    if key not in grid.cache:
-        v, _th, _m, _gap = axes(K)
-        inside = grid.inside
-        ny, nx = inside.shape
-        rr, cc = np.nonzero(inside)
-        along = []
-        for k in range(K):
-            dx, dy = int(v[k, 0]), int(v[k, 1])
-            lines = [(dx, dy), *_line_cells(dx, dy)]
-            ok = np.ones(len(rr), dtype=bool)
-            for ix, iy in lines:
-                r3, c3 = rr + iy, cc + ix
-                o3 = (r3 >= 0) & (r3 < ny) & (c3 >= 0) & (c3 < nx)
-                o3[o3] &= inside[r3[o3], c3[o3]]
-                ok &= o3
-            a = rr[ok] * nx + cc[ok]
-            along.append((xp.asarray(a), xp.asarray(a + dy * nx + dx),
-                          xp.asarray(np.stack([a + iy * nx + ix for ix, iy in lines[1:]])
-                                     if len(lines) > 1 else np.zeros((0, len(a)), np.int64))))
-        grid.cache[key] = Pattern(along=along, cells=xp.asarray(rr * nx + cc))
-    return grid.cache[key]
 
 
 def _free_ids(o, xp):
@@ -1110,25 +1589,23 @@ def _free_ids(o, xp):
 
 
 def along_edges(grid: Grid, open_, p: Params):
-    """Per axis k: (k, a, b, w) with a, b open-cell ids (row-major order of `open_ > 0`),
-    b = a + v_k, every cell the step crosses open; w is scaled by the SMALLEST open fraction
+    """Per axis k: (k, a, b, w) with a, b open-cell ids (cell order of `open_ > 0`), b ahead
+    of a along v_k, every cell the step crosses open; w is scaled by the SMALLEST open fraction
     among those cells (a gap narrower than a cell conducts in proportion to its width) and by
     the smaller of the two ends' `p.along` factors. Device arrays."""
     xp = p.solver.xp
-    v, _th, m, _gap = axes(p.K)
     o = xp.asarray(open_, dtype=xp.float64).ravel()
     cell, _nf = _free_ids(o, xp)
-    pat = pattern(grid, p.K, xp)
+    pat = grid.pattern(p.K, xp)
     F = p.along.layers(open_, grid.h, p.K)
     for k in range(p.K):
-        a, b, line = pat.along[k]
+        a, b, line, wk = pat.along[k]
         frac = xp.minimum(o[a], o[b])
         for li in line:
             frac = xp.minimum(frac, o[li])
         ok = frac > 0
         a, b, frac = a[ok], b[ok], frac[ok]
-        dx, dy = int(v[k, 0]), int(v[k, 1])
-        w = frac * (m[k] / float(dx * dx + dy * dy))
+        w = frac * (wk if np.isscalar(wk) else wk[ok])
         if not np.isscalar(F[k]):
             Fk = xp.asarray(F[k]).ravel()
             w = w * xp.minimum(Fk[a], Fk[b])
@@ -1173,7 +1650,8 @@ def crossing(grid: Grid, open_: NDArray[np.float64], sol: Solution,
 def edges(grid: Grid, open_, p: Params):
     """Every edge of the operator as families (ca, cb, ka, kb, w): free-cell ids and axes of the
     two ends. Along-axis edges per axis, then the turning edges (k, k+1) inside every free cell,
-    scaled by its open fraction (its volume). Ground is applied by `operator`. Device arrays."""
+    scaled by its open fraction and area (its volume). Ground is applied by `operator`. Device
+    arrays."""
     xp = p.solver.xp
     _v, _th, _m, gap = axes(p.K)
     for k, a, b, w in along_edges(grid, open_, p):
@@ -1181,10 +1659,10 @@ def edges(grid: Grid, open_, p: Params):
     o = xp.asarray(open_, dtype=xp.float64).ravel()
     vol = o[o > 0]
     c = xp.arange(len(vol))
-    h = grid.h
+    area = grid.cell_area(xp, o > 0)
     for k in range(p.K):
         yield (c, c, xp.full(len(c), k), xp.full(len(c), (k + 1) % p.K),
-               vol * (h * h / (p.ell_m ** 2 * gap[k])))
+               vol * (area / (p.ell_m ** 2 * gap[k])))
 
 
 def unknown_of(ground, open_, xp=np):
@@ -1233,22 +1711,9 @@ def operator(grid: Grid, open_, p: Params):
     return L, cell, unk_cell
 
 
-def _reach(grid: Grid, o, p: Params):
-    """(ny, nx) device mask: open cells in a 4-connected component of open space holding a
-    ground cell. The operator's cell graph is exactly 4-connectivity (a diagonal or longer step
-    needs every cell it crosses open), so these are the cells with a path to the street."""
-    xp = p.solver.xp
-    free = o > 0
-    lab, n = p.solver.ndimage.label(free)
-    ok = xp.zeros(int(n) + 1, dtype=bool)
-    ok[lab[free & xp.asarray(grid.ground)]] = True
-    ok[0] = False
-    return ok[lab]
-
-
 def grounded(grid: Grid, open_: NDArray[np.float64], p: Params) -> NDArray[np.bool_]:
     """Open cells with a path to the street (ground cells included), on the host."""
-    return p.solver.to_host(_reach(grid, p.solver.xp.asarray(open_, dtype=float), p))
+    return p.solver.to_host(grid.reach(p.solver.xp.asarray(open_, dtype=float), p))
 
 
 def master_operator(grid: Grid, p: Params):
@@ -1306,7 +1771,7 @@ class System:
         o = xp.asarray(open_, dtype=xp.float64)
         r, c, v, diag, self.cell, self.unk_cell = _assemble(grid, o, p)
         N = len(diag)
-        reach = _reach(grid, o, p)[o > 0]                    # per free cell
+        reach = grid.reach(o, p)[o > 0]                      # per free cell
         self.keep = xp.repeat(reach[self.unk_cell >= 0], K)
         new = xp.cumsum(self.keep) - 1
         nk = int(self.keep.sum())
