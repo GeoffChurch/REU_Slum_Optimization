@@ -1,8 +1,8 @@
 # Roadless clearing: experiment backlog
 
 A living list: add ideas, strike them when tried (the result goes to NOTES.md, with numbers),
-delete them when shown dominated. Status tags: **queued**, **running**, **idea**, **owner's
-call**, **blocked**.
+delete them when shown dominated. Status tags: **prioritized** (the owner wants it done),
+**queued**, **running**, **idea**, **owner's call**, **blocked**.
 
 Baselines (NOTES.md, "Large blocks" and "Lens A at D 0.05"): greedy `S0.01cat` /
 `S0.005cat` and SIMP + eps-scored incumbent `fw0.q3.i10.t0.001.e0.0001.k1s1e-06`, both J_2,
@@ -35,6 +35,16 @@ default at a5x8. Every one of the 82 large blocks has the default at h 0.5 near 
 Also closed: wider polish rounds (w16 = w8 at 1.28x) and late sampling on top of the hard-block
 preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x -> 1.21x).
 
+Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry below:
+- **Goal-oriented refinement** (Coverage and model): the composite refined where the
+  dual-weighted residual says Lens A is sensitive, not by distance.
+- **Sightline and the greedy on the composite** (Coverage and model).
+- **The cheap preset on the composite** (Coverage and model): greedy + polish on the oversized
+  blocks.
+- **Faster submits** (Infrastructure): the mesh's cell count cached, not rebuilt at every submit.
+- **The add/remove search as one Strategy** (New methods).
+- **A continuous, heavy-tailed outcome model for kernelcore** (Experiment design; other repo).
+
 Open:
 - **The owner's tau** for sequential stopping (the smallest mean gain worth a variant's time).
 
@@ -45,9 +55,6 @@ Not pursued, with what would change that:
   several times cheaper per update than h 0.75 and kept every gate.
 - *The greedy's sweep kernel* (results identical, ~20 -- 30% of the greedy): the greedy is now a
   0.3 -- 0.4x add-on of the hard-block preset; worth it if the greedy becomes the main method.
-- *The add/remove search as one Strategy* (schedule x scorers x acceptance): realized in pieces --
-  exchange() with pair escalation is floating search, the greedy its add-only schedule; one class
-  over them is a refactor, not an experiment.
 
 ## How we run experiments
 
@@ -116,13 +123,13 @@ Not pursued, with what would change that:
     `.k2`'s and MMA's lost gate (0.55, not 0.78).
   - Cheaper `.r` (done): the winners come from the last two stages' random roundings, so
     `.r2l2` samples only there (1.58x, same gains as `.r2`).
-  - Undecided-set polish (done, `.p<tries>w<width>`; NOTES "Late sampling and the polish"): the
-    new SIMP default `.p64w8` (46 held out: +0.003 mean, ahead 83%, never behind, 1.3x);
-    `.r2l2.p64w8` for hard blocks. **Next:** a larger cap (it hit 64 on 22422 and 38616 while
-    still improving); 2-for-1 moves; the same polish on the greedy's clearing (its undecided set:
-    the buildings near its last batches' cutoff).
-  - Multiple starts (below), or the add/remove search seeded with the incumbent.
-- **Multiple starts** (idea). Uniform and Frank-Wolfe starts, best by the incumbent (~2x).
+  - Undecided-set polish (done, `.p<tries>w<width>`; NOTES "Late sampling and the polish"), and
+    what followed it, all done: the larger cap `.p256w8`, the pair moves `x2` (together the
+    default `.p256w8x2`), and the same polish on the greedy's clearing (the hard-block preset's
+    second track `.GS0.01cate1`, and polish_greedy.py's cheap preset).
+- **Multiple starts** (closed, NOTES "Multi-start on coarse grids"). A Frank-Wolfe start (fw5)
+  lands where the uniform start does; a second, random start (`.p64w8.m2`) never beat the uniform
+  one (identical on 12 of 13, 2.12x); coarse multi-start `.C<h>.m<k>` neither faster nor better.
 - **Projection** (measured, kept selectable: `.b8-32` wins some gated blocks, loses some
   controls; not needed against collapses once the incumbent is on).
 - **SIMP + incumbent under the sightline metric** (done: the 13 at D 0.10 and D 0.05, and the 46
@@ -133,7 +140,10 @@ Not pursued, with what would change that:
 
 ## New methods
 
-- **Add/remove subset search** (grow-then-prune measured: dominated by the SIMP path for now,
+- **Add/remove subset search** (**prioritized**: the family as one Strategy, which the greedy,
+  the polish's exchange() with pair escalation and grow-then-prune each realize in part; the
+  presets then become its configurations, and the schedules below its experiments.
+  Grow-then-prune measured: dominated by the SIMP path for now,
   collapses on gated blocks through substitutes and is slow; NOTES "Warm SIMP path and
   grow-then-prune". Next schedule to try: floating (re-add after a restore that hurts), and a
   substitute-aware restore score; wiki `pages/methods/plus-l-take-away-r.md`).
@@ -158,7 +168,7 @@ Not pursued, with what would change that:
   headline number still comes from the untouched set; keep some random blocks in every
   screen. Cheap first step: an SVD of the matrix we already have (greedy, SIMP variants,
   translucent search; 220 + 59 blocks) to see which blocks load on which axis.
-- **Generalize kernelcore's outcome model** (idea, other repo). Its EVSI reweighting is
+- **Generalize kernelcore's outcome model** (**prioritized**, other repo). Its EVSI reweighting is
   general; its likelihood is binary verdicts. A continuous heavy-tailed outcome model would
   serve this backlog's screens and adaptive selection.
 
@@ -168,16 +178,29 @@ Not pursued, with what would change that:
   suffix `.a<d0>x<smax>`) keeps h 0.5 within d0 of every building, street and the block edge and
   doubles the cell with each doubling of distance; within 0.004 of uniform h 0.5 on the 59 at a5
   (order kept but for ties), though 14401 reads 0.009 low at a5 (0.0014 at a20: the order still
-  kept), and 2.4 -- 5.1M cells on the oversized blocks. Ideas on top of it:
-  goal-oriented refinement (the dual-weighted residual picking where to refine, not distance);
-  a separate d0 for streets and the block edge; the sightline conductances and the greedy's search
-  on a composite (both scan raster lines, so the uniform grid only for now).
+  kept), and 2.4 -- 5.1M cells on the oversized blocks. Also an idea on top of it: a separate d0
+  for streets and the block edge.
+- **Goal-oriented refinement** (**prioritized**). Refine where the dual-weighted residual (the
+  adjoint, which the tension already solves for, weighting each cell's residual) says Lens A is
+  sensitive, instead of by distance: 14401 reads 0.009 low at a5 where the 59 read at most 0.004,
+  so distance alone misses some of what the score depends on. Measure: Lens A error against
+  uniform h 0.5 per cell spent, on the 59 and 14401, against a5 and a10.
+- **Sightline and the greedy on the composite** (**prioritized**). Sightline and SoftSightline
+  scan raster lines (`needs_raster`), as the metric or as the greedy's translucent search; both
+  raise on a composite. The greedy under uni has no raster check but has never run on one: first
+  establish that it does (against uniform h 0.5 on the 59), then give the sightline scans a
+  composite form.
+- **The cheap preset on the composite** (**prioritized**). polish_greedy.py builds a uniform h 0.5
+  grid; it takes a mesh, and greedy + polish runs on the oversized blocks. Needs the greedy on the
+  composite (above).
 - **Coarse-to-fine** (`.c1`, tried 2026-10-04; NOTES). 0.75x the time, but it collapses on 30848
   (-0.255). Kept selectable. Worth retrying only with a coarse h that keeps 30848's gate (0.75?)
   or with only the first stage coarse.
 
 ## Infrastructure
 
-- **Cluster launcher: moving bookgen and mycooc onto GeoffChurch/cluster_submit** (reblock moved
-  2026-10-03). The package and its migration guides (`docs/migrating/{bookgen,mycooc}.md` there)
-  hold what each still needs; their old tools print a deprecation notice.
+- **Faster submits** (**prioritized**). cluster.py sizes an adaptive mesh's tasks by building
+  the mesh (`AdaptiveMesh.cells`), minutes per block at every submit; cache the count per block and
+  mesh (the mesh depends only on the block's geometry and the mesh's parameters).
+- **Cluster launcher: bookgen and mycooc on GeoffChurch/cluster_submit** (done): mycooc deleted
+  its old launcher (3ad93ac5), bookgen deleted ltcluster with no compatibility path (b901184b).
