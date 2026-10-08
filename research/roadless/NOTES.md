@@ -1593,3 +1593,22 @@ So each of the 82 large blocks now has SIMP at h 0.5 near its buildings: the bas
 19593 and 6498 (the default only, on the H100), the default on all but 14401, 7851 and 32841 (the
 base only). The coarse-h runs are superseded (their clearings kept in ov_clearings.parquet).
 Composite cells: 2.4 -- 5.1M, well within a 32 GB card.
+
+The three blocks that had only the base (14401, 32841, 7851: they fit 48 GB at h 0.5, and those
+cards are booked) ran base and default at a5x8 on the 32 GB cards (runs three-base-a5,
+three-def-a5): 14401 0.3843 -> 0.3893 (+0.0050), 32841 0.2742 -> 0.3070 (+0.0328), 7851 0.1278
+both; 2.2 -- 3.4 min base, 2.3 -- 5.7 default. 14401's base at a5 read 0.009 below its base at
+h 0.5, so the h 0.5 clearing was scored on the composites too (three_clearings.parquet, runs
+three-res, three-res2), Lens A minus its exact h 0.5 score:
+
+    block  exact h 0.5  a20x8    a10x8    a5x8     a2.5x8
+    14401  0.3932       -0.0014  -0.0044  -0.0094  -0.0141
+    32841  0.2766       -0.0003  -0.0011  -0.0023  -0.0024
+    7851   0.1275       -0.0001  -0.0002  -0.0002  -0.0004
+
+So it is the mesh, not the search: 14401 reads low at a5 by 2.5x the 59's worst (-0.0038), the
+error falling with d0 at about first order. It shifts the block's clearings alike (their spread
+on any composite at most 0.0005), so the order holds and the default's +0.005 is the same at every
+d0; only absolute scores on a composite carry the bias. 14401 at a20x8 is 3.6M cells against 5.4M
+uniform. On the oversized blocks a10 - a5 was at most +0.0026, so their a5 scores are probably
+within ~0.005 of h 0.5, with 14401 a reminder that a block can do worse.

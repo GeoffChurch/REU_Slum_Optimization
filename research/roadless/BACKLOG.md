@@ -29,16 +29,13 @@ up to 0.31); sequential stopping (seqscreen.py: ~20 of 46 blocks decide, at the 
 
 Also closed: the oversized blocks (the 17 over 1.4 km^2 and 53556), base and default at the
 metric's resolution through local coarsening (`.a5x8`; 4287 `.a5x32`, 63612 `.a2.5x8`; NOTES, "The
-oversized blocks at the metric's resolution"); 19593 and 6498 on the H100. Every one of the 82 large
-blocks has SIMP at h 0.5 near its buildings.
+oversized blocks at the metric's resolution"); 19593 and 6498 on the H100; 14401, 7851 and 32841's
+default at a5x8. Every one of the 82 large blocks has the default at h 0.5 near its buildings.
 
 Also closed: wider polish rounds (w16 = w8 at 1.28x) and late sampling on top of the hard-block
 preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x -> 1.21x).
 
 Open:
-- **The default on 14401, 7851, 32841** (the base only: they fit 48 GB at h 0.5, and the 48 GB
-  cards are booked). **running**: base and default at a5x8 on the 32 GB cards (runs three-base-a5,
-  three-def-a5), so the pair shares a mesh.
 - **The owner's tau** for sequential stopping (the smallest mean gain worth a variant's time).
 
 Not pursued, with what would change that:
@@ -170,7 +167,8 @@ Not pursued, with what would change that:
 - **Blocks over ~1.4 km^2** (done 2026-10-08): local coarsening (`lifted.CompositeGrid`, plan
   suffix `.a<d0>x<smax>`) keeps h 0.5 within d0 of every building, street and the block edge and
   doubles the cell with each doubling of distance; within 0.004 of uniform h 0.5 on the 59 at a5
-  (order kept but for ties) and 2.4 -- 5.1M cells on the oversized blocks. Ideas on top of it:
+  (order kept but for ties), though 14401 reads 0.009 low at a5 (0.0014 at a20: the order still
+  kept), and 2.4 -- 5.1M cells on the oversized blocks. Ideas on top of it:
   goal-oriented refinement (the dual-weighted residual picking where to refine, not distance);
   a separate d0 for streets and the block edge; the sightline conductances and the greedy's search
   on a composite (both scan raster lines, so the uniform grid only for now).
