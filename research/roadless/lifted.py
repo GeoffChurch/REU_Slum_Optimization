@@ -479,8 +479,16 @@ class CompositeGrid:
         """Grid.of's lattice and sub-samples, refined top-down (`_layout`), with Grid's
         attributes on the fine cells."""
         footprints = np.asarray(footprints)
-        lay = _layout(boundary, footprints, streets, h, d0=d0, smax=smax, band_m=band_m,
-                      offset=offset)
+        return cls.from_layout(_layout(boundary, footprints, streets, h, d0=d0, smax=smax,
+                                       band_m=band_m, offset=offset),
+                               footprints, streets, h, band_m=band_m)
+
+    @classmethod
+    def from_layout(cls, lay: _Layout, footprints, streets, h: float, *,
+                    band_m: float) -> CompositeGrid:
+        """`lay`'s cells, with Grid's attributes on the fine ones (footprint sub-samples and
+        labels, ground within band_m of a street, dist_b)."""
+        footprints = np.asarray(footprints)
         xs, ys, fx, fy, S, coarse = lay.xs, lay.ys, lay.fx, lay.fy, lay.S, lay.coarse
         ny, nx = len(ys), len(xs)
         lx, ly = xs[0] - h / 2, ys[0] - h / 2              # the lattice's lower-left corner
