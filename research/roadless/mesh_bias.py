@@ -4,8 +4,9 @@ that have both (NOTES, "What a coarser grid does to Lens A").
 
     PYTHONPATH=. uv run python research/roadless/mesh_bias.py <along> [<mesh> ...]
 
-Columns: median, mean and worst difference; the share of clearings off by more than 0.05; the
-blocks whose every clearing is within 0.01; the median over blocks of the Kendall tau (tau-b)
+Columns: the mesh's cells as a share of uniform h 0.5's (median over blocks); median, mean and
+worst difference; the share of clearings off by more than 0.05; the blocks whose every clearing
+is within 0.01; the median over blocks of the Kendall tau (tau-b)
 between the clearings' order on the mesh and at h 0.5 (scores rounded to ROUND decimals), and the
 share of blocks whose order is exactly kept (tau 1). No meshes named: every one in the rows.
 """
@@ -30,6 +31,7 @@ def rows(along: str) -> pd.DataFrame:
 
 def table(d: pd.DataFrame, meshes: list[str]) -> pd.DataFrame:
     exact = d[d.mesh == EXACT].set_index(["block", "name"]).perm
+    cells = d.groupby(["mesh", "block"]).cells.first()
     out = []
     for mesh in meshes:
         m = d[d.mesh == mesh].set_index(["block", "name"]).perm
@@ -45,7 +47,10 @@ def table(d: pd.DataFrame, meshes: list[str]) -> pd.DataFrame:
             if len(set(a)) > 1 and len(set(b)) > 1:
                 taus.append(kendalltau(a, b).statistic)
         per_block = diff.groupby("block").d.apply(lambda s: s.abs().max())
-        out.append(dict(mesh=mesh, blocks=diff.block.nunique(), median=diff.d.median(),
+        on = cells[mesh].index.intersection(cells[EXACT].index)
+        share = (cells[mesh][on] / cells[EXACT][on]).median()
+        out.append(dict(mesh=mesh, blocks=diff.block.nunique(), cells=share,
+                        median=diff.d.median(),
                         mean=diff.d.mean(), worst=diff.d.loc[diff.d.abs().idxmax()],
                         off_005=float((diff.d.abs() > 0.05).mean()),
                         within_001=int((per_block <= 0.01).sum()),

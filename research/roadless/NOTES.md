@@ -1637,3 +1637,63 @@ bsub, ground, building, dist_b, xy, and the count). Under a 12-process load a fu
 seconds each); the count alone 0.38x and 0.71x. Sizing a submit: the 16 oversized blocks 840 s
 -> 51 s, the 59 691 s -> 38 s (16 -- 18x). No cache: the count is cheap enough that one would
 only add a key to keep in step with the mesh code.
+
+### The greedy and the cheap preset on the composite (2026-10-08)
+
+The greedy under uni has no raster step (its nonlocal term is Uniform's zero vjp), so it runs on a
+CompositeGrid as it is. On 6310, an all-fine composite (a100x1: 336,553 cells, every one h 0.5)
+reproduces the uniform greedy to D 0.02: the same picks, J within 3e-10 at every step, J0 within
+6e-16, the tension within 6e-7 (its solves are at 1e-3); a30x1, with 382 cells of 1 m, the same
+picks and J within 1e-5. polish_greedy.py now takes a mesh (a required argument; its suffix in
+the rows path, its name in the rows; the 118 existing rows migrated, `h0.5`).
+
+The cheap preset (S0.01cat.P64w8, D 0.05, p 2) at a5x8 on the 59 (run cheap-a5-59) against the
+same at uniform h 0.5: on each its own mesh, median -0.0011, mean -0.0016. Its clearings rescored
+exactly at h 0.5 (cheap-a5-rescore, 58 blocks; 30796 needs a 48 GB card) split that into the
+search and the mesh:
+
+                                              mean     median   range
+    search: a5 clearing - uniform clearing   -0.0004   0.0000   -0.0145 .. +0.0028
+    mesh: a5's read of its clearing          -0.0012  -0.0009   -0.0038 .. +0.0004
+
+The search on the composite is as good as on the uniform grid (ahead on 16, behind on 22, tied on
+20), but for 39240 (-0.0145), where the greedy took another path (its unpolished clearing
+-0.0115): the greedy is path-dependent and a slightly different tension can send it elsewhere.
+Same time (1.02x): these urban blocks shed few cells.
+
+### Goal-oriented refinement (owner 2026-10-08: prioritized)
+
+14401 read 0.009 low at a5, 2.5x the 59's worst, so distance from features misses some of what
+the score depends on. Refining where J_2 is sensitive instead: from the pilot a2.5x8, each round
+solves the baseline with the buildings at eps 0.01 (the tension's world) and its J_2 adjoint,
+gives each coarse cell eta = E (s / h)^alpha (E its half of |w du dlam| over each of its edges,
+s its side), splits the largest ceil(gap / 6) (a split adds 3 cells: half the gap to the target
+per round) and 2:1-balances (no neighbour, across an edge or a corner, under half a cell's size;
+the distance meshes already are, as their thresholds double per level). Prototype
+(goal_proto.py, scratch), the five res-check clearings (14401: its three) against exact h 0.5, at
+the distance meshes' cell counts (share of uniform cells):
+
+    block   distance mesh                     goal mesh, alpha 1 (alpha 2)
+    40144   a5   0.55  -0.0037                0.54  -0.0013 (-0.0012)
+            a10  0.67  -0.0018                0.66  -0.0005 (-0.0005)
+            a20  0.83  -0.0007                0.82  -0.0001 (-0.0001)
+    20543   a5   0.25  -0.0029                0.25  -0.0016 (-0.0020)
+            a10  0.32  -0.0012                0.32  -0.0008 (-0.0011)
+            a20  0.43  -0.0005                0.42  -0.0002 (-0.0003)
+    14401   a5   0.33  -0.0095                0.33        (-0.0029)
+            a10  0.47  -0.0044                0.46        (-0.0004)
+            a20  0.65  -0.0013                0.64        (-0.000003)
+
+1.5 -- 400x less error for the same cells, most where distance does worst (14401: the goal mesh at
+0.46 beats a20 at 0.65), and a smaller spread between a block's clearings. alpha 1 and 2 within
+1.4x; alpha 1 kept. (A first run's balance compared each probe with the wrong cell's level and
+over-refined, 6 -- 96% more cells even on the distance meshes; fixed, the distance meshes need no
+balancing and 2,000 random splits about 1,000 more cells.)
+
+Built (common.GoalMesh, `<h>g<d0>x<smax>f<factor>p<power>`: the pilot a<d0>x<smax> refined to
+`factor` x its cells for J_power; a SIMP plan's `.g...`; lifted.split_cells and balance).
+MeshSpec.build now takes the block and the run's physics (Params, population), since a goal mesh
+solves on the way; the others ignore them. cells(block) gives the target, so a submit sizes it
+without a solve. On 40144 it reproduces the prototype (333,642 cells against 333,639, GPU noise
+in the ranking at the cutoff; -0.00128 on every clearing), mesh and five scorings in 19 s.
+Validation on the 59: run goal-59, factors 1.2, 1.5 and 2, with a20x8 for comparison.
