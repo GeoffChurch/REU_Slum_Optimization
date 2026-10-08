@@ -1555,3 +1555,41 @@ runs' own scores were far off the composite's (coarse score minus a5): 45267 at 
 (0.180 vs 0.173) where a5 puts it far below (0.111 vs 0.317): optimizing on the coarse grid found
 a worse clearing. The coarse-h numbers in "What a coarser grid does to Lens A" are superseded by
 the a5 runs.
+
+### The oversized blocks at the metric's resolution (2026-10-08)
+
+Base and `.p256w8x2` on all 18 (the 17 and 53556) at a5x8, 4287 at a5x32 and 63612 at a2.5x8, on
+the 32 GB cards (runs ov-base-a5, ov-def-a5, ov-base/def-4287, ov-base/def-63612). Against them,
+the coarse runs' own base and default clearings scored on the same mesh (ov-mesh-*):
+
+    block  mesh    coarse h  base    default  gain     min base/default  coarse clearings (base, default)
+    63612  a2.5x8  2         0.7695  0.7706   +0.0011  9.6 / 12.9        0.5929  0.6129
+    28051  a5x8    1.25      0.5406  0.5464   +0.0059  5.8 / 8.2         0.4378  0.4356
+    1182   a5x8    3         0.1178  0.1178   0        5.5 / 5.8         0.0958  0.0958
+    64070  a5x8    2.5       0.2206  0.2260   +0.0054  4.0 / 5.6         0.2063  0.2007
+    63818  a5x8    3         0.3292  0.3321   +0.0028  5.4 / 9.8         0.3174  0.1109
+    62803  a5x8    2         0.2754  0.2785   +0.0031  5.5 / 12.7        0.2722  0.2711
+    62441  a5x8    2         0.1866  0.1866   0        3.5 / 3.5         0.1819  0.1789
+    472    a5x8    3         0.2881  0.2881   0        4.6 / 5.7         0.2834  0.2834
+    45267  a5x8    1         0.5351  0.5391   +0.0040  4.1 / 5.9         0.5356  0.5351
+    26061  a5x8    1         0.2998  0.3040   +0.0042  3.6 / 6.9         0.2993  0.3006
+    4287   a5x32   2         0.1369  0.1384   +0.0015  13.4 / 23.2       0.1353  0.1281
+    38190  a5x8    1.25      0.2905  0.2905   0        2.4 / 3.1         0.2881  0.2880
+    7499   a5x8    1.5       0.1836  0.1872   +0.0036  4.3 / 5.5         0.1850  0.1840
+    62403  a5x8    1         0.0804  0.0819   +0.0014  3.1 / 4.8         0.0807  0.0802
+    62385  a5x8    1         0.5606  0.5613   +0.0006  4.1 / 5.6         0.5595  0.5601
+    62523  a5x8    1.25      0.0960  0.0962   +0.0002  3.3 / 4.3         0.0955  0.0955
+    38142  a5x8    1         0.0924  0.0924   0        3.4 / 3.8         0.0922  0.0922
+    53556  a5x8    --        0.2242  0.2321   +0.0080  2.3 / 3.5         --
+
+The default is never below the base (+0.0023 mean, +0.0015 median, tied on 5), at 1.0 -- 2.3x
+the base's time (1.39x median); base 2.3 -- 13.4 min, default 3.1 -- 23.2 (4287 the slowest).
+Optimizing at the metric's resolution beats both coarse clearings on all 17, by +0.0002 to +0.158
+(median +0.0035): most where a coarse cell closed a gate (63612 at h 2 +0.158, 28051 at h 1.25
++0.109) or where the coarse grid misled the search (1182 and 63818 at h 3, 64070 at h 2.5: +0.015
+-- +0.022). The h 1 runs' clearings were within 0.004 of it. The base alone trails the coarse
+base clearing on three blocks by at most 0.0014 (45267, 62403, 7499), a SIMP run's own scatter.
+So each of the 82 large blocks now has SIMP at h 0.5 near its buildings: the base on all but
+19593 and 6498 (the default only, on the H100), the default on all but 14401, 7851 and 32841 (the
+base only). The coarse-h runs are superseded (their clearings kept in ov_clearings.parquet).
+Composite cells: 2.4 -- 5.1M, well within a 32 GB card.

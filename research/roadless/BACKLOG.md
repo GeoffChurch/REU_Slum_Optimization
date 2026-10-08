@@ -27,17 +27,18 @@ instead); greedy screening width `S0.01catw4` (+0.0006, marginal); pairs after t
 marginal); resolution (res-check: h 0.75 within 0.01 on 35 of 59, h 1.0 understates gated blocks by
 up to 0.31); sequential stopping (seqscreen.py: ~20 of 46 blocks decide, at the owner's tau).
 
+Also closed: the oversized blocks (the 17 over 1.4 km^2 and 53556), base and default at the
+metric's resolution through local coarsening (`.a5x8`; 4287 `.a5x32`, 63612 `.a2.5x8`; NOTES, "The
+oversized blocks at the metric's resolution"); 19593 and 6498 on the H100. Every one of the 82 large
+blocks has SIMP at h 0.5 near its buildings.
+
 Also closed: wider polish rounds (w16 = w8 at 1.28x) and late sampling on top of the hard-block
 preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x -> 1.21x).
 
 Open:
-- **H100**: 19593, 53556, 6498 queued for it (run big3, the default `.p256w8x2`; its 4 GPUs
-  taken all of 2026-10-06). 45267 is estimated at 86.6 GB, past any card: it joins the blocks below.
-- **The over-1.4 km^2 blocks** (17; owner 2026-10-07: a coarser grid): done on the 32 GB cards at
-  h 1 -- 4 (NOTES, "What a coarser grid does to Lens A"); from h 2 on the coarse metric scrambles the
-  order of clearings, so those numbers are indicative. **Owner's call: local coarsening** (h 0.5
-  within ~20 m of a building -- 3 -- 30% of these blocks -- coarse cells beyond; a new
-  discretization with a fine/coarse interface, validated against uniform h 0.5 on the 59).
+- **The default on 14401, 7851, 32841** (the base only: they fit 48 GB at h 0.5, and the 48 GB
+  cards are booked). **running**: base and default at a5x8 on the 32 GB cards (runs three-base-a5,
+  three-def-a5), so the pair shares a mesh.
 - **The owner's tau** for sequential stopping (the smallest mean gain worth a variant's time).
 
 Not pursued, with what would change that:
@@ -106,9 +107,8 @@ Not pursued, with what would change that:
   cycle that kept every system's AMG hierarchy (2.6 GB on 30796) until the cycle collector ran,
   about 11 GB of dead hierarchies at the peak (NOTES, "Translucent greedy on 30796"). With a
   release of cupy's cached blocks before each new system, 14401, 7851 and 32841 now fit 48 GB for
-  the greedy and SIMP (62 of 82 large blocks). **Next:** the four at 100 -- 125M unknowns (19593,
-  53556, 6498, 45267) on the 80 GB H100 when it is free (about 0.64 GiB per million unknowns
-  live).
+  the greedy and SIMP (62 of 82 large blocks). Done: 19593 and 6498 on the H100; 53556, 45267 and
+  the other 16 through local coarsening (Status, above).
 - **Damped OC or MMA** (done 2026-10-04, null; NOTES). Damped OC ties or trails slightly on the
   13 (median -0.0005 / -0.0001), and MMA collapses on 22422. Both stay selectable (`.u`).
 - **Sturdier gate capture** (from that null). On a gated block SIMP's answer is one lucky
@@ -167,11 +167,13 @@ Not pursued, with what would change that:
 
 ## Coverage and model
 
-- **Blocks over ~1.4 km^2** (owner's call). 21 -- 23 of the 82 large blocks did not fit 48 GB at
-  h 0.5: a coarser grid, or the grid cropped to the built-up area. Both change the model. The
-  2026-10-04 memory fixes brought three within 48 GB (Memory, above; 62 of 82 now). Four more at
-  100 -- 125M unknowns may fit 80 GB, and the other 16 (130M -- 1.66 billion unknowns) still need
-  one of the two.
+- **Blocks over ~1.4 km^2** (done 2026-10-08): local coarsening (`lifted.CompositeGrid`, plan
+  suffix `.a<d0>x<smax>`) keeps h 0.5 within d0 of every building, street and the block edge and
+  doubles the cell with each doubling of distance; within 0.004 of uniform h 0.5 on the 59 at a5
+  (order kept but for ties) and 2.4 -- 5.1M cells on the oversized blocks. Ideas on top of it:
+  goal-oriented refinement (the dual-weighted residual picking where to refine, not distance);
+  a separate d0 for streets and the block edge; the sightline conductances and the greedy's search
+  on a composite (both scan raster lines, so the uniform grid only for now).
 - **Coarse-to-fine** (`.c1`, tried 2026-10-04; NOTES). 0.75x the time, but it collapses on 30848
   (-0.255). Kept selectable. Worth retrying only with a coarse h that keeps 30848's gate (0.75?)
   or with only the first stage coarse.
