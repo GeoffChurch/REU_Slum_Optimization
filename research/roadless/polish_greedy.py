@@ -5,13 +5,14 @@ ranked by the eps-world gradient at the 0/1 clearing (the tension), candidates s
 world at 1e-6 as SIMP's incumbent does, the result exactly.
 
     PYTHONPATH=. uv run python research/roadless/polish_greedy.py <id> <p> <cpu|gpu> <picker> \\
-        <tries> <width> <along> <budget> [x2]
+        <tries> <width> <along> <budget> <mesh> [x2]
 
-`x2`: two-for-one moves too (relax.exchange's pairs). Rows in
-polish_rows/<along>/<picker>.P<tries>w<width>[x2]/D<budget>/<id>_p<p>.parquet: `perm` the
-polished clearing's Lens A, `greedy_perm` the greedy's own clearing within the budget (a real
-clearing, not picker_compare's interpolation between steps), `t` the greedy and the polish,
-`t_greedy` the greedy alone.
+mesh: <h> or <h>a<d0>x<smax> (lifted.mesh_of), the grid of every solve and score. `x2`:
+two-for-one moves too (relax.exchange's pairs). Rows in
+polish_rows/<along>/<picker>.P<tries>w<width>[x2]<the mesh's suffix>/D<budget>/<id>_p<p>.parquet
+(h 0.5 unnamed, as in a SIMP plan): `perm` the polished clearing's Lens A, `greedy_perm` the
+greedy's own clearing within the budget (a real clearing, not picker_compare's interpolation
+between steps), `t` the greedy and the polish, `t_greedy` the greedy alone, `mesh` its name.
 """
 from __future__ import annotations
 
@@ -32,15 +33,17 @@ RTOL = 1e-3          # the solves while polishing, as SIMP's base plan's (t0.001
 SCORE_EPS = 1e-6     # candidates' eps world, as SIMP's incumbent (k1s1e-06)
 
 
-def rows_of(picker: str, tries: int, width: int, pairs: bool, along: str, budget: float) -> Path:
-    return (HERE / "polish_rows" / along / f"{picker}.P{tries}w{width}{'x2' if pairs else ''}"
-            / f"D{budget:g}")
+def rows_of(picker: str, tries: int, width: int, pairs: bool, mesh: lifted.MeshSpec, along: str,
+            budget: float) -> Path:
+    return (HERE / "polish_rows" / along
+            / f"{picker}.P{tries}w{width}{'x2' if pairs else ''}{mesh.suffix}" / f"D{budget:g}")
 
 
 def main(bid: str, power: float, device: str, picker_spec: str, tries: int, width: int,
-         along: str, budget: float, pairs: bool) -> None:
-    out = rows_of(picker_spec, tries, width, pairs, along, budget) / f"{bid}_p{power:g}.parquet"
-    c = relax._clearing(bid, device, along, lifted.UniformMesh(0.5, offset=lifted.OFFSET))
+         along: str, budget: float, mesh: lifted.MeshSpec, pairs: bool) -> None:
+    out = (rows_of(picker_spec, tries, width, pairs, mesh, along, budget)
+           / f"{bid}_p{power:g}.parquet")
+    c = relax._clearing(bid, device, along, mesh)
     picker = clear.picker_of(picker_spec, clear.sweep_of(device))
     t0 = time.time()
     order = [j for pk, _ in clear.grow(c, picker, power, budget, c.sc.J(c.sc.u0, power), False)
@@ -57,7 +60,8 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
     perm = rel.perm(rel.exact(rp))
     t = time.time() - t0
     out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([dict(block=bid, n=c.n, picker=picker_spec, perm=perm, greedy_perm=greedy_perm,
+    pd.DataFrame([dict(block=bid, n=c.n, picker=picker_spec, mesh=mesh.name, perm=perm,
+                       greedy_perm=greedy_perm,
                        D=float(c.cost @ rp), greedy_D=float(c.cost @ r), moves=moves,
                        scorings=used, t=t, t_greedy=t_greedy,
                        cleared=np.flatnonzero(rp).tolist())]).to_parquet(out)
@@ -68,6 +72,8 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if len(a) == 9 and a[8] != "x2":
-        raise SystemExit(f"the optional last argument is x2, not {a[8]!r}")
-    main(a[0], float(a[1]), a[2], a[3], int(a[4]), int(a[5]), a[6], float(a[7]), len(a) == 9)
+    if len(a) not in (9, 10) or (len(a) == 10 and a[9] != "x2"):
+        raise SystemExit("usage: <id> <p> <cpu|gpu> <picker> <tries> <width> <along> <budget> "
+                         "<mesh> [x2]")
+    main(a[0], float(a[1]), a[2], a[3], int(a[4]), int(a[5]), a[6], float(a[7]),
+         lifted.mesh_of(a[8]), len(a) == 10)
