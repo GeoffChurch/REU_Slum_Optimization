@@ -1396,3 +1396,16 @@ h 0.75: 45267, 62385, 38142, 26061, 62403; h 1: 62523, 38190, 28051; h 1.5: 7499
 63612; h 2: 64070, 63818, 472, 1182, 4287. And res-check at h 1.5 and 2 on the 59 (how low those
 read). 53556's rerun (the AMG fix) was cancelled while the H100 stayed booked -- the launcher's
 budget chained every later run behind it -- and goes back when the H100 frees.
+
+**2026-10-07 -- 08: the first coarse runs were lost to a bad node.** quadro2's CUDA does not
+initialise (cudaErrorUnknown in seconds; cluster_submit e83caa8 marked it unusable on 2026-10-07
+after a mycooc run). Idle with 8 free GPUs, it took 83 of this run's tasks -- res-check2's 55 and
+every oversized-block task but one -- because the research branch still pinned cluster_submit
+5e76c39; now 950eeed (924b730). The 48 and 80 GB cards (quadro1, h100) are held by other users'
+2 -- 7 day jobs, so the oversized blocks are re-planned for the 32 GB cards, each at the finest h
+under 28 GB: h 1 (45267, 62385, 38142, 26061, 62403), 1.25 (62523, 38190, 28051), 1.5 (7499), 2
+(62803, 62441, 63612), 2.5 (64070), 3 (63818, 472, 1182), 4 (4287); base and `.p256w8x2`. res-check
+at h 1.25 -- 4 on 58 of the 59 (30796 is sized at h 0.5 by the launcher, 34 GB: a 48 GB card).
+The four res-check2 blocks that ran: h 1.5 and 2 read 0.05 -- 0.27 low (to be confirmed on 58).
+cluster_submit runs the runs one after another (its GPU budget chains each behind the live ones),
+so a one-task run leaves three GPUs idle: a packing improvement for the package's backlog.
