@@ -41,7 +41,6 @@ Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry 
 - **Sightline and the greedy on the composite** (Coverage and model).
 - **The cheap preset on the composite** (Coverage and model): greedy + polish on the oversized
   blocks.
-- **Faster submits** (Infrastructure): the mesh's cell count cached, not rebuilt at every submit.
 - **The add/remove search as one Strategy** (New methods).
 - **A continuous, heavy-tailed outcome model for kernelcore** (Experiment design; other repo).
 
@@ -199,8 +198,9 @@ Not pursued, with what would change that:
 
 ## Infrastructure
 
-- **Faster submits** (**prioritized**). cluster.py sizes an adaptive mesh's tasks by building
-  the mesh (`AdaptiveMesh.cells`), minutes per block at every submit; cache the count per block and
-  mesh (the mesh depends only on the block's geometry and the mesh's parameters).
+- **Faster submits** (done 2026-10-08; NOTES "Faster submits"): a staged `dwithin` near test, a
+  count without the cells' attributes, 8 blocks counted at a time; sizing 16 -- 18x faster, the
+  meshes identical. A goal-oriented mesh, whose cells come from a solve, will need its own
+  `cells` (its cell budget, say) rather than a build at submit.
 - **Cluster launcher: bookgen and mycooc on GeoffChurch/cluster_submit** (done): mycooc deleted
   its old launcher (3ad93ac5), bookgen deleted ltcluster with no compatibility path (b901184b).

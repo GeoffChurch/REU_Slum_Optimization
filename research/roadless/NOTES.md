@@ -1612,3 +1612,28 @@ on any composite at most 0.0005), so the order holds and the default's +0.005 is
 d0; only absolute scores on a composite carry the bias. 14401 at a20x8 is 3.6M cells against 5.4M
 uniform. On the oversized blocks a10 - a5 was at most +0.0026, so their a5 scores are probably
 within ~0.005 of h 0.5, with 14401 a reminder that a block can do worse.
+
+### Faster submits (2026-10-08, owner: "start with faster submits")
+
+cluster.py sized an adaptive mesh's tasks by building each block's CompositeGrid in turn: 14 min
+for the 16 oversized blocks, 11.5 min for the 59 (a5x8). 73% of a build was the quadtree's near
+test (`query_nearest` with a max distance, per box: is a piece within d0 2^(l-1)?). Measured per
+level on 26061, 30796, 1558 (a5 -- a20), against query_nearest:
+
+    near test                                        a5           a10     a20 (dense urban)
+    all `dwithin` pairs, any per box                 0.33 -- 0.59  0.48    1.47 -- 2.15
+    `dwithin` at dist/4, the rest at dist            0.34 -- 0.38  0.40    0.66 -- 0.76
+    `dwithin` at dist/8, /4, /2, dist                0.45 -- 0.51  0.52    0.58 -- 0.59
+    `dwithin` at a small radius, query_nearest rest  0.79 -- 0.85  0.86    0.69 -- 0.91
+
+All pairs at once blows up where a dense block's top-level boxes (D 160 m at a20) each pair with
+hundreds of pieces; staging settles most boxes among few pairs. lifted._near is now the
+two-stage form (dist / 4, then dist), the build split into `_layout` (the leaves) and the cells'
+attributes, and `CompositeGrid.count` the leaves alone (no footprint raster, street band or
+KD-tree); cluster.py counts SIZING_WORKERS = 8 blocks at a time. Identical meshes to the old build
+on all 139 checked (the 80 blocks at a5x8, 4287 at a5x32; the 59 at a20x8: level, i0, j0, isub,
+bsub, ground, building, dist_b, xy, and the count). Under a 12-process load a full build takes
+0.59x the old time at a5 (0.44 -- 0.73), 0.90x at a20 (a few small dense blocks up to 1.4x, a few
+seconds each); the count alone 0.38x and 0.71x. Sizing a submit: the 16 oversized blocks 840 s
+-> 51 s, the 59 691 s -> 38 s (16 -- 18x). No cache: the count is cheap enough that one would
+only add a key to keep in step with the mesh code.

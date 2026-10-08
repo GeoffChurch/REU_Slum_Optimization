@@ -333,6 +333,97 @@ def _pieces(geoms) -> NDArray[np.object_]:
     return np.asarray(out, dtype=object)
 
 
+NEAR_CHUNK = 100_000     # boxes per STRtree query: bounds the pair arrays, not the answer
+NEAR_STAGES = (0.25, 1.0)    # the radii _near tries in turn, as fractions of its distance: speed
+                             # only (the last is the distance itself)
+
+
+def _near(tree: shapely.STRtree, boxes: NDArray[np.object_], dist: float) -> NDArray[np.bool_]:
+    """Whether some piece in `tree` is within `dist` of each box: STRtree `dwithin` pairs,
+    reduced to any per box. A box with a piece within dist / 4 is settled there, among few
+    pairs, and only the rest are queried at `dist`, where a dense block's boxes would each pair
+    with hundreds of pieces. 0.34 -- 0.76x query_nearest's time at d0 5 -- 20 (NOTES)."""
+    near = np.zeros(len(boxes), dtype=bool)
+    rest = np.arange(len(boxes))
+    for frac in NEAR_STAGES:
+        hit = np.zeros(len(rest), dtype=bool)
+        for s0 in range(0, len(rest), NEAR_CHUNK):
+            hit[s0 + tree.query(boxes[rest[s0:s0 + NEAR_CHUNK]], predicate="dwithin",
+                                distance=frac * dist)[0]] = True
+        near[rest[hit]] = True
+        rest = rest[~hit]
+    return near
+
+
+class _Layout(NamedTuple):
+    """CompositeGrid's cells before their attributes: the fine lattice (centres xs, ys; S x S
+    sub-samples per cell at fx, fy), the coarse cells (level, first fine row, first fine
+    column), and the fine cells' flat indices (i nx + j, sorted) with their inside sub-samples."""
+    xs: NDArray[np.float64]
+    ys: NDArray[np.float64]
+    fx: NDArray[np.float64]
+    fy: NDArray[np.float64]
+    S: int
+    coarse: list[tuple[int, NDArray[np.int64], NDArray[np.int64]]]
+    key: NDArray[np.int64]
+    isub: NDArray[np.bool_]
+
+
+def _layout(boundary, footprints: NDArray[np.object_], streets, h: float, *, d0: float,
+            smax: float, band_m: float, offset: tuple[float, float]) -> _Layout:
+    """Grid.of's lattice and sub-samples, refined top-down: a cell of side h 2^l (l >= 1) stays
+    whole when no footprint, street or block-edge piece is within d0 2^(l-1) of it (and its
+    centre is inside the block: then all of it is), else it splits in four; the h cells are kept
+    where some sub-sample is inside the block, as Grid's."""
+    L = int(round(np.log2(smax / h)))
+    if L < 1 or h * 2 ** L != smax:
+        raise ValueError(f"smax {smax:g} is not h {h:g} x a power of two >= 2")
+    if d0 <= band_m:
+        raise ValueError(f"d0 {d0:g} must exceed the ground band {band_m:g} (no coarse "
+                         "cell on the ground)")
+    minx, miny, maxx, maxy = boundary.bounds
+    xs = np.arange(minx - h + offset[0] * h, maxx + 2 * h, h)
+    ys = np.arange(miny - h + offset[1] * h, maxy + 2 * h, h)
+    ny, nx = len(ys), len(xs)
+    S = 4
+    d = h / S
+    fx = xs[0] - h / 2 + (np.arange(nx * S) + 0.5) * d
+    fy = ys[0] - h / 2 + (np.arange(ny * S) + 0.5) * d
+    rings = shapely.get_rings(shapely.get_parts(boundary))
+    tree = shapely.STRtree(np.concatenate([_pieces(footprints), _pieces(list(streets)),
+                                           _pieces(rings)]))
+    shapely.prepare(boundary)
+    lx, ly = xs[0] - h / 2, ys[0] - h / 2              # the lattice's lower-left corner
+    r = 1 << L
+    ti, tj = np.meshgrid(np.arange(-(-ny // r)), np.arange(-(-nx // r)), indexing="ij")
+    ti, tj = ti.ravel(), tj.ravel()
+    coarse = []                                       # (level, i0, j0) per coarse cell
+    for lev in range(L, 0, -1):
+        r = 1 << lev
+        boxes = shapely.box(lx + tj * r * h, ly + ti * r * h, lx + (tj + 1) * r * h,
+                            ly + (ti + 1) * r * h)
+        near = _near(tree, boxes, d0 * 2 ** (lev - 1))
+        far = np.flatnonzero(~near)
+        keep = far[shapely.contains_xy(boundary, lx + (tj[far] + 0.5) * r * h,
+                                       ly + (ti[far] + 0.5) * r * h)]
+        coarse.append((lev, ti[keep] * r, tj[keep] * r))
+        ti = (2 * ti[near])[:, None] + np.array([0, 0, 1, 1])[None, :]
+        tj = (2 * tj[near])[:, None] + np.array([0, 1, 0, 1])[None, :]
+        ti, tj = ti.ravel(), tj.ravel()
+        ok = (ti * (r // 2) < ny) & (tj * (r // 2) < nx)
+        ti, tj = ti[ok], tj[ok]
+    # the fine cells: Grid's, where some sub-sample is inside the block
+    key = np.sort(ti * nx + tj)
+    fi, fj = key // nx, key % nx
+    sub_r = np.repeat(np.arange(S), S)                # sub-sample (row in cell) S + column
+    sub_c = np.tile(np.arange(S), S)
+    R = (fi * S)[:, None] + sub_r[None, :]
+    C = (fj * S)[:, None] + sub_c[None, :]
+    isub = _scanfill_at(boundary, fx, fy, R.ravel(), C.ravel()).reshape(-1, S * S)
+    ins = isub.any(axis=1)
+    return _Layout(xs=xs, ys=ys, fx=fx, fy=fy, S=S, coarse=coarse, key=key[ins], isub=isub[ins])
+
+
 @dataclass(eq=False)
 class CompositeGrid:
     """A block's cells at several sizes (AdaptiveMesh): the metric's h near footprints,
@@ -385,60 +476,16 @@ class CompositeGrid:
     @classmethod
     def of(cls, boundary, footprints, streets, h: float, *, d0: float, smax: float,
            band_m: float, offset: tuple[float, float]) -> CompositeGrid:
-        """Grid.of's lattice and sub-samples, refined top-down: a cell of side h 2^l (l >= 1)
-        stays whole when no footprint, street or block-edge piece is within d0 2^(l-1) of it
-        (and its centre is inside the block: then all of it is), else it splits in four; the
-        h cells are kept where some sub-sample is inside the block, as Grid's."""
-        L = int(round(np.log2(smax / h)))
-        if L < 1 or h * 2 ** L != smax:
-            raise ValueError(f"smax {smax:g} is not h {h:g} x a power of two >= 2")
-        if d0 <= band_m:
-            raise ValueError(f"d0 {d0:g} must exceed the ground band {band_m:g} (no coarse "
-                             "cell on the ground)")
-        minx, miny, maxx, maxy = boundary.bounds
-        xs = np.arange(minx - h + offset[0] * h, maxx + 2 * h, h)
-        ys = np.arange(miny - h + offset[1] * h, maxy + 2 * h, h)
-        ny, nx = len(ys), len(xs)
-        S = 4
-        d = h / S
-        fx = xs[0] - h / 2 + (np.arange(nx * S) + 0.5) * d
-        fy = ys[0] - h / 2 + (np.arange(ny * S) + 0.5) * d
+        """Grid.of's lattice and sub-samples, refined top-down (`_layout`), with Grid's
+        attributes on the fine cells."""
         footprints = np.asarray(footprints)
-        rings = shapely.get_rings(shapely.get_parts(boundary))
-        tree = shapely.STRtree(np.concatenate([_pieces(footprints), _pieces(list(streets)),
-                                               _pieces(rings)]))
-        shapely.prepare(boundary)
+        lay = _layout(boundary, footprints, streets, h, d0=d0, smax=smax, band_m=band_m,
+                      offset=offset)
+        xs, ys, fx, fy, S, coarse = lay.xs, lay.ys, lay.fx, lay.fy, lay.S, lay.coarse
+        ny, nx = len(ys), len(xs)
         lx, ly = xs[0] - h / 2, ys[0] - h / 2              # the lattice's lower-left corner
-        r = 1 << L
-        ti, tj = np.meshgrid(np.arange(-(-ny // r)), np.arange(-(-nx // r)), indexing="ij")
-        ti, tj = ti.ravel(), tj.ravel()
-        coarse = []                                       # (level, i0, j0) per coarse cell
-        for lev in range(L, 0, -1):
-            r = 1 << lev
-            boxes = shapely.box(lx + tj * r * h, ly + ti * r * h, lx + (tj + 1) * r * h,
-                                ly + (ti + 1) * r * h)
-            near = np.zeros(len(boxes), dtype=bool)
-            near[tree.query_nearest(boxes, max_distance=d0 * 2 ** (lev - 1),
-                                    all_matches=False)[0]] = True
-            far = np.flatnonzero(~near)
-            keep = far[shapely.contains_xy(boundary, lx + (tj[far] + 0.5) * r * h,
-                                           ly + (ti[far] + 0.5) * r * h)]
-            coarse.append((lev, ti[keep] * r, tj[keep] * r))
-            ti = (2 * ti[near])[:, None] + np.array([0, 0, 1, 1])[None, :]
-            tj = (2 * tj[near])[:, None] + np.array([0, 1, 0, 1])[None, :]
-            ti, tj = ti.ravel(), tj.ravel()
-            ok = (ti * (r // 2) < ny) & (tj * (r // 2) < nx)
-            ti, tj = ti[ok], tj[ok]
-        # the fine cells: Grid's, where some sub-sample is inside the block
-        key = np.sort(ti * nx + tj)
+        key, isub_f = lay.key, lay.isub
         fi, fj = key // nx, key % nx
-        sub_r = np.repeat(np.arange(S), S)                # sub-sample (row in cell) S + column
-        sub_c = np.tile(np.arange(S), S)
-        R = (fi * S)[:, None] + sub_r[None, :]
-        C = (fj * S)[:, None] + sub_c[None, :]
-        isub_f = _scanfill_at(boundary, fx, fy, R.ravel(), C.ravel()).reshape(-1, S * S)
-        ins = isub_f.any(axis=1)
-        key, fi, fj, isub_f = key[ins], fi[ins], fj[ins], isub_f[ins]
         bsub_f = isub_f & (_rasterize_cells(footprints, fx, fy, S, key, nx) >= 0)
         building_f = bsub_f.mean(axis=-1) > 0.5
         st = shapely.union_all(np.asarray(streets)).buffer(band_m)
@@ -467,6 +514,14 @@ class CompositeGrid:
                    isub=np.concatenate([isub_f, np.ones((nc, S * S), dtype=bool)]),
                    bsub=np.concatenate([bsub_f, np.zeros((nc, S * S), dtype=bool)]),
                    fx=fx, fy=fy)
+
+    @staticmethod
+    def count(boundary, footprints, streets, h: float, *, d0: float, smax: float,
+              band_m: float, offset: tuple[float, float]) -> int:
+        """len(of(...).level) without the cells' attributes: what a run's memory scales with."""
+        lay = _layout(boundary, np.asarray(footprints), streets, h, d0=d0, smax=smax,
+                      band_m=band_m, offset=offset)
+        return len(lay.key) + sum(len(i) for _, i, _ in lay.coarse)
 
     def _sub_xy(self) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
         t = (np.arange(self.S) + 0.5) / self.S - 0.5
@@ -674,8 +729,8 @@ class AdaptiveMesh:
                                 smax=self.smax, band_m=BAND_M, offset=self.offset)
 
     def cells(self, boundary, footprints, streets) -> float:
-        """Counted by building it (a minute or two on the largest blocks)."""
-        return float(len(self.build(boundary, footprints, streets).level))
+        return float(CompositeGrid.count(boundary, footprints, streets, self.h, d0=self.d0,
+                                         smax=self.smax, band_m=BAND_M, offset=self.offset))
 
 
 def mesh_of(token: str) -> MeshSpec:

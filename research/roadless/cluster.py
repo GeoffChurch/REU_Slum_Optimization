@@ -4,10 +4,10 @@
 shipped as an input (a node has no source data; common.build_blocks reads the bank). Each task
 needs GPU memory for the eps world, every inside cell x 8 headings, about GB_PER_MILLION GB per
 million unknowns, and cluster_submit routes it to the smallest card that holds it. `--mesh` is
-the grid the tasks use (lifted.mesh_of: <h> or <h>a<d0>x<smax>, the latter's cells counted by
-building it here); `--gb` sets a floor under the estimate, to send a block known to need a bigger
-card to one. Results (parquet rows) come back to the same paths here, never overwriting a local
-file.
+the grid the tasks use (lifted.mesh_of: <h> or <h>a<d0>x<smax>, the latter's cells counted
+here, SIZING_WORKERS blocks at a time); `--gb` sets a floor under the estimate, to send a block
+known to need a bigger card to one. Results (parquet rows) come back to the same paths here,
+never overwriting a local file.
 
     uv run python research/roadless/cluster.py setup
     uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] \
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,6 +32,8 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 GB_PER_MILLION = 0.7    # measured: the translucent greedy on 30796 peaks at 31.2 GiB for 48.7M
                         # unknowns after the K-cycle fix (NOTES); raise it if a block runs out
+SIZING_WORKERS = 8      # processes counting the blocks' cells at submit: speed only (a shared
+                        # machine; the count is shapely and integer numpy, no BLAS threads)
 # The checkout's .venv from uv.lock, with every default group: cupy and pyamg (`gpu`) among them.
 ENV = cs.Uv()
 
@@ -73,18 +76,24 @@ class Blocks:
         ids = (Path(args.ids[1:]).read_text().split() if args.ids.startswith("@")
                else args.ids.split(","))
         bank = common.write_bank(ids, workdir / "bank.pkl")
+        with ProcessPoolExecutor(min(SIZING_WORKERS, len(ids))) as ex:
+            cells = list(ex.map(_cells, [mesh] * len(ids), [bank[b] for b in ids]))
         tasks = tuple(
             cs.Task(f"python -u {line.replace('{id}', b)}",
-                    max(mesh.cells(bank[b].boundary, list(bank[b].buildings.outlines),
-                                   list(bank[b].streets.geometry)) * 8 / 1e6 * GB_PER_MILLION,
-                        args.gb))
-            for b in ids)
+                    max(n * 8 / 1e6 * GB_PER_MILLION, args.gb))
+            for b, n in zip(ids, cells, strict=True))
         return cs.RunPlan(
             tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=None),
             inputs=(workdir / "bank.pkl", *args.extra),
             prelude=("source research/roadless/cluster_env.sh",
                      'export REBLOCK_BLOCK_BANK="$CLUSTER_SUBMIT_INPUTS/bank.pkl"'),
             describe=(f"{len(ids)} blocks: {line}",))
+
+
+def _cells(mesh, block) -> float:
+    """`mesh`'s cells on `block` (a pool worker's task)."""
+    return mesh.cells(block.boundary, list(block.buildings.outlines),
+                      list(block.streets.geometry))
 
 
 def _names(line: str, token: str, mesh) -> bool:
