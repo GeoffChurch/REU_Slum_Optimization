@@ -33,8 +33,11 @@ preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x
 Open:
 - **H100**: 19593, 53556, 6498 queued for it (run big3, the default `.p256w8x2`; its 4 GPUs
   taken all of 2026-10-06). 45267 is estimated at 86.6 GB, past any card: it joins the blocks below.
-- **Owner's call, the over-1.4 km^2 blocks** (17 with 45267 need a coarser grid or a crop): res-check says Lens
-  A at h 0.75 reads ~0.005 low on average, up to ~0.08 low on gated blocks; h 1.0 up to 0.31 low.
+- **The over-1.4 km^2 blocks** (17; owner 2026-10-07: a coarser grid): done on the 32 GB cards at
+  h 1 -- 4 (NOTES, "What a coarser grid does to Lens A"); from h 2 on the coarse metric scrambles the
+  order of clearings, so those numbers are indicative. **Owner's call: local coarsening** (h 0.5
+  within ~20 m of a building -- 3 -- 30% of these blocks -- coarse cells beyond; a new
+  discretization with a fine/coarse interface, validated against uniform h 0.5 on the 59).
 - **The owner's tau** for sequential stopping (the smallest mean gain worth a variant's time).
 
 Not pursued, with what would change that:

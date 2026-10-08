@@ -1409,3 +1409,40 @@ at h 1.25 -- 4 on 58 of the 59 (30796 is sized at h 0.5 by the launcher, 34 GB: 
 The four res-check2 blocks that ran: h 1.5 and 2 read 0.05 -- 0.27 low (to be confirmed on 58).
 cluster_submit runs the runs one after another (its GPU budget chains each behind the live ones),
 so a one-task run leaves three GPUs idle: a packing improvement for the package's backlog.
+
+### What a coarser grid does to Lens A, and the oversized blocks' first results (2026-10-08)
+
+res-check on the 59 at every spacing used (h 1.25 -- 4 on 58: 30796 needs a 48 GB card), five
+fixed clearings per block, score at h minus score at h 0.5:
+
+    h      median   mean     worst   |d|>0.05  blocks within 0.01  rank agreement (Kendall tau, median)
+    0.75   -0.0005  -0.0052  -0.081   3%       35/59               1.00
+    1      -0.0029  -0.0192  -0.313  15%       28/59               1.00
+    1.25   -0.0190  -0.0380  -0.204  33%       13/58               0.69
+    1.5    -0.0401  -0.0675  -0.382  44%       14/58               0.45
+    2      -0.0599  -0.0881  -0.303  61%        6/58               0.16
+    2.5    -0.1088  -0.1286  -0.624  71%        1/58               0.26
+    3      -0.1503  -0.1626  -0.607  80%        0/58               0.06
+    4      -0.2065  -0.2047  -0.544  89%        0/58               0.06
+
+A coarse grid reads low and, past h ~1.25, scrambles which clearing is better: at h >= 2 the order
+of the five clearings is near random against h 0.5. (Measured on these urban blocks; the sparse
+peri-urban ones may suffer less near their scattered buildings, which this cannot show.)
+
+The 17 oversized blocks on the 32 GB cards (each at the finest h under 28 GB; base and
+`.p256w8x2`, the default never below the base on its own grid):
+
+    h     blocks: base -> default
+    1     26061 0.3031 +0.0002, 38142 0.0933 +0.0001, 45267 0.3974 +0.0023, 62385 0.5652 +0.0004,
+          62403 0.0834 +0.0003
+    1.25  28051 0.2226 +0.0187, 38190 0.3367 +0.0013, 62523 0.1191 +0.0000
+    1.5   7499 0.2029 +0.0046
+    2     62441 0.1958 +0.0003, 62803 0.2737 0, 63612 0.5646 +0.0330
+    2.5   64070 0.2431 +0.0008
+    3     1182 0.1170 0, 472 0.4397 0, 63818 0.1731 +0.0073
+    4     4287 0.1857 +0.0012
+    times 2 -- 5 min base, 1.2 -- 1.8x for the default.
+
+The h 1 blocks are close to what h 0.5 would say; from h 2 on the numbers are indicative only.
+That is the case for local coarsening (h 0.5 near buildings, which covers 3 -- 30% of these
+blocks within 20 m): it would score them at the metric's resolution. Owner's call.
