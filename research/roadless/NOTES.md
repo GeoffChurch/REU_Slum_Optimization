@@ -1446,3 +1446,44 @@ The 17 oversized blocks on the 32 GB cards (each at the finest h under 28 GB; ba
 The h 1 blocks are close to what h 0.5 would say; from h 2 on the numbers are indicative only.
 That is the case for local coarsening (h 0.5 near buildings, which covers 3 -- 30% of these
 blocks within 20 m): it would score them at the metric's resolution. Owner's call.
+
+### Local coarsening: the prototype (owner 2026-10-08: "Yes, build that")
+
+The operator's along weight w = m_k/|v_k|^2 is scale-free (the continuum's h^2 cancels: a lattice
+step of h|v| for a strip of width h/|v|), so a coarse cell reuses it on its own lattice; turning
+edges scale with each cell's own area (s^2). The fine/coarse interface, prototyped in
+composite_proto/proto.py from a uniform fine Grid (validation only, not memory-lean):
+
+- every cell steps along each heading to the cell containing its target point (crossed cells
+  open, the min open fraction scaling the weight, as on the uniform grid);
+- same size: the usual edge (forward only); a LARGER target: an edge with the flux-consistent
+  weight m_k (s/|v|) / d -- the source's strip width over the projected distance between centres
+  (= m_k/|v|^2 at equal sizes) -- taken in both directions from the smaller side; a smaller target:
+  no edge (the smaller cells' own steps reach the larger one);
+- the mesh is fixed from the baseline geometry; a clearing changes only fine cells' open fractions
+  (every building is in the fine region), and the fine cells are those open in the current field.
+
+Block 6310 (dense; coarse tiles only where open, far from buildings and streets), Lens A at D 0.05
+for the five res-check clearings against exact uniform h 0.5:
+
+    two levels                     P0 vs uniform   Lens A diff (5 clearings)
+    r 4 (2 m), D 10 m              +0.04%          -0.0001
+    r 4 (2 m), D 5 m               +0.12%          (P0 only)
+    r 4 (2 m), D 2 m (stress)      +0.52%          -0.0012 .. -0.0013
+    r 8 (4 m), D 5 m               +0.09%          -0.0003 .. -0.0004
+    r 16 (8 m), D 5 m              +0.25%          -0.0009 .. -0.0010
+
+Against a uniform h 1 (median -0.003, worst -0.31) or h 2 (-0.06): the coarse-grid bias essentially
+gone, even jumping straight from 0.5 m to 8 m. Design for the real build:
+- levels 0.5, 1, 2, 4, 8 m by distance to the nearest building, street or block edge: 0.5 within D0
+  (10 m), doubling with each doubling of the distance; built top-down, subdividing only what needs
+  it; sub-sampled geometry (inside, footprint, ground, building labels) only for 0.5 m cells, per
+  tile on the uniform grid's own lattice (so the two agree where both exist); coarse cells fully
+  inside and open by construction; dist_b by nearest building cell (= the EDT);
+- the grid becomes a mesh (flat cells, each with its size): the uniform Grid stays bit-identical,
+  a CompositeGrid gives the same attributes over flat cells plus its own pattern (point location
+  by level), components (graph), cell areas and sub-sample positions; the sightline
+  along-conductances refuse it (they scan grid lines); `uni` only;
+- chosen upstream: a plan suffix for the mesh, built where the Clearing is.
+Validation before use: the composite against exact h 0.5 on the 59 (fixed clearings, as res-check)
+and SIMP on a few; then the 17 oversized blocks at h 0.5 near their buildings.
