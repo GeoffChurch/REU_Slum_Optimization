@@ -1704,4 +1704,4 @@ median -0.0107 (-0.0594 .. +0.0054), cheap - base median -0.0067 (-0.0588 .. +0.
 the default's time and 0.72x the base's (median). As on the 46 held out (-0.015 against the
 default), a cheaper point, not a better one: it wins only on 28051 (+0.0054 over the default) and
 ties on 1182; its worst is 62385 (-0.059, a gate the SIMP presets find). Every large block now
-has all three presets' cheap and default points but 19593 and 6498 (default only, uniform h 0.5).
+has the default and the cheap preset but 19593 and 6498 (the default only, uniform h 0.5).
