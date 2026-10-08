@@ -1413,20 +1413,21 @@ so a one-task run leaves three GPUs idle: a packing improvement for the package'
 ### What a coarser grid does to Lens A, and the oversized blocks' first results (2026-10-08)
 
 res-check on the 59 at every spacing used (h 1.25 -- 4 on 58: 30796 needs a 48 GB card), five
-fixed clearings per block, score at h minus score at h 0.5:
+fixed clearings per block, score at h minus score at h 0.5 (mesh_bias.py; the order compared at
+1e-8, since identical clearings score alike only to ~1e-12 on the GPU):
 
-    h      median   mean     worst   |d|>0.05  blocks within 0.01  rank agreement (Kendall tau, median)
-    0.75   -0.0005  -0.0052  -0.081   3%       35/59               1.00
-    1      -0.0029  -0.0192  -0.313  15%       28/59               1.00
-    1.25   -0.0190  -0.0380  -0.204  33%       13/58               0.69
-    1.5    -0.0401  -0.0675  -0.382  44%       14/58               0.45
-    2      -0.0599  -0.0881  -0.303  61%        6/58               0.16
-    2.5    -0.1088  -0.1286  -0.624  71%        1/58               0.26
-    3      -0.1503  -0.1626  -0.607  80%        0/58               0.06
-    4      -0.2065  -0.2047  -0.544  89%        0/58               0.06
+    h      median   mean     worst   |d|>0.05  blocks within 0.01  Kendall tau (median)  order kept
+    0.75   -0.0005  -0.0052  -0.081   3%       35/59               1.00                  66%
+    1      -0.0029  -0.0192  -0.313  15%       28/59               1.00                  66%
+    1.25   -0.0190  -0.0380  -0.204  33%       13/58               1.00                  55%
+    1.5    -0.0401  -0.0675  -0.382  44%       14/58               0.76                  40%
+    2      -0.0599  -0.0881  -0.303  61%        6/58               0.60                  33%
+    2.5    -0.1088  -0.1286  -0.624  71%        1/58               0.53                  28%
+    3      -0.1503  -0.1626  -0.607  80%        0/58               0.23                  17%
+    4      -0.2065  -0.2047  -0.544  89%        0/58               0.20                  19%
 
-A coarse grid reads low and, past h ~1.25, scrambles which clearing is better: at h >= 2 the order
-of the five clearings is near random against h 0.5. (Measured on these urban blocks; the sparse
+A coarse grid reads low and reorders the clearings: already at h 0.75 a third of the blocks swap
+some pair (pairs up to 0.038 apart at h 0.5), and from h 2 most do. (Measured on these urban blocks; the sparse
 peri-urban ones may suffer less near their scattered buildings, which this cannot show.)
 
 The 17 oversized blocks on the 32 GB cards (each at the finest h under 28 GB; base and
@@ -1525,3 +1526,20 @@ GPU estimates (0.7 GB per million unknowns, cells x 8) on the oversized blocks: 
 (uniform h 0.5: 87 -- 1159 GB.) So a5 for 16 blocks (4287 at a5x32), 63612 at a2.5, if the
 validation holds: res-check on the 59 at a10x8, a5x8, a5x32, a2.5x8 (run res-mesh), and on the
 oversized blocks the convergence in d0 of their coarse runs' clearings (ov_clearings.parquet).
+
+The validation (run res-mesh: res-check on the 59, the five clearings each; mesh_bias.py):
+
+    mesh     cells (median of uniform)  median   mean     worst    blocks within 0.01  order kept
+    a10x8    0.81                       -0.0004  -0.0004  -0.0019  59/59               93%
+    a5x8     0.68                       -0.0009  -0.0012  -0.0038  59/59               92%
+    a5x32    0.68                       -0.0009  -0.0012  -0.0038  59/59               92%
+    a2.5x8   0.57                       -0.0025  -0.0031  -0.0083  59/59               92%
+    (uniform h 0.75                     -0.0005  -0.0052  -0.081   35/59               66%)
+
+Every clearing of a block reads low by nearly the same amount (the shift's spread within a block:
+median 0.0001, at most 0.0010 at a5), so the order holds: the pairs a composite swaps were within
+0.00005 at h 0.5 (ties, in effect), where h 0.75 swaps pairs up to 0.038 apart. a5x32 equals a5x8
+here (no cell of these urban blocks is 40 m from everything). So the oversized blocks run at a5
+(4287 at a5x32, 63612 at a2.5x8), base and default (ov-base-a5, ov-def-a5 and the per-block runs;
+16 blocks with 53556, which no longer needs the H100); their coarse runs' clearings rescored at
+several d0 (ov-mesh-*) show the convergence on peri-urban blocks themselves.
