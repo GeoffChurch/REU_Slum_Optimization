@@ -36,13 +36,15 @@ Also closed: wider polish rounds (w16 = w8 at 1.28x) and late sampling on top of
 preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x -> 1.21x).
 
 Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry below:
-- **Goal-oriented refinement** (Coverage and model): the composite refined where the
-  dual-weighted residual says Lens A is sensitive, not by distance.
-- **Sightline and the greedy on the composite** (Coverage and model).
-- **The cheap preset on the composite** (Coverage and model): greedy + polish on the oversized
-  blocks.
-- **The add/remove search as one Strategy** (New methods).
-- **A continuous, heavy-tailed outcome model for kernelcore** (Experiment design; other repo).
+- **Goal-oriented refinement** (Coverage and model): built, the o1 goal mesh; the oversized
+  blocks wait on cluster space.
+- **Sightline and the greedy on the composite** (Coverage and model): built; 8 of the 59 wait
+  on cluster space.
+- **The cheap preset on the composite** (Coverage and model): done, on the oversized blocks.
+- **The add/remove search as one Strategy** (New methods): built, with floating search.
+- **An outcome model for kernelcore** (Experiment design; other repo): spec for the owner's
+  review, GeoffChurch/kernelcore `docs/superpowers/specs/2026-10-09-outcome-models-design.md`
+  (a Dirichlet posterior over atoms, not a Student-t, which NOTES found pins the mean at 0).
 
 Open:
 - **The owner's tau** for sequential stopping (the smallest mean gain worth a variant's time).
