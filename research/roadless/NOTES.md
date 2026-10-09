@@ -1734,6 +1734,17 @@ At equal error it spends a median 0.11 of the uniform cells fewer than the dista
 (0.27x), 8235 (0.65x) and 9710 (0.93x) at f1.2 and 8152 (0.68x) at f1.5, each less than at
 o0.01. The goal mesh is o1 from here.
 
+Why those five lose. Two are the yardstick's: on 20952 and 44602 the distance meshes' bias changes
+sign between a2.5 and a10 (20952 a2.5 -0.0011, a5 -0.00002, a10 +0.00013, a20 +0.00005; 44602
+a2.5 +0.0005 .. +0.0013, a5 -0.0001 .. +0.0004, a10 -0.0004, a20 -0.0002), so a5 reads near zero
+by cancellation and the curve through it is an envelope no mesh earns. The goal mesh there is as
+good as the finer distance meshes: 20952 +0.00016 at 0.81 of the uniform cells, about a10's at
+0.86; 44602 at f1.5 -0.00003 .. -0.00006 at 0.80, 5 -- 10x better than a10 and a20. 9710 is a tie
+(0.93x). Two are real but mild: on 8235 f1.2 spent 12% more cells (0.65 -> 0.77) and left the
+error at the pilot's -0.00045 (where the sign crosses too: a5 +0.0002), and on 8152 f1.5 reads
+0.0004 at 0.63 where distance gets 0.0003 (0.68x). Nothing to fix in the mesh; a comparison that
+scores a mesh by a smoothed bias rather than one mesh's |error| would not count the first two.
+
 The cheap preset on the 21 oversized and base-only blocks, on the SIMP runs' meshes (cheap-ov-*:
 a5x8, 4287 a5x32, 63612 a2.5x8), against SIMP base and the default on the same: cheap - default
 median -0.0107 (-0.0594 .. +0.0054), cheap - base median -0.0067 (-0.0588 .. +0.0258), at 0.50x
