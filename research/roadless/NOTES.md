@@ -1861,3 +1861,64 @@ The two further rows BACKLOG names (a substitute-aware restore, screened adds) a
 configuration each, as the spec first said: each needs two parts (spec, "What the two new rows
 need"). search.py passes `mypy --strict` (the command is in its docstring), so pairing a ranking
 with a builder that expects another kind of ranking is a type error.
+
+### Stopping by the value of more blocks (owner 2026-10-09: the kernelcore model dropped, the stop built here, tau and price derived)
+
+The kernelcore outcome model (a spec in GeoffChurch/kernelcore, dropped in cb5595a) would have
+valued more blocks by reweighting Dirichlet draws over the observed differences plus a grid on
+[-1, 1]. Reviewed on the held-out screens (r2, p64 and both against base), it failed where it
+mattered. Reweighting collapses with the horizon even with no grid: the mean effective share is
+0.15 at 4 blocks, 0.03 -- 0.07 at 8 and 0.006 at 16, under kernelcore's 0.1 guard, and the
+estimates ran 1.5 -- 3x high. One to four more blocks are worth exactly 0 under the bootstrap
+(they cannot carry the mean across tau), so a next-horizon stop stops at once: 4 -- 8 of 20
+orders wrong on both. And the grid's alpha, not the data, sets the stop: the exact posterior sd
+of mu at 20 blocks rises 2 -- 5x at alpha 0.001 and about 50x at 1, moving the stop from about
+19 blocks to 42 to never. Collapses stay with the sentinel's veto.
+
+seqscreen.py stops by the value of more blocks instead. The decision is b over a if mu > tau,
+tau = rate x b's extra GPU-seconds per block, `rate` the Lens A a GPU-second is worth. The loss,
+min(E(tau - mu)+, E(mu - tau)+), is linear in mu, so the value of k more blocks is exact through
+the posterior mean after them, under the bootstrap a Polya urn on the observed atoms (against
+enumeration at k 1 -- 3: within 1%; an urn that ignores the counts is off by up to 2x). The
+screen stops when no k is worth rate / future x b's predicted GPU-seconds on the next k blocks
+(a's times b's time ratio so far), `future` the block runs the decision governs; at once on a
+collapse (> 0.1 below a); never before 15 blocks. It replaces the probability rule (P(mu > tau)
+outside [0.05, 0.95] from 20 blocks).
+
+rate from the decisions on record, b against a on the same blocks:
+
+    decision                                       gain      extra GPU-s  per GPU-s
+    .p256w8x2 over .p64w8, the 46: adopted         +0.00019  10.4         1.9e-5  (rate below)
+    late sampling on the hard-block preset, the    +0.0001   ~76 (1.33x)  1.3e-6  (rate above;
+      13: closed                                                                   3.9e-6 by the
+                                                                                   rows' times)
+
+So rate lies in about [2e-6, 1.9e-5], 6e-6 in the middle: one GPU-minute more per block must
+buy 0.00036 Lens A (0.0001 -- 0.0011). tau is then per variant: against base r2 0.00053, both
+0.00047, x2 0.00021, p64 0.00014; x2 over p64 0.00006. The old rule's single 0.002 would have
+turned down the default itself (x2 over p64, +0.00019). price = rate / future.
+
+Replayed on six held-out screens (r2, p64, x2 and both against base; x2 and both against p64;
+none with a block below -0.007), 20 orders each, against the 46 blocks' decision at the same tau.
+The realized loss is the regret of a wrong call, |mu - tau|, plus rate / future x the GPU-seconds
+spent, per governed block. At rate 6e-6:
+
+    future   blocks (mean)  GPU-h per screen  wrong of 120  loss (1e-6 per screen)
+             old    value   old    value      old   value   old    value
+    82       26.0   15.4    1.1    0.6        1     6       281    182
+    820      26.0   16.6    1.1    0.7        1     4       29.1   26.1
+    8200     26.0   18.5    1.1    0.8        1     2       3.9    4.2
+
+The value rule settles the clear screens at the floor (p64, x2, both: right in every order) and
+spends where the call is close: r2, 0.00035 over its tau, runs to a median 24 blocks (15 -- 40)
+at future 8200. Its wrong calls are those near-ties, 2 of 20 on r2 and on x2 over p64. At rate
+1.9e-5, x2 over p64 is a tie (0.000003 apart): the value rule calls it either way at 15 -- 21
+blocks (12 of 20 "wrong", no regret), where the old rule ran 44. Over the three rates and five
+futures (82 -- 8200) the value rule's loss is the lower in 11 of 15. The old rule's is lower at
+large futures and small rates, by at most 1.6x on small losses (2.2 against 3.5 at 2e-6 and
+8200), where its five extra blocks pay. The floor: 15 has the lower loss than 20 in 11 of the
+15, than 10 in 9; below 15 the bootstrap's 90% interval misses the 46 blocks' mean 12 -- 21% of
+the time at 10 blocks. future barely matters on these screens (only r2 moves, 15 -> 24 blocks
+from 82 to 8200), so 820, the large blocks about ten times over, is a fair default: price 7.3e-9
+per GPU-second per governed block. Caveats: the floor and the rate come from these same screens
+and decisions, none has a collapse, and the truth is the 46 blocks' mean, a finite population.

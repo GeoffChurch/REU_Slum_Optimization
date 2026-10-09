@@ -25,7 +25,7 @@ multi-start `.C<h>.m<k>` and fine `.m<k>` (neither faster nor better); the two-p
 (pairs reach the same blocks); seeding `.g` (loses where a better start polishes worse: `.G`
 instead); greedy screening width `S0.01catw4` (+0.0006, marginal); pairs after the greedy (+0.0005,
 marginal); resolution (res-check: h 0.75 within 0.01 on 35 of 59, h 1.0 understates gated blocks by
-up to 0.31); sequential stopping (seqscreen.py: ~20 of 46 blocks decide, at the owner's tau).
+up to 0.31); sequential stopping (seqscreen.py: by the value of more blocks, 15 -- 24 of 46).
 
 Also closed: the oversized blocks (the 17 over 1.4 km^2 and 53556), base and default at the
 metric's resolution through local coarsening (`.a5x8`; 4287 `.a5x32`, 63612 `.a2.5x8`; NOTES, "The
@@ -41,16 +41,15 @@ Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry 
 - **Sightline and the greedy on the composite** (Coverage and model): done, on the 59.
 - **The cheap preset on the composite** (Coverage and model): done, on the oversized blocks.
 - **The add/remove search as one Strategy** (New methods): built, with floating search.
-- **An outcome model for kernelcore** (Experiment design; other repo): spec written,
-  GeoffChurch/kernelcore `docs/superpowers/specs/2026-10-09-outcome-models-design.md` (a
-  Dirichlet posterior over atoms, not a Student-t, which NOTES found pins the mean at 0), and
-  reviewed: not to build as written (reweighting collapses past about 4 blocks even with no grid,
-  short horizons are worth exactly 0, the grid's alpha decides the stop). The review recommends
-  exact cost-aware value of information inside seqscreen.py instead (the posterior mean's Polya
-  urn, a stop when no batch of blocks is worth its GPU time, a floor near 15); the owner's call.
+- **An outcome model for kernelcore** (Experiment design): dropped on review (owner
+  2026-10-09); the stop is built in seqscreen.py instead, by the value of more blocks (NOTES,
+  "Stopping by the value of more blocks").
 
 Open:
-- **The owner's tau** for sequential stopping (the smallest mean gain worth a variant's time).
+- **The owner's rate and future** for seqscreen.py. The decisions on record put rate, the Lens
+  A a GPU-second is worth, in about [2e-6, 1.9e-5] (6e-6 the middle; tau = rate x a variant's
+  extra GPU-seconds per block, so 0.00006 -- 0.00053 on the held-out screens where 0.002 was
+  used). future, the block runs a decision governs, barely moves the stop: 820 by default.
 
 Not pursued, with what would change that:
 - *A Galerkin coarse model* (the solver's AMG level as the design problem's model, which keeps a
@@ -70,14 +69,10 @@ Not pursued, with what would change that:
   any block collapses (> 0.1 below its baseline) or its median time exceeds 3x the baseline's.
   Only survivors get the 44.
 - **One GPU process at a time** (large blocks), queued in a detached script.
-- **Sequential stopping (idea).** Replace the fixed screen with a posterior on each variant's
-  mean paired difference (Student-t or contaminated-normal likelihood for the -0.8 collapses),
-  futility stop when P(mean < 0) or P(collapse) is high, and stop sampling when the value of
-  the next blocks per GPU-second falls below cost. Ideas from GeoffChurch/kernelcore
-  (`selection.value_of_calls`: EVSI by reweighting posterior draws over simulated outcomes,
-  greedy picks valued on fresh patterns) and GeoffChurch/bookgen
-  (`arena/arena/eval/stopping.py`, `ValueOfInformation`). Their code is for binary pairwise
-  verdicts: reuse the idea, write ~100 lines of numpy here.
+- **Sequential stopping** (done 2026-10-09). seqscreen.py: the Bayesian bootstrap's posterior
+  on a variant's mean paired difference, a stop when no number of further blocks is worth its
+  GPU time (the exact value of more blocks through the posterior mean's Polya urn), a 15-block
+  floor and the collapse veto. kernelcore's reweighting collapses on these screens (NOTES).
 
 ## Greedy
 
@@ -164,9 +159,11 @@ Not pursued, with what would change that:
   headline number still comes from the untouched set; keep some random blocks in every
   screen. Cheap first step: an SVD of the matrix we already have (greedy, SIMP variants,
   translucent search; 220 + 59 blocks) to see which blocks load on which axis.
-- **Generalize kernelcore's outcome model** (**prioritized**, other repo). Its EVSI reweighting is
-  general; its likelihood is binary verdicts. A continuous heavy-tailed outcome model would
-  serve this backlog's screens and adaptive selection.
+- *Generalize kernelcore's outcome model* (dropped 2026-10-09). The screens' stop is built in
+  seqscreen.py; reweighting draws collapses past about 4 blocks and a prior grid decides the stop
+  (NOTES, "Stopping by the value of more blocks"). Would come back with a consumer that must
+  choose among blocks that are not exchangeable (the adaptive selection above), designed against
+  it.
 
 ## Coverage and model
 
