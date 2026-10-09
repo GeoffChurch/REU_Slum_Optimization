@@ -10,13 +10,21 @@ so the states are nested and the rows come out in the greedy's format (every bud
 run). A gate is judged with its companions cleared, the greedy's blind spot; the risk is
 substitutes (each cheap to restore alone) restored in one batch, hence small batches.
 
+Second schedule, floating search (backward floating, Pudil): grow-then-prune with conditional
+adds after each restore round, the greedy's own round kept only if its exact J beats the best
+archived at its budget level (the restore step's lattice) and its D is within d_max, until a
+cap on their scorings; the fix for the prune's collapse on gated blocks through substitutes.
+Its rows are the archive's best per level, each with its full clearing (not nested).
+
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> <cpu|gpu> [along] [d_max]
 
 spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
-GP3xS0.01catr0.005m8.
+GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
+FL3xS0.01catr0.005m8c100.
 """
 from __future__ import annotations
 
+import dataclasses
 import os
 import re
 import sys
@@ -840,16 +848,164 @@ class GrowPrune:
                                                  screen=screen)), Emptied()))), rec)
 
 
-def plan_of(spec: str) -> GrowPrune:
-    m = re.fullmatch(r"GP([0-9.]+)x(\S+?)r([0-9.]+)(?:m(\d+))?", spec)
-    if m is None:
-        raise ValueError(f"unknown search {spec!r}")
-    return GrowPrune(grow=float(m.group(1)), picker=m.group(2), restore=float(m.group(3)),
-                     shortlist=0 if m.group(4) is None else int(m.group(4)),
-                     screen_eps=EPS_SCREEN)
+class Level(NamedTuple):
+    D: float
+    score: Score
+    removed: np.ndarray
 
 
-def prune_block(b, plan: GrowPrune, *, rnd: Round,
+class Archive:
+    """The best exact state per budget level (level = ceil(D / step)): floating search's
+    comparison (Pudil) and its rows; `scored` counts the conditional adds' scorings (the cap's:
+    the restore screen's solves are not its)."""
+
+    def __init__(self, *, step: float):
+        self.step = step
+        self.best: dict[int, Level] = {}
+        self.scored = 0
+
+    def level(self, D: float) -> int:
+        return int(np.ceil(D / self.step - 1e-9))
+
+    def offer(self, D: float, score: Score, removed: np.ndarray) -> None:
+        L = self.level(D)
+        if L not in self.best or score.J < self.best[L].score.J:
+            self.best[L] = Level(D=D, score=score, removed=removed.copy())
+
+    def beats(self, D: float, J: float, removed: np.ndarray) -> bool:
+        """Strictly better than the level's best, and not the same clearing (an archived state
+        re-added scores the same J on the CPU; on the GPU only to rounding)."""
+        lv = self.best.get(self.level(D))
+        return lv is None or (J < lv.score.J and not np.array_equal(removed, lv.removed))
+
+
+@dataclass(frozen=True, kw_only=True)
+class ArchiveSpent:
+    archive: Archive
+    cap: int
+
+    def done(self, s: SearchState) -> bool:
+        return self.archive.scored >= self.cap
+
+
+@dataclass(frozen=True, kw_only=True)
+class BeatsArchive:
+    """Floating search's conditional inclusion: the lowest-J candidate, kept only if its D is
+    within d_max and its J beats the archive's best at its level; every other scored candidate
+    within d_max is offered to the archive (the kept one reaches it through FloatRows)."""
+    archive: Archive
+    d_max: float
+
+    @property
+    def needs_score(self) -> bool:
+        return True
+
+    def accept(self, s: SearchState, cands: list[Candidate]) -> Candidate | None:
+        self.archive.scored += len(cands)
+        if not cands:
+            return None
+        best = min(cands, key=lambda cand: cand.score.J)    # the first lowest, as Spread's
+        after_ = {id(cand): after(s.c.removed, cand.move) for cand in cands}
+        D_of = {k: float(s.c.cost[r].sum()) for k, r in after_.items()}   # as s.D will be
+        r, D = after_[id(best)], D_of[id(best)]
+        kept = D <= self.d_max + 1e-12 and self.archive.beats(D, best.score.J, r)
+        for cand in cands:
+            if (cand is not best or not kept) and D_of[id(cand)] <= self.d_max + 1e-12:
+                self.archive.offer(D_of[id(cand)], cand.score, after_[id(cand)])
+        return best if kept else None
+
+
+class FloatRows:
+    """Floating search's rows: the archive's best per level, in increasing D, each with its full
+    clearing (`clearing`, index order: the states are not nested, so no `cleared` deltas and
+    cleared_through does not read them), after a D 0 row. Every exact state at or below d_max
+    is offered to the archive."""
+
+    def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+                 d_max: float, archive: Archive, t0: float):
+        self.block_id, self.n, self.power, self.J0, self.P0, self.d_max, self.t0 = (
+            block_id, c.n, power, J0, P0, d_max, t0)
+        self.archive = archive
+
+    def wants(self, s: SearchState) -> bool:
+        return s.D <= self.d_max + 1e-12 and bool(s.c.removed.any())
+
+    def on_step(self, s: SearchState, o: Outcome) -> None:
+        if self.wants(s):               # apply scored it exactly
+            self.archive.offer(s.D, s.score, s.c.removed)
+
+    def frame(self) -> pd.DataFrame:
+        rows = [dict(block=self.block_id, n=self.n, D=0.0, perm=0.0, perm1=0.0, clearing=[],
+                     P0=self.P0, t=0.0)]
+        for L in sorted(self.archive.best):
+            lv = self.archive.best[L]
+            rows.append(dict(block=self.block_id, n=self.n, D=lv.D,
+                             perm=1 - (lv.score.J / self.J0) ** (1 / self.power),
+                             perm1=1 - lv.score.P / self.P0,
+                             clearing=np.flatnonzero(lv.removed).tolist(), P0=self.P0,
+                             t=time.time() - self.t0))
+        return pd.DataFrame(rows)
+
+
+@dataclass(frozen=True, kw_only=True)
+class FloatPrune:
+    grow: float                 # the greedy clears up to grow x d_max
+    picker: str                 # the greedy's picker
+    restore: float              # population share restored per round (and the archive's step)
+    shortlist: int              # first-order shortlist rescored per round (0: first order only)
+    cap: int                    # the conditional adds' scorings
+    screen_eps: float           # the eps world the shortlist is scored in
+
+    @property
+    def name(self) -> str:
+        return (f"FL{self.grow:g}x{self.picker}r{self.restore:g}"
+                + (f"m{self.shortlist}" if self.shortlist else "") + f"c{self.cap}")
+
+    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+              d_max: float, t0: float, rnd: Round, screen: Valuer) -> Built:
+        archive = Archive(step=self.restore)
+        rec = FloatRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
+                        archive=archive, t0=t0)
+        # the conditional add is the greedy's round with its acceptor swapped
+        add = dataclasses.replace(rnd, name=f"{rnd.name}|archive", evaluate=All(EXACT),
+                                  accept=BeatsArchive(archive=archive, d_max=d_max))
+        restore = restore_round(step=self.restore, shortlist=self.shortlist, screen=screen)
+        stop = AnyOf((ArchiveSpent(archive=archive, cap=self.cap), Above(d_max)))
+        return Built(Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
+                          Until(Seq((Do(restore), Until(Do(add), stop))), Emptied()))), rec)
+
+
+class SearchPlan(Protocol):
+    """A schedule's preset (GrowPrune, FloatPrune): its name (the rows' directory), the greedy
+    picker its add round is built from, the eps world of its restore screen, and its parts.
+    Read-only members: a frozen dataclass's fields are not settable variables."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def picker(self) -> str: ...
+
+    @property
+    def screen_eps(self) -> float: ...
+
+    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+              d_max: float, t0: float, rnd: Round, screen: Valuer) -> Built: ...
+
+
+def plan_of(spec: str) -> SearchPlan:
+    if m := re.fullmatch(r"GP([0-9.]+)x(\S+?)r([0-9.]+)(?:m(\d+))?", spec):
+        return GrowPrune(grow=float(m.group(1)), picker=m.group(2), restore=float(m.group(3)),
+                         shortlist=0 if m.group(4) is None else int(m.group(4)),
+                         screen_eps=EPS_SCREEN)
+    if m := re.fullmatch(r"FL([0-9.]+)x(\S+?)r([0-9.]+)(?:m(\d+))?c(\d+)", spec):
+        return FloatPrune(grow=float(m.group(1)), picker=m.group(2), restore=float(m.group(3)),
+                          shortlist=0 if m.group(4) is None else int(m.group(4)),
+                          cap=int(m.group(5)), screen_eps=EPS_SCREEN)
+    raise ValueError(f"unknown search {spec!r}")
+
+
+def prune_block(b, plan: SearchPlan, *, rnd: Round,
                 screen_of: Callable[[Clearing, float], Valuer], power: float,
                 along: str, device: str, d_max: float) -> pd.DataFrame:
     p = lifted.Params(3.0, 8, along=lifted.along_of(along, lifted.scans_of(device)),
@@ -868,7 +1024,7 @@ def prune_block(b, plan: GrowPrune, *, rnd: Round,
     return rows
 
 
-def main(ids: list[str], plan: GrowPrune, power: float, device: str, along: str,
+def main(ids: list[str], plan: SearchPlan, power: float, device: str, along: str,
          d_max: float) -> None:
     import relax  # the edge binds the eps world; search.py's library code does not import relax
 
