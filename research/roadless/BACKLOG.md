@@ -194,8 +194,10 @@ Not pursued, with what would change that:
   raise on a composite. The greedy under uni has no raster check but has never run on one: first
   establish that it does (against uniform h 0.5 on the 59), then give the sightline scans a
   composite form. Both done (NOTES, "Sightline on the composite"): the scans run on the fine
-  raster, painted and averaged per cell; ss-res-59 checks the meshes under the sightline metric,
-  then the oversized blocks can run the sightline presets.
+  raster, painted and averaged per cell; under the sightline metric on 51 of the 59 every mesh
+  reads as under uni (a20 p95 |error| 0.0006), the goal mesh ahead of distance on 31 of 32 but by
+  less (1.8x, 0.04 of the cells). Next: the 8 left (cluster quota), then the sightline presets on
+  the oversized blocks.
 - **The cheap preset on the composite** (**prioritized**). polish_greedy.py builds a uniform h 0.5
   grid; it takes a mesh, and greedy + polish runs on the oversized blocks. Needs the greedy on the
   composite (above).

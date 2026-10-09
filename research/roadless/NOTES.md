@@ -1771,5 +1771,22 @@ g and the vjp's weight fused and in place on the GPU): 30.0 GiB, inside a 32 GB 
 as fast (38 and 21 s against 39 and 23 s). On 38190 (67M pixels) the translucent greedy's steps
 take 10 -- 14 s against uni's 7 s. `cluster.py --scans` sizes for the rasters: what a run holds
 between solves (0.6 GB per million unknowns) plus 40 bytes a pixel, or the solves' own estimate
-if larger (472 on a5x8: 30.1). Validation under the sightline metric on the 59: ss-res-59
-(uniform h 0.5, a5, a10, a20 and the o1 goal mesh at f1.5).
+if larger (472 on a5x8: 30.1).
+
+Validation under the sightline metric (ss-res-59, ss100k2n2r30, the five clearings per block):
+51 of the 59 (the other 8 failed at launch or were killed mid-run when the cluster's project
+quota filled; they wait on space). Error against uniform h 0.5:
+
+    mesh             cells (median share)  median   p95 |error|  worst
+    a5x8             0.68                  -0.0004  0.0048       +0.0075 (33717)
+    a10x8            0.81                  -0.0001  0.0018       +0.0028 (33717)
+    a20x8            0.91                  -0.0000  0.0006       -0.0012 (20423)
+    g2.5x8f1.5p2o1   0.85                  -0.0000  0.0014       +0.0026 (33717)
+
+As under uni, the error falls with the share of the cells. The goal mesh's indicator solves in
+the run's conductance (System applies p.along), so it is goal-oriented here too, but it gains
+less: per block against the distance curve (a5 .. a20, log error linear in the share) at its
+share, 32 compared (16 all fine, 3 outside a5 .. a20's range), median 1.8x (4.1x under uni at
+f1.5), ahead on 31, worst 0.45x (22640); at equal error it spends a median 0.04 of the uniform
+cells fewer (IQR 0.02 -- 0.06, 19 blocks) against 0.11 under uni. Why it gains less under the
+sightline conductance is not looked at. Every mesh now runs under either metric.
