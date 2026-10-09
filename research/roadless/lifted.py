@@ -479,7 +479,7 @@ class CompositeGrid:
         """`lay`'s cells, with Grid's attributes on the fine ones (footprint sub-samples and
         labels, ground within band_m of a street, dist_b)."""
         footprints = np.asarray(footprints)
-        xs, ys, fx, fy, S, coarse = lay.xs, lay.ys, lay.fx, lay.fy, lay.S, lay.coarse
+        xs, ys, fx, fy, S = lay.xs, lay.ys, lay.fx, lay.fy, lay.S
         ny, nx = len(ys), len(xs)
         lx, ly = xs[0] - h / 2, ys[0] - h / 2              # the lattice's lower-left corner
         key, isub_f = lay.key, lay.isub
@@ -489,9 +489,7 @@ class CompositeGrid:
         st = shapely.union_all(np.asarray(streets)).buffer(band_m)
         shapely.prepare(st)
         ground_f = shapely.contains_xy(st, xs[fj], ys[fi])
-        lev_c = np.concatenate([np.full(len(i), lv) for lv, i, _ in coarse])
-        i0_c = np.concatenate([i for _, i, _ in coarse])
-        j0_c = np.concatenate([j for _, _, j in coarse])
+        lev_c, i0_c, j0_c = _flat(lay)
         nf, nc = len(key), len(lev_c)
         level = np.concatenate([np.zeros(nf, dtype=np.int64), lev_c.astype(np.int64)])
         i0 = np.concatenate([fi, i0_c]).astype(np.int64)
