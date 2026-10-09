@@ -341,7 +341,8 @@ class SearchState:
     movable: np.ndarray
 
     @classmethod
-    def start(cls, c: Clearing, power: float, score: Score, world: World | None) -> SearchState:
+    def start(cls, c: Clearing, *, power: float, score: Score,
+              world: World | None) -> SearchState:
         """From c's current clearing, nothing spent, every building movable."""
         return cls(c, power, score, world, [], 0, np.ones(c.n, dtype=bool))
 
@@ -633,6 +634,8 @@ class GainPerCost:
     """Screened's: the exact gain over the state's J per unit of population, negated."""
 
     def of(self, s: SearchState, cand: Candidate) -> float:
+        if s.world is not EXACT:
+            raise ValueError("gain per cost needs the state scored exactly")
         return -(s.score.J - cand.score.J) / s.c.cost[cand.move.add[0]]
 
 
@@ -696,7 +699,7 @@ Expected: prints, `All checks passed!`. (Importing relax first and search second
 
 **Interfaces:**
 - Consumes: Task 2.
-- Produces: `search.greedy_round(spec: str, sweep: clear.Sweep) -> Round` (`M<m>`, `B<d>g<gap>`, `S<d>cat[w<w>]`; anything else raises), `search.SPREAD_REACH = 3.0`, `search.GreedyRows(block_id, c, power, J0, P0, t0)` with `.rows`, `search.greedy(rnd, d_max) -> Part` (Until(Do(rnd), Reached(d_max))).
+- Produces: `search.greedy_round(spec: str, sweep: clear.Sweep) -> Round` (`M<m>`, `B<d>g<gap>`, `S<d>cat[w<w>]`; anything else raises), `search.SPREAD_REACH = 3.0`, `search.GreedyRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, t0=t0)` with `.rows`, `search.greedy(rnd, d_max) -> Part` (Until(Do(rnd), Reached(d_max))).
 
 - [ ] **Step 1: The add ranking and the three builders** (search.py). The bodies are the old pickers', split at the point where they scored:
 
@@ -834,7 +837,7 @@ class GreedyRows:
     """The greedy's rows (clear.greedy_block's format): every state scored exactly; per step D,
     perm (J_power), perm1 (P) and the step's buildings in pick order, after a step-0 row."""
 
-    def __init__(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
                  t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.t0 = (
             block_id, c.n, power, J0, P0, t0)
@@ -862,9 +865,8 @@ class GreedyRows:
 ```python
     import search as engine     # search imports clear, so here; `search` is the conductance
     t0 = time.time()
-    rec = engine.GreedyRows(b.block_id, c, power, J0, P0, t0)
-    engine.greedy(rnd, d_max)(engine.SearchState.start(c, power, engine.Score(J0, P0),
-                                                       engine.EXACT), rec)
+    rec = engine.GreedyRows(block_id=b.block_id, c=c, power=power, J0=J0, P0=P0, t0=t0)
+    engine.greedy(rnd, d_max)(engine.SearchState.start(c, power=power, score=engine.Score(J0, P0), world=engine.EXACT), rec)
     rows = rec.rows
 ```
   and the old `rows = [...]` initialisation above it goes (GreedyRows makes the step-0 row).
@@ -878,7 +880,7 @@ class GreedyRows:
 
 ```python
         rnd = search.greedy_round(spec, clear.sweep_of(device))
-        s = search.SearchState.start(c, power, search.Score(rel.J0, np.nan), search.EXACT)
+        s = search.SearchState.start(c, power=power, score=search.Score(rel.J0, c.sc.P0), world=search.EXACT)
         search.greedy(rnd, budget)(s, search.Silent())
         c.removed[:] = False
         order = s.order
@@ -887,16 +889,15 @@ class GreedyRows:
   - polish_greedy.py: `picker = clear.picker_of(picker_spec, clear.sweep_of(device))` becomes `rnd = search.greedy_round(picker_spec, clear.sweep_of(device))`; the greedy lines `order = [j for pk, _ in clear.grow(...) ...]`, `t_greedy = ...`, `c.removed[:] = False`, `r = relax.cut_to_budget(order, ...)` become
 
 ```python
-    s = search.SearchState.start(c, power, search.Score(c.sc.J(c.sc.u0, power), c.sc.P0),
-                                 search.EXACT)
+    s = search.SearchState.start(c, power=power, score=search.Score(c.sc.J(c.sc.u0, power), c.sc.P0), world=search.EXACT)
     search.greedy(rnd, budget)(s, search.Silent())
     t_greedy = time.time() - t0
     c.removed[:] = False
     r = relax.cut_to_budget(s.order, c.cost, budget)
 ```
   (exchange stays as it is until Task 4; `import search`.)
-  - search.py grow_prune: `picker_of(plan.picker, sweep_of(device))` becomes `greedy_round(plan.picker, sweep_of(device))`; its grow loop `for _pk, _D in grow(c, ..., plan.grow * d_max, J0, True): pass` becomes `greedy(rnd, plan.grow * d_max)(SearchState.start(c, power, Score(J0, P0), EXACT), Silent())` (the grow phase's states were scored and thrown away: now they are not scored; only `t` can change). Drop `grow` and `picker_of` from its `from clear import` line.
-  - gramprobe.py: `picker = clear.picker_of("S0.01cat", ...)` becomes `rnd = search.greedy_round("S0.01cat", clear.sweep_of("gpu"))`; its patch `object.__setattr__(picker.source, "gram", gram_)` becomes `object.__setattr__(rnd.build.source, "gram", gram_)` (and `gram = rnd.build.source.gram` wherever it saved the original); its loop becomes `search.greedy(rnd, d_max)(search.SearchState.start(c, 2.0, search.Score(J0, c.sc.P0), search.EXACT), search.GreedyRows(bid, c, 2.0, J0, c.sc.P0, time.time()))` (a record that wants every state, so each step's exact solve stays in what it times, as the old `grow(..., True)` did; `bid` is main's block id, check the name). `import search`.
+  - search.py grow_prune: `picker_of(plan.picker, sweep_of(device))` becomes `greedy_round(plan.picker, sweep_of(device))`; its grow loop `for _pk, _D in grow(c, ..., plan.grow * d_max, J0, True): pass` becomes `greedy(rnd, plan.grow * d_max)(SearchState.start(c, power=power, score=Score(J0, P0), world=EXACT), Silent())` (the grow phase's states were scored and thrown away: now they are not scored; only `t` can change). Drop `grow` and `picker_of` from its `from clear import` line.
+  - gramprobe.py: `picker = clear.picker_of("S0.01cat", ...)` becomes `rnd = search.greedy_round("S0.01cat", clear.sweep_of("gpu"))`; its patch `object.__setattr__(picker.source, "gram", gram_)` becomes `object.__setattr__(rnd.build.source, "gram", gram_)` (and `gram = rnd.build.source.gram` wherever it saved the original); its loop becomes `search.greedy(rnd, d_max)(search.SearchState.start(c, power=2.0, score=search.Score(J0, c.sc.P0), world=search.EXACT), search.GreedyRows(block_id=bid, c=c, power=2.0, J0=J0, P0=c.sc.P0, t0=time.time()))` (a record that wants every state, so each step's exact solve stays in what it times, as the old `grow(..., True)` did; `bid` is main's block id, check the name). `import search`.
   - memprobe_greedy.py imports the module as `import search as engine` (its `main` has a local `search`, the search conductance) and uses `engine.` below; the same renames for its picker (`rnd = engine.greedy_round(...)`) and gram patch; `exact = clear.exact` and `clear.exact = exact_` with `exact_(c_, removed, power)` calling `exact(c_, removed, power)` (the scoring report around it unchanged); its loop becomes
 
 ```python
@@ -908,10 +909,9 @@ class GreedyRows:
             print(f"  step {step[0]} D {s.D:.3f} perm' {1 - (s.score.J / J0) ** 0.5:.3f}",
                   flush=True)
 
-    engine.greedy(rnd, d_max)(engine.SearchState.start(c, 2.0, engine.Score(J0, c.sc.P0),
-                                                       engine.EXACT), _Print())
+    engine.greedy(rnd, d_max)(engine.SearchState.start(c, power=2.0, score=engine.Score(J0, c.sc.P0), world=engine.EXACT), _Print())
 ```
-  - profile_round.py: `pk = picker_of(picker, sweep_of(solver))` becomes `rnd = search.greedy_round(picker, sweep_of(solver))`; the timed `t = c.tension(2.0)` / `pk.pick(c, t, J, 2.0, True)` pair becomes one timed `search.Do(rnd)(s, rec)` with `s = search.SearchState.start(c, 2.0, search.Score(J, c.sc.P0), search.EXACT)` and `rec = search.GreedyRows(bid, c, 2.0, J, c.sc.P0, time.time())` (so the step's exact solve is timed, as `pick(..., True)` scored inside), printed as `step {secs}s ({len(s.order)} cleared)`; its docstring says it profiles one round (rank, build, evaluate, the state's exact score) instead of tension and pick separately. `import search`; drop `picker_of` from its clear import.
+  - profile_round.py: `pk = picker_of(picker, sweep_of(solver))` becomes `rnd = search.greedy_round(picker, sweep_of(solver))`; the timed `t = c.tension(2.0)` / `pk.pick(c, t, J, 2.0, True)` pair becomes one timed `search.Do(rnd)(s, rec)` with `s = search.SearchState.start(c, power=2.0, score=search.Score(J, c.sc.P0), world=search.EXACT)` and `rec = search.GreedyRows(block_id=bid, c=c, power=2.0, J0=J, P0=c.sc.P0, t0=time.time())` (so the step's exact solve is timed, as `pick(..., True)` scored inside), printed as `step {secs}s ({len(s.order)} cleared)`; its docstring says it profiles one round (rank, build, evaluate, the state's exact score) instead of tension and pick separately. `import search`; drop `picker_of` from its clear import.
   - releaseprobe.py: `clear.picker_of("S0.01cat", ...)` becomes `search.greedy_round("S0.01cat", clear.sweep_of("gpu"))` (`import search` inside `variant`, next to its other imports).
   - `grep -n "picker_of\|\.pick(\|clear\.grow\|Screened\|Batched\|Spread(" research/roadless/*.py` finds nothing else (fix anything it does).
 
@@ -1032,8 +1032,9 @@ Incumbent.polish: the lines from `J0 = self.J` through the `exchange(...)` call 
         J0 = self.J
         c = self.rel.c
         c.removed[:] = self.r > 0
-        s = search.SearchState(c, self.rel.power, search.Score(self.J, np.nan), self.scorer, [],
-                               0, np.isin(np.arange(c.n), movable))
+        s = search.SearchState(c=c, power=self.rel.power, score=search.Score(self.J, np.nan),
+                               world=self.scorer, order=[], scorings=0,
+                               movable=np.isin(np.arange(c.n), movable))
         moves = search.Until(
             search.Do(search.exchange_round(self.scorer, budget=self.budget, width=width,
                                             pairs=pairs, pool=PAIR_POOL, tries=tries)),
@@ -1051,7 +1052,7 @@ Delete `exchange`, `_singles`, `_pairs`; keep `PAIR_POOL` (the edge's constant, 
     rel = relax.Relaxation(c, power, rtol=RTOL)
     scorer = relax.Relaxation(c, power, q=1.0, rtol=RTOL, eps=SCORE_EPS, params=c.p)
     greedy_perm = rel.perm(rel.exact(r))
-    s = search.SearchState.start(c, power, search.UNSCORED, None)  # the polish's own count
+    s = search.SearchState.start(c, power=power, score=search.UNSCORED, world=None)  # the polish's own count
     moves = search.polish(scorer, budget=budget, width=width, pairs=pairs, pool=relax.PAIR_POOL,
                           tries=tries)(s, search.Silent())
     rp, J, used = c.removed.astype(float), s.score.J, s.scorings
@@ -1089,7 +1090,7 @@ Expected: `clearing empty after one`. Then push.
 
 **Interfaces:**
 - Consumes: Tasks 2-3.
-- Produces: `Order`, `RestoreTension`, `Screen(world=, m=)`, `ToLevel(step)`, `restore_round(*, step, shortlist, screen) -> Round[Order]`, `PruneRows(block_id, c, power, J0, P0, d_max, t0)` with `.frame()`, `Rows` (Protocol: a Record with `frame()`), `Built(part, rows)` (NamedTuple), `GrowPrune(*, grow, picker, restore, shortlist, screen_eps)` (frozen, kw_only) with `build(block_id, c, power, J0, P0, d_max, t0, rnd, screen) -> Built`, `prune_block(b, plan, rnd, screen_of, power, along, device, d_max) -> pd.DataFrame`.
+- Produces: `Order`, `RestoreTension`, `Screen(world=, m=)`, `ToLevel(step)`, `restore_round(*, step, shortlist, screen) -> Round[Order]`, `PruneRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, t0=t0)` with `.frame()`, `Rows` (Protocol: a Record with `frame()`), `Built(part, rows)` (NamedTuple), `GrowPrune(*, grow, picker, restore, shortlist, screen_eps)` (frozen, kw_only) with `build(block_id, c, power, J0, P0, d_max, t0, rnd, screen) -> Built`, `prune_block(b, plan, rnd, screen_of, power, along, device, d_max) -> pd.DataFrame`.
 
 - [ ] **Step 1: The restore round** (restore_batch's body, split):
 
@@ -1182,7 +1183,7 @@ class PruneRows:
     exactly; written in increasing D in the greedy's format, `cleared` in index order (the
     states are nested), `t` the time when written."""
 
-    def __init__(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
                  d_max: float, t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.d_max, self.t0 = (
             block_id, c.n, power, J0, P0, d_max, t0)
@@ -1215,7 +1216,7 @@ class PruneRows:
 ```python
     def build(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
               d_max: float, t0: float, rnd: Round, screen: Valuer) -> Built:
-        rec = PruneRows(block_id, c, power, J0, P0, d_max, t0)
+        rec = PruneRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, t0=t0)
         return Built(Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
                           Until(Do(restore_round(step=self.restore, shortlist=self.shortlist,
                                                  screen=screen)), Emptied()))), rec)
@@ -1232,7 +1233,7 @@ def prune_block(b, plan: GrowPrune, rnd: Round, screen_of: Callable[[Clearing, f
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
     built = plan.build(b.block_id, c, power, J0, P0, d_max, t0, rnd, screen_of(c, power))
-    built.part(SearchState.start(c, power, Score(J0, P0), EXACT), built.rows)
+    built.part(SearchState.start(c, power=power, score=Score(J0, P0), world=EXACT), built.rows)
     rows = built.rows.frame()
     print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {plan.name}: "
           f"{len(rows) - 1} states; perm' {rows.perm.iloc[-1]:.3f} at D {rows.D.iloc[-1]:.3f}  "
@@ -1242,6 +1243,7 @@ def prune_block(b, plan: GrowPrune, rnd: Round, screen_of: Callable[[Clearing, f
   - `main` (the edge) resolves the round once, `rnd = greedy_round(plan.picker, sweep_of(device))`, and binds the screen: `import relax  # the edge binds the eps world; search.py's library code does not import relax` then `screen_of = lambda c, power: relax.Relaxation(c, power, q=1.0, rtol=RTOL_SCORE, eps=plan.screen_eps)` (a `def` if ruff's E731 is selected; it is not in this plan's gate), and calls `prune_block(b, plan, rnd, screen_of, power, along, device, d_max)`.
     The old screen was built after the grow phase; building it before changes nothing it computes (no solve until its first value), which the agreement check confirms.
     The old "grown to D" print goes (say so in the commit message).
+  - search.py's `if __name__ == "__main__":` block imports the module and calls it (`import search` then `search.main(..., search.plan_of(...), ...)`): run as a script it would otherwise hold two copies of the engine (`__main__` and the `search` that relax imports), whose `EXACT` and classes differ.
   - clear.py: delete `_exact` (no caller left: grep).
 
 - [ ] **Step 4: Smoke, lint, commit locally** (message "research: roadless -- grow-then-prune on the engine: RestoreTension, Screen, ToLevel (restore_round), PruneRows, GrowPrune.build; grow_prune, restore_batch and clear._exact deleted").
@@ -1287,7 +1289,7 @@ More: find what the engine holds across a round (a thunk capturing the ranking, 
 
 **Interfaces:**
 - Consumes: Tasks 2, 3, 5.
-- Produces: `Level` (NamedTuple: D, score, removed), `Archive(step)` with `level(D)`, `offer(D, score, removed)`, `beats(D, J, removed)`, `best`, `scored` (the conditional adds' scorings); `ArchiveSpent(archive, cap)` (a Stop); `BeatsArchive(archive=, d_max=)`; `FloatRows(block_id, c, power, J0, P0, d_max, archive, t0)` with `.frame()`; `FloatPrune(*, grow, picker, restore, shortlist, cap, screen_eps)` with GrowPrune's `build` signature; `SearchPlan` (Protocol: `name`, `picker`, `screen_eps`, `build`), taken by prune_block and main; `plan_of` returning either.
+- Produces: `Level` (NamedTuple: D, score, removed), `Archive(step)` with `level(D)`, `offer(D, score, removed)`, `beats(D, J, removed)`, `best`, `scored` (the conditional adds' scorings); `ArchiveSpent(archive, cap)` (a Stop); `BeatsArchive(archive=, d_max=)`; `FloatRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, archive=archive, t0=t0)` with `.frame()`; `FloatPrune(*, grow, picker, restore, shortlist, cap, screen_eps)` with GrowPrune's `build` signature; `SearchPlan` (Protocol: `name`, `picker`, `screen_eps`, `build`), taken by prune_block and main; `plan_of` returning either.
 
 - [ ] **Step 1:**
 
@@ -1365,7 +1367,7 @@ class FloatRows:
     cleared_through does not read them), after a D 0 row. Every exact state at or below d_max
     is offered to the archive."""
 
-    def __init__(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
                  d_max: float, archive: Archive, t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.d_max, self.t0 = (
             block_id, c.n, power, J0, P0, d_max, t0)
@@ -1397,7 +1399,7 @@ class FloatRows:
     def build(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
               d_max: float, t0: float, rnd: Round, screen: Valuer) -> Built:
         archive = Archive(self.restore)
-        rec = FloatRows(block_id, c, power, J0, P0, d_max, archive, t0)
+        rec = FloatRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, archive=archive, t0=t0)
         add = dataclasses.replace(rnd, name=f"{rnd.name}|archive", evaluate=All(EXACT),
                                   accept=BeatsArchive(archive=archive, d_max=d_max))
         restore = restore_round(step=self.restore, shortlist=self.shortlist, screen=screen)
