@@ -242,7 +242,7 @@ def exact(c: Clearing, removed: np.ndarray, power: float) -> tuple[float, float]
 
 - [ ] **Step 2: search.py stops importing relax at module level.** Delete `from relax import Relaxation`; in `grow_prune`, where `screen = Relaxation(...)` is built, write `import relax  # the eps world is the caller's to build; search.py does not import relax at the top` and `screen = relax.Relaxation(c, power, q=1.0, rtol=RTOL_SCORE, eps=EPS_SCREEN)`. Annotate `restore_batch`'s `screen` as `Valuer` (defined below). Change the `from clear import ...` line to `import clear` plus the names still used (`from clear import RTOL_SCORE, Clearing, _exact, grow, picker_of, rows_dir, sweep_of`) until Task 3 and 5 remove them.
 
-- [ ] **Step 3: The engine.** Add `from collections.abc import Callable, Iterable`, `from dataclasses import dataclass`, `from typing import Generic, Protocol, TypeVar`, and after the imports:
+- [ ] **Step 3: The engine.** Add `from collections.abc import Callable`, `from dataclasses import dataclass`, `from typing import Generic, Protocol, TypeVar`, and after the imports:
 
 ```python
 R = TypeVar("R")
@@ -410,7 +410,7 @@ class Acceptor(Protocol):
     def accept(self, s: SearchState, cands: list[Candidate]) -> Candidate | None: ...
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Round(Generic[R]):
     """One round of an add/remove search: rank the buildings (first order), optionally refine
     a shortlist's ranking in a costlier world, build tiers of candidate moves, then per tier
@@ -580,7 +580,7 @@ class All:
         return out
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Top:
     """Score the best `width` moves of a tier by estimate (fewer as `tries` runs out), in
     estimate order (exchange's)."""
@@ -727,7 +727,7 @@ class TopSingles:
         return [lambda: Batches([Move([j], []) for j in top], est)]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Spaced:
     """By tension per unit of population, every building not within `gap` metres of one taken,
     until D reaches the next multiple of `delta` (Batched's)."""
@@ -758,7 +758,7 @@ class Spaced:
         return [lambda: Batches([Move(taken, [])], np.zeros(1))]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Diverse:
     """Shortlist by tension per unit of population up to `reach` times the round's population
     step, measure how alike the candidates' effects are with `source`, and build `width`
@@ -766,7 +766,6 @@ class Diverse:
     (Spread's)."""
     delta: float
     source: clear.GramSource
-    _: KW_ONLY
     reach: float
     width: int
 
@@ -802,17 +801,22 @@ def greedy_round(spec: str, sweep: clear.Sweep) -> Round[Gains]:
     the next 0.01, `S0.01catw4` the best of 4 such batches. (Impact, Sketch and the no-spacing
     null were measured and dominated: NOTES, "Batching"; Impact again on the GPU, "GPU-resident
     rounds".)"""
+    # names rebuilt from the parsed values, as the pickers' were (row directories)
     if m := re.fullmatch(r"M(\d+)", spec):
-        return Round(spec, AddTension(), None, TopSingles(int(m[1])), All(EXACT),
-                     Best(GainPerCost()))
+        k = int(m[1])
+        return Round(name=f"M{k}", rank=AddTension(), refine=None, build=TopSingles(k),
+                     evaluate=All(EXACT), accept=Best(GainPerCost()))
     if m := re.fullmatch(r"B([0-9.]+)g([0-9.]+)", spec):
-        return Round(spec, AddTension(), None, Spaced(float(m[1]), float(m[2])), All(EXACT),
-                     Only())
+        delta, gap = float(m[1]), float(m[2])
+        return Round(name=f"B{delta:g}g{gap:g}", rank=AddTension(), refine=None,
+                     build=Spaced(delta=delta, gap=gap), evaluate=All(EXACT), accept=Only())
     if m := re.fullmatch(r"S([0-9.]+)cat(?:w(\d+))?", spec):
-        return Round(spec, AddTension(), None,
-                     Diverse(float(m[1]), clear.Catchment(sweep), reach=SPREAD_REACH,
-                             width=1 if m[2] is None else int(m[2])),
-                     All(EXACT), Best(LowestJ()))
+        delta, width = float(m[1]), 1 if m[2] is None else int(m[2])
+        source = clear.Catchment(sweep)
+        return Round(name=f"S{delta:g}{source.name}" + (f"w{width}" if width > 1 else ""),
+                     rank=AddTension(), refine=None,
+                     build=Diverse(delta=delta, source=source, reach=SPREAD_REACH, width=width),
+                     evaluate=All(EXACT), accept=Best(LowestJ()))
     raise ValueError(f"unknown picker {spec!r}")
 
 
@@ -821,7 +825,7 @@ def greedy(rnd: Round, d_max: float) -> Part:
     return Until(Do(rnd), Reached(d_max))
 ```
 Check against the old code, and say so in the report: Diverse calls `_batches` twice when a refiner asks `size` (none of the greedy rounds has one, so `size` is never called for them); `TopSingles` estimates are not used to choose (All scores every move); Batched's old `D` loop and Spread's shortlist are copied line for line; the Tension lives only in `Gains`, which Round drops before the thunks run (the thunks capture `top`, `taken`, `moves`: lists, not the ranking).
-`re` is already imported in search.py; add `KW_ONLY` to the dataclasses import.
+`re` is already imported in search.py. Every part with more than one field is `@dataclass(frozen=True, kw_only=True)` (the Global Constraint), so they are built by keyword.
 
 - [ ] **Step 2: GreedyRows** (search.py):
 
@@ -852,7 +856,8 @@ class GreedyRows:
 ```
 
 - [ ] **Step 3: clear.py.** Delete `Picked`, `Picker`, `Screened`, `Batched`, `Spread`, `grow`, `picker_of`.
-  - `greedy_block(b, rnd, h, d_max, out, population, power, along, solver, search=None)`: its parameter `picker: Picker` becomes `rnd` (a `search.Round`, annotated as a string `"search.Round"` with `from __future__ import annotations` already present); its body from `t0 = time.time()` through the loop becomes
+  - Type-only import for the annotations: `from typing import TYPE_CHECKING` and `if TYPE_CHECKING: import search as engine` (search imports clear at run time), annotations written `engine.Round` (`from __future__ import annotations` is present, so they are never evaluated). After the deletions, drop `import re` and `NamedTuple` from clear.py's imports if ruff F401 reports them unused, and rewrite the module docstring's lines on the pickers (clear.py:8-11) to name `search.greedy_round`.
+  - `greedy_block(b, rnd, h, d_max, out, population, power, along, solver, search=None)`: its parameter `picker: Picker` becomes `rnd: engine.Round`; its body from `t0 = time.time()` through the loop becomes
 
 ```python
     import search as engine     # search imports clear, so here; `search` is the conductance
@@ -863,7 +868,7 @@ class GreedyRows:
     rows = rec.rows
 ```
   and the old `rows = [...]` initialisation above it goes (GreedyRows makes the step-0 row).
-  - `_one` passes `_CFG["picker"]` unchanged (it now holds a Round); `run(workers, picker, ...)` keeps its parameter name `picker`, annotated `"search.Round"`, and names the directory by `picker.name` as now.
+  - `_one` passes `_CFG["picker"]` unchanged (it now holds a Round); `run(workers, picker, ...)` keeps its parameter name `picker`, annotated `engine.Round`, and names the directory by `picker.name` as now.
   - The CLI's `run|some` branch: `picker_of(sys.argv[3], sweep_of(sys.argv[9]))` becomes `engine.greedy_round(sys.argv[3], sweep_of(sys.argv[9]))` with `import search as engine` inside that branch (commented as above).
   - Everywhere in clear.py the module is `engine`, never `search`: `greedy_block`, `run` and `Clearing` have a parameter `search` (the search conductance).
   - `Picker`, `Tension` and `Clearing` annotations elsewhere in clear.py: none use Picker after the deletions (grep to confirm).
@@ -891,7 +896,7 @@ class GreedyRows:
 ```
   (exchange stays as it is until Task 4; `import search`.)
   - search.py grow_prune: `picker_of(plan.picker, sweep_of(device))` becomes `greedy_round(plan.picker, sweep_of(device))`; its grow loop `for _pk, _D in grow(c, ..., plan.grow * d_max, J0, True): pass` becomes `greedy(rnd, plan.grow * d_max)(SearchState.start(c, power, Score(J0, P0), EXACT), Silent())` (the grow phase's states were scored and thrown away: now they are not scored; only `t` can change). Drop `grow` and `picker_of` from its `from clear import` line.
-  - gramprobe.py: `picker = clear.picker_of("S0.01cat", ...)` becomes `rnd = search.greedy_round("S0.01cat", clear.sweep_of("gpu"))`; its patch `object.__setattr__(picker.source, "gram", gram_)` becomes `object.__setattr__(rnd.build.source, "gram", gram_)` (and `gram = rnd.build.source.gram` wherever it saved the original); its loop becomes `search.greedy(rnd, d_max)(search.SearchState.start(c, 2.0, search.Score(J0, c.sc.P0), search.EXACT), search.Silent())`. `import search`.
+  - gramprobe.py: `picker = clear.picker_of("S0.01cat", ...)` becomes `rnd = search.greedy_round("S0.01cat", clear.sweep_of("gpu"))`; its patch `object.__setattr__(picker.source, "gram", gram_)` becomes `object.__setattr__(rnd.build.source, "gram", gram_)` (and `gram = rnd.build.source.gram` wherever it saved the original); its loop becomes `search.greedy(rnd, d_max)(search.SearchState.start(c, 2.0, search.Score(J0, c.sc.P0), search.EXACT), search.GreedyRows(bid, c, 2.0, J0, c.sc.P0, time.time()))` (a record that wants every state, so each step's exact solve stays in what it times, as the old `grow(..., True)` did; `bid` is main's block id, check the name). `import search`.
   - memprobe_greedy.py imports the module as `import search as engine` (its `main` has a local `search`, the search conductance) and uses `engine.` below; the same renames for its picker (`rnd = engine.greedy_round(...)`) and gram patch; `exact = clear.exact` and `clear.exact = exact_` with `exact_(c_, removed, power)` calling `exact(c_, removed, power)` (the scoring report around it unchanged); its loop becomes
 
 ```python
@@ -906,7 +911,7 @@ class GreedyRows:
     engine.greedy(rnd, d_max)(engine.SearchState.start(c, 2.0, engine.Score(J0, c.sc.P0),
                                                        engine.EXACT), _Print())
 ```
-  - profile_round.py: `pk = picker_of(picker, sweep_of(solver))` becomes `rnd = search.greedy_round(picker, sweep_of(solver))`; the timed `t = c.tension(2.0)` / `pk.pick(c, t, J, 2.0, True)` pair becomes one timed `out = rnd.step(search.SearchState.start(c, 2.0, search.Score(J, c.sc.P0), search.EXACT))` printed as `step {secs}s ({len(out.cleared)} cleared)`, and its docstring says it profiles one round (rank, build, evaluate) instead of tension and pick separately. `import search`; drop `picker_of` from its clear import.
+  - profile_round.py: `pk = picker_of(picker, sweep_of(solver))` becomes `rnd = search.greedy_round(picker, sweep_of(solver))`; the timed `t = c.tension(2.0)` / `pk.pick(c, t, J, 2.0, True)` pair becomes one timed `search.Do(rnd)(s, rec)` with `s = search.SearchState.start(c, 2.0, search.Score(J, c.sc.P0), search.EXACT)` and `rec = search.GreedyRows(bid, c, 2.0, J, c.sc.P0, time.time())` (so the step's exact solve is timed, as `pick(..., True)` scored inside), printed as `step {secs}s ({len(s.order)} cleared)`; its docstring says it profiles one round (rank, build, evaluate, the state's exact score) instead of tension and pick separately. `import search`; drop `picker_of` from its clear import.
   - releaseprobe.py: `clear.picker_of("S0.01cat", ...)` becomes `search.greedy_round("S0.01cat", clear.sweep_of("gpu"))` (`import search` inside `variant`, next to its other imports).
   - `grep -n "picker_of\|\.pick(\|clear\.grow\|Screened\|Batched\|Spread(" research/roadless/*.py` finds nothing else (fix anything it does).
 
@@ -939,7 +944,7 @@ Expected: all identical. Any difference: the first row and its columns; find the
 - Consumes: Tasks 2-3.
 - Produces: `search.exchange_round(world, *, budget, width, pairs, pool, tries) -> Round[Grad]`, `search.polish(world, *, budget, width, pairs, pool, tries) -> Part` (Seq(Rescore(world), Until(Do(round), Spent(tries)))), `relax.Relaxation.score(s, removed) -> search.Score`.
 
-- [ ] **Step 1: search.py.** Move `_singles` and `_pairs` from relax.py verbatim, `_pairs` taking `pool` in place of the global `PAIR_POOL`:
+- [ ] **Step 1: search.py.** Move `_singles` and `_pairs` from relax.py, `_pairs` taking `pool` in place of the global `PAIR_POOL`, and both returning `IndexMoves(mv, est)` instead of the pair `(mv, est)` (their bodies otherwise verbatim):
 
 ```python
 def _pairs(g, ins, outs, cost, left, pool: int):
@@ -972,7 +977,7 @@ class Gradient:
         return Grad(self.world.value_sgrad(r)[1], r)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Swaps:
     """Add one the budget left allows or swap one in for a cleared one, within s.movable; with
     `pairs`, a second tier of two-in-one-out and one-in-two-out among the `pool` most
@@ -990,9 +995,9 @@ class Swaps:
         left = self.budget + 1e-12 - float(cost @ x)
         movable = np.flatnonzero(s.movable)
         ins, outs = movable[x[movable] == 0], movable[x[movable] > 0]
-        out: list[Callable[[], Tier]] = [lambda: IndexMoves(*_singles(g, ins, outs, cost, left))]
+        out: list[Callable[[], Tier]] = [lambda: _singles(g, ins, outs, cost, left)]
         if self.pairs:
-            out.append(lambda: IndexMoves(*_pairs(g, ins, outs, cost, left, self.pool)))
+            out.append(lambda: _pairs(g, ins, outs, cost, left, self.pool))
         return out
 
 
@@ -1000,8 +1005,9 @@ def exchange_round(world: Graded, *, budget: float, width: int, pairs: bool, poo
                    tries: int) -> Round[Grad]:
     """Exchange refinement's round: moves ranked by their linearized change from the world's
     gradient at the 0/1 clearing, the best `width` scored in it, the best kept if it improves."""
-    return Round(f"P{tries}w{width}" + ("x2" if pairs else ""), Gradient(world), None,
-                 Swaps(budget, pairs, pool), Top(world, width, tries), IfBetter())
+    return Round(name=f"P{tries}w{width}" + ("x2" if pairs else ""), rank=Gradient(world),
+                 refine=None, build=Swaps(budget=budget, pairs=pairs, pool=pool),
+                 evaluate=Top(world=world, width=width, tries=tries), accept=IfBetter())
 
 
 def polish(world: Graded, *, budget: float, width: int, pairs: bool, pool: int,
@@ -1045,17 +1051,18 @@ Delete `exchange`, `_singles`, `_pairs`; keep `PAIR_POOL` (the edge's constant, 
     rel = relax.Relaxation(c, power, rtol=RTOL)
     scorer = relax.Relaxation(c, power, q=1.0, rtol=RTOL, eps=SCORE_EPS, params=c.p)
     greedy_perm = rel.perm(rel.exact(r))
+    s = search.SearchState.start(c, power, search.UNSCORED, None)  # the polish's own count
     moves = search.polish(scorer, budget=budget, width=width, pairs=pairs, pool=relax.PAIR_POOL,
                           tries=tries)(s, search.Silent())
     rp, J, used = c.removed.astype(float), s.score.J, s.scorings
 ```
-`polish` returns the moves `Seq` counted (Rescore counts 0).
+`polish` returns the moves `Seq` counted (Rescore counts 0). The polish starts a fresh SearchState: the greedy's scorings (M4, S0.01catw4 score candidates) must not count against its tries, as the old `exchange` began its count at 0 (relax.py:329). Update polish_greedy's docstring (lines 3 and 11) where it names the picker classes or `exchange`.
 
 - [ ] **Step 4: Smoke, lint, commit locally** (as Task 3 Step 5, message "research: roadless -- exchange as a Round: Gradient, Swaps, Top, IfBetter, Rescore (search.polish); Relaxation is a World; polish_greedy and Incumbent.polish on the engine; relax.exchange deleted").
 
 - [ ] **Step 5: Agreement, polish and SIMP:** `agree.py run t4 <commit> polish SIMP`; for t4's greedy and GP rows, copy them from t3's tree is NOT needed: compare only polish and SIMP keys (`compare base1 t4` reports the others as "only in base1": ignore those lines). Expected: polish and SIMP identical.
 
-- [ ] **Step 6: The clearing left empty (review focus 2).**
+- [ ] **Step 6: The clearing left empty (review focus 2).** A full SIMP run (~40 min): run it in the background.
 
 ```bash
 cd ~/src/reblock && OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 \
@@ -1082,13 +1089,14 @@ Expected: `clearing empty after one`. Then push.
 
 **Interfaces:**
 - Consumes: Tasks 2-3.
-- Produces: `Order`, `RestoreTension`, `Screen(world, m)`, `ToLevel(step)`, `restore_round(*, step, shortlist, screen) -> Round[Order]`, `PruneRows(block_id, c, power, J0, P0, d_max, t0)` with `.frame()`, `Rows` (Protocol: a Record with `frame()`), `GrowPrune(grow, picker, restore, shortlist, *, screen_eps)` (frozen dataclass) with `build(block_id, c, power, J0, P0, d_max, t0, rnd, screen) -> tuple[Part, Rows]`, `prune_block(b, plan, rnd, screen_of, power, along, device, d_max) -> pd.DataFrame`.
+- Produces: `Order`, `RestoreTension`, `Screen(world=, m=)`, `ToLevel(step)`, `restore_round(*, step, shortlist, screen) -> Round[Order]`, `PruneRows(block_id, c, power, J0, P0, d_max, t0)` with `.frame()`, `Rows` (Protocol: a Record with `frame()`), `Built(part, rows)` (NamedTuple), `GrowPrune(*, grow, picker, restore, shortlist, screen_eps)` (frozen, kw_only) with `build(block_id, c, power, J0, P0, d_max, t0, rnd, screen) -> Built`, `prune_block(b, plan, rnd, screen_of, power, along, device, d_max) -> pd.DataFrame`.
 
 - [ ] **Step 1: The restore round** (restore_batch's body, split):
 
 ```python
 class Order(NamedTuple):
-    order: np.ndarray           # the cleared buildings, least loss of J per unit of population first
+    order: np.ndarray           # the cleared buildings, least loss of J per unit of
+                                # population first
 
 
 @dataclass(frozen=True)
@@ -1103,7 +1111,7 @@ class RestoreTension:
         return Order(on[np.argsort(loss, kind="stable")])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Screen:
     """The first-order ranking's top max(m, 2k) re-ranked by each one's own loss in `world`
     (the first-order ranking alone, rank correlation 0.6 -- 0.7 with the exact loss, lost 0.22
@@ -1144,9 +1152,10 @@ class ToLevel:
 
 
 def restore_round(*, step: float, shortlist: int, screen: Valuer) -> Round[Order]:
-    return Round(f"r{step:g}" + (f"m{shortlist}" if shortlist else ""), RestoreTension(),
-                 Screen(screen, shortlist) if shortlist else None, ToLevel(step), All(EXACT),
-                 Only())
+    return Round(name=f"r{step:g}" + (f"m{shortlist}" if shortlist else ""),
+                 rank=RestoreTension(),
+                 refine=Screen(world=screen, m=shortlist) if shortlist else None,
+                 build=ToLevel(step), evaluate=All(EXACT), accept=Only())
 ```
 Check against restore_batch (say so in the report): `D` from `c.cost[c.removed].sum()` equals the old `c.cost[on].sum()` (same elements, same order); `k` from the first-order order feeds the shortlist, then `k` is recomputed on the refined order, as before; the screen's `now` and each `value` in the same order.
 
@@ -1155,6 +1164,11 @@ Check against restore_batch (say so in the report): `D` from `c.cost[c.removed].
 ```python
 class Rows(Record, Protocol):
     def frame(self) -> pd.DataFrame: ...
+
+
+class Built(NamedTuple):
+    part: Part
+    rows: Rows
 
 
 class PruneState(NamedTuple):
@@ -1196,15 +1210,15 @@ class PruneRows:
 ```
 
 - [ ] **Step 3: GrowPrune, plan_of, prune_block, main.**
-  - GrowPrune becomes `@dataclass(frozen=True)` with fields `grow: float`, `picker: str`, `restore: float`, `shortlist: int`, `_: KW_ONLY`, `screen_eps: float`; `name` unchanged; `plan_of` passes `screen_eps=EPS_SCREEN`; and
+  - GrowPrune becomes `@dataclass(frozen=True, kw_only=True)` with fields `grow: float`, `picker: str`, `restore: float`, `shortlist: int`, `screen_eps: float`; `name` unchanged; `plan_of` builds it by keyword with `screen_eps=EPS_SCREEN`; and
 
 ```python
     def build(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
-              d_max: float, t0: float, rnd: Round, screen: Valuer) -> tuple[Part, Rows]:
+              d_max: float, t0: float, rnd: Round, screen: Valuer) -> Built:
         rec = PruneRows(block_id, c, power, J0, P0, d_max, t0)
-        return Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
-                    Until(Do(restore_round(step=self.restore, shortlist=self.shortlist,
-                                           screen=screen)), Emptied()))), rec
+        return Built(Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
+                          Until(Do(restore_round(step=self.restore, shortlist=self.shortlist,
+                                                 screen=screen)), Emptied()))), rec)
 ```
   - grow_prune and restore_batch are replaced by
 
@@ -1217,9 +1231,9 @@ def prune_block(b, plan: GrowPrune, rnd: Round, screen_of: Callable[[Clearing, f
     c = Clearing(b, mesh, p, population=common.POPULATIONS["area"])
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
-    part, rec = plan.build(b.block_id, c, power, J0, P0, d_max, t0, rnd, screen_of(c, power))
-    part(SearchState.start(c, power, Score(J0, P0), EXACT), rec)
-    rows = rec.frame()
+    built = plan.build(b.block_id, c, power, J0, P0, d_max, t0, rnd, screen_of(c, power))
+    built.part(SearchState.start(c, power, Score(J0, P0), EXACT), built.rows)
+    rows = built.rows.frame()
     print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {plan.name}: "
           f"{len(rows) - 1} states; perm' {rows.perm.iloc[-1]:.3f} at D {rows.D.iloc[-1]:.3f}  "
           f"{time.time() - t0:.0f}s", flush=True)
@@ -1241,12 +1255,12 @@ def prune_block(b, plan: GrowPrune, rnd: Round, screen_of: Callable[[Clearing, f
 **Files:**
 - Modify: `.superpowers/sdd/2026-10-08-add-remove-search/agree.py` (add `coverage`)
 
-- [ ] **Step 1:** Add `coverage <label> <commit>`: a fresh worktree of HEAD, and for each block a Python process that imports the script's module, wraps the functions below on that module object, and calls the script's `main(...)` with its argv (for relax: `relax.main("one", [b], 2.0, "cpu", relax.plan_of(SIMP), "uni", 1, 0.05)`; for polish_greedy: `polish_greedy.main(b, 2.0, "cpu", "S0.01cat", 64, 8, "uni", 0.05, common.mesh_of("0.5"), True)`; for search: `search.main([b], search.plan_of(GP), 2.0, "cpu", "uni", 0.15)`; for the greedy: `clear.run(1, search.greedy_round("S0.01catw4", clear.sweep_of("cpu")), 0.5, 0.15, "area", 2.0, lifted.along_of("uni"), lifted.solver_of("cpu"), None, [b])`), writing rows into the coverage tree only. Counters, printed per block:
+- [ ] **Step 1:** Add `coverage <label> <commit>`: a fresh worktree of HEAD, and for each block a Python process that imports the script's module, wraps the functions below on that module object, and calls the script's `main(...)` with its argv (for relax: `relax.main("one", [b], 2.0, "cpu", relax.plan_of(SIMP), "uni", 1, 0.05)`; for polish_greedy: `polish_greedy.main(b, 2.0, "cpu", "S0.01cat", 64, 8, "uni", 0.05, common.mesh_of("0.5"), True)`; for search: `search.main([b], search.plan_of(GP), 2.0, "cpu", "uni", 0.15)`; for the greedy, in-process (clear.run forks a pool even with one worker, so counters there would rise in the child): `rnd = search.greedy_round("S0.01catw4", clear.sweep_of("cpu")); d = clear.rows_dir(rnd.name, 0.5, "area", 2.0, "uni"); d.mkdir(exist_ok=True); clear._CFG = dict(picker=rnd, h=0.5, d_max=0.15, dir=d, pop="area", power=2.0, along=lifted.along_of("uni"), solver=lifted.solver_of("cpu"), search=None); clear._BLOCKS = common.build_blocks([b]); assert clear._one(0) is None` (`_one` returns the block id on failure)), writing rows into the coverage tree only. Counters, printed per block:
   - `search._pairs` calls (the pair tier evaluated);
   - in `search.Diverse._batches`, rounds where the distinct batches number fewer than `width` (wrap the method: compare `len(result)` with `self.width`);
   - `relax.cut_to_budget` calls whose result skips a building of the order that a later taken one follows (compare the result with the order's prefix);
   - in `search.Screen.refine`, rounds where the refined order's first `first_k` differ as a set from the first-order's.
-  (relax.run with workers 1 calls `_run` in-process, so module patches apply; clear.run forks a pool: call `clear._one` per block after setting `clear._CFG` and `clear._BLOCKS` as `run` does, in-process.)
+  (relax.main with workers 1 maps `_run` in-process, so module patches apply.)
 - [ ] **Step 2:** Run it. A counter at zero on all three blocks: find a block where it fires (19537, 247 buildings, for the pair tier; check NOTES' small blocks), add it to IDS temporarily, `run base3 <BASE> <preset>` and `run t6 <HEAD> <preset>` for that preset only, `compare base3 t6`.
 - [ ] **Step 3:** Ledger: the counts per block, any block added, its comparison.
 
@@ -1257,7 +1271,7 @@ def prune_block(b, plan: GrowPrune, rnd: Round, screen_of: Callable[[Clearing, f
 - [ ] **Step 1:** GPU idle; run memprobe_greedy at BASE (in `trees/base1`) twice, then at HEAD once, one after another (never together), on `ZAF.9.3.1_1_20543` under the translucent search, each in the background:
 
 ```bash
-cd <tree> && CUDA_PATH=/usr PYTHONPATH=. OMP_NUM_THREADS=1 ~/src/reblock/.venv/bin/python -u research/roadless/memprobe_greedy.py ZAF.9.3.1_1_20543 uni@ss100k0.5n2r30 0.02 default > memprobe_<label>.log 2>&1
+cd <tree> && CUDA_PATH=/usr PYTHONPATH=. OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 ~/src/reblock/.venv/bin/python -u research/roadless/memprobe_greedy.py ZAF.9.3.1_1_20543 uni@ss100k0.5n2r30 0.02 default > memprobe_<label>.log 2>&1
 ```
 Compare the largest "peak" / pool figure memprobe itself prints per step across the three logs (its own report, not nvidia-smi samples).
 Expected: HEAD within the two BASE runs' spread, or within 2% of their larger.
@@ -1273,7 +1287,7 @@ More: find what the engine holds across a round (a thunk capturing the ranking, 
 
 **Interfaces:**
 - Consumes: Tasks 2, 3, 5.
-- Produces: `Level` (NamedTuple: D, score, removed), `Archive(step)` with `level(D)`, `offer(D, score, removed)`, `beats(D, J)`, `best`; `BeatsArchive(archive, d_max)`; `FloatRows(block_id, c, power, J0, P0, d_max, archive, t0)` with `.frame()`; `FloatPrune(grow, picker, restore, shortlist, cap, *, screen_eps)` with GrowPrune's `build` signature; `SearchPlan` (Protocol: `name`, `picker`, `screen_eps`, `build`), taken by prune_block and main; `plan_of` returning either.
+- Produces: `Level` (NamedTuple: D, score, removed), `Archive(step)` with `level(D)`, `offer(D, score, removed)`, `beats(D, J, removed)`, `best`, `scored` (the conditional adds' scorings); `ArchiveSpent(archive, cap)` (a Stop); `BeatsArchive(archive=, d_max=)`; `FloatRows(block_id, c, power, J0, P0, d_max, archive, t0)` with `.frame()`; `FloatPrune(*, grow, picker, restore, shortlist, cap, screen_eps)` with GrowPrune's `build` signature; `SearchPlan` (Protocol: `name`, `picker`, `screen_eps`, `build`), taken by prune_block and main; `plan_of` returning either.
 
 - [ ] **Step 1:**
 
@@ -1286,11 +1300,13 @@ class Level(NamedTuple):
 
 class Archive:
     """The best exact state per budget level (level = ceil(D / step)): floating search's
-    comparison (Pudil) and its rows."""
+    comparison (Pudil) and its rows; `scored` counts the conditional adds' scorings (the cap's:
+    the restore screen's solves are not its)."""
 
     def __init__(self, step: float):
         self.step = step
         self.best: dict[int, Level] = {}
+        self.scored = 0
 
     def level(self, D: float) -> int:
         return int(np.ceil(D / self.step - 1e-9))
@@ -1300,15 +1316,27 @@ class Archive:
         if L not in self.best or score.J < self.best[L].score.J:
             self.best[L] = Level(D, score, removed.copy())
 
-    def beats(self, D: float, J: float) -> bool:
-        L = self.level(D)
-        return L not in self.best or J < self.best[L].score.J
+    def beats(self, D: float, J: float, removed: np.ndarray) -> bool:
+        """Strictly better than the level's best, and not the same clearing (an archived state
+        re-added scores the same J on the CPU; on the GPU only to rounding)."""
+        lv = self.best.get(self.level(D))
+        return lv is None or (J < lv.score.J and not np.array_equal(removed, lv.removed))
 
 
 @dataclass(frozen=True)
+class ArchiveSpent:
+    archive: Archive
+    cap: int
+
+    def done(self, s: SearchState) -> bool:
+        return self.archive.scored >= self.cap
+
+
+@dataclass(frozen=True, kw_only=True)
 class BeatsArchive:
     """Floating search's conditional inclusion: the lowest-J candidate, kept only if its D is
-    within d_max and its J beats the archive's best at its level."""
+    within d_max and its J beats the archive's best at its level; every other scored candidate
+    within d_max is offered to the archive (the kept one reaches it through FloatRows)."""
     archive: Archive
     d_max: float
 
@@ -1317,16 +1345,18 @@ class BeatsArchive:
         return True
 
     def accept(self, s: SearchState, cands: list[Candidate]) -> Candidate | None:
-        best = None
+        self.archive.scored += len(cands)
+        if not cands:
+            return None
+        best = min(cands, key=lambda cand: cand.score.J)    # the first lowest, as Spread's
+        after_ = {id(cand): after(s.c.removed, cand.move) for cand in cands}
+        D_of = {k: float(s.c.cost[r].sum()) for k, r in after_.items()}   # as s.D will be
+        r, D = after_[id(best)], D_of[id(best)]
+        kept = D <= self.d_max + 1e-12 and self.archive.beats(D, best.score.J, r)
         for cand in cands:
-            if best is None or cand.score.J < best.score.J:
-                best = cand
-        if best is None:
-            return None
-        D = s.D + float(s.c.cost[best.move.add].sum()) - float(s.c.cost[best.move.restore].sum())
-        if D > self.d_max + 1e-12 or not self.archive.beats(D, best.score.J):
-            return None
-        return best
+            if (cand is not best or not kept) and D_of[id(cand)] <= self.d_max + 1e-12:
+                self.archive.offer(D_of[id(cand)], cand.score, after_[id(cand)])
+        return best if kept else None
 
 
 class FloatRows:
@@ -1361,39 +1391,50 @@ class FloatRows:
         return pd.DataFrame(rows)
 ```
 
-- [ ] **Step 2: FloatPrune and SearchPlan.** FloatPrune: GrowPrune's fields plus `cap: int` before `_: KW_ONLY` and `screen_eps`; name `FL{grow:g}x{picker}r{restore:g}[m{shortlist}]c{cap}`;
+- [ ] **Step 2: FloatPrune and SearchPlan.** FloatPrune: `@dataclass(frozen=True, kw_only=True)`, GrowPrune's fields plus `cap: int`; name `FL{grow:g}x{picker}r{restore:g}[m{shortlist}]c{cap}`;
 
 ```python
     def build(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
-              d_max: float, t0: float, rnd: Round, screen: Valuer) -> tuple[Part, Rows]:
+              d_max: float, t0: float, rnd: Round, screen: Valuer) -> Built:
         archive = Archive(self.restore)
         rec = FloatRows(block_id, c, power, J0, P0, d_max, archive, t0)
-        add = Round(f"{rnd.name}|archive", rnd.rank, rnd.refine, rnd.build, All(EXACT),
-                    BeatsArchive(archive, d_max))
+        add = dataclasses.replace(rnd, name=f"{rnd.name}|archive", evaluate=All(EXACT),
+                                  accept=BeatsArchive(archive=archive, d_max=d_max))
         restore = restore_round(step=self.restore, shortlist=self.shortlist, screen=screen)
-        return Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
-                    Until(Seq((Do(restore),
-                               Until(Do(add), AnyOf((Spent(self.cap), Above(d_max)))))),
-                          Emptied()))), rec
+        stop = AnyOf((ArchiveSpent(archive, self.cap), Above(d_max)))
+        return Built(Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
+                          Until(Seq((Do(restore), Until(Do(add), stop))), Emptied()))), rec)
 ```
 (the conditional add is the greedy's round with its acceptor swapped: the table's "new row", in code.)
 `class SearchPlan(Protocol)`: `name` (property), `picker: str`, `screen_eps: float`, `build(...)` as above; prune_block and main take a `SearchPlan`.
 plan_of: `GP...` as now; `re.fullmatch(r"FL([0-9.]+)x(\S+?)r([0-9.]+)(?:m(\d+))?c(\d+)", spec)` to FloatPrune; else raise.
-`Above(d_max)` stops conditional adds while D is past d_max (no tension spent there); `BeatsArchive` refuses a move past d_max (a level holding d_max but above it).
+`Above(d_max)` stops conditional adds while D is past d_max (no tension spent there); `BeatsArchive` refuses a move past d_max (a level holding d_max but above it). `import dataclasses` in search.py for `replace`.
 
-- [ ] **Step 3: Termination check, CPU, 19421**, with a temporary assertion (not committed) in `BeatsArchive.accept` before `return best`: `assert self.archive.beats(D, best.score.J)` is tautological, so instead record the kept J and level, and after the run assert each kept J was strictly below that level's best at the time:
+- [ ] **Step 3: Termination check, CPU, 19421 (in the background, ~1.5 h).** Temporary instrumentation, not committed: in `FloatRows.on_step`, before `offer`,
+
+```python
+        if o.cleared:                       # a kept conditional add (restores clear nothing)
+            L = self.archive.level(s.D)
+            prev = self.archive.best.get(L)
+            assert s.world is EXACT and s.D <= self.d_max + 1e-12, (s.D, s.world)
+            assert prev is None or s.score.J < prev.score.J, (L, s.score.J, prev.score.J)
+            KEPT.append((L, float(s.score.J), np.packbits(s.c.removed).tobytes()))
+```
+(`KEPT: list = []` at module level; the grow phase runs under `Silent`, so `o.cleared` here is only ever a conditional add), and at the top of `BeatsArchive.accept`: `assert s.D <= self.d_max + 1e-12` (Above stopped add rounds above d_max).
+In the run below, after `prune_block` returns, print `len(KEPT)`, assert `KEPT` is not empty and its clearings are distinct, and print `archive.scored`.
 
 ```bash
 cd ~/src/reblock && OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 \
 REBLOCK_BLOCK_BANK=.superpowers/sdd/2026-10-08-add-remove-search/bank.pkl PYTHONPATH=. \
 uv run python research/roadless/search.py ZAF.9.3.1_1_19421 FL3xS0.01catr0.005m8c100 2 cpu uni 0.15
 ```
-Expected: finishes; rows in `research/roadless/clear_rows_FL3xS0.01catr0.005m8c100_h0.5_area_p2/`; D increasing.
-Against the GP rows on disk for 19421: report perm per level; at levels at or above the first kept add's, FL is at least GP's (the archive held the prune's own states there before any add diverged); below it, report only.
+Expected: finishes; at least one kept add; rows in `research/roadless/clear_rows_FL3xS0.01catr0.005m8c100_h0.5_area_p2/` with D increasing.
+Compare with the CPU GP rows of `trees/t5` for 19421 (not the rows on disk, which may be the GPU's), mapping GP's D through the same `Archive.level`: FL at least GP's at every level at or above the level the first kept add started from (the archive held the prune's own states there); below it, report only.
+Remove the instrumentation before Step 4.
 
 - [ ] **Step 4: Smoke, lint, commit, push** ("floating search: backward floating on grow-then-prune (FL...c<cap>): the greedy's round with BeatsArchive as its acceptor after each restore; FloatRows with full clearings").
 
-- [ ] **Step 5: First run.** 19421, 19510, 19537 on the CPU locally (background, one process each), and 9712, 22422 on the cluster:
+- [ ] **Step 5: First run.** 19421, 19510, 19537 on the CPU locally (in the background, one process each, the four thread variables at 1, a bank written for them), and 9712, 22422 on the cluster:
 
 ```bash
 cd ~/src/reblock && uv run python research/roadless/cluster.py submit blocks fl-5 --mesh 0.5 ZAF.9.5.4_1_9712,ZAF.9.3.1_1_22422 -- research/roadless/search.py {id} FL3xS0.01catr0.005m8c200 2 gpu uni 0.15
