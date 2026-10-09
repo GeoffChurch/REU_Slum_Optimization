@@ -1790,3 +1790,52 @@ share, 32 compared (16 all fine, 3 outside a5 .. a20's range), median 1.8x (4.1x
 f1.5), ahead on 31, worst 0.45x (22640); at equal error it spends a median 0.04 of the uniform
 cells fewer (IQR 0.02 -- 0.06, 19 blocks) against 0.11 under uni. Why it gains less under the
 sightline conductance is not looked at. Every mesh now runs under either metric.
+
+### The add/remove search as one Strategy (owner 2026-10-08: prioritized)
+
+The greedy (pickers M, B and S), exchange (the polish), grow-then-prune and SIMP's polish were
+four loops; they are now configurations of one `Round` in search.py. A round ranks the buildings
+by a first-order estimate (the add or restore tension, or the eps world's gradient), builds
+candidate moves from the ranking (singles, a spaced or diverse batch, swaps, a restore batch),
+optionally after re-ranking a shortlist in a costlier world, then scores some in a world and
+accepts one. A schedule (Do, Until, Seq, With, Rescore) runs rounds under stops, and a record
+says which states the rows need scored exactly. Spec:
+docs/superpowers/specs/2026-10-08-add-remove-search-design.md.
+
+Agreement: every preset (the four pickers, polish_greedy P64w8x2, GP3xS0.01catr0.005m8, SIMP
+.k1s1e-06.p256w8x2.GS0.01cate1) on 19421, 19510 and 38138 on the CPU, row for row against fresh
+runs of the old code, identical within the CPU's own noise at every step of the work and after
+the final review's fixes. (Two runs of the old code differ by pyamg's randomly seeded
+spectral-radius estimate, so the check takes discrete columns exactly, floats to 1e-7, arrays
+to 1e-4; three injected faults were each reported.) The pair tier, Spread's short batches and
+the Screen's reordering fire on every check block. cut_to_budget's skip never does (a building
+there is large against the batch gap), so it is covered through the pick order, which the greedy
+rows pin. GPU memory (memprobe_greedy, 20543, translucent): 18.14 GB peak, old and new.
+
+Floating search, new (`FL<grow>x<picker>r<step>[m<k>]c<cap>`): grow-then-prune where each
+restore is followed by the greedy's add round from there, kept only if its exact J beats the
+best archived at its budget level (Pudil's rule: an archive per level, every exact state within
+d_max offered to it). It repeats until an add is refused, D passes d_max or `cap` scorings are
+spent. FL3xS0.01catr0.005m8c100 on grow-then-prune's five blocks, d_max 0.15, the GPU, against
+GP3xS0.01catr0.005m8 and the greedy S0.01cat (Lens A, best row at or below each budget; the
+ranges over D 0.025, 0.05 .. 0.15):
+
+    block  n     at D 0.05: FL  GP     greedy  FL - GP          FL - greedy      FL time  / GP's
+    19421   112             0.472  0.433  0.464   0 .. +0.039     0 .. +0.041     2 min    1.40x
+    19510    88             0.345  0.237  0.268   0 .. +0.224     0 .. +0.078     3 min    2.22x
+    19537   247             0.799  0.799  0.716   0 .. +0.009  +0.008 .. +0.254   8 min    1.31x
+    9712   1721             0.121  0.119  0.107   0 .. +0.002  +0.006 .. +0.014  26 min    1.12x
+    22422  1977             0.782  0.011  0.534  +0.757 .. +0.828  +0.006 .. +0.269  100 min  1.64x
+
+Never below grow-then-prune or the greedy at any budget (two zeros are -2e-8 and -2e-14: the same
+clearing, solver noise). It repairs the prune's collapse on gated blocks: on 22422, where
+restoring substitutes one at a time shut the gate's pocket, grow-then-prune reads 0.011 at D 0.05
+and floating search 0.782. Against SIMP at D 0.05 (rows on 9712 and 22422 only): 9712 0.121
+against base 0.130 and default 0.130, 22422 0.782 against 0.777 and 0.783. SIMP gives one budget
+in 1.5 -- 15 min; floating search the whole curve to 0.15 in one run. At a single budget it is
+behind or tied with SIMP on the two blocks with SIMP rows.
+
+The two further rows BACKLOG names (a substitute-aware restore, screened adds) are not one
+configuration each, as the spec first said: each needs two parts (spec, "What the two new rows
+need"). search.py passes `mypy --strict` (the command is in its docstring), so pairing a ranking
+with a builder that expects another kind of ranking is a type error.

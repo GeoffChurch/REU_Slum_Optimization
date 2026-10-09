@@ -139,24 +139,16 @@ Not pursued, with what would change that:
 
 ## New methods
 
-- **Add/remove subset search** (**prioritized**: the family as one Strategy, which the greedy,
-  the polish's exchange() with pair escalation and grow-then-prune each realize in part; the
-  presets then become its configurations, and the schedules below its experiments.
-  Grow-then-prune measured: dominated by the SIMP path for now,
-  collapses on gated blocks through substitutes and is slow; NOTES "Warm SIMP path and
-  grow-then-prune". Next schedule to try: floating (re-add after a restore that hurts), and a
-  substitute-aware restore score; wiki `pages/methods/plus-l-take-away-r.md`).
-  One family, plus-l take-away-r / floating search: a schedule of (add a, remove r) moves with
-  an add scorer (tension, Spread's overlap discount), a remove scorer (the adjoint's closing
-  loss on cleared buildings, the same discount for removal batches) and an acceptance rule
-  (exact J). Special cases: the greedy (add batches, remove none), exchange refinement (at D,
-  add 1 remove 1, accept if better), grow then prune (add to ~3x D, then remove batches back
-  to D: the mycooc vocabulary recipe, `pages/mycooc/experiments/lattice_pool_em_audit-results.md`,
-  overcomplete pool 3x the target, 20% pruned per round with a refit, beat top-K by 5-10 F1),
-  floating search (add 1, remove while it helps). Removal judges a gate in its companions'
-  company (the greedy's blind spot); its risk is substitutes, each removable alone, dropped
-  together in one batch: small batches, a re-solve per round, the overlap discount. Build it
-  as one Strategy (schedule x scorers x acceptance), the greedy becoming its first preset.
+- **Add/remove subset search** (built 2026-10-09; NOTES "The add/remove search as one
+  Strategy"). search.py: a Round (rank, refine, build, evaluate, accept) under a schedule; the
+  greedy's pickers, exchange (the polish), grow-then-prune and floating search are its
+  configurations. Floating search (FL3xS0.01catr0.005m8c100) is never below grow-then-prune or
+  the greedy on the five blocks and repairs the prune's collapse (22422 at D 0.05: 0.782 against
+  0.011), at 1.1 -- 2.2x its time; behind or tied with SIMP at D 0.05 on 9712 and 22422. Next
+  rows, two new parts each (spec, "What the two new rows need"): a substitute-aware restore (a
+  restore ranking that keeps the Tension, a restore-direction diverse builder) and screened adds
+  (an add-direction refiner, a builder that reads the refined order). Wiki
+  `pages/methods/plus-l-take-away-r.md`.
 
 ## Experiment design
 

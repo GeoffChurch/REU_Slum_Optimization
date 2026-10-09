@@ -25,7 +25,8 @@ Every one of their rounds does the same four things:
 | restore batch | restore tension | the top max(m, 2k) in the eps world | a batch to the next multiple below | | the one |
 
 That table is the design: the members become configurations of one `Round`, and a new search is a new row.
-Two experiments BACKLOG names are rows nothing else needs: a **substitute-aware restore** (the restore batch built with Spread's diversity discount) and **screened adds** (an add ranking refined in the eps world).
+Two experiments BACKLOG names are further rows: a **substitute-aware restore** (the restore batch built with Spread's diversity discount) and **screened adds** (an add ranking refined in the eps world).
+Each needs parts of its own ("What the two new rows need", below).
 
 ## The parts
 
@@ -83,10 +84,11 @@ class Round(Generic[R]):            # a Step
     accept: Acceptor
 ```
 `Round.step` ranks, refines, builds its tiers and drops the ranking (the tension's system and AMG hierarchy) before any scoring solve, as Spread's `del t, H` does now; then it evaluates and accepts tier by tier.
+The refiner runs while the ranking is alive, so a refined round's ranking must not hold the tension's system.
 An evaluator scores a tier only when the acceptor needs a score or the tier holds more than one move, which is Spread's "score only if there is a choice" and Screened's always, as one rule.
 
 The parts the members need:
-- Rankers: `AddTension()`, `RestoreTension()` (Clearing.tension, ranking per unit of population as now, the Tension kept in the ranking for the catchment), `Gradient(world)` (value_sgrad at the 0/1 clearing; adding a is g_a, closing b is -g_b).
+- Rankers: `AddTension()`, `RestoreTension()` (Clearing.tension, ranking per unit of population as now; its ranking, `Order`, holds the indices only, so the Screen's solves never run beside the tension's system), `Gradient(world)` (value_sgrad at the 0/1 clearing; adding a is g_a, closing b is -g_b).
 - Refiner: `Screen(world, m)`: the top max(m, 2k) by first-order loss re-ranked by their own change in `world` (restore_batch's shortlist).
 - Builders: `TopSingles(m)`, `Spaced(delta, gap)`, `Diverse(delta, source, *, reach, width)`, `Swaps(budget, pairs, pool)` (singles and swaps, then the pair tier), `ToLevel(step)` (a restore batch to the next multiple below).
 - Evaluators: `NoScore()`, `All(world)`, `Top(world, width, tries)`.
@@ -160,7 +162,14 @@ Backward floating on grow-then-prune, the schedule NOTES ("Warm SIMP path and gr
 - **GPU memory**: memprobe_greedy's own peak lines on a large block under the translucent search, old twice (its noise) and new.
 - **Each task leaves every script runnable**: a member's callers move in the task that deletes its old loop.
 
+## What the two new rows need
+
+The final review found that neither is one configuration of the parts as built; this spec had said each was.
+- **Substitute-aware restore**: a restore ranking that keeps the Tension for the catchment's gram and sheds its system before the Screen solves, and a restore-direction diverse builder (`Diverse` shortlists unremoved buildings and fills to the next multiple above).
+- **Screened adds**: an add-direction `Refiner[Gains]` (`Screen` re-ranks restores, closing each building in its world), and a builder that reads the refined order (`Diverse` re-derives its gains from the tension).
+- Both: the ranking cannot hold the tension's system through the refiner's solves, so a ranking that needs the Tension later splits into the arrays the refiner reads and the system it does not.
+
 ## Not in scope
 
-- The two new rows (substitute-aware restore, screened adds) beyond showing they are one configuration each.
+- The two new rows (substitute-aware restore, screened adds).
 - Changes to Clearing, Tension or the solves.
