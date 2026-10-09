@@ -46,10 +46,9 @@ Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry 
   "Stopping by the value of more blocks").
 
 Open:
-- **The owner's rate and future** for seqscreen.py. The decisions on record put rate, the Lens
-  A a GPU-second is worth, in about [2e-6, 1.9e-5] (6e-6 the middle; tau = rate x a variant's
-  extra GPU-seconds per block, so 0.00006 -- 0.00053 on the held-out screens where 0.002 was
-  used). future, the block runs a decision governs, barely moves the stop: 820 by default.
+- **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
+  call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
+  owner's answer moves an end of the bracket to that screen's break-even rate. None is live.
 
 Not pursued, with what would change that:
 - *A Galerkin coarse model* (the solver's AMG level as the design problem's model, which keeps a

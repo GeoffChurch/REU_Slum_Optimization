@@ -1922,3 +1922,24 @@ the time at 10 blocks. future barely matters on these screens (only r2 moves, 15
 from 82 to 8200), so 820, the large blocks about ten times over, is a fair default: price 7.3e-9
 per GPU-second per governed block. Caveats: the floor and the rate come from these same screens
 and decisions, none has a collapse, and the truth is the 46 blocks' mean, a finite population.
+
+The owner has no intuition for either constant (2026-10-09), so the rate is a bracket, not a
+value (seqscreen.RATES, the two calls above; FUTURE 820). A screen's call is "adopt" or "keep"
+when it holds at every rate in the bracket and "ask" when it turns on the rate. An ask is a
+question in units one can judge, this much Lens A for this much more time, and the answer moves
+an end of the bracket to the screen's break-even rate, mu / extra seconds. The stop averages the
+value of more blocks and their cost over the bracket (five rates, geometric), the owner's rate
+taken as log-uniform: requiring the stop at every rate instead ran r2 to a median 35 blocks
+against 21, for the same call. On the six screens (future 820):
+
+    screen         call   blocks (median, range)  GPU-h
+    p64 vs base    adopt  15 (15 -- 15)            0.47
+    x2 vs base     adopt  15 (15 -- 15)            0.52
+    both vs base   adopt  15 (15 -- 15)            0.70
+    both vs p64    keep   15 (15 -- 34)            0.71
+    r2 vs base     ask    21 (15 -- 40)            0.98   +0.00088 (0.21%) for 2.03x the time
+    x2 vs p64      ask    15 (15 -- 21)            0.53   +0.00019 (0.05%) for 1.10x
+
+Neither ask is live: x2 over p64 is the call that set the bracket's top, so it sits on the edge
+(at the stop 9 orders say adopt, 9 ask, 2 keep), and r2 against base is moot now that r2 on top
+of p64 is a keep at every rate.
