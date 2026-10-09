@@ -58,7 +58,8 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
     rel = relax.Relaxation(c, power, rtol=RTOL)
     scorer = relax.Relaxation(c, power, q=1.0, rtol=RTOL, eps=SCORE_EPS, params=c.p)
     greedy_perm = rel.perm(rel.exact(r))
-    s = search.SearchState.start(c, power=power, score=search.UNSCORED, world=None)  # own count
+    # the polish's own count: the greedy's scorings are not its tries
+    s = search.SearchState.start(c, power=power, score=search.UNSCORED, world=None)
     moves = search.polish(scorer, budget=budget, width=width, pairs=pairs, pool=relax.PAIR_POOL,
                           tries=tries)(s, search.Silent())
     rp, used = c.removed.astype(float), s.scorings

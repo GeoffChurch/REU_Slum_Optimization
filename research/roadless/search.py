@@ -98,7 +98,7 @@ class Batches:
         return self.moves[i]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class IndexMoves:
     """A tier of small moves as a (4, M) array: rows 0-1 buildings added, 2-3 restored, -1
     none (exchange's ~10^6 swaps, materialised only for the few scored)."""
@@ -624,7 +624,7 @@ def _singles(g, ins, outs, cost, left):
                          np.stack([ia.ravel(), none_p, ib.ravel(), none_p])], axis=1)
     est = np.concatenate([np.where(cost[ins] <= left, g[ins], np.inf),
                           np.where(cost[ia] <= left + cost[ib], g[ia] - g[ib], np.inf).ravel()])
-    return IndexMoves(mv, est)
+    return IndexMoves(idx=mv, est=est)
 
 
 def _pairs(g, ins, outs, cost, left, pool: int):
@@ -641,7 +641,7 @@ def _pairs(g, ins, outs, cost, left, pool: int):
     est = np.concatenate([
         np.where(cost[a1] + cost[a2] <= left + cost[b], g[a1] + g[a2] - g[b], np.inf),
         np.where(cost[a] <= left + cost[b1] + cost[b2], g[a] - g[b1] - g[b2], np.inf)])
-    return IndexMoves(mv, est)
+    return IndexMoves(idx=mv, est=est)
 
 
 class Graded(World, Protocol):
@@ -661,7 +661,7 @@ class Gradient:
 
     def rank(self, s: SearchState) -> Grad:
         r = s.c.removed.astype(float)
-        return Grad(self.world.value_sgrad(r)[1], r)
+        return Grad(g=self.world.value_sgrad(r)[1], r=r)
 
 
 @dataclass(frozen=True, kw_only=True)

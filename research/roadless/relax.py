@@ -618,8 +618,8 @@ class Incumbent:
         """Exchange refinement of the incumbent (search.exchange_round) over every building if
         `everything`, else over the undecided ones: grey in the final iterate x, or where the
         incumbent and x's top-x rounding disagree (late samples flip them; NOTES "Where .r2's
-        winners come from"). Ranked by the gradient at the 0/1 incumbent in the scorer's eps world (the greedy's
-        tension)."""
+        winners come from"). Ranked by the gradient at the 0/1 incumbent in the scorer's eps world
+        (the greedy's tension)."""
         if self.scorer is None:
             raise ValueError("polish ranks with the eps-world scorer: give the plan .k<n>s<eps>")
         cost = self.rel.c.cost
