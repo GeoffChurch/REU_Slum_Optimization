@@ -48,8 +48,8 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
     c = relax._clearing(bid, device, along, mesh)
     rnd = search.greedy_round(picker_spec, clear.sweep_of(device))
     t0 = time.time()
-    s = search.SearchState.start(c, power, search.Score(c.sc.J(c.sc.u0, power), c.sc.P0),
-                                 search.EXACT)
+    s = search.SearchState.start(
+        c, power=power, score=search.Score(c.sc.J(c.sc.u0, power), c.sc.P0), world=search.EXACT)
     search.greedy(rnd, budget)(s, search.Silent())
     t_greedy = time.time() - t0
     c.removed[:] = False

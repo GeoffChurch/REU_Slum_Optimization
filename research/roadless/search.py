@@ -132,7 +132,8 @@ class SearchState:
     movable: np.ndarray
 
     @classmethod
-    def start(cls, c: Clearing, power: float, score: Score, world: World | None) -> SearchState:
+    def start(cls, c: Clearing, *, power: float, score: Score, world: World | None
+              ) -> SearchState:
         """From c's current clearing, nothing spent, every building movable."""
         return cls(c, power, score, world, [], 0, np.ones(c.n, dtype=bool))
 
@@ -424,6 +425,8 @@ class GainPerCost:
     """Screened's: the exact gain over the state's J per unit of population, negated."""
 
     def of(self, s: SearchState, cand: Candidate) -> float:
+        if s.world is not EXACT:
+            raise ValueError("gain per cost needs the state scored exactly")
         return -(s.score.J - cand.score.J) / s.c.cost[cand.move.add[0]]
 
 
@@ -591,7 +594,7 @@ class GreedyRows:
     """The greedy's rows (clear.greedy_block's format): every state scored exactly; per step D,
     perm (J_power), perm1 (P) and the step's buildings in pick order, after a step-0 row."""
 
-    def __init__(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
                  t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.t0 = (
             block_id, c.n, power, J0, P0, t0)
@@ -672,7 +675,8 @@ def grow_prune(b, plan: GrowPrune, power: float, along: str, device: str, d_max:
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
     rnd = greedy_round(plan.picker, sweep_of(device))
-    greedy(rnd, plan.grow * d_max)(SearchState.start(c, power, Score(J0, P0), EXACT), Silent())
+    greedy(rnd, plan.grow * d_max)(
+        SearchState.start(c, power=power, score=Score(J0, P0), world=EXACT), Silent())
     print(f"  {b.block_id} grown to D {float(c.cost[c.removed].sum()):.3f} "
           f"{time.time() - t0:.0f}s", flush=True)
     # the eps world is the caller's to build; search.py does not import relax at the top

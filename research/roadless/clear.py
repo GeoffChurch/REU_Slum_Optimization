@@ -510,9 +510,9 @@ def greedy_block(b, rnd: engine.Round, h: float, d_max: float, out: Path, popula
     P0 = sc.P0
     import search as engine     # search imports clear, so here; `search` is the conductance
     t0 = time.time()
-    rec = engine.GreedyRows(b.block_id, c, power, J0, P0, t0)
-    engine.greedy(rnd, d_max)(engine.SearchState.start(c, power, engine.Score(J0, P0),
-                                                       engine.EXACT), rec)
+    rec = engine.GreedyRows(block_id=b.block_id, c=c, power=power, J0=J0, P0=P0, t0=t0)
+    engine.greedy(rnd, d_max)(engine.SearchState.start(
+        c, power=power, score=engine.Score(J0, P0), world=engine.EXACT), rec)
     rows = rec.rows
     tmp = out.with_suffix(f".{os.getpid()}.tmp")
     pd.DataFrame(rows).to_parquet(tmp)

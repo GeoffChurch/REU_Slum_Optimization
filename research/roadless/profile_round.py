@@ -34,8 +34,10 @@ def main(bid: str, h: float, along: str, solver: str, picker: str) -> None:
     pstats.Stats(pr).sort_stats("cumulative").print_stats(20)
     rnd = search.greedy_round(picker, sweep_of(solver))
     J = c.sc.J(c.sc.u0, 2.0)
-    s = search.SearchState.start(c, 2.0, search.Score(J, c.sc.P0), search.EXACT)
-    rec = search.GreedyRows(bid, c, 2.0, J, c.sc.P0, time.time())
+    s = search.SearchState.start(c, power=2.0, score=search.Score(J, c.sc.P0),
+                                  world=search.EXACT)
+    rec = search.GreedyRows(block_id=bid, c=c, power=2.0, J0=J, P0=c.sc.P0,
+                            t0=time.time())
     pr = cProfile.Profile()
     pr.enable()
     t0 = time.time()

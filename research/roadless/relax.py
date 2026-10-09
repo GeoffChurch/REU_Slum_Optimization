@@ -797,7 +797,8 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     if plan.seed or plan.track:
         spec = plan.seed or plan.track
         rnd = search.greedy_round(spec, clear.sweep_of(device))
-        s = search.SearchState.start(c, power, search.Score(rel.J0, np.nan), search.EXACT)
+        s = search.SearchState.start(c, power=power, score=search.Score(rel.J0, c.sc.P0),
+                                     world=search.EXACT)
         search.greedy(rnd, budget)(s, search.Silent())
         c.removed[:] = False
         r_greedy = cut_to_budget(s.order, c.cost, budget)

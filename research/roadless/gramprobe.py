@@ -68,9 +68,9 @@ def main(bid: str, along: str, d_max: float) -> None:
     object.__setattr__(rnd.build.source, "gram", gram_)
     J0 = c.sc.J(c.sc.u0, 2.0)
     # a record that wants every state: each step's exact solve stays in what is timed
-    search.greedy(rnd, d_max)(search.SearchState.start(c, 2.0, search.Score(J0, c.sc.P0),
-                                                       search.EXACT),
-                              search.GreedyRows(bid, c, 2.0, J0, c.sc.P0, time.time()))
+    search.greedy(rnd, d_max)(search.SearchState.start(
+        c, power=2.0, score=search.Score(J0, c.sc.P0), world=search.EXACT),
+        search.GreedyRows(block_id=bid, c=c, power=2.0, J0=J0, P0=c.sc.P0, t0=time.time()))
 
 
 if __name__ == "__main__":

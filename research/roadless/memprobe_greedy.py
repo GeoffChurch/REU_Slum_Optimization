@@ -144,8 +144,8 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
             print(f"  step {step[0]} D {s.D:.3f} perm' {1 - (s.score.J / J0) ** 0.5:.3f}",
                   flush=True)
 
-    engine.greedy(rnd, d_max)(engine.SearchState.start(c, 2.0, engine.Score(J0, c.sc.P0),
-                                                       engine.EXACT), _Print())
+    engine.greedy(rnd, d_max)(engine.SearchState.start(
+        c, power=2.0, score=engine.Score(J0, c.sc.P0), world=engine.EXACT), _Print())
 
 
 if __name__ == "__main__":
