@@ -11,19 +11,27 @@ the top at the screen's break-even rate mu / extra seconds, no the bottom.
 
 The posterior on mu is the Bayesian bootstrap (mu = sum_i w_i d_i, w ~ Dirichlet(1)), no shape
 assumed: a parametric t pinned mu at 0 on such data. Deciding now loses
-min(E(tau - mu)+, E(mu - tau)+) on each block the decision governs. That loss is linear in mu, so k more blocks are worth
-exactly its expected drop through the posterior mean after them, under the bootstrap a Polya
-urn's (`value`). The screen stops when no k is worth its cost, rate / FUTURE x b's GPU-seconds
-on the next k blocks (b's time on a block predicted as a's times b's time ratio so far), both
-averaged over the bracket: the owner's rate is unknown here, so it is taken as log-uniform
-across RATES (requiring it at every rate instead ran r2 against base to a median 35 blocks
-against 21, for the same call); at once when a block collapses (more than COLLAPSE below a: the
-sentinel's veto); and never before MIN_BLOCKS, since the bootstrap is overconfident on few
-blocks. Replayed on finished comparisons it says when each would have stopped, the GPU time it
-spent, and whether it called it as all the blocks do.
+min(E(tau - mu)+, E(mu - tau)+) on each block the decision governs. That loss is linear in mu,
+so k more blocks are worth exactly its expected drop through the posterior mean after them,
+under the bootstrap a Polya urn's (`value`). The screen stops when no k is worth its cost,
+rate / FUTURE x b's GPU-seconds on the next k blocks (b's time on a block predicted as a's times
+b's time ratio so far), both averaged over the bracket: the owner's rate is unknown here, so it
+is taken as log-uniform across RATES (requiring it at every rate instead ran r2 against base to
+a median 35 blocks against 21, for the same call); at once when a block collapses (more than
+COLLAPSE below a: the sentinel's veto); and never before MIN_BLOCKS, since the bootstrap is
+overconfident on few blocks. Replayed on finished comparisons it says when each would have
+stopped, the GPU time it spent, and whether it called it as all the blocks do.
 
     PYTHONPATH=. uv run python research/roadless/seqscreen.py <tuning|held> <budget> \\
         <name>=<kind>,<along>,<what> <name>=... <b>/<a>...
+
+Live (`next`), for a b being run with a's rows on every block: b's blocks go in the replay's
+first order, and `next` prints the block to run after b's rows so far, or (exit STOPPED) the
+stop and its call. A loop runs b until it stops:
+
+    while id=$(PYTHONPATH=. uv run python research/roadless/seqscreen.py next held 0.05 \\
+            fl=search,uni,FL3xS0.01catr0.005m8c100D0.05 cheap=polished,uni,S0.01cat.P64w8 \\
+            fl/cheap); do <run b on $id>; done
 
 (specs as simp_compare.py's). a's and b's times must come from the same kind of card.
 """
@@ -34,6 +42,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import numpy as np
+import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -52,12 +61,13 @@ FUTURE = 820      # block runs a decision governs, the 82 large blocks about ten
                   # replayed from 82 to 8200 it moved one screen's stop, 15 -> 24 blocks (NOTES)
 ORDER_SEED = 0
 ORDERS = 20       # random block orders replayed per comparison
+STOPPED = 10      # `next`'s exit when the screen has stopped (a Python error exits 1)
 
 
 class Screen(NamedTuple):
-    d: np.ndarray     # b - a per block, in the order run
-    t: np.ndarray     # b's GPU-seconds per block
-    ta: np.ndarray    # a's
+    d: np.ndarray     # b - a per block run, in the order run
+    t: np.ndarray     # b's GPU-seconds per block run
+    ta: np.ndarray    # a's on every block of the screen, in order: those run, then the rest
 
 
 class Stop(NamedTuple):
@@ -90,29 +100,42 @@ def call(mu: float, extra: float, rates: np.ndarray) -> str:
 
 
 def stop_at(s: Screen, *, rates: np.ndarray, future: float, floor: int,
-            rng: np.random.Generator) -> Stop:
-    """Where the screen stops, why, and its call."""
+            rng: np.random.Generator) -> Stop | None:
+    """Where the screen stops, why, and its call; None while it runs on past the blocks run."""
     for n in range(1, len(s.d) + 1):
         if s.d[n - 1] < -COLLAPSE:
             return Stop(n, "collapse", "keep")
-        if n < floor or n == len(s.d):
-            continue
         extra = float(np.mean(s.t[:n] - s.ta[:n]))
+        if n == len(s.ta):
+            return Stop(n, "ran out", call(float(s.d[:n].mean()), extra, rates))
+        if n < floor:
+            continue
         cost = s.t[:n].sum() / s.ta[:n].sum() * np.cumsum(s.ta[n:])
         gain = np.mean([value(s.d[:n], r * extra, len(cost), rng) for r in rates], axis=0)
         if np.all(gain <= rates.mean() / future * cost):
             return Stop(n, "settled", call(float(s.d[:n].mean()), extra, rates))
-    return Stop(len(s.d), "ran out", call(float(s.d.mean()), float(np.mean(s.t - s.ta)), rates))
+    return None
 
 
-def main(which: str, budget: float, specs: list[str], pairs: list[str]) -> None:
+def question(b: str, a: str, mu: float, mean_a: float, ratio: float, extra: float) -> str:
+    """An "ask" put to the owner, and what each answer does to RATES."""
+    return (f"  ask: is {mu:+.5f} Lens A ({100 * mu / mean_a:+.2f}% of {a}'s mean) worth "
+            f"{ratio:.2f}x {a}'s GPU time? Yes puts RATES' top at {mu / extra:.1e}, no its bottom")
+
+
+def specs_of(which: str, budget: float, specs: list[str]) -> dict[str, pd.DataFrame]:
     blocks = blocks_of(which)
-    rates = np.geomspace(*RATES, RATE_POINTS)
     per = {}
     for spec in specs:
         name, rest = spec.split("=")
         kind, along, what = rest.split(",")
         per[name] = LOADERS[kind](along, what, budget).reindex(blocks).dropna()
+    return per
+
+
+def main(which: str, budget: float, specs: list[str], pairs: list[str]) -> None:
+    rates = np.geomspace(*RATES, RATE_POINTS)
+    per = specs_of(which, budget, specs)
     print(f"rate {RATES[0]:.1e} .. {RATES[1]:.1e} Lens A per GPU-second, future {FUTURE}")
     for pair in pairs:
         rng = np.random.default_rng(ORDER_SEED)     # each pair its own orders, whatever precedes it
@@ -127,6 +150,7 @@ def main(which: str, budget: float, specs: list[str], pairs: list[str]) -> None:
             i = rng.permutation(len(s.d))
             stop = stop_at(Screen(s.d[i], s.t[i], s.ta[i]), rates=rates, future=FUTURE,
                            floor=MIN_BLOCKS, rng=np.random.default_rng([ORDER_SEED, o]))
+            assert stop is not None     # every block run: it stops by the last
             stops.append(stop)
             hours.append(s.t[i][:stop.n].sum() / 3600)
         ns = np.array([x.n for x in stops])
@@ -136,13 +160,43 @@ def main(which: str, budget: float, specs: list[str], pairs: list[str]) -> None:
               f"{np.median(hours):.2f} GPU-h, calls {calls}, "
               f"{sum(x.call != whole for x in stops)} of {ORDERS} not the whole screen's")
         if whole == "ask":
-            ratio = s.t.sum() / s.ta.sum()
-            print(f"  ask: is {mu:+.5f} Lens A ({100 * mu / per[a].perm[both].mean():+.2f}% of "
-                  f"{a}'s mean) worth {ratio:.2f}x {a}'s GPU time? Yes puts RATES' top at "
-                  f"{mu / extra:.1e}, no its bottom")
+            print(question(b, a, mu, float(per[a].perm[both].mean()), s.t.sum() / s.ta.sum(),
+                           extra))
+
+
+def upcoming(which: str, budget: float, specs: list[str], pair: str) -> int:
+    """The live screen: print the block b runs next (exit 0), or its stop (exit STOPPED)."""
+    per = specs_of(which, budget, specs)
+    b, a = pair.split("/")
+    # the replay's first order over a's blocks: a finished screen replays to this very stop
+    order = per[a].index[np.random.default_rng(ORDER_SEED).permutation(len(per[a]))]
+    n = next((k for k, x in enumerate(order) if x not in per[b].index), len(order))
+    run = order[:n]
+    if len(stray := per[b].index.difference(run)):
+        raise SystemExit(f"{b} has rows off the screen's order: {', '.join(stray)}")
+    s = Screen((per[b].perm[run] - per[a].perm[run]).to_numpy(), per[b].t[run].to_numpy(),
+               per[a].t[order].to_numpy())
+    rates = np.geomspace(*RATES, RATE_POINTS)
+    stop = stop_at(s, rates=rates, future=FUTURE, floor=MIN_BLOCKS,
+                   rng=np.random.default_rng([ORDER_SEED, 0]))
+    if stop is None:
+        print(order[n])
+        return 0
+    mu, extra = float(s.d[:stop.n].mean()), float(np.mean(s.t[:stop.n] - s.ta[:stop.n]))
+    print(f"{b} vs {a}: stopped after {stop.n} of {len(order)} blocks ({stop.why}): {stop.call}; "
+          f"mu {mu:+.5f}, {extra:+.1f} s a block, {s.t[:stop.n].sum() / 3600:.2f} GPU-h",
+          file=sys.stderr)
+    if stop.call == "ask":
+        print(question(b, a, mu, float(per[a].perm[run[:stop.n]].mean()),
+                       s.t[:stop.n].sum() / s.ta[:stop.n].sum(), extra), file=sys.stderr)
+    return STOPPED
 
 
 if __name__ == "__main__":
-    args = sys.argv[3:]
-    main(sys.argv[1], float(sys.argv[2]),
-         [a for a in args if "=" in a], [a for a in args if "/" in a and "=" not in a])
+    live = sys.argv[1] == "next"
+    args = sys.argv[3 + live:]
+    specs, pairs = [a for a in args if "=" in a], [a for a in args if "/" in a and "=" not in a]
+    if live:
+        (pair,) = pairs
+        raise SystemExit(upcoming(sys.argv[2], float(sys.argv[3]), specs, pair))
+    main(sys.argv[1], float(sys.argv[2]), specs, pairs)

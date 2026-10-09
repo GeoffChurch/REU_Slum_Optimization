@@ -18,11 +18,13 @@ Its rows are the archive's best per level, each with its full clearing (not nest
 conditional add accepts the lowest J among its candidates (BeatsArchive), so a picker's own
 criterion (M's gain per unit of population) does not apply there.
 
-    CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> <cpu|gpu> [along] [d_max]
+    CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> \
+        <cpu|gpu> <along> <d_max>
 
 spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
 GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
-FL3xS0.01catr0.005m8c100.
+FL3xS0.01catr0.005m8c100. Rows in clear.rows_dir(<spec>D<d_max>, ...), e.g.
+clear_rows_FL3xS0.01catr0.005m8c100D0.05_h0.5_area_p2: d_max sets the grow and the rows.
 
 The check that audits the parts' pairings (a Gradient ranking with TopSingles is an error):
 
@@ -1100,7 +1102,7 @@ def main(ids: list[str], plan: SearchPlan, power: float, device: str, along: str
     def screen_of(c: Clearing, pw: float) -> Valuer:
         return relax.Relaxation(c, pw, q=1.0, rtol=RTOL_SCORE, eps=plan.screen_eps)
 
-    out = rows_dir(plan.name, 0.5, "area", power, along)
+    out = rows_dir(f"{plan.name}D{d_max:g}", 0.5, "area", power, along)
     out.mkdir(parents=True, exist_ok=True)
     failed = []
     for b in common.build_blocks(ids):
@@ -1126,5 +1128,4 @@ if __name__ == "__main__":
                         # a second copy of the engine (its own EXACT and classes)
     search.main(sys.argv[1].split(","),
                 search.plan_of(sys.argv[2], sweep=sweep_of(sys.argv[4])), float(sys.argv[3]),
-                sys.argv[4], sys.argv[5] if len(sys.argv) > 5 else "uni",
-                float(sys.argv[6]) if len(sys.argv) > 6 else 0.15)
+                sys.argv[4], sys.argv[5], float(sys.argv[6]))

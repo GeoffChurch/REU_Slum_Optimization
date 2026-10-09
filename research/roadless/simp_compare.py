@@ -10,7 +10,10 @@ the D 0.05 SIMP rows ran on the cluster's V100 / RTX 8000 cards, the greedies he
 Ada.
 
     PYTHONPATH=. uv run python research/roadless/simp_compare.py <tuning|held> <budget> \
-        <name>=<simp|greedy|polished>,<along>,<plan|picker|picker.P<t>w<w>>... <b>/<a>...
+        <name>=<kind>,<along>,<what>... <b>/<a>...
+
+kind and what: simp and a SIMP plan, greedy and a picker, polished and <picker>.P<t>w<w>, or
+search and search.py's <spec>D<d_max> (e.g. FL3xS0.01catr0.005m8c100D0.05).
 """
 from __future__ import annotations
 
@@ -60,8 +63,18 @@ def polished(along: str, name: str, budget: float) -> pd.DataFrame:
     return d.set_index("block")[["perm", "t"]]
 
 
+def searched(along: str, name: str, budget: float) -> pd.DataFrame:
+    """search.py's rows, `name` = <spec>D<d_max>: the best clearing at or below the budget (a
+    floating search's rows are its archive's best per level, not nested), `t` the whole run."""
+    best = {}
+    for f in rows_dir(name, 0.5, "area", POWER, along).glob("*.parquet"):     # a block each
+        g = pd.read_parquet(f)
+        best[g.block.iloc[0]] = (g.perm[g.D <= budget + 1e-12].max(), g.t.max())
+    return pd.DataFrame.from_dict(best, orient="index", columns=["perm", "t"])
+
+
 # A spec's kind, as typed on the command line: an unknown one raises.
-LOADERS = {"simp": simp, "greedy": greedy, "polished": polished}
+LOADERS = {"simp": simp, "greedy": greedy, "polished": polished, "search": searched}
 
 
 def main(which: str, budget: float, specs: list[str], pairs: list[str]) -> None:
