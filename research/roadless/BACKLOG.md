@@ -185,7 +185,10 @@ Not pursued, with what would change that:
   so distance alone misses some of what the score depends on. Measure: Lens A error against
   uniform h 0.5 per cell spent, on the 59 and 14401, against a5 and a10. Built (common.GoalMesh);
   with nothing cleared in the indicator's world it lost to distance on a third of the 59 (NOTES);
-  with the buildings open (o1) it fixed the five tried: goal-o1-59 decides.
+  with the buildings open (o1) it is ahead of distance on 49 of 53 blocks at f1.2 (2.8x less
+  error at equal cells, median; 0.11 of the uniform cells fewer at equal error). Next: goal meshes
+  on the oversized blocks (a pilot that fits, sized by its target), and why 20952 and 44602 still
+  lose.
 - **Sightline and the greedy on the composite** (**prioritized**). Sightline and SoftSightline
   scan raster lines (`needs_raster`), as the metric or as the greedy's translucent search; both
   raise on a composite. The greedy under uni has no raster check but has never run on one: first

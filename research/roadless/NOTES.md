@@ -1722,7 +1722,17 @@ clearing opens new flow. The five blocks at f1.2 with the buildings more open in
 
 Monotone in the opening on the losers, flat on the winners, the build's time the same. The
 world is now part of the mesh, `o<opening>` (GoalMesh.opening, the buildings' openness; goal-59's
-rows renamed o0.01), and goal-o1-59 runs the 59 with the buildings fully open.
+rows renamed o0.01), and goal-o1-59 runs the 59 with the buildings fully open:
+
+    factor  compared  ratio (median)  goal mesh ahead  worst  mean |error|  (o0.01)
+    1.2     53        2.8x            49               0.26x  0.00050       0.00092
+    1.5     40        4.1x            39               0.68x  0.00012       0.00021
+    2        9        4.0x             7               0.46x  0.00002       0.00003
+
+At equal error it spends a median 0.11 of the uniform cells fewer than the distance meshes (IQR
+0.06 -- 0.16, 45 blocks at f1.2; 0.11 at f1.5). Behind them still on 20952 (0.26x), 44602
+(0.27x), 8235 (0.65x) and 9710 (0.93x) at f1.2 and 8152 (0.68x) at f1.5, each less than at
+o0.01. The goal mesh is o1 from here.
 
 The cheap preset on the 21 oversized and base-only blocks, on the SIMP runs' meshes (cheap-ov-*:
 a5x8, 4287 a5x32, 63612 a2.5x8), against SIMP base and the default on the same: cheap - default
