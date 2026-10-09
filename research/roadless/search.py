@@ -789,10 +789,16 @@ class Built(NamedTuple):
     rows: Rows
 
 
-class PruneState(NamedTuple):
+class ExactState(NamedTuple):
+    """A state scored exactly, as a prune's rows keep it: its D, score and clearing (a copy)."""
     D: float
     score: Score
     removed: np.ndarray
+
+
+def owed(s: SearchState, *, d_max: float) -> bool:
+    """The states a prune's rows owe (scored exactly): at or below d_max, something cleared."""
+    return s.D <= d_max + 1e-12 and bool(s.c.removed.any())
 
 
 class PruneRows:
@@ -804,14 +810,14 @@ class PruneRows:
                  d_max: float, t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.d_max, self.t0 = (
             block_id, c.n, power, J0, P0, d_max, t0)
-        self.states: list[PruneState] = []
+        self.states: list[ExactState] = []
 
     def wants(self, s: SearchState) -> bool:
-        return s.D <= self.d_max + 1e-12 and bool(s.c.removed.any())
+        return owed(s, d_max=self.d_max)
 
     def on_step(self, s: SearchState, o: Outcome) -> None:
         if self.wants(s):
-            self.states.append(PruneState(D=s.D, score=s.score, removed=s.c.removed.copy()))
+            self.states.append(ExactState(D=s.D, score=s.score, removed=s.c.removed.copy()))
 
     def frame(self) -> pd.DataFrame:
         rows = [dict(block=self.block_id, n=self.n, step=0, D=0.0, perm=0.0, perm1=0.0,
@@ -843,15 +849,11 @@ class GrowPrune:
     def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
               d_max: float, t0: float, rnd: Round, screen: Valuer) -> Built:
         rec = PruneRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, t0=t0)
-        return Built(Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
-                          Until(Do(restore_round(step=self.restore, shortlist=self.shortlist,
-                                                 screen=screen)), Emptied()))), rec)
-
-
-class Level(NamedTuple):
-    D: float
-    score: Score
-    removed: np.ndarray
+        return Built(part=Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
+                               Until(Do(restore_round(step=self.restore,
+                                                      shortlist=self.shortlist, screen=screen)),
+                                     Emptied()))),
+                     rows=rec)
 
 
 class Archive:
@@ -861,18 +863,18 @@ class Archive:
 
     def __init__(self, *, step: float):
         self.step = step
-        self.best: dict[int, Level] = {}
+        self.best: dict[int, ExactState] = {}
         self.scored = 0
 
     def level(self, D: float) -> int:
         return int(np.ceil(D / self.step - 1e-9))
 
-    def offer(self, D: float, score: Score, removed: np.ndarray) -> None:
+    def offer(self, *, D: float, score: Score, removed: np.ndarray) -> None:
         L = self.level(D)
         if L not in self.best or score.J < self.best[L].score.J:
-            self.best[L] = Level(D=D, score=score, removed=removed.copy())
+            self.best[L] = ExactState(D=D, score=score, removed=removed.copy())
 
-    def beats(self, D: float, J: float, removed: np.ndarray) -> bool:
+    def beats(self, *, D: float, J: float, removed: np.ndarray) -> bool:
         """Strictly better than the level's best, and not the same clearing (an archived state
         re-added scores the same J on the CPU; on the GPU only to rounding)."""
         lv = self.best.get(self.level(D))
@@ -881,6 +883,8 @@ class Archive:
 
 @dataclass(frozen=True, kw_only=True)
 class ArchiveSpent:
+    """The cap on the conditional adds' scorings. Checked before each conditional-add round, so
+    archive.scored can pass the cap by up to one round's candidates less one."""
     archive: Archive
     cap: int
 
@@ -892,7 +896,8 @@ class ArchiveSpent:
 class BeatsArchive:
     """Floating search's conditional inclusion: the lowest-J candidate, kept only if its D is
     within d_max and its J beats the archive's best at its level; every other scored candidate
-    within d_max is offered to the archive (the kept one reaches it through FloatRows)."""
+    within d_max is offered to the archive, but for those at a kept one's level (the kept one
+    reaches it through FloatRows)."""
     archive: Archive
     d_max: float
 
@@ -904,22 +909,25 @@ class BeatsArchive:
         self.archive.scored += len(cands)
         if not cands:
             return None
-        best = min(cands, key=lambda cand: cand.score.J)    # the first lowest, as Spread's
-        after_ = {id(cand): after(s.c.removed, cand.move) for cand in cands}
-        D_of = {k: float(s.c.cost[r].sum()) for k, r in after_.items()}   # as s.D will be
-        r, D = after_[id(best)], D_of[id(best)]
-        kept = D <= self.d_max + 1e-12 and self.archive.beats(D, best.score.J, r)
-        for cand in cands:
-            if (cand is not best or not kept) and D_of[id(cand)] <= self.d_max + 1e-12:
-                self.archive.offer(D_of[id(cand)], cand.score, after_[id(cand)])
-        return best if kept else None
+        rs = [after(s.c.removed, cand.move) for cand in cands]   # in cands' order
+        Ds = [float(s.c.cost[r].sum()) for r in rs]                 # as s.D will be
+        i = min(range(len(cands)), key=lambda k: cands[k].score.J)  # the first lowest (Spread's)
+        kept = (Ds[i] <= self.d_max + 1e-12
+                and self.archive.beats(D=Ds[i], J=cands[i].score.J, removed=rs[i]))
+        # kept: nothing at its level is offered (none beats it, at best ties; a tie offered first
+        # would hold the level with a clearing never visited): FloatRows offers it after apply
+        L = self.archive.level(Ds[i])
+        for cand, r, D in zip(cands, rs, Ds):
+            if D <= self.d_max + 1e-12 and not (kept and self.archive.level(D) == L):
+                self.archive.offer(D=D, score=cand.score, removed=r)
+        return cands[i] if kept else None
 
 
 class FloatRows:
     """Floating search's rows: the archive's best per level, in increasing D, each with its full
     clearing (`clearing`, index order: the states are not nested, so no `cleared` deltas and
-    cleared_through does not read them), after a D 0 row. Every exact state at or below d_max
-    is offered to the archive."""
+    cleared_through does not read them), after a D 0 row, `t` the time when written. Every exact
+    state at or below d_max is offered to the archive."""
 
     def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
                  d_max: float, archive: Archive, t0: float):
@@ -928,11 +936,11 @@ class FloatRows:
         self.archive = archive
 
     def wants(self, s: SearchState) -> bool:
-        return s.D <= self.d_max + 1e-12 and bool(s.c.removed.any())
+        return owed(s, d_max=self.d_max)
 
     def on_step(self, s: SearchState, o: Outcome) -> None:
         if self.wants(s):               # apply scored it exactly
-            self.archive.offer(s.D, s.score, s.c.removed)
+            self.archive.offer(D=s.D, score=s.score, removed=s.c.removed)
 
     def frame(self) -> pd.DataFrame:
         rows = [dict(block=self.block_id, n=self.n, D=0.0, perm=0.0, perm1=0.0, clearing=[],
@@ -971,8 +979,9 @@ class FloatPrune:
                                   accept=BeatsArchive(archive=archive, d_max=d_max))
         restore = restore_round(step=self.restore, shortlist=self.shortlist, screen=screen)
         stop = AnyOf((ArchiveSpent(archive=archive, cap=self.cap), Above(d_max)))
-        return Built(Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
-                          Until(Seq((Do(restore), Until(Do(add), stop))), Emptied()))), rec)
+        return Built(part=Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
+                               Until(Seq((Do(restore), Until(Do(add), stop))), Emptied()))),
+                     rows=rec)
 
 
 class SearchPlan(Protocol):
@@ -1019,7 +1028,7 @@ def prune_block(b, plan: SearchPlan, *, rnd: Round,
     built.part(SearchState.start(c, power=power, score=Score(J0, P0), world=EXACT), built.rows)
     rows = built.rows.frame()
     print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {plan.name}: "
-          f"{len(rows) - 1} states; perm' {rows.perm.iloc[-1]:.3f} at D {rows.D.iloc[-1]:.3f}  "
+          f"{len(rows) - 1} rows; perm' {rows.perm.iloc[-1]:.3f} at D {rows.D.iloc[-1]:.3f}  "
           f"{time.time() - t0:.0f}s", flush=True)
     return rows
 
