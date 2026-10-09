@@ -1745,6 +1745,27 @@ error at the pilot's -0.00045 (where the sign crosses too: a5 +0.0002), and on 8
 0.0004 at 0.63 where distance gets 0.0003 (0.68x). Nothing to fix in the mesh; a comparison that
 scores a mesh by a smoothed bias rather than one mesh's |error| would not count the first two.
 
+The goal mesh on the oversized blocks (runs ovgoal-*-r1, on the SIMP base, default and cheap
+clearings of the 19 that run at a5x8). None fits uniform h 0.5 on a 32 GB card, so the reference
+is the finest goal mesh that does: f2 on the 12 smaller, f1.5 on the 7 larger (2.0 -- 5.0M
+cells). On 14401, the one whose uniform h 0.5 was scored, the reference reads 0.0007 low, against
+a5's 0.0095 and the equal-cell goal mesh's 0.0024. Against the reference, at a5's cells:
+
+    mesh             cells (of a5x8's)    mean |error|  per block, a5's error / the goal mesh's
+    a5x8             1                    0.00257
+    g2.5x8f1.4p2o1   0.98 (0.92 -- 1.07)  0.00041       median 4.9x (0.98 -- 69x), ahead on 18
+
+a5 reads low on all 19 (-0.0001 .. -0.0090); the goal mesh reads -0.0017 .. +0.0002, within
+0.0006 on 16 (not 14401, 45267, 62385), and the one tie is 62523 (0.0001 each). Both keep the
+reference's order of the clearings (on six blocks base and default are the same clearing). a5
+shrinks a gain a little, the goal mesh hardly: default - base moves by up to 0.0010 on a5 (32841,
+a gain of 0.034) and by up to 0.0003 on the goal mesh. 4287 (a5x32 against g2.5x32f1.5, 5.1 and
+5.0M cells) and 63612 (a2.5x8 against g2.5x32f1.1, 4.8 and 5.1M) have no finer mesh that fits:
+there the goal mesh reads +0.0027 and +0.0043 above the distance mesh on every clearing, on the
+side where the distance meshes' bias puts the truth. So the oversized blocks' composite scores
+("The oversized blocks at the metric's resolution") read low by about a5's 0.003 (14401 0.009)
+and their gains by at most 0.001; the goal mesh at the same cells leaves a sixth of that.
+
 The cheap preset on the 21 oversized and base-only blocks, on the SIMP runs' meshes (cheap-ov-*:
 a5x8, 4287 a5x32, 63612 a2.5x8), against SIMP base and the default on the same: cheap - default
 median -0.0107 (-0.0594 .. +0.0054), cheap - base median -0.0067 (-0.0588 .. +0.0258), at 0.50x
@@ -1773,23 +1794,24 @@ take 10 -- 14 s against uni's 7 s. `cluster.py --scans` sizes for the rasters: w
 between solves (0.6 GB per million unknowns) plus 40 bytes a pixel, or the solves' own estimate
 if larger (472 on a5x8: 30.1).
 
-Validation under the sightline metric (ss-res-59, ss100k2n2r30, the five clearings per block):
-51 of the 59 (the other 8 failed at launch or were killed mid-run when the cluster's project
-quota filled; they wait on space). Error against uniform h 0.5:
+Validation under the sightline metric (ss-res-59 and ss-res-59-r1, ss100k2n2r30, the five
+clearings per block), error against uniform h 0.5 on the 59:
 
     mesh             cells (median share)  median   p95 |error|  worst
-    a5x8             0.68                  -0.0004  0.0048       +0.0075 (33717)
+    a5x8             0.68                  -0.0005  0.0053       +0.0082 (7662)
     a10x8            0.81                  -0.0001  0.0018       +0.0028 (33717)
     a20x8            0.91                  -0.0000  0.0006       -0.0012 (20423)
-    g2.5x8f1.5p2o1   0.85                  -0.0000  0.0014       +0.0026 (33717)
+    g2.5x8f1.5p2o1   0.84                  -0.0000  0.0018       +0.0026 (33717)
 
 As under uni, the error falls with the share of the cells. The goal mesh's indicator solves in
 the run's conductance (System applies p.along), so it is goal-oriented here too, but it gains
 less: per block against the distance curve (a5 .. a20, log error linear in the share) at its
-share, 32 compared (16 all fine, 3 outside a5 .. a20's range), median 1.8x (4.1x under uni at
-f1.5), ahead on 31, worst 0.45x (22640); at equal error it spends a median 0.04 of the uniform
-cells fewer (IQR 0.02 -- 0.06, 19 blocks) against 0.11 under uni. Why it gains less under the
-sightline conductance is not looked at. Every mesh now runs under either metric.
+share, 40 compared (16 all fine, 3 outside a5 .. a20's range), median 1.9x (4.1x under uni at
+f1.5), ahead on 38, worst 0.18x (8152) and 0.45x (22640); at equal error it spends a median 0.05
+of the uniform cells fewer (IQR 0.02 -- 0.08, 24 blocks) against 0.11 under uni. 8152, a mild
+loser under uni (0.68x), is a clear one here: the goal mesh reads up to 0.0018 off at 0.63 of the
+cells, where a10 at 0.69 reads 0.0002. Why it gains less under the sightline conductance, and
+8152, are not looked at. Every mesh now runs under either metric.
 
 ### The add/remove search as one Strategy (owner 2026-10-08: prioritized)
 

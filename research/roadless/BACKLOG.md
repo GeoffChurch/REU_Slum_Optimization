@@ -36,15 +36,18 @@ Also closed: wider polish rounds (w16 = w8 at 1.28x) and late sampling on top of
 preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x -> 1.21x).
 
 Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry below:
-- **Goal-oriented refinement** (Coverage and model): built, the o1 goal mesh; the oversized
-  blocks wait on cluster space.
-- **Sightline and the greedy on the composite** (Coverage and model): built; 8 of the 59 wait
-  on cluster space.
+- **Goal-oriented refinement** (Coverage and model): done, the o1 goal mesh, on the 59 and the
+  oversized blocks.
+- **Sightline and the greedy on the composite** (Coverage and model): done, on the 59.
 - **The cheap preset on the composite** (Coverage and model): done, on the oversized blocks.
 - **The add/remove search as one Strategy** (New methods): built, with floating search.
-- **An outcome model for kernelcore** (Experiment design; other repo): spec for the owner's
-  review, GeoffChurch/kernelcore `docs/superpowers/specs/2026-10-09-outcome-models-design.md`
-  (a Dirichlet posterior over atoms, not a Student-t, which NOTES found pins the mean at 0).
+- **An outcome model for kernelcore** (Experiment design; other repo): spec written,
+  GeoffChurch/kernelcore `docs/superpowers/specs/2026-10-09-outcome-models-design.md` (a
+  Dirichlet posterior over atoms, not a Student-t, which NOTES found pins the mean at 0), and
+  reviewed: not to build as written (reweighting collapses past about 4 blocks even with no grid,
+  short horizons are worth exactly 0, the grid's alpha decides the stop). The review recommends
+  exact cost-aware value of information inside seqscreen.py instead (the posterior mean's Polya
+  urn, a stop when no batch of blocks is worth its GPU time, a floor near 15); the owner's call.
 
 Open:
 - **The owner's tau** for sequential stopping (the smallest mean gain worth a variant's time).
@@ -182,16 +185,17 @@ Not pursued, with what would change that:
   with the buildings open (o1) it is ahead of distance on 49 of 53 blocks at f1.2 (2.8x less
   error at equal cells, median; 0.11 of the uniform cells fewer at equal error). Its five losers
   are two sign crossings of the distance meshes' bias (20952, 44602: a5 near zero by luck), a tie
-  and two mild losses (NOTES). Next: goal meshes on the oversized blocks (running: ovgoal-*).
+  and two mild losses (NOTES). On the 19 oversized blocks at a5's cells it leaves a sixth of a5's
+  error (median 4.9x less, ahead on 18, the 19th a tie), against the finest goal mesh that fits.
 - **Sightline and the greedy on the composite** (**prioritized**). Sightline and SoftSightline
   scan raster lines (`needs_raster`), as the metric or as the greedy's translucent search; both
   raise on a composite. The greedy under uni has no raster check but has never run on one: first
   establish that it does (against uniform h 0.5 on the 59), then give the sightline scans a
   composite form. Both done (NOTES, "Sightline on the composite"): the scans run on the fine
-  raster, painted and averaged per cell; under the sightline metric on 51 of the 59 every mesh
-  reads as under uni (a20 p95 |error| 0.0006), the goal mesh ahead of distance on 31 of 32 but by
-  less (1.8x, 0.04 of the cells). Next: the 8 left (cluster quota), then the sightline presets on
-  the oversized blocks.
+  raster, painted and averaged per cell; under the sightline metric on the 59 every mesh reads as
+  under uni (a20 p95 |error| 0.0006), the goal mesh ahead of distance on 38 of 40 but by less
+  (1.9x, 0.05 of the cells; 8152 0.18x, not looked at). Next: the sightline presets on the
+  oversized blocks.
 - **The cheap preset on the composite** (**prioritized**). polish_greedy.py builds a uniform h 0.5
   grid; it takes a mesh, and greedy + polish runs on the oversized blocks. Needs the greedy on the
   composite (above).
