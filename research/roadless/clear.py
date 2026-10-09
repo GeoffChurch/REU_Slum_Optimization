@@ -243,7 +243,8 @@ def _next_target(c: Clearing, delta: float) -> tuple[float, float]:
 class GramSource(Protocol):
     """How alike the candidates' effects are: a PSD matrix over `cand` whose normalised entries
     are the correlations rho_ij that `search.Diverse` builds its batch from."""
-    name: str
+    @property
+    def name(self) -> str: ...
 
     def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray: ...
 
@@ -576,18 +577,20 @@ def run(workers: int, picker: engine.Round, h: float, d_max: float, pop: str, po
 
 
 if __name__ == "__main__":
+    import clear        # run as a script this file would be `__main__`, and search's `clear` a
+                        # second copy of this module (its own EXACT-side classes and helpers)
+    import search as engine     # `search` is a conductance elsewhere in this module
     if sys.argv[1] == "loo":
-        loo(int(sys.argv[2]), float(sys.argv[3]) if len(sys.argv) > 3 else 0.5,
-            sys.argv[4] if len(sys.argv) > 4 else "count",
-            float(sys.argv[5]) if len(sys.argv) > 5 else 1.0)
+        clear.loo(int(sys.argv[2]), float(sys.argv[3]) if len(sys.argv) > 3 else 0.5,
+                  sys.argv[4] if len(sys.argv) > 4 else "count",
+                  float(sys.argv[5]) if len(sys.argv) > 5 else 1.0)
     elif sys.argv[1] in ("run", "some"):
         # run <workers> <picker> <h> <d_max> <pop> <p> <along>[@<search along>] <solver> [ids,]
         scans = lifted.scans_of(sys.argv[9])
         specs = sys.argv[8].split("@")
-        import search as engine     # `search` is a conductance elsewhere in this module
-        run(int(sys.argv[2]), engine.greedy_round(sys.argv[3], sweep_of(sys.argv[9])),
-            float(sys.argv[4]), float(sys.argv[5]),
-            sys.argv[6], float(sys.argv[7]), lifted.along_of(specs[0], scans),
-            lifted.solver_of(sys.argv[9]),
-            lifted.along_of(specs[1], scans) if len(specs) == 2 else None,
-            sys.argv[10].split(",") if sys.argv[1] == "some" else None)
+        clear.run(int(sys.argv[2]), engine.greedy_round(sys.argv[3], clear.sweep_of(sys.argv[9])),
+                  float(sys.argv[4]), float(sys.argv[5]),
+                  sys.argv[6], float(sys.argv[7]), lifted.along_of(specs[0], scans),
+                  lifted.solver_of(sys.argv[9]),
+                  lifted.along_of(specs[1], scans) if len(specs) == 2 else None,
+                  sys.argv[10].split(",") if sys.argv[1] == "some" else None)

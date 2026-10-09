@@ -634,10 +634,8 @@ class Incumbent:
         s = search.SearchState(c=c, power=self.rel.power, score=search.Score(self.J, np.nan),
                                world=self.scorer, order=[], scorings=0,
                                movable=np.isin(np.arange(c.n), movable))
-        moves = search.Until(
-            search.Do(search.exchange_round(self.scorer, budget=self.budget, width=width,
-                                            pairs=pairs, pool=PAIR_POOL, tries=tries)),
-            search.Spent(tries))(s, search.Silent())
+        moves = search.exchange(self.scorer, budget=self.budget, width=width, pairs=pairs,
+                                pool=PAIR_POOL, tries=tries)(s, search.Silent())
         self.J, self.r, used = s.score.J, c.removed.astype(float), s.scorings
         c.removed[:] = False                    # relax.one keeps its clearings in x, not here
         log(f"  polish: {len(movable)} {'buildings' if everything else 'undecided buildings'}, "
