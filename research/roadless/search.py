@@ -34,7 +34,7 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
 import clear  # noqa: E402
-from clear import RTOL_SCORE, Clearing, _exact, rows_dir, sweep_of  # noqa: E402
+from clear import RTOL_SCORE, Clearing, rows_dir, sweep_of  # noqa: E402
 
 R = TypeVar("R")
 
@@ -708,94 +708,172 @@ def polish(world: Graded, *, budget: float, width: int, pairs: bool, pool: int,
 EPS_SCREEN = 1e-6               # the eps world the shortlist is scored in (the real one to ~1e-3)
 
 
-class GrowPrune(NamedTuple):
+class Order(NamedTuple):
+    order: np.ndarray           # the cleared buildings, least loss of J per unit of
+                                # population first
+
+
+@dataclass(frozen=True)
+class RestoreTension:
+    """The restore tension (Clearing.tension(restore=True): the finite difference toward
+    everything put back), per unit of population."""
+
+    def rank(self, s: SearchState) -> Order:
+        c = s.c
+        on = np.flatnonzero(c.removed)
+        loss = -c.tension(s.power, restore=True).g[on] / c.cost[on]
+        return Order(on[np.argsort(loss, kind="stable")])
+
+
+@dataclass(frozen=True, kw_only=True)
+class Screen:
+    """The first-order ranking's top max(m, 2k) re-ranked by each one's own loss in `world`
+    (the first-order ranking alone, rank correlation 0.6 -- 0.7 with the exact loss, lost 0.22
+    Lens A on a small block where exact backward elimination beat the greedy). Its solves
+    count in s.scorings."""
+    world: Valuer
+    m: int
+
+    def refine(self, s: SearchState, r: Order, first_k: int) -> Order:
+        c = s.c
+        cand = r.order[:max(self.m, 2 * first_k)]
+        x = c.removed.astype(float)
+        now = self.world.value(x)
+        own = np.empty(len(cand))
+        for i, j in enumerate(cand):
+            x[j] = 0.0
+            own[i] = (self.world.value(x) - now) / c.cost[j]
+            x[j] = 1.0
+        s.scorings += len(cand) + 1
+        return Order(np.concatenate([cand[np.argsort(own, kind="stable")], r.order[len(cand):]]))
+
+
+@dataclass(frozen=True)
+class ToLevel:
+    """Put back, in ranking order, until the cleared share falls to the next multiple of
+    `step` below (at most one building past it)."""
+    step: float
+
+    def size(self, s: SearchState, r: Order) -> int:
+        c = s.c
+        D = float(c.cost[c.removed].sum())
+        target = (np.ceil(D / self.step - 1e-9) - 1) * self.step
+        return int(np.searchsorted(np.cumsum(c.cost[r.order]), D - target - 1e-12)) + 1
+
+    def tiers(self, s: SearchState, r: Order) -> list[Callable[[], Tier]]:
+        batch = [int(j) for j in r.order[:self.size(s, r)]]
+        return [lambda: Batches([Move([], batch)], np.zeros(1))]
+
+
+def restore_round(*, step: float, shortlist: int, screen: Valuer) -> Round[Order]:
+    return Round(name=f"r{step:g}" + (f"m{shortlist}" if shortlist else ""),
+                 rank=RestoreTension(),
+                 refine=Screen(world=screen, m=shortlist) if shortlist else None,
+                 build=ToLevel(step), evaluate=All(EXACT), accept=Only())
+
+
+class Rows(Record, Protocol):
+    def frame(self) -> pd.DataFrame: ...
+
+
+class Built(NamedTuple):
+    part: Part
+    rows: Rows
+
+
+class PruneState(NamedTuple):
+    D: float
+    score: Score
+    removed: np.ndarray
+
+
+class PruneRows:
+    """Grow-then-prune's rows: every state at or below d_max with something cleared, scored
+    exactly; written in increasing D in the greedy's format, `cleared` in index order (the
+    states are nested), `t` the time when written."""
+
+    def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+                 d_max: float, t0: float):
+        self.block_id, self.n, self.power, self.J0, self.P0, self.d_max, self.t0 = (
+            block_id, c.n, power, J0, P0, d_max, t0)
+        self.states: list[PruneState] = []
+
+    def wants(self, s: SearchState) -> bool:
+        return s.D <= self.d_max + 1e-12 and bool(s.c.removed.any())
+
+    def on_step(self, s: SearchState, o: Outcome) -> None:
+        if self.wants(s):
+            self.states.append(PruneState(s.D, s.score, s.c.removed.copy()))
+
+    def frame(self) -> pd.DataFrame:
+        rows = [dict(block=self.block_id, n=self.n, step=0, D=0.0, perm=0.0, perm1=0.0,
+                     cleared=[], P0=self.P0, t=0.0)]
+        prev = np.zeros(self.n, dtype=bool)
+        for st in reversed(self.states):
+            rows.append(dict(block=self.block_id, n=self.n, step=len(rows), D=st.D,
+                             perm=1 - (st.score.J / self.J0) ** (1 / self.power),
+                             perm1=1 - st.score.P / self.P0,
+                             cleared=np.flatnonzero(st.removed & ~prev).tolist(), P0=self.P0,
+                             t=time.time() - self.t0))
+            prev = st.removed
+        return pd.DataFrame(rows)
+
+
+@dataclass(frozen=True, kw_only=True)
+class GrowPrune:
     grow: float                 # the greedy clears up to grow x d_max
     picker: str                 # the greedy's picker
     restore: float              # population share restored per round
     shortlist: int              # first-order shortlist rescored per round (0: first order only)
+    screen_eps: float           # the eps world the shortlist is scored in
 
     @property
     def name(self) -> str:
         return (f"GP{self.grow:g}x{self.picker}r{self.restore:g}"
                 + (f"m{self.shortlist}" if self.shortlist else ""))
 
+    def build(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+              d_max: float, t0: float, rnd: Round, screen: Valuer) -> Built:
+        rec = PruneRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, t0=t0)
+        return Built(Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
+                          Until(Do(restore_round(step=self.restore, shortlist=self.shortlist,
+                                                 screen=screen)), Emptied()))), rec)
+
 
 def plan_of(spec: str) -> GrowPrune:
     m = re.fullmatch(r"GP([0-9.]+)x(\S+?)r([0-9.]+)(?:m(\d+))?", spec)
     if m is None:
         raise ValueError(f"unknown search {spec!r}")
-    return GrowPrune(float(m.group(1)), m.group(2), float(m.group(3)),
-                     0 if m.group(4) is None else int(m.group(4)))
+    return GrowPrune(grow=float(m.group(1)), picker=m.group(2), restore=float(m.group(3)),
+                     shortlist=0 if m.group(4) is None else int(m.group(4)),
+                     screen_eps=EPS_SCREEN)
 
 
-def restore_batch(c: Clearing, power: float, step: float, shortlist: int,
-                  screen: Valuer) -> np.ndarray:
-    """The cleared buildings to put back this round: least loss of J per unit of population
-    first, until the cleared share falls to the next multiple of `step` below. The loss is
-    first order (the restore tension), or for its `shortlist` cheapest each restore's own loss
-    in the eps world at EPS_SCREEN (the first-order ranking alone, rank correlation 0.6 -- 0.7
-    with the exact loss, lost 0.22 Lens A on a small block where exact backward elimination
-    beat the greedy)."""
-    on = np.flatnonzero(c.removed)
-    loss = -c.tension(power, restore=True).g[on] / c.cost[on]
-    D = float(c.cost[on].sum())
-    target = (np.ceil(D / step - 1e-9) - 1) * step
-    order = on[np.argsort(loss, kind="stable")]
-    k = int(np.searchsorted(np.cumsum(c.cost[order]), D - target - 1e-12)) + 1
-    if shortlist:
-        cand = order[:max(shortlist, 2 * k)]
-        x = c.removed.astype(float)
-        now = screen.value(x)
-        own = np.empty(len(cand))
-        for i, j in enumerate(cand):
-            x[j] = 0.0
-            own[i] = (screen.value(x) - now) / c.cost[j]
-            x[j] = 1.0
-        order = np.concatenate([cand[np.argsort(own, kind="stable")], order[len(cand):]])
-        k = int(np.searchsorted(np.cumsum(c.cost[order]), D - target - 1e-12)) + 1
-    return order[:k]
-
-
-def grow_prune(b, plan: GrowPrune, power: float, along: str, device: str, d_max: float
-               ) -> pd.DataFrame:
+def prune_block(b, plan: GrowPrune, rnd: Round, screen_of: Callable[[Clearing, float], Valuer],
+                power: float, along: str, device: str, d_max: float) -> pd.DataFrame:
     p = lifted.Params(3.0, 8, along=lifted.along_of(along, lifted.scans_of(device)),
                       solver=lifted.solver_of(device))
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
     c = Clearing(b, mesh, p, population=common.POPULATIONS["area"])
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
-    rnd = greedy_round(plan.picker, sweep_of(device))
-    greedy(rnd, plan.grow * d_max)(
-        SearchState.start(c, power=power, score=Score(J0, P0), world=EXACT), Silent())
-    print(f"  {b.block_id} grown to D {float(c.cost[c.removed].sum()):.3f} "
-          f"{time.time() - t0:.0f}s", flush=True)
-    # the eps world is the caller's to build; search.py does not import relax at the top
-    import relax
-    screen = relax.Relaxation(c, power, q=1.0, rtol=RTOL_SCORE, eps=EPS_SCREEN)
-    states = []                                     # (D, J, P, cleared) at or below d_max
-    while c.removed.any():
-        c.removed[restore_batch(c, power, plan.restore, plan.shortlist, screen)] = False
-        D = float(c.cost[c.removed].sum())
-        if D <= d_max + 1e-12 and c.removed.any():
-            J, P = _exact(c, [], power)
-            states.append((D, J, P, c.removed.copy()))
-    rows = [dict(block=b.block_id, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[],
-                 P0=P0, t=0.0)]
-    prev = np.zeros(c.n, dtype=bool)
-    for D, J, P, r in reversed(states):
-        rows.append(dict(block=b.block_id, n=c.n, step=len(rows), D=D,
-                         perm=1 - (J / J0) ** (1 / power), perm1=1 - P / P0,
-                         cleared=np.flatnonzero(r & ~prev).tolist(), P0=P0,
-                         t=time.time() - t0))
-        prev = r
+    built = plan.build(b.block_id, c, power, J0, P0, d_max, t0, rnd, screen_of(c, power))
+    built.part(SearchState.start(c, power=power, score=Score(J0, P0), world=EXACT), built.rows)
+    rows = built.rows.frame()
     print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {plan.name}: "
-          f"{len(rows) - 1} states; perm' {rows[-1]['perm']:.3f} at D {rows[-1]['D']:.3f}  "
+          f"{len(rows) - 1} states; perm' {rows.perm.iloc[-1]:.3f} at D {rows.D.iloc[-1]:.3f}  "
           f"{time.time() - t0:.0f}s", flush=True)
-    return pd.DataFrame(rows)
+    return rows
 
 
 def main(ids: list[str], plan: GrowPrune, power: float, device: str, along: str,
          d_max: float) -> None:
+    import relax  # the edge binds the eps world; search.py's library code does not import relax
+
+    def screen_of(c: Clearing, power: float) -> Valuer:
+        return relax.Relaxation(c, power, q=1.0, rtol=RTOL_SCORE, eps=plan.screen_eps)
+
+    rnd = greedy_round(plan.picker, sweep_of(device))
     out = rows_dir(plan.name, 0.5, "area", power, along)
     out.mkdir(parents=True, exist_ok=True)
     failed = []
@@ -804,7 +882,7 @@ def main(ids: list[str], plan: GrowPrune, power: float, device: str, along: str,
         if f.exists():
             continue
         try:
-            rows = grow_prune(b, plan, power, along, device, d_max)
+            rows = prune_block(b, plan, rnd, screen_of, power, along, device, d_max)
         except Exception as e:
             print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]}", flush=True)
             failed.append(b.block_id)
@@ -817,6 +895,8 @@ def main(ids: list[str], plan: GrowPrune, power: float, device: str, along: str,
 
 
 if __name__ == "__main__":
-    main(sys.argv[1].split(","), plan_of(sys.argv[2]), float(sys.argv[3]), sys.argv[4],
-         sys.argv[5] if len(sys.argv) > 5 else "uni",
-         float(sys.argv[6]) if len(sys.argv) > 6 else 0.15)
+    import search       # run as a script this file would be `__main__`, and relax's `search`
+                        # a second copy of the engine (its own EXACT and classes)
+    search.main(sys.argv[1].split(","), search.plan_of(sys.argv[2]), float(sys.argv[3]),
+                sys.argv[4], sys.argv[5] if len(sys.argv) > 5 else "uni",
+                float(sys.argv[6]) if len(sys.argv) > 6 else 0.15)

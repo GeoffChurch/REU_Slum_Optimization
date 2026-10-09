@@ -226,14 +226,6 @@ def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
               f"{exact[pick].max() / exact.max():.3f} of the true best", flush=True)
 
 
-def _exact(c: Clearing, cleared: list[int], power: float) -> tuple[float, float]:
-    r = c.removed.copy()
-    r[cleared] = True
-    op = c.open_(r)
-    sol = lifted.solve(c.sc.grid, op, c.sc.f, c.p, rtol=RTOL_SCORE)
-    return c.sc.J(c.sc.home_u_of(sol, op), power), sol.P
-
-
 def exact(c: Clearing, removed: np.ndarray, power: float) -> tuple[float, float]:
     """(J_power, P) of the clearing `removed`: real geometry, the metric conductance,
     RTOL_SCORE. The one exact entry point (memprobe_greedy instruments it)."""
