@@ -247,6 +247,14 @@ def _exact(c: Clearing, cleared: list[int], power: float) -> tuple[float, float]
     return c.sc.J(c.sc.home_u_of(sol, op), power), sol.P
 
 
+def exact(c: Clearing, removed: np.ndarray, power: float) -> tuple[float, float]:
+    """(J_power, P) of the clearing `removed`: real geometry, the metric conductance,
+    RTOL_SCORE. The one exact entry point (memprobe_greedy instruments it)."""
+    op = c.open_(removed)
+    sol = lifted.solve(c.sc.grid, op, c.sc.f, c.p, rtol=RTOL_SCORE)
+    return c.sc.J(c.sc.home_u_of(sol, op), power), sol.P
+
+
 def _next_target(c: Clearing, delta: float) -> tuple[float, float]:
     """(D now, the next multiple of delta above it)."""
     D = float(c.cost[c.removed].sum())

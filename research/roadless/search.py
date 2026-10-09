@@ -22,7 +22,9 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import NamedTuple
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Generic, NamedTuple, Protocol, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -31,8 +33,435 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
+import clear  # noqa: E402
 from clear import RTOL_SCORE, Clearing, _exact, grow, picker_of, rows_dir, sweep_of  # noqa: E402
-from relax import Relaxation  # noqa: E402
+
+R = TypeVar("R")
+
+
+class Score(NamedTuple):
+    J: float                    # J_power
+    P: float                    # P (J_1); NaN in an eps world
+
+
+UNSCORED = Score(np.nan, np.nan)
+
+
+class World(Protocol):
+    """Where a clearing is scored."""
+
+    def score(self, s: SearchState, removed: np.ndarray) -> Score: ...
+
+
+class _Exact:
+    """The exact world: real geometry, the metric conductance, RTOL_SCORE (clear.exact, looked
+    up at call time so memprobe_greedy's instrumentation applies)."""
+
+    def score(self, s: SearchState, removed: np.ndarray) -> Score:
+        return Score(*clear.exact(s.c, removed, s.power))
+
+
+EXACT = _Exact()
+
+
+class Valuer(Protocol):
+    """An eps world's J of a design x (relax.Relaxation)."""
+
+    def value(self, x: np.ndarray) -> float: ...
+
+
+class Move(NamedTuple):
+    add: list[int]              # in pick order
+    restore: list[int]
+
+
+class Candidate(NamedTuple):
+    move: Move
+    est: float                  # its linearized change in J (lower better)
+    score: Score | None         # in the evaluator's world, if scored
+
+
+class Tier(Protocol):
+    """One tier of a round's moves: their estimates, each move materialised only when looked at."""
+    est: np.ndarray
+
+    def move(self, i: int) -> Move: ...
+
+
+@dataclass(frozen=True)
+class Batches:
+    """A tier of explicit moves (a batch's buildings in pick order)."""
+    moves: list[Move]
+    est: np.ndarray
+
+    def move(self, i: int) -> Move:
+        return self.moves[i]
+
+
+@dataclass(frozen=True)
+class IndexMoves:
+    """A tier of small moves as a (4, M) array: rows 0-1 buildings added, 2-3 restored, -1
+    none (exchange's ~10^6 swaps, materialised only for the few scored)."""
+    idx: np.ndarray
+    est: np.ndarray
+
+    def move(self, i: int) -> Move:
+        return Move([int(x) for x in self.idx[:2, i] if x >= 0],
+                    [int(x) for x in self.idx[2:, i] if x >= 0])
+
+
+class Outcome(NamedTuple):
+    cleared: list[int]          # in pick order
+    restored: list[int]
+    score: Score | None         # the new state's, in `world`
+    world: World | None
+
+
+@dataclass
+class SearchState:
+    """One block's search: c.removed is the clearing (only `apply` changes it); `score` the
+    current state's in `world` (UNSCORED, None: not scored); `order` every building cleared, in
+    pick order (relax.cut_to_budget's); `scorings` the candidate scorings spent (the caps);
+    `movable` the buildings a move may touch."""
+    c: Clearing
+    power: float
+    score: Score
+    world: World | None
+    order: list[int]
+    scorings: int
+    movable: np.ndarray
+
+    @classmethod
+    def start(cls, c: Clearing, power: float, score: Score, world: World | None) -> SearchState:
+        """From c's current clearing, nothing spent, every building movable."""
+        return cls(c, power, score, world, [], 0, np.ones(c.n, dtype=bool))
+
+    @property
+    def D(self) -> float:
+        return float(self.c.cost[self.c.removed].sum())
+
+
+def after(removed: np.ndarray, m: Move) -> np.ndarray:
+    """The clearing after move m."""
+    r = removed.copy()
+    r[m.add] = True
+    r[m.restore] = False
+    return r
+
+
+class Step(Protocol):
+    def step(self, s: SearchState) -> Outcome | None: ...
+
+
+class Record(Protocol):
+    """What a run owes: which states must be scored exactly, and what it keeps of each step."""
+
+    def wants(self, s: SearchState) -> bool: ...
+
+    def on_step(self, s: SearchState, o: Outcome) -> None: ...
+
+
+class Stop(Protocol):
+    def done(self, s: SearchState) -> bool: ...
+
+
+class Part(Protocol):
+    """A schedule: runs on `s` under `rec`, returns the moves it made."""
+
+    def __call__(self, s: SearchState, rec: Record) -> int: ...
+
+
+class Ranker(Protocol[R]):
+    def rank(self, s: SearchState) -> R: ...
+
+
+class Refiner(Protocol[R]):
+    def refine(self, s: SearchState, r: R, first_k: int) -> R: ...
+
+
+class Builder(Protocol[R]):
+    """Candidate moves as tiers (a later tier only if no move of an earlier one is accepted),
+    each a thunk that must not hold the ranking (Round drops it before any is called)."""
+
+    def tiers(self, s: SearchState, r: R) -> list[Callable[[], Tier]]: ...
+
+    def size(self, s: SearchState, r: R) -> int: ...
+
+
+class Evaluator(Protocol):
+    world: World
+
+    def evaluate(self, s: SearchState, t: Tier, needs_score: bool) -> list[Candidate]: ...
+
+
+class Acceptor(Protocol):
+    @property
+    def needs_score(self) -> bool: ...     # whether choosing needs the candidates scored
+
+    def accept(self, s: SearchState, cands: list[Candidate]) -> Candidate | None: ...
+
+
+@dataclass(frozen=True, kw_only=True)
+class Round(Generic[R]):
+    """One round of an add/remove search: rank the buildings (first order), optionally refine
+    a shortlist's ranking in a costlier world, build tiers of candidate moves, then per tier
+    evaluate and accept; the first tier with an accepted move gives the outcome."""
+    name: str
+    rank: Ranker[R]
+    refine: Refiner[R] | None
+    build: Builder[R]
+    evaluate: Evaluator
+    accept: Acceptor
+
+    def step(self, s: SearchState) -> Outcome | None:
+        r = self.rank.rank(s)
+        if self.refine is not None:
+            r = self.refine.refine(s, r, self.build.size(s, r))
+        tiers = self.build.tiers(s, r)
+        del r                   # the tension's system and hierarchy, before any scoring solve
+        for tier in tiers:
+            cand = self.accept.accept(s, self.evaluate.evaluate(s, tier(),
+                                                                self.accept.needs_score))
+            if cand is not None:
+                return Outcome(cand.move.add, cand.move.restore, cand.score,
+                               None if cand.score is None else self.evaluate.world)
+        return None
+
+
+def apply(s: SearchState, o: Outcome, rec: Record) -> None:
+    """Make the move; score the new state exactly if `rec` wants it and the round did not;
+    tell `rec`."""
+    c = s.c
+    if o.cleared:
+        c.removed[o.cleared] = True
+        s.order.extend(o.cleared)
+    if o.restored:
+        c.removed[o.restored] = False
+    s.score, s.world = (UNSCORED, None) if o.score is None else (o.score, o.world)
+    if rec.wants(s) and s.world is not EXACT:
+        s.score, s.world = EXACT.score(s, c.removed), EXACT
+    rec.on_step(s, o)
+
+
+@dataclass(frozen=True)
+class Do:
+    step: Step
+
+    def __call__(self, s: SearchState, rec: Record) -> int:
+        o = self.step.step(s)
+        if o is None:
+            return 0
+        apply(s, o, rec)
+        return 1
+
+
+@dataclass(frozen=True)
+class Until:
+    """`part` again and again until `stop`, or until it makes no move."""
+    part: Part
+    stop: Stop
+
+    def __call__(self, s: SearchState, rec: Record) -> int:
+        n = 0
+        while not self.stop.done(s):
+            k = self.part(s, rec)
+            if k == 0:
+                break
+            n += k
+        return n
+
+
+@dataclass(frozen=True)
+class Seq:
+    parts: tuple[Part, ...]
+
+    def __call__(self, s: SearchState, rec: Record) -> int:
+        n = 0
+        for p in self.parts:
+            n += p(s, rec)
+        return n
+
+
+@dataclass(frozen=True)
+class With:
+    """`part` under its own record (a phase whose states the run does not owe)."""
+    rec: Record
+    part: Part
+
+    def __call__(self, s: SearchState, rec: Record) -> int:
+        return self.part(s, self.rec)
+
+
+@dataclass(frozen=True)
+class Rescore:
+    """The state scored in `world` (not a candidate scoring): before a phase that compares in
+    it."""
+    world: World
+
+    def __call__(self, s: SearchState, rec: Record) -> int:
+        s.score, s.world = self.world.score(s, s.c.removed), self.world
+        return 0
+
+
+@dataclass(frozen=True)
+class Reached:
+    """The greedy's stop: D at or past d, or nothing left to clear."""
+    d: float
+
+    def done(self, s: SearchState) -> bool:
+        return s.D >= self.d - 1e-12 or bool(s.c.removed.all())
+
+
+@dataclass(frozen=True)
+class Emptied:
+    def done(self, s: SearchState) -> bool:
+        return not s.c.removed.any()
+
+
+@dataclass(frozen=True)
+class Spent:
+    n: int
+
+    def done(self, s: SearchState) -> bool:
+        return s.scorings >= self.n
+
+
+@dataclass(frozen=True)
+class Above:
+    d: float
+
+    def done(self, s: SearchState) -> bool:
+        return s.D > self.d + 1e-12
+
+
+@dataclass(frozen=True)
+class AnyOf:
+    stops: tuple[Stop, ...]
+
+    def done(self, s: SearchState) -> bool:
+        return any(x.done(s) for x in self.stops)
+
+
+@dataclass(frozen=True)
+class Silent:
+    """Owes nothing: no state scored for it, nothing kept."""
+
+    def wants(self, s: SearchState) -> bool:
+        return False
+
+    def on_step(self, s: SearchState, o: Outcome) -> None:
+        pass
+
+
+@dataclass(frozen=True)
+class All:
+    """Score every move of a tier in `world`, unless it has one and no score is needed (Spread's
+    'score only if there is a choice', Screened's always, as one rule)."""
+    world: World
+
+    def evaluate(self, s: SearchState, t: Tier, needs_score: bool) -> list[Candidate]:
+        n = len(t.est)
+        if n == 1 and not needs_score:
+            return [Candidate(t.move(0), float(t.est[0]), None)]
+        out = []
+        for i in range(n):
+            m = t.move(i)
+            s.scorings += 1
+            out.append(Candidate(m, float(t.est[i]), self.world.score(s, after(s.c.removed, m))))
+        return out
+
+
+@dataclass(frozen=True, kw_only=True)
+class Top:
+    """Score the best `width` moves of a tier by estimate (fewer as `tries` runs out), in
+    estimate order (exchange's)."""
+    world: World
+    width: int
+    tries: int
+
+    def evaluate(self, s: SearchState, t: Tier, needs_score: bool) -> list[Candidate]:
+        if s.world is not self.world:
+            raise ValueError("the state is not scored in this world: Rescore before the phase")
+        e = t.est
+        k = min(self.width, self.tries - s.scorings, int(np.isfinite(e).sum()))
+        if k == 0:
+            return []
+        top = np.argpartition(e, k - 1)[:k]
+        out = []
+        for i in top[np.argsort(e[top])]:
+            m = t.move(int(i))
+            s.scorings += 1
+            out.append(Candidate(m, float(e[i]), self.world.score(s, after(s.c.removed, m))))
+        return out
+
+
+@dataclass(frozen=True)
+class Only:
+    """The tier's one move."""
+
+    @property
+    def needs_score(self) -> bool:
+        return False
+
+    def accept(self, s: SearchState, cands: list[Candidate]) -> Candidate | None:
+        return cands[0] if cands else None
+
+
+class Key(Protocol):
+    """Lower is better."""
+
+    def of(self, s: SearchState, cand: Candidate) -> float: ...
+
+
+@dataclass(frozen=True)
+class LowestJ:
+    def of(self, s: SearchState, cand: Candidate) -> float:
+        return cand.score.J
+
+
+@dataclass(frozen=True)
+class GainPerCost:
+    """Screened's: the exact gain over the state's J per unit of population, negated."""
+
+    def of(self, s: SearchState, cand: Candidate) -> float:
+        return -(s.score.J - cand.score.J) / s.c.cost[cand.move.add[0]]
+
+
+@dataclass(frozen=True)
+class Best:
+    """Always a move: the first with the lowest key (one candidate: it, unscored if it was)."""
+    key: Key
+
+    @property
+    def needs_score(self) -> bool:
+        return False
+
+    def accept(self, s: SearchState, cands: list[Candidate]) -> Candidate | None:
+        if len(cands) <= 1:
+            return cands[0] if cands else None
+        best, bestv = None, np.inf
+        for cand in cands:
+            v = self.key.of(s, cand)
+            if v < bestv:
+                best, bestv = cand, v
+        return best
+
+
+@dataclass(frozen=True)
+class IfBetter:
+    """The first scored move with the lowest J, if strictly below the state's (exchange's)."""
+
+    @property
+    def needs_score(self) -> bool:
+        return True
+
+    def accept(self, s: SearchState, cands: list[Candidate]) -> Candidate | None:
+        best = None
+        for cand in cands:
+            if cand.score.J < s.score.J and (best is None or cand.score.J < best.score.J):
+                best = cand
+        return best
+
 
 EPS_SCREEN = 1e-6               # the eps world the shortlist is scored in (the real one to ~1e-3)
 
@@ -58,7 +487,7 @@ def plan_of(spec: str) -> GrowPrune:
 
 
 def restore_batch(c: Clearing, power: float, step: float, shortlist: int,
-                  screen: Relaxation) -> np.ndarray:
+                  screen: Valuer) -> np.ndarray:
     """The cleared buildings to put back this round: least loss of J per unit of population
     first, until the cleared share falls to the next multiple of `step` below. The loss is
     first order (the restore tension), or for its `shortlist` cheapest each restore's own loss
@@ -98,7 +527,9 @@ def grow_prune(b, plan: GrowPrune, power: float, along: str, device: str, d_max:
         pass
     print(f"  {b.block_id} grown to D {float(c.cost[c.removed].sum()):.3f} "
           f"{time.time() - t0:.0f}s", flush=True)
-    screen = Relaxation(c, power, q=1.0, rtol=RTOL_SCORE, eps=EPS_SCREEN)
+    # the eps world is the caller's to build; search.py does not import relax at the top
+    import relax
+    screen = relax.Relaxation(c, power, q=1.0, rtol=RTOL_SCORE, eps=EPS_SCREEN)
     states = []                                     # (D, J, P, cleared) at or below d_max
     while c.removed.any():
         c.removed[restore_batch(c, power, plan.restore, plan.shortlist, screen)] = False
