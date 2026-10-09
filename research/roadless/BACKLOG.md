@@ -183,12 +183,16 @@ Not pursued, with what would change that:
   adjoint, which the tension already solves for, weighting each cell's residual) says Lens A is
   sensitive, instead of by distance: 14401 reads 0.009 low at a5 where the 59 read at most 0.004,
   so distance alone misses some of what the score depends on. Measure: Lens A error against
-  uniform h 0.5 per cell spent, on the 59 and 14401, against a5 and a10.
+  uniform h 0.5 per cell spent, on the 59 and 14401, against a5 and a10. Built (common.GoalMesh);
+  with nothing cleared in the indicator's world it lost to distance on a third of the 59 (NOTES);
+  with the buildings open (o1) it fixed the five tried: goal-o1-59 decides.
 - **Sightline and the greedy on the composite** (**prioritized**). Sightline and SoftSightline
   scan raster lines (`needs_raster`), as the metric or as the greedy's translucent search; both
   raise on a composite. The greedy under uni has no raster check but has never run on one: first
   establish that it does (against uniform h 0.5 on the 59), then give the sightline scans a
-  composite form.
+  composite form. Both done (NOTES, "Sightline on the composite"): the scans run on the fine
+  raster, painted and averaged per cell; ss-res-59 checks the meshes under the sightline metric,
+  then the oversized blocks can run the sightline presets.
 - **The cheap preset on the composite** (**prioritized**). polish_greedy.py builds a uniform h 0.5
   grid; it takes a mesh, and greedy + polish runs on the oversized blocks. Needs the greedy on the
   composite (above).

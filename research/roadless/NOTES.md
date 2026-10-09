@@ -1696,7 +1696,33 @@ MeshSpec.build now takes the block and the run's physics (Params, population), s
 solves on the way; the others ignore them. cells(block) gives the target, so a submit sizes it
 without a solve. On 40144 it reproduces the prototype (333,642 cells against 333,639, GPU noise
 in the ranking at the cutoff; -0.00128 on every clearing), mesh and five scorings in 19 s.
-Validation on the 59: run goal-59, factors 1.2, 1.5 and 2, with a20x8 for comparison.
+Validation on the 59 (goal-59, factors 1.2, 1.5 and 2; 38 tasks first failed on a layout refined
+to all fine cells, fixed in 860c91b and rerun). Per block, the distance curve (a2.5 .. a20, log
+error linear in the cell share) at the goal mesh's share, over the goal mesh's mean |error| on the
+five clearings:
+
+    factor  all fine  share (median)  compared  ratio (median)  goal mesh ahead  worst
+    1.2      6 / 59   0.68            53        1.7x            34               0.15x
+    1.5     16 / 59   0.84            40        3.1x            33               0.29x
+    2       38 / 59   1.00             9        2.6x             6               0.36x
+
+Better in the median, but behind the distance meshes on a third of the blocks, down to 6.6x the
+error: on 33717, refining from 0.43 to 0.51 of the uniform cells took the error from 0.0018 to
+0.0020, where a5 at 0.54 reached 0.0006. The prototype's three blocks were all winners. alpha
+was not it (0 and 2 within 15% of 1 on five blocks, losers and winners alike). The indicator's
+world was: it solved with the buildings at eps 0.01, nothing cleared, so it never refined where a
+clearing opens new flow. The five blocks at f1.2 with the buildings more open in that world:
+
+    block  o0.01    o0.1     o0.3     o1       a5 (its share / the goal mesh's)
+    33717  0.00197  0.00125  0.00055  0.00024  0.00059 (0.54 / 0.51)
+    20423  0.00135  0.00088  0.00054  0.00034  0.00040 (0.15 / 0.14)
+    8152   0.00245  0.00176  0.00108  0.00097  0.00078 (0.55 / 0.51)
+    40144  0.00110  0.00097  0.00092  0.00093  0.00370 (0.55 / 0.56)
+    22422  0.00129  0.00125  0.00137  0.00136  0.00275 (0.37 / 0.31)
+
+Monotone in the opening on the losers, flat on the winners, the build's time the same. The
+world is now part of the mesh, `o<opening>` (GoalMesh.opening, the buildings' openness; goal-59's
+rows renamed o0.01), and goal-o1-59 runs the 59 with the buildings fully open.
 
 The cheap preset on the 21 oversized and base-only blocks, on the SIMP runs' meshes (cheap-ov-*:
 a5x8, 4287 a5x32, 63612 a2.5x8), against SIMP base and the default on the same: cheap - default
@@ -1705,3 +1731,24 @@ the default's time and 0.72x the base's (median). As on the 46 held out (-0.015 
 default), a cheaper point, not a better one: it wins only on 28051 (+0.0054 over the default) and
 ties on 1182; its worst is 62385 (-0.059, a gate the SIMP presets find). Every large block now
 has the default and the cheap preset but 19593 and 6498 (the default only, uniform h 0.5).
+
+### Sightline on the composite (owner 2026-10-08: prioritized)
+
+The sightline metric and the translucent search scan lattice lines, so they raised on a
+composite. An along-conductance now takes the grid, and a grid maps its fields to and from the
+fine lattice's raster: Grid by the identity (layers and vjp bit for bit as before), CompositeGrid
+by painting each cell over its pixels and giving a cell the mean of the raster's factor over
+them, with exact adjoints (paint and gather, mean and its transpose: 1e-16). An all-fine
+composite reproduces the uniform grid's layers exactly and its vjp to 3e-16. On 40144 under
+ss100k2n2r30 the five res-check clearings read, against uniform h 0.5, a5 -0.0012 .. -0.0016,
+a20 -0.0004 .. -0.0005 and g2.5x8f1.5p2o1 -0.0005 .. -0.0007: as under uni.
+
+The raster is the cost: the oversized blocks' lattices run to 260M pixels (472), where the scans'
+thirteen float64 temporaries took the translucent greedy on a5x8 to 43.9 GiB. The scans now keep
+five (fb no longer stores the transmittances and the vjp recomputes them, bit for bit on the CPU;
+g and the vjp's weight fused and in place on the GPU): 30.0 GiB, inside a 32 GB card, the steps
+as fast (38 and 21 s against 39 and 23 s). On 38190 (67M pixels) the translucent greedy's steps
+take 10 -- 14 s against uni's 7 s. `cluster.py --scans` sizes for the rasters: what a run holds
+between solves (0.6 GB per million unknowns) plus 40 bytes a pixel, or the solves' own estimate
+if larger (472 on a5x8: 30.1). Validation under the sightline metric on the 59: ss-res-59
+(uniform h 0.5, a5, a10, a20 and the o1 goal mesh at f1.5).
