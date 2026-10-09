@@ -168,10 +168,7 @@ class Scorer:
     def __init__(self, block, mesh: lifted.MeshSpec, p: lifted.Params, rule=None,
                  population=None):
         population = CountPopulation() if population is None else population
-        grid = mesh.build(block, p, population)
-        if p.along.needs_raster and not grid.raster:
-            raise ValueError(f"along {p.along.name} scans grid lines: not on mesh {mesh.name}")
-        self._on(block, grid, p, rule, population)
+        self._on(block, mesh.build(block, p, population), p, rule, population)
 
     @classmethod
     def on_grid(cls, block, grid, p: lifted.Params, population) -> Scorer:
@@ -274,6 +271,9 @@ class GoalMesh:
     def cells(self, block) -> float:
         """Its target (it stops within GOAL_REACH of it, or at the first round past it)."""
         return float(round(self.factor * self.pilot.cells(block)))
+
+    def pixels(self, block) -> int:
+        return self.pilot.pixels(block)
 
     def build(self, block, p: lifted.Params, population) -> lifted.CompositeGrid:
         lay = self.pilot.layout(block)

@@ -23,6 +23,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import re
+import weakref
 from dataclasses import dataclass
 from typing import Callable, NamedTuple, Protocol
 
@@ -81,6 +82,14 @@ def _line_cells(dx: int, dy: int) -> list[tuple[int, int]]:
     return sorted(cells)
 
 
+def lattice(boundary, h: float,
+            offset: tuple[float, float]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """The fine lattice's cell-centre columns xs and rows ys over a block (every mesh's)."""
+    minx, miny, maxx, maxy = boundary.bounds
+    return (np.arange(minx - h + offset[0] * h, maxx + 2 * h, h),
+            np.arange(miny - h + offset[1] * h, maxy + 2 * h, h))
+
+
 @dataclass(frozen=True, eq=False)
 class Grid:
     x0: float
@@ -102,10 +111,23 @@ class Grid:
         """Open fraction of each cell: inside the block and not footprint."""
         return (self.isub & ~self.bsub).mean(axis=-1)
 
-    @property
-    def raster(self) -> bool:
-        """Fields are (ny, nx) rasters (what an along-conductance that scans grid lines needs)."""
-        return True
+    # A field is already the (ny, nx) raster an along-conductance scans: the maps between them
+    # (CompositeGrid's) are the identity.
+    def paint(self, field, xp):
+        """The raster of a field: each cell's value over its pixels."""
+        return field
+
+    def mean(self, R, xp):
+        """(..., ny, nx) raster -> (..., field): each cell's mean over its pixels."""
+        return R
+
+    def mean_T(self, A, xp):
+        """The adjoint of `mean`: (..., field) -> (..., ny, nx)."""
+        return A
+
+    def gather(self, G, xp):
+        """The adjoint of `paint`: (ny, nx) -> field, each cell's sum over its pixels."""
+        return G
 
     def pattern(self, K: int, xp) -> Pattern:
         """The grid's Pattern for K axes on device `xp`, built once per grid."""
@@ -174,9 +196,7 @@ class Grid:
         (i, j) of the fine lattice sits at (x0 - h/2 + (j + 1/2) h/S, y0 - h/2 + (i + 1/2) h/S):
         inside the block by a scanline fill of its rings, inside a footprint by
         `_rasterize`."""
-        minx, miny, maxx, maxy = boundary.bounds
-        xs = np.arange(minx - h + offset[0] * h, maxx + 2 * h, h)
-        ys = np.arange(miny - h + offset[1] * h, maxy + 2 * h, h)
+        xs, ys = lattice(boundary, h, offset)
         X, Y = np.meshgrid(xs, ys)
         S = 4
         ny, nx = X.shape
@@ -381,9 +401,7 @@ def _layout(boundary, footprints: NDArray[np.object_], streets, h: float, *, d0:
     if d0 <= band_m:
         raise ValueError(f"d0 {d0:g} must exceed the ground band {band_m:g} (no coarse "
                          "cell on the ground)")
-    minx, miny, maxx, maxy = boundary.bounds
-    xs = np.arange(minx - h + offset[0] * h, maxx + 2 * h, h)
-    ys = np.arange(miny - h + offset[1] * h, maxy + 2 * h, h)
+    xs, ys = lattice(boundary, h, offset)
     ny, nx = len(ys), len(xs)
     S = 4
     d = h / S
@@ -464,9 +482,55 @@ class CompositeGrid:
     def ff0(self) -> NDArray[np.float64]:
         return (self.isub & ~self.bsub).mean(axis=-1)
 
-    @property
-    def raster(self) -> bool:
-        return False
+    # The maps between a field (n,) and the fine-lattice raster (ny, nx) an along-conductance
+    # scans: a coarse cell covers 4^level pixels, a fine cell one, a pixel outside every cell
+    # (outside the block) is 0. Per level, chunked so a gather of PIXEL_CHUNK pixels is the
+    # largest transient.
+    PIXEL_CHUNK = 1 << 24
+
+    def _by_level(self, xp) -> list:
+        """[(level, cell ids, rows (m, 2^level), cols (m, 2^level))] on device `xp`."""
+        key = ("by_level", xp.__name__)
+        if key not in self.cache:
+            out = []
+            for lev in np.unique(self.level).tolist():
+                ids = np.flatnonzero(self.level == lev)
+                ar = np.arange(1 << lev)
+                for c0 in range(0, len(ids), max(1, self.PIXEL_CHUNK >> (2 * lev))):
+                    c = ids[c0:c0 + max(1, self.PIXEL_CHUNK >> (2 * lev))]
+                    out.append((lev, xp.asarray(c), xp.asarray(self.i0[c][:, None] + ar),
+                                xp.asarray(self.j0[c][:, None] + ar)))
+            self.cache[key] = out
+        return self.cache[key]
+
+    def paint(self, field, xp):
+        """The raster of a field: each cell's value over its pixels."""
+        R = xp.zeros(self.shape)
+        for _lev, c, r, q in self._by_level(xp):
+            R[r[:, :, None], q[:, None, :]] = field[c][:, None, None]
+        return R
+
+    def mean(self, R, xp):
+        """(..., ny, nx) raster -> (..., n): each cell's mean over its pixels."""
+        out = xp.zeros((*R.shape[:-2], len(self.level)))
+        for _lev, c, r, q in self._by_level(xp):
+            out[..., c] = R[..., r[:, :, None], q[:, None, :]].mean(axis=(-2, -1))
+        return out
+
+    def mean_T(self, A, xp):
+        """The adjoint of `mean`: (..., n) -> (..., ny, nx)."""
+        R = xp.zeros((*A.shape[:-1], *self.shape))
+        for lev, c, r, q in self._by_level(xp):
+            share = A[..., c] / float(1 << (2 * lev))
+            R[..., r[:, :, None], q[:, None, :]] = share[..., None, None]
+        return R
+
+    def gather(self, G, xp):
+        """The adjoint of `paint`: (ny, nx) -> (n,), each cell's sum over its pixels."""
+        out = xp.zeros(len(self.level))
+        for _lev, c, r, q in self._by_level(xp):
+            out[c] = G[r[:, :, None], q[:, None, :]].sum(axis=(-2, -1))
+        return out
 
     @property
     def size(self) -> NDArray[np.float64]:
@@ -675,6 +739,11 @@ class MeshSpec(Protocol):
         solve."""
         ...
 
+    def pixels(self, block) -> int:
+        """Its fine lattice's pixels on a block: the raster a scanning along-conductance runs
+        on (SoftSightline: what its memory scales with)."""
+        ...
+
 
 def _geometry(block) -> tuple:
     """A block's boundary, footprints and streets, as the grids take them."""
@@ -700,6 +769,9 @@ class UniformMesh:
 
     def cells(self, block) -> float:
         return block.boundary.area / self.h ** 2
+
+    def pixels(self, block) -> int:
+        return _pixels(block, self.h, self.offset)
 
 
 @dataclass(frozen=True)
@@ -729,6 +801,14 @@ class AdaptiveMesh:
 
     def cells(self, block) -> float:
         return float(_cells_of(self.layout(block)))
+
+    def pixels(self, block) -> int:
+        return _pixels(block, self.h, self.offset)
+
+
+def _pixels(block, h: float, offset: tuple[float, float]) -> int:
+    xs, ys = lattice(block.boundary, h, offset)
+    return len(xs) * len(ys)
 
 
 def _cells_of(lay: _Layout) -> int:
@@ -889,22 +969,18 @@ def directions(nmax: int) -> list[tuple[int, int]]:
 
 
 class AlongConductance(Protocol):
-    """Per-heading multipliers on the along-axis edges: layers(open_, h, K)[k] is layer k's
-    (ny, nx) factor field (>= 1, non-decreasing as space is freed, so monotonicity survives) or
-    the scalar 1.0. vjp(open_, h, K, A) is the gradient with respect to open_ of
-    sum_k sum_x A[k, x] layers[k][x] (what clearing a cell does to the factors elsewhere)."""
+    """Per-heading multipliers on the along-axis edges: layers(grid, open_, K)[k] is layer k's
+    factor per cell (>= 1, non-decreasing as space is freed, so monotonicity survives) or the
+    scalar 1.0. vjp(grid, open_, K, A) is the gradient with respect to open_ of
+    sum_k sum_x A[k, x] layers[k][x] (what clearing a cell does to the factors elsewhere).
+    open_, A and the results are the grid's fields; a conductance that scans lines does so on
+    the fine lattice's raster (grid.paint), a cell's factor its mean over its pixels."""
     name: str
 
-    @property
-    def needs_raster(self) -> bool:
-        """It scans grid lines, so needs a raster field (a uniform Grid)."""
-        ...
+    def layers(self, grid: Grid | CompositeGrid, open_,
+               K: int) -> list[float] | NDArray[np.float64]: ...
 
-    def layers(self, open_: NDArray[np.float64], h: float,
-               K: int) -> list[float] | NDArray[np.float32]: ...
-
-    def vjp(self, open_: NDArray[np.float64], h: float, K: int,
-            A: NDArray[np.float64]) -> NDArray[np.float64]: ...
+    def vjp(self, grid: Grid | CompositeGrid, open_, K: int, A) -> NDArray[np.float64]: ...
 
 
 @dataclass(frozen=True)
@@ -912,14 +988,10 @@ class Uniform:
     """Every open cell conducts alike (the original model)."""
     name: str = "uni"
 
-    @property
-    def needs_raster(self) -> bool:
-        return False
-
-    def layers(self, open_, h, K):
+    def layers(self, grid, open_, K):
         return [1.0] * K
 
-    def vjp(self, open_, h, K, A):
+    def vjp(self, grid, open_, K, A):
         return np.zeros(open_.shape)
 
 
@@ -941,10 +1013,6 @@ class Sightline:
     def name(self) -> str:
         return f"sl{self.beta:g}"
 
-    @property
-    def needs_raster(self) -> bool:
-        return True
-
     def runs(self, open_, h) -> tuple[NDArray[np.float64], NDArray[np.float32]]:
         """(angle of each fine direction in [0, pi), capped run fraction (n_dir, ny, nx))."""
         clear = open_ >= self.clear_frac
@@ -957,12 +1025,12 @@ class Sightline:
             R[i] = np.minimum(run, self.r_max_m) / self.r_max_m
         return ang, R
 
-    def layers(self, open_, h, K):
-        ang, R = self.runs(open_, h)
+    def layers(self, grid, open_, K):
+        ang, R = self.runs(grid.paint(open_, np), grid.h)
         W = _angle_weights(K, ang)
-        return (1.0 + self.beta * np.tensordot(W, R, axes=1)).astype(np.float32)
+        return grid.mean((1.0 + self.beta * np.tensordot(W, R, axes=1)).astype(np.float32), np)
 
-    def vjp(self, open_, h, K, A):
+    def vjp(self, grid, open_, K, A):
         """Hard runs are piecewise constant in open_: zero almost everywhere."""
         return np.zeros(open_.shape)
 
@@ -981,91 +1049,97 @@ def _angle_weights(K: int, ang: NDArray[np.float64]) -> NDArray[np.float64]:
 
 
 @njit(cache=True)
+def _step_t(open_, r, c, sy, dx, dy, offs, s, kappa, m):
+    """The transmittance of the step from (r, c) to (r + sy dy, c + sy dx) (sy = +-1; its far
+    end on the grid): optical depth kappa s mean(1 - open) over its far end and the cells it
+    crosses, `offs` (outside the grid counts closed)."""
+    ny, nx = open_.shape
+    tau = 1.0 - open_[r + sy * dy, c + sy * dx]
+    for i in range(offs.shape[0]):
+        r3, c3 = r + sy * offs[i, 1], c + sy * offs[i, 0]
+        tau += 1.0 - open_[r3, c3] if (0 <= r3 < ny and 0 <= c3 < nx) else 1.0
+    return np.exp(-kappa * s / m * tau)
+
+
+@njit(cache=True)
 def _soft_fb(open_, dx, dy, offs, s, kappa):
     """Expected free path forward (F) and back (B) along (dx, dy) from each cell, the ray's
     intensity falling as exp(-kappa x the closed length it crosses): each step of length s takes
-    optical depth kappa s mean(1 - open) over the cells it enters (its far end and `offs`;
-    outside the grid counts closed). Tf, Tb: each cell's step transmittance forward and back."""
+    optical depth kappa s mean(1 - open) over the cells it enters (`_step_t`)."""
     ny, nx = open_.shape
     m = offs.shape[0] + 1
     F = np.zeros((ny, nx))
     B = np.zeros((ny, nx))
-    Tf = np.zeros((ny, nx))
-    Tb = np.zeros((ny, nx))
     for r in range(ny - 1, -1, -1):
         for c in range(nx - 1, -1, -1):
             r2, c2 = r + dy, c + dx
             if 0 <= r2 < ny and 0 <= c2 < nx:
-                tau = 1.0 - open_[r2, c2]
-                for i in range(offs.shape[0]):
-                    r3, c3 = r + offs[i, 1], c + offs[i, 0]
-                    tau += 1.0 - open_[r3, c3] if (0 <= r3 < ny and 0 <= c3 < nx) else 1.0
-                Tf[r, c] = np.exp(-kappa * s / m * tau)
-                F[r, c] = Tf[r, c] * (s + F[r2, c2])
+                F[r, c] = _step_t(open_, r, c, 1, dx, dy, offs, s, kappa, m) * (s + F[r2, c2])
     for r in range(ny):
         for c in range(nx):
             r2, c2 = r - dy, c - dx
             if 0 <= r2 < ny and 0 <= c2 < nx:
-                tau = 1.0 - open_[r2, c2]
-                for i in range(offs.shape[0]):
-                    r3, c3 = r - offs[i, 1], c - offs[i, 0]
-                    tau += 1.0 - open_[r3, c3] if (0 <= r3 < ny and 0 <= c3 < nx) else 1.0
-                Tb[r, c] = np.exp(-kappa * s / m * tau)
-                B[r, c] = Tb[r, c] * (s + B[r2, c2])
-    return F, B, Tf, Tb
+                B[r, c] = _step_t(open_, r, c, -1, dx, dy, offs, s, kappa, m) * (s + B[r2, c2])
+    return F, B
 
 
 @njit(cache=True)
-def _soft_vjp(dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
+def _soft_vjp(open_, dx, dy, offs, s, kappa, F, B, G, out):
     """Add to `out` the gradient over open_ of sum_x G[x] (F[x] + B[x]): reverse-mode through
-    the two scans (each cotangent flows back along the ray, damped by the transmittance)."""
+    the two scans (each cotangent flows back along the ray, damped by the transmittance, which
+    is recomputed rather than stored: two rasters fewer)."""
     ny, nx = F.shape
     m = offs.shape[0] + 1
     bar = np.zeros((ny, nx))
-    # forward rays: F(p) = Tf(p) (s + F(x)) with x = p + v, so visit p before x
+    # forward rays: F(p) = T(p) (s + F(x)) with x = p + v, so visit p before x; p's cotangent
+    # is G[p] + T(p - v) bar[p - v], pushed to p by p - v
     for r in range(ny):
         for c in range(nx):
-            b = G[r, c]
             rp, cp = r - dy, c - dx
-            if 0 <= rp < ny and 0 <= cp < nx:
-                b += Tf[rp, cp] * bar[rp, cp]
-            bar[r, c] = b
+            b = bar[r, c] if (0 <= rp < ny and 0 <= cp < nx) else G[r, c]
             r2, c2 = r + dy, c + dx
-            if b != 0.0 and 0 <= r2 < ny and 0 <= c2 < nx:
-                coef = b * (s + F[r2, c2]) * Tf[r, c] * kappa * s / m
-                out[r2, c2] += coef
-                for i in range(offs.shape[0]):
-                    r3, c3 = r + offs[i, 1], c + offs[i, 0]
-                    if 0 <= r3 < ny and 0 <= c3 < nx:
-                        out[r3, c3] += coef
-    bar[:, :] = 0.0
+            if 0 <= r2 < ny and 0 <= c2 < nx:
+                T = _step_t(open_, r, c, 1, dx, dy, offs, s, kappa, m)
+                bar[r2, c2] = G[r2, c2] + T * b
+                if b != 0.0:
+                    coef = b * (s + F[r2, c2]) * T * kappa * s / m
+                    out[r2, c2] += coef
+                    for i in range(offs.shape[0]):
+                        r3, c3 = r + offs[i, 1], c + offs[i, 0]
+                        if 0 <= r3 < ny and 0 <= c3 < nx:
+                            out[r3, c3] += coef
     for r in range(ny - 1, -1, -1):
         for c in range(nx - 1, -1, -1):
-            b = G[r, c]
             rp, cp = r + dy, c + dx
-            if 0 <= rp < ny and 0 <= cp < nx:
-                b += Tb[rp, cp] * bar[rp, cp]
-            bar[r, c] = b
+            b = bar[r, c] if (0 <= rp < ny and 0 <= cp < nx) else G[r, c]
             r2, c2 = r - dy, c - dx
-            if b != 0.0 and 0 <= r2 < ny and 0 <= c2 < nx:
-                coef = b * (s + B[r2, c2]) * Tb[r, c] * kappa * s / m
-                out[r2, c2] += coef
-                for i in range(offs.shape[0]):
-                    r3, c3 = r - offs[i, 1], c - offs[i, 0]
-                    if 0 <= r3 < ny and 0 <= c3 < nx:
-                        out[r3, c3] += coef
+            if 0 <= r2 < ny and 0 <= c2 < nx:
+                T = _step_t(open_, r, c, -1, dx, dy, offs, s, kappa, m)
+                bar[r2, c2] = G[r2, c2] + T * b
+                if b != 0.0:
+                    coef = b * (s + B[r2, c2]) * T * kappa * s / m
+                    out[r2, c2] += coef
+                    for i in range(offs.shape[0]):
+                        r3, c3 = r - offs[i, 1], c - offs[i, 0]
+                        if 0 <= r3 < ny and 0 <= c3 < nx:
+                            out[r3, c3] += coef
 
 
 class Scans(Protocol):
     """Where SoftSightline's 1-D scans run. `xp` is the array module (numpy or cupy); fb returns
-    (F, B, Tf, Tb) and vjp_add accumulates into `out`, all `xp` arrays; to_host / to_dev move
-    arrays across."""
+    (F, B) and vjp_add accumulates into `out`, all `xp` arrays; response and response_weight are
+    SoftSightline's g(F + B) and beta g'(F + B) M, elementwise (on the GPU fused and in place:
+    a raster each, not one per operation); to_host / to_dev move arrays across."""
     xp: object
 
     def fb(self, open_, dx: int, dy: int, offs, s: float, kappa: float): ...
 
-    def vjp_add(self, dx: int, dy: int, offs, s: float, kappa: float, F, B, Tf, Tb, G,
+    def vjp_add(self, open_, dx: int, dy: int, offs, s: float, kappa: float, F, B, G,
                 out) -> None: ...
+
+    def response(self, F, B, r0: float, hill: float): ...
+
+    def response_weight(self, F, B, M, beta: float, r0: float, hill: float): ...
 
     def to_dev(self, a): ...
 
@@ -1080,8 +1154,17 @@ class CpuScans:
     def fb(self, open_, dx, dy, offs, s, kappa):
         return _soft_fb(open_, dx, dy, offs, s, kappa)
 
-    def vjp_add(self, dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
-        _soft_vjp(dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out)
+    def vjp_add(self, open_, dx, dy, offs, s, kappa, F, B, G, out):
+        _soft_vjp(open_, dx, dy, offs, s, kappa, F, B, G, out)
+
+    def response(self, F, B, r0, hill):
+        x = ((F + B) / r0) ** hill
+        return x / (1.0 + x)
+
+    def response_weight(self, F, B, M, beta, r0, hill):
+        R = F + B
+        x = (R / r0) ** hill
+        return beta * (hill * x / ((R + 1e-12) * (1.0 + x) ** 2)) * M
 
     def to_dev(self, a):
         return np.asarray(a)
@@ -1103,68 +1186,75 @@ __device__ inline double step_tau(const double* o, int ny, int nx, int r, int c,
 }
 extern "C" __global__ void soft_fb(const double* o, int ny, int nx, int dx, int dy,
         const int* offs, int noffs, double s, double kappa, const int* sr, const int* sc,
-        int nstart, double* F, double* B, double* Tf, double* Tb) {
+        int nstart, double* F, double* B) {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= nstart) return;
     double k = kappa * s / (noffs + 1);
     int r = sr[t], c = sc[t], n = 0;
     while (r >= 0 && r < ny && c >= 0 && c < nx) {            // B along the line, from its start
         int x = r * nx + c;
-        if (n == 0) { Tb[x] = 0.0; B[x] = 0.0; }
-        else {
-            double T = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, -1));
-            Tb[x] = T; B[x] = T * (s + B[(r - dy) * nx + (c - dx)]);
-        }
+        if (n == 0) B[x] = 0.0;
+        else B[x] = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, -1))
+                    * (s + B[(r - dy) * nx + (c - dx)]);
         r += dy; c += dx; n++;
     }
     r -= dy; c -= dx;
     for (int j = 0; j < n; j++) {                             // F from its end, back to the start
         int x = r * nx + c;
-        if (j == 0) { Tf[x] = 0.0; F[x] = 0.0; }
-        else {
-            double T = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, 1));
-            Tf[x] = T; F[x] = T * (s + F[(r + dy) * nx + (c + dx)]);
-        }
+        if (j == 0) F[x] = 0.0;
+        else F[x] = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, 1))
+                    * (s + F[(r + dy) * nx + (c + dx)]);
         r -= dy; c -= dx;
     }
 }
 __device__ inline void addto(double* out, int ny, int nx, int r, int c, double v) {
     if (r >= 0 && r < ny && c >= 0 && c < nx) atomicAdd(&out[r * nx + c], v);
 }
-extern "C" __global__ void soft_vjp(int ny, int nx, int dx, int dy, const int* offs, int noffs,
-        double s, double kappa, const int* sr, const int* sc, int nstart, const double* F,
-        const double* B, const double* Tf, const double* Tb, const double* G, double* out) {
+// the transmittances recomputed, not stored (soft_fb's, bit for bit)
+extern "C" __global__ void soft_vjp(const double* o, int ny, int nx, int dx, int dy,
+        const int* offs, int noffs, double s, double kappa, const int* sr, const int* sc,
+        int nstart, const double* F, const double* B, const double* G, double* out) {
     int t = blockIdx.x * blockDim.x + threadIdx.x;
     if (t >= nstart) return;
     double k = kappa * s / (noffs + 1);
-    // forward rays: F(p) = Tf(p) (s + F(x)), x = p + v: walk from the start, carrying bar F
+    // forward rays: F(p) = T(p) (s + F(x)), x = p + v: walk from the start, carrying bar F
     int r = sr[t], c = sc[t], n = 0;
     double bar = 0.0, Tprev = 0.0;
     while (r >= 0 && r < ny && c >= 0 && c < nx) {
         int x = r * nx + c;
         bar = G[x] + Tprev * bar;
         int r2 = r + dy, c2 = c + dx;
-        if (bar != 0.0 && r2 >= 0 && r2 < ny && c2 >= 0 && c2 < nx) {
-            double coef = bar * (s + F[r2 * nx + c2]) * Tf[x] * k;
-            addto(out, ny, nx, r2, c2, coef);
-            for (int i = 0; i < noffs; i++) addto(out, ny, nx, r + offs[2*i+1], c + offs[2*i], coef);
+        double T = 0.0;
+        if (r2 >= 0 && r2 < ny && c2 >= 0 && c2 < nx) {
+            T = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, 1));
+            if (bar != 0.0) {
+                double coef = bar * (s + F[r2 * nx + c2]) * T * k;
+                addto(out, ny, nx, r2, c2, coef);
+                for (int i = 0; i < noffs; i++)
+                    addto(out, ny, nx, r + offs[2*i+1], c + offs[2*i], coef);
+            }
         }
-        Tprev = Tf[x];
+        Tprev = T;
         r += dy; c += dx; n++;
     }
-    // backward rays: B(p) = Tb(p) (s + B(x)), x = p - v: walk from the end
+    // backward rays: B(p) = T(p) (s + B(x)), x = p - v: walk from the end
     r -= dy; c -= dx;
     bar = 0.0; Tprev = 0.0;
     for (int j = 0; j < n; j++) {
         int x = r * nx + c;
         bar = G[x] + Tprev * bar;
         int r2 = r - dy, c2 = c - dx;
-        if (bar != 0.0 && r2 >= 0 && r2 < ny && c2 >= 0 && c2 < nx) {
-            double coef = bar * (s + B[r2 * nx + c2]) * Tb[x] * k;
-            addto(out, ny, nx, r2, c2, coef);
-            for (int i = 0; i < noffs; i++) addto(out, ny, nx, r - offs[2*i+1], c - offs[2*i], coef);
+        double T = 0.0;
+        if (r2 >= 0 && r2 < ny && c2 >= 0 && c2 < nx) {
+            T = exp(-k * step_tau(o, ny, nx, r, c, dx, dy, offs, noffs, -1));
+            if (bar != 0.0) {
+                double coef = bar * (s + B[r2 * nx + c2]) * T * k;
+                addto(out, ny, nx, r2, c2, coef);
+                for (int i = 0; i < noffs; i++)
+                    addto(out, ny, nx, r - offs[2*i+1], c - offs[2*i], coef);
+            }
         }
-        Tprev = Tb[x];
+        Tprev = T;
         r -= dy; c -= dx;
     }
 }
@@ -1185,8 +1275,18 @@ class GpuScans:
 
     def _kernels(self):
         if "kernels" not in self._memo:
-            mod = self.xp.RawModule(code=_SCAN_CU)
-            self._memo["kernels"] = (mod.get_function("soft_fb"), mod.get_function("soft_vjp"))
+            cp = self.xp
+            mod = cp.RawModule(code=_SCAN_CU)
+            self._memo["kernels"] = (
+                mod.get_function("soft_fb"), mod.get_function("soft_vjp"),
+                cp.ElementwiseKernel("float64 B, float64 r0, float64 hill", "float64 F",
+                                     "double x = pow((F + B) / r0, hill); F = x / (1.0 + x)",
+                                     "soft_response"),
+                cp.ElementwiseKernel(
+                    "float64 F, float64 B, float64 beta, float64 r0, float64 hill", "float64 M",
+                    "double R = F + B; double x = pow(R / r0, hill); double q = 1.0 + x; "
+                    "M = beta * (hill * x / ((R + 1e-12) * (q * q))) * M",
+                    "soft_response_weight"))
         return self._memo["kernels"]
 
     def _starts(self, ny: int, nx: int, dx: int, dy: int):
@@ -1209,27 +1309,38 @@ class GpuScans:
     def fb(self, open_, dx, dy, offs, s, kappa):
         cp = self.xp
         ny, nx = open_.shape
-        f_fb, _ = self._kernels()
+        f_fb = self._kernels()[0]
         sr, sc, ns = self._starts(ny, nx, dx, dy)
-        F, B, Tf, Tb = (cp.zeros((ny, nx)) for _ in range(4))
+        F, B = cp.zeros((ny, nx)), cp.zeros((ny, nx))
         og = cp.ascontiguousarray(open_, dtype=cp.float64)
         oo = cp.asarray(np.asarray(offs, dtype=np.int32).ravel())
         f_fb(((ns + 127) // 128,), (128,),
              (og, np.int32(ny), np.int32(nx), np.int32(dx), np.int32(dy), oo,
               np.int32(len(offs)), np.float64(s), np.float64(kappa), sr, sc, np.int32(ns),
-              F, B, Tf, Tb))
-        return F, B, Tf, Tb
+              F, B))
+        return F, B
 
-    def vjp_add(self, dx, dy, offs, s, kappa, F, B, Tf, Tb, G, out):
+    def vjp_add(self, open_, dx, dy, offs, s, kappa, F, B, G, out):
         cp = self.xp
         ny, nx = F.shape
-        _, f_vjp = self._kernels()
+        f_vjp = self._kernels()[1]
         sr, sc, ns = self._starts(ny, nx, dx, dy)
         oo = cp.asarray(np.asarray(offs, dtype=np.int32).ravel())
         f_vjp(((ns + 127) // 128,), (128,),
-              (np.int32(ny), np.int32(nx), np.int32(dx), np.int32(dy), oo, np.int32(len(offs)),
-               np.float64(s), np.float64(kappa), sr, sc, np.int32(ns), F, B, Tf, Tb,
+              (cp.ascontiguousarray(open_, dtype=cp.float64), np.int32(ny), np.int32(nx),
+               np.int32(dx), np.int32(dy), oo, np.int32(len(offs)), np.float64(s),
+               np.float64(kappa), sr, sc, np.int32(ns), F, B,
                cp.ascontiguousarray(G, dtype=cp.float64), out))
+
+    def response(self, F, B, r0, hill):
+        """g(F + B), into F."""
+        self._kernels()[2](B, r0, hill, F)
+        return F
+
+    def response_weight(self, F, B, M, beta, r0, hill):
+        """beta g'(F + B) M, into M."""
+        self._kernels()[3](F, B, beta, r0, hill, M)
+        return M
 
     def to_dev(self, a):
         return self.xp.asarray(a)
@@ -1263,10 +1374,6 @@ class SoftSightline:
         return f"ss{self.beta:g}k{self.kappa:g}" + (
             "" if self.hill == 1.0 and self.r0_m == 20.0 else f"n{self.hill:g}r{self.r0_m:g}")
 
-    @property
-    def needs_raster(self) -> bool:
-        return True
-
     def g(self, R):
         x = (R / self.r0_m) ** self.hill
         return x / (1.0 + x)
@@ -1297,40 +1404,44 @@ class SoftSightline:
         and an end ahead); its sum along a line of length L is L^2 / 2."""
         od = self.scans.to_dev(open_)
         for i, dx, dy, offs, s in self._steps(h):
-            F, B, _tf, _tb = self.scans.fb(od, dx, dy, offs, s, self.kappa)
+            F, B = self.scans.fb(od, dx, dy, offs, s, self.kappa)
             yield i, self.scans.to_host(F), self.scans.to_host(B)
 
-    def layers(self, open_, h, K):
-        """(K, ny, nx) on the scans' device."""
-        key = (hashlib.blake2b(np.ascontiguousarray(self.scans.to_host(open_)).tobytes(),
-                               digest_size=16).digest(), h, K)
-        if key in self._cache:
-            return self._cache[key]
+    def layers(self, grid, open_, K):
+        """(K, field) on the scans' device."""
+        key = (id(grid), hashlib.blake2b(np.ascontiguousarray(self.scans.to_host(open_)).tobytes(),
+                                         digest_size=16).digest(), K)
+        if key in self._cache and self._cache[key][0]() is grid:
+            return self._cache[key][1]
         xp = self.scans.xp
         W = _angle_weights(K, self._dirs()[1])
-        od = self.scans.to_dev(open_)
-        out = xp.ones((K, *od.shape))
-        for i, dx, dy, offs, s in self._steps(h):
-            F, B, _tf, _tb = self.scans.fb(od, dx, dy, offs, s, self.kappa)
-            g = self.g(F + B)
+        od = grid.paint(self.scans.to_dev(open_), xp)
+        out = xp.ones((K, *open_.shape))
+        for i, dx, dy, offs, s in self._steps(grid.h):
+            F, B = self.scans.fb(od, dx, dy, offs, s, self.kappa)
+            g = grid.mean(self.scans.response(F, B, self.r0_m, self.hill), xp)
+            del F, B                                    # rasters: free them before the next
             for k in np.flatnonzero(W[:, i]):
                 out[k] += (self.beta * W[k, i]) * g
         self._cache.clear()
-        self._cache[key] = out
+        self._cache[key] = (weakref.ref(grid), out)    # an id outlives its grid: check it
         return out
 
-    def vjp(self, open_, h, K, A):
-        """(ny, nx) on the scans' device."""
+    def vjp(self, grid, open_, K, A):
+        """(field) on the scans' device."""
         xp = self.scans.xp
         W = _angle_weights(K, self._dirs()[1])
-        od = self.scans.to_dev(open_)
+        od = grid.paint(self.scans.to_dev(open_), xp)
         Ad = self.scans.to_dev(A)
         out = xp.zeros(od.shape)
-        for i, dx, dy, offs, s in self._steps(h):
-            F, B, Tf, Tb = self.scans.fb(od, dx, dy, offs, s, self.kappa)
-            G = self.beta * self.dg(F + B) * xp.tensordot(xp.asarray(W[:, i]), Ad, axes=1)
-            self.scans.vjp_add(dx, dy, offs, s, self.kappa, F, B, Tf, Tb, G, out)
-        return out
+        for i, dx, dy, offs, s in self._steps(grid.h):
+            F, B = self.scans.fb(od, dx, dy, offs, s, self.kappa)
+            G = self.scans.response_weight(
+                F, B, grid.mean_T(xp.tensordot(xp.asarray(W[:, i]), Ad, axes=1), xp),
+                self.beta, self.r0_m, self.hill)
+            self.scans.vjp_add(od, dx, dy, offs, s, self.kappa, F, B, G, out)
+            del F, B, G
+        return grid.gather(out, xp)
 
 
 def along_of(spec: str, scans: Scans = CpuScans()) -> AlongConductance:
@@ -1724,7 +1835,7 @@ def along_edges(grid: Grid, open_, p: Params):
     o = xp.asarray(open_, dtype=xp.float64).ravel()
     cell, _nf = _free_ids(o, xp)
     pat = grid.pattern(p.K, xp)
-    F = p.along.layers(open_, grid.h, p.K)
+    F = p.along.layers(grid, open_, p.K)
     for k in range(p.K):
         a, b, line, wk = pat.along[k]
         frac = xp.minimum(o[a], o[b])

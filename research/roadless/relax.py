@@ -149,7 +149,7 @@ class Relaxation:
         pat = g.pattern(K, xp)
         _v, _th, _m, gap = lifted.axes(K)
         gc = xp.zeros(o.size)                           # dJ / d(open) per grid cell
-        Fl = p.along.layers(op_eps, g.h, K)
+        Fl = p.along.layers(g, op_eps, K)
         dF = None                                       # dJ / d(layer factor), if any vary
         for k in range(K):
             a, b, line, const = pat.along[k]           # const: a fully open edge's weight
@@ -173,7 +173,7 @@ class Relaxation:
             for i, qc in enumerate(cells):
                 gc += xp.bincount(qc[act[i]], coef[act[i]], minlength=o.size)
         if dF is not None:                              # the factors' own response to opening
-            gc += xp.asarray(p.along.vjp(op_eps, g.h, K, dF.reshape(K, *op_eps.shape))).ravel()
+            gc += xp.asarray(p.along.vjp(g, op_eps, K, dF.reshape(K, *op_eps.shape))).ravel()
         free = xp.flatnonzero(o > 0)
         area = g.cell_area(xp, o > 0)
         for k in range(K):

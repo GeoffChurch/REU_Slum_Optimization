@@ -5,14 +5,16 @@ shipped as an input (a node has no source data; common.build_blocks reads the ba
 needs GPU memory for the eps world, every inside cell x 8 headings, about GB_PER_MILLION GB per
 million unknowns, and cluster_submit routes it to the smallest card that holds it. `--mesh` is
 the grid the tasks use (common.mesh_of: <h>, <h>a<d0>x<smax> or
-<h>g<d0>x<smax>f<factor>p<power>o<opening>), its cells counted here, SIZING_WORKERS blocks at a time (a
-goal mesh's: its target); `--gb` sets a floor under the estimate, to send a block known to need
-a bigger card to one. Results (parquet rows) come back to the same paths here, never
-overwriting a local file.
+<h>g<d0>x<smax>f<factor>p<power>o<opening>), its cells counted here, SIZING_WORKERS blocks at a
+time (a goal mesh's: its target); `--scans` says the tasks' conductance scans the fine lattice
+(a sightline metric or search: SoftSightline), whose rasters peak when the solves' own memory is
+down to what a run holds, so the estimate is the larger of the two; `--gb` sets a floor under
+the estimate, to send a block known to need a bigger card to one. Results (parquet rows) come
+back to the same paths here, never overwriting a local file.
 
     uv run python research/roadless/cluster.py setup
     uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] \
-        [--mesh M] [--with FILE ...] <ids,|@file> -- <script> <args with {id}>
+        [--mesh M] [--scans] [--with FILE ...] <ids,|@file> -- <script> <args with {id}>
     uv run python research/roadless/cluster.py status|sync [<run>]
     uv run python research/roadless/cluster.py wait <run> [--timeout 3h]    # exit 0 passed, 3 failed, 4 timed out, 5 blind
     uv run python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]   # its failed / missing blocks as <run>-r1
@@ -33,6 +35,10 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 GB_PER_MILLION = 0.7    # measured: the translucent greedy on 30796 peaks at 31.2 GiB for 48.7M
                         # unknowns after the K-cycle fix (NOTES); raise it if a block runs out
+HELD_PER_MILLION = 0.6  # --scans: what a run holds between solves (472's translucent greedy on
+                        # a5x8, 34M unknowns: 19.8 GiB) ...
+RASTER_BYTES = 40       # ... plus five float64 rasters of the fine lattice (the painted field,
+                        # F, B, the vjp's weight and its sum): 472, 260M pixels, peaks at 30.0 GiB
 SIZING_WORKERS = 8      # processes counting the blocks' cells at submit: speed only (a shared
                         # machine; the count is shapely and integer numpy, no BLAS threads)
 # The checkout's .venv from uv.lock, with every default group: cupy and pyamg (`gpu`) among them.
@@ -54,6 +60,9 @@ class Blocks:
                             help="the grid the tasks use (<h> or <h>a<d0>x<smax>: relax.py's "
                                  ".h<h> / .a<d0>x<smax>, or one of resolution_check.py's); "
                                  "sets the memory estimate")
+        parser.add_argument("--scans", action="store_true",
+                            help="the tasks' conductance scans the fine lattice (ss/sl metric "
+                                 "or search): size for its rasters too")
         parser.add_argument("--with", dest="extra", type=Path, action="append", default=[],
                             help="a file shipped beside the block bank (repeatable); a task "
                                  "reads it as $CLUSTER_SUBMIT_INPUTS/<its name>")
@@ -77,11 +86,10 @@ class Blocks:
                else args.ids.split(","))
         bank = common.write_bank(ids, workdir / "bank.pkl")
         with ProcessPoolExecutor(min(SIZING_WORKERS, len(ids))) as ex:
-            cells = list(ex.map(_cells, [mesh] * len(ids), [bank[b] for b in ids]))
-        tasks = tuple(
-            cs.Task(f"python -u {line.replace('{id}', b)}",
-                    max(n * 8 / 1e6 * GB_PER_MILLION, args.gb))
-            for b, n in zip(ids, cells, strict=True))
+            gb = list(ex.map(_gb, [mesh] * len(ids), [bank[b] for b in ids],
+                             [args.scans] * len(ids)))
+        tasks = tuple(cs.Task(f"python -u {line.replace('{id}', b)}", max(g, args.gb))
+                      for b, g in zip(ids, gb, strict=True))
         return cs.RunPlan(
             tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=None),
             inputs=(workdir / "bank.pkl", *args.extra),
@@ -90,9 +98,14 @@ class Blocks:
             describe=(f"{len(ids)} blocks: {line}",))
 
 
-def _cells(mesh, block) -> float:
-    """`mesh`'s cells on `block` (a pool worker's task)."""
-    return mesh.cells(block)
+def _gb(mesh, block, scans: bool) -> float:
+    """A task's GPU memory on `block` (a pool worker's task): the eps world's solves, every cell
+    x 8 headings, or (`scans`) what a run holds plus the scans' rasters, whichever is more."""
+    unknowns = mesh.cells(block) * 8 / 1e6
+    solves = unknowns * GB_PER_MILLION
+    if not scans:
+        return solves
+    return max(solves, unknowns * HELD_PER_MILLION + mesh.pixels(block) * RASTER_BYTES / 2 ** 30)
 
 
 def _names(line: str, token: str, mesh) -> bool:

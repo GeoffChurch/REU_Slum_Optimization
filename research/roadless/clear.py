@@ -89,8 +89,6 @@ class Clearing:
         """`search`: the along-conductance the TENSION ranks under (e.g. more translucent
         buildings, so counterfactual corridors show in the gradient); scoring stays `p`."""
         self.sc = common.Scorer(block, mesh, p, population=population)
-        if search is not None and search.needs_raster and not self.sc.grid.raster:
-            raise ValueError(f"search {search.name} scans grid lines: not on mesh {mesh.name}")
         self.cost = self.sc.w / self.sc.w.sum()        # population share of each building
         self.p = p
         self.ps = p if search is None else dataclasses.replace(p, along=search)
@@ -153,7 +151,7 @@ class Clearing:
         # elsewhere) is the nonlocal term, from the along-conductance's vjp below.
         K = self.p.K
         pu = dataclasses.replace(self.ps, along=lifted.Uniform())
-        Fl = self.ps.along.layers(op_eps, g.h, K)
+        Fl = self.ps.along.layers(g, op_eps, K)
         uk = _cells_axes(sy, sol.u, K)
         lk = _cells_axes(sy, lam, K)
         ff = self.inside_flat                            # free cell -> flat (eps: all inside)
@@ -180,7 +178,7 @@ class Clearing:
             else:
                 fam.append((ca, cb, ka, kb, wf - wc, wc))
         # nonlocal gain: d(gain)/d(open) at every cell, x the open each building would add
-        dgain = xp.asarray(self.ps.along.vjp(op_eps, g.h, K, Agrad.reshape(K, *op_eps.shape)))
+        dgain = xp.asarray(self.ps.along.vjp(g, op_eps, K, Agrad.reshape(K, *op_eps.shape)))
         nonlocal_gain = th(self.bfree @ dgain.ravel()[ff]) * (1.0 - EPS)
         # attribution: building j owns frac/(1 - op) of each cell it covers (restore: frac /
         # (op - op0), its share of the cell's cleared part)
