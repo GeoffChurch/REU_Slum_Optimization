@@ -106,8 +106,8 @@ class IndexMoves:
     est: np.ndarray
 
     def move(self, i: int) -> Move:
-        return Move([int(x) for x in self.idx[:2, i] if x >= 0],
-                    [int(x) for x in self.idx[2:, i] if x >= 0])
+        return Move(add=[int(x) for x in self.idx[:2, i] if x >= 0],
+                    restore=[int(x) for x in self.idx[2:, i] if x >= 0])
 
 
 class Outcome(NamedTuple):
@@ -489,7 +489,7 @@ class TopSingles:
     def tiers(self, s: SearchState, r: Gains) -> list[Callable[[], Tier]]:
         top = [int(j) for j in np.argsort(-r.T)[:self.m] if not s.c.removed[j]]
         est = -r.T[top]
-        return [lambda: Batches([Move([j], []) for j in top], est)]
+        return [lambda: Batches([Move(add=[j], restore=[]) for j in top], est)]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -520,7 +520,7 @@ class Spaced:
 
     def tiers(self, s: SearchState, r: Gains) -> list[Callable[[], Tier]]:
         taken = self._taken(s, r)
-        return [lambda: Batches([Move(taken, [])], np.zeros(1))]
+        return [lambda: Batches([Move(add=taken, restore=[])], np.zeros(1))]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -550,7 +550,7 @@ class Diverse:
         for f in firsts:
             chosen = clear._spread(gain, cost, H, target - D, first=f)
             batches.setdefault(frozenset(chosen), chosen)
-        return [Move([cand[i] for i in b], []) for b in batches.values()]
+        return [Move(add=[cand[i] for i in b], restore=[]) for b in batches.values()]
 
     def tiers(self, s: SearchState, r: Gains) -> list[Callable[[], Tier]]:
         moves = self._batches(s, r)
@@ -762,7 +762,7 @@ class ToLevel:
 
     def tiers(self, s: SearchState, r: Order) -> list[Callable[[], Tier]]:
         batch = [int(j) for j in r.order[:self.size(s, r)]]
-        return [lambda: Batches([Move([], batch)], np.zeros(1))]
+        return [lambda: Batches([Move(add=[], restore=batch)], np.zeros(1))]
 
 
 def restore_round(*, step: float, shortlist: int, screen: Valuer) -> Round[Order]:
@@ -803,7 +803,7 @@ class PruneRows:
 
     def on_step(self, s: SearchState, o: Outcome) -> None:
         if self.wants(s):
-            self.states.append(PruneState(s.D, s.score, s.c.removed.copy()))
+            self.states.append(PruneState(D=s.D, score=s.score, removed=s.c.removed.copy()))
 
     def frame(self) -> pd.DataFrame:
         rows = [dict(block=self.block_id, n=self.n, step=0, D=0.0, perm=0.0, perm1=0.0,
@@ -832,7 +832,7 @@ class GrowPrune:
         return (f"GP{self.grow:g}x{self.picker}r{self.restore:g}"
                 + (f"m{self.shortlist}" if self.shortlist else ""))
 
-    def build(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
               d_max: float, t0: float, rnd: Round, screen: Valuer) -> Built:
         rec = PruneRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, t0=t0)
         return Built(Seq((With(Silent(), greedy(rnd, self.grow * d_max)),
@@ -849,15 +849,17 @@ def plan_of(spec: str) -> GrowPrune:
                      screen_eps=EPS_SCREEN)
 
 
-def prune_block(b, plan: GrowPrune, rnd: Round, screen_of: Callable[[Clearing, float], Valuer],
-                power: float, along: str, device: str, d_max: float) -> pd.DataFrame:
+def prune_block(b, plan: GrowPrune, *, rnd: Round,
+                screen_of: Callable[[Clearing, float], Valuer], power: float,
+                along: str, device: str, d_max: float) -> pd.DataFrame:
     p = lifted.Params(3.0, 8, along=lifted.along_of(along, lifted.scans_of(device)),
                       solver=lifted.solver_of(device))
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
     c = Clearing(b, mesh, p, population=common.POPULATIONS["area"])
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
-    built = plan.build(b.block_id, c, power, J0, P0, d_max, t0, rnd, screen_of(c, power))
+    built = plan.build(block_id=b.block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
+                       t0=t0, rnd=rnd, screen=screen_of(c, power))
     built.part(SearchState.start(c, power=power, score=Score(J0, P0), world=EXACT), built.rows)
     rows = built.rows.frame()
     print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {plan.name}: "
@@ -870,8 +872,8 @@ def main(ids: list[str], plan: GrowPrune, power: float, device: str, along: str,
          d_max: float) -> None:
     import relax  # the edge binds the eps world; search.py's library code does not import relax
 
-    def screen_of(c: Clearing, power: float) -> Valuer:
-        return relax.Relaxation(c, power, q=1.0, rtol=RTOL_SCORE, eps=plan.screen_eps)
+    def screen_of(c: Clearing, pw: float) -> Valuer:
+        return relax.Relaxation(c, pw, q=1.0, rtol=RTOL_SCORE, eps=plan.screen_eps)
 
     rnd = greedy_round(plan.picker, sweep_of(device))
     out = rows_dir(plan.name, 0.5, "area", power, along)
@@ -882,7 +884,8 @@ def main(ids: list[str], plan: GrowPrune, power: float, device: str, along: str,
         if f.exists():
             continue
         try:
-            rows = prune_block(b, plan, rnd, screen_of, power, along, device, d_max)
+            rows = prune_block(b, plan, rnd=rnd, screen_of=screen_of, power=power, along=along,
+                              device=device, d_max=d_max)
         except Exception as e:
             print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]}", flush=True)
             failed.append(b.block_id)
