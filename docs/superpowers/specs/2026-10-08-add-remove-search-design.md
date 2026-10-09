@@ -94,10 +94,11 @@ BACKLOG names it as the next schedule to try.
 
 ## What has to hold
 
-- **Bit identity on the CPU.**
-  Each preset, run by the engine, reproduces the current code's rows exactly on three small blocks (CPU solver and scans).
+- **Agreement checked, deviations flagged (owner, 2026-10-08: "we don't strictly need bit-identical, just to flag any deviations for investigation").**
+  Each preset, run by the engine, is compared row by row with the current code on three small blocks (CPU solver and scans).
   The presets checked: the four greedy pickers, polish_greedy P64w8x2, GP3xS0.01catr0.005m8, and a SIMP plan with `.p256w8x2`.
-  GPU runs are compared to 1e-9 (summation order already varies there).
+  Any difference is reported with where it arises (which step, which building, which number) and investigated before the old path is deleted.
+  An explained difference can stand; the explanation goes in the plan's ledger.
 - **No legacy path.**
   clear.grow, relax.exchange, search.grow_prune and Incumbent.polish's loop are deleted once their presets match, and their callers move to the engine.
   Row formats are unchanged, so nothing needs migrating.
@@ -116,7 +117,7 @@ Any change to Clearing, Tension or the solves.
 - **Subtle order dependence.**
   Screened scores its M even when unscored; Spread's width alternatives are deduplicated by set; exchange scores all `k` before choosing.
   Grow-then-prune's rows list each step's cleared buildings in index order, not pick order.
-  Each is a line in the identity tests, not a behaviour to improve in passing.
+  Each is a line in the agreement checks, not a behaviour to improve in passing.
 - **Size.**
   About 400 lines move.
-  The identity tests are the guard, run before each member's old path is deleted.
+  The agreement checks are the guard, run before each member's old path is deleted.
