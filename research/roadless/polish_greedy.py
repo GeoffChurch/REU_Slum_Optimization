@@ -1,14 +1,14 @@
-"""The greedy, then a polish. A greedy picker (clear.py) to the budget, its clearing within the
-budget (every building of its steps in pick order while it fits: all of the steps before the
-crossing one, part of that), then exchange refinement (relax.exchange) over every building,
-ranked by the eps-world gradient at the 0/1 clearing (the tension), candidates scored in the eps
-world at 1e-6 as SIMP's incumbent does, the result exactly.
+"""The greedy, then a polish. A greedy round (search.greedy_round) to the budget, its clearing
+within the budget (every building of its steps in pick order while it fits: all of the
+steps before the crossing one, part of that), then exchange refinement (search.polish) over
+every building, ranked by the eps-world gradient at the 0/1 clearing (the tension), candidates
+scored in the eps world at 1e-6 as SIMP's incumbent does, the result exactly.
 
     PYTHONPATH=. uv run python research/roadless/polish_greedy.py <id> <p> <cpu|gpu> <picker> \\
         <tries> <width> <along> <budget> <mesh> [x2]
 
 mesh: a common.mesh_of token, the grid of every solve and score. `x2`:
-two-for-one moves too (relax.exchange's pairs). Rows in
+two-for-one moves too (search.Swaps' pairs). Rows in
 polish_rows/<along>/<picker>.P<tries>w<width>[x2]<the mesh's suffix>/D<budget>/<id>_p<p>.parquet
 (h 0.5 unnamed, as in a SIMP plan): `perm` the polished clearing's Lens A, `greedy_perm` the
 greedy's own clearing within the budget (a real clearing, not picker_compare's interpolation
@@ -54,12 +54,14 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
     t_greedy = time.time() - t0
     c.removed[:] = False
     r = relax.cut_to_budget(s.order, c.cost, budget)
+    c.removed[:] = r > 0
     rel = relax.Relaxation(c, power, rtol=RTOL)
     scorer = relax.Relaxation(c, power, q=1.0, rtol=RTOL, eps=SCORE_EPS, params=c.p)
     greedy_perm = rel.perm(rel.exact(r))
-    J, rp, moves, used = relax.exchange(
-        scorer.value, lambda x: scorer.value_sgrad(x)[1], scorer.value(r), r, np.arange(c.n),
-        c.cost, budget, tries, width, pairs)
+    s = search.SearchState.start(c, power=power, score=search.UNSCORED, world=None)  # own count
+    moves = search.polish(scorer, budget=budget, width=width, pairs=pairs, pool=relax.PAIR_POOL,
+                          tries=tries)(s, search.Silent())
+    rp, used = c.removed.astype(float), s.scorings
     perm = rel.perm(rel.exact(rp))
     t = time.time() - t0
     out.parent.mkdir(parents=True, exist_ok=True)

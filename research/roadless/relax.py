@@ -127,6 +127,10 @@ class Relaxation:
     def value(self, x: np.ndarray) -> float:
         return self.c.sc.J(self._solve(x)[3], self.power)
 
+    def score(self, s: search.SearchState, removed: np.ndarray) -> search.Score:
+        """The eps world as a search.World: J of the clearing (no P here)."""
+        return search.Score(self.value(removed.astype(float)), np.nan)
+
     def value_sgrad(self, x: np.ndarray) -> tuple[float, np.ndarray]:
         """J and its gradient in the projected clearing s = proj(x)."""
         c, p = self.c, self.pp
@@ -285,79 +289,6 @@ def round_sampled(x: np.ndarray, cost: np.ndarray, budget: float, rng: np.random
 
 # Pair moves draw from the PAIR_POOL most promising buildings to add and to close.
 PAIR_POOL = 64
-
-
-def _singles(g, ins, outs, cost, left):
-    """Add one (budget left permitting) or swap one in for one out: moves as rows (added,
-    added, closed, closed; -1 for none) and their linearized changes."""
-    ia, ib = np.meshgrid(ins, outs, indexing="ij")
-    none_s, none_p = np.full(len(ins), -1), np.full(ia.size, -1)
-    mv = np.concatenate([np.stack([ins, none_s, none_s, none_s]),
-                         np.stack([ia.ravel(), none_p, ib.ravel(), none_p])], axis=1)
-    est = np.concatenate([np.where(cost[ins] <= left, g[ins], np.inf),
-                          np.where(cost[ia] <= left + cost[ib], g[ia] - g[ib], np.inf).ravel()])
-    return mv, est
-
-
-def _pairs(g, ins, outs, cost, left):
-    """Two in for one out and one in for two out, among the PAIR_POOL buildings most promising
-    to add (most negative gradient) and cheapest to close."""
-    pin = ins[np.argsort(g[ins], kind="stable")[:PAIR_POOL]]
-    pout = outs[np.argsort(-g[outs], kind="stable")[:PAIR_POOL]]
-    i, j = np.triu_indices(len(pin), 1)
-    a1, a2, b = np.repeat(pin[i], len(pout)), np.repeat(pin[j], len(pout)), np.tile(pout, len(i))
-    k, m = np.triu_indices(len(pout), 1)
-    a, b1, b2 = np.repeat(pin, len(k)), np.tile(pout[k], len(pin)), np.tile(pout[m], len(pin))
-    mv = np.concatenate([np.stack([a1, a2, b, np.full(len(b), -1)]),
-                         np.stack([a, np.full(len(a), -1), b1, b2])], axis=1)
-    est = np.concatenate([
-        np.where(cost[a1] + cost[a2] <= left + cost[b], g[a1] + g[a2] - g[b], np.inf),
-        np.where(cost[a] <= left + cost[b1] + cost[b2], g[a] - g[b1] - g[b2], np.inf)])
-    return mv, est
-
-
-def exchange(score: Callable[[np.ndarray], float], grad: Callable[[np.ndarray], np.ndarray],
-             J: float, r: np.ndarray, movable: np.ndarray, cost: np.ndarray, budget: float,
-             tries: int, width: int, pairs: bool) -> tuple[float, np.ndarray, int, int]:
-    """Exchange refinement of the 0/1 clearing r (score J) over the buildings `movable`. Each
-    round ranks the single moves within them -- add one the budget left allows, or swap one in
-    for a cleared one -- by their linearized change from grad(r) (adding a: g_a; closing b:
-    -g_b), scores the best `width` and keeps the best of those if it improves. With `pairs`, a
-    round whose singles improve nothing then tries the best `width` two-in-one-out and
-    one-in-two-out moves (_pairs; floating search's escalation: their summed estimates would
-    crowd the singles out of one ranking). Stops when a round improves nothing or `tries`
-    scorings are spent. Returns (J, r, moves kept, scorings)."""
-    used = moves = 0
-    while used < tries:
-        g = grad(r)
-        left = budget + 1e-12 - float(cost @ r)
-        ins, outs = movable[r[movable] == 0], movable[r[movable] > 0]
-        best = None
-        for kind in (_singles, _pairs) if pairs else (_singles,):
-            mv, e = kind(g, ins, outs, cost, left)
-            k = min(width, tries - used, int(np.isfinite(e).sum()))
-            if k == 0:
-                continue
-            top = np.argpartition(e, k - 1)[:k]
-            for m in top[np.argsort(e[top])]:
-                rn = r.copy()
-                for x in mv[:2, m]:
-                    if x >= 0:
-                        rn[x] = 1.0
-                for x in mv[2:, m]:
-                    if x >= 0:
-                        rn[x] = 0.0
-                used += 1
-                Jn = score(rn)
-                if Jn < J and (best is None or Jn < best[0]):
-                    best = (Jn, rn)
-            if best is not None:
-                break
-        if best is None:
-            break
-        J, r = best
-        moves += 1
-    return J, r, moves, used
 
 
 def frank_wolfe(rel: Relaxation, budget: float, iters: int, log=print) -> dict:
@@ -684,10 +615,10 @@ class Incumbent:
 
     def polish(self, x: np.ndarray, tries: int, width: int, everything: bool, pairs: bool,
                log=print) -> None:
-        """Exchange refinement of the incumbent (`exchange`) over every building if `everything`,
-        else over the undecided ones: grey in the final iterate x, or where the incumbent and x's
-        top-x rounding disagree (late samples flip them; NOTES "Where .r2's winners come from").
-        Ranked by the gradient at the 0/1 incumbent in the scorer's eps world (the greedy's
+        """Exchange refinement of the incumbent (search.exchange_round) over every building if
+        `everything`, else over the undecided ones: grey in the final iterate x, or where the
+        incumbent and x's top-x rounding disagree (late samples flip them; NOTES "Where .r2's
+        winners come from"). Ranked by the gradient at the 0/1 incumbent in the scorer's eps world (the greedy's
         tension)."""
         if self.scorer is None:
             raise ValueError("polish ranks with the eps-world scorer: give the plan .k<n>s<eps>")
@@ -698,9 +629,17 @@ class Incumbent:
                                       != (self.r > 0))))
         movable = und if self.first is None else und[self.first[und] == 0]   # held stay held
         J0 = self.J
-        self.J, self.r, moves, used = exchange(
-            self._score, lambda r: self.scorer.value_sgrad(r)[1], self.J, self.r, movable,
-            cost, self.budget, tries, width, pairs)
+        c = self.rel.c
+        c.removed[:] = self.r > 0
+        s = search.SearchState(c=c, power=self.rel.power, score=search.Score(self.J, np.nan),
+                               world=self.scorer, order=[], scorings=0,
+                               movable=np.isin(np.arange(c.n), movable))
+        moves = search.Until(
+            search.Do(search.exchange_round(self.scorer, budget=self.budget, width=width,
+                                            pairs=pairs, pool=PAIR_POOL, tries=tries)),
+            search.Spent(tries))(s, search.Silent())
+        self.J, self.r, used = s.score.J, c.removed.astype(float), s.scorings
+        c.removed[:] = False                    # relax.one keeps its clearings in x, not here
         log(f"  polish: {len(movable)} {'buildings' if everything else 'undecided buildings'}, "
             f"{moves} moves kept, {used} scorings, J {J0:.6g} -> {self.J:.6g}")
 

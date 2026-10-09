@@ -615,6 +615,96 @@ class GreedyRows:
                   f" {r['t']:.0f}s", flush=True)
 
 
+def _singles(g, ins, outs, cost, left):
+    """Add one (budget left permitting) or swap one in for one out: moves as rows (added,
+    added, closed, closed; -1 for none) and their linearized changes."""
+    ia, ib = np.meshgrid(ins, outs, indexing="ij")
+    none_s, none_p = np.full(len(ins), -1), np.full(ia.size, -1)
+    mv = np.concatenate([np.stack([ins, none_s, none_s, none_s]),
+                         np.stack([ia.ravel(), none_p, ib.ravel(), none_p])], axis=1)
+    est = np.concatenate([np.where(cost[ins] <= left, g[ins], np.inf),
+                          np.where(cost[ia] <= left + cost[ib], g[ia] - g[ib], np.inf).ravel()])
+    return IndexMoves(mv, est)
+
+
+def _pairs(g, ins, outs, cost, left, pool: int):
+    """Two in for one out and one in for two out, among the `pool` buildings most promising
+    to add (most negative gradient) and cheapest to close."""
+    pin = ins[np.argsort(g[ins], kind="stable")[:pool]]
+    pout = outs[np.argsort(-g[outs], kind="stable")[:pool]]
+    i, j = np.triu_indices(len(pin), 1)
+    a1, a2, b = np.repeat(pin[i], len(pout)), np.repeat(pin[j], len(pout)), np.tile(pout, len(i))
+    k, m = np.triu_indices(len(pout), 1)
+    a, b1, b2 = np.repeat(pin, len(k)), np.tile(pout[k], len(pin)), np.tile(pout[m], len(pin))
+    mv = np.concatenate([np.stack([a1, a2, b, np.full(len(b), -1)]),
+                         np.stack([a, np.full(len(a), -1), b1, b2])], axis=1)
+    est = np.concatenate([
+        np.where(cost[a1] + cost[a2] <= left + cost[b], g[a1] + g[a2] - g[b], np.inf),
+        np.where(cost[a] <= left + cost[b1] + cost[b2], g[a] - g[b1] - g[b2], np.inf)])
+    return IndexMoves(mv, est)
+
+
+class Graded(World, Protocol):
+    """An eps world with its gradient (relax.Relaxation)."""
+
+    def value_sgrad(self, x: np.ndarray) -> tuple[float, np.ndarray]: ...
+
+
+class Grad(NamedTuple):
+    g: np.ndarray               # dJ/ds at the 0/1 clearing r: adding a is g_a, closing b -g_b
+    r: np.ndarray               # the clearing, as 0/1 floats
+
+
+@dataclass(frozen=True)
+class Gradient:
+    world: Graded
+
+    def rank(self, s: SearchState) -> Grad:
+        r = s.c.removed.astype(float)
+        return Grad(self.world.value_sgrad(r)[1], r)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Swaps:
+    """Add one the budget left allows or swap one in for a cleared one, within s.movable; with
+    `pairs`, a second tier of two-in-one-out and one-in-two-out among the `pool` most
+    promising (floating search's escalation: their summed estimates would crowd the singles
+    out of one ranking)."""
+    budget: float
+    pairs: bool
+    pool: int
+
+    def size(self, s: SearchState, r: Grad) -> int:
+        return 1
+
+    def tiers(self, s: SearchState, r: Grad) -> list[Callable[[], Tier]]:
+        cost, g, x = s.c.cost, r.g, r.r
+        left = self.budget + 1e-12 - float(cost @ x)
+        movable = np.flatnonzero(s.movable)
+        ins, outs = movable[x[movable] == 0], movable[x[movable] > 0]
+        out: list[Callable[[], Tier]] = [lambda: _singles(g, ins, outs, cost, left)]
+        if self.pairs:
+            out.append(lambda: _pairs(g, ins, outs, cost, left, self.pool))
+        return out
+
+
+def exchange_round(world: Graded, *, budget: float, width: int, pairs: bool, pool: int,
+                   tries: int) -> Round[Grad]:
+    """Exchange refinement's round: moves ranked by their linearized change from the world's
+    gradient at the 0/1 clearing, the best `width` scored in it, the best kept if it improves."""
+    return Round(name=f"P{tries}w{width}" + ("x2" if pairs else ""), rank=Gradient(world),
+                 refine=None, build=Swaps(budget=budget, pairs=pairs, pool=pool),
+                 evaluate=Top(world=world, width=width, tries=tries), accept=IfBetter())
+
+
+def polish(world: Graded, *, budget: float, width: int, pairs: bool, pool: int,
+           tries: int) -> Part:
+    """Exchange refinement until a round improves nothing or `tries` scorings are spent."""
+    return Seq((Rescore(world), Until(Do(exchange_round(world, budget=budget, width=width,
+                                                        pairs=pairs, pool=pool, tries=tries)),
+                                      Spent(tries))))
+
+
 EPS_SCREEN = 1e-6               # the eps world the shortlist is scored in (the real one to ~1e-3)
 
 
