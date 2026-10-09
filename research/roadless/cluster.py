@@ -5,7 +5,7 @@ shipped as an input (a node has no source data; common.build_blocks reads the ba
 needs GPU memory for the eps world, every inside cell x 8 headings, about GB_PER_MILLION GB per
 million unknowns, and cluster_submit routes it to the smallest card that holds it. `--mesh` is
 the grid the tasks use (common.mesh_of: <h>, <h>a<d0>x<smax> or
-<h>g<d0>x<smax>f<factor>p<power>), its cells counted here, SIZING_WORKERS blocks at a time (a
+<h>g<d0>x<smax>f<factor>p<power>o<opening>), its cells counted here, SIZING_WORKERS blocks at a time (a
 goal mesh's: its target); `--gb` sets a floor under the estimate, to send a block known to need
 a bigger card to one. Results (parquet rows) come back to the same paths here, never
 overwriting a local file.

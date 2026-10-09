@@ -235,8 +235,6 @@ class Scorer:
         return 1.0 - self.P_free(free) / self.P0
 
 
-GOAL_EPS = 0.01      # the indicator's world: buildings conduct eps (the greedy's tension world,
-                     # clear.EPS, where the prototype was measured)
 GOAL_RTOL = 1e-3     # its solves: a ranking (as the tension's)
 GOAL_ALPHA = 1.0     # eta = E (s / h)^alpha: 1 and 2 within 1.4x of each other (NOTES)
 GOAL_STEP = 6        # a round splits ceil(gap / GOAL_STEP) cells (each adds 3): half the gap
@@ -246,25 +244,28 @@ GOAL_REACH = 0.98    # done at this share of the target
 @dataclass(frozen=True)
 class GoalMesh:
     """The distance mesh a<d0>x<smax> (lifted.AdaptiveMesh) refined where J_power is sensitive,
-    to `factor` x its cells. Each round solves the baseline with the buildings at GOAL_EPS and
-    its J_power adjoint, scores every coarse cell eta = E (s / h)^GOAL_ALPHA (E its share of
-    |w du dlam| over its edges, s its side), splits the largest ceil(gap / GOAL_STEP) and
-    balances (lifted.balance). NOTES, "Goal-oriented refinement"."""
+    to `factor` x its cells. Each round solves the baseline with the buildings `opening` open (1:
+    as if every one were cleared, the flow any clearing could start) and its J_power adjoint,
+    scores every coarse cell eta = E (s / h)^GOAL_ALPHA (E its share of |w du dlam| over its
+    edges, s its side), splits the largest ceil(gap / GOAL_STEP) and balances (lifted.balance).
+    NOTES, "Goal-oriented refinement"."""
     h: float
     d0: float
     smax: float
     factor: float
     power: float
+    opening: float
     offset: tuple[float, float]
 
     @property
     def name(self) -> str:
-        return f"h{self.h:g}g{self.d0:g}x{self.smax:g}f{self.factor:g}p{self.power:g}"
+        return (f"h{self.h:g}g{self.d0:g}x{self.smax:g}f{self.factor:g}p{self.power:g}"
+                f"o{self.opening:g}")
 
     @property
     def suffix(self) -> str:
         return (("" if self.h == 0.5 else f".h{self.h:g}")
-                + f".g{self.d0:g}x{self.smax:g}f{self.factor:g}p{self.power:g}")
+                + f".g{self.d0:g}x{self.smax:g}f{self.factor:g}p{self.power:g}o{self.opening:g}")
 
     @property
     def pilot(self) -> lifted.AdaptiveMesh:
@@ -284,19 +285,20 @@ class GoalMesh:
             coarse = grid.level > 0
             if len(grid.level) >= GOAL_REACH * target or not coarse.any():
                 return grid
-            eta = goal_indicator(block, grid, p, population, self.power)[coarse]
+            eta = goal_indicator(block, grid, p, population, self.power, self.opening)[coarse]
             mask = np.zeros(len(eta), dtype=bool)
             mask[np.argsort(-eta)[:math.ceil((target - len(grid.level)) / GOAL_STEP)]] = True
             lay = lifted.balance(lifted.split_cells(lay, mask))
             p.solver.release()
 
 
-def goal_indicator(block, grid, p: lifted.Params, population, power: float) -> np.ndarray:
+def goal_indicator(block, grid, p: lifted.Params, population, power: float,
+                   opening: float) -> np.ndarray:
     """Per cell: eta = E (s / h)^GOAL_ALPHA, E the cell's half of |w du dlam| over each of its
-    edges (u the baseline with the buildings at GOAL_EPS, lam its J_power adjoint)."""
+    edges (u the baseline with the buildings `opening` open, lam its J_power adjoint)."""
     sc = Scorer.on_grid(block, grid, p, population)
     xp, K = p.solver.xp, p.K
-    op = sc.free0 + GOAL_EPS * (grid.isub.mean(axis=-1) - sc.free0)
+    op = sc.free0 + opening * (grid.isub.mean(axis=-1) - sc.free0)
     sol = lifted.solve(grid, op, sc.f, p, rtol=GOAL_RTOL, host=False)
     host = dataclasses.replace(sol, u=p.solver.to_host(sol.u), cell=p.solver.to_host(sol.cell),
                                unk_cell=p.solver.to_host(sol.unk_cell))
@@ -324,14 +326,15 @@ def goal_indicator(block, grid, p: lifted.Params, population, power: float) -> n
 
 def mesh_of(token: str) -> lifted.MeshSpec:
     """A mesh named on a command line, at lifted.OFFSET: <h> (lifted.UniformMesh),
-    <h>a<d0>x<smax> (lifted.AdaptiveMesh) or <h>g<d0>x<smax>f<factor>p<power> (GoalMesh)."""
+    <h>a<d0>x<smax> (lifted.AdaptiveMesh) or <h>g<d0>x<smax>f<factor>p<power>o<opening>
+    (GoalMesh)."""
     num = r"([0-9]+(?:\.[0-9]+)?)"
     if m := re.fullmatch(num, token):
         return lifted.UniformMesh(float(m[1]), offset=lifted.OFFSET)
     if m := re.fullmatch(f"{num}a{num}x{num}", token):
         return lifted.AdaptiveMesh(float(m[1]), float(m[2]), float(m[3]), offset=lifted.OFFSET)
-    if m := re.fullmatch(f"{num}g{num}x{num}f{num}p{num}", token):
+    if m := re.fullmatch(f"{num}g{num}x{num}f{num}p{num}o{num}", token):
         return GoalMesh(float(m[1]), float(m[2]), float(m[3]), float(m[4]), float(m[5]),
-                        offset=lifted.OFFSET)
+                        float(m[6]), offset=lifted.OFFSET)
     raise ValueError(f"unknown mesh {token!r}: <h>, <h>a<d0>x<smax> or "
-                     "<h>g<d0>x<smax>f<factor>p<power>")
+                     "<h>g<d0>x<smax>f<factor>p<power>o<opening>")

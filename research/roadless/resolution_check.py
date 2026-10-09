@@ -11,7 +11,8 @@ block has gates below that spacing. Buildings, their costs and a clearing do not
 
 mesh: <h> (a uniform grid), <h>a<d0>x<smax> (lifted.AdaptiveMesh: h within d0 metres of
 every footprint, street and the block edge, coarser with distance up to smax) or
-<h>g<d0>x<smax>f<factor>p<power> (common.GoalMesh: that refined where J_power is sensitive).
+<h>g<d0>x<smax>f<factor>p<power>o<opening> (common.GoalMesh: that refined where J_power is
+sensitive, the buildings `opening` open).
 
 clearings.parquet: block, name, cleared (building indices); in the cluster's inputs
 ($CLUSTER_SUBMIT_INPUTS) or a local path. A name ending `_steps` is a greedy's pick order, cut to

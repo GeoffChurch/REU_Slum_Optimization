@@ -514,8 +514,8 @@ class Plan(NamedTuple):
     a coarser uniform one (it reads low on gated blocks -- NOTES, "Where resolution matters"),
     `.a<d0>x<smax>` local coarsening (lifted.AdaptiveMesh: h within d0 metres of every
     footprint, street and the block edge, cells doubling with distance up to `smax`), and
-    `.g<d0>x<smax>f<factor>p<power>` that refined where J_power is sensitive (common.GoalMesh),
-    the last two for blocks too large for a uniform h 0.5 (NOTES, "Local coarsening",
+    `.g<d0>x<smax>f<factor>p<power>o<opening>` that refined where J_power is sensitive with the
+    buildings `opening` open (common.GoalMesh), the last two for blocks too large for a uniform h 0.5 (NOTES, "Local coarsening",
     "Goal-oriented refinement")."""
     fw: int
     qmax: float
@@ -588,7 +588,7 @@ def plan_of(spec: str) -> Plan:
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?"
-                     r"(?:\.h(?P<h>[0-9.]+?))?(?P<mesh>\.[ag][0-9.]+x[0-9.]+?(?:f[0-9.]+p[0-9.]+)?)?",
+                     r"(?:\.h(?P<h>[0-9.]+?))?(?P<mesh>\.[ag][0-9.]+x[0-9.]+?(?:f[0-9.]+p[0-9.]+o[0-9.]+)?)?",
                      spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
