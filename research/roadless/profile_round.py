@@ -1,4 +1,5 @@
-"""Profile one greedy round (tension + pick + exact solve) on one block: where does the time go?
+"""Profile one greedy round (rank, build, evaluate, the state's exact score) on one block:
+where does the time go?
 
     PYTHONPATH=. uv run python research/roadless/profile_round.py <id> <h> <along> <solver> [picker]
 """
@@ -14,7 +15,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
-from clear import Clearing, picker_of, sweep_of  # noqa: E402
+import search  # noqa: E402
+from clear import Clearing, sweep_of  # noqa: E402
 
 
 def main(bid: str, h: float, along: str, solver: str, picker: str) -> None:
@@ -30,16 +32,15 @@ def main(bid: str, h: float, along: str, solver: str, picker: str) -> None:
     pr.disable()
     print(f"setup {time.time() - t0:.1f}s", flush=True)
     pstats.Stats(pr).sort_stats("cumulative").print_stats(20)
-    pk = picker_of(picker, sweep_of(solver))
+    rnd = search.greedy_round(picker, sweep_of(solver))
     J = c.sc.J(c.sc.u0, 2.0)
+    s = search.SearchState.start(c, 2.0, search.Score(J, c.sc.P0), search.EXACT)
+    rec = search.GreedyRows(bid, c, 2.0, J, c.sc.P0, time.time())
     pr = cProfile.Profile()
     pr.enable()
     t0 = time.time()
-    t = c.tension(2.0)
-    print(f"tension {time.time() - t0:.1f}s", flush=True)
-    t1 = time.time()
-    out = pk.pick(c, t, J, 2.0, True)
-    print(f"pick {time.time() - t1:.1f}s ({len(out.cleared)} cleared)", flush=True)
+    search.Do(rnd)(s, rec)
+    print(f"step {time.time() - t0:.1f}s ({len(s.order)} cleared)", flush=True)
     pr.disable()
     pstats.Stats(pr).sort_stats("cumulative").print_stats(45)
 

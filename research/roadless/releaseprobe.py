@@ -24,12 +24,13 @@ def variant(bid: str, along: str, d_max: float, out: Path, release: bool) -> Non
     import clear
     import common
     import lifted
+    import search
     if not release:
         lifted.GpuAMG.release = lambda self: None   # type: ignore[method-assign]
     scans = lifted.scans_of("gpu")
     specs = along.split("@")
     (b,) = common.build_blocks([bid])
-    clear.greedy_block(b, clear.picker_of("S0.01cat", clear.sweep_of("gpu")), 0.5, d_max, out,
+    clear.greedy_block(b, search.greedy_round("S0.01cat", clear.sweep_of("gpu")), 0.5, d_max, out,
                        common.POPULATIONS["area"], 2.0, lifted.along_of(specs[0], scans),
                        lifted.solver_of("gpu"),
                        lifted.along_of(specs[1], scans) if len(specs) == 2 else None)

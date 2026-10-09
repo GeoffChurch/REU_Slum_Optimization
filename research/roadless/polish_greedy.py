@@ -28,6 +28,7 @@ sys.path.insert(0, str(HERE))
 import clear  # noqa: E402
 import common  # noqa: E402
 import lifted  # noqa: E402
+import search  # noqa: E402
 import relax  # noqa: E402
 
 RTOL = 1e-3          # the solves while polishing, as SIMP's base plan's (t0.001)
@@ -45,13 +46,14 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
     out = (rows_of(picker_spec, tries, width, pairs, mesh, along, budget)
            / f"{bid}_p{power:g}.parquet")
     c = relax._clearing(bid, device, along, mesh)
-    picker = clear.picker_of(picker_spec, clear.sweep_of(device))
+    rnd = search.greedy_round(picker_spec, clear.sweep_of(device))
     t0 = time.time()
-    order = [j for pk, _ in clear.grow(c, picker, power, budget, c.sc.J(c.sc.u0, power), False)
-             for j in pk.cleared]
+    s = search.SearchState.start(c, power, search.Score(c.sc.J(c.sc.u0, power), c.sc.P0),
+                                 search.EXACT)
+    search.greedy(rnd, budget)(s, search.Silent())
     t_greedy = time.time() - t0
     c.removed[:] = False
-    r = relax.cut_to_budget(order, c.cost, budget)
+    r = relax.cut_to_budget(s.order, c.cost, budget)
     rel = relax.Relaxation(c, power, rtol=RTOL)
     scorer = relax.Relaxation(c, power, q=1.0, rtol=RTOL, eps=SCORE_EPS, params=c.p)
     greedy_perm = rel.perm(rel.exact(r))

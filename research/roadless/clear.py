@@ -5,10 +5,10 @@ wherever a footprint is), so the potential is defined inside them. dP/dw_e = -(u
 a building's first-order gain from clearing is the sum over the edges it covers of
 (Delta u)^2 x (the weight gained). That is the TENSION: how hard the escape flow presses on it.
 
-Greedy. Each step: one tension solve (two for power != 1), then a Picker clears: Screened (exact
-solves for the top M by tension, clear the best) or Batched (a spaced set of the top buildings up
-to the next multiple of delta of population, one exact solve). `loo` checks the screen against
-exact leave-one-out on one step.
+Greedy. Each step: one tension solve (two for power != 1), then a search.greedy_round clears
+(M: exact solves for the top M by tension, clear the best; B: a spaced set of the top buildings up
+to the next multiple of delta of population; S: a catchment-diverse such set). `loo` checks the
+screen against exact leave-one-out on one step.
 
     PYTHONPATH=. uv run python research/roadless/clear.py loo <block idx> [h]
     PYTHONPATH=. uv run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <along> <solver>
@@ -22,13 +22,12 @@ from __future__ import annotations
 
 import dataclasses
 import os
-import re
 import sys
 import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 
 import numpy as np
 import pandas as pd
@@ -39,6 +38,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
+
+if TYPE_CHECKING:
+    import search as engine  # search imports clear at run time
 
 EPS = 0.01
 RTOL_TENSION = 1e-3     # a ranking: checked unchanged against 1e-9 (NOTES, "Speed")
@@ -224,21 +226,6 @@ def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
               f"{exact[pick].max() / exact.max():.3f} of the true best", flush=True)
 
 
-class Picked(NamedTuple):
-    cleared: list[int]
-    J: float          # J_power after clearing them
-    P1: float         # P (= J_1) after clearing them
-
-
-class Picker(Protocol):
-    """What one greedy step clears, given the round's tension and J_power now. `score`: the step's
-    exact J and P1 are wanted; without it a picker that needs no exact solve to choose returns
-    them as NaN (the greedy as a seed or a polish's start is re-scored where it is used)."""
-    name: str
-
-    def pick(self, c: Clearing, t: Tension, J: float, power: float, score: bool) -> Picked: ...
-
-
 def _exact(c: Clearing, cleared: list[int], power: float) -> tuple[float, float]:
     r = c.removed.copy()
     r[cleared] = True
@@ -261,61 +248,9 @@ def _next_target(c: Clearing, delta: float) -> tuple[float, float]:
     return D, (np.floor(D / delta + 1e-9) + 1) * delta
 
 
-@dataclass(frozen=True)
-class Screened:
-    """Exact-solve the top M by tension, clear the one with the best exact gain per unit
-    population. M + 1 (or 2) solves per building."""
-    M: int
-
-    @property
-    def name(self) -> str:
-        return f"M{self.M}"
-
-    def pick(self, c: Clearing, t: Tension, J: float, power: float, score: bool) -> Picked:
-        T = t.g / c.cost
-        best = Picked([], np.inf, np.inf)
-        bestv = -np.inf
-        for j in (int(j) for j in np.argsort(-T)[:self.M] if not c.removed[j]):
-            Jj, P1 = _exact(c, [j], power)
-            v = (J - Jj) / c.cost[j]
-            if v > bestv:
-                best, bestv = Picked([j], Jj, P1), v
-        return best
-
-
-@dataclass(frozen=True)
-class Batched:
-    """Clear, by tension per unit population, every building not within `gap_m` of one already
-    taken this round, until D reaches the next multiple of `delta` (so a lens threshold on that
-    lattice is overshot by at most one building, as in the one-at-a-time greedy). One exact
-    solve per round, for the record; no screen."""
-    delta: float
-    gap_m: float
-
-    @property
-    def name(self) -> str:
-        return f"B{self.delta:g}g{self.gap_m:g}"
-
-    def pick(self, c: Clearing, t: Tension, J: float, power: float, score: bool) -> Picked:
-        T = t.g / c.cost
-        D, target = _next_target(c, self.delta)
-        taken: list[int] = []
-        near: set[int] = set()
-        for j in (int(j) for j in np.argsort(-T) if not c.removed[j]):
-            if D >= target - 1e-12:
-                break
-            if j in near:
-                continue
-            taken.append(j)
-            D += float(c.cost[j])
-            near.update(int(k) for k in c.sc.tree.query(c.sc.polys[j], predicate="dwithin",
-                                                         distance=self.gap_m))
-        return Picked(taken, *(_exact(c, taken, power) if score else (np.nan, np.nan)))
-
-
 class GramSource(Protocol):
     """How alike the candidates' effects are: a PSD matrix over `cand` whose normalised entries
-    are the correlations rho_ij that `Spread` builds its batch from."""
+    are the correlations rho_ij that `search.Diverse` builds its batch from."""
     name: str
 
     def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray: ...
@@ -543,7 +478,7 @@ def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float,
     is worth g_i - sum_{j in batch} rho_ij sqrt(g_i g_j) once the batch is chosen (a duplicate of
     a chosen one is worth 0, an independent one keeps its g_i, a complementary one, rho < 0,
     gains). Take the best worth per unit cost until the batch's cost reaches `need`; `first`, if
-    given, is taken first whatever its worth (Spread's screening width)."""
+    given, is taken first whatever its worth (Diverse's screening width)."""
     d = np.sqrt(np.clip(np.diag(H), 0.0, None))
     with np.errstate(invalid="ignore", divide="ignore"):
         rho = np.where(np.outer(d, d) > 0, H / np.outer(d, d), 0.0)
@@ -562,60 +497,7 @@ def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float,
     return chosen
 
 
-@dataclass(frozen=True)
-class Spread:
-    """Shortlist the top candidates by tension per unit population up to `reach` times the
-    round's population step, measure how alike their effects are with `source`, and take the
-    batch `_spread` builds from their correlations. `width` > 1: build that many batches, the
-    k-th starting from the shortlist's k-th best by tension per unit population, score each
-    exactly and take the best (`width` exact solves a round instead of one)."""
-    delta: float
-    source: GramSource
-    reach: float = 3.0
-    width: int = 1
-
-    @property
-    def name(self) -> str:
-        return f"S{self.delta:g}{self.source.name}" + (f"w{self.width}" if self.width > 1 else "")
-
-    def pick(self, c: Clearing, t: Tension, J: float, power: float, score: bool) -> Picked:
-        T = t.g / c.cost
-        D, target = _next_target(c, self.delta)
-        order = [int(j) for j in np.argsort(-T) if not c.removed[j]]
-        cum = np.cumsum(c.cost[order])
-        cand = order[:int(np.searchsorted(cum, self.reach * (target - D))) + 1]
-        H = self.source.gram(c, t, cand, power)
-        gain, cost = t.g[cand], c.cost[cand]
-        firsts = [None] + [int(i) for i in np.argsort(-gain / cost)[1:self.width]]
-        batches: dict[frozenset[int], list[int]] = {}   # distinct batches, each in pick order
-        for f in firsts:
-            chosen = _spread(gain, cost, H, target - D, first=f)
-            batches.setdefault(frozenset(chosen), chosen)
-        del t, H                    # the round's system and hierarchy, before the scoring solves
-        if len(batches) == 1 and not score:          # nothing to choose between, nothing wanted
-            return Picked([cand[i] for i in next(iter(batches.values()))], np.nan, np.nan)
-        best = None
-        for batch in batches.values():
-            taken = [cand[i] for i in batch]
-            Jb, P1 = _exact(c, taken, power)
-            if best is None or Jb < best.J:
-                best = Picked(taken, Jb, P1)
-        return best
-
-
-def grow(c: Clearing, picker: Picker, power: float, d_max: float, J: float, score: bool):
-    """The greedy from c's current clearing (J_power J): each step ranks the remaining buildings
-    by tension per unit of population and lets `picker` clear some, until d_max. Yields
-    (Picked, D after) per step; c.removed is updated before each yield. `score`: each step's
-    exact J (Picker.pick)."""
-    while c.cost[c.removed].sum() < d_max - 1e-12 and not c.removed.all():
-        pk = picker.pick(c, c.tension(power), J, power, score)
-        c.removed[pk.cleared] = True
-        J = pk.J
-        yield pk, float(c.cost[c.removed].sum())
-
-
-def greedy_block(b, picker: Picker, h: float, d_max: float, out: Path, population,
+def greedy_block(b, rnd: engine.Round, h: float, d_max: float, out: Path, population,
                  power: float, along: lifted.AlongConductance, solver: lifted.Solver,
                  search: lifted.AlongConductance | None = None) -> None:
     """The greedy to d_max. Records perm (in J_power) and perm1 (the p = 1 score) at every
@@ -626,16 +508,12 @@ def greedy_block(b, picker: Picker, h: float, d_max: float, out: Path, populatio
     sc = c.sc
     J0 = sc.J(sc.u0, power)
     P0 = sc.P0
-    rows = [dict(block=b.block_id, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[],
-                 P0=P0, t=0.0)]
+    import search as engine     # search imports clear, so here; `search` is the conductance
     t0 = time.time()
-    for step, (pk, D) in enumerate(grow(c, picker, power, d_max, J0, True), start=1):
-        rows.append(dict(block=b.block_id, n=c.n, step=step, D=D,
-                         perm=1 - (pk.J / J0) ** (1 / power), perm1=1 - pk.P1 / P0,
-                         cleared=pk.cleared, P0=P0, t=time.time() - t0))
-        if c.n > 1000:
-            print(f"  {b.block_id} step {step} D {D:.3f} perm' {rows[-1]['perm']:.3f}"
-                  f" {rows[-1]['t']:.0f}s", flush=True)
+    rec = engine.GreedyRows(b.block_id, c, power, J0, P0, t0)
+    engine.greedy(rnd, d_max)(engine.SearchState.start(c, power, engine.Score(J0, P0),
+                                                       engine.EXACT), rec)
+    rows = rec.rows
     tmp = out.with_suffix(f".{os.getpid()}.tmp")
     pd.DataFrame(rows).to_parquet(tmp)
     os.replace(tmp, out)
@@ -680,31 +558,13 @@ def sweep_of(spec: str) -> Sweep:
     raise ValueError(f"unknown sweep {spec!r}")
 
 
-def picker_of(spec: str, sweep: Sweep) -> Picker:
-    """`M4` -> Screened(4); `B0.01g3` -> Batched(delta 0.01, gap 3 m); `S0.01cat` ->
-    Spread(delta 0.01) with Catchment (its sweep on `sweep`'s device), `S0.01catw4` with screening
-    width 4. (Impact, Sketch and the
-    no-spacing null were measured and dominated: NOTES.md, "Batching"; Impact again on the GPU,
-    "GPU-resident rounds".)"""
-    if spec.startswith("M"):
-        return Screened(int(spec[1:]))
-    if spec.startswith("B"):
-        delta, gap = spec[1:].split("g")
-        return Batched(float(delta), float(gap))
-    m = re.fullmatch(r"S([0-9.]+)cat(?:w(\d+))?", spec)
-    if m:
-        return Spread(float(m.group(1)), Catchment(sweep),
-                      width=1 if m.group(2) is None else int(m.group(2)))
-    raise ValueError(f"unknown picker {spec!r}")
-
-
 def rows_dir(picker: str, h: float, pop: str, power: float = 1.0, along: str = "uni") -> Path:
     return HERE / (f"clear_rows_{picker}_h{h:g}" + ("" if pop == "count" else f"_{pop}")
                    + ("" if power == 1.0 else f"_p{power:g}")
                    + ("" if along == "uni" else f"_{along}"))
 
 
-def run(workers: int, picker: Picker, h: float, d_max: float, pop: str, power: float,
+def run(workers: int, picker: engine.Round, h: float, d_max: float, pop: str, power: float,
         along: lifted.AlongConductance, solver: lifted.Solver,
         search: lifted.AlongConductance | None, ids: list[str] | None = None) -> None:
     """All 220 study blocks, largest first, or just `ids`. `search`: the tension's
@@ -732,8 +592,9 @@ if __name__ == "__main__":
         # run <workers> <picker> <h> <d_max> <pop> <p> <along>[@<search along>] <solver> [ids,]
         scans = lifted.scans_of(sys.argv[9])
         specs = sys.argv[8].split("@")
-        run(int(sys.argv[2]), picker_of(sys.argv[3], sweep_of(sys.argv[9])), float(sys.argv[4]),
-            float(sys.argv[5]),
+        import search as engine     # `search` is a conductance elsewhere in this module
+        run(int(sys.argv[2]), engine.greedy_round(sys.argv[3], sweep_of(sys.argv[9])),
+            float(sys.argv[4]), float(sys.argv[5]),
             sys.argv[6], float(sys.argv[7]), lifted.along_of(specs[0], scans),
             lifted.solver_of(sys.argv[9]),
             lifted.along_of(specs[1], scans) if len(specs) == 2 else None,

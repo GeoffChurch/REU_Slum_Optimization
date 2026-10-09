@@ -16,6 +16,7 @@ import clear  # noqa: E402
 import common  # noqa: E402
 import cupy as cp  # noqa: E402
 import lifted  # noqa: E402
+import search  # noqa: E402
 
 STATS: dict = {}
 
@@ -50,8 +51,8 @@ def main(bid: str, along: str, d_max: float) -> None:
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
     c = clear.Clearing(b, mesh, p, population=common.POPULATIONS["area"])
     clear.GpuSweep.prepare = _prepare(clear.GpuSweep.prepare)
-    picker = clear.picker_of("S0.01cat", clear.sweep_of("gpu"))
-    gram = picker.source.gram
+    rnd = search.greedy_round("S0.01cat", clear.sweep_of("gpu"))
+    gram = rnd.build.source.gram
     step = [0]
 
     def gram_(c_, t, cand, power):
@@ -64,10 +65,12 @@ def main(bid: str, along: str, d_max: float) -> None:
               + f" | rest {dt - STATS['prepare'] - sum(r for _, r in runs):.2f}s", flush=True)
         return H
 
-    object.__setattr__(picker.source, "gram", gram_)
+    object.__setattr__(rnd.build.source, "gram", gram_)
     J0 = c.sc.J(c.sc.u0, 2.0)
-    for _pk, _D in clear.grow(c, picker, 2.0, d_max, J0, True):
-        pass
+    # a record that wants every state: each step's exact solve stays in what is timed
+    search.greedy(rnd, d_max)(search.SearchState.start(c, 2.0, search.Score(J0, c.sc.P0),
+                                                       search.EXACT),
+                              search.GreedyRows(bid, c, 2.0, J0, c.sc.P0, time.time()))
 
 
 if __name__ == "__main__":

@@ -34,7 +34,7 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
 import clear  # noqa: E402
-from clear import RTOL_SCORE, Clearing, _exact, grow, picker_of, rows_dir, sweep_of  # noqa: E402
+from clear import RTOL_SCORE, Clearing, _exact, rows_dir, sweep_of  # noqa: E402
 
 R = TypeVar("R")
 
@@ -463,6 +463,155 @@ class IfBetter:
         return best
 
 
+class Gains(NamedTuple):
+    t: clear.Tension            # the round's tension (Catchment sweeps its system)
+    T: np.ndarray               # t.g / cost: gain per unit of population (removed: -inf)
+
+
+@dataclass(frozen=True)
+class AddTension:
+    def rank(self, s: SearchState) -> Gains:
+        t = s.c.tension(s.power)
+        return Gains(t, t.g / s.c.cost)
+
+
+@dataclass(frozen=True)
+class TopSingles:
+    """The top m by tension per unit of population, one building each (Screened's)."""
+    m: int
+
+    def size(self, s: SearchState, r: Gains) -> int:
+        return self.m
+
+    def tiers(self, s: SearchState, r: Gains) -> list[Callable[[], Tier]]:
+        top = [int(j) for j in np.argsort(-r.T)[:self.m] if not s.c.removed[j]]
+        est = -r.T[top]
+        return [lambda: Batches([Move([j], []) for j in top], est)]
+
+
+@dataclass(frozen=True, kw_only=True)
+class Spaced:
+    """By tension per unit of population, every building not within `gap` metres of one taken,
+    until D reaches the next multiple of `delta` (Batched's)."""
+    delta: float
+    gap: float
+
+    def size(self, s: SearchState, r: Gains) -> int:
+        return len(self._taken(s, r))
+
+    def _taken(self, s: SearchState, r: Gains) -> list[int]:
+        c = s.c
+        D, target = clear._next_target(c, self.delta)
+        taken: list[int] = []
+        near: set[int] = set()
+        for j in (int(j) for j in np.argsort(-r.T) if not c.removed[j]):
+            if D >= target - 1e-12:
+                break
+            if j in near:
+                continue
+            taken.append(j)
+            D += float(c.cost[j])
+            near.update(int(k) for k in c.sc.tree.query(c.sc.polys[j], predicate="dwithin",
+                                                         distance=self.gap))
+        return taken
+
+    def tiers(self, s: SearchState, r: Gains) -> list[Callable[[], Tier]]:
+        taken = self._taken(s, r)
+        return [lambda: Batches([Move(taken, [])], np.zeros(1))]
+
+
+@dataclass(frozen=True, kw_only=True)
+class Diverse:
+    """Shortlist by tension per unit of population up to `reach` times the round's population
+    step, measure how alike the candidates' effects are with `source`, and build `width`
+    batches with clear._spread (the k-th started from the shortlist's k-th best), distinct
+    (Spread's)."""
+    delta: float
+    source: clear.GramSource
+    reach: float
+    width: int
+
+    def size(self, s: SearchState, r: Gains) -> int:
+        return len(self._batches(s, r)[0].add)
+
+    def _batches(self, s: SearchState, r: Gains) -> list[Move]:
+        c = s.c
+        D, target = clear._next_target(c, self.delta)
+        order = [int(j) for j in np.argsort(-r.T) if not c.removed[j]]
+        cum = np.cumsum(c.cost[order])
+        cand = order[:int(np.searchsorted(cum, self.reach * (target - D))) + 1]
+        H = self.source.gram(c, r.t, cand, s.power)
+        gain, cost = r.t.g[cand], c.cost[cand]
+        firsts = [None] + [int(i) for i in np.argsort(-gain / cost)[1:self.width]]
+        batches: dict[frozenset[int], list[int]] = {}   # distinct batches, each in pick order
+        for f in firsts:
+            chosen = clear._spread(gain, cost, H, target - D, first=f)
+            batches.setdefault(frozenset(chosen), chosen)
+        return [Move([cand[i] for i in b], []) for b in batches.values()]
+
+    def tiers(self, s: SearchState, r: Gains) -> list[Callable[[], Tier]]:
+        moves = self._batches(s, r)
+        return [lambda: Batches(moves, np.zeros(len(moves)))]
+
+
+SPREAD_REACH = 3.0      # Diverse's shortlist, in population steps (the measured default)
+
+
+def greedy_round(spec: str, sweep: clear.Sweep) -> Round[Gains]:
+    """`M4`: the top 4 scored exactly, the best gain per unit of population; `B0.01g3`: a batch
+    spaced 3 m apart to the next 0.01 of population; `S0.01cat`: a catchment-diverse batch to
+    the next 0.01, `S0.01catw4` the best of 4 such batches. (Impact, Sketch and the no-spacing
+    null were measured and dominated: NOTES, "Batching"; Impact again on the GPU, "GPU-resident
+    rounds".)"""
+    # names rebuilt from the parsed values, as the pickers' were (row directories)
+    if m := re.fullmatch(r"M(\d+)", spec):
+        k = int(m[1])
+        return Round(name=f"M{k}", rank=AddTension(), refine=None, build=TopSingles(k),
+                     evaluate=All(EXACT), accept=Best(GainPerCost()))
+    if m := re.fullmatch(r"B([0-9.]+)g([0-9.]+)", spec):
+        delta, gap = float(m[1]), float(m[2])
+        return Round(name=f"B{delta:g}g{gap:g}", rank=AddTension(), refine=None,
+                     build=Spaced(delta=delta, gap=gap), evaluate=All(EXACT), accept=Only())
+    if m := re.fullmatch(r"S([0-9.]+)cat(?:w(\d+))?", spec):
+        delta, width = float(m[1]), 1 if m[2] is None else int(m[2])
+        source = clear.Catchment(sweep)
+        return Round(name=f"S{delta:g}{source.name}" + (f"w{width}" if width > 1 else ""),
+                     rank=AddTension(), refine=None,
+                     build=Diverse(delta=delta, source=source, reach=SPREAD_REACH, width=width),
+                     evaluate=All(EXACT), accept=Best(LowestJ()))
+    raise ValueError(f"unknown picker {spec!r}")
+
+
+def greedy(rnd: Round, d_max: float) -> Part:
+    """The greedy: `rnd` until D reaches d_max."""
+    return Until(Do(rnd), Reached(d_max))
+
+
+class GreedyRows:
+    """The greedy's rows (clear.greedy_block's format): every state scored exactly; per step D,
+    perm (J_power), perm1 (P) and the step's buildings in pick order, after a step-0 row."""
+
+    def __init__(self, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+                 t0: float):
+        self.block_id, self.n, self.power, self.J0, self.P0, self.t0 = (
+            block_id, c.n, power, J0, P0, t0)
+        self.rows = [dict(block=block_id, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[],
+                          P0=P0, t=0.0)]
+
+    def wants(self, s: SearchState) -> bool:
+        return True
+
+    def on_step(self, s: SearchState, o: Outcome) -> None:
+        self.rows.append(dict(block=self.block_id, n=self.n, step=len(self.rows), D=s.D,
+                              perm=1 - (s.score.J / self.J0) ** (1 / self.power),
+                              perm1=1 - s.score.P / self.P0, cleared=o.cleared, P0=self.P0,
+                              t=time.time() - self.t0))
+        if self.n > 1000:
+            r = self.rows[-1]
+            print(f"  {self.block_id} step {r['step']} D {r['D']:.3f} perm' {r['perm']:.3f}"
+                  f" {r['t']:.0f}s", flush=True)
+
+
 EPS_SCREEN = 1e-6               # the eps world the shortlist is scored in (the real one to ~1e-3)
 
 
@@ -522,9 +671,8 @@ def grow_prune(b, plan: GrowPrune, power: float, along: str, device: str, d_max:
     c = Clearing(b, mesh, p, population=common.POPULATIONS["area"])
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
-    for _pk, _D in grow(c, picker_of(plan.picker, sweep_of(device)), power,
-                        plan.grow * d_max, J0, True):
-        pass
+    rnd = greedy_round(plan.picker, sweep_of(device))
+    greedy(rnd, plan.grow * d_max)(SearchState.start(c, power, Score(J0, P0), EXACT), Silent())
     print(f"  {b.block_id} grown to D {float(c.cost[c.removed].sum()):.3f} "
           f"{time.time() - t0:.0f}s", flush=True)
     # the eps world is the caller's to build; search.py does not import relax at the top

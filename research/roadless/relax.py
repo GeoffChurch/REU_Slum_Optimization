@@ -45,6 +45,7 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
 import clear  # noqa: E402
+import search  # noqa: E402
 from clear import EPS, RTOL_SCORE, Clearing, _cells_axes, rows_dir  # noqa: E402
 
 D_LENS = 0.05          # Lens A's budget (owner, 2026-10-03: 0.10 saturates under sightline)
@@ -795,11 +796,11 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     r_greedy = None
     if plan.seed or plan.track:
         spec = plan.seed or plan.track
-        picker = clear.picker_of(spec, clear.sweep_of(device))
-        order = [j for pk, _ in clear.grow(c, picker, power, budget, rel.J0, False)
-                 for j in pk.cleared]
+        rnd = search.greedy_round(spec, clear.sweep_of(device))
+        s = search.SearchState.start(c, power, search.Score(rel.J0, np.nan), search.EXACT)
+        search.greedy(rnd, budget)(s, search.Silent())
         c.removed[:] = False
-        r_greedy = cut_to_budget(order, c.cost, budget)
+        r_greedy = cut_to_budget(s.order, c.cost, budget)
         if plan.seed:
             inc.consider(r_greedy, f"the greedy {plan.seed}")
         log(f"  the greedy {spec}: {time.time() - t0:.0f}s")

@@ -21,6 +21,7 @@ import clear  # noqa: E402
 import common  # noqa: E402
 import cupy as cp  # noqa: E402
 import lifted  # noqa: E402
+import search as engine  # noqa: E402
 
 GB = 2**30
 PEAK = [0]                      # the pool's most bytes in use since the last report
@@ -92,8 +93,8 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
           f"layers array {8 * g.inside.size * 8 / GB:.2f} GB (K x ny x nx float64)", flush=True)
     report("after setup", c)
 
-    picker = clear.picker_of("S0.01cat", clear.sweep_of("gpu"))
-    tension, gram, exact = c.tension, picker.source.gram, clear._exact
+    rnd = engine.greedy_round("S0.01cat", clear.sweep_of("gpu"))
+    tension, gram, exact = c.tension, rnd.build.source.gram, clear.exact
     step = [0]
 
     def tension_(power, restore=False):
@@ -114,7 +115,7 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
         report(f"step {step[0]} after gram ({len(cand)} candidates)", c)
         return H
 
-    def exact_(c_, cleared, power):
+    def exact_(c_, removed, power):
         report(f"step {step[0]} before scoring", c)
         if release:
             POOL[0].free_all_blocks()
@@ -123,7 +124,7 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
             print(f"    gc.collect: {gc.collect()} objects", flush=True)
             report(f"step {step[0]} collected", c)
         try:
-            out = exact(c_, cleared, power)
+            out = exact(c_, removed, power)
         except Exception:
             report(f"step {step[0]} FAILED in scoring", c)
             raise
@@ -131,11 +132,20 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
         return out
 
     c.tension = tension_
-    object.__setattr__(picker.source, "gram", gram_)      # the source is a frozen dataclass
-    clear._exact = exact_
+    object.__setattr__(rnd.build.source, "gram", gram_)      # the source is a frozen dataclass
+    clear.exact = exact_
     J0 = c.sc.J(c.sc.u0, 2.0)
-    for pk, D in clear.grow(c, picker, 2.0, d_max, J0, True):
-        print(f"  step {step[0]} D {D:.3f} perm' {1 - (pk.J / J0) ** 0.5:.3f}", flush=True)
+
+    class _Print:
+        def wants(self, s):
+            return True
+
+        def on_step(self, s, o):
+            print(f"  step {step[0]} D {s.D:.3f} perm' {1 - (s.score.J / J0) ** 0.5:.3f}",
+                  flush=True)
+
+    engine.greedy(rnd, d_max)(engine.SearchState.start(c, 2.0, engine.Score(J0, c.sc.P0),
+                                                       engine.EXACT), _Print())
 
 
 if __name__ == "__main__":
