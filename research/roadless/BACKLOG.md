@@ -143,20 +143,24 @@ Not pursued, with what would change that:
   greedy's pickers, exchange (the polish), grow-then-prune and floating search are its
   configurations. Floating search (FL3xS0.01catr0.005m8c100) is never below grow-then-prune or
   the greedy on the five blocks and repairs the prune's collapse (22422 at D 0.05: 0.782 against
-  0.011), at 1.1 -- 2.2x its time; behind or tied with SIMP at D 0.05 on 9712 and 22422. Next
+  0.011), at 1.1 -- 2.2x its time. At one budget (d_max 0.05, the first live screen: NOTES,
+  "Floating search at the cheap preset's budget") it is dominated by SIMP's default: -0.011 on
+  15 held-out blocks at about 10x the time; its niche is the whole curve in one run. Next
   rows, two new parts each (spec, "What the two new rows need"): a substitute-aware restore (a
   restore ranking that keeps the Tension, a restore-direction diverse builder) and screened adds
   (an add-direction refiner, a builder that reads the refined order). Wiki
   `pages/methods/plus-l-take-away-r.md`.
-- **Swing schedules** (owner 2026-10-09: proposed). Several swings past the budget, each
-  smaller (grow to 3x and prune back, then 1.5x, then 1.2x, then the polish at the budget):
-  big swings judge complements together, small ones settle the substitutes. First the fixed
-  schedule against floating search and the cheap preset at D 0.05 on the same card; then, if
-  it pays, the adaptive form: each swing size's gain and GPU time estimated from the run's
-  own history, the best gain per second taken, stopping when none is worth its price at the
-  screens' rate (seqscreen.py's stop moved inside a run; swings are not exchangeable, so it
-  needs a trend). Neighbours: oscillating search, VNS, adaptive LNS (wiki page above, "Swing
-  schedules").
+- **Swing schedules** (owner 2026-10-09: proposed). Several swings past the budget, each smaller
+  (grow to 3x and prune back, then 1.5x, then 1.2x, then the polish at the budget): big swings
+  judge complements together, small ones settle the substitutes (search.py
+  `SW<grow>-<grow>-...x<picker>r<share>m<k>.P<t>w<w>`). First the fixed schedule on the live
+  screen's 15 blocks at D 0.05 against the cheap preset, floating search and SIMP's default
+  (which dominates floating search there: a swing schedule must beat SIMP or cost about as
+  little), a cheap arm (1.5x, 1.2x) beside the 3x one; then, if it pays, the adaptive form: each
+  swing size's gain and GPU time estimated from the run's own history, the best gain per second
+  taken, stopping when none is worth its price at the screens' rate (seqscreen.py's stop moved
+  inside a run; swings are not exchangeable, so it needs a trend). Neighbours: oscillating
+  search, VNS, adaptive LNS (wiki page above, "Swing schedules").
 
 ## Experiment design
 

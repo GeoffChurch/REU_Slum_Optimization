@@ -1943,3 +1943,29 @@ against 21, for the same call. On the six screens (future 820):
 Neither ask is live: x2 over p64 is the call that set the bracket's top, so it sits on the edge
 (at the stop 9 orders say adopt, 9 ask, 2 keep), and r2 against base is moot now that r2 on top
 of p64 is a keep at every rate.
+
+### Floating search at the cheap preset's budget: the first live screen (owner 2026-10-09)
+
+seqscreen.py's `next` ran floating search at d_max 0.05 (FL3xS0.01catr0.005m8c100D0.05: the grow
+to 0.15, the restore rounds and the conditional adds all for the cheap preset's budget; search.py
+now has d_max in its rows' name) against the cheap preset (S0.01cat.P64w8), on the held-out
+blocks in the replay's first order, on the local RTX 6000 Ada like the cheap preset's rows.
+Stopped by hand after 15 blocks, where the stop said run on (one to 31 more blocks each worth more
+than its price at the bracket's mean rate) and the call was an ask:
+
+    floating search against   mean     median   ahead (of 15)
+    the cheap preset          +0.0043  +0.0025  10
+    SIMP base                 -0.0086  -0.0078   3
+    SIMP .p256w8 (default)    -0.0109  -0.0092   2
+
+Median time a block: floating search 527 s, the cheap preset 28 s (29x in total; 30796 alone
+9000 s against 147 s), SIMP 45 -- 64 s on the cluster's older cards. At one budget floating
+search is dominated by SIMP's default, behind on 13 of 15 at about 10x the time, so the ask
+(+0.0043 Lens A, 1.2% of the cheap preset's mean, for 29x its time; break-even 3.7e-6) is moot.
+It is behind the cheap preset itself on five (19161 -0.019, 44602 -0.013, three by under 0.003):
+the polish finds what its restores and conditional adds do not. Its niche stays the whole curve
+to d_max in one run.
+
+The screen compared one pair and would have run on (about 10 GPU-hours) for a decision a third
+preset had already made. A candidate is screened against every frontier point it could displace:
+the cheapest it would sit above and the one at its cost.
