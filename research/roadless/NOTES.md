@@ -1956,11 +1956,11 @@ than its price at the bracket's mean rate) and the call was an ask:
     floating search against   mean     median   ahead (of 15)
     the cheap preset          +0.0043  +0.0025  10
     SIMP base                 -0.0086  -0.0078   3
-    SIMP .p256w8 (default)    -0.0109  -0.0092   2
+    SIMP .p256w8x2 (default)  -0.0109  -0.0092   2
 
 Median time a block: floating search 527 s, the cheap preset 28 s (29x in total; 30796 alone
-9000 s against 147 s), SIMP 45 -- 64 s on the cluster's older cards. At one budget floating
-search is dominated by SIMP's default, behind on 13 of 15 at about 10x the time, so the ask
+9000 s against 147 s), SIMP base 64 s and default 87 s in their rows. At one budget floating
+search is dominated by SIMP's default, behind on 13 of 15 at about 6x the time, so the ask
 (+0.0043 Lens A, 1.2% of the cheap preset's mean, for 29x its time; break-even 3.7e-6) is moot.
 It is behind the cheap preset itself on five (19161 -0.019, 44602 -0.013, three by under 0.003):
 the polish finds what its restores and conditional adds do not. Its niche stays the whole curve
@@ -1984,12 +1984,12 @@ SW1.5-1.2 (the same otherwise).
     the cheap preset          +0.0101  +0.0099  14       +0.0106  +0.0077  14
     floating search           +0.0058  +0.0048  12       +0.0062  +0.0048  15
     SIMP base                 -0.0027  -0.0030   5       -0.0023  -0.0038   4
-    SIMP .p256w8 (default)    -0.0050  -0.0031   3       -0.0046  -0.0049   4
+    SIMP .p256w8x2 (default)  -0.0050  -0.0031   3       -0.0046  -0.0049   4
     SW1.5-1.2                                            +0.0004  +0.0003   8
 
 Median time a block: SW1.5-1.2 145 s, SW3-1.5-1.2 398 s, floating search 527 s, the cheap
-preset 28 s (1.27, 4.04, 5.03 and 0.17 GPU-hours on the 15); SIMP 45 s (default) and 64 s
-(base) on the cluster's older cards.
+preset 28 s (1.27, 4.04, 5.03 and 0.17 GPU-hours on the 15); SIMP's default 87 s and base 64 s
+in their rows (0.61 and 0.46 GPU-hours).
 - Swings dominate floating search at one budget: SW1.5-1.2 is +0.006 at 0.3x its time, and
   SW3-1.5-1.2 is ahead on all 15 at 0.9x.
 - The large first swing buys nothing here: SW3 against SW1.5, median +0.000 [-0.003, +0.002],
@@ -1998,8 +1998,8 @@ preset 28 s (1.27, 4.04, 5.03 and 0.17 GPU-hours on the 15); SIMP 45 s (default)
   +0.006, 20423 -0.005); whether that is a block's preferred amplitude or the search's path
   dependence is unknown without repeats. Judging complements together, the reason for a large
   swing, did not show at this budget.
-- Both are dominated by SIMP's default: -0.005 mean, behind on 11 or 12 of 15, at 3x (SW1.5)
-  and 9x its time, on a faster card. They beat it on 30796 (+0.004, +0.005: the largest block,
+- Both are dominated by SIMP's default: -0.005 mean, behind on 11 or 12 of 15, at 1.5x (SW1.5)
+  and 4.6x its time (median ratio). They beat it on 30796 (+0.004, +0.005: the largest block,
   n 5023, where floating search beats it too), 8152 and 8480 (both under +0.001), and 22640
   (SW3, +0.001).
 - Against the cheap preset they are behind only on 19161 (-0.006, -0.010): the polish starts
@@ -2007,7 +2007,7 @@ preset 28 s (1.27, 4.04, 5.03 and 0.17 GPU-hours on the 15); SIMP 45 s (default)
   SIMP's `.g` seeding fell into and `.G` (polish both, keep the better) fixed.
 
 The swings close two-thirds of the cheap preset's gap to SIMP's default (+0.010 of +0.015) at
-5x the cheap preset's time and 3x SIMP's: not a frontier point between the two. The adaptive
+5x the cheap preset's time and 1.5x SIMP's: not a frontier point between the two. The adaptive
 form's lever would be the amplitude, and the fixed arms already say the large one is wasted
 here. The CPU smoke run (SW3-1.5-1.2 on two small blocks, 19510 and 19421, D 0.05) gave 0.3455
 (floating search's clearing) and 0.488 (floating search 0.472).

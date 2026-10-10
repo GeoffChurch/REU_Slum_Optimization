@@ -145,7 +145,7 @@ Not pursued, with what would change that:
   the greedy on the five blocks and repairs the prune's collapse (22422 at D 0.05: 0.782 against
   0.011), at 1.1 -- 2.2x its time. At one budget (d_max 0.05, the first live screen: NOTES,
   "Floating search at the cheap preset's budget") it is dominated by SIMP's default (-0.011 on
-  15 held-out blocks at about 10x the time) and by swings (below); its niche is the whole curve
+  15 held-out blocks at about 6x the time) and by swings (below); its niche is the whole curve
   in one run. Next rows, two new parts each (spec, "What the two new rows need"): a
   substitute-aware restore (a restore ranking that keeps the Tension, a restore-direction
   diverse builder) and screened adds (an add-direction refiner, a builder that reads the
@@ -154,7 +154,7 @@ Not pursued, with what would change that:
   cheap preset's budget"). Several grow-then-prune swings past the budget, each smaller, then the
   polish (search.py `SW<grow>-<grow>-...x<picker>r<share>m<k>.P<t>w<w>`). On 15 held-out blocks
   at D 0.05, SW1.5-1.2 is +0.010 over the cheap preset and +0.006 over floating search at 0.3x
-  its time, but -0.005 against SIMP's default at 3x SIMP's time; SW3-1.5-1.2 ties it at 3x the
+  its time, but -0.005 against SIMP's default at 1.5x SIMP's time; SW3-1.5-1.2 ties it at 3x the
   time (the large swing wasted). Not on the frontier. What could put it there, untried: swings
   as SIMP's finisher (SIMP's polished clearing as the archive's first state, one 1.2x swing and
   the polish; NOTES "What follows" after SIMP's collapses), and the polish from both the

@@ -26,6 +26,10 @@ P<tries>w<width>) from the best. Every exact state at or below d_max, the greedy
 included, goes to an archive like floating search's, and its rows are the archive's, so a
 swing never ends below the greedy's own clearing within the budget.
 
+Any schedule can start from SIMP's clearing at d_max instead of from nothing (`SIMP<plan>+<spec>`,
+relax.py's rows of that plan, power and conductance): the seed is the first move, scored exactly
+and checked against SIMP's own score of it, so a swing from it finishes SIMP's answer.
+
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> \
         <cpu|gpu> <along> <d_max>
 
@@ -33,7 +37,9 @@ spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
 GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
 FL3xS0.01catr0.005m8c100; SW<grow>-<grow>-...x<greedy picker>r<share>[m<shortlist>]
 .P<tries>w<width>[x2] (the polish's, as polish_greedy.py's), e.g.
-SW3-1.5-1.2xS0.01catr0.005m8.P64w8. Rows in clear.rows_dir(<spec>D<d_max>, ...), e.g.
+SW3-1.5-1.2xS0.01catr0.005m8.P64w8; SIMP<relax plan>+<any of those>, e.g.
+SIMPfw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2+SW1.2xS0.01catr0.005m8.P64w8 (SIMP's default,
+then a 1.2x swing and the polish). Rows in clear.rows_dir(<spec>D<d_max>, ...), e.g.
 clear_rows_FL3xS0.01catr0.005m8c100D0.05_h0.5_area_p2: d_max sets the grow and the rows.
 
 The check that audits the parts' pairings (a Gradient ranking with TopSingles is an error):
@@ -49,7 +55,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Generic, NamedTuple, Protocol, TypeVar
 
@@ -1128,18 +1134,100 @@ class Swings:
             swings += [ToBest(archive)] if i else []
             swings += [greedy(self.add, g * d_max), Grown(block_id=block_id, t0=t0),
                        Until(Do(restore), Within(d_max))]
-        last = (ToBest(archive),
+        last = (Noted(archive=archive, label="before the polish", block_id=block_id, J0=J0,
+                      power=power, t0=t0),
+                ToBest(archive),
                 With(Silent(), polish(polish_world, budget=d_max, width=self.width,
                                       pairs=self.pairs, pool=self.pool, tries=self.tries)),
                 Kept(archive=archive, d_max=d_max))
         return Built(part=Seq((*swings, *last)), rows=rec)
 
 
+@dataclass(frozen=True, kw_only=True)
+class Noted:
+    """Says the archive's best so far, making no move: which phase a gain came from."""
+    archive: Archive
+    label: str
+    block_id: str
+    J0: float
+    power: float
+    t0: float
+
+    def __call__(self, s: SearchState, rec: Record) -> int:
+        best = min(self.archive.best.values(), key=lambda st: st.score.J)
+        print(f"  {self.block_id} {self.label}: perm' "
+              f"{1 - (best.score.J / self.J0) ** (1 / self.power):.4f} at D {best.D:.3f} "
+              f"{time.time() - self.t0:.0f}s", flush=True)
+        return 0
+
+
+class Seed(NamedTuple):
+    """Another method's clearing of a block, and its Lens A there."""
+    cleared: list[int]
+    perm: float
+
+
+SEED_TOL = 1e-4     # a seed's Lens A here against its source's (a check, not a setting): the
+                    # same clearing on another card differs by solver noise, ~1e-7; other
+                    # buildings or another metric differ by far more
+
+
+@dataclass(frozen=True, kw_only=True)
+class FromSeed:
+    """The search's first move: the seed's clearing, within d_max, scored exactly and checked
+    against its source's score (the same buildings under the same metric)."""
+    seed: Seed
+    J0: float
+    power: float
+    d_max: float
+    block_id: str
+
+    def __call__(self, s: SearchState, rec: Record) -> int:
+        apply(s, Outcome(list(self.seed.cleared), [], None, None), rec)
+        if s.D > self.d_max + 1e-12:
+            raise ValueError(f"{self.block_id}: the seed's D {s.D:.4f} is past d_max "
+                             f"{self.d_max:g}")
+        if s.world is not EXACT:
+            s.score, s.world = EXACT.score(s, s.c.removed), EXACT
+        perm = 1 - (s.score.J / self.J0) ** (1 / self.power)
+        if abs(perm - self.seed.perm) > SEED_TOL:
+            raise ValueError(f"{self.block_id}: the seed scores {perm:.6f} here, "
+                             f"{self.seed.perm:.6f} where it was made")
+        print(f"  {self.block_id} seed perm' {perm:.4f} (its source {self.seed.perm:.4f}) at D "
+              f"{s.D:.3f}", flush=True)
+        return 1
+
+
+@dataclass(frozen=True, kw_only=True)
+class Seeded:
+    """`plan` from another method's clearing instead of from nothing: the seed first, then the
+    plan's parts, its rows."""
+    source: str                     # the seeds' name, e.g. SIMP<relax plan>
+    seeds: Mapping[str, Seed]       # block id -> its clearing at d_max
+    plan: SearchPlan
+
+    @property
+    def name(self) -> str:
+        return f"{self.source}+{self.plan.name}"
+
+    @property
+    def screen_eps(self) -> float:
+        return self.plan.screen_eps
+
+    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+              d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
+        inner = self.plan.build(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
+                                t0=t0, screen=screen, polish_world=polish_world)
+        first = FromSeed(seed=self.seeds[block_id], J0=J0, power=power, d_max=d_max,
+                         block_id=block_id)
+        return Built(part=Seq((first, inner.part)), rows=inner.rows)
+
+
 class SearchPlan(Protocol):
-    """A schedule's preset (GrowPrune, FloatPrune, Swings): its name (the rows' directory,
-    derived from the rounds it holds), the eps world of its restore screen, and its parts, built
-    on the worlds the edge offers (the restore screen's; the polish's). Read-only members: a
-    frozen dataclass's fields are not settable variables."""
+    """A schedule's preset (GrowPrune, FloatPrune, Swings; any of them Seeded): its name (the
+    rows' directory, derived from the rounds it holds), the eps world of its restore screen, and
+    its parts, built on the worlds the edge offers (the restore screen's; the polish's).
+    Read-only members: a frozen dataclass's fields are not settable variables."""
 
     @property
     def name(self) -> str: ...
@@ -1151,8 +1239,17 @@ class SearchPlan(Protocol):
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built: ...
 
 
-def plan_of(spec: str, *, sweep: clear.Sweep, pool: int) -> SearchPlan:
-    """The preset `spec` names, its greedy round built on `sweep`, a polish's pairs among `pool`."""
+def plan_of(spec: str, *, sweep: clear.Sweep, pool: int,
+            simp_seeds: Callable[[str], Mapping[str, Seed]]) -> SearchPlan:
+    """The preset `spec` names, its greedy round built on `sweep`, a polish's pairs among `pool`,
+    a SIMP plan's clearings (SIMP<plan>+...) from `simp_seeds`."""
+    if m := re.fullmatch(r"SIMP([^+]+)\+(.+)", spec):
+        return Seeded(source=f"SIMP{m.group(1)}", seeds=simp_seeds(m.group(1)),
+                      plan=_unseeded(m.group(2), sweep=sweep, pool=pool))
+    return _unseeded(spec, sweep=sweep, pool=pool)
+
+
+def _unseeded(spec: str, *, sweep: clear.Sweep, pool: int) -> SearchPlan:
     if m := re.fullmatch(r"SW([0-9.]+(?:-[0-9.]+)*)x(\S+?)r([0-9.]+)(?:m(\d+))?\.P(\d+)w(\d+)(x2)?",
                          spec):
         return Swings(grows=tuple(float(g) for g in m.group(1).split("-")),
@@ -1230,6 +1327,22 @@ if __name__ == "__main__":
     import relax
     import search       # run as a script this file would be `__main__`, and relax's `search`
                         # a second copy of the engine (its own EXACT and classes)
+    power, device, along, d_max = (float(sys.argv[3]), sys.argv[4], sys.argv[5],
+                                   float(sys.argv[6]))
+
+    def simp_seeds(name: str) -> dict[str, search.Seed]:
+        """SIMP plan `name`'s clearings at this run's budget, power and conductance."""
+        plan = relax.plan_of(name)
+        if plan.name != name:
+            raise ValueError(f"SIMP plan {name!r} is spelled {plan.name!r}")
+        files = sorted(relax.rows_of(plan, along, d_max).glob(f"*_p{power:g}.parquet"))
+        if not files:
+            raise ValueError(f"no rows of SIMP {name} ({along}, D {d_max:g}, p {power:g})")
+        rows = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+        return {str(b): search.Seed(cleared=[int(i) for i in c], perm=float(pm))
+                for b, c, pm in zip(rows.block, rows.simp_cleared, rows.simp_perm, strict=True)}
+
     search.main(sys.argv[1].split(","),
-                search.plan_of(sys.argv[2], sweep=sweep_of(sys.argv[4]), pool=relax.PAIR_POOL),
-                float(sys.argv[3]), sys.argv[4], sys.argv[5], float(sys.argv[6]))
+                search.plan_of(sys.argv[2], sweep=sweep_of(device), pool=relax.PAIR_POOL,
+                               simp_seeds=simp_seeds),
+                power, device, along, d_max)
