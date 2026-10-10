@@ -2064,8 +2064,9 @@ it just swapping some buildings along the same corridors? ... is it normalized p
   gain worth 19% more budget.
 
 Lens A is 1 - (J/J0)^(1/2), each block against itself uncleared, so gains compare across
-blocks. Whether a typical +0.001 ordering survives another grid is untested; res-check found
-the best of five near-tied clearings changing on about 30% of blocks between h 0.5 and h 0.75.
+blocks. The finisher's gain keeps its sign and size on finer grids and shifted ones (below, "The
+metric's resolution floor"), though res-check found the best of five near-tied clearings
+changing on about 30% of blocks between h 0.5 and the coarser h 0.75.
 The case for the finisher is SIMP's occasional large miss, not the typical re-pick.
 
 The 13 tuning blocks, where SIMP's gated answers are fragile (owner: "You can start that up"),
@@ -2082,3 +2083,62 @@ n 5023) sets it apart, one witness. Not a preset: the gain is one block's. It st
 EPS_SCREEN 1e-6, RTOL_SCORE) did not converge, AMG-CG at 2000 iterations at 1.9e-5 -- 5.0e-5
 against 1e-5, varying run to run; the gate closed at eps 1e-6 leaves a pocket nearly cut off.
 Any restore round can meet it on a gated block (grow-then-prune, floating search, swings).
+
+### The metric's resolution floor (owner 2026-10-10: the agenda's first item)
+
+The clearings of the 59 large blocks (the cheap preset, SIMP base, `.p256w8`, SIMP's default,
+the finisher; the hard-block preset on the 13 tuning blocks) scored exactly at h 0.35 and 0.25
+(resolution_check.py; cluster runs fine25, fine35). h 0.25 covers 51: the seven largest do not
+fit 80 GB there, and 38616's solve did not converge (AMG-CG 4.9e-8 after 2000 iterations).
+
+    the same 51 blocks                 mean gap                    per-block |change| 0.5 -> 0.25
+                                       h 0.5    h 0.35   h 0.25    median  90%     max
+    SIMP's default - the cheap preset  +0.0181  +0.0155  +0.0149   0.0009  0.0094  0.104 (23597)
+    SIMP's default - SIMP base         +0.0036  +0.0030  +0.0030   0.0007  0.0047  0.027 (43547)
+    the finisher - SIMP's default      +0.0005  +0.0005  +0.0005   0.0000  0.0007  0.0013
+    .p256w8 - SIMP's default           -0.0007  -0.0006  -0.0004   0.0000  0.0004  0.012 (46841)
+
+Per block, of the gaps over 1e-3 at h 0.5 the sign flips at h 0.25 on 3 of 51 (SIMP's default
+against the cheap preset), 2 of 30 (against SIMP base), 0 of 11 (the finisher), 1 of 7
+(`.p256w8`). A block's level moves more than its gaps: SIMP's default's Lens A changed by a
+median 0.005 from h 0.5 to 0.25, by over 0.02 on 12 of 51, up to 0.20 (20543 0.50 -> 0.70,
+30848 0.65 -> 0.48), and not towards a limit: on 9 of the 18 blocks that moved over 0.005 from
+0.5 to 0.35, the step to 0.25 went the other way.
+
+Alignment alone does as much (offset_check.py: h 0.5 at the metric's lattice offset and three
+shifts, on 9 of the blocks that moved most). SIMP's default's level ranges over the four offsets
+by 0.004 -- 0.157: 20543 0.36 -- 0.51, 38366 0.37 -- 0.47, 17608 0.70 -- 0.77. Its gaps barely
+move:
+
+    9 blocks, h 0.5                    mean gap                 per-block range    sign against
+                                       metric's   three shifts  median  max        the metric's
+    SIMP's default - the cheap preset  +0.0090    +0.0096       0.0052  0.0136     0 of 27
+    SIMP's default - SIMP base         +0.0051    +0.0055       0.0019  0.0201     1 of 27
+    SIMP base - the cheap preset       +0.0039    +0.0041       0.0057  0.0212     2 of 27
+    the finisher - SIMP's default      +0.0005    +0.0003       0.0000  0.0014     0 of 24
+    .p256w8 - SIMP's default           -0.0026    -0.0028       0.0000  0.0048     0 of 27
+
+- Paired gaps share the grid, so most of its error cancels. Every mean gap keeps its sign at
+  every spacing and offset; its size moves by about 2e-4, or 20%.
+- The clearings were optimized at the metric's offset and keep their gaps under the shifts (the
+  shifted means are as large): no fitting to the alignment.
+- Per block, a re-pick of a few buildings (the finisher, `.p256w8`, the hard-block preset against
+  SIMP's default) holds to 0.002 at the 90th percentile; different layouts (SIMP against the
+  cheap preset) move by a median 0.005, up to 0.02 under a shift and 0.10 under refinement.
+- A block's level carries up to about +-0.08 on some large blocks, and so do per-block absolute
+  claims and the share above 0.9; comparisons of levels across blocks need that margin.
+
+No floor added to the screens' tau. Alignment is per-block noise the bootstrap already carries:
+a block's lattice sits arbitrarily against its buildings, so the error is in the spread of the
+paired differences. Refinement moved mean gaps by about 20% without turning one, which matters
+only for a call near tau; tau stays a price (rate x extra GPU-seconds). Per-block claims need a
+margin of about 0.01 between different layouts and 0.002 between re-picks. The finisher's
++0.0005 is real in sign and size; the verdict on it stands on its size.
+
+Why a level moves (a hypothesis, untested): J_2 weights the worst-off homes, which reach the
+street through gaps between buildings of the order of h; a gap conducts by its sampled open
+fraction (4 x 4 sub-samples a cell, the smallest along a step), which the alignment sets. A
+clearing rarely opens those gaps, so their share of J is common to J and J0 and dilutes the
+ratio by an amount the alignment decides. The metric's passable width is thereby implicit in h
+and the sub-sampling; an explicit one would make it a modelling choice (the agenda's third
+item). The test is a map of the change in each home's term between two offsets on 20543.

@@ -47,15 +47,18 @@ Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry 
 
 Owner's agenda (2026-10-10: "we can take things up one by one and write down all the open
 items up front"), in the order proposed:
-1. **The metric's resolution floor** (running: cluster runs fine25, fine35). The presets',
-   SIMP base's and the finisher's clearings on the 59 rescored at h 0.5, 0.35 and 0.25 (0.35 only
-   on the seven too big for 80 GB at 0.25): do gaps of 0.001 -- 0.004 keep their sign on finer
-   grids? The answer is the least gain a screen should count (seqscreen's tau).
+1. **The metric's resolution floor**: done (NOTES, "The metric's resolution floor"). Mean gaps
+   keep their sign at h 0.35 and 0.25 and under shifted lattices, their size within about 20%;
+   no floor added to tau (alignment is per-block noise the bootstrap already carries). A
+   block's level is not: alignment alone moves it by up to 0.16, so per-block levels need a
+   margin of about +-0.08 on some large blocks.
 2. **Visualization**: the presets' clearings and the corridors they induce (the current through
-   the opened space), side by side, so results can be looked at, not only scored.
+   the opened space), side by side, so results can be looked at, not only scored. With it, the
+   test of why a level moves: each home's term at two lattice offsets on 20543.
 3. **The sightline metric and building transparency** (discussion): what each measures, where
    SIMP is weaker under sightline, and transparency as a model of the world against a device of
-   the search (the translucent greedy).
+   the search (the translucent greedy). With it, the passable width, now implicit in h and the
+   sub-sampling (a gap conducts by its sampled open fraction, which the alignment sets).
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population
    as footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =
@@ -191,7 +194,8 @@ Not pursued, with what would change that:
   finisher"). Its eps world (EPS_SCREEN 1e-6) did not converge on 30848 (AMG-CG 2000 iterations,
   1.9e-5 -- 5.0e-5 against 1e-5); every restore round can meet it. Fixes to weigh: warm starts
   from the current state's solution, a looser rtol for a screen that only ranks, a larger
-  screen eps.
+  screen eps. The exact score can meet it too on a fine grid: 38616 at h 0.25, uncleared, 4.9e-8
+  after 2000 (NOTES, "The metric's resolution floor").
 
 ## Experiment design
 
