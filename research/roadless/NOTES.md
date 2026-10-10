@@ -2067,3 +2067,18 @@ Lens A is 1 - (J/J0)^(1/2), each block against itself uncleared, so gains compar
 blocks. Whether a typical +0.001 ordering survives another grid is untested; res-check found
 the best of five near-tied clearings changing on about 30% of blocks between h 0.5 and h 0.75.
 The case for the finisher is SIMP's occasional large miss, not the typical re-pick.
+
+The 13 tuning blocks, where SIMP's gated answers are fragile (owner: "You can start that up"),
+from SIMP's default and from the hard-block preset `.p256w8x2.GS0.01cate1`: on 12 the finisher
+gains on one, 20269 +0.0006 (22422 +0.0001), from either start; mean +0.0001, 5e-7 Lens A per
+GPU-second, below the screens' bracket. The gated blocks' misses (1558, 38616, 30848) are the
+greedy track's to fix, and the finisher finds nothing past it. On all 58 blocks: 1.0e-5 per
+GPU-second, 5.6e-6 without 30796. A gate on SIMP's answer would not find 30796 either: by
+fragmentation (patches per cleared building) it ranks 42nd of 46; only its size (the largest,
+n 5023) sets it apart, one witness. Not a preset: the gain is one block's. It stays a spec
+(`SIMP<plan>+SW...`), on the frontier for Lens A at twice SIMP's time.
+
+30848 failed from both starts: the restore round's screen (search.py Screen, the eps world at
+EPS_SCREEN 1e-6, RTOL_SCORE) did not converge, AMG-CG at 2000 iterations at 1.9e-5 -- 5.0e-5
+against 1e-5, varying run to run; the gate closed at eps 1e-6 leaves a pocket nearly cut off.
+Any restore round can meet it on a gated block (grow-then-prune, floating search, swings).

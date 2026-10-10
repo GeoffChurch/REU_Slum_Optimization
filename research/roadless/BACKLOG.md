@@ -157,11 +157,17 @@ Not pursued, with what would change that:
   From the greedy they are dominated by SIMP's default (-0.005 at 3x its time; a 3x first swing
   ties 1.5x at 3x the time). As SIMP's finisher (one 1.2x swing and the polish) they are on the
   frontier: +0.0010 mean over SIMP's default on the 46 held out (half of it 30796, +0.024),
-  never behind, at SIMP's time again. **Owner's call:** adopt it as a preset above the default
-  (1.4e-5 Lens A per GPU-second, inside the screens' rate bracket). Next: the 13 tuning blocks
-  (gated; from the hard-block preset's answer too), the swing's size (1.1x, 1.3x) and two
-  swings. The adaptive form waits on a schedule worth adapting. Neighbours: oscillating search,
-  VNS, adaptive LNS (wiki page above, "Swing schedules").
+  never behind, at SIMP's time again; on the 13 tuning blocks +0.0001. Not a preset: the gain
+  is one block's (30796), and no gate on SIMP's answer finds it (NOTES). The typical gain is a
+  re-pick of a few buildings worth 0.8% more budget. What would change that: blocks like 30796
+  common among the large ones (it is the only held-out block over 3000 buildings). The adaptive
+  form waits on a schedule worth adapting. Neighbours: oscillating search, VNS, adaptive LNS
+  (wiki page above, "Swing schedules").
+- **The restore screen's solve on gated blocks** (2026-10-10, NOTES "Swings as SIMP's
+  finisher"). Its eps world (EPS_SCREEN 1e-6) did not converge on 30848 (AMG-CG 2000 iterations,
+  1.9e-5 -- 5.0e-5 against 1e-5); every restore round can meet it. Fixes to weigh: warm starts
+  from the current state's solution, a looser rtol for a screen that only ranks, a larger
+  screen eps.
 
 ## Experiment design
 
