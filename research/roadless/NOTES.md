@@ -1969,3 +1969,45 @@ to d_max in one run.
 The screen compared one pair and would have run on (about 10 GPU-hours) for a decision a third
 preset had already made. A candidate is screened against every frontier point it could displace:
 the cheapest it would sit above and the one at its cost.
+
+### Swing schedules at the cheap preset's budget (owner 2026-10-09: "add a bunch and drop a bunch, and then add a smaller amount and drop a smaller amount, etc?")
+
+search.py's swings (`SW<grow>-<grow>-...`): the greedy grows to grow x d_max, screened restore
+rounds prune back to d_max, the next swing starts from the archive's best (every exact state at
+or below d_max, the greedy's ascent included) and the cheap preset's polish (P64w8, from the
+archive's best) ends the run. Two arms on the live screen's 15 held-out blocks at d_max 0.05, on
+the local RTX 6000 Ada: the owner's shape, SW3-1.5-1.2xS0.01catr0.005m8.P64w8, and a cheap arm,
+SW1.5-1.2 (the same otherwise).
+
+    against                   SW1.5-1.2                  SW3-1.5-1.2
+                              mean     median   ahead    mean     median   ahead (of 15)
+    the cheap preset          +0.0101  +0.0099  14       +0.0106  +0.0077  14
+    floating search           +0.0058  +0.0048  12       +0.0062  +0.0048  15
+    SIMP base                 -0.0027  -0.0030   5       -0.0023  -0.0038   4
+    SIMP .p256w8 (default)    -0.0050  -0.0031   3       -0.0046  -0.0049   4
+    SW1.5-1.2                                            +0.0004  +0.0003   8
+
+Median time a block: SW1.5-1.2 145 s, SW3-1.5-1.2 398 s, floating search 527 s, the cheap
+preset 28 s (1.27, 4.04, 5.03 and 0.17 GPU-hours on the 15); SIMP 45 s (default) and 64 s
+(base) on the cluster's older cards.
+- Swings dominate floating search at one budget: SW1.5-1.2 is +0.006 at 0.3x its time, and
+  SW3-1.5-1.2 is ahead on all 15 at 0.9x.
+- The large first swing buys nothing here: SW3 against SW1.5, median +0.000 [-0.003, +0.002],
+  at 3.0x the time, and its grow to 3x and prune back are about 70% of its run (22659: 115 of
+  166 s; 30796: 4650 of 6684 s). Per block the two differ by up to 0.009 (38988 +0.009, 18739
+  +0.006, 20423 -0.005); whether that is a block's preferred amplitude or the search's path
+  dependence is unknown without repeats. Judging complements together, the reason for a large
+  swing, did not show at this budget.
+- Both are dominated by SIMP's default: -0.005 mean, behind on 11 or 12 of 15, at 3x (SW1.5)
+  and 9x its time, on a faster card. They beat it on 30796 (+0.004, +0.005: the largest block,
+  n 5023, where floating search beats it too), 8152 and 8480 (both under +0.001), and 22640
+  (SW3, +0.001).
+- Against the cheap preset they are behind only on 19161 (-0.006, -0.010): the polish starts
+  from the archive's lowest J and ends below the greedy's polished clearing, the trap that
+  SIMP's `.g` seeding fell into and `.G` (polish both, keep the better) fixed.
+
+The swings close two-thirds of the cheap preset's gap to SIMP's default (+0.010 of +0.015) at
+5x the cheap preset's time and 3x SIMP's: not a frontier point between the two. The adaptive
+form's lever would be the amplitude, and the fixed arms already say the large one is wasted
+here. The CPU smoke run (SW3-1.5-1.2 on two small blocks, 19510 and 19421, D 0.05) gave 0.3455
+(floating search's clearing) and 0.488 (floating search 0.472).
