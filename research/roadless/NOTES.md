@@ -2177,5 +2177,18 @@ escape-time band its median rises from 0.16 at the exit to 0.97 mid-way and fall
 deepest band, and the bands explain 15% of the variance of log flow; the prior explains 36%
 (uniform metric) and 18% (sightline). The ratio shows a branching corridor network through the
 whole block, under the sightline metric most clearly. Where the prior's flow vanishes (the
-watershed in the middle) the ratio blows up; flooring the prior at its 10th percentile removes
-that knot and keeps the network. On the page as a toggle on the flow layers.
+watershed in the middle) the ratio is large: a knot. No floor (owner: "I'd rather have a knot
+than a clamp, unless there's some rigorous justification"); the page shows the ratio two ways,
+after Monroe, Colaresi & Quinn 2008 (the Fightin' Words estimator, bookgen's keyword layer):
+delta, the log ratio of a cell's share of all walking to its share in the open field (their Eq
+16, the counts large against any prior), and z = delta / sqrt(1/y + 1/y') (Eq 18, 21), reading a
+cell's flow as the expected number of walkers crossing it (current as expected net crossings of
+a random walk, Doyle & Snell). The knot is a ratio of two small counts, so its z is small, with
+nothing clamped; the count scale multiplies every z by one constant, so the map does not depend
+on it. z also raises the large corridors near the exits again (sqrt of their counts): more
+walkers make the same ratio surer.
+
+5810's north edge is a railway: 1.7 km of its 5.6 km outline runs within 15 m of OSM rail with
+no OSM road within 15 m. The block data (Million Neighborhoods) bounds blocks by railways as
+well as streets, and every outline is an exit, so the lanes draining to that edge drain to a
+railway line.
