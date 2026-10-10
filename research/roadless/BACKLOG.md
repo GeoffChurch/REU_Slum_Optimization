@@ -148,6 +148,15 @@ Not pursued, with what would change that:
   restore ranking that keeps the Tension, a restore-direction diverse builder) and screened adds
   (an add-direction refiner, a builder that reads the refined order). Wiki
   `pages/methods/plus-l-take-away-r.md`.
+- **Swing schedules** (owner 2026-10-09: proposed). Several swings past the budget, each
+  smaller (grow to 3x and prune back, then 1.5x, then 1.2x, then the polish at the budget):
+  big swings judge complements together, small ones settle the substitutes. First the fixed
+  schedule against floating search and the cheap preset at D 0.05 on the same card; then, if
+  it pays, the adaptive form: each swing size's gain and GPU time estimated from the run's
+  own history, the best gain per second taken, stopping when none is worth its price at the
+  screens' rate (seqscreen.py's stop moved inside a run; swings are not exchangeable, so it
+  needs a trend). Neighbours: oscillating search, VNS, adaptive LNS (wiki page above, "Swing
+  schedules").
 
 ## Experiment design
 
