@@ -2049,3 +2049,21 @@ Untried: the finisher on the 13 tuning blocks, where SIMP's gated answers are fr
 30848, 38616) and the hard-block preset `.p256w8x2.GS0.01cate1` gains +0.0119, from that
 preset's answer too (on the 46 it equals the default's); the swing's size (1.1x, 1.3x) and two
 swings (1.2-1.1).
+
+What it changes (owner: "does that +0.001 gain actually look like a different topology, or is
+it just swapping some buildings along the same corridors? ... is it normalized properly"):
+- On 27 of the 46 blocks, nothing. On 18 it re-picks 2 -- 10 of the 60 -- 180 buildings SIMP
+  cleared (2 -- 9% of the budget), each added building mostly tens to hundreds of metres from
+  the nearest dropped one, each block opening one to six single-building gaps and closing as
+  many: SIMP's layout, a few of its buildings moved (43708, +0.0034: six small buildings in the
+  central cluster for four).
+- Their gain is worth a median 0.8% more budget (the greedy's local slope of Lens A in D at
+  0.05), against about 10% for SIMP's lead over the cheap preset; 0.3% of the block's Lens A.
+- 30796 is structural: 39 scattered single buildings dropped (31 isolated openings closed) for
+  5, among them a long one and a large one in the industrial east, 17% of the budget moved, the
+  gain worth 19% more budget.
+
+Lens A is 1 - (J/J0)^(1/2), each block against itself uncleared, so gains compare across
+blocks. Whether a typical +0.001 ordering survives another grid is untested; res-check found
+the best of five near-tied clearings changing on about 30% of blocks between h 0.5 and h 0.75.
+The case for the finisher is SIMP's occasional large miss, not the typical re-pick.
