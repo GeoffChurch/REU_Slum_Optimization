@@ -2142,3 +2142,30 @@ clearing rarely opens those gaps, so their share of J is common to J and J0 and 
 ratio by an amount the alignment decides. The metric's passable width is thereby implicit in h
 and the sub-sampling; an explicit one would make it a modelling choice (the agenda's third
 item). The test is a map of the change in each home's term between two offsets on 20543.
+
+### Visualization: block 5810 (owner 2026-10-10: "The block I most want to see is ZAF.9.3.1_1_5810")
+
+Flow maps of three clearings at D 0.05, published as a private artifact (Block 5810 Flow Atlas):
+the cheap preset (202 buildings), SIMP's default (312; every SIMP variant picks this set there,
+base differs by 3) and the translucent-search greedy under the sightline metric (S0.01cat,
+ss100k2n2r30 @ ss100k0.5n2r30, cut to the budget: 390). Each pane's flow is solved under its
+method's own metric (current_map.flow). Each clearing scored under both metrics:
+
+                       cheap preset  SIMP    sightline greedy
+    uniform metric     0.223         0.259   0.202
+    sightline metric   0.339         0.436   0.440
+    shared with SIMP   92            312     144
+
+- SIMP's uniform-metric clearing comes within 0.004 of the sightline greedy under the sightline
+  metric, while the sightline greedy is last under the uniform one. One block.
+- Under the uniform metric the flow drains to the block edge as a sheet; under the sightline
+  metric it gathers into straight lanes running to the north edge, which the sightline greedy
+  extends. The flow the uniform clearings redirect still runs in long corridors through existing
+  lanes, most visibly where the west part meets the north-east strip.
+
+What an exit is: a kblock's streets are its polygon's boundary, every ring (kblock.py), and every
+cell within BAND_M (1 m) of one is ground. Every block's outline is an exit, so blocks are
+independent problems: a region of kblocks is its blocks side by side with a pooled budget,
+whatever its shape. 5810's one hole (132 m^2, 21 m inside the south edge) is an exit too.
+Current OSM maps 6.8 km of residential ways and 2.6 km of paths and footways inside 5810 (its
+outline is 5.6 km), which the block data treats as open ground.

@@ -53,8 +53,9 @@ items up front"), in the order proposed:
    block's level is not: alignment alone moves it by up to 0.16, so per-block levels need a
    margin of about +-0.08 on some large blocks.
 2. **Visualization**: the presets' clearings and the corridors they induce (the current through
-   the opened space), side by side, so results can be looked at, not only scored. With it, the
-   test of why a level moves: each home's term at two lattice offsets on 20543.
+   the opened space), side by side, so results can be looked at, not only scored. First page:
+   5810 (NOTES, "Visualization: block 5810"). Still to do: the test of why a level moves, each
+   home's term at two lattice offsets on 20543.
 3. **The sightline metric and building transparency** (discussion): what each measures, where
    SIMP is weaker under sightline, and transparency as a model of the world against a device of
    the search (the translucent greedy). With it, the passable width, now implicit in h and the
@@ -65,7 +66,11 @@ items up front"), in the order proposed:
    every candidate road that fits the opened space, so L(N) <= C iff N <= R(C); the composites
    are idempotent by construction (R L a closure, L R an interior); the forgotten information is
    the corridor width; the roadless optimum then bounds every road network under the roadless
-   benefit at equal displacement (the price of roads).
+   benefit at equal displacement (the price of roads); (c) what counts as an exit: every kblock
+   outline (now, so blocks are independent and a region only pools the budget), every current
+   OSM road (6.8 km of residential ways lie inside 5810), or the major network only (junctions
+   as wide open ground, and regions the faces of the major network, exact again since their
+   edges are the exits).
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
