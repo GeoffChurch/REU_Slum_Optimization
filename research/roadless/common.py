@@ -52,14 +52,31 @@ def build_blocks(ids: list[str]) -> list:
     return sorted(blocks, key=lambda b: len(b.buildings))
 
 
-def _from_source(ids: list[str]) -> list:
+def _source(*overrides: str):
     from hydra import compose, initialize_config_dir
 
     from reblock.presets import load_stages
     with initialize_config_dir(version_base=None, config_dir=str(REPO / "conf")):
         cfg = compose(config_name="compare_config",
-                      overrides=["data=capetown_full", "buildings=footprints"])
-    return list(load_stages(cfg).source.restricted(ids).region().blocks)
+                      overrides=["data=capetown_full", "buildings=footprints", *overrides])
+    return load_stages(cfg).source
+
+
+def _from_source(ids: list[str]) -> list:
+    """kblocks from the Cape Town source; an id `<kblock>@<network>` is a region (regions.py),
+    built from that source's blocks at any building count."""
+    import regions
+
+    named = {i: regions.parse(i) for i in ids}
+    plain = [i for i, r in named.items() if r is None]
+    out = list(_source().restricted(plain).region().blocks) if plain else []
+    faces = [r for r in named.values() if r is not None]
+    if faces:
+        every = _source("data.min_buildings=1")
+        out += [regions.build(r, every.blocks_path,
+                              lambda m: list(every.restricted(m).region().blocks))
+                for r in faces]
+    return out
 
 
 def write_bank(ids: list[str], path: Path) -> dict:
