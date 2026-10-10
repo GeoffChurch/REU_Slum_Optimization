@@ -64,8 +64,8 @@ items up front"), in the order proposed:
    turning edges; two fixes measured on a corridor. The owner's call on the turning boost (a model
    change: walkers stop going ballistic in a lane); then its gradient, uniform rays on the GPU and
    the composite mesh, and a re-score under the sightline metric.
-4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population
-   as footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
+4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population as
+   footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =
    every candidate road that fits the opened space, so L(N) <= C iff N <= R(C); the composites
    are idempotent by construction (R L a closure, L R an interior); the forgotten information is
@@ -76,18 +76,22 @@ items up front"), in the order proposed:
    Then the region's shape is part of the model: a hole is an exit inside it, a concavity an exit
    deep in it, and its size sets how much of J is walking along streets, which no clearing
    changes. Candidates: faces of the major-road network (a boundary that is a real exit), or
-   kblock unions with holes filled and concavities closed, every building inside. Rectangles
-   and circles buy no solver advantage: a sine or Fourier transform diagonalizes only uniform
+   kblock unions with holes filled and concavities closed, every building inside. Rectangles and
+   circles buy no solver advantage: a sine or Fourier transform diagonalizes only uniform
    conductance, and buildings are zero-conductance holes. The one transform with a use is FFT
    homogenization (Moulinec--Suquet), a fabric's effective conductivity tensor per neighbourhood
    for a coarse two-scale model: tested (NOTES, "FFT homogenization"), not a design model (it
-   erases gates and compresses the gaps between clearings), possibly a screening layer for exits
-   at region boundaries, decided on 5810@major (fine scalar against two-scale). First test
-   (NOTES, "A region whose only exit is its edge"): on 5810@major the budget leaves 5810 for the
-   formal grid in its hook, whose streets no longer count as access. Open: streets as faster
-   ground rather than exits (a conductance on OSM ways, or the sightline metric, which needs a
-   raster: 27M cells here), railways and freeways as barriers, and which boundaries are real
-   exits.
+   erases gates and compresses the gaps between clearings), but a screening layer (NOTES, "FFT
+   homogenization on 5810@major"): its first-order map at 100 m windows ranks 50 m tiles like the
+   fine model (Spearman 0.98 -- 0.99), and a clearing confined to the map's top tiles (5x the
+   budget's footprint, a quarter of the region's) keeps 90 -- 95% of the optimizers' Lens A.
+   First test (NOTES, "A region whose only exit is its edge"): on 5810@major the budget leaves
+   5810 for the formal grid in its hook, whose streets no longer count as access. Open: streets
+   as faster ground rather than exits (a conductance on OSM ways, or the sightline metric, which
+   needs a raster: 27M cells here), railways and freeways as barriers, which boundaries are real
+   exits, a real restricted run at k 2 -- 3 (the cheap preset needs only a tile mask, SIMP ~50
+   lines), and a budget pooled across faces, where screening pays; the fine model itself may
+   reach built-up Cape Town (~5 -- 11 H100-h by extrapolation).
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights

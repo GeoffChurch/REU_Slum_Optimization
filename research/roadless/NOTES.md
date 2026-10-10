@@ -2311,3 +2311,57 @@ Not done: the turning boost in the gradient (relax.py and the vjp), uniform rays
 the composite mesh, and re-scoring; both fixes change the sightline metric's numbers, and the
 turning boost changes the model (walkers no longer go ballistic in a lane; the straight-run reward
 stays, in the per-heading boost).
+
+### FFT homogenization on 5810@major: the deciding test (owner 2026-10-10: "Sure, let's try it on 5810")
+
+fft_homog/region_report.md, the `region_*` scripts and tables, region_checks/ (the fields, ~4 GB,
+stayed in the session's scratch; steps 1 -- 3 of the report regenerate them in ~15 min). The
+fine scalar 'uni' on the whole region at h 0.5 (25.4M unknowns, 252 s and 14.4 GB on one core)
+against two-scale (macro H 2 m, readout U). The stored lifted scores reproduce to 6 digits on
+the local GPU (0.271361, 0.301406).
+
+- J_2 at baseline: 100 m windows +2.2% (inside-avg), +2.8% (extrapolated), -2.3% (open-outside);
+  200 m inside-avg -1.8%; 50 m +9.6 to +12.1%, growing with depth as on 5810. At 100 m the homes
+  deeper than 100 m (97.8% of J_2) are within a median +0.7 to +1.9%; the exit's boundary layer
+  (homes within 10 m read +56%) carries ~0% of J_2. Per-home Spearman 0.998 -- 0.999.
+- The two clearings (D 0.05): the order cheap < SIMP survives every variant, the gap does not.
+  SIMP minus the cheap preset: lifted 0.030, fine scalar 0.018, two-scale 50 m 0.009 -- 0.010,
+  100 m 0.014 -- 0.016. Two-scale at 100 m reads 0.015 -- 0.026 below fine (a local opening
+  diluted over a larger window), at 50 m within 0.012.
+- Tile ranking, 160 stratified 50 m tiles per rule (R20, STRIP) against fine local re-solves:
+  the two-scale re-solve at 50 or 100 m and the first-order map at 100 m reach Spearman 0.975 --
+  0.989, raw and per displaced m^2 (every 95% interval >= 0.958), 12 -- 14 of the fine top 16.
+  The first-order map at 50 m, the 5810 study's, fails per m^2 on STRIP: 0.882 [0.823, 0.936].
+  Large buildings nearly block 78 of its 68,267 windows (sigma < 0.01; none below 0.04 at 100
+  m), and there the linear prediction overshoots the fine gain 51 -- 205x. A naive proxy: 0.66 --
+  0.80.
+- Restriction: tiles ranked by predicted gain per displaced m^2 until they hold k x the budget's
+  footprint. Truncating the stored clearings to them keeps at most 88.8% of Lens A (k 5, the 50 m
+  re-solve; 50 -- 85% with the 50 m map): the truncations underspend (D 0.017 -- 0.040). Topped
+  up to D 0.05 inside the same tiles by the macro adjoint's sensitivity (a one-pass restricted
+  optimizer, no re-solves), k 5 keeps 90.5 -- 94.6% with the 100 m map and 91.3 -- 94.9% with
+  the 50 m re-solve; k 2 -- 3 keeps 66 -- 88.5%. k 5 is ~113 of the 2,518 tiles, 25% of the
+  region's footprint. The optimizers put 4 -- 9% of their cleared footprint in tiles crossing the
+  edge, which no tile set here holds (all 2,518 inside tiles: 95.8% / 93.6%).
+- Cost: 14.5 CPU-h and 21 GPU-min in all. The 100 m tensor field 99 s on 11 workers, the
+  first-order map over every tile ~0.7 CPU-h, a fine re-solve per tile 59 s (warm start, exact
+  solve within 20 m of the change around the baseline's V-cycle). A restricted optimizer still
+  solves the whole region at every score, so it is barely faster: screening pays for placing a
+  pooled budget across faces, not inside one.
+- Cape Town's major-road faces (region_capetown_faces.py): 689 built up (>= 5 buildings/ha, >= 10
+  buildings), 718 km^2, 1.33M buildings, median 0.60 km^2, 9 at least 5810@major's size, the
+  largest 26 km^2. By area (x106.5): the fine scalar baselines ~7.5 CPU-h, the 100 m field ~32
+  CPU-h, one lifted score per face ~4 GPU-h with setup. Our extrapolation, unmeasured: if time
+  scales with area, the stored runs (170 s cheap, 386 s SIMP on an H100) come to ~5 and ~11
+  H100-h for all of them; by a score's memory (34.8 GiB at 6.74 km^2) only 2 faces (26 and 16
+  km^2, 35k buildings) exceed an 80 GB card at a5x8.
+
+Verdict against the rule (tile Spearman >= 0.9, a restricted optimizer >= 90% of Lens A): met at
+k 5 with the first-order map at 100 m windows, not with the 50 m map the 5810 study used, and not
+below k 5 by either bound. Whether a real restricted optimizer keeps 90% at k 2 -- 3 is open. To
+find out: the cheap preset needs no search change (`SearchState.movable` from a tile mask, ~20
+lines in polish_greedy.py), SIMP ~40 -- 60 lines in relax.py (a per-building upper bound through
+the OC and MMA steps, the rounding and the polish); ~1 GPU-h for k 2, 3, 5 and both methods. Its
+use is a city-wide pooled budget across faces, with the gate detector the 5810 study asked for
+(homogenization still erases gates). The fine model itself looks within reach of built-up Cape
+Town without it, on the extrapolation above.
