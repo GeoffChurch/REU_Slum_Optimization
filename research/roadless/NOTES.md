@@ -2216,3 +2216,98 @@ vacant land and on to the N1. So with the region's edge as the only exit, a form
 street counts as far from access as an informal one deep in a settlement, and a railway or a
 freeway is ground to walk across or an exit to walk to. Published as a private artifact (5810
 Region Flow Atlas), with the flow against the no-buildings prior as on the 5810 page.
+
+### FFT homogenization (owner 2026-10-10: "look into FFT homogenization. If we could eventually run this on e.g. all of Cape Town that would be amazing")
+
+A feasibility study, fft_homog/ (report.md, the scripts and tables; the fields, 288 MB, stayed in
+the session's scratch). Homogenized: a scalar 'uni', one potential per cell, a face between
+4-neighbours conducting min(o_a, o_b) (the uni rule for an axis step), the metric's ground and
+demand: the lifted model's fast-turning neighbour. At 5810's baseline it ranks homes like lifted
+uni (Spearman 0.997, lifted ~0.80 x scalar), but its Lens A runs 0.04 -- 0.08 lower on 5810's
+clearings and 0.16 lower on 22422's gate.
+
+- Schemes: the staggered grid is exactly the 5-point finite volumes; CG preconditioned by the FFT
+  Laplacian converges at infinite contrast, 40 -- 150 iterations, 3 -- 12x faster than the basic
+  scheme, the augmented Lagrangian or Eyre--Milton, within 1.2e-10 of a sparse direct solve on 20
+  windows, 26 ms per 50 m window per core. Moulinec--Suquet's original collocation is unstable
+  with pores; undamped Eyre--Milton is not guaranteed to converge.
+- Fabric: dense informal fabric conducts 0.33 -- 0.55 as well as open ground (the densest 200 m
+  window 0.33). Anisotropy median 1.27 on 12.5 m tiles, 1.10 on 100 m; the major axis follows the
+  lanes (22 deg from the lane axis, 44 deg with the lane axes shuffled). No strict representative
+  volume: the spread between tiles falls only 17% from 50 to 100 m; nested windows settle to
+  +-10% by 50 -- 100 m.
+- J_2 on 5810, two-scale against the fine solve of the same scalar model: -20% to +20% by window
+  size and the treatment of windows at the exit, best +0.4% (200 m). The interior converges by
+  100 m windows; what remains is a boundary layer at the exits (homes within 10 m read +27 to +97%,
+  but carry under 1% of J_2). Correctors move J_2 by under 0.3%.
+- Clearings (5810's, optimized under lifted uni): 50 m windows land within 0.007 of the fine
+  scalar Lens A, but SIMP minus the greedy at D 0.05 falls from 0.0074 to 0.0009 (D 0.10: 0.0103
+  to 0.0058).
+- Gates: on 22422 two-scale J_0 is 51% low (20 pocket homes hold 83% of it), and opening the gate
+  scores 0.15 against 0.37 fine. Homogenization erases gates by construction.
+- Screening: over 164 tiles of 50 m and two clearing rules, two-scale (or its first-order adjoint
+  map) ranks tiles by fine gain with Spearman 0.98 / 0.99 and 94% of the top decile; a depth proxy
+  scores 0.04 / 0.22. The gain is where the macro flow concentrates, not where homes are deepest.
+- Cost: the fine scalar solve of 5810 takes 12 s and 1.4 GB on one core (built-up Cape Town ~5
+  CPU-h), lifted uni 277 s and 11.7 GB (~110 CPU-h); a city tensor field at 50 m windows, 25 m
+  stride ~16 CPU-h. Under per-block exits the median built-up block is 0.017 km^2: nothing to
+  homogenize.
+
+Verdict: not a design model (it erases gates, compresses the differences the optimizers compete
+on, and the fine solve is already cheap). Possibly a screening layer, for exits at region
+boundaries or a city-wide pooled budget, with a separate gate detector. The deciding experiment is
+5810@major: fine scalar against two-scale (100 m windows) on J_2, on the two region clearings'
+Lens A and on the 50 m tile ranking; keep it if the tile Spearman stays >= 0.9 and an optimizer
+restricted to the map's top areas keeps >= 90% of Lens A.
+
+### The sightline metric's angle error (owner 2026-10-10: "Sightline greedy has some visible artifacts from angular discretization")
+
+The 5810 flow under ss100k2n2r30 has axis-aligned streaks (flux_before_ss on the atlas page). A W x
+40 m corridor rotated 0 -- 45 deg (checks.channel: demand at one end, street at the other; K 8,
+ell 3, h 0.5), P's max / min over the angles:
+
+    W      uni    sightline  uniform rays  turning boosted  both
+    1 m    1.66   5.32       2.51          5.08             2.33
+    1.5 m  1.33   2.40       2.26          1.73             1.58
+    2 m    1.15   1.67       1.79          1.26             1.26
+    4 m    1.06   1.17       1.31          1.13             1.14
+
+sightline_angle.py. Uniform rays: 96 directions, each scanned along the rows of its own rotated
+copy of the raster (bilinear there and back), the same hat weights. Turning boosted: the turning
+edge (x, k)-(x, k+1) times min(F_k(x), F_k+1(x)). Also measured at 1 m: lattice directions to
+nmax 12 / 24, 2.67 / 2.14; K 16, 5.30 (1.39 at 2 m); h 0.25, 3.54. Two causes:
+- The ray directions, for 1 m lanes. The 48 lattice directions are uneven (9.5 deg gaps beside
+  the axes, 1.1 deg near 45 deg), and a lane's long rays lie within ~W / L of its axis (1.4 deg at
+  1 m x 40 m): aliasing in angle. Uniform rays halve the error.
+- The walker's headings, for wider lanes. The boost multiplies the along edges (13 -- 27 in a
+  40 m lane 1 -- 4 m wide) and not the turning edges, so a walker in a lane goes ~ell sqrt(a),
+  11 -- 16 m, per radian of turning: it is ballistic. A lane between two of the 8 headings is
+  walked by zig-zagging, each turn the bottleneck (both headings carry the lane's boost: 13.4 and
+  13.3 at 2 m and 15 deg); the error peaks at 15 and 35 deg, midway between headings, and
+  resolving it would take headings ~W / (ell sqrt a) apart (~10 deg at 2 m; K 8's are 18 -- 27
+  deg apart). It is radiative transfer's "ray effect" of discrete ordinates. Boosting the turning
+  edges by the same factor (the boost then scales the whole (x, theta) metric, and the
+  persistence stays ell) brings 2 -- 4 m lanes to within 1.1x of uni (1.5 m: 1.3x, 1.2x with
+  uniform rays as well).
+Together the fixes leave the error the uniform metric has, a lane of two cells, which only h
+removes.
+
+The owner's alternatives:
+- Fourier in angle (P_N): exactly rotation-invariant, but a ballistic lane's angular profile is a
+  spike, which a truncated series rings around (negative conductances: no walker, no Rayleigh
+  monotonicity) unless it keeps about as many terms as there would be headings. The visibility has
+  no transform at all: a free path is a product of transmittances along a line (it solves
+  e . grad F = kappa c F - 1 along each direction), nonlinear in the buildings.
+- Linear reduction: exact in the fast-turning limit (ell -> 0), where the heading integrates out
+  and only the boost's angular harmonics 0 and 2 survive, a 2 x 2 conductivity tensor per cell
+  (one unknown instead of K; what FFT homogenization produces). The boost is what leaves that
+  limit in a lane, so it is a different model. PCA over the cells' angular profiles returns the
+  Fourier basis when the directions are spread evenly (the covariance is then circulant).
+- Clustering (per-cell headings fitted to the lanes, like fixels in diffusion MRI): the
+  discretization would change with each clearing, so P would jump instead of falling
+  monotonically: no gradient for SIMP, no tension for the greedy.
+
+Not done: the turning boost in the gradient (relax.py and the vjp), uniform rays on the GPU and
+the composite mesh, and re-scoring; both fixes change the sightline metric's numbers, and the
+turning boost changes the model (walkers no longer go ballistic in a lane; the straight-run reward
+stays, in the per-heading boost).

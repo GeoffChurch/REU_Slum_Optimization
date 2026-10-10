@@ -59,7 +59,11 @@ items up front"), in the order proposed:
 3. **The sightline metric and building transparency** (discussion): what each measures, where
    SIMP is weaker under sightline, and transparency as a model of the world against a device of
    the search (the translucent greedy). With it, the passable width, now implicit in h and the
-   sub-sampling (a gap conducts by its sampled open fraction, which the alignment sets).
+   sub-sampling (a gap conducts by its sampled open fraction, which the alignment sets). Its
+   angle error (NOTES, "The sightline metric's angle error"): uneven ray directions and unboosted
+   turning edges; two fixes measured on a corridor. The owner's call on the turning boost (a model
+   change: walkers stop going ballistic in a lane); then its gradient, uniform rays on the GPU and
+   the composite mesh, and a re-score under the sightline metric.
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population
    as footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =
@@ -76,11 +80,14 @@ items up front"), in the order proposed:
    and circles buy no solver advantage: a sine or Fourier transform diagonalizes only uniform
    conductance, and buildings are zero-conductance holes. The one transform with a use is FFT
    homogenization (Moulinec--Suquet), a fabric's effective conductivity tensor per neighbourhood
-   for a coarse two-scale model; untested, and a model change. First test (NOTES, "A region whose
-   only exit is its edge"): on 5810@major the budget leaves 5810 for the formal grid in its hook,
-   whose streets no longer count as access. Open: streets as faster ground rather than exits (a
-   conductance on OSM ways, or the sightline metric, which needs a raster: 27M cells here),
-   railways and freeways as barriers, and which boundaries are real exits.
+   for a coarse two-scale model: tested (NOTES, "FFT homogenization"), not a design model (it
+   erases gates and compresses the gaps between clearings), possibly a screening layer for exits
+   at region boundaries, decided on 5810@major (fine scalar against two-scale). First test
+   (NOTES, "A region whose only exit is its edge"): on 5810@major the budget leaves 5810 for the
+   formal grid in its hook, whose streets no longer count as access. Open: streets as faster
+   ground rather than exits (a conductance on OSM ways, or the sightline metric, which needs a
+   raster: 27M cells here), railways and freeways as barriers, and which boundaries are real
+   exits.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
