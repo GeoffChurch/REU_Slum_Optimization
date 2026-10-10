@@ -45,6 +45,30 @@ Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry 
   2026-10-09); the stop is built in seqscreen.py instead, by the value of more blocks (NOTES,
   "Stopping by the value of more blocks").
 
+Owner's agenda (2026-10-10: "we can take things up one by one and write down all the open
+items up front"), in the order proposed:
+1. **The metric's resolution floor** (running: cluster runs fine25, fine35). The presets',
+   SIMP base's and the finisher's clearings on the 59 rescored at h 0.5, 0.35 and 0.25 (0.35 only
+   on the seven too big for 80 GB at 0.25): do gaps of 0.001 -- 0.004 keep their sign on finer
+   grids? The answer is the least gain a screen should count (seqscreen's tau).
+2. **Visualization**: the presets' clearings and the corridors they induce (the current through
+   the opened space), side by side, so results can be looked at, not only scored.
+3. **The sightline metric and building transparency** (discussion): what each measures, where
+   SIMP is weaker under sightline, and transparency as a model of the world against a device of
+   the search (the translucent greedy).
+4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population
+   as footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
+   networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =
+   every candidate road that fits the opened space, so L(N) <= C iff N <= R(C); the composites
+   are idempotent by construction (R L a closure, L R an interior); the forgotten information is
+   the corridor width; the roadless optimum then bounds every road network under the roadless
+   benefit at equal displacement (the price of roads).
+5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
+   collision penalties for more demolition and better end-state networks. Judged after 4, at
+   equal displacement (a shift of the frontier, not a move along it, which the cost weights
+   already make); the promising form discounts the buildings the roadless optimum clears, the
+   map R of 4.
+
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
