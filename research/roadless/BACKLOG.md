@@ -67,10 +67,16 @@ items up front"), in the order proposed:
    are idempotent by construction (R L a closure, L R an interior); the forgotten information is
    the corridor width; the roadless optimum then bounds every road network under the roadless
    benefit at equal displacement (the price of roads); (c) what counts as an exit: every kblock
-   outline (now, so blocks are independent and a region only pools the budget), every current
-   OSM road (6.8 km of residential ways lie inside 5810), or the major network only (junctions
-   as wide open ground, and regions the faces of the major network, exact again since their
-   edges are the exits).
+   outline (now, so blocks are independent and a region only pools the budget), or (owner
+   2026-10-10) only a region's own boundary, roads not used at all, streets wide open ground.
+   Then the region's shape is part of the model: a hole is an exit inside it, a concavity an exit
+   deep in it, and its size sets how much of J is walking along streets, which no clearing
+   changes. Candidates: faces of the major-road network (a boundary that is a real exit), or
+   kblock unions with holes filled and concavities closed, every building inside. Rectangles
+   and circles buy no solver advantage: a sine or Fourier transform diagonalizes only uniform
+   conductance, and buildings are zero-conductance holes. The one transform with a use is FFT
+   homogenization (Moulinec--Suquet), a fabric's effective conductivity tensor per neighbourhood
+   for a coarse two-scale model; untested, and a model change.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights

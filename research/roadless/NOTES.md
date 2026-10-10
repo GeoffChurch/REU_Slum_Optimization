@@ -2169,3 +2169,13 @@ independent problems: a region of kblocks is its blocks side by side with a pool
 whatever its shape. 5810's one hole (132 m^2, 21 m inside the south edge) is an exit too.
 Current OSM maps 6.8 km of residential ways and 2.6 km of paths and footways inside 5810 (its
 outline is 5.6 km), which the block data treats as open ground.
+
+Flow relative to a no-buildings prior (owner: "normalize against a prior ... visible corridors
+throughout the block"): the same homes' flow to the same edge with every building gone, under
+each metric's conductance, divided into each map's flow. Raw flow is not largest at the edge: by
+escape-time band its median rises from 0.16 at the exit to 0.97 mid-way and falls to 0.24 in the
+deepest band, and the bands explain 15% of the variance of log flow; the prior explains 36%
+(uniform metric) and 18% (sightline). The ratio shows a branching corridor network through the
+whole block, under the sightline metric most clearly. Where the prior's flow vanishes (the
+watershed in the middle) the ratio blows up; flooring the prior at its 10th percentile removes
+that knot and keeps the network. On the page as a toggle on the flow layers.
