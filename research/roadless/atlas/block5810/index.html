@@ -1,0 +1,421 @@
+<title>Block 5810 Flow Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Layout: a survey sheet. Header strip, a control rail, the map (one pane or two, synced), then the numbers and the key beside or below. The map canvas keeps one dark look in both themes; the page chrome follows the theme. */
+:root {
+  --bg: #eef0ee;
+  --panel: #f8f9f7;
+  --ink: #1b2024;
+  --muted: #5b646b;
+  --line: #d3d8d6;
+  --accent: #7638c9;
+  --accent-ink: #ffffff;
+  --map-out: #0d0f11;
+  --map-ground: #1d2125;
+  --map-bld: #5b636a;
+  --map-ctx: #343a3f;
+  --map-edge: #d6dce0;
+  --map-cleared: #e46bff;
+  --map-other: #f2f2f2;
+  --display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111315; --panel: #181b1e; --ink: #e3e7ea; --muted: #98a2aa; --line: #2b3035;
+    --accent: #b98aff; --accent-ink: #14101c; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111315; --panel: #181b1e; --ink: #e3e7ea; --muted: #98a2aa; --line: #2b3035;
+  --accent: #b98aff; --accent-ink: #14101c; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1480px; margin: 0 auto; padding-inline: 20px; padding-block: 20px 40px; display: grid; gap: 16px; }
+header { display: grid; gap: 4px; }
+.eyebrow { font: 12px/1.3 var(--mono); color: var(--muted); letter-spacing: 0.04em; }
+h1 { font: 600 clamp(26px, 3.4vw, 38px)/1.1 var(--display); margin: 0; letter-spacing: 0.005em; text-wrap: balance; }
+.sub { color: var(--muted); margin: 0; max-width: 75ch; }
+.rail { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: end; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.ctl { display: grid; gap: 5px; min-width: 0; }
+.ctl > span { font: 600 11px/1 var(--display); text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+.seg { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+.seg button { font: 500 13px/1 var(--body); padding: 8px 11px; border: 0; border-right: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.seg button:focus-visible, select:focus-visible, .map:focus-visible, .zoom button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select { font: 13px/1 var(--body); padding: 7px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--ink); }
+.checks { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; }
+.checks label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+.maps { display: grid; gap: 8px; grid-template-columns: 1fr; min-width: 0; }
+.maps.two { grid-template-columns: 1fr 1fr; }
+.pane { position: relative; min-width: 0; }
+.map { display: block; width: 100%; height: min(74vh, 820px); min-height: 320px; background: var(--map-out); border-radius: 6px; touch-action: none; cursor: grab; user-select: none; }
+.map.dragging { cursor: grabbing; }
+.tag { position: absolute; left: 10px; top: 10px; font: 600 13px/1 var(--display); letter-spacing: 0.04em; color: #f2f4f5; background: rgba(13, 15, 17, 0.72); padding: 6px 8px; border-radius: 4px; pointer-events: none; }
+.tag b { color: var(--map-cleared); font-weight: 600; }
+.zoom { position: absolute; right: 10px; top: 10px; display: grid; gap: 4px; }
+.zoom button { width: 32px; height: 32px; font: 500 18px/1 var(--body); color: #f2f4f5; background: rgba(13, 15, 17, 0.72); border: 1px solid #3a4046; border-radius: 4px; cursor: pointer; }
+.loading { position: absolute; inset: 0; display: grid; place-items: center; color: #aab3ba; font: 13px var(--mono); pointer-events: none; }
+.scale { position: absolute; left: 10px; bottom: 10px; font: 11px/1 var(--mono); color: #e8ecee; display: grid; gap: 3px; pointer-events: none; }
+.scale i { display: block; height: 4px; border: 1px solid #e8ecee; border-top: 0; }
+aside { display: grid; gap: 14px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; display: grid; gap: 8px; min-width: 0; }
+.card h2 { font: 600 15px/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.08em; margin: 0; color: var(--muted); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 5px 4px; border-bottom: 1px solid var(--line); }
+th:first-child, td:first-child { text-align: left; color: var(--muted); font-weight: 400; }
+thead th { font: 600 12px/1.2 var(--display); letter-spacing: 0.03em; color: var(--ink); vertical-align: bottom; }
+td.best { font-weight: 500; color: var(--accent); }
+.key { display: grid; gap: 6px; font-size: 13px; }
+.bar { height: 10px; border-radius: 2px; }
+.ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+.sw { display: inline-block; width: 14px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 2px; }
+.notes { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; }
+.foot { color: var(--muted); font-size: 12px; max-width: 110ch; }
+@media (max-width: 1100px) { .stage { grid-template-columns: 1fr; } aside { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); } }
+@media (max-width: 760px) { .maps.two { grid-template-columns: 1fr; } .map { height: 62vh; } .wrap { padding-inline: 16px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">ZAF.9.3.1_1_5810 · CAPE TOWN · ROADLESS CLEARING, D 0.05</div>
+    <h1>Block 5810 under three clearings</h1>
+    <p class="sub">6,619 buildings on 57.7 ha. Each method clears buildings holding 5% of the block's footprint area, and the flow is everyone's walk to the street at the block edge, solved on a 0.5 m grid. Drag to pan, scroll or pinch to zoom.</p>
+  </header>
+
+  <div class="rail" role="group" aria-label="Map controls">
+    <div class="ctl"><span>Layer</span>
+      <div class="seg" id="field">
+        <button type="button" data-v="after" aria-pressed="true">Flow after</button>
+        <button type="button" data-v="change" aria-pressed="false">Change in flow</button>
+        <button type="button" data-v="escape" aria-pressed="false">Escape time</button>
+        <button type="button" data-v="before" aria-pressed="false">Flow before</button>
+        <button type="button" data-v="none" aria-pressed="false">Buildings only</button>
+      </div>
+    </div>
+    <div class="ctl"><span>Flow shown as</span>
+      <div class="seg" id="scale">
+        <button type="button" data-v="raw" aria-pressed="false">Raw</button>
+        <button type="button" data-v="ratio" aria-pressed="true">Against no buildings</button>
+        <button type="button" data-v="z" aria-pressed="false">Same, in standard errors</button>
+      </div>
+    </div>
+    <div class="ctl"><span>Panes</span>
+      <div class="seg" id="mode">
+        <button type="button" data-v="one" aria-pressed="false">One</button>
+        <button type="button" data-v="two" aria-pressed="true">Side by side</button>
+      </div>
+    </div>
+    <div class="ctl"><label for="armA"><span>Left</span></label>
+      <select id="armA"></select></div>
+    <div class="ctl" id="ctlB"><label for="armB"><span>Right</span></label>
+      <select id="armB"></select></div>
+    <div class="ctl"><label for="view"><span>Go to</span></label>
+      <select id="view"></select></div>
+    <div class="ctl"><span>Overlays</span>
+      <div class="checks">
+        <label><input type="checkbox" id="ovOther"> Other pane's clearing</label>
+        <label><input type="checkbox" id="ovOsm"> OSM roads and paths</label>
+        <label><input type="checkbox" id="ovCtx" checked> Neighbouring blocks</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="maps two" id="maps"></div>
+    <aside>
+      <div class="card">
+        <h2>The three clearings</h2>
+        <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th></th><th>Cheap preset</th><th>SIMP</th><th>Sightline greedy</th></tr></thead>
+          <tbody>
+            <tr><td>Buildings cleared</td><td>202</td><td>312</td><td>390</td></tr>
+            <tr><td>Lens A, uniform metric</td><td>0.223</td><td class="best">0.259</td><td>0.202</td></tr>
+            <tr><td>Lens A, sightline metric</td><td>0.339</td><td>0.436</td><td class="best">0.440</td></tr>
+            <tr><td>Shared with SIMP</td><td>92</td><td>312</td><td>144</td></tr>
+            <tr><td>Median change in escape time</td><td>−9%</td><td>−12%</td><td>−18%</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p class="foot" style="margin:0">The cheap preset and SIMP were optimized under the uniform metric, the sightline greedy under the sightline one. Each pane's flow is solved under its method's own metric, so the escape-time medians compare within a metric only.</p>
+      </div>
+      <div class="card">
+        <h2>Key</h2>
+        <div class="key" id="key"></div>
+        <div class="key">
+          <div><span class="sw" style="background:var(--map-bld)"></span>Building left standing</div>
+          <div><span class="sw" style="background:transparent;border:2px solid var(--map-cleared)"></span>Building cleared by this pane's method</div>
+          <div><span class="sw" style="background:transparent;border:2px dashed var(--map-other)"></span>Cleared by the other pane's method</div>
+          <div><span class="sw" style="background:var(--map-edge);height:3px"></span>Block edge: the street, the only exit</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>What to look for</h2>
+        <ul class="notes">
+          <li>Raw flow piles up where everyone upstream passes through. "Against no buildings" compares each cell's share of all walking with its share when the same homes walk to the same edge across open ground, so what remains is where the buildings channel the flow: the corridors, throughout the block. Nothing is floored, so the watershed in the middle, where the open-field flow nearly vanishes, glows as a knot.</li>
+          <li>"In standard errors" divides that log ratio by its standard error, reading each cell's flow as a count of walkers (Monroe, Colaresi and Quinn's z-score). The knot is a ratio of two tiny counts, so it fades without any clamp; large corridors gain, because more walkers make the same ratio surer.</li>
+          <li>Under the uniform metric a channel conducts in proportion to its width, so the clearings are scattered openings. The flow they redirect still runs in long corridors through existing lanes, most visibly at the east seam ("Change in flow").</li>
+          <li>Under the sightline metric long straight runs conduct better, and the flow gathers into lanes running to the north edge, which the sightline greedy extends.</li>
+          <li>Each metric's own optimizer scores best on it, but SIMP's clearing comes within 0.004 of the sightline greedy on the sightline metric, while the sightline greedy scores lowest on the uniform one.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+  <p class="foot">Lens A is 1 − (J/J₀)<sup>1/2</sup> for the block against itself uncleared. Escape time is each open cell's expected time to reach the street; cells a clearing newly opens are left blank on that layer. Building footprints: Google Open Buildings. Roads and paths: © OpenStreetMap contributors. Neighbouring blocks are drawn for context only; they are not part of any clearing.</p>
+</div>
+
+<script>
+(() => {
+  const PAD = 120, EW = 1558, EH = 1408, FW = EW + 2 * PAD, FH = EH + 2 * PAD;
+  const ARMS = {
+    cheap: { label: "Cheap preset", set: "cheap", before: "flux_before", relBefore: "rel_before", n: 202 },
+    simp: { label: "SIMP", set: "default", before: "flux_before", relBefore: "rel_before", n: 312 },
+    ss: { label: "Sightline greedy", set: "ss", before: "flux_before_ss", relBefore: "rel_before_ss", n: 390 },
+  };
+  const REL_KEY = ["Share of all walking, against the same walk with no buildings", "linear-gradient(90deg, #14466e, #28aadc, #d2f8ff)", "same share (1×)", "5.3× (uniform), 7.7× (sightline)"];
+  const Z_KEY = ["That log ratio in standard errors (walkers as counts)", "linear-gradient(90deg, #14466e, #28aadc, #d2f8ff)", "0", "top 0.5% before clearing"];
+  const LAYER = { cheap: "cheap", simp: "default", ss: "ss" };
+  const KEYS = {
+    after: ["Flow after the clearing", "linear-gradient(90deg, #14466e, #28aadc, #d2f8ff)", "median cell", "top 0.5%"],
+    before: ["Flow before any clearing", "linear-gradient(90deg, #14466e, #28aadc, #d2f8ff)", "median cell", "top 0.5%"],
+    change: ["Change in flow through each cell", "linear-gradient(90deg, #a0c8ff, #5a8cdc 40%, transparent 50%, #ffbe50 60%, #ff4030)", "less flow", "more flow"],
+    escape: ["Change in time to reach the street", "linear-gradient(90deg, #ffaf5f, #c86e28 40%, transparent 50%, #287860 60%, #64eba5)", "slower", "faster (−50%)"],
+    none: null,
+  };
+  // views: centre and width in metres from the block's south-west grid corner
+  const VIEWS = [
+    ["Whole block", null],
+    ["Dense west part", [425, 480, 900]],
+    ["North-edge lanes", [490, 756, 420]],
+    ["East seam", [720, 520, 320]],
+    ["Institutional site", [585, 330, 260]],
+    ["North-east strip", [1150, 1080, 820]],
+  ];
+  const NS = "http://www.w3.org/2000/svg";
+  const st = { field: "after", mode: "two", a: "simp", b: "ss", scale: "ratio", other: false, osm: false, ctx: true };
+  let B = null, C = null;
+  const paths = {};
+  let view = { cx: FW / 2, cy: FH / 2, w: FW };
+
+  const el = (tag, attrs = {}, parent) => {
+    const e = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (parent) parent.appendChild(e);
+    return e;
+  };
+
+  function makePane(side) {
+    const pane = document.createElement("div");
+    pane.className = "pane";
+    const svg = el("svg", { class: "map", tabindex: "0", role: "img", preserveAspectRatio: "xMidYMid meet" });
+    svg.setAttribute("aria-label", "Map of block 5810");
+    el("rect", { x: -FW, y: -FH, width: 3 * FW, height: 3 * FH, fill: "var(--map-out)" }, svg);
+    const p = { side, pane, svg };
+    p.ground = el("path", { fill: "var(--map-ground)", "fill-rule": "evenodd" }, svg);
+    p.ctx = el("g", {}, svg);
+    p.ctxB = el("path", { fill: "var(--map-ctx)" }, p.ctx);
+    p.ctxN = el("path", { fill: "none", stroke: "#4c545b", "stroke-width": 1, "vector-effect": "non-scaling-stroke" }, p.ctx);
+    p.bld = el("path", { fill: "var(--map-bld)" }, svg);
+    p.img = el("image", { x: PAD, y: PAD, width: EW, height: EH, preserveAspectRatio: "none", style: "image-rendering: pixelated" }, svg);
+    p.cleared = el("path", { fill: "none", stroke: "var(--map-cleared)", "stroke-width": 1.4, "vector-effect": "non-scaling-stroke" }, svg);
+    p.other = el("path", { fill: "none", stroke: "var(--map-other)", "stroke-width": 1.2, "stroke-dasharray": "3 2", "vector-effect": "non-scaling-stroke" }, svg);
+    p.edge = el("path", { fill: "none", stroke: "var(--map-edge)", "stroke-width": 2, "vector-effect": "non-scaling-stroke" }, svg);
+    p.osm = el("g", {}, svg);
+    p.osmMaj = el("path", { fill: "none", stroke: "#ffffff", "stroke-width": 2.2, "stroke-opacity": 0.8, "vector-effect": "non-scaling-stroke" }, p.osm);
+    p.osmMin = el("path", { fill: "none", stroke: "#ffffff", "stroke-width": 1.2, "stroke-opacity": 0.75, "stroke-dasharray": "6 3", "vector-effect": "non-scaling-stroke" }, p.osm);
+    p.osmPath = el("path", { fill: "none", stroke: "#ffffff", "stroke-width": 1, "stroke-opacity": 0.7, "stroke-dasharray": "1.5 3", "vector-effect": "non-scaling-stroke" }, p.osm);
+    pane.appendChild(svg);
+    p.tag = document.createElement("div"); p.tag.className = "tag"; pane.appendChild(p.tag);
+    const z = document.createElement("div"); z.className = "zoom";
+    for (const [t, f, lab] of [["+", 0.6, "Zoom in"], ["−", 1 / 0.6, "Zoom out"], ["⤢", 0, "Whole block"]]) {
+      const bt = document.createElement("button"); bt.type = "button"; bt.textContent = t; bt.setAttribute("aria-label", lab);
+      bt.addEventListener("click", () => f ? zoomAt(view.cx, view.cy, f) : goView(null));
+      z.appendChild(bt);
+    }
+    pane.appendChild(z);
+    p.load = document.createElement("div"); p.load.className = "loading"; p.load.textContent = "Loading the block…"; pane.appendChild(p.load);
+    const sc = document.createElement("div"); sc.className = "scale"; p.scaleTxt = document.createElement("span"); p.scaleBar = document.createElement("i");
+    sc.append(p.scaleTxt, p.scaleBar); pane.appendChild(sc);
+    wire(p);
+    return p;
+  }
+
+  const panes = [makePane("a"), makePane("b")];
+  const maps = document.getElementById("maps");
+  panes.forEach(p => maps.appendChild(p.pane));
+
+  function applyView() {
+    for (const p of panes) {
+      const r = p.svg.getBoundingClientRect();
+      if (!r.width) continue;
+      const h = view.w * r.height / r.width;
+      p.svg.setAttribute("viewBox", `${view.cx - view.w / 2} ${view.cy - h / 2} ${view.w} ${h}`);
+      const mPerPx = view.w / r.width;
+      const nice = [5, 10, 20, 50, 100, 200, 500].find(m => m / mPerPx >= 60) || 500;
+      p.scaleTxt.textContent = `${nice} m`;
+      p.scaleBar.style.width = `${nice / mPerPx}px`;
+    }
+  }
+  function zoomAt(x, y, f) {
+    const w = Math.min(Math.max(view.w * f, 12), FW * 1.6);
+    const k = w / view.w;
+    view = { cx: x - (x - view.cx) * k, cy: y - (y - view.cy) * k, w };
+    applyView();
+  }
+  function goView(v) {
+    view = v ? { cx: PAD + v[0], cy: PAD + EH - v[1], w: v[2] } : { cx: FW / 2, cy: FH / 2, w: FW };
+    applyView();
+  }
+  function toSvg(p, cx, cy) {
+    const r = p.svg.getBoundingClientRect();
+    const h = view.w * r.height / r.width;
+    return [view.cx - view.w / 2 + (cx - r.left) / r.width * view.w, view.cy - h / 2 + (cy - r.top) / r.height * h];
+  }
+  function wire(p) {
+    const pts = new Map();
+    let pinch = null;
+    p.svg.addEventListener("wheel", e => {
+      e.preventDefault();
+      const [x, y] = toSvg(p, e.clientX, e.clientY);
+      zoomAt(x, y, Math.exp(e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
+    }, { passive: false });
+    p.svg.addEventListener("pointerdown", e => {
+      p.svg.setPointerCapture(e.pointerId);
+      pts.set(e.pointerId, [e.clientX, e.clientY]);
+      p.svg.classList.add("dragging");
+      if (pts.size === 2) {
+        const [a, b] = [...pts.values()];
+        pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), w: view.w };
+      }
+    });
+    p.svg.addEventListener("pointermove", e => {
+      if (!pts.has(e.pointerId)) return;
+      const prev = pts.get(e.pointerId);
+      pts.set(e.pointerId, [e.clientX, e.clientY]);
+      const r = p.svg.getBoundingClientRect();
+      if (pts.size === 1) {
+        const s = view.w / r.width;
+        view.cx -= (e.clientX - prev[0]) * s;
+        view.cy -= (e.clientY - prev[1]) * s;
+        applyView();
+      } else if (pts.size === 2 && pinch) {
+        const [a, b] = [...pts.values()];
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        const [x, y] = toSvg(p, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+        zoomAt(x, y, (pinch.w * pinch.d / d) / view.w);
+      }
+    });
+    const up = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (!pts.size) p.svg.classList.remove("dragging"); };
+    p.svg.addEventListener("pointerup", up);
+    p.svg.addEventListener("pointercancel", up);
+    p.svg.addEventListener("keydown", e => {
+      const step = view.w * 0.12;
+      const k = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+      if (k) { view.cx += k[0]; view.cy += k[1]; applyView(); e.preventDefault(); }
+      else if (e.key === "+" || e.key === "=") { zoomAt(view.cx, view.cy, 0.7); e.preventDefault(); }
+      else if (e.key === "-") { zoomAt(view.cx, view.cy, 1 / 0.7); e.preventDefault(); }
+    });
+  }
+
+  function armPaths(arm) {
+    if (!paths[arm]) {
+      const on = new Set(B[ARMS[arm].set]);
+      const keep = [], gone = [];
+      B.d.forEach((d, i) => (on.has(i) ? gone : keep).push(d));
+      paths[arm] = { keep: keep.join(""), gone: gone.join("") };
+    }
+    return paths[arm];
+  }
+
+  function layerHref(arm) {
+    const f = st.field;
+    if (f === "none") return "";
+    if (st.scale !== "raw" && (f === "before" || f === "after")) {
+      const pre = st.scale === "ratio" ? "rel" : "z";
+      return f === "before" ? `layers/${pre}_before${arm === "ss" ? "_ss" : ""}.png` : `layers/${pre}_${LAYER[arm]}.png`;
+    }
+    if (f === "before") return `layers/${ARMS[arm].before}.png`;
+    const pre = { after: "flux", change: "dflux", escape: "escape" }[f];
+    return `layers/${pre}_${LAYER[arm]}.png`;
+  }
+
+  function render() {
+    maps.classList.toggle("two", st.mode === "two");
+    panes[1].pane.hidden = st.mode !== "two";
+    document.getElementById("ctlB").hidden = st.mode !== "two";
+    document.querySelector('label[for="armA"] span').textContent = st.mode === "two" ? "Left" : "Method";
+    const flowField = st.field === "after" || st.field === "before";
+    const k = flowField && st.scale === "ratio" ? REL_KEY : flowField && st.scale === "z" ? Z_KEY : KEYS[st.field];
+    document.getElementById("key").innerHTML = k
+      ? `<div>${k[0]}</div><div class="bar" style="background:${k[1]}"></div><div class="ends"><span>${k[2]}</span><span>${k[3]}</span></div>`
+      : `<div>No field shown.</div>`;
+    if (!B) return;
+    panes.forEach((p, i) => {
+      const arm = i === 0 ? st.a : st.b;
+      const otherArm = i === 0 ? (st.mode === "two" ? st.b : null) : st.a;
+      const ap = armPaths(arm);
+      const before = st.field === "before" || st.field === "none";
+      p.bld.setAttribute("d", before ? ap.keep + ap.gone : ap.keep);
+      p.cleared.setAttribute("d", ap.gone);
+      p.other.setAttribute("d", st.other && otherArm && otherArm !== arm ? armPaths(otherArm).gone : "");
+      const href = layerHref(arm);
+      if (href) p.img.setAttribute("href", href); else p.img.removeAttribute("href");
+      p.ctx.style.display = st.ctx ? "" : "none";
+      p.osm.style.display = st.osm ? "" : "none";
+      p.tag.innerHTML = `${ARMS[arm].label} · <b>${ARMS[arm].n} cleared</b>`;
+    });
+    applyView();
+  }
+
+  for (const id of ["armA", "armB"]) {
+    const s = document.getElementById(id);
+    for (const [k, v] of Object.entries(ARMS)) s.add(new Option(v.label, k));
+  }
+  document.getElementById("armA").value = st.a;
+  document.getElementById("armB").value = st.b;
+  const vs = document.getElementById("view");
+  VIEWS.forEach(([n], i) => vs.add(new Option(n, String(i))));
+  vs.addEventListener("change", () => goView(VIEWS[+vs.value][1]));
+  document.getElementById("armA").addEventListener("change", e => { st.a = e.target.value; render(); });
+  document.getElementById("armB").addEventListener("change", e => { st.b = e.target.value; render(); });
+  for (const [id, key] of [["field", "field"], ["mode", "mode"], ["scale", "scale"]]) {
+    const g = document.getElementById(id);
+    g.addEventListener("click", e => {
+      const b = e.target.closest("button"); if (!b) return;
+      st[key] = b.dataset.v;
+      g.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+      render();
+    });
+  }
+  document.getElementById("ovOther").addEventListener("change", e => { st.other = e.target.checked; render(); });
+  document.getElementById("ovOsm").addEventListener("change", e => { st.osm = e.target.checked; render(); });
+  document.getElementById("ovCtx").addEventListener("change", e => { st.ctx = e.target.checked; render(); });
+  new ResizeObserver(applyView).observe(maps);
+
+  render();
+  Promise.all([fetch("layers/buildings.json").then(r => r.json()), fetch("layers/context.json").then(r => r.json())])
+    .then(([b, c]) => {
+      B = b; C = c;
+      for (const p of panes) {
+        p.ground.setAttribute("d", C.outline);
+        p.edge.setAttribute("d", C.outline);
+        p.ctxB.setAttribute("d", C.context_buildings);
+        p.ctxN.setAttribute("d", C.neighbours);
+        p.osmMaj.setAttribute("d", C.osm_major);
+        p.osmMin.setAttribute("d", C.osm_minor);
+        p.osmPath.setAttribute("d", C.osm_path);
+        p.load.hidden = true;
+      }
+      render();
+    })
+    .catch(() => panes.forEach(p => { p.load.textContent = "The map layers did not load. Reload the page to try again."; }));
+})();
+</script>
