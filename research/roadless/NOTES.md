@@ -2192,3 +2192,27 @@ walkers make the same ratio surer.
 no OSM road within 15 m. The block data (Million Neighborhoods) bounds blocks by railways as
 well as streets, and every outline is an exit, so the lanes draining to that edge drain to a
 railway line.
+
+### A region whose only exit is its edge: 5810@major (owner 2026-10-10: "just the boundary of the region would be the sink, so we still wouldn't use roads at all")
+
+regions.py: `<kblock>@major` is the face of the OSM major-road network (motorway to tertiary,
+links included) holding the kblock's interior point, every building anchored inside it (the kblock
+source's, at any count), its outer ring the only street. 5810@major: 6.74 km^2 (area / convex
+hull 0.82), bounded by the N1 to the north and major roads on the other sides; 12,663 buildings
+from 77 kblocks (12,700 Open Buildings outlines have a point inside), 5810's 6,619 among them;
+5.5M cells at 0.5a5x8 (27M uniform). On an H100 (runs face-cheap, face-simp), D 0.05:
+
+                         Lens A   cleared  in 5810  share of cleared area in 5810  time
+    the cheap preset     0.2714   548      157      20%                            170 s
+    SIMP's default       0.3014   714      162      17%                            386 s
+
+5810 holds 33% of the region's footprint area. Inside 5810 the region's clearings share 20 of
+the cheap preset's 202 and 17 of SIMP's 312 per-block picks: where the exits are decides the
+answer more than the method does. Most of the clearing goes to the formal grid in 5810's hook,
+whose streets were exits per block and are open ground here, so its homes count as deep; the
+flow the clearings add runs south through it to the diagonal road. 5810's informal west part
+drains west, south and north, across the railway (open ground here, an exit per block) into the
+vacant land and on to the N1. So with the region's edge as the only exit, a formal home on a
+street counts as far from access as an informal one deep in a settlement, and a railway or a
+freeway is ground to walk across or an exit to walk to. Published as a private artifact (5810
+Region Flow Atlas), with the flow against the no-buildings prior as on the 5810 page.

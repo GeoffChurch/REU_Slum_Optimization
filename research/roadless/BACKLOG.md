@@ -76,7 +76,11 @@ items up front"), in the order proposed:
    and circles buy no solver advantage: a sine or Fourier transform diagonalizes only uniform
    conductance, and buildings are zero-conductance holes. The one transform with a use is FFT
    homogenization (Moulinec--Suquet), a fabric's effective conductivity tensor per neighbourhood
-   for a coarse two-scale model; untested, and a model change.
+   for a coarse two-scale model; untested, and a model change. First test (NOTES, "A region whose
+   only exit is its edge"): on 5810@major the budget leaves 5810 for the formal grid in its hook,
+   whose streets no longer count as access. Open: streets as faster ground rather than exits (a
+   conductance on OSM ways, or the sightline metric, which needs a raster: 27M cells here),
+   railways and freeways as barriers, and which boundaries are real exits.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
