@@ -151,17 +151,17 @@ Not pursued, with what would change that:
   diverse builder) and screened adds (an add-direction refiner, a builder that reads the
   refined order). Wiki `pages/methods/plus-l-take-away-r.md`.
 - **Swing schedules** (owner 2026-10-09; tested 2026-10-10, NOTES "Swing schedules at the
-  cheap preset's budget"). Several grow-then-prune swings past the budget, each smaller, then the
-  polish (search.py `SW<grow>-<grow>-...x<picker>r<share>m<k>.P<t>w<w>`). On 15 held-out blocks
-  at D 0.05, SW1.5-1.2 is +0.010 over the cheap preset and +0.006 over floating search at 0.3x
-  its time, but -0.005 against SIMP's default at 3x SIMP's time; SW3-1.5-1.2 ties it at 3x the
-  time (the large swing wasted). Not on the frontier. What could put it there, untried: swings
-  as SIMP's finisher (SIMP's polished clearing as the archive's first state, one 1.2x swing and
-  the polish; NOTES "What follows" after SIMP's collapses), and the polish from both the
-  greedy's clearing and the archive's best (19161, as SIMP's `.G`). The adaptive form (each
-  swing size priced from the run's history, seqscreen.py's stop inside a run) waits on a fixed
-  schedule worth adapting. Neighbours: oscillating search, VNS, adaptive LNS (wiki page above,
-  "Swing schedules").
+  cheap preset's budget" and "Swings as SIMP's finisher"). Several grow-then-prune swings past
+  the budget, each smaller, then the polish (search.py
+  `SW<grow>-<grow>-...x<picker>r<share>m<k>.P<t>w<w>`; from SIMP's answer `SIMP<plan>+SW...`).
+  From the greedy they are dominated by SIMP's default (-0.005 at 3x its time; a 3x first swing
+  ties 1.5x at 3x the time). As SIMP's finisher (one 1.2x swing and the polish) they are on the
+  frontier: +0.0010 mean over SIMP's default on the 46 held out (half of it 30796, +0.024),
+  never behind, at SIMP's time again. **Owner's call:** adopt it as a preset above the default
+  (1.4e-5 Lens A per GPU-second, inside the screens' rate bracket). Next: the 13 tuning blocks
+  (gated; from the hard-block preset's answer too), the swing's size (1.1x, 1.3x) and two
+  swings. The adaptive form waits on a schedule worth adapting. Neighbours: oscillating search,
+  VNS, adaptive LNS (wiki page above, "Swing schedules").
 
 ## Experiment design
 

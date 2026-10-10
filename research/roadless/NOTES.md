@@ -2012,3 +2012,40 @@ The swings close two-thirds of the cheap preset's gap to SIMP's default (+0.010 
 form's lever would be the amplitude, and the fixed arms already say the large one is wasted
 here. The CPU smoke run (SW3-1.5-1.2 on two small blocks, 19510 and 19421, D 0.05) gave 0.3455
 (floating search's clearing) and 0.488 (floating search 0.472).
+
+### Swings as SIMP's finisher (owner 2026-10-10: "Let's try the 1.2x swing plus the polish as a finisher on SIMP's answer")
+
+search.py runs any schedule from SIMP's clearing (`SIMP<relax plan>+<spec>`): the seed is the
+first move, scored exactly and checked against SIMP's own score of it (within 1e-4; all 46
+matched). SIMPfw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2+SW1.2xS0.01catr0.005m8.P64w8 on the
+46 held-out blocks at D 0.05, on the local RTX 6000 Ada: from SIMP's default answer the greedy
+to 1.2x the budget, restore rounds back to it, then the cheap preset's polish. The seed stays in
+the archive, so the finisher never ends below SIMP's answer.
+
+    against SIMP's default, the 46   mean     median           ahead (> 1e-4)  behind
+    SIMP's default + the finisher    +0.0010  +0.0000 [0, 0]   19              0
+
+- Half the gain is one block: 30796 (n 5023, the largest) +0.024, 0.402 -> 0.427, above every
+  other method there (floating search 0.407, the swings from the greedy 0.406 and 0.408). Then
+  43708 +0.0034, 6312 +0.0028, 38988 +0.0020, 41515 +0.0019, and 14 blocks +0.0001 -- +0.0014.
+- The swing finds it: the archive's best before the polish holds 95% of the summed gain (the
+  polish +0.002 of +0.047).
+- It costs SIMP's time again: median 44 s a block (mean 74 s; 0.94 GPU-hours on the 46) against
+  `.p256w8`'s 40 s on the same card (1.02x, median per block); 30796 565 s, 24240 389 s.
+- On the 15 it is +0.0071 over the swings from the greedy (ahead on 13) at about two-thirds of
+  their time with SIMP's run counted; over the cheap preset +0.019, ahead on all 46.
+
+Its gain per GPU-second is 1.4e-5 Lens A (8.0e-6 without 30796; Bayesian bootstrap over blocks,
+5 -- 95%: 6.9e-6 -- 2.3e-5): above the screens' rate bracket's bottom (2e-6) with probability
+1.0, its middle (6e-6) 0.98, its top (1.9e-5, the rate `.p256w8x2` was adopted at) 0.14. An ask
+in seqscreen's terms: worth it at any rate below about 1.4e-5, not at the bracket's top; the
+owner's answer narrows the bracket. Adopted, it is a preset above SIMP's default at twice its
+time, beside the default rather than replacing it. The frontier at D 0.05 under uni is then the
+cheap preset (28 s), SIMP's default (40 s) and SIMP + the finisher (84 s); swings from the
+greedy are dominated by SIMP's default (configurations of the code the finisher runs: nothing to
+delete).
+
+Untried: the finisher on the 13 tuning blocks, where SIMP's gated answers are fragile (22422,
+30848, 38616) and the hard-block preset `.p256w8x2.GS0.01cate1` gains +0.0119, from that
+preset's answer too (on the 46 it equals the default's); the swing's size (1.1x, 1.3x) and two
+swings (1.2-1.1).
