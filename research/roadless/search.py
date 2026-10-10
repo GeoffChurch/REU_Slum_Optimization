@@ -18,12 +18,22 @@ Its rows are the archive's best per level, each with its full clearing (not nest
 conditional add accepts the lowest J among its candidates (BeatsArchive), so a picker's own
 criterion (M's gain per unit of population) does not apply there.
 
+Third schedule, swings (the owner's annealing question, BACKLOG "Swing schedules"): several
+grow-then-prune swings at one budget, each smaller, then exchange at the budget. The greedy to
+g_1 x d_max and restore rounds back to d_max, then from the best state so far the greedy to
+g_2 x d_max and back, and so on; last the cheap preset's polish (polish_greedy.py's world and
+P<tries>w<width>) from the best. Every exact state at or below d_max, the greedy's ascent
+included, goes to an archive like floating search's, and its rows are the archive's, so a
+swing never ends below the greedy's own clearing within the budget.
+
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> \
         <cpu|gpu> <along> <d_max>
 
 spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
 GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
-FL3xS0.01catr0.005m8c100. Rows in clear.rows_dir(<spec>D<d_max>, ...), e.g.
+FL3xS0.01catr0.005m8c100; SW<grow>-<grow>-...x<greedy picker>r<share>[m<shortlist>]
+.P<tries>w<width>[x2] (the polish's, as polish_greedy.py's), e.g.
+SW3-1.5-1.2xS0.01catr0.005m8.P64w8. Rows in clear.rows_dir(<spec>D<d_max>, ...), e.g.
 clear_rows_FL3xS0.01catr0.005m8c100D0.05_h0.5_area_p2: d_max sets the grow and the rows.
 
 The check that audits the parts' pairings (a Gradient ranking with TopSingles is an error):
@@ -357,6 +367,15 @@ class Above:
 
     def done(self, s: SearchState) -> bool:
         return s.D > self.d + 1e-12
+
+
+@dataclass(frozen=True)
+class Within:
+    """A prune's stop at the budget: D at or below d."""
+    d: float
+
+    def done(self, s: SearchState) -> bool:
+        return s.D <= self.d + 1e-12
 
 
 @dataclass(frozen=True)
@@ -908,7 +927,7 @@ class GrowPrune:
                     Grown(block_id=block_id, t0=t0)))
 
     def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
-              d_max: float, t0: float, screen: Valuer) -> Built:
+              d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         rec = PruneRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, t0=t0)
         restore = restore_round(step=self.restore, shortlist=self.shortlist, screen=screen)
         return Built(part=Seq((self.grown(block_id=block_id, d_max=d_max, t0=t0),
@@ -984,10 +1003,10 @@ class BeatsArchive:
 
 
 class FloatRows:
-    """Floating search's rows: the archive's best per level, in increasing D, each with its full
-    clearing (`clearing`, index order: the states are not nested, so no `cleared` deltas and
-    cleared_through does not read them), after a D 0 row, `t` the time when written. Every exact
-    state at or below d_max is offered to the archive."""
+    """Floating search's and the swings' rows: the archive's best per level, in increasing D,
+    each with its full clearing (`clearing`, index order: the states are not nested, so no
+    `cleared` deltas and cleared_through does not read them), after a D 0 row, `t` the time when
+    written. Every exact state at or below d_max is offered to the archive."""
 
     def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
                  d_max: float, archive: Archive, t0: float):
@@ -1032,7 +1051,7 @@ class FloatPrune:
         return self.base.screen_eps
 
     def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
-              d_max: float, t0: float, screen: Valuer) -> Built:
+              d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         g = self.base
         archive = Archive(step=g.restore)
         rec = FloatRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
@@ -1047,10 +1066,80 @@ class FloatPrune:
                      rows=rec)
 
 
+@dataclass(frozen=True)
+class ToBest:
+    """A move to the archive's best state (lowest J): where the next swing starts."""
+    archive: Archive
+
+    def __call__(self, s: SearchState, rec: Record) -> int:
+        best = min(self.archive.best.values(), key=lambda st: st.score.J)
+        add = np.flatnonzero(best.removed & ~s.c.removed).tolist()
+        back = np.flatnonzero(s.c.removed & ~best.removed).tolist()
+        if not add and not back:
+            return 0
+        apply(s, Outcome(add, back, best.score, EXACT), rec)
+        return 1
+
+
+@dataclass(frozen=True, kw_only=True)
+class Kept:
+    """The state scored exactly and offered to the archive: after a phase run under Silent (the
+    polish, whose rounds compare in their own world)."""
+    archive: Archive
+    d_max: float
+
+    def __call__(self, s: SearchState, rec: Record) -> int:
+        if s.world is not EXACT:
+            s.score, s.world = EXACT.score(s, s.c.removed), EXACT
+        if owed(s, d_max=self.d_max):
+            self.archive.offer(D=s.D, score=s.score, removed=s.c.removed)
+        return 0
+
+
+@dataclass(frozen=True, kw_only=True)
+class Swings:
+    """Grow-then-prune swings at one budget, each smaller, then the polish (module docstring).
+    Each swing starts from the archive's best; the greedy's states at or below d_max are kept
+    (its single-batch rounds leave them unscored, so each costs one exact solve)."""
+    grows: tuple[float, ...]    # each swing's greedy clears up to grow x d_max
+    add: Round[Any]             # the greedy's round
+    restore: float              # population share restored per round; the archive's step
+    shortlist: int              # first-order shortlist rescored per round (0: first order only)
+    screen_eps: float           # the eps world the shortlist is scored in
+    tries: int                  # the polish's scorings
+    width: int                  # the polish's candidates scored per round
+    pairs: bool                 # the polish's two-for-one moves
+    pool: int                   # their candidates (relax.PAIR_POOL)
+
+    @property
+    def name(self) -> str:
+        return (f"SW{'-'.join(f'{g:g}' for g in self.grows)}x{self.add.name}r{self.restore:g}"
+                + (f"m{self.shortlist}" if self.shortlist else "")
+                + f".P{self.tries}w{self.width}" + ("x2" if self.pairs else ""))
+
+    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+              d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
+        archive = Archive(step=self.restore)
+        rec = FloatRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
+                        archive=archive, t0=t0)
+        restore = restore_round(step=self.restore, shortlist=self.shortlist, screen=screen)
+        swings: list[Part] = []
+        for i, g in enumerate(self.grows):
+            swings += [ToBest(archive)] if i else []
+            swings += [greedy(self.add, g * d_max), Grown(block_id=block_id, t0=t0),
+                       Until(Do(restore), Within(d_max))]
+        last = (ToBest(archive),
+                With(Silent(), polish(polish_world, budget=d_max, width=self.width,
+                                      pairs=self.pairs, pool=self.pool, tries=self.tries)),
+                Kept(archive=archive, d_max=d_max))
+        return Built(part=Seq((*swings, *last)), rows=rec)
+
+
 class SearchPlan(Protocol):
-    """A schedule's preset (GrowPrune, FloatPrune): its name (the rows' directory, derived from
-    the rounds it holds), the eps world of its restore screen, and its parts. Read-only
-    members: a frozen dataclass's fields are not settable variables."""
+    """A schedule's preset (GrowPrune, FloatPrune, Swings): its name (the rows' directory,
+    derived from the rounds it holds), the eps world of its restore screen, and its parts, built
+    on the worlds the edge offers (the restore screen's; the polish's). Read-only members: a
+    frozen dataclass's fields are not settable variables."""
 
     @property
     def name(self) -> str: ...
@@ -1059,11 +1148,18 @@ class SearchPlan(Protocol):
     def screen_eps(self) -> float: ...
 
     def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
-              d_max: float, t0: float, screen: Valuer) -> Built: ...
+              d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built: ...
 
 
-def plan_of(spec: str, *, sweep: clear.Sweep) -> SearchPlan:
-    """The preset `spec` names, its greedy round built on `sweep`."""
+def plan_of(spec: str, *, sweep: clear.Sweep, pool: int) -> SearchPlan:
+    """The preset `spec` names, its greedy round built on `sweep`, a polish's pairs among `pool`."""
+    if m := re.fullmatch(r"SW([0-9.]+(?:-[0-9.]+)*)x(\S+?)r([0-9.]+)(?:m(\d+))?\.P(\d+)w(\d+)(x2)?",
+                         spec):
+        return Swings(grows=tuple(float(g) for g in m.group(1).split("-")),
+                      add=greedy_round(m.group(2), sweep), restore=float(m.group(3)),
+                      shortlist=0 if m.group(4) is None else int(m.group(4)),
+                      screen_eps=EPS_SCREEN, tries=int(m.group(5)), width=int(m.group(6)),
+                      pairs=m.group(7) is not None, pool=pool)
     if m := re.fullmatch(r"(GP|FL)([0-9.]+)x(\S+?)r([0-9.]+)(?:m(\d+))?(?:c(\d+))?", spec):
         kind, cap = m.group(1), m.group(6)
         if (kind == "FL") != (cap is not None):
@@ -1077,7 +1173,8 @@ def plan_of(spec: str, *, sweep: clear.Sweep) -> SearchPlan:
 
 
 def prune_block(b: Any, plan: SearchPlan, *,
-                screen_of: Callable[[Clearing, float], Valuer], power: float,
+                screen_of: Callable[[Clearing, float], Valuer],
+                polish_of: Callable[[Clearing, float], Graded], power: float,
                 along: str, device: str, d_max: float) -> pd.DataFrame:
     p = lifted.Params(3.0, 8, along=lifted.along_of(along, lifted.scans_of(device)),
                       solver=lifted.solver_of(device))
@@ -1086,7 +1183,7 @@ def prune_block(b: Any, plan: SearchPlan, *,
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
     built = plan.build(block_id=b.block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
-                       t0=t0, screen=screen_of(c, power))
+                       t0=t0, screen=screen_of(c, power), polish_world=polish_of(c, power))
     built.part(SearchState.start(c, power=power, score=Score(J0, P0), world=EXACT), built.rows)
     rows = built.rows.frame()
     print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {plan.name}: "
@@ -1097,10 +1194,16 @@ def prune_block(b: Any, plan: SearchPlan, *,
 
 def main(ids: list[str], plan: SearchPlan, power: float, device: str, along: str,
          d_max: float) -> None:
+    import polish_greedy  # the cheap preset's polish world
     import relax  # the edge binds the eps world; search.py's library code does not import relax
 
     def screen_of(c: Clearing, pw: float) -> Valuer:
         return relax.Relaxation(c, pw, q=1.0, rtol=RTOL_SCORE, eps=plan.screen_eps)
+
+    def polish_of(c: Clearing, pw: float) -> Graded:
+        """The cheap preset's polish world (the swings' last stage)."""
+        return relax.Relaxation(c, pw, q=1.0, rtol=polish_greedy.RTOL,
+                                eps=polish_greedy.SCORE_EPS, params=c.p)
 
     out = rows_dir(f"{plan.name}D{d_max:g}", 0.5, "area", power, along)
     out.mkdir(parents=True, exist_ok=True)
@@ -1110,8 +1213,8 @@ def main(ids: list[str], plan: SearchPlan, power: float, device: str, along: str
         if f.exists():
             continue
         try:
-            rows = prune_block(b, plan, screen_of=screen_of, power=power, along=along,
-                              device=device, d_max=d_max)
+            rows = prune_block(b, plan, screen_of=screen_of, polish_of=polish_of, power=power,
+                               along=along, device=device, d_max=d_max)
         except Exception as e:
             print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]}", flush=True)
             failed.append(b.block_id)
@@ -1124,8 +1227,9 @@ def main(ids: list[str], plan: SearchPlan, power: float, device: str, along: str
 
 
 if __name__ == "__main__":
+    import relax
     import search       # run as a script this file would be `__main__`, and relax's `search`
                         # a second copy of the engine (its own EXACT and classes)
     search.main(sys.argv[1].split(","),
-                search.plan_of(sys.argv[2], sweep=sweep_of(sys.argv[4])), float(sys.argv[3]),
-                sys.argv[4], sys.argv[5], float(sys.argv[6]))
+                search.plan_of(sys.argv[2], sweep=sweep_of(sys.argv[4]), pool=relax.PAIR_POOL),
+                float(sys.argv[3]), sys.argv[4], sys.argv[5], float(sys.argv[6]))
