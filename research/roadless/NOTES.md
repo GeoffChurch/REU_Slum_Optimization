@@ -2441,7 +2441,9 @@ Stage 1 launched 2026-10-10 22:52: the six methods on the 60 that fit (56 new bl
 proposals), 10 processes, a 6 h cap per proposal, then the prefixes; scoring after, on the local
 GPU when there is room or on the cluster. Open: the 23 oversized blocks (cycle_desire there needs
 another plan: by its memory per km^2 the largest do not fit), and the arterial (a higher cap on
-the cluster, or out).
+the cluster, or out). Done 2026-10-11 04:26: all 336 proposals, none failed or timed out
+(cycle_desire 43.2 CPU-h, longest 4.3 h on 30796; the other five 2.5 CPU-h together), and the
+prefixes for all 60.
 
 What four blocks say: the shipped metric and roadless order the road methods alike more often on
 large blocks than on the 220's small ones, and roadless tells the leaders apart here. They part
