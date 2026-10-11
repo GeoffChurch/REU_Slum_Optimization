@@ -66,9 +66,13 @@ items up front"), in the order proposed:
    the composite mesh, and a re-score under the sightline metric.
    Buildings as imperfect insulators (owner 2026-10-11; NOTES, "The insulator world"): no single
    eps both meets the owner's criterion (a walled-in home worse, but not massively worse, than
-   its open neighbours: 1e-3 -- 3e-3) and keeps the gates (1e-4 or less). Next: shadowed homes
-   inject on their open side (60% of large-block stranding, no parameter), and a door link for
-   the walled-in rest; then into lifted/common after stage 1, before the full run is scored.
+   its open neighbours: 1e-3 -- 3e-3) and keeps the gates (1e-4 or less). Tested instead: the
+   shadowed homes on their open side, and one door link per walled-in home (g 0.01, about 63 m
+   of 1 m alley), leak-free and meeting the criterion at the median; the small blocks' tail
+   (p90 ~10) is set beyond the door (a door rule that weighs the street side is untried). The
+   owner's call: adopt it as the metric (into lifted/common, replacing the exclusion; re-score
+   the stored clearings; score the full run under it). insulator.py's dominated door variants
+   (face ends, isotropic node, kappa, a door per pocket) go with the next change to it.
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population as
    footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =

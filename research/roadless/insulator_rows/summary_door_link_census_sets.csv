@@ -1,0 +1,3 @@
+set,blocks,homes,stranded,spec_t1,spec_t2,spec_t3,spec_t4,spec_t5,fix_t1,fix_t2,fix_t3,fix_t4,fix_t5,walled,walled_share,blocks_walled,max_block_share,pockets,pocket_homes_max
+31 small,31,6276,88,74,7,0,6,1,56,25,0,6,1,63,0.010038240917782026,24,0.06766917293233082,57,9
+60 large,60,100724,60,33,22,0,5,0,19,36,0,5,0,24,0.00023827488979786347,12,0.004655493482309125,29,3

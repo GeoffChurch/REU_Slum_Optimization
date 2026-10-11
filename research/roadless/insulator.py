@@ -33,10 +33,19 @@ are used as they are (a long run imports them); everything new is here.
     REBLOCK_BLOCK_BANK=<bank> uv run python $S door <procs> <kind> <ids,>   # confined leaks
     REBLOCK_BLOCK_BANK=<bank> CUDA_PATH=/usr uv run python $S large-door <kind> <ids,>
     uv run python $S report       # every table of insulator_report.md, and the CSV summaries
+  the door link (the placement fix; the section "the door link"):
+    REBLOCK_BLOCK_BANK=<bank> uv run python $S link-census <procs> <ids,>   # tiers, pockets
+    REBLOCK_BLOCK_BANK=<bank> uv run python $S link <procs> <plan> <coupling> <ends> <kappa> \
+        <g,> <ids,>
+    REBLOCK_BLOCK_BANK=<bank> CUDA_PATH=/usr uv run python $S link-large <plan> <coupling> \
+        <ends> <kappa> <g,> <g for the clearings,> <ids,>
+    uv run python $S corridor     # each g as metres of 1 m-wide open corridor
+    uv run python $S link-report  # the door link's tables and CSV summaries
 
-<kind>: metre | leaf | straight | local (DoorKind; the section "the door"). Rows in
-insulator_rows/ (parquet, ignored); the report's CSV summaries sit beside them; the findings
-in insulator_report.md.
+<kind>: metre | leaf | straight | local (DoorKind; the section "the door"). <plan>: pocket |
+home (DoorPlan); <coupling>: heading | iso (Coupling); <ends>: face | open (DoorEnds); <kappa>:
+the thickness term per metre (0: a fixed g). Rows in insulator_rows/ (parquet, ignored); the
+report's CSV summaries sit beside them; the findings in insulator_report.md.
 """
 from __future__ import annotations
 
@@ -45,15 +54,18 @@ import os
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
+import pyamg
 import scipy.sparse as sp
 import shapely
-from scipy.sparse.csgraph import dijkstra
+from scipy.sparse.csgraph import connected_components, dijkstra
+from scipy.sparse.linalg import cg, factorized
 from scipy.spatial import cKDTree
 
 HERE = Path(__file__).resolve().parent
@@ -122,7 +134,12 @@ class Placement:
     shadowed: np.ndarray
 
     @classmethod
-    def of(cls, grid: lifted.Grid, polys: np.ndarray, p: lifted.Params) -> Placement:
+    def of(cls, grid: lifted.Grid, polys: np.ndarray, p: lifted.Params, *,
+           open_side: bool) -> Placement:
+        """`open_side` True: the placement fix. Every shadowed stranded home injects on the
+        free cells within RING_M of its outline that reach the street (tier 2), whether or not
+        it also has a sealed ring. False: the spec, under which a home with a sealed ring cell
+        stays in tier 1 (the eps-world and lattice-door sections were run with it)."""
         n = len(polys)
         ncell = grid.inside.size
         reach = lifted.grounded(grid, grid.ff0, p)
@@ -138,6 +155,12 @@ class Placement:
             vals.append(np.ones(len(at)) if v is None else v)
 
         if stranded.any():
+            reach_flat = reach.ravel()
+            near_of, open_of = {}, {}
+            for j in np.flatnonzero(stranded):
+                near_of[j] = _near_outline(grid, polys[j])
+                open_of[j] = near_of[j][reach_flat[near_of[j]]]
+                shadowed[j] = len(open_of[j]) > 0
             # tier 1: every ring cell, sealed ones included; the same nearest-building rule
             sealed = (grid.ff0 > 0) & (grid.dist_b <= RING_M + 1e-9) & ~reach
             at = np.flatnonzero(sealed.ravel())
@@ -148,17 +171,15 @@ class Placement:
                                                            all_matches=False)
                 owner = np.full(len(at), -1)
                 owner[idx[0]] = idx[1]
-                mine = (owner >= 0) & stranded[np.maximum(owner, 0)]
+                ok = np.maximum(owner, 0)
+                mine = (owner >= 0) & stranded[ok] & ~(open_side & shadowed[ok])
                 cells.append(at[mine])
                 homes.append(owner[mine])
                 vals.append(np.ones(int(mine.sum())))
                 have[owner[mine]] = True
-            reach_flat = reach.ravel()
             footprint = []
             for j in np.flatnonzero(stranded):
-                near = _near_outline(grid, polys[j])
-                open_near = near[reach_flat[near]]
-                shadowed[j] = len(open_near) > 0
+                near, open_near = near_of[j], open_of[j]
                 if have[j]:
                     continue
                 if len(open_near):          # tier 2: its door on the open side
@@ -223,11 +244,12 @@ def _near_outline(grid: lifted.Grid, poly) -> np.ndarray:
     return (rr * grid.inside.shape[1] + cc)[ok]
 
 
-def _crossing_graph(grid: lifted.Grid) -> sp.csr_matrix:
+def _crossing_graph(grid: lifted.Grid, open_: np.ndarray) -> sp.csr_matrix:
     """4-connected steps between inside cells, a step costing the metres of footprint it
-    enters, h (1 - o) at its target (plus 1e-9: no zero-weight edges)."""
+    enters, h (1 - o) at its target, o the open fraction in `open_` (plus 1e-9: no zero-weight
+    edges)."""
     ny, nx = grid.inside.shape
-    o = grid.ff0.ravel()
+    o = open_.ravel()
     ins = grid.inside.ravel()
     idx = np.arange(ny * nx).reshape(ny, nx)
     src, dst = [], []
@@ -245,7 +267,8 @@ def _barrier(grid: lifted.Grid, reach: np.ndarray, S: sp.csr_matrix,
     """Per home: the fewest metres of footprint crossed on a 4-connected path through inside
     cells from open space with a path to the street to the nearest of its cells
     (_crossing_graph's; 0 where reached already; tier 0 homes: 0)."""
-    dist = dijkstra(_crossing_graph(grid), indices=np.flatnonzero(reach.ravel()), min_only=True)
+    dist = dijkstra(_crossing_graph(grid, grid.ff0), indices=np.flatnonzero(reach.ravel()),
+                    min_only=True)
     out = np.zeros(len(stranded))
     Sc = S.tocsc()
     for j in np.flatnonzero(stranded):
@@ -266,21 +289,31 @@ def home_potentials(grid: lifted.Grid, open_: np.ndarray, fields: list[np.ndarra
     B = xp.stack([sy.load(f, p) for f in fields], axis=1)
     U = sy.solve(B, rtol=rtol)
     P = p.solver.to_host((B * U).sum(axis=0))
-    share = xp.asarray(lifted.axes(p.K)[2] / np.pi)
-    o = xp.asarray(open_).ravel()
-    free = xp.flatnonzero(o > 0)
-    live = sy.unk_cell >= 0
-    ub = np.zeros((o.size, len(fields)))
-    for j in range(len(fields)):
-        uk = xp.zeros((len(free), p.K))
-        uk[live] = U[:, j].reshape(-1, p.K)
-        col = xp.zeros(o.size)
-        col[free] = uk @ share
-        ub[:, j] = p.solver.to_host(col)
+    ub = _cell_u(U, sy.unk_cell, open_, p)
     n = sy.n
     del sy, B, U
     p.solver.release()
     return pl.home_u(ub), P, n
+
+
+def _cell_u(U, unk_cell, open_: np.ndarray, p: lifted.Params) -> np.ndarray:
+    """(grid cells flat x fields) on the host: each free cell's potential averaged over the
+    headings by angular share (the injection's weights), from the per-unknown solutions U
+    (device; the first len(live unknowns) rows are the cells' unknowns), 0 elsewhere."""
+    xp = p.solver.xp
+    share = xp.asarray(lifted.axes(p.K)[2] / np.pi)
+    o = xp.asarray(open_).ravel()
+    free = xp.flatnonzero(o > 0)
+    live = unk_cell >= 0
+    nl = int(live.sum()) * p.K
+    ub = np.zeros((o.size, U.shape[1]))
+    for j in range(U.shape[1]):
+        uk = xp.zeros((len(free), p.K))
+        uk[live] = U[:nl, j].reshape(-1, p.K)
+        col = xp.zeros(o.size)
+        col[free] = uk @ share
+        ub[:, j] = p.solver.to_host(col)
+    return ub
 
 
 def _centroids(polys: np.ndarray) -> np.ndarray:
@@ -318,7 +351,7 @@ def small_one(bid: str) -> None:
     p = params("cpu")
     grid = mesh(H).build(b, p, None)
     polys = np.asarray(b.buildings.outlines)
-    pl = Placement.of(grid, polys, p)
+    pl = Placement.of(grid, polys, p, open_side=False)
     W = {name: pop.weights(polys) for name, pop in common.POPULATIONS.items()}
     reach = lifted.grounded(grid, grid.ff0, p)
     open_home = pl.tier == 0
@@ -378,7 +411,7 @@ def fine_one(bid: str, h: float) -> None:
     p = params("cpu")
     grid = mesh(h).build(b, p, None)
     polys = np.asarray(b.buildings.outlines)
-    pl = Placement.of(grid, polys, p)
+    pl = Placement.of(grid, polys, p, open_side=False)
     W = {name: pop.weights(polys) for name, pop in common.POPULATIONS.items()}
     open_home = pl.tier == 0
     fields = [pl.field(w, open_home, grid.inside.shape) for w in W.values()]
@@ -435,7 +468,7 @@ def large_one(bid: str, p: lifted.Params, eps_list: tuple[float, ...]) -> None:
     [b] = common.build_blocks([bid])
     grid = mesh(H).build(b, p, None)
     polys = np.asarray(b.buildings.outlines)
-    pl = Placement.of(grid, polys, p)
+    pl = Placement.of(grid, polys, p, open_side=False)
     W = {name: pop.weights(polys) for name, pop in common.POPULATIONS.items()}
     open_home = pl.tier == 0
     full = grid.isub.mean(axis=-1)
@@ -530,7 +563,7 @@ def census_one(bid: str) -> None:
     p = params("cpu")
     grid = mesh(H).build(b, p, None)
     polys = np.asarray(b.buildings.outlines)
-    pl = Placement.of(grid, polys, p)
+    pl = Placement.of(grid, polys, p, open_side=False)
     W = {name: pop.weights(polys) for name, pop in common.POPULATIONS.items()}
     st = pl.tier > 0
     row = dict(block=bid, n=len(polys), cells=int(grid.inside.sum()),
@@ -666,7 +699,8 @@ def door_of(grid: lifted.Grid, reach: np.ndarray, pl: Placement) -> Door:
     (one per sealed pocket a home touches)."""
     from scipy import ndimage
     shape = grid.inside.shape
-    _d, pred, _s = dijkstra(_crossing_graph(grid), indices=np.flatnonzero(reach.ravel()),
+    _d, pred, _s = dijkstra(_crossing_graph(grid, grid.ff0),
+                            indices=np.flatnonzero(reach.ravel()),
                             min_only=True, return_predecessors=True)
     o = grid.ff0.ravel()
     full = grid.isub.mean(axis=-1).ravel()
@@ -789,7 +823,7 @@ def door_one(bid: str, kind: DoorKind) -> None:
     p = params("cpu")
     grid = mesh(H).build(b, p, None)
     polys = np.asarray(b.buildings.outlines)
-    pl = Placement.of(grid, polys, p)
+    pl = Placement.of(grid, polys, p, open_side=False)
     W = {name: pop.weights(polys) for name, pop in common.POPULATIONS.items()}
     open_home = pl.tier == 0
     if open_home.all():
@@ -840,7 +874,7 @@ def large_door(ids: list[str], kind: DoorKind) -> None:
         [b] = common.build_blocks([bid])
         grid = mesh(H).build(b, p, None)
         polys = np.asarray(b.buildings.outlines)
-        pl = Placement.of(grid, polys, p)
+        pl = Placement.of(grid, polys, p, open_side=False)
         if (pl.tier == 0).all():
             print(f"{bid}: no stranded home, the door world is today's", flush=True)
             continue
@@ -880,6 +914,858 @@ def large_door(ids: list[str], kind: DoorKind) -> None:
         p.solver.release()
 
 
+# ------------------------------------------------------------------ the door link
+# The lattice doors above make r depend on the corridor's shape (a winding one-cell corridor
+# leaves 38486's 9-home courtyard at r 37 even fully open). The door link is one conductance per
+# walled-in pocket instead: the pocket cell its cheapest crossing reaches (_crossing_graph's
+# fewest footprint metres, as _barrier) is joined to the street-side cell that crossing starts
+# from by ONE extra conductance g in the operator. No footprint is opened (but the closed cells
+# tiers 4-5 inject on, which become their pocket), so nothing leaks but through the door's ends;
+# the door is placed once, from the baseline geometry, and kept in every scenario (clearing only
+# raises conductances: the score stays monotone). Placement: the fix (open_side True), so the
+# walled-in homes are tiers 1, 3, 4 and 5.
+#   pocket  a connected set of sealed free cells (4-connected, as the operator) holding the
+#           injection cells of at least one walled-in home; for tiers 4-5, the closed cells they
+#           inject on, opened fully (their own interior);
+#   plan    PocketDoors (one door per pocket, shared by its homes: the default) or HomeDoors (one
+#           per walled-in home and pocket it injects into: the sensitivity check);
+#   coupling  HeadingPreserving (per axis k an edge (a, k)-(b, k) of g m_k / pi: no new unknown,
+#           so GpuAMG's master coarsening still maps every unknown) or IsotropicNode (one new
+#           unknown per door, joined to every axis of both ends by 2 g m_k / pi: series total g;
+#           CPU only, the check);
+#   kappa   the thickness term: link resistance (1 + kappa barrier_m) / g, a cost per wall plus
+#           kappa / g per metre of footprint crossed (0: a fixed g).
+# g is in the operator's units (a straight open channel of width W and length L conducts m_k W /
+# L in layer k); `corridor` measures each g as the metres of 1 m-wide straight open corridor that
+# give a sealed room the same escape time (summary_door_link_corridor.csv).
+
+
+class Links(NamedTuple):
+    """Extra conductances between grid cells (flat indices, host): link i joins cell a[i]
+    (pocket side, never ground) to cell b[i] (street side; ground allowed) with total
+    conductance g[i]."""
+    a: np.ndarray
+    b: np.ndarray
+    g: np.ndarray
+
+
+class Coupling(Protocol):
+    """How a link couples the headings of its two cells (resolved once, from the command
+    line). edges(ua, ub, g, K, N, xp) -> (i, j, w): the link edges between unknowns (i never
+    ground; j -1 for a ground end, which adds to i's diagonal only), given each link's ends as
+    unknown blocks (ua, ub; ub -1 on ground), the K axes, and N, the cell unknowns' count (new
+    unknowns are numbered from N, nodes_per_link of them per link)."""
+    name: str
+    nodes_per_link: int
+
+    def edges(self, ua, ub, g, K: int, N: int, xp) -> tuple: ...
+
+
+def _axis_share(K: int, xp):
+    return xp.asarray(lifted.axes(K)[2] / np.pi)
+
+
+@dataclass(frozen=True)
+class HeadingPreserving:
+    """Per axis k, an edge (a, k)-(b, k) of conductance g m_k / pi (total g): a walker keeps
+    its heading through the door."""
+    name: str = "heading"
+    nodes_per_link: int = 0
+
+    def edges(self, ua, ub, g, K, N, xp):
+        k = xp.arange(K)
+        i = (ua[:, None] * K + k[None, :]).ravel()
+        j = xp.where(ub[:, None] >= 0, ub[:, None] * K + k[None, :], -1).ravel()
+        return i, j, (g[:, None] * _axis_share(K, xp)[None, :]).ravel()
+
+
+@dataclass(frozen=True)
+class IsotropicNode:
+    """One new unknown d per door, joined to (a, k) and to (b, k) by 2 g m_k / pi each (in
+    series, total g): the door forgets the heading. Its unknown has no cell of the master
+    operator, so GpuAMG cannot coarsen it: CPU only."""
+    name: str = "iso"
+    nodes_per_link: int = 1
+
+    def edges(self, ua, ub, g, K, N, xp):
+        k = xp.arange(K)
+        d = N + xp.arange(len(ua))
+        w = (2.0 * g[:, None] * _axis_share(K, xp)[None, :]).ravel()
+        i = xp.concatenate([(ua[:, None] * K + k[None, :]).ravel(), xp.repeat(d, K)])
+        j = xp.concatenate([xp.repeat(d, K),
+                            xp.where(ub[:, None] >= 0, ub[:, None] * K + k[None, :], -1).ravel()])
+        return i, j, xp.concatenate([w, w])
+
+
+COUPLINGS: tuple[Coupling, ...] = (HeadingPreserving(), IsotropicNode())
+
+
+def _linked_reach(grid: lifted.Grid, o, links: Links, p: lifted.Params):
+    """Per free cell (device, free-cell order): its open-space component holds a ground cell,
+    or is joined to one holding a ground cell through links. With no links: grid.reach."""
+    xp = p.solver.xp
+    free = o > 0
+    lab, n = p.solver.ndimage.label(free)
+    n = int(n)
+    labh = p.solver.to_host(lab).ravel()
+    gl = np.unique(labh[p.solver.to_host(free & xp.asarray(grid.ground)).ravel()])
+    gl = gl[gl > 0]
+    rows = np.concatenate([labh[links.a], np.full(len(gl), n + 1)])
+    cols = np.concatenate([labh[links.b], gl])
+    G = sp.coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(n + 2, n + 2))
+    _nc, comp = connected_components(G, directed=False)
+    ok = comp == comp[n + 1]
+    ok[0] = False
+    return xp.asarray(ok)[lab][free]
+
+
+class LinkSolver(Protocol):
+    """How a linked system is solved (resolved once, with the device). prepare(A, cut,
+    coarsening) -> solve(b, rtol, x0): CG on A itself (the links in it, so the residual sees
+    them) to a relative residual of rtol, on the device; cut() is A with the links'
+    off-diagonal entries removed (their diagonal kept: each end grounded through its link), for
+    a preconditioner that must not aggregate across a door."""
+
+    def prepare(self, A, cut: Callable, coarsening: lifted.Coarsening) -> Callable: ...
+
+
+@dataclass(frozen=True)
+class CpuCutAMG:
+    """CPU: exact below lifted.SMALL unknowns; above, CG on A preconditioned by one V-cycle of
+    pyamg smoothed aggregation (lifted.CpuAMG's settings) built on the cut operator. pyamg on A
+    itself is unreliable here: its setup starts the prolongation smoother's spectral radius
+    from a random vector, and at strength theta 0 a link is a strong edge an aggregate can
+    straddle; on 38486 (g 0.03) two of four seeds diverged and a deterministic (Gershgorin)
+    weighting stalled at a relative residual of 1.7. The cut operator differs from A by rank 2K
+    per door, so CG on A takes a few extra iterations (33 there, every seed, to 1e-10)."""
+
+    def prepare(self, A, cut, coarsening):
+        if A.shape[0] < lifted.SMALL:
+            lu = factorized(A.tocsc())
+            return lambda b, rtol, x0=None: lu(b)
+        M = pyamg.smoothed_aggregation_solver(cut(), symmetry="symmetric",
+                                              max_coarse=2000).aspreconditioner(cycle="V")
+
+        def solve1(b, rtol, x0):
+            x, info = cg(A, b, x0=x0, rtol=rtol, maxiter=lifted.MAXITER, M=M)
+            if info != 0:
+                r = float(np.linalg.norm(b - A @ x) / np.linalg.norm(b))
+                raise RuntimeError(f"linked CG did not converge: {r:.2e} after {info}")
+            return x
+
+        def solve(b, rtol, x0=None):
+            if b.ndim == 1:
+                return solve1(b, rtol, x0)
+            return np.stack([solve1(b[:, i], rtol, None if x0 is None else x0[:, i])
+                             for i in range(b.shape[1])], axis=1)
+        return solve
+
+
+@dataclass(frozen=True)
+class GpuMasterAMG:
+    """GPU: lifted.GpuAMG as it is. Its aggregates are the master operator's (every inside
+    cell, no links) restricted to the system's unknowns, so no aggregate holds a door's two
+    ends; the links enter only through the Galerkin sums and the CG on A."""
+    base: lifted.GpuAMG
+
+    def prepare(self, A, cut, coarsening):
+        return self.base.prepare(A, coarsening)
+
+
+def link_solver_of(p: lifted.Params) -> LinkSolver:
+    """The linked systems' solver for the device of `p` (resolved once, upstream)."""
+    if isinstance(p.solver, lifted.GpuAMG):
+        return GpuMasterAMG(base=p.solver)
+    if isinstance(p.solver, lifted.CpuAMG):
+        return CpuCutAMG()
+    raise TypeError(f"no linked solver for {p.solver!r}")
+
+
+class LinkedSystem:
+    """lifted.System with extra conductances between cells: L on the unknowns that reach ground
+    through open space or through a link, set up once for any number of right-hand sides (the
+    same assembly, CSR build and solver setup; lifted.System drops a sealed pocket before any
+    door exists, since its `reach` comes from the open field alone). Unknowns in a component
+    that reaches neither are dropped (u = 0 there); injecting into one is an error. With no
+    links it is lifted.System exactly. The solver sees the links: they are in A, which its CG
+    residual is computed with (`residual` checks it)."""
+
+    def __init__(self, grid: lifted.Grid, open_, p: lifted.Params, links: Links,
+                 coupling: Coupling, solver: LinkSolver):
+        p.solver.release()
+        xp = self.xp = p.solver.xp
+        self.to_host = p.solver.to_host
+        self.K = K = p.K
+        o = xp.asarray(open_, dtype=xp.float64)
+        r, c, v, diag, self.cell, self.unk_cell = lifted._assemble(grid, o, p)
+        N = len(diag)
+        cellf = self.cell.ravel()
+        ca, cb = cellf[xp.asarray(links.a)], cellf[xp.asarray(links.b)]
+        if bool((ca < 0).any()) or bool((cb < 0).any()):
+            raise ValueError("a link ends on a closed cell")
+        ua, ub = self.unk_cell[ca], self.unk_cell[cb]
+        if bool((ua < 0).any()):
+            raise ValueError("a link's pocket end is a ground cell")
+        self.n_extra = n_extra = coupling.nodes_per_link * len(links.a)
+        Nt = N + n_extra
+        reach = _linked_reach(grid, o, links, p)                  # per free cell
+        self.keep = xp.repeat(reach[self.unk_cell >= 0], K)
+        n_base = len(r)                         # the triplets before the links'
+        if len(links.a):
+            li, lj, lw = coupling.edges(ua, ub, xp.asarray(links.g, dtype=xp.float64), K, N, xp)
+            diag = xp.concatenate([diag, xp.zeros(n_extra)])
+            diag += xp.bincount(li, weights=lw, minlength=Nt)
+            to = lj >= 0
+            diag += xp.bincount(lj[to], weights=lw[to], minlength=Nt)
+            r = xp.concatenate([r, li[to], lj[to]])
+            c = xp.concatenate([c, lj[to], li[to]])
+            v = xp.concatenate([v, -lw[to], -lw[to]])
+            if n_extra:                         # a door node lives while its pocket does
+                self.keep = xp.concatenate([self.keep,
+                                            xp.repeat(reach[ca], coupling.nodes_per_link)])
+        new = xp.cumsum(self.keep) - 1
+        nk = int(self.keep.sum())
+        both = self.keep[r] & self.keep[c]
+        ar = xp.arange(Nt)[self.keep]
+        cache = grid.cache.setdefault(("solver", K, p.ell_m), {})
+        self.A = lifted._csr(p.solver, xp.concatenate([v[both], diag[self.keep]]),
+                             xp.concatenate([new[r[both]], new[ar]]),
+                             xp.concatenate([new[c[both]], new[ar]]), nk, cache)
+
+        def cut():
+            base = both & (xp.arange(len(r)) < n_base)
+            return p.solver.sparse.coo_matrix(
+                (xp.concatenate([v[base], diag[self.keep]]),
+                 (xp.concatenate([new[r[base]], new[ar]]),
+                  xp.concatenate([new[c[base]], new[ar]]))), shape=(nk, nk)).tocsr()
+
+        def mid():
+            if n_extra:
+                raise NotImplementedError("a door node has no master cell: CPU only")
+            mc = -xp.ones(o.size, dtype=xp.int64)
+            live = xp.asarray((grid.inside & ~grid.ground).ravel())
+            mc[live] = xp.arange(int(live.sum()))
+            flat = xp.flatnonzero(o.ravel() > 0)[self.unk_cell >= 0]
+            return (mc[flat][:, None] * K + xp.arange(K)[None, :]).ravel()[self.keep]
+        self._solver = solver.prepare(self.A, cut, lifted.Coarsening(
+            mid=mid, master=lambda: lifted.master_operator(grid, p), cache=cache))
+
+    @property
+    def n(self) -> int:
+        return len(self.keep)
+
+    def solve(self, b, rtol: float, x0=None):
+        """As lifted.System.solve."""
+        if bool((b[~self.keep] != 0).any()):
+            raise ValueError("loaded unknowns have no path to ground")
+        u = self.xp.zeros(b.shape)
+        u[self.keep] = self._solver(b[self.keep], rtol, None if x0 is None else x0[self.keep])
+        return u
+
+    def load(self, f_cell, p: lifted.Params):
+        """As lifted.System.load (a door node takes no load)."""
+        xp = self.xp
+        fc = xp.asarray(f_cell, dtype=xp.float64).ravel()[self.cell.ravel() >= 0]
+        live = self.unk_cell >= 0
+        b = xp.zeros(self.n)
+        idx = (self.unk_cell[live][:, None] * p.K + xp.arange(p.K)[None, :]).ravel()
+        b[idx] = (fc[live][:, None] * _axis_share(p.K, xp)[None, :]).ravel()
+        return b
+
+    def residual(self, B, U) -> np.ndarray:
+        """Per column, ||B - A U|| / ||B|| over the kept unknowns: the residual of the system
+        with its links."""
+        xp = self.xp
+        Bk, Uk = B[self.keep], U[self.keep]
+        R = Bk - self.A @ Uk
+        return self.to_host(xp.linalg.norm(R, axis=0) / xp.maximum(xp.linalg.norm(Bk, axis=0),
+                                                                    1e-300))
+
+
+def linked_potentials(grid: lifted.Grid, open_: np.ndarray, fields: list[np.ndarray],
+                      pl: Placement, p: lifted.Params, links: Links, coupling: Coupling, *,
+                      rtol: float) -> tuple[np.ndarray, np.ndarray, int, float]:
+    """home_potentials in the world `open_` with `links`: (home potentials (homes x fields),
+    P per field, unknowns, the worst field's relative residual with the links)."""
+    xp = p.solver.xp
+    sy = LinkedSystem(grid, open_, p, links, coupling, link_solver_of(p))
+    B = xp.stack([sy.load(f, p) for f in fields], axis=1)
+    U = sy.solve(B, rtol=rtol)
+    P = p.solver.to_host((B * U).sum(axis=0))
+    res = float(sy.residual(B, U).max())
+    ub = _cell_u(U, sy.unk_cell, open_, p)
+    n = sy.n
+    del sy, B, U
+    p.solver.release()
+    return pl.home_u(ub), P, n, res
+
+
+def walled(pl: Placement) -> np.ndarray:
+    """The walled-in homes: stranded, with no free cell reaching the street within RING_M of
+    the outline (under the fix: tiers 1, 3, 4, 5)."""
+    return (pl.tier == 1) | (pl.tier >= 3)
+
+
+class DoorEnds(Protocol):
+    """Which cells a door may join (resolved once, from the command line): sources(o, full,
+    reach) the street-side cells a crossing may start from (flat bool), targets(cells, o, full)
+    those of a pocket's (or a home's) cells it may end on. o, full: flat open and inside
+    fractions."""
+    name: str
+
+    def sources(self, o: np.ndarray, full: np.ndarray, reach: np.ndarray) -> np.ndarray: ...
+
+    def targets(self, cells: np.ndarray, o: np.ndarray, full: np.ndarray) -> np.ndarray: ...
+
+
+@dataclass(frozen=True)
+class FaceEnds:
+    """Any street-connected cell and any pocket cell (_barrier's crossing): the crossing starts
+    and ends on the wall's face cells, usually partial (a sliver of open space, e.g. 1/16), whose
+    weak edges then throttle the door whatever its g."""
+    name: str = "face"
+
+    def sources(self, o, full, reach):
+        return reach
+
+    def targets(self, cells, o, full):
+        return cells
+
+
+@dataclass(frozen=True)
+class OpenEnds:
+    """Open space on both sides: the street-connected cells with no footprint (o = full), and
+    the pocket's (or the home's) most open cells; the crossing between them counts the partial
+    face cells' footprint as wall."""
+    name: str = "open"
+
+    def sources(self, o, full, reach):
+        return reach & (o >= full - 1e-12)
+
+    def targets(self, cells, o, full):
+        rel = o[cells] / full[cells]
+        return cells[rel >= rel.max() - 1e-12]
+
+
+ENDS: tuple[DoorEnds, ...] = (FaceEnds(), OpenEnds())
+
+
+class Pockets(NamedTuple):
+    """A block's walled-in pockets, from the baseline geometry. open_: the door world's open
+    field (ff0 with the closed cells tiers 4-5 inject on opened fully); full: inside fractions
+    (flat); reach: street-connected open space in it (flat); label: per cell, its pocket or -1;
+    homes: per pocket, its walled-in homes; main: per home, the pocket holding most of its
+    injection (-1 none); ends: the rule the doors' ends follow; dist, src: per cell, the fewest
+    footprint metres from the street-side cells `ends` allows (_crossing_graph on open_) and the
+    cell that cheapest crossing starts from."""
+    open_: np.ndarray
+    full: np.ndarray
+    reach: np.ndarray
+    label: np.ndarray
+    homes: tuple
+    main: np.ndarray
+    ends: DoorEnds
+    dist: np.ndarray
+    src: np.ndarray
+
+
+def pockets_of(grid: lifted.Grid, pl: Placement, p: lifted.Params, *,
+               ends: DoorEnds) -> Pockets:
+    from scipy import ndimage
+    shape = grid.inside.shape
+    wl = walled(pl)
+    Sc = pl.S.tocsc()
+    inj = np.zeros(grid.inside.size, dtype=bool)
+    for j in np.flatnonzero(wl):
+        inj[Sc.indices[Sc.indptr[j]:Sc.indptr[j + 1]]] = True
+    o0 = grid.ff0.ravel()
+    full = grid.isub.mean(axis=-1).ravel()
+    opened = inj & (o0 == 0)
+    op = np.where(opened, full, o0).reshape(shape)
+    reach = lifted.grounded(grid, op, p).ravel()
+    sealed = (op.ravel() > 0) & ~reach
+    lab, n = ndimage.label(sealed.reshape(shape))
+    lab = lab.ravel() - 1
+    hold = np.unique(lab[inj & sealed])
+    pid = -np.ones(n + 1, dtype=np.int64)
+    pid[hold] = np.arange(len(hold))
+    label = np.where(lab >= 0, pid[np.maximum(lab, 0)], -1)
+    homes: list[list[int]] = [[] for _ in hold]
+    main = -np.ones(len(pl.tier), dtype=np.int64)
+    for j in np.flatnonzero(wl):
+        sl = slice(Sc.indptr[j], Sc.indptr[j + 1])
+        rows, vals = Sc.indices[sl], Sc.data[sl]
+        q = label[rows]
+        if (q >= 0).any():
+            share = np.bincount(q[q >= 0], weights=vals[q >= 0], minlength=len(hold))
+            main[j] = int(np.argmax(share))
+            for qq in np.flatnonzero(share > 0):
+                homes[qq].append(int(j))
+    if len(hold):
+        dist, _pred, src = dijkstra(_crossing_graph(grid, op),
+                                    indices=np.flatnonzero(ends.sources(op.ravel(), full, reach)),
+                                    min_only=True, return_predecessors=True)
+    else:
+        dist, src = np.zeros(grid.inside.size), -np.ones(grid.inside.size, dtype=np.int64)
+    return Pockets(open_=op, full=full, reach=reach, label=label,
+                   homes=tuple(np.asarray(h, dtype=np.int64) for h in homes), main=main,
+                   ends=ends, dist=np.asarray(dist), src=np.asarray(src, dtype=np.int64))
+
+
+class DoorSites(NamedTuple):
+    """The doors' ends (flat cells): a in a pocket, b in street-connected open space; the
+    footprint metres the crossing between them passes (barrier_m); its pocket; its home (-1:
+    the pocket's shared door)."""
+    a: np.ndarray
+    b: np.ndarray
+    barrier_m: np.ndarray
+    pocket: np.ndarray
+    home: np.ndarray
+
+
+def _site(pk: Pockets, cells: np.ndarray) -> tuple[int, int, float]:
+    """(a, b, barrier_m) of the cheapest crossing from the street-side cells pk.ends allows to
+    the cells of `cells` it allows."""
+    cells = pk.ends.targets(cells, pk.open_.ravel(), pk.full)
+    a = int(cells[np.argmin(pk.dist[cells])])
+    assert np.isfinite(pk.dist[a]) and pk.src[a] >= 0, "a pocket no crossing reaches"
+    return a, int(pk.src[a]), float(pk.dist[a])
+
+
+class DoorPlan(Protocol):
+    """Where the door links go (resolved once, from the command line)."""
+    name: str
+
+    def sites(self, pk: Pockets, pl: Placement) -> DoorSites: ...
+
+
+def _sites(rows: list[tuple]) -> DoorSites:
+    if not rows:
+        e = np.zeros(0, dtype=np.int64)
+        return DoorSites(a=e, b=e, barrier_m=np.zeros(0), pocket=e, home=e)
+    a, b, bar, q, j = map(np.asarray, zip(*rows, strict=True))
+    return DoorSites(a=a.astype(np.int64), b=b.astype(np.int64), barrier_m=bar.astype(float),
+                     pocket=q.astype(np.int64), home=j.astype(np.int64))
+
+
+@dataclass(frozen=True)
+class PocketDoors:
+    """One door per pocket, shared by its homes (a courtyard of 9 homes shares its hidden
+    passage): from the pocket cell its cheapest crossing reaches."""
+    name: str = "pocket"
+
+    def sites(self, pk, pl):
+        return _sites([(*_site(pk, np.flatnonzero(pk.label == q)), q, -1)
+                       for q in range(len(pk.homes))])
+
+
+@dataclass(frozen=True)
+class HomeDoors:
+    """One door per walled-in home and pocket it injects into: from the home's own cell its
+    cheapest crossing reaches (a pocket's homes may share the street-side cell)."""
+    name: str = "home"
+
+    def sites(self, pk, pl):
+        Sc = pl.S.tocsc()
+        out = []
+        for q, hs in enumerate(pk.homes):
+            for j in hs:
+                rows = Sc.indices[Sc.indptr[j]:Sc.indptr[j + 1]]
+                out.append((*_site(pk, rows[pk.label[rows] == q]), q, int(j)))
+        return _sites(out)
+
+
+PLANS: tuple[DoorPlan, ...] = (PocketDoors(), HomeDoors())
+
+
+def door_links(sites: DoorSites, *, g: float, kappa: float) -> Links:
+    """The door edges of a block: each site's link, resistance (1 + kappa barrier_m) / g."""
+    return Links(a=sites.a, b=sites.b, g=g / (1.0 + kappa * sites.barrier_m))
+
+
+@dataclass(frozen=True)
+class LinkDoor:
+    """A door-link run: where the doors go and which cells they join, how a link couples
+    headings, the thickness term."""
+    plan: DoorPlan
+    coupling: Coupling
+    ends: DoorEnds
+    kappa: float
+
+    @property
+    def name(self) -> str:
+        return (f"link_{self.plan.name}_{self.coupling.name}_{self.ends.name}"
+                f"_k{self.kappa:g}")
+
+
+def _named(options: tuple, name: str, what: str):
+    """The option a command line names (the one place these are strings)."""
+    for x in options:
+        if x.name == name:
+            return x
+    raise SystemExit(f"unknown {what} {name!r}: {[x.name for x in options]}")
+
+
+def link_door(plan: str, coupling: str, ends: str, kappa: str) -> LinkDoor:
+    return LinkDoor(plan=_named(PLANS, plan, "plan"),
+                    coupling=_named(COUPLINGS, coupling, "coupling"),
+                    ends=_named(ENDS, ends, "ends"), kappa=float(kappa))
+
+
+def link_dir(door: LinkDoor) -> Path:
+    return ROWS / f"door_{door.name}_h{H:g}_ell{ELL_M:g}_K{K}"
+
+
+def link_census_dir() -> Path:
+    return ROWS / f"door_link_census_h{H:g}"
+
+
+def _pocket_cols(pl: Placement, pk: Pockets, W: dict[str, np.ndarray]) -> dict:
+    """Per home: its main pocket, the walled-in homes there, and their weight per population."""
+    n = len(pl.tier)
+    nh = np.zeros(n, dtype=np.int64)
+    pw = {name: np.zeros(n) for name in W}
+    for j in np.flatnonzero(pk.main >= 0):
+        hs = pk.homes[pk.main[j]]
+        nh[j] = len(hs)
+        for name, w in W.items():
+            pw[name][j] = float(w[hs].sum())
+    return dict(pocket=pk.main, pocket_homes=nh, **{f"pocket_w_{k}": v for k, v in pw.items()})
+
+
+def link_census_one(bid: str) -> None:
+    """Task 1: the placement fix's census (no solve): per block the tiers under the fix and the
+    pockets; per formerly stranded home its tier under the spec and the fix, its pocket, and the
+    door sites of both plans."""
+    out = link_census_dir() / f"{bid}.parquet"
+    if out.exists():
+        return
+    t0 = time.perf_counter()
+    [b] = common.build_blocks([bid])
+    p = params("cpu")
+    grid = mesh(H).build(b, p, None)
+    polys = np.asarray(b.buildings.outlines)
+    spec = Placement.of(grid, polys, p, open_side=False)
+    pl = Placement.of(grid, polys, p, open_side=True)
+    assert ((spec.tier > 0) == (pl.tier > 0)).all() and (spec.shadowed == pl.shadowed).all()
+    W = {name: pop.weights(polys) for name, pop in common.POPULATIONS.items()}
+    pks = {e.name: pockets_of(grid, pl, p, ends=e) for e in ENDS}
+    pk = pks["face"]                    # the pockets (the ends change only the doors)
+    st = pl.tier > 0
+    wl = walled(pl)
+    sites = {(plan.name, e): plan.sites(pke, pl) for plan in PLANS for e, pke in pks.items()}
+    row = dict(block=bid, n=len(polys), cells=int(grid.inside.sum()),
+               area_km2=float(b.boundary.area / 1e6), stranded=int(st.sum()),
+               **{f"n_tier{t}": int((pl.tier == t).sum()) for t in range(1, 6)},
+               **{f"spec_tier{t}": int((spec.tier == t).sum()) for t in range(1, 6)},
+               n_shadowed=int((st & pl.shadowed).sum()), walled=int(wl.sum()),
+               pockets=len(pk.homes),
+               pocket_homes_max=max((len(h) for h in pk.homes), default=0),
+               doors_home=len(sites[("home", "face")].a),
+               door_barrier_med_m=(float(np.median(sites[("pocket", "face")].barrier_m))
+                                   if len(pk.homes) else np.nan),
+               door_open_barrier_med_m=(float(np.median(sites[("pocket", "open")].barrier_m))
+                                        if len(pk.homes) else np.nan),
+               t=time.perf_counter() - t0)
+    for name, w in W.items():
+        row[f"stranded_{name}"] = float(w[st].sum() / w.sum())
+        row[f"walled_{name}"] = float(w[wl].sum() / w.sum())
+    cen = _centroids(polys)
+    xy = grid.xy.reshape(-1, 2)
+    homes = pd.DataFrame(dict(block=bid, home=np.flatnonzero(st), tier=pl.tier[st],
+                              spec_tier=spec.tier[st], shadowed=pl.shadowed[st],
+                              barrier_m=pl.barrier_m[st], cx=cen[st, 0], cy=cen[st, 1],
+                              **{k: v[st] for k, v in _pocket_cols(pl, pk, W).items()}))
+    sdf = []
+    for (name, e), s in sites.items():
+        sdf.append(pd.DataFrame(dict(block=bid, plan=name, ends=e, pocket=s.pocket, home=s.home,
+                                     a=s.a,
+                                     b=s.b, ax=xy[s.a, 0], ay=xy[s.a, 1], bx=xy[s.b, 0],
+                                     by=xy[s.b, 1], barrier_m=s.barrier_m,
+                                     a_open=pk.open_.ravel()[s.a], b_open=pk.open_.ravel()[s.b],
+                                     b_ground=grid.ground.ravel()[s.b])))
+    link_census_dir().mkdir(parents=True, exist_ok=True)
+    homes.to_parquet(link_census_dir() / f"{bid}__homes.parquet")
+    pd.concat(sdf, ignore_index=True).to_parquet(link_census_dir() / f"{bid}__sites.parquet")
+    pd.DataFrame([row]).to_parquet(out)
+    print(f"{time.strftime('%H:%M:%S')} {bid} n={len(polys)} stranded {int(st.sum())} walled "
+          f"{int(wl.sum())} pockets {len(pk.homes)} {row['t']:.0f}s", flush=True)
+
+
+def _link_path(door: LinkDoor, bid: str, g: float) -> Path:
+    return link_dir(door) / f"{bid}__g{g:g}.parquet"
+
+
+def link_one(bid: str, door: LinkDoor, gs: tuple[float, ...]) -> None:
+    """The door link on one small block (CPU), both populations, per g in `gs` (one file each:
+    a run resumes, and a refined grid adds only its new values): per home u (every home
+    injecting) and u_open (the tier-0 demand alone: the leak), with its pocket. A block with no
+    walled-in home is one solve, its rows written for every g."""
+    todo = [g for g in gs if not _link_path(door, bid, g).exists()]
+    if not todo:
+        return
+    t0 = time.perf_counter()
+    [b] = common.build_blocks([bid])
+    p = params("cpu")
+    grid = mesh(H).build(b, p, None)
+    polys = np.asarray(b.buildings.outlines)
+    pl = Placement.of(grid, polys, p, open_side=True)
+    W = {name: pop.weights(polys) for name, pop in common.POPULATIONS.items()}
+    open_home = pl.tier == 0
+    shape = grid.inside.shape
+    pk = pockets_of(grid, pl, p, ends=door.ends)
+    sites = door.plan.sites(pk, pl)
+    cen = _centroids(polys)
+    pc = _pocket_cols(pl, pk, W)
+    fields, keys = [], []
+    for name, w in W.items():
+        fields += [pl.field(w, open_home, shape), pl.field(w, ~open_home, shape)]
+        keys += [(name, "open"), (name, "str")]
+    done = None
+    xy = grid.xy.reshape(-1, 2)
+    link_dir(door).mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(dict(block=bid, pocket=sites.pocket, home=sites.home, a=sites.a, b=sites.b,
+                      ax=xy[sites.a, 0], ay=xy[sites.a, 1], bx=xy[sites.b, 0],
+                      by=xy[sites.b, 1], barrier_m=sites.barrier_m,
+                      a_open=pk.open_.ravel()[sites.a], b_open=pk.open_.ravel()[sites.b],
+                      b_ground=grid.ground.ravel()[sites.b])).to_parquet(
+        link_dir(door) / f"{bid}__sites.parquet")
+    for g in todo:
+        rows = []
+        if done is None or len(sites.a):
+            ts = time.perf_counter()
+            links = door_links(sites, g=g, kappa=door.kappa)
+            done = (*linked_potentials(grid, pk.open_, fields, pl, p, links, door.coupling,
+                                       rtol=RTOL), time.perf_counter() - ts)
+        hu, P, n_unk, res, t_solve = done
+        for name, w in W.items():
+            u_open = hu[:, keys.index((name, "open"))]
+            u = u_open + hu[:, keys.index((name, "str"))]
+            rows.append(pd.DataFrame(dict(
+                block=bid, door=door.name, g=g, pop=name, home=np.arange(len(polys)),
+                tier=pl.tier, barrier_m=pl.barrier_m, shadowed=pl.shadowed, w=w, cx=cen[:, 0],
+                cy=cen[:, 1], u=u, u_open=np.where(open_home, u_open, np.nan),
+                pocket=pc["pocket"], pocket_homes=pc["pocket_homes"],
+                pocket_w=pc[f"pocket_w_{name}"], doors=len(sites.a), unknowns=n_unk,
+                resid=res, t_solve=t_solve)))
+        out = _link_path(door, bid, g)
+        tmp = out.with_suffix(f".{os.getpid()}.tmp")
+        pd.concat(rows, ignore_index=True).to_parquet(tmp)
+        os.replace(tmp, out)
+    print(f"{time.strftime('%H:%M:%S')} {bid} {door.name}: {len(pk.homes)} pockets, "
+          f"{len(sites.a)} doors, tiers {np.bincount(pl.tier, minlength=6).tolist()}, "
+          f"{time.perf_counter() - t0:.0f}s", flush=True)
+
+
+def link_large(ids: list[str], door: LinkDoor, gs: tuple[float, ...],
+               gs_clear: tuple[float, ...]) -> None:
+    """The door link on large blocks (GPU) with walled-in homes under the fix: today's world
+    (eps 0, tier-0 demand: u(0) for the leak), the door world with nothing cleared per g in
+    `gs` (both populations, per home: u and u_open), and the stored clearings per g in
+    `gs_clear` (area population, every home injecting: J_2 for Lens A)."""
+    import gc
+    p = params("gpu")
+    link_dir(door).mkdir(parents=True, exist_ok=True)
+    for bid in ids:
+        out = link_dir(door) / f"{bid}__large.parquet"
+        if out.exists():
+            continue
+        try:
+            t0 = time.perf_counter()
+            [b] = common.build_blocks([bid])
+            grid = mesh(H).build(b, p, None)
+            polys = np.asarray(b.buildings.outlines)
+            pl = Placement.of(grid, polys, p, open_side=True)
+            if not walled(pl).any():
+                print(f"{bid}: no walled-in home under the fix", flush=True)
+                continue
+            W = {name: pop.weights(polys) for name, pop in common.POPULATIONS.items()}
+            open_home = pl.tier == 0
+            shape = grid.inside.shape
+            pk = pockets_of(grid, pl, p, ends=door.ends)
+            sites = door.plan.sites(pk, pl)
+            pc = _pocket_cols(pl, pk, W)
+            cen = _centroids(polys)
+            homes, scen = [], []
+            print(f"{time.strftime('%H:%M:%S')} {bid} n={len(polys)} cells="
+                  f"{int(grid.inside.sum())} tiers {np.bincount(pl.tier, minlength=6).tolist()} "
+                  f"pockets {len(pk.homes)} doors {len(sites.a)} setup "
+                  f"{time.perf_counter() - t0:.0f}s", flush=True)
+            hu0, _P0, n0 = home_potentials(grid, grid.ff0, [pl.field(W[k], open_home, shape)
+                                                            for k in W], pl, p, rtol=RTOL_LARGE)
+            for j, name in enumerate(W):
+                homes.append(pd.DataFrame(dict(
+                    block=bid, door=door.name, g=0.0, world="today", pop=name,
+                    home=np.arange(len(polys)), tier=pl.tier, barrier_m=pl.barrier_m,
+                    shadowed=pl.shadowed, w=W[name], cx=cen[:, 0], cy=cen[:, 1],
+                    u=np.where(open_home, hu0[:, j], np.nan), u_open=np.nan,
+                    pocket=pc["pocket"], pocket_homes=pc["pocket_homes"],
+                    pocket_w=pc[f"pocket_w_{name}"], doors=len(sites.a), unknowns=n0,
+                    resid=np.nan)))
+            fields, keys = [], []
+            for name, w in W.items():
+                fields += [pl.field(w, open_home, shape), pl.field(w, ~open_home, shape)]
+                keys += [(name, "open"), (name, "str")]
+            for g in gs:
+                links = door_links(sites, g=g, kappa=door.kappa)
+                ts = time.perf_counter()
+                hu, P, n_unk, res = linked_potentials(grid, pk.open_, fields, pl, p, links,
+                                                      door.coupling, rtol=RTOL_LARGE)
+                for name, w in W.items():
+                    u_open = hu[:, keys.index((name, "open"))]
+                    u = u_open + hu[:, keys.index((name, "str"))]
+                    homes.append(pd.DataFrame(dict(
+                        block=bid, door=door.name, g=g, world="door", pop=name,
+                        home=np.arange(len(polys)), tier=pl.tier, barrier_m=pl.barrier_m,
+                        shadowed=pl.shadowed, w=w, cx=cen[:, 0], cy=cen[:, 1], u=u,
+                        u_open=np.where(open_home, u_open, np.nan), pocket=pc["pocket"],
+                        pocket_homes=pc["pocket_homes"], pocket_w=pc[f"pocket_w_{name}"],
+                        doors=len(sites.a), unknowns=n_unk, resid=res)))
+                    if name == "area" and g in gs_clear:
+                        scen.append(_j2_row(bid, door, g, "none", 0, w, u, pl, np.nan, n_unk,
+                                            res))
+                print(f"  {bid} g {g:g} none: {n_unk} unknowns, resid {res:.1e}, "
+                      f"{time.perf_counter() - ts:.0f}s", flush=True)
+            w = W["area"]
+            lab = grid.label_sub(polys)
+            full = grid.isub.mean(axis=-1)
+            opened = (pk.open_ != grid.ff0)
+            f_all = pl.field(w, np.ones(len(polys), dtype=bool), shape)
+            for cname, (rel, col, perm_col) in STORED.items():
+                r = pd.read_parquet(HERE / rel / f"{bid}_p{CLEARING_POWER:g}.parquet").iloc[0]
+                x = np.zeros(len(polys), dtype=bool)
+                x[np.asarray(r[col], dtype=np.int64)] = True
+                cleared = (lab >= 0) & x[np.maximum(lab, 0)]
+                op = np.where(opened, full, (grid.isub & (~grid.bsub | cleared)).mean(axis=-1))
+                for g in gs_clear:
+                    links = door_links(sites, g=g, kappa=door.kappa)
+                    ts = time.perf_counter()
+                    hu, _P, n_unk, res = linked_potentials(grid, op, [f_all], pl, p, links,
+                                                           door.coupling, rtol=RTOL_LARGE)
+                    scen.append(_j2_row(bid, door, g, cname, int(x.sum()), w, hu[:, 0], pl,
+                                        float(r[perm_col]), n_unk, res))
+                    print(f"  {bid} g {g:g} {cname}: {n_unk} unknowns, resid {res:.1e}, "
+                          f"{time.perf_counter() - ts:.0f}s", flush=True)
+            pd.concat(homes, ignore_index=True).to_parquet(
+                link_dir(door) / f"{bid}__large_homes.parquet")
+            pd.DataFrame(scen).to_parquet(out)
+            print(f"{time.strftime('%H:%M:%S')} {bid} done in {time.perf_counter() - t0:.0f}s",
+                  flush=True)
+            del grid
+        except Exception as e:
+            print(f"{time.strftime('%H:%M:%S')} {bid} FAILED {type(e).__name__}: {e}"[:400],
+                  flush=True)
+            traceback.print_exc()
+        gc.collect()
+        p.solver.release()
+
+
+def _j2_row(bid: str, door: LinkDoor, g: float, cname: str, n_cl: int, w: np.ndarray,
+            u: np.ndarray, pl: Placement, stored: float, n_unk: int, res: float) -> dict:
+    """One scenario's J_2 (area) over every home, the tier-0 homes and the walled-in homes."""
+    wl = walled(pl)
+    t0 = pl.tier == 0
+    return dict(block=bid, door=door.name, g=g, clearing=cname, n_cleared=n_cl,
+                J2=float((w * u ** 2).sum()), J2_open=float((w[t0] * u[t0] ** 2).sum()),
+                J2_walled=float((w[wl] * u[wl] ** 2).sum()),
+                u_walled=",".join(f"{v:.4g}" for v in u[wl]), stored_perm=stored,
+                unknowns=n_unk, resid=res)
+
+
+# The reference corridor: g as the metres of a straight open corridor CORRIDOR_W wide giving a
+# sealed room the same escape time. Geometry (m): the block is CORRIDOR_BOX_W wide; a street
+# along its bottom edge (ground: 1 m band); APRON_M of open space; a wall L thick across the
+# whole width with a CORRIDOR_W gap at the middle (A) or none (B, the door link instead); above
+# it a ROOM_W x ROOM_D room, the rest of that band footprint. A unit demand is spread uniformly
+# over the room's cells; u_room is its injection-weighted mean potential.
+CORRIDOR_W = 1.0
+CORRIDOR_L = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0)   # 0.5 m: no closed row at h 0.5
+CORRIDOR_BOX_W = 20.0
+APRON_M = 6.0
+ROOM_W, ROOM_D = 10.0, 6.0
+CORRIDOR_G = tuple(float(x) for x in np.logspace(-4, 1, 41))   # world B's g (interpolated)
+
+
+def _corridor_world(L: float, gap: bool, p: lifted.Params, ends: DoorEnds):
+    """(grid, the room's injection field, door site (a, b) or None) of one reference world; the
+    door's ends follow `ends`, as on the blocks."""
+    from shapely.geometry import LineString, box
+    X, top = CORRIDOR_BOX_W, APRON_M + L + ROOM_D
+    boundary = box(0.0, 0.0, X, top)
+    wall = box(0.0, APRON_M, X, APRON_M + L)
+    if gap:
+        wall = wall.difference(box(X / 2 - CORRIDOR_W / 2, APRON_M, X / 2 + CORRIDOR_W / 2,
+                                   APRON_M + L))
+    room = box(X / 2 - ROOM_W / 2, APRON_M + L, X / 2 + ROOM_W / 2, top)
+    sides = box(0.0, APRON_M + L, X, top).difference(room)
+    feet = shapely.get_parts(np.array([wall, sides], dtype=object))
+    grid = lifted.Grid.of(boundary, feet, [LineString([(-5.0, 0.0), (X + 5.0, 0.0)])], H,
+                          offset=lifted.OFFSET)
+    o = grid.ff0
+    inroom = grid.mask_of(room) & (o > 0)
+    f = np.where(inroom, 1.0, 0.0)
+    f /= f.sum()
+    site = None
+    reach = lifted.grounded(grid, o, p).ravel()
+    if gap:
+        assert reach[inroom.ravel()].all(), "the room does not reach the street"
+    else:
+        assert not reach[inroom.ravel()].any(), "the walled-up room reaches the street"
+        full = grid.isub.mean(axis=-1).ravel()
+        dist, _pred, src = dijkstra(_crossing_graph(grid, o),
+                                    indices=np.flatnonzero(ends.sources(o.ravel(), full, reach)),
+                                    min_only=True, return_predecessors=True)
+        cells = ends.targets(np.flatnonzero(inroom.ravel()), o.ravel(), full)
+        a = int(cells[np.argmin(dist[cells])])
+        site = (a, int(src[a]))
+    return grid, f, site
+
+
+def _u_room(grid, f, links: Links, coupling: Coupling, p: lifted.Params) -> float:
+    sy = LinkedSystem(grid, grid.ff0, p, links, coupling, link_solver_of(p))
+    B = sy.load(f, p)[:, None]
+    U = sy.solve(B, rtol=1e-10)
+    ub = _cell_u(U, sy.unk_cell, grid.ff0, p)[:, 0]
+    return float((f.ravel() * ub).sum())
+
+
+def corridor_calibration(ends: DoorEnds) -> pd.DataFrame:
+    """u_room with the corridor open (A, per L in CORRIDOR_L) and walled up with one door link
+    whose ends follow `ends` (B, per g in CORRIDOR_G; each coupling), and g_equiv(L), the g at
+    which B's u_room equals A's (log-log interpolation along CORRIDOR_G)."""
+    p = params("cpu")
+    none = Links(np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0))
+    rows = []
+    uA = []
+    for L in CORRIDOR_L:
+        grid, f, _ = _corridor_world(L, True, p, ends)
+        uA.append(_u_room(grid, f, none, HeadingPreserving(), p))
+    grid, f, (a, b) = _corridor_world(4.0, False, p, ends)  # B does not depend on L
+    for coupling in COUPLINGS:
+        uB = np.array([_u_room(grid, f, Links(np.array([a]), np.array([b]), np.array([g])),
+                               coupling, p) for g in CORRIDOR_G])
+        lg, lu = np.log(np.array(CORRIDOR_G)), np.log(uB)
+        for L, u in zip(CORRIDOR_L, uA, strict=True):
+            # uB falls in g: interpolate log g against log u
+            ge = (float(np.exp(np.interp(np.log(u), lu[::-1], lg[::-1])))
+                  if lu[-1] <= np.log(u) <= lu[0] else np.nan)
+            rows.append(dict(ends=ends.name, coupling=coupling.name, L_m=L, u_room_corridor=u,
+                             g_equiv=ge))
+        rows += [dict(ends=ends.name, coupling=coupling.name, g=g, u_room_door=u) for g, u in
+                 zip(CORRIDOR_G, uB, strict=True)]
+    return pd.DataFrame(rows)
+
+
+def corridor_metres(cal: pd.DataFrame, g: float, coupling: str, ends: str) -> float:
+    """The length of the reference corridor equivalent to a door of conductance g
+    (interpolated in log g against log L along `cal`'s g_equiv; nan outside it)."""
+    c = cal[(cal.coupling == coupling) & (cal.ends == ends) & cal.L_m.notna()].dropna(
+        subset=["g_equiv"])
+    lg, lL = np.log(c.g_equiv.to_numpy()), np.log(c.L_m.to_numpy())
+    o = np.argsort(lg)
+    return float(np.exp(np.interp(np.log(g), lg[o], lL[o], left=np.nan, right=np.nan)))
+
+
 # ------------------------------------------------------------------ report
 
 def _read(d: Path, pattern: str) -> pd.DataFrame:
@@ -899,12 +1785,12 @@ def neighbours(homes: pd.DataFrame) -> dict[int, np.ndarray]:
     return out
 
 
-def ratio_rows(small: pd.DataFrame, worlds: pd.DataFrame, key: str) -> pd.DataFrame:
-    """(a) Per formerly stranded home, population and world (`key`: eps, or door_eps):
+def ratio_rows(base_all: pd.DataFrame, worlds: pd.DataFrame, key: str) -> pd.DataFrame:
+    """(a) Per formerly stranded home, population and world (`key`: eps, door_eps or g):
     r = u_i / max u_j over N(i), and u_i over the block's worst tier-0 home (r_block). Tiers,
-    centroids and N(i) from the eps-0 rows of `small`; u from `worlds`."""
+    centroids and N(i) from `base_all` (one row per block, population and home: the eps-0 rows
+    of the eps world; the door link's own rows); u from `worlds`."""
     rows = []
-    base_all = small[small.eps == 0.0]
     for (bid, pop), g in worlds.groupby(["block", "pop"]):
         base = base_all[(base_all.block == bid) & (base_all["pop"] == pop)].set_index("home")
         nb = neighbours(base.reset_index())
@@ -1131,7 +2017,7 @@ def report() -> None:
     controls = set((ROWS / "control_ids.txt").read_text().split(","))
     f3 = lambda cols: {c: "{:.3g}" for c in cols}           # noqa: E731
     if not small.empty:
-        rat = ratio_rows(small, small[small.eps > 0], "eps")
+        rat = ratio_rows(small[small.eps == 0.0], small[small.eps > 0], "eps")
         rat.to_csv(ROWS / "stranded_homes.csv", index=False)
         ta = table_a(rat, "eps")
         ta.to_csv(ROWS / "summary_a_ratio.csv", index=False)
@@ -1163,7 +2049,7 @@ def report() -> None:
             door = _read(door_dir(kind), "ZAF*[0-9].parquet")
             if door.empty:
                 continue
-            drat = ratio_rows(small, door, "door_eps")
+            drat = ratio_rows(small[small.eps == 0.0], door, "door_eps")
             drat.to_csv(ROWS / f"door_{kind.name}_stranded_homes.csv", index=False)
             dta = table_a(drat, "door_eps")
             dta.to_csv(ROWS / f"summary_door_{kind.name}_a.csv", index=False)
@@ -1177,7 +2063,7 @@ def report() -> None:
                 print(_md(dbo, f3(dbo.columns)))
                 print()
                 print(_md(dbm, f3(dbm.columns)))
-            dl = door_leak(small, door)
+            dl = door_leak(small, door, "door_eps")
             dl.to_csv(ROWS / f"summary_door_{kind.name}_c.csv", index=False)
             print(f"\n## the door ({kind.name}): (c)\n")
             print(_md(dl, f3(dl.columns)))
@@ -1219,20 +2105,246 @@ def door_large(big: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
-def door_leak(small: pd.DataFrame, door: pd.DataFrame) -> pd.DataFrame:
+def door_leak(small: pd.DataFrame, door: pd.DataFrame, key: str) -> pd.DataFrame:
     """The door's (c): tier-0 homes' u / u(eps 0), with the stranded demand (u) and without
-    (u_open, which a door that hangs off the open network leaves exactly as it was)."""
+    (u_open, which a door that hangs off the open network leaves exactly as it was), per world
+    (`key`: door_eps or g)."""
     base = small[(small.eps == 0.0) & (small.tier == 0)].set_index(["block", "pop", "home"]).u
     out = []
-    for (pop, de), g in door[door.tier == 0].groupby(["pop", "door_eps"]):
+    for (pop, de), g in door[door.tier == 0].groupby(["pop", key]):
         g = g.set_index(["block", "pop", "home"])
         u0 = base.reindex(g.index)
         ok = u0 > 0
         r, lk = (g.u / u0)[ok], (g.u_open / u0)[ok]
-        out.append(dict(pop=pop, door_eps=de, homes=len(r), ratio_med=_q(r, 0.5),
+        out.append({"pop": pop, key: de} | dict(homes=len(r), ratio_med=_q(r, 0.5),
                         ratio_p95=_q(r, 0.95), ratio_max=float(r.max()), ratio_min=float(r.min()),
                         leak_min=float(lk.min()), leak_max=float(lk.max())))
     return pd.DataFrame(out)
+
+
+def _link_runs() -> dict[str, pd.DataFrame]:
+    """Every door-link run's small-block rows, by run name."""
+    out = {}
+    for d in sorted(ROWS.glob(f"door_link_*_h{H:g}_ell{ELL_M:g}_K{K}")):
+        rows = _read(d, "ZAF*__g*.parquet")
+        if not rows.empty:
+            out[rows.door.iloc[0]] = rows
+    return out
+
+
+def _link_sites(door: str) -> pd.DataFrame:
+    return _read(ROWS / f"door_{door}_h{H:g}_ell{ELL_M:g}_K{K}", "*__sites.parquet")
+
+
+def _first_g(rows: pd.DataFrame) -> pd.DataFrame:
+    """One row per block, population and home (tiers, centroids, pockets: the same at every g),
+    whichever g a block's rows hold."""
+    return rows.drop_duplicates(["block", "pop", "home"])
+
+
+def link_census_tables() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Task 1: per set (the 31 small blocks, the 60 large), per block with a walled-in home,
+    and per formerly stranded home (spec tier, fix tier, pocket)."""
+    cen = _read(link_census_dir(), "ZAF*[0-9].parquet")
+    homes = _read(link_census_dir(), "*__homes.parquet")
+    small_ids = set((ROWS / "stranded_ids.txt").read_text().strip().split(","))
+    cen["set"] = np.where(cen.block.isin(small_ids), "31 small", "60 large")
+    homes["set"] = np.where(homes.block.isin(small_ids), "31 small", "60 large")
+    sets = []
+    for name, g in cen.groupby("set"):
+        sets.append(dict(set=name, blocks=len(g), homes=int(g.n.sum()),
+                         stranded=int(g.stranded.sum()),
+                         **{f"spec_t{t}": int(g[f"spec_tier{t}"].sum()) for t in range(1, 6)},
+                         **{f"fix_t{t}": int(g[f"n_tier{t}"].sum()) for t in range(1, 6)},
+                         walled=int(g.walled.sum()),
+                         walled_share=float(g.walled.sum() / g.n.sum()),
+                         blocks_walled=int((g.walled > 0).sum()),
+                         max_block_share=float((g.walled / g.n).max()),
+                         pockets=int(g.pockets.sum()),
+                         pocket_homes_max=int(g.pocket_homes_max.max())))
+    per = cen[cen.walled > 0][["set", "block", "n", "stranded", "walled", "n_tier1", "n_tier3",
+                               "n_tier4", "n_tier5", "pockets", "pocket_homes_max",
+                               "door_barrier_med_m", "walled_count", "walled_area"]]
+    return (pd.DataFrame(sets), per.sort_values(["set", "walled"], ascending=[True, False]),
+            homes)
+
+
+def link_size_table(rat: pd.DataFrame, rows: pd.DataFrame, g: float) -> pd.DataFrame:
+    """r against pocket size (walled-in homes sharing the home's main pocket) at one g."""
+    pk = _first_g(rows)[["block", "pop", "home", "pocket_homes"]]
+    m = rat[(rat.g == g) & (rat.tier != 2)].merge(pk, on=["block", "pop", "home"])
+    out = []
+    for (pop, size), gg in m.groupby(["pop", pd.cut(m.pocket_homes, [0, 1, 3, 100],
+                                                     labels=["1", "2-3", "4+"])],
+                                     observed=True):
+        out.append(dict(pop=pop, pocket_homes=str(size), homes=len(gg), r_med=_q(gg.r, 0.5),
+                        r_p90=_q(gg.r, 0.9), r_max=float(gg.r.max())))
+    return pd.DataFrame(out)
+
+
+def link_large_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(d): per large block and g, Lens A (area, J_2) of the stored clearings over every home
+    and over the tier-0 homes, against the stored value, and the walled-in homes' share of
+    J_2; and the large blocks' rows per home (for (a) and (c))."""
+    out = []
+    homes = []
+    for d in sorted(ROWS.glob(f"door_link_*_h{H:g}_ell{ELL_M:g}_K{K}")):
+        sc = _read(d, "*__large.parquet")
+        if sc.empty:
+            continue
+        homes.append(_read(d, "*__large_homes.parquet"))
+        for (door, bid, g), gg in sc.groupby(["door", "block", "g"]):
+            a = gg.set_index("clearing")
+            row = dict(door=door, block=bid, g=g, walled_share_none=a.J2_walled["none"]
+                       / a.J2["none"])
+            for cname in STORED:
+                if cname in a.index:
+                    row[f"lensA_{cname}"] = 1 - (a.J2[cname] / a.J2["none"]) ** 0.5
+                    row[f"lensA_open_{cname}"] = 1 - (a.J2_open[cname] / a.J2_open["none"]) ** 0.5
+                    row[f"stored_{cname}"] = a.stored_perm[cname]
+                    row[f"walled_share_{cname}"] = a.J2_walled[cname] / a.J2[cname]
+            out.append(row)
+    return pd.DataFrame(out), (pd.concat(homes, ignore_index=True) if homes else pd.DataFrame())
+
+
+def link_leak_worst(small: pd.DataFrame, rows: pd.DataFrame, g: float) -> pd.DataFrame:
+    """(c) at one g: the open homes with the lowest u_open / u(0) (the leak alone) and the
+    highest u / u(0) (with the added demand), with the distance from their centroid to the
+    nearest door's street-side cell."""
+    base = small[(small.eps == 0.0) & (small.tier == 0)][["block", "pop", "home", "u"]].rename(
+        columns={"u": "u0"})
+    m = rows[(rows.g == g) & (rows.tier == 0)].merge(base, on=["block", "pop", "home"])
+    m["leak"] = m.u_open / m.u0
+    m["ratio"] = m.u / m.u0
+    sites = _link_sites(rows.door.iloc[0])
+    dist = np.full(len(m), np.inf)
+    for bid, gg in m.groupby("block"):
+        s = sites[sites.block == bid]
+        if len(s):
+            dd = np.hypot(gg.cx.to_numpy()[:, None] - s.bx.to_numpy()[None, :],
+                          gg.cy.to_numpy()[:, None] - s.by.to_numpy()[None, :]).min(axis=1)
+            dist[m.index.get_indexer(gg.index)] = dd
+    m["door_b_dist_m"] = dist
+    cols = ["block", "pop", "home", "u0", "u_open", "u", "leak", "ratio", "door_b_dist_m"]
+    return pd.concat([m.nsmallest(3, "leak")[cols].assign(by="leak"),
+                      m.nlargest(3, "ratio")[cols].assign(by="ratio")], ignore_index=True)
+
+
+def link_report() -> None:
+    """The door link's tables (insulator_report.md, "The door link"), printed as markdown, and
+    the CSV summaries summary_door_link_*.csv."""
+    f3 = lambda cols: {c: "{:.3g}" for c in cols}           # noqa: E731
+    sets, per, chomes = link_census_tables()
+    sets.to_csv(ROWS / "summary_door_link_census_sets.csv", index=False)
+    per.to_csv(ROWS / "summary_door_link_census.csv", index=False)
+    chomes.to_csv(ROWS / "door_link_census_homes.csv", index=False)
+    print("## Task 1: the census under the placement fix\n")
+    print(_md(sets, {"walled_share": "{:.4%}", "max_block_share": "{:.2%}"}))
+    print()
+    print(_md(per, {c: "{:.3g}" for c in per.columns}))
+    cal_f = ROWS / "summary_door_link_corridor.csv"
+    cal = pd.read_csv(cal_f) if cal_f.exists() else pd.DataFrame()
+    if not cal.empty:
+        print("\n## the reference corridor\n")
+        c = cal[cal.L_m.notna()]
+        print(_md(c[["ends", "coupling", "L_m", "u_room_corridor", "g_equiv"]], f3(c.columns)))
+    small = _read(small_dir(), "ZAF*[0-9].parquet")
+    fr = pd.read_csv(ROWS / "fine_homes.csv")
+    fix_tier = chomes.set_index(["block", "home"]).tier
+    fr_fix = fr.assign(spec_tier=fr.tier,
+                       tier=fix_tier.reindex(pd.MultiIndex.from_frame(fr[["block", "home"]]))
+                       .to_numpy())
+    runs = _link_runs()
+    rats = {}
+    for door, rows in runs.items():
+        rat = ratio_rows(_first_g(rows), rows, "g")
+        rats[door] = rat
+        rat.to_csv(ROWS / f"door_{door}_stranded_homes.csv", index=False)
+        ta = table_a(rat, "g")
+        if not cal.empty:
+            _l, _p, coupling, ends, _k = door.split("_")
+            ta["corridor_m"] = [corridor_metres(cal, g, coupling, ends) for g in ta.g]
+        ta.to_csv(ROWS / f"summary_door_{door}_a.csv", index=False)
+        print(f"\n## {door}: (a) r = u_i / max u_j over N(i), walled-in homes (fix)\n")
+        print(_md(ta, f3(ta.columns)))
+        walled_rat = rat[rat.tier != 2]
+        tbo, tbm = table_b(fr_fix, walled_rat, "g")
+        tbo.to_csv(ROWS / f"summary_door_{door}_b_open.csv", index=False)
+        tbm.to_csv(ROWS / f"summary_door_{door}_b_match.csv", index=False)
+        print(f"\n## {door}: (b) against the finer raster\n")
+        print(_md(tbo, f3(tbo.columns)))
+        print()
+        print(_md(tbm, f3(tbm.columns)))
+        dl = door_leak(small, rows, "g")
+        dl.to_csv(ROWS / f"summary_door_{door}_c.csv", index=False)
+        print(f"\n## {door}: (c) leak, tier-0 homes\n")
+        print(_md(dl, f3(dl.columns)))
+        for g in sorted(rows.g.unique()):
+            sz = link_size_table(rat, rows, g)
+            sz.insert(0, "g", g)
+            sz.to_csv(ROWS / f"summary_door_{door}_size_g{g:g}.csv", index=False)
+        print(f"\n## {door}: r against pocket size\n")
+        allsz = pd.concat([pd.read_csv(ROWS / f"summary_door_{door}_size_g{g:g}.csv")
+                           for g in sorted(rows.g.unique())], ignore_index=True)
+        allsz.to_csv(ROWS / f"summary_door_{door}_size.csv", index=False)
+        for f in ROWS.glob(f"summary_door_{door}_size_g*.csv"):
+            f.unlink()
+        print(_md(allsz, f3(allsz.columns)))
+    # the placement fix against the finer raster: the tier-2 homes (u does not depend on g but
+    # through the walled-in homes' added demand), in the default run
+    ref = "link_pocket_heading_open_k0"
+    if ref in rats:
+        g0 = rats[ref].g.min()
+        t2 = rats[ref][(rats[ref].tier == 2) & (rats[ref].g == g0)][["block", "pop", "home", "r"]]
+        fx = fr_fix[fr_fix.open_fine & fr_fix.r_fine.notna() & (fr_fix.tier == 2)].merge(
+            t2, on=["block", "pop", "home"])
+        fx["logratio"] = np.log(fx.r / fx.r_fine)
+        fx.to_csv(ROWS / "summary_door_link_b_fix.csv", index=False)
+        print("\n## the placement fix against the finer raster (tier 2 under the fix)\n")
+        print(_md(fx[["block", "home", "pop", "h", "spec_tier", "barrier_m", "r_fine", "r",
+                      "logratio"]], f3(["r_fine", "r", "logratio", "barrier_m"])))
+    # couplings and plans against the default run, per home
+    if ref in rats:
+        for g in (0.005, 0.01):
+            lw = link_leak_worst(small, runs[ref], g)
+            lw.to_csv(ROWS / f"summary_door_{ref}_c_worst_g{g:g}.csv", index=False)
+            print(f"\n## {ref}: (c) the worst open homes at g {g:g}\n")
+            print(_md(lw, f3(lw.columns)))
+        cmp_ = []
+        for door, rat in rats.items():
+            if door == ref:
+                continue
+            m = rats[ref].merge(rat, on=["block", "pop", "home", "g"], suffixes=("", "_x"))
+            m = m[m.tier != 2]
+            lr = np.log(m.r_x / m.r)
+            for (pop, g), gg in m.assign(lr=lr).groupby(["pop", "g"]):
+                cmp_.append(dict(door=door, pop=pop, g=g, homes=len(gg),
+                                 logratio_med=_q(gg.lr, 0.5), logratio_min=float(gg.lr.min()),
+                                 logratio_max=float(gg.lr.max()),
+                                 abs_med=_q(gg.lr.abs(), 0.5)))
+        cmp_ = pd.DataFrame(cmp_)
+        cmp_.to_csv(ROWS / "summary_door_link_vs_default.csv", index=False)
+        print(f"\n## log(r / r of {ref}), per home\n")
+        print(_md(cmp_, f3(cmp_.columns)))
+    dd, lh = link_large_tables()
+    if not dd.empty:
+        dd.to_csv(ROWS / "summary_door_link_d.csv", index=False)
+        print("\n## (d) large blocks\n")
+        print(_md(dd, {c: "{:.4f}" for c in dd.columns if c not in ("door", "block")}
+                  | {"g": "{:.3g}"}))
+        for door, lhd in lh.groupby("door"):
+            door_w = lhd[lhd.world == "door"]
+            lrat = ratio_rows(_first_g(door_w), door_w, "g")
+            lrat.to_csv(ROWS / f"door_{door}_large_stranded_homes.csv", index=False)
+            lta = table_a(lrat, "g")
+            lta.to_csv(ROWS / f"summary_door_{door}_large_a.csv", index=False)
+            print(f"\n## {door}: (a) on the large blocks\n")
+            print(_md(lta, f3(lta.columns)))
+            today = lhd[lhd.world == "today"].assign(eps=0.0)
+            ll = door_leak(today, door_w, "g")
+            ll.to_csv(ROWS / f"summary_door_{door}_large_c.csv", index=False)
+            print(f"\n## {door}: (c) on the large blocks\n")
+            print(_md(ll, f3(ll.columns)))
 
 
 # ------------------------------------------------------------------ main
@@ -1258,6 +2370,24 @@ def main(argv: list[str]) -> None:
         kind = door_kind(argv[2])
         ids = _by_size(argv[3].split(","))
         _pool(int(argv[1]), door_one, [(i, kind) for i in ids])
+    elif cmd == "link-census":
+        ids = _by_size(argv[2].split(","))
+        _pool(int(argv[1]), link_census_one, [(i,) for i in ids])
+    elif cmd == "link":
+        door = link_door(argv[2], argv[3], argv[4], argv[5])
+        gs = tuple(float(x) for x in argv[6].split(","))
+        ids = _by_size(argv[7].split(","))
+        _pool(int(argv[1]), link_one, [(i, door, gs) for i in ids])
+    elif cmd == "link-large":
+        door = link_door(argv[1], argv[2], argv[3], argv[4])
+        link_large(argv[7].split(","), door, tuple(float(x) for x in argv[5].split(",")),
+                   tuple(float(x) for x in argv[6].split(",")))
+    elif cmd == "corridor":
+        cal = pd.concat([corridor_calibration(e) for e in ENDS], ignore_index=True)
+        cal.to_csv(ROWS / "summary_door_link_corridor.csv", index=False)
+        print(cal.to_string())
+    elif cmd == "link-report":
+        link_report()
     elif cmd == "report":
         report()
     else:

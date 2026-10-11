@@ -24,21 +24,27 @@ Any eps that lets walled-in homes out also drains the slivered ones.
 The finer raster says the slivers' long escape times are real: u / block median is the same at h 0.25 as at h 0.5 (median ratio 1.00-1.04 in every band, 1.02 above 8x the median).
 So the leak at the gates is a distortion, not a correction, and the gates are what the optimizers must find.
 
-**Alternative worth testing: let only the walled-in out.**
-Prototyped here in four variants (three run on all 31 blocks; section "Confining the leak"), each with the leak confined to the stranded pockets.
+**Let only the walled-in out.**
+Prototyped in four lattice variants (three run on all 31 blocks; section "Confining the leak") and as a door link (section "The door link"), each with the leak confined to the stranded pockets.
 - **Gates are kept exactly.** 30848's and 5810's open-home Lens A equals the stored value for every variant and parameter; 22422 and 9712 have no stranded homes, so they score as today. The median open home's u moves by at most 0.2% (the stranded homes' added demand).
 - **Two variants meet (a) and (b) at the median.**
   - Local walls at eps 3e-3 (the footprint within a pocket's barrier + 1 m conducts eps): walled-in homes' median r 2.1 (count) / 1.7 (area), p90 8.2 / 5.3, matching the finer raster at the median (log ratio -0.05 / +0.04).
   - The leaf door at door_eps 0.1 (the cheapest crossing opened as a passage, with one closed cell per wall conducting door_eps: a cost per wall crossed): median 1.75 / 1.37, p90 11.8 / 6.6, log ratio -0.05 / -0.11.
   - The residual leak sits next to the pockets (worst open home 0.55 and 0.83).
-- **Next to test: a door link.** A one-cell lattice door makes r depend on the corridor's shape: even a fully open corridor leaves a 9-home courtyard at r 37.
-  The cleaner model is one conductance per pocket, joining its ring to the street-connected cell across its thinnest wall as an edge in the operator: a cost per wall crossed, leak-free by construction.
+- **The door link does it with one parameter and no leak** (section "The door link").
+  It is one conductance g per walled-in home across its thinnest wall, an edge in the operator joining fully open cells on either side.
+  At g = 0.01 (about 63 m of 1 m-wide straight alley) the walled-in homes' median r is 1.8 (count) / 1.5 (area) on the small blocks and 1.6 / 1.5 on the large, and no open home's own escape moves by more than 0.1%.
+  Its tail is not the door's: p90 10.5 / 11.0 on the small blocks (4.9 / 3.5 on the large), set by where the thinnest wall leads and by neighbours at the street.
+  A lattice door leaves 38486's 9-home courtyard at r 37 even fully open; the door link leaves it at 29 at most.
 
 **Placement fix, free of parameters.**
 Most stranding on large blocks is not walls.
 - 36 of 60 stranded homes on the 60 large blocks (60%), and 25 of 88 on the 31 small blocks, are *shadowed*: street-connected open space lies within 1 m of their outline, but in a neighbour's ring.
 - 22 of the 60 have no ring cell at all.
-- Letting a stranded home use the free cells within 1 m of its own outline, reachable ones first, frees them with no leakage and no eps. Tier 2 below does this for the homes with no ring cell; extending it to the 14 (large) and 18 (small) shadowed tier-1 homes was not run.
+- Letting a stranded home use the free cells within 1 m of its own outline, reachable ones first, frees them with no leakage and no eps.
+  Tier 2 below does this for the homes with no ring cell; the fix extends it to the 14 (large) and 18 (small) shadowed tier-1 homes (section "The door link").
+  That leaves 24 walled-in homes on the 60 large blocks (0.024%) and 63 on the 31 small (1.0%).
+  Against the finer raster the fix is optimistic for the homes it moves: their r at h 0.5 is about half the finer raster's (8 homes).
 
 **If one global eps is wanted anyway** (the optimizers already search in this world): 1e-4 is the fairly-good-insulator choice.
 - It keeps the gates (22422 -0.018, 30848 -0.040 on open homes) and the slivers (92-94%).
@@ -323,14 +329,15 @@ Comparison (count; the value nearest the finer raster for each variant):
    A stranded home with street-connected open space within 1 m of its outline injects there (tier 2, extended to shadowed tier-1 homes).
    This frees 60% of large-block and 28% of small-block stranding with no parameter and no leak.
    The spec's tier 1 keeps a shadowed home in its sealed ring, which is why some walled-in homes here (30848's 2523, 5810's 277) have open space a metre away.
-3. **For the walled-in remainder (0.02% of large-block homes, 1% on the small blocks): confine the leak.**
-   Local walls at eps 3e-3, or the leaf door at door_eps 0.1, do it.
-   Both meet (a) at the median (r 1.4 -- 2.1) and (b) at the median.
-   Both keep every gate and sliver, since the leak is confined to the pockets' surroundings (worst open home 0.55 and 0.83, next to a pocket).
-   Weak points: a tail (p90 5 -- 12) from lattice geometry (necks, winding one-cell corridors), and a second parameter for the local walls (the 1 m margin).
-   The cleaner model to test next is a **door link**: one conductance g per walled-in pocket (or per home) joining its ring to the street-connected cell across its thinnest wall, as an edge in the operator.
-   It is a cost per wall crossed, independent of wall thickness and corridor shape, and leak-free by construction.
-   Set g so that the median r is about 2, then check it against the finer raster (b) on more blocks than the 5 here.
+   It is optimistic for the homes it moves: about half the finer raster's r (8 homes).
+3. **For the walled-in remainder (0.024% of large-block homes, 1.0% on the small blocks): a door link per home, g = 0.01.**
+   One conductance per walled-in home and pocket, joining the pocket's most open cell to a street-connected cell with no footprint across the thinnest wall, heading-preserving, placed once from the baseline geometry (section "The door link").
+   g = 0.01 costs about what 63 m of 1 m-wide straight alley does.
+   It meets (a) at the median (r 1.8 / 1.5 small, 1.6 / 1.5 large), opens no footprint and leaks at most 0.1%, keeps the score monotone, and runs on the GPU solver as it is.
+   On the 12 large blocks with walled-in homes, Lens A over all homes is within 0.022 of Lens A over open homes, and the walled-in homes hold at most 4.1% of J_2 (12% after clearing): report that share alongside Lens A.
+   Weak points: the small blocks' tail (p90 10.5 / 11.0), set by what lies beyond the thinnest wall, and the three homes a finer raster opens, which want g of 0.0015 -- 0.0034.
+   The next refinement is a door that weighs the street side, for courtyards whose thinnest wall leads into open space they congest (38486).
+   Local walls (eps 3e-3) and the leaf door (door_eps 0.1) also meet (a) at the median, on the spec's placement, but open footprint and leak next to the pockets (worst open home 0.55 and 0.83).
 4. **If a single eps is needed now** (the optimizers' search world already is one): 1e-4.
    It is the largest value on the grid that keeps the gates within 0.02 (22422) and 0.04 (30848, open homes), and the slivers within 6 -- 8%.
    Report the walled-in homes' J_2 share alongside Lens A, because at 1e-4 one such home can dominate a block (30848).
@@ -352,3 +359,274 @@ Comparison (count; the value nearest the finer raster for each variant):
 - `insulator.py`: `small`, `fine`, `large`, `census`, `door <kind>`, `large-door <kind>`, `report` (the module docstring has the commands).
 - Rows (parquet, ignored): `small_h0.5_ell3_K8/`, `fine_h0.35_ell3_K8/`, `fine_h0.25_ell3_K8/`, `large_h0.5_ell3_K8/`, `census_h0.5/`, `door_<kind>_h0.5_ell3_K8/` (straight: 38486 only, so its summaries cover one block).
 - Kept: `stranded_ids.txt`, `control_ids.txt`; summaries `summary_a_ratio.csv`, `summary_b_open.csv`, `summary_b_match.csv`, `summary_c_homes.csv`, `summary_c_blocks.csv`, `summary_c_sliver.csv`, `summary_d_large.csv`, `summary_census.csv`, `summary_door_<kind>_{a,b_open,b_match,c,d}.csv`; per home `stranded_homes.csv`, `fine_homes.csv`, `door_<kind>_stranded_homes.csv`.
+
+## The door link
+
+The two steps recommended above, tested: the placement fix extended to every shadowed home (Task 1), and a door link for the walled-in homes that remain (Task 2).
+Code: `insulator.py` (`Placement.of(open_side=True)`; `pockets_of`, `DoorPlan`, `DoorEnds`, `Coupling`, `door_links`, `LinkedSystem`; the commands `link-census`, `link`, `link-large`, `corridor` and `link-report`).
+Rows: `insulator_rows/door_link_*/` (parquet, ignored).
+A run is named by its door plan, coupling, ends and thickness term: `door_link_<plan>_<coupling>_<ends>_k<kappa>_h0.5_ell3_K8/`, with summaries `summary_door_link_<plan>_<coupling>_<ends>_k<kappa>_*.csv`.
+
+### Answer
+
+**Recommended: one door link per walled-in home, joining open space to open space, heading-preserving, g = 0.01** (the cost of about 63 m of 1 m-wide straight alley at ell 3 m).
+- (a) Walled-in homes' median r is 1.80 (count) / 1.51 (area) on the small blocks, p90 10.5 / 11.0, and 1.57 / 1.51 on the large blocks, p90 4.9 / 3.5.
+- (b) The three walled-in homes the finer raster opens prefer a lower g (0.0015 -- 0.0034): at 0.01 they get r 0.9 -- 1.2 against 1.1 -- 3.2 at h 0.25.
+- (c) Leak-free: no open home's u from the open homes' own demand moves by more than 0.1% (g up to 0.03).
+  The demand the walled-in homes add is legitimate congestion: the median open home does not move, p95 rises 4 -- 8%, and one home (38486's 74, on its courtyard's way out) rises 4.9x.
+- (d) On the 12 large blocks with walled-in homes, Lens A over all homes trails Lens A over open homes by at most 0.022 (20543, one home inside a footprint) and keeps the stored clearings' order on every block.
+  The walled-in homes hold at most 4.1% of J_2 with nothing cleared (median 0.34%) and 12% after SIMP's clearing, which does not touch their doors.
+
+**What breaks: "not massively worse", in the tail of the small blocks.**
+At every g that keeps the median near 2, p90 stays at 10 -- 13 there, in every form tested.
+The large blocks, with pockets of at most three homes, come close: p90 4.9 / 3.5 at g 0.01, 2.8 / 2.3 at g 0.02 (per home).
+The door does not set the tail:
+- where the thinnest wall leads: 38486's 9-home courtyard crosses into open space its own demand congests (98x the block median at the door's street end), so with g at 0.3 its homes still have r up to 29 (count);
+- neighbours at the street: 21622's home 178 (inside a footprint) has neighbours with u of about 3, so any door that costs 1/g = 100 puts it at r 33;
+- a pocket's homes sharing one door, which a door per home removes.
+
+**Choices the brief left open, measured.**
+- Ends: the thinnest wall's crossing as `_barrier` computes it starts and ends on the wall's face cells, which are partial (every small-block door's street end; median 1/8 open).
+  The door then pours its pocket into a sliver that throttles it at any g (38486: r 95 at g 0.3).
+  Joining the nearest fully open cells instead, a rule with no parameter, removes it.
+- Per home, not per pocket: a door per pocket makes r grow with the pocket's homes (median 1.3, 4.0, 11.3 for pockets of 1, 2 -- 3, 4 or more at g 0.01, count); a door per home brings pockets of 2 -- 3 homes to 1.8.
+- Heading-preserving edges: an isotropic door node changes r by at most 0.3%, and its extra unknown has no cell for the GPU solver's master coarsening.
+- The thickness term (1 + kappa barrier_m) / g leaves the tail as wide or wider at matched medians: not kept.
+
+### Task 1: the placement fix, extended (`summary_door_link_census_sets.csv`, `summary_door_link_census.csv`, `door_link_census_homes.csv`)
+
+A stranded home with a free cell within 1 m of its own outline that reaches the street injects on those cells (tier 2), whether or not it also has a sealed ring.
+Tiers under the spec (left of the arrow) and under the fix:
+
+| set | homes | stranded | tier 1 | tier 2 | tier 4 | tier 5 | walled in | share | blocks | pockets | homes per pocket, max |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 31 small | 6,276 | 88 | 74 → 56 | 7 → 25 | 6 | 1 | 63 | 1.00% | 24 | 57 | 9 |
+| 60 large | 100,724 | 60 | 33 → 19 | 22 → 36 | 5 | 0 | 24 | 0.024% | 12 | 29 | 3 |
+
+- No home is tier 3 in either set, so the walled-in homes are tier 1 (sealed in their own ring) and tiers 4 -- 5 (footprint all round: 7 on the small blocks, 5 on the large).
+- On the large blocks: 41673 has 5, 41806 4, 22267 3; 21252, 23597 and 43708 2 each; 20543, 22336, 38254, 39240, 41515 and 5706 1 each.
+  At most 0.47% of a block's homes (41673; 0.22% by area).
+- On the small blocks (24 of the 31): 38486 has 9 (one courtyard), 63718 7, 21622 6, 19537 4; 19263, 19538, 43353, 43817, 43874 and 44837 3 each; 21708, 39257, 43365, 43876 and 46233 2 each; nine blocks 1 each.
+  At most 6.8% of a block (38486).
+- They sit behind a median 3.0 m of footprint (IQR 1.7 -- 4.0, max 7.5) on the small blocks and 2.3 m (1.5 -- 3.7, max 5.0) on the large.
+- 30848 and 5810 have no walled-in home under the fix (2523 and 277 become tier 2), so the door link leaves them as today but for those homes' demand, now on the open side.
+- A home whose ring touches several sealed nooks has a pocket in each (41673: 5 homes, 7 pockets; 22267: 3 homes, 7 pockets).
+  Of the 63 small-block homes, 22 are alone in their main pocket, 11 share it with one other home, 17 with two, 4 with three, and 9 form 38486's courtyard.
+
+The fix against the finer raster (`summary_door_link_b_fix.csv`): eight tier-2 homes reach open space at h 0.25 (four the fix moved, four tier 2 under the spec too).
+For all eight, r at h 0.5 under the fix is below the finer raster's: median log(r / r_fine) -0.75 (count) / -0.45 (area); at h 0.35 (five homes), -0.32 / -0.28.
+The four the fix moved: 42454's 120 -0.31, 43817's 153 -0.80, 44274's 55 -1.88, 46233's 139 -0.69 (count).
+In the eps world (1e-3, their sealed ring) the same four were +0.23 to +0.69.
+The fix borrows cells on a neighbour's open side; at h 0.25 the nearest-building rule gives each home its own ring, behind the sliver, so the fix is optimistic for them by about 2x.
+
+### The door link: model
+
+- **Pocket.** A connected set (4-connected, as the operator) of sealed free cells holding the injection cells of at least one walled-in home.
+  For tiers 4 -- 5, the closed cells they inject on, opened fully (the home's own interior): no other footprint is opened.
+- **Door.** One extra conductance g joining a pocket cell a to a street-connected cell b across the pocket's thinnest wall: the crossing with the fewest footprint metres, `_crossing_graph`'s Dijkstra as in `_barrier`.
+  It is placed once, from the baseline geometry, and kept in every scenario: clearing only raises conductances, so the score stays monotone.
+  Per pocket (`PocketDoors`): one door shared by the pocket's homes, from the pocket cell its cheapest crossing reaches.
+  Per home (`HomeDoors`): one door per walled-in home and pocket it injects into, from the home's own cell its cheapest crossing reaches (a pocket's doors may share b).
+  Small blocks: 57 pocket doors or 90 home doors; large blocks: 29 or 32.
+- **Ends** (`DoorEnds`).
+  Face (the crossing as `_barrier` computes it): b is any street-connected cell, a any pocket cell.
+  The cheapest crossing then starts and ends on the wall's face cells, which are partial: every small-block door's street end (median 1/8 open; 82% under half), and 90% on the large blocks (median 1/4).
+  Open: b is a street-connected cell with no footprint, a one of the pocket's (or the home's) most open cells, and the crossing between them counts the face cells' footprint as wall (median crossing 3.8 m against 3.3 m on the small blocks).
+  Every open door's street end is fully open; 9% of its pocket ends are less than half open (pockets with no open cell).
+- **Heading coupling** (`Coupling`).
+  Heading-preserving: per axis k an edge (a, k)-(b, k) of g m_k / pi, so the door totals g and adds no unknown: `GpuAMG`'s master coarsening still maps every unknown to a cell.
+  Isotropic node (the check, CPU only): one new unknown per door, joined to every axis of a and of b by 2 g m_k / pi (total g in series).
+- **Thickness** (the variant): link resistance (1 + kappa barrier_m) / g, a cost per wall plus kappa / g per metre.
+- **The solve** (`LinkedSystem`).
+  `lifted.System` drops every unknown whose component has no ground before a door exists, so the linked system is assembled here: `lifted._assemble`, the door edges and their diagonal terms appended, `keep` recomputed on the connectivity with the links, then `lifted._csr` and the solver's setup.
+  pyamg on the linked operator is unreliable: its setup starts the prolongation smoother's spectral radius from a random vector, and at strength theta 0 a door is a strong edge an aggregate can straddle.
+  On 38486 at g 0.03, two of four seeds diverged, and a deterministic (Gershgorin) weighting stalled at a residual of 1.7.
+  On the CPU, CG on the linked operator is therefore preconditioned by pyamg built on the same operator without the doors' off-diagonal entries (`CpuCutAMG`; 33 iterations on every seed there); on the GPU, `GpuAMG` runs unchanged, its aggregates coming from the master operator, which has no doors (`GpuMasterAMG`).
+  Either way the CG residual is taken on the operator with its doors: the worst recorded is 1.0e-8 on the small blocks (rtol 1e-8) and 1.0e-6 on the large (rtol 1e-6).
+  Checks: with no links, the operator equals `lifted.System`'s and u agrees to 1e-11.
+  Each pocket's door current equals the demand injected into it to 1e-10 for both couplings.
+  Dropping the doors' diagonal terms makes the CG fail.
+
+g in metres (`corridor`, `summary_door_link_corridor.csv`): a 20 m-wide synthetic block, a street along one edge, 6 m of open apron, a wall L thick with a 1 m gap, and above it a 10 x 6 m room, closed but for the gap.
+A unit demand is spread over the room, and u_room is its mean potential.
+With the gap open, u_room rises by 1.62 per metre of corridor; walled up with one door (open ends), u_room = 3.36 + 1/g.
+So g = 0.63 / L for L of 16 m and more:
+
+| g | 0.003 | 0.005 | 0.01 | 0.02 | 0.03 | 0.1 | 0.3 |
+|---|---|---|---|---|---|---|---|
+| metres of 1 m corridor (open ends) | 207 | 125 | 63 | 32 | 22 | 7 | 3 |
+
+The isotropic node matches within 1%.
+With face ends even an infinite door costs as much as 3 m of corridor (u_room = 6.4 + 1/g; open ends: 1 m).
+A 0.5 m wall has no closed row at h 0.5, so the shortest reference is 1 m.
+
+### (a) The owner's criterion (`summary_door_link_<run>_a.csv`, `door_link_<run>_stranded_homes.csv`)
+
+r = u_i / max u_j over the 6 nearest open-access (tier 0) homes, over the walled-in homes under the fix (63 homes in 24 small blocks; 24 in 12 large).
+
+Per home, open ends (the recommended form), small blocks:
+
+| g | metres | count med | p90 | max | r<=1 | r>3 | area med | p90 | max | r<=1 | r>3 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.001 | - | 10.80 | 43.5 | 321.1 | 2% | 83% | 7.89 | 27.4 | 243.4 | 2% | 68% |
+| 0.002 | - | 5.94 | 30.8 | 160.9 | 2% | 63% | 4.11 | 20.2 | 122.0 | 6% | 59% |
+| 0.003 | 207 | 4.29 | 21.2 | 107.5 | 3% | 59% | 3.07 | 14.6 | 81.5 | 11% | 51% |
+| 0.005 | 125 | 2.86 | 13.6 | 64.8 | 10% | 46% | 2.22 | 12.3 | 49.1 | 19% | 30% |
+| 0.01 | 63 | 1.80 | 10.5 | 32.8 | 21% | 29% | 1.51 | 11.0 | 29.0 | 29% | 19% |
+| 0.02 | 32 | 1.32 | 9.9 | 28.1 | 25% | 21% | 1.04 | 10.6 | 28.3 | 41% | 17% |
+| 0.03 | 22 | 1.15 | 9.7 | 27.8 | 43% | 17% | 0.99 | 8.3 | 28.1 | 51% | 16% |
+| 0.05 | 13 | 1.03 | 7.3 | 27.6 | 49% | 17% | 0.94 | 6.6 | 27.9 | 57% | 16% |
+| 0.1 | 7 | 0.95 | 7.2 | 27.4 | 54% | 16% | 0.89 | 6.5 | 27.7 | 57% | 16% |
+| 0.3 | 3 | 0.87 | 7.2 | 27.3 | 57% | 14% | 0.86 | 6.5 | 27.6 | 63% | 14% |
+
+Per pocket, open ends, small blocks:
+
+| g | metres | count med | p90 | max | r<=1 | r>3 | area med | p90 | max | r<=1 | r>3 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.001 | - | 17.26 | 110.5 | 321.1 | 2% | 89% | 12.37 | 69.3 | 243.4 | 2% | 75% |
+| 0.002 | - | 9.23 | 56.0 | 160.9 | 2% | 76% | 6.82 | 43.2 | 122.0 | 3% | 67% |
+| 0.003 | 207 | 6.53 | 38.0 | 107.5 | 3% | 70% | 4.88 | 29.0 | 81.5 | 8% | 62% |
+| 0.005 | 125 | 4.26 | 23.3 | 64.8 | 5% | 59% | 3.33 | 18.3 | 49.1 | 11% | 51% |
+| 0.01 | 63 | 2.64 | 12.8 | 43.1 | 16% | 46% | 1.72 | 12.7 | 32.3 | 25% | 40% |
+| 0.02 | 32 | 1.77 | 11.1 | 35.8 | 22% | 30% | 1.28 | 11.6 | 30.1 | 35% | 27% |
+| 0.03 | 22 | 1.48 | 10.5 | 33.4 | 29% | 29% | 1.14 | 8.5 | 29.4 | 37% | 17% |
+| 0.05 | 13 | 1.28 | 8.2 | 31.4 | 35% | 22% | 1.04 | 7.4 | 28.8 | 43% | 16% |
+| 0.1 | 7 | 1.05 | 7.8 | 30.0 | 41% | 16% | 1.02 | 7.1 | 28.4 | 49% | 16% |
+| 0.3 | 3 | 0.95 | 7.6 | 29.0 | 56% | 14% | 0.89 | 6.8 | 28.1 | 57% | 14% |
+
+Per pocket, face ends (the crossing as `_barrier` computes it), small blocks:
+
+| g | metres | count med | p90 | max | r<=1 | r>3 | area med | p90 | max | r<=1 | r>3 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 0.003 | 209 | 8.38 | 39.8 | 158.8 | 3% | 70% | 5.07 | 29.6 | 99.4 | 6% | 63% |
+| 0.01 | 65 | 3.30 | 14.8 | 120.2 | 11% | 52% | 2.21 | 14.1 | 75.3 | 21% | 43% |
+| 0.03 | 24 | 2.01 | 13.0 | 105.5 | 17% | 43% | 1.51 | 12.4 | 66.1 | 27% | 30% |
+| 0.1 | 9 | 1.30 | 12.1 | 98.1 | 27% | 27% | 1.26 | 11.5 | 61.5 | 37% | 22% |
+| 0.3 | 5 | 1.18 | 11.7 | 95.1 | 32% | 25% | 1.13 | 11.2 | 59.6 | 41% | 19% |
+
+Large blocks (GPU):
+
+| run | g | metres | count med | p90 | max | r<=1 | r>3 | area med | p90 | max | r<=1 | r>3 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| per home | 0.005 | 125 | 2.81 | 9.1 | 16.2 | 4% | 38% | 2.09 | 5.9 | 15.6 | 8% | 29% |
+| per home | 0.01 | 63 | 1.57 | 4.9 | 8.7 | 17% | 25% | 1.51 | 3.5 | 8.3 | 25% | 12% |
+| per home | 0.02 | 32 | 1.11 | 2.8 | 4.9 | 38% | 8% | 1.06 | 2.3 | 4.7 | 38% | 4% |
+| per pocket | 0.003 | 207 | 4.50 | 17.0 | 26.3 | 0% | 62% | 2.81 | 16.1 | 25.3 | 8% | 42% |
+| per pocket | 0.01 | 63 | 1.97 | 5.8 | 8.7 | 17% | 42% | 1.56 | 5.3 | 8.4 | 25% | 25% |
+| per pocket | 0.03 | 22 | 1.32 | 2.8 | 3.6 | 29% | 8% | 1.20 | 2.2 | 3.5 | 29% | 4% |
+| per pocket | 0.1 | 7 | 1.02 | 1.7 | 2.0 | 46% | 0% | 1.02 | 1.2 | 1.8 | 42% | 0% |
+
+- The median r is about 2 at g 0.008 (count) and 0.006 (area) per home, at 0.015 and 0.008 per pocket, and at 0.03 and 0.01 with face ends.
+- With face ends the tail does not shrink with g (p90 11.7, max 95 at g 0.3): the throttle is the door's end cells, not the door.
+  Open ends cut the max at g 0.3 from 95 to 29 and the p90 from 11.7 to 7.6 (count).
+- With open ends the tail stops shrinking once g is past about 0.05: from there on it is set by what lies beyond the door (below, "The tail").
+
+r against pocket size (`summary_door_link_<run>_size.csv`; walled-in homes sharing the home's main pocket; count, g 0.01):
+
+| homes in the pocket | homes | per pocket: med | p90 | max | per home: med | p90 | max |
+|---|---|---|---|---|---|---|---|
+| 1 | 22 | 1.32 | 5.9 | 32.8 | 1.26 | 5.9 | 32.8 |
+| 2 -- 3 | 28 | 3.98 | 12.4 | 30.6 | 1.80 | 4.8 | 26.3 |
+| 4 or more | 13 | 11.3 | 43.0 | 43.1 | 7.61 | 28.9 | 28.9 |
+
+A door per pocket makes r grow with the pocket's demand: the door's drop is (the pocket's demand) / g.
+A door per home brings pockets of 2 -- 3 homes level with single homes; the 4+ class (38486's courtyard and a 4-home pocket on 63718) keeps a high r at any g, because its homes' doors all land at the same street-side cell (below).
+
+### (b) The finer raster (`summary_door_link_<run>_b_open.csv`, `summary_door_link_<run>_b_match.csv`)
+
+Under the fix only three walled-in homes reach open space at h 0.25 (46233's 232 and 274, sharing a pocket behind about 1 m of footprint, and 63718's 127, behind 3.7 m), and two at h 0.35 (46233's).
+r_fine at h 0.25 is 3.24, 1.78 and 1.06 (count); 2.65, 1.73 and 1.05 (area).
+
+| run | h | homes | g* count: median (p10 -- p90) | g* area | log(r / r_fine) at g 0.01: count | area |
+|---|---|---|---|---|---|---|
+| per home | 0.25 | 3 | 0.0034 (0.0018 -- 0.028) | 0.0015 (0.0003 -- 0.014) | -0.67 | -1.00 |
+| per home | 0.35 | 2 | 0.0027 (0.0021 -- 0.0033) | 0.0013 (0.0011 -- 0.0015) | -0.84 | -1.08 |
+| per pocket | 0.25 | 3 | 0.0069 (0.0036 -- 0.030) | 0.0030 (0.0018 -- 0.015) | -0.27 | -0.73 |
+| per pocket | 0.35 | 2 | 0.0054 (0.0041 -- 0.0066) | 0.0025 (0.0021 -- 0.0029) | -0.46 | -0.83 |
+
+Per home at g 0.01, r is 0.94 and 0.91 for 46233's two homes (r_fine 3.24 and 1.78) and 1.15 for 63718's 127 (1.06).
+At h 0.25 46233's homes escape through a long sub-cell gap, which costs them more than the door does: matching them needs g of about 0.002 -- 0.003, where the median walled-in home is at r 4 -- 6.
+Three homes in two blocks cannot set g against (a): the homes a finer raster can open are by construction those behind a sub-cell gap, not a wall.
+
+### (c) Leakage (`summary_door_link_<run>_c.csv`, `summary_door_link_pocket_heading_open_k0_c_worst_g*.csv`)
+
+Tier-0 homes, u / u(eps 0); u_open is the part due to the tier-0 demand alone (the leak), u adds the walled-in and tier-2 homes' demand.
+
+| run | worst u_open / u(0), g 0.01 | g 0.03 | g 0.3 | u / u(0): median | p95 | max |
+|---|---|---|---|---|---|---|
+| per home, open ends | 1.000 | 0.999 | 0.994 | 1.000 | 1.08 (count) / 1.04 (area) | 4.92 / 4.39 |
+| per pocket, open ends | 1.000 | 0.999 | 0.993 | 1.000 | 1.08 / 1.04 | 4.92 / 4.39 |
+| per pocket, face ends | 0.975 | 0.951 | 0.911 | 1.000 | 1.08 / 1.05 | 5.54 / 6.86 |
+| per pocket, open ends, large | 1.000 | 1.000 | 0.999 | 1.000 | 1.01 / 1.01 | 2.41 / 1.42 |
+
+- The door is leak-free up to its end cells: a pocket hangs off its street-side cell and gives the open network a little extra room to turn there.
+  With face ends that cell is a sliver whose own turning is weak, so the extra room matters (0.91 at g 0.3).
+- The added demand does not depend on g: the walled-in homes' demand leaves through b whatever the door costs.
+  Its largest effect is on 38486's home 74 (u 30 → 148, count), 6 m from the courtyard door's street end, and its neighbour 124 (204 → 843).
+
+### (d) Large blocks (`summary_door_link_d.csv`)
+
+The 12 large blocks with walled-in homes under the fix, all with stored clearings at D 0.05.
+Lens A (area, J_2) of the stored clearings in the door world over every home ("all") and over the tier-0 homes ("open"), against the stored value, and the walled-in homes' share of J_2; per home, open ends, g 0.01:
+
+| block | homes | walled in | J_2 share, none | SIMP: all | open | stored | J_2 share | cheap: all | open | stored | J_2 share |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 20543 | 1,538 | 1 | 4.05% | 0.4804 | 0.5023 | 0.5026 | 11.97% | 0.4597 | 0.4767 | 0.4763 | 9.99% |
+| 5706 | 1,347 | 1 | 1.42% | 0.5686 | 0.5816 | 0.5817 | 7.22% | 0.5572 | 0.5697 | 0.5698 | 6.88% |
+| 43708 | 1,296 | 2 | 1.35% | 0.5639 | 0.5691 | 0.5702 | 3.57% | 0.5284 | 0.5337 | 0.5349 | 3.46% |
+| 41806 | 1,118 | 4 | 0.88% | 0.5709 | 0.5707 | 0.5701 | 0.79% | 0.5539 | 0.5535 | 0.5507 | 0.72% |
+| 22267 | 1,575 | 3 | 0.74% | 0.7050 | 0.7071 | 0.7070 | 2.15% | 0.6935 | 0.6933 | 0.6931 | 0.59% |
+| 41673 | 1,074 | 5 | 0.34% | 0.5729 | 0.5732 | 0.5731 | 0.40% | 0.5484 | 0.5485 | 0.5483 | 0.35% |
+| 21252 | 1,025 | 2 | 0.33% | 0.3452 | 0.3463 | 0.3467 | 0.67% | 0.3215 | 0.3213 | 0.3216 | 0.27% |
+| 39240 | 1,081 | 1 | 0.31% | 0.6220 | 0.6224 | 0.6215 | 0.70% | 0.5706 | 0.5711 | 0.5705 | 0.65% |
+| 22336 | 1,342 | 1 | 0.21% | 0.5708 | 0.5728 | 0.5729 | 1.14% | 0.5482 | 0.5501 | 0.5501 | 1.03% |
+| 38254 | 1,220 | 1 | 0.10% | 0.5464 | 0.5473 | 0.5474 | 0.46% | 0.5246 | 0.5254 | 0.5255 | 0.42% |
+| 41515 | 1,510 | 1 | 0.01% | 0.5589 | 0.5603 | 0.5606 | 0.05% | 0.5514 | 0.5512 | 0.5512 | 0.05% |
+| 23597 | 1,130 | 2 | 0.01% | 0.4748 | 0.4748 | 0.4749 | 0.02% | 0.4673 | 0.4674 | 0.4674 | 0.02% |
+
+- Lens A over open homes stays within 0.003 of the stored value (the added demand's congestion); over all homes it is lower by at most 0.022 (20543), 0.013 (5706) and 0.005 (43708), and within 0.002 elsewhere.
+- SIMP leads cheap on every block, over all homes and over open homes, as stored.
+- A clearing lowers every open home's u but leaves the doors as they are, so the walled-in homes' share of J_2 rises after clearing: 20543's one home, inside a footprint behind 3.5 m of wall, holds 4.05% of J_2 with nothing cleared and 12% after SIMP's clearing.
+- Per pocket gives the same table within 0.0002 on every block but 41806 (a 3-home pocket), where Lens A over all homes is 0.010 lower and the walled-in homes hold 1.9% of J_2 (6.3% after SIMP's clearing).
+  Per pocket at g 0.03, the largest gap over all homes falls to 0.004 and the largest share of J_2 to 1.1% (2.8% after clearing).
+- With face ends, at g 0.01 the gap reaches 0.037 and the share 5.0% (41806, whose doors' street ends are 1/16 to 9/16 open).
+
+### The tail
+
+Per home at g 0.01, 18 of the 63 small-block homes have r above 3 (count): 7 in 38486's courtyard, 5 inside footprints (21622's 178, 42404's 65, 44837's three), 43817's 47 and 69, 38365's 4 and 19263's three.
+Potentials at the doors' ends (`summary_door_link_ends_diag.csv`; per pocket, open ends, count):
+
+- **Where the door leads.** 38486's courtyard (9 homes) crosses its thinnest wall into open space that is itself badly connected.
+  At g 0.3 the door's own drop is 30, but its street-side cell sits at u 1,672: 2.0x the worst of its homes' neighbours and 98x the block median.
+  The courtyard's demand, entering there, is what lifts it: open homes 4 and 6 m from it go from u 204 to 843 and from 30 to 148.
+  Its homes stay at r 2.1 -- 29 at g 0.3 (count), and the 4+ class keeps a median r near 7.
+  43817's largest pocket does the same (u 846 at its door's street end, 35x the block median), while that block's other two pockets' doors land at u of about 30.
+- **Neighbours at the street.** 21622's home 178 (tier 4) has neighbours with u of about 3: its door's street end is at u 0.9, and the door's own drop (1/g = 100 at g 0.01) is the whole of its r of 33; at g 0.3 its r is 1.8.
+- **One door per pocket.** 19263's and 44837's 3-home pockets pay three times the drop (300 at g 0.01, per pocket); one door per home removes it.
+
+Choosing b by the thinnest wall alone ignores how well the open space behind it connects.
+A rule that weighs the street side (several doors, or the crossing that minimises the escape time rather than the wall metres) is the next thing to try for the 4+ pockets; it was not run.
+38486's courtyard, at r 37 with the leaf door fully open, is at 29 at most with the door link (per pocket at g 0.3, per home at g 0.01).
+
+### Variants
+
+- **Isotropic door node** (`door_link_pocket_iso_open_k0`; 6 blocks, 32 walled-in homes, g 0.003 -- 0.1): |log(r_iso / r)| at most 0.003; open homes' u within 0.4%; the corridor calibration within 1%.
+  The coupling does not matter, so the heading-preserving edges stay: they keep the GPU solver.
+- **Thickness term** (`door_link_pocket_heading_open_k1`, kappa 1 per metre): the median r is near 1.7 at g 0.1 with p90 11.2 (kappa 0: g 0.02, p90 11.1), and near 3.2 at g 0.03 with p90 23.8 (kappa 0: about 16).
+  The three finer-raster homes keep their spread: the thickest-walled of them (63718's 127, 3.7 m at h 0.5) is the least affected at h 0.25, so a cost per metre moves it the wrong way.
+  Not kept.
+- **Face ends** are the crossing as `_barrier` computes it; the rows are kept (`door_link_pocket_heading_face_k0`) for (a) -- (d) above.
+
+### Caveats
+
+- (b) rests on three homes in two blocks; two share a pocket. The homes a finer raster can open are those behind sub-cell gaps, so (b) says nothing about doors through real walls.
+- The small blocks are those with stranded homes; the large-block numbers (24 homes, pockets of at most three) are what the full run will see.
+- Tiers 4 -- 5 (7 small-block homes, 5 large) are nested or overlapped footprints whose interior becomes their pocket; four of them are in the small blocks' tail.
+- One grid offset (lifted.OFFSET), as above.
+- g is calibrated on one synthetic geometry; the corridor equivalents are a reading aid, not part of the model.
+
+### Files
+
+- `insulator.py`: the commands `link-census`, `link <procs> <plan> <coupling> <ends> <kappa> <g,> <ids,>`, `link-large`, `corridor`, `link-report` (the module docstring).
+- Rows (parquet, ignored): `door_link_census_h0.5/`; `door_link_{pocket,home}_heading_open_k0_h0.5_ell3_K8/`, `door_link_pocket_heading_face_k0_h0.5_ell3_K8/`, `door_link_pocket_iso_open_k0_h0.5_ell3_K8/`, `door_link_pocket_heading_open_k1_h0.5_ell3_K8/` (small blocks: `<block>__g<g>.parquet` and `<block>__sites.parquet`; large: `<block>__large.parquet`, `<block>__large_homes.parquet`).
+- Kept: `summary_door_link_census_sets.csv`, `summary_door_link_census.csv`, `door_link_census_homes.csv`, `summary_door_link_corridor.csv`, `summary_door_link_b_fix.csv`, `summary_door_link_vs_default.csv`, `summary_door_link_d.csv`, `summary_door_link_ends_diag.csv`; per run `summary_door_link_<run>_{a,b_open,b_match,c,size}.csv`, `summary_door_link_<run>_large_{a,c}.csv` and `door_link_<run>_stranded_homes.csv`.

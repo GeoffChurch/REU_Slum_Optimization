@@ -2509,3 +2509,23 @@ across its thinnest wall, an edge in the operator (leak-free by construction, bl
 corridor's shape). If one eps is wanted meanwhile, 1e-4 (SIMP's own) keeps the gates, but a few
 walled-in homes then dominate J_2: on 30848 one (u 3,104 against a median of 33) cuts SIMP's
 Lens A from 0.615 over open homes to 0.480 over all.
+
+**The door link** (insulator_report.md, "The door link"). The placement fix extended to every
+shadowed home leaves 63 walled-in homes on the 31 small blocks (1.0%) and 24 on the 60 large
+(0.024%, 12 blocks; 30848's and 5810's are freed). Each gets one fixed conductance g across its
+thinnest wall, open cell to open cell, heading-preserving, an edge in the operator: nothing else
+opens, so no open home's u from the open homes' own demand moves by more than 0.1% (g up to
+0.03). At g 0.01 (about 63 m of 1 m-wide straight alley at ell 3 m) the walled-in homes' median
+r is 1.80 (count) / 1.51 (area) on the small blocks, p90 10.5 / 11.0, and 1.57 / 1.51 on the
+large, p90 4.9 / 3.5. On the 12 large blocks Lens A over all homes trails Lens A over open homes
+by at most 0.022 (20543) and keeps the stored clearings' order; the walled-in homes hold at most
+4.1% of J_2 with nothing cleared and 12% after SIMP's clearing, which leaves their doors as they
+are. What breaks is the small blocks' tail (p90 10 -- 13 at every g that keeps the median near
+2, in every form), set beyond the door: 38486's courtyard opens into space its own demand
+congests, and 21622's home 178 has neighbours at the street (u ~3), so any door costs it r 33.
+Measured and worse: a door per pocket (r grows with the pocket's homes: median 1.3, 4.0, 11.3 for
+1, 2 -- 3, 4+), the crossing's partial face cells as ends (a sliver that throttles the door at
+any g), an isotropic door node (r within 0.3%, and an extra unknown the GPU solver cannot
+coarsen), a thickness term (the tail as wide or wider at matched medians). The finer raster
+prefers g 0.0015 -- 0.0034 (three homes) and finds the fix about 2x optimistic for the homes it
+moves (eight homes).
