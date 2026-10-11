@@ -66,11 +66,14 @@ ALONG = "uni"                                # the along conductance (lifted.alo
 DEVICE = "gpu"                               # solver and scans (lifted.solver_of / scans_of)
 SCORE_RTOL = 1e-5                            # clear.RTOL_SCORE: the stored clearings' exact score
 CLEARING_POWER = 2.0                         # the stored clearings' objective (J_2)
-# The stored clearings at D 0.05 (area population, J_2, uni): (rows, Lens A column, cleared
+# The stored clearings at D 0.05 (area population, J_2, uni), each rescored on the blocks that
+# have it (14401's SIMP default exists on 0.5a5x8 only): (rows, Lens A column, cleared
 # column, D column, the mesh they were optimized and scored on).
 STORED = {
     "simp_default": ("relax_rows/uni/fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2/D0.05",
                      "simp_perm", "simp_cleared", "simp_D", "0.5"),
+    "simp_default_a5x8": ("relax_rows/uni/fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2.a5x8/D0.05",
+                          "simp_perm", "simp_cleared", "simp_D", "0.5a5x8"),
     "cheap": ("polish_rows/uni/S0.01cat.P64w8/D0.05", "perm", "cleared", "D", "0.5"),
     "cheap_a5x8": ("polish_rows/uni/S0.01cat.P64w8.a5x8/D0.05", "perm", "cleared", "D",
                    "0.5a5x8"),
@@ -553,8 +556,11 @@ def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> No
                 rel = relax.Relaxation(c, CLEARING_POWER)
                 rows = []
                 for cname, (rel_dir, perm_col, cleared_col, D_col, stored_mesh) in STORED.items():
-                    r = pd.read_parquet(ROADLESS / rel_dir / f"{bid}_p{CLEARING_POWER:g}.parquet"
-                                        ).iloc[0]
+                    src = ROADLESS / rel_dir / f"{bid}_p{CLEARING_POWER:g}.parquet"
+                    if not src.exists():
+                        print(f"  {cname}: none stored for {bid}", flush=True)
+                        continue
+                    r = pd.read_parquet(src).iloc[0]
                     x = np.zeros(c.n)
                     x[np.asarray(r[cleared_col], dtype=np.int64)] = 1.0
                     ts = time.perf_counter()
