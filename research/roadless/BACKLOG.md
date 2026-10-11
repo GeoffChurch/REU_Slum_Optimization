@@ -64,6 +64,11 @@ items up front"), in the order proposed:
    turning edges; two fixes measured on a corridor. The owner's call on the turning boost (a model
    change: walkers stop going ballistic in a lane); then its gradient, uniform rays on the GPU and
    the composite mesh, and a re-score under the sightline metric.
+   Buildings as imperfect insulators (owner 2026-10-11; NOTES, "The insulator world"): no single
+   eps both meets the owner's criterion (a walled-in home worse, but not massively worse, than
+   its open neighbours: 1e-3 -- 3e-3) and keeps the gates (1e-4 or less). Next: shadowed homes
+   inject on their open side (60% of large-block stranding, no parameter), and a door link for
+   the walled-in rest; then into lifted/common after stage 1, before the full run is scored.
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population as
    footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =
@@ -97,9 +102,9 @@ items up front"), in the order proposed:
    0.87 for the walking model alone, against the 220's median 0.43), roadless separates the
    leaders (resistance_lp ahead), and SIMP's default beats the best road network at D 0.05 by
    +0.065 -- +0.777, a lower bound on (b)'s price of roads. Stage 1 of the full run (the 60
-   blocks that fit at h 0.5, six methods) is running; open: the 23 oversized blocks
-   (cycle_desire's cost and memory go with area) and the arterial (its `max_roads: 60` keeps it
-   short of Lens A).
+   blocks that fit at h 0.5, six methods) is running, to be scored once item 3 settles the
+   stranded homes; open: the 23 oversized blocks (cycle_desire's cost and memory go with area)
+   and the arterial (its `max_roads: 60` keeps it short of Lens A).
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights

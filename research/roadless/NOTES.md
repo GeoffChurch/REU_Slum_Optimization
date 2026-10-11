@@ -80,7 +80,8 @@ single stream. Crossings are where catchments meet; egress flow is overwhelmingl
 **Demand fix (2026-09-29).** First version spread each building's demand over its WHOLE 1 m
 ring and dropped the part in sealed nooks, reading 4-8% "stranded". Now demand goes only on ring
 cells with a path to the street (per building, renormalized); a building is stranded only if no
-ring cell reaches the street. Stranded is then 0-2% at h 1-0.5 and 0.000 at h <= 0.35.
+ring cell reaches the street. Stranded is then 0-2% at h 1-0.5 and 0.000 at h <= 0.35 (three
+test blocks; not in general: "The insulator world").
 
 **h convergence, K 8, ell 3, fixed demand** (conv/b*_h*.log). perm' at the Lens A prefix:
 
@@ -2460,3 +2461,49 @@ median edge (p5 -- p95: 55 -- 4,740x on 30848, 82 -- 811x on 9712). Footpaths at
 (same median) raise every method by 0.01 -- 0.05, keep the order on 22422 and 5810, and swap one
 pair on 9712 and 30848 (tau +0.87). Neither is what (a) turns on; the lane conductance tuned for
 method spread (the road/walk ratio) is.
+
+### The insulator world: buildings as imperfect insulators (owner 2026-10-11: "We shouldn't exclude homes. Instead, we could maybe have buildings be imperfect insulators")
+
+insulator.py; insulator_report.md has every table, insulator_rows/ the summaries (parquet
+ignored). Each cell's open fraction becomes o + eps (full - o), the eps world clear.py and
+relax.py search in, made the metric: every home drains, and clearing stays monotone. A stranded
+home injects over its whole ring, sealed as it is; one with no ring cell, over the free cells
+within 1 m of its own outline. On the 31 small blocks with stranded homes (6,276 homes, 88
+stranded), ten controls, and 22422, 30848, 5810 and 9712 on the GPU, eps 1e-4 -- 0.1; at eps 0
+the stored Lens A is reproduced to 2e-8. r is a formerly stranded home's u over the largest u
+among its 6 nearest open-access homes (the owner's criterion: worse, but not massively worse).
+
+**No single eps.** r is moderate at 1e-3 -- 3e-3: median 2.47 (count) / 1.60 (area) at 1e-3 and
+1.36 / 1.03 at 3e-3, over the 74 homes walled into their own ring (25 blocks); at 1e-4 it is
+17.6 / 10.3, p90 52 / 33. The few homes a finer raster opens (7 in 5 blocks at h 0.25) match at
+eps* ~1.6e-3 (count; 5e-4 -- 3.5e-3). Leakage wants 1e-4 or less: 22422's gate (SIMP 0.783 at
+eps 0) is worth 0.764 at 1e-4, 0.628 at 1e-3 and 0.243 at 1e-2, and homes behind slivers (u
+above 8x the block median) keep 92 -- 94% of their relative escape time at 1e-4, 54 -- 63% at
+1e-3. The finer raster says those long escapes are real (u / block median at h 0.25 over h 0.5:
+1.00 -- 1.04 in every band), so the leak at a gate is a distortion, not a correction. Controls
+barely move at 1e-4 (median u ratio 0.998, J_2 shift 0.006). On 30848 the eps world reorders the
+stored clearings: cheap leads SIMP by 0.020 at eps 0, they tie at 1e-3, SIMP leads by 0.022 at
+3e-3.
+
+**Most stranding is placement, not walls.** On the full run's 60 large blocks 60 of 100,724
+homes are stranded (0.06%; at most 0.84% of a block, 41673). 36 of them, and 25 of the 88 on the
+small blocks, are shadowed: open space with a path to the street lies within 1 m of the outline,
+in a neighbour's ring under the nearest-building rule. Injecting on those cells frees them with
+no parameter and no leak; run here only for the homes with no ring cell at all (22 large, 7
+small), not for the shadowed homes with a sealed ring (14 and 18).
+
+**Correction (the demand fix, 2026-09-29):** "0.000 at h <= 0.35" held for its three test blocks
+only. 77 of the 88 are still stranded at h 0.25 (81 at 0.35), behind a median 3.0 m of footprint
+(IQR 1.8 -- 4.2).
+
+**Confining the leak** to the stranded pockets keeps every gate exactly (30848's and 5810's
+open-home Lens A equal the stored values; 22422 and 9712 have no stranded home) and meets r at
+the median: the footprint within a pocket's barrier + 1 m at eps 3e-3 (median r 2.1 / 1.7, p90
+8.2 / 5.3), or the cheapest crossing opened, with one cell per wall at 0.1 (a cost per wall
+crossed: 1.75 / 1.37, p90 11.8 / 6.6); both match the finer raster at the median. The tail is
+lattice geometry: with that crossing fully open, 38486's 9-home courtyard, reached by a winding
+one-cell corridor, still has r 37. Next: a door link, one conductance per walled-in pocket
+across its thinnest wall, an edge in the operator (leak-free by construction, blind to the
+corridor's shape). If one eps is wanted meanwhile, 1e-4 (SIMP's own) keeps the gates, but a few
+walled-in homes then dominate J_2: on 30848 one (u 3,104 against a median of 33) cuts SIMP's
+Lens A from 0.615 over open homes to 0.480 over all.
