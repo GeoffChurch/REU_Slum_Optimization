@@ -2447,3 +2447,16 @@ large blocks than on the 220's small ones, and roadless tells the leaders apart 
 on what a road is worth: (a) pays for road length (the arterial), roadless for the buildings a
 road removes, and on roadless's one scale clearing beats the best road network by 0.065 -- 0.777
 at D 0.05. Whether the agreement holds across blocks is the full run's question.
+
+### The shipped metric's footpath floor and edge length (owner 2026-10-11: "Are any overcomplicated or hacky in any way?")
+
+perm_floor.py, on the sentinel's count prefixes at D 0.05 (the six methods). The footpath
+clearance floor (FOOTPATH_EPS 0.02, reblock.mesh, outside PermeabilityParams) fires on 0.6 --
+10.3% of mesh edges (the disks overlap, clearance < 0, on 0.6 -- 9.2%: the radii come from
+building points, the edges join parcel centroids), but 0.005 or 0.08 moves (a) by at most 0.003
+and no rank. Footpath conductance has no length term (the clearance fraction times a per-block
+constant) while a road's falls as 1/length, so the road/footpath ratio is ~205x only at the
+median edge (p5 -- p95: 55 -- 4,740x on 30848, 82 -- 811x on 9712). Footpaths at clearance/length
+(same median) raise every method by 0.01 -- 0.05, keep the order on 22422 and 5810, and swap one
+pair on 9712 and 30848 (tau +0.87). Neither is what (a) turns on; the lane conductance tuned for
+method spread (the road/walk ratio) is.
