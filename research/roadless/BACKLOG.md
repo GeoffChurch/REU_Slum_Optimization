@@ -79,8 +79,10 @@ items up front"), in the order proposed:
    4.2e-6 is out, the GPU solver stalls there). The owner chose B (2026-10-11: "B SGTM"), and it
    is ported (NOTES, "The port": lifted.Placement, Scorer.enclosed_left; insulator.py,
    crossing.py and walls.py deleted, the door's, the toll's and the private walls' code with
-   them). Next: the stored clearings re-scored and the full run scored under B (item 4), then B's
-   optimizer, free first and then today's search, on the 12 large blocks with enclosed homes.
+   them). Scored (item 4): in B's order the best road prefix at D 0.05 is ahead of SIMP's stored
+   default on 9 of the 12 large blocks with enclosed homes, on (i) alone (the stored clearings,
+   searched before B, free none of them on 10). Next: B's optimizer, free first and then today's
+   search with the rest of the budget, on those 12.
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population as
    footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =
@@ -113,11 +115,14 @@ items up front"), in the order proposed:
    on 4 large blocks the shipped metric and roadless order the road methods alike (tau 0.60 --
    0.87 for the walking model alone, against the 220's median 0.43), roadless separates the
    leaders (resistance_lp ahead), and SIMP's default beats the best road network at D 0.05 by
-   +0.065 -- +0.777, a lower bound on (b)'s price of roads. Stage 1 of the full run (the 60
-   blocks that fit at h 0.5, six methods: networks and prefixes) is done (its networks kept in
-   road_rows/scratch, ignored); its scoring under B is next, on the cluster, with the stored
-   clearings re-scored beside it; open: the 23 oversized blocks (cycle_desire's cost and memory
-   go with area) and the arterial (its `max_roads: 60` keeps it short of Lens A).
+   +0.065 -- +0.777, a lower bound on (b)'s price of roads. The full run on the 60 blocks that
+   fit at h 0.5 (NOTES, "Re-scoring the road methods: the 60 large blocks under B"; six methods,
+   the networks kept in road_rows/scratch, ignored): the lenses agree as on the sentinel (tau
+   medians +0.47 -- +0.80), resistance_lp leads all three, and in B's order SIMP's default is
+   ahead of the best road on 51 (by a median +0.148 where (i) ties, at least +0.047) and behind
+   on (i) on 9 of the 12 with enclosed homes (item 3's optimizer is for those). Open: the 23
+   oversized blocks (cycle_desire's cost and memory go with area) and the arterial (its
+   `max_roads: 60` keeps it short of Lens A).
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights

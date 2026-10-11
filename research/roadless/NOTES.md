@@ -2604,3 +2604,53 @@ from one sliver-door home at 37x the median u), and 400 of 3,515 ring homes move
 (the cells they now share congest). insulator.py, crossing.py and walls.py are deleted (code at
 9e10bbf); fft_homog's extracts (in a session scratchpad) predate the change and must be
 regenerated before its scripts run again.
+
+### Re-scoring the road methods: the 60 large blocks under B (owner 2026-10-11: "B SGTM")
+
+road_rescore.py `score` on the cluster (run road-b-r1, one task a block, its networks, prefixes
+and stored clearings shipped as a tar: cluster.py `--unpack`): the six methods of stage 1 on the
+60 blocks that fit at h 0.5, every prefix scored as on the sentinel ((a) the shipped
+permeability and (b) roadless count p 1 on the count prefixes, (c) roadless area J_2 on the area
+prefixes) with its B (i), the population share it leaves enclosed, and the stored clearings
+rescored beside them. 5.6 GPU-h (a median 3.6 min a block, the longest 25 min; GPU peak 40.5
+GB), 1 h 43 min on four GPUs. `report` ranks (b) and (c) in B's order and writes
+road_rows/summary_*.csv.
+
+- The scorer: the stored clearings rescore to their stored Lens A within 3.2e-9 on the 38 blocks
+  with no shadowed home (14401's are on 0.5a5x8 only) and move by a median 7e-5 (at most 1.6e-3,
+  41515; down on 31 of 42 rows) on the 21 with one (36 homes, insulator_rows/summary_census.csv):
+  Lens A over the rest now counts a home the nearest-building rule had stranded. Against
+  walls.py's B on its 16 blocks: (ii) to 3.8e-8, (i) to 1e-16.
+- Enclosed homes: on 12 of the 60 blocks (24 homes, 0.010 -- 0.225% of a block's area
+  population, median 0.077%). At D 0.05 the road prefixes free some (all) of them on:
+  resistance_lp 7 (5), clearance 4 (2), clearance_looped 4 (3), cycle_native 3 (1),
+  cycle_desire 3 (0), grid 1 (1); some road frees every one on 7 of the 12. A road's corridor
+  frees homes in passing; the stored clearings, searched before B, mostly do not: SIMP's default
+  frees some on 2 (41673, 41806) and all on none, the cheap preset some on 4, all on 1 (21252).
+- The price of roads at D 0.05 in B's order: SIMP's default is ahead of the best road prefix on
+  51 of the 60 and behind on (i) on 9, all among the 12 (the cheap preset 52 and 8). Where (i)
+  ties (51 blocks) SIMP's default leads by a median +0.148 (p10 +0.089, p90 +0.345; +0.047 --
+  +0.777), the cheap preset by +0.127 (+0.042 -- +0.756), and the best road gets a median 57% of
+  SIMP's Lens A (p10 43%, p90 70%). Where a road is ahead it is on (i) alone, at times with
+  little Lens A: on 23597 clearance frees the enclosed home at 0.008 where SIMP's default leaves
+  it at 0.475. walls.py's free+simp (the union, D 0.050 -- 0.064) was ahead of every road prefix
+  on all 12 ((i) 0, (ii) 1e-5 -- 6e-3 above SIMP's alone); B's optimizer, free and then the
+  search with the rest of the budget, is next (BACKLOG 3).
+- The lenses: Kendall tau over the methods reaching both budgets, median [IQR] over the 60 in
+  B's order, D 0.05 | D 0.10: (a, b) +0.60 [+0.47, +0.73] | +0.60 [+0.40, +0.73]; (a, c) +0.47
+  [+0.20, +0.73] | +0.47 [+0.30, +0.60]; (b, c) +0.73 [+0.60, +1.00] | +0.80 [+0.57, +1.00]. The
+  sentinel's agreement holds (the 220's (a, b) at D 0.10: +0.43). The 12 blocks with enclosed
+  homes agree less on (ii) alone already ((a, c) +0.13 at D 0.05 against +0.60 on the other 48),
+  so B's order is not what parts them.
+- The leaders at D 0.05: resistance_lp under (a) on 56 (cycle_desire 4), (b) 54, (c) 41
+  (cycle_native 7, cycle_desire 4, clearance_looped 4, grid 2, clearance 2; B's order moved 6 of
+  the 12); at D 0.10 under (c) 39 (cycle_desire 7, cycle_native 6, grid 5). The medians of (c)
+  at D 0.05: resistance_lp 0.224, cycle_native 0.192, cycle_desire 0.183, clearance_looped
+  0.149, clearance 0.127, grid 0.119; resistance_lp lays 1.47x cycle_native's road (p10 1.12,
+  p90 2.04) for the same displacement. clearance reaches D 0.05 on 56 of the 60 and D 0.10 on
+  48, cycle_native on 59 and 56, cycle_desire on 59 and 55, the rest on all.
+
+What the 60 say: roadless and the shipped metric order the road methods alike, resistance_lp
+leads under all three lenses, and wherever B (i) ties SIMP's default leads the best road network
+by at least +0.047 at D 0.05. Where (i) decides, the stored clearings lose because they were
+searched without it, which B's optimizer is for.

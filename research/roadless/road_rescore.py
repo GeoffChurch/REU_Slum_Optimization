@@ -1,5 +1,5 @@
 """The road lineup on the large blocks, scored three ways and set against the stored clearings
-(BACKLOG 4(b), "the price of roads"): the 4-block sentinel before any full large-block run.
+(BACKLOG 4(b), "the price of roads"): the 4-block sentinel, then the 60 that fit at h 0.5.
 
 Each method's network (reblock.derivations.propose, the derive cache), cut to its canonical
 street-first prefixes (common.prefix_to) at BUDGETS and whole, scored
@@ -10,7 +10,9 @@ CARVE rule (common.Carve), every solve keeping both powers (P and J_2 come from 
 Before (b) and (c), each scored prefix and clearing records `enclosed`, the population share it
 leaves enclosed (common.Scorer.enclosed_left; owner 2026-10-11, "B SGTM").
 The stored clearings (SIMP default, the cheap preset) are rescored on the same scorer: their
-stored Lens A is the check that the scorer reproduces the optimizers' own.
+stored Lens A is the check that the scorer reproduces the optimizers' own. `report` ranks (b) and
+(c) in B's order (the least population left enclosed, then Lens A over the rest) and writes its
+summary tables beside the rows (road_rows/summary_*.csv, committed).
 
     S=research/roadless/road_rescore.py    # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S propose <scratch> <id> <method> <cache|fresh>
@@ -652,6 +654,16 @@ SHORT = {"clearance": "clear", "clearance_looped": "clear_loop", "cycle_native":
          "euclidean_grid": "grid", "greedy_arterial_access_displacement": "arterial"}
 REPORT_BUDGETS = (0.05, 0.10)     # the table's budgets (Lens A now and Lens A of the 220 study)
 PRICE_BUDGET = 0.05               # the stored clearings' budget
+# The price of roads sets each stored clearing against the roads: the one optimized on the
+# report's mesh, or on a block without one (14401) the one optimized on 0.5a5x8, rescored.
+PRICE_CLEARINGS = {"simp_default": ("simp_default", "simp_default_a5x8"),
+                   "cheap": ("cheap", "cheap_a5x8")}
+
+
+def summary_path(mesh_token: str, what: str) -> Path:
+    """A report's summary table (committed; the rows it reads are not)."""
+    mesh = common.mesh_of(mesh_token)
+    return ROWS / f"summary_{mesh.name}_ell{ELL_M:g}_K{K}_{ALONG}_{budgets_tag()}_{what}.csv"
 
 
 def _read_all(paths: list[Path]) -> pd.DataFrame:
@@ -689,27 +701,42 @@ def _tau(x: np.ndarray, y: np.ndarray) -> float:
     return float(kendalltau(x, y).statistic) if len(x) >= 3 else np.nan
 
 
+def _b_rank(g: pd.DataFrame, enc: str, val: str) -> np.ndarray:
+    """Ranks in B's order (owner 2026-10-11, "B SGTM"): the least population left enclosed first,
+    then the larger Lens A over the rest. 1 + the rows strictly ahead, so exact ties share one."""
+    e, v = g[enc].to_numpy(), g[val].to_numpy()
+    ahead = (e[None, :] < e[:, None]) | ((e[None, :] == e[:, None]) & (v[None, :] > v[:, None]))
+    return 1.0 + ahead.sum(axis=1)
+
+
 def lens_table(mesh_token: str, budget: float) -> pd.DataFrame:
     """Per (block, method) at `budget`: (a) and (b) on the count prefix, (c) on the area prefix,
-    each prefix's road length and displacement, and whether it reaches the budget."""
+    each roadless lens with its B (i) (enc_b, enc_c: the population share the prefix leaves
+    enclosed), each prefix's road length and displacement, whether it reaches the budget, and
+    its rank among the methods that do ((a) by value, (b) and (c) in B's order)."""
     keys = ["block", "method"]
     cnt = score_rows(mesh_token, "count")
     cnt = cnt[np.isclose(cnt.budget, budget)][keys + ["n", "m", "road_m", "D_count", "D_area",
-                                                      "P_old", "P1", "P2"]]
+                                                      "P_old", "P1", "P2", "enclosed"]]
     cnt = cnt.rename(columns={"m": "m_count", "road_m": "road_m_count", "D_count": "Dc_count",
-                              "D_area": "Da_count", "P_old": "a", "P1": "b", "P2": "b_P2"})
+                              "D_area": "Da_count", "P_old": "a", "P1": "b", "P2": "b_P2",
+                              "enclosed": "enc_b"})
     area = score_rows(mesh_token, "area")
     area = area[np.isclose(area.budget, budget)][keys + ["m", "road_m", "D_count", "D_area",
-                                                         "P_old", "P1", "P2"]]
+                                                         "P_old", "P1", "P2", "enclosed"]]
     area = area.rename(columns={"m": "m_area", "road_m": "road_m_area", "D_count": "Dc_area",
                                 "D_area": "Da_area", "P_old": "a_on_area", "P1": "c_P1",
-                                "P2": "c"})
+                                "P2": "c", "enclosed": "enc_c"})
     t = cnt.merge(area, on=keys, how="outer")
     t["reach_count"] = t.Dc_count >= budget - 1e-9
     t["reach_area"] = t.Da_area >= budget - 1e-9
-    for col, reach in (("a", "reach_count"), ("b", "reach_count"), ("c", "reach_area")):
-        t[f"rank_{col}"] = (t[t[reach]].groupby("block")[col].rank(ascending=False, method="min")
-                            .reindex(t.index))
+    t["rank_a"] = (t[t.reach_count].groupby("block").a.rank(ascending=False, method="min")
+                   .reindex(t.index))
+    for col, enc, reach in (("b", "enc_b", "reach_count"), ("c", "enc_c", "reach_area")):
+        rank = pd.Series(np.nan, index=t.index)
+        for _, g in t[t[reach]].groupby("block"):
+            rank[g.index] = _b_rank(g, enc, col)
+        t[f"rank_{col}"] = rank
     return t
 
 
@@ -740,46 +767,102 @@ def report(mesh_token: str, composite_token: str) -> None:
     for _, r in own.iterrows():
         print(f"  {r.block:18s} {r.clearing:13s} on {r.mesh:9s} stored {r.stored_perm:.7f} "
               f"rescored {r.perm:.7f}  diff {r.perm - r.stored_perm:+.1e}  D {r.D:.5f} (stored "
-              f"{r.stored_D:.5f})")
+              f"{r.stored_D:.5f})  enclosed left {r.enclosed:.5f}")
+    diff = (own.perm - own.stored_perm).abs()
+    moved = own[diff > 1e-6]
+    print(f"  max |diff| {diff.max():.1e} over {len(own)} rows; over 1e-6 on {len(moved)} rows "
+          f"({moved.block.nunique()} blocks: where a home the placement fix un-shadowed moves "
+          "J_2)")
+    cl.to_csv(summary_path(mesh_token, "clearings"), index=False)
     # the table
     for budget in REPORT_BUDGETS:
         t = lens_table(mesh_token, budget)
+        t.to_csv(summary_path(mesh_token, f"lens_D{budget:g}"), index=False)
         print(f"\nAT D {budget:g} on {mesh.name}: (a) shipped permeability and (b) roadless count "
               "p 1 on the count prefix, (c) roadless area J_2 on the area prefix; [rank of the "
-              "methods reaching the budget]; * = the whole network falls short")
+              "methods reaching the budget, (b) and (c) in B's order]; * = the whole network "
+              "falls short; on a block with enclosed homes, B (i) for (b) | (c)")
+        taus = []
         for bid, g in t.sort_values(["n", "method"]).groupby("block", sort=False):
+            enclosed = bool((g.enc_b > 0).any() or (g.enc_c > 0).any())
             print(f"  {bid} n={int(g.n.iloc[0])}")
             print(f"    {'method':13s} {'(a)':>12s} {'(b)':>12s} {'(c)':>12s}   road km count | "
-                  "area   D count prefix | area prefix")
-            for _, r in g.sort_values("c", ascending=False).iterrows():
+                  "area   D count prefix | area prefix"
+                  + ("   B (i) (b) | (c)" if enclosed else ""))
+            for _, r in g.sort_values(["rank_c", "c"], ascending=[True, False]).iterrows():
                 def cell(v, rk, ok):
                     return f"{v:.4f}{'*' if not ok else ''} [{'-' if np.isnan(rk) else int(rk)}]"
                 print(f"    {SHORT[r.method]:13s} {cell(r.a, r.rank_a, r.reach_count):>12s} "
                       f"{cell(r.b, r.rank_b, r.reach_count):>12s} "
                       f"{cell(r.c, r.rank_c, r.reach_area):>12s}   {r.road_m_count / 1000:6.2f} | "
-                      f"{r.road_m_area / 1000:6.2f}   {r.Dc_count:.4f} | {r.Da_area:.4f}")
+                      f"{r.road_m_area / 1000:6.2f}   {r.Dc_count:.4f} | {r.Da_area:.4f}"
+                      + (f"   {r.enc_b:.5f} | {r.enc_c:.5f}" if enclosed else ""))
             both = g[g.reach_count & g.reach_area]
+            a, rb, rc = both.a.to_numpy(), both.rank_b.to_numpy(), both.rank_c.to_numpy()
+            taus.append(dict(block=bid, ab=_tau(a, -rb), ac=_tau(a, -rc), bc=_tau(rb, rc)))
+            k = taus[-1]
             print(f"    Kendall tau over the {len(both)} methods reaching both: (a,b) "
-                  f"{_tau(both.a.to_numpy(), both.b.to_numpy()):+.3f}  (a,c) "
-                  f"{_tau(both.a.to_numpy(), both.c.to_numpy()):+.3f}  (b,c) "
-                  f"{_tau(both.b.to_numpy(), both.c.to_numpy()):+.3f}")
+                  f"{k['ab']:+.3f}  (a,c) {k['ac']:+.3f}  (b,c) {k['bc']:+.3f}")
+        tau = pd.DataFrame(taus)
+        print(f"  ACROSS THE {len(tau)} BLOCKS, Kendall tau median [IQR]: " + "  ".join(
+            f"({k[0]},{k[1]}) {tau[k].median():+.2f} [{tau[k].quantile(0.25):+.2f}, "
+            f"{tau[k].quantile(0.75):+.2f}]" for k in ("ab", "ac", "bc")))
+        for col in ("a", "b", "c"):
+            lead = t[t[f"rank_{col}"] == 1].drop_duplicates("block").method.map(SHORT)
+            print(f"  leader under ({col}): "
+                  + ", ".join(f"{k} {v}" for k, v in lead.value_counts().items()))
     # the price of roads
-    print(f"\nTHE PRICE OF ROADS at D {PRICE_BUDGET:g} under (c) on {mesh.name} (a lower bound: "
-          "the "
-          "optimizers are heuristics; the road prefix is the first reaching the budget, the "
-          "clearings stay within it)")
+    print(f"\nTHE PRICE OF ROADS at D {PRICE_BUDGET:g} under (c) on {mesh.name}, in B's order (a "
+          "lower bound: the optimizers are heuristics; the road prefix is the first reaching the "
+          "budget, the clearings stay within it). Each clearing against the best road: the share "
+          "each leaves enclosed (B (i)), then Lens A over the rest (B (ii))")
     t = lens_table(mesh_token, PRICE_BUDGET)
     cl_m = cl[cl.mesh == mesh.name]
+    rows = []
     for bid, g in t.sort_values(["n"]).groupby("block", sort=False):
-        ok = g[g.reach_area]
-        best = ok.loc[ok.c.idxmax()]
-        line = (f"  {bid:18s} best road {SHORT[best.method]:12s} {best.c:.4f} "
-                f"(D {best.Da_area:.4f},"
-                f" {best.road_m_area / 1000:.2f} km)")
-        for cname in ("simp_default", "cheap"):
-            r = cl_m[(cl_m.block == bid) & (cl_m.clearing == cname)].iloc[0]
-            line += f"; {cname} {r.perm:.4f} (D {r.D:.4f}) minus best {r.perm - best.c:+.4f}"
+        best = g.loc[g.rank_c.idxmin()]
+        row = dict(block=bid, n=int(best.n), best=best.method, best_enc=best.enc_c, best_c=best.c,
+                   best_D=best.Da_area, best_km=best.road_m_area / 1000)
+        line = (f"  {bid:18s} best road {SHORT[best.method]:12s} {best.c:.4f} (i {best.enc_c:.5f};"
+                f" D {best.Da_area:.4f}, {best.road_m_area / 1000:.2f} km)")
+        for family, names in PRICE_CLEARINGS.items():
+            c = cl_m[cl_m.block == bid].set_index("clearing")
+            r = c.loc[[nm for nm in names if nm in c.index][0]]
+            di, dii = r.enclosed - best.enc_c, r.perm - best.c
+            row |= {f"{family}": r.name, f"{family}_enc": r.enclosed, f"{family}_c": r.perm,
+                    f"{family}_D": r.D, f"{family}_ahead": bool(di < 0 or (di == 0 and dii > 0)),
+                    f"{family}_di": di, f"{family}_dii": dii}
+            verdict = (f"minus best {dii:+.4f}" if di == 0 else
+                       f"{'ahead' if di < 0 else 'behind'} on (i) by {abs(di):.5f}")
+            line += f"; {r.name} {r.perm:.4f} (i {r.enclosed:.5f}; D {r.D:.4f}) {verdict}"
+        rows.append(row)
         print(line)
+    pr = pd.DataFrame(rows)
+    pr.to_csv(summary_path(mesh_token, "price"), index=False)
+    for family in PRICE_CLEARINGS:
+        tie = pr[pr[f"{family}_di"] == 0]
+        q = tie[f"{family}_dii"].quantile([0.1, 0.5, 0.9])
+        share = (tie.best_c / tie[f"{family}_c"]).quantile([0.1, 0.5, 0.9])
+        print(f"  {family}: ahead of the best road on {int(pr[f'{family}_ahead'].sum())} of "
+              f"{len(pr)} blocks; behind on (i) on {int((pr[f'{family}_di'] > 0).sum())}; where "
+              f"(i) ties ({len(tie)}), minus the best road {q[0.5]:+.4f} (p10 {q[0.1]:+.4f}, p90 "
+              f"{q[0.9]:+.4f}; {tie[f'{family}_dii'].min():+.4f} .. "
+              f"{tie[f'{family}_dii'].max():+.4f}), the best road's share of its Lens A "
+              f"{share[0.5]:.2f} (p10 {share[0.1]:.2f}, p90 {share[0.9]:.2f})")
+    # B (i): the enclosed homes, and what the prefixes and clearings free
+    setup = _read_all(sorted(score_dir(mesh_token, "area").glob("*__setup__*.parquet")))
+    enc0 = setup.drop_duplicates("block", keep="last").set_index("block").enclosed0
+    held = enc0[enc0 > 0]
+    print(f"\nENCLOSED HOMES (area population): {len(held)} of {len(enc0)} blocks, a share of "
+          f"{held.min():.5f} -- {held.max():.5f} (median {held.median():.5f}); at D "
+          f"{PRICE_BUDGET:g}, the blocks where each frees some and where it frees all")
+    pre = t[t.block.isin(held.index) & t.reach_area]
+    for m, g in pre.groupby("method"):
+        some = int((g.enc_c < g.block.map(held)).sum())
+        print(f"  {SHORT[m]:13s} {len(g):3d} blocks: some {some}, all {int((g.enc_c == 0).sum())}")
+    for name, g in cl_m[cl_m.block.isin(held.index)].groupby("clearing"):
+        print(f"  {name:17s} {len(g):3d} blocks: some "
+              f"{int((g.enclosed < g.block.map(held)).sum())}, all {int((g.enclosed == 0).sum())}")
     # the composite mesh
     print(f"\nCOMPOSITE MESH: (c) on {comp.name} minus on {mesh.name}, same prefixes")
     ca = score_rows(composite_token, "area")
