@@ -24,8 +24,9 @@ G: dict = {}
 def init():
     d = np.load("fabric_5810.npz")
     C = np.load("clearings_5810.npz")
-    G.update(o=d["ff0"].astype(float), ins=d["inside"], gr=d["ground"], f=d["f"],
-             own=d["owner"], w=d["w"], live=~d["stranded"], area=d["area"])
+    dm = ts.demand_of(d, d["ff0"].shape)
+    G.update(o=d["ff0"].astype(float), ins=d["inside"], gr=d["ground"], f=dm.f, Sd=dm.Sd,
+             enc=dm.enclosed, w=dm.w, area=d["area"])
     order = np.argsort(C["sub_bldg"], kind="stable")
     G.update(sc=C["sub_cell"][order], sb=C["sub_bldg"][order], sn=C["sub_count"][order])
     G["starts"] = np.searchsorted(G["sb"], np.arange(len(G["w"]) + 1))
@@ -51,7 +52,7 @@ def job(args):
     t0 = time.perf_counter()
     r0, c0, rule = args
     n = int(50 / H)
-    o, f, own, w, live = G["o"], G["f"], G["own"], G["w"], G["live"]
+    o, f, Sd, enc, w = G["o"], G["f"], G["Sd"], G["enc"], G["w"]
     if rule == "R20":
         inn = ((G["cnt"] > 0) & (G["cy"] >= r0) & (G["cy"] < r0 + n)
                & (G["cx"] >= c0) & (G["cx"] < c0 + n))
@@ -73,14 +74,14 @@ def job(args):
     oc = open_buildings(ids)
     changed = oc != o
     fs = ts.fine_solve(oc, G["gr"], f)
-    Jf = ts.J(ts.home_u(fs.u, f, own, w, live), w, live)
+    Jf = ts.J(ts.home_u(fs.u, Sd, enc), w, enc)
     tf = G["tf"]
     sig, nwin = ts.sigma_serial(tf, oc, G["ins"], f, changed)
     sb = ts.fill(ts.TensorField(sig, tf.inside, tf.have, tf.chi, tf.wf, tf.s, tf.n, 0, tf.iters),
                  None)
     mac = ts.macro_solve(sb, tf.s, K, G["ins"], G["gr"], f)
     U = ts.evaluate(mac, o.shape)[0]
-    Jt = ts.J(ts.home_u(np.where(G["gr"], 0, U), f, own, w, live), w, live)
+    Jt = ts.J(ts.home_u(np.where(G["gr"], 0, U), Sd, enc), w, enc)
     # first order: dJ = -sum_e S_e . dk_e
     sbase = ts.fill(tf, None)
     NI, NJ = G["S"].shape[0] + 1, G["S"].shape[1] + 1
@@ -96,19 +97,17 @@ def job(args):
 
 if __name__ == "__main__":
     init()
-    o, f, own, w, live, ins, gr = (G[k] for k in ("o", "f", "own", "w", "live", "ins", "gr"))
+    o, f, Sd, enc, w, ins, gr = (G[k] for k in ("o", "f", "Sd", "enc", "w", "ins", "gr"))
     fs0 = ts.fine_solve(o, gr, f)
-    J0f = ts.J(ts.home_u(fs0.u, f, own, w, live), w, live)
+    J0f = ts.J(ts.home_u(fs0.u, Sd, enc), w, enc)
     tf = G["tf"]
     sb0 = ts.fill(tf, None)
     m0 = ts.macro_solve(sb0, tf.s, K, ins, gr, f)
     U0, Ux, Uy = ts.evaluate(m0, o.shape)
-    ut = ts.home_u(np.where(gr, 0, U0), f, own, w, live)
-    J0t = ts.J(ut, w, live)
-    # adjoint of J2 (U-only readout): g = load of 2 u_owner f
-    gcell = np.zeros(o.shape)
-    on = own >= 0
-    gcell[on] = 2 * np.nan_to_num(ut[own[on]]) * f[on]
+    ut = ts.home_u(np.where(gr, 0, U0), Sd, enc)
+    J0t = ts.J(ut, w, enc)
+    # adjoint of J2 (U-only readout): g = Sd (2 w u), each home's 2 w u loaded as its demand
+    gcell = (Sd @ (2 * w * np.nan_to_num(ut))).reshape(o.shape)
     gvec = ts.load_vector(gcell, K, m0.unk, m0.n)
     lam, _, _ = ts.amg_solve(m0.A, gvec, 1e-10)
     NI, NJ = m0.U.shape

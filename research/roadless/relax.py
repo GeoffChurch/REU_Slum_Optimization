@@ -72,10 +72,7 @@ class Relaxation:
         self.inside = np.flatnonzero(g.inside)
         self.J0 = c.sc.J(c.sc.u0, power)
         xp = c.p.solver.xp                     # what home_u needs, on the device
-        on = np.flatnonzero(c.sc.owner.ravel() >= 0)
-        self._on = xp.asarray(on)
-        self._owner_on = xp.asarray(c.sc.owner.ravel()[on])
-        self._f_on = xp.asarray(c.sc.f.ravel()[on])
+        self._ST = c.p.solver.sparse.csr_matrix(c.sc.pl.S.T.tocsr())     # homes x cells
         self._share = xp.asarray(lifted.axes(c.p.K)[2] / np.pi)
 
     def proj(self, x: np.ndarray) -> np.ndarray:
@@ -112,17 +109,14 @@ class Relaxation:
 
     def _home_u(self, sol: lifted.Solution, op_eps: np.ndarray) -> np.ndarray:
         """Scorer.home_u_of with the per-unknown potentials left on the device (48M of them on
-        a big block): each cell's potential by angular share, injection-weighted per home."""
+        a big block): each cell's potential by angular share, then S^T there."""
         c, xp = self.c, self.c.p.solver.xp
         free = xp.flatnonzero(xp.asarray(op_eps).ravel() > 0)
         uk = xp.zeros((len(free), c.p.K))
         uk[sol.unk_cell >= 0] = sol.u.reshape(-1, c.p.K)
         ub = xp.zeros(op_eps.size)
         ub[free] = uk @ self._share
-        num = c.p.solver.to_host(xp.bincount(self._owner_on, weights=self._f_on * ub[self._on],
-                                             minlength=c.n))
-        with np.errstate(invalid="ignore", divide="ignore"):
-            return np.where(c.sc.live_home, num / c.sc.w, np.nan)
+        return np.where(c.sc.enclosed, np.nan, c.p.solver.to_host(self._ST @ ub))
 
     def value(self, x: np.ndarray) -> float:
         return self.c.sc.J(self._solve(x)[3], self.power)
@@ -141,11 +135,8 @@ class Relaxation:
         if self.power == 1.0:
             lam = sol.u
         else:
-            mult = np.zeros_like(c.sc.f)
-            on = c.sc.owner >= 0
-            mult[on] = self.power * np.nan_to_num(home_u[c.sc.owner[on]]) ** (self.power - 1.0)
-            lam = lifted.solve(g, op_eps, c.sc.f * mult, p, system=sy, rtol=self.rtol,
-                               host=False, x0=self._lam).u
+            lam = lifted.solve(g, op_eps, c.sc.adjoint_load(home_u, self.power), p, system=sy,
+                               rtol=self.rtol, host=False, x0=self._lam).u
             self._lam = lam
         K = p.K
         uk, lk = _cells_axes(sy, sol.u, K), _cells_axes(sy, lam, K)

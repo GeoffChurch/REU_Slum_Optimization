@@ -2,7 +2,7 @@
 elements of side k px, one tensor per element interpolated from the block tensors, + FLOOR I,
 U = 0 at nodes outside the region or on ground, the injection loaded with bilinear weights),
 with what the tile study needs kept: the SA hierarchy, the homes' readout as a matrix (each
-home's injection-weighted mean of U over its ring cells, ground cells 0, as ts.home_u of
+home's injection-weighted mean of U over its cells, ground cells 0, as ts.home_u of
 ts.evaluate's U), the J_2 adjoint and the element sensitivities S (dJ ~ -sum_e S_e : dsigma_e),
 and a local re-solve after a change of the block tensors (the fine model's multiplicative
 Schwarz: the base hierarchy plus an exact solve on the nodes within `margin` of the change).
@@ -79,7 +79,7 @@ class MacroBase:
         self.U0, self.iters, _ = pcg(lambda x: self.A @ x, self.F, self.vcycle, tol, 2000)
         self.t_assemble, self.t_setup, self.t_solve = t1 - t0, t2 - t1, time.perf_counter() - t2
         self.uh0 = self.home(self.U0)
-        lv = fab.live
+        lv = ~fab.enclosed
         self.J0 = float((fab.w[lv] * self.uh0[lv] ** 2).sum())
         if adjoint:
             g = self.H.T @ np.where(lv, 2 * fab.w * np.nan_to_num(self.uh0), 0.0)
@@ -92,15 +92,16 @@ class MacroBase:
         return x
 
     def _readout(self) -> sp.csr_matrix:
-        """(buildings x unknowns): home i's u = sum over its ring cells c (off the ground) of
-        f_c U(c) / w_i, U(c) ts.evaluate's bilinear interpolation of the nodes."""
+        """(buildings x unknowns): home i's u = sum over its cells c (off the ground) of
+        Sd_ci U(c), U(c) ts.evaluate's bilinear interpolation of the nodes."""
         fab, k = self.fab, self.k
-        fc = np.flatnonzero((fab.f.ravel() > 0) & ~fab.ground.ravel())
+        on = fab.Sd.tocoo()
+        off = ~fab.ground.ravel()[on.row]
+        fc, own, sv = on.row[off], on.col[off], on.data[off]
         nx = fab.o.shape[1]
         i, j = fc // nx, fc % nx
         Ir, Jn = i // k, j // k
         b, a = i / k - Ir, j / k - Jn
-        own, fv = fab.owner.ravel()[fc], fab.f.ravel()[fc]
         rows, cols, vals = [], [], []
         for di, dj, wt in ((0, 0, (1 - a) * (1 - b)), (0, 1, a * (1 - b)), (1, 0, (1 - a) * b),
                            (1, 1, a * b)):
@@ -108,12 +109,12 @@ class MacroBase:
             m = n >= 0
             rows.append(own[m])
             cols.append(n[m])
-            vals.append((fv * wt / fab.w[own])[m])
+            vals.append((sv * wt)[m])
         return sp.coo_matrix((np.concatenate(vals), (np.concatenate(rows), np.concatenate(cols))),
                              shape=(len(fab.w), self.N)).tocsr()
 
     def home(self, U: np.ndarray) -> np.ndarray:
-        return np.where(self.fab.live, self.H @ U, np.nan)
+        return np.where(self.fab.enclosed, np.nan, self.H @ U)
 
     def nodal(self, U: np.ndarray) -> np.ndarray:
         out = np.zeros((self.NI, self.NJ))
@@ -211,7 +212,7 @@ class MacroBase:
         r0 = -(dA @ self.U0)
         d, it, _ = pcg(Aop, r0, M, rtol, 1000)
         dh = self.H @ d
-        lv = self.fab.live
+        lv = ~self.fab.enclosed
         dJ = float((self.fab.w[lv] * (2 * self.uh0[lv] + dh[lv]) * dh[lv]).sum())
         return dict(dJ=dJ, dJ_lin=dJ_lin, iters=it, n_elems=len(elems), n_loc=len(ids),
                     seconds=time.perf_counter() - t0)

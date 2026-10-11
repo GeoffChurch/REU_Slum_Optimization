@@ -3,6 +3,8 @@
 The owner (2026-10-11): "We shouldn't exclude homes. Instead, we could maybe have buildings be imperfect insulators, which is perhaps related to transparency. That way, escape time would be finite. They should be fairly good insulators but we should get realistic results (e.g. the worst escape time should be worse, but not massively worse, than any of its neighbors that have open paths)".
 
 Code: `insulator.py` (lifted.py and common.py are used unchanged).
+The owner chose B from "Uniform walls" (2026-10-11, "B SGTM"), and it is now the metric (`lifted.Placement`, `common.Scorer.enclosed_left`; NOTES, "The insulator world").
+`insulator.py`, `crossing.py` and `walls.py` were then deleted; their code is at commit 9e10bbf.
 Rows: `insulator_rows/` (parquet is ignored; the CSV summaries named in each section are kept).
 
 ## Answer

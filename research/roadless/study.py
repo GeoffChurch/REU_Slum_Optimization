@@ -77,12 +77,13 @@ def _one(i: int) -> None:
             r = dict(block=b.block_id, n=n, arm=name, n_roads=len(pre),
                      road_m=float(pre.geometry.length.sum()),
                      D=common.displacement(b, pre, w),
-                     P_old=permeability(ctx, pre), stranded=carve.stranded)
+                     P_old=permeability(ctx, pre), enclosed0=carve.enclosed0)
             free = carve.free_of(pre)
             sol = lifted.solve(carve.grid, free, carve.f, p)
             u = carve.home_u_of(sol, free)
             u0 = carve.u0
-            r.update(P_carve=1.0 - sol.P / carve.P0, P2_carve=carve.perm_p(u, 2.0),
+            r.update(enclosed=carve.enclosed_left(free),
+                     P_carve=1.0 - sol.P / carve.P0, P2_carve=carve.perm_p(u, 2.0),
                      u95=float(np.nanpercentile(u, 95) / np.nanpercentile(u0, 95)),
                      umax=float(np.nanmax(u) / np.nanmax(u0)),
                      umed=float(np.nanmedian(u) / np.nanmedian(u0)))
@@ -155,7 +156,8 @@ def report(h: float, ell: float, K: int, pop: str = "count") -> None:
     for arm, g in A.groupby("arm"):
         print(f"  {arm:13s} {len(g):4d}  {g.P_old.median():.3f}  {g.P_carve.median():.3f}  "
               f"{g.P_obl.median():.3f}  {g.road_m.median():7.0f}")
-    print(f"  stranded share: median {d.stranded.median():.3f}, max {d.stranded.max():.3f}")
+    print(f"  enclosed share at baseline: median {d.enclosed0.median():.3f}, max "
+          f"{d.enclosed0.max():.3f}")
     taus = [_tau(g.P_old.to_numpy(), g.P_carve.to_numpy()) for _, g in A.groupby("block")]
     print(f"\n  per-block Kendall tau, old vs roadless ranking of the arms reaching 10%: median "
           f"{np.nanmedian(taus):+.3f}, IQR {np.nanpercentile(taus, 25):+.3f}.."

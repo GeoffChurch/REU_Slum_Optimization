@@ -90,12 +90,11 @@ class FineBase:
             self.u0, self.iters = u0, 0
         self.t_solve = time.perf_counter() - t
         self.res = float(np.linalg.norm(self.b0 - self.A0 @ self.u0) / np.linalg.norm(self.b0))
-        # the homes' readout: cells with injection, their unknown (-1 on ground), owner, f
-        fc = np.flatnonzero(f.ravel() > 0)
-        self.f_unk = self.idx0.ravel()[fc]
-        self.f_own = fab.owner.ravel()[fc]
-        self.f_val = f.ravel()[fc]
-        assert (self.f_own >= 0).all()
+        # the homes' readout: Sd^T over the baseline unknowns (ground cells, u 0, left out)
+        on = fab.Sd.tocoo()
+        unk = self.idx0.ravel()[on.row]
+        m = unk >= 0
+        self.R = sp.csr_matrix((on.data[m], (on.col[m], unk[m])), shape=(len(fab.w), self.N0))
         self.uh0 = self.home(self.u0)
         self.J0 = self.J(self.uh0)
         self.P0 = float(self.b0 @ self.u0)
@@ -109,14 +108,11 @@ class FineBase:
 
     def home(self, x: np.ndarray) -> np.ndarray:
         """Per building: the injection-weighted mean of x (over the baseline unknowns) on its
-        ring cells (ts.home_u); nan where stranded."""
-        v = np.where(self.f_unk >= 0, x[np.maximum(self.f_unk, 0)], 0.0)
-        num = np.bincount(self.f_own, weights=self.f_val * v, minlength=len(self.fab.w))
-        with np.errstate(invalid="ignore", divide="ignore"):
-            return np.where(self.fab.live, num / self.fab.w, np.nan)
+        cells (ts.home_u); nan where enclosed."""
+        return np.where(self.fab.enclosed, np.nan, self.R @ x)
 
     def J(self, uh: np.ndarray) -> float:
-        lv = self.fab.live
+        lv = ~self.fab.enclosed
         return float((self.fab.w[lv] * uh[lv] ** 2).sum())
 
     def u_cells(self, x: np.ndarray) -> np.ndarray:
@@ -216,7 +212,7 @@ class FineBase:
         t1 = time.perf_counter()
         d, it, res = pcg(Aop, r0, M, rtol, 1000)
         uh = self.home(d[:N0])
-        lv = fab.live
+        lv = ~fab.enclosed
         dJ = float((fab.w[lv] * (2 * self.uh0[lv] + uh[lv]) * uh[lv]).sum())
         dP = float(self.b0 @ d[:N0])
         out = dict(dJ=dJ, dP=dP, iters=it, res=res, n_new=n_new, n_dA=int(dA.nnz),
@@ -240,8 +236,8 @@ class FineBase:
             raise RuntimeError(f"full solve: residual {rel:.1e}")
         u = np.zeros(oc.shape)
         u[on] = x
-        uh = ts.home_u(u, self.fab.f, self.fab.owner, self.fab.w, self.fab.live)
-        return dict(J=ts.J(uh, self.fab.w, self.fab.live), P=float(b @ x), uh=uh,
+        uh = ts.home_u(u, self.fab.Sd, self.fab.enclosed)
+        return dict(J=ts.J(uh, self.fab.w, self.fab.enclosed), P=float(b @ x), uh=uh,
                     iters=len(res) - 1, seconds=time.perf_counter() - t0, u=u)
 
 

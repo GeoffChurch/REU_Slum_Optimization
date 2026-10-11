@@ -28,10 +28,14 @@ Continuum: E(u) = int (d_s u)^2 + ell^-2 (d_theta u)^2. Symmetric, so P = f^T L^
 total expected escape time and the power of the system-optimal LINEAR-congestion routing, and
 freeing space can only lower P (Rayleigh). ell = metres travelled per radian of turning.
 
-Demand: each building injects 1 over the free cells within 1 m of it that it is nearest to,
-spread over axes by angular share; FIXED at the original footprints (rehoused in place), so only
-the operator changes. Ground: cells within 1 m of Block.streets. Homes in pockets sealed at
-baseline (no path to ground) are dropped from the demand and counted (`stranded`).
+Demand: each building injects 1 over the free cells within 1 m of it that it is nearest to and
+that reach the street at baseline, spread over axes by angular share; FIXED at the original
+footprints (rehoused in place), so only the operator changes. Ground: cells within 1 m of
+Block.streets. A home with no such cell, but free cells within 1 m of its own outline that reach
+the street (the nearest-building rule gave them to a neighbour), injects over those, shared; the
+rest are ENCLOSED: they inject nothing, are out of J, and a clearing reports the population it
+leaves enclosed (`Scorer.enclosed_left`), scored before J (lifted.Placement; owner 2026-10-11,
+"The insulator world").
 
 Rules for what a network frees: CARVE (the corridor itself -- what the displacement charge pays
 for) and OBLITERATE (every building the corridor touches, whole). Score perm' = 1 - P/P0.
@@ -2581,4 +2585,22 @@ rate between the two that eps, the walls and the block set. Searching at eps_gat
 nothing cleared the GPU solver stopped at 2,000 iterations on 5 of the 16 (residuals 2e-6 --
 4e-5), as the swings' screens did on 30848 at 1e-6. B's optimizer is two stages: free (every
 enclosed home's cheapest crossings, D 0.0004 -- 0.0144 a block, median 0.0022), then today's
-search with the rest. Recommended: B; the owner's call.
+search with the rest. Recommended: B; the owner chose it (2026-10-11: "B SGTM").
+
+**The port** (owner 2026-10-11, "B SGTM"). B is the metric. lifted.Placement replaces
+lifted.demand and the per-cell owner map with S (cells x homes, so a cell can take several
+homes' demand): the shadowed homes inject on their open side, and the enclosed ones (no free
+cell within 1 m of the outline reaches the street) inject nothing and are reported by
+Scorer.enclosed_left, which road_rescore.py and resolution_check.py record as `enclosed`. The
+optimizers' adjoint loads (Scorer.adjoint_load) and device readouts (relax, the cat greedy's
+gram, goal_indicator) run on S. Checked on the CPU against 9e10bbf where no home is shadowed
+(six small blocks: f, u0, P0, J_2 and Lens A to 4.4e-13, SIMP's gradient to 6.8e-14, the tension
+and gram to 9.4e-13), and against the walls rows where homes are (17 small blocks, 25 shadowed
+homes: u0 to 2.2e-9; the enclosed share left exact on all 41 small blocks and all 60 large-block
+clearings). B frees a home when any cell within 1 m of its outline opens to the street, so it
+frees more than walls.py did (40 of 561 single-building probes, never fewer). The fix moves the
+baseline where a home was shadowed: on those 17 blocks J_2 rises by a median 1.3% (29% on 43817,
+from one sliver-door home at 37x the median u), and 400 of 3,515 ring homes move by more than 1%
+(the cells they now share congest). insulator.py, crossing.py and walls.py are deleted (code at
+9e10bbf); fft_homog's extracts (in a session scratchpad) predate the change and must be
+regenerated before its scripts run again.

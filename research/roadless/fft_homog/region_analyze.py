@@ -92,8 +92,8 @@ def homes() -> None:
     for L in (100, 200, 50):
         for fill in ("open-outside", "extrapolated", "inside-avg"):
             z = np.load(rc.OUT / f"homes_L{L}_{fill}.npz")
-            u_f, u_t, hd, w, live = z["u_f"], z["u_t"], z["hd"], z["w"], z["live"]
-            ok = live & (u_f > 0)
+            u_f, u_t, hd, w, enc = z["u_f"], z["u_t"], z["hd"], z["w"], z["enclosed"]
+            ok = ~enc & (u_f > 0)
             J_f = (w[ok] * u_f[ok] ** 2).sum()
             rel = (u_t - u_f) / u_f
             src = ts_rows[(ts_rows.L_m == L) & (ts_rows.fill == fill) & (ts_rows.H_m == 2)

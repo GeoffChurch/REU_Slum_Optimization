@@ -7,6 +7,8 @@ street-first prefixes (common.prefix_to) at BUDGETS and whole, scored
   (b) roadless, the walking model changed only: count population, p 1, the same prefixes;
   (c) roadless as the optimizers use it: area population, J_2, on AREA-weight prefixes;
 CARVE rule (common.Carve), every solve keeping both powers (P and J_2 come from one solve).
+Before (b) and (c), each scored prefix and clearing records `enclosed`, the population share it
+leaves enclosed (common.Scorer.enclosed_left; owner 2026-10-11, "B SGTM").
 The stored clearings (SIMP default, the cheap preset) are rescored on the same scorer: their
 stored Lens A is the check that the scorer reproduces the optimizers' own.
 
@@ -562,6 +564,7 @@ def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> No
                                      stored_mesh=common.mesh_of(stored_mesh).name,
                                      n_cleared=int(x.sum()), D=float(c.cost @ x),
                                      stored_D=float(r[D_col]), stored_perm=float(r[perm_col]),
+                                     enclosed=c.sc.enclosed_left(rel.open_of(x)),
                                      perm=rel.perm(J), perm1=1.0 - P / c.sc.P0,
                                      t=time.perf_counter() - ts))
                     print(f"  {cname}: rescored {rows[-1]['perm']:.7f}, stored "
@@ -598,6 +601,7 @@ def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> No
                         gw.note_pool()
                         u = sc.home_u_of(sol, free)
                         got[(pop, m)] = dict(
+                            enclosed=sc.enclosed_left(free),
                             P1=1.0 - sol.P / sc.P0, P2=sc.perm_p(u, 2.0),
                             u95=float(np.nanpercentile(u, 95) / np.nanpercentile(sc.u0, 95)),
                             umax=float(np.nanmax(u) / np.nanmax(sc.u0)),
@@ -623,7 +627,7 @@ def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> No
             sc = scorers[pop]
             pd.DataFrame([dict(block=bid, n=len(b.buildings), mesh=mesh.name, pop=pop,
                                cells=int(c.sc.grid.inside.sum()), P0=sc.P0,
-                               J2_0=sc.J(sc.u0, 2.0), stranded=sc.stranded,
+                               J2_0=sc.J(sc.u0, 2.0), enclosed0=sc.enclosed0,
                                t_setup=t_setup, t_block=time.perf_counter() - t0,
                                networks=",".join(todo),
                                gpu_peak_gb=gw.peak_mib / 1024, pool_peak_gb=gw.pool_peak_gb,

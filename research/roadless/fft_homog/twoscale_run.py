@@ -14,25 +14,22 @@ from scipy.stats import spearmanr
 WORKERS = 8
 OUT = "twoscale.csv"
 d = np.load("fabric_5810.npz")
-o, ins, gr, f = d["ff0"].astype(float), d["inside"], d["ground"], d["f"]
-own, w, live = d["owner"], d["w"], ~d["stranded"]
+o, ins, gr = d["ff0"].astype(float), d["inside"], d["ground"]
+Sd, enc, w, f = ts.demand_of(d, o.shape)
 H = 0.5
 
 fs = ts.fine_solve(o, gr, f, tol=1e-10)
-u_f = ts.home_u(fs.u, f, own, w, live)
-J_f, P_f = ts.J(u_f, w, live), float((f * fs.u).sum())
+u_f = ts.home_u(fs.u, Sd, enc)
+J_f, P_f = ts.J(u_f, w, enc), float((f * fs.u).sum())
 print(f"fine: {fs.n} unknowns {fs.seconds:.1f}s J2 {J_f:.6g} P {P_f:.6g}", flush=True)
 
-# each home's distance to the exit (m): EDT from ground cells, at the home's ring cells
+# each home's distance to the exit (m): EDT from ground cells, at the home's cells (Sd^T)
 dist = ndimage.distance_transform_edt(~gr) * H
-on = own >= 0
-hd = np.bincount(own[on], weights=(f * dist)[on], minlength=len(w)) / np.where(w > 0, w, 1)
+hd = Sd.T @ dist.ravel()
 # main body vs the north-east strip (rows > 1700 or cols > 1550 px)
-rr, cc = np.nonzero(on)
 strip_cell = np.zeros(o.shape, dtype=bool)
 strip_cell[(np.arange(o.shape[0])[:, None] > 1700) | (np.arange(o.shape[1])[None, :] > 1550)] = True
-hs = (np.bincount(own[on], weights=(f * strip_cell)[on], minlength=len(w))
-      / np.where(w > 0, w, 1) > 0.5)
+hs = Sd.T @ strip_cell.ravel().astype(float) > 0.5
 
 rows = []
 for L, s in [(int(a), int(b)) for a, b in (x.split(":") for x in sys.argv[1:])] or [(50, 10)]:
@@ -66,11 +63,11 @@ for L, s in [(int(a), int(b)) for a, b in (x.split(":") for x in sys.argv[1:])] 
                 if corr == "U+chi+w":
                     uc += tf.wf
                 uc = np.where(gr, 0.0, uc)
-                u_t = ts.home_u(uc, f, own, w, live)
-                J_t = ts.J(u_t, w, live)
+                u_t = ts.home_u(uc, Sd, enc)
+                J_t = ts.J(u_t, w, enc)
                 P_t = float((f * uc).sum())
                 rel = (u_t - u_f) / u_f
-                ok = live & (u_f > 0)
+                ok = ~enc & (u_f > 0)
                 row = dict(L_m=L, stride_m=s, fill=fill_name, H_m=k_m, corr=corr,
                            macro_unknowns=mac.n, macro_s=mac.seconds,
                            J2_rel_err=J_t / J_f - 1, P_rel_err=P_t / P_f - 1,
@@ -90,5 +87,5 @@ for L, s in [(int(a), int(b)) for a, b in (x.split(":") for x in sys.argv[1:])] 
                       flush=True)
                 if corr == "U+chi+w" and k_m == 2:
                     np.savez_compressed(f"homes_L{L}_{fill_name}.npz", u_f=u_f, u_t=u_t, hd=hd,
-                                        strip=hs, w=w, live=live)
+                                        strip=hs, w=w, enclosed=enc)
     pd.DataFrame(rows).to_csv(OUT, index=False)

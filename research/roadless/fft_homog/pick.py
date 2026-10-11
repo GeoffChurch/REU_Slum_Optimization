@@ -1,15 +1,15 @@
 """Pick window centres in 5810: fully inside the block; densest / median / sparsest by building
-count at 200 m (building positions = mean of each building's ring cells)."""
+count at 200 m (building positions = mean of each building's injection cells)."""
 import numpy as np
+import ts
 
 d = np.load("fabric_5810.npz")
-ff, ins, own = d["ff0"].astype(float), d["inside"], d["owner"]
-nb = int(d["n_buildings"])
-rr, cc = np.nonzero(own >= 0)
-k = own[rr, cc]
-cnt = np.bincount(k, minlength=nb)
-cy = np.bincount(k, weights=rr, minlength=nb) / np.maximum(cnt, 1)
-cx = np.bincount(k, weights=cc, minlength=nb) / np.maximum(cnt, 1)
+ff, ins = d["ff0"].astype(float), d["inside"]
+on = ts.demand_of(d, ff.shape).Sd.tocoo()       # its nonzeros: (cell, home)
+nb, nx = int(d["n_buildings"]), ff.shape[1]
+cnt = np.bincount(on.col, minlength=nb)           # each home's cells (0: enclosed)
+cy = np.bincount(on.col, weights=on.row // nx, minlength=nb) / np.maximum(cnt, 1)
+cx = np.bincount(on.col, weights=on.row % nx, minlength=nb) / np.maximum(cnt, 1)
 ok = cnt > 0
 B = np.zeros(ff.shape)
 np.add.at(B, (cy[ok].astype(int), cx[ok].astype(int)), 1)

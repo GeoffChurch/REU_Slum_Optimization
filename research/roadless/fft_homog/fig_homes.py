@@ -14,15 +14,15 @@ files = sys.argv[1:]
 fig, axs = plt.subplots(1, 2, figsize=(12, 4.8))
 for path, col in zip(files, (BLUE, ORANGE), strict=False):
     z = np.load(path)
-    u_f, u_t, hd, live = z["u_f"], z["u_t"], z["hd"], z["live"]
-    ok = live & (u_f > 0) & (u_t > 0)
+    u_f, u_t, hd, enc = z["u_f"], z["u_t"], z["hd"], z["enclosed"]
+    ok = ~enc & (u_f > 0) & (u_t > 0)
     lab = path.replace("homes_", "").replace(".npz", "").replace("_", " windows, ")
     axs[0].scatter(u_f[ok], u_t[ok], s=4, color=col, alpha=0.35, edgecolors="none", label=lab)
     rel = (u_t - u_f) / u_f
     bins = np.array([0, 5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 450])
     mids, med, lo, hi = [], [], [], []
     for a, b in zip(bins[:-1], bins[1:], strict=True):
-        m = live & (u_f > 0) & (hd >= a) & (hd < b)
+        m = ~enc & (u_f > 0) & (hd >= a) & (hd < b)
         if m.sum() < 10:
             continue
         mids.append(0.5 * (a + b))

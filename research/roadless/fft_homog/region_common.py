@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import scipy.sparse as sp
 
 HERE = Path(__file__).resolve().parent                      # research/roadless/fft_homog
 ROADLESS = HERE.parent
@@ -140,13 +141,14 @@ class Fabric:
     o: np.ndarray            # (ny, nx) open fraction ff0
     inside: np.ndarray
     ground: np.ndarray
-    f: np.ndarray            # injection (lifted.demand, area population)
-    owner: np.ndarray        # building per ring cell, -1 none
+    f: np.ndarray            # injection Sd w (lifted.Placement, area population)
+    Sd: sp.csr_matrix        # the placement's S (cells flat x buildings): each building's
+                             #   share of its injection per cell
     w: np.ndarray            # per building: population weight
-    live: np.ndarray         # per building: not stranded
+    enclosed: np.ndarray     # per building: enclosed (injects nothing, out of J)
     area: np.ndarray         # per building: footprint m^2
-    cy: np.ndarray           # per building: mean ring-cell row / column (pick.py's), cnt ring
-    cx: np.ndarray           #   cells (0: no ring cell)
+    cy: np.ndarray           # per building: mean injection-cell row / column (pick.py's), cnt
+    cx: np.ndarray           #   injection cells (0: enclosed)
     cnt: np.ndarray
     py: np.ndarray           # per building: polygon centroid row / column (px)
     px: np.ndarray
@@ -157,12 +159,14 @@ class Fabric:
 
 
 def load_fabric() -> Fabric:
+    import ts
     d = np.load(OUT / "fabric_region.npz")
     order = np.argsort(d["sub_bldg"], kind="stable")
     sb = d["sub_bldg"][order]
     n = len(d["w"])
+    dm = ts.demand_of(d, d["ff0"].shape)
     return Fabric(o=d["ff0"].astype(np.float64), inside=d["inside"], ground=d["ground"],
-                  f=d["f"], owner=d["owner"], w=d["w"], live=~d["stranded"], area=d["area"],
+                  f=dm.f, Sd=dm.Sd, w=dm.w, enclosed=dm.enclosed, area=d["area"],
                   cy=d["cy"], cx=d["cx"], cnt=d["cnt"], py=d["py"], px=d["px"],
                   sc=d["sub_cell"][order], sb=sb, sn=d["sub_count"][order],
                   starts=np.searchsorted(sb, np.arange(n + 1)))

@@ -155,10 +155,7 @@ def composite_P(sc, r: int, D: float, Dg: float, p: lifted.Params, field=None):
     ucell[liveu] = uu.reshape(-1, K) @ (m / np.pi)
     ub = np.zeros((ny, nx))
     ub[rr, cc] = ucell[:nf]
-    on = sc.owner >= 0
-    num = np.bincount(sc.owner[on], weights=(sc.f * ub)[on], minlength=len(sc.polys))
-    with np.errstate(invalid="ignore", divide="ignore"):
-        home = np.where(sc.live_home, num / sc.w, np.nan)
+    home = np.where(sc.enclosed, np.nan, sc.pl.home_u(ub.ravel()))
     return P, home, dict(fine_cells=nf, coarse_cells=nc, unknowns=int(keepu.sum()), coarse_tiles=int(coarse_tile.sum()),
                    tiles=int(Ty * Tx))
 
@@ -170,7 +167,8 @@ if __name__ == "__main__":
     Dg = float(sys.argv[4]) if len(sys.argv) > 4 else D
     p = lifted.Params(3.0, 8, along=lifted.Uniform(), solver=lifted.CpuAMG())
     [b] = common.build_blocks([bid])
-    sc = common.Scorer(b, 0.5, p, population=common.POPULATIONS["area"])
+    sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p,
+                       population=common.POPULATIONS["area"])
     lab = sc.grid.label_sub(sc.polys)
     g = sc.grid
     cost = sc.w / sc.w.sum()

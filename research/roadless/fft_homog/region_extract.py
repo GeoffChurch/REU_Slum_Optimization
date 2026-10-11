@@ -1,7 +1,7 @@
 """Rasterize 5810@major once on the metric's uniform lattice (h 0.5, lifted.OFFSET) and save
 what the region_*.py scripts need: the fabric (as extract.py), the per-cell footprint labels as
 (cell, building, count) triples (as extract2.py, to open any building exactly), the building
-centroids (pick.py's ring-cell means, and the polygons' own), and a check that the two stored
+centroids (pick.py's injection-cell means, and the polygons' own), and a check that the two stored
 clearings' indices are in b.buildings.outlines order (their cleared population share D).
 
 Run from the reblock repo root:
@@ -35,8 +35,8 @@ with rc.Monitor("extract: uniform h 0.5 grid, demand, labels"):
           f"{time.time() - t:.0f} s", flush=True)
     w = common.POPULATIONS["area"].weights(polys)
     reach = lifted.grounded(g, g.ff0, p)
-    f, stranded, owner = lifted.demand(g, polys, reach, w)
-    print(f"demand: stranded {int(stranded.sum())}, {time.time() - t:.0f} s", flush=True)
+    pl = lifted.Placement.of(g, polys, reach, ring_m=lifted.RING_M)
+    print(f"demand: enclosed {int(pl.enclosed.sum())}, {time.time() - t:.0f} s", flush=True)
     lab = g.label_sub(polys).reshape(-1, g.S * g.S)
     cells, subs = np.nonzero(lab >= 0)
     key = cells.astype(np.int64) * len(polys) + lab[cells, subs]
@@ -47,12 +47,13 @@ with rc.Monitor("extract: uniform h 0.5 grid, demand, labels"):
     print(f"labels: {len(ukey)} (cell, building) pairs, {time.time() - t:.0f} s", flush=True)
 
 ny, nx = g.inside.shape
-# pick.py's centroids: the mean of each building's ring cells (rows, columns), with their count
-rr, cc = np.nonzero(owner >= 0)
-k = owner[rr, cc]
-cnt = np.bincount(k, minlength=len(polys))
-cy = np.bincount(k, weights=rr, minlength=len(polys)) / np.maximum(cnt, 1)
-cx = np.bincount(k, weights=cc, minlength=len(polys)) / np.maximum(cnt, 1)
+# pick.py's centroids: the mean of each building's injection cells (rows, columns), with their
+# count (0: enclosed)
+on = pl.S.tocoo()
+cnt = np.bincount(on.col, minlength=len(polys))
+cy = np.bincount(on.col, weights=on.row // nx, minlength=len(polys)) / np.maximum(cnt, 1)
+cx = np.bincount(on.col, weights=on.row % nx, minlength=len(polys)) / np.maximum(cnt, 1)
+del on
 cen = shapely.centroid(polys)
 px = (shapely.get_x(cen) - g.x0) / g.h            # cell (i, j) is centred at (x0 + j h, y0 + i h)
 py = (shapely.get_y(cen) - g.y0) / g.h
@@ -71,7 +72,8 @@ for name, row, Dcol in (("cheap", cheap_row, "D"), ("simp", simp_row, "simp_D"))
 
 np.savez_compressed(
     rc.OUT / "fabric_region.npz", ff0=g.ff0.astype(np.float32), inside=g.inside,
-    ground=g.ground, reach=reach, f=f, owner=owner.astype(np.int32), w=w, stranded=stranded,
+    ground=g.ground, reach=reach, S_data=pl.S.data, S_indices=pl.S.indices,
+    S_indptr=pl.S.indptr, S_shape=np.array(pl.S.shape), enclosed=pl.enclosed, w=w,
     x0=g.x0, y0=g.y0, h=g.h, area=area, cy=cy, cx=cx, cnt=cnt, py=py, px=px,
     sub_cell=sub_cell, sub_bldg=sub_bldg, sub_count=cnts.astype(np.int16),
     n_buildings=len(polys), region_area=b.boundary.area, boundary_wkt=b.boundary.wkt)

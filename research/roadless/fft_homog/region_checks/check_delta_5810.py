@@ -4,12 +4,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 import region_common as rc
 import region_fine as rf
+import ts
 S = str(rc.OUT.parent / "fft_homog") + "/"
 d = np.load(S + "fabric_5810.npz"); C = np.load(S + "clearings_5810.npz")
 order = np.argsort(C["sub_bldg"], kind="stable"); sb = C["sub_bldg"][order]; n = len(d["w"])
 cen = np.load(S + "centroids.npy")
-fab = rc.Fabric(o=d["ff0"].astype(float), inside=d["inside"], ground=d["ground"], f=d["f"],
-                owner=d["owner"], w=d["w"], live=~d["stranded"], area=d["area"], cy=cen[0],
+dm = ts.demand_of(d, d["ff0"].shape)
+fab = rc.Fabric(o=d["ff0"].astype(float), inside=d["inside"], ground=d["ground"], f=dm.f,
+                Sd=dm.Sd, w=dm.w, enclosed=dm.enclosed, area=d["area"], cy=cen[0],
                 cx=cen[1], cnt=cen[2], py=cen[0], px=cen[1], sc=C["sub_cell"][order], sb=sb,
                 sn=C["sub_count"][order], starts=np.searchsorted(sb, np.arange(n + 1)))
 t = time.time(); fb = rf.FineBase(fab); print("base", fb.N0, fb.iters, f"{time.time()-t:.1f}s J0 {fb.J0:.10g}", flush=True)

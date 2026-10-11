@@ -22,7 +22,8 @@ def main(bid: str, hs: list[float]) -> None:
     for h in hs:
         g = lifted.Grid.of(b.boundary, polys, list(b.streets.geometry), h)
         reach = lifted.grounded(g, g.ff0, lifted.Params(3.0, 8))
-        f, _, _ = lifted.demand(g, polys, reach, np.ones(len(polys)))
+        f = lifted.Placement.of(g, polys, reach, ring_m=lifted.RING_M).field(
+            np.ones(len(polys)), g.inside.shape)
         ref = None
         for name in ("cpu", "gpu"):
             p = lifted.Params(3.0, 8, solver=lifted.solver_of(name))

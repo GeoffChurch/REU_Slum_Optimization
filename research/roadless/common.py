@@ -200,14 +200,16 @@ class Scorer:
         self.polys = np.asarray(block.buildings.outlines)
         self.tree = shapely.STRtree(self.polys)
         self.free0 = self.grid.ff0
-        # demand only where the street can be reached at baseline: fixed from here on, so
-        # freeing space only ever adds conductance. `stranded` = share of buildings with no
-        # reachable ring cell (they inject nothing).
+        # demand only where the street can be reached at baseline (lifted.Placement): fixed from
+        # here on, so freeing space only ever adds conductance. The enclosed homes inject
+        # nothing and are out of J; a clearing is scored first by the population it leaves
+        # enclosed (`enclosed_left`), then by J over the rest (owner 2026-10-11, "B SGTM").
         reach = lifted.grounded(self.grid, self.free0, p)   # bool mask
         self.w = population.weights(self.polys)
-        self.f, stranded, self.owner = lifted.demand(self.grid, self.polys, reach, self.w)
-        self.live_home = ~stranded
-        self.stranded = float(self.w[stranded].sum() / max(self.w.sum(), 1e-12))
+        self.pl = lifted.Placement.of(self.grid, self.polys, reach, ring_m=lifted.RING_M)
+        self.f = self.pl.field(self.w, self.grid.inside.shape)
+        self.enclosed = self.pl.enclosed
+        self.enclosed0 = float(self.w[self.enclosed].sum() / self.w.sum())
         sol = lifted.solve(self.grid, self.free0, self.f, p)
         self.P0 = sol.P
         self.u0 = self.home_u_of(sol, self.free0)
@@ -217,20 +219,33 @@ class Scorer:
 
     def home_u_of(self, sol: lifted.Solution, free) -> np.ndarray:
         """Per building: its congested escape time u_i, the injection-weighted mean potential
-        over its ring cells (so sum_i w_i u_i = P). nan for stranded buildings."""
+        over its cells (so sum_i w_i u_i = P). nan for the enclosed buildings."""
         ub = lifted.cell_mean_u(sol, free, self.p)
-        on = self.owner >= 0
-        num = np.bincount(self.owner[on], weights=(self.f * ub)[on], minlength=len(self.polys))
-        with np.errstate(invalid="ignore", divide="ignore"):
-            return np.where(self.live_home, num / self.w, np.nan)
+        return np.where(self.enclosed, np.nan, self.pl.home_u(ub.ravel()))
 
     def home_u(self, free) -> np.ndarray:
         return self.home_u_of(lifted.solve(self.grid, free, self.f, self.p), free)
 
     def J(self, u: np.ndarray, power: float) -> float:
-        """J_p = sum_i w_i u_i^p over reachable buildings (J_1 = P)."""
-        ok = self.live_home
+        """J_p = sum_i w_i u_i^p over the buildings not enclosed (J_1 = P)."""
+        ok = ~self.enclosed
         return float((self.w[ok] * u[ok] ** power).sum())
+
+    def adjoint_load(self, u_home: np.ndarray, power: float) -> np.ndarray:
+        """The load of J_power's adjoint, dJ/du per cell (in the grid's shape): home i's
+        w_i power u_i^(power - 1) injected as its population is (the enclosed inject nothing)."""
+        return self.pl.field(self.w * power * np.nan_to_num(u_home) ** (power - 1.0),
+                             self.grid.inside.shape)
+
+    def enclosed_left(self, free) -> float:
+        """The share of the population still enclosed in the field `free`: the baseline's
+        enclosed homes with no cell within RING_M of the outline open and street-connected
+        there (B (i), scored before J). With none enclosed, 0 without the reach (on a composite
+        mesh a host pass over every cell: 14 -- 20 s on the oversized blocks)."""
+        if not self.enclosed.any():
+            return 0.0
+        freed = self.pl.reached(lifted.grounded(self.grid, free, self.p))
+        return float(self.w[self.enclosed & ~freed].sum() / self.w.sum())
 
     def perm_p(self, u: np.ndarray, power: float) -> float:
         return 1.0 - (self.J(u, power) / self.J(self.u0, power)) ** (1.0 / power)
@@ -319,11 +334,8 @@ def goal_indicator(block, grid, p: lifted.Params, population, power: float,
     sol = lifted.solve(grid, op, sc.f, p, rtol=GOAL_RTOL, host=False)
     host = dataclasses.replace(sol, u=p.solver.to_host(sol.u), cell=p.solver.to_host(sol.cell),
                                unk_cell=p.solver.to_host(sol.unk_cell))
-    u_home = sc.home_u_of(host, op)
-    mult = np.zeros_like(sc.f)
-    on = sc.owner >= 0
-    mult[on] = power * np.nan_to_num(u_home[sc.owner[on]]) ** (power - 1.0)
-    lam = lifted.solve(grid, op, sc.f * mult, p, rtol=GOAL_RTOL, host=False)
+    lam = lifted.solve(grid, op, sc.adjoint_load(sc.home_u_of(host, op), power), p,
+                       rtol=GOAL_RTOL, host=False)
 
     def per_axis(s: lifted.Solution):
         out = xp.zeros((len(s.unk_cell), K))

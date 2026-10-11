@@ -18,7 +18,8 @@ clearings.parquet: block, name, cleared (building indices); in the cluster's inp
 ($CLUSTER_SUBMIT_INPUTS) or a local path. A name ending `_steps` is a greedy's pick order, cut to
 `budget` as polish_greedy.py cuts it (every building in order while it fits) and reported
 without the suffix. Rows in res_rows/<along>/<id>_p<p>_h<mesh,mesh,...>.parquet:
-block, name, h (the finest cell), mesh (its name), perm (Lens A on that mesh), cells.
+block, name, h (the finest cell), mesh (its name), enclosed (the population share the clearing
+leaves enclosed, common.Scorer.enclosed_left), perm (Lens A on that mesh), cells.
 """
 from __future__ import annotations
 
@@ -58,6 +59,7 @@ def main(bid: str, power: float, device: str, along: str, clearings: str, tokens
             r = np.zeros(c.n)
             r[np.asarray(cleared, dtype=np.int64)] = 1.0
             rows.append(dict(block=bid, name=name, h=mesh.h, mesh=mesh.name,
+                             enclosed=c.sc.enclosed_left(rel.open_of(r)),
                              perm=rel.perm(rel.exact(r)), cells=cells))
         print(f"{bid} {mesh.name}: {cells} cells, "
               + ", ".join(f"{r['name']} {r['perm']:.4f}" for r in rows if r["mesh"] == mesh.name)

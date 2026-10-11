@@ -142,11 +142,8 @@ class Clearing:
         if power == 1.0:
             lam = sol.u
         else:
-            mult = np.zeros_like(self.sc.f)
-            on = self.sc.owner >= 0
-            mult[on] = power * np.nan_to_num(home_u[self.sc.owner[on]]) ** (power - 1.0)
-            lam = lifted.solve(g, op_eps, self.sc.f * mult, self.ps, system=sy, rtol=self.rtol,
-                               host=False).u
+            lam = lifted.solve(g, op_eps, self.sc.adjoint_load(home_u, power), self.ps,
+                               system=sy, rtol=self.rtol, host=False).u
         # Each edge's weight gained by clearing everything, at the CURRENT along-factors (the
         # local term): w = w_uniform x min(factor at the two ends). The factors' own response to
         # clearing (straight runs lengthening through the cleared cells, boosting edges
@@ -434,19 +431,23 @@ class Catchment:
         keep = xp.flatnonzero(sy.keep)
         u = t.u[keep]
         rowsum = A @ xp.ones(A.shape[0])
-        # per kept unknown: its home (the owner of its cell) and its injection
-        owner_free = xp.asarray(c.sc.owner).ravel()[sy.cell.ravel() >= 0]
-        live = sy.unk_cell >= 0
-        owner_unk = xp.repeat(owner_free[live], K)[keep]
-        b = sy.load(c.sc.f, c.p)[keep]
-        home = xp.flatnonzero(owner_unk >= 0)
-        inj = xp.bincount(owner_unk[home], b[home], minlength=c.n)
-        Hown = spm.coo_matrix((b[home], (owner_unk[home], home)),
-                              shape=(c.n, len(keep))).tocsr()
-        # members: kept positions of each candidate's unknowns (eps world: free cell = inside)
-        assert len(sy.unk_cell) == c.bfree.shape[1]
+        assert len(sy.unk_cell) == c.bfree.shape[1]     # eps world: free cell = inside
         pos = -xp.ones(sy.n, dtype=xp.int64)
         pos[keep] = xp.arange(len(keep))
+        # per home, its injection on each kept unknown (sy.load's: S_cj w_j by the axis's
+        # angular share), so a cell several homes inject into splits its load among them
+        Sc = c.sc.pl.S.tocoo()
+        unk = sy.unk_cell[sy.cell.ravel()[xp.asarray(Sc.row)]]         # -1 on ground
+        on = unk >= 0
+        at = pos[(unk[on][:, None] * K + xp.arange(K)[None, :]).ravel()]
+        home = xp.repeat(xp.asarray(Sc.col)[on], K)
+        load = (xp.asarray(Sc.data * c.sc.w[Sc.col])[on][:, None]
+                * xp.asarray(lifted.axes(K)[2] / np.pi)[None, :]).ravel()
+        kept = at >= 0
+        inj = xp.bincount(home[kept], load[kept], minlength=c.n)
+        Hown = spm.coo_matrix((load[kept], (home[kept], at[kept])),
+                              shape=(c.n, len(keep))).tocsr()
+        # members: kept positions of each candidate's unknowns
         sub = c.bfree[xp.asarray(cand)].tocoo()
         un = sy.unk_cell[sub.col]
         ok = un >= 0

@@ -4,7 +4,7 @@
 
 ## 0. What was homogenized, and what "error" means
 
-- **Fabric.** Block ZAF.9.3.1_1_5810: 6,619 footprints, 576,948 m² inside the outline. It is rasterized exactly as the metric does it (`lifted.UniformMesh(0.5, offset=lifted.OFFSET)`): 2,816 × 3,116 cells, 2,313,038 of them inside, each with an open fraction from 4 × 4 sub-samples. Demand is the metric's own (`lifted.demand`, area population, 2 stranded homes). Gated blocks 22422 and 30848 were extracted the same way.
+- **Fabric.** Block ZAF.9.3.1_1_5810: 6,619 footprints, 576,948 m² inside the outline. It is rasterized exactly as the metric does it (`lifted.UniformMesh(0.5, offset=lifted.OFFSET)`): 2,816 × 3,116 cells, 2,313,038 of them inside, each with an open fraction from 4 × 4 sub-samples. Demand is the metric's own at the time (`lifted.demand`, area population, 2 stranded homes; since replaced by `lifted.Placement`, under which both are shadowed and inject). Gated blocks 22422 and 30848 were extracted the same way.
 - **Model homogenized: a scalar 'uni'.**
   - One potential per cell.
   - A face between 4-neighbours conducts c = min(o_a, o_b), the uni rule for an axis step.

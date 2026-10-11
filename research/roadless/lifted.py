@@ -51,6 +51,7 @@ AXES = {
 # fractions of a cell
 OFFSET = (0.3713, 0.1931)
 BAND_M = 1.0              # ground: cell centres within this many metres of a street
+RING_M = 1.0              # the demand ring (Placement): cell centres within this of a home
 
 
 def axes(K: int) -> tuple[NDArray[np.int64], NDArray[np.float64], NDArray[np.float64],
@@ -234,6 +235,20 @@ class Grid:
         X, Y = self.xy[..., 0], self.xy[..., 1]
         out[self.inside] = shapely.contains_xy(geom, X[self.inside], Y[self.inside])
         return out
+
+    def cells_near(self, geom, dist: float) -> NDArray[np.int64]:
+        """Flat indices of the inside cells whose centres lie within `dist` of `geom` (shapely's
+        distance: a centre inside it is at 0), tested in its bounding box padded by dist + h
+        only."""
+        xs, ys = self.xy[0, :, 0], self.xy[:, 0, 1]
+        x0, y0, x1, y1 = geom.bounds
+        pad = dist + self.h
+        c0, c1 = np.searchsorted(xs, x0 - pad), np.searchsorted(xs, x1 + pad, side="right")
+        r0, r1 = np.searchsorted(ys, y0 - pad), np.searchsorted(ys, y1 + pad, side="right")
+        rr, cc = np.nonzero(self.inside[r0:r1, c0:c1])
+        rr, cc = rr + r0, cc + c0
+        ok = shapely.dwithin(geom, shapely.points(self.xy[rr, cc, 0], self.xy[rr, cc, 1]), dist)
+        return (rr * self.inside.shape[1] + cc)[ok]
 
 
 def _to_cells(fine, S: int):
@@ -609,6 +624,24 @@ class CompositeGrid:
         out[:] = shapely.contains_xy(geom, self.xy[:, 0], self.xy[:, 1])
         return out
 
+    def cells_near(self, geom, dist: float) -> NDArray[np.int64]:
+        """Grid.cells_near: the cells holding a fine-lattice point of `geom`'s bounding box
+        padded by dist + h (every cell whose centre is in the box holds the points beside its
+        centre), tested."""
+        ny, nx = self.shape
+        x0, y0, x1, y1 = geom.bounds
+        pad = dist + self.h
+        j0 = max(int(np.floor((x0 - pad - self.x0) / self.h)), 0)
+        j1 = min(int(np.ceil((x1 + pad - self.x0) / self.h)) + 1, nx)
+        i0 = max(int(np.floor((y0 - pad - self.y0) / self.h)), 0)
+        i1 = min(int(np.ceil((y1 + pad - self.y0) / self.h)) + 1, ny)
+        py, px = np.meshgrid(np.arange(i0, i1, dtype=float), np.arange(j0, j1, dtype=float),
+                             indexing="ij")
+        cells = np.unique(self._locate(py.ravel(), px.ravel()))
+        cells = cells[cells >= 0]
+        ok = shapely.dwithin(geom, shapely.points(self.xy[cells, 0], self.xy[cells, 1]), dist)
+        return cells[ok]
+
     def _locate(self, py: NDArray[np.float64], px: NDArray[np.float64]) -> NDArray[np.int64]:
         """The cell holding each fine-lattice point (row py, column px; fine cell (i, j)'s centre
         at (i, j)), -1 where none."""
@@ -896,32 +929,82 @@ def balance(lay: _Layout) -> _Layout:
 BALANCE_CHUNK = 200_000      # cells probed at once: bounds memory, not the answer
 
 
-def demand(grid: Grid | CompositeGrid, footprints, allowed: NDArray[np.bool_],
-           weights: NDArray[np.float64], ring_m: float = 1.0
-           ) -> tuple[NDArray[np.float64], NDArray[np.bool_], NDArray[np.int64]]:
-    """Per-cell injection (in the grid's shape): building j injects weights[j] (its population),
-    uniformly over the `allowed` free cells within `ring_m` of it whose nearest building it is
-    (`allowed` = cells with a path to the street, so a ring partly in a sealed nook puts all its
-    demand on the open side). A building with no allowed ring cell is STRANDED: it injects
-    nothing. Returns (field, stranded mask per building, owner building per cell or -1)."""
-    ring = allowed & (grid.dist_b <= ring_m + 1e-9)
-    at = np.nonzero(ring)
-    polys = np.asarray(footprints)
-    n = len(polys)
-    f = np.zeros(grid.inside.shape)
-    own = -np.ones(grid.inside.shape, dtype=np.int64)
-    if len(at[0]) == 0:
-        return f, np.ones(n, dtype=bool), own
-    tree = shapely.STRtree(polys)
-    xy = grid.xy[at]
-    pts = shapely.points(xy[:, 0], xy[:, 1])
-    idx, _ = tree.query_nearest(pts, return_distance=True, all_matches=False)
-    owner = np.full(len(at[0]), -1)
-    owner[idx[0]] = idx[1]
-    cnt = np.bincount(owner, minlength=n).astype(float)
-    np.add.at(f, at, weights[owner] / cnt[owner])
-    own[at] = owner
-    return f, cnt == 0, own
+@dataclass(frozen=True, eq=False)
+class Placement:
+    """Where each home injects: the metric's demand (owner 2026-10-11, "B SGTM": the placement
+    fix, and the enclosed homes scored apart; insulator_report.md, "The door link", Task 1, and
+    "Uniform walls"). Only cells `allowed` (with a path to the street at baseline) take demand,
+    so a ring partly in a sealed nook puts all of it on the open side, and freeing space only
+    ever adds conductance. A home's RING is the allowed cells within ring_m of a building
+    (dist_b) whose nearest building it is; it injects its population uniformly over them. A
+    home with no ring cell is SHADOWED when free cells within ring_m of its own outline reach the
+    street (the nearest-building rule gave them to its neighbours): it injects uniformly over
+    those, whoever's ring they are in, so a cell can take several homes' demand. The rest are
+    ENCLOSED: no free cell within ring_m of the outline reaches the street; they inject nothing
+    and are out of J, and a clearing reports the population it leaves enclosed (`reached`),
+    scored before J. A population w injects S w, and home j's escape time is (S^T u_cell)_j,
+    the injection-weighted mean potential over its cells (common.Scorer.home_u_of)."""
+    S: sp.csr_matrix                 # (grid cells flat, homes): home j's share of its injection
+                                     # per cell; a live home's column sums to 1, an enclosed
+                                     # home's is empty
+    enclosed: NDArray[np.bool_]      # per home: no free cell within ring_m of its outline
+                                     # reaches the street
+    near: sp.csr_matrix              # (grid cells flat, homes), 0/1: per ENCLOSED home, the
+                                     # inside cells whose centres lie within ring_m of its outline,
+                                     # its own footprint's included (a clearing can open a covered
+                                     # cell); empty columns for the live homes
+
+    @classmethod
+    def of(cls, grid: Grid | CompositeGrid, footprints, allowed: NDArray[np.bool_], *,
+           ring_m: float) -> Placement:
+        """The ring by each allowed cell's nearest building (STRtree.query_nearest); the outline
+        by exact polygon distance (a centre inside the footprint is at 0), tested only near the
+        few homes with no ring cell (grid.cells_near)."""
+        polys = np.asarray(footprints)
+        n, ncell = len(polys), grid.inside.size
+        ok = np.asarray(allowed).ravel()
+        at = np.flatnonzero(ok & (grid.dist_b.ravel() <= ring_m + 1e-9))
+        xy = grid.xy.reshape(-1, 2)[at]
+        idx = shapely.STRtree(polys).query_nearest(shapely.points(xy[:, 0], xy[:, 1]),
+                                                   all_matches=False)
+        owner = np.full(len(at), -1)
+        owner[idx[0]] = idx[1]
+        isub, bsub = grid.isub.reshape(ncell, -1), grid.bsub.reshape(ncell, -1)
+        enclosed = np.zeros(n, dtype=bool)
+        cells, homes = [at], [owner]
+        near_cells, near_homes = [np.zeros(0, dtype=np.int64)], [np.zeros(0, dtype=np.int64)]
+        for j in np.flatnonzero(np.bincount(owner, minlength=n) == 0):
+            c = grid.cells_near(polys[j], ring_m + 1e-9)
+            door = c[(isub[c] & ~bsub[c]).any(axis=1) & ok[c]]     # free (ff0 > 0), allowed
+            if len(door):                       # shadowed: on its open side
+                cells.append(door)
+                homes.append(np.full(len(door), j))
+            else:
+                enclosed[j] = True
+                near_cells.append(c)
+                near_homes.append(np.full(len(c), j))
+        c, h = np.concatenate(cells), np.concatenate(homes)
+        k = np.bincount(h, minlength=n).astype(float)
+        nc, nh = np.concatenate(near_cells), np.concatenate(near_homes)
+        return cls(S=sp.csr_matrix((1.0 / k[h], (c, h)), shape=(ncell, n)), enclosed=enclosed,
+                   near=sp.csr_matrix((np.ones(len(nc)), (nc, nh)), shape=(ncell, n)))
+
+    def field(self, w: NDArray[np.float64], shape) -> NDArray[np.float64]:
+        """The injection of population w (per home), S w, in the grid's shape."""
+        return (self.S @ w).reshape(shape)
+
+    def home_u(self, u_cell) -> NDArray[np.float64]:
+        """Per home, S^T u_cell: from per-cell potentials (flat; columns for several fields)."""
+        return np.asarray(self.S.T @ u_cell)
+
+    def reached(self, reach: NDArray[np.bool_]) -> NDArray[np.bool_]:
+        """Per home: enclosed, and some cell within ring_m of its outline in `reach` (open and
+        street-connected in a clearing's field: `grounded`). The live homes' columns of `near`
+        are empty: never."""
+        nz = self.near.tocoo()
+        out = np.zeros(len(self.enclosed), dtype=bool)
+        out[nz.col[np.asarray(reach).ravel()[nz.row]]] = True
+        return out
 
 
 @njit(cache=True)

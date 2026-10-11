@@ -3,4 +3,5 @@ rows*/
 *.png
 *.parquet
 *.pkl
+*.npz
 __pycache__/

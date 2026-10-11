@@ -30,12 +30,10 @@ BANDS = ((0, 10), (10, 30), (30, 100), (100, 300), (300, 600), (600, np.inf))
 
 
 def home_depth(fab: rc.Fabric) -> np.ndarray:
-    """Each home's injection-weighted mean straight-line distance (m) from its ring cells to
-    the nearest ground cell (twoscale_run.py's)."""
+    """Each home's injection-weighted mean straight-line distance (m) from its cells to the
+    nearest ground cell (twoscale_run.py's; 0 where enclosed)."""
     dist = ndimage.distance_transform_edt(~fab.ground) * rc.H
-    on = fab.owner >= 0
-    return (np.bincount(fab.owner[on], weights=(fab.f * dist)[on], minlength=len(fab.w))
-            / np.where(fab.w > 0, fab.w, 1))
+    return fab.Sd.T @ dist.ravel()
 
 
 def base() -> None:
@@ -43,7 +41,7 @@ def base() -> None:
     fine = np.load(rc.OUT / "fine_base.npz")
     u_f, J_f, P_f = fine["uh0"], float(fine["J0"]), float(fine["P0"])
     hd = home_depth(fab)
-    ok = fab.live & (u_f > 0)
+    ok = ~fab.enclosed & (u_f > 0)
     print(f"fine J2 {J_f:.8g}, P {P_f:.8g}; home depth quantiles (m) 10/50/90/99/max "
           f"{np.round(np.percentile(hd[ok], [10, 50, 90, 99, 100]), 1)}", flush=True)
     share = {b: float((fab.w[ok & (hd >= b[0]) & (hd < b[1])]
@@ -67,10 +65,10 @@ def base() -> None:
                 for corr in ("U", "U+chi+w"):
                     uc = U if corr == "U" else U + tf.chi[0] * Ux + tf.chi[1] * Uy + tf.wf
                     uc = np.where(fab.ground, 0.0, uc)
-                    u_t = ts.home_u(uc, fab.f, fab.owner, fab.w, fab.live)
+                    u_t = ts.home_u(uc, fab.Sd, fab.enclosed)
                     if corr == "U":
                         assert np.allclose(u_t[ok], mac.uh0[ok], rtol=1e-9, atol=1e-9)
-                    J_t, P_t = ts.J(u_t, fab.w, fab.live), float((fab.f * uc).sum())
+                    J_t, P_t = ts.J(u_t, fab.w, fab.enclosed), float((fab.f * uc).sum())
                     rel = (u_t - u_f) / u_f
                     row = dict(L_m=L, stride_m=s, fill=fill_name, H_m=H_m, corr=corr,
                                macro_unknowns=mac.N, macro_iters=mac.iters,
@@ -96,7 +94,7 @@ def base() -> None:
                            for a, b in row.items()}, flush=True)
                     if corr == "U" and H_m == 2:
                         np.savez_compressed(rc.OUT / f"homes_L{L}_{fill_name}.npz", u_f=u_f,
-                                            u_t=u_t, hd=hd, w=fab.w, live=fab.live)
+                                            u_t=u_t, hd=hd, w=fab.w, enclosed=fab.enclosed)
                 del mac, U, Ux, Uy, uc
         pd.DataFrame(rows).to_csv(rc.OUT / "region_twoscale.csv", index=False)
         pd.DataFrame(decomp).to_csv(rc.OUT / "region_decomp.csv", index=False)

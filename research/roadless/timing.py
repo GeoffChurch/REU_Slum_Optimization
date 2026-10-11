@@ -8,4 +8,4 @@ for i in (20, 110, 200):
     for h in (1.0, 0.5):
         mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
         t=time.time(); sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=16))
-        print(b.block_id, len(b.buildings), f"area {b.boundary.area:.0f} h={h} free cells {sc.free0.sum()} P0 {sc.P0:.1f} fallback {sc.n_fallback} stranded {sc.stranded:.3f} {time.time()-t:.1f}s", flush=True)
+        print(b.block_id, len(b.buildings), f"area {b.boundary.area:.0f} h={h} free cells {sc.free0.sum()} P0 {sc.P0:.1f} enclosed {sc.enclosed0:.3f} {time.time()-t:.1f}s", flush=True)

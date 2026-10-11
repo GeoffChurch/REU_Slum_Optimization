@@ -10,13 +10,14 @@ correctors chi_x, chi_y and the local source corrector w (A w = f - g, g the win
 spread over each conducting component by open fraction), kept on the window's central s x s
 block; (2) the macro problem -div(sigma grad U) = f on Q1 finite elements of side k px, U = 0 at
 nodes outside the block or on ground; (3) per cell u ~ U + chi . grad U + w, per home the
-injection-weighted mean over its ring cells.
+injection-weighted mean over its cells (Sd^T u, Sd lifted.Placement's S).
 """
 from __future__ import annotations
 
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import fftk
 import numpy as np
@@ -97,15 +98,31 @@ def fine_solve(o, ground, f, tol=1e-10) -> FineSolution:
     return FineSolution(u, time.perf_counter() - t, it, A.shape[0])
 
 
-def home_u(ucell, f, owner, w, live):
-    on = owner >= 0
-    num = np.bincount(owner[on], weights=(f * ucell)[on], minlength=len(w))
-    with np.errstate(invalid="ignore", divide="ignore"):
-        return np.where(live, num / w, np.nan)
+class Demand(NamedTuple):
+    """An extract's demand (lifted.Placement's, area population): Sd, the placement's S (raster
+    cells flat x homes, CSR; a home's column its share of its injection per cell, an enclosed
+    home's empty), the enclosed homes, the population w, and the injection f = Sd w (the
+    raster's shape)."""
+    Sd: sp.csr_matrix
+    enclosed: np.ndarray
+    w: np.ndarray
+    f: np.ndarray
 
 
-def J(u, w, live, p=2.0):
-    return float((w[live] * u[live] ** p).sum())
+def demand_of(d, shape) -> Demand:
+    """The Demand of an extract `d` (its S_data, S_indices, S_indptr, S_shape: the placement's
+    S as CSR arrays; enclosed, w)."""
+    Sd = sp.csr_matrix((d["S_data"], d["S_indices"], d["S_indptr"]), shape=tuple(d["S_shape"]))
+    return Demand(Sd=Sd, enclosed=d["enclosed"], w=d["w"], f=(Sd @ d["w"]).reshape(shape))
+
+
+def home_u(ucell, Sd, enclosed):
+    """Per home: Sd^T ucell, the injection-weighted mean over its cells; nan where enclosed."""
+    return np.where(enclosed, np.nan, Sd.T @ ucell.ravel())
+
+
+def J(u, w, enclosed, p=2.0):
+    return float((w[~enclosed] * u[~enclosed] ** p).sum())
 
 
 # ------------------------------------------------------------------------- tensor field

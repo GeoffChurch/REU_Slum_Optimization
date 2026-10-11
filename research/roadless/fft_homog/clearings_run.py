@@ -10,27 +10,27 @@ import pandas as pd
 import ts
 
 d = np.load("fabric_5810.npz")
-o, ins, gr, f = d["ff0"].astype(float), d["inside"], d["ground"], d["f"]
-own, w, live = d["owner"], d["w"], ~d["stranded"]
+o, ins, gr = d["ff0"].astype(float), d["inside"], d["ground"]
+Sd, enc, w, f = ts.demand_of(d, o.shape)
 C = np.load("clearings_5810.npz")
 H = 0.5
 K = 4          # macro element 2 m
 fields = sys.argv[1:] or ["fields_L50_s10.npz"]
 
 fs0 = ts.fine_solve(o, gr, f)
-J0_f = ts.J(ts.home_u(fs0.u, f, own, w, live), w, live)
+J0_f = ts.J(ts.home_u(fs0.u, Sd, enc), w, enc)
 rows = []
 FINE = {}
 for key in ("simp_D0.05", "simp_D0.10", "greedy_D0.05", "greedy_D0.10"):
     fs = ts.fine_solve(C[f"ff_{key}"].astype(float), gr, f)
-    FINE[key] = (ts.J(ts.home_u(fs.u, f, own, w, live), w, live), fs.seconds)
+    FINE[key] = (ts.J(ts.home_u(fs.u, Sd, enc), w, enc), fs.seconds)
 for path in fields:
     tf = ts.load_field(path)
     J0_t = {}
     for name, ia in (("open-outside", False), ("inside-avg", True)):
         m0 = ts.macro_solve(ts.fill(tf, None, ia), tf.s, K, ins, gr, f)
         U0 = ts.evaluate(m0, o.shape)[0]
-        J0_t[name] = ts.J(ts.home_u(np.where(gr, 0, U0), f, own, w, live), w, live)
+        J0_t[name] = ts.J(ts.home_u(np.where(gr, 0, U0), Sd, enc), w, enc)
     for key in ("simp_D0.05", "simp_D0.10", "greedy_D0.05", "greedy_D0.10"):
         oc = C[f"ff_{key}"].astype(float)
         Jf, fsec = FINE[key]
@@ -39,7 +39,7 @@ for path in fields:
         for name, ia in (("open-outside", False), ("inside-avg", True)):
             mac = ts.macro_solve(ts.fill(tfc, None, ia), tf.s, K, ins, gr, f)
             U = ts.evaluate(mac, o.shape)[0]
-            Jt = ts.J(ts.home_u(np.where(gr, 0, U), f, own, w, live), w, live)
+            Jt = ts.J(ts.home_u(np.where(gr, 0, U), Sd, enc), w, enc)
             row = dict(field=path, fill=name, clearing=key, n_buildings=len(C[f"ids_{key}"]),
                        lensA_lifted_stored=float(C[f"perm_{key}"]),
                        lensA_fine_scalar=1 - np.sqrt(Jf / J0_f),

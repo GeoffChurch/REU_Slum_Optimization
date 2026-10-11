@@ -20,12 +20,13 @@ for bid in ("ZAF.9.3.1_1_22422", "ZAF.9.3.1_1_30848"):
     polys = np.asarray(b.buildings.outlines)
     w = common.POPULATIONS["area"].weights(polys)
     reach = lifted.grounded(g, g.ff0, p)
-    f, stranded, owner = lifted.demand(g, polys, reach, w)
+    pl = lifted.Placement.of(g, polys, reach, ring_m=lifted.RING_M)
     lab = g.label_sub(polys)
     rows = pd.read_parquet(RUN / f"{bid}.parquet")
-    out = dict(ff0=g.ff0.astype(np.float32), inside=g.inside, ground=g.ground, f=f,
-               owner=owner.astype(np.int32), w=w, stranded=stranded, area=shapely.area(polys),
-               block_area=b.boundary.area)
+    out = dict(ff0=g.ff0.astype(np.float32), inside=g.inside, ground=g.ground,
+               S_data=pl.S.data, S_indices=pl.S.indices, S_indptr=pl.S.indptr,
+               S_shape=np.array(pl.S.shape), enclosed=pl.enclosed, w=w,
+               area=shapely.area(polys), block_area=b.boundary.area)
     for step in (1, 2, 5):
         s = rows[(rows.step >= 1) & (rows.step <= step)]
         ids = np.unique(np.concatenate([np.asarray(c, dtype=np.int64) for c in s.cleared]))
@@ -37,6 +38,6 @@ for bid in ("ZAF.9.3.1_1_22422", "ZAF.9.3.1_1_30848"):
         out[f"D_step{step}"] = float(rows[rows.step == step].D.iloc[0])
         out[f"n_step{step}"] = len(ids)
     np.savez_compressed(HERE / f"fabric_{bid.split('_')[-1]}.npz", **out)
-    print(bid, g.ff0.shape, len(polys), "stranded", int(stranded.sum()), "area",
+    print(bid, g.ff0.shape, len(polys), "enclosed", int(pl.enclosed.sum()), "area",
           round(b.boundary.area),
           {k: out[k] for k in out if k.startswith(("perm", "n_", "D_"))}, flush=True)

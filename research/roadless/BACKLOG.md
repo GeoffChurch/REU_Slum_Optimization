@@ -76,10 +76,11 @@ items up front"), in the order proposed:
    weight in J_2 goes as 1/eps^2, and at 1e-4 one home holds 80% of 20543's; A also leaks 0.02 --
    0.04 at the gates. B is the same family's leak-free end, its optimizer two stages (free the
    enclosed homes, D median 0.0022 a block, then today's search; a search at the gate-keeping eps
-   4.2e-6 is out, the GPU solver stalls there). **Owner's call**: A or B (B recommended). Then
-   the port (into lifted/common, replacing the exclusion), the stored clearings re-scored and the
-   full run scored under it. The door link's, the toll's and the private walls' code goes once
-   that settles (the door's dominated variants with it).
+   4.2e-6 is out, the GPU solver stalls there). The owner chose B (2026-10-11: "B SGTM"), and it
+   is ported (NOTES, "The port": lifted.Placement, Scorer.enclosed_left; insulator.py,
+   crossing.py and walls.py deleted, the door's, the toll's and the private walls' code with
+   them). Next: the stored clearings re-scored and the full run scored under B (item 4), then B's
+   optimizer, free first and then today's search, on the 12 large blocks with enclosed homes.
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population as
    footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =
@@ -113,9 +114,10 @@ items up front"), in the order proposed:
    0.87 for the walking model alone, against the 220's median 0.43), roadless separates the
    leaders (resistance_lp ahead), and SIMP's default beats the best road network at D 0.05 by
    +0.065 -- +0.777, a lower bound on (b)'s price of roads. Stage 1 of the full run (the 60
-   blocks that fit at h 0.5, six methods: networks and prefixes) is done, to be scored once
-   item 3 settles the stranded homes; open: the 23 oversized blocks (cycle_desire's cost and
-   memory go with area) and the arterial (its `max_roads: 60` keeps it short of Lens A).
+   blocks that fit at h 0.5, six methods: networks and prefixes) is done (its networks kept in
+   road_rows/scratch, ignored); its scoring under B is next, on the cluster, with the stored
+   clearings re-scored beside it; open: the 23 oversized blocks (cycle_desire's cost and memory
+   go with area) and the arterial (its `max_roads: 60` keeps it short of Lens A).
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights

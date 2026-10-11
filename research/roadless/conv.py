@@ -21,5 +21,5 @@ for i in idx:
         t = time.time()
         sc = common.Scorer(b, lifted.UniformMesh(h, offset=off), lifted.Params(ell_m=ell, K=K))
         vals = {n: sc.perm(pre[n]) for n in names}
-        print(f"{b.block_id} n={len(b.buildings)} K={K} ell={ell} h={h} off={off}: P0 {sc.P0:9.1f} stranded {sc.stranded:.3f} "
+        print(f"{b.block_id} n={len(b.buildings)} K={K} ell={ell} h={h} off={off}: P0 {sc.P0:9.1f} enclosed {sc.enclosed0:.3f} "
               + " ".join(f"{n[:12]} {v:.3f}" for n, v in vals.items()) + f"  {time.time()-t:.0f}s", flush=True)
