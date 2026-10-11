@@ -92,6 +92,14 @@ items up front"), in the order proposed:
    exits, a real restricted run at k 2 -- 3 (the cheap preset needs only a tile mask, SIMP ~50
    lines), and a budget pooled across faces, where screening pays; the fine model itself may
    reach built-up Cape Town (~5 -- 11 H100-h by extrapolation).
+   Re-scoring the road methods (NOTES, "Re-scoring the road methods: the large-block sentinel"):
+   on 4 large blocks the shipped metric and roadless order the road methods alike (tau 0.60 --
+   0.87 for the walking model alone, against the 220's median 0.43), roadless separates the
+   leaders (resistance_lp ahead), and SIMP's default beats the best road network at D 0.05 by
+   +0.065 -- +0.777, a lower bound on (b)'s price of roads. Stage 1 of the full run (the 60
+   blocks that fit at h 0.5, six methods) is running; open: the 23 oversized blocks
+   (cycle_desire's cost and memory go with area) and the arterial (its `max_roads: 60` keeps it
+   short of Lens A).
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights

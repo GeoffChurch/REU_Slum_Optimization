@@ -2365,3 +2365,85 @@ the OC and MMA steps, the rounding and the polish); ~1 GPU-h for k 2, 3, 5 and b
 use is a city-wide pooled budget across faces, with the gate detector the 5810 study asked for
 (homogenization still erases gates). The fine model itself looks within reach of built-up Cape
 Town without it, on the extrapolation above.
+
+### Re-scoring the road methods: the large-block sentinel (owner 2026-10-10: "Go")
+
+road_rescore.py (rows in road_rows/, not committed; the networks in the derive cache). The 220
+study's lineup on the sentinel (22422 and 30848 gated, 5810, 9712), each network cut to its
+street-first prefixes at D 0.02 -- 0.20 and whole, and scored three ways: (a) the shipped
+permeability on count-weight prefixes; (b) roadless with only the walking model changed (count
+population, p 1, the same prefixes); (c) roadless as the optimizers use it (area population, J_2,
+area-weight prefixes). CARVE, h 0.5, uni, ell 3, K 8. The scorer reproduces the stored SIMP
+default and cheap clearings' Lens A to 2.6e-10 on all four blocks, and study.py's rows on a small
+block to 1e-11.
+
+- Cost per block, CPU s single-threaded: clearance 1 -- 5, grid < 1, clearance_looped 20 -- 47,
+  resistance_lp 42 -- 588, cycle_native 110 -- 622 (n^1.07), cycle_desire 2,560 -- 6,200 where
+  its betweenness counts were not cached: ~6,000 -- 7,000 s and 6 -- 10 GB per km^2, by area
+  rather than buildings (5810's 1,083 s reused cached counts). Every other proposal stayed under
+  1 GB. The arterial took 2,728 -- 6,632 s and passed the 2 h cap on 30848; at `max_roads: 60`
+  its whole networks displace 0.6 -- 3.5%, so it never reaches D 0.05. Scoring: ~2 s per solve; a
+  block's networks, every prefix under both lenses, and the clearings take 5 -- 11 min on the GPU
+  (15 -- 29 GB).
+- On the composite 0.5a5x8 (22422, 9712) (c) moves by at most 0.0024 (0.0005 at D 0.05) and the
+  stored clearings by -0.0007 to -0.0028; the rankings keep, but for a near-tie at D 0.20 (0.1305
+  against 0.1306).
+- Lens A at D 0.05 among the six methods reaching it, (a) (b) (c), best first by (c):
+
+    9712   resist_lp .938 .068 .065     cycle .876 .050 .059         cycle_desire .886 .039 .040
+           clear .716 .033 .039         clear_loop .759 .034 .039    grid .754 .032 .034
+    22422  resist_lp .933 .100 .0054     cycle_desire .842 .071 .0041  cycle .819 .063 .0034
+           grid .672 .046 .0025          clear_loop .732 .038 .0025    clear .660 .032 .0023
+    30848  cycle .763 .385 .292         resist_lp .827 .431 .291     cycle_desire .767 .371 .282
+           grid .679 .325 .262          clear_loop .705 .292 .245    clear .714 .296 .240
+    5810   resist_lp .892 .139 .148     cycle .876 .118 .139         cycle_desire .887 .089 .102
+           grid .805 .075 .100          clear_loop .730 .076 .093    clear .620 .061 .071
+
+- Kendall tau over those six, D 0.05 | D 0.10: (a, b) 0.60 -- 0.87 | 0.60 -- 0.87; (a, c) 0.33 --
+  0.87 | 0.33 -- 0.87; (b, c) 0.73 -- 1.00 | -0.07 -- 1.00. On the 220, (a, b) at D 0.10 had a
+  median of +0.43 (IQR 0.24 -- 0.62); all four blocks here are at 0.60 or above. The leaders
+  separate too: under (b) at D 0.10 resistance_lp leads cycle_native by 0.02 -- 0.08 on all four,
+  where on the 220 the four leaders tied within 0.004 (the arterial among them). resistance_lp
+  leads (c) at D 0.05 on 3 of 4 (behind cycle_native by 0.0014 on 30848), with 1.5 -- 2.6x
+  cycle_native's road length at the same displacement.
+- 30848 is where (b) and (c) part (tau -0.07 at D 0.10): from D 0.05 to 0.10 (c) jumps for
+  cycle_desire (0.28 to 0.52) and clearance (0.24 to 0.48), not for resistance_lp (0.29 to 0.35),
+  while under (b) all three gain 0.09 -- 0.12. A pocket opening, by the jump (not inspected):
+  worth much to J_2 on area, little to P on count.
+- 22422, gated: no road prefix opens the gate before D 0.15 ((c) at most 0.0104);
+  clearance_looped, cycle_native, cycle_desire and resistance_lp open it at D 0.19 -- 0.20 ((c)
+  0.53 -- 0.55; resistance_lp's whole network, D 0.23, 0.79), clearance never (0.006 at its whole
+  network's D 0.14). SIMP's 70 buildings get 0.783 at D 0.05. The equity power shows:
+  resistance_lp's (b) is 0.100 at D 0.05, its (c) 0.005.
+- The arterial: (a) 0.82 -- 0.89 for whole networks displacing 0.6 -- 3.5% (on 22422 its network
+  at D 0.016 outscores cycle_native's at D 0.05, 0.875 against 0.819), (c) 0.007 -- 0.060. The
+  shipped metric pays for road length through open ground (a road edge conducts ~204x a footpath
+  per metre); roadless pays only for the corridor a road frees, and open ground is walkable
+  already.
+- The price of roads at D 0.05 under (c), a lower bound (the road prefixes overshoot to D 0.050
+  -- 0.052, grid's to 0.061; the clearings stay at or under 0.05): SIMP's default minus the best
+  road method +0.065 (9712), +0.111 (5810), +0.363 (30848), +0.777 (22422); the cheap preset
+  +0.054, +0.075, +0.383, +0.756. The best road network gets 50% and 57% of SIMP's Lens A on the
+  ungated 9712 and 5810, 45% and 0.7% on the gated 30848 and 22422.
+- The full run (the 82 large blocks and 5810@major). The sentinel agent's projection (236 -- 331
+  CPU-h, the arterial a floor; 9.2 GPU-h) took every block at the sentinel's median and slowest
+  per-block times, but cycle_desire's cost goes with area. By area it is ~45 CPU-h on the 60
+  blocks that fit a 48 GB card at h 0.5 (25 km^2, the largest 1.5 km^2) and ~500 CPU-h on the 23
+  that do not (276 km^2; at 6 -- 10 GB per km^2 the five of 24 -- 52 km^2 need more memory than
+  this machine's 250 GB). The other five methods: ~3.5 CPU-h on the 60. Scoring ~5 GPU-h on the
+  60 at h 0.5 and ~4 on 0.5a5x8 for the 23 (63612 near 47 GB even there; ollama holds 25 GB of
+  the local card at times, which leaves room only for blocks under ~20M unknowns). The arterial
+  at `max_roads: 60` is left out: it reaches no Lens A here, and its cost goes with its road
+  count.
+
+Stage 1 launched 2026-10-10 22:52: the six methods on the 60 that fit (56 new blocks, 336
+proposals), 10 processes, a 6 h cap per proposal, then the prefixes; scoring after, on the local
+GPU when there is room or on the cluster. Open: the 23 oversized blocks (cycle_desire there needs
+another plan: by its memory per km^2 the largest do not fit), and the arterial (a higher cap on
+the cluster, or out).
+
+What four blocks say: the shipped metric and roadless order the road methods alike more often on
+large blocks than on the 220's small ones, and roadless tells the leaders apart here. They part
+on what a road is worth: (a) pays for road length (the arterial), roadless for the buildings a
+road removes, and on roadless's one scale clearing beats the best road network by 0.065 -- 0.777
+at D 0.05. Whether the agreement holds across blocks is the full run's question.
