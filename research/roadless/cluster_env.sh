@@ -3,3 +3,6 @@
 # so nothing points it there; the cluster's /usr/local/cuda is 11.8 and the nodes' drivers 12.8.
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1
 export PYTHONUNBUFFERED=1 PYTHONUTF8=1 PYTHONPATH=.
+# no bytecode written into the per-commit checkout the run's tasks share (road_rescore.py
+# requires it with the single-threaded settings)
+export PYTHONDONTWRITEBYTECODE=1
