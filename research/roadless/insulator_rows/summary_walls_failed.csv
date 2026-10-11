@@ -1,0 +1,8 @@
+block,eps,stage,error,message,at,set,recovered
+ZAF.9.3.1_1_19570,1e-06,none,RuntimeError,AMG-CG did not converge: 1.48e-07 after 501,2026-10-11 11:32:19,small,True
+ZAF.9.3.1_1_43874,1e-05,none,RuntimeError,AMG-CG did not converge: 2.44e-07 after 501,2026-10-11 12:01:07,small,True
+ZAF.9.3.1_1_43874,1e-06,none,RuntimeError,AMG-CG did not converge: 4.18e-05 after 501,2026-10-11 11:53:41,small,True
+ZAF.9.3.1_1_43874,3e-06,none,RuntimeError,AMG-CG did not converge: 1.05e-05 after 501,2026-10-11 11:57:24,small,True
+ZAF.9.3.1_1_63718,1e-05,none,RuntimeError,AMG-CG did not converge: 3.69e-07 after 501,2026-10-11 11:38:07,small,True
+ZAF.9.3.1_1_63718,1e-06,none,RuntimeError,AMG-CG did not converge: 1.10e-04 after 501,2026-10-11 11:31:25,small,True
+ZAF.9.3.1_1_63718,3e-06,none,RuntimeError,AMG-CG did not converge: 2.77e-05 after 501,2026-10-11 11:34:47,small,True
