@@ -9,12 +9,15 @@ the grid the tasks use (common.mesh_of: <h>, <h>a<d0>x<smax> or
 time (a goal mesh's: its target); `--scans` says the tasks' conductance scans the fine lattice
 (a sightline metric or search: SoftSightline), whose rasters peak when the solves' own memory is
 down to what a run holds, so the estimate is the larger of the two; `--gb` sets a floor under
-the estimate, to send a block known to need a bigger card to one. Results (parquet rows) come
-back to the same paths here, never overwriting a local file.
+the estimate, to send a block known to need a bigger card to one. `--unpack` ships a tar per
+block of inputs git does not carry (parquet rows, at their repo paths) and unpacks it in the
+task's checkout before the command. Results (parquet rows) come back to the same paths here,
+never overwriting a local file.
 
     uv run python research/roadless/cluster.py setup
     uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] \
-        [--mesh M] [--scans] [--with FILE ...] <ids,|@file> -- <script> <args with {id}>
+        [--mesh M] [--scans] [--with FILE ...] [--unpack TAR] <ids,|@file> \
+        -- <script> <args with {id}>
     uv run python research/roadless/cluster.py status|sync [<run>]
     uv run python research/roadless/cluster.py wait <run> [--timeout 3h]    # exit 0 passed, 3 failed, 4 timed out, 5 blind
     uv run python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]   # its failed / missing blocks as <run>-r1
@@ -66,6 +69,10 @@ class Blocks:
         parser.add_argument("--with", dest="extra", type=Path, action="append", default=[],
                             help="a file shipped beside the block bank (repeatable); a task "
                                  "reads it as $CLUSTER_SUBMIT_INPUTS/<its name>")
+        parser.add_argument("--unpack", metavar="TAR",
+                            help="a tar per block, its path with {id}: shipped beside the bank "
+                                 "and unpacked in the task's checkout before its command (inputs "
+                                 "git does not carry, at their repo paths)")
         parser.add_argument("command", nargs=argparse.REMAINDER,
                             help="-- <script> <args with {id}>")
 
@@ -84,15 +91,30 @@ class Blocks:
             raise SystemExit(f"--mesh {args.mesh} but the command does not use it")
         ids = (Path(args.ids[1:]).read_text().split() if args.ids.startswith("@")
                else args.ids.split(","))
+        unpack: dict[str, Path] = {}
+        if args.unpack is not None:
+            if "{id}" not in Path(args.unpack).name:
+                raise SystemExit("--unpack needs {id} in the tar's name")
+            unpack = {b: Path(args.unpack.replace("{id}", b)) for b in ids}
+            absent = [str(t) for t in unpack.values() if not t.is_file()]
+            if absent:
+                raise SystemExit(f"--unpack: {len(absent)} tars absent, e.g. {absent[0]}")
+
+        def task_line(b: str) -> str:
+            run = f"python -u {line.replace('{id}', b)}"
+            if args.unpack is None:
+                return run
+            return f'tar -xf "$CLUSTER_SUBMIT_INPUTS/{unpack[b].name}" && {run}'
+
         bank = common.write_bank(ids, workdir / "bank.pkl")
         with ProcessPoolExecutor(min(SIZING_WORKERS, len(ids))) as ex:
             gb = list(ex.map(_gb, [mesh] * len(ids), [bank[b] for b in ids],
                              [args.scans] * len(ids)))
-        tasks = tuple(cs.Task(f"python -u {line.replace('{id}', b)}", max(g, args.gb))
+        tasks = tuple(cs.Task(task_line(b), max(g, args.gb))
                       for b, g in zip(ids, gb, strict=True))
         return cs.RunPlan(
             tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=None),
-            inputs=(workdir / "bank.pkl", *args.extra),
+            inputs=(workdir / "bank.pkl", *args.extra, *unpack.values()),
             prelude=("source research/roadless/cluster_env.sh",
                      'export REBLOCK_BLOCK_BANK="$CLUSTER_SUBMIT_INPUTS/bank.pkl"'),
             describe=(f"{len(ids)} blocks: {line}",))
