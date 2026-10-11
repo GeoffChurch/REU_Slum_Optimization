@@ -2529,3 +2529,28 @@ any g), an isotropic door node (r within 0.3%, and an extra unknown the GPU solv
 coarsen), a thickness term (the tail as wide or wider at matched medians). The finer raster
 prefers g 0.0015 -- 0.0034 (three homes) and finds the fix about 2x optimistic for the homes it
 moves (eight homes).
+
+**The private crossing** (crossing.py; owner 2026-10-11: "Is there a way to simplify your
+suggested method? The if-else feels unnatural", then "a version that can account for
+traffic/contention ... since it would reward multiple points of egress"). Two ways out for the
+walled-in homes with no edge in the operator, on the door's crossings (one per walled-in home
+and pocket, open ends), on the 31 small blocks (63 homes), each calibrated to the door's median
+r (1.80, count). A toll: the home's demand enters O at the crossing's street end and pays a
+private resistance after the solve. Per crossing (1 / g, g* 0.0104) it is the door without the
+edge: median 1.80, p90 10.2 against the door's 10.5, max 31.1 against 32.8. Per metre of
+footprint crossed (T / g1, g1* 0.040) it lowers thin walls and raises thick ones but keeps the
+tail (p90 10.8). Private walls: the walled-in walkers cross a private copy of the block whose
+footprint conducts eps (its exits held at 0), then go on in O from where they come out; O's own
+traffic cannot use it, homes share its walls (contention) and parallel walls add (several ways
+out). At eps* 3.0e-3 (median 1.78) the p90 halves (5.0 count, 3.0 area, against 10.5 / 11.0):
+pockets of 4+ homes go from median r 7.6 to 1.1, since 38486's courtyard leaves on every side
+into open space at u ~60 rather than through its thinnest wall into space at u ~1,670 (a median
+19% of a home's walkers land within 5 m of that wall's street end). But the max rises (40.1,
+21622's 178), five of the seven homes inside a footprint get worse (42404's 65: 13.8 against
+6.2), and pockets of 2 -- 3 homes go from 1.8 to 2.2. Several shared doors per pocket instead
+would make a courtyard a corridor between the spaces on its sides (38486's: u ~1,670 and ~60),
+the leak a single door avoids by ending in a dead end; any model with several ways out needs the
+private rule stated. Stopped when the owner dropped the criterion (2026-10-11: "I am fine with
+having fully enclosed buildings be much worse off than exposed neighbors"); next, one wall
+resistance for everyone, scored as one number at eps 1e-4 or as two (the population still
+enclosed, then Lens A over the rest).

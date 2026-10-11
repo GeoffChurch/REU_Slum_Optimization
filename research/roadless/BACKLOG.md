@@ -65,14 +65,18 @@ items up front"), in the order proposed:
    change: walkers stop going ballistic in a lane); then its gradient, uniform rays on the GPU and
    the composite mesh, and a re-score under the sightline metric.
    Buildings as imperfect insulators (owner 2026-10-11; NOTES, "The insulator world"): no single
-   eps both meets the owner's criterion (a walled-in home worse, but not massively worse, than
-   its open neighbours: 1e-3 -- 3e-3) and keeps the gates (1e-4 or less). Tested instead: the
-   shadowed homes on their open side, and one door link per walled-in home (g 0.01, about 63 m
-   of 1 m alley), leak-free and meeting the criterion at the median; the small blocks' tail
-   (p90 ~10) is set beyond the door (a door rule that weighs the street side is untried). The
-   owner's call: adopt it as the metric (into lifted/common, replacing the exclusion; re-score
-   the stored clearings; score the full run under it). insulator.py's dominated door variants
-   (face ends, isotropic node, kappa, a door per pocket) go with the next change to it.
+   eps both meets the owner's first criterion (a walled-in home worse, but not massively worse,
+   than its open neighbours: 1e-3 -- 3e-3) and keeps the gates (1e-4 or less). Tested for that
+   criterion: the shadowed homes on their open side (kept), one door link per walled-in home, a
+   toll after the solve (the door's numbers without its edge) and private walls (the tail halved
+   by letting a pocket out on every side); crossing.py, stopped. Then the owner dropped the
+   criterion: enclosed homes may be much worse off, with one wall resistance for everyone. Under
+   test (walls.py): one number at eps 1e-4 (SIMP's), against two, the population still enclosed
+   and then Lens A over the rest, with the optimizers searching at a gate-keeping eps (about
+   5e-6: walls carrying at most 5% of any open home's escape). Then the port (into lifted/common,
+   replacing the exclusion), the stored clearings re-scored and the full run scored under it. The
+   door link's, the toll's and the private walls' code goes once that settles (the door's
+   dominated variants with it).
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population as
    footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =

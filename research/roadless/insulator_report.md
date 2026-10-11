@@ -630,3 +630,45 @@ A rule that weighs the street side (several doors, or the crossing that minimise
 - `insulator.py`: the commands `link-census`, `link <procs> <plan> <coupling> <ends> <kappa> <g,> <ids,>`, `link-large`, `corridor`, `link-report` (the module docstring).
 - Rows (parquet, ignored): `door_link_census_h0.5/`; `door_link_{pocket,home}_heading_open_k0_h0.5_ell3_K8/`, `door_link_pocket_heading_face_k0_h0.5_ell3_K8/`, `door_link_pocket_iso_open_k0_h0.5_ell3_K8/`, `door_link_pocket_heading_open_k1_h0.5_ell3_K8/` (small blocks: `<block>__g<g>.parquet` and `<block>__sites.parquet`; large: `<block>__large.parquet`, `<block>__large_homes.parquet`).
 - Kept: `summary_door_link_census_sets.csv`, `summary_door_link_census.csv`, `door_link_census_homes.csv`, `summary_door_link_corridor.csv`, `summary_door_link_b_fix.csv`, `summary_door_link_vs_default.csv`, `summary_door_link_d.csv`, `summary_door_link_ends_diag.csv`; per run `summary_door_link_<run>_{a,b_open,b_match,c,size}.csv`, `summary_door_link_<run>_large_{a,c}.csv` and `door_link_<run>_stranded_homes.csv`.
+
+## The private crossing (stopped)
+
+The owner (2026-10-11), of the door link: "Is there a way to simplify your suggested method? The if-else feels unnatural"; then "Yes, test that. But, it would be nice to also test a version that can account for traffic/contention, if that would fit into the same framework, since it would reward multiple points of egress".
+Code: `crossing.py` (the commands `small`, `large`, `report`); rows `insulator_rows/crossing_*` (parquet, ignored); summaries `summary_crossing_small.csv`, `summary_crossing_size.csv`.
+Stopped on the small blocks when the owner dropped the criterion: "I am fine with having fully enclosed buildings be much worse off than exposed neighbors".
+
+### The models
+
+Both leave the open network O as today, with no edge in the operator, and use the door's crossings (`HomeDoors` with open ends).
+- **The toll.** A walled-in home's demand enters O at its crossing's street end b and pays a private resistance after the solve: u = u_O(b) + d / g per crossing (the door's physics with no edge), or u_O(b) + d T / g1 per metre of footprint crossed (d the demand crossing, T its metres).
+- **Private walls.** The walled-in homes' walkers cross a private copy of the block whose footprint conducts eps relative to open ground (isotropic, its fully open street-connected cells held at 0), then go on in O from where they come out; their u is the copy's potential plus O's, averaged over their exits.
+  O's own traffic cannot use the copy, so nothing leaks; homes share its walls (contention), and several thin walls conduct in parallel (several ways out).
+  The copy lives on a window 25 m around the walled-in homes: at 50 m, u moves by at most 1.2e-5 (log ratio; 12 blocks, 43 walled-in homes).
+
+### Results at matched medians (31 small blocks, 63 walled-in homes)
+
+Each model is calibrated to the door's median r at g 0.01 (1.80, count): the toll per crossing at g 0.0104, per metre at g1 0.040, the private walls at eps 3.0e-3 (grid 3e-3).
+
+| model | count: median | p90 | max | r>3 | area: median | p90 | max | r>3 |
+|---|---|---|---|---|---|---|---|---|
+| door, g 0.01 | 1.80 | 10.5 | 32.8 | 29% | 1.51 | 11.0 | 29.0 | 19% |
+| toll per crossing, g 0.0104 | 1.80 | 10.2 | 31.1 | 25% | 1.32 | 10.8 | 30.1 | 21% |
+| toll per metre, g1 0.040 | 1.80 | 10.8 | 28.7 | 27% | 1.27 | 10.9 | 30.5 | 21% |
+| private walls, eps 3e-3 | 1.78 | 5.0 | 40.1 | 25% | 1.24 | 3.0 | 32.8 | 11% |
+
+By pocket size (count; walled-in homes sharing the home's main pocket):
+
+| homes in the pocket | homes | door: median | p90 | max | toll per crossing: median | p90 | private walls: median | p90 | max |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 22 | 1.26 | 5.9 | 32.8 | 1.21 | 5.5 | 1.04 | 4.8 | 40.1 |
+| 2 -- 3 | 28 | 1.80 | 4.8 | 26.3 | 1.81 | 4.9 | 2.21 | 5.6 | 7.8 |
+| 4 or more | 13 | 7.61 | 28.9 | 28.9 | 7.58 | 28.7 | 1.11 | 3.1 | 3.1 |
+
+- The toll per crossing is the door's physics without its edge, and gives the same distribution: per home within 12% of the door's r for 57 of the 63 homes (count; median 3%), 46 by area (the largest gaps, up to 1.7x, on homes in several pockets and inside footprints).
+  The door's matrix edge buys nothing a toll added after the solve does not.
+- The toll per metre lowers the homes behind thin walls and raises those behind thick ones, and leaves the tail where it was.
+- The private walls halve the p90 by letting a pocket out on every side.
+  38486's 9-home courtyard leaves into open space at u of about 60 rather than through its thinnest wall into space at about 1,670; a median 19% of a walled-in home's walkers land within 5 m of that wall's street end (p10 5%, p90 32%), spread over 12.5 m (RMS, median).
+  Against that, the max rises (21622's home 178, inside a footprint with neighbours at the street: 40.1 against 32.8), five of the seven homes inside a footprint get worse (42404's 65: 13.8 against 6.2), and pockets of 2 -- 3 homes go from a median of 1.8 to 2.2.
+- Several doors per pocket, in the shared operator, would not give the same: they would make a courtyard a corridor between the spaces on its sides (38486's: u of about 1,670 and 60), the leak a single door avoids by ending in a dead end.
+  A model with several ways out needs the private rule stated outright: invented passages serve only the homes with no visible way out.
