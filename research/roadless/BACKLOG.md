@@ -70,13 +70,16 @@ items up front"), in the order proposed:
    criterion: the shadowed homes on their open side (kept), one door link per walled-in home, a
    toll after the solve (the door's numbers without its edge) and private walls (the tail halved
    by letting a pocket out on every side); crossing.py, stopped. Then the owner dropped the
-   criterion: enclosed homes may be much worse off, with one wall resistance for everyone. Under
-   test (walls.py): one number at eps 1e-4 (SIMP's), against two, the population still enclosed
-   and then Lens A over the rest, with the optimizers searching at a gate-keeping eps (about
-   5e-6: walls carrying at most 5% of any open home's escape). Then the port (into lifted/common,
-   replacing the exclusion), the stored clearings re-scored and the full run scored under it. The
-   door link's, the toll's and the private walls' code goes once that settles (the door's
-   dominated variants with it).
+   criterion: enclosed homes may be much worse off, with one wall resistance for everyone. Tested
+   (walls.py; NOTES, "Uniform walls"): one number at eps 1e-4 (A) against two (B: the population
+   still enclosed, then today's Lens A over the rest). No eps is canonical: the enclosed homes'
+   weight in J_2 goes as 1/eps^2, and at 1e-4 one home holds 80% of 20543's; A also leaks 0.02 --
+   0.04 at the gates. B is the same family's leak-free end, its optimizer two stages (free the
+   enclosed homes, D median 0.0022 a block, then today's search; a search at the gate-keeping eps
+   4.2e-6 is out, the GPU solver stalls there). **Owner's call**: A or B (B recommended). Then
+   the port (into lifted/common, replacing the exclusion), the stored clearings re-scored and the
+   full run scored under it. The door link's, the toll's and the private walls' code goes once
+   that settles (the door's dominated variants with it).
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population as
    footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =

@@ -672,3 +672,130 @@ By pocket size (count; walled-in homes sharing the home's main pocket):
   Against that, the max rises (21622's home 178, inside a footprint with neighbours at the street: 40.1 against 32.8), five of the seven homes inside a footprint get worse (42404's 65: 13.8 against 6.2), and pockets of 2 -- 3 homes go from a median of 1.8 to 2.2.
 - Several doors per pocket, in the shared operator, would not give the same: they would make a courtyard a corridor between the spaces on its sides (38486's: u of about 1,670 and 60), the leak a single door avoids by ending in a dead end.
   A model with several ways out needs the private rule stated outright: invented passages serve only the homes with no visible way out.
+
+## Uniform walls: one number against two
+
+The owner (2026-10-11): "Actually, I think I am fine with having fully enclosed buildings be much worse off than exposed neighbors, so we can try to find a uniform resistance that buildings can have, such that we strike some sort of nice, ideally canonical/motivated balance"; then, on a single eps of 1e-4 against ordering by two numbers, "I'm not sure between a single 1e-4 and order via two numbers, so maybe we can test both".
+Code: `walls.py` (the commands `small`, `small-exact`, `clearings`, `large`, `report`); rows `insulator_rows/walls_{small,large}_h0.5_ell3_K8/` (parquet, ignored); summaries `summary_walls_*.csv` and `walls_enclosed_homes.csv`.
+
+### Answer
+
+- No uniform resistance strikes a canonical balance.
+  An enclosed home's escape time is a toll set by eps and its own walls, so its weight in J_2 grows as 1/eps^2: eps sets an exchange rate between the enclosed homes and everyone else, and the walls and each block's escape times move it.
+  At eps 1e-4 one enclosed home holds 80% of J_2 on 20543 and 78% on 5706, and Lens A of SIMP's stored D 0.05 clearing falls there from 0.50 and 0.58 to 0.08 and 0.10.
+- A (one number, eps 1e-4) also leaks at the gates: the gated sentinels lose 0.018 -- 0.040 of Lens A, and 3.9% of the small blocks' open homes lose more than 5% of their escape time.
+- B (two numbers) is the eps -> 0 end of the same family: there any enclosed home left outweighs every other change, and among clearings that leave the same ones, the rest's J_2 decides.
+  B counts the enclosed homes by population where the limit weighs them by their walls' tolls, and drops their own flow through the open network (at eps 4.2e-6 that flow and the leak together move Lens A over the open homes by at most 0.0024).
+  B's second number is today's metric with the placement fix: the stored Lens A to 4e-8 on the 7 large blocks with no shadowed home moved, and to 1.6e-3 on the other 9.
+- B's optimizer is two stages, not a search at the gate-keeping eps: free the enclosed homes (clearing every enclosed home's cheapest crossings costs D 0.0004 -- 0.0144 per block, median 0.0022, on the 12 large blocks that have any), then today's search with the rest of the budget.
+  At eps_gate (4.2e-6) the GPU solver did not converge with nothing cleared on 5 of the 16 large blocks.
+- Recommendation: B (below).
+
+### The model
+
+Both candidates place demand with the placement fix (`Placement.of(open_side=True)`; "The door link", Task 1), and call a home enclosed when no free cell within 1 m of its outline reaches the street (`insulator.walled`: tiers 1, 3, 4 and 5).
+- **A, one number.** Every footprint sub-sample conducts eps relative to open ground (`insulator_open`, the eps world), every home injects, and Lens A is over every home; eps 1e-4 is the strength SIMP's default searches at.
+- **B, two numbers.** Walls are walls (eps 0). A clearing is scored first by (i) the population still enclosed after it (no injection cell open and street-connected in its exact field), then by (ii) Lens A over the homes not enclosed at baseline, which inject alone.
+- **eps_gate**, the world B's optimizer was to search in: the largest eps at which the walls carry at most 5% of every open home's escape, u_open(eps) / u_open(0) >= 0.95 for every tier-0 home, u_open the potential due to the tier-0 demand alone.
+- On the large blocks, five clearings: none; the stored D 0.05 clearings of SIMP's default and of the cheap preset; `free`, every building with a footprint sub-sample on an enclosed home's cheapest crossing (one per home and pocket, `HomeDoors` with open ends); and `free+simp`, their union.
+  D is the cleared buildings' share of the area population; cleared homes inject at their old cells, as in today's metric.
+
+### Small blocks: the gate curve (`summary_walls_gate.csv`, `summary_walls_eps_gate.csv`, `summary_walls_worst_fit.csv`)
+
+The 41 small blocks (the 31 with stranded homes and ten controls; 7,821 tier-0 homes), on the CPU at rtol 1e-8; tier-0 u matches the eps world's rows to 1.6e-9.
+u_open(eps) / u_open(0) over the tier-0 homes (area; count within 0.01); gated: the 79 homes in 11 blocks whose u(0) is at least 8x their block's median.
+
+| eps | min | p0.1 | p1 | p5 | median | below 0.95 | gated below 0.95 |
+|---|---|---|---|---|---|---|---|
+| 1e-6 | 0.989 | 0.995 | 0.999 | 1.000 | 1.000 | 0 | 0 |
+| 3e-6 | 0.969 | 0.986 | 0.996 | 0.999 | 1.000 | 0 | 0 |
+| 1e-5 | 0.903 | 0.955 | 0.987 | 0.996 | 1.000 | 6 | 5 |
+| 3e-5 | 0.758 | 0.877 | 0.962 | 0.988 | 0.999 | 54 | 24 |
+| 1e-4 | 0.486 | 0.687 | 0.885 | 0.962 | 0.997 | 302 (3.9%) | 60 |
+| 3e-4 | 0.243 | 0.475 | 0.734 | 0.901 | 0.992 | 793 (10%) | 79 |
+| 1e-3 | 0.093 | 0.250 | 0.499 | 0.764 | 0.973 | 2,299 (29%) | 79 |
+
+- The min crosses 0.95 at 4.25e-6 (area) and 4.22e-6 (count): eps_gate 4.2e-6.
+  p0.1 crosses at 1.07e-5, p1 at 3.6e-5 -- 3.7e-5.
+- The worst home at every eps is 43365's home 162 (u(0) 22x its block's median); 1 / (1 + eps / eps0) fits its curve with eps0 9.9e-5 (rms log error 0.019), and puts it at 0.95 near 5.2e-6, about 20% above the grid's crossing.
+- On the large blocks 30848's home 676 (u(0) 139x the median) has 0.413 at 1e-4, which puts it at 0.95 near 3.7e-6 by the same law; its solve at 4.2e-6 did not converge.
+  Over every block eps_gate is therefore at most about 3.7e-6 (about 3.0e-6 if the law overstates this home's crossing as it did 43365's).
+
+### Small blocks: the enclosed homes (`summary_walls_enclosed.csv`, `summary_walls_enclosed_share.csv`, `walls_enclosed_homes.csv`)
+
+63 enclosed homes on 24 of the small blocks: r = u_i over the largest u among its 6 nearest tier-0 homes, z = u_i over its block's median tier-0 u (area; count in brackets for r's median), and the enclosed homes' share of their block's J_2 (area, over the 24 blocks).
+
+| eps | r: median | p90 | max | z: median | share of J_2: median | max |
+|---|---|---|---|---|---|---|
+| 1e-6 | 1,197 (1,649) | 3,383 | 47,941 | 2,944 | 0.9998 | 1.000 |
+| 3e-6 | 399 (550) | 1,128 | 15,983 | 986 | 0.998 | 1.000 |
+| 1e-5 | 120 (165) | 339 | 4,798 | 301 | 0.981 | 1.000 |
+| 3e-5 | 40 (55) | 113 | 1,602 | 103 | 0.861 | 0.9996 |
+| 1e-4 | 12.3 (16.8) | 34 | 484 | 33 | 0.414 | 0.996 |
+| 3e-4 | 4.4 (5.9) | 11.9 | 164 | 13.4 | 0.103 | 0.968 |
+| 1e-3 | 1.7 (2.2) | 4.6 | 52 | 5.5 | 0.031 | 0.781 |
+
+- r and z go as 1/eps over the whole range: an enclosed home's escape is a toll its walls set.
+- Between keeping the gates (4.2e-6) and a moderate r (1e-3, the range of the owner's first criterion) the enclosed homes' share of J_2 runs from 99.8% to 3%; at 1e-5 they already hold 98%.
+
+### Large blocks (`summary_walls_large_*.csv`)
+
+The 12 large blocks of the full run with enclosed homes under the placement fix (24 homes: 19 in tier 1, and 5 in tier 4, with no free cell within 1 m, which inject on their own footprint's cells; 0.01 -- 0.23% of a block's population), and the four sentinels (22422 and 30848 gated, 5810 and 9712 ordinary), on the cluster's GPUs at rtol 1e-6 and eps 0, 4.2e-6 and 1e-4 (one task per block; 42 minutes on four GPUs).
+At 1e-4 the enclosed homes have r median 8.1 (count 16.6), p90 35, max 125, and z median 34 (count 45), p90 70, max 210, as on the small blocks.
+Their share of J_2 with nothing cleared is 9.5% at the median but 0.7 -- 80% by block, because each toll is set against its block's escape times (median tier-0 u 5.9 -- 301).
+Lens A (area, J_2) under A over every home at 1e-4, and under B (ii):
+
+| block | enclosed | share of J_2: none | after SIMP | A: SIMP | A: cheap | A: free | A: free+simp | B (ii): SIMP | B (ii): cheap | D of free |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 20543 | 1 (tier 4) | 0.80 | 0.93 | 0.077 | 0.074 | 0.552 | 0.758 | 0.503 | 0.476 | 0.0025 |
+| 5706 | 1 | 0.78 | 0.95 | 0.097 | 0.095 | 0.533 | 0.802 | 0.582 | 0.570 | 0.0007 |
+| 41806 | 4 (one tier 4) | 0.43 | 0.69 | 0.404 | 0.387 | 0.242 | 0.669 | 0.570 | 0.551 | 0.0043 |
+| 43708 | 2 (one tier 4) | 0.39 | 0.75 | 0.328 | 0.310 | 0.231 | 0.662 | 0.569 | 0.535 | 0.0046 |
+| 22336 | 1 (tier 4) | 0.32 | 0.72 | 0.329 | 0.319 | 0.177 | 0.644 | 0.573 | 0.550 | 0.0019 |
+| 22267 | 3 | 0.15 | 0.58 | 0.530 | 0.596 | 0.096 | 0.699 | 0.707 | 0.693 | 0.0080 |
+| 38254 | 1 | 0.04 | 0.16 | 0.513 | 0.493 | 0.020 | 0.555 | 0.547 | 0.526 | 0.0011 |
+| 39240 | 1 | 0.03 | 0.13 | 0.594 | 0.544 | 0.014 | 0.622 | 0.623 | 0.571 | 0.0004 |
+| 41673 | 5 | 0.02 | 0.07 | 0.542 | 0.517 | 0.038 | 0.559 | 0.573 | 0.548 | 0.0100 |
+| 21252 | 2 | 0.01 | 0.03 | 0.340 | 0.324 | 0.017 | 0.355 | 0.347 | 0.322 | 0.0144 |
+| 41515 | 1 (tier 4) | 0.01 | 0.05 | 0.548 | 0.541 | 0.005 | 0.560 | 0.559 | 0.552 | 0.0011 |
+| 23597 | 2 | 0.007 | 0.02 | 0.459 | 0.449 | 0.004 | 0.465 | 0.475 | 0.467 | 0.0005 |
+
+- On 20543 and 5706 one home holds four-fifths of J_2, and clearing the 1 -- 3 buildings that free it (D 0.0025 and 0.0007; 20543's crossing runs through the home's own footprint) is worth 7.2x and 5.5x SIMP's whole D 0.05 clearing under A.
+- The order of SIMP's and the cheap preset's clearings: SIMP first on 15 of the 16 blocks today and under B (ii), 14 under A (22267 flips: the cheap preset frees one of its three enclosed homes), 13 under B ((i) also gives 21252 to the cheap preset, which frees both of its enclosed homes); 30848 is the cheap preset's in every world.
+  SIMP's and the cheap preset's clearings each free one home on 41673 and 41806, and SIMP's none elsewhere.
+- A's open homes: Lens A over the non-enclosed at 1e-4 trails B (ii) by up to 0.043 (20543) and 0.039 (22267); at 4.2e-6 by at most 0.0024.
+- The sentinels' leak at 1e-4 (Lens A over every home, against eps 0): 22422 -0.018 (SIMP's 0.783 to 0.764) and -0.020 (the cheap preset's), 30848 -0.040 and -0.040 (46 of its 5,395 homes lose more than 5% of their escape time), 5810 -0.0005, 9712 -0.0001.
+  At 4.2e-6, 22422 loses 0.0008 and the ordinary two less than 1e-4; the two clearings keep their order on all four.
+- At 4.2e-6, wherever the solve converged, the enclosed homes hold 76 -- 99.95% of J_2 with nothing cleared and 92 -- 99.99% after SIMP's clearing: Lens A there says whether a clearing frees them (SIMP's 0.0003 -- 0.23, `free`'s 0.51 -- 0.98), B (i) as one number.
+
+### Solves (`summary_walls_solver.csv`, `summary_walls_failed.csv`)
+
+- Small blocks (CPU, rtol 1e-8): pyamg's CG stopped at its 500-iteration cap on 7 block-eps (63718 and 43874 at 1e-6, 3e-6 and 1e-5; 19570 at 1e-6), and accepted 4 fields above rtol inside its 10x slack; all 11 were re-solved with SuperLU and one step of iterative refinement (`small-exact`; residuals at most 2.4e-9).
+- Large blocks (GPU, rtol 1e-6): every system at eps 0 (72) and at 1e-4 (72) converged, medians 4.5 s and 14 s.
+  At 4.2e-6, 66 converged (median 44 s, max 457 s), and 6 stopped at the 2,000-iteration cap: nothing cleared on 22267, 30848, 38254, 39240 and 41673 (residuals 2.0e-6 -- 4.3e-5), and SIMP's clearing on 30848 (5.4e-6).
+  The swings' restore screens met the same on 30848 at 1e-6 (NOTES, "Swings as SIMP's finisher").
+  Untested: the K-cycle's aggregates come from the sparsity pattern alone (strength theta 0), so they straddle walls whose conductance is eps.
+
+### Recommendation
+
+B: walls are walls, and a clearing reports the population it leaves enclosed and, after it, today's Lens A over everyone else.
+- It is what the uniform resistance says at its leak-free end, so it answers "canonical" without a constant.
+- Its second number keeps every stored result (to 1.6e-3 where the placement fix moved a shadowed home).
+- Its optimizer frees first and then searches as today; no solve at the gate-keeping eps is needed.
+
+A stays the one-number option, with eps 1e-4 as its constant.
+Its price is a leak of 0.02 -- 0.04 at the gates, and an exchange rate set by the walls and the block, which gives one home four-fifths of a block's score.
+
+### Caveats
+
+- `free` is one clearing, not an optimum: each enclosed home's crossing cheapest in metres of footprint, not in D.
+  On 11 of the 24 homes it runs through the home's own building (all five tier-4 homes), which (i) then counts as freed while its residents inject at their old cells, as today's metric counts every cleared home.
+- `free+simp` overspends the budget (D 0.050 -- 0.064); B's optimizer would search with D 0.05 less `free`'s.
+- eps_gate is 4.2e-6 on the small blocks and about 3.7e-6 with 30848's gated home, from one point and the law that put 43365's home 20% above its grid crossing.
+- 16 large blocks: the 12 of the full run's 60 with enclosed homes, and four sentinels; the road methods' networks are not scored yet.
+
+### Files
+
+- `walls.py`: `small <procs> <eps,> <ids,>`, `small-exact <procs> <ids,>`, `clearings <out> <ids,>`, `large <clearings> <eps,> <ids,>` (on the cluster: `cluster.py submit blocks <run> --with <clearings> <ids> -- research/roadless/walls.py large <its name> <eps,> {id}`), `report`.
+- Rows (parquet, ignored): `walls_small_h0.5_ell3_K8/<block>__eps<eps>.parquet`; `walls_large_h0.5_ell3_K8/<block>__eps<eps>__{homes,scenarios}.parquet` and `<block>__free.parquet`; failures under `failed/` beside them; `walls_clearings.parquet`, the large run's input.
+- Kept: `summary_walls_{check_old,gate,eps_gate,worst_fit,worst_curve,worst_homes,enclosed,enclosed_share,solver,failed}.csv`, `walls_enclosed_homes.csv`, `summary_walls_large_{blocks,a,a_gate,b,order,free,leak,gate,enclosed}.csv`.

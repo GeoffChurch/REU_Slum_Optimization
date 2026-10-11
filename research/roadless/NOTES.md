@@ -2554,3 +2554,31 @@ private rule stated. Stopped when the owner dropped the criterion (2026-10-11: "
 having fully enclosed buildings be much worse off than exposed neighbors"); next, one wall
 resistance for everyone, scored as one number at eps 1e-4 or as two (the population still
 enclosed, then Lens A over the rest).
+
+**Uniform walls** (walls.py; insulator_report.md, "Uniform walls: one number against two"; owner
+2026-10-11: "I am fine with having fully enclosed buildings be much worse off than exposed
+neighbors, so we can try to find a uniform resistance that buildings can have", then "I'm not
+sure between a single 1e-4 and order via two numbers, so maybe we can test both"). A: every
+footprint conducts eps 1e-4 (SIMP's), every home injects, Lens A over all. B: walls are walls;
+first the population still enclosed (no injection cell open and street-connected), then Lens A
+over the rest (today's metric with the placement fix: the stored Lens A to 4e-8, or 1.6e-3 where
+a shadowed home moved). On the 41 small blocks the walls carry at most 5% of every open home's
+escape up to eps_gate 4.2e-6 (the worst, 43365's home 162, follows 1 / (1 + eps / 9.9e-5);
+30848's gated 676 puts it at 3.7e-6 or less), and at 1e-4 302 of 7,821 open homes (3.9%) lose
+more than 5%. The 63 enclosed homes' r and z go as 1/eps (median r 12 at 1e-4) and their share
+of J_2 with them: 99.8% at 3e-6, 98% at 1e-5, 41% at 1e-4, 3% at 1e-3. On the 12 large blocks
+with enclosed homes (24) and the four sentinels (cluster, one task a block, 42 minutes): at 1e-4
+the share is 0.7 -- 80% by block, each toll set against its block's escape times (median tier-0
+u 5.9 -- 301). On 20543 and 5706 one home holds four-fifths, so SIMP's D 0.05 clearing scores
+0.08 and 0.10 under A against 0.50 and 0.58 under B, and clearing the 1 -- 3 buildings that free
+that home (D 0.0025, 0.0007) is worth 7.2x and 5.5x it. The gated sentinels leak 0.018 -- 0.040
+at 1e-4 (22422, 30848). SIMP's clearing ahead of the cheap preset's: today 15 of 16, A 14 (22267
+flips: cheap frees a home), B 13 (21252 too). B is the uniform resistance's eps -> 0 end: any
+enclosed home left outweighs everything else there (weighed by its walls' toll, where B counts
+population), then the rest's J_2 (the enclosed homes' own flow through the open network, which B
+drops, and the leak together move it by at most 0.0024 at 4.2e-6); any finite eps is an exchange
+rate between the two that eps, the walls and the block set. Searching at eps_gate is out: with
+nothing cleared the GPU solver stopped at 2,000 iterations on 5 of the 16 (residuals 2e-6 --
+4e-5), as the swings' screens did on 30848 at 1e-6. B's optimizer is two stages: free (every
+enclosed home's cheapest crossings, D 0.0004 -- 0.0144 a block, median 0.0022), then today's
+search with the rest. Recommended: B; the owner's call.
