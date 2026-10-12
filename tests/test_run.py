@@ -22,6 +22,7 @@ from reblock.pipeline import PipelineSpec, run
 from reblock.region import IdentityRegionBuilder
 from reblock.run import spec_from_cfg
 from reblock.screen.identity import IdentityScreen
+from reblock.transparency import Opaque
 from tests.block_fixtures import no_buildings
 
 PHULE = str(Path(__file__).resolve().parents[1] / "ext" / "topology" / "examples"
@@ -300,7 +301,8 @@ def _dji_spec(block_groups: list[list[str]], *, depth_target: int) -> PipelineSp
         source=_dji_source(), screen=IdentityScreen(block_ids=None),
         method=ClearanceReblocker(depth_target=depth_target, substrate=ChordSubstrate(),
                                   repulsion=0.0, max_roads=400,
-                                  road_width_m=DEFAULT_ROAD_WIDTH_M), evals=[KComplexityEval()],
+                                  road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                  price=Opaque()), evals=[KComplexityEval()],
         max_blocks=1, region_builder=IdentityRegionBuilder(), block_groups=block_groups,
     )
 
@@ -322,7 +324,7 @@ def test_singleton_group_run_matches_single_block_reblock() -> None:
                               building_tier=SpacingDiscs, member_buildings=None)
     block = next(b for b in direct_src.region().blocks if b.block_id == bid)
     clearance = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
     direct = reblock_block(block, clearance, [KComplexityEval()])
     assert r.proposal.proposal_id == direct.proposal.proposal_id
     assert r.metric("kcomplexity", "delta_k") == direct.metric("kcomplexity", "delta_k")

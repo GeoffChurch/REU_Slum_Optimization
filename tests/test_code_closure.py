@@ -26,6 +26,7 @@ from reblock.derive_graph import Identified, _closure_paths, _module_file, closu
 from reblock.methods.desire_substrate import DesireWarpedSubstrate
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from reblock.transparency import Opaque
 from tests.data.test_kblock_source import DJI_BLD, DJI_BLOCKS
 from tests.data.test_shapefile_source import PHULE
 from tests.methods.betweenness.test_source import BASE as BETWEENNESS
@@ -121,21 +122,23 @@ def test_a_methods_code_version_is_blind_to_its_siblings() -> None:
 
     clearance = modules(ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0,
                                            depth_target=2, max_roads=400,
-                                           road_width_m=DEFAULT_ROAD_WIDTH_M))
+                                           road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque()))
     cycle = modules(CycleNativeReblocker(substrate=ChordSubstrate(), max_displacement=0.10,
                                          max_cycles=400, shortlist=8, params=SHIPPED,
-                                         road_width_m=DEFAULT_ROAD_WIDTH_M))
+                                         road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque()))
     assert clearance != cycle
     assert SRC / "methods" / "cycle_native.py" not in clearance
     assert SRC / "methods" / "clearance.py" not in cycle
 
     a = _code_version(_propose_impl, (ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0,
                                                          depth_target=2, max_roads=400,
-                                                         road_width_m=DEFAULT_ROAD_WIDTH_M),))
+                                                         road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                                         price=Opaque()),))
     b = _code_version(_propose_impl, (CycleNativeReblocker(substrate=ChordSubstrate(),
                                                            max_displacement=0.10, max_cycles=400,
                                                            shortlist=8, params=SHIPPED,
-                                                           road_width_m=DEFAULT_ROAD_WIDTH_M),))
+                                                           road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                                           price=Opaque()),))
     assert a != b, "two methods must not share a code version"
 
 

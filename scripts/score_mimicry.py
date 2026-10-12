@@ -42,6 +42,7 @@ from reblock.methods.loop_closure import LoopClosureRefiner
 from reblock.methods.osm_footpaths import block_footpaths
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from reblock.transparency import Opaque
 from scripts._donor_pool import donor_pool
 
 
@@ -92,11 +93,13 @@ def main() -> None:
                                              reinforcement=0.5, max_sources=400, seed=0,
                                              road_width_m=DEFAULT_ROAD_WIDTH_M),
         "clearance": ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
-                                        max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
+                                        max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                        price=Opaque()),
         "clearance_looped": LoopClosureRefiner(base=ClearanceReblocker(depth_target=1,
                                                                        substrate=ChordSubstrate(),
                                                                        repulsion=0.0, max_roads=400,
-                                                                       road_width_m=DEFAULT_ROAD_WIDTH_M),
+                                                                       road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                                                       price=Opaque()),
                                                budget_frac=0.12, min_bridges_per_m=0.01,
                                                max_loops=400, min_loop_len_m=40.0,
                                                search_radius_m=45.0, snap_lam=2.0,

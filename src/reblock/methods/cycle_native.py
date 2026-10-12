@@ -14,6 +14,10 @@ path from that parcel back to the street that avoids the first one's edges. The 
 through the street. Candidates are scored by permeability gain per unit displacement -- the same
 currency the lenses use -- and the best is committed.
 
+The displacement in that ratio is PRICED (`price`, `reblock.transparency`: building b's share
+counts times its factor); the `max_displacement` cap is not, since it decides how far the method
+builds rather than what it builds. Under `Opaque` the two are the same number, bit for bit.
+
 Avoiding the outbound edges is what makes the return path a genuine alternate route rather than a
 retrace; without it the "cycle" is a there-and-back spur and the method degenerates to clearance.
 
@@ -48,7 +52,7 @@ onto a finished tree. Choosing cycles from the start finds loops that also serve
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 
 import geopandas as gpd
 import numpy as np
@@ -59,7 +63,6 @@ from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
-from reblock.buildings import IncrementalOverlap
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
 from reblock.methods.substrates import RoutingGraph, Substrate
@@ -69,6 +72,7 @@ from reblock.permeability import (
     permeability,
     with_width,
 )
+from reblock.transparency import PricedOverlap, Transparency, factors_of
 
 
 def _trace(graph: RoutingGraph, pred: np.ndarray, start: int) -> list[int]:
@@ -109,6 +113,9 @@ class CycleNativeReblocker:
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
     road_width_m: float
+    _: KW_ONLY
+    # Each building's factor on the displacement that RANKS candidate cycles (`Opaque`: today's).
+    price: Transparency
 
     @property
     def identity(self) -> Hashable | None:
@@ -144,13 +151,15 @@ class CycleNativeReblocker:
         cur_p = float(permeability(ctx, empty))
         # The committed corridor as per-building covered pieces, so a candidate cycle is priced by
         # the buildings IT reaches rather than by re-unioning the whole network -- a recompute
-        # whose cost grows with every road committed (see `IncrementalOverlap`).
-        taken = IncrementalOverlap(block.buildings)
+        # whose cost grows with every road committed (see `buildings.IncrementalOverlap`).
+        taken = PricedOverlap(block.buildings, factors=factors_of(self.price, block))
         hw = self.road_width_m / 2.0
         for _ in range(self.max_cycles):
+            # The cap reads TRUE displacement, the ranking below PRICED.
             spent = taken.total() / n_b
             if spent >= self.max_displacement:
                 break
+            spent_priced = taken.priced_total() / n_b
             net = list(seeds)
             for road in roads:
                 for x, y in road.coords:
@@ -186,13 +195,15 @@ class CycleNativeReblocker:
                     back = _geom(graph, _trace(graph, pred2, int(starts[i])), street)
                 cand = [out_geom] + ([back] if back is not None else [])
                 piece = unary_union([g.buffer(hw) for g in cand])
-                d = spent + taken.delta(piece) / n_b
+                inc = taken.increment(piece)
+                d = spent + inc.true / n_b
                 if d > self.max_displacement:
                     continue
                 trial = with_width(gpd.GeoDataFrame(geometry=[*roads, *cand], crs=crs),
                                    self.road_width_m)
                 gain = float(permeability(ctx, trial)) - cur_p
-                cost = max(d - spent, 1e-9)
+                # `d - spent`'s own arithmetic, priced: under `Opaque` the same float, bit for bit.
+                cost = max((spent_priced + inc.priced / n_b) - spent_priced, 1e-9)
                 if gain > 0 and gain / cost > best_val:
                     best, best_val = (cand, gain + cur_p, piece), gain / cost
             if best is None:

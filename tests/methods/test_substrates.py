@@ -103,7 +103,8 @@ def test_chord_substrate_builds_connected_graph_and_hits_target() -> None:
                   for a, b in zip(graph.rows, graph.cols, strict=True)}
     assert len(undirected) * 2 == len(graph.rows)          # symmetric
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
-                                    radii=np.zeros(len(block.building_geometries)))
+                                    radii=np.zeros(len(block.building_geometries)),
+                                    factors=np.ones(len(block.building_geometries)))
     after = _layers(block, roads).to_numpy()
     assert int(after.max()) <= 2 and params["grid_unreachable"] == 0
     assert ChordSubstrate().identity == ("chord_diag",) and ChordSubstrate().tag == "chord_diag"
@@ -121,7 +122,8 @@ def test_extra_substrates_build_and_hit_target(sub: Substrate, tag: str, ident: 
                   for a, b in zip(graph.rows, graph.cols, strict=True)}
     assert len(undirected) * 2 == len(graph.rows)
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
-                                    radii=np.zeros(len(block.building_geometries)))
+                                    radii=np.zeros(len(block.building_geometries)),
+                                    factors=np.ones(len(block.building_geometries)))
     after = _layers(block, roads).to_numpy()
     assert int(after.max()) <= 2 and params["grid_unreachable"] == 0
     assert sub.tag == tag and sub.identity == ident

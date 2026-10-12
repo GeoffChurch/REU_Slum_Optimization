@@ -24,3 +24,6 @@ max_road_m: 1000000.0   # a hard metre cap, effectively off; see the class docst
 chunks: 8
 params: ${permeability.params}
 road_width_m: 7.0
+# Each building's factor in the displacement budget (reblock.transparency); Opaque is every
+# factor 1, the plain budget.
+price: {_target_: reblock.transparency.Opaque}

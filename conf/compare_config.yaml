@@ -142,7 +142,7 @@ all_methods:
     workers: 16
     engine: {_target_: reblock.methods.arterial.ExactEngine}
     max_anchors: 0
-  clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
+  clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400, road_width_m: 7.0, price: {_target_: reblock.transparency.Opaque}}
   demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", buffer_m: 3.0, eps: 0.1, gamma: 1.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
   # demand_greedy routed toward curvature-aware betweenness ridges (raw counts). Beats clearance on
   # both lenses on 220 small blocks (Lens A +0.040, Lens B -0.009), on held-out Cape Town and Nairobi
@@ -226,6 +226,7 @@ all_methods:
     shortlist: 8
     params: "${permeability.params}"
     road_width_m: 7.0
+    price: {_target_: reblock.transparency.Opaque}
   # cycle_native with its candidate loops routed along curvature-aware betweenness ridges
   # (prior-deviance contrast): the substrate's edges are shortened along the ridges
   # (reblock.methods.desire_substrate), and cycle_native still scores every candidate loop by
@@ -250,6 +251,7 @@ all_methods:
     shortlist: 8
     params: "${permeability.params}"
     road_width_m: 7.0
+    price: {_target_: reblock.transparency.Opaque}
 
   # drainage tree. The gap to demand_greedy is exactly what the desire-line prior is worth.
 
@@ -292,6 +294,9 @@ all_methods:
     chunks: 8
     params: ${permeability.params}
     road_width_m: 7.0
+    # Each building's factor in the displacement budget (reblock.transparency); Opaque is every
+    # factor 1, the plain budget. The same on every cycle_native and clearance entry.
+    price: {_target_: reblock.transparency.Opaque}
   # Cycle-native: each move is a loop from the street back to the street, so the output is
   # bridgeless by construction and every road can be oriented one-way. See conf/method/cycle_native.yaml.
   cycle_native:
@@ -302,17 +307,19 @@ all_methods:
     shortlist: 8
     params: ${permeability.params}
     road_width_m: 7.0
+    price: {_target_: reblock.transparency.Opaque}
   # Flow accumulation rather than drainage: route every trip, count edge traffic, keep the busiest.
   # Sparse, can contain loops, does not reach every parcel -- the properties real footpaths have and
   # a drainage tree cannot. flow_quantile is the hierarchy knob (low = footpath web, high = skeleton).
   flow_paths: {_target_: reblock.methods.flow_paths.FlowPathsReblocker, substrate: "${substrate}", destination: all_pairs, iterations: 3, reinforcement: 0.5, flow_quantile: 0.90, max_sources: 400, seed: 0, road_width_m: 7.0}
   flow_paths_noreinforce: {_target_: reblock.methods.flow_paths.FlowPathsReblocker, substrate: "${substrate}", destination: all_pairs, iterations: 1, reinforcement: 0.0, flow_quantile: 0.90, max_sources: 400, seed: 0, road_width_m: 7.0}
-  clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
+  clearance_grid: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: {_target_: reblock.methods.substrates.GridSubstrate, res: 1.5}, repulsion: 0.0, depth_target: 2, max_roads: 400, road_width_m: 7.0, price: {_target_: reblock.transparency.Opaque}}
   clearance_looped:
     _target_: reblock.methods.loop_closure.LoopClosureRefiner
     base: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}",
            repulsion: 0.0, depth_target: 1, max_roads: 400,
-           road_width_m: 7.0}   # depth_target 1 = deeper base (best-of-both)
+           road_width_m: 7.0,   # depth_target 1 = deeper base (best-of-both)
+           price: {_target_: reblock.transparency.Opaque}}
     budget_frac: 0.12
     min_bridges_per_m: 0.01
     max_loops: 400

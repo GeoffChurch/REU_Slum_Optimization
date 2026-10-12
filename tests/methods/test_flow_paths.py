@@ -20,6 +20,7 @@ from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.flow_paths import FlowPathsReblocker, accumulate_flow
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from reblock.transparency import Opaque
 
 UTM = CRS.from_epsg(32734)
 
@@ -63,7 +64,8 @@ def test_it_is_sparser_than_a_drainage_tree_and_leaves_parcels_unserved() -> Non
                                     road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     tree_roads = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
                                     max_roads=400,
-                                    road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
+                                    road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                    price=Opaque()).propose(block).roads
 
     assert flow_roads is not None and tree_roads is not None
     assert len(flow_roads) > 0, "produced nothing at all"

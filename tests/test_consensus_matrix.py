@@ -27,6 +27,7 @@ from reblock.methods.osm_footpaths import OsmFootpathsReblocker
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, EgressContext, permeability, with_width
 from reblock.presets import load_method
+from reblock.transparency import Opaque
 from reblock.transplant.consensus import ConsensusDesireSource
 from reblock.transplant.donor_transplant import DonorTransplantReblocker
 
@@ -61,7 +62,8 @@ def _arms() -> dict[str, gpd.GeoDataFrame]:
     for name, repulsion in (("clearance", 0.0), ("repelled", 3.0)):
         roads = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=repulsion,
                                    depth_target=1, max_roads=400,
-                                   road_width_m=DEFAULT_ROAD_WIDTH_M).propose(BLOCK).roads
+                                   road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                   price=Opaque()).propose(BLOCK).roads
         arms[name] = cast(gpd.GeoDataFrame, roads)
     assert all(len(r) >= 4 for r in arms.values())
     return arms

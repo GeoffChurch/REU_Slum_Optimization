@@ -23,6 +23,7 @@ from reblock.methods.loop_closure import (
 )
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from reblock.transparency import Opaque
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
@@ -320,7 +321,7 @@ def test_loop_candidates_max_candidates_none_is_unbounded_default() -> None:
 # in a fake base and varies what it is about with `replace`.
 LOOPS = LoopClosureRefiner(
     base=ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=1,
-                            max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
+                            max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque()),
     budget_frac=0.12, min_bridges_per_m=0.01, max_loops=400, min_loop_len_m=40.0,
     search_radius_m=45.0, snap_lam=2.0, max_candidates=1500, road_width_m=DEFAULT_ROAD_WIDTH_M)
 # The same, with the search radius and loop floor scaled down to these metre-sized fixtures.

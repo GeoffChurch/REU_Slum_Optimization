@@ -64,6 +64,7 @@ from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M, with_width
+from reblock.transparency import Opaque
 from scripts._donor_pool import donor_pool
 
 SNAP_TOL = 0.5      # metres; endpoints closer than this are the same node
@@ -205,10 +206,12 @@ def main() -> None:
 
     methods: dict[str, Method] = {
         "clearance": ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
-                                        max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
+                                        max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                        price=Opaque()),
         "looped_tree": LoopClosureRefiner(
             base=ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
-                                    max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
+                                    max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                    price=Opaque()),
             budget_frac=0.12, min_bridges_per_m=0.01, max_loops=400, min_loop_len_m=40.0,
             search_radius_m=45.0, snap_lam=2.0, max_candidates=1500,
             road_width_m=DEFAULT_ROAD_WIDTH_M),

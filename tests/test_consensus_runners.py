@@ -22,6 +22,7 @@ from reblock.contracts import Block, Method
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from reblock.transparency import Opaque
 from tests.test_consensus_matrix import _slab, _study
 from tests.transplant.pool_fixtures import pool
 
@@ -36,7 +37,7 @@ def _study_of(runner: study.Runner, out: Path) -> study.Study:
     """Two real arms on synthetic recipients; the pool is never read."""
     arms: dict[str, Method] = {
         name: ClearanceReblocker(substrate=ChordSubstrate(), repulsion=repulsion, depth_target=1,
-                                 max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+                                 max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
         for name, repulsion in (("own", 0.0), ("repelled", 3.0))}
     return study.Study(pool=pool(RECIPIENTS, with_paths=()), arms=arms, reference="own",
                        pcfg=PCFG, recipients=len(RECIPIENTS), runner=runner, out=out)

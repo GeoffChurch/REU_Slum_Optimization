@@ -28,6 +28,7 @@ from reblock.region import (
     region_block,
     region_reblock,
 )
+from reblock.transparency import Opaque
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32643)
@@ -242,7 +243,7 @@ def test_region_reblock_reblocks_the_region_block_against_its_existing_network()
     # depth 2 (the shipped target), which would let ClearanceReblocker propose zero roads -- too
     # trivial to prove the region_reblock == propose(region-block) plumbing invariant below.
     method = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
-                                max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+                                max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
     result = region_reblock([a, b], method, [KComplexityEval()])
 
     assert isinstance(result, Result)

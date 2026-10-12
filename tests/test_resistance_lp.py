@@ -18,6 +18,7 @@ from reblock.contracts import Block
 from reblock.methods.resistance_lp import ResistanceLPReblocker, solve_coverage_lp
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
+from reblock.transparency import Opaque
 from tests.permeability_fixtures import SHIPPED
 
 CORRIDOR_M = 3.0
@@ -67,7 +68,8 @@ def test_displacement_budget_is_respected(cap: float) -> None:
     block = _grid_block()
     roads = ResistanceLPReblocker(max_displacement=cap, substrate=ChordSubstrate(), max_road_m=1e6,
                                   chunks=8, params=SHIPPED,
-                                  road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
+                                  road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                  price=Opaque()).propose(block).roads
     assert roads is not None and len(roads) > 0, "no roads: the cap is vacuous"
     got = displacement(block.buildings, roads) / len(
         block.building_geometries)
@@ -89,7 +91,8 @@ def test_every_road_reaches_the_street() -> None:
     block = _grid_block()
     roads = ResistanceLPReblocker(max_displacement=0.15, substrate=ChordSubstrate(), max_road_m=1e6,
                                   chunks=8, params=SHIPPED,
-                                  road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
+                                  road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                  price=Opaque()).propose(block).roads
     assert roads is not None and len(roads) > 0
 
     graph = _noded_graph(roads, block.streets)
@@ -123,7 +126,8 @@ def test_lp_respects_displacement_budget() -> None:
                 (np.zeros(0, dtype=np.int64), np.zeros(0))]
     z = solve_coverage_lp(path_segs, seg_len, seg_edges, seg_disp,
                           edge_gain=np.array([5.0, 5.0, 1.0]), n_buildings=2,
-                          base_c=np.zeros(2), disp_budget=1.0, len_budget=100.0)
+                          base_c=np.zeros(2), disp_budget=1.0, len_budget=100.0,
+                          price=np.ones(2))
 
     used = np.zeros(2)
     for s, (bidx, c) in enumerate(seg_disp):

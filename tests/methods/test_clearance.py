@@ -41,6 +41,7 @@ from reblock.methods.substrates import (
 )
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.presets import load_method, load_methods, load_substrate
+from reblock.transparency import Opaque
 from tests.block_fixtures import no_buildings
 
 
@@ -75,7 +76,7 @@ def test_node_clearance_is_euclidean_when_unweighted() -> None:
     pts = np.array([[0.0, 0.0], [5.0, 0.0]])
     buildings = np.array([[0.0, 0.0]])
     radii = np.zeros(1)
-    clear = _node_clearance(pts, buildings, radii)
+    clear = _node_clearance(pts, buildings, radii, factors=np.ones(1)).clearance
     # node ON the building -> eps; node 5 away -> 5 + eps
     assert clear[0] == pytest.approx(0.3)
     assert clear[1] == pytest.approx(5.3)
@@ -84,15 +85,16 @@ def test_node_clearance_is_euclidean_when_unweighted() -> None:
 def test_node_clearance_weighted_radius_shrinks_clearance() -> None:
     pts = np.array([[5.0, 0.0]])
     buildings = np.array([[0.0, 0.0]])
-    plain = _node_clearance(pts, buildings, np.zeros(1))
-    weighted = _node_clearance(pts, buildings, np.array([3.0]))  # radius-3 footprint
+    plain = _node_clearance(pts, buildings, np.zeros(1), factors=np.ones(1)).clearance
+    weighted = _node_clearance(pts, buildings, np.array([3.0]),  # radius-3 footprint
+                               factors=np.ones(1)).clearance
     assert weighted[0] < plain[0]
     assert weighted[0] == pytest.approx(5.0 - 3.0 + 0.3)
 
 
 def test_node_clearance_no_buildings_is_uniform() -> None:
     pts = np.array([[0.0, 0.0], [10.0, 10.0]])
-    clear = _node_clearance(pts, np.empty((0, 2)), np.zeros(0))
+    clear = _node_clearance(pts, np.empty((0, 2)), np.zeros(0), factors=np.ones(0)).clearance
     assert clear[0] == clear[1]  # uniform -> straight regardless of t
 
 
@@ -108,7 +110,8 @@ def test_repulsion_bends_the_path_around_buildings() -> None:
     dst = int(tree.query([5.0, 1.0])[1])
 
     def route(t: float) -> tuple[float, float]:
-        w = _edge_weights(pts, rows, cols, edist, buildings, radii, t)
+        w = _edge_weights(pts, rows, cols, edist, buildings, radii, t,
+                          factors=np.ones(len(buildings)))
         csr = csr_matrix((w, (rows, cols)), shape=(len(pts), len(pts)))
         _d, pred, _s = dijkstra(csr, indices=[src], return_predecessors=True, min_only=True)
         node, path = dst, [dst]
@@ -132,7 +135,7 @@ UTM = CRS.from_epsg(32643)
 # Every setting spelled once, at the values `conf/method/clearance.yaml` ships (pinned by
 # `test_clearance_method_yaml_is_clearance`); each test varies what it is about.
 CLEARANCE = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                               max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+                               max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
 
 
 def _column_block(h: int) -> Block:
@@ -229,7 +232,8 @@ def test_greedy_reblock_achieves_depth_target() -> None:
     block = _column_block_with_buildings(8)  # depth 1..8
     graph = GridSubstrate(res=0.5).build(block)
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
-                                    radii=np.zeros(len(block.building_geometries)))
+                                    radii=np.zeros(len(block.building_geometries)),
+                                    factors=np.ones(len(block.building_geometries)))
     assert len(roads) > 0
     after = parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
                                  unreached=one_past_deepest).to_numpy()
@@ -241,7 +245,8 @@ def test_greedy_reblock_returns_empty_when_already_shallow() -> None:
     block = _column_block_with_buildings(2)  # depth 1..2, target 2 -> nothing to do
     graph = GridSubstrate(res=0.5).build(block)
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
-                                    radii=np.zeros(len(block.building_geometries)))
+                                    radii=np.zeros(len(block.building_geometries)),
+                                    factors=np.ones(len(block.building_geometries)))
     assert len(roads) == 0
     assert params["roads"] == 0
 
@@ -330,9 +335,9 @@ def test_edge_weights_3point_sees_a_midspan_building() -> None:
     buildings = np.array([[5.0, 3.0]])          # nearest to the midpoint, far from endpoints
     radii = np.zeros(1)
     t = _sigmoid(6.0)                            # high repulsion -> clearance dominates cost
-    w = _edge_weights(pts, rows, cols, edist, buildings, radii, t)
+    w = _edge_weights(pts, rows, cols, edist, buildings, radii, t, factors=np.ones(1))
     # endpoint-only weight for comparison: mean of the two endpoint node costs * length
-    clear_ends = _node_clearance(pts, buildings, radii)
+    clear_ends = _node_clearance(pts, buildings, radii, factors=np.ones(1)).clearance
     node_cost_ends = (1.0 - t) + t / clear_ends
     endpoint_only = 10.0 * 0.5 * (node_cost_ends[0] + node_cost_ends[1])
     assert w[0] == pytest.approx(w[1])          # symmetric COO

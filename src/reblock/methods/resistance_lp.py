@@ -41,11 +41,17 @@ Four things that matter, none of which the greedy can express:
 
 The objective is a linearization, so `chunks` spends the budget in K instalments, re-linearizing
 between them: K=1 is the pure one-shot LP, large K approaches the greedy.
+
+The budget row IS this method's allocation, so `price` (`reblock.transparency`) enters it:
+`sum_b f_b u_b <= D * n_buildings`, and `_round` enforces the same priced budget. Under `Opaque`
+every `f_b` is 1 and nothing changes; under a discount the network's TRUE displacement exceeds
+`max_displacement` by what the discounted buildings were let off. What the method reports, and
+every lens, is still the true displacement of the roads it emits.
 """
 from __future__ import annotations
 
 from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 
 import geopandas as gpd
 import numpy as np
@@ -58,7 +64,7 @@ from shapely import STRtree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
-from reblock.buildings import Extents, IncrementalOverlap
+from reblock.buildings import Extents
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
 from reblock.methods.resistance_greedy import _mesh, linearized_gain
@@ -71,6 +77,7 @@ from reblock.permeability import (
     permeability,
     with_width,
 )
+from reblock.transparency import PricedOverlap, Transparency, factors_of
 
 SegId = tuple[str, int, int]
 
@@ -138,14 +145,16 @@ def segment_displacement(
 def solve_coverage_lp(
     path_segs: list[list[int]], seg_len: np.ndarray, seg_edges: list[np.ndarray],
     seg_disp: list[tuple[np.ndarray, np.ndarray]], edge_gain: np.ndarray,
-    n_buildings: int, base_c: np.ndarray, disp_budget: float, len_budget: float,
+    n_buildings: int, base_c: np.ndarray, disp_budget: float, len_budget: float, *,
+    price: np.ndarray,
 ) -> np.ndarray:
     """The LP above. Returns `z`, the fractional build level of every segment.
 
     Variable layout is [x (paths) | z (segments) | y (adjacency edges) | u (buildings)], and every
     constraint is a row of A_ub in that block order. `base_c` is the displacement already incurred
     by roads built in earlier chunks; it becomes the lower bound on `u`, so the LP neither
-    re-charges for it nor gets to pretend it is free.
+    re-charges for it nor gets to pretend it is free. `price` is each building's factor in the
+    budget row, `sum_b price_b u_b <= disp_budget`: all ones is the plain displacement budget.
     """
     n_p, n_s, n_e = len(path_segs), len(seg_len), len(edge_gain)
     n_b = n_buildings
@@ -165,7 +174,7 @@ def solve_coverage_lp(
         ub.append(rhs)
 
     if n_b:
-        row([(uoff + b, 1.0) for b in range(n_b)], disp_budget)
+        row([(uoff + b, float(price[b])) for b in range(n_b)], disp_budget)
     row([(zoff + s, float(seg_len[s])) for s in range(n_s)], len_budget)
     holders: list[list[int]] = [[] for _ in range(n_s)]
     for p, segs in enumerate(path_segs):
@@ -215,6 +224,9 @@ class ResistanceLPReblocker:
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
     road_width_m: float
+    _: KW_ONLY
+    # Each building's factor in the displacement budget and its rounding (`Opaque`: today's).
+    price: Transparency
 
     @property
     def identity(self) -> Hashable | None:
@@ -240,6 +252,7 @@ class ResistanceLPReblocker:
 
         n_b = len(block.buildings)
         disp_cap = self.max_displacement * n_b
+        factors = factors_of(self.price, block)
 
         pt_tree = cKDTree(graph.pts)
         reps = np.array([[g.representative_point().x, g.representative_point().y]
@@ -306,9 +319,10 @@ class ResistanceLPReblocker:
             spent_m = float(sum(r.length for r in best))
             z = solve_coverage_lp(path_segs, seg_len, seg_edges, seg_disp, edge_gain,
                                   n_b, base_c, allow, max(self.max_road_m - spent_m, 0.0),
-)
+                                  price=factors)
             roads, base_c2 = self._round(block.buildings, best, path_segs, seg_len, seg_geom, z,
-                                         allow, max(self.max_road_m - spent_m, 0.0))
+                                         allow, max(self.max_road_m - spent_m, 0.0),
+                                         factors=factors)
             if not roads:
                 continue
             trial = with_width(gpd.GeoDataFrame(geometry=[*best, *roads], crs=crs),
@@ -326,7 +340,7 @@ class ResistanceLPReblocker:
     def _round(
         self, buildings: Extents, committed: list[LineString], path_segs: list[list[int]],
         seg_len: np.ndarray, seg_geom: list[LineString], z: np.ndarray,
-        disp_budget: float, len_budget: float,
+        disp_budget: float, len_budget: float, *, factors: np.ndarray,
     ) -> tuple[list[LineString], np.ndarray]:
         """Commit paths in LP-confidence order, street-first, each segment at most once.
 
@@ -342,12 +356,15 @@ class ResistanceLPReblocker:
         building, and a segment is accepted only if the exact union displacement stays in budget.
         Under the max it once used, a building flanked by two roads (each taking a different slice)
         was charged for one slice, and the method exceeded its own cap.
+
+        The budget is the LP's, so it is PRICED (`factors`), exactly; the returned per-building
+        displacement is true, as the next chunk's lower bound on `u` must be.
         """
         hw = self.road_width_m / 2.0
-        tracker = IncrementalOverlap(buildings)
+        tracker = PricedOverlap(buildings, factors=factors)
         if committed:
             tracker.add(shapely.union_all([g.buffer(hw) for g in committed]))
-        total = tracker.total()
+        total = tracker.priced_total()
         order = sorted(range(len(path_segs)),
                        key=lambda p: -float(min(z[s] for s in path_segs[p])))
         built: set[int] = set()
@@ -360,7 +377,7 @@ class ResistanceLPReblocker:
                 if spent + float(seg_len[s]) > len_budget:
                     break
                 piece = seg_geom[s].buffer(hw)
-                d = tracker.delta(piece)
+                d = tracker.increment(piece).priced
                 if total + d > disp_budget:
                     break
                 tracker.add(piece)

@@ -21,3 +21,4 @@ max_cycles: 400
 shortlist: 8
 params: ${permeability.params}
 road_width_m: 7.0
+price: {_target_: reblock.transparency.Opaque}

@@ -19,6 +19,7 @@ from reblock.permeability import (
     with_width,
 )
 from reblock.render import save_render as _real_save_render
+from reblock.transparency import Opaque
 from tests.block_fixtures import no_buildings
 from tests.permeability_fixtures import SHIPPED
 
@@ -168,7 +169,8 @@ def test_run_permeability_lenses_writes_tables_and_renders(tmp_path: Path) -> No
     rows = run_permeability_lenses(
         region, {"clearance": ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0,
                                                  depth_target=2, max_roads=400,
-                                                 road_width_m=DEFAULT_ROAD_WIDTH_M)}, tmp_path,
+                                                 road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                                 price=Opaque())}, tmp_path,
         pcfg=_pcfg(0.3, 0.1))
 
     assert len(rows) == 1
@@ -233,7 +235,7 @@ def test_run_permeability_lenses_reblocks_once_per_method_not_twice(
     monkeypatch.setattr(cb, "region_reblock", counting)
     region = [_street_block(0, "a"), _street_block(4, "b")]
     clearance = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
     cb.run_permeability_lenses(region, {"clearance": clearance}, tmp_path,
                                pcfg=_pcfg(0.3, 0.1))
     assert calls["n"] == 1        # one method -> one reblock; frontier + both lenses reuse it
@@ -256,7 +258,7 @@ def test_run_permeability_lenses_singleton_region_skips_region_reblock(
     monkeypatch.setattr(cb, "region_reblock", _boom)
     region = [_street_block(0, "a")]
     clearance = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
     cb.run_permeability_lenses(region, {"clearance": clearance}, tmp_path,
                                pcfg=_pcfg(0.3, 0.1))
 
@@ -344,7 +346,7 @@ def test_every_method_is_truncated_through_the_shared_lenses(
     monkeypatch.setattr(cb, "lens_prefixes", sentinel)
     region = [_street_block(0, "a")]
     clearance = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=1,
-                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M)
+                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
     roads = cast(gpd.GeoDataFrame, clearance.propose(region[0]).roads)
     assert len(roads) > 1
     (row,) = cb.run_permeability_lenses(region, {"clearance": clearance}, tmp_path,

@@ -6,7 +6,8 @@
 _target_: reblock.methods.loop_closure.LoopClosureRefiner
 base: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}",
        repulsion: 0.0, depth_target: 1, max_roads: 400,
-       road_width_m: 7.0}   # depth_target 1 = deeper base (best-of-both)
+       road_width_m: 7.0,   # depth_target 1 = deeper base (best-of-both)
+       price: {_target_: reblock.transparency.Opaque}}
 budget_frac: 0.12
 min_bridges_per_m: 0.01
 max_loops: 400

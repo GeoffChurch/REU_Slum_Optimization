@@ -20,3 +20,6 @@ max_cycles: 400
 shortlist: 8
 params: ${permeability.params}
 road_width_m: 7.0
+# Each building's factor on the displacement that ranks candidates (reblock.transparency);
+# Opaque is every factor 1.
+price: {_target_: reblock.transparency.Opaque}

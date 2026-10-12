@@ -43,6 +43,7 @@ from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.pipeline import build_regions
 from reblock.presets import load_screen, load_source
 from reblock.region import DenseClusterRegionBuilder, region_block
+from reblock.transparency import Opaque
 
 
 def stripped_region(blocks: list[Block]) -> Block:
@@ -99,7 +100,8 @@ def main() -> None:
                                                      reinforcement=0.5, max_sources=400, seed=0,
                                                      road_width_m=DEFAULT_ROAD_WIDTH_M),
         "clearance": ClearanceReblocker(depth_target=1, max_roads=3000, substrate=ChordSubstrate(),
-                                        repulsion=0.0, road_width_m=DEFAULT_ROAD_WIDTH_M),
+                                        repulsion=0.0, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                        price=Opaque()),
         "demand_greedy_uniform": DemandGreedyReblocker(desire_source=NoDesire(), depth_target=1,
                                                        max_roads=3000, substrate=ChordSubstrate(),
                                                        buffer_m=3.0, eps=0.1, gamma=1.0,

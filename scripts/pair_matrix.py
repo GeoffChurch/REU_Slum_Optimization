@@ -70,6 +70,7 @@ from reblock.permeability import (
     permeability,
     with_width,
 )
+from reblock.transparency import Opaque
 from reblock.transplant.gw import Arr
 from reblock.transplant.operating_points import SIGNATURE, TRANSPORT
 from reblock.transplant.signature import SignatureParams, signature, signature_distance
@@ -554,7 +555,7 @@ def pair_scorer() -> PairScorer:
     return PairScorer(
         transport=TRANSPORT, signature=SIGNATURE, snap=NearestNodeSnap(ChordSubstrate()),
         direct=ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                                  max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M),
+                                  max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque()),
         permeability=load_permeability_config(CONF).params, road_width_m=DEFAULT_ROAD_WIDTH_M)
 
 

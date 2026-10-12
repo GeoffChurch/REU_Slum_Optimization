@@ -9,13 +9,19 @@ cost -> the straight line (aspirational, best directness). s -> +inf: hug the ma
 = the Voronoi edges (equidistant from the two nearest buildings) = the buildable gaps. Access
 depth is maintained incrementally (a road only lowers depth) so large regions stay fast.
 See docs/superpowers/specs/2026-07-12-clearance-reblocker-design.md.
+
+`price` (`reblock.transparency`) scales the building term by the NEAREST building's factor,
+t * f / clearance, so a road may pass closer to a cheap building; under `Opaque` (every factor 1)
+the field is the one above. `length` is the substrate's `edist`, so a
+`transparency.TransparentSubstrate` reroutes this method too.
 """
 from __future__ import annotations
 
 import math
 from collections import deque
 from collections.abc import Hashable, Iterable
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
+from typing import NamedTuple
 
 import geopandas as gpd
 import numpy as np
@@ -39,6 +45,7 @@ from reblock.derive.access import (
 from reblock.derive_graph import config_identity
 from reblock.methods.substrates import RoutingGraph, Substrate
 from reblock.permeability import with_width
+from reblock.transparency import Transparency, factors_of
 
 _CLEARANCE_EPS = 0.3       # keeps node cost finite on a grid node sitting on a building point
 _SIGMOID_EPS = 1e-15       # clamps sigmoid strictly inside (0, 1); float64 underflows to exact
@@ -57,30 +64,41 @@ def _sigmoid(s: float) -> float:
     return min(max(z, _SIGMOID_EPS), 1.0 - _SIGMOID_EPS)
 
 
+class NodeClearance(NamedTuple):
+    """Per point: its clearance, and the price factor of the building it is measured to."""
+
+    clearance: NDArray[np.float64]
+    factor: NDArray[np.float64]
+
+
 def _node_clearance(
-    pts: NDArray[np.float64], building_pts: NDArray[np.float64], radii: NDArray[np.float64]
-) -> NDArray[np.float64]:
+    pts: NDArray[np.float64], building_pts: NDArray[np.float64], radii: NDArray[np.float64],
+    *, factors: NDArray[np.float64],
+) -> NodeClearance:
     """Per-node clearance = distance to the nearest building minus that building's exclusion
     radius (0 in the plain case), floored at 0, plus `_CLEARANCE_EPS`. With uniform/zero radii
     this is the exact Euclidean clearance (== the Voronoi distance field); nonzero radii use the
     nearest-building approximation of the additively-weighted (Apollonius) clearance. No
-    buildings -> uniform clearance, so the path is straight regardless of t."""
+    buildings -> uniform clearance, so the path is straight regardless of t. Beside it, that
+    nearest building's `factors` entry (1 where there is no building)."""
     if len(building_pts) == 0:
-        return np.ones(len(pts), dtype=np.float64)
+        return NodeClearance(np.ones(len(pts), dtype=np.float64),
+                             np.ones(len(pts), dtype=np.float64))
     dist, nearest = cKDTree(building_pts).query(pts)
     clear = np.maximum(dist - radii[nearest], 0.0) + _CLEARANCE_EPS
-    return clear.astype(np.float64)
+    return NodeClearance(clear.astype(np.float64), factors[nearest])
 
 
 def _edge_weights(
     pts: NDArray[np.float64], rows: NDArray[np.int64], cols: NDArray[np.int64],
     edist: NDArray[np.float64], building_pts: NDArray[np.float64],
-    radii: NDArray[np.float64], t: float,
+    radii: NDArray[np.float64], t: float, *, factors: NDArray[np.float64],
 ) -> NDArray[np.float64]:
     """Edge weight = length * mean(node cost) sampled at BOTH endpoints AND the midpoint, node
-    cost = (1 - t) + t / clearance. 3-point (not endpoint-only) so a long edge whose midpoint
-    skims a building — but whose endpoints sit in the open — still reads as expensive. Returns
-    weights aligned to the symmetric COO `rows`/`cols` order."""
+    cost = (1 - t) + t * f / clearance, f the price factor of the building the clearance is
+    measured to. 3-point (not endpoint-only) so a long edge whose midpoint skims a building — but
+    whose endpoints sit in the open — still reads as expensive. Returns weights aligned to the
+    symmetric COO `rows`/`cols` order."""
     n = len(pts)
     mask = rows < cols                                   # one direction per undirected edge
     ui, uj, ulen = rows[mask], cols[mask], edist[mask]
@@ -89,9 +107,10 @@ def _edge_weights(
         return np.zeros(0, dtype=np.float64)
     mid = (pts[ui] + pts[uj]) / 2.0
     sample_pts = np.vstack([pts[ui], pts[uj], mid])
-    clear = _node_clearance(sample_pts, building_pts, radii)
-    ci, cj, cm = clear[:e], clear[e:2 * e], clear[2 * e:]
-    mean_cost = ((1.0 - t) + t / ci) + ((1.0 - t) + t / cj) + ((1.0 - t) + t / cm)
+    near = _node_clearance(sample_pts, building_pts, radii, factors=factors)
+    cost = (1.0 - t) + t * near.factor / near.clearance
+    ci, cj, cm = cost[:e], cost[e:2 * e], cost[2 * e:]
+    mean_cost = ci + cj + cm
     uw = ulen * (mean_cost / 3.0)
     # scatter the per-undirected-edge weight back onto BOTH directed COO entries
     key = np.minimum(rows, cols).astype(np.int64) * n + np.maximum(rows, cols).astype(np.int64)
@@ -150,7 +169,7 @@ def greedy_drainage(
 
 def _greedy_reblock(
     block: Block, graph: RoutingGraph, *, t: float, depth_target: int, max_roads: int,
-    radii: NDArray[np.float64],
+    radii: NDArray[np.float64], factors: NDArray[np.float64],
 ) -> tuple[gpd.GeoDataFrame, dict[str, object]]:
     """`greedy_drainage` under the clearance repulsion cost field."""
     # One point per building, aligned with `radii`: `get_coordinates` of the geometry column
@@ -158,7 +177,8 @@ def _greedy_reblock(
     building_pts = block.buildings.xy
     if len(graph.pts) == 0:
         raise ValueError("substrate yields no nodes for this block")
-    w = _edge_weights(graph.pts, graph.rows, graph.cols, graph.edist, building_pts, radii, t)
+    w = _edge_weights(graph.pts, graph.rows, graph.cols, graph.edist, building_pts, radii, t,
+                      factors=factors)
     return _drainage(block, graph, w, depth_target=depth_target, max_roads=max_roads)
 
 
@@ -255,6 +275,9 @@ class ClearanceReblocker:
     # Total width of the roads this method emits; stamped on every one. The metric has no
     # global corridor to fall back on.
     road_width_m: float
+    _: KW_ONLY
+    # Each building's factor on its term of the cost field (`Opaque`: today's).
+    price: Transparency
 
     @property
     def identity(self) -> Hashable | None:
@@ -268,7 +291,7 @@ class ClearanceReblocker:
         graph = self.substrate.build(block)
         roads, params = _greedy_reblock(
             block, graph, t=t, depth_target=self.depth_target,
-            max_roads=self.max_roads, radii=radii)
+            max_roads=self.max_roads, radii=radii, factors=factors_of(self.price, block))
         pid = (f"clearance:{self.substrate.tag}:r{self.repulsion:g}"
                f":d{self.depth_target}:mr{self.max_roads}")
         return Proposal(

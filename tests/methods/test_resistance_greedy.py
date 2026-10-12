@@ -24,6 +24,7 @@ from reblock.permeability import (
     permeability,
     with_width,
 )
+from reblock.transparency import Opaque
 from tests.permeability_fixtures import SHIPPED
 
 UTM = CRS.from_epsg(32734)
@@ -119,7 +120,8 @@ def test_it_selects_differently_from_clearance() -> None:
     block = _slab(6, 6)
     theirs = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
                                 max_roads=400,
-                                road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
+                                road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                price=Opaque()).propose(block).roads
     ours = replace(GREEDY, max_roads=30, shortlist=10).propose(block).roads
     assert theirs is not None and ours is not None
 
