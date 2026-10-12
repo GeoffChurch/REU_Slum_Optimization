@@ -5,3 +5,4 @@ rows*/
 *.pkl
 *.npz
 __pycache__/
+transparency_rows/scratch/

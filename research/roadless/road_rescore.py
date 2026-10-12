@@ -12,16 +12,25 @@ leaves enclosed (common.Scorer.enclosed_left; owner 2026-10-11, "B SGTM").
 The stored clearings (SIMP default, the cheap preset) are rescored on the same scorer: their
 stored Lens A is the check that the scorer reproduces the optimizers' own. `report` ranks (b) and
 (c) in B's order (the least population left enclosed, then Lens A over the rest) and writes its
-summary tables beside the rows (road_rows/summary_*.csv, committed).
+summary tables beside the rows (<rows>/summary_*.csv, committed).
 
     S=research/roadless/road_rescore.py    # from the repo root, PYTHONPATH=., single-threaded
-    uv run python $S propose <scratch> <id> <method> <cache|fresh>
-    uv run python $S propose-all <scratch> <procs> <ids,> <methods,> <timeout h> <time-hits|no>
-    uv run python $S prefixes <scratch> <procs> <ids,>
-    CUDA_PATH=/usr uv run python $S score <scratch> <mesh> <pops,> <ids,>
-    uv run python $S report <mesh> <composite mesh>
-    uv run python $S sizes <composite mesh> <procs>
-    uv run python $S project <mesh> <composite mesh>
+    uv run python $S propose <rows> <scratch> <id> <method> <cache|fresh>
+    uv run python $S propose-all <rows> <scratch> <procs> <ids,> <methods,> <timeout h> \
+        <time-hits|no>
+    uv run python $S prefixes <rows> <lineup,> <scratch> <procs> <ids,>
+    CUDA_PATH=/usr uv run python $S score <rows> <lineup,> <scratch> <mesh> <pops,> <ids,>
+    uv run python $S report <rows> <lineup,> <mesh> <composite mesh>
+    uv run python $S sizes <rows> <composite mesh> <procs>
+    uv run python $S project <rows> <lineup,> <mesh> <composite mesh>
+
+<rows> is the rows root and <lineup,> the networks it scores, both required: item 4 ran with
+research/roadless/road_rows and common.LINEUP (clearance,clearance_looped,cycle_native,
+cycle_native_betweenness_contrast,resistance_lp,euclidean_grid,
+greedy_arterial_access_displacement); the transparency experiment (transparency_run.py) proposes
+its own arms and runs prefixes and score under its own root, transparency_rows. propose and
+propose-all take the method by its name in compare_config's all_methods (common.arms());
+propose() itself takes the method, resolved by its caller.
 
 The sentinel (BACKLOG, "How we run experiments"): ZAF.9.3.1_1_22422, ZAF.9.3.1_1_30848,
 ZAF.9.3.1_1_5810, ZAF.9.5.4_1_9712. Lens (b) reads P (p 1) from the count rows, (c) J_2 from
@@ -29,11 +38,12 @@ the area rows; every row keeps both.
 
 <scratch>: networks, ordered networks, logs (bulky, not committed). propose `cache` goes through
 the derive cache (and says whether it hit); `fresh` calls the method directly, bypassing the
-cache, to time a cached proposal (propose-all queues one after every cache hit) and to check the
-cached roads against a recomputation. Rows: road_rows/proposals/ (feasibility), road_rows/
-prefixes_<budgets>/ (the prefixes, their displacement under both weightings, and (a)),
-road_rows/<mesh>_ell<ell>_K<K>_<along>_<pop>_<budgets>/ ((b) for pop count, (c) for area, and the
-stored clearings rescored on that mesh). Every process single-threaded; one GPU process.
+cache (a refiner's base too), to time a cached proposal (propose-all queues one after every cache
+hit) and to check the cached roads against a recomputation. Rows: <rows>/proposals/
+(feasibility), <rows>/prefixes_<budgets>/ (the prefixes, their displacement under both
+weightings, and (a)), <rows>/<mesh>_ell<ell>_K<K>_<along>_<pop>_<budgets>/ ((b) for pop count,
+(c) for area, and the stored clearings rescored on that mesh). Every process single-threaded; one
+GPU process.
 """
 from __future__ import annotations
 
@@ -48,6 +58,7 @@ import threading
 import time
 import traceback
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -57,7 +68,6 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 
 ROADLESS = common.REPO / "research" / "roadless"
-ROWS = ROADLESS / "road_rows"
 
 # ------------------------------------------------------------------ the run's parameters
 # Everything that can change a number is here or on the command line, and in the rows' paths.
@@ -93,13 +103,13 @@ def budgets_tag() -> str:
     return "D" + "-".join(f"{b:g}" for b in BUDGETS)
 
 
-def score_dir(mesh_token: str, pop: str) -> Path:
+def score_dir(rows: Path, mesh_token: str, pop: str) -> Path:
     mesh = common.mesh_of(mesh_token)
-    return ROWS / f"{mesh.name}_ell{ELL_M:g}_K{K}_{ALONG}_{pop}_{budgets_tag()}"
+    return rows / f"{mesh.name}_ell{ELL_M:g}_K{K}_{ALONG}_{pop}_{budgets_tag()}"
 
 
-def prefix_dir() -> Path:
-    return ROWS / f"prefixes_{budgets_tag()}"
+def prefix_dir(rows: Path) -> Path:
+    return rows / f"prefixes_{budgets_tag()}"
 
 
 def net_path(scratch: Path, bid: str, name: str, fresh: bool) -> Path:
@@ -110,8 +120,8 @@ def ordered_path(scratch: Path, bid: str, name: str) -> Path:
     return scratch / "networks" / bid / f"{name}.ordered.parquet"
 
 
-def proposal_row(bid: str, name: str, fresh: bool) -> Path:
-    return ROWS / "proposals" / f"{bid}__{name}{'__fresh' if fresh else ''}.parquet"
+def proposal_row(rows: Path, bid: str, name: str, fresh: bool) -> Path:
+    return rows / "proposals" / f"{bid}__{name}{'__fresh' if fresh else ''}.parquet"
 
 
 def _check_single_threaded() -> None:
@@ -183,15 +193,24 @@ def _arms() -> dict:
     return out
 
 
-def propose(scratch: Path, bid: str, name: str, fresh: bool) -> None:
-    """One (block, method) network, timed; the roads to <scratch>/networks, a feasibility row to
-    road_rows/proposals."""
+def _fresh(method, block):
+    """`method` on `block` with no derive cache anywhere: a refiner (LoopClosureRefiner), which
+    fetches its base's proposal through the cache when it is given none, is handed its base's
+    fresh proposal as its prior."""
+    from reblock.methods.loop_closure import LoopClosureRefiner
+    if isinstance(method, LoopClosureRefiner):
+        return method.propose(block, prior=method.base.propose(block))
+    return method.propose(block)
+
+
+def propose(rows: Path, scratch: Path, bid: str, name: str, method, fresh: bool) -> None:
+    """One (block, network) proposal by `method` (resolved by the caller), timed; the roads to
+    <scratch>/networks as `name`, a feasibility row to <rows>/proposals."""
     _check_single_threaded()
     from reblock import derivations
     from reblock.derive_graph import DerivationKey, _code_version, _l2, env_version
     t_all = time.perf_counter()
     [b] = common.build_blocks([bid])
-    method = _arms()[name]
     t_build = time.perf_counter() - t_all
     rss_before = _status_gb("VmRSS")
     fn = derivations._propose_impl
@@ -207,7 +226,7 @@ def propose(scratch: Path, bid: str, name: str, fresh: bool) -> None:
                fresh=fresh, cache_hit=cached, rss_before_gb=rss_before)
     try:
         with Sampler(progress, every=0.5, write_every=30.0) as s:
-            prop = fn(method, b) if fresh else derivations.propose(method, b)
+            prop = _fresh(method, b) if fresh else derivations.propose(method, b)
         roads = prop.roads
         n_roads = 0 if roads is None else len(roads)
         road_m = 0.0 if roads is None else float(roads.geometry.length.sum())
@@ -231,22 +250,23 @@ def propose(scratch: Path, bid: str, name: str, fresh: bool) -> None:
         traceback.print_exc()
         row.update(status=f"failed {type(e).__name__}: {e}"[:300], hwm_gb=_status_gb("VmHWM"))
     row["total_wall_s"] = time.perf_counter() - t_all
-    dest = proposal_row(bid, name, fresh)
+    dest = proposal_row(rows, bid, name, fresh)
     dest.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame([row]).to_parquet(dest)
 
 
-def propose_all(scratch: Path, procs: int, ids: list[str], methods: list[str], timeout_s: float,
-                time_hits: bool) -> None:
-    """Every (block, method) network without a row, for `methods` of the lineup, `procs`
-    processes at a time: the costliest first (COST_GUESS x buildings) on procs - SHORT_SLOTS
-    slots, the cheapest first on the rest (so small blocks finish early and can be scored). With
-    `time_hits` a cache hit queues a fresh run of the same pair (its cost). A job past
-    `timeout_s` of wall time is killed (by PID) and recorded: a finding (the sentinel ran 2 h)."""
+def propose_all(rows: Path, scratch: Path, procs: int, ids: list[str], methods: list[str],
+                timeout_s: float, time_hits: bool) -> None:
+    """Every (block, method) network without a row, for `methods` of compare_config's
+    all_methods (common.arms()), `procs` processes at a time: the costliest first (COST_GUESS x
+    buildings) on procs - SHORT_SLOTS slots, the cheapest first on the rest (so small blocks
+    finish early and can be scored). With `time_hits` a cache hit queues a fresh run of the same
+    pair (its cost). A job past `timeout_s` of wall time is killed (by PID) and recorded: a
+    finding (the sentinel ran 2 h)."""
     _check_single_threaded()
-    unknown = sorted(set(methods) - set(common.LINEUP))
+    unknown = sorted(set(methods) - set(_arms()))
     if unknown:
-        raise SystemExit(f"not in common.LINEUP: {unknown}")
+        raise SystemExit(f"not methods of common.arms(): {unknown}")
     sizes = pd.read_parquet(ROADLESS / "large82_area.parquet").set_index("block")["n"]
     snap = scratch / "road_rescore_snapshot.py"         # the children run this copy: edits to the
     shutil.copy(__file__, snap)                          # script mid-run cannot reach them
@@ -258,12 +278,12 @@ def propose_all(scratch: Path, procs: int, ids: list[str], methods: list[str], t
         return float(sizes[job[0]]) * COST_GUESS[job[1]]
 
     queue = sorted(((bid, name, False) for bid in ids for name in methods
-                    if not proposal_row(bid, name, False).exists()), key=cost, reverse=True)
+                    if not proposal_row(rows, bid, name, False).exists()), key=cost, reverse=True)
     for bid in ids if time_hits else []:                # fresh runs of hits already recorded
         for name in methods:
-            p = proposal_row(bid, name, False)
+            p = proposal_row(rows, bid, name, False)
             if (p.exists() and bool(pd.read_parquet(p).cache_hit.iloc[0])
-                    and not proposal_row(bid, name, True).exists()):
+                    and not proposal_row(rows, bid, name, True).exists()):
                 queue.append((bid, name, True))
     queue.sort(key=cost, reverse=True)
     running: dict[int, tuple] = {}                      # pid -> (Popen, job, start, long?, log)
@@ -276,8 +296,8 @@ def propose_all(scratch: Path, procs: int, ids: list[str], methods: list[str], t
             bid, name, fresh = job
             log = scratch / "logs" / f"propose_{bid}__{name}{'__fresh' if fresh else ''}.log"
             fh = open(log, "w")
-            p = subprocess.Popen([sys.executable, str(snap), "propose", str(scratch), bid, name,
-                                  "fresh" if fresh else "cache"], stdout=fh,
+            p = subprocess.Popen([sys.executable, str(snap), "propose", str(rows), str(scratch),
+                                  bid, name, "fresh" if fresh else "cache"], stdout=fh,
                                  stderr=subprocess.STDOUT, env=env, cwd=str(common.REPO))
             running[p.pid] = (p, job, time.perf_counter(), long_, fh)
             print(f"{time.strftime('%H:%M:%S')} start pid {p.pid} {bid} {name}"
@@ -292,7 +312,7 @@ def propose_all(scratch: Path, procs: int, ids: list[str], methods: list[str], t
                 p.wait()
                 prog = scratch / "progress" / f"{bid}__{name}{'__fresh' if fresh else ''}.json"
                 known = json.loads(prog.read_text()) if prog.exists() else {}
-                dest = proposal_row(bid, name, fresh)
+                dest = proposal_row(rows, bid, name, fresh)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 pd.DataFrame([dict(block=bid, n=int(sizes[bid]), method=name, fresh=fresh,
                                    status=f"timeout after {timeout_s:.0f} s wall",
@@ -307,10 +327,10 @@ def propose_all(scratch: Path, procs: int, ids: list[str], methods: list[str], t
             print(f"{time.strftime('%H:%M:%S')} done pid {pid} {bid} {name}"
                   f"{' fresh' if fresh else ''}: rc {rc}, {time.perf_counter() - t0:.0f}s",
                   flush=True)
-            row = proposal_row(bid, name, fresh)
+            row = proposal_row(rows, bid, name, fresh)
             if (time_hits and rc == 0 and not fresh and row.exists()
                     and bool(pd.read_parquet(row).cache_hit.iloc[0])
-                    and not proposal_row(bid, name, True).exists()):
+                    and not proposal_row(rows, bid, name, True).exists()):
                 queue.append((bid, name, True))
                 queue.sort(key=cost, reverse=True)
                 print(f"  cache hit: queued a fresh run of {bid} {name}", flush=True)
@@ -338,31 +358,36 @@ def prefix_len(block, ordered, target: float, w: np.ndarray) -> int:
     return lo
 
 
-_BLOCKS: dict = {}
-_SCRATCH: list[Path] = []
+_BLOCKS: dict = {}       # the jobs' blocks, built once before the pool forks
 
 
-def prefixes_one(job: tuple[str, str]) -> str | None:
+class PrefixJob(NamedTuple):
+    rows: Path
+    scratch: Path
+    bid: str
+    name: str
+
+
+def prefixes_one(job: PrefixJob) -> str | None:
     """One network's canonical prefixes: per weighting and budget its length, and per distinct
     prefix its road length, displacement under both weightings and (a). The ordered network to
-    <scratch>, the rows to prefix_dir(). The failed job's name, or None."""
-    bid, name = job
+    <scratch>, the rows to prefix_dir(<rows>). The failed job's name, or None."""
     try:
-        _prefixes_one(bid, name)
+        _prefixes_one(job)
     except Exception as e:
         traceback.print_exc()
-        print(f"{bid} {name} prefixes FAILED {type(e).__name__}: {e}"[:300], flush=True)
-        return f"{bid} {name}"
+        print(f"{job.bid} {job.name} prefixes FAILED {type(e).__name__}: {e}"[:300], flush=True)
+        return f"{job.bid} {job.name}"
     return None
 
 
-def _prefixes_one(bid: str, name: str) -> None:
+def _prefixes_one(job: PrefixJob) -> None:
     import geopandas as gpd
 
     from reblock.budget import STREET_TOL, street_first_ordered
     from reblock.compare import load_permeability_config
     from reblock.permeability import EgressContext, permeability
-    scratch, b = _SCRATCH[0], _BLOCKS[bid]
+    scratch, bid, name, b = job.scratch, job.bid, job.name, _BLOCKS[job.bid]
     t0 = time.perf_counter()
     roads = gpd.read_parquet(net_path(scratch, bid, name, False))
     ordered = street_first_ordered(b, roads, STREET_TOL)
@@ -391,28 +416,28 @@ def _prefixes_one(bid: str, name: str) -> None:
                         D_count=common.displacement(b, pre, W["count"]),
                         D_area=common.displacement(b, pre, W["area"]), P_old=P_old,
                         t_P_old=time.perf_counter() - ta)
-    rows = [dict(block=bid, n=len(polys), method=name, **r, **per_m[r["m"]]) for r in lens]
-    out = prefix_dir() / f"{bid}__{name}.parquet"
+    prefix_rows = [dict(block=bid, n=len(polys), method=name, **r, **per_m[r["m"]]) for r in lens]
+    out = prefix_dir(job.rows) / f"{bid}__{name}.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(prefix_rows)
     df["t_order"], df["t_prefixes"], df["t_total"] = t_order, t_pre, time.perf_counter() - t0
     df.to_parquet(out)
     print(f"{time.strftime('%H:%M:%S')} {bid} {name}: {len(ordered)} roads, order {t_order:.1f}s, "
           f"prefixes {t_pre:.1f}s, total {time.perf_counter() - t0:.1f}s", flush=True)
 
 
-def prefixes(scratch: Path, procs: int, ids: list[str]) -> None:
-    """prefixes_one for every network present without rows, `procs` processes."""
+def prefixes(rows: Path, lineup: tuple[str, ...], scratch: Path, procs: int,
+             ids: list[str]) -> None:
+    """prefixes_one for every network of `lineup` present without rows, `procs` processes."""
     _check_single_threaded()
     import multiprocessing
-    jobs = [(bid, name) for bid in ids for name in common.LINEUP
+    jobs = [PrefixJob(rows, scratch, bid, name) for bid in ids for name in lineup
             if net_path(scratch, bid, name, False).exists()
-            and not (prefix_dir() / f"{bid}__{name}.parquet").exists()]
+            and not (prefix_dir(rows) / f"{bid}__{name}.parquet").exists()]
     if not jobs:
         print("nothing to do", flush=True)
         return
-    _SCRATCH.append(scratch)
-    _BLOCKS.update({b.block_id: b for b in common.build_blocks(sorted({j[0] for j in jobs}))})
+    _BLOCKS.update({b.block_id: b for b in common.build_blocks(sorted({j.bid for j in jobs}))})
     with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=4) as pool:
         failed = [f for f in pool.imap_unordered(prefixes_one, jobs) if f]
     if failed:
@@ -514,10 +539,11 @@ class Corridors:
             yield m, mask, (g.isub & (~g.bsub | mask)).mean(axis=-1)
 
 
-def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> None:
-    """Every network with prefix rows, on `mesh_token`, for each of `pops` (count: (b) on the
-    count prefixes; area: (c) on the area prefixes, and the stored clearings rescored); one block
-    at a time, one scorer per population on one grid."""
+def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, pops: list[str],
+          ids: list[str]) -> None:
+    """Every network of `lineup` with prefix rows, on `mesh_token`, for each of `pops` (count:
+    (b) on the count prefixes; area: (c) on the area prefixes, and the stored clearings
+    rescored); one block at a time, one scorer per population on one grid."""
     _check_single_threaded()
     import clear
     import geopandas as gpd
@@ -531,13 +557,13 @@ def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> No
     p = lifted.Params(ell_m=ELL_M, K=K, along=lifted.along_of(ALONG, lifted.scans_of(DEVICE)),
                       solver=lifted.solver_of(DEVICE))
     for pop in pops:
-        score_dir(mesh_token, pop).mkdir(parents=True, exist_ok=True)
+        score_dir(rows, mesh_token, pop).mkdir(parents=True, exist_ok=True)
     for bid in ids:
-        todo = [name for name in common.LINEUP
-                if (prefix_dir() / f"{bid}__{name}.parquet").exists()
-                and any(not (score_dir(mesh_token, pop) / f"{bid}__{name}.parquet").exists()
+        todo = [name for name in lineup
+                if (prefix_dir(rows) / f"{bid}__{name}.parquet").exists()
+                and any(not (score_dir(rows, mesh_token, pop) / f"{bid}__{name}.parquet").exists()
                         for pop in pops)]
-        clear_out = score_dir(mesh_token, "area") / f"{bid}__clearings.parquet"
+        clear_out = score_dir(rows, mesh_token, "area") / f"{bid}__clearings.parquet"
         if not todo and clear_out.exists():
             continue
         [b] = common.build_blocks([bid])
@@ -556,7 +582,7 @@ def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> No
                   f"{int(c.sc.grid.inside.sum())} cells", flush=True)
             if not clear_out.exists():
                 rel = relax.Relaxation(c, CLEARING_POWER)
-                rows = []
+                cl_rows = []
                 for cname, (rel_dir, perm_col, cleared_col, D_col, stored_mesh) in STORED.items():
                     src = ROADLESS / rel_dir / f"{bid}_p{CLEARING_POWER:g}.parquet"
                     if not src.exists():
@@ -568,21 +594,21 @@ def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> No
                     ts = time.perf_counter()
                     J, P = rel.exact_JP(x)
                     gw.note_pool()
-                    rows.append(dict(block=bid, mesh=mesh.name, clearing=cname,
+                    cl_rows.append(dict(block=bid, mesh=mesh.name, clearing=cname,
                                      stored_mesh=common.mesh_of(stored_mesh).name,
                                      n_cleared=int(x.sum()), D=float(c.cost @ x),
                                      stored_D=float(r[D_col]), stored_perm=float(r[perm_col]),
                                      enclosed=c.sc.enclosed_left(rel.open_of(x)),
                                      perm=rel.perm(J), perm1=1.0 - P / c.sc.P0,
                                      t=time.perf_counter() - ts))
-                    print(f"  {cname}: rescored {rows[-1]['perm']:.7f}, stored "
-                          f"{rows[-1]['stored_perm']:.7f} (on {rows[-1]['stored_mesh']})",
+                    print(f"  {cname}: rescored {cl_rows[-1]['perm']:.7f}, stored "
+                          f"{cl_rows[-1]['stored_perm']:.7f} (on {cl_rows[-1]['stored_mesh']})",
                           flush=True)
-                pd.DataFrame(rows).to_parquet(clear_out)
+                pd.DataFrame(cl_rows).to_parquet(clear_out)
             X, Y = c.sc.grid._sub_xy()
             cor = Corridors(c.sc.grid, X, Y)
             for name in todo:
-                pre = pd.read_parquet(prefix_dir() / f"{bid}__{name}.parquet")
+                pre = pd.read_parquet(prefix_dir(rows) / f"{bid}__{name}.parquet")
                 ordered = gpd.read_parquet(ordered_path(scratch, bid, name))
                 need = {pop: pre[pre["pop"] == pop] for pop in pops}
                 stops = sorted({int(m) for pop in pops for m in need[pop]["m"]})
@@ -617,12 +643,12 @@ def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> No
                             unknowns=sol.n_unknowns, t_solve=time.perf_counter() - ts)
                     tm = time.perf_counter()
                 for pop in pops:
-                    rows = [dict(r.to_dict(), mesh=mesh.name, **got[(pop, int(r["m"]))])
-                            for _, r in need[pop].iterrows()]
-                    df = pd.DataFrame(rows)
+                    net_rows = [dict(r.to_dict(), mesh=mesh.name, **got[(pop, int(r["m"]))])
+                                for _, r in need[pop].iterrows()]
+                    df = pd.DataFrame(net_rows)
                     df["t_masks"], df["t_check"] = t_masks, t_check
                     df["t_network"] = time.perf_counter() - tn
-                    df.to_parquet(score_dir(mesh_token, pop) / f"{bid}__{name}.parquet")
+                    df.to_parquet(score_dir(rows, mesh_token, pop) / f"{bid}__{name}.parquet")
                 lensA = {pop: got[(pop, int(need[pop][need[pop].budget == BUDGETS[1]].m.iloc[0]))]
                          for pop in pops}
                 print(f"  {name}: {len(ordered)} roads, {len(stops)} prefixes, masks "
@@ -640,7 +666,7 @@ def score(scratch: Path, mesh_token: str, pops: list[str], ids: list[str]) -> No
                                networks=",".join(todo),
                                gpu_peak_gb=gw.peak_mib / 1024, pool_peak_gb=gw.pool_peak_gb,
                                host_hwm_gb=_status_gb("VmHWM"))]).to_parquet(
-                score_dir(mesh_token, pop) / f"{bid}__setup__{int(time.time())}.parquet")
+                score_dir(rows, mesh_token, pop) / f"{bid}__setup__{int(time.time())}.parquet")
         print(f"{time.strftime('%H:%M:%S')} {bid} done in {time.perf_counter() - t0:.0f}s, GPU "
               f"peak {gw.peak_mib / 1024:.1f} GB (pool {gw.pool_peak_gb:.1f} GB)", flush=True)
         del c, scorers
@@ -660,10 +686,10 @@ PRICE_CLEARINGS = {"simp_default": ("simp_default", "simp_default_a5x8"),
                    "cheap": ("cheap", "cheap_a5x8")}
 
 
-def summary_path(mesh_token: str, what: str) -> Path:
+def summary_path(rows: Path, mesh_token: str, what: str) -> Path:
     """A report's summary table (committed; the rows it reads are not)."""
     mesh = common.mesh_of(mesh_token)
-    return ROWS / f"summary_{mesh.name}_ell{ELL_M:g}_K{K}_{ALONG}_{budgets_tag()}_{what}.csv"
+    return rows / f"summary_{mesh.name}_ell{ELL_M:g}_K{K}_{ALONG}_{budgets_tag()}_{what}.csv"
 
 
 def _read_all(paths: list[Path]) -> pd.DataFrame:
@@ -671,10 +697,10 @@ def _read_all(paths: list[Path]) -> pd.DataFrame:
             else pd.DataFrame())
 
 
-def proposals_table() -> pd.DataFrame:
+def proposals_table(rows: Path) -> pd.DataFrame:
     """Per (block, method): the network (the cached run's) and what computing it cost (the fresh
     run's where the cache hit)."""
-    d = _read_all(sorted((ROWS / "proposals").glob("*.parquet")))
+    d = _read_all(sorted((rows / "proposals").glob("*.parquet")))
     # propose-all's row for a run it stopped carries no cache_hit; a stopped cache-mode run was a
     # miss (a hit returns in milliseconds)
     stopped = d.status.str.startswith("timeout")
@@ -691,9 +717,9 @@ def proposals_table() -> pd.DataFrame:
     return out
 
 
-def score_rows(mesh_token: str, pop: str) -> pd.DataFrame:
-    d = score_dir(mesh_token, pop)
-    return _read_all([f for name in common.LINEUP for f in sorted(d.glob(f"*__{name}.parquet"))])
+def score_rows(rows: Path, lineup: tuple[str, ...], mesh_token: str, pop: str) -> pd.DataFrame:
+    d = score_dir(rows, mesh_token, pop)
+    return _read_all([f for name in lineup for f in sorted(d.glob(f"*__{name}.parquet"))])
 
 
 def _tau(x: np.ndarray, y: np.ndarray) -> float:
@@ -709,19 +735,20 @@ def _b_rank(g: pd.DataFrame, enc: str, val: str) -> np.ndarray:
     return 1.0 + ahead.sum(axis=1)
 
 
-def lens_table(mesh_token: str, budget: float) -> pd.DataFrame:
+def lens_table(rows: Path, lineup: tuple[str, ...], mesh_token: str,
+               budget: float) -> pd.DataFrame:
     """Per (block, method) at `budget`: (a) and (b) on the count prefix, (c) on the area prefix,
     each roadless lens with its B (i) (enc_b, enc_c: the population share the prefix leaves
     enclosed), each prefix's road length and displacement, whether it reaches the budget, and
     its rank among the methods that do ((a) by value, (b) and (c) in B's order)."""
     keys = ["block", "method"]
-    cnt = score_rows(mesh_token, "count")
+    cnt = score_rows(rows, lineup, mesh_token, "count")
     cnt = cnt[np.isclose(cnt.budget, budget)][keys + ["n", "m", "road_m", "D_count", "D_area",
                                                       "P_old", "P1", "P2", "enclosed"]]
     cnt = cnt.rename(columns={"m": "m_count", "road_m": "road_m_count", "D_count": "Dc_count",
                               "D_area": "Da_count", "P_old": "a", "P1": "b", "P2": "b_P2",
                               "enclosed": "enc_b"})
-    area = score_rows(mesh_token, "area")
+    area = score_rows(rows, lineup, mesh_token, "area")
     area = area[np.isclose(area.budget, budget)][keys + ["m", "road_m", "D_count", "D_area",
                                                          "P_old", "P1", "P2", "enclosed"]]
     area = area.rename(columns={"m": "m_area", "road_m": "road_m_area", "D_count": "Dc_area",
@@ -740,12 +767,12 @@ def lens_table(mesh_token: str, budget: float) -> pd.DataFrame:
     return t
 
 
-def report(mesh_token: str, composite_token: str) -> None:
+def report(rows: Path, lineup: tuple[str, ...], mesh_token: str, composite_token: str) -> None:
     pd.set_option("display.width", 250)
     pd.set_option("display.max_columns", 40)
     mesh, comp = common.mesh_of(mesh_token), common.mesh_of(composite_token)
     # feasibility
-    pt = proposals_table()
+    pt = proposals_table(rows)
     print("FEASIBILITY (the cost: the fresh run where the derive cache hit; single-threaded, "
           "on a shared machine)")
     for bid, g in pt.sort_values(["n", "method"]).groupby("block", sort=False):
@@ -761,8 +788,8 @@ def report(mesh_token: str, composite_token: str) -> None:
     # the scorer against the stored clearings
     print(f"\nSCORER CHECK: the stored clearings rescored on {mesh.name} and {comp.name} "
           "(J_2, area population, rtol 1e-5) against their stored Lens A")
-    cl = _read_all(sorted(score_dir(mesh_token, "area").glob("*__clearings.parquet"))
-                   + sorted(score_dir(composite_token, "area").glob("*__clearings.parquet")))
+    cl = _read_all(sorted(score_dir(rows, mesh_token, "area").glob("*__clearings.parquet"))
+                   + sorted(score_dir(rows, composite_token, "area").glob("*__clearings.parquet")))
     own = cl[cl.mesh == cl.stored_mesh]
     for _, r in own.iterrows():
         print(f"  {r.block:18s} {r.clearing:13s} on {r.mesh:9s} stored {r.stored_perm:.7f} "
@@ -773,11 +800,11 @@ def report(mesh_token: str, composite_token: str) -> None:
     print(f"  max |diff| {diff.max():.1e} over {len(own)} rows; over 1e-6 on {len(moved)} rows "
           f"({moved.block.nunique()} blocks: where a home the placement fix un-shadowed moves "
           "J_2)")
-    cl.to_csv(summary_path(mesh_token, "clearings"), index=False)
+    cl.to_csv(summary_path(rows, mesh_token, "clearings"), index=False)
     # the table
     for budget in REPORT_BUDGETS:
-        t = lens_table(mesh_token, budget)
-        t.to_csv(summary_path(mesh_token, f"lens_D{budget:g}"), index=False)
+        t = lens_table(rows, lineup, mesh_token, budget)
+        t.to_csv(summary_path(rows, mesh_token, f"lens_D{budget:g}"), index=False)
         print(f"\nAT D {budget:g} on {mesh.name}: (a) shipped permeability and (b) roadless count "
               "p 1 on the count prefix, (c) roadless area J_2 on the area prefix; [rank of the "
               "methods reaching the budget, (b) and (c) in B's order]; * = the whole network "
@@ -816,9 +843,9 @@ def report(mesh_token: str, composite_token: str) -> None:
           "lower bound: the optimizers are heuristics; the road prefix is the first reaching the "
           "budget, the clearings stay within it). Each clearing against the best road: the share "
           "each leaves enclosed (B (i)), then Lens A over the rest (B (ii))")
-    t = lens_table(mesh_token, PRICE_BUDGET)
+    t = lens_table(rows, lineup, mesh_token, PRICE_BUDGET)
     cl_m = cl[cl.mesh == mesh.name]
-    rows = []
+    price_rows = []
     for bid, g in t.sort_values(["n"]).groupby("block", sort=False):
         best = g.loc[g.rank_c.idxmin()]
         row = dict(block=bid, n=int(best.n), best=best.method, best_enc=best.enc_c, best_c=best.c,
@@ -835,10 +862,10 @@ def report(mesh_token: str, composite_token: str) -> None:
             verdict = (f"minus best {dii:+.4f}" if di == 0 else
                        f"{'ahead' if di < 0 else 'behind'} on (i) by {abs(di):.5f}")
             line += f"; {r.name} {r.perm:.4f} (i {r.enclosed:.5f}; D {r.D:.4f}) {verdict}"
-        rows.append(row)
+        price_rows.append(row)
         print(line)
-    pr = pd.DataFrame(rows)
-    pr.to_csv(summary_path(mesh_token, "price"), index=False)
+    pr = pd.DataFrame(price_rows)
+    pr.to_csv(summary_path(rows, mesh_token, "price"), index=False)
     for family in PRICE_CLEARINGS:
         tie = pr[pr[f"{family}_di"] == 0]
         q = tie[f"{family}_dii"].quantile([0.1, 0.5, 0.9])
@@ -850,7 +877,7 @@ def report(mesh_token: str, composite_token: str) -> None:
               f"{tie[f'{family}_dii'].max():+.4f}), the best road's share of its Lens A "
               f"{share[0.5]:.2f} (p10 {share[0.1]:.2f}, p90 {share[0.9]:.2f})")
     # B (i): the enclosed homes, and what the prefixes and clearings free
-    setup = _read_all(sorted(score_dir(mesh_token, "area").glob("*__setup__*.parquet")))
+    setup = _read_all(sorted(score_dir(rows, mesh_token, "area").glob("*__setup__*.parquet")))
     enc0 = setup.drop_duplicates("block", keep="last").set_index("block").enclosed0
     held = enc0[enc0 > 0]
     print(f"\nENCLOSED HOMES (area population): {len(held)} of {len(enc0)} blocks, a share of "
@@ -865,9 +892,9 @@ def report(mesh_token: str, composite_token: str) -> None:
               f"{int((g.enclosed < g.block.map(held)).sum())}, all {int((g.enclosed == 0).sum())}")
     # the composite mesh
     print(f"\nCOMPOSITE MESH: (c) on {comp.name} minus on {mesh.name}, same prefixes")
-    ca = score_rows(composite_token, "area")
+    ca = score_rows(rows, lineup, composite_token, "area")
     if len(ca):
-        ua = score_rows(mesh_token, "area")
+        ua = score_rows(rows, lineup, mesh_token, "area")
         keys = ["block", "method", "pop", "budget", "full", "m"]
         mg = ca.merge(ua, on=keys, suffixes=("_comp", "_uni"))
         mg["dP2"], mg["dP1"] = mg.P2_comp - mg.P2_uni, mg.P1_comp - mg.P1_uni
@@ -928,11 +955,11 @@ def _cells(bid: str) -> tuple[str, float, float]:
     return bid, b.boundary.area / 1e6, float(_SIZE_MESH[0].cells(b))
 
 
-def sizes_path(composite_token: str) -> Path:
-    return ROWS / f"sizes_{common.mesh_of(composite_token).name}.parquet"
+def sizes_path(rows: Path, composite_token: str) -> Path:
+    return rows / f"sizes_{common.mesh_of(composite_token).name}.parquet"
 
 
-def sizes(composite_token: str, procs: int) -> None:
+def sizes(rows: Path, composite_token: str, procs: int) -> None:
     """The composite mesh's cell count (and the area) of every full-run block that may not fit
     a 48 GB card at h 0.5: the projection's input for the oversized blocks."""
     _check_single_threaded()
@@ -945,21 +972,21 @@ def sizes(composite_token: str, procs: int) -> None:
         got = list(pool.imap_unordered(_cells, todo))
     df = pd.DataFrame(got, columns=["block", "area_km2", "cells_comp"])
     df["mesh"] = _SIZE_MESH[0].name
-    df.to_parquet(sizes_path(composite_token))
+    df.to_parquet(sizes_path(rows, composite_token))
     print(f"{len(df)} blocks sized in {time.perf_counter() - t0:.0f}s", flush=True)
 
 
-def per_block_scoring(mesh_token: str) -> pd.DataFrame:
+def per_block_scoring(rows: Path, lineup: tuple[str, ...], mesh_token: str) -> pd.DataFrame:
     """Per block on `mesh_token`: what scoring all its networks cost on the GPU, over however
     many passes it took: one setup (the median of the passes'), every network's own time (count
     and area together) and the clearings', the peak memory of any pass."""
-    d = score_dir(mesh_token, "area")
+    d = score_dir(rows, mesh_token, "area")
     st = _read_all(sorted(d.glob("*__setup__*.parquet")))
     per = st.groupby("block").agg(t_setup=("t_setup", "median"), passes=("t_setup", "size"),
                                   gpu_peak_gb=("gpu_peak_gb", "max"),
                                   pool_peak_gb=("pool_peak_gb", "max"),
                                   host_hwm_gb=("host_hwm_gb", "max"))
-    sr = score_rows(mesh_token, "area")
+    sr = score_rows(rows, lineup, mesh_token, "area")
     net = sr.groupby(["block", "method"]).t_network.first().groupby("block")
     per["t_networks"], per["networks"] = net.sum(), net.size()
     cl = _read_all(sorted(d.glob("*__clearings.parquet")))
@@ -967,17 +994,17 @@ def per_block_scoring(mesh_token: str) -> pd.DataFrame:
     per["t_full"] = per.t_setup + per.t_networks + per.t_clearings
     # all of the lineup's networks at this block's mean cost per network (blocks still missing
     # some), one setup, the clearings
-    per["t_lineup"] = (per.t_setup + len(common.LINEUP) * per.t_networks / per.networks
+    per["t_lineup"] = (per.t_setup + len(lineup) * per.t_networks / per.networks
                        + per.t_clearings)
     big = pd.read_parquet(ROADLESS / "large82_area.parquet")
     return per.reset_index().merge(big[["block", "M_unknowns"]], on="block")
 
 
-def project(mesh_token: str, composite_token: str) -> None:
+def project(rows: Path, lineup: tuple[str, ...], mesh_token: str, composite_token: str) -> None:
     """The full run's cost from the sentinel's: proposals (CPU-hours per method, a power law in
     the building count fitted on the four blocks), scoring (GPU-hours, a power law in unknowns),
     and which blocks a 48 GB card cannot hold at `mesh_token` (they take `composite_token`)."""
-    pt = proposals_table()
+    pt = proposals_table(rows)
     blocks = full_run_blocks()
     print(f"{len(blocks)} blocks in the full run ({int(blocks.n.notna().sum())} of the large 82; "
           f"others: {sorted(blocks[blocks.n.isna()].block)})")
@@ -989,7 +1016,7 @@ def project(mesh_token: str, composite_token: str) -> None:
     n_all = blocks.n.fillna(blocks.n_simp).to_numpy(dtype=float)
     lo_tot = hi_tot = 0.0
     proj_rows = []
-    for name in common.LINEUP:
+    for name in lineup:
         g_all = pt[pt.method == name]
         g = g_all[g_all.cost_status == "ok"]
         cut = g_all[g_all.cost_status.str.startswith("timeout")]
@@ -1017,7 +1044,7 @@ def project(mesh_token: str, composite_token: str) -> None:
     # scoring
     print(f"\nSCORING on the GPU (lenses (b) and (c), 7 networks, the clearings), per block: "
           f"measured on the sentinel at {common.mesh_of(mesh_token).name}")
-    st = per_block_scoring(mesh_token)
+    st = per_block_scoring(rows, lineup, mesh_token)
     for _, r in st.iterrows():
         print(f"  {r.block}: {r.M_unknowns:.1f}M unknowns (cells x {K}), {r.t_full:.0f}s for "
               f"{r.networks} networks (setup {r.t_setup:.0f}s, networks {r.t_networks:.0f}s, "
@@ -1044,7 +1071,7 @@ def project(mesh_token: str, composite_token: str) -> None:
                       for _, r in risky.iterrows()))
     over = blocks[~(blocks.gb_uniform < cap)].copy()
     comp_mesh = common.mesh_of(composite_token)
-    got = pd.read_parquet(sizes_path(composite_token)).set_index("block")
+    got = pd.read_parquet(sizes_path(rows, composite_token)).set_index("block")
     missing = sorted(set(over.block) - set(got.index))
     if missing:
         raise SystemExit(f"run `sizes` with a lower SIZES_MIN_M: {missing} are not sized")
@@ -1076,7 +1103,7 @@ def project(mesh_token: str, composite_token: str) -> None:
           f"{float(blocks[~fits].M_run.sum()):.0f}M), {msum * s_lo / 3600:.1f} -- "
           f"{msum * s_hi / 3600:.1f} h at the sentinel's fastest and slowest rates; the largest "
           f"block {blocks.t_pred.max() / 3600:.2f} h")
-    out = ROWS / f"projection_{common.mesh_of(mesh_token).name}_{comp_mesh.name}.parquet"
+    out = rows / f"projection_{common.mesh_of(mesh_token).name}_{comp_mesh.name}.parquet"
     blocks.to_parquet(out)
     pd.DataFrame(proj_rows).to_parquet(out.with_name("projection_proposals.parquet"))
     print(f"  rows: {out}")
@@ -1084,27 +1111,35 @@ def project(mesh_token: str, composite_token: str) -> None:
 
 # ------------------------------------------------------------------ main
 
+def lineup_of(arg: str) -> tuple[str, ...]:
+    """A lineup named on the command line: the networks, comma-separated, each once."""
+    names = tuple(arg.split(","))
+    if not all(names) or len(set(names)) != len(names):
+        raise SystemExit(f"a lineup names each network once, none empty: {arg!r}")
+    return names
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     cmd = a[0]
     if cmd == "propose":
-        if a[4] not in ("cache", "fresh"):
-            raise SystemExit(f"propose takes cache or fresh, not {a[4]!r}")
-        propose(Path(a[1]), a[2], a[3], a[4] == "fresh")
+        if a[5] not in ("cache", "fresh"):
+            raise SystemExit(f"propose takes cache or fresh, not {a[5]!r}")
+        propose(Path(a[1]), Path(a[2]), a[3], a[4], _arms()[a[4]], a[5] == "fresh")
     elif cmd == "propose-all":
-        if a[6] not in ("time-hits", "no"):
-            raise SystemExit(f"propose-all takes time-hits or no, not {a[6]!r}")
-        propose_all(Path(a[1]), int(a[2]), a[3].split(","), a[4].split(","),
-                    float(a[5]) * 3600, a[6] == "time-hits")
+        if a[7] not in ("time-hits", "no"):
+            raise SystemExit(f"propose-all takes time-hits or no, not {a[7]!r}")
+        propose_all(Path(a[1]), Path(a[2]), int(a[3]), a[4].split(","), a[5].split(","),
+                    float(a[6]) * 3600, a[7] == "time-hits")
     elif cmd == "prefixes":
-        prefixes(Path(a[1]), int(a[2]), a[3].split(","))
+        prefixes(Path(a[1]), lineup_of(a[2]), Path(a[3]), int(a[4]), a[5].split(","))
     elif cmd == "score":
-        score(Path(a[1]), a[2], a[3].split(","), a[4].split(","))
+        score(Path(a[1]), lineup_of(a[2]), Path(a[3]), a[4], a[5].split(","), a[6].split(","))
     elif cmd == "report":
-        report(a[1], a[2])
+        report(Path(a[1]), lineup_of(a[2]), a[3], a[4])
     elif cmd == "sizes":
-        sizes(a[1], int(a[2]))
+        sizes(Path(a[1]), a[2], int(a[3]))
     elif cmd == "project":
-        project(a[1], a[2])
+        project(Path(a[1]), lineup_of(a[2]), a[3], a[4])
     else:
         raise SystemExit(f"unknown mode {cmd!r}")
