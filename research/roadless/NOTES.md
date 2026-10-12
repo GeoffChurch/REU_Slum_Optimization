@@ -2654,3 +2654,40 @@ What the 60 say: roadless and the shipped metric order the road methods alike, r
 leads under all three lenses, and wherever B (i) ties SIMP's default leads the best road network
 by at least +0.047 at D 0.05. Where (i) decides, the stored clearings lose because they were
 searched without it, which B's optimizer is for.
+
+### B's optimizer: free first (owner 2026-10-11: "B SGTM")
+
+clear.free_first, run first by relax.py (one, path) and polish_greedy.py: the crossings that free
+the homes enclosed at baseline, the least D per unit of the home's population first, while they
+fit the budget; then today's search with the rest, the free stage's buildings held (SIMP at x 1
+through its roundings and polish, the greedy from them, the polish never moving them). Each round
+is one Dijkstra from the street over a graph of the open components at baseline and the
+buildings' 4-connected pieces (14 of 40 blocks checked have a building in 2 -- 3 pieces, which as
+one region would claim a path the raster lacks); the metric's own test must free the chosen home
+or the run stops. Where no home is enclosed nothing is held and the run is unchanged (on the CPU
+within solver noise: pyamg draws its start vectors from numpy's global RNG, up to 1e-11 in Lens
+A between processes).
+
+- Small blocks (CPU): 19263's three enclosed homes (0.0235 of the area population) are freed by
+  one building (D 0.0072), 38486's courtyard (nine homes, 0.0501) by one (D 0.0042), 46295's home
+  with footprint all round by a neighbour (D 0.0036; its own building 0.0074). What freeing costs
+  Lens A at D 0.05: 19263 -0.063 (SIMP) and -0.074 (cheap); 38486 +0.022 and +0.020 (the freed
+  courtyard is space neither search had opened); 46295 -0.001 and -0.007. 21 more small blocks
+  with enclosed homes: D 0.0007 -- 0.0139 a block, the top on 42404 for a home of 0.00065 of the
+  population.
+- The 12 large blocks with enclosed homes (runs free-simp and free-cheap, 0.28 and 0.10 GPU-h, as
+  before): both presets free every home, the free stage D 0.00008 -- 0.0026 (median 0.0008, 1 --
+  4 buildings). Lens A against the stored clearings: SIMP's default a median -0.0030 (-0.0060 --
+  +0.0009, up on 2), the cheap preset -0.0021 (-0.0152 -- +0.0056, up on 3); the clearings
+  overlap the stored ones at a median Jaccard 0.88 and 0.83. road_rescore.py (run free-rescore)
+  reproduces their Lens A to 8.9e-9, none enclosed.
+- In B's order at D 0.05 both presets now lead the best road prefix on all 12 (before: SIMP's
+  default on 3, the cheap preset on 4): on (i) on the 5 where no road frees every home, and where
+  (i) ties (7) by a median +0.171 (+0.130 -- +0.467) and +0.140 (+0.074 -- +0.459). Over the 60
+  both are ahead on all; where (i) ties (55) SIMP's default leads by a median +0.152 (p10 +0.090,
+  p90 +0.358; +0.047 -- +0.777) and the best road gets a median 56% of its Lens A (p10 32%, p90
+  71%), the cheap preset by +0.127 (+0.042 -- +0.756). road_rows/summary_*.csv are regenerated.
+- Not free-first: the composite mesh (free_first raises on a CompositeGrid with an enclosed
+  home; the 12's cheap_a5x8 clearings predate it), the plain greedy (clear.greedy_block, the
+  track), and the stored rows on the other blocks with enclosed homes (the 21 small ones above
+  among them).
