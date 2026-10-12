@@ -13,19 +13,18 @@ The same WKB, row for row (every coordinate exact), and the same widths; one row
 <out.csv>, with its wall and CPU seconds.
 
 `sets` (guard 4), on both stored clearings (transparency_sets.SIMP_DEFAULT and CHEAP) of every block
-in <ids,>: the cleared set's members are the stored row's positions, read again here, and its
-factors f there and 1 elsewhere; the matched random set has the clearing's count in every decile
-of footprint area (the deciles computed here, not by transparency_sets), the same members for the
-same seed and different members for different seeds; and every identity moves with the clearing's
-content, the factor, the seed and the strata. Then the area share, which deciles match in
-distribution but not draw by draw: |random share / clearing share - 1| over every (block,
-clearing, seed), its median, p90 and worst. On the 59 blocks with stored clearings, 10 seeds:
-median 0.036, p90 0.200, worst 1.39 -- where a clearing takes a block's largest buildings and its
-top decile spans a factor 25 - 120 in area, a draw from that decile is far smaller.
+in <ids,>, with the experiment's stratification (STRATIFICATION, equal area mass in 20 strata): the
+cleared set's members are the stored row's positions, read again here, and its factors f there and
+1 elsewhere; the matched random set has the clearing's count in every stratum (the strata computed
+here, not by transparency_sets), the same members for the same seed and different members for
+different seeds, and its `Draw` records its area over the clearing's and its Jaccard overlap with
+the clearing as computed here; and every identity moves with the clearing's content, the factor,
+the seed and the stratification. Then the area ratio's and the overlap's median, p90 and worst
+over every (block, clearing, seed).
 
 FAULT INJECTION, `sets` on six blocks: positions read off by one, draws that ignore the strata, the
-seed ignored, a ClearedSet identity without the positions' digest, and strata computed on misaligned
-areas each fail it. `opaque`: the brief's literal route formula (outside length from the union,
+seed ignored, a ClearedSet identity without the positions' digest, and AreaMass cutting its strata
+by count each fail it. `opaque`: the brief's literal route formula (outside length from the union,
 inside length per building), under which a stretch inside two overlapping opaque footprints weighs
 more than open ground, fails it.
 """
@@ -61,7 +60,7 @@ SINGLE = dict(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1"
               NUMBA_NUM_THREADS="1", PYTHONDONTWRITEBYTECODE="1")
 # propose order only (no result depends on it): the costliest first
 COST_GUESS = {"cycle_native": 2.5, "resistance_lp": 2.0, "clearance_looped": 1.0}
-STRATA = 10                 # deciles of footprint area, as the experiment draws its control
+STRATIFICATION = ts.AreaMass(strata=20)     # the experiment's control (owner's ruling 2026-10-12)
 F_CHECK = 0.25              # any factor in (0, 1) does for these checks
 
 
@@ -158,12 +157,25 @@ def _stored_positions(rows: ts.StoredRows, bid: str) -> NDArray[np.int64]:
     return np.sort(np.asarray(r[rows.column].iloc[0], dtype=np.int64))
 
 
+def _mass_strata(area: NDArray[np.float64], strata: int) -> NDArray[np.intp]:
+    """Strata of equal total area, computed here rather than by transparency_sets: by area,
+    smallest first, a building in the stratum where the running total passes its middle."""
+    order = np.argsort(area, kind="stable")
+    total = float(area[order].sum())
+    out = np.empty(len(area), dtype=np.intp)
+    running = 0.0
+    for i in order:
+        running += float(area[i])
+        out[i] = int((running - area[i] / 2.0) / total * strata)
+    return out
+
+
 def sets(ids: list[str], seeds: list[int]) -> None:
     shares = []
+    k = STRATIFICATION.strata
     for b in common.build_blocks(ids):
         area = np.asarray([g.area for g in b.buildings.outlines])
-        stratum = np.searchsorted(np.quantile(area, np.arange(1, STRATA) / STRATA), area,
-                                  side="right")
+        stratum = _mass_strata(area, k)
         for kind, rows in (("simp_default", ts.SIMP_DEFAULT), ("cheap", ts.CHEAP)):
             if not (HERE / rows.rows / f"{b.block_id}_p2.parquet").exists():
                 continue
@@ -173,52 +185,63 @@ def sets(ids: list[str], seeds: list[int]) -> None:
             assert np.array_equal(cleared.members(b), want), (b.block_id, kind)
             f = factors_of(cleared, b)
             assert np.all(f[want] == F_CHECK) and np.all(np.delete(f, want) == 1.0)
-            share_c = area[want].sum() / area.sum()
             drawn = {}
             for seed in seeds:
-                r = ts.MatchedRandomSet(clearing=c, strata=STRATA, seed=seed, f=F_CHECK)
-                m = r.members(b)
+                r = ts.MatchedRandomSet(clearing=c, stratification=STRATIFICATION, seed=seed,
+                                        f=F_CHECK)
+                d = r.draw(b)
+                m = d.members
                 again = ts.MatchedRandomSet(clearing=ts.Clearing.read(rows, b.block_id),
-                                            strata=STRATA, seed=seed, f=F_CHECK).members(b)
+                                            stratification=STRATIFICATION, seed=seed,
+                                            f=F_CHECK).members(b)
                 assert np.array_equal(m, again), (b.block_id, kind, seed, "not reproducible")
                 assert len(m) == len(want) == len(np.unique(m)), (b.block_id, kind, seed)
-                assert np.array_equal(np.bincount(stratum[m], minlength=STRATA),
-                                      np.bincount(stratum[want], minlength=STRATA))
+                assert np.array_equal(np.bincount(stratum[m], minlength=k),
+                                      np.bincount(stratum[want], minlength=k))
+                ratio = area[m].sum() / area[want].sum()
+                jaccard = len(set(m.tolist()) & set(want.tolist())) / len(
+                    set(m.tolist()) | set(want.tolist()))
+                assert np.isclose(d.area_ratio, ratio, rtol=1e-12, atol=0.0)
+                assert d.jaccard == jaccard
                 f = factors_of(r, b)
                 assert np.all(f[m] == F_CHECK) and np.all(np.delete(f, m) == 1.0)
                 drawn[seed] = m
                 shares.append(dict(block=b.block_id, kind=kind, seed=seed, count=len(m),
-                                   share_c=share_c, share_r=area[m].sum() / area.sum(),
-                                   overlap=len(np.intersect1d(m, want))))
+                                   ratio=ratio, jaccard=jaccard))
             for s1 in seeds:
                 for s2 in seeds:
                     if s1 < s2 and np.array_equal(drawn[s1], drawn[s2]):
                         raise AssertionError(f"{b.block_id} {kind}: seeds {s1} and {s2} agree")
             # identities move with what changes the factors, and only with that
             moved = dataclasses.replace(c, cleared=(*c.cleared[:-1], c.cleared[-1] + 1))
-            base = ts.MatchedRandomSet(clearing=c, strata=STRATA, seed=seeds[0], f=F_CHECK)
+            base = ts.MatchedRandomSet(clearing=c, stratification=STRATIFICATION, seed=seeds[0],
+                                       f=F_CHECK)
             for other in (dataclasses.replace(base, clearing=moved),
                           dataclasses.replace(base, seed=seeds[0] + 1),
                           dataclasses.replace(base, f=F_CHECK / 2),
-                          dataclasses.replace(base, strata=STRATA + 1)):
-                assert other.identity != base.identity
+                          dataclasses.replace(base, stratification=ts.AreaMass(strata=k + 1)),
+                          dataclasses.replace(base, stratification=ts.CountQuantiles(strata=k))):
+                assert other.identity != base.identity and other.tag != base.tag
             assert ts.ClearedSet(clearing=moved, f=F_CHECK).identity != cleared.identity
             assert ts.ClearedSet(clearing=c, f=F_CHECK / 2).identity != cleared.identity
             reread = ts.Clearing.read(rows, b.block_id)
             assert ts.ClearedSet(clearing=reread, f=F_CHECK).identity == cleared.identity
         print(f"{b.block_id}: ok", flush=True)
     df = pd.DataFrame(shares)
-    df["rel"] = df.share_r / df.share_c - 1.0
-    q = df.rel.abs().quantile([0.5, 0.9, 0.99, 1.0])
-    print(f"{df.block.nunique()} blocks, {len(df)} random sets: count = the clearing's on all; "
-          f"area share relative to the clearing's, |share_r / share_c - 1|: median {q[0.5]:.3f}, "
-          f"p90 {q[0.9]:.3f}, p99 {q[0.99]:.3f}, max {q[1.0]:.3f} "
-          f"(mean signed {df.rel.mean():+.3f}); overlap with the clearing, median share "
-          f"{(df.overlap / df['count']).median():.3f}")
-    worst = df.loc[df.rel.abs().idxmax()]
-    print(f"worst: {worst.block} {worst.kind} seed {worst.seed}: clearing {worst.share_c:.4f}, "
-          f"random {worst.share_r:.4f} ({worst['count']} buildings)")
-    per = df.groupby(["block", "kind"]).rel.apply(lambda r: r.abs().max())
+    off = (df.ratio - 1.0).abs()
+    print(f"{df.block.nunique()} blocks, {len(df)} random sets, {STRATIFICATION}: count = the "
+          f"clearing's in every stratum on all")
+    print(f"area ratio (random / clearing): median {df.ratio.median():.4f}, p10 "
+          f"{df.ratio.quantile(0.1):.4f}, p90 {df.ratio.quantile(0.9):.4f}, "
+          f"min {df.ratio.min():.4f}, max {df.ratio.max():.4f}; |ratio - 1| median "
+          f"{off.median():.4f}, p90 "
+          f"{off.quantile(0.9):.4f}, worst {off.max():.4f}")
+    print(f"Jaccard overlap with the clearing: median {df.jaccard.median():.4f}, p90 "
+          f"{df.jaccard.quantile(0.9):.4f}, worst {df.jaccard.max():.4f}")
+    for what, row in (("area", df.loc[off.idxmax()]), ("overlap", df.loc[df.jaccard.idxmax()])):
+        print(f"worst {what}: {row.block} {row.kind} seed {row.seed}: ratio {row.ratio:.4f}, "
+              f"Jaccard {row.jaccard:.4f} ({row['count']} buildings)")
+    per = df.groupby(["block", "kind"]).ratio.apply(lambda r: (r - 1.0).abs().max())
     print(f"(block, clearing) pairs whose worst seed is off by more than 0.25: "
           f"{int((per > 0.25).sum())} of {len(per)}, more than 0.10: {int((per > 0.10).sum())}")
 

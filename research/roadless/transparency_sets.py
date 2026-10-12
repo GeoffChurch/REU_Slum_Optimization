@@ -3,15 +3,13 @@
 
   ClearedSet        the buildings one stored roadless clearing clears, at factor f; every other
                     building 1.
-  MatchedRandomSet  the control: a random set matched to such a clearing. From each stratum of
-                    the block's footprint areas (`strata` quantile bins, deciles at 10) it draws,
-                    uniformly without replacement, as many buildings as the clearing has there:
-                    the count matches exactly, the area share in distribution (on the 59 blocks
-                    with stored clearings its median draw is 3.6% off the clearing's, 90% of draws
-                    within 20%, but up to 139% where a clearing takes a block's largest buildings
-                    and the top decile spans a factor 25 - 120 in area). Seeded per (seed, block),
-                    at factor f; it draws from every building of a stratum, the clearing's own
-                    included.
+  MatchedRandomSet  the control: a random set matched to such a clearing. For each building the
+                    clearing holds in a stratum of the block's footprint areas, it draws one from
+                    the same stratum, uniformly without replacement, from every building of the
+                    stratum (the clearing's own included); seeded per (seed, block), at factor f.
+                    The stratification is a Strategy: AreaMass (strata of equal total area, the
+                    experiment's, at 20) or CountQuantiles (deciles at 10). Each draw records its
+                    area over the clearing's and its Jaccard overlap with the clearing (`Draw`).
 
 Each is one block's: `Clearing.read` reads that block's stored row ONCE, where the experiment is
 configured, and the set raises on any other block. The identities cover what was read -- the
@@ -28,6 +26,7 @@ import hashlib
 from collections.abc import Hashable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
@@ -35,7 +34,8 @@ import shapely
 from numpy.typing import NDArray
 
 from reblock.contracts import Block
-from reblock.derive_graph import source_hash
+from reblock.derive_graph import config_identity, source_hash
+from reblock.transparency import price_tag
 
 ROADLESS = Path(__file__).resolve().parent
 # This module's own code, in every identity below: it is in no reblock closure.
@@ -116,6 +116,10 @@ class ClearedSet:
     def identity(self) -> Hashable:
         return ("ClearedSet", CODE, self.clearing.block_id, self.clearing.digest, self.f)
 
+    @property
+    def tag(self) -> str:
+        return price_tag(self.identity)
+
     def members(self, block: Block) -> NDArray[np.intp]:
         return self.clearing.positions(block)
 
@@ -123,12 +127,69 @@ class ClearedSet:
         return _with_factor(block, self.members(block), self.f)
 
 
-def area_strata(block: Block, strata: int) -> NDArray[np.intp]:
-    """Each building's stratum, 0 .. strata - 1: its quantile bin of footprint area over the
-    block."""
-    area = shapely.area(np.asarray(block.buildings.outlines))
-    edges = np.quantile(area, np.arange(1, strata) / strata)
-    return np.asarray(np.searchsorted(edges, area, side="right"), dtype=np.intp)
+class Stratification(Protocol):
+    """How a block's buildings are cut into strata by footprint area, the matched random set
+    drawing as many from each stratum as the clearing holds there."""
+
+    @property
+    def identity(self) -> Hashable: ...
+
+    def assign(self, area: NDArray[np.float64]) -> NDArray[np.intp]:
+        """Each building's stratum, from 0, given every building's footprint area."""
+        ...
+
+
+def _strata_checked(strata: int) -> None:
+    if strata < 1:
+        raise ValueError(f"strata must be >= 1; got {strata}")
+
+
+@dataclass(frozen=True, kw_only=True)
+class CountQuantiles:
+    """Strata of equal COUNT: quantile bins of footprint area (deciles at 10). It matches the area
+    share in distribution only: where a clearing takes a block's largest buildings, the top bin
+    spans a factor 25 - 120 in area and a draw from it is far smaller (deciles on the 59 blocks:
+    |area ratio - 1| median 0.036, p90 0.200, worst 1.39)."""
+
+    strata: int
+
+    def __post_init__(self) -> None:
+        _strata_checked(self.strata)
+
+    @property
+    def identity(self) -> Hashable:
+        return config_identity(self)
+
+    def assign(self, area: NDArray[np.float64]) -> NDArray[np.intp]:
+        edges = np.quantile(area, np.arange(1, self.strata) / self.strata)
+        return np.asarray(np.searchsorted(edges, area, side="right"), dtype=np.intp)
+
+
+@dataclass(frozen=True, kw_only=True)
+class AreaMass:
+    """Strata of equal total AREA: the buildings sorted by footprint area and cut where their
+    running total crosses each 1 / strata of the block's footprint area, each building in the
+    stratum that holds its middle. A block's largest buildings make strata of their own, so the
+    clearing's largest are matched by others as large; where the clearing holds a stratum's only
+    buildings, the random set holds them too (its overlap with the clearing, `Draw.jaccard`). The
+    experiment's stratification, at 20 strata (owner's ruling, 2026-10-12)."""
+
+    strata: int
+
+    def __post_init__(self) -> None:
+        _strata_checked(self.strata)
+
+    @property
+    def identity(self) -> Hashable:
+        return config_identity(self)
+
+    def assign(self, area: NDArray[np.float64]) -> NDArray[np.intp]:
+        order = np.argsort(area, kind="stable")
+        ranked = area[order]
+        middle = np.cumsum(ranked) - ranked / 2.0
+        out = np.empty(len(area), dtype=np.intp)
+        out[order] = np.floor(middle / ranked.sum() * self.strata).astype(np.intp)
+        return out
 
 
 def _block_key(block_id: str) -> int:
@@ -136,31 +197,52 @@ def _block_key(block_id: str) -> int:
     return int.from_bytes(hashlib.sha256(block_id.encode()).digest()[:8], "little")
 
 
+class Draw(NamedTuple):
+    """One random set, and what the experiment records of it: its footprint area over the
+    clearing's (1 is a perfect match) and its Jaccard overlap with the clearing,
+    |R & C| / |R | C|."""
+
+    members: NDArray[np.intp]
+    area_ratio: float
+    jaccard: float
+
+
 @dataclass(frozen=True, kw_only=True)
 class MatchedRandomSet:
     clearing: Clearing
-    strata: int
+    stratification: Stratification
     seed: int
     f: float
 
     def __post_init__(self) -> None:
         _factor_checked(self.f)
-        if self.strata < 1:
-            raise ValueError(f"strata must be >= 1; got {self.strata}")
 
     @property
     def identity(self) -> Hashable:
         return ("MatchedRandomSet", CODE, self.clearing.block_id, self.clearing.digest,
-                self.strata, self.seed, self.f)
+                self.stratification.identity, self.seed, self.f)
 
-    def members(self, block: Block) -> NDArray[np.intp]:
-        stratum = area_strata(block, self.strata)
+    @property
+    def tag(self) -> str:
+        return price_tag(self.identity)
+
+    def draw(self, block: Block) -> Draw:
+        """For each building the clearing holds in a stratum, one from the same stratum, uniformly
+        without replacement, seeded per (seed, block)."""
+        area = shapely.area(np.asarray(block.buildings.outlines))
+        stratum = self.stratification.assign(area)
         cleared = self.clearing.positions(block)
         rng = np.random.default_rng([self.seed, _block_key(block.block_id)])
-        drawn = [rng.choice(np.flatnonzero(stratum == s), size=int((stratum[cleared] == s).sum()),
-                            replace=False)
-                 for s in range(self.strata)]
-        return np.sort(np.concatenate(drawn)).astype(np.intp)
+        members = np.sort(np.concatenate([
+            rng.choice(np.flatnonzero(stratum == s), size=int((stratum[cleared] == s).sum()),
+                       replace=False)
+            for s in np.unique(stratum[cleared])])).astype(np.intp)
+        both = len(np.intersect1d(members, cleared))
+        return Draw(members=members, area_ratio=float(area[members].sum() / area[cleared].sum()),
+                    jaccard=both / (len(members) + len(cleared) - both))
+
+    def members(self, block: Block) -> NDArray[np.intp]:
+        return self.draw(block).members
 
     def factors(self, block: Block) -> NDArray[np.float64]:
         return _with_factor(block, self.members(block), self.f)
