@@ -2763,3 +2763,108 @@ The screen, fixed before any result (committed and pushed before the first propo
   prefix's true displacement that falls on C, and for a random set its area over C's and its
   Jaccard overlap with C.
 - The 13 tuning blocks and the held-out blocks are not part of this run.
+
+Run (2026-10-12), proposals at 13d6c30, the screen's commit (two canary runs on 9712 first): 160
+networks, fresh, 8 processes, 41 min, 5.27 CPU-h (cycle_native 3.1, resistance_lp 1.9,
+clearance_looped 0.3), none failed, peak RSS 1.1 GB; a discount changes no method's cost (the
+knobs do: shortlist 16 costs 2 -- 3x). Prefixes 27 min on 7 processes. Scoring on the cluster
+(run transp-sentinel, one task a block, the arms' prefixes and networks shipped as tars): 2.87
+GPU-h, 1 h 23 min on four GPUs (22422 81 min, 29.6 GB).
+- Checks. The 12 recomputed base networks are item 4's, WKB row for row and widths. The
+  desire-routed preset is reused: Task 1 left its substrate's code untouched (desire_substrate,
+  demand_greedy, desire_lines, betweenness) and changed cycle_native.py only in arithmetic that
+  is the old float for float at factor 1, and recomputed at HEAD (cycle_native fresh, its
+  betweenness counts from the derive cache) it is item 4's network on 9712 and 22422 (204 and
+  427 s). The stored clearings rescore to item 4's rows within 8.5e-10, the base arms' (a), (b)
+  and (c) within 1e-16, 2.3e-9 and 6.4e-8. No prefix leaves anyone enclosed, and every whole
+  network reaches D 0.15 under both weightings (priced resistance_lp's true D 0.203 -- 0.237
+  against its 0.20 cap).
+- The discount moves the roads: the area-weighted share of the (c) prefix's true displacement
+  that falls on C, mean over the four blocks (about 5% by chance), goes from 0.086 to 0.218 for
+  cycle_native's main form at f 0.1 (price alone 0.101, route alone 0.216), from 0.124 to 0.189
+  for resistance_lp's (route alone 0.178, both 0.285), from 0.072 to 0.179 for
+  clearance_looped's (price alone 0.105, route alone 0.158). A random set draws the roads onto
+  itself too, less (its own share 0.11 -- 0.21, 0.04 -- 0.16, 0.07 -- 0.19). The random sets'
+  area matches C's within 1.3% on 30848 and 9712 and within -6% / +20% on 22422, but every seed
+  falls to 0.81 -- 0.89 of C's on 5810, which biases the control there toward a smaller effect
+  (Jaccard overlap with C 0.022 -- 0.050).
+- Lens (c) at area D 0.05 per block, the mean gain over base, the mean share of the gap to SIMP's
+  default closed, the median (a) loss against base at count D 0.05 | 0.10, the blocks above the
+  random sets' mean (>r), and the share on C as above (p+r: price and route); > advances. No arm
+  is vetoed (the worst is 0.037 below its base, cycle_native's desire-routed preset on 5810).
+  SIMP's default (c): 0.7829, 0.6550, 0.2589, 0.1299.
+
+    cycle_native       22422  30848   5810   9712     gain     gap  (a) .05 | .10  >r  on C
+    base              0.0034 0.2921 0.1389 0.0588                                       0.086
+    shortlist 4       0.0035 0.4973 0.1086 0.0465  +0.0407  +0.035 +0.0065 | +0.0010  1  0.088
+    shortlist 16      0.0048 0.3072 0.1349 0.0567  +0.0026  -0.005 -0.0045 | -0.0066  4  0.088
+    desire-routed     0.0041 0.2818 0.1021 0.0399  -0.0163  -0.150 -0.0109 | -0.0050  1  0.085
+    C f0.5 p+r        0.0046 0.2993 0.1370 0.0561  +0.0009  -0.008 +0.0063 | +0.0016  4  0.175
+    C f0.1 p+r        0.0035 0.3146 0.1557 0.0571  +0.0094  +0.045 +0.0101 | -0.0021  3  0.218
+    C f0.1 price      0.0033 0.2995 0.1307 0.0509  -0.0022  -0.040 +0.0083 | -0.0002  3  0.101
+    C f0.1 route      0.0056 0.3023 0.1387 0.0551  +0.0021  -0.006 +0.0061 | +0.0007  4  0.216
+    C' f0.1 p+r       0.0045 0.2899 0.1405 0.0528  -0.0014  -0.019 +0.0063 | +0.0010  3  0.141
+    random f0.1 mean  0.0038 0.2902 0.1252 0.0502  -0.0060  sd 0.0007 0.0093 0.0061 0.0027
+
+    resistance_lp      22422  30848   5810   9712     gain     gap  (a) .05 | .10  >r  on C
+    base              0.0054 0.2907 0.1481 0.0650                                       0.124
+    chunks 4          0.0065 0.3144 0.1607 0.0557  +0.0070  +0.009 +0.0091 | +0.0027  3  0.127
+    chunks 16         0.0052 0.2856 0.1388 0.0571  -0.0056  -0.055 -0.0004 | +0.0009  0  0.113
+    C f0.5 price      0.0056 0.3026 0.1443 0.0657  +0.0022  +0.002 +0.0004 | -0.0019  3  0.162
+  > C f0.1 price      0.0060 0.2986 0.1608 0.0694  +0.0064  +0.051 -0.0029 | -0.0009  4  0.189
+    C f0.1 route      0.0056 0.3016 0.1626 0.0592  +0.0049  +0.018 +0.0074 | +0.0006  3  0.178
+  > C f0.1 p+r        0.0062 0.3201 0.1702 0.0714  +0.0147  +0.095 +0.0076 | +0.0010  4  0.285
+  > C' f0.1 price     0.0056 0.3023 0.1530 0.0645  +0.0040  +0.017 +0.0045 | -0.0013  3  0.136
+  > random f0.1 mean  0.0055 0.2892 0.1535 0.0639  +0.0007  sd 0.0004 0.0118 0.0070 0.0022
+
+    clearance_looped   22422  30848   5810   9712     gain     gap  (a) .05 | .10  >r  on C
+    base              0.0025 0.2446 0.0925 0.0388                                       0.072
+    repulsion -2      0.0031 0.2428 0.0826 0.0412  -0.0022  -0.009 +0.0038 | -0.0058  2  0.077
+    repulsion 2       0.0028 0.2313 0.0882 0.0376  -0.0046  -0.018 -0.0464 | -0.0386  2  0.072
+    repulsion 4       0.0033 0.2713 0.0743 0.0395  +0.0025  -0.009 -0.0698 | -0.0509  2  0.087
+    C f0.5 p+r        0.0031 0.2792 0.0823 0.0380  +0.0060  +0.004 +0.0160 | +0.0035  3  0.128
+  > C f0.1 p+r        0.0036 0.2815 0.0958 0.0503  +0.0132  +0.059 -0.0095 | -0.0199  4  0.179
+    C f0.1 price      0.0026 0.2852 0.0980 0.0354  +0.0107  +0.024 -0.0128 | -0.0056  3  0.105
+    C f0.1 route      0.0037 0.2793 0.0893 0.0440  +0.0095  +0.031 +0.0009 | -0.0037  4  0.158
+  > C' f0.1 p+r       0.0030 0.2809 0.1159 0.0449  +0.0166  +0.074 -0.0196 | -0.0086  4  0.095
+  > random f0.1 mean  0.0024 0.2477 0.0794 0.0419  -0.0018  sd 0.0004 0.0111 0.0060 0.0047
+
+- The screen. resistance_lp: its main form, C priced at f 0.1 (+0.0064 against f 0.5's +0.0022),
+  is above its random sets on 4 of 4 and loses no (a) (-0.0029 | -0.0009): it advances to the 13
+  with its random control, with the ablation price and route beside it (+0.0147, 4 of 4, (a)
+  +0.0076 | +0.0010; route alone, +0.0049, does not beat the main form) and C' (+0.0040, within
+  0.01). clearance_looped: its main form, C priced and routed on its tree at f 0.1 (+0.0132
+  against +0.0060), is above its random sets on 4 of 4 and gains (a) (-0.0095 | -0.0199): it
+  advances with its control and C' (+0.0166, above C); price alone (+0.0107) and route alone
+  (+0.0095) do not beat it. cycle_native advances nothing: its main form at f 0.1 (+0.0094,
+  above its random sets on 3 of 4) loses a median 0.01015 of (a) at count D 0.05, over the
+  guard's 0.01 by 0.00015 ((a) is exact here: item 4's reproduced to 1e-16), a knife edge and
+  the owner's call; its f 0.5 form passes every test at +0.0009 but is not the f with the larger
+  mean, route alone passes at +0.0021 below the main form, price alone -0.0022, C' -0.0014.
+- Beside it. The gap to SIMP's default closed: a mean 4.5% (cycle_native), 5.1% and 9.5%
+  (resistance_lp, price and price and route), 5.9% and 7.4% (clearance_looped, C and C'); on
+  gated 22422 0.3% at most, as no arm opens the gate at D 0.05 ((c) at most 0.0065 against
+  SIMP's 0.783). Against random sets made as cheap the main form gains +0.015 (cycle_native),
+  +0.006 (resistance_lp) and +0.015 (clearance_looped), partly because a random discount costs
+  cycle_native and clearance_looped (-0.006, -0.002). Against the best own-knob point: for
+  cycle_native it is shortlist 4 (mean (c) 0.164), all from a pocket it opens on 30848 (0.497
+  against 0.292; below base on 5810 and 9712), and its main form is 0.031 behind it; for
+  resistance_lp chunks 4 (0.134), the main form 0.0006 behind and price and route 0.0077 ahead;
+  for clearance_looped repulsion 4 (0.097), the main form 0.011 and C' 0.014 ahead. The pilot's
+  +0.03 at h 1.0 does not hold at h 0.5 on these blocks: on 9712, common to both, the pilot's
+  arms give cycle_native -0.0017, resistance_lp +0.0044, clearance_looped's route alone +0.0052
+  (with the price +0.0115).
+- Unlike the pilot, resistance_lp's route does not lower it here (+0.0049 alone), and with the
+  price it is the largest gain of the run; clearance_looped's C' (the cheap preset's clearing, 10
+  -- 255 buildings against C's 70 -- 322) beats C, cycle_native's does not.
+
+What the sentinel says: making the buildings the roadless optimum clears cheaper moves 1.5 --
+2.5x as much of a road network's displacement onto them, but at equal displacement it buys
+little of the roadless benefit, +0.006 -- +0.013 of (c) on average for the main forms (+0.015
+and +0.017 for resistance_lp's price and route and clearance_looped's C'), 4 -- 10% of the gap
+to SIMP's default, nothing on a gated block, and only resistance_lp and clearance_looped get
+past the screen. The 13 tuning blocks are next for them: resistance_lp priced at f 0.1 (price and
+route and C' beside it), clearance_looped priced and routed at f 0.1 (C' beside it), each with
+its random control; cycle_native only if the owner waives the 0.00015 on the guard. Committed:
+transparency_rows/arms.csv and summary_{records,screen,lens}.csv (the rows and networks are in
+the ignored transparency_rows/ parquet and scratch).

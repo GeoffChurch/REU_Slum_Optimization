@@ -131,7 +131,16 @@ items up front"), in the order proposed:
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
    already make); the promising form discounts the buildings the roadless optimum clears, the
-   map R of 4.
+   map R of 4. The sentinel (owner 2026-10-12, "Leave out arterial"; NOTES, "Transparency for
+   the road methods: the sentinel"; reblock.transparency, transparency_run.py): a discount moves
+   1.5 -- 2.5x as much of the roads' displacement onto SIMP's set, but (c) at area D 0.05 gains
+   only +0.006 -- +0.013 for the main forms (4 -- 6% of the gap to SIMP's default, none on gated
+   22422), +0.006 -- +0.015 above random sets made as cheap. Through the screen: resistance_lp
+   priced at f 0.1 (its price and route, +0.015, and the cheap preset's set beside it) and
+   clearance_looped priced and routed at f 0.1 (the cheap preset's set beside it), each with its
+   random control. cycle_native stops on the (a) guard by 0.00015 (a median loss of 0.01015 at
+   count D 0.05; **owner's call**). Next, **queued**: the 13 tuning blocks for those that
+   passed.
 
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
