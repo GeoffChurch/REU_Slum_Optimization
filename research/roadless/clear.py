@@ -13,8 +13,8 @@ screen against exact leave-one-out on one step.
 Free first (B's first stage, `free_first`). Under B a clearing is scored first by the population
 it leaves enclosed, so the optimizers (relax.py, polish_greedy.py) first clear crossings that
 free the homes enclosed at baseline, cheapest per unit of population, found on a graph of the
-open components and the buildings and checked by the metric's own test, then hold them cleared
-through the search with the rest of the budget.
+open components and the buildings' 4-connected pieces and checked by the metric's own test,
+then hold them cleared through the search with the rest of the budget.
 
     PYTHONPATH=. uv run python research/roadless/clear.py loo <block idx> [h]
     PYTHONPATH=. uv run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <along> <solver>
@@ -40,7 +40,7 @@ import pandas as pd
 import scipy.sparse as sp
 from numba import njit
 from scipy import ndimage
-from scipy.sparse.csgraph import dijkstra
+from scipy.sparse.csgraph import connected_components, dijkstra
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -252,12 +252,15 @@ FREE_STEP = 1e-12   # free_first: every step through the region graph costs this
 @dataclass(frozen=True, eq=False)
 class RegionGraph:
     """free_first's graph at baseline, on the uniform raster: regions 0 .. ncomp - 1 the
-    4-connected components of open space (Grid.reach's structure), then one per building; a cell
-    is in its component if open and in every building covering part of it, and two regions are
-    adjacent (a -> b, both ways) when they share a cell or sit in 4-adjacent cells. The street
-    steps into `entry`: the components holding a ground cell and the buildings covering one
-    (cleared, it is open ground)."""
+    4-connected components of open space (Grid.reach's structure), then the pieces of the
+    buildings, each building's cells split into 4-connected pieces (`owner`: piece -> building).
+    A cell is in its component if open and in the piece of every building covering part of it,
+    and two regions are adjacent (a -> b, both ways) when they share a cell or sit in 4-adjacent
+    cells. A building is entered and left through one piece: clearing it opens every piece, but
+    the raster joins them only where they touch. The street steps into `entry`: the components
+    holding a ground cell and the pieces covering one (cleared, it is open ground)."""
     ncomp: int
+    owner: np.ndarray
     a: np.ndarray
     b: np.ndarray
     entry: np.ndarray
@@ -266,8 +269,9 @@ class RegionGraph:
 
     @classmethod
     def of(cls, c: Clearing) -> RegionGraph:
-        """Adjacency is R^T A4 R off the diagonal, A4 the cells' 4-adjacency plus the
-        identity."""
+        """Adjacency is R^T A4 R off the diagonal, A4 the cells' 4-adjacency plus the identity;
+        a building's incidences (building, cell) form one piece where M A4 M^T joins them (M:
+        incidences x cells)."""
         g = c.sc.grid
         ny, nx = g.inside.shape
         ncell = ny * nx
@@ -275,29 +279,38 @@ class RegionGraph:
         lab, ncomp = ndimage.label(open0.reshape(ny, nx))
         lab = lab.ravel()
         oc = np.flatnonzero(open0)
-        bc = c.bf.tocoo()
-        bcell = np.flatnonzero(g.inside)[bc.col]           # inside-cell ids -> flat raster ids
-        R = sp.csr_matrix((np.ones(len(oc) + len(bcell)),
-                           (np.concatenate([oc, bcell]),
-                            np.concatenate([lab[oc] - 1, ncomp + bc.row]))),
-                          shape=(ncell, ncomp + c.n))
         idx = np.arange(ncell).reshape(ny, nx)
         p = np.concatenate([idx[:, :-1].ravel(), idx[:-1].ravel()])    # a cell and the one to
         q = np.concatenate([idx[:, 1:].ravel(), idx[1:].ravel()])      # its right or below it
         A4 = sp.csr_matrix((np.ones(ncell + 2 * len(p)),
                             (np.concatenate([idx.ravel(), p, q]),
                              np.concatenate([idx.ravel(), q, p]))), shape=(ncell, ncell))
+        bc = c.bf.tocoo()
+        bcell = np.flatnonzero(g.inside)[bc.col]           # inside-cell ids -> flat raster ids
+        ninc = len(bcell)
+        M = sp.csr_matrix((np.ones(ninc), (np.arange(ninc), bcell)), shape=(ninc, ncell))
+        touch = (M @ A4 @ M.T).tocoo()
+        same = bc.row[touch.row] == bc.row[touch.col]      # touching incidences of one building
+        npiece, piece = connected_components(
+            sp.csr_matrix((np.ones(int(same.sum())), (touch.row[same], touch.col[same])),
+                          shape=(ninc, ninc)), directed=False)
+        owner = np.empty(npiece, dtype=np.int64)
+        owner[piece] = bc.row
+        R = sp.csr_matrix((np.ones(len(oc) + ninc),
+                           (np.concatenate([oc, bcell]),
+                            np.concatenate([lab[oc] - 1, ncomp + piece]))),
+                          shape=(ncell, ncomp + npiece))
         adj = (R.T @ A4 @ R).tocoo()
         off = adj.row != adj.col
         ground = g.ground.ravel()
         entry = np.concatenate([np.unique(lab[open0 & ground]) - 1,
-                                ncomp + np.unique(bc.row[ground[bcell]])])
-        return cls(ncomp=int(ncomp), a=adj.row[off], b=adj.col[off], entry=entry, R=R,
-                   open0=open0)
+                                ncomp + np.unique(piece[ground[bcell]])])
+        return cls(ncomp=int(ncomp), owner=owner, a=adj.row[off], b=adj.col[off], entry=entry,
+                   R=R, open0=open0)
 
     def sources(self, near: np.ndarray) -> np.ndarray:
         """The regions a home is freed through, from its near cells (flat): the components of
-        the open ones and the buildings covering the closed ones."""
+        the open ones and the pieces covering the closed ones."""
         op = self.open0[near]
         comps = self.R[near[op]].indices
         return np.unique(np.concatenate([comps[comps < self.ncomp], self.R[near[~op]].indices]))
@@ -306,7 +319,7 @@ class RegionGraph:
 class Crossing(NamedTuple):
     """A home's cheapest crossing in a round of free_first."""
     home: int
-    cleared: list[int]          # the unheld buildings on its path from the street, ascending
+    cleared: list[int]          # the unheld owners of its path's pieces, ascending
     D: float                    # their population share (Clearing.cost)
 
 
@@ -314,12 +327,15 @@ def free_first(c: Clearing, *, budget: float, held: np.ndarray) -> np.ndarray:
     """B's first stage (owner 2026-10-11, "B SGTM"): `held` plus crossings that free the homes
     enclosed at baseline, the least D per unit of the home's population first, while the held
     set's D (c.cost) stays within `budget`. Each round one Dijkstra from the street over the
-    RegionGraph, entering a region costing its building's share (a component or a held building
-    0, FREE_STEP more a step); a home's crossing is the unheld buildings on the cheapest path to
-    one of its source regions (RegionGraph.sources of Placement.near), and once it is held the
-    home must be freed by the metric's own test (Placement.reached). A crossing may clear the
-    home's own building (one with footprint all round): the metric counts it freed, as it keeps
-    every cleared home's residents. No home enclosed: `held` at once, no geometry (any mesh)."""
+    RegionGraph, entering a piece costing its owner's share (a component, or a piece of a held
+    building, 0; FREE_STEP more a step); a home's crossing is the unheld owners of the pieces on
+    the cheapest path to one of its source regions (RegionGraph.sources of Placement.near), and
+    once it is held the home must be freed by the metric's own test (Placement.reached). A path
+    through two pieces of one building pays that building twice in the search, though the
+    crossing's D is the true sum: conservative, so the graph claims no path the raster lacks. A
+    crossing may clear the home's own building (one with footprint all round): the metric counts
+    it freed, as it keeps every cleared home's residents. No home enclosed: `held` at once, no
+    geometry (any mesh)."""
     sc = c.sc
     if not sc.enclosed.any():
         return held.copy()
@@ -329,7 +345,7 @@ def free_first(c: Clearing, *, budget: float, held: np.ndarray) -> np.ndarray:
             f"{bid}: free_first's region graph is the uniform raster's 4-connected cells "
             f"(Grid.reach's); a {type(g).__name__} has cells of several sizes and no raster")
     rg = RegionGraph.of(c)
-    street = rg.ncomp + c.n                                 # the street's node, after them
+    street = rg.ncomp + len(rg.owner)                       # the street's node, after them
     a = np.concatenate([rg.a, np.full(len(rg.entry), street)])
     b = np.concatenate([rg.b, rg.entry])
     near = sc.pl.near.tocsc()
@@ -339,7 +355,8 @@ def free_first(c: Clearing, *, budget: float, held: np.ndarray) -> np.ndarray:
     left = sc.enclosed & ~sc.pl.reached(lifted.grounded(g, c.open_(held), c.p))
     spent, k = 0.0, 0
     while left.any():
-        enter = np.concatenate([np.zeros(rg.ncomp), np.where(held, 0.0, c.cost)])
+        enter = np.concatenate([np.zeros(rg.ncomp),
+                                np.where(held[rg.owner], 0.0, c.cost[rg.owner])])
         G = sp.csr_matrix((enter[b] + FREE_STEP, (a, b)), shape=(street + 1, street + 1))
         dist, pred, _ = dijkstra(G, directed=True, indices=[street], min_only=True,
                                  return_predecessors=True)
@@ -354,7 +371,8 @@ def free_first(c: Clearing, *, budget: float, held: np.ndarray) -> np.ndarray:
             while t != street:
                 path.append(t)
                 t = int(pred[t])
-            new = sorted(r - rg.ncomp for r in path if r >= rg.ncomp and not held[r - rg.ncomp])
+            own = {int(rg.owner[r - rg.ncomp]) for r in path if r >= rg.ncomp}
+            new = sorted(j for j in own if not held[j])
             D = float(c.cost[new].sum())
             if D <= room and D / sc.w[h] < key:
                 best, key = Crossing(home=int(h), cleared=new, D=D), D / sc.w[h]
