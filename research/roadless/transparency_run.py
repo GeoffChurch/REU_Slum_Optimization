@@ -1578,7 +1578,10 @@ class Claim:
         failing = sorted({t.rule for t in tests if not t.holds})
         if not failing:
             return "a shift of the frontier on the held-out blocks: rules 1 -- 4 all hold"
-        return "no shift: rule " + ", ".join(str(r) for r in failing) + " fails"
+        if len(failing) == 1:
+            return f"no shift: rule {failing[0]} fails"
+        return (f"no shift: rules {', '.join(str(r) for r in failing[:-1])} and {failing[-1]} "
+                "fail")
 
     @staticmethod
     def _print(m: ClaimArms, tests: list[RuleRow], st: Mapping[str, Mapping[str, object]],

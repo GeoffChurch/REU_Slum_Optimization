@@ -3149,3 +3149,95 @@ SIMP's default closed (per block, as on the 13, and its mean; SIMP's (c) from it
 at area D 0.10; the share of the (c) prefix's true displacement on C; and the random draws' area
 over C's and Jaccard overlap with C. The code: transparency_run.Claim, guarded by
 transparency_check.py `claim` (synthetic lens tables, one case per rule, fault-injected four ways).
+
+Run (2026-10-12), one task per (block, arm), single-threaded, every network fresh, at the rules'
+commit (e573227). The opaque check first, transp-held-base-orion and -quadro2: both methods' base
+on all 46 (92 tasks, 2.47 task-h, the longest 8.6 min). Then transp-held-arms-orion and -quadro2:
+every block's other 15 arms (690 tasks, 20.2 task-h, the longest 12.5 min). All 782 passed. A
+block's arms on one node, the blocks split by item 4's costs: orion took 24 (30796 among them),
+quadro2 22; 32 and 27 ran at once (whole cores; on quadro2 another user's jobs held 8 CPUs and 320
+of its 376 GB). Proposals 8.19 CPU-h (clearance_looped 2.39, resistance_lp 5.80; the longest
+network 405 s, 30796's chunks 16), prefixes 11.90 h, peak RSS 0.90 GB. Scoring on the GPUs, (c) at
+area D 0.05 and 0.10 only: transp-held-score, 43 tasks on 32 GB cards or larger (tesla1 and tesla2,
+three on the H100s) and 20023, 20423 and 30796 on 48 GB ones (the H100s), as the recalibrated
+sizing put them; at most four at once, two for most of the run (other users' jobs were ahead in the
+queue); 2.83 GPU-h, the longest task 10.8 min, the GPU peak 41.1 GB (30796).
+- Checks. The opaque check on the nodes: all 92 base networks are item 4's, WKB row for row and
+  widths (48 on orion, 44 on quadro2). The base arms reproduce item 4's (a) within 1.1e-16, (c)
+  within 4.9e-8 and B (i) within 9.2e-17, and the stored clearings rescore to item 4's rows within
+  4.8e-9. Every whole network reaches D 0.10 under both weightings (priced resistance_lp's true D
+  by count 0.212 -- 0.249 against its 0.20 cap). The sizing held: cluster_check.py `gpu
+  transp-held-score` finds every block on a card that holds its measured peak with 5% to spare (the
+  least room 30796, 41.1 GB on 48); the scorer peaked at 0.80 -- 0.87 GB per million unknowns on
+  the blocks over 14M.
+- The discount moves the roads, as on the 13: the area-weighted share of the (c) prefix's true
+  displacement on C, mean over the 46 (about 5% by chance), goes from 0.081 to 0.224 for
+  clearance_looped's C priced and routed and from 0.124 to 0.232 for resistance_lp's C priced. A
+  random set draws the roads onto itself too, less (its own share 0.148 -- 0.155 and 0.098 --
+  0.107). The draws' area over C's has a median of 1.0027 (p10 0.989, p90 1.027; 0.918 -- 1.264)
+  and their Jaccard overlap with C a median of 0.041 (at most 0.104).
+- Lens (c) at area D 0.05 per method, as on the 13: each arm's mean, its mean gain over base with
+  the Bayesian-bootstrap 95% interval over the 46, the blocks up in B's order, the worst block's
+  gain, the median (a) loss against base at count D 0.05 | 0.10, the mean share of the gap to
+  SIMP's default closed, and the share on C as above; the random sets as their mean. Every value
+  per block is in transparency_rows/held/summary_lens.csv, per arm in summary_claim.csv, per rule
+  in summary_rules.csv.
+
+    clearance_looped   mean (c)    gain     95% int.    up   worst  (a) .05 |   .10    gap  on C
+    base                 0.1817 +0.0000 [+.0000,+.0000]  0 +0.0000  +0.0000 | +0.0000 +0.000 0.081
+    repulsion4           0.1906 +0.0089 [-.0133,+.0222] 30 -0.3534  -0.0420 | -0.0266 +0.030 0.088
+    simp-price-route     0.2157 +0.0341 [+.0230,+.0464] 39 -0.0645  -0.0099 | -0.0027 +0.130 0.224
+    random price-route   0.1809 -0.0008  (seeds -0.0087 -- +0.0095), on C 0.089
+
+    resistance_lp      mean (c)    gain     95% int.    up   worst  (a) .05 |   .10    gap  on C
+    base                 0.2425 +0.0000 [+.0000,+.0000]  0 +0.0000  +0.0000 | +0.0000 +0.000 0.124
+    chunks4              0.2572 +0.0146 [+.0011,+.0373] 34 -0.1098  +0.0159 | +0.0035 +0.069 0.130
+    chunks16             0.2240 -0.0185 [-.0331,-.0070] 16 -0.1978  -0.0022 | -0.0019 -0.111 0.121
+    simp-price           0.2738 +0.0313 [+.0171,+.0545] 38 -0.1088  +0.0100 | +0.0036 +0.157 0.232
+    random price         0.2396 -0.0030  (seeds -0.0077 -- +0.0083), on C 0.128
+
+- The rules. clearance_looped: (1) C's mean (c) gain over base is +0.0341 [+0.0230, +0.0464], up on
+  39 of the 46 in B's order, but C is behind base on B (i) on one block, 5706, where it leaves
+  0.052% of the population enclosed and base none (its (c) there +0.062): rule 1 fails. (2) Against
+  repulsion 4, left out on the 2 blocks where it is behind base on B (i): +0.0259 [+0.0099,
+  +0.0492] over the other 44, holds (over all 46, the rule as first written, +0.0251 [+0.0098,
+  +0.0474]). (3) Above its random sets' per-block mean by +0.0348 [+0.0252, +0.0466], holds. (4)
+  (a) gained, a median loss of -0.0099 at count D 0.05 and -0.0027 at 0.10, holds. No shift: rule 1
+  fails, on B (i) on one block. resistance_lp: (1) +0.0313 [+0.0171, +0.0545], up on 38, but behind
+  base on B (i) on four blocks (22336, 39240 and 43708, where base leaves no one enclosed and C
+  0.054 -- 0.161% of the population, and 41673, 0.170% to 0.225%): rule 1 fails. (2) Against chunks
+  4, left out on 4 blocks, +0.0163 [+0.0091, +0.0256] over 42; against chunks 16, left out on 2,
+  +0.0519 [+0.0365, +0.0750] over 44: holds (unamended, +0.0166 [+0.0096, +0.0254] and +0.0498
+  [+0.0349, +0.0722]). (3) +0.0342 [+0.0220, +0.0520] above its random sets, holds. (4) A median
+  (a) loss of 0.010033 at count D 0.05 (23 of the 46 lose more than 0.01) and 0.0036 at 0.10: over
+  the guard by 0.00003 at D 0.05, rule 4 fails. No shift: rules 1 and 4 fail.
+- Beside it (description, not verdict). The gains are broad, not a few gates as on the 13: the
+  claims' median gains are +0.0272 (clearance_looped) and +0.0241 (resistance_lp), their means
+  without the three blocks of largest gain +0.0274 (6310, 19161 and 7662, +0.109 -- +0.157) and
+  +0.0205 (44775, +0.405, a gate C opens by the jump, not inspected; 43708, 6316), and each is up
+  on (c) alone on 40 of the 46. The gap to SIMP's default closed: 13.0% and 15.7% (the mean of the
+  blocks'; pooled 13.9% and 17.0%), against 9.4% and 13.1% on the 13. At area D 0.10: +0.0355
+  [+0.0262, +0.0459], up on 41, and +0.0355 [+0.0226, +0.0472], up on 43. The same arms on the 13:
+  +0.0249 and +0.0204. The knobs: repulsion 4 +0.0089 (+0.0018 on the 13), collapsing on 17608
+  (0.413 to 0.060); chunks 4 +0.0146 (+0.0320 on the 13) and chunks 16 -0.0185 (+0.0040). The
+  random sets gain nothing on average (-0.0008 and -0.0030), and four of resistance_lp's five
+  collapse on 43547 (0.350 to 0.085 -- 0.090). resistance_lp's C is 0.109 below base on 44602 (by
+  the drop a gate base opens and C misses, not inspected), as chunks 4 and 16 and three of the
+  random sets are: beyond the 13's collapse veto, which the held-out rules do not carry. Walling in
+  at D 0.05 is common: behind base on B (i) on 0 -- 3 blocks for clearance_looped's random sets and
+  3 -- 5 for resistance_lp's, on 2 for repulsion 4 and on 4 and 2 for chunks 4 and 16; base leaves
+  population enclosed on 8 blocks (clearance_looped) and 6 (resistance_lp), the claims on 7 and 8,
+  and each claim leaves less enclosed than base on 3.
+
+What the held-out blocks say: under the rules fixed before the run, neither claim is a shift of the
+frontier. Each falls on B's first criterion, a discounted network cut at D 0.05 leaving a few homes
+enclosed that base frees: clearance_looped on one block of 46 (5706, 0.05% of its population),
+resistance_lp on four, and resistance_lp's (a) guard by 0.00003 at count D 0.05 besides. Everything
+else holds, with room: making the buildings SIMP's default clears cheaper buys +0.034
+(clearance_looped) and +0.031 (resistance_lp) of (c) at area D 0.05 on the held-out blocks, broadly
+(medians +0.027 and +0.024, 13 -- 16% of the gap to SIMP's default), more than on the 13 (+0.025
+and +0.020), more than the methods' own knobs (by +0.026, and by +0.016 and +0.052) and than random
+sets made as cheap (by +0.035 and +0.034), at (a) gained (clearance_looped) or at the guard
+(resistance_lp). Committed: transparency_rows/held/plan.csv, arms.csv and
+summary_{records,rules,claim,lens}.csv (the rows and networks are in the ignored
+transparency_rows/held/ parquet and scratch).

@@ -150,9 +150,18 @@ items up front"), in the order proposed:
    its own knob, chunks 4 (+0.0320), which itself leaves population enclosed on 20543: held to the
    candidates' B (i) veto, chunks 16 would be the bar and C priced (+0.0204, 12 of 13 up) would go
    on (**owner's call**: knobs are now held to the B (i) test, and resistance_lp's C priced goes
-   on, decided after the 13's results). Next, **running**: the 46 held-out blocks for both, the
-   claim's four rules fixed before any held-out result (NOTES, "Transparency for the road
-   methods: the held-out blocks").
+   on, decided after the 13's results). The 46 held-out blocks (NOTES, "Transparency for the road
+   methods: the held-out blocks"; four rules fixed before any held-out result, every block run):
+   **neither claim is a shift of the frontier**. clearance_looped's C priced and routed gains
+   +0.0341 [+0.0230, +0.0464] of (c) at area D 0.05, beats repulsion 4 (+0.0259) and its random
+   sets (+0.0348) and gains (a), but leaves 0.05% of the population enclosed on one block (5706)
+   where base leaves none: rule 1 fails. resistance_lp's C priced gains +0.0313 [+0.0171,
+   +0.0545], beats chunks 4 and 16 and its random sets, but is behind base on B (i) on four blocks
+   and loses a median 0.010033 of (a) at count D 0.05: rules 1 and 4 fail. The gains are broad
+   (medians +0.027 and +0.024, 13 -- 16% of the gap to SIMP's default), larger than on the 13;
+   what fails is B's first criterion at the D 0.05 cut, on which all but one of the other 13
+   discounted and knob arms also wall a few homes in on some block. Whether to pursue it (a
+   discount that keeps base's freed homes, say) is the **owner's call**.
 
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
@@ -351,4 +360,11 @@ Not pursued, with what would change that:
   `cpu` and `gpu` (fault-injected), and a smoke run on orion. The partition allocates whole
   cores (CR_CORE_MEMORY), so a 1-cpu task holds two CPUs and at most 36 run at once on orion, 32
   on quadro2; the 13 tuning blocks' 481 networks and their prefixes took 28 task-h, each
-  network identical to its twin computed here, where one was (NOTES).
+  network identical to its twin computed here, where one was (NOTES); the 46 held-out blocks'
+  782, 22.7 task-h.
+- **GPU sizing recalibrated** (done 2026-10-12): cluster.py's GB_PER_MILLION 0.7 -> 0.95, from
+  the scorer's measured peaks on the 13 (0.83 -- 0.87 GB per million unknowns on the large
+  blocks; at 0.7 item 4's run had sent 1558, 14401 and 20023 to 32 GB cards they would not fit).
+  cluster_check.py `gpu <run> <rows>` checks a recorded scoring run's measured peaks against the
+  sizing (every card holds its block's peak with 5% to spare; fault-injected at 0.7 and 0.9);
+  transp-held-score passed it. SIMP and the greedies peak at ~0.65, so they get room to spare.
