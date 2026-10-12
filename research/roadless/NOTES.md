@@ -2868,3 +2868,70 @@ route and C' beside it), clearance_looped priced and routed at f 0.1 (C' beside 
 its random control; cycle_native only if the owner waives the 0.00015 on the guard. Committed:
 transparency_rows/arms.csv and summary_{records,screen,lens}.csv (the rows and networks are in
 the ignored transparency_rows/ parquet and scratch).
+
+### Transparency for the road methods: the 13 tuning blocks (owner 2026-10-12: "run the 13- and 60-block stages on orion/quadro2")
+
+The sentinel's next stage: the 13 tuning blocks (simp_compare.TUNING, the sentinel's four among
+them), every network proposed and cut to its prefixes on the cluster's CPU nodes, orion and
+quadro2, whose GPUs are unusable, and scored on its GPUs; transparency_run.py's `tuning` stage,
+under transparency_rows/tuning (the sentinel's rows stay where they are).
+
+The CPU path (cluster.py's `cpu` kind; BACKLOG, Infrastructure): one task per (block, arm),
+single-threaded, CPU only, pinned to one node named on the command line, a block's arms all on one
+node (results can differ by machine) and two nodes two runs; at most 64 tasks at once on orion and
+40 on quadro2. Each task proposes its network fresh (or copies item 4's, for the reused arm) and
+cuts its prefixes (`transparency_run.py tuning arm <id> <arm>`); the stored clearings and item 4's
+desire-routed networks ship as a tar per block, and the networks and rows come back through the
+run's pull. cluster_submit held any run, CPU-only ones too, to the project's four GPUs' worth of
+tasks at once; GeoffChurch/cluster_submit e299a2b lifts that for a run that holds no GPU.
+
+The arms (transparency_run.TUNING_PLAN; transparency_rows/tuning/arms.csv), every discount at f
+0.1, C SIMP's default clearing at D 0.05, C' the cheap preset's, and the random sets matched to C
+(AreaMass, 20 strata), seeds 1 -- 5, in each candidate's own form:
+- resistance_lp: base; chunks 4 and 16; C priced (the main form), C priced and routed, C' priced;
+  the random sets priced, and priced and routed (ten).
+- clearance_looped: base; its tree's repulsion -2, 2 and 4; C priced and routed (the main form), C'
+  priced and routed; the random sets priced and routed.
+- cycle_native: base; shortlist 4 and 16; the desire-routed preset, its item-4 networks reused
+  after the sentinel's check (its code path unchanged since; the preset recomputed on the nodes on
+  5810 and 20269 against item 4's); C priced and routed; the random sets priced and routed. Its
+  main form is in by the controller's ruling: it missed the sentinel's (a) guard by 0.00015 (a
+  median loss of 0.01015 against 0.01), the screen exists to save compute, the cluster's CPUs make
+  it cheap, and adding an arm to the next stage cannot flatter that stage's evidence; it is held to
+  the same rule as the others.
+37 arms, 36 proposed per block (468 networks), fresh. Scoring reads only what the rule reads: lens
+(c) at area D 0.05 and 0.10 (h 0.5, uni, B's order; road_rescore.py `score` with the area
+population alone, the prefix rows 0.05,0.1), and (a) at count D 0.05 and 0.10 from the prefixes.
+Where a node's network is the sentinel's, the reduced scoring must give the sentinel's values
+(checked on its blocks).
+
+The opaque check on the nodes, before any other arm runs: the base networks computed there must
+equal item 4's (road_rows/scratch/networks/) on all 13; any difference stops the stage, as machine
+dependence would undo the comparison's footing. The sentinel's blocks are recomputed there too and
+set against the sentinel's local networks (expected identical).
+
+B's order on the 13. Item 4's base prefixes at area D 0.05 leave population enclosed on two of the
+13 (its committed lens rows): 20543 (cycle_native's and clearance_looped's, 0.0009 of it) and 23597
+(cycle_native's and resistance_lp's, 0.0003). B puts (i), the population a prefix leaves enclosed,
+before (c): an arm that leaves more than its base on a block is behind it there whatever (c), which
+the rule treats as the collapse veto; one that leaves less is ahead (counted among the blocks up).
+The means, medians and intervals are over (c) itself.
+
+The choice rule, fixed before any result (this commit precedes the first proposal on the 13): per
+method, among its C and C' arms (resistance_lp's three, clearance_looped's two, cycle_native's
+one), the one with the largest mean (c) gain over base at area D 0.05 on the 13 that also has
+- no block more than 0.1 below base on (c), and none behind it on B (i);
+- a median (a) loss against base of at most 0.01 at count D 0.05, and at D 0.10;
+- a mean (c) gain above the best own-knob point's: the knob with the largest mean gain on the 13
+  (base is not a knob; the desire-routed preset is one of cycle_native's);
+- a mean (c) above its own random sets' mean (the five seeds in its form, over the 13).
+The chosen arm, with base, the best own-knob point and its random sets, goes to the held-out
+blocks. A method with no arm that qualifies stops there, and that is its result. The rule asks no
+mean gain above 0 of its own, only one above the best knob's, which is negative if every knob
+loses. Reported beside it: each arm's mean gain with a Bayesian-bootstrap 95% interval over the 13
+(paired by block: 10,000 Dirichlet(1, ..., 1) weight vectors over the blocks, seed 20261012, one
+matrix for every arm); the share of the gap to SIMP's default closed, (arm - base) / (SIMP's (c) -
+base) per block and its mean (SIMP's (c) from item 4's rows); the per-block values; and per arm and
+block, as the sentinel did, the whole network's true displacement, the share of the (c) prefix's
+true displacement on C, and for a random set its area over C's and its Jaccard overlap with C.
+
