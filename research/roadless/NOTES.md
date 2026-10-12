@@ -2691,3 +2691,75 @@ A between processes).
   home; the 12's cheap_a5x8 clearings predate it), the plain greedy (clear.greedy_block, the
   track), and the stored rows on the other blocks with enclosed homes (the 21 small ones above
   among them).
+
+### Transparency for the road methods: the sentinel (owner 2026-10-12: "Leave out arterial")
+
+BACKLOG 5, the experiment the owner approved: does a road method build a better network at equal
+displacement when the buildings the roadless optimum clears are made cheaper for it, to displace
+(the price) and to route through (the route)? Judged where item 4 judged the lineup, lens (c) at
+area D 0.05, and against random sets of buildings made as cheap.
+
+What a scout found first (scratch scripts). No method forbids crossing a building and none prices
+it while routing: cycle_native, resistance_lp and the clearance tree route by length on
+chord_diag (34 -- 70% of its edges cross a footprint) and price displacement afterwards, and
+clearance_looped's loop stage has no building term at all; a price discount alone barely
+reroutes. Discounting every building alike is no control (a no-op for cycle_native's and the
+arterial's scale-free rankings, a budget rescaling for resistance_lp, the repulsion logit for
+clearance), hence random sets matched to the clearing. The arterial reaches D 0.011 -- 0.044 with
+its 60 roads at 2.7 -- 6.6k CPU-s a network, short of D 0.05: left out. Headroom: on 59 large
+blocks a median 6 -- 12% of a stored network's displacement at area D 0.05 falls on SIMP's set (5%
+by chance), its roads touching 15 -- 27% of the set's buildings. A CPU pilot (h 1.0, (c) at area
+D 0.05, 9712 and the four smallest of the 60): cycle_native price and route at f 0.1 +0.032 (up
+on 5 of 5, random sets -0.001), resistance_lp price at f 0.1 +0.034 (5 of 5; random -0.015),
+clearance_looped route +0.030 (4 of 5; random +0.001), against gaps to SIMP's clearing of 0.14 --
+0.17; f 0.1 was picked after the fact from four levels.
+
+What Task 1 built (bcbca3c -- f7c2952): reblock.transparency, a Transparency Strategy of
+per-building factors f in (0, 1] (Opaque, every factor 1, in every preset), PricedOverlap, and
+TransparentSubstrate (the base's edge length times the mean factor along the edge, the smallest
+where footprints overlap); a required `price` on cycle_native (it ranks candidates by priced
+displacement, its cap reads true displacement), resistance_lp (its budget row and rounding
+priced, so its true displacement passes max_displacement by what the discount lets off) and
+clearance (its building term times the nearest building's f); transparency_sets.py, the sets
+(C, C', and the matched random sets: AreaMass, 20 strata of equal footprint area, area ratio
+median 1.002 on the 59); and the guards, among them that Opaque reproduces item 4's networks.
+
+The arms (transparency_run.py, PLAN; every value that changes a network in
+transparency_rows/arms.csv), per method and block: the base, opaque, recomputed and checked
+against item 4's network; the method's own knobs, opaque (cycle_native's `shortlist` 4 and 16, the
+preset's 8, and the desire-routed preset cycle_native_betweenness_contrast, whose item-4 network
+is reused; resistance_lp's `chunks` 4 and 16, the preset's 8; clearance_looped's tree's
+`repulsion` -2, 2 and 4, the preset's 0); C, the buildings SIMP's default clears at D 0.05, in
+the main form at f 0.5 and 0.1 (price and route for cycle_native and clearance_looped's tree,
+price alone for resistance_lp, whose route lowered it in the pilot); C at f 0.1 ablated
+(cycle_native and clearance_looped price only and route only, resistance_lp route only and both);
+C', the cheap preset's clearing, in the main form at f 0.1; and the control, five random sets
+matched to C (seeds 1 -- 5) in the main form at f 0.1. 41 arms, 160 networks to propose, fresh
+(no derive cache), cut and scored as item 4 (h 0.5, uni, the same budgets and prefixes; (b) and
+(c) on the cluster).
+
+The screen, fixed before any result (committed and pushed before the first proposal ran):
+- Lens (c) at area D 0.05 is the primary number. No home is enclosed at baseline on the sentinel
+  (item 4's rows), so B's order is (c)'s value; report stops if any prefix leaves one enclosed.
+  (a) at count D 0.05 and 0.10 is the guard.
+- Collapse veto: an arm more than 0.1 below its method's base on (c) on any of the four blocks is
+  dropped.
+- Per method, the main form at the f (0.5 or 0.1) with the larger mean (c) gain over base (the
+  mean over the four blocks of arm minus base) advances to the 13 tuning blocks, with its random
+  control, if (i) that mean gain is above 0, (ii) its (c) is above the mean (c) of its five
+  random sets on at least 3 of the 4 blocks, (iii) its (a) loss against base, the median over
+  the four blocks, is at most 0.01 at count D 0.05 and at count D 0.10, and (iv) the veto does
+  not drop it. The random sets run at f 0.1 only; a main form at f 0.5 is held against them as
+  they are.
+- An ablation advances only if it passes (i) -- (iv) ((ii) against the main form's random sets,
+  the only control run) and its mean gain beats the main form's.
+- C' advances beside the main form if the main form advances, the veto does not drop C', and its
+  mean gain is within 0.01 of C's main form at the same f (0.1), or above it.
+- Reported beside it: the share of the gap to SIMP's default closed, (arm's (c) - base) / (SIMP's
+  (c) - base) per block and its mean (SIMP's (c) from item 4's rows, the same scorer and mesh; the
+  stored clearings are rescored here as the check); each arm's mean (c) against the method's best
+  own-knob point (the best mean (c) of its base and knob arms); per arm and block, the whole
+  network's true displacement (it must reach D 0.10 for the prefixes), the share of the (c)
+  prefix's true displacement that falls on C, and for a random set its area over C's and its
+  Jaccard overlap with C.
+- The 13 tuning blocks and the held-out blocks are not part of this run.
