@@ -171,6 +171,10 @@ items up front"), in the order proposed:
    holds rules 1 -- 3 but fails rule 4 by more than before (a median (a) loss of 0.010978 at count D
    0.05). Free first cost clearance_looped's base most (-0.031 of (c) a touched block);
    resistance_lp's base and claim gained (+0.020, +0.026).
+   **TODO** (owner 2026-10-12, "leave a TODO"): make free first the default for the road methods
+   in the research lineup (free_roads.FreeEnclosed in place of reblock.free_first.HoldNothing in
+   road_rescore's arms), as B's order implies, and re-score item 4's lineup with it. It changes a
+   network only on a block with homes enclosed at baseline (12 of the 60 large blocks).
 
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
