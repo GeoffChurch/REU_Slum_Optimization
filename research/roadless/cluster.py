@@ -64,10 +64,12 @@ SIZING_WORKERS = 8      # processes counting the blocks' cells at submit: speed 
                         # machine; the count is shapely and integer numpy, no BLAS threads)
 # The nodes a `cpu` run may go to, and the most of its tasks each runs at once (`--gpus`): the
 # cluster's two nodes whose GPUs are unusable (sites/ai.toml) and whose CPUs are fine (owner
-# 2026-10-12: "run the 13- and 60-block stages on orion/quadro2").
+# 2026-10-12: "run the 13- and 60-block stages on orion/quadro2"). Slurm allocates whole cores
+# (CR_CORE_MEMORY: a 1-cpu task holds both of a core's threads), so fewer run at once than these
+# allow: 36 single-CPU tasks on orion, 32 on quadro2, less what others hold, and what --mem leaves.
 CPU_NODES = {
-    "orion": 64,        # 72 cores, idle on 2026-10-12; a few left for the node's own work
-    "quadro2": 40,      # 64 cores, shared with another user's jobs (8 cores, 320 GB on 2026-10-12)
+    "orion": 64,        # 72 CPUs, 36 cores; idle on 2026-10-12
+    "quadro2": 40,      # 64 CPUs, 32 cores; shared (another user's jobs: 8 CPUs, 320 of 376 GB)
 }
 # The checkout's .venv from uv.lock, with every default group: cupy and pyamg (`gpu`) among them.
 ENV = cs.Uv()
