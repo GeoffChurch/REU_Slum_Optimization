@@ -138,9 +138,19 @@ items up front"), in the order proposed:
    22422), +0.006 -- +0.015 above random sets made as cheap. Through the screen: resistance_lp
    priced at f 0.1 (its price and route, +0.015, and the cheap preset's set beside it) and
    clearance_looped priced and routed at f 0.1 (the cheap preset's set beside it), each with its
-   random control. cycle_native stops on the (a) guard by 0.00015 (a median loss of 0.01015 at
-   count D 0.05; **owner's call**). Next, **queued**: the 13 tuning blocks for those that
-   passed.
+   random control. cycle_native stopped on the (a) guard by 0.00015 (a median loss of 0.01015 at
+   count D 0.05) and went on to the 13 by the controller's ruling. The 13 tuning blocks (NOTES,
+   "Transparency for the road methods: the 13 tuning blocks"; every network proposed on the
+   cluster's CPU nodes, cluster.py's `cpu` kind): the discounts move 1.7 -- 2.7x as much
+   displacement onto SIMP's set and gain +0.020 -- +0.035 of (c) at area D 0.05 on average (8 --
+   13% of the gap to SIMP's default, much of it gates on 46841, 23597 and 1558), above random sets
+   made as cheap. Under the rule fixed before the run, **clearance_looped priced and routed on
+   SIMP's set at f 0.1 goes on** (+0.0249 [+0.0079, +0.0575], (a) gained), with base, repulsion 4
+   and its random control; cycle_native stops on the (a) guard (0.0142); resistance_lp stops below
+   its own knob, chunks 4 (+0.0320), which itself leaves population enclosed on 20543: held to the
+   candidates' B (i) veto, chunks 16 would be the bar and C priced (+0.0204, 12 of 13 up) would go
+   on (**owner's call**). Next, **queued**: the held-out blocks for clearance_looped (and
+   resistance_lp's C priced, if the owner so rules).
 
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
@@ -336,4 +346,7 @@ Not pursued, with what would change that:
   tar at once into the checkout they share, so each goes through cluster_unpack.py (every file
   renamed into place); road_rescore.py writes what a task returns whole (a temp name, then a
   rename), as a run's pull takes `*.parquet` while tasks still run. Guards: cluster_check.py
-  `cpu` and `gpu` (fault-injected).
+  `cpu` and `gpu` (fault-injected), and a smoke run on orion. The partition allocates whole
+  cores (CR_CORE_MEMORY), so a 1-cpu task holds two CPUs and at most 36 run at once on orion, 32
+  on quadro2; the 13 tuning blocks' 481 networks and their prefixes took 28 task-h, each
+  network identical to its twin computed here, where one was (NOTES).

@@ -2935,3 +2935,141 @@ base) per block and its mean (SIMP's (c) from item 4's rows); the per-block valu
 block, as the sentinel did, the whole network's true displacement, the share of the (c) prefix's
 true displacement on C, and for a random set its area over C's and its Jaccard overlap with C.
 
+Run (2026-10-12), one task per (block, arm), single-threaded, every network fresh, from the rule's
+commit (e4dae5b) on. transp-smoke on orion: 33717's three base arms and an arm that does not exist
+(the fault injection: it failed with rc 1 and the run's wait reported it; the three passed in 45 s
+-- 2 min 17 s, and their networks and rows came back). The opaque check: transp-base-orion and
+-quadro2, the other 36 base networks (1.30 and 0.57 task-h). transp-desire-orion and -quadro2: the
+desire-routed preset recomputed on 5810 and 20269 (1.41 and 0.16 task-h). Then transp-arms-orion
+and -quadro2: every block's other 34 arms, 442 tasks, all passed (19.2 and 6.9 task-h; the longest
+34 min, 5810's shortlist 16). A block's arms on one node: orion took 1558, 22422, 30848, 33717,
+46841 and 5810, quadro2 the smaller 18895, 20269, 20543, 23597, 38616, 9712 and 9717 (another
+user's jobs held 8 of its CPUs and 320 of its 376 GB). The partition allocates whole cores
+(CR_CORE_MEMORY), so a single-threaded task holds both of a core's CPUs: 36 ran at once on orion
+and 27 on quadro2 (at 2 GB a task), under the throttles of 64 and 40. Proposals 15.8 CPU-h
+(cycle_native 8.1, resistance_lp 6.7, clearance_looped 1.1), prefixes 10.8, none failed, peak RSS
+1.0 GB; the nodes ran the base networks 1.0 -- 2.9x slower than this machine, and orion, every core
+busy, ran 5810's shortlist 16 in 1,902 s against the sentinel's 788 here. Priced resistance_lp's
+true D is 0.201 -- 0.237 against its 0.20 cap, as on the sentinel. Scoring on the GPUs, (c) at area
+D 0.05 and 0.10 only: transp-tuning-score-a (quadro2's seven blocks) and -b (orion's other five) on
+three GPUs, and transp-tuning-score-1558 on one card of at least 40 GB (it peaked at 38.1 GB, as in
+item 4's scoring, where the launcher estimates 30.9): 1.64 GPU-h, all on the H100s, the longest
+14.8 min (1558).
+- Checks. The opaque check on the nodes: all 39 base networks computed there are item 4's, WKB row
+  for row and widths (18 on orion, 21 on quadro2): neither machine moves a base network. The
+  desire-routed preset recomputed on the nodes, betweenness counts and all (the cluster has no
+  derive cache), is item 4's network on 20269 (quadro2, 566 s; item 4's run took 581 s here) and on
+  5810 (orion, 5,063 s and 3.9 GB, where item 4's timed rerun, 1,083 s, read the counts from its
+  cache): the preset's item-4 networks are reused on all 13. On the sentinel's blocks all 128
+  networks of the 32 arms both stages share are the sentinel's (22422, 30848 and 5810 on orion,
+  9712 on quadro2): no machine moved a priced network either. Where the networks are the same, the
+  reduced scoring gives the sentinel's values: (a) and B (i) exactly, (c) within 7.3e-8 at D 0.05
+  and 1.6e-7 at 0.10. The stored clearings rescore to item 4's rows within 3.2e-9, the base arms'
+  (a) within 1.1e-16 and their (c) within 9.0e-8.
+- Short of the budget. cycle_native's whole network falls short of D 0.05 on 33717 for its base (D
+  0.045 by area, 0.037 by count, as in item 4), shortlist 4, the desire-routed preset and three of
+  its random sets, and of D 0.10 there for every arm; on 38616 by area for base, both shortlists
+  and four random sets; 1558's shortlist 4 stops at D 0.053 -- 0.055. There (c) and (a) read the
+  whole network, at less displacement than an arm that reaches the budget. Every resistance_lp and
+  clearance_looped network reaches D 0.10.
+- The discount moves the roads, as on the sentinel: the area-weighted share of the (c) prefix's
+  true displacement on C, mean over the 13 (about 5% by chance), goes from 0.080 to 0.206 for
+  cycle_native's C priced and routed, from 0.116 to 0.194 (priced) and 0.297 (priced and routed)
+  for resistance_lp (C' priced 0.144), from 0.072 to 0.192 for clearance_looped (C' 0.108). A
+  random set draws the roads onto itself too, less (its own share 0.14 -- 0.16 for cycle_native,
+  0.09 -- 0.10 priced and 0.15 -- 0.18 priced and routed for resistance_lp, 0.12 -- 0.15 for
+  clearance_looped). The random sets' area is C's within 3% on 9 of the 13 (the ratio's median
+  1.0025; Jaccard overlap with C median 0.035, at most 0.094) and within 6.3% on 46841, but 0.94 --
+  1.20 of it on 22422, 0.87 -- 1.19 on 23597 and 0.81 -- 0.89 on 5810, as on the sentinel.
+- Lens (c) at area D 0.05, per method: each arm's mean, its mean gain over base with the
+  Bayesian-bootstrap 95% interval over the 13, the blocks up in B's order, the worst block's gain,
+  the median (a) loss against base at count D 0.05 | 0.10, the mean share of the gap to SIMP's
+  default closed, and the share on C as above; * vetoed (on a knob, for information: the rule holds
+  candidates to it, not knobs), = chosen, + goes to the held-out blocks; the random sets in each
+  form as their mean. Then each candidate's and best knob's (c) gain per block, x 100. Every value
+  per block is in transparency_rows/tuning/summary_choice.csv and summary_lens.csv.
+
+    cycle_native       mean (c)    gain     95% int.    up   worst  (a) .05 |   .10    gap  on C
+    base                 0.1196 +0.0000 [+.0000,+.0000]  0 +0.0000  +0.0000 | +0.0000 +0.000 0.080
+    shortlist4           0.1278 +0.0081 [-.0119,+.0489]  7 -0.0368  +0.0134 | +0.0059 -0.009 0.071
+    shortlist16          0.1211 +0.0015 [-.0132,+.0116]  9 -0.0670  -0.0005 | -0.0077 +0.008 0.089
+    desire               0.1149 -0.0047 [-.0150,+.0065]  5 -0.0368  -0.0117 | -0.0145 -0.050 0.088
+    simp-price-route     0.1538 +0.0341 [+.0103,+.0631] 11 -0.0537  +0.0142 | +0.0003 +0.129 0.206
+    random price-route   0.1220 +0.0024  (seeds -0.0100 -- +0.0212), on C 0.087
+
+    resistance_lp      mean (c)    gain     95% int.    up   worst  (a) .05 |   .10    gap  on C
+    base                 0.1648 +0.0000 [+.0000,+.0000]  0 +0.0000  +0.0000 | +0.0000 +0.000 0.116
+  * chunks4              0.1968 +0.0320 [+.0132,+.0666] 11 -0.0093  +0.0061 | +0.0041 +0.134 0.132
+    chunks16             0.1688 +0.0040 [-.0148,+.0399]  2 -0.0430  -0.0012 | +0.0021 -0.032 0.107
+    simp-price           0.1852 +0.0204 [+.0100,+.0347] 12 -0.0032  -0.0014 | +0.0003 +0.131 0.194
+  * simp-price-route     0.1997 +0.0349 [-.0215,+.0872] 12 -0.2120  +0.0127 | +0.0045 +0.102 0.297
+  * cheap-price          0.1519 -0.0129 [-.0560,+.0057] 10 -0.2222  +0.0044 | +0.0012 -0.079 0.144
+    random price         0.1548 -0.0100  (seeds -0.0271 -- -0.0007), on C 0.117
+    random price-route   0.1571 -0.0077  (seeds -0.0324 -- +0.0180), on C 0.118
+
+    clearance_looped   mean (c)    gain     95% int.    up   worst  (a) .05 |   .10    gap  on C
+  + base                 0.1020 +0.0000 [+.0000,+.0000]  0 +0.0000  +0.0000 | +0.0000 +0.000 0.072
+    repulsion-2          0.0991 -0.0029 [-.0089,+.0018]  6 -0.0288  -0.0017 | -0.0013 -0.014 0.070
+    repulsion2           0.0970 -0.0050 [-.0145,+.0024]  6 -0.0479  -0.0505 | -0.0230 -0.015 0.074
+  + repulsion4           0.1038 +0.0018 [-.0060,+.0108]  6 -0.0212  -0.0733 | -0.0429 +0.005 0.070
+  =+simp-price-route     0.1269 +0.0249 [+.0079,+.0575] 10 -0.0112  -0.0261 | -0.0165 +0.094 0.192
+    cheap-price-route    0.1247 +0.0227 [+.0033,+.0567]  9 -0.0401  -0.0172 | -0.0077 +0.080 0.107
+  + random price-route   0.1053 +0.0033  (seeds -0.0046 -- +0.0081), on C 0.071
+
+    (c) gain x 100   1558 18895 20269 20543 22422 23597 30848 33717 38616 46841  5810  9712  9717
+    cyc sl 4        -3.7  -1.8  +2.2  +0.4  +0.0  +0.1 +20.5  -2.1  +0.1  +0.2  -3.0  -1.2  -1.2
+    cyc C p+r       +1.3  +5.4  +6.1  +2.8  +0.0 +10.1  +2.2  +2.9  -5.4 +15.3  +1.7  -0.2  +2.1
+    rlp ch 4       +19.7  +7.0  +0.6  +4.4  +0.1  +0.1  +2.4  +2.7  +1.6  +1.4  +1.3  -0.9  +1.3
+    rlp C p         -0.2  +7.6  +3.1  +6.4  +0.1  -0.3  +0.8  +1.9  +1.3  +3.0  +1.3  +0.4  +1.3
+    rlp C p+r      +22.9  +2.6  +2.8 -21.2  +0.1  +9.7  +2.9  +3.3  +0.5 +17.6  +2.2  +0.6  +1.4
+    rlp C' p        +0.5  -2.0  +0.8 -22.2  +0.0  -0.0  +1.2  +0.5  +1.8  +1.5  +0.5  -0.1  +1.0
+    clr rep 4       -0.5  -2.1  +1.6  -1.3  +0.1  -0.3  +2.7  -0.2  -0.7  +3.1  -1.8  +0.1  +1.8
+    clr C p+r       +1.0  -0.1  +4.5  -0.2  +0.1  +0.1  +3.7  +2.7  -1.1 +17.9  +0.3  +1.2  +2.3
+    clr C' p+r      +1.0  -4.0  +4.2  -0.2  +0.0  -0.0  +3.6  +1.7  -0.2 +18.5  +2.3  +0.6  +2.0
+
+- The rule. cycle_native: its one candidate, C priced and routed, gains +0.0341 [+0.0103, +0.0631]
+  (up on 11 of 13, median +0.022), beats its best knob (shortlist 4, +0.0081, all of it from
+  30848's pocket) and its random sets (mean (c) 0.1538 against 0.1220), is vetoed on no block, but
+  loses a median 0.0142 of (a) at count D 0.05 (+0.0003 at 0.10) against the guard's 0.01: it
+  stops, as on the sentinel (0.01015 there), not by a hair this time. Its random sets in the same
+  form lose (a) too (median 0.0055 -- 0.0187), so the loss is the form's, routing through
+  buildings, not the set's. resistance_lp: C priced, its main form, gains +0.0204 [+0.0100,
+  +0.0347], up on 12 of 13 (median +0.013), the worst -0.0032, (a) unmoved (-0.0014 | +0.0003), far
+  above its random sets (-0.0100), but below its best knob, chunks 4 (+0.0320 [+0.0132, +0.0666],
+  1558 alone +0.197). C priced and routed (+0.0349) and C' priced (-0.0129) are vetoed: 20543
+  collapses under each (0.336 to 0.124 and 0.114), as it does under two of the five random sets
+  priced and four of the five priced and routed; resistance_lp's base opens a gate there (0.336,
+  against 0.10 -- 0.11 for the other methods) that half its discounted networks miss. No candidate
+  qualifies, and resistance_lp stops. clearance_looped: C priced and routed gains +0.0249 [+0.0079,
+  +0.0575] (up on 10, median +0.010), the worst -0.0112, gains (a) (-0.0261 | -0.0165), is above
+  its random sets (mean (c) 0.1269 against 0.1053) and its best knob (repulsion 4, +0.0018); C'
+  priced and routed passes too, at +0.0227 [+0.0033, +0.0567]. Chosen: C priced and routed, which
+  goes to the held-out blocks with base, repulsion 4 and its five random sets priced and routed.
+- Where the call turns on the rule's letter (the owner's). resistance_lp's best knob, chunks 4, is
+  itself behind base on B (i) on 20543 (it leaves 0.0009 of the population enclosed there, which
+  base frees); the rule holds candidates to the veto, not knobs. Held to it, the best knob would be
+  chunks 16 (+0.0040), and C priced would qualify and go on. cycle_native's (a) loss is over the
+  guard at D 0.05 and nil at 0.10.
+- Beside it. The gap to SIMP's default closed, mean over the 13: cycle_native's candidate 12.9%,
+  resistance_lp's 13.1% (priced) and 10.2% (priced and routed), clearance_looped's 9.4% (C) and
+  8.0% (C'), against the sentinel's 4 -- 10%; on gated 22422 nothing, as no arm opens it at D 0.05.
+  Much of the gain is gates the discounts open: 46841 (+0.15 -- +0.18 for each arm priced and
+  routed on C or C', and for one random set of five in each method's priced-and-routed form), 23597
+  (+0.10 for cycle_native's and resistance_lp's priced and routed, and +0.17 for one of
+  resistance_lp's random sets), 1558 (resistance_lp's priced and routed +0.23, one of its random
+  sets +0.16; chunks 4 +0.20, chunks 16 +0.18). Without 46841 clearance_looped's chosen arm gains
+  +0.012 a block. The same arms gained less on the sentinel's four (cycle_native's +0.0094,
+  resistance_lp's +0.0064 and +0.0147, clearance_looped's +0.0132 and, C', +0.0166); the random
+  sets' mean gain here: cycle_native +0.0024, resistance_lp -0.0100 (priced) and -0.0077 (priced
+  and routed), clearance_looped +0.0033.
+
+What the 13 say: making the buildings SIMP's default clears cheaper moves 1.7 -- 2.7x as much of a
+road network's displacement onto them, and at equal displacement buys more than on the sentinel,
++0.020 -- +0.035 of (c) on average for the main forms and their variants (resistance_lp's C' aside,
+-0.013), 8 -- 13% of the gap to SIMP's default, well above random sets made as cheap, much of it
+from gates on a few blocks. Under the rule fixed before the run, clearance_looped's main form, C
+priced and routed at f 0.1, goes to the held-out blocks, with base, repulsion 4 and its random
+control; cycle_native stops on the (a) guard (0.0142 at count D 0.05) and resistance_lp on its own
+knob (chunks 4, which the B (i) veto would rule out were knobs held to it: the owner's call).
+Committed: transparency_rows/tuning/arms.csv and summary_{records,choice,lens}.csv (the rows and
+networks are in the ignored transparency_rows/tuning/ parquet and scratch).
