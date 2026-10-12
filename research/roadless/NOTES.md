@@ -3073,3 +3073,79 @@ control; cycle_native stops on the (a) guard (0.0142 at count D 0.05) and resist
 knob (chunks 4, which the B (i) veto would rule out were knobs held to it: the owner's call).
 Committed: transparency_rows/tuning/arms.csv and summary_{records,choice,lens}.csv (the rows and
 networks are in the ignored transparency_rows/tuning/ parquet and scratch).
+
+### Transparency for the road methods: the held-out blocks (owner 2026-10-12: "run the 13- and 60-block stages on orion/quadro2"; on resistance_lp, "Yes, include it")
+
+The stage where the claims stand or fall: what came out of the 13 runs on the held-out blocks,
+transparency_run.py's `held` stage, under transparency_rows/held.
+
+The blocks. Item 4's 60 large blocks that fit at h 0.5 (the blocks of its committed lens rows,
+road_rows/summary_*_lens_D0.05.csv, the same 60 as road_rescore.py `project`'s blocks under 48 GB
+and as its networks) less the 13 tuning blocks: 47. 14401 has no stored clearing at h 0.5 (neither
+SIMP's default nor the cheap preset's), so no C, and is left out: 46 blocks (transparency_run.HELD;
+transparency_check.py `held` derives them again). No sequential stop: every one of the 46 is run.
+Proposals on the CPU nodes and the reduced scoring make the whole set cheap, and a claim on all the
+held-out blocks is cleaner than one on an early stop.
+
+The arms are data, not code (transparency_rows/held/plan.csv: per method its claim and its own
+knobs, each an arm of the 13; base and the claim's random sets come with them, and a method joins
+by a row; arms.csv lists them all):
+- clearance_looped, chosen under the 13's rule: base; its tree's repulsion 4 (its best knob on the
+  13); C priced and routed at f 0.1, the claim; the five random sets matched to C (AreaMass, 20
+  strata, seeds 1 -- 5), priced and routed at f 0.1.
+- resistance_lp, by the owner's amendment below: base; chunks 4 and chunks 16; C priced at f 0.1,
+  the claim; the five random sets, priced at f 0.1.
+17 arms a block, 782 networks, every one proposed fresh.
+
+The amendment (owner 2026-10-12, decided after the 13's results were seen). The 13's choice rule
+vetoed a candidate that leaves population enclosed (behind base on B (i)) but did not hold the
+method's own knobs to the same test, and resistance_lp's best knob there, chunks 4, itself leaves
+people enclosed on 20543, where base leaves none. The B (i) test now applies to knobs as it does to
+candidates: under B a setting that walls people in is not a fair comparison point on that block.
+Held to it, resistance_lp's bar on the 13 is chunks 16 (+0.0040), and C priced (+0.0204) passes the
+13's rule. As this was decided after the 13's results were seen, the held-out blocks are where
+resistance_lp's claim stands or falls, and chunks 4 stays in as a comparison point.
+clearance_looped's knob gets the same treatment, set before any held-out result exists: repulsion 4
+is left out of rule 2 on any block where it is behind base on B (i).
+
+Compute, as the 13. One task per (block, arm) on orion and quadro2 (cluster.py's `cpu` kind), every
+arm of a block on one node. The opaque check first, on every held-out block before its arms count:
+the base networks computed on the nodes, clearance_looped's and resistance_lp's, must be item 4's,
+WKB row for row and widths; any difference stops the stage. The reduced scoring on the cluster's
+GPUs, four at most: lens (c) at area D 0.05 and 0.10 (h 0.5, uni, B's order) and (a) at count D
+0.05 and 0.10 from the prefixes. The launcher's GPU sizing is recalibrated first, GB_PER_MILLION
+0.7 -> 0.95: the 13's measured scoring peaks are above 0.7 on all 13, 0.83 -- 0.87 GB per million
+unknowns on the nine over 14M (0.95 is the largest of these, 22422's 0.866, with 10% to spare) and
+1.1 -- 1.4 on the four under 13M (a few GB fixed, which any card holds); at 0.7 item 4's run sent
+1558, 14401 and 20023 to 32 GB cards their peaks (37.5, 37.3, 33.9 GB) would not have fit, and they
+ran on bigger cards by luck (cluster_check.py `gpu`, fault-injected).
+
+B's order, as on the 13: an arm that leaves more population enclosed than base at area D 0.05 (B
+(i)) is behind it on that block whatever its (c); one that leaves less is ahead, and counts among
+the blocks up. Means, medians and intervals are over (c) itself.
+
+The claim's rules, fixed before any held-out result (this commit precedes the first proposal on the
+held-out blocks). For each method, over the 46, paired by block, each interval a Bayesian
+bootstrap's 95% (transparency_run.boot_weights over the 46: 10,000 Dirichlet(1, ..., 1) draws
+seeded 20261012, one matrix for every arm and test); an interval "excluding 0" is read as above it,
+its lower end above 0, as each rule claims a gain:
+1. Primary: C's mean (c) gain over base at area D 0.05, its interval above 0, and C behind base on
+   B (i) on no block.
+2. Against the method's own knobs, for each knob K (clearance_looped's repulsion 4; resistance_lp's
+   chunks 4 and chunks 16): on the blocks where K is not behind base on B (i), C's mean (c) gain
+   over K, its interval above 0 (the weights of those blocks renormalized: a Bayesian bootstrap
+   over them). Reported: the blocks each K is left out on. Rule 2 holds only if it holds against
+   every knob (a knob left out on every block leaves nothing to compare, and the rule does not hold
+   against it).
+3. Against targeting by chance: C's mean (c) above its random sets' per-block mean (the five seeds
+   in C's form), the mean difference's interval above 0.
+4. The shipped metric: C's median (a) loss against base at most 0.01 at count D 0.05, and at D
+   0.10.
+The verdict, per method: a shift of the frontier on the held-out blocks if 1 -- 4 all hold;
+otherwise the rules that fail, said. Reported beside it, as description and not part of the
+verdict: the median paired gain; the mean without the three blocks of largest gain (on the 13 the
+gains came largely from gates on 46841, 23597 and 1558); the blocks up; the share of the gap to
+SIMP's default closed (per block, as on the 13, and its mean; SIMP's (c) from item 4's rows); (c)
+at area D 0.10; the share of the (c) prefix's true displacement on C; and the random draws' area
+over C's and Jaccard overlap with C. The code: transparency_run.Claim, guarded by
+transparency_check.py `claim` (synthetic lens tables, one case per rule, fault-injected four ways).

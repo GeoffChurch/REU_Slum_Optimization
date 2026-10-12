@@ -149,8 +149,10 @@ items up front"), in the order proposed:
    and its random control; cycle_native stops on the (a) guard (0.0142); resistance_lp stops below
    its own knob, chunks 4 (+0.0320), which itself leaves population enclosed on 20543: held to the
    candidates' B (i) veto, chunks 16 would be the bar and C priced (+0.0204, 12 of 13 up) would go
-   on (**owner's call**). Next, **queued**: the held-out blocks for clearance_looped (and
-   resistance_lp's C priced, if the owner so rules).
+   on (**owner's call**: knobs are now held to the B (i) test, and resistance_lp's C priced goes
+   on, decided after the 13's results). Next, **running**: the 46 held-out blocks for both, the
+   claim's four rules fixed before any held-out result (NOTES, "Transparency for the road
+   methods: the held-out blocks").
 
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
