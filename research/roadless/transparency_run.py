@@ -49,6 +49,7 @@ the stage's rows root (item 4's road_rows/ is read, never written):
     uv run python $S <stage> report                   # the stage's verdict, and the summaries
     uv run python $S <free stage> plans <procs> <ids,|all>   # its plan per block: plans.csv
     uv run python $S <free stage> reuse <ids,>        # the held stage's rows where it holds none
+    uv run python $S <free stage> check-held <ids,> <arms,|all>   # the networks hold its plan
     uv run python $S <stage> versus <stage'>          # beside another: the rules, the cost
 
 `propose` runs `propose-one <id> <arm>` children here; on the cluster's CPU nodes `arm` is one
@@ -1053,9 +1054,7 @@ def _plans_of(stage: Stage, bid: str) -> dict[str, fr.Plan]:
     for m in _claim_plan(stage):
         tree = _tree(stage.method(m.base, presets, bid))
         plans[m.method] = _free(stage).plan(b, tree.substrate.build(b), width_m=tree.road_width_m)
-    roads = {name: [bytes(w) for w in shapely.to_wkb(np.asarray([s.road.geometry
-                                                                 for s in p.steps]))]
-             for name, p in plans.items()}
+    roads = {name: _plan_wkb(p) for name, p in plans.items()}
     if len({repr(r) for r in roads.values()}) != 1:
         raise AssertionError(f"{bid}: the methods' graphs hold different roads")
     return plans
@@ -1156,6 +1155,31 @@ def reuse(stage: Stage, ids: list[str]) -> None:
     print(f"{len(ids)} blocks reuse the held stage's rows; {path}")
 
 
+def _plan_wkb(plan: fr.Plan) -> list[bytes]:
+    """The plan's held roads, WKB, in order."""
+    return [bytes(w) for w in shapely.to_wkb(np.asarray([s.road.geometry for s in plan.steps]))]
+
+
+def check_held(stage: Stage, ids: list[str], arms: list[Arm]) -> None:
+    """`arms`' networks of record on `ids` against this machine's plan: the plan's roads first,
+    WKB row for row, marked held, with the network's widths (the nodes computed the same held
+    roads). Raises on any difference."""
+    bad = []
+    for bid in ids:
+        want = _plan_wkb(next(iter(_plans_of(stage, bid).values())))
+        for arm in arms:
+            net = gpd.read_parquet(stage.record_path(bid, arm.name))
+            n = held_count(net)
+            same = n == len(want) and _wkb(cast(gpd.GeoDataFrame, net.iloc[:n])) == want
+            print(f"{bid} {arm.name:42s} {len(net):5d} roads, {n} held, this machine's plan "
+                  f"{len(want)}: {'the same' if same else 'DIFFERENT'}", flush=True)
+            if not same:
+                bad.append(f"{bid} {arm.name}")
+    if bad:
+        raise SystemExit(f"{len(bad)} networks hold other roads than this machine's plan: {bad}")
+    print(f"{len(ids)} blocks x {len(arms)} arms: every network holds this machine's plan first")
+
+
 def _touched(stage: Stage) -> tuple[str, ...]:
     """The blocks where some arm's network holds roads first: its network of record says so."""
     return tuple(b for b in stage.blocks if any(
@@ -1179,8 +1203,7 @@ def _free_checks(stage: Stage, lens: Mapping[float, pd.DataFrame],
     bad = []
     for bid in touched:
         plan = next(iter(_plans_of(stage, bid).values()))
-        want = [bytes(w) for w in shapely.to_wkb(np.asarray([s.road.geometry
-                                                            for s in plan.steps]))]
+        want = _plan_wkb(plan)
         n = len(want)
         pre_all = rr._read_all([rr.prefix_dir(stage.rows) / f"{bid}__{a.name}.parquet"
                                 for a in stage.arms])
@@ -2040,6 +2063,8 @@ if __name__ == "__main__":
         reuse(stage, stage.ids_of(a[2]))
     elif cmd == "versus":
         versus(stage, _stage(a[2]))
+    elif cmd == "check-held":
+        check_held(stage, stage.ids_of(a[2]), stage.arms_of(a[3]))
     elif cmd == "report":
         stage.verdict.report(stage)
     else:
