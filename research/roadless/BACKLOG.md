@@ -160,8 +160,17 @@ items up front"), in the order proposed:
    and loses a median 0.010033 of (a) at count D 0.05: rules 1 and 4 fail. The gains are broad
    (medians +0.027 and +0.024, 13 -- 16% of the gap to SIMP's default), larger than on the 13;
    what fails is B's first criterion at the D 0.05 cut, on which all but one of the other 13
-   discounted and knob arms also wall a few homes in on some block. Whether to pursue it (a
-   discount that keeps base's freed homes, say) is the **owner's call**.
+   discounted and knob arms also wall a few homes in on some block. Free first (owner 2026-10-12,
+   "Yes, let's try to free enclosed homes first"; NOTES, "Transparency for the road methods: free
+   first"; reblock.free_first, free_roads.FreeEnclosed): every arm of both methods first holds roads
+   that free the homes enclosed at baseline (on the ten held-out blocks that have any, 21 homes, 18
+   roads, D 0.0009 -- 0.0058 by area a block), the held-out rules unchanged, decided after their
+   results. No arm then leaves anyone enclosed at D 0.05, and **clearance_looped's C priced and
+   routed is a shift of the frontier** (rules 1 -- 4 hold: +0.0417 [+0.0304, +0.0552] over base,
+   +0.0314 over repulsion 4, +0.0348 over its random sets, (a) gained); resistance_lp's C priced
+   holds rules 1 -- 3 but fails rule 4 by more than before (a median (a) loss of 0.010978 at count D
+   0.05). Free first cost clearance_looped's base most (-0.031 of (c) a touched block);
+   resistance_lp's base and claim gained (+0.020, +0.026).
 
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose

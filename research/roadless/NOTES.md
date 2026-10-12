@@ -3297,3 +3297,100 @@ does (none on the ten); guard 4 (`lead`) runs on the cluster's networks beside i
 Reported beside the verdict: what free first cost each arm on the blocks it touched, its (c) at area
 D 0.05 and 0.10 and (a) at count D 0.05 and 0.10 against the same arm in the held stage, paired by
 block; and whether resistance_lp's rule 4, missed by 0.000033, moves.
+
+Run (2026-10-12), from the procedure's commit (5a0b7b1f) on. The plan on the other 36 held-out
+blocks (transparency_rows/free/plans.csv, on both methods' graphs, 3.3 s a block median): no home
+enclosed at baseline on any, nothing held, so each reuses the held stage's rows (87 files a block,
+copied: reused.csv; their records, recomputed here, are the held stage's exactly). The ten on the
+CPU nodes, each on the node that ran it in the held stage: free-base-orion and -quadro2, the base
+arms (20 tasks, 0.42 task-h) at 5a0b7b1f, then free-arms-orion and -quadro2, the other 15 arms (150
+tasks, 3.54 task-h) at 6aaa7d33, which adds only a local check (nothing on the arms' path changed);
+all 170 passed. Proposals 1.70 CPU-h (clearance_looped 0.62, resistance_lp 1.08; 1.30 in the held
+stage on these blocks), the longest 175 s, peak RSS 2.71 GB (5706, against 0.47 GB in the held
+stage: the stage carves on the h 0.5 raster), prefixes 1.54 h. Scoring, (c) at area D 0.05 and 0.10
+only: free-score, ten tasks on 32 GB cards (tesla1, tesla2), four at once at most, 0.80 GPU-h, the
+longest 17.4 min (5706), the GPU peak 10.5 GB (22267).
+- Checks. The base networks the nodes computed hold this machine's plan first, WKB row for row (20
+  of 20, before the other arms ran), and so do all 170; the 51 of 41673, 21252 and 43708 are, road
+  for road, the networks this machine computed for the guards (free-local). Guard 4 on the cluster's
+  networks (transparency_check.py `lead free`, the scorer on the CPU): on all 170 the held roads
+  lead the network and its ordered network, every held road is inside both D 0.05 prefixes, and no
+  home is left enclosed there. The report's own checks: on the ten every arm's B (i) at area D 0.05
+  and 0.10 is 0, as the plan leaves no one; on the 36 the base arms reproduce item 4's (a) within
+  1.1e-16, (c) within 4.1e-8 and B (i) exactly; the stored clearings rescore to item 4's rows within
+  4.8e-9.
+- Free first frees everyone: no arm leaves population enclosed on any of the 46 blocks at area D
+  0.05 or 0.10. In the held stage base had left some on 8 blocks (clearance_looped) and 6
+  (resistance_lp), the claims on 7 and 8, and every knob and random arm but one on some block.
+- The rules, free first beside the held-out stage (each interval a Bayesian bootstrap's 95% over the
+  46, paired, boot_weights). No claim is behind base on B (i) on any block (the held-out stage: 1 for
+  clearance_looped, 4 for resistance_lp), and no knob either, so rule 2 runs over all 46 (the
+  held-out stage: 44 for repulsion 4, 42 and 44 for chunks 4 and 16).
+
+                               free first                         the held-out stage
+    clearance_looped
+      1 C over base            +0.0417 [+0.0304, +0.0552]  holds  +0.0341 [+0.0230, +0.0464]  FAILS
+      2 C over repulsion 4     +0.0314 [+0.0167, +0.0540]  holds  +0.0259 [+0.0099, +0.0492]  holds
+      3 C over random sets     +0.0348 [+0.0261, +0.0460]  holds  +0.0348 [+0.0252, +0.0466]  holds
+      4 (a) loss .05 | .10     -0.0125 | -0.0070           holds  -0.0099 | -0.0027           holds
+      verdict                  a shift of the frontier            no shift: rule 1 fails
+    resistance_lp
+      1 C over base            +0.0326 [+0.0187, +0.0557]  holds  +0.0313 [+0.0171, +0.0545]  FAILS
+      2 C over chunks 4        +0.0241 [+0.0153, +0.0358]  holds  +0.0163 [+0.0091, +0.0256]  holds
+        C over chunks 16       +0.0503 [+0.0363, +0.0719]  holds  +0.0519 [+0.0365, +0.0750]  holds
+      3 C over random sets     +0.0415 [+0.0282, +0.0603]  holds  +0.0342 [+0.0220, +0.0520]  holds
+      4 (a) loss .05 | .10     +0.010978 | +0.003623       FAILS  +0.010033 | +0.003623       FAILS
+      verdict                  no shift: rule 4 fails             no shift: rules 1 and 4 fail
+
+- Under the rules fixed before the run, clearance_looped's claim, C priced and routed at f 0.1, is a
+  shift of the frontier on the held-out blocks once every arm frees the enclosed homes first: all
+  four rules hold, rule 1 with room (+0.0417, the interval's lower end +0.0304). resistance_lp's, C
+  priced at f 0.1, holds rules 1 -- 3 but not rule 4: its median (a) loss against base at count D
+  0.05 moves from 0.010033 to 0.010978, further over the guard's 0.01, so it fails as written
+  (0.0036 at D 0.10, as before).
+- What free first cost each arm on the ten blocks it touched, the arm with free first minus the same
+  arm in the held stage, paired by block: (c) at area D 0.05, mean [median; min, max], its mean at D
+  0.10, (a) at count D 0.05 mean [median], and the blocks of ten where (c) at D 0.05 rose. A
+  negative is a cost; the held roads take 0.0009 -- 0.0058 of the area D 0.05 budget a block (12% of
+  it on 41673), so where they open nothing the arm builds less of its own.
+
+                      (c) area D .05                     (c) D .10   (a) count D .05     up
+    clearance_looped
+      base            -0.0306 [-0.0293; -0.116, +0.020]   +0.0266    -0.0211 [-0.0298]    2
+      repulsion 4     -0.0245 [-0.0067; -0.163, +0.035]   -0.0062    +0.0092 [+0.0044]    4
+      C p+r           +0.0044 [+0.0108; -0.095, +0.125]   -0.0102    -0.0039 [+0.0056]    7
+      random p+r      +0.0047 (seeds -0.0229 -- +0.0235)  +0.0082    -0.0026              3 -- 6
+    resistance_lp
+      base            +0.0200 [+0.0064; -0.021, +0.138]   +0.0270    +0.0052 [+0.0042]    6
+      chunks 4        -0.0083 [-0.0079; -0.029, +0.006]   -0.0022    -0.0100 [-0.0160]    3
+      chunks 16       +0.0238 [-0.0078; -0.042, +0.318]   +0.0357    -0.0004 [+0.0005]    3
+      C p             +0.0263 [+0.0064; -0.023, +0.166]   +0.0271    +0.0054 [+0.0069]    7
+      random p        -0.0074 (seeds -0.0324 -- +0.0198)  -0.0106    +0.0008              3 -- 5
+
+- Free first costs clearance_looped's base most (-0.031 a touched block, down on 8 of the ten,
+  -0.116 on 41673, whose four held roads take 12% of the budget), and its claim little (+0.004, up
+  on 7): the claim's gain over base on the 46 grows from +0.0341 to +0.0417, most of it base falling
+  where it builds less. resistance_lp's base and claim both gain (+0.020 and +0.026; +0.138 and
+  +0.166 on 41673, not inspected), and its gain over base moves little (+0.0313 to +0.0326). Single
+  blocks swing far for the knobs and random sets (not inspected: a method rerouted from a new start,
+  by the size): resistance_lp's chunks 16 +0.318 and a random set -0.353 on 22267,
+  clearance_looped's repulsion 4 -0.163 and a random set +0.212 on 41673.
+- Beside it (description, not verdict). The claims' medians +0.0287 (clearance_looped) and +0.0241
+  (resistance_lp), their means without the three largest gains +0.0339 (41673, 6310, 19161) and
+  +0.0212 (44775, 22267, 6316), up in B's order on 41 and 42 of the 46; the gap to SIMP's default
+  closed 15.8% and 16.8% (pooled 16.6% and 18.2%; 13.0% and 15.7% in the held stage); at area D 0.10
+  +0.0275 [+0.0134, +0.0388], up on 40, and +0.0356 [+0.0218, +0.0496], up on 44. The knobs:
+  repulsion 4 +0.0102 [-0.0119, +0.0233], chunks 4 +0.0085 [-0.0072, +0.0320], chunks 16 -0.0176
+  [-0.0309, -0.0046]. The random sets: clearance_looped's +0.0006 -- +0.0141 (mean +0.0069, -0.0008
+  in the held stage: base fell more than they did), resistance_lp's -0.0147 -- -0.0031 (mean
+  -0.0089). The share of the (c) prefix's displacement on C, 0.222 and 0.231 (0.224 and 0.232).
+
+What free first says: holding roads that free the enclosed homes first removes what failed both
+claims on the held-out blocks, B's first criterion, at a price in (c) that falls mostly on
+clearance_looped's base and turns no rule that held into one that fails. With every arm freeing
+everyone, clearance_looped's C priced and routed is a shift of the frontier on all four rules;
+resistance_lp's C priced still misses the (a) guard, by more than before (0.010978 against 0.01).
+The stage was decided after the held-out results, so this is the claims re-tested under a changed
+method. Committed: transparency_rows/free/arms.csv, plans.csv, reused.csv, check_lead.csv and
+summary_{records,rules,claim,lens,versus,versus_rules}.csv (the rows and networks are in the ignored
+transparency_rows/free/ parquet and scratch).

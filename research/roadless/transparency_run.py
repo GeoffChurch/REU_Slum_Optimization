@@ -1258,8 +1258,8 @@ def versus(stage: Stage, other: Stage) -> None:
           f"{other.name}, mean [median; min, max] over the blocks")
     for d in GUARD_D:
         g = df[np.isclose(df.budget, d)].groupby("arm", sort=False)
-        print(f"\n  (c) at area D {d:g} | (a) at count D {d:g}; B (i) {other.name} -> {stage.name}"
-              f" (blocks behind 0)")
+        print(f"\n  (c) at area D {d:g} | (a) at count D {d:g}; the blocks whose (c) prefix leaves "
+              f"population enclosed (B (i) > 0), {other.name} -> {stage.name}")
         for arm in stage.lineup:
             x = g.get_group(arm)
             print(f"    {arm:42s} {x.dc.mean():+.4f} [{x.dc.median():+.4f}; {x.dc.min():+.4f}, "
