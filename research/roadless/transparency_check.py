@@ -4,6 +4,7 @@ rest are unit tests (tests/test_transparency.py).
     S=research/roadless/transparency_check.py   # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S opaque <out.csv> <procs> <ids,> <methods,>
     uv run python $S sets <ids,> <seeds>
+    uv run python $S rule
 
 `opaque` (guard 1): each method as configured (compare_config's all_methods, common.arms()), with
 `Opaque` for the price and `TransparentSubstrate(<its substrate>, Opaque())` for the route, run
@@ -22,7 +23,17 @@ the clearing as computed here; and every identity moves with the clearing's cont
 the seed and the stratification. Then the area ratio's and the overlap's median, p90 and worst
 over every (block, clearing, seed).
 
-FAULT INJECTION, `sets` on six blocks: positions read off by one, draws that ignore the strata, the
+`rule`: the 13's choice rule (transparency_run.Choice.decide; NOTES, "Transparency for the road
+methods: the 13 tuning blocks") on synthetic lens tables, no result read: resistance_lp's arms on
+13 made-up blocks, each case one condition of the rule -- the largest qualifying candidate chosen,
+with base, the best knob and the random sets in its form going on; behind base on B (i) on one
+block, or more than 0.1 below it on (c), vetoes; a median (a) loss over 0.01 rules out; a knob
+ahead of every candidate stops the method; a candidate below its own random sets (its form's, not
+the other form's) is out; with every knob losing, a losing candidate above it is chosen (as the
+rule is written).
+
+FAULT INJECTION, `rule`: the veto without B (i), and the random sets of every form for each
+candidate, each fail it. `sets` on six blocks: positions read off by one, draws that ignore the strata, the
 seed ignored, a ClearedSet identity without the positions' digest, and AreaMass cutting its strata
 by count each fail it. `opaque`: the brief's literal route formula (outside length from the union,
 inside length per building), under which a stretch inside two overlapping opaque footprints weighs
@@ -246,11 +257,77 @@ def sets(ids: list[str], seeds: list[int]) -> None:
           f"{int((per > 0.25).sum())} of {len(per)}, more than 0.10: {int((per > 0.10).sum())}")
 
 
+def rule() -> None:
+    """The 13's choice rule on synthetic lens tables (the module's docstring)."""
+    import transparency_run as tr
+    m = next(x for x in tr.TUNING_PLAN if x.method == "resistance_lp")
+    blocks = tuple(f"synthetic_{i}" for i in range(13))
+    simp = pd.Series(0.5, index=list(blocks))
+    short = {a.name: a.change.label for a in m.arms}
+    by = {v: k for k, v in short.items()}
+
+    def lens_of(c: dict[str, NDArray[np.float64]], enc: dict[str, NDArray[np.float64]] | None = None,
+                a: dict[str, NDArray[np.float64]] | None = None) -> dict[float, pd.DataFrame]:
+        rows = [dict(block=b, method=n, c=c.get(short[n], c["base"])[i],
+                     enc_c=(enc or {}).get(short[n], np.zeros(13))[i],
+                     a=(a or {}).get(short[n], np.full(13, 0.8))[i])
+                for n in short for i, b in enumerate(blocks)]
+        return {d: pd.DataFrame(rows) for d in tr.GUARD_D}
+
+    W = tr.boot_weights(len(blocks))
+    base = np.full(13, 0.10)
+    c = {"base": base, "chunks4": base + 0.002, "chunks16": base - 0.003,
+         "simp-f0.1-price": base + 0.010, "simp-f0.1-price-route": base + 0.015,
+         "cheap-f0.1-price": base + 0.008,
+         **{f"rand{s}-f0.1-{w}": base + 0.001 for s in tr.SEEDS for w in ("price", "price-route")}}
+
+    def decide(c: dict[str, NDArray[np.float64]], **kw: dict[str, NDArray[np.float64]]
+               ) -> tuple[dict[str, dict[str, object]], str, str | None]:
+        st, knob, chosen = tr.Choice.decide(m, lens_of(c, **kw), simp, W)
+        return st, short[knob.name], None if chosen is None else short[chosen.name]
+
+    st, knob, chosen = decide(c)
+    r = st[by["simp-f0.1-price-route"]]
+    assert knob == "chunks4" and chosen == "simp-f0.1-price-route", (knob, chosen)
+    assert abs(float(r["mean_gain"]) - 0.015) < 1e-12 and r["blocks_up"] == 13
+    assert float(r["lo"]) <= 0.015 <= float(r["hi"])
+    assert abs(float(r["gap_closed"]) - 0.015 / 0.4) < 1e-12
+    assert {short[n] for n, x in st.items() if x["goes_on"]} == {
+        "base", "chunks4", "simp-f0.1-price-route", *[f"rand{s}-f0.1-price-route" for s in tr.SEEDS]}
+    print("the largest qualifying candidate chosen; base, the best knob, its form's random sets on")
+    st, _, chosen = decide(c, enc={"simp-f0.1-price-route": np.r_[0.001, np.zeros(12)]})
+    assert st[by["simp-f0.1-price-route"]]["veto"] and chosen == "simp-f0.1-price", chosen
+    print("behind base on B (i) on one block: vetoed, the next candidate chosen")
+    low = np.r_[base[:12] + 0.03, base[12] - 0.11]
+    st, _, chosen = decide({**c, "simp-f0.1-price-route": low})
+    assert st[by["simp-f0.1-price-route"]]["veto"] and chosen == "simp-f0.1-price", chosen
+    print("more than 0.1 below base on (c) on one block: vetoed")
+    st, _, chosen = decide(c, a={"simp-f0.1-price-route": np.full(13, 0.8 - 0.011)})
+    assert not st[by["simp-f0.1-price-route"]]["a_ok"] and chosen == "simp-f0.1-price", chosen
+    print("a median (a) loss of 0.011: out")
+    st, knob, chosen = decide({**c, "chunks16": base + 0.02})
+    assert knob == "chunks16" and chosen is None and not any(x["goes_on"] for x in st.values())
+    print("a knob ahead of every candidate: none chosen, the method stops")
+    st, _, chosen = decide({**c, **{f"rand{s}-f0.1-price-route": base + 0.02 for s in tr.SEEDS}})
+    assert not st[by["simp-f0.1-price-route"]]["above_own_random"]
+    assert st[by["simp-f0.1-price"]]["above_own_random"] and chosen == "simp-f0.1-price", chosen
+    print("below its own form's random sets: out (the other form's arm is not held to them)")
+    losing = {**c, "chunks4": base - 0.002, "chunks16": base - 0.004,
+              "simp-f0.1-price": base - 0.001, "simp-f0.1-price-route": base - 0.003,
+              "cheap-f0.1-price": base - 0.005,
+              **{f"rand{s}-f0.1-price": base - 0.0015 for s in tr.SEEDS}}
+    st, _, chosen = decide(losing)
+    assert chosen == "simp-f0.1-price" and float(st[by[chosen]]["mean_gain"]) < 0
+    print("every knob losing: a losing candidate above the best knob and its random sets chosen")
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a[0] == "opaque":
         opaque(Path(a[1]), int(a[2]), a[3].split(","), a[4].split(","))
     elif a[0] == "sets":
         sets(a[1].split(","), [int(s) for s in a[2].split(",")])
+    elif a[0] == "rule":
+        rule()
     else:
         raise SystemExit(f"unknown command {a[0]!r}")

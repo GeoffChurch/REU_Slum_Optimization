@@ -28,9 +28,10 @@ the stage's rows root (item 4's road_rows/ is read, never written):
     uv run python $S <stage> arm <id> <arm>           # one cluster task: network, then prefixes
     uv run python $S <stage> recompute <id> <arm>     # a reused arm's preset, fresh (a check)
     uv run python $S <stage> cpu-tars <dir> <ids,>    # a tar per block for the arm tasks
-    uv run python $S <stage> pulled <ids,>            # every arm's network and rows came back
-    uv run python $S <stage> check-base <ids,>        # the opaque arms against item 4's networks
+    uv run python $S <stage> pulled <ids,> <arms,|all>        # their networks and rows came back
+    uv run python $S <stage> check-base <ids,> <arms,|all>    # opaque arms against item 4's
     uv run python $S <stage> same-as <stage'> <ids,>  # the arms both have, network for network
+    uv run python $S <stage> same-lens <stage'> <ids,>    # ... and where the same, their lenses
     uv run python $S <stage> prefixes <procs> <ids,>
     uv run python $S <stage> tars <dir> <ids,>        # a tar per block for score on the cluster
     uv run python $S <stage> records <procs> <ids,>   # displacement on C, the draws, the costs
@@ -518,6 +519,10 @@ class Stage:
             raise SystemExit(f"{self.name}'s blocks are {self.blocks}, each once: {arg!r}")
         return ids
 
+    def arms_of(self, arg: str) -> list[Arm]:
+        """Arms named on the command line, comma-separated, or `all`."""
+        return list(self.arms) if arg == "all" else [self.arm_of(n) for n in arg.split(",")]
+
     def record_path(self, bid: str, name: str) -> Path:
         """The network of record: the fresh run's roads (road_rescore.propose writes them as
         <name>.fresh.parquet and propose_one renames them) or, for a reused arm, item 4's."""
@@ -697,15 +702,15 @@ def _same(a_path: Path, b_path: Path) -> tuple[bool, int, int]:
     return same, len(a), len(b)
 
 
-def check_base(stage: Stage, ids: list[str]) -> None:
-    """Every opaque preset arm against item 4's network of its preset: the proposed bases, the
-    reused networks, and a reused arm's fresh recomputation where `recompute` made one. The same
+def check_base(stage: Stage, ids: list[str], arms: list[Arm]) -> None:
+    """`arms`, opaque preset arms, against item 4's network of each one's preset: a proposed base,
+    a reused network, and a reused arm's fresh recomputation where `recompute` made one. The same
     WKB row for row and the same widths; raises on any difference: the comparison rests on it."""
     out = []
     for bid in ids:
-        for arm in stage.arms:
+        for arm in arms:
             if not isinstance(arm.change, AsConfigured):
-                continue
+                raise SystemExit(f"{arm.name} is not a preset as configured")
             theirs = ITEM4_NETS / bid / f"{arm.preset}.parquet"
             mine = [("", stage.record_path(bid, arm.name))]
             fresh = rr.net_path(stage.scratch, bid, arm.name, True)
@@ -743,13 +748,31 @@ def same_as(stage: Stage, other: Stage, ids: list[str]) -> None:
         raise SystemExit(f"{len(out) - sum(out)} networks differ from {other.name}'s")
 
 
-def pulled(stage: Stage, ids: list[str]) -> None:
-    """Every (block, arm) has its network of record, ordered network and prefix rows here, and a
-    proposed arm its proposal row with status ok: what the cluster's tasks write, back through
-    their run's pull. Raises listing what is missing."""
+def same_lens(stage: Stage, other: Stage, ids: list[str]) -> None:
+    """On blocks of both stages, every arm both have whose networks are the same road for road:
+    (a) and (c), with B (i), at each of GUARD_D, this stage's against the other's (each stage's
+    own scoring, reduced_lens's columns). Prints the largest differences."""
+    both = [a.name for a in stage.arms if a.name in set(other.lineup)]
+    same = [(bid, n) for bid in ids for n in both
+            if _same(stage.record_path(bid, n), other.record_path(bid, n))[0]]
+    for d in GUARD_D:
+        mine, theirs = reduced_lens(stage, d), reduced_lens(other, d)
+        keys = ["block", "method"]
+        pairs = pd.DataFrame(same, columns=keys)
+        t = pairs.merge(mine, on=keys).merge(theirs, on=keys, suffixes=("", "_other"))
+        diffs = {col: float((t[col] - t[col + "_other"]).abs().max()) for col in ("a", "c", "enc_c")}
+        print(f"D {d:g}: {len(t)} (block, arm) pairs with the same network on {t.block.nunique()} "
+              f"blocks, max |diff| against {other.name}: "
+              + ", ".join(f"{k} {v:.1e}" for k, v in diffs.items()), flush=True)
+
+
+def pulled(stage: Stage, ids: list[str], arms: list[Arm]) -> None:
+    """Every (block, arm) of `ids` x `arms` has its network of record, ordered network and prefix
+    rows here, and a proposed arm its proposal row with status ok: what the cluster's tasks write,
+    back through their run's pull. Raises listing what is missing."""
     missing, bad = [], []
     for bid in ids:
-        for arm in stage.arms:
+        for arm in arms:
             want = [stage.record_path(bid, arm.name),
                     rr.ordered_path(stage.scratch, bid, arm.name),
                     rr.prefix_dir(stage.rows) / f"{bid}__{arm.name}.parquet"]
@@ -761,7 +784,7 @@ def pulled(stage: Stage, ids: list[str]) -> None:
                 status = str(pd.read_parquet(row).status.iloc[0])
                 if status != "ok":
                     bad.append(f"{bid} {arm.name}: {status}")
-    print(f"{len(ids)} blocks x {len(stage.arms)} arms: {len(missing)} files missing, "
+    print(f"{len(ids)} blocks x {len(arms)} arms: {len(missing)} files missing, "
           f"{len(bad)} proposals not ok")
     if missing or bad:
         raise SystemExit("\n".join(missing[:20] + bad[:20]))
@@ -1111,6 +1134,12 @@ def reduced_lens(stage: Stage, budget: float) -> pd.DataFrame:
     return t
 
 
+def boot_weights(n: int) -> np.ndarray:
+    """The Bayesian bootstrap's weights over `n` blocks: BOOT_DRAWS Dirichlet(1, ..., 1) draws,
+    seeded BOOT_SEED, one matrix (draws x blocks) for every arm, so the intervals are paired."""
+    return np.random.default_rng(BOOT_SEED).dirichlet(np.ones(n), size=BOOT_DRAWS)
+
+
 def _wide(t: pd.DataFrame, blocks: tuple[str, ...], names: tuple[str, ...],
           col: str) -> pd.DataFrame:
     """`col` per arm (rows, in `names`' order) and block (columns, in `blocks`' order)."""
@@ -1171,59 +1200,13 @@ class Choice:
                              for col in ("a", "c", "enc_c")]
                     print(f"  {arm.name} at D {d:g} against item 4's {arm.preset}: max |diff| "
                           f"(a) {diffs[0]:.1e}, (c) {diffs[1]:.1e}, B (i) {diffs[2]:.1e}")
-        rng = np.random.default_rng(BOOT_SEED)
-        W = rng.dirichlet(np.ones(len(blocks)), size=BOOT_DRAWS)     # draws x blocks
+        W = boot_weights(len(blocks))
         out = []
         for m in self.plan:
-            names = tuple(a.name for a in m.arms)
-            c5 = _wide(lens[LENS_D], blocks, names, "c")
-            enc = _wide(lens[LENS_D], blocks, names, "enc_c")
-            a = {d: _wide(lens[d], blocks, names, "a") for d in GUARD_D}
-            base = m.base.name
-            gain = c5.sub(c5.loc[base], axis=1)
-            behind = enc.gt(enc.loc[base] + ENCLOSED_TOL, axis=1)
-            ahead = enc.lt(enc.loc[base] - ENCLOSED_TOL, axis=1)
-            st: dict[str, dict[str, object]] = {}
-            for part, arm in m.parts():
-                g = gain.loc[arm.name].to_numpy(dtype=float)
-                boot = W @ g
-                loss = {d: float((a[d].loc[base] - a[d].loc[arm.name]).median()) for d in GUARD_D}
-                up = ahead.loc[arm.name] | (~behind.loc[arm.name] & (gain.loc[arm.name] > 0))
-                st[arm.name] = dict(
-                    method=m.method, arm=arm.name, part=part, mean_c=float(c5.loc[arm.name].mean()),
-                    mean_gain=float(g.mean()), lo=float(np.quantile(boot, 0.025)),
-                    hi=float(np.quantile(boot, 0.975)), min_gain=float(g.min()),
-                    blocks_up=int(up.sum()), behind_i=int(behind.loc[arm.name].sum()),
-                    ahead_i=int(ahead.loc[arm.name].sum()),
-                    veto=bool((g < -VETO).any() or behind.loc[arm.name].any()),
-                    **{f"a_loss_D{d:g}": loss[d] for d in GUARD_D},
-                    a_ok=all(v <= A_LOSS for v in loss.values()),
-                    gap_closed=float((gain.loc[arm.name] / (simp - c5.loc[base])).mean()),
-                    **{f"c_{_short(b)}": float(c5.loc[arm.name, b]) for b in blocks})
-            best_knob = max(m.knobs, key=lambda k: float(st[k.name]["mean_gain"]))
-            knob_gain = float(st[best_knob.name]["mean_gain"])
-            for arm in m.arms:
-                st[arm.name].update(best_knob=arm is best_knob, vs_best_knob=float(
-                    st[arm.name]["mean_gain"]) - knob_gain)
-            qualifying = []
-            for cand in m.candidates:
-                r = st[cand.name]
-                own = [x.name for x in m.own_random(cand)]
-                rand_c = float(c5.loc[own].to_numpy().mean())
-                r.update(own_random_mean_c=rand_c, above_own_random=r["mean_c"] > rand_c,
-                         beats_knob=float(r["mean_gain"]) > knob_gain)
-                r["qualifies"] = bool(not r["veto"] and r["a_ok"] and r["beats_knob"]
-                                      and r["above_own_random"])
-                if r["qualifies"]:
-                    qualifying.append(cand)
-            chosen = max(qualifying, key=lambda x: float(st[x.name]["mean_gain"]), default=None)
-            for arm in m.arms:
-                st[arm.name]["chosen"] = arm is chosen
-                st[arm.name]["goes_on"] = chosen is not None and (
-                    arm is chosen or arm is m.base or arm is best_knob
-                    or arm in m.own_random(chosen))
+            st, best_knob, chosen = self.decide(m, lens, simp, W)
             out += list(st.values())
-            self._print(m, st, c5, simp, best_knob, chosen)
+            self._print(m, st, _wide(lens[LENS_D], blocks, tuple(a.name for a in m.arms), "c"),
+                        simp, best_knob, chosen)
         pd.DataFrame(out).to_csv(stage.rows / "summary_choice.csv", index=False)
         keep = ["block", "method", "n", "m_count", "a", "m_area", "c", "enc_c", "Dc_count",
                 "Da_area", "reach_count", "reach_area"]
@@ -1231,6 +1214,64 @@ class Choice:
         both.rename(columns={"method": "arm"}).merge(
             rec[["block", "arm", "share_simp", "share_own", "area_ratio", "jaccard"]],
             on=["block", "arm"]).to_csv(stage.rows / "summary_lens.csv", index=False)
+
+    @staticmethod
+    def decide(m: ChoiceArms, lens: Mapping[float, pd.DataFrame], simp: pd.Series,
+               W: np.ndarray) -> tuple[dict[str, dict[str, object]], Arm, Arm | None]:
+        """The rule on one method: every arm's numbers (per arm, the columns of
+        summary_choice.csv), its best own-knob point and the chosen candidate (None: none
+        qualifies). `lens` per budget of GUARD_D (reduced_lens's columns), `simp` SIMP's default's
+        (c) per block (its index the blocks, in order), `W` the bootstrap's weights (draws x
+        blocks, boot_weights)."""
+        blocks = tuple(simp.index)
+        names = tuple(a.name for a in m.arms)
+        c5 = _wide(lens[LENS_D], blocks, names, "c")
+        enc = _wide(lens[LENS_D], blocks, names, "enc_c")
+        a = {d: _wide(lens[d], blocks, names, "a") for d in GUARD_D}
+        base = m.base.name
+        gain = c5.sub(c5.loc[base], axis=1)
+        behind = enc.gt(enc.loc[base] + ENCLOSED_TOL, axis=1)
+        ahead = enc.lt(enc.loc[base] - ENCLOSED_TOL, axis=1)
+        st: dict[str, dict[str, object]] = {}
+        for part, arm in m.parts():
+            g = gain.loc[arm.name].to_numpy(dtype=float)
+            boot = W @ g
+            loss = {d: float((a[d].loc[base] - a[d].loc[arm.name]).median()) for d in GUARD_D}
+            up = ahead.loc[arm.name] | (~behind.loc[arm.name] & (gain.loc[arm.name] > 0))
+            st[arm.name] = dict(
+                method=m.method, arm=arm.name, part=part, mean_c=float(c5.loc[arm.name].mean()),
+                mean_gain=float(g.mean()), lo=float(np.quantile(boot, 0.025)),
+                hi=float(np.quantile(boot, 0.975)), min_gain=float(g.min()),
+                blocks_up=int(up.sum()), behind_i=int(behind.loc[arm.name].sum()),
+                ahead_i=int(ahead.loc[arm.name].sum()),
+                veto=bool((g < -VETO).any() or behind.loc[arm.name].any()),
+                **{f"a_loss_D{d:g}": loss[d] for d in GUARD_D},
+                a_ok=all(v <= A_LOSS for v in loss.values()),
+                gap_closed=float((gain.loc[arm.name] / (simp - c5.loc[base])).mean()),
+                **{f"c_{_short(b)}": float(c5.loc[arm.name, b]) for b in blocks})
+        best_knob = max(m.knobs, key=lambda k: float(st[k.name]["mean_gain"]))
+        knob_gain = float(st[best_knob.name]["mean_gain"])
+        for arm in m.arms:
+            st[arm.name].update(best_knob=arm is best_knob,
+                                vs_best_knob=float(st[arm.name]["mean_gain"]) - knob_gain)
+        qualifying = []
+        for cand in m.candidates:
+            r = st[cand.name]
+            own = [x.name for x in m.own_random(cand)]
+            rand_c = float(c5.loc[own].to_numpy().mean())
+            r.update(own_random_mean_c=rand_c, above_own_random=float(r["mean_c"]) > rand_c,
+                     beats_knob=float(r["mean_gain"]) > knob_gain)
+            r["qualifies"] = bool(not r["veto"] and r["a_ok"] and r["beats_knob"]
+                                  and r["above_own_random"])
+            if r["qualifies"]:
+                qualifying.append(cand)
+        chosen = max(qualifying, key=lambda x: float(st[x.name]["mean_gain"]), default=None)
+        for arm in m.arms:
+            st[arm.name]["chosen"] = arm is chosen
+            st[arm.name]["goes_on"] = chosen is not None and (
+                arm is chosen or arm is m.base or arm is best_knob
+                or arm in m.own_random(chosen))
+        return st, best_knob, chosen
 
     @staticmethod
     def _print(m: ChoiceArms, st: Mapping[str, Mapping[str, object]], c5: pd.DataFrame,
@@ -1303,11 +1344,13 @@ if __name__ == "__main__":
     elif cmd == "recompute":
         recompute(stage, stage.ids_of(a[2])[0], a[3])
     elif cmd == "check-base":
-        check_base(stage, stage.ids_of(a[2]))
+        check_base(stage, stage.ids_of(a[2]), stage.arms_of(a[3]))
     elif cmd == "same-as":
         same_as(stage, _stage(a[2]), stage.ids_of(a[3]))
+    elif cmd == "same-lens":
+        same_lens(stage, _stage(a[2]), stage.ids_of(a[3]))
     elif cmd == "pulled":
-        pulled(stage, stage.ids_of(a[2]))
+        pulled(stage, stage.ids_of(a[2]), stage.arms_of(a[3]))
     elif cmd == "prefixes":
         prefixes(stage, int(a[2]), stage.ids_of(a[3]))
     elif cmd == "cpu-tars":
