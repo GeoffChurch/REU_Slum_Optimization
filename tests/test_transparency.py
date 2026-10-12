@@ -19,7 +19,7 @@ from shapely.geometry import LineString, Point, Polygon, box
 from reblock.buildings import ANCHOR_COL, Discs, Footprints, IncrementalOverlap
 from reblock.contracts import Block
 from reblock.derive_graph import config_identity
-from reblock.transparency import Opaque, PricedOverlap, Transparency, factors_of
+from reblock.transparency import Opaque, PricedOverlap, Transparency, factors_of, price_tag
 
 UTM = CRS.from_epsg(32734)
 
@@ -33,6 +33,10 @@ class Given:
     @property
     def identity(self) -> Hashable:
         return ("given", self.values)
+
+    @property
+    def tag(self) -> str:
+        return price_tag(self.identity)
 
     def factors(self, block: Block) -> NDArray[np.float64]:
         del block
@@ -58,6 +62,13 @@ def test_opaque_is_every_factor_one_and_satisfies_the_protocol() -> None:
     assert isinstance(Opaque(), Transparency)
     np.testing.assert_array_equal(factors_of(Opaque(), block), np.ones(3))
     assert Opaque().identity == config_identity(Opaque()) is not None
+    assert Opaque().tag == ""                   # it changes no road set, so no label
+
+
+def test_a_price_tag_follows_the_identity() -> None:
+    a, b = Given((1.0, 0.5, 1.0)), Given((1.0, 0.25, 1.0))
+    assert a.tag.startswith(":price-") and a.tag != b.tag
+    assert a.tag == Given((1.0, 0.5, 1.0)).tag
 
 
 @pytest.mark.parametrize("values", [(1.0, 0.0, 1.0), (1.0, 1.5, 1.0), (1.0, float("nan"), 1.0),

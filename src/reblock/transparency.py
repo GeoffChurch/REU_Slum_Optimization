@@ -59,6 +59,18 @@ class Transparency(Protocol):
         """`f_b` per building of `block`, in `block.buildings` row order. Read it through
         `factors_of`, which checks it."""
 
+    @property
+    def tag(self) -> str:
+        """What these factors add to the label of a method they price. A label names render
+        files, so it carries what changes the road set: '' for `Opaque`, which changes nothing
+        (every label stays as it was), else `price_tag` of the identity."""
+
+
+def price_tag(identity: Hashable | None) -> str:
+    """A priced method's label part: ':price-' and a digest of its factors' identity, as
+    `DesireWarpedSubstrate.tag` digests its configuration."""
+    return ":price-" + hashlib.sha256(repr(identity).encode()).hexdigest()[:8]
+
 
 def factors_of(transparency: Transparency, block: Block) -> NDArray[np.float64]:
     """`transparency`'s factors for `block`, checked: one per building, each in (0, 1]."""
@@ -80,6 +92,10 @@ class Opaque:
     @property
     def identity(self) -> Hashable | None:
         return config_identity(self)
+
+    @property
+    def tag(self) -> str:
+        return ""
 
     def factors(self, block: Block) -> NDArray[np.float64]:
         return np.ones(len(block.buildings), dtype=np.float64)

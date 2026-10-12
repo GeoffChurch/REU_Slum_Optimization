@@ -292,7 +292,8 @@ class ClearanceReblocker:
         roads, params = _greedy_reblock(
             block, graph, t=t, depth_target=self.depth_target,
             max_roads=self.max_roads, radii=radii, factors=factors_of(self.price, block))
-        pid = (f"clearance:{self.substrate.tag}:r{self.repulsion:g}"
+        # The label names render files: the price (nothing for `Opaque`) is in it.
+        pid = (f"clearance{self.price.tag}:{self.substrate.tag}:r{self.repulsion:g}"
                f":d{self.depth_target}:mr{self.max_roads}")
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,

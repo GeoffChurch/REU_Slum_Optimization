@@ -21,7 +21,7 @@ from reblock.contracts import Block
 from reblock.derive_graph import closure_hash
 from reblock.methods.desire_substrate import DesireWarpedSubstrate
 from reblock.methods.substrates import ChordSubstrate, PrebuiltSubstrate, RoutingGraph
-from reblock.transparency import Opaque, TransparentSubstrate
+from reblock.transparency import Opaque, TransparentSubstrate, price_tag
 from tests.methods.test_desire_substrate import _Lines
 
 UTM = CRS.from_epsg(32734)
@@ -62,6 +62,10 @@ class ByAnchor:
     @property
     def identity(self) -> Hashable:
         return ("by-anchor", self.by_anchor)
+
+    @property
+    def tag(self) -> str:
+        return price_tag(self.identity)
 
     def factors(self, block: Block) -> NDArray[np.float64]:
         lookup = dict(self.by_anchor)
@@ -159,6 +163,7 @@ def test_factors_with_no_address_make_it_uncacheable() -> None:
     @dataclass(frozen=True)
     class Live:
         identity = None
+        tag = price_tag(None)
 
         def factors(self, block: Block) -> NDArray[np.float64]:
             return np.ones(len(block.buildings))

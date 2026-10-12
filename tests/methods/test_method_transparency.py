@@ -24,16 +24,17 @@ from shapely.geometry import LineString, Point, Polygon, box
 
 from reblock.budget import road_corridor
 from reblock.buildings import ANCHOR_COL, Footprints
-from reblock.contracts import Block
+from reblock.contracts import Block, Method
 from reblock.methods.clearance import ClearanceReblocker, _edge_weights, _sigmoid
 from reblock.methods.cycle_native import CycleNativeReblocker
 from reblock.methods.resistance_lp import ResistanceLPReblocker
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
-from reblock.transparency import Opaque, TransparentSubstrate
+from reblock.transparency import Opaque, Transparency, TransparentSubstrate, price_tag
 from tests.methods.test_clearance import CLEARANCE
 from tests.methods.test_cycle_native import CYCLE
 from tests.permeability_fixtures import SHIPPED
+from tests.test_loop_closure import LOOPS
 
 UTM = CRS.from_epsg(32734)
 SIDE_M = 90.0
@@ -49,6 +50,10 @@ class Uniform:
     def identity(self) -> Hashable:
         return ("uniform", self.f)
 
+    @property
+    def tag(self) -> str:
+        return price_tag(self.identity)
+
     def factors(self, block: Block) -> NDArray[np.float64]:
         return np.full(len(block.buildings), self.f)
 
@@ -63,6 +68,10 @@ class Chosen:
     @property
     def identity(self) -> Hashable:
         return ("chosen", self.members, self.f)
+
+    @property
+    def tag(self) -> str:
+        return price_tag(self.identity)
 
     def factors(self, block: Block) -> NDArray[np.float64]:
         out = np.ones(len(block.buildings))
@@ -248,3 +257,35 @@ def test_clearances_building_term_is_scaled_by_the_nearest_buildings_factor() ->
     assert (weight(1.0, 0.25) - length_term
             == pytest.approx(0.25 * (weight(1.0, 1.0) - length_term)))
     assert weight(0.25, 1.0) == weight(1.0, 1.0)
+
+
+# ------------------------------------------------------------- the label carries the price
+
+# Today's labels, which an opaque run keeps: they name render files.
+LABELS = {
+    "clearance": "clearance:chord_diag:r0:d2:mr400",
+    "clearance_looped": "loop_closure:clearance:chord_diag:r0:d1:mr400:bf0.12:ml400",
+    "cycle_native": "cycle_native:chord_diag:d0.2:mc400",
+    "resistance_lp": "resistance_lp:chord_diag:d0.2:k8",
+}
+
+
+def _arm(name: str, price: Transparency) -> Method:
+    if name == "clearance_looped":       # the loop stage has no price: its base tree does
+        return replace(LOOPS, base=replace(CLEARANCE, depth_target=1, price=price))
+    return replace(METHODS[name], price=price)
+
+
+@pytest.mark.parametrize("name", sorted(LABELS))
+def test_a_priced_run_is_labelled_apart_from_the_opaque_one(name: str) -> None:
+    """A label names render files, so it carries what changes the road set: an opaque run keeps
+    today's label, and a priced run's differs by the price's tag.
+
+    FAULT INJECTION: dropping `{self.price.tag}` from cycle_native's, resistance_lp's or
+    clearance's `proposal_id` fails that method's case; clearance's fails clearance_looped's too,
+    whose label carries its base's."""
+    block = _block()
+    price = Chosen(_corridor(block), STRONG)
+    assert _arm(name, Opaque()).propose(block).proposal_id == LABELS[name]
+    priced = _arm(name, price).propose(block).proposal_id
+    assert priced != LABELS[name] and price.tag in priced

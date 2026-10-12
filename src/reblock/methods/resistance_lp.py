@@ -392,8 +392,9 @@ class ResistanceLPReblocker:
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
             roads=with_width(roads, self.road_width_m),
-            proposal_id=(f"resistance_lp:{self.substrate.tag}:d{self.max_displacement:g}"
-                         f":k{self.chunks}"),
+            # The label names render files: the price (nothing for `Opaque`) is in it.
+            proposal_id=(f"resistance_lp{self.price.tag}:{self.substrate.tag}"
+                         f":d{self.max_displacement:g}:k{self.chunks}"),
             method="resistance_lp",
             params={**params, "substrate": self.substrate.tag,
                     "max_displacement": self.max_displacement, "chunks": self.chunks})

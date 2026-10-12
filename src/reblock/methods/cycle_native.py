@@ -218,8 +218,8 @@ class CycleNativeReblocker:
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=out, edges=None,
             # The label names render files, so it carries what changes the road set: the
-            # substrate, and max_cycles whenever it binds.
-            proposal_id=(f"cycle_native:{self.substrate.tag}:d{self.max_displacement:g}"
-                         f":mc{self.max_cycles}"),
+            # price (nothing for `Opaque`), the substrate, and max_cycles whenever it binds.
+            proposal_id=(f"cycle_native{self.price.tag}:{self.substrate.tag}"
+                         f":d{self.max_displacement:g}:mc{self.max_cycles}"),
             method="cycle_native",
             params={"roads": len(out), "road_width_m": self.road_width_m})
