@@ -19,7 +19,8 @@ summary tables beside the rows (<rows>/summary_*.csv, committed).
     uv run python $S propose-all <rows> <scratch> <procs> <ids,> <methods,> <timeout h> \
         <time-hits|no>
     uv run python $S prefixes <rows> <lineup,> <scratch> <procs> <ids,>
-    CUDA_PATH=/usr uv run python $S score <rows> <lineup,> <scratch> <mesh> <pops,> <ids,>
+    CUDA_PATH=/usr uv run python $S score <rows> <lineup,> <scratch> <mesh> <pops,> <scored> \
+        <ids,>                     # <scored>: the prefix rows solved, 0.02,0.05,0.1,0.15,0.2,whole
     uv run python $S report <rows> <lineup,> <mesh> <composite mesh>
     uv run python $S sizes <rows> <composite mesh> <procs>
     uv run python $S project <rows> <lineup,> <mesh> <composite mesh>
@@ -130,6 +131,15 @@ def _check_single_threaded() -> None:
         raise SystemExit(f"run single-threaded: set {bad} to {SINGLE}")
 
 
+def write_parquet(df: pd.DataFrame, path: Path) -> None:
+    """`df` to `path` whole or not at all: written under a name no pull matches (cluster.py's
+    pulls take `*.parquet`, while a task runs too, and never replace a local file), then renamed.
+    A GeoDataFrame writes its own way (its to_parquet)."""
+    tmp = path.with_name(path.name + ".tmp")
+    df.to_parquet(tmp)
+    os.replace(tmp, path)
+
+
 # ------------------------------------------------------------------ memory and time
 
 def _status_gb(field: str) -> float:
@@ -233,7 +243,7 @@ def propose(rows: Path, scratch: Path, bid: str, name: str, method, fresh: bool)
         out = net_path(scratch, bid, name, fresh)
         out.parent.mkdir(parents=True, exist_ok=True)
         if roads is not None:
-            roads.to_parquet(out)
+            write_parquet(roads, out)
         same = np.nan
         if fresh and net_path(scratch, bid, name, False).exists():
             import geopandas as gpd
@@ -252,7 +262,7 @@ def propose(rows: Path, scratch: Path, bid: str, name: str, method, fresh: bool)
     row["total_wall_s"] = time.perf_counter() - t_all
     dest = proposal_row(rows, bid, name, fresh)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([row]).to_parquet(dest)
+    write_parquet(pd.DataFrame([row]), dest)
 
 
 def propose_all(rows: Path, scratch: Path, procs: int, ids: list[str], methods: list[str],
@@ -391,7 +401,7 @@ def _prefixes_one(job: PrefixJob) -> None:
     t0 = time.perf_counter()
     roads = gpd.read_parquet(net_path(scratch, bid, name, False))
     ordered = street_first_ordered(b, roads, STREET_TOL)
-    ordered.to_parquet(ordered_path(scratch, bid, name))
+    write_parquet(ordered, ordered_path(scratch, bid, name))
     t_order = time.perf_counter() - t0
     polys = np.asarray(b.buildings.outlines)
     W = {pop: common.POPULATIONS[pop].weights(polys) for pop in POPS}
@@ -421,7 +431,7 @@ def _prefixes_one(job: PrefixJob) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(prefix_rows)
     df["t_order"], df["t_prefixes"], df["t_total"] = t_order, t_pre, time.perf_counter() - t0
-    df.to_parquet(out)
+    write_parquet(df, out)
     print(f"{time.strftime('%H:%M:%S')} {bid} {name}: {len(ordered)} roads, order {t_order:.1f}s, "
           f"prefixes {t_pre:.1f}s, total {time.perf_counter() - t0:.1f}s", flush=True)
 
@@ -539,11 +549,35 @@ class Corridors:
             yield m, mask, (g.isub & (~g.bsub | mask)).mean(axis=-1)
 
 
+class Scored(NamedTuple):
+    """Which of a network's prefix rows `score` solves: those at `budgets` (of BUDGETS) and, if
+    `whole`, the whole network's. Item 4 and the sentinel scored every one; a stage that reads
+    fewer lenses scores fewer (transparency_run's tuning stage: (c) at area D 0.05 and 0.10)."""
+    budgets: tuple[float, ...]
+    whole: bool
+
+    @classmethod
+    def parse(cls, arg: str) -> Scored:
+        """`<budget>,...[,whole]`, e.g. 0.02,0.05,0.1,0.15,0.2,whole: every row."""
+        words = arg.split(",")
+        budgets = tuple(float(w) for w in words if w != "whole")
+        off = [b for b in budgets if not np.isclose(b, BUDGETS).any()]
+        if off or len(set(words)) != len(words) or not words:
+            raise SystemExit(f"score rows are budgets of {BUDGETS} or `whole`, each once: {arg!r}")
+        return cls(budgets=budgets, whole="whole" in words)
+
+    def of(self, pre: pd.DataFrame) -> pd.DataFrame:
+        """The prefix rows to solve."""
+        at = pre.budget.apply(lambda b: bool(np.isclose(b, self.budgets).any()))
+        return pre[at | (pre.full.astype(bool) & self.whole)]
+
+
 def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, pops: list[str],
-          ids: list[str]) -> None:
+          scored: Scored, ids: list[str]) -> None:
     """Every network of `lineup` with prefix rows, on `mesh_token`, for each of `pops` (count:
     (b) on the count prefixes; area: (c) on the area prefixes, and the stored clearings
-    rescored); one block at a time, one scorer per population on one grid."""
+    rescored), the prefix rows `scored` names; one block at a time, one scorer per population on
+    one grid."""
     _check_single_threaded()
     import clear
     import geopandas as gpd
@@ -604,13 +638,13 @@ def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, p
                     print(f"  {cname}: rescored {cl_rows[-1]['perm']:.7f}, stored "
                           f"{cl_rows[-1]['stored_perm']:.7f} (on {cl_rows[-1]['stored_mesh']})",
                           flush=True)
-                pd.DataFrame(cl_rows).to_parquet(clear_out)
+                write_parquet(pd.DataFrame(cl_rows), clear_out)
             X, Y = c.sc.grid._sub_xy()
             cor = Corridors(c.sc.grid, X, Y)
             for name in todo:
                 pre = pd.read_parquet(prefix_dir(rows) / f"{bid}__{name}.parquet")
                 ordered = gpd.read_parquet(ordered_path(scratch, bid, name))
-                need = {pop: pre[pre["pop"] == pop] for pop in pops}
+                need = {pop: scored.of(pre[pre["pop"] == pop]) for pop in pops}
                 stops = sorted({int(m) for pop in pops for m in need[pop]["m"]})
                 got: dict[tuple[str, int], dict] = {}
                 tn = time.perf_counter()
@@ -618,9 +652,9 @@ def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, p
                 tm = time.perf_counter()
                 for m, mask, free in cor.masks(ordered, stops):
                     t_masks += time.perf_counter() - tm
-                    if m == len(ordered):                # the whole network: Carve's own mask
-                        tc = time.perf_counter()
-                        ref = c.sc.grid.sub_of(road_corridor(ordered))
+                    if m == stops[-1]:          # the longest prefix scored (the whole network
+                        tc = time.perf_counter()  # when it is): Carve's own mask
+                        ref = c.sc.grid.sub_of(road_corridor(ordered.iloc[:m]))
                         if not np.array_equal(ref, mask):
                             raise AssertionError(f"{bid} {name}: road-by-road corridor differs "
                                                  f"from Carve's on {int((ref != mask).sum())} "
@@ -648,9 +682,9 @@ def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, p
                     df = pd.DataFrame(net_rows)
                     df["t_masks"], df["t_check"] = t_masks, t_check
                     df["t_network"] = time.perf_counter() - tn
-                    df.to_parquet(score_dir(rows, mesh_token, pop) / f"{bid}__{name}.parquet")
-                lensA = {pop: got[(pop, int(need[pop][need[pop].budget == BUDGETS[1]].m.iloc[0]))]
-                         for pop in pops}
+                    write_parquet(df, score_dir(rows, mesh_token, pop) / f"{bid}__{name}.parquet")
+                at = {pop: need[pop][np.isclose(need[pop].budget, BUDGETS[1])] for pop in pops}
+                lensA = {pop: got[(pop, int(r.m.iloc[0]))] for pop, r in at.items() if len(r)}
                 print(f"  {name}: {len(ordered)} roads, {len(stops)} prefixes, masks "
                       f"{t_masks:.0f}s, check {t_check:.0f}s, total "
                       f"{time.perf_counter() - tn:.0f}s; at D {BUDGETS[1]:g} "
@@ -659,13 +693,12 @@ def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, p
             del X, Y, cor
         for pop in pops:
             sc = scorers[pop]
-            pd.DataFrame([dict(block=bid, n=len(b.buildings), mesh=mesh.name, pop=pop,
-                               cells=int(c.sc.grid.inside.sum()), P0=sc.P0,
-                               J2_0=sc.J(sc.u0, 2.0), enclosed0=sc.enclosed0,
-                               t_setup=t_setup, t_block=time.perf_counter() - t0,
-                               networks=",".join(todo),
-                               gpu_peak_gb=gw.peak_mib / 1024, pool_peak_gb=gw.pool_peak_gb,
-                               host_hwm_gb=_status_gb("VmHWM"))]).to_parquet(
+            write_parquet(pd.DataFrame([dict(
+                block=bid, n=len(b.buildings), mesh=mesh.name, pop=pop,
+                cells=int(c.sc.grid.inside.sum()), P0=sc.P0, J2_0=sc.J(sc.u0, 2.0),
+                enclosed0=sc.enclosed0, t_setup=t_setup, t_block=time.perf_counter() - t0,
+                networks=",".join(todo), gpu_peak_gb=gw.peak_mib / 1024,
+                pool_peak_gb=gw.pool_peak_gb, host_hwm_gb=_status_gb("VmHWM"))]),
                 score_dir(rows, mesh_token, pop) / f"{bid}__setup__{int(time.time())}.parquet")
         print(f"{time.strftime('%H:%M:%S')} {bid} done in {time.perf_counter() - t0:.0f}s, GPU "
               f"peak {gw.peak_mib / 1024:.1f} GB (pool {gw.pool_peak_gb:.1f} GB)", flush=True)
@@ -1134,7 +1167,8 @@ if __name__ == "__main__":
     elif cmd == "prefixes":
         prefixes(Path(a[1]), lineup_of(a[2]), Path(a[3]), int(a[4]), a[5].split(","))
     elif cmd == "score":
-        score(Path(a[1]), lineup_of(a[2]), Path(a[3]), a[4], a[5].split(","), a[6].split(","))
+        score(Path(a[1]), lineup_of(a[2]), Path(a[3]), a[4], a[5].split(","), Scored.parse(a[6]),
+              a[7].split(","))
     elif cmd == "report":
         report(Path(a[1]), lineup_of(a[2]), a[3], a[4])
     elif cmd == "sizes":

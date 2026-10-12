@@ -325,3 +325,15 @@ Not pursued, with what would change that:
   `cells` (its cell budget, say) rather than a build at submit.
 - **Cluster launcher: bookgen and mycooc on GeoffChurch/cluster_submit** (done): mycooc deleted
   its old launcher (3ad93ac5), bookgen deleted ltcluster with no compatibility path (b901184b).
+- **CPU runs on orion and quadro2** (built 2026-10-12, for BACKLOG 5's 13 tuning blocks; owner:
+  "run the 13- and 60-block stages on orion/quadro2"): cluster.py's `cpu` kind, one task per
+  (block, item) of `--items` with `{id}` and `{item}` in the command, every task CPU only (no GPU
+  sizing, no GPU request), pinned to the node `--node` names (required: orion or quadro2,
+  CPU_NODES, the nodes whose GPUs are unusable), the cores and memory of a task required too;
+  `--gpus`, cluster_submit's throttle, at most 64 at once on orion and 40 on quadro2. A run of CPU
+  tasks is no longer held to the project's 4 GPUs' worth of tasks (GeoffChurch/cluster_submit
+  e299a2b; the pin bumped past its site files, `load_cluster("ai")`). A block's tasks unpack its
+  tar at once into the checkout they share, so each goes through cluster_unpack.py (every file
+  renamed into place); road_rescore.py writes what a task returns whole (a temp name, then a
+  rename), as a run's pull takes `*.parquet` while tasks still run. Guards: cluster_check.py
+  `cpu` and `gpu` (fault-injected).
