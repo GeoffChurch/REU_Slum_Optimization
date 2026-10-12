@@ -4,6 +4,12 @@ steps before the crossing one, part of that), then exchange refinement (search.p
 every building, ranked by the eps-world gradient at the 0/1 clearing (the tension), candidates
 scored in the eps world at 1e-6 as SIMP's incumbent does, the result exactly.
 
+First it frees (B's first stage, clear.free_first): the crossings that free the homes enclosed
+at baseline, cheapest per unit of population, within the budget. The greedy starts from them
+(its D counts them; its clearing is them and its picks while they fit the rest of the budget)
+and the polish never moves them. Where no home is enclosed nothing is held and the run is as
+before.
+
     PYTHONPATH=. uv run python research/roadless/polish_greedy.py <id> <p> <cpu|gpu> <picker> \\
         <tries> <width> <along> <budget> <mesh> [x2]
 
@@ -12,7 +18,10 @@ two-for-one moves too (search.Swaps' pairs). Rows in
 polish_rows/<along>/<picker>.P<tries>w<width>[x2]<the mesh's suffix>/D<budget>/<id>_p<p>.parquet
 (h 0.5 unnamed, as in a SIMP plan): `perm` the polished clearing's Lens A, `greedy_perm` the
 greedy's own clearing within the budget (a real clearing, not picker_compare's interpolation
-between steps), `t` the greedy and the polish, `t_greedy` the greedy alone, `mesh` its name.
+between steps), `t` the free stage, the greedy and the polish, `t_greedy` the free stage and the
+greedy, `mesh` its name, `free_D` the free stage's D, `free_cleared` its buildings, `enclosed`
+the polished clearing's B (i) (the population share it leaves enclosed:
+common.Scorer.enclosed_left).
 """
 from __future__ import annotations
 
@@ -48,32 +57,42 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
     c = relax._clearing(bid, device, along, mesh)
     rnd = search.greedy_round(picker_spec, clear.sweep_of(device))
     t0 = time.time()
-    s = search.SearchState.start(
-        c, power=power, score=search.Score(c.sc.J(c.sc.u0, power), c.sc.P0), world=search.EXACT)
+    # B's first stage: the crossings that free the enclosed homes, the greedy's start (its D
+    # counts them) and not movable in the polish; none enclosed, none held
+    held = clear.free_first(c, budget=budget, held=np.zeros(c.n, dtype=bool))
+    c.removed[:] = held
+    start = (search.Score(*clear.exact(c, held, power)) if held.any()
+             else search.Score(c.sc.J(c.sc.u0, power), c.sc.P0))      # the baseline's, no solve
+    s = search.SearchState.start(c, power=power, score=start, world=search.EXACT)
     search.greedy(rnd, budget)(s, search.Silent())
     t_greedy = time.time() - t0
     c.removed[:] = False
-    r = relax.cut_to_budget(s.order, c.cost, budget)
+    r = ((relax.cut_to_budget(s.order, c.cost, budget - float(c.cost[held].sum())) > 0)
+         | held).astype(float)
     c.removed[:] = r > 0
     rel = relax.Relaxation(c, power, rtol=RTOL)
     scorer = relax.Relaxation(c, power, q=1.0, rtol=RTOL, eps=SCORE_EPS, params=c.p)
     greedy_perm = rel.perm(rel.exact(r))
     # the polish's own count: the greedy's scorings are not its tries
     s = search.SearchState.start(c, power=power, score=search.UNSCORED, world=None)
+    s.movable[held] = False                                 # held stay held
     moves = search.polish(scorer, budget=budget, width=width, pairs=pairs, pool=relax.PAIR_POOL,
                           tries=tries)(s, search.Silent())
     rp, used = c.removed.astype(float), s.scorings
     perm = rel.perm(rel.exact(rp))
     t = time.time() - t0
     out.parent.mkdir(parents=True, exist_ok=True)
+    enclosed = c.sc.enclosed_left(c.open_(rp > 0))
     pd.DataFrame([dict(block=bid, n=c.n, picker=picker_spec, mesh=mesh.name, perm=perm,
                        greedy_perm=greedy_perm,
                        D=float(c.cost @ rp), greedy_D=float(c.cost @ r), moves=moves,
                        scorings=used, t=t, t_greedy=t_greedy,
-                       cleared=np.flatnonzero(rp).tolist())]).to_parquet(out)
+                       cleared=np.flatnonzero(rp).tolist(), free_D=float(c.cost[held].sum()),
+                       free_cleared=np.flatnonzero(held).tolist(),
+                       enclosed=enclosed)]).to_parquet(out)
     print(f"{bid} n={c.n} {picker_spec} at D {budget:g}: greedy {greedy_perm:.4f} -> polished "
-          f"{perm:.4f} ({moves} moves, {used} scorings); greedy {t_greedy:.0f}s, total {t:.0f}s",
-          flush=True)
+          f"{perm:.4f} ({moves} moves, {used} scorings, enclosed {enclosed:.4f}); greedy "
+          f"{t_greedy:.0f}s, total {t:.0f}s", flush=True)
 
 
 if __name__ == "__main__":

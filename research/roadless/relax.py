@@ -23,6 +23,14 @@ fw > 0), rows in relax_rows/<along>/<plan>/D<budget>/. path: nested budgets D 0.
 rows in the greedy's format (clear.rows_dir, picker SIMP<plan>), so picker_compare reads them
 like any picker.
 
+Both free first (B's first stage, clear.free_first): the crossings that free the homes enclosed
+at baseline, cheapest per unit of population, within the budget, held at 1 through SIMP, its
+roundings and the polish, which search with the rest of the budget; where no home is enclosed
+nothing is held and the run is as before. one's rows add free_D (the free stage's D),
+free_cleared (its buildings) and enclosed (B (i) of the answer: the population share it leaves
+enclosed, common.Scorer.enclosed_left). fw, .c, .C, .m, .g and .G are not built for held
+buildings: a block whose free stage holds any raises.
+
 plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>.t<solve
 tolerance while optimizing>, e.g. fw40.q3.i20.t1e-05 (the first 220 runs) or fw0.q5.i10.t0.001;
 the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .c .u).
@@ -696,6 +704,15 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
+    # B's first stage: the crossings that free the enclosed homes, held at 1 through SIMP (xlo),
+    # the incumbent's roundings (first) and its polish (not movable); none enclosed, none held
+    held = clear.free_first(c, budget=budget, held=np.zeros(c.n, dtype=bool))
+    if held.any() and (plan.fw > 0 or plan.coarse > 0 or plan.coarse_all > 0 or plan.starts > 1
+                       or plan.seed or plan.track):
+        raise NotImplementedError(f"{bid}: the free stage holds {int(held.sum())} buildings, and "
+                                  f"fw, .c, .C, .m, .g and .G are not built for held buildings: "
+                                  f"{plan.name}")
+    xlo = np.where(held, 1.0, XMIN)
     out = dict(block=bid, n=c.n, power=power, plan=plan.name, along=along)
     if plan.fw > 0:
         fw = frank_wolfe(rel, budget, plan.fw, log=log)
@@ -707,6 +724,10 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
                    rounded_D=float(c.cost @ r), frac_share=float(np.mean(frac)),
                    frac_cost=float(c.cost[frac].sum()), cleared=np.flatnonzero(r).tolist(),
                    x=x.tolist())
+    elif held.any():
+        # path's start with its fixed set: held at 1, the rest an even share of the budget left
+        rest = budget - float(c.cost[held].sum())
+        x = np.where(held, 1.0, rest / float(c.cost[~held].sum()))
     else:
         x = start_x(0, c.cost, budget)
     starts = max(plan.starts, 1)
@@ -716,7 +737,7 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
         raise ValueError(f".C is built for fw0 and without .c: {plan.name}")
     sample_in = plan.stages[-plan.late:] if plan.late > 0 else plan.stages
     inc = Incumbent(rel, budget, max(plan.keep, 1), samples=plan.samples, sample_in=sample_in,
-                    score_eps=plan.kscore)
+                    first=held.astype(float), score_eps=plan.kscore)
     watch = inc if plan.keep > 0 else None
     if plan.seed and plan.track:
         raise ValueError(f"a greedy seeds the incumbent or runs as a second track, not both: "
@@ -744,7 +765,7 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
             inc_c = Incumbent(rel_c, budget, max(plan.keep, 1), samples=plan.samples,
                               sample_in=sample_in, score_eps=plan.kscore)
             xk = simp(rel_c, start_x(k, c.cost, budget), budget, plan.stages, plan.iters,
-                      plan.update, log=log, watch=inc_c if plan.keep > 0 else None)
+                      plan.update, log=log, xlo=xlo, watch=inc_c if plan.keep > 0 else None)
             inc_c.offer(xk, plan.stages[-1])
             J_before = inc.J
             inc.consider(inc_c.r, f"start {k}'s winner at h {plan.coarse_all:g}")
@@ -765,11 +786,12 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
                 log(f"  coarse h {plan.coarse:g}: {rel_c.c.sc.grid.inside.sum()} cells, fine "
                     f"{c.sc.grid.inside.sum()}")
                 xk = simp(rel_c, xk, budget, stages[:-1], plan.iters, plan.update, log=log,
-                          watch=watch)
+                          xlo=xlo, watch=watch)
                 del rel_c
                 stages = stages[-1:]
             J_before = inc.J
-            xk = simp(rel, xk, budget, stages, plan.iters, plan.update, log=log, watch=watch)
+            xk = simp(rel, xk, budget, stages, plan.iters, plan.update, log=log, xlo=xlo,
+                      watch=watch)
             inc.offer(xk, plan.stages[-1])                # the last iterate's rounding
             if k == 0 or inc.J < J_before:
                 xs = xk
@@ -791,12 +813,14 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     out.update(simp_perm=rel.perm(Jbest), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
                simp_cleared=np.flatnonzero(rs).tolist(), simp_x=xs.tolist(),
-               t=time.time() - t0)
+               free_D=float(c.cost[held].sum()), free_cleared=np.flatnonzero(held).tolist(),
+               enclosed=c.sc.enclosed_left(c.open_(rs > 0)), t=time.time() - t0)
     print(f"{bid} n={c.n} p={power:g} {along} {plan.name}: "
           + (f"relaxed {out['relaxed_perm']:.4f} bound {out['bound_perm']:.4f} rounded "
              f"{out['rounded_perm']:.4f}; " if plan.fw > 0 else "")
           + f"SIMP rounded {out['simp_perm']:.4f} (D {out['simp_D']:.4f}, grey "
-          f"{out['simp_grey']:.3f}); {out['t']:.0f}s", flush=True)
+          f"{out['simp_grey']:.3f}, enclosed {out['enclosed']:.4f}); {out['t']:.0f}s",
+          flush=True)
     return out
 
 
@@ -810,8 +834,9 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     ~ q x^(q-1) ~ 0 and multiplicative updates, so it never comes back -- measured: -0.076 Lens
     A against the greedy), round, score exactly. plan.warm > 0: after the first budget, the
     rest start from the last x lifted to at least that even share (so none is trapped at
-    XMIN), and each stage gets plan.warm updates. Rows in the greedy's format: `cleared` = the
-    buildings new at this step."""
+    XMIN), and each stage gets plan.warm updates. Each budget frees first (clear.free_first
+    within D, from the held set): its crossings join the held set before SIMP. Rows in the
+    greedy's format: `cleared` = the buildings new at this step, the free stage's among them."""
     if (plan.coarse > 0 or plan.polish > 0 or plan.coarse_all > 0 or plan.starts > 1
             or plan.seed or plan.track):
         raise ValueError(f"coarse grids, polish and multi-start are not built for path: "
@@ -825,6 +850,8 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
     x = np.full(c.n, PATH_DS[0])
     t0 = time.time()
     for i, D in enumerate(PATH_DS):
+        last = fixed
+        fixed = clear.free_first(c, budget=D, held=last)
         rest = max(D - float(c.cost[fixed].sum()), 0.0)
         even = rest / max(float(c.cost[~fixed].sum()), 1e-12)
         warm = plan.warm > 0 and i > 0
@@ -838,7 +865,7 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
         inc.offer(x, plan.stages[-1])
         r = inc.r > 0
         assert r[fixed].all()
-        new = np.flatnonzero(r & ~fixed)
+        new = np.flatnonzero(r & ~last)
         fixed |= r
         J, P = rel.exact_JP(fixed.astype(float))
         rows.append(dict(block=bid, n=c.n, step=len(rows), D=float(c.cost[fixed].sum()),
