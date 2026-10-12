@@ -1,0 +1,6 @@
+method,part,arm
+clearance_looped,claim,clearance_looped+simp-f0.1-price-route
+clearance_looped,knob,clearance_looped+repulsion4
+resistance_lp,claim,resistance_lp+simp-f0.1-price
+resistance_lp,knob,resistance_lp+chunks4
+resistance_lp,knob,resistance_lp+chunks16

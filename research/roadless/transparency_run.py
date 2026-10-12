@@ -16,6 +16,10 @@ its scoring solves, and its Verdict, the rule fixed in NOTES before its results:
   sentinel  the 4-block sentinel, 41 arms (PLAN), every lens scored; the Screen (transparency_rows/)
   tuning    the 13 tuning blocks (simp_compare.TUNING), 37 arms (TUNING_PLAN), (c) scored at area
             D 0.05 and 0.10 only, (a) from the prefixes; the Choice (transparency_rows/tuning/)
+  held      the 46 held-out blocks (HELD), scored as the 13; its arms are data, the committed
+            transparency_rows/held/plan.csv (held_plan: per method its claim and its own knobs,
+            each an arm of the 13, base and the claim's random sets with them); the Claim
+            (transparency_rows/held/)
 `arms` writes a stage's arms, with every value that can change a network, to <rows>/arms.csv
 (committed). The networks are proposed fresh (road_rescore.propose, no derive cache anywhere),
 cut to their canonical prefixes by road_rescore.prefixes and scored by road_rescore.score, under
@@ -54,7 +58,7 @@ import sys
 import tarfile
 import time
 import traceback
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Protocol
@@ -80,6 +84,24 @@ from reblock.transparency import Transparency, TransparentSubstrate, factors_of 
 ITEM4_ROWS = HERE / "road_rows"              # item 4's rows and networks, read only
 ITEM4_NETS = ITEM4_ROWS / "scratch" / "networks"
 SENTINEL = ("ZAF.9.3.1_1_22422", "ZAF.9.3.1_1_30848", "ZAF.9.3.1_1_5810", "ZAF.9.5.4_1_9712")
+# The held-out blocks: item 4's 60 large blocks that fit at h 0.5 (the blocks of its committed lens
+# rows, road_rows/summary_*_lens_D0.05.csv; road_rescore.py `project`'s gb_uniform under 48 GB)
+# less the 13 tuning blocks (simp_compare.TUNING) and 14401, which has no stored clearing at h 0.5
+# (neither SIMP's default nor the cheap preset's). transparency_check.py `held` derives them again.
+HELD = ("ZAF.9.1.4_1_6312", "ZAF.9.3.1_1_17608", "ZAF.9.3.1_1_18739", "ZAF.9.3.1_1_18910",
+        "ZAF.9.3.1_1_18947", "ZAF.9.3.1_1_18985", "ZAF.9.3.1_1_19161", "ZAF.9.3.1_1_19810",
+        "ZAF.9.3.1_1_20023", "ZAF.9.3.1_1_20080", "ZAF.9.3.1_1_20423", "ZAF.9.3.1_1_20952",
+        "ZAF.9.3.1_1_21252", "ZAF.9.3.1_1_21777", "ZAF.9.3.1_1_22267", "ZAF.9.3.1_1_22336",
+        "ZAF.9.3.1_1_22591", "ZAF.9.3.1_1_22633", "ZAF.9.3.1_1_22640", "ZAF.9.3.1_1_22659",
+        "ZAF.9.3.1_1_22673", "ZAF.9.3.1_1_23735", "ZAF.9.3.1_1_24240", "ZAF.9.3.1_1_30796",
+        "ZAF.9.3.1_1_38254", "ZAF.9.3.1_1_38366", "ZAF.9.3.1_1_38528", "ZAF.9.3.1_1_38988",
+        "ZAF.9.3.1_1_39240", "ZAF.9.3.1_1_40144", "ZAF.9.3.1_1_41515", "ZAF.9.3.1_1_41673",
+        "ZAF.9.3.1_1_41806", "ZAF.9.3.1_1_43547", "ZAF.9.3.1_1_43708", "ZAF.9.3.1_1_44602",
+        "ZAF.9.3.1_1_44775", "ZAF.9.3.1_1_45876", "ZAF.9.3.1_1_5706", "ZAF.9.3.1_1_6310",
+        "ZAF.9.3.1_1_6316", "ZAF.9.3.1_1_7662", "ZAF.9.3.1_1_8152", "ZAF.9.3.1_1_8480",
+        "ZAF.9.5.4_1_8235", "ZAF.9.5.4_1_9710")
+HELD_ROWS = HERE / "transparency_rows" / "held"
+HELD_PLAN = HELD_ROWS / "plan.csv"           # the held-out stage's arms, as data (committed)
 MESH = "0.5"                                 # item 4's: h 0.5, uni (road_rescore's parameters)
 F_LEVELS = (0.5, 0.1)                        # the sentinel's main form's factors
 F_ONE = 0.1                                  # the ablations', C''s and the random sets' factor;
@@ -458,6 +480,66 @@ TUNING_PLAN = (
 )
 
 
+@dataclass(frozen=True, kw_only=True)
+class ClaimArms:
+    """One method's arms on the held-out blocks, by their part in its claim: base, its own knobs
+    (opaque), the claim (a candidate of the 13) and the claim's random sets (the five seeds in its
+    form)."""
+
+    method: str
+    base: Arm
+    knobs: tuple[Arm, ...]
+    claim: Arm
+    random: tuple[Arm, ...]
+
+    def __post_init__(self) -> None:
+        if not self.knobs:
+            raise ValueError(f"{self.method}: a claim is held against at least one own knob")
+
+    @property
+    def arms(self) -> tuple[Arm, ...]:
+        return (self.base, *self.knobs, self.claim, *self.random)
+
+    def parts(self) -> list[tuple[str, Arm]]:
+        return ([("base", self.base)] + [("knob", a) for a in self.knobs]
+                + [("claim", self.claim)] + [("random", a) for a in self.random])
+
+
+PLAN_PARTS = ("claim", "knob")                # a plan file's parts; base and random come with
+
+
+def held_plan(path: Path) -> tuple[ClaimArms, ...]:
+    """The held-out stage's arms from `path`, a CSV of method, part, arm: per method one `claim`,
+    a candidate of its arms on the 13 (TUNING_PLAN), and one or more `knob`s, its own knobs there;
+    its base and the claim's random sets (its form's, ChoiceArms.own_random) come with them.
+    Checked here, where the file is read: an unknown method, part or arm, a method without its one
+    claim, or an arm named twice raises."""
+    df = pd.read_csv(path, dtype=str, keep_default_na=False)
+    if list(df.columns) != ["method", "part", "arm"] or (df == "").any().any():
+        raise SystemExit(f"{path}: the columns are method, part, arm, every cell filled")
+    tuning = {m.method: m for m in TUNING_PLAN}
+    off = sorted(set(df.method) - set(tuning)) + sorted(set(df.part) - set(PLAN_PARTS))
+    if off or df.arm.duplicated().any():
+        raise SystemExit(f"{path}: unknown methods or parts {off}, or an arm named twice")
+    out = []
+    for method in dict.fromkeys(df.method):          # in the file's order
+        m, g = tuning[method], df[df.method == method]
+        by_name = {a.name: a for a in m.arms}
+        unknown = sorted(set(g.arm) - set(by_name))
+        if unknown:
+            raise SystemExit(f"{path}: {unknown} are not {method}'s arms on the 13")
+        claims = [by_name[n] for n in g[g.part == "claim"].arm]
+        knobs = tuple(by_name[n] for n in g[g.part == "knob"].arm)
+        if len(claims) != 1 or claims[0] not in m.candidates or not all(k in m.knobs
+                                                                         for k in knobs):
+            raise SystemExit(f"{path}: {method} needs one claim among its candidates on the 13 "
+                             "and knobs among its knobs there")
+        [claim] = claims
+        out.append(ClaimArms(method=method, base=m.base, knobs=knobs, claim=claim,
+                             random=m.own_random(claim)))
+    return tuple(out)
+
+
 def _check_single_threaded() -> None:
     bad = {k: os.environ.get(k) for k, v in rr.SINGLE.items() if os.environ.get(k) != v}
     if bad:
@@ -539,9 +621,10 @@ def arms_table(stage: Stage) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _plan(stage: Stage) -> tuple[MethodArms, ...] | tuple[ChoiceArms, ...]:
+def _plan(stage: Stage
+          ) -> tuple[MethodArms, ...] | tuple[ChoiceArms, ...] | tuple[ClaimArms, ...]:
     v = stage.verdict
-    if not isinstance(v, Screen | Choice):
+    if not isinstance(v, Screen | Choice | Claim):
         raise TypeError(f"{stage.name}'s verdict has no plan: {v!r}")
     return v.plan
 
@@ -1147,6 +1230,37 @@ def _wide(t: pd.DataFrame, blocks: tuple[str, ...], names: tuple[str, ...],
     return w.reindex(index=list(names), columns=list(blocks))
 
 
+def _complete(stage: Stage) -> dict[float, pd.DataFrame]:
+    """reduced_lens at each of GUARD_D, every arm with (a) and (c) on every block (raises
+    otherwise); notes each network that falls short of a budget (its prefix is all of it)."""
+    lens = {d: reduced_lens(stage, d) for d in GUARD_D}
+    for d, t in lens.items():
+        n = t.groupby("method").size()
+        if (sorted(set(stage.lineup) - set(t.method)) or n.ne(len(stage.blocks)).any()
+                or t[["a", "c"]].isna().any().any()):
+            raise SystemExit(f"not every arm has (a) and (c) on every block at D {d:g}")
+        short_of = t[~(t.reach_count & t.reach_area)]
+        for _, r in short_of.iterrows():
+            print(f"  NOTE: {r.block} {r.method}'s whole network falls short of D {d:g} "
+                  f"(count {r.Dc_count:.4f}, area {r.Da_area:.4f}): its prefix is all of it")
+    return lens
+
+
+def _against_item4(lens: Mapping[float, pd.DataFrame], blocks: tuple[str, ...],
+                   arms: list[Arm]) -> None:
+    """Opaque preset arms' (a), (c) and B (i) at each of GUARD_D against item 4's rows (the same
+    scorer and mesh): the reduced scoring's check where the networks are item 4's."""
+    item4 = {d: pd.read_csv(rr.summary_path(ITEM4_ROWS, MESH, f"lens_D{d:g}")) for d in GUARD_D}
+    for arm in arms:
+        for d in GUARD_D:
+            ref4 = item4[d][item4[d].method == arm.preset].set_index("block")
+            diffs = [float((_per_block(lens[d], blocks, arm.name, col)
+                            - ref4[col].reindex(list(blocks))).abs().max())
+                     for col in ("a", "c", "enc_c")]
+            print(f"  {arm.name} at D {d:g} against item 4's {arm.preset}: max |diff| "
+                  f"(a) {diffs[0]:.1e}, (c) {diffs[1]:.1e}, B (i) {diffs[2]:.1e}")
+
+
 @dataclass(frozen=True, kw_only=True)
 class Choice:
     """The 13 tuning blocks' choice rule (NOTES, "Transparency for the road methods: the 13
@@ -1176,30 +1290,12 @@ class Choice:
         arm) and summary_lens.csv (per block and arm, at each of GUARD_D)."""
         pd.set_option("display.width", 250)
         blocks = stage.blocks
-        lens = {d: reduced_lens(stage, d) for d in GUARD_D}
-        for d, t in lens.items():
-            n = t.groupby("method").size()
-            if (sorted(set(stage.lineup) - set(t.method)) or n.ne(len(blocks)).any()
-                    or t[["a", "c"]].isna().any().any()):
-                raise SystemExit(f"not every arm has (a) and (c) on every block at D {d:g}")
-            short_of = t[~(t.reach_count & t.reach_area)]
-            for _, r in short_of.iterrows():
-                print(f"  NOTE: {r.block} {r.method}'s whole network falls short of D {d:g} "
-                      f"(count {r.Dc_count:.4f}, area {r.Da_area:.4f}): its prefix is all of it")
+        lens = _complete(stage)
         rec = pd.read_csv(stage.rows / "summary_records.csv")
         simp = _simp(blocks)
         _scorer_check(stage)
-        item4 = {d: pd.read_csv(rr.summary_path(ITEM4_ROWS, MESH, f"lens_D{d:g}"))
-                 for d in GUARD_D}
-        for m in self.plan:
-            for arm in (m.base, *[a for a in m.knobs if a.reuse_item4]):
-                for d in GUARD_D:
-                    ref4 = item4[d][item4[d].method == arm.preset].set_index("block")
-                    diffs = [float((_per_block(lens[d], blocks, arm.name, col)
-                                    - ref4[col].reindex(list(blocks))).abs().max())
-                             for col in ("a", "c", "enc_c")]
-                    print(f"  {arm.name} at D {d:g} against item 4's {arm.preset}: max |diff| "
-                          f"(a) {diffs[0]:.1e}, (c) {diffs[1]:.1e}, B (i) {diffs[2]:.1e}")
+        _against_item4(lens, blocks, [a for m in self.plan
+                                      for a in (m.base, *[k for k in m.knobs if k.reuse_item4])])
         W = boot_weights(len(blocks))
         out = []
         for m in self.plan:
@@ -1306,6 +1402,223 @@ class Choice:
         print(f"    {'SIMP default':26s}" + "".join(f"{v:8.4f}" for v in simp))
 
 
+# ------------------------------------------------------------------ the held-out blocks' claim
+def _interval(W: np.ndarray, diff: np.ndarray, keep: np.ndarray) -> tuple[float, float, float]:
+    """The mean of `diff` over the blocks `keep` and its Bayesian-bootstrap 95% interval: `W`'s
+    weights of those blocks renormalized, a Dirichlet(1, ..., 1) over them, paired with every
+    other interval drawn from `W`. No block kept: NaN, which holds nothing."""
+    if not keep.any():
+        return np.nan, np.nan, np.nan
+    w = W[:, keep] / W[:, keep].sum(axis=1, keepdims=True)
+    boot = w @ diff[keep]
+    return (float(diff[keep].mean()), float(np.quantile(boot, 0.025)),
+            float(np.quantile(boot, 0.975)))
+
+
+class RuleRow(NamedTuple):
+    """One test of a method's claim on the held-out blocks (a row of summary_rules.csv)."""
+
+    method: str
+    rule: int              # 1 -- 4, as NOTES numbers them
+    against: str           # what the claim is set against
+    blocks: int            # the blocks the test is over
+    behind_i: int          # rule 1: the claim's blocks behind base on B (i); rule 2: the knob's
+    value: float           # 1, 2: mean (c) gain; 3: mean difference; 4: median (a) loss
+    lo: float              # 1 -- 3: the 95% interval
+    hi: float
+    holds: bool
+
+
+@dataclass(frozen=True, kw_only=True)
+class Claim:
+    """The held-out blocks' rules (NOTES, "Transparency for the road methods: the held-out
+    blocks"), fixed before any held-out result. Per method, over the blocks, paired by block,
+    each interval a Bayesian bootstrap's 95% (boot_weights over the blocks: one matrix for every
+    arm and test), "above 0" its lower end above 0:
+      1. (primary) the claim's mean (c) gain over base at area D LENS_D, its interval above 0,
+         and the claim behind base on B (i) (it leaves more population enclosed) on no block;
+      2. against each own knob, on the blocks where that knob is not behind base on B (i) (the
+         owner's amendment, 2026-10-12): the claim's mean (c) gain over the knob, its interval
+         above 0 (the weights of those blocks renormalized); for every knob;
+      3. the claim's (c) above its random sets' per-block mean, the mean difference's interval
+         above 0;
+      4. the claim's median (a) loss against base at most A_LOSS at count D 0.05, and at D 0.10.
+    A shift of the frontier on the held-out blocks if 1 -- 4 all hold; otherwise the rules that
+    fail. Beside it, description, not verdict: per arm the median gain, the mean without the
+    three blocks of largest gain, the blocks up in B's order, the gap to SIMP's default closed,
+    (c) at area D 0.10, the share of the (c) prefix's displacement on C, and the random draws'
+    area ratio and overlap."""
+
+    plan: tuple[ClaimArms, ...]
+
+    @property
+    def arms(self) -> tuple[Arm, ...]:
+        return tuple(a for m in self.plan for a in m.arms)
+
+    def report(self, stage: Stage) -> None:
+        """The rules' verdict and the tables behind it; writes <rows>/summary_rules.csv (per
+        method and test), summary_claim.csv (per arm) and summary_lens.csv (per block and arm,
+        at each of GUARD_D)."""
+        pd.set_option("display.width", 250)
+        blocks = stage.blocks
+        lens = _complete(stage)
+        rec = pd.read_csv(stage.rows / "summary_records.csv")
+        simp = _simp(blocks)
+        _scorer_check(stage)
+        _against_item4(lens, blocks, [m.base for m in self.plan])
+        W = boot_weights(len(blocks))
+        tests: list[RuleRow] = []
+        stats: list[dict[str, object]] = []
+        for m in self.plan:
+            t, st = self.judge(m, lens, simp, W)
+            for arm in m.arms:
+                r = rec[rec.arm == arm.name]
+                if len(r) != len(blocks):
+                    raise SystemExit(f"{arm.name}: records on {len(r)} of {len(blocks)} blocks")
+                st[arm.name].update(
+                    share_simp=float(r.share_simp.mean()), share_own=float(r.share_own.mean()),
+                    area_ratio_median=float(r.area_ratio.median()),
+                    area_ratio_min=float(r.area_ratio.min()),
+                    area_ratio_max=float(r.area_ratio.max()),
+                    jaccard_median=float(r.jaccard.median()), jaccard_max=float(r.jaccard.max()),
+                    D_area_whole_min=float(r.D_area_whole.min()))
+            tests += t
+            stats += list(st.values())
+            draws = rec[rec.arm.isin([a.name for a in m.random])]
+            own = draws.groupby("arm").share_own.mean()
+            self._print(m, t, st, simp, (
+                f"random sets ({len(draws)} draws): their own share {own.min():.3f} -- "
+                f"{own.max():.3f}; area over C's median {draws.area_ratio.median():.4f} (p10 "
+                f"{draws.area_ratio.quantile(0.1):.3f}, p90 {draws.area_ratio.quantile(0.9):.3f}, "
+                f"{draws.area_ratio.min():.3f} -- {draws.area_ratio.max():.3f}); Jaccard with C "
+                f"median {draws.jaccard.median():.3f}, at most {draws.jaccard.max():.3f}"))
+        pd.DataFrame([x._asdict() for x in tests]).to_csv(stage.rows / "summary_rules.csv",
+                                                           index=False)
+        pd.DataFrame(stats).to_csv(stage.rows / "summary_claim.csv", index=False)
+        keep = ["block", "method", "n", "m_count", "a", "m_area", "c", "enc_c", "Dc_count",
+                "Da_area", "reach_count", "reach_area"]
+        both = pd.concat([lens[d][keep].assign(budget=d) for d in GUARD_D], ignore_index=True)
+        both.rename(columns={"method": "arm"}).merge(
+            rec[["block", "arm", "share_simp", "share_own", "area_ratio", "jaccard"]],
+            on=["block", "arm"]).to_csv(stage.rows / "summary_lens.csv", index=False)
+
+    @staticmethod
+    def judge(m: ClaimArms, lens: Mapping[float, pd.DataFrame], simp: pd.Series,
+              W: np.ndarray) -> tuple[list[RuleRow], dict[str, dict[str, object]]]:
+        """The rules on one method: each test's row, and every arm's numbers (summary_claim.csv's
+        columns but the records'). `lens` per budget of GUARD_D (reduced_lens's columns), `simp`
+        SIMP's default's (c) per block (its index the blocks, in order), `W` the bootstrap's
+        weights (draws x blocks, boot_weights)."""
+        blocks = tuple(simp.index)
+        names = tuple(a.name for a in m.arms)
+        c = {d: _wide(lens[d], blocks, names, "c") for d in GUARD_D}
+        enc = {d: _wide(lens[d], blocks, names, "enc_c") for d in GUARD_D}
+        a = {d: _wide(lens[d], blocks, names, "a") for d in GUARD_D}
+        base, claim = m.base.name, m.claim.name
+        behind = {d: enc[d].gt(enc[d].loc[base] + ENCLOSED_TOL, axis=1) for d in GUARD_D}
+        ahead = {d: enc[d].lt(enc[d].loc[base] - ENCLOSED_TOL, axis=1) for d in GUARD_D}
+        every = np.ones(len(blocks), dtype=bool)
+        c5, behind5 = c[LENS_D], behind[LENS_D]
+
+        def gain(name: str, d: float) -> np.ndarray:
+            return (c[d].loc[name] - c[d].loc[base]).to_numpy(dtype=float)
+
+        def a_loss(name: str, d: float) -> float:
+            return float((a[d].loc[base] - a[d].loc[name]).median())
+
+        claim_behind = int(behind5.loc[claim].sum())
+        mean, lo, hi = _interval(W, gain(claim, LENS_D), every)
+        tests = [RuleRow(method=m.method, rule=1, against="base", blocks=len(blocks),
+                         behind_i=claim_behind, value=mean, lo=lo, hi=hi,
+                         holds=bool(lo > 0 and claim_behind == 0))]
+        for k in m.knobs:
+            kept = ~behind5.loc[k.name].to_numpy(dtype=bool)
+            diff = (c5.loc[claim] - c5.loc[k.name]).to_numpy(dtype=float)
+            mean, lo, hi = _interval(W, diff, kept)
+            tests.append(RuleRow(method=m.method, rule=2, against=k.change.label,
+                                 blocks=int(kept.sum()), behind_i=int((~kept).sum()), value=mean,
+                                 lo=lo, hi=hi, holds=bool(lo > 0)))
+        rand = c5.loc[[r.name for r in m.random]].mean(axis=0)
+        mean, lo, hi = _interval(W, (c5.loc[claim] - rand).to_numpy(dtype=float), every)
+        tests.append(RuleRow(method=m.method, rule=3, against="random sets", blocks=len(blocks),
+                             behind_i=0, value=mean, lo=lo, hi=hi, holds=bool(lo > 0)))
+        for d in GUARD_D:
+            v = a_loss(claim, d)
+            tests.append(RuleRow(method=m.method, rule=4, against=f"(a) at count D {d:g}",
+                                 blocks=len(blocks), behind_i=0, value=v, lo=np.nan, hi=np.nan,
+                                 holds=v <= A_LOSS))
+        gap = (simp - c5.loc[base]).to_numpy(dtype=float)
+        st: dict[str, dict[str, object]] = {}
+        for part, arm in m.parts():
+            g5, g10 = gain(arm.name, LENS_D), gain(arm.name, 0.1)
+            mean5, lo5, hi5 = _interval(W, g5, every)
+            mean10, lo10, hi10 = _interval(W, g10, every)
+            up = {d: ahead[d].loc[arm.name] | (~behind[d].loc[arm.name] & (gain(arm.name, d) > 0))
+                  for d in GUARD_D}
+            top3 = np.argsort(-g5, kind="stable")[:3]          # the three largest gains
+            rest = np.ones(len(blocks), dtype=bool)
+            rest[top3] = False
+            st[arm.name] = dict(
+                method=m.method, arm=arm.name, part=part, mean_c=float(c5.loc[arm.name].mean()),
+                mean_gain=mean5, lo=lo5, hi=hi5, median_gain=float(np.median(g5)),
+                mean_gain_without_top3=float(g5[rest].mean()),
+                top3=",".join(_short(blocks[i]) for i in top3), min_gain=float(g5.min()),
+                blocks_up=int(up[LENS_D].sum()), behind_i=int(behind5.loc[arm.name].sum()),
+                ahead_i=int(ahead[LENS_D].loc[arm.name].sum()),
+                **{f"a_loss_D{d:g}": a_loss(arm.name, d) for d in GUARD_D},
+                gap_closed=float((g5 / gap).mean()), gap_closed_pooled=float(g5.sum() / gap.sum()),
+                mean_c_D10=float(c[0.1].loc[arm.name].mean()), mean_gain_D10=mean10,
+                lo_D10=lo10, hi_D10=hi10, blocks_up_D10=int(up[0.1].sum()),
+                **{f"c_{_short(b)}": float(c5.loc[arm.name, b]) for b in blocks})
+        return tests, st
+
+    @staticmethod
+    def verdict(tests: list[RuleRow]) -> str:
+        """`tests`' verdict, one method's: a shift if every rule holds, else the rules that fail."""
+        failing = sorted({t.rule for t in tests if not t.holds})
+        if not failing:
+            return "a shift of the frontier on the held-out blocks: rules 1 -- 4 all hold"
+        return "no shift: rule " + ", ".join(str(r) for r in failing) + " fails"
+
+    @staticmethod
+    def _print(m: ClaimArms, tests: list[RuleRow], st: Mapping[str, Mapping[str, object]],
+               simp: pd.Series, draws: str) -> None:
+        short = {a.name: a.change.label for a in m.arms}
+        print(f"\n{m.method.upper()} on {len(simp)} held-out blocks: (c) at area D {LENS_D:g}, "
+              f"the mean gain over base with its 95% interval, the median gain, the mean without "
+              f"the three largest gains, the blocks up in B's order, the worst block, the (a) "
+              f"loss against base (median) at count D 0.05 | 0.10, the gap to SIMP's default "
+              f"closed (mean of the blocks'), the mean gain at area D 0.10, the share of the (c) "
+              f"prefix's displacement on C")
+        print(f"  {'arm':23s} {'mean (c)':>8s} {'gain':>8s} {'95% interval':>19s} {'median':>8s} "
+              f"{'w/o top3':>8s} {'up':>3s} {'worst':>8s} {'a .05':>7s} {'a .10':>7s} "
+              f"{'gap':>7s} {'gain .10':>8s} {'on C':>6s}")
+        for _part, arm in m.parts():
+            r = st[arm.name]
+            print(f"  {short[arm.name]:23s} {r['mean_c']:8.4f} {r['mean_gain']:+8.4f} "
+                  f"[{r['lo']:+8.4f},{r['hi']:+8.4f}] {r['median_gain']:+8.4f} "
+                  f"{r['mean_gain_without_top3']:+8.4f} {r['blocks_up']:3d} {r['min_gain']:+8.4f} "
+                  f"{r['a_loss_D0.05']:+7.4f} {r['a_loss_D0.1']:+7.4f} {r['gap_closed']:+7.3f} "
+                  f"{r['mean_gain_D10']:+8.4f} {r['share_simp']:6.3f}")
+        cl = st[m.claim.name]
+        print(f"  the claim's three largest gains: {cl['top3']}; at area D 0.10 "
+              f"{cl['mean_gain_D10']:+.4f} [{cl['lo_D10']:+.4f}, {cl['hi_D10']:+.4f}], up on "
+              f"{cl['blocks_up_D10']}; the gap closed, pooled: {cl['gap_closed_pooled']:+.3f}")
+        print(f"  {draws}")
+        for t in tests:
+            what = {1: "the claim's mean (c) gain over base",
+                    2: f"the claim's mean (c) gain over {t.against} where it is not behind base "
+                       f"on B (i)",
+                    3: "the claim's mean (c) above its random sets' per-block mean",
+                    4: f"the claim's median {t.against} loss against base"}[t.rule]
+            num = (f"{t.value:+.4f} (at most {A_LOSS:g})" if t.rule == 4 else
+                   f"{t.value:+.4f} [{t.lo:+.4f}, {t.hi:+.4f}]")
+            extra = (f", behind base on B (i) on {t.behind_i}" if t.rule == 1 else
+                     f", on {t.blocks} blocks ({t.behind_i} left out)" if t.rule == 2 else "")
+            print(f"  rule {t.rule}: {what}: {num}{extra} -> {'holds' if t.holds else 'FAILS'}")
+        print(f"  verdict: {Claim.verdict(tests)}")
+
+
 # ------------------------------------------------------------------ the stages
 SENTINEL_STAGE = Stage(
     name="sentinel", rows=HERE / "transparency_rows", blocks=SENTINEL, verdict=Screen(plan=PLAN),
@@ -1314,14 +1627,24 @@ TUNING_STAGE = Stage(
     name="tuning", rows=HERE / "transparency_rows" / "tuning", blocks=simp_compare.TUNING,
     verdict=Choice(plan=TUNING_PLAN), pops=("area",), scored=rr.Scored(budgets=GUARD_D,
                                                                        whole=False))
-STAGES = {s.name: s for s in (SENTINEL_STAGE, TUNING_STAGE)}
+
+
+def held_stage() -> Stage:
+    """The held-out blocks, scored as the 13; its arms read from HELD_PLAN (held_plan)."""
+    return Stage(name="held", rows=HELD_ROWS, blocks=HELD, verdict=Claim(plan=held_plan(HELD_PLAN)),
+                 pops=("area",), scored=rr.Scored(budgets=GUARD_D, whole=False))
+
+
+# Each stage by name, built when named (the held stage reads its plan file then).
+STAGES: dict[str, Callable[[], Stage]] = {"sentinel": lambda: SENTINEL_STAGE,
+                                          "tuning": lambda: TUNING_STAGE, "held": held_stage}
 
 
 # ------------------------------------------------------------------ main
 def _stage(name: str) -> Stage:
     if name not in STAGES:
         raise SystemExit(f"stages are {sorted(STAGES)}, not {name!r}")
-    return STAGES[name]
+    return STAGES[name]()
 
 
 if __name__ == "__main__":

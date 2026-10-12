@@ -5,6 +5,8 @@ rest are unit tests (tests/test_transparency.py).
     uv run python $S opaque <out.csv> <procs> <ids,> <methods,>
     uv run python $S sets <ids,> <seeds>
     uv run python $S rule
+    uv run python $S held
+    uv run python $S claim
 
 `opaque` (guard 1): each method as configured (compare_config's all_methods, common.arms()), with
 `Opaque` for the price and `TransparentSubstrate(<its substrate>, Opaque())` for the route, run
@@ -32,12 +34,30 @@ ahead of every candidate stops the method; a candidate below its own random sets
 the other form's) is out; with every knob losing, a losing candidate above it is chosen (as the
 rule is written).
 
+`held`: the held-out blocks (transparency_run.HELD) derived again: item 4's 60 (its committed lens
+rows' blocks, the same as its projection's blocks under 48 GB at h 0.5 and its networks'
+directories), less simp_compare.TUNING, less the blocks without both stored clearings at h 0.5
+(14401); and item 4's network of each plan method's preset on every one of them (check-base's).
+
+`claim`: the held-out blocks' rules (transparency_run.Claim.judge and .verdict; NOTES,
+"Transparency for the road methods: the held-out blocks") on synthetic lens tables over 20
+made-up blocks, no result read, both methods of the plan file: every rule holding is a shift (the
+interval rule 1's bootstrap over W, paired); the claim behind base on B (i) on one block, or its
+gains straddling 0, fails rule 1; a knob behind base on B (i) on three blocks, where it is far
+ahead on (c), is left out there and rule 2 holds against it on the other 17 (its interval brackets
+the mean over them); a knob ahead of the claim fails rule 2 though the other knob is beaten; a
+knob behind base everywhere leaves nothing to compare, and rule 2 does not hold against it; random
+sets as good as the claim fail rule 3; a median (a) loss of 0.011 at count D 0.10 alone fails
+rule 4.
+
 FAULT INJECTION, `rule`: the veto without B (i), and the random sets of every form for each
-candidate, each fail it. `sets` on six blocks: positions read off by one, draws that ignore the strata, the
-seed ignored, a ClearedSet identity without the positions' digest, and AreaMass cutting its strata
-by count each fail it. `opaque`: the brief's literal route formula (outside length from the union,
-inside length per building), under which a stretch inside two overlapping opaque footprints weighs
-more than open ground, fails it.
+candidate, each fail it. `claim`: rule 2 over every block (the knob's B (i) ignored), rule 2
+holding when any knob is beaten, rule 1 without B (i), and the kept blocks' weights not
+renormalized each fail it. `sets` on six blocks: positions read off by one, draws that ignore the
+strata, the seed ignored, a ClearedSet identity without the positions' digest, and AreaMass cutting
+its strata by count each fail it. `opaque`: the brief's literal route formula (outside length from
+the union, inside length per building), under which a stretch inside two overlapping opaque
+footprints weighs more than open ground, fails it.
 """
 from __future__ import annotations
 
@@ -321,6 +341,113 @@ def rule() -> None:
     print("every knob losing: a losing candidate above the best knob and its random sets chosen")
 
 
+def held() -> None:
+    """The held-out blocks derived again, against transparency_run.HELD (the module's docstring)."""
+    import road_rescore as rr
+    import simp_compare
+    import transparency_run as tr
+    sixty = set(pd.read_csv(rr.summary_path(tr.ITEM4_ROWS, tr.MESH, "lens_D0.05")).block)
+    proj = pd.read_parquet(tr.ITEM4_ROWS / "projection_h0.5_h0.5a5x8.parquet")
+    fits = set(proj[proj.gb_uniform < 48.0].block)
+    nets = {p.name for p in NETS.iterdir() if p.is_dir()}
+    assert len(sixty) == 60 and sixty == fits == nets, (len(sixty), len(fits), len(nets))
+    tuning = set(simp_compare.TUNING)
+    assert len(tuning) == 13 and tuning <= sixty
+    rest = sixty - tuning
+    stored = (ts.SIMP_DEFAULT, ts.CHEAP)
+    absent = sorted(b for b in rest
+                    if not all((HERE / r.rows / f"{b}_p2.parquet").exists() for r in stored))
+    held = tuple(sorted(rest - set(absent)))
+    assert held == tr.HELD and len(set(tr.HELD)) == len(tr.HELD), (
+        f"HELD differs: {sorted(set(held) ^ set(tr.HELD))}")
+    print(f"item 4's {len(sixty)} blocks (its lens rows = its projection's fits = its networks), "
+          f"less the 13: {len(rest)}; without both stored clearings at h 0.5: {absent}; held "
+          f"out: {len(held)}, transparency_run.HELD")
+    plan = tr.held_plan(tr.HELD_PLAN)
+    for m in plan:
+        missing = [b for b in held if not (NETS / b / f"{m.base.preset}.parquet").exists()]
+        assert not missing, f"{m.method}: item 4 has no network on {missing}"
+    print(f"the plan's {len(plan)} methods ({', '.join(m.method for m in plan)}): item 4's "
+          f"network of each base's preset on all {len(held)}")
+
+
+def claim() -> None:
+    """The held-out blocks' rules on synthetic lens tables (the module's docstring)."""
+    import transparency_run as tr
+    plan = {m.method: m for m in tr.held_plan(tr.HELD_PLAN)}
+    n = 20
+    blocks = tuple(f"synthetic_{i:02d}" for i in range(n))
+    simp = pd.Series(0.5, index=list(blocks))
+    W = tr.boot_weights(n)
+    base = np.full(n, 0.10)
+    wiggle = 0.004 * np.sin(np.arange(n, dtype=float))     # so the intervals have width
+    zero = np.zeros(n)
+    Arr = NDArray[np.float64]
+
+    def judge(m: tr.ClaimArms, c: dict[str, Arr], enc: dict[str, Arr] | None = None,
+              a: dict[tuple[str, float], Arr] | None = None
+              ) -> tuple[dict[tuple[int, str], tr.RuleRow], str]:
+        short = {x.name: x.change.label for x in m.arms}
+        lens = {d: pd.DataFrame([dict(block=b, method=name, c=c.get(lab, base)[i],
+                                      enc_c=(enc or {}).get(lab, zero)[i],
+                                      a=(a or {}).get((lab, d), np.full(n, 0.8))[i])
+                                 for name, lab in short.items() for i, b in enumerate(blocks)])
+                for d in tr.GUARD_D}
+        tests, _ = tr.Claim.judge(m, lens, simp, W)
+        return {(t.rule, t.against): t for t in tests}, tr.Claim.verdict(tests)
+
+    lp, cl = plan["resistance_lp"], plan["clearance_looped"]
+    good = {"simp-f0.1-price": base + 0.02 + wiggle, "chunks4": base + 0.005 + wiggle / 2,
+            "chunks16": base + 0.004,
+            **{f"rand{s}-f0.1-price": base + 0.001 + wiggle / 3 for s in tr.SEEDS}}
+    t, v = judge(lp, good)
+    r1 = t[(1, "base")]
+    boot = W @ (0.02 + wiggle)
+    assert v.startswith("a shift") and all(x.holds for x in t.values()), v
+    assert abs(r1.value - float(np.mean(0.02 + wiggle))) < 1e-12 and r1.behind_i == 0
+    assert abs(r1.lo - np.quantile(boot, 0.025)) < 1e-12 < r1.lo
+    assert abs(r1.hi - np.quantile(boot, 0.975)) < 1e-12
+    assert t[(2, "chunks4")].blocks == t[(2, "chunks16")].blocks == n
+    print("every rule holding: a shift (rule 1's interval the bootstrap over W, paired)")
+    t, v = judge(lp, good, enc={"simp-f0.1-price": np.r_[0.001, np.zeros(n - 1)]})
+    assert not t[(1, "base")].holds and t[(1, "base")].behind_i == 1 and v == "no shift: rule 1 " \
+        "fails", v
+    print("the claim behind base on B (i) on one block: rule 1 fails")
+    t, v = judge(lp, {**good, "simp-f0.1-price": base + 0.02 * (-1.0) ** np.arange(n)})
+    assert not t[(1, "base")].holds and t[(1, "base")].lo < 0 < t[(1, "base")].hi, v
+    print("gains straddling 0: rule 1 fails")
+    walled = np.r_[np.ones(3), np.zeros(n - 3)].astype(bool)
+    k4 = np.where(walled, base + 0.30, base + 0.005 + wiggle / 2)
+    t, v = judge(lp, {**good, "chunks4": k4}, enc={"chunks4": np.where(walled, 0.001, 0.0)})
+    r2 = t[(2, "chunks4")]
+    mean_kept = float(np.mean((0.02 + wiggle - (k4 - base))[~walled]))
+    assert r2.holds and r2.blocks == n - 3 and r2.behind_i == 3, r2
+    assert abs(r2.value - mean_kept) < 1e-12 and r2.lo <= r2.value <= r2.hi, r2
+    assert v.startswith("a shift"), v
+    print("a knob behind base on B (i) on 3 blocks, far ahead on (c) there: left out, rule 2 "
+          "holds over the other 17")
+    t, v = judge(lp, {**good, "chunks16": base + 0.03 + wiggle})
+    assert t[(2, "chunks4")].holds and not t[(2, "chunks16")].holds and v == "no shift: rule " \
+        "2 fails", v
+    print("a knob ahead of the claim: rule 2 fails, the other knob beaten notwithstanding")
+    t, v = judge(lp, good, enc={"chunks16": np.full(n, 0.001)})
+    assert t[(2, "chunks16")].blocks == 0 and not t[(2, "chunks16")].holds, t[(2, "chunks16")]
+    print("a knob behind base on every block: nothing to compare, rule 2 does not hold")
+    t, v = judge(lp, {**good, **{f"rand{s}-f0.1-price": good["simp-f0.1-price"]
+                                 + 0.003 * (-1.0) ** np.arange(n) for s in tr.SEEDS}})
+    r3 = t[(3, "random sets")]
+    assert not r3.holds and r3.lo < 0 < r3.hi and v == "no shift: rule 3 fails", (r3, v)
+    print("random sets as good as the claim: rule 3 fails")
+    t, v = judge(lp, good, a={("simp-f0.1-price", 0.1): np.full(n, 0.8 - 0.011)})
+    assert t[(4, "(a) at count D 0.05")].holds and not t[(4, "(a) at count D 0.1")].holds
+    assert v == "no shift: rule 4 fails", v
+    print("a median (a) loss of 0.011 at count D 0.10 alone: rule 4 fails")
+    t, v = judge(cl, {"simp-f0.1-price-route": base + 0.02 + wiggle, "repulsion4": base + 0.003,
+                      **{f"rand{s}-f0.1-price-route": base + wiggle / 3 for s in tr.SEEDS}})
+    assert v.startswith("a shift") and [k for k in t if k[0] == 2] == [(2, "repulsion4")], v
+    print("clearance_looped, one knob: every rule holding, a shift")
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a[0] == "opaque":
@@ -329,5 +456,9 @@ if __name__ == "__main__":
         sets(a[1].split(","), [int(s) for s in a[2].split(",")])
     elif a[0] == "rule":
         rule()
+    elif a[0] == "held":
+        held()
+    elif a[0] == "claim":
+        claim()
     else:
         raise SystemExit(f"unknown command {a[0]!r}")

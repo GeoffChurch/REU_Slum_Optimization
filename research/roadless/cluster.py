@@ -54,8 +54,17 @@ import cluster_submit as cs
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-GB_PER_MILLION = 0.7    # measured: the translucent greedy on 30796 peaks at 31.2 GiB for 48.7M
-                        # unknowns after the K-cycle fix (NOTES); raise it if a block runs out
+GB_PER_MILLION = 0.95   # measured (2026-10-12): road_rescore.py's scoring of the 13 tuning blocks
+                        # peaks at 0.83 -- 0.87 GB per million unknowns on the nine over 14M
+                        # (22422's 0.866 the most), at 1.1 -- 1.4 on the four under 13M (a few
+                        # GB fixed, which any card holds), above 0.7 (the rate before) on all 13
+                        # and on item 4's 60, where 1558, 14401 and 20023 went to 32 GB cards
+                        # they would not fit and ran on bigger ones by luck. 0.95 is 22422's rate
+                        # with 10% to spare: a peak the 1 s sampling misses, and the spread
+                        # between runs (the 13's large blocks peaked up to 2% above item 4's).
+                        # SIMP and the greedies peak at ~0.65 (NOTES), so they get room to spare.
+                        # cluster_check.py `gpu` checks recorded runs' peaks against it; raise it
+                        # if a block runs out
 HELD_PER_MILLION = 0.6  # --scans: what a run holds between solves (472's translucent greedy on
                         # a5x8, 34M unknowns: 19.8 GiB) ...
 RASTER_BYTES = 40       # ... plus five float64 rasters of the fine lattice (the painted field,
