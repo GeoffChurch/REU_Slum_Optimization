@@ -118,7 +118,7 @@ import shapely
 from numpy.typing import NDArray
 
 from reblock.contracts import Block, Method
-from reblock.free_first import HELD_COL, HoldNothing, held_count
+from reblock.free_first import HoldNothing, held_count
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.cycle_native import CycleNativeReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
@@ -510,14 +510,6 @@ def _same_frame(a: gpd.GeoDataFrame, b: gpd.GeoDataFrame) -> bool:
                 and held_count(a) == held_count(b))
 
 
-def _tree(method: Method) -> CycleNativeReblocker | ResistanceLPReblocker | ClearanceReblocker:
-    """The method that holds roads first: clearance_looped's tree, or the method itself."""
-    m = method.base if isinstance(method, LoopClosureRefiner) else method
-    if not isinstance(m, CycleNativeReblocker | ResistanceLPReblocker | ClearanceReblocker):
-        raise TypeError(f"{type(m).__name__} has no free-first stage")
-    return m
-
-
 def _against_held(job: tuple[str, str, str]) -> dict[str, object]:
     """One (stage, block, arm): the arm's network proposed fresh here, against the held stage's
     network of record (computed before free first existed, every arm holding nothing)."""
@@ -527,7 +519,7 @@ def _against_held(job: tuple[str, str, str]) -> dict[str, object]:
     arm = stage.arm_of(name)
     [b] = common.build_blocks([bid])
     method = stage.method(arm, common.arms(), bid)
-    first = _tree(method).free_first
+    first = tr._tree(method).free_first
     t0, c0 = time.perf_counter(), time.process_time()
     roads = _roads(method, b)
     wall, cpu = time.perf_counter() - t0, time.process_time() - c0
@@ -587,7 +579,7 @@ def _method_graphs(bid: str, b: Block) -> dict[str, tuple[RoutingGraph, float]]:
     out: dict[str, tuple[RoutingGraph, float]] = {}
     for m in tr.held_plan(tr.HELD_PLAN):
         for arm in (m.base, m.claim):
-            tree = _tree(arm.method(presets, bid))
+            tree = tr._tree(arm.method(presets, bid))
             out[arm.name] = (tree.substrate.build(b), tree.road_width_m)
     return out
 
@@ -604,14 +596,6 @@ def _plans(bid: str, b: Block) -> dict[str, fr.Plan]:
             raise AssertionError(f"{bid}: {name}'s graph holds other roads than "
                                  f"{next(iter(plans))}'s")
     return plans
-
-
-def _held_rows(roads: gpd.GeoDataFrame) -> NDArray[np.intp]:
-    """The rows `roads` marks held, wherever they are (`held_count` refuses a frame whose held
-    rows do not lead: this is the guard looking at one that may not)."""
-    if HELD_COL not in roads.columns:
-        return np.zeros(0, dtype=np.intp)
-    return np.flatnonzero(roads[HELD_COL].to_numpy(dtype=bool))
 
 
 def _head(roads: gpd.GeoDataFrame, m: int) -> gpd.GeoDataFrame:
@@ -741,7 +725,7 @@ def _lead_one(job: tuple[str, str]) -> list[dict[str, object]]:
         ordered = gpd.read_parquet(rr.ordered_path(stage.scratch, bid, arm.name))
         pre = pd.read_parquet(rr.prefix_dir(stage.rows) / f"{bid}__{arm.name}.parquet")
         n = held_count(net)
-        at = _held_rows(ordered)            # where the ordered network has its held roads
+        at = tr._held_rows(ordered)         # where the ordered network has its held roads
         leads = bool(n == len(want) and _wkb(_head(net, n)) == want
                      and np.array_equal(at, np.arange(n)) and _wkb(_head(ordered, n)) == want)
         r: dict[str, object] = dict(block=bid, arm=arm.name, held=n, plan_roads=len(want),

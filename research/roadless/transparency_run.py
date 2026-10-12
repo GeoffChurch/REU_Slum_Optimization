@@ -47,6 +47,9 @@ the stage's rows root (item 4's road_rows/ is read, never written):
     uv run python $S <stage> tars <dir> <ids,>        # a tar per block for score on the cluster
     uv run python $S <stage> records <procs> <ids,>   # displacement on C, the draws, the costs
     uv run python $S <stage> report                   # the stage's verdict, and the summaries
+    uv run python $S <free stage> plans <procs> <ids,|all>   # its plan per block: plans.csv
+    uv run python $S <free stage> reuse <ids,>        # the held stage's rows where it holds none
+    uv run python $S <stage> versus <stage'>          # beside another: the rules, the cost
 
 `propose` runs `propose-one <id> <arm>` children here; on the cluster's CPU nodes `arm` is one
 task of cluster.py's `cpu` kind (`cpu-tars` prints its command). An arm marked `reuse_item4` (the
@@ -68,10 +71,13 @@ import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Protocol
+from typing import NamedTuple, Protocol, cast
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
+import shapely
+from numpy.typing import NDArray
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -83,6 +89,7 @@ import simp_compare  # noqa: E402
 import transparency_sets as ts  # noqa: E402
 
 from reblock.contracts import Method  # noqa: E402
+from reblock.free_first import HELD_COL, held_count  # noqa: E402
 from reblock.methods.clearance import ClearanceReblocker  # noqa: E402
 from reblock.methods.cycle_native import CycleNativeReblocker  # noqa: E402
 from reblock.methods.loop_closure import LoopClosureRefiner  # noqa: E402
@@ -1021,6 +1028,239 @@ def tars(stage: Stage, out: Path, ids: list[str]) -> None:
           f"{','.join(stage.pops)} {scored} {{id}}")
 
 
+# ------------------------------------------------------------------ free first
+def _free(stage: Stage) -> fr.FreeEnclosed:
+    """The free-first strategy every arm of `stage` holds: a free stage's (FreeEveryArm)."""
+    if not isinstance(stage.first, FreeEveryArm):
+        raise SystemExit(f"{stage.name}'s arms hold nothing first")
+    return stage.first.free
+
+
+def _tree(method: Method) -> Priced:
+    """The method that holds roads first: clearance_looped's tree, or the method itself."""
+    m = method.base if isinstance(method, LoopClosureRefiner) else method
+    if not isinstance(m, CycleNativeReblocker | ResistanceLPReblocker | ClearanceReblocker):
+        raise TypeError(f"{type(m).__name__} has no free-first stage")
+    return m
+
+
+def _plans_of(stage: Stage, bid: str) -> dict[str, fr.Plan]:
+    """The stage's plan on `bid` as each plan method's base arm computes it (its own graph and
+    width, FreeEnclosed.plan: what its `held` returns), the held roads the same for every one."""
+    [b] = common.build_blocks([bid])
+    presets = common.arms()
+    plans = {}
+    for m in _claim_plan(stage):
+        tree = _tree(stage.method(m.base, presets, bid))
+        plans[m.method] = _free(stage).plan(b, tree.substrate.build(b), width_m=tree.road_width_m)
+    roads = {name: [bytes(w) for w in shapely.to_wkb(np.asarray([s.road.geometry
+                                                                 for s in p.steps]))]
+             for name, p in plans.items()}
+    if len({repr(r) for r in roads.values()}) != 1:
+        raise AssertionError(f"{bid}: the methods' graphs hold different roads")
+    return plans
+
+
+def _claim_plan(stage: Stage) -> tuple[ClaimArms, ...]:
+    if not isinstance(stage.verdict, Claim):
+        raise SystemExit(f"{stage.name}'s verdict is no Claim")
+    return stage.verdict.plan
+
+
+def _plan_rows(job: tuple[str, str]) -> list[dict[str, object]]:
+    stage_name, bid = job
+    t0 = time.perf_counter()
+    plans = _plans_of(_stage(stage_name), bid)
+    t = (time.perf_counter() - t0) / len(plans)
+    return [dict(block=bid, method=name, enclosed=len(p.enclosed),
+                 homes=",".join(map(str, p.enclosed)), roads=len(p.steps), D_area=p.D_area,
+                 D_count=p.D_count, share_before=p.share_before, share_after=p.share_after,
+                 unreachable=len(p.unreachable), over_budget=len(p.over_budget), t_s=t)
+            for name, p in plans.items()]
+
+
+def plans(stage: Stage, procs: int, ids: list[str]) -> None:
+    """The stage's plan on every block of `ids` (`_plans_of`), merged into <rows>/plans.csv: per
+    block and method, the homes enclosed at baseline and the roads held."""
+    _check_single_threaded()
+    import multiprocessing
+    with multiprocessing.get_context("fork").Pool(min(procs, len(ids)), maxtasksperchild=1) as p:
+        got = [r for rows in p.imap_unordered(_plan_rows, [(stage.name, b) for b in ids])
+               for r in rows]
+    path = stage.rows / "plans.csv"
+    df = _merged(path, pd.DataFrame(got), ids).sort_values(["block", "method"])
+    stage.rows.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
+    pd.set_option("display.width", 250)
+    print(df[df.block.isin(ids)].drop(columns=["homes"]).to_string(index=False))
+    mine = df[df.block.isin(ids)]
+    holds = sorted(set(mine[mine.roads > 0].block))
+    print(f"{len(ids)} blocks: the plan holds roads on {len(holds)} ({', '.join(holds) or '-'}), "
+          f"nothing on {len(ids) - len(holds)}; written to {path}")
+
+
+def _merged(path: Path, new: pd.DataFrame, ids: list[str]) -> pd.DataFrame:
+    """`new`'s rows (of the blocks `ids`) with the CSV at `path`'s rows of every other block."""
+    if not path.exists():
+        return new
+    old = pd.read_csv(path)
+    return pd.concat([old.drop(index=old.index[old["block"].isin(ids)]), new],
+                     ignore_index=True)
+
+
+def reuse(stage: Stage, ids: list[str]) -> None:
+    """On blocks where the stage's plan holds nothing (<rows>/plans.csv, every method), every arm's
+    network is the held stage's (transparency_check.py `no-enclosed`): its network of record,
+    ordered network, prefix and proposal rows, and its scored rows with the block's clearings and
+    setup rows, copied from the held stage into this one's rows. Refuses a block the plan holds
+    roads on, or never ran on, and a destination that exists and differs. <rows>/reused.csv."""
+    source = held_stage()
+    if source.lineup != stage.lineup or source.blocks != stage.blocks:
+        raise SystemExit(f"{stage.name}'s blocks and arms are not the held stage's")
+    pl = pd.read_csv(stage.rows / "plans.csv")
+    methods = {m.method for m in _claim_plan(stage)}
+    area = (rr.score_dir(source.rows, MESH, "area"), rr.score_dir(stage.rows, MESH, "area"))
+    out = []
+    for bid in ids:
+        g = pl[pl.block == bid]
+        if set(g.method) != methods or (g.roads > 0).any() or (g.enclosed > 0).any():
+            raise SystemExit(f"{bid}: the plan holds roads there, or has not run on it: "
+                             f"{g[['method', 'enclosed', 'roads']].to_dict('records')}")
+        pairs = [(area[0] / f"{bid}__clearings.parquet", area[1] / f"{bid}__clearings.parquet")]
+        pairs += [(p, area[1] / p.name) for p in sorted(area[0].glob(f"{bid}__setup__*.parquet"))]
+        for name in stage.lineup:
+            pairs += [(source.record_path(bid, name), stage.record_path(bid, name)),
+                      (rr.ordered_path(source.scratch, bid, name),
+                       rr.ordered_path(stage.scratch, bid, name)),
+                      (rr.prefix_dir(source.rows) / f"{bid}__{name}.parquet",
+                       rr.prefix_dir(stage.rows) / f"{bid}__{name}.parquet"),
+                      (rr.proposal_row(source.rows, bid, name, True),
+                       rr.proposal_row(stage.rows, bid, name, True)),
+                      (area[0] / f"{bid}__{name}.parquet", area[1] / f"{bid}__{name}.parquet")]
+        copied = 0
+        for src, dst in pairs:
+            if dst.exists():
+                if dst.read_bytes() != src.read_bytes():
+                    raise SystemExit(f"{dst} exists and is not {src}")
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_name(dst.name + ".tmp")
+            shutil.copyfile(src, tmp)
+            os.replace(tmp, dst)
+            copied += 1
+        out.append(dict(block=bid, files=len(pairs), copied=copied, source=str(source.rows)))
+        print(f"{bid}: nothing held; {len(pairs)} files the held stage's ({copied} copied now)",
+              flush=True)
+    path = stage.rows / "reused.csv"
+    _merged(path, pd.DataFrame(out), ids).sort_values("block").to_csv(path, index=False)
+    print(f"{len(ids)} blocks reuse the held stage's rows; {path}")
+
+
+def _touched(stage: Stage) -> tuple[str, ...]:
+    """The blocks where some arm's network holds roads first: its network of record says so."""
+    return tuple(b for b in stage.blocks if any(
+        held_count(gpd.read_parquet(stage.record_path(b, a.name))) for a in stage.arms))
+
+
+def _held_rows(roads: gpd.GeoDataFrame) -> NDArray[np.intp]:
+    """The rows a frame marks held, wherever they are (`held_count` refuses a frame whose held
+    rows do not lead: this is a check looking at one that may not)."""
+    if HELD_COL not in roads.columns:
+        return np.zeros(0, dtype=np.intp)
+    return np.flatnonzero(roads[HELD_COL].to_numpy(dtype=bool))
+
+
+def _free_checks(stage: Stage, lens: Mapping[float, pd.DataFrame],
+                 touched: tuple[str, ...]) -> None:
+    """On the blocks where the arms hold roads (item 4's networks are not theirs there): every
+    arm's network holds the plan's roads first (WKB row for row), its ordered network leads with
+    them, every prefix at LENS_D holds them all, and the scorer's rows (B (i), the population left
+    enclosed, at each of GUARD_D) leave no more enclosed than the plan does. Raises otherwise."""
+    bad = []
+    for bid in touched:
+        plan = next(iter(_plans_of(stage, bid).values()))
+        want = [bytes(w) for w in shapely.to_wkb(np.asarray([s.road.geometry
+                                                            for s in plan.steps]))]
+        n = len(want)
+        pre_all = rr._read_all([rr.prefix_dir(stage.rows) / f"{bid}__{a.name}.parquet"
+                                for a in stage.arms])
+        for arm in stage.arms:
+            net = gpd.read_parquet(stage.record_path(bid, arm.name))
+            ordered = gpd.read_parquet(rr.ordered_path(stage.scratch, bid, arm.name))
+            pre = pre_all[pre_all.method == arm.name]
+            at = _held_rows(ordered)
+            m5 = pre[np.isclose(pre.budget, LENS_D)].m.to_numpy()
+            ok = (held_count(net) == n and _wkb(cast(gpd.GeoDataFrame, net.iloc[:n])) == want
+                  and np.array_equal(at, np.arange(n))
+                  and _wkb(cast(gpd.GeoDataFrame, ordered.iloc[:n])) == want
+                  and len(m5) == 2 and bool((m5 >= n).all()))
+            enc = [float(lens[d][(lens[d].block == bid) & (lens[d].method == arm.name)]
+                         .enc_c.iloc[0]) for d in GUARD_D]
+            if not ok or max(enc) > plan.share_after + ENCLOSED_TOL:
+                bad.append(f"{bid} {arm.name}: lead {ok}, B (i) {enc} against the plan's "
+                           f"{plan.share_after}")
+        print(f"  {bid}: {n} held roads, for {len(plan.enclosed)} homes enclosed at baseline "
+              f"({plan.share_before:.5f} of the population; the plan leaves {plan.share_after:g}):"
+              f" every arm's network and ordered network lead with them, every D {LENS_D:g} "
+              f"prefix holds them, B (i) at D {', '.join(f'{d:g}' for d in GUARD_D)} within the "
+              f"plan's", flush=True)
+    if bad:
+        raise SystemExit("free-first checks fail:\n" + "\n".join(bad[:20]))
+
+
+def versus(stage: Stage, other: Stage) -> None:
+    """`stage` beside `other` (the free stage beside the held one): the rules side by side, and on
+    the blocks `stage`'s arms hold roads on, what that cost each arm, per block: (c) at area D
+    0.05 and 0.10, (a) at count D 0.05 and 0.10, `stage`'s minus `other`'s, with B (i). Writes
+    <rows>/summary_versus.csv (per arm and block) and summary_versus_rules.csv."""
+    pd.set_option("display.width", 250)
+    pd.set_option("display.max_rows", 500)
+    touched = _touched(stage)
+    keys = ["block", "method"]
+    rows = []
+    for d in GUARD_D:
+        mine = reduced_lens(stage, d)
+        theirs = reduced_lens(other, d)
+        t = mine.merge(theirs, on=keys, suffixes=("", "_other"))
+        t = t.drop(index=t.index[~t["block"].isin(touched)])
+        for _, r in t.iterrows():
+            rows.append(dict(block=r.block, arm=r.method, budget=d, c=r.c, c_other=r.c_other,
+                             dc=r.c - r.c_other, a=r.a, a_other=r.a_other, da=r.a - r.a_other,
+                             enc_c=r.enc_c, enc_c_other=r.enc_c_other,
+                             Da_area=r.Da_area, Da_area_other=r.Da_area_other))
+    df = pd.DataFrame(rows)
+    df.to_csv(stage.rows / "summary_versus.csv", index=False)
+    print(f"{stage.name} against {other.name} on the {len(touched)} blocks {stage.name}'s arms "
+          f"hold roads on ({', '.join(_short(b) for b in touched)}): {stage.name} minus "
+          f"{other.name}, mean [median; min, max] over the blocks")
+    for d in GUARD_D:
+        g = df[np.isclose(df.budget, d)].groupby("arm", sort=False)
+        print(f"\n  (c) at area D {d:g} | (a) at count D {d:g}; B (i) {other.name} -> {stage.name}"
+              f" (blocks behind 0)")
+        for arm in stage.lineup:
+            x = g.get_group(arm)
+            print(f"    {arm:42s} {x.dc.mean():+.4f} [{x.dc.median():+.4f}; {x.dc.min():+.4f}, "
+                  f"{x.dc.max():+.4f}] | {x.da.mean():+.4f} [{x.da.median():+.4f}]; B (i) "
+                  f"{int((x.enc_c_other > ENCLOSED_TOL).sum())} -> "
+                  f"{int((x.enc_c > ENCLOSED_TOL).sum())}")
+    rules = pd.read_csv(stage.rows / "summary_rules.csv").merge(
+        pd.read_csv(other.rows / "summary_rules.csv"), on=["method", "rule", "against"],
+        suffixes=("", "_other"))
+    rules.to_csv(stage.rows / "summary_versus_rules.csv", index=False)
+    print(f"\n  the rules, {stage.name} | {other.name}:")
+
+    def cell(rule: int, v: float, lo: float, hi: float, holds: bool, behind: int) -> str:
+        num = f"{v:+.6f}" if rule == 4 else f"{v:+.4f} [{lo:+.4f}, {hi:+.4f}]"
+        extra = f", behind {behind}" if rule in (1, 2) else ""
+        return f"{num}{extra} {'holds' if holds else 'FAILS'}"
+
+    for _, r in rules.iterrows():
+        here = cell(r.rule, r.value, r.lo, r.hi, r.holds, r.behind_i)
+        there = cell(r.rule, r.value_other, r.lo_other, r.hi_other, r.holds_other,
+                     r.behind_i_other)
+        print(f"    {r.method:16s} rule {r.rule} {r.against:22s} {here} | {there}")
+
+
 # ------------------------------------------------------------------ records
 _BLOCKS: dict = {}       # the jobs' blocks, built once before the pool forks
 
@@ -1557,7 +1797,15 @@ class Claim:
         rec = pd.read_csv(stage.rows / "summary_records.csv")
         simp = _simp(blocks)
         _scorer_check(stage)
-        _against_item4(lens, blocks, [m.base for m in self.plan])
+        # Item 4's networks are the base arms' only where they hold nothing first; where they
+        # hold roads, the free-first checks instead (the owner's controller, 2026-10-12)
+        touched = _touched(stage)
+        _against_item4(lens, tuple(b for b in blocks if b not in touched),
+                       [m.base for m in self.plan])
+        if touched:
+            print(f"FREE FIRST: the arms hold roads on {len(touched)} blocks, item 4's base "
+                  "networks not theirs there; checked instead:")
+            _free_checks(stage, lens, touched)
         W = boot_weights(len(blocks))
         tests: list[RuleRow] = []
         stats: list[dict[str, object]] = []
@@ -1786,6 +2034,12 @@ if __name__ == "__main__":
         tars(stage, Path(a[2]), stage.ids_of(a[3]))
     elif cmd == "records":
         records(stage, int(a[2]), stage.ids_of(a[3]))
+    elif cmd == "plans":
+        plans(stage, int(a[2]), list(stage.blocks) if a[3] == "all" else stage.ids_of(a[3]))
+    elif cmd == "reuse":
+        reuse(stage, stage.ids_of(a[2]))
+    elif cmd == "versus":
+        versus(stage, _stage(a[2]))
     elif cmd == "report":
         stage.verdict.report(stage)
     else:

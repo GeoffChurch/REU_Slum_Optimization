@@ -3241,3 +3241,59 @@ sets made as cheap (by +0.035 and +0.034), at (a) gained (clearance_looped) or a
 (resistance_lp). Committed: transparency_rows/held/plan.csv, arms.csv and
 summary_{records,rules,claim,lens}.csv (the rows and networks are in the ignored
 transparency_rows/held/ parquet and scratch).
+
+### Transparency for the road methods: free first (owner 2026-10-12: "Yes, let's try to free enclosed homes first")
+
+The held-out stage's claims both fell on B's first criterion, a discounted network cut at area D
+0.05 leaving a few homes enclosed that base frees (clearance_looped on 5706, resistance_lp on 22336,
+39240, 41673 and 43708), and 12 of the other 13 knob and random arms walled people in on some block
+too: road networks free enclosed homes only in passing. The owner: give the road methods what B's
+optimizer got, a stage that frees the homes enclosed at baseline before anything else, then the
+method as before. This stage asks whether the claims hold once every arm does that. It was decided
+after the held-out results were seen (the B (i) misses above, and resistance_lp's rule 4 missed by
+0.000033), so it is the claims re-tested under a changed method, not a fresh test of them.
+
+The stage (d238f7c2). reblock.free_first: a Strategy every road method holds (`free_first` beside
+`price`; HoldNothing, nothing held, in every preset), whose roads the method commits before its own
+first move -- cycle_native's cap and ranking count them, resistance_lp builds them before its first
+chunk, clearance's tree starts from them, and clearance_looped's loops see them as part of the tree
+-- and which lead its network, marked held. The research strategy, free_roads.FreeEnclosed: the
+homes enclosed at baseline as the scorer defines them (h 0.5); for each, a road on the method's own
+graph from the street or a road already held, routed by what its own 7 m corridor displaces
+(area-weighted), ending on a node or through an edge whose corridor reaches the home's near cells or
+the sealed pocket they touch; the least true displacement per unit of the home's area population
+first, within the prefix budget, D 0.05 by area and by count; each held road must free its home by
+the metric's own test, or the stage raises. The prefixes put the held roads first
+(common.canonical_order), so every prefix at D 0.05 holds them all. Not routed through free_first's
+crossing: a road through it still pays for every building its corridor touches on the way, and
+21252's home 631 is reached only through a parcel diagonal across its pocket. On the ten held-out
+blocks with homes enclosed at baseline (21 homes) 18 roads free every one, D 0.0009 -- 0.0058 by
+area and 0.0004 -- 0.0048 by count a block, 6 -- 304 m long. The guards (transparency_check.py
+`hold-nothing`, `no-enclosed`, `free-roads`, `lead`), each fault-injected, are in that commit.
+
+The arms and the rules. Every arm of the held-out plan (transparency_rows/held/plan.csv), both
+methods -- base, the knobs (repulsion 4; chunks 4 and 16), the claims (clearance_looped's C priced
+and routed, resistance_lp's C priced, f 0.1) and their five random sets -- from the free-first
+stage's roads (transparency_run's `free` stage, FREE: FreeEnclosed within area and count D 0.05, the
+area population, h 0.5), on the same 46 blocks. Rules 1 -- 4 of the held-out stage unchanged, with
+the owner's amendment (a knob behind base on B (i) is left out of rule 2 on that block), the same
+bootstrap weights (boot_weights over the 46, seed 20261012), every rule judged as written: a miss by
+a hair, rule 4's 0.01 included, is a fail. The verdict per method, beside the held-out stage's.
+
+The procedure, fixed before any free-first result (this commit precedes the first). The plan
+(FreeEnclosed.plan on each method's graph, what each arm's `held` computes) runs first on the other
+36 held-out blocks: where it holds nothing every arm's network is the held stage's (with nothing
+held a method runs as with HoldNothing: guard 2), so that block's rows are the held stage's, copied
+(`reuse`); a block where it holds roads is run as the ten, and said. The ten (and any such block) on
+the CPU nodes, every arm of a block on the node that ran it in the held stage (orion 21252, 22267,
+22336, 41515, 41806, 5706; quadro2 38254, 39240, 41673, 43708), the base arms first, their held
+roads checked against this machine's plan (WKB row for row) before the other arms run; the reduced
+scoring on the cluster's GPUs ((c) at area D 0.05 and 0.10, four at most). The report checks the
+base arms against item 4 only where nothing is held. On the blocks with held roads it checks instead
+that every arm's network holds the plan's roads first, that its ordered network and every D 0.05
+prefix lead with them, and that the scorer leaves no more population enclosed there than the plan
+does (none on the ten); guard 4 (`lead`) runs on the cluster's networks beside it.
+
+Reported beside the verdict: what free first cost each arm on the blocks it touched, its (c) at area
+D 0.05 and 0.10 and (a) at count D 0.05 and 0.10 against the same arm in the held stage, paired by
+block; and whether resistance_lp's rule 4, missed by 0.000033, moves.
